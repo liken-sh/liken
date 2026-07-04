@@ -16,3 +16,10 @@ disable:
 # The admin kubeconfig k3s writes; group-readable is fine on a machine
 # with exactly one user, who is root.
 write-kubeconfig-mode: "0644"
+
+# NodePort services listen only on the primary interface's address.
+# The default — every local IP, including whatever CNI interfaces
+# appear later — is broad enough that kube-proxy logs a complaint
+# about it at startup. One interface is the shape of these machines.
+kube-proxy-arg:
+  - nodeport-addresses=primary
