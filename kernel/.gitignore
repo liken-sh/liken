@@ -1,0 +1,4 @@
+# Downloaded packages and extracted kernels are build artifacts,
+# reproducible from VERSION + fetch.sh; only the pin is source.
+cache/
+dist/
