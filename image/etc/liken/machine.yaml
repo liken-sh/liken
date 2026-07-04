@@ -1,10 +1,11 @@
 # The Machine manifest: the one document that tells a liken machine who
 # it is. It's shaped exactly like a Kubernetes resource on purpose —
 # init reads it from this file at boot (there's no API server when PID 1
-# wakes up), and the same document is meant to live in the cluster as a
-# real CRD, with liken publishing the machine's live facts into its
-# status. What you write here is what `kubectl get machine -o yaml`
-# shows you, forever.
+# wakes up), and once the cluster is up, the liken operator seeds this
+# same document into it as a real Machine resource and publishes the
+# machine's live facts into its status. From then on the cluster's copy
+# is the authoritative one: `kubectl edit machine` wins over this file,
+# which only seeds clusters that don't know the machine yet.
 #
 # liken's defaults are deliberately aggressive: an empty spec means
 # DHCP on the first real network interface, DNS from the lease, done.
@@ -16,3 +17,12 @@ metadata:
   name: liken-dev
 spec:
   network: {}
+  # Kernel tuning rides the same document as everything else. Each
+  # parameter is applied twice on purpose: by init at boot (so it holds
+  # before k3s starts) and by the liken operator ever after (so editing
+  # the Machine in-cluster takes effect without a reboot, and drift gets
+  # corrected). The kernel's default of 128 inotify instances per user
+  # goes quickly on a node where every log-follower and config-watcher
+  # holds one; raising it is the classic first node tune.
+  sysctls:
+    fs.inotify.max_user_instances: "8192"

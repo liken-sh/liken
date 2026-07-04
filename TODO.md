@@ -41,11 +41,22 @@
           hard-way discovery: kube-apiserver reads the ServiceAccount
           key with a parser that takes SEC1 "EC PRIVATE KEY" but not
           PKCS#8.)
-   4. [ ] The Kubernetes API is the machine API: OS-level reads and writes
-          become a Machine CRD (facts in status, declared state in spec),
-          reconciled by a small in-cluster liken operator. Init never
-          talks to k3s; it writes facts to `/run/liken/` and the operator
-          does the API half.
+   4. [x] The Kubernetes API is the machine API: the Machine manifest is
+          now a real CRD (`kubectl get machines` works), reconciled by a
+          liken operator that ships inside the initramfs as a
+          hand-assembled OCI tarball (operator/image.sh) and deploys
+          through k3s's auto-manifests directory — zero registry pulls,
+          zero kubectl steps. Init never talks to k3s: it applies
+          spec.sysctls at boot and writes facts to `/run/liken/`; the
+          operator (plain net/http against the API server — no
+          client-go, the watch loop is the lesson) seeds the Machine
+          from the manifest, publishes facts + observed sysctls into
+          status, and reconciles sysctl edits live. The shared Go types
+          live in the machine/ domain, used by both programs. (A
+          leftover mystery got mostly solved on the way: "The manifest
+          file is empty, ignoring." fires once per embedded
+          control-plane component as it parses its options — unrelated
+          to k3s's manifests directory.)
 3. [ ] Design the public bootstrapping story: today the identity bundle is
        minted by make in a private checkout, but a released OS needs a way
        for anyone to mint theirs — an installer step, a tiny CLI, or a
@@ -90,6 +101,12 @@ Questions we know we owe answers, without pretending to have them yet:
 * **Static networking.** `spec.network` today only picks an interface and
   assumes DHCP. Static addressing needs address/gateway/nameserver fields
   and a story for machines that must come up when no DHCP exists.
+* **Volumes need a disk to exist first.** The Machine spec deliberately
+  says nothing about storage yet, because there are no block devices to
+  govern — the whole machine is RAM. Attach a real disk to `make run`
+  (a qcow2, giving `/var/lib/rancher` persistence so images stop
+  re-importing every boot), then design `spec.volumes` against it, with
+  `status.hardware.blockDevices` as the read side.
 * **Cluster membership.** A `kind: Cluster` manifest carrying what a
   machine needs to form or join a cluster: the k3s join token (or a
   reference to it — a token in plain YAML is a secrets problem), the

@@ -35,6 +35,18 @@
 #                                 means the image contains private keys:
 #                                 whoever holds this file owns the
 #                                 cluster it boots
+#   /var/lib/rancher/k3s/         the Machine CRD and the liken operator's
+#     server/manifests/           deployment: k3s applies everything in
+#                                 this directory to the cluster at
+#                                 startup, so the OS's own resources
+#                                 arrive with no kubectl step
+#   /var/lib/rancher/k3s/         the liken operator's container image as
+#     agent/images/               an OCI tarball (built by hand in
+#                                 operator/image.sh); k3s imports every
+#                                 archive here into containerd at start,
+#                                 which is the whole distribution story —
+#                                 the machine never pulls from a registry
+#                                 to become itself
 #
 # Nothing else. No shell, no coreutils, no libc: every file above is
 # either written in this repo or vendored by a pinned, verified fetch.
@@ -59,6 +71,20 @@ cp "$here/../k3s/dist/$k3s_version/k3s" "$root/bin/k3s"
 # looks before generating its own.
 mkdir -p "$root/var/lib/rancher/k3s/server"
 cp -r "$here/../identity/dist/tls" "$root/var/lib/rancher/k3s/server/tls"
+
+# The Machine API and its operator, delivered the Kubernetes way: the
+# manifests go where k3s auto-applies them, the operator's image goes
+# where k3s auto-imports it. The LIKEN_VERSION substitution pins the
+# DaemonSet to exactly the image version this build ships alongside it.
+liken_version="$(cat "$here/../VERSION")"
+mkdir -p "$root/var/lib/rancher/k3s/server/manifests"
+for manifest in "$here"/../operator/manifests/*.yaml; do
+    sed "s/LIKEN_VERSION/$liken_version/g" "$manifest" \
+        >"$root/var/lib/rancher/k3s/server/manifests/$(basename "$manifest")"
+done
+mkdir -p "$root/var/lib/rancher/k3s/agent/images"
+cp "$here/../operator/dist/liken-operator-image.tar" \
+   "$root/var/lib/rancher/k3s/agent/images/liken-operator.tar"
 
 # The CA bundle comes from the build host — every Linux machine has the
 # Mozilla trust store at this conventional path. Vendoring it with a

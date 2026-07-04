@@ -1,0 +1,174 @@
+# The Machine API, declared to Kubernetes.
+#
+# A CustomResourceDefinition is how Kubernetes learns a new noun: apply
+# this document and the API server starts serving
+# /apis/liken.sh/v1alpha1/machines — storage, validation, watches, RBAC
+# and kubectl support included, with no code written. The schema below
+# is the same shape as the Go types in the machine package; the
+# descriptions surface in `kubectl explain machine.spec`, which makes
+# the API self-documenting at the terminal.
+#
+# This file lands in /var/lib/rancher/k3s/server/manifests, k3s's
+# auto-deploy directory: everything there is applied to the cluster at
+# startup and re-applied whenever the file changes — a tiny, built-in
+# GitOps loop, and the reason liken needs no `kubectl apply` step
+# anywhere.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  # CRD names are always <plural>.<group>; the group is a DNS name we
+  # own, which is what keeps every organization's custom "Machine" from
+  # colliding.
+  name: machines.liken.sh
+spec:
+  group: liken.sh
+  names:
+    kind: Machine
+    listKind: MachineList
+    plural: machines
+    singular: machine
+  # Cluster-scoped, like Node: a machine underlies the cluster and
+  # belongs to no namespace within it.
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      # The status subresource splits the object into two endpoints
+      # with separate write paths: ordinary updates cannot touch
+      # status, and status updates cannot touch spec. That boundary is
+      # what makes "spec is declared, status is observed" enforceable
+      # rather than just polite.
+      subresources:
+        status: {}
+      # What `kubectl get machines` prints, without -o yaml.
+      additionalPrinterColumns:
+        - name: Address
+          type: string
+          jsonPath: .status.network.addresses[0]
+        - name: Liken
+          type: string
+          jsonPath: .status.version.liken
+        - name: Kernel
+          type: string
+          jsonPath: .status.version.kernel
+        - name: Ready
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].status
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            A Machine is one computer running liken: the declared state
+            of the operating system beneath this cluster, and the
+            observed facts of the hardware it woke up on.
+          properties:
+            spec:
+              type: object
+              description: >-
+                What this machine is asked to be. Fields differ in when
+                they take effect: network is read by init at boot,
+                sysctls are both applied at boot and reconciled live by
+                the liken operator.
+              properties:
+                network:
+                  type: object
+                  description: >-
+                    How the machine attaches to the world. Empty means
+                    liken's default posture, DHCP on the first interface
+                    that looks like real hardware. Applied by init at
+                    boot; changing it in-cluster takes effect next boot.
+                  properties:
+                    interface:
+                      type: string
+                      description: >-
+                        Pins network bring-up to a specific interface
+                        name, e.g. eth1.
+                sysctls:
+                  type: object
+                  description: >-
+                    Kernel tuning, parameter name to desired value, e.g.
+                    vm.overcommit_memory: "1". Applied by init at boot
+                    and re-asserted continuously by the liken operator,
+                    so an edit here takes effect without a reboot.
+                  additionalProperties:
+                    type: string
+            status:
+              type: object
+              description: >-
+                What the machine observed about itself. Everything here
+                is re-derived on every reconcile pass — nothing is
+                remembered — so it can be trusted as a report of what
+                currently holds, written by init (via the facts file)
+                and published by the liken operator.
+              properties:
+                version:
+                  type: object
+                  description: >-
+                    What this machine runs. The k3s and kubelet versions
+                    live on the built-in Node object; this covers the
+                    layer beneath it.
+                  properties:
+                    liken:
+                      type: string
+                    kernel:
+                      type: string
+                network:
+                  type: object
+                  description: The boot's DHCP outcome.
+                  properties:
+                    interface:
+                      type: string
+                    mac:
+                      type: string
+                    addresses:
+                      type: array
+                      items:
+                        type: string
+                    gateway:
+                      type: string
+                    nameservers:
+                      type: array
+                      items:
+                        type: string
+                    leaseExpires:
+                      type: string
+                      format: date-time
+                hardware:
+                  type: object
+                  properties:
+                    cpus:
+                      type: integer
+                    memoryBytes:
+                      type: integer
+                sysctls:
+                  type: object
+                  description: >-
+                    The observed value of every parameter named in
+                    spec.sysctls, read back from the kernel — spec and
+                    reality, side by side.
+                  additionalProperties:
+                    type: string
+                bootedAt:
+                  type: string
+                  format: date-time
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: [type, status]
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time

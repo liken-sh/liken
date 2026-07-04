@@ -1,0 +1,133 @@
+package main
+
+// A Kubernetes API client from first principles.
+//
+// Every pod is born with everything it needs to call home. Kubernetes
+// injects two environment variables naming the API server's in-cluster
+// address, and kubelet mounts a directory of credentials into every
+// container at a well-known path: a CA certificate to verify the
+// server, and a ServiceAccount token to authenticate as. "In-cluster
+// config" — the thing client-go's rest.InClusterConfig() does — is
+// nothing more than reading those five values.
+//
+// From there the API is plain REST. Every object lives at a predictable
+// URL (/apis/<group>/<version>/<plural>/<name>), GET reads it, POST
+// creates it, PUT replaces it, and authentication is one bearer-token
+// header. kubectl -v=9 prints these exact requests; this file is that
+// output, implemented.
+
+import (
+	"bytes"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"time"
+
+	"github.com/chrisguidry/liken/machine"
+)
+
+const serviceAccountDir = "/var/run/secrets/kubernetes.io/serviceaccount"
+
+// machinesPath is where our CRD's objects live. The URL structure is
+// the same for every resource in Kubernetes: built-ins just use the
+// legacy /api/v1 root instead of /apis/<group>. Machines are
+// cluster-scoped, so there's no /namespaces/<ns>/ segment.
+const machinesPath = "/apis/" + machine.APIVersion + "/machines"
+
+type apiClient struct {
+	base string
+	http *http.Client
+}
+
+func inClusterClient() (*apiClient, error) {
+	host, port := os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")
+	if host == "" || port == "" {
+		return nil, fmt.Errorf("not running in a cluster: KUBERNETES_SERVICE_HOST unset")
+	}
+
+	// The mounted CA is the cluster's server CA — the same root minted
+	// in identity/mint.sh before this machine ever booted. Trusting
+	// exactly that CA (not the system trust store) is what stops a pod
+	// from being fooled by anything else answering on that address.
+	caPEM, err := os.ReadFile(serviceAccountDir + "/ca.crt")
+	if err != nil {
+		return nil, fmt.Errorf("reading service account CA: %w", err)
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("service account CA contains no certificates")
+	}
+
+	return &apiClient{
+		base: "https://" + host + ":" + port,
+		http: &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{RootCAs: roots},
+				// Watches are long-lived responses that trickle data;
+				// the server ends them on its own schedule. No client
+				// timeout, or every watch would die mid-stream.
+				ResponseHeaderTimeout: 30 * time.Second,
+			},
+		},
+	}, nil
+}
+
+// do issues one authenticated request. The token is re-read from disk
+// every time: ServiceAccount tokens are short-lived now (kubelet
+// refreshes the mounted file as they approach expiry), and a client
+// that caches one in memory eventually starts getting 401s.
+func (c *apiClient) do(method, path, contentType string, body []byte) (*http.Response, error) {
+	token, err := os.ReadFile(serviceAccountDir + "/token")
+	if err != nil {
+		return nil, fmt.Errorf("reading service account token: %w", err)
+	}
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequest(method, c.base+path, reader)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+string(token))
+	req.Header.Set("Accept", "application/json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	return c.http.Do(req)
+}
+
+// errNotFound distinguishes "this object doesn't exist" (an ordinary
+// state the caller handles by creating it) from real failures.
+var errNotFound = fmt.Errorf("not found")
+
+// requestJSON runs a request and decodes the JSON response into out,
+// turning non-2xx statuses into errors that carry the server's own
+// words — Kubernetes API errors are structured JSON with a message
+// field, but for our purposes the raw body reads fine.
+func (c *apiClient) requestJSON(method, path string, body []byte, out any) error {
+	contentType := ""
+	if body != nil {
+		contentType = "application/json"
+	}
+	resp, err := c.do(method, path, contentType, body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return errNotFound
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		message, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return fmt.Errorf("%s %s: %s: %s", method, path, resp.Status, message)
+	}
+	if out == nil {
+		return nil
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}

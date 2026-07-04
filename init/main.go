@@ -39,6 +39,8 @@ import (
 	"strings"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/chrisguidry/liken/machine"
 )
 
 func main() {
@@ -74,12 +76,12 @@ func main() {
 	// defaults) but not malformed — though even then, liken carries on
 	// with defaults rather than dying: a misconfigured machine that
 	// reaches the console beats a kernel panic.
-	machine, err := loadMachine()
+	m, err := machine.Load(machine.ManifestPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "liken: machine manifest: %v\n", err)
-		machine = &Machine{}
+		m = &machine.Machine{}
 	}
-	if name := machine.Metadata.Name; name != "" {
+	if name := m.Metadata.Name; name != "" {
 		// Sethostname is PID 1 privilege in action: one syscall, no
 		// hostnamectl, no daemon. The kernel simply keeps a string.
 		if err := unix.Sethostname([]byte(name)); err != nil {
@@ -89,9 +91,17 @@ func main() {
 		}
 	}
 
+	// Kernel tuning is part of who the machine is, so it happens right
+	// after identity: early enough that every value holds before k3s
+	// starts. The operator re-asserts the same spec once the cluster is
+	// up, which is what makes a live kubectl edit stick without a
+	// reboot.
+	applySysctls(m.Spec.Sysctls)
+
 	worldReport()
 
-	if conn, err := bringUpNetwork(machine.Spec.Network); err != nil {
+	conn, err := bringUpNetwork(m.Spec.Network)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "liken: network: %v\n", err)
 	} else {
 		conn.report()
@@ -103,6 +113,10 @@ func main() {
 	// can boot and powers off.
 	if _, err := os.Stat(k3sBinary); err == nil {
 		prepareForK3s()
+		// Facts wait until here because they live under /run, and
+		// prepareForK3s just mounted a fresh tmpfs there — anything
+		// written earlier would be shadowed by the mount.
+		publishFacts(conn)
 		loadModules()
 		go reportWhenReady()
 		superviseK3s() // never returns

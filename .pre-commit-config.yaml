@@ -10,6 +10,10 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+        # Kubernetes manifests are conventionally multi-document
+        # streams (operator/manifests/operator.yaml carries a
+        # namespace, RBAC, and a DaemonSet in one file).
+        args: [--allow-multiple-documents]
       - id: check-merge-conflict
       - id: check-added-large-files
   # shellcheck-py wraps a prebuilt shellcheck binary, so the hook works
@@ -28,24 +32,32 @@ repos:
         entry: gofmt -l -w
         language: system
         types: [go]
+      # The Go checks run per module — init, machine, and operator are
+      # separate modules (see go.work), so each gets its own invocation.
       - id: go-vet
         name: go vet
-        entry: go -C init vet ./...
+        entry: bash -c 'for m in init machine operator; do go -C "$m" vet ./... || exit 1; done'
         language: system
-        files: ^init/
+        files: ^(init|machine|operator)/
+        pass_filenames: false
+      - id: go-test
+        name: go test
+        entry: bash -c 'for m in init machine operator; do go -C "$m" test ./... || exit 1; done'
+        language: system
+        files: ^(init|machine|operator)/
         pass_filenames: false
       - id: staticcheck
         name: staticcheck
-        entry: bash -c 'cd init && staticcheck ./...'
+        entry: bash -c 'for m in init machine operator; do (cd "$m" && staticcheck ./...) || exit 1; done'
         language: system
-        files: ^init/
+        files: ^(init|machine|operator)/
         pass_filenames: false
       - id: go-mod-tidy
         name: go mod tidy
         # -diff reports what tidying would change without changing it,
         # so a stale go.mod/go.sum fails loudly instead of silently
         # mutating during a commit.
-        entry: go -C init mod tidy -diff
+        entry: bash -c 'for m in init machine operator; do go -C "$m" mod tidy -diff || exit 1; done'
         language: system
-        files: ^init/
+        files: ^(init|machine|operator)/
         pass_filenames: false

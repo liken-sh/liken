@@ -10,11 +10,30 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/chrisguidry/liken/machine"
 )
+
+// applySysctls actuates spec.sysctls at boot. Failures are reported and
+// skipped rather than fatal — a typo'd parameter shouldn't cost the
+// machine its boot — and the keys are applied in sorted order so the
+// console reads the same every time.
+func applySysctls(sysctls map[string]string) {
+	for _, name := range slices.Sorted(maps.Keys(sysctls)) {
+		value := sysctls[name]
+		if err := machine.ApplySysctl(machine.SysctlDir, name, value); err != nil {
+			fmt.Fprintf(os.Stderr, "liken: %v\n", err)
+			continue
+		}
+		fmt.Printf("liken: sysctl %s = %s\n", name, value)
+	}
+}
 
 // k3sMounts are the filesystems Kubernetes assumes beyond the
 // essentials. Same table-driven shape as main.go's essentials.

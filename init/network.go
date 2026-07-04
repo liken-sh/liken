@@ -23,6 +23,8 @@ import (
 
 	"github.com/insomniacslk/dhcp/dhcpv4/nclient4"
 	"github.com/vishvananda/netlink"
+
+	"github.com/chrisguidry/liken/machine"
 )
 
 // connection is what bringUpNetwork learned: enough to print an honest
@@ -37,7 +39,7 @@ type connection struct {
 	server      net.IP
 }
 
-func bringUpNetwork(spec NetworkSpec) (*connection, error) {
+func bringUpNetwork(spec machine.NetworkSpec) (*connection, error) {
 	// Loopback first: 127.0.0.1 is assumed by so much software that a
 	// machine without it barely counts as booted. The kernel creates
 	// the interface; we only have to raise it.
@@ -70,7 +72,7 @@ func bringUpNetwork(spec NetworkSpec) (*connection, error) {
 // loopback and has a MAC address — i.e. looks like a real NIC. On the
 // hardware liken targets (one machine, one port) there's nothing to
 // disambiguate; when there is, the manifest pins it by name.
-func pickInterface(spec NetworkSpec) (netlink.Link, error) {
+func pickInterface(spec machine.NetworkSpec) (netlink.Link, error) {
 	if spec.Interface != "" {
 		link, err := netlink.LinkByName(spec.Interface)
 		if err != nil {

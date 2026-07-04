@@ -16,7 +16,7 @@ KERNEL_DIST := kernel/dist/$(KERNEL_VERSION)
 K3S_VERSION := $(strip $(file <k3s/VERSION))
 K3S_DIST := k3s/dist/$(K3S_VERSION)
 
-all: kernel k3s init identity image
+all: kernel k3s init operator identity image
 
 # Because the version is part of the artifact's name, a pin bump changes
 # the target path itself and Make rebuilds without any staleness
@@ -35,11 +35,24 @@ $(K3S_DIST)/k3s: k3s/VERSION k3s/fetch.sh
 k3s: $(K3S_DIST)/k3s
 
 # liken itself: the Go program that boots as PID 1 (the story is in
-# init/main.go's header comment).
-init/dist/liken: $(wildcard init/*.go) init/go.mod init/go.sum
+# init/main.go's header comment). It shares the machine package — the
+# Machine API as Go types — with the operator, so both rebuild when it
+# changes.
+init/dist/liken: $(wildcard init/*.go) init/go.mod init/go.sum \
+		$(wildcard machine/*.go) VERSION
 	$(MAKE) -C init
 
 init: init/dist/liken
+
+# The liken operator: the in-cluster half of the Machine API, packaged
+# as a hand-assembled OCI image (the stories are in operator/main.go
+# and operator/image.sh).
+operator/dist/liken-operator-image.tar: $(wildcard operator/*.go) \
+		operator/go.mod operator/go.sum operator/image.sh \
+		$(wildcard machine/*.go) VERSION
+	$(MAKE) -C operator
+
+operator: operator/dist/liken-operator-image.tar
 
 # The cluster's identity: certificate authorities minted here, in the
 # repo, before any machine boots (the story is in identity/mint.sh).
@@ -63,6 +76,8 @@ kubeconfig: identity/dist/tls/server-ca.crt
 # k3s needs into the cpio archive the kernel unpacks at boot.
 image/dist/liken.cpio: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s \
 		identity/dist/tls/server-ca.crt \
+		operator/dist/liken-operator-image.tar \
+		$(wildcard operator/manifests/*.yaml) \
 		image/build.sh $(shell find image/etc -type f) image/Makefile
 	$(MAKE) -C image
 
@@ -134,7 +149,8 @@ clean:
 	$(MAKE) -C kernel clean
 	$(MAKE) -C k3s clean
 	$(MAKE) -C init clean
+	$(MAKE) -C operator clean
 	$(MAKE) -C identity clean
 	$(MAKE) -C image clean
 
-.PHONY: all kernel k3s init identity kubeconfig image run run-once clean
+.PHONY: all kernel k3s init operator identity kubeconfig image run run-once clean

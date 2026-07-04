@@ -13,7 +13,10 @@ dist/liken.cpio: build.sh $(shell find etc -type f) \
 		../init/dist/liken \
 		../kernel/dist/$(KERNEL_VERSION)/vmlinuz \
 		../k3s/dist/$(K3S_VERSION)/k3s \
-		../identity/dist/tls/server-ca.crt
+		../identity/dist/tls/server-ca.crt \
+		../operator/dist/liken-operator-image.tar \
+		$(wildcard ../operator/manifests/*.yaml) \
+		../VERSION
 	./build.sh
 
 .PHONY: all clean

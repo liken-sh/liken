@@ -2,11 +2,15 @@ module github.com/chrisguidry/liken/init
 
 go 1.26.4
 
+// The machine package lives in this repo, not on a module proxy; the
+// replace directive is what lets this module build standalone.
+replace github.com/chrisguidry/liken/machine => ../machine
+
 require (
+	github.com/chrisguidry/liken/machine v0.0.0-00010101000000-000000000000
 	github.com/insomniacslk/dhcp v0.0.0-20260603135910-a415979eb11e
 	github.com/vishvananda/netlink v1.3.1
 	golang.org/x/sys v0.46.0
-	sigs.k8s.io/yaml v1.6.0
 )
 
 require (
@@ -19,4 +23,5 @@ require (
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	golang.org/x/net v0.38.0 // indirect
 	golang.org/x/sync v0.3.0 // indirect
+	sigs.k8s.io/yaml v1.6.0 // indirect
 )
