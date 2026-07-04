@@ -42,3 +42,23 @@
        first boot.
 5. [ ] The mastery tier: A/B image upgrades, UKIs, dm-verity, secure boot,
        TPM-sealed secrets.
+
+# Open problems
+
+Questions we know we owe answers, without pretending to have them yet:
+
+* **Which machine am I?** One image may boot many machines, so something
+  has to definitively identify a machine and select its Machine manifest.
+  Candidates for the identity signal: the kernel command line (a
+  `liken.machine=` parameter the bootloader owns), a hardware fact (MAC
+  address, DMI serial, TPM identity), or a config partition per machine.
+  Related: where do many manifests live — many files in one image, or
+  fetched by identity at boot?
+* **Static networking.** `spec.network` today only picks an interface and
+  assumes DHCP. Static addressing needs address/gateway/nameserver fields
+  and a story for machines that must come up when no DHCP exists.
+* **Cluster membership.** A `kind: Cluster` manifest carrying what a
+  machine needs to form or join a cluster: the k3s join token (or a
+  reference to it — a token in plain YAML is a secrets problem), the
+  server URL to join, and which machines are servers vs. agents. How it
+  relates to Machine (embedded? referenced by name?) is undecided.
