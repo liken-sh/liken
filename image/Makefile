@@ -12,7 +12,8 @@ K3S_VERSION := $(strip $(file <../k3s/VERSION))
 dist/liken.cpio: build.sh $(shell find etc -type f) \
 		../init/dist/liken \
 		../kernel/dist/$(KERNEL_VERSION)/vmlinuz \
-		../k3s/dist/$(K3S_VERSION)/k3s
+		../k3s/dist/$(K3S_VERSION)/k3s \
+		../identity/dist/tls/server-ca.crt
 	./build.sh
 
 .PHONY: all clean

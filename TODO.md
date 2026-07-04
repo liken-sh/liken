@@ -31,11 +31,16 @@
           ends at a settled single-node cluster; `make run-once`
           (`liken.oneshot`) makes any k3s death power the machine off
           so a harness can measure the boot.
-   3. [ ] Machine identity is an input, not an output: `make` mints a
-          CA bundle (gitignored) and pre-seeds k3s's TLS directory in the
-          image, so an operator's kubeconfig is computed offline — never
-          copied off the machine. `make kubeconfig`, `--tls-san`, and a
-          QEMU port-forward for `kubectl get nodes` from the host.
+   3. [x] Machine identity is an input, not an output: `make` mints a
+          CA bundle (gitignored, identity/) and pre-seeds k3s's TLS
+          directory in the image, so an operator's kubeconfig is
+          computed offline — never copied off the machine. `make
+          kubeconfig` plus a loopback-only QEMU port-forward gets
+          `kubectl get nodes` from the host; no `--tls-san` needed,
+          since k3s's serving cert covers 127.0.0.1 by default. (The
+          hard-way discovery: kube-apiserver reads the ServiceAccount
+          key with a parser that takes SEC1 "EC PRIVATE KEY" but not
+          PKCS#8.)
    4. [ ] The Kubernetes API is the machine API: OS-level reads and writes
           become a Machine CRD (facts in status, declared state in spec),
           reconciled by a small in-cluster liken operator. Init never

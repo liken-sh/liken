@@ -25,6 +25,16 @@
 #                                 and no way to log in as either. kubelet
 #                                 reads passwd and the sub-ID ranges to
 #                                 map container users into namespaces
+#   /var/lib/rancher/k3s/         the cluster's certificate authorities,
+#     server/tls/                 minted by the identity domain. k3s
+#                                 finds them here and signs its leaf
+#                                 certs from them instead of inventing
+#                                 its own roots — which is what makes an
+#                                 operator's kubeconfig computable
+#                                 offline (identity/mint.sh). It also
+#                                 means the image contains private keys:
+#                                 whoever holds this file owns the
+#                                 cluster it boots
 #
 # Nothing else. No shell, no coreutils, no libc: every file above is
 # either written in this repo or vendored by a pinned, verified fetch.
@@ -44,6 +54,11 @@ mkdir -p "$root/etc/ssl/certs" "$root/bin"
 cp -r "$here/etc" "$root/"
 cp "$here/../init/dist/liken" "$root/liken"
 cp "$here/../k3s/dist/$k3s_version/k3s" "$root/bin/k3s"
+
+# The pre-minted certificate authorities, placed exactly where k3s
+# looks before generating its own.
+mkdir -p "$root/var/lib/rancher/k3s/server"
+cp -r "$here/../identity/dist/tls" "$root/var/lib/rancher/k3s/server/tls"
 
 # The CA bundle comes from the build host — every Linux machine has the
 # Mozilla trust store at this conventional path. Vendoring it with a

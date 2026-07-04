@@ -16,7 +16,7 @@ KERNEL_DIST := kernel/dist/$(KERNEL_VERSION)
 K3S_VERSION := $(strip $(file <k3s/VERSION))
 K3S_DIST := k3s/dist/$(K3S_VERSION)
 
-all: kernel k3s init image
+all: kernel k3s init identity image
 
 # Because the version is part of the artifact's name, a pin bump changes
 # the target path itself and Make rebuilds without any staleness
@@ -41,9 +41,28 @@ init/dist/liken: $(wildcard init/*.go) init/go.mod init/go.sum
 
 init: init/dist/liken
 
+# The cluster's identity: certificate authorities minted here, in the
+# repo, before any machine boots (the story is in identity/mint.sh).
+# The keys are gitignored and the artifacts carry no version — losing
+# or remaking them just gives the next boot a new identity.
+identity/dist/tls/server-ca.crt: identity/mint.sh
+	$(MAKE) -C identity
+
+identity: identity/dist/tls/server-ca.crt
+
+# An operator's admin credential, computed offline from the client CA
+# — the machine is never asked for it (the story is in
+# identity/kubeconfig.sh). Use it explicitly, so no kubeconfig you
+# already have is ever touched:
+#
+#   kubectl --kubeconfig identity/dist/kubeconfig get nodes
+kubeconfig: identity/dist/tls/server-ca.crt
+	$(MAKE) -C identity kubeconfig
+
 # The bootable initramfs: the image domain packs liken and everything
 # k3s needs into the cpio archive the kernel unpacks at boot.
 image/dist/liken.cpio: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s \
+		identity/dist/tls/server-ca.crt \
 		image/build.sh $(shell find image/etc -type f) image/Makefile
 	$(MAKE) -C image
 
@@ -78,7 +97,14 @@ image: image/dist/liken.cpio
 #   -netdev user             QEMU's built-in user-mode network: it plays
 #                            DHCP server, router, NAT, and DNS proxy for
 #                            the guest (the 10.0.2.0/24 world), no root
-#                            or bridges required on the host
+#                            or bridges required on the host. hostfwd
+#                            punches one hole inward: host 127.0.0.1:16443
+#                            forwards to the guest's API server on 6443,
+#                            which is what lets kubectl on the host reach
+#                            the cluster (see identity/kubeconfig.sh). A
+#                            non-default host port, bound to loopback
+#                            only, so it can't collide with any other
+#                            cluster the host talks to
 #   -device virtio-net-pci   the NIC we attach it to — virtio because
 #                            our vendored kernel builds that driver in
 #                            (CONFIG_VIRTIO_NET=y); QEMU's default e1000
@@ -95,7 +121,7 @@ run: $(KERNEL_DIST)/vmlinuz image/dist/liken.cpio
 		-serial stdio \
 		-monitor none \
 		-no-reboot \
-		-netdev user,id=net0 \
+		-netdev user,id=net0,hostfwd=tcp:127.0.0.1:16443-:6443 \
 		-device virtio-net-pci,netdev=net0
 
 # One-shot boots for debugging and automation: liken.oneshot tells init
@@ -108,6 +134,7 @@ clean:
 	$(MAKE) -C kernel clean
 	$(MAKE) -C k3s clean
 	$(MAKE) -C init clean
+	$(MAKE) -C identity clean
 	$(MAKE) -C image clean
 
-.PHONY: all kernel k3s init image run run-once clean
+.PHONY: all kernel k3s init identity kubeconfig image run run-once clean
