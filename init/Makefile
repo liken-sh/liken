@@ -1,6 +1,5 @@
-# The init domain: liken itself, the one program this project writes.
-# Everything else in the distro is vendored; this is the part we owe the
-# world an explanation for, and main.go opens with it.
+# The init domain: liken itself, the only program here that isn't
+# vendored. main.go opens with the story of what it is.
 
 # CGO_ENABLED=0 forbids C bindings, which makes Go emit a fully static
 # binary — no libc, no dynamic loader. That's not an optimization here,

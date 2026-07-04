@@ -6,12 +6,13 @@ package main
 // Kubernetes resource. That's a deliberate, well-precedented move —
 // kubelet's KubeletConfiguration, k0s's config, and Talos's machine
 // config all work this way — because a schema-disciplined document can
-// ride two transports: today init reads it from a file baked into the
-// image (there is no API server yet when PID 1 wakes up), and later the
-// same document becomes a real CRD in the cluster, where a liken
-// operator publishes live facts into its status. One mental model from
-// first boot to fleet: `kubectl get machine -o yaml` on day 300 shows
-// the same shape you hand-wrote on day one.
+// ride two transports: at boot, init reads it from a file baked into
+// the image (there is no API server when PID 1 wakes up); once the
+// cluster is up, the same document is meant to live in it as a real
+// CRD, where a liken operator publishes the machine's live facts into
+// its status. One mental model from first boot to fleet: `kubectl get
+// machine -o yaml` on day 300 shows the same shape you hand-wrote on
+// day one.
 //
 // The API group is liken.sh — CRD groups are DNS names, and we own
 // that one.
@@ -45,9 +46,8 @@ type MachineSpec struct {
 
 // NetworkSpec is deliberately almost empty: liken's default posture is
 // zero-config — DHCP on the first physical interface, hostname from the
-// manifest, DNS from the lease. Fields appear here only when a machine
-// genuinely needs to deviate (a pinned interface today; static
-// addressing someday).
+// manifest, DNS from the lease. Fields exist here only for machines
+// that genuinely need to deviate.
 type NetworkSpec struct {
 	// Interface pins network bring-up to a specific interface name
 	// (e.g. "eth1"). Empty means: the first interface that looks like

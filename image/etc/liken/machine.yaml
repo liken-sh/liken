@@ -1,10 +1,10 @@
 # The Machine manifest: the one document that tells a liken machine who
 # it is. It's shaped exactly like a Kubernetes resource on purpose —
-# init reads it from this file at boot (there's no API server yet when
-# PID 1 wakes up), and later the same document will live in the cluster
-# as a real CRD, with liken publishing the machine's live facts into its
-# status. What you write here is what `kubectl get machine -o yaml` will
-# show you, forever.
+# init reads it from this file at boot (there's no API server when PID 1
+# wakes up), and the same document is meant to live in the cluster as a
+# real CRD, with liken publishing the machine's live facts into its
+# status. What you write here is what `kubectl get machine -o yaml`
+# shows you, forever.
 #
 # liken's defaults are deliberately aggressive: an empty spec means
 # DHCP on the first real network interface, DNS from the lease, done.
@@ -12,8 +12,7 @@
 apiVersion: liken.sh/v1alpha1
 kind: Machine
 metadata:
-  # The machine's name: its hostname today, its Kubernetes node name
-  # once k3s is here.
+  # The machine's name: its hostname, and its Kubernetes node name.
   name: liken-dev
 spec:
   network: {}

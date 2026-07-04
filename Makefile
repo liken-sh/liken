@@ -3,18 +3,20 @@
 # prerequisites, timestamps — the natural way to drive the build.
 #
 # The structure follows the repo's rule of organizing by domain: each
-# domain directory (kernel/, and soon init/ and image/) has its own
+# domain directory (kernel/, k3s/, init/, image/) has its own
 # Makefile that owns its rules and can be run standalone with
 # `make -C <domain>`. This root Makefile names the artifacts the domains
 # exchange and delegates the work of producing them.
 
-# The kernel's version pin names its artifacts, so the root reads it too:
-# downstream rules (the image build, QEMU) will depend on these real
-# files, not on phony targets.
+# Version pins name the vendored artifacts, so the root reads them too:
+# downstream rules (the image build, QEMU) depend on these real files,
+# not on phony targets.
 KERNEL_VERSION := $(strip $(file <kernel/VERSION))
 KERNEL_DIST := kernel/dist/$(KERNEL_VERSION)
+K3S_VERSION := $(strip $(file <k3s/VERSION))
+K3S_DIST := k3s/dist/$(K3S_VERSION)
 
-all: kernel init
+all: kernel k3s init image
 
 # Because the version is part of the artifact's name, a pin bump changes
 # the target path itself and Make rebuilds without any staleness
@@ -25,6 +27,13 @@ $(KERNEL_DIST)/vmlinuz: kernel/VERSION kernel/fetch.sh
 
 kernel: $(KERNEL_DIST)/vmlinuz
 
+# All of Kubernetes, as one pinned, verified download (the story is in
+# k3s/fetch.sh).
+$(K3S_DIST)/k3s: k3s/VERSION k3s/fetch.sh
+	$(MAKE) -C k3s
+
+k3s: $(K3S_DIST)/k3s
+
 # liken itself: the Go program that boots as PID 1 (the story is in
 # init/main.go's header comment).
 init/dist/liken: $(wildcard init/*.go) init/go.mod init/go.sum
@@ -32,10 +41,10 @@ init/dist/liken: $(wildcard init/*.go) init/go.mod init/go.sum
 
 init: init/dist/liken
 
-# The bootable initramfs: the image domain packs liken (and someday
-# modules, k3s, and CA certificates) into the cpio archive the kernel
-# unpacks at boot.
-image/dist/liken.cpio: init/dist/liken image/machine.yaml image/Makefile
+# The bootable initramfs: the image domain packs liken and everything
+# k3s needs into the cpio archive the kernel unpacks at boot.
+image/dist/liken.cpio: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s \
+		image/build.sh $(shell find image/etc -type f) image/Makefile
 	$(MAKE) -C image
 
 image: image/dist/liken.cpio
@@ -52,10 +61,11 @@ image: image/dist/liken.cpio
 #                            model lacks it, and without any entropy
 #                            source the kernel RNG never initializes, so
 #                            the first getrandom() in userspace blocks
-#                            forever — liken's DHCP client (which wants
-#                            a random transaction ID) hung exactly there
-#   -m 512                   more than enough for a kernel and one Go
-#                            process; k3s will raise this someday
+#                            forever (liken's DHCP client draws one for
+#                            its transaction IDs)
+#   -m 4096                  Kubernetes-sized memory: the root
+#                            filesystem, container images, and every
+#                            workload all live in RAM here
 #   -append                  the kernel command line: put the kernel's
 #                            console on the first serial port, then run
 #                            our program — by name — as PID 1
@@ -72,15 +82,15 @@ image: image/dist/liken.cpio
 #   -device virtio-net-pci   the NIC we attach it to — virtio because
 #                            our vendored kernel builds that driver in
 #                            (CONFIG_VIRTIO_NET=y); QEMU's default e1000
-#                            is a module we don't ship yet
+#                            is a module we don't ship
 run: $(KERNEL_DIST)/vmlinuz image/dist/liken.cpio
 	qemu-system-x86_64 \
 		-accel kvm -accel tcg \
 		-cpu max \
-		-m 512 \
+		-m 4096 \
 		-kernel $(KERNEL_DIST)/vmlinuz \
 		-initrd image/dist/liken.cpio \
-		-append "console=ttyS0 rdinit=/liken" \
+		-append "console=ttyS0 rdinit=/liken $(LIKEN_BOOT_ARGS)" \
 		-display none \
 		-serial stdio \
 		-monitor none \
@@ -88,9 +98,16 @@ run: $(KERNEL_DIST)/vmlinuz image/dist/liken.cpio
 		-netdev user,id=net0 \
 		-device virtio-net-pci,netdev=net0
 
+# One-shot boots for debugging and automation: liken.oneshot tells init
+# not to resurrect k3s — its first death powers the machine off, QEMU
+# exits, and the console log is a complete, bounded record of the boot.
+run-once: LIKEN_BOOT_ARGS = liken.oneshot
+run-once: run
+
 clean:
 	$(MAKE) -C kernel clean
+	$(MAKE) -C k3s clean
 	$(MAKE) -C init clean
 	$(MAKE) -C image clean
 
-.PHONY: all kernel init image run clean
+.PHONY: all kernel k3s init image run run-once clean

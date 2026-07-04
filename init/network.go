@@ -26,7 +26,7 @@ import (
 )
 
 // connection is what bringUpNetwork learned: enough to print an honest
-// report and, someday, to renew the lease it came from.
+// report of how this machine is attached to the world.
 type connection struct {
 	ifname      string
 	mac         net.HardwareAddr
@@ -101,12 +101,12 @@ func pickInterface(spec NetworkSpec) (netlink.Link, error) {
 // The summary logger prints each packet of the exchange to the console
 // — on a machine with no shell, the boot log is the packet capture.
 //
-// A hard-won note on entropy: the client draws a random transaction ID
-// via getrandom(2), which blocks — uninterruptibly, immune to our
-// context deadline — until the kernel's RNG has initialized. On
-// hardware with no entropy source (like QEMU's default CPU model,
-// which lacks RDRAND) that is forever. The host must provide entropy:
-// RDRAND, virtio-rng, or patience with the kernel's jitter collector.
+// A note on entropy: the client draws a random transaction ID via
+// getrandom(2), which blocks — uninterruptibly, immune to our context
+// deadline — until the kernel's RNG has initialized. On hardware with
+// no entropy source (like QEMU's default CPU model, which lacks
+// RDRAND) that is forever. The host must provide entropy: RDRAND,
+// virtio-rng, or patience with the kernel's jitter collector.
 func acquireLease(ifname string) (*nclient4.Lease, error) {
 	client, err := nclient4.New(ifname, nclient4.WithSummaryLogger())
 	if err != nil {
@@ -186,26 +186,4 @@ func joinIPs(ips []net.IP) string {
 		strs[i] = ip.String()
 	}
 	return strings.Join(strs, ", ")
-}
-
-// resolveDemo proves the network end to end, the way every future
-// program on this machine will experience it: Go's resolver reads
-// /etc/resolv.conf — the file applyLease just wrote — and queries the
-// nameservers the lease named. Under QEMU that's 10.0.2.3, the built-in
-// DNS proxy, which forwards to the host's resolver; on real hardware
-// it's whatever the LAN's DHCP handed out.
-//
-// A Go note: on a normal Linux system Go may delegate lookups to libc.
-// liken has no libc, so Go's pure-Go resolver is the only resolver —
-// no nsswitch, no local caching daemon, just that one file.
-func resolveDemo(name string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	addrs, err := net.DefaultResolver.LookupHost(ctx, name)
-	if err != nil {
-		fmt.Printf("liken: resolving %s: %v\n", name, err)
-		return
-	}
-	fmt.Printf("liken: %s -> %s\n", name, strings.Join(addrs, ", "))
 }

@@ -52,10 +52,9 @@
 # Downloads are cached in kernel/cache/ and verified against the sha256
 # checksums the archive publishes alongside each build, so re-runs are
 # cheap and a torn download can't slip through. (The archive also signs
-# its checksum file with the Ubuntu kernel team's GPG key; we don't verify
-# that today, which is a conscious gap — sha256 gives us integrity, not
-# provenance. Worth revisiting when liken starts caring about supply
-# chain.)
+# its checksum file with the Ubuntu kernel team's GPG key; we don't
+# verify that signature, a conscious gap — sha256 gives us integrity,
+# not provenance.)
 
 set -euo pipefail
 
@@ -99,7 +98,7 @@ trap 'rm -rf "$staging"' EXIT
 
 # Download (with cache) and unpack one package, identified by a filename
 # pattern rather than an exact name. `ar p` streams the payload member to
-# stdout; the payload may be a plain data.tar (mainline builds today) or
+# stdout; the payload may be a plain data.tar (current mainline builds) or
 # compressed with zstd or xz (Ubuntu's own archives, older builds).
 fetch() {
     local pattern="$1" line digest deb payload

@@ -23,18 +23,18 @@
 //     safety measure so a stray kill -9 can't panic the machine.
 //
 // A traditional init grows from here into a service manager. liken's
-// does not: its whole ambition is to make a world just barely habitable
-// for k3s, start it, and keep it running — Kubernetes is the service
-// manager. Today it does less than that: it mounts the essential
-// pseudo-filesystems, reads its Machine manifest, joins the network,
-// proves the connection with a DNS lookup, and powers off. A machine
-// that can introduce itself to the world, but doesn't yet have a job.
+// does not: its whole job is to make a world just barely habitable for
+// k3s, start it, and keep it running — Kubernetes is the service
+// manager. When the image carries no k3s, a boot is a self-test: mount
+// the essentials, read the Machine manifest, join the network, prove
+// the connection with a DNS lookup, power off.
 package main
 
 import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -88,26 +88,48 @@ func main() {
 		fmt.Fprintf(os.Stderr, "liken: network: %v\n", err)
 	} else {
 		conn.report()
-		// The proof of life for milestone "boot-to-network": one real
-		// DNS query, resolved through the nameserver the lease gave
-		// us, over a route we installed, from an address we
-		// negotiated.
-		resolveDemo("github.com")
 	}
 
-	// Nothing to supervise yet — a boot is complete once the report is
+	// If the image carries k3s, liken has its real job: build the rest
+	// of the world Kubernetes expects, then supervise it forever. A
+	// machine without k3s (the image's minimal form) just proves it
+	// can boot and powers off.
+	if _, err := os.Stat(k3sBinary); err == nil {
+		prepareForK3s()
+		loadModules()
+		go reportWhenReady()
+		superviseK3s() // never returns
+	}
+
+	// With no k3s to supervise, a boot is complete once the report is
 	// out. Powering off (never exiting! see above) hands QEMU a clean
 	// shutdown, which is what lets `make run` double as a test harness.
 	fmt.Println("liken: boot complete, powering off")
+	powerOff()
+}
 
-	// Sync flushes dirty pages to disk. Today everything lives in RAM
-	// and this is a formality, but it becomes load-bearing the moment a
-	// writable data partition exists, and it costs nothing to be in the
-	// habit.
+// powerOff ends the machine's life politely: sync flushes dirty pages
+// to disk — on a machine whose whole world is RAM it's a formality,
+// but it costs nothing and is load-bearing the moment a writable disk
+// exists — and the reboot syscall does the rest. PID 1 must never
+// simply exit; this is the one sanctioned way out.
+func powerOff() {
 	unix.Sync()
 	if err := unix.Reboot(unix.LINUX_REBOOT_CMD_POWER_OFF); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: power off failed: %v\n", err)
 	}
+}
+
+// bootParam reports whether a word appears on the kernel command line
+// — liken's channel for per-boot behavior that isn't machine identity
+// (that belongs in the Machine manifest). Parameters are namespaced
+// liken.* to stay clear of the kernel's own.
+func bootParam(name string) bool {
+	raw, err := os.ReadFile("/proc/cmdline")
+	if err != nil {
+		return false
+	}
+	return slices.Contains(strings.Fields(string(raw)), name)
 }
 
 // A mount table rather than a sequence of calls: the essential
@@ -173,8 +195,8 @@ func worldReport() {
 	}
 
 	// The command line is how the outside world parameterizes a boot —
-	// it's where rdinit= pointed at us, and where a future liken learns
-	// things like which repo it reconciles.
+	// it's where rdinit= points at us, and the natural channel for any
+	// fact a machine must know before it has a filesystem.
 	if cmdline, err := os.ReadFile("/proc/cmdline"); err == nil {
 		fmt.Printf("liken: cmdline: %s\n", strings.TrimSpace(string(cmdline)))
 	}
@@ -198,9 +220,12 @@ func worldReport() {
 // reap collects the exit status of any child process, forever. SIGCHLD
 // arrives whenever a child dies; because signal coalescing can fold many
 // deaths into one delivery, each wakeup drains every waiting corpse, not
-// just one. (Go note: signal.Notify registers a handler with the runtime
-// and forwards deliveries onto a channel, turning an async interrupt
-// into an ordinary receive loop — and satisfying the "PID 1 must install
+// just one. This loop is the only place in liken that calls wait — every
+// exit status it collects is posted to the registry in supervisor.go,
+// where whoever started the process can claim it. (Go note:
+// signal.Notify registers a handler with the runtime and forwards
+// deliveries onto a channel, turning an async interrupt into an
+// ordinary receive loop — and satisfying the "PID 1 must install
 // handlers" rule from the header comment.)
 func reap() {
 	sigchld := make(chan os.Signal, 1)
@@ -209,10 +234,12 @@ func reap() {
 		for {
 			// -1 means "any child"; WNOHANG means "don't block if none
 			// are dead yet" — pid 0 says the living can go on living.
-			pid, err := unix.Wait4(-1, nil, unix.WNOHANG, nil)
+			var status unix.WaitStatus
+			pid, err := unix.Wait4(-1, &status, unix.WNOHANG, nil)
 			if pid <= 0 || err != nil {
 				break
 			}
+			recordDeath(pid, status)
 		}
 	}
 }

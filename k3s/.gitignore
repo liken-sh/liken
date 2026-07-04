@@ -1,0 +1,4 @@
+# Downloaded binaries are build artifacts, reproducible from VERSION +
+# fetch.sh; only the pin is source.
+cache/
+dist/
