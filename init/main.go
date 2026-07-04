@@ -4,7 +4,8 @@
 // in-memory root filesystem and executes one program as process ID 1. We
 // name ours liken and point the kernel at it with rdinit=/liken on the
 // kernel command line. That exec is the entire handoff from kernelspace:
-// no environment, no arguments, no other processes, and almost no
+// a bare-bones environment, any boot parameters the kernel itself didn't
+// recognize passed as arguments, no other processes, and almost no
 // filesystem — just this program, alone, in a world it must finish
 // building itself.
 //
@@ -55,6 +56,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, "liken is an init and must run as PID 1; refusing")
 		os.Exit(1)
 	}
+
+	// Before any mount or any child process: trade the kernel's rootfs
+	// for a real root filesystem. On success this re-execs the program
+	// from the new root and main starts over — which is why the console
+	// says hello twice. switchroot.go tells the whole story.
+	maybeSwitchRoot()
 
 	// Reaping starts before anything else: the moment we spawn a child
 	// (or inherit an orphan), collecting its exit status is our job and

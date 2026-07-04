@@ -16,12 +16,3 @@ disable:
 # The admin kubeconfig k3s writes; group-readable is fine on a machine
 # with exactly one user, who is root.
 write-kubeconfig-mode: "0644"
-
-# The root filesystem is the initramfs: RAM, not a block device. kubelet's
-# local-storage capacity isolation wants to measure a real filesystem
-# ("cannot find filesystem info for device rootfs") to account and evict
-# on ephemeral storage — an accounting that has no meaning when storage
-# is memory. Memory pressure is the real signal here, and kubelet already
-# watches that.
-kubelet-arg:
-  - local-storage-capacity-isolation=false

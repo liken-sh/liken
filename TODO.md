@@ -64,11 +64,12 @@ us; each works today and is guarded by the version pin + `make run-once`.
   real file with no coupling to k3s internals.
 * [ ] File the upstream k3s issue: its bundled iptables entrypoint is a
   `#!/bin/sh` detection script, which breaks any host without a shell.
-* [ ] Experiment: switch_root onto a plain tmpfs early in boot, the way
-  k3OS did, so the root filesystem is an ordinary measurable mount
-  instead of the kernel's magic initramfs rootfs. May let us drop
-  `local-storage-capacity-isolation=false` (revisit that flag no later
-  than when a writable data partition arrives).
+* [x] switch_root onto a plain tmpfs early in boot, the way k3OS did,
+  so the root filesystem is an ordinary measurable mount instead of the
+  kernel's magic initramfs rootfs. This let us drop
+  `local-storage-capacity-isolation=false` entirely and silenced
+  kubelet's recurring filesystem-stat errors — kubelet now measures /
+  like any other machine's.
 
 # Open problems
 
