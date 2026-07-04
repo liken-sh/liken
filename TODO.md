@@ -17,7 +17,28 @@
           itself.
 2. [ ] Init starts k3s and nothing else — and discover every host dependency
        (cgroups, kernel modules, time, entropy) the hard way.
-3. [ ] Bake in Flux bootstrap, so the machine converges to its repo from
+   1. [x] Boot to network from a Machine manifest (`kind: Machine`,
+          `apiVersion: liken.sh/v1alpha1`, file-delivered at boot): raise
+          the interface, speak DHCP (the whole DORA exchange prints to
+          the console), apply the lease via netlink, and prove it with a
+          DNS lookup against an outside nameserver. (Entropy was the
+          predicted hard-way discovery: no RDRAND → kernel RNG never
+          initializes → getrandom() blocks forever in the DHCP client.)
+   2. [ ] Machine identity is an input, not an output: `make` mints a
+          CA bundle (gitignored) and pre-seeds k3s's TLS directory in the
+          image, so an operator's kubeconfig is computed offline — never
+          copied off the machine. `make kubeconfig`, `--tls-san`, and a
+          QEMU port-forward for `kubectl get nodes` from the host.
+   3. [ ] The Kubernetes API is the machine API: OS-level reads and writes
+          become a Machine CRD (facts in status, declared state in spec),
+          reconciled by a small in-cluster liken operator. Init never
+          talks to k3s; it writes facts to `/run/liken/` and the operator
+          does the API half.
+3. [ ] Design the public bootstrapping story: today the identity bundle is
+       minted by make in a private checkout, but a released OS needs a way
+       for anyone to mint theirs — an installer step, a tiny CLI, or a
+       documented openssl recipe.
+4. [ ] Bake in Flux bootstrap, so the machine converges to its repo from
        first boot.
-4. [ ] The mastery tier: A/B image upgrades, UKIs, dm-verity, secure boot,
+5. [ ] The mastery tier: A/B image upgrades, UKIs, dm-verity, secure boot,
        TPM-sealed secrets.

@@ -35,7 +35,7 @@ init: init/dist/liken
 # The bootable initramfs: the image domain packs liken (and someday
 # modules, k3s, and CA certificates) into the cpio archive the kernel
 # unpacks at boot.
-image/dist/liken.cpio: init/dist/liken image/Makefile
+image/dist/liken.cpio: init/dist/liken image/machine.yaml image/Makefile
 	$(MAKE) -C image
 
 image: image/dist/liken.cpio
@@ -47,6 +47,13 @@ image: image/dist/liken.cpio
 #   -accel kvm -accel tcg    hardware virtualization when available
 #                            (near-native speed), pure emulation when
 #                            not (CI), in that order of preference
+#   -cpu max                 the fullest CPU the accelerator can offer —
+#                            crucially including RDRAND. QEMU's default
+#                            model lacks it, and without any entropy
+#                            source the kernel RNG never initializes, so
+#                            the first getrandom() in userspace blocks
+#                            forever — liken's DHCP client (which wants
+#                            a random transaction ID) hung exactly there
 #   -m 512                   more than enough for a kernel and one Go
 #                            process; k3s will raise this someday
 #   -append                  the kernel command line: put the kernel's
@@ -58,9 +65,18 @@ image: image/dist/liken.cpio
 #                            onto the same stream; tests read pure liken
 #   -no-reboot               a guest-initiated reboot ends QEMU instead
 #                            of looping, so boots terminate cleanly
+#   -netdev user             QEMU's built-in user-mode network: it plays
+#                            DHCP server, router, NAT, and DNS proxy for
+#                            the guest (the 10.0.2.0/24 world), no root
+#                            or bridges required on the host
+#   -device virtio-net-pci   the NIC we attach it to — virtio because
+#                            our vendored kernel builds that driver in
+#                            (CONFIG_VIRTIO_NET=y); QEMU's default e1000
+#                            is a module we don't ship yet
 run: $(KERNEL_DIST)/vmlinuz image/dist/liken.cpio
 	qemu-system-x86_64 \
 		-accel kvm -accel tcg \
+		-cpu max \
 		-m 512 \
 		-kernel $(KERNEL_DIST)/vmlinuz \
 		-initrd image/dist/liken.cpio \
@@ -68,7 +84,9 @@ run: $(KERNEL_DIST)/vmlinuz image/dist/liken.cpio
 		-display none \
 		-serial stdio \
 		-monitor none \
-		-no-reboot
+		-no-reboot \
+		-netdev user,id=net0 \
+		-device virtio-net-pci,netdev=net0
 
 clean:
 	$(MAKE) -C kernel clean

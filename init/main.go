@@ -25,9 +25,10 @@
 // A traditional init grows from here into a service manager. liken's
 // does not: its whole ambition is to make a world just barely habitable
 // for k3s, start it, and keep it running — Kubernetes is the service
-// manager. Today it does even less than that: it mounts the essential
-// pseudo-filesystems, reports on the world it woke up in, and powers
-// off. A newborn's cry, to prove the machine can live.
+// manager. Today it does less than that: it mounts the essential
+// pseudo-filesystems, reads its Machine manifest, joins the network,
+// proves the connection with a DNS lookup, and powers off. A machine
+// that can introduce itself to the world, but doesn't yet have a job.
 package main
 
 import (
@@ -61,7 +62,38 @@ func main() {
 	go reap()
 
 	mountEssentials()
+
+	// Who is this machine? The manifest is allowed to be missing (all
+	// defaults) but not malformed — though even then, liken carries on
+	// with defaults rather than dying: a misconfigured machine that
+	// reaches the console beats a kernel panic.
+	machine, err := loadMachine()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "liken: machine manifest: %v\n", err)
+		machine = &Machine{}
+	}
+	if name := machine.Metadata.Name; name != "" {
+		// Sethostname is PID 1 privilege in action: one syscall, no
+		// hostnamectl, no daemon. The kernel simply keeps a string.
+		if err := unix.Sethostname([]byte(name)); err != nil {
+			fmt.Fprintf(os.Stderr, "liken: sethostname %q: %v\n", name, err)
+		} else {
+			fmt.Printf("liken: i am %s\n", name)
+		}
+	}
+
 	worldReport()
+
+	if conn, err := bringUpNetwork(machine.Spec.Network); err != nil {
+		fmt.Fprintf(os.Stderr, "liken: network: %v\n", err)
+	} else {
+		conn.report()
+		// The proof of life for milestone "boot-to-network": one real
+		// DNS query, resolved through the nameserver the lease gave
+		// us, over a route we installed, from an address we
+		// negotiated.
+		resolveDemo("github.com")
+	}
 
 	// Nothing to supervise yet — a boot is complete once the report is
 	// out. Powering off (never exiting! see above) hands QEMU a clean
