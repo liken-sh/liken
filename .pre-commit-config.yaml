@@ -1,0 +1,51 @@
+# Quality checks that run before every commit, via pre-commit (or prek,
+# its drop-in replacement). The Go stack here — gofmt, go vet,
+# staticcheck, and a tidy go.mod — is the idiomatic minimum for a Go
+# project; the rest is repo hygiene and a linter for the shell that
+# implements our Make rules.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+  # shellcheck-py wraps a prebuilt shellcheck binary, so the hook works
+  # even on machines without shellcheck installed.
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        # -w rewrites files in place; pre-commit fails the commit when a
+        # hook modifies files, so an unformatted commit becomes a
+        # formatted retry.
+        entry: gofmt -l -w
+        language: system
+        types: [go]
+      - id: go-vet
+        name: go vet
+        entry: go -C init vet ./...
+        language: system
+        files: ^init/
+        pass_filenames: false
+      - id: staticcheck
+        name: staticcheck
+        entry: bash -c 'cd init && staticcheck ./...'
+        language: system
+        files: ^init/
+        pass_filenames: false
+      - id: go-mod-tidy
+        name: go mod tidy
+        # -diff reports what tidying would change without changing it,
+        # so a stale go.mod/go.sum fails loudly instead of silently
+        # mutating during a commit.
+        entry: go -C init mod tidy -diff
+        language: system
+        files: ^init/
+        pass_filenames: false
