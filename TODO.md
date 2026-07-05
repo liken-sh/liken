@@ -15,7 +15,7 @@
           flags (`-display none -serial stdio -monitor none -no-reboot`)
           rather than the `-nographic` bundle, so each flag can explain
           itself.
-2. [ ] Init starts k3s and nothing else — and discover every host dependency
+2. [x] Init starts k3s and nothing else — and discover every host dependency
        (cgroups, kernel modules, time, entropy) the hard way.
    1. [x] Boot to network from a Machine manifest (`kind: Machine`,
           `apiVersion: liken.sh/v1alpha1`, file-delivered at boot): raise
@@ -57,35 +57,82 @@
           file is empty, ignoring." fires once per embedded
           control-plane component as it parses its options — unrelated
           to k3s's manifests directory.)
-3. [ ] Design the public bootstrapping story: today the identity bundle is
-       minted by make in a private checkout, but a released OS needs a way
-       for anyone to mint theirs — an installer step, a tiny CLI, or a
-       documented openssl recipe.
-4. [ ] Bake in Flux bootstrap, so the machine converges to its repo from
-       first boot.
-5. [ ] The mastery tier: A/B image upgrades, UKIs, dm-verity, secure boot,
-       TPM-sealed secrets.
+3. [ ] Unwind the known hacks before building on top of them. These are
+       fixes from the boot-to-k3s work that encode knowledge k3s never
+       promised us; each works today and is guarded by the version pin
+       + `make run-once`, but every milestone below stacks more weight
+       on the boot path, so the coupling gets settled first.
+   1. [ ] Init's PATH hardcodes k3s's internal layout
+          (`/var/lib/rancher/k3s/data/current/bin` and `bin/aux`) —
+          probably redundant since dropping `prefer-bundled-bin`; test
+          removing it.
+   2. [ ] The `/sbin/iptables` dangling symlinks point into k3s's
+          unpacked bundle. Proper fix: vendor our own static xtables
+          binaries with a pinned, verified fetch like everything else,
+          so `/sbin/iptables` is a real file with no coupling to k3s
+          internals.
+   3. [ ] File the upstream k3s issue: its bundled iptables entrypoint
+          is a `#!/bin/sh` detection script, which breaks any host
+          without a shell.
+   4. [x] switch_root onto a plain tmpfs early in boot, the way k3OS
+          did, so the root filesystem is an ordinary measurable mount
+          instead of the kernel's magic initramfs rootfs. This let us
+          drop `local-storage-capacity-isolation=false` entirely and
+          silenced kubelet's recurring filesystem-stat errors — kubelet
+          now measures / like any other machine's.
+4. [ ] Volumes — which starts with a disk existing at all. The whole
+       machine is RAM today; attach a real disk to `make run` (a qcow2)
+       and learn what liken must do about it: discover the block device,
+       decide whether to partition, make a filesystem, mount it — all
+       before k3s starts, because the prize is `/var/lib/rancher` on
+       persistent storage (container images stop re-importing every
+       boot, cluster state survives a reboot). Then design the API
+       against the real thing: `spec.volumes` declares what the machine
+       should do with its disks, `status.hardware.blockDevices` reports
+       what's actually attached.
+5. [ ] Bake in Flux bootstrap, so the machine converges to its repo from
+       first boot. This is where the Machine manifest's authority story
+       resolves: today the file seeds the cluster and the cluster copy
+       wins; with GitOps, git wins and both are downstream of it. Open
+       questions to answer on the way: where the git credentials live
+       (they're identity, like the CA bundle), and how a machine learns
+       *which* repo — another field the image carries, or part of the
+       Machine manifest itself.
+6. [ ] Growing the cluster past one node, driven by a `kind: Cluster`
+       resource: what a machine needs to form or join a cluster — the
+       k3s join token (or a reference to it; a token in plain YAML is a
+       secrets problem), the server URL, and which machines are servers
+       vs. agents. The Cluster could carry a template for `kind:
+       Machine` resources that a new, unknown node *claims* on first
+       boot — which is also where the "which machine am I?" open problem
+       gets a real answer. The lab has to grow too: two QEMU guests that
+       can reach each other is its own networking lesson (user-mode
+       networking isolates guests; joining them takes a socket network
+       or a bridge).
+7. [ ] Explore device management: how does a shell-less, udev-less OS
+       expose `/dev` beyond the basics — USB devices arriving after
+       boot, GPUs, serial adapters? devtmpfs gives us the nodes, but
+       hotplug means fielding kernel uevents and loading modules,
+       which is the job udev does elsewhere. Then the Kubernetes half:
+       how workloads get to the hardware (device plugins, dynamic
+       resource allocation) and whether devices belong in
+       `status.hardware` alongside CPUs and memory.
+8. [ ] Explore declarative upgrades: setting `spec.version` on a Machine
+       should upgrade the machine — liken's version drives the k3s
+       version, so one field moves the whole stack. For a two-file OS an
+       upgrade is "replace vmlinuz and liken.cpio and reboot", which
+       makes A/B slots and roll-back-on-failed-boot the natural shape —
+       but it also means liken finally needs a bootloader story, since
+       QEMU's `-kernel` has been playing that role.
 
-# Known hacks to unwind
+Deferred until the fundamentals above are proven — the
+public-consumption tier:
 
-Fixes from the boot-to-k3s work that encode knowledge k3s never promised
-us; each works today and is guarded by the version pin + `make run-once`.
-
-* [ ] Init's PATH hardcodes k3s's internal layout
-  (`/var/lib/rancher/k3s/data/current/bin` and `bin/aux`) — probably
-  redundant since dropping `prefer-bundled-bin`; test removing it.
-* [ ] The `/sbin/iptables` dangling symlinks point into k3s's unpacked
-  bundle. Proper fix: vendor our own static xtables binaries with a
-  pinned, verified fetch like everything else, so `/sbin/iptables` is a
-  real file with no coupling to k3s internals.
-* [ ] File the upstream k3s issue: its bundled iptables entrypoint is a
-  `#!/bin/sh` detection script, which breaks any host without a shell.
-* [x] switch_root onto a plain tmpfs early in boot, the way k3OS did,
-  so the root filesystem is an ordinary measurable mount instead of the
-  kernel's magic initramfs rootfs. This let us drop
-  `local-storage-capacity-isolation=false` entirely and silenced
-  kubelet's recurring filesystem-stat errors — kubelet now measures /
-  like any other machine's.
+* The public bootstrapping story: today the identity bundle is minted by
+  make in a private checkout, but a released OS needs a way for anyone
+  to mint theirs — an installer step, a tiny CLI, or a documented
+  openssl recipe.
+* The mastery tier: UKIs, dm-verity, secure boot, TPM-sealed secrets.
 
 # Open problems
 
@@ -97,18 +144,8 @@ Questions we know we owe answers, without pretending to have them yet:
   `liken.machine=` parameter the bootloader owns), a hardware fact (MAC
   address, DMI serial, TPM identity), or a config partition per machine.
   Related: where do many manifests live — many files in one image, or
-  fetched by identity at boot?
+  fetched by identity at boot? The cluster-growth milestone's claim flow
+  is the current best candidate for the answer.
 * **Static networking.** `spec.network` today only picks an interface and
   assumes DHCP. Static addressing needs address/gateway/nameserver fields
   and a story for machines that must come up when no DHCP exists.
-* **Volumes need a disk to exist first.** The Machine spec deliberately
-  says nothing about storage yet, because there are no block devices to
-  govern — the whole machine is RAM. Attach a real disk to `make run`
-  (a qcow2, giving `/var/lib/rancher` persistence so images stop
-  re-importing every boot), then design `spec.volumes` against it, with
-  `status.hardware.blockDevices` as the read side.
-* **Cluster membership.** A `kind: Cluster` manifest carrying what a
-  machine needs to form or join a cluster: the k3s join token (or a
-  reference to it — a token in plain YAML is a secrets problem), the
-  server URL to join, and which machines are servers vs. agents. How it
-  relates to Machine (embedded? referenced by name?) is undecided.
