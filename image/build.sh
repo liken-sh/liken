@@ -18,8 +18,20 @@
 #                                 exactly as Ubuntu built them
 #   /bin/k3s                      all of Kubernetes, in one binary
 #   /etc/rancher/k3s/config.yaml  how k3s should behave
-#   /etc/ssl/certs/               CA certificates, so pulling images
-#                                 over TLS can verify who it's talking to
+#   /sbin/iptables (& friends)    the netfilter userspace kube-proxy and
+#                                 the CNI exec to program the kernel's
+#                                 packet filter: one static multi-call
+#                                 binary (vendored from k3s-root by
+#                                 xtables/fetch.sh) under each of the
+#                                 names it answers to. k3s puts /sbin
+#                                 ahead of its own bundled tools on the
+#                                 PATHs it builds, so these win — which
+#                                 matters because the bundled iptables
+#                                 is a #!/bin/sh script, and there is no
+#                                 shell here to run it
+#   /etc/ssl/certs/               CA certificates (vendored by the trust
+#                                 domain), so pulling images over TLS
+#                                 can verify who it's talking to
 #   /etc/passwd, group,           the Unix identity files: this machine
 #     subuid, subgid              has exactly two users, root and nobody,
 #                                 and no way to log in as either. kubelet
@@ -56,16 +68,27 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 kernel_version="$(cat "$here/../kernel/VERSION")"
 k3s_version="$(cat "$here/../k3s/VERSION")"
+xtables_version="$(cat "$here/../xtables/VERSION")"
 kdist="$here/../kernel/dist/$kernel_version"
 release="$(cat "$kdist/release")"
 
 root="$here/dist/root"
 rm -rf "$here/dist"
-mkdir -p "$root/etc/ssl/certs" "$root/bin"
+mkdir -p "$root/etc/ssl/certs" "$root/bin" "$root/sbin"
 
 cp -r "$here/etc" "$root/"
 cp "$here/../init/dist/liken" "$root/liken"
 cp "$here/../k3s/dist/$k3s_version/k3s" "$root/bin/k3s"
+
+# The netfilter userspace: one real static binary, then a symlink per
+# tool name — the multi-call binary reads argv[0] to know which tool to
+# be. Only the legacy variant ships, matching the iptable_* kernel
+# modules in modules.conf.
+cp "$here/../xtables/dist/$xtables_version/bin/xtables-legacy-multi" "$root/sbin/"
+for tool in iptables iptables-save iptables-restore \
+            ip6tables ip6tables-save ip6tables-restore; do
+    ln -s xtables-legacy-multi "$root/sbin/$tool"
+done
 
 # The pre-minted certificate authorities, placed exactly where k3s
 # looks before generating its own.
@@ -86,11 +109,12 @@ mkdir -p "$root/var/lib/rancher/k3s/agent/images"
 cp "$here/../operator/dist/liken-operator-image.tar" \
    "$root/var/lib/rancher/k3s/agent/images/liken-operator.tar"
 
-# The CA bundle comes from the build host — every Linux machine has the
-# Mozilla trust store at this conventional path. Vendoring it with a
-# pinned fetch like the kernel and k3s would be more honest about where
-# trust comes from; for a bundle this stable, the host's copy serves.
-cp /etc/ssl/certs/ca-certificates.crt "$root/etc/ssl/certs/ca-certificates.crt"
+# The machine's trust store, vendored by the trust domain (the story
+# of where these roots come from is in trust/fetch.sh). The staged name
+# is the conventional path Go's crypto/x509 and most TLS stacks probe.
+trust_version="$(cat "$here/../trust/VERSION")"
+cp "$here/../trust/dist/$trust_version/cacert.pem" \
+   "$root/etc/ssl/certs/ca-certificates.crt"
 
 # The image carries only the modules the machine will load — the list
 # in etc/liken/modules.conf — plus everything they depend on. The

@@ -14,7 +14,7 @@ func someFacts(t *testing.T) *MachineStatus {
 	booted := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
 	expires := booted.Add(time.Hour)
 	return &MachineStatus{
-		Version: VersionStatus{Liken: "0.1.0", Kernel: "6.15.4"},
+		Version: VersionStatus{Liken: "0.1.0", Kernel: "6.15.4", Xtables: "v1.8.11 (legacy)"},
 		Network: NetworkStatus{
 			Interface:    "eth0",
 			MAC:          "52:54:00:12:34:56",

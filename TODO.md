@@ -57,29 +57,34 @@
           file is empty, ignoring." fires once per embedded
           control-plane component as it parses its options — unrelated
           to k3s's manifests directory.)
-3. [ ] Unwind the known hacks before building on top of them. These are
+3. [x] Unwind the known hacks before building on top of them. These are
        fixes from the boot-to-k3s work that encode knowledge k3s never
        promised us; each works today and is guarded by the version pin
        + `make run-once`, but every milestone below stacks more weight
        on the boot path, so the coupling gets settled first.
-   1. [ ] Init's PATH hardcodes k3s's internal layout
-          (`/var/lib/rancher/k3s/data/current/bin` and `bin/aux`) —
-          probably redundant since dropping `prefer-bundled-bin`; test
-          removing it.
-   2. [ ] The `/sbin/iptables` dangling symlinks point into k3s's
-          unpacked bundle. Proper fix: vendor our own static xtables
-          binaries with a pinned, verified fetch like everything else,
-          so `/sbin/iptables` is a real file with no coupling to k3s
-          internals.
-   3. [ ] File the upstream k3s issue: its bundled iptables entrypoint
-          is a `#!/bin/sh` detection script, which breaks any host
-          without a shell.
-   4. [x] switch_root onto a plain tmpfs early in boot, the way k3OS
+   1. [x] Init's PATH hardcoded k3s's internal layout — it was indeed
+          redundant. Removed; the console shows k3s prepending its own
+          unpacked userland to the PATHs it builds for children, and
+          the cluster settles without the tail.
+   2. [x] The `/sbin/iptables` dangling symlinks are gone: the
+          netfilter userspace is now its own vendored domain
+          (`xtables/`), fetched from k3s-root — the same project that
+          builds k3s's bundled copy, pinned to the same version the
+          vendored k3s uses — so `/sbin/iptables` is a real static
+          binary from the image build onward. The machine also reports
+          its xtables version in the Machine's status.version, observed
+          via `iptables -V` like every other fact.
+   3. [x] switch_root onto a plain tmpfs early in boot, the way k3OS
           did, so the root filesystem is an ordinary measurable mount
           instead of the kernel's magic initramfs rootfs. This let us
           drop `local-storage-capacity-isolation=false` entirely and
           silenced kubelet's recurring filesystem-stat errors — kubelet
           now measures / like any other machine's.
+   4. [x] The CA bundle came from whichever machine ran the build
+          (build.sh's own comment confessed it). Now vendored like
+          everything else: a `trust/` domain pinning a dated snapshot
+          of the Mozilla bundle, so what the machine trusts is a
+          reviewable version bump instead of a build-host accident.
 4. [ ] Volumes — which starts with a disk existing at all. The whole
        machine is RAM today; attach a real disk to `make run` (a qcow2)
        and learn what liken must do about it: discover the block device,

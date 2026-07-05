@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -31,6 +32,14 @@ func publishFacts(conn *connection) {
 	var u unix.Utsname
 	if err := unix.Uname(&u); err == nil {
 		facts.Version.Kernel = unix.ByteSliceToString(u.Release[:])
+	}
+
+	// The netfilter userspace introduces itself as "iptables vX.Y.Z
+	// (legacy)"; the version and variant are the interesting part. Like
+	// the kernel release, this is asked of the running machine, not
+	// copied from a build pin.
+	if out, ok := run("iptables", "-V"); ok {
+		facts.Version.Xtables = strings.TrimPrefix(out, "iptables ")
 	}
 
 	// Sysinfo is one syscall answering two questions: how much memory

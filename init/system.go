@@ -108,38 +108,12 @@ func prepareForK3s() {
 	}
 
 	// k3s consults $HOME and $PATH like any Unix program; PID 1 gets
-	// neither from the kernel, so we invent them. The last two PATH
-	// entries are k3s's own unpacked userland (data/current is a
-	// symlink k3s maintains across versions): the netfilter tools
-	// kube-proxy execs live in bin/aux, and putting them on PATH here
-	// beats depending on exactly how k3s rewrites PATH between its
-	// re-execs.
+	// neither from the kernel, so we invent them. The conventional
+	// four directories are enough: k3s prepends its own unpacked
+	// userland when it builds PATHs for the children it starts.
 	os.Setenv("HOME", "/root")
-	os.Setenv("PATH", "/sbin:/bin:/usr/sbin:/usr/bin"+
-		":/var/lib/rancher/k3s/data/current/bin"+
-		":/var/lib/rancher/k3s/data/current/bin/aux")
+	os.Setenv("PATH", "/sbin:/bin:/usr/sbin:/usr/bin")
 
-	// One of k3s's bundled tools defeats its own bundling: bin/aux's
-	// "iptables" is a legacy-vs-nftables detection script that starts
-	// #!/bin/sh, and this machine has no shell to run it with — but
-	// the x bit makes PATH lookups accept it, so it must be shadowed,
-	// not just supplemented. liken makes the script's decision
-	// statically instead: /sbin (which k3s keeps ahead of its bundle
-	// dirs when building children's PATHs) links each iptables name to
-	// the legacy xtables binaries, matching the iptable_* kernel
-	// modules the image ships. The links dangle until k3s first
-	// unpacks itself and resolve forever after.
-	_ = os.MkdirAll("/sbin", 0o755)
-	aux := "/var/lib/rancher/k3s/data/current/bin/aux/"
-	for _, tool := range []string{
-		"iptables", "iptables-save", "iptables-restore",
-		"ip6tables", "ip6tables-save", "ip6tables-restore",
-	} {
-		legacy := strings.Replace(tool, "tables", "tables-legacy", 1)
-		if err := os.Symlink(aux+legacy, "/sbin/"+tool); err != nil && !os.IsExist(err) {
-			fmt.Fprintf(os.Stderr, "liken: symlink %s: %v\n", tool, err)
-		}
-	}
 	_ = os.MkdirAll("/root", 0o700)
 	_ = os.MkdirAll("/var/log", 0o755)
 }

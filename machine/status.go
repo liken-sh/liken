@@ -38,6 +38,11 @@ type MachineStatus struct {
 type VersionStatus struct {
 	Liken  string `json:"liken,omitempty"`
 	Kernel string `json:"kernel,omitempty"`
+
+	// Xtables is the netfilter userspace as it reports itself
+	// (`iptables -V`, e.g. "v1.8.11 (legacy)") — observed, not echoed
+	// from a build pin, like every other fact here.
+	Xtables string `json:"xtables,omitempty"`
 }
 
 type NetworkStatus struct {

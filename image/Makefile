@@ -8,11 +8,15 @@
 
 KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 K3S_VERSION := $(strip $(file <../k3s/VERSION))
+XTABLES_VERSION := $(strip $(file <../xtables/VERSION))
+TRUST_VERSION := $(strip $(file <../trust/VERSION))
 
 dist/liken.cpio: build.sh $(shell find etc -type f) \
 		../init/dist/liken \
 		../kernel/dist/$(KERNEL_VERSION)/vmlinuz \
 		../k3s/dist/$(K3S_VERSION)/k3s \
+		../xtables/dist/$(XTABLES_VERSION)/bin/xtables-legacy-multi \
+		../trust/dist/$(TRUST_VERSION)/cacert.pem \
 		../identity/dist/tls/server-ca.crt \
 		../operator/dist/liken-operator-image.tar \
 		$(wildcard ../operator/manifests/*.yaml) \

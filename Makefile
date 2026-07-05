@@ -1,9 +1,13 @@
-# liken is assembled, not compiled: every artifact is a plain file
-# derived from pinned inputs, which makes GNU Make's model — files,
-# prerequisites, timestamps — the natural way to drive the build.
+# Every artifact in liken is a plain file with real prerequisites,
+# which makes GNU Make's model — files, prerequisites, timestamps —
+# the natural way to drive the build. The inputs come two ways: most
+# of the system is vendored (the kernel, k3s, the xtables binaries,
+# the trust store — each a pinned version, fetched and verified), and
+# the parts that are liken itself (init and the operator, the two Go
+# programs) are compiled here.
 #
 # The structure follows the repo's rule of organizing by domain: each
-# domain directory (kernel/, k3s/, init/, image/) has its own
+# domain directory (kernel/, k3s/, init/, image/, ...) has its own
 # Makefile that owns its rules and can be run standalone with
 # `make -C <domain>`. This root Makefile names the artifacts the domains
 # exchange and delegates the work of producing them.
@@ -15,8 +19,12 @@ KERNEL_VERSION := $(strip $(file <kernel/VERSION))
 KERNEL_DIST := kernel/dist/$(KERNEL_VERSION)
 K3S_VERSION := $(strip $(file <k3s/VERSION))
 K3S_DIST := k3s/dist/$(K3S_VERSION)
+XTABLES_VERSION := $(strip $(file <xtables/VERSION))
+XTABLES_DIST := xtables/dist/$(XTABLES_VERSION)
+TRUST_VERSION := $(strip $(file <trust/VERSION))
+TRUST_DIST := trust/dist/$(TRUST_VERSION)
 
-all: kernel k3s init operator identity image
+all: kernel k3s xtables trust init operator identity image
 
 # Because the version is part of the artifact's name, a pin bump changes
 # the target path itself and Make rebuilds without any staleness
@@ -33,6 +41,20 @@ $(K3S_DIST)/k3s: k3s/VERSION k3s/fetch.sh
 	$(MAKE) -C k3s
 
 k3s: $(K3S_DIST)/k3s
+
+# The netfilter userspace, vendored from the same project that builds
+# k3s's own bundled copy (the story is in xtables/fetch.sh).
+$(XTABLES_DIST)/bin/xtables-legacy-multi: xtables/VERSION xtables/fetch.sh
+	$(MAKE) -C xtables
+
+xtables: $(XTABLES_DIST)/bin/xtables-legacy-multi
+
+# The CA certificates the machine trusts, pinned by snapshot date (the
+# story is in trust/fetch.sh).
+$(TRUST_DIST)/cacert.pem: trust/VERSION trust/fetch.sh
+	$(MAKE) -C trust
+
+trust: $(TRUST_DIST)/cacert.pem
 
 # liken itself: the Go program that boots as PID 1 (the story is in
 # init/main.go's header comment). It shares the machine package — the
@@ -75,6 +97,8 @@ kubeconfig: identity/dist/tls/server-ca.crt
 # The bootable initramfs: the image domain packs liken and everything
 # k3s needs into the cpio archive the kernel unpacks at boot.
 image/dist/liken.cpio: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s \
+		$(XTABLES_DIST)/bin/xtables-legacy-multi \
+		$(TRUST_DIST)/cacert.pem \
 		identity/dist/tls/server-ca.crt \
 		operator/dist/liken-operator-image.tar \
 		$(wildcard operator/manifests/*.yaml) \
@@ -148,9 +172,11 @@ run-once: run
 clean:
 	$(MAKE) -C kernel clean
 	$(MAKE) -C k3s clean
+	$(MAKE) -C xtables clean
+	$(MAKE) -C trust clean
 	$(MAKE) -C init clean
 	$(MAKE) -C operator clean
 	$(MAKE) -C identity clean
 	$(MAKE) -C image clean
 
-.PHONY: all kernel k3s init operator identity kubeconfig image run run-once clean
+.PHONY: all kernel k3s xtables trust init operator identity kubeconfig image run run-once clean

@@ -30,7 +30,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -96,26 +95,17 @@ const (
 	k3sLog    = "/var/log/k3s.log"
 )
 
-// k3sPid is the currently-supervised k3s process, for diagnostics that
-// want to inspect it from outside (e.g. its live environment).
-var k3sPid atomic.Int64
-
 // postMortem is the end of a one-shot boot: with no shell to
 // investigate from, init answers the questions an investigator would
 // ask — what environment did children inherit, and do the tools they
 // need actually resolve and run?
 func postMortem() {
 	fmt.Printf("liken: post-mortem: init PATH=%s\n", os.Getenv("PATH"))
-	for _, p := range []string{
-		"/sbin/iptables",
-		"/var/lib/rancher/k3s/data/current/bin/aux/iptables-legacy",
-	} {
-		resolved, err := filepath.EvalSymlinks(p)
-		if err != nil {
-			fmt.Printf("liken: post-mortem: %s: %v\n", p, err)
-		} else {
-			fmt.Printf("liken: post-mortem: %s -> %s\n", p, resolved)
-		}
+	resolved, err := filepath.EvalSymlinks("/sbin/iptables")
+	if err != nil {
+		fmt.Printf("liken: post-mortem: /sbin/iptables: %v\n", err)
+	} else {
+		fmt.Printf("liken: post-mortem: /sbin/iptables -> %s\n", resolved)
 	}
 	if out, ok := run("iptables", "-V"); ok {
 		fmt.Printf("liken: post-mortem: iptables -V: %s\n", out)
@@ -180,7 +170,6 @@ func runK3sOnce() error {
 		return fmt.Errorf("starting k3s: %w", err)
 	}
 	fmt.Printf("liken: k3s server started (pid %d), logs in %s\n", cmd.Process.Pid, k3sLog)
-	k3sPid.Store(int64(cmd.Process.Pid))
 
 	status := awaitDeath(cmd.Process.Pid)
 	// Release, not Wait: the reaper already collected the status —
@@ -211,20 +200,9 @@ func describeExit(status unix.WaitStatus) string {
 // Kubernetes node.
 func reportWhenReady() {
 	last := ""
-	printedPath := false
 	deadline := time.Now().Add(5 * time.Minute)
 	for time.Now().Before(deadline) {
 		time.Sleep(3 * time.Second)
-		if pid := k3sPid.Load(); pid != 0 && !printedPath {
-			if env, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid)); err == nil {
-				for kv := range strings.SplitSeq(string(env), "\x00") {
-					if strings.HasPrefix(kv, "PATH=") {
-						fmt.Printf("liken: k3s (pid %d) has %s\n", pid, kv)
-					}
-				}
-				printedPath = true
-			}
-		}
 		out, ok := run(k3sBinary, "kubectl", "get", "nodes", "--no-headers")
 		if !ok || out == "" {
 			continue
