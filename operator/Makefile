@@ -9,7 +9,7 @@ VERSION := $(strip $(file <../VERSION))
 
 all: dist/liken-operator-image.tar
 
-dist/liken-operator: go.mod go.sum $(wildcard *.go) $(wildcard ../machine/*.go) ../VERSION
+dist/liken-operator: ../go.mod ../go.sum $(wildcard *.go) $(wildcard ../machine/*.go) ../VERSION
 	CGO_ENABLED=0 go build -trimpath \
 		-ldflags "-X github.com/chrisguidry/liken/machine.Version=$(VERSION)" \
 		-o dist/liken-operator .

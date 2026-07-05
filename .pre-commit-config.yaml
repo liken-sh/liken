@@ -32,32 +32,33 @@ repos:
         entry: gofmt -l -w
         language: system
         types: [go]
-      # The Go checks run per module — init, machine, and operator are
-      # separate modules (see go.work), so each gets its own invocation.
+      # The repo is one Go module (see go.mod at the root), so every
+      # check is a single invocation of ./... — Go files in any domain
+      # directory, present or future, are covered without listing them.
       - id: go-vet
         name: go vet
-        entry: bash -c 'for m in init machine operator; do go -C "$m" vet ./... || exit 1; done'
+        entry: bash -c 'go vet ./...'
         language: system
-        files: ^(init|machine|operator)/
+        files: \.go$|^go\.(mod|sum)$
         pass_filenames: false
       - id: go-test
         name: go test
-        entry: bash -c 'for m in init machine operator; do go -C "$m" test ./... || exit 1; done'
+        entry: bash -c 'go test ./...'
         language: system
-        files: ^(init|machine|operator)/
+        files: \.go$|^go\.(mod|sum)$
         pass_filenames: false
       - id: staticcheck
         name: staticcheck
-        entry: bash -c 'for m in init machine operator; do (cd "$m" && staticcheck ./...) || exit 1; done'
+        entry: bash -c 'staticcheck ./...'
         language: system
-        files: ^(init|machine|operator)/
+        files: \.go$|^go\.(mod|sum)$
         pass_filenames: false
       - id: go-mod-tidy
         name: go mod tidy
         # -diff reports what tidying would change without changing it,
         # so a stale go.mod/go.sum fails loudly instead of silently
         # mutating during a commit.
-        entry: bash -c 'for m in init machine operator; do go -C "$m" mod tidy -diff || exit 1; done'
+        entry: bash -c 'go mod tidy -diff'
         language: system
-        files: ^(init|machine|operator)/
+        files: \.go$|^go\.(mod|sum)$
         pass_filenames: false

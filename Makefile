@@ -38,7 +38,7 @@ k3s: $(K3S_DIST)/k3s
 # init/main.go's header comment). It shares the machine package — the
 # Machine API as Go types — with the operator, so both rebuild when it
 # changes.
-init/dist/liken: $(wildcard init/*.go) init/go.mod init/go.sum \
+init/dist/liken: $(wildcard init/*.go) go.mod go.sum \
 		$(wildcard machine/*.go) VERSION
 	$(MAKE) -C init
 
@@ -48,7 +48,7 @@ init: init/dist/liken
 # as a hand-assembled OCI image (the stories are in operator/main.go
 # and operator/image.sh).
 operator/dist/liken-operator-image.tar: $(wildcard operator/*.go) \
-		operator/go.mod operator/go.sum operator/image.sh \
+		go.mod go.sum operator/image.sh \
 		$(wildcard machine/*.go) VERSION
 	$(MAKE) -C operator
 

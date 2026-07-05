@@ -13,7 +13,7 @@ VERSION := $(strip $(file <../VERSION))
 # PID 1 has no one to ask for them. -trimpath keeps this machine's
 # filesystem layout out of the binary, a small step toward reproducible
 # builds.
-dist/liken: go.mod go.sum $(wildcard *.go) $(wildcard ../machine/*.go) ../VERSION
+dist/liken: ../go.mod ../go.sum $(wildcard *.go) $(wildcard ../machine/*.go) ../VERSION
 	CGO_ENABLED=0 go build -trimpath \
 		-ldflags "-X github.com/chrisguidry/liken/machine.Version=$(VERSION)" \
 		-o dist/liken .
