@@ -77,7 +77,7 @@ func TestPlanPartitionsPacksSizedRolesAligned(t *testing.T) {
 	// sectors but the next role still starts on the following MiB
 	// boundary; the remainder runs to the last usable sector.
 	mine := []machine.DeclaredRole{
-		declared("systemEphemeral", "/dev/vdb", "1Ki"),
+		declared("machineEphemeral", "/dev/vdb", "1Ki"),
 		declared("podStorage", "/dev/vdb", "512Mi"),
 		declared("podEphemeral", "/dev/vdb", ""),
 	}
@@ -86,7 +86,7 @@ func TestPlanPartitionsPacksSizedRolesAligned(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []gptPartition{
-		{name: "liken:systemEphemeral", firstLBA: 2_048, lastLBA: 2_049},
+		{name: "liken:machineEphemeral", firstLBA: 2_048, lastLBA: 2_049},
 		{name: "liken:podStorage", firstLBA: 4_096, lastLBA: 1_052_671},
 		{name: "liken:podEphemeral", firstLBA: 1_052_672, lastLBA: 4_194_269},
 	}
@@ -119,7 +119,7 @@ func TestPlanPartitionsRejectsNoRoomForRemainder(t *testing.T) {
 	// The sized role fits exactly, to the last usable sector; the
 	// remainder role is left with nothing.
 	mine := []machine.DeclaredRole{
-		declared("systemEphemeral", "/dev/vdb", "1Mi"),
+		declared("machineEphemeral", "/dev/vdb", "1Mi"),
 		declared("podStorage", "/dev/vdb", ""),
 	}
 	_, err := planPartitions("/dev/vdb", mine, 4_130)

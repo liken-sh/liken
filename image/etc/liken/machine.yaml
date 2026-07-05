@@ -28,15 +28,22 @@ spec:
   # boot: a machine declared to have persistent state must not come up
   # ephemeral.
   storage:
+    # The machine's own durable data: the staged and proven manifests
+    # that let a spec edit survive a reboot. First in the canonical
+    # order, so it's the first partition on its disk: the one a future
+    # boot must find before it has read any spec.
+    machineState:
+      device: /dev/vda
+      size: 64Mi
+    # The operating system's own scratch space: /tmp.
+    machineEphemeral:
+      device: /dev/vdb
+      size: 512Mi
     # k3s's state: its database, TLS material, and containerd's
     # images. Persisting this is why a reboot doesn't re-import every
     # container image.
     clusterState:
       device: /dev/vda
-    # The operating system's own scratch space: /tmp.
-    systemEphemeral:
-      device: /dev/vdb
-      size: 512Mi
     # Durable storage pods claim by name: the PersistentVolumeClaim
     # pool, served by k3s's local-path provisioner.
     podStorage:

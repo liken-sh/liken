@@ -37,11 +37,13 @@ import (
 // Where each role lands in the filesystem: liken's private
 // translation, deliberately absent from the Machine API.
 //
-//	clusterState     /var/lib/rancher: all of k3s's state, its
-//	                 database, its TLS material, containerd's images
-//	systemEphemeral  /tmp, the OS's own scratch; nosuid/nodev and
+//	machineState     /var/lib/liken/machine: the machine's own durable
+//	                 data, chiefly the staged and proven manifests
+//	machineEphemeral /tmp, the OS's own scratch; nosuid/nodev and
 //	                 world-writable-with-sticky-bit, per long Unix
 //	                 tradition
+//	clusterState     /var/lib/rancher: all of k3s's state, its
+//	                 database, its TLS material, containerd's images
 //	podStorage       the local-path provisioner's root; the path also
 //	                 appears in the image's k3s config.yaml
 //	podEphemeral     kubelet's root directory: emptyDirs, pod scratch
@@ -52,10 +54,11 @@ type roleMount struct {
 }
 
 var roleMounts = map[string]roleMount{
-	"clusterState":    {path: "/var/lib/rancher"},
-	"systemEphemeral": {path: "/tmp", flags: unix.MS_NOSUID | unix.MS_NODEV, mode: 0o1777},
-	"podStorage":      {path: "/var/lib/liken/pod-storage"},
-	"podEphemeral":    {path: "/var/lib/kubelet"},
+	"machineState":     {path: "/var/lib/liken/machine"},
+	"machineEphemeral": {path: "/tmp", flags: unix.MS_NOSUID | unix.MS_NODEV, mode: 0o1777},
+	"clusterState":     {path: "/var/lib/rancher"},
+	"podStorage":       {path: "/var/lib/liken/pod-storage"},
+	"podEphemeral":     {path: "/var/lib/kubelet"},
 }
 
 // A partition as sysfs presents it: a subdirectory of its disk's

@@ -112,6 +112,31 @@ spec:
                     satisfied stops the boot. Roles absent from the
                     spec are backed by the machine's RAM root.
                   properties:
+                    machineState:
+                      type: object
+                      description: >-
+                        The machine's own durable data, chiefly the
+                        staged and proven manifests that let a spec
+                        edit survive a reboot and apply at the next
+                        one. First in the canonical partition order,
+                        so a future boot can find it before it has
+                        read any spec.
+                      required: [device]
+                      properties:
+                        device:
+                          type: string
+                        size:
+                          type: string
+                    machineEphemeral:
+                      type: object
+                      description: >-
+                        The operating system's own scratch space (/tmp).
+                      required: [device]
+                      properties:
+                        device:
+                          type: string
+                        size:
+                          type: string
                     clusterState:
                       type: object
                       description: >-
@@ -119,16 +144,6 @@ spec:
                         containerd's images. Persisting this is what
                         lets a reboot resume the same cluster instead
                         of starting a new one.
-                      required: [device]
-                      properties:
-                        device:
-                          type: string
-                        size:
-                          type: string
-                    systemEphemeral:
-                      type: object
-                      description: >-
-                        The operating system's own scratch space (/tmp).
                       required: [device]
                       properties:
                         device:
@@ -244,7 +259,7 @@ spec:
                     root, and per-role figures would count it multiple
                     times.
                   properties:
-                    clusterState:
+                    machineState:
                       type: object
                       properties:
                         backing:
@@ -255,7 +270,18 @@ spec:
                           type: string
                         capacityBytes:
                           type: integer
-                    systemEphemeral:
+                    machineEphemeral:
+                      type: object
+                      properties:
+                        backing:
+                          type: string
+                        device:
+                          type: string
+                        partition:
+                          type: string
+                        capacityBytes:
+                          type: integer
+                    clusterState:
                       type: object
                       properties:
                         backing:

@@ -53,6 +53,31 @@ func TestRolesAreOrderedAndSkipUndeclared(t *testing.T) {
 	}
 }
 
+// The canonical order is load-bearing twice: it's the partition
+// layout when roles share a disk, and it puts machineState first, so
+// the partition a boot must find before reading any spec is the
+// first one on its disk.
+func TestRolesCanonicalOrder(t *testing.T) {
+	one := &StorageRole{Device: "/dev/vda"}
+	spec := StorageSpec{
+		MachineState:     one,
+		MachineEphemeral: one,
+		ClusterState:     one,
+		PodStorage:       one,
+		PodEphemeral:     one,
+	}
+	want := []string{"machineState", "machineEphemeral", "clusterState", "podStorage", "podEphemeral"}
+	roles := spec.Roles()
+	if len(roles) != len(want) {
+		t.Fatalf("got %d roles, want %d", len(roles), len(want))
+	}
+	for i, w := range want {
+		if roles[i].Name != w {
+			t.Errorf("role %d is %s, want %s", i, roles[i].Name, w)
+		}
+	}
+}
+
 func TestPartitionNames(t *testing.T) {
 	spec := StorageSpec{ClusterState: &StorageRole{Device: "/dev/vda"}}
 	if got := spec.Roles()[0].PartitionName(); got != "liken:clusterState" {
@@ -62,10 +87,11 @@ func TestPartitionNames(t *testing.T) {
 
 func TestValidateAcceptsTheLabMachine(t *testing.T) {
 	spec := StorageSpec{
-		ClusterState:    &StorageRole{Device: "/dev/vda"},
-		SystemEphemeral: &StorageRole{Device: "/dev/vdb", Size: "512Mi"},
-		PodStorage:      &StorageRole{Device: "/dev/vdb", Size: "2Gi"},
-		PodEphemeral:    &StorageRole{Device: "/dev/vdb"},
+		MachineState:     &StorageRole{Device: "/dev/vda", Size: "64Mi"},
+		MachineEphemeral: &StorageRole{Device: "/dev/vdb", Size: "512Mi"},
+		ClusterState:     &StorageRole{Device: "/dev/vda"},
+		PodStorage:       &StorageRole{Device: "/dev/vdb", Size: "2Gi"},
+		PodEphemeral:     &StorageRole{Device: "/dev/vdb"},
 	}
 	if err := spec.Validate(); err != nil {
 		t.Error(err)

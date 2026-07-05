@@ -29,16 +29,25 @@ import (
 const PartitionPrefix = "liken:"
 
 type StorageSpec struct {
-	// ClusterState is k3s's state: the etcd or sqlite database, TLS
-	// material, and containerd's images. Persisting it is what lets a
-	// reboot resume the same cluster instead of starting a new one.
-	ClusterState *StorageRole `json:"clusterState,omitempty"`
+	// MachineState is the machine's own durable data: the manifests
+	// that configure it (the staged and proven copies that let a spec
+	// edit survive a reboot and apply at the next one). Small, but it
+	// changes what the machine *is*: with it, configuration outlives
+	// the image that first delivered it.
+	MachineState *StorageRole `json:"machineState,omitempty"`
 
-	// SystemEphemeral is the operating system's own scratch space:
+	// MachineEphemeral is the operating system's own scratch space:
 	// /tmp. Small but necessary: the container runtime stages exec
 	// sessions there, and on a machine whose root is RAM, moving it
 	// to disk frees that memory for pods.
-	SystemEphemeral *StorageRole `json:"systemEphemeral,omitempty"`
+	MachineEphemeral *StorageRole `json:"machineEphemeral,omitempty"`
+
+	// ClusterState is k3s's state: the etcd or sqlite database, TLS
+	// material, and containerd's images. Persisting it is what lets a
+	// reboot resume the same cluster instead of starting a new one.
+	// (Named for the cluster, not the machine, on purpose: this data
+	// belongs to the future kind: Cluster story.)
+	ClusterState *StorageRole `json:"clusterState,omitempty"`
 
 	// PodStorage is durable storage pods claim by name: the
 	// PersistentVolumeClaim pool, served by k3s's local-path
@@ -82,17 +91,20 @@ func (r DeclaredRole) PartitionName() string {
 }
 
 // Roles returns the declared roles in canonical order. The order
-// matters: it's the order partitions are laid down when roles share a
-// disk, fixed here rather than by YAML map order, which Kubernetes
-// doesn't preserve.
+// matters twice: it's the order partitions are laid down when roles
+// share a disk (fixed here rather than by YAML map order, which
+// Kubernetes doesn't preserve), and it puts machineState first, so
+// the partition a future boot must find before it has read any spec
+// is the first one on its disk.
 func (s StorageSpec) Roles() []DeclaredRole {
 	var roles []DeclaredRole
 	for _, candidate := range []struct {
 		name string
 		role *StorageRole
 	}{
+		{"machineState", s.MachineState},
+		{"machineEphemeral", s.MachineEphemeral},
 		{"clusterState", s.ClusterState},
-		{"systemEphemeral", s.SystemEphemeral},
 		{"podStorage", s.PodStorage},
 		{"podEphemeral", s.PodEphemeral},
 	} {

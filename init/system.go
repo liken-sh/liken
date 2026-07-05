@@ -121,7 +121,7 @@ func prepareForK3s() {
 	// /tmp exists on every machine (the container runtime stages
 	// kubectl exec sessions there), world-writable with the sticky
 	// bit, per Unix convention. On a machine that declares the
-	// systemEphemeral storage role, a disk partition is already
+	// machineEphemeral storage role, a disk partition is already
 	// mounted here and this is a no-op; everywhere else it's RAM like
 	// the rest of the root. (Chmod because MkdirAll filters modes
 	// through the umask, and the sticky bit matters.)

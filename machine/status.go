@@ -95,10 +95,11 @@ const (
 // fields mirror the spec's keys exactly, so spec and status line up
 // name for name.
 type StorageStatus struct {
-	ClusterState    StorageRoleStatus `json:"clusterState"`
-	SystemEphemeral StorageRoleStatus `json:"systemEphemeral"`
-	PodStorage      StorageRoleStatus `json:"podStorage"`
-	PodEphemeral    StorageRoleStatus `json:"podEphemeral"`
+	MachineState     StorageRoleStatus `json:"machineState"`
+	MachineEphemeral StorageRoleStatus `json:"machineEphemeral"`
+	ClusterState     StorageRoleStatus `json:"clusterState"`
+	PodStorage       StorageRoleStatus `json:"podStorage"`
+	PodEphemeral     StorageRoleStatus `json:"podEphemeral"`
 }
 
 // StorageRoleStatus is where one role is backed. A memory-backed role
@@ -116,10 +117,12 @@ type StorageRoleStatus struct {
 // outside the vocabulary.
 func (s *StorageStatus) Role(name string) *StorageRoleStatus {
 	switch name {
+	case "machineState":
+		return &s.MachineState
+	case "machineEphemeral":
+		return &s.MachineEphemeral
 	case "clusterState":
 		return &s.ClusterState
-	case "systemEphemeral":
-		return &s.SystemEphemeral
 	case "podStorage":
 		return &s.PodStorage
 	case "podEphemeral":
@@ -133,10 +136,11 @@ func (s *StorageStatus) Role(name string) *StorageRoleStatus {
 // places each on a partition.
 func AllRolesInMemory() StorageStatus {
 	return StorageStatus{
-		ClusterState:    StorageRoleStatus{Backing: BackingMemory},
-		SystemEphemeral: StorageRoleStatus{Backing: BackingMemory},
-		PodStorage:      StorageRoleStatus{Backing: BackingMemory},
-		PodEphemeral:    StorageRoleStatus{Backing: BackingMemory},
+		MachineState:     StorageRoleStatus{Backing: BackingMemory},
+		MachineEphemeral: StorageRoleStatus{Backing: BackingMemory},
+		ClusterState:     StorageRoleStatus{Backing: BackingMemory},
+		PodStorage:       StorageRoleStatus{Backing: BackingMemory},
+		PodEphemeral:     StorageRoleStatus{Backing: BackingMemory},
 	}
 }
 
