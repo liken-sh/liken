@@ -54,11 +54,34 @@ type roleMount struct {
 }
 
 var roleMounts = map[string]roleMount{
-	"machineState":     {path: "/var/lib/liken/machine"},
+	"machineState":     {path: machine.MachineStateDir},
 	"machineEphemeral": {path: "/tmp", flags: unix.MS_NOSUID | unix.MS_NODEV, mode: 0o1777},
 	"clusterState":     {path: "/var/lib/rancher"},
 	"podStorage":       {path: "/var/lib/liken/pod-storage"},
 	"podEphemeral":     {path: "/var/lib/kubelet"},
+}
+
+// teardownStorage unmounts whatever reconciliation may have mounted,
+// in reverse canonical order, returning the machine to the state a
+// fresh reconcile expects, so a different spec can be tried. It works
+// from the mount table's answers rather than a status: a reconcile
+// that failed halfway may have mounted a role it never got to report
+// (unmounting a path that isn't a mountpoint answers EINVAL, which is
+// "nothing to do", not a problem). Nothing else is running this early
+// in boot, so nothing can hold these mounts busy.
+func teardownStorage() {
+	// mountRole parks clusterState's filesystem here while seeding; a
+	// failure mid-dance leaves it parked.
+	_ = unix.Unmount("/.liken-claim", 0)
+	for _, name := range []string{"podEphemeral", "podStorage", "clusterState", "machineEphemeral", "machineState"} {
+		target := roleMounts[name].path
+		err := unix.Unmount(target, 0)
+		if err == nil {
+			fmt.Printf("liken: storage: unmounted %s\n", target)
+		} else if err != unix.EINVAL && !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "liken: storage: unmounting %s: %v\n", target, err)
+		}
+	}
 }
 
 // A partition as sysfs presents it: a subdirectory of its disk's

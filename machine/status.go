@@ -33,6 +33,12 @@ type MachineStatus struct {
 	// side by side in one kubectl get.
 	Sysctls map[string]string `json:"sysctls,omitempty"`
 
+	// Actuation reports which manifest this boot actually ran under:
+	// the reference point that lets the operator compare the cluster's
+	// spec against what the machine actuated, and see any rejection
+	// that happened on the way up.
+	Actuation ActuationStatus `json:"actuation,omitzero"`
+
 	BootedAt *time.Time `json:"bootedAt,omitempty"`
 
 	// Conditions follow the standard Kubernetes idiom: a set of typed,
@@ -142,6 +148,32 @@ func AllRolesInMemory() StorageStatus {
 		PodStorage:       StorageRoleStatus{Backing: BackingMemory},
 		PodEphemeral:     StorageRoleStatus{Backing: BackingMemory},
 	}
+}
+
+// The manifests a boot can run under, in preference order: a staged
+// manifest awaiting its proving boot, the proven last-known-good, or
+// the image's seed (first boot only; see staging.go).
+const (
+	ManifestSourceStaged = "Staged"
+	ManifestSourceProven = "Proven"
+	ManifestSourceSeed   = "Seed"
+)
+
+// ActuationStatus is the boot's account of its own configuration:
+// which manifest won, identified by the hash of its exact bytes, and
+// the storage spec it actuated. This is the half of drift detection
+// only init can supply; the operator compares it against the
+// cluster's spec.
+type ActuationStatus struct {
+	ManifestSource string      `json:"manifestSource,omitempty"`
+	ManifestHash   string      `json:"manifestHash,omitempty"`
+	Storage        StorageSpec `json:"storage,omitzero"`
+
+	// Rejection is the standing quarantine record, republished every
+	// boot until a promotion clears it, so a rejected spec stays
+	// visible in the cluster no matter how many times the machine
+	// power-cycles.
+	Rejection *Rejection `json:"rejection,omitempty"`
 }
 
 // Condition mirrors the shape Kubernetes uses everywhere (Pods, Nodes,

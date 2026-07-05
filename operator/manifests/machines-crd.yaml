@@ -314,6 +314,74 @@ spec:
                           type: string
                         capacityBytes:
                           type: integer
+                actuation:
+                  type: object
+                  description: >-
+                    Which manifest this boot actually ran under: the
+                    staged one awaiting its proving boot, the proven
+                    last-known-good, or (first boot only) the seed
+                    baked into the image. The hash identifies the
+                    manifest's exact bytes, and the storage block is
+                    the spec as actuated: together they are the
+                    reference point for detecting drift between what
+                    the cluster asks and what the machine did. A
+                    rejection reports a staged manifest that failed
+                    its boot and was quarantined; it stands until a
+                    different spec proves out.
+                  properties:
+                    manifestSource:
+                      type: string
+                      enum: [Staged, Proven, Seed]
+                    manifestHash:
+                      type: string
+                    storage:
+                      type: object
+                      properties:
+                        machineState:
+                          type: object
+                          properties:
+                            device:
+                              type: string
+                            size:
+                              type: string
+                        machineEphemeral:
+                          type: object
+                          properties:
+                            device:
+                              type: string
+                            size:
+                              type: string
+                        clusterState:
+                          type: object
+                          properties:
+                            device:
+                              type: string
+                            size:
+                              type: string
+                        podStorage:
+                          type: object
+                          properties:
+                            device:
+                              type: string
+                            size:
+                              type: string
+                        podEphemeral:
+                          type: object
+                          properties:
+                            device:
+                              type: string
+                            size:
+                              type: string
+                    rejection:
+                      type: object
+                      properties:
+                        hash:
+                          type: string
+                        reason:
+                          type: string
+                        rejectedAt:
+                          type: string
+                          format: date-time
                 sysctls:
                   type: object
                   description: >-

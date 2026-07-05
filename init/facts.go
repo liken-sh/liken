@@ -22,7 +22,7 @@ import (
 	"github.com/chrisguidry/liken/machine"
 )
 
-func publishFacts(conn *connection, storage machine.StorageStatus) {
+func publishFacts(conn *connection, storage machine.StorageStatus, actuation machine.ActuationStatus) {
 	now := time.Now()
 	facts := &machine.MachineStatus{
 		Version: machine.VersionStatus{Liken: machine.Version},
@@ -32,10 +32,11 @@ func publishFacts(conn *connection, storage machine.StorageStatus) {
 			// rather than remembered, like everything else in status.
 			BlockDevices: discoverBlockDevices(),
 		},
-		// Where every storage role landed: the one block that can't
-		// be re-derived here, because only reconcileStorage saw the
-		// claiming happen.
-		Storage: storage,
+		// Where every storage role landed, and under which manifest:
+		// the blocks that can't be re-derived here, because only the
+		// settling saw them happen.
+		Storage:   storage,
+		Actuation: actuation,
 	}
 
 	var u unix.Utsname

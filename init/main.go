@@ -39,8 +39,6 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
-
-	"github.com/chrisguidry/liken/machine"
 )
 
 func main() {
@@ -72,15 +70,20 @@ func main() {
 
 	mountEssentials()
 
-	// The manifest is allowed to be missing (all defaults) but not
-	// malformed. Even then, liken carries on with defaults rather
-	// than dying: a misconfigured machine that reaches the console
-	// beats a kernel panic.
-	m, err := machine.Load(machine.ManifestPath)
+	// Storage settles first, and with it the question of which
+	// manifest this boot runs under: the staged one awaiting its
+	// proving boot, the proven last-known-good, or (first boot only)
+	// the seed baked into the image. manifests.go tells that story.
+	// Everything after this line configures the machine from the
+	// manifest that *won*, never from one that was rejected along the
+	// way. This is also the one actuator allowed to stop a boot;
+	// storage.go explains why an unsatisfiable role powers the
+	// machine off.
+	m, storage, actuation, err := settleStorage()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "liken: machine manifest: %v\n", err)
-		m = &machine.Machine{}
+		failBoot("%v", err)
 	}
+
 	if name := m.Metadata.Name; name != "" {
 		// Sethostname is one syscall: no hostnamectl, no daemon. The
 		// kernel simply keeps a string.
@@ -91,21 +94,11 @@ func main() {
 		}
 	}
 
-	// Sysctls are applied early so every value holds before k3s
-	// starts. The operator re-asserts the same spec once the cluster
-	// is up, which is what makes a live kubectl edit take effect
-	// without a reboot.
+	// Sysctls are applied before k3s starts so every value holds by
+	// the time it reads them. The operator re-asserts the same spec
+	// once the cluster is up, which is what makes a live kubectl edit
+	// take effect without a reboot.
 	applySysctls(m.Spec.Sysctls)
-
-	// Storage before anything writes under /var, and long before k3s:
-	// a filesystem can't be swapped under a running cluster. This is
-	// also the one actuator allowed to stop a boot; storage.go
-	// explains why an unsatisfiable storage role powers the machine
-	// off.
-	storage, err := reconcileStorage(m.Spec.Storage)
-	if err != nil {
-		failBoot("%v", err)
-	}
 
 	worldReport()
 
@@ -125,7 +118,7 @@ func main() {
 		// Facts wait until here because they live under /run, and
 		// prepareForK3s just mounted a fresh tmpfs there; anything
 		// written earlier would be shadowed by the mount.
-		publishFacts(conn, storage)
+		publishFacts(conn, storage, actuation)
 		loadModules()
 		go reportWhenReady()
 		superviseK3s() // never returns

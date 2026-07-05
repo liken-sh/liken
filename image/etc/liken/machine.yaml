@@ -1,11 +1,15 @@
 # The Machine manifest: the one document that configures a liken
-# machine. It's shaped like a Kubernetes resource on purpose: init
-# reads it from this file at boot (there's no API server yet), and once
-# the cluster is up, the liken operator seeds this same document into
-# it as a real Machine resource and publishes the machine's live facts
-# into its status. From then on the cluster's copy is the authoritative
-# one: `kubectl edit machine` wins over this file, which only seeds
-# clusters that don't have the Machine yet.
+# machine. It's shaped like a Kubernetes resource on purpose: the same
+# document exists in the cluster as a real Machine resource, where the
+# liken operator publishes the machine's live facts into its status.
+#
+# This file is a seed, consulted exactly once. The first boot runs
+# under it, and that boot's success writes it to the machineState
+# filesystem as the first *proven* manifest; every boot after reads
+# its manifests from that disk, not from here. Editing the Machine in
+# the cluster is how configuration changes from then on: the operator
+# stages the edited spec to the same disk, and the next boot applies
+# it (or falls back to the proven copy if it can't).
 #
 # The defaults are deliberately minimal: an empty spec means DHCP on
 # the first real network interface, DNS from the lease, done.

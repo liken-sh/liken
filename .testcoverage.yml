@@ -20,7 +20,7 @@ threshold:
   # The whole module, everything counted, including the operator
   # (currently untested; its watch loop wants the same
   # decisions-from-actions split init's storage got).
-  total: 30
+  total: 31
 
 override:
   # The Machine API: pure functions over declared types. (Paths here

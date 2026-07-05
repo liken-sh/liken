@@ -118,24 +118,35 @@ type NetworkSpec struct {
 	Interface string `json:"interface,omitempty"`
 }
 
+// Parse reads a Machine manifest from its bytes. Strict on purpose:
+// a misspelled field name in a manifest should be an error someone
+// sees, not a setting that silently never applies.
+func Parse(raw []byte) (*Machine, error) {
+	m := &Machine{}
+	if err := yaml.UnmarshalStrict(raw, m); err != nil {
+		return nil, err
+	}
+	if m.Kind != "Machine" {
+		return nil, fmt.Errorf("expected kind Machine, got %q", m.Kind)
+	}
+	return m, nil
+}
+
 // Load reads a Machine manifest from a file. A machine with no
 // manifest is still a valid machine (everything defaults), but a
 // manifest that exists and doesn't parse, or declares some other kind,
 // is a configuration error and is reported as one.
 func Load(path string) (*Machine, error) {
-	m := &Machine{}
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return m, nil
+		return &Machine{}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	if err := yaml.UnmarshalStrict(raw, m); err != nil {
-		return nil, fmt.Errorf("parsing %s: %w", path, err)
-	}
-	if m.Kind != "Machine" {
-		return nil, fmt.Errorf("%s: expected kind Machine, got %q", path, m.Kind)
+	m, err := Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return m, nil
 }
