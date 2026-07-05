@@ -164,11 +164,19 @@
           staged spec that fails at boot falls back to proven and
           holds at RejectedLastBoot without a reboot loop). The
           disk-growth drill grew podEphemeral's partition and
-          filesystem from 1.5 to 5.5 GiB in place. One sharp edge
-          found and accepted: the CEL no-shrink rule compares the spec
-          against its previous self, so backing out an unsatisfiable
-          grow needs `kubectl replace --force` (delete-and-create runs
-          no transition rules), the standard escape for CEL ratchets.
+          filesystem from 1.5 to 5.5 GiB in place.
+   7. [x] Editing back to a good state. The first CEL rules compared
+          the spec against its previous value, which wedged: after
+          declaring a size the machine couldn't satisfy, reverting the
+          spec was also refused as a shrink, and the only exit was
+          `kubectl replace --force` — untenable once Flux owns the
+          spec. The rules now compare the spec against
+          `status.boot.storage` (the sizes the machine actually booted
+          with), so a failed aspiration can always be edited back to
+          reality, and only a real on-disk shrink is refused. When the
+          spec returns to what the machine runs, the operator also
+          withdraws any manifest still staged (the next boot would
+          have applied it) and clears the standing rejection.
 6. [ ] Bake in Flux bootstrap, so the machine converges to its repo from
        first boot. This is where the Machine manifest's authority story
        resolves: today the file seeds the cluster and the cluster copy

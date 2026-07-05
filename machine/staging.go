@@ -184,6 +184,43 @@ func Reject(root string, r Rejection) error {
 	return syncDir(dir)
 }
 
+// WithdrawStaged removes the staged manifest. The operator calls this
+// when the spec has been edited back to what the machine is already
+// running: if the staged file stayed behind, the next boot would
+// apply an edit the cluster no longer asks for. A missing file is not
+// an error; there is nothing to withdraw.
+func WithdrawStaged(root string) error {
+	dir := manifestsDir(root)
+	if err := os.Remove(filepath.Join(dir, stagedManifest)); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	return syncDir(dir)
+}
+
+// ClearRejection removes the rejected manifest and its rejection
+// note. The rejection's purpose is to stop the operator from staging
+// the same failed spec again; once the cluster stops asking for that
+// spec, the record has no further use, and without this cleanup every
+// future boot would keep republishing it in status.
+func ClearRejection(root string) error {
+	dir := manifestsDir(root)
+	removed := false
+	for _, name := range []string{rejectedManifest, rejectionNote} {
+		err := os.Remove(filepath.Join(dir, name))
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		removed = removed || err == nil
+	}
+	if !removed {
+		return nil
+	}
+	return syncDir(dir)
+}
+
 // writeDurable is the atomic, power-loss-proof write: temp file in
 // the same directory (rename can't cross filesystems), contents
 // fsynced before the rename makes them visible, directory fsynced so

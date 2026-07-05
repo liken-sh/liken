@@ -68,6 +68,63 @@ spec:
             A Machine is one computer running liken: the declared
             state of the operating system beneath this cluster, and
             the observed facts of the hardware it's running on.
+          # Admission-time validation, run by the API server itself.
+          # Partition sizes are grow-only, and the invariant is about
+          # the disk, not the spec's history: a role may not be
+          # declared smaller than the size the machine last booted
+          # with, which status.boot.storage records. Comparing spec
+          # against status (rather than against the spec's previous
+          # value with oldSelf) is what keeps an edit reversible: a
+          # size the machine turned out unable to satisfy can be
+          # edited back down to what is actually on disk, because
+          # that is not a shrink of anything real. These rules live
+          # at the root of the schema because they need to see both
+          # spec and status.
+          #
+          # CEL cannot see the machine itself. A spec that passes
+          # here can still be refused by the operator before staging
+          # (it checks against the real disk inventory), and init
+          # never shrinks anything at boot. Three layers, one rule.
+          #
+          # Note the method form for comparison: Kubernetes Quantity
+          # values do not support the >= operator in CEL, only
+          # isLessThan and friends.
+          x-kubernetes-validations:
+            - rule: >-
+                !has(self.spec) || !has(self.spec.storage) ||
+                !has(self.spec.storage.machineState) || !has(self.spec.storage.machineState.size) ||
+                !has(self.status) || !has(self.status.boot) || !has(self.status.boot.storage) ||
+                !has(self.status.boot.storage.machineState) || !has(self.status.boot.storage.machineState.size) ||
+                !quantity(self.spec.storage.machineState.size).isLessThan(quantity(self.status.boot.storage.machineState.size))
+              message: machineState may not shrink below the size this machine booted with; partitions are grow-only
+            - rule: >-
+                !has(self.spec) || !has(self.spec.storage) ||
+                !has(self.spec.storage.machineEphemeral) || !has(self.spec.storage.machineEphemeral.size) ||
+                !has(self.status) || !has(self.status.boot) || !has(self.status.boot.storage) ||
+                !has(self.status.boot.storage.machineEphemeral) || !has(self.status.boot.storage.machineEphemeral.size) ||
+                !quantity(self.spec.storage.machineEphemeral.size).isLessThan(quantity(self.status.boot.storage.machineEphemeral.size))
+              message: machineEphemeral may not shrink below the size this machine booted with; partitions are grow-only
+            - rule: >-
+                !has(self.spec) || !has(self.spec.storage) ||
+                !has(self.spec.storage.clusterState) || !has(self.spec.storage.clusterState.size) ||
+                !has(self.status) || !has(self.status.boot) || !has(self.status.boot.storage) ||
+                !has(self.status.boot.storage.clusterState) || !has(self.status.boot.storage.clusterState.size) ||
+                !quantity(self.spec.storage.clusterState.size).isLessThan(quantity(self.status.boot.storage.clusterState.size))
+              message: clusterState may not shrink below the size this machine booted with; partitions are grow-only
+            - rule: >-
+                !has(self.spec) || !has(self.spec.storage) ||
+                !has(self.spec.storage.podStorage) || !has(self.spec.storage.podStorage.size) ||
+                !has(self.status) || !has(self.status.boot) || !has(self.status.boot.storage) ||
+                !has(self.status.boot.storage.podStorage) || !has(self.status.boot.storage.podStorage.size) ||
+                !quantity(self.spec.storage.podStorage.size).isLessThan(quantity(self.status.boot.storage.podStorage.size))
+              message: podStorage may not shrink below the size this machine booted with; partitions are grow-only
+            - rule: >-
+                !has(self.spec) || !has(self.spec.storage) ||
+                !has(self.spec.storage.podEphemeral) || !has(self.spec.storage.podEphemeral.size) ||
+                !has(self.status) || !has(self.status.boot) || !has(self.status.boot.storage) ||
+                !has(self.status.boot.storage.podEphemeral) || !has(self.status.boot.storage.podEphemeral.size) ||
+                !quantity(self.spec.storage.podEphemeral.size).isLessThan(quantity(self.status.boot.storage.podEphemeral.size))
+              message: podEphemeral may not shrink below the size this machine booted with; partitions are grow-only
           properties:
             spec:
               type: object
@@ -129,52 +186,6 @@ spec:
                     with no proven spec to fall back to stops the
                     boot. Roles absent from the spec are backed by the
                     machine's RAM root.
-                  # Admission-time validation, run by the API server
-                  # itself: sizes are grow-only, and the half of that
-                  # rule that's visible in the object alone (this spec
-                  # vs its previous self) is enforced here, before the
-                  # edit is even accepted. Transition rules (the ones
-                  # naming oldSelf) run only on UPDATE. What CEL cannot
-                  # see is the machine: a size that shrinks a role
-                  # relative to its *actual partition* (including
-                  # giving a remainder role any fixed size at all) is
-                  # refused by the operator before staging, and init
-                  # itself never shrinks anything at boot. Three
-                  # layers, one rule.
-                  #
-                  # One consequence to know: these rules ratchet the
-                  # *spec*, so after declaring a size the machine
-                  # turned out unable to satisfy, backing the number
-                  # out is also refused. The escape is
-                  # `kubectl replace --force`: delete-and-create runs
-                  # no transition rules, the standard exit from any
-                  # CEL ratchet.
-                  x-kubernetes-validations:
-                    - rule: >-
-                        !has(oldSelf.machineState) || !has(self.machineState) ||
-                        !has(oldSelf.machineState.size) || !has(self.machineState.size) ||
-                        !quantity(self.machineState.size).isLessThan(quantity(oldSelf.machineState.size))
-                      message: machineState may not shrink; storage roles are grow-only
-                    - rule: >-
-                        !has(oldSelf.machineEphemeral) || !has(self.machineEphemeral) ||
-                        !has(oldSelf.machineEphemeral.size) || !has(self.machineEphemeral.size) ||
-                        !quantity(self.machineEphemeral.size).isLessThan(quantity(oldSelf.machineEphemeral.size))
-                      message: machineEphemeral may not shrink; storage roles are grow-only
-                    - rule: >-
-                        !has(oldSelf.clusterState) || !has(self.clusterState) ||
-                        !has(oldSelf.clusterState.size) || !has(self.clusterState.size) ||
-                        !quantity(self.clusterState.size).isLessThan(quantity(oldSelf.clusterState.size))
-                      message: clusterState may not shrink; storage roles are grow-only
-                    - rule: >-
-                        !has(oldSelf.podStorage) || !has(self.podStorage) ||
-                        !has(oldSelf.podStorage.size) || !has(self.podStorage.size) ||
-                        !quantity(self.podStorage.size).isLessThan(quantity(oldSelf.podStorage.size))
-                      message: podStorage may not shrink; storage roles are grow-only
-                    - rule: >-
-                        !has(oldSelf.podEphemeral) || !has(self.podEphemeral) ||
-                        !has(oldSelf.podEphemeral.size) || !has(self.podEphemeral.size) ||
-                        !quantity(self.podEphemeral.size).isLessThan(quantity(oldSelf.podEphemeral.size))
-                      message: podEphemeral may not shrink; storage roles are grow-only
                   properties:
                     machineState:
                       type: object

@@ -90,8 +90,8 @@ func orRemainder(size string) string {
 
 // validateStaging is everything admission can't check, because it
 // takes the actual machine: CEL rules in the CRD compare the spec
-// against its previous self, but only the facts know what partitions
-// exist and what disks are attached.
+// against the last boot's published status, but only the facts know
+// what partitions exist and what disks are attached.
 func validateStaging(spec machine.StorageSpec, facts *machine.MachineStatus) error {
 	if err := spec.Validate(); err != nil {
 		return err
@@ -171,11 +171,13 @@ func renderManifest(name string, spec machine.MachineSpec) ([]byte, string, erro
 // publish, and which side effects to perform. decideConvergence is
 // pure; reconcile() acts.
 type convergence struct {
-	condition     machine.Condition
-	stage         bool   // write manifest to the machineState filesystem
-	requestReboot bool   // write the reboot intent for init
-	manifest      []byte // the bytes to stage
-	hash          string // their identity
+	condition      machine.Condition
+	stage          bool   // write manifest to the machineState filesystem
+	requestReboot  bool   // write the reboot intent for init
+	withdraw       bool   // remove the staged manifest; the spec no longer wants it
+	clearRejection bool   // remove the rejection record; the spec it blocks is gone
+	manifest       []byte // the bytes to stage
+	hash           string // their identity
 }
 
 func converged(reason, message string) machine.Condition {
@@ -192,7 +194,12 @@ func notConverged(reason, message string) machine.Condition {
 //  1. No facts, or facts without a boot record (an older init, a
 //     machine mid-upgrade): Unknown. Guessing could reboot a machine
 //     over a misreading.
-//  2. No drift: converged, done. The overwhelmingly common pass.
+//  2. No drift: converged. This case also cleans up after an edit
+//     that was taken back. A manifest still staged for a spec the
+//     cluster no longer wants is withdrawn, because the next boot
+//     would otherwise apply it. A standing rejection is cleared for
+//     the same reason: the spec it blocks is no longer being asked
+//     for, so the record has nothing left to do.
 //  3. The desired spec is the one init rejected last boot: refuse to
 //     re-stage it. Facts die with every boot but the quarantine file
 //     doesn't, so this holds across power cycles; only a genuinely
@@ -216,7 +223,11 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, stagedH
 
 	drift := storageDrift(m.Spec.Storage, facts.Boot.Storage)
 	if len(drift) == 0 {
-		return convergence{condition: converged("BootCurrent", "this boot actuated the current spec")}
+		return convergence{
+			condition:      converged("BootCurrent", "this boot actuated the current spec"),
+			withdraw:       stagedHash != "",
+			clearRejection: facts.Boot.Rejection != nil,
+		}
 	}
 	diffs := strings.Join(drift, "; ")
 

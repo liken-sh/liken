@@ -189,6 +189,50 @@ func TestRejectWithoutAStagedManifestFails(t *testing.T) {
 	}
 }
 
+func TestWithdrawStagedRemovesTheStagedManifest(t *testing.T) {
+	root := t.TempDir()
+	if err := WriteStaged(root, []byte(sampleManifest)); err != nil {
+		t.Fatal(err)
+	}
+	if err := WithdrawStaged(root); err != nil {
+		t.Fatal(err)
+	}
+	if m, raw, _ := LoadStaged(root); m != nil || raw != nil {
+		t.Error("withdrawal should remove the staged manifest")
+	}
+}
+
+func TestWithdrawStagedWithNothingStagedIsFine(t *testing.T) {
+	if err := WithdrawStaged(t.TempDir()); err != nil {
+		t.Errorf("nothing to withdraw is not an error: %v", err)
+	}
+}
+
+func TestClearRejectionRemovesBothFiles(t *testing.T) {
+	root := t.TempDir()
+	if err := WriteStaged(root, []byte(sampleManifest)); err != nil {
+		t.Fatal(err)
+	}
+	if err := Reject(root, Rejection{Hash: "h", Reason: "did not fit", RejectedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ClearRejection(root); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := LoadRejection(root); r != nil {
+		t.Error("the rejection note should be gone")
+	}
+	if _, err := os.Stat(filepath.Join(root, "manifests", "rejected.yaml")); !os.IsNotExist(err) {
+		t.Error("the quarantined manifest should be gone")
+	}
+}
+
+func TestClearRejectionWithNoRejectionIsFine(t *testing.T) {
+	if err := ClearRejection(t.TempDir()); err != nil {
+		t.Errorf("nothing to clear is not an error: %v", err)
+	}
+}
+
 func TestLoadRejectionRejectsGarbage(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "manifests")

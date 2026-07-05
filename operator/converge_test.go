@@ -112,6 +112,34 @@ func TestStorageDriftSeesADeviceChange(t *testing.T) {
 	}
 }
 
+func TestStorageDriftFallsBackToStringsForUnparseableSizes(t *testing.T) {
+	// Validation will refuse these anyway; drift detection just has to
+	// not panic on them, and string equality is the honest comparison
+	// left.
+	desired := labStorage()
+	desired.PodStorage.Size = "a-whole-bunch"
+	actuated := labStorage()
+	actuated.PodStorage.Size = "a-whole-bunch"
+	if diffs := storageDrift(desired, actuated); len(diffs) != 0 {
+		t.Errorf("identical spellings should not drift, parseable or not: %v", diffs)
+	}
+	actuated.PodStorage.Size = "even-more"
+	if diffs := storageDrift(desired, actuated); len(diffs) != 1 {
+		t.Errorf("different spellings should drift: %v", diffs)
+	}
+}
+
+func TestStorageDriftNamesTheRemainder(t *testing.T) {
+	// A remainder role's size is spelled "" in the spec; the diff
+	// message should say "(remainder)" rather than showing nothing.
+	desired := labStorage()
+	desired.ClusterState.Size = "3Gi" // was the remainder
+	diffs := storageDrift(desired, labStorage())
+	if len(diffs) != 1 || !strings.Contains(diffs[0], "(remainder)") {
+		t.Errorf("expected the diff to name the remainder: %v", diffs)
+	}
+}
+
 func TestValidateStagingAcceptsAGrow(t *testing.T) {
 	spec := labStorage()
 	spec.PodStorage.Size = "3Gi"
@@ -139,6 +167,14 @@ func TestValidateStagingRefusesFixingARemainderBelowItsSize(t *testing.T) {
 	spec.ClusterState.Size = "512Mi"
 	if err := validateStaging(spec, labFacts()); err == nil {
 		t.Error("expected a refusal to shrink a remainder by fixing it")
+	}
+}
+
+func TestValidateStagingRefusesAnUnparseableSize(t *testing.T) {
+	spec := labStorage()
+	spec.PodStorage.Size = "quite-large"
+	if err := validateStaging(spec, labFacts()); err == nil {
+		t.Error("expected a refusal for a size that does not parse")
 	}
 }
 
@@ -206,8 +242,39 @@ func TestDecideConvergenceWhenTheBootIsCurrent(t *testing.T) {
 	if conv.condition.Status != "True" || conv.condition.Reason != "BootCurrent" {
 		t.Errorf("got %+v", conv.condition)
 	}
-	if conv.stage || conv.requestReboot {
+	if conv.stage || conv.requestReboot || conv.withdraw || conv.clearRejection {
 		t.Error("a converged machine needs no side effects")
+	}
+}
+
+func TestDecideConvergenceWithdrawsAStagedManifestNobodyWants(t *testing.T) {
+	// The spec was edited and then edited back before any reboot: no
+	// drift, but the earlier edit still sits staged. Left there, the
+	// next boot would apply it.
+	conv := decideConvergence(labMachine(), labFacts(), "some-staged-hash")
+	if conv.condition.Reason != "BootCurrent" {
+		t.Fatalf("got %+v", conv.condition)
+	}
+	if !conv.withdraw {
+		t.Error("a staged manifest for a spec no longer asked for must be withdrawn")
+	}
+	if conv.stage || conv.requestReboot {
+		t.Errorf("withdrawal is the only side effect here: %+v", conv)
+	}
+}
+
+func TestDecideConvergenceClearsARejectionOnceTheSpecMovesOn(t *testing.T) {
+	// A staged spec was rejected at boot, and the cluster's spec has
+	// since been edited back to what the machine runs. The rejection
+	// blocked exactly that abandoned spec; it has nothing left to do.
+	facts := labFacts()
+	facts.Boot.Rejection = &machine.Rejection{Hash: "the-abandoned-spec", Reason: "could not grow"}
+	conv := decideConvergence(labMachine(), facts, "")
+	if conv.condition.Reason != "BootCurrent" {
+		t.Fatalf("got %+v", conv.condition)
+	}
+	if !conv.clearRejection {
+		t.Error("a rejection for a spec no longer asked for must be cleared")
 	}
 }
 
