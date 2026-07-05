@@ -89,7 +89,7 @@ func reconcile(c *apiClient, m *machine.Machine) {
 
 	// Convergence: does the cluster's spec match what this boot
 	// actuated, and if not, stage the difference for the next boot
-	// (converge.go). The decision is pure; these lines are its hands.
+	// (converge.go). The decision is pure; these lines carry it out.
 	conv := decideConvergence(m, facts, readStagedHash())
 	if conv.withdraw {
 		if err := machine.WithdrawStaged(machine.MachineStateDir); err != nil {

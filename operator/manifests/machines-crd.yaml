@@ -81,10 +81,11 @@ spec:
           # at the root of the schema because they need to see both
           # spec and status.
           #
-          # CEL cannot see the machine itself. A spec that passes
-          # here can still be refused by the operator before staging
-          # (it checks against the real disk inventory), and init
-          # never shrinks anything at boot. Three layers, one rule.
+          # CEL cannot see the machine itself, so this is one of
+          # three places the same rule is enforced: a spec that
+          # passes admission can still be refused by the operator
+          # before staging (it checks against the real disk
+          # inventory), and init never shrinks anything at boot.
           #
           # Note the method form for comparison: Kubernetes Quantity
           # values do not support the >= operator in CEL, only

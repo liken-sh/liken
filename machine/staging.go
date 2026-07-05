@@ -29,7 +29,7 @@ package machine
 // the rename itself lives in the directory, and an unsynced directory
 // update can vanish with the power. Facts skip the fsyncs because
 // /run is tmpfs; these files exist precisely to survive the power
-// going out, so they pay full price.
+// going out, so they do both fsyncs every time.
 
 import (
 	"crypto/sha256"
@@ -167,8 +167,8 @@ func Promote(root string) error {
 // first, then staged becomes rejected. A crash between the two leaves
 // staged.yaml in place, and the next boot simply retries it: a
 // persistent failure re-records this same rejection and finishes the
-// rename; a transient one (the disk was unplugged) gets the second
-// chance it deserves. Self-healing in both directions.
+// rename, and a transient one (the disk was unplugged) gets a second
+// chance. Either way the interrupted state converges on its own.
 func Reject(root string, r Rejection) error {
 	dir := manifestsDir(root)
 	note, err := yaml.Marshal(r)

@@ -175,11 +175,11 @@ func isBlank(devPath string) (bool, error) {
 // written to any disk. A spec that will fail should fail before it
 // changes the world, because the boot may go on to try a different
 // spec (the proven manifest, after a staged one is rejected), and
-// partitions half-created under the failed spec would poison that
-// attempt. What remains unavoidable is a genuine mid-write I/O
-// failure; a disk claimed by a failed attempt stays claimed, and if
+// partitions half-created under the failed spec would break that
+// attempt too. What remains unavoidable is a genuine mid-write I/O
+// failure: a disk claimed by a failed attempt stays claimed, and if
 // that leaves two partitions carrying one role's name, recognition
-// refuses to guess and the boot stops, the honest outcome.
+// refuses to guess and the boot stops.
 func reconcileStorage(spec machine.StorageSpec) (machine.StorageStatus, error) {
 	status := machine.AllRolesInMemory()
 	roles := spec.Roles()

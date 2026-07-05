@@ -162,7 +162,8 @@ func TestValidateStagingRefusesAShrink(t *testing.T) {
 
 func TestValidateStagingRefusesFixingARemainderBelowItsSize(t *testing.T) {
 	// clusterState is a remainder occupying 1Gi; giving it a fixed
-	// 512Mi is a shrink wearing different clothes.
+	// 512Mi is still a shrink, even though the declared size grew from
+	// nothing.
 	spec := labStorage()
 	spec.ClusterState.Size = "512Mi"
 	if err := validateStaging(spec, labFacts()); err == nil {

@@ -5,18 +5,16 @@ package main
 // Only PID 1 can take a machine down properly, so the operator never
 // reboots anything itself: it writes an intent file (machine/reboot.go
 // describes the channel) and init does the rest. The watching is a
-// 2-second poll, chosen over fancier mechanisms on purpose: it's a
-// few lines anyone can read, and the latency budget here is a whole
-// reboot.
+// 2-second poll, chosen over inotify on purpose: it's a few lines
+// anyone can read, and a 2-second delay is nothing next to the reboot
+// it triggers.
 //
-// The shutdown itself is the thing a traditional init spends most of
-// its code on, reduced to four honest steps: signal every process
-// (k3s was already stopped gracefully, but its containers outlive it
-// by design and they get their warning here), give them a moment and
-// then stop waiting, detach the role filesystems, sync, and ask the
-// kernel to restart. Under QEMU's -no-reboot flag a restart becomes a
-// clean exit instead, which is exactly what a bounded test run wants
-// to observe.
+// The shutdown sequence is four steps: signal every process (k3s was
+// already stopped gracefully, but its containers outlive it and get
+// their own warning here), wait a fixed grace period, detach the role
+// filesystems, sync, and ask the kernel to restart. Under QEMU's
+// -no-reboot flag a restart becomes a clean exit instead, which is
+// what a bounded test run wants to observe.
 
 import (
 	"fmt"

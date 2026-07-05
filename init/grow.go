@@ -7,7 +7,7 @@ package main
 // moves data. A partition grows by rewriting its table entry's end
 // sector and telling the filesystem inside (ext4.go's half of the
 // job); shrinking or moving would mean relocating live data, which is
-// a migration, a different animal liken doesn't keep.
+// a data migration, and liken doesn't do migrations.
 //
 // Two rules bound what a grow can do:
 //
