@@ -96,7 +96,9 @@ spec:
           securityContext:
             privileged: true
           volumeMounts:
-            # The facts init published: the operator's input.
+            # The facts init published: the operator's input. Read-only
+            # by mount, not by convention: status is observed, never
+            # asserted, and the operator cannot rewrite its own input.
             - name: run-liken
               mountPath: /run/liken
               readOnly: true
@@ -105,6 +107,20 @@ spec:
             - name: etc-liken
               mountPath: /etc/liken
               readOnly: true
+            # The machineState filesystem, where the operator stages a
+            # manifest for the next boot: its one output channel to
+            # init's future self.
+            - name: machine-state
+              mountPath: /var/lib/liken/machine
+            # The reboot channel: a subdirectory of /run/liken the
+            # operator may write while the facts above stay behind a
+            # read-only mount. Two mounts, two directions: facts flow
+            # init to operator, intents flow operator to init.
+            - name: run-liken-operator
+              mountPath: /run/liken/operator
+      # Note what this feature did NOT need: any new RBAC. Staging and
+      # rebooting are host-filesystem acts, bounded by these mounts,
+      # not cluster permissions.
       volumes:
         - name: run-liken
           hostPath:
@@ -112,3 +128,16 @@ spec:
         - name: etc-liken
           hostPath:
             path: /etc/liken
+        # DirectoryOrCreate because these paths only exist as real
+        # mounts/directories when init created them; the default type
+        # would fail the pod outright on a machine without them, while
+        # the operator prefers to start and report (the facts say
+        # whether machineState is really a disk).
+        - name: machine-state
+          hostPath:
+            path: /var/lib/liken/machine
+            type: DirectoryOrCreate
+        - name: run-liken-operator
+          hostPath:
+            path: /run/liken/operator
+            type: DirectoryOrCreate

@@ -1,0 +1,341 @@
+package main
+
+// The operator's first tests, and they follow the same rule as
+// init's: decisions are pure functions over plain values, so every
+// row of the convergence truth table runs without a cluster, a disk,
+// or a mount in sight.
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/chrisguidry/liken/machine"
+)
+
+func specWith(storage machine.StorageSpec) machine.MachineSpec {
+	return machine.MachineSpec{Storage: storage}
+}
+
+// labStorage is the lab machine's shape: five roles across two disks.
+func labStorage() machine.StorageSpec {
+	return machine.StorageSpec{
+		MachineState:     &machine.StorageRole{Device: "/dev/vda", Size: "64Mi"},
+		MachineEphemeral: &machine.StorageRole{Device: "/dev/vdb", Size: "512Mi"},
+		ClusterState:     &machine.StorageRole{Device: "/dev/vda"},
+		PodStorage:       &machine.StorageRole{Device: "/dev/vdb", Size: "2Gi"},
+		PodEphemeral:     &machine.StorageRole{Device: "/dev/vdb"},
+	}
+}
+
+// labFacts builds the facts a healthy boot of the lab machine
+// publishes: every role placed, actuation recorded.
+func labFacts() *machine.MachineStatus {
+	facts := &machine.MachineStatus{
+		Hardware: machine.HardwareStatus{
+			BlockDevices: []machine.BlockDevice{
+				{Name: "vda", SizeBytes: 2 << 30},
+				{Name: "vdb", SizeBytes: 4 << 30},
+			},
+		},
+		Storage: machine.StorageStatus{
+			MachineState:     machine.StorageRoleStatus{Backing: machine.BackingPartition, Device: "vda1", CapacityBytes: 64 << 20},
+			MachineEphemeral: machine.StorageRoleStatus{Backing: machine.BackingPartition, Device: "vdb1", CapacityBytes: 512 << 20},
+			ClusterState:     machine.StorageRoleStatus{Backing: machine.BackingPartition, Device: "vda2", CapacityBytes: 1 << 30},
+			PodStorage:       machine.StorageRoleStatus{Backing: machine.BackingPartition, Device: "vdb2", CapacityBytes: 2 << 30},
+			PodEphemeral:     machine.StorageRoleStatus{Backing: machine.BackingPartition, Device: "vdb3", CapacityBytes: 1 << 30},
+		},
+		Actuation: machine.ActuationStatus{
+			ManifestSource: machine.ManifestSourceProven,
+			ManifestHash:   "abc123",
+			Storage:        labStorage(),
+		},
+	}
+	return facts
+}
+
+func labMachine() *machine.Machine {
+	return &machine.Machine{
+		APIVersion: machine.APIVersion,
+		Kind:       "Machine",
+		Metadata:   machine.ObjectMeta{Name: "liken-dev"},
+		Spec:       specWith(labStorage()),
+	}
+}
+
+func TestStorageDriftSeesNoDriftInTheSameSpec(t *testing.T) {
+	if diffs := storageDrift(labStorage(), labStorage()); len(diffs) != 0 {
+		t.Errorf("identical specs should not drift: %v", diffs)
+	}
+}
+
+func TestStorageDriftNormalizesSizes(t *testing.T) {
+	desired := labStorage()
+	desired.PodStorage.Size = "2048Mi" // the same ask as 2Gi, spelled differently
+	if diffs := storageDrift(desired, labStorage()); len(diffs) != 0 {
+		t.Errorf("2048Mi and 2Gi are the same size: %v", diffs)
+	}
+}
+
+func TestStorageDriftSeesAGrow(t *testing.T) {
+	desired := labStorage()
+	desired.PodStorage.Size = "3Gi"
+	diffs := storageDrift(desired, labStorage())
+	if len(diffs) != 1 || !strings.Contains(diffs[0], "podStorage") {
+		t.Errorf("expected one podStorage diff: %v", diffs)
+	}
+}
+
+func TestStorageDriftSeesAnAddedRole(t *testing.T) {
+	actuated := labStorage()
+	actuated.PodStorage = nil
+	diffs := storageDrift(labStorage(), actuated)
+	if len(diffs) != 1 || !strings.Contains(diffs[0], "declared but not actuated") {
+		t.Errorf("expected an added-role diff: %v", diffs)
+	}
+}
+
+func TestStorageDriftSeesARemovedRole(t *testing.T) {
+	desired := labStorage()
+	desired.PodEphemeral = nil
+	diffs := storageDrift(desired, labStorage())
+	if len(diffs) != 1 || !strings.Contains(diffs[0], "no longer declared") {
+		t.Errorf("expected a removed-role diff: %v", diffs)
+	}
+}
+
+func TestStorageDriftSeesADeviceChange(t *testing.T) {
+	desired := labStorage()
+	desired.ClusterState.Device = "/dev/vdc"
+	diffs := storageDrift(desired, labStorage())
+	if len(diffs) != 1 || !strings.Contains(diffs[0], "device") {
+		t.Errorf("expected a device diff: %v", diffs)
+	}
+}
+
+func TestValidateStagingAcceptsAGrow(t *testing.T) {
+	spec := labStorage()
+	spec.PodStorage.Size = "3Gi"
+	if err := validateStaging(spec, labFacts()); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestValidateStagingRefusesAShrink(t *testing.T) {
+	spec := labStorage()
+	spec.PodStorage.Size = "1Gi" // the partition is already 2Gi
+	err := validateStaging(spec, labFacts())
+	if err == nil {
+		t.Fatal("expected a refusal to shrink")
+	}
+	if !strings.Contains(err.Error(), "grow-only") {
+		t.Errorf("error should teach the rule: %v", err)
+	}
+}
+
+func TestValidateStagingRefusesFixingARemainderBelowItsSize(t *testing.T) {
+	// clusterState is a remainder occupying 1Gi; giving it a fixed
+	// 512Mi is a shrink wearing different clothes.
+	spec := labStorage()
+	spec.ClusterState.Size = "512Mi"
+	if err := validateStaging(spec, labFacts()); err == nil {
+		t.Error("expected a refusal to shrink a remainder by fixing it")
+	}
+}
+
+func TestValidateStagingRefusesUnknownDevicesForNewRoles(t *testing.T) {
+	facts := labFacts()
+	facts.Storage.PodStorage = machine.StorageRoleStatus{Backing: machine.BackingMemory}
+	spec := labStorage()
+	spec.PodStorage.Device = "/dev/vdz"
+	err := validateStaging(spec, facts)
+	if err == nil {
+		t.Fatal("expected a refusal for a device the machine doesn't have")
+	}
+	for _, want := range []string{"/dev/vdz", "vda, vdb"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q: %v", want, err)
+		}
+	}
+}
+
+func TestRenderManifestIsDeterministicAndCarriesNoStatus(t *testing.T) {
+	m := labMachine()
+	m.Status.Version.Liken = "should-not-appear"
+	a, hashA, err := renderManifest(m.Metadata.Name, m.Spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, hashB, err := renderManifest(m.Metadata.Name, m.Spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hashA != hashB {
+		t.Error("the same spec must render to the same bytes")
+	}
+	if strings.Contains(string(a), "status") || strings.Contains(string(a), "should-not-appear") {
+		t.Errorf("a staged manifest carries spec, never status:\n%s", a)
+	}
+	if parsed, err := machine.Parse(a); err != nil || parsed.Metadata.Name != "liken-dev" {
+		t.Errorf("the rendered manifest must parse back: %v", err)
+	}
+}
+
+// The decideConvergence truth table, one test per row.
+
+func TestDecideConvergenceWithoutFacts(t *testing.T) {
+	conv := decideConvergence(labMachine(), nil, "")
+	if conv.condition.Status != "Unknown" || conv.condition.Reason != "FactsIncomplete" {
+		t.Errorf("got %+v", conv.condition)
+	}
+	if conv.stage || conv.requestReboot {
+		t.Error("no side effects without facts")
+	}
+}
+
+func TestDecideConvergenceWithoutAnActuationRecord(t *testing.T) {
+	facts := labFacts()
+	facts.Actuation = machine.ActuationStatus{}
+	conv := decideConvergence(labMachine(), facts, "")
+	if conv.condition.Reason != "FactsIncomplete" {
+		t.Errorf("got %+v", conv.condition)
+	}
+}
+
+func TestDecideConvergenceWhenTheBootIsCurrent(t *testing.T) {
+	conv := decideConvergence(labMachine(), labFacts(), "")
+	if conv.condition.Status != "True" || conv.condition.Reason != "BootCurrent" {
+		t.Errorf("got %+v", conv.condition)
+	}
+	if conv.stage || conv.requestReboot {
+		t.Error("a converged machine needs no side effects")
+	}
+}
+
+// grownLabMachine is the canonical drift: podStorage grown to 3Gi.
+func grownLabMachine() *machine.Machine {
+	m := labMachine()
+	m.Spec.Storage.PodStorage.Size = "3Gi"
+	return m
+}
+
+func TestDecideConvergenceStagesAndWaitsUnderManualPolicy(t *testing.T) {
+	m := grownLabMachine()
+	conv := decideConvergence(m, labFacts(), "")
+	if conv.condition.Reason != "RebootPending" {
+		t.Fatalf("got %+v", conv.condition)
+	}
+	if !conv.stage || conv.requestReboot {
+		t.Errorf("Manual policy stages but never reboots: %+v", conv)
+	}
+	if !strings.Contains(conv.condition.Message, "podStorage") {
+		t.Errorf("the message should carry the diff: %q", conv.condition.Message)
+	}
+}
+
+func TestDecideConvergenceRequestsARebootUnderAutoPolicy(t *testing.T) {
+	m := grownLabMachine()
+	m.Spec.RebootPolicy = machine.RebootAuto
+	conv := decideConvergence(m, labFacts(), "")
+	if conv.condition.Reason != "RebootRequested" {
+		t.Fatalf("got %+v", conv.condition)
+	}
+	if !conv.stage || !conv.requestReboot {
+		t.Errorf("Auto policy stages and reboots: %+v", conv)
+	}
+}
+
+func TestDecideConvergenceIsIdempotentAboutStaging(t *testing.T) {
+	m := grownLabMachine()
+	_, hash, err := renderManifest(m.Metadata.Name, m.Spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conv := decideConvergence(m, labFacts(), hash)
+	if conv.stage {
+		t.Error("bytes already staged must not be rewritten every pass")
+	}
+	if conv.condition.Reason != "RebootPending" {
+		t.Errorf("the condition still reports the pending reboot: %+v", conv.condition)
+	}
+}
+
+func TestDecideConvergenceHonorsARejection(t *testing.T) {
+	m := grownLabMachine()
+	m.Spec.RebootPolicy = machine.RebootAuto
+	_, hash, err := renderManifest(m.Metadata.Name, m.Spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := labFacts()
+	facts.Actuation.Rejection = &machine.Rejection{Hash: hash, Reason: "disk on fire"}
+
+	conv := decideConvergence(m, facts, "")
+	if conv.condition.Reason != "RejectedLastBoot" {
+		t.Fatalf("got %+v", conv.condition)
+	}
+	if conv.stage || conv.requestReboot {
+		t.Error("a rejected spec must never re-stage or reboot (reject-once)")
+	}
+	if !strings.Contains(conv.condition.Message, "disk on fire") {
+		t.Errorf("the message should carry init's reason: %q", conv.condition.Message)
+	}
+}
+
+func TestDecideConvergenceStagesAgainForADifferentEdit(t *testing.T) {
+	// The rejection blocks exactly one spec; a genuinely different
+	// edit clears it naturally.
+	m := grownLabMachine()
+	facts := labFacts()
+	facts.Actuation.Rejection = &machine.Rejection{Hash: "some-other-hash", Reason: "old news"}
+	conv := decideConvergence(m, facts, "")
+	if conv.condition.Reason != "RebootPending" || !conv.stage {
+		t.Errorf("a different spec should stage normally: %+v", conv)
+	}
+}
+
+func TestDecideConvergenceRefusesToLoopOnAContradiction(t *testing.T) {
+	m := grownLabMachine()
+	m.Spec.RebootPolicy = machine.RebootAuto
+	_, hash, err := renderManifest(m.Metadata.Name, m.Spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := labFacts()
+	facts.Actuation.ManifestHash = hash // "I actuated that" — yet drift computes
+
+	conv := decideConvergence(m, facts, "")
+	if conv.condition.Reason != "ActuationMismatch" {
+		t.Fatalf("got %+v", conv.condition)
+	}
+	if conv.stage || conv.requestReboot {
+		t.Error("a contradiction must wedge, not reboot-loop")
+	}
+}
+
+func TestDecideConvergenceNeedsADurableMachineState(t *testing.T) {
+	m := grownLabMachine()
+	facts := labFacts()
+	facts.Storage.MachineState = machine.StorageRoleStatus{Backing: machine.BackingMemory}
+	conv := decideConvergence(m, facts, "")
+	if conv.condition.Reason != "MachineStateEphemeral" {
+		t.Fatalf("got %+v", conv.condition)
+	}
+	if conv.stage || conv.requestReboot {
+		t.Error("nowhere durable to stage means no side effects")
+	}
+}
+
+func TestDecideConvergenceRefusesInvalidStaging(t *testing.T) {
+	m := labMachine()
+	m.Spec.Storage.PodStorage.Size = "1Gi" // a shrink
+	conv := decideConvergence(m, labFacts(), "")
+	if conv.condition.Reason != "StagingRejected" {
+		t.Fatalf("got %+v", conv.condition)
+	}
+	if conv.stage || conv.requestReboot {
+		t.Error("an invalid spec must not stage")
+	}
+	if !strings.Contains(conv.condition.Message, "grow-only") {
+		t.Errorf("the message should carry the validation error: %q", conv.condition.Message)
+	}
+}

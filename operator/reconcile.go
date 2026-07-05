@@ -87,6 +87,31 @@ func reconcile(c *apiClient, m *machine.Machine) {
 	status.Conditions = machine.SetCondition(status.Conditions,
 		machine.StorageCondition(m.Spec.Storage, status.Storage), now)
 
+	// Convergence: does the cluster's spec match what this boot
+	// actuated, and if not, stage the difference for the next boot
+	// (converge.go). The decision is pure; these lines are its hands.
+	conv := decideConvergence(m, facts, readStagedHash())
+	if conv.stage {
+		if err := machine.WriteStaged(machine.MachineStateDir, conv.manifest); err != nil {
+			conv = convergence{condition: notConverged("StagingFailed", err.Error())}
+		} else {
+			fmt.Printf("staged spec %.12s for the next boot\n", conv.hash)
+		}
+	}
+	if conv.requestReboot {
+		intent := &machine.RebootIntent{
+			Reason:       "applying the staged spec",
+			ManifestHash: conv.hash,
+			RequestedAt:  now,
+		}
+		if err := machine.WriteRebootIntent(machine.OperatorRunDir, intent); err != nil {
+			conv.condition = notConverged("StagingFailed", err.Error())
+		} else {
+			fmt.Printf("requested a reboot to apply spec %.12s\n", conv.hash)
+		}
+	}
+	status.Conditions = machine.SetCondition(status.Conditions, conv.condition, now)
+
 	// Ready is the roll-up: True exactly when every other condition
 	// is. The scan skips any prior Ready so the previous pass's value
 	// can't affect this one.

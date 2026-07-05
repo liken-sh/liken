@@ -55,6 +55,9 @@ spec:
         - name: Ready
           type: string
           jsonPath: .status.conditions[?(@.type=="Ready")].status
+        - name: Converged
+          type: string
+          jsonPath: .status.conditions[?(@.type=="SpecConverged")].status
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -96,6 +99,17 @@ spec:
                     so an edit here takes effect without a reboot.
                   additionalProperties:
                     type: string
+                rebootPolicy:
+                  type: string
+                  enum: [Auto, Manual]
+                  default: Manual
+                  description: >-
+                    What the operator may do when applying the spec
+                    requires a reboot (today: any storage change).
+                    Manual, the default, stages the change to the
+                    machineState filesystem and reports RebootPending;
+                    any next boot applies it. Auto lets the operator
+                    reboot the machine itself.
                 storage:
                   type: object
                   description: >-
@@ -108,9 +122,51 @@ spec:
                     The device path is consulted only on the boot that
                     claims a blank disk; from then on the role's
                     partition is recognized by the GPT partition name
-                    written on it. A declared role that can't be
-                    satisfied stops the boot. Roles absent from the
-                    spec are backed by the machine's RAM root.
+                    written on it. Edits here are staged and take
+                    effect at the next boot; a staged spec that can't
+                    be satisfied is quarantined and the machine boots
+                    its last proven spec instead, and only a machine
+                    with no proven spec to fall back to stops the
+                    boot. Roles absent from the spec are backed by the
+                    machine's RAM root.
+                  # Admission-time validation, run by the API server
+                  # itself: sizes are grow-only, and the half of that
+                  # rule that's visible in the object alone (this spec
+                  # vs its previous self) is enforced here, before the
+                  # edit is even accepted. Transition rules (the ones
+                  # naming oldSelf) run only on UPDATE. What CEL cannot
+                  # see is the machine: a size that shrinks a role
+                  # relative to its *actual partition* (including
+                  # giving a remainder role any fixed size at all) is
+                  # refused by the operator before staging, and init
+                  # itself never shrinks anything at boot. Three
+                  # layers, one rule.
+                  x-kubernetes-validations:
+                    - rule: >-
+                        !has(oldSelf.machineState) || !has(self.machineState) ||
+                        !has(oldSelf.machineState.size) || !has(self.machineState.size) ||
+                        quantity(self.machineState.size) >= quantity(oldSelf.machineState.size)
+                      message: machineState may not shrink; storage roles are grow-only
+                    - rule: >-
+                        !has(oldSelf.machineEphemeral) || !has(self.machineEphemeral) ||
+                        !has(oldSelf.machineEphemeral.size) || !has(self.machineEphemeral.size) ||
+                        quantity(self.machineEphemeral.size) >= quantity(oldSelf.machineEphemeral.size)
+                      message: machineEphemeral may not shrink; storage roles are grow-only
+                    - rule: >-
+                        !has(oldSelf.clusterState) || !has(self.clusterState) ||
+                        !has(oldSelf.clusterState.size) || !has(self.clusterState.size) ||
+                        quantity(self.clusterState.size) >= quantity(oldSelf.clusterState.size)
+                      message: clusterState may not shrink; storage roles are grow-only
+                    - rule: >-
+                        !has(oldSelf.podStorage) || !has(self.podStorage) ||
+                        !has(oldSelf.podStorage.size) || !has(self.podStorage.size) ||
+                        quantity(self.podStorage.size) >= quantity(oldSelf.podStorage.size)
+                      message: podStorage may not shrink; storage roles are grow-only
+                    - rule: >-
+                        !has(oldSelf.podEphemeral) || !has(self.podEphemeral) ||
+                        !has(oldSelf.podEphemeral.size) || !has(self.podEphemeral.size) ||
+                        quantity(self.podEphemeral.size) >= quantity(oldSelf.podEphemeral.size)
+                      message: podEphemeral may not shrink; storage roles are grow-only
                   properties:
                     machineState:
                       type: object

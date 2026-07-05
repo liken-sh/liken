@@ -103,8 +103,33 @@ type MachineSpec struct {
 
 	// Storage assigns storage roles to disks (see storage.go). Applied
 	// by init at boot, before k3s: a filesystem can't be swapped under
-	// a running cluster.
+	// a running cluster. Edits are staged to the machineState
+	// filesystem and take effect at the next boot; RebootPolicy says
+	// who initiates that boot.
 	Storage StorageSpec `json:"storage,omitzero"`
+
+	// RebootPolicy is what the operator may do when applying the spec
+	// requires a reboot (today: any storage change). Manual, the
+	// default, stages the change and reports it; any next boot
+	// applies it. Auto lets the operator reboot the machine itself.
+	// Manual is the default because on a single-node cluster a reboot
+	// is a total outage, and a typo'd edit should never bounce the
+	// machine on its own authority.
+	RebootPolicy string `json:"rebootPolicy,omitempty"`
+}
+
+// The reboot policies. Anything unrecognized reads as Manual: when in
+// doubt, don't reboot.
+const (
+	RebootAuto   = "Auto"
+	RebootManual = "Manual"
+)
+
+func (s MachineSpec) RebootPolicyOrDefault() string {
+	if s.RebootPolicy == RebootAuto {
+		return RebootAuto
+	}
+	return RebootManual
 }
 
 // NetworkSpec is deliberately almost empty: the default is zero
