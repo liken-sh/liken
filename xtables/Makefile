@@ -1,6 +1,6 @@
 # The xtables domain: the netfilter userspace, vendored like the
-# kernel and k3s — one pinned version, static binaries, fetched and
-# verified by fetch.sh (the story lives there).
+# kernel and k3s: one pinned version, static binaries, fetched and
+# verified by fetch.sh (documented there).
 VERSION := $(strip $(file <VERSION))
 
 dist/$(VERSION)/bin/xtables-legacy-multi: VERSION fetch.sh

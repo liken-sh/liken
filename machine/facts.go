@@ -1,15 +1,15 @@
 package machine
 
-// The facts file: how init tells the operator what it knows.
+// The facts file: how init passes what it observed to the operator.
 //
-// Init learns things no in-cluster program can observe firsthand — the
-// DHCP exchange, the moment of boot, the world before k3s. It writes
-// them here, shaped exactly like MachineStatus, so the operator's job
-// on this half is nearly a copy: read the file, fold in what it
-// observes itself (sysctl values, conditions), publish to the API.
-// A file is the whole protocol on purpose: init stays free of any
-// Kubernetes dependency, and the operator needs only a read-only
-// hostPath mount to listen.
+// Init learns things no in-cluster program can observe firsthand: the
+// DHCP exchange, the moment of boot, the hardware as the kernel first
+// presented it. It writes them here, shaped exactly like
+// MachineStatus, so the operator's half is nearly a copy: read the
+// file, fold in what it observes itself (sysctl values, conditions),
+// publish to the API. The protocol is deliberately just a file: init
+// stays free of any Kubernetes dependency, and the operator needs
+// only a read-only hostPath mount.
 
 import (
 	"fmt"
@@ -21,8 +21,8 @@ import (
 
 // WriteFacts publishes the machine's facts atomically: write a
 // temporary file, then rename it into place. Rename within a filesystem
-// is atomic, so the operator — which re-reads this file on its own
-// schedule — sees either the old facts or the new, never a torn write.
+// is atomic, so the operator (which re-reads this file on its own
+// schedule) sees either the old facts or the new, never a torn write.
 func WriteFacts(path string, facts *MachineStatus) error {
 	raw, err := yaml.Marshal(facts)
 	if err != nil {
@@ -47,10 +47,10 @@ func WriteFacts(path string, facts *MachineStatus) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-// ReadFacts is the operator's side of the channel. A missing file is an
-// error rather than a default: facts describe a boot, and an operator
-// running on a machine that claims not to have booted should say so
-// loudly (in a condition) instead of publishing an empty status.
+// ReadFacts is the operator's side of the channel. A missing file is
+// an error rather than a default: facts describe a boot, and if they
+// are missing on a running machine, the operator should report that
+// in a condition instead of publishing an empty status.
 func ReadFacts(path string) (*MachineStatus, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {

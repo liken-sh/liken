@@ -14,8 +14,8 @@ desired state declared in git.
 The OS image is just a bootloader for a git repo.
 
 The immutable image contains only a kernel, a tiny init stub, and
-[k3s](https://k3s.io). Everything else — system services, user apps, node
-configuration — is a [Flux](https://fluxcd.io) Kustomization reconciled from
+[k3s](https://k3s.io). Everything else (system services, user apps, node
+configuration) is a [Flux](https://fluxcd.io) Kustomization reconciled from
 a git repository. Machine identity reduces to "which repo and path do I
 reconcile."
 
@@ -48,13 +48,13 @@ This idea isn't new, and the neighbors are worth knowing:
   [Bottlerocket](https://github.com/bottlerocket-os/bottlerocket) — minimal
   immutable hosts where everything interesting runs in containers.
 
-What none of them quite are is *GitOps-native from first boot* — where the
+What none of them quite are is *GitOps-native from first boot*, where the
 git repo isn't a layer you add to the OS, it *is* the OS.
 
 ## Status
 
 A spike. Nothing works yet; there may not even be code here yet. This is
-first and foremost a learning project — the goal is to understand what an
+first and foremost a learning project: the goal is to understand what an
 init system actually does by building the smallest one that can stand up
 Kubernetes, then letting Kubernetes do the rest. The rough path lives in
 [TODO.md](TODO.md).

@@ -6,11 +6,11 @@
 # kubelet, the API server, scheduler, controller manager, flannel,
 # CoreDNS, and a sqlite-backed datastore, compiled into a single
 # self-contained executable with no expectations of the host beyond a
-# kernel — it even unpacks its own userland (mount, iptables, and
-# friends) under /var/lib/rancher at runtime. We put one file in the
-# image and a service manager comes out.
+# kernel; it even unpacks its own userland (mount, iptables, and
+# more) under /var/lib/rancher at runtime. One file in the image
+# provides the whole service manager.
 #
-# Like the kernel, we pin a version (k3s/VERSION, e.g. v1.36.2+k3s1 —
+# Like the kernel, we pin a version (k3s/VERSION, e.g. v1.36.2+k3s1,
 # upstream Kubernetes plus k3s's packaging revision) and fetch the
 # published build from the project's GitHub releases, verifying it
 # against the sha256 manifest published beside it.
@@ -45,7 +45,7 @@ mkdir -p "$cache"
 # The release publishes one sha256 manifest per architecture covering
 # all of its artifacts; the line ending in exactly " k3s" is the bare
 # server/agent binary (its siblings are airgap image bundles, which
-# liken doesn't vendor — a machine's first boot pulls its images over
+# liken doesn't vendor; a machine's first boot pulls its images over
 # the network).
 digest="$(curl -fsSL "$base/sha256sum-$arch.txt" | awk '$2 == "k3s" { print $1 }')"
 if [[ -z "$digest" ]]; then

@@ -5,27 +5,28 @@
 # write.
 #
 # The kernel enforces netfilter rules, but userspace programs install
-# them — and Kubernetes networking execs those programs constantly.
+# them, and Kubernetes networking execs those programs constantly.
 # liken ships them itself, at /sbin, so the machine's packet filter
 # doesn't depend on any other component unpacking its internals first.
 #
 # The binaries come from k3s-root, the buildroot project that produces
-# k3s's own bundled userland — so the bytes on our PATH are the same
-# ones k3s carries, just delivered honestly: a pinned version, fetched
-# from the project's GitHub releases, verified against the sha256
-# manifest published beside it. The version pin (xtables/VERSION) must
+# k3s's own bundled userland, so the bytes on our PATH are the same
+# ones k3s carries, delivered the same way as every other vendored
+# input: a pinned version, fetched from the project's GitHub releases,
+# verified against the sha256 manifest published beside it. The
+# version pin (xtables/VERSION) must
 # match the VERSION_ROOT in the vendored k3s release's
 # scripts/version.sh, so the two copies of xtables on the machine can
 # never disagree.
 #
 # One artifact in the tarball matters to us: xtables-legacy-multi, a
 # multi-call binary that behaves as whichever tool it's invoked as
-# (iptables, iptables-save, ...) — the busybox trick. The image build
+# (iptables, iptables-save, ...), the busybox trick. The image build
 # stages it at /sbin under each of its names. We take the *legacy*
 # variant deliberately: it matches the iptable_* kernel modules the
 # image ships. The tarball's own bare "iptables" names point at a
 # legacy-vs-nftables detection script that needs /bin/sh, which this
-# machine doesn't have — the reason liken makes that decision
+# machine doesn't have, which is why liken makes that decision
 # statically instead.
 #
 # Usage:

@@ -1,6 +1,6 @@
-# The trust domain: the CA certificates this machine believes, vendored
-# like everything else — one pinned snapshot, fetched and verified by
-# fetch.sh (the story lives there).
+# The trust domain: the CA certificates this machine trusts, vendored
+# like everything else: one pinned snapshot, fetched and verified by
+# fetch.sh (documented there).
 VERSION := $(strip $(file <VERSION))
 
 dist/$(VERSION)/cacert.pem: VERSION fetch.sh

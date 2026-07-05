@@ -3,8 +3,8 @@ package machine
 // The storage half of the Machine spec.
 //
 // Storage is declared by purpose, not by mount path. The manifest
-// never says "/var/lib/rancher" — that's a k3s implementation detail
-// liken owns — it says "this disk holds the cluster's state", and
+// never says "/var/lib/rancher" (that's a k3s implementation detail
+// liken owns); it says "this disk holds the cluster's state", and
 // liken translates. The roles are fields rather than a list on
 // purpose: each is a singleton (a machine has one cluster state, one
 // pod-storage pool), so making them schema means a duplicate role
@@ -12,9 +12,10 @@ package machine
 //
 // The device path in each role matters only on the boot that claims
 // the disk: kernel device names are assigned in driver probe order,
-// which is a handle, not an identity. Claiming stamps the role's name
-// onto the partition itself (its GPT partition name), and every boot
-// after finds it by that name, wherever the disk enumerates.
+// which makes them a handle, not an identity. Claiming writes the
+// role's name onto the partition itself (its GPT partition name), and
+// every boot after finds it by that name, wherever the disk
+// enumerates.
 
 import (
 	"fmt"
@@ -28,16 +29,15 @@ import (
 const PartitionPrefix = "liken:"
 
 type StorageSpec struct {
-	// ClusterState is the cluster's world — k3s's state, the etcd or
-	// sqlite database, and containerd's images. Persisting it is what
-	// makes a reboot resume the same cluster instead of founding a
-	// new one.
+	// ClusterState is k3s's state: the etcd or sqlite database, TLS
+	// material, and containerd's images. Persisting it is what lets a
+	// reboot resume the same cluster instead of starting a new one.
 	ClusterState *StorageRole `json:"clusterState,omitempty"`
 
 	// SystemEphemeral is the operating system's own scratch space:
-	// /tmp. Small but load-bearing — the container runtime stages
-	// exec sessions there — and on a RAM-rooted machine, moving it to
-	// disk is memory back in the pods' pockets.
+	// /tmp. Small but necessary: the container runtime stages exec
+	// sessions there, and on a machine whose root is RAM, moving it
+	// to disk frees that memory for pods.
 	SystemEphemeral *StorageRole `json:"systemEphemeral,omitempty"`
 
 	// PodStorage is durable storage pods claim by name: the
@@ -46,28 +46,28 @@ type StorageSpec struct {
 	PodStorage *StorageRole `json:"podStorage,omitempty"`
 
 	// PodEphemeral is kubelet's working space: emptyDir volumes and
-	// per-pod scratch — the pool pods meter with ephemeral-storage
-	// requests and limits.
+	// per-pod scratch, the pool that pods meter with
+	// ephemeral-storage requests and limits.
 	PodEphemeral *StorageRole `json:"podEphemeral,omitempty"`
 }
 
 // StorageRole places one role onto hardware. A role missing from the
-// spec isn't an error — it simply lives on the machine's RAM root,
-// like everything did before disks existed.
+// spec isn't an error; that role's directory simply stays on the
+// machine's RAM root.
 type StorageRole struct {
 	// Device is the disk this role lives on, as a device path
 	// (/dev/vda). Consulted only when claiming a blank disk.
 	Device string `json:"device"`
 
 	// Size is how much of the device this role takes, as a binary
-	// quantity ("2Gi") — an exact allocation, not a request. Omitted,
+	// quantity ("2Gi"): an exact allocation, not a request. Omitted,
 	// the role takes the rest of its disk; only one role per disk may
 	// do that.
 	Size string `json:"size,omitempty"`
 }
 
 // A DeclaredRole is one role present in the spec, paired with its
-// name — the form the rest of liken consumes, since the name becomes
+// name: the form the rest of liken works with, since the name becomes
 // the partition's on-disk identity.
 type DeclaredRole struct {
 	Name string
@@ -75,15 +75,16 @@ type DeclaredRole struct {
 }
 
 // PartitionName is the role's on-disk identity: the GPT partition
-// name claiming stamps, and recognition looks for.
+// name written when the role's disk is claimed, and matched on every
+// boot after.
 func (r DeclaredRole) PartitionName() string {
 	return PartitionPrefix + r.Name
 }
 
-// Roles returns the declared roles in canonical order. The order is
-// load-bearing: it's the order partitions are laid down when roles
-// share a disk, fixed here rather than by YAML map order, which
-// Kubernetes doesn't preserve.
+// Roles returns the declared roles in canonical order. The order
+// matters: it's the order partitions are laid down when roles share a
+// disk, fixed here rather than by YAML map order, which Kubernetes
+// doesn't preserve.
 func (s StorageSpec) Roles() []DeclaredRole {
 	var roles []DeclaredRole
 	for _, candidate := range []struct {
@@ -102,7 +103,7 @@ func (s StorageSpec) Roles() []DeclaredRole {
 	return roles
 }
 
-// Validate checks the spec's internal consistency — the errors a
+// Validate checks the spec's internal consistency: the errors a
 // person can fix in the manifest, caught before any disk is touched.
 func (s StorageSpec) Validate() error {
 	remainders := map[string]string{}
@@ -126,13 +127,13 @@ func (s StorageSpec) Validate() error {
 	return nil
 }
 
-// StorageCondition summarizes the whole storage story as one standard
-// Kubernetes condition, comparing what the spec promised against
-// where each role actually landed. True means every declared role sits
-// on its partition. False should be unreachable on a running machine —
-// init stops the boot rather than break a storage promise — but a
-// condition must be able to say every state it names, and a future,
-// softer failure mode will find this one waiting.
+// StorageCondition summarizes storage as one standard Kubernetes
+// condition, comparing what the spec declared against where each role
+// is actually backed. True means every declared role sits on its
+// partition. False should be unreachable on a running machine, since
+// init powers off rather than boot with a declared role unsatisfied.
+// But a condition has to be able to express every state it names, and
+// a future, softer failure mode may need it.
 func StorageCondition(spec StorageSpec, status StorageStatus) Condition {
 	var placed, inMemory []string
 	for _, role := range spec.Roles() {
@@ -147,7 +148,7 @@ func StorageCondition(spec StorageSpec, status StorageStatus) Condition {
 	case len(inMemory) > 0:
 		return Condition{
 			Type: "StorageReady", Status: "False", Reason: "RolesInMemory",
-			Message: fmt.Sprintf("declared roles living in memory: %s", strings.Join(inMemory, ", ")),
+			Message: fmt.Sprintf("declared roles backed by memory: %s", strings.Join(inMemory, ", ")),
 		}
 	case len(placed) > 0:
 		return Condition{
@@ -157,13 +158,13 @@ func StorageCondition(spec StorageSpec, status StorageStatus) Condition {
 	default:
 		return Condition{
 			Type: "StorageReady", Status: "True", Reason: "NothingDeclared",
-			Message: "no storage declared; everything lives in memory",
+			Message: "no storage declared; all roles backed by memory",
 		}
 	}
 }
 
-// ParseSize reads a binary quantity — "2Gi", "512Mi", or a plain
-// count of bytes — into bytes. Only the power-of-two suffixes are
+// ParseSize reads a binary quantity ("2Gi", "512Mi", or a plain
+// count of bytes) into bytes. Only the power-of-two suffixes are
 // accepted: disks are carved in the same units their partition math
 // uses, and accepting "2G" (decimal) alongside "2Gi" (binary) invites
 // off-by-7% surprises.

@@ -4,13 +4,13 @@ package main
 //
 // The kernel can't use a driver that was built as a module until
 // someone feeds that module back to it, and the kernel itself doesn't
-// know where modules live — that's userspace's job. The usual someone
+// know where modules live; that's userspace's job. The usual someone
 // is modprobe, from the kmod project; liken ships no modprobe, so init
 // does the two things modprobe would have done:
 //
 //   1. Resolve dependencies. Modules depend on other modules (overlay
 //      needs nothing; iptable_nat pulls a chain of netfilter pieces).
-//      Nobody scans the module tree at runtime to figure this out — at
+//      Nobody scans the module tree at runtime to figure this out: at
 //      image build time, depmod wrote an index, modules.dep, mapping
 //      every module to the full list of modules it needs, already
 //      ordered so that loading right-to-left satisfies everyone.
@@ -23,7 +23,7 @@ package main
 //      CONFIG_MODULE_DECOMPRESS=y), so init never touches the bytes.
 //
 // Which modules to load comes from /etc/liken/modules.conf, a plain
-// list baked into the image — the same list the image build used to
+// list baked into the image, the same list the image build used to
 // decide which module files to ship. liken loads everything k3s will
 // need up front, at boot: the alternative (on-demand autoloading) works
 // by the kernel exec'ing /sbin/modprobe itself, and we'd rather have a
@@ -69,8 +69,9 @@ func loadModules() {
 	fmt.Printf("liken: loaded %d kernel modules for %s\n", count, strings.Join(names, ", "))
 }
 
-// readModuleList reads the requested module names: one per line, blank
-// lines and #-comments welcome — the file is documentation too.
+// readModuleList reads the requested module names: one per line, with
+// blank lines and # comments allowed, since the file doubles as
+// documentation.
 func readModuleList(path string) ([]string, error) {
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -94,7 +95,7 @@ func readModuleList(path string) ([]string, error) {
 //
 //	kernel/fs/overlayfs/overlay.ko.zst: kernel/a.ko.zst kernel/b.ko.zst
 //
-// — a module's path, then every module it transitively needs. We key
+// that is, a module's path, then every module it transitively needs. We key
 // the map by module name (the filename minus extensions), remembering
 // that module names use "_" and "-" interchangeably.
 func readModulesDep(path string) (map[string][]string, error) {
@@ -123,9 +124,8 @@ func moduleName(path string) string {
 
 // loadModule feeds one module and its dependencies to the kernel,
 // dependencies first (modules.dep lists them ready to load
-// right-to-left). Already-loaded modules — by us or built into the
-// kernel's runtime by an earlier dependency chain — return EEXIST,
-// which is success wearing a frown.
+// right-to-left). Already-loaded modules, whether by us or by an
+// earlier dependency chain, return EEXIST, which counts as success.
 func loadModule(base, name string, deps map[string][]string, loaded map[string]bool, count *int) error {
 	entry, ok := deps[strings.ReplaceAll(name, "-", "_")]
 	if !ok {

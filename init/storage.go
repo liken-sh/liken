@@ -1,24 +1,25 @@
 package main
 
-// Actuating spec.storage: the machine meets its disks.
+// Actuating spec.storage.
 //
-// The contract (machine/storage.go has the API's side of the story):
-// every boot, each declared role is *recognized* — found by the GPT
-// partition name claiming stamped on it — or, exactly once, *claimed*:
-// a blank disk gets a partition table, fresh filesystems, and the
-// roles' names written into it. Two rules make this safe to run on
-// every machine, every boot:
+// The contract (machine/storage.go documents the API side): every
+// boot, each declared role is *recognized* (found by the GPT
+// partition name written when it was claimed) or, exactly once,
+// *claimed*: a blank disk gets a partition table, fresh filesystems,
+// and the roles' names written into it. Two rules make this safe to
+// run on every machine, every boot:
 //
 //   - Reconciling never destroys data. Only a disk with no partition
-//     table and no filesystem — nothing we or anyone else ever wrote —
-//     may be claimed. Anything unrecognized is refused, out loud.
+//     table and no filesystem, nothing we or anyone else ever wrote,
+//     may be claimed. Anything unrecognized is refused, with the
+//     reason printed to the console.
 //
-//   - A broken promise stops the boot. If a declared role can't be
-//     recognized or claimed, the machine powers off rather than start
-//     k3s on RAM where persistence was promised. A machine that's
-//     down is recoverable; a cluster that silently wrote its state to
-//     memory is not. (Roles *absent* from the spec are no promise at
-//     all: those directories simply stay on the RAM root.)
+//   - An unsatisfiable role stops the boot. If a declared role can't
+//     be recognized or claimed, the machine powers off rather than
+//     start k3s with that state in RAM. A machine that's down is
+//     recoverable; a cluster that silently wrote its state to memory
+//     is not. (Roles *absent* from the spec carry no such obligation:
+//     those directories simply stay on the RAM root.)
 
 import (
 	"fmt"
@@ -32,12 +33,12 @@ import (
 	"github.com/chrisguidry/liken/machine"
 )
 
-// Where each role lands in the filesystem — liken's private
-// translation, deliberately absent from the Machine API:
+// Where each role lands in the filesystem: liken's private
+// translation, deliberately absent from the Machine API.
 //
-//	clusterState     /var/lib/rancher — k3s's whole world: its
+//	clusterState     /var/lib/rancher: all of k3s's state, its
 //	                 database, its TLS material, containerd's images
-//	systemEphemeral  /tmp — the OS's own scratch; nosuid/nodev and
+//	systemEphemeral  /tmp, the OS's own scratch; nosuid/nodev and
 //	                 world-writable-with-sticky-bit, per long Unix
 //	                 tradition
 //	podStorage       the local-path provisioner's root; the path also
@@ -103,9 +104,10 @@ func discoverPartitions() []partition {
 }
 
 // isBlank reports whether a disk carries nothing recognizable: no MBR
-// or GPT, no ext4 filesystem written straight to the device. This is
-// the entire license to claim — a disk something else formatted fails
-// every one of these checks' inverses and is left alone.
+// or GPT, no ext4 filesystem written straight to the device. Blank is
+// the only condition under which claiming is allowed; a disk
+// something else formatted fails one of these checks and is left
+// alone.
 func isBlank(devPath string) (bool, error) {
 	f, err := os.Open(devPath)
 	if err != nil {
@@ -130,7 +132,7 @@ func isBlank(devPath string) (bool, error) {
 	return true, nil
 }
 
-// hasExt4 checks a partition for ext4's superblock magic — two bytes,
+// hasExt4 checks a partition for ext4's superblock magic: two bytes,
 // 0xEF53 little-endian, at offset 1080 (the superblock starts at 1024;
 // the magic is 56 bytes in). This is the same check blkid makes; a
 // filesystem's identity really is this shallow.
@@ -149,28 +151,29 @@ func hasExt4(devPath string) bool {
 
 // reconcileStorage actuates the storage spec, or stops the boot
 // trying. On success every declared role is an ext4 filesystem
-// mounted at its role's path, and the returned landing table says so
-// — the same facts the console narrates, headed for the Machine's
-// status, because a story only told to the serial port is invisible
-// to everyone operating the machine from afar.
+// mounted at its role's path, and the returned status records where
+// each role landed: the same facts printed to the console, bound for
+// the Machine's status, because anything reported only to the serial
+// port is invisible to anyone operating the machine remotely.
 func reconcileStorage(spec machine.StorageSpec) machine.StorageStatus {
-	landings := machine.AllRolesInMemory()
+	status := machine.AllRolesInMemory()
 	roles := spec.Roles()
 	if len(roles) == 0 {
-		return landings
+		return status
 	}
 	if err := spec.Validate(); err != nil {
 		failBoot("%v", err)
 	}
 
-	// Recognition: each declared role, found by the name stamped on
-	// its partition. The device in the spec is not consulted — a disk
-	// that moved controllers since it was claimed is still itself.
+	// Recognition: each declared role, found by the name written on
+	// its partition. The device in the spec is not consulted; a disk
+	// that moved controllers since it was claimed is still the same
+	// disk.
 	found := recognizeRoles(roles)
 
-	// Claiming: any role still missing had better point at a blank
-	// disk. Group by device, since roles sharing a disk are claimed
-	// together in one partition table.
+	// Claiming: any role still missing must point at a blank disk.
+	// Group by device, since roles sharing a disk are claimed together
+	// in one partition table.
 	var missing []machine.DeclaredRole
 	for _, role := range roles {
 		if _, ok := found[role.Name]; !ok {
@@ -197,20 +200,21 @@ func reconcileStorage(spec machine.StorageSpec) machine.StorageStatus {
 	for _, role := range roles {
 		p := found[role.Name]
 		mountRole(role, p)
-		*landings.Role(role.Name) = machine.StorageRoleStatus{
+		*status.Role(role.Name) = machine.StorageRoleStatus{
 			Backing:       machine.BackingPartition,
 			Device:        p.name,
 			Partition:     p.partName,
 			CapacityBytes: p.sizeBytes,
 		}
 	}
-	return landings
+	return status
 }
 
 // recognizeRoles matches declared roles to partitions by name. Two
-// partitions answering to the same role is unresolvable ambiguity — a
-// transplanted or cloned disk — and guessing which one holds the real
-// cluster is how data dies, so the boot stops instead.
+// partitions carrying the same role name is unresolvable ambiguity (a
+// transplanted or cloned disk), and guessing wrong about which one
+// holds the real cluster would destroy data, so the boot stops
+// instead.
 func recognizeRoles(roles []machine.DeclaredRole) map[string]partition {
 	parts := discoverPartitions()
 	found := map[string]partition{}
@@ -239,8 +243,8 @@ func claimDisk(device string, roles []machine.DeclaredRole, found map[string]par
 		if role.Device == device {
 			// A disk where some roles are recognized but others need
 			// claiming is a disk whose table liken wrote and then
-			// something changed — not blank, not claimable, a human's
-			// problem.
+			// something changed: not blank, not claimable, and not
+			// safe to fix automatically.
 			if _, ok := found[role.Name]; ok {
 				failBoot("disk %s already carries %s but is missing other declared roles; refusing to modify it",
 					device, role.PartitionName())
@@ -300,8 +304,8 @@ func claimDisk(device string, roles []machine.DeclaredRole, found map[string]par
 }
 
 // waitForPartitions gives the kernel a moment to surface the devices
-// for a table just written: BLKRRPART is synchronous but devtmpfs
-// nodes and sysfs entries land a beat later.
+// for a table just written: BLKRRPART is synchronous but the devtmpfs
+// nodes and sysfs entries appear slightly later.
 func waitForPartitions(parts []gptPartition) {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -330,10 +334,10 @@ func diskByPath(device string) *machine.BlockDevice {
 }
 
 // mountRole puts a role's filesystem where its purpose says it goes,
-// making the filesystem first if the partition is fresh from a claim
-// (recognizing our own name on a partition with no filesystem also
-// covers a boot that died between partitioning and mkfs — claiming is
-// resumable because the name goes on first).
+// making the filesystem first if the partition is fresh from a claim.
+// (Recognizing our own name on a partition with no filesystem also
+// covers a boot that died between partitioning and mkfs; claiming is
+// resumable because the name goes on first.)
 func mountRole(role machine.DeclaredRole, p partition) {
 	dev := "/dev/" + p.name
 	if !hasExt4(dev) {
@@ -349,12 +353,12 @@ func mountRole(role machine.DeclaredRole, p partition) {
 	}
 	target := rm.path
 
-	// clusterState is special: the image bakes the cluster's seeds —
-	// the pre-minted CAs, the operator's manifests and container image
-	// — underneath this very mountpoint, and mounting over them would
-	// hide every one. So the filesystem is first mounted to the side,
-	// seeded from the image's copies, and only then moved into place;
-	// MS_MOVE re-hangs a live mount atomically.
+	// clusterState is special: the image bakes its seed files (the
+	// pre-generated CAs, the operator's manifests and container
+	// image) underneath this very mountpoint, and mounting over them
+	// would hide them all. So the filesystem is first mounted to the
+	// side, seeded from the image's copies, and only then moved into place;
+	// MS_MOVE re-attaches a live mount atomically.
 	if role.Name == "clusterState" {
 		staging := "/.liken-claim"
 		if err := os.MkdirAll(staging, 0o755); err != nil {
@@ -392,13 +396,13 @@ func mountRole(role machine.DeclaredRole, p partition) {
 		role.Name, dev, p.partName, target)
 }
 
-// seedClusterState plants the image's cluster seeds into a
-// clusterState filesystem. The TLS material is copied only if the
-// disk has none: those keys are the cluster's identity, and a disk
-// that already has an identity keeps it. The manifests and the
-// operator image are refreshed every boot: they're pinned to the
-// liken version of the running image, and an upgraded image must
-// deliver its upgraded operator.
+// seedClusterState copies the image's seed files into a clusterState
+// filesystem. The TLS material is copied only if the disk has none:
+// those keys are the cluster's identity, and a disk that already has
+// an identity keeps it. The manifests and the operator image are
+// refreshed every boot: they're pinned to the liken version of the
+// running image, and an upgraded image must deliver its upgraded
+// operator.
 func seedClusterState(root string) error {
 	for _, seed := range []struct {
 		rel     string
@@ -410,7 +414,7 @@ func seedClusterState(root string) error {
 	} {
 		src := filepath.Join("/var/lib/rancher", seed.rel)
 		if _, err := os.Stat(src); err != nil {
-			continue // an image without k3s has no seeds, and that's fine
+			continue // an image without k3s has no seed files
 		}
 		dst := filepath.Join(root, seed.rel)
 		if seed.refresh {
@@ -430,14 +434,15 @@ func seedClusterState(root string) error {
 	return nil
 }
 
-// failBoot is the fail-stop: narrate the problem, then power off
-// instead of starting a cluster on a broken storage promise.
+// failBoot is the fail-stop: print the problem, then power off
+// instead of starting a cluster with declared storage unsatisfied.
 func failBoot(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "liken: storage: "+format+"\n", args...)
-	fmt.Fprintln(os.Stderr, "liken: storage: a declared role can't be honored, and a machine promised persistent state must not come up ephemeral; powering off")
+	fmt.Fprintln(os.Stderr, "liken: storage: a declared role can't be satisfied, and a machine declared to have persistent state must not come up ephemeral; powering off")
 	powerOff()
 	// powerOff only returns if the reboot syscall failed; PID 1 still
-	// must never exit, so hold the machine here for a human.
+	// must never exit, so hold the machine here for a person to
+	// investigate.
 	for {
 		time.Sleep(time.Hour)
 	}

@@ -5,9 +5,9 @@ package main
 // A full distribution answers "what disks does this machine have?"
 // with udev: a daemon that fields device events, runs a rules engine,
 // and publishes its conclusions as a tree of symlinks under /dev/disk.
-// liken skips the middleman. Everything udev knows, it learned by
-// reading sysfs — the kernel's live object model, already mounted at
-// /sys — and liken is the only program here that wants the answer, so
+// liken doesn't need the daemon. Everything udev knows, it learned by
+// reading sysfs (the kernel's live object model, already mounted at
+// /sys), and liken is the only program here that wants the answer, so
 // it reads the same files itself. Each sysfs attribute is a tiny text
 // file holding one value; discovery is just directory walks and reads.
 
@@ -21,7 +21,7 @@ import (
 	"github.com/chrisguidry/liken/machine"
 )
 
-// devicePath is the node devtmpfs maintains for a disk — the name
+// devicePath is the node devtmpfs maintains for a disk; the name
 // under /dev is the same name sysfs lists, kernel-assigned in both
 // places.
 func devicePath(d machine.BlockDevice) string {
@@ -30,7 +30,7 @@ func devicePath(d machine.BlockDevice) string {
 
 // discoverBlockDevices enumerates the machine's disks: one entry per
 // directory in /sys/block that stands for real storage. The result is
-// the status type directly — this same inventory is a section of the
+// the status type directly: this same inventory is a section of the
 // world report and a block of the facts init publishes.
 func discoverBlockDevices() []machine.BlockDevice {
 	entries, err := os.ReadDir("/sys/block")
@@ -45,9 +45,9 @@ func discoverBlockDevices() []machine.BlockDevice {
 		dir := filepath.Join("/sys/block", name)
 
 		// /sys/block lists every block device, including the purely
-		// virtual ones the kernel can conjure without hardware (loop,
+		// virtual ones the kernel can create without hardware (loop,
 		// ram, zram). What marks real storage is the `device` symlink:
-		// it points back at the bus device — PCI, virtio, USB — that
+		// it points back at the bus device (PCI, virtio, USB) that
 		// provides the disk, and virtual devices have no such parent.
 		if _, err := os.Stat(filepath.Join(dir, "device")); err != nil {
 			continue
@@ -55,9 +55,9 @@ func discoverBlockDevices() []machine.BlockDevice {
 
 		d := machine.BlockDevice{Name: name}
 
-		// The size file counts sectors of 512 bytes — always 512,
+		// The size file counts sectors of 512 bytes: always 512,
 		// whatever the disk's real sector size, because that unit
-		// fossilized into the kernel's ABI decades ago.
+		// was fixed into the kernel's ABI decades ago.
 		if raw, err := os.ReadFile(filepath.Join(dir, "size")); err == nil {
 			if sectors, err := strconv.ParseUint(strings.TrimSpace(string(raw)), 10, 64); err == nil {
 				d.SizeBytes = sectors * 512
@@ -77,9 +77,9 @@ func discoverBlockDevices() []machine.BlockDevice {
 }
 
 // sysfsString reads the first of the named attributes that exists,
-// as a trimmed string. The trimming is load-bearing: sysfs values end
-// in a newline, and SCSI model strings are padded with spaces to
-// their on-wire field width — transport artifacts, not data.
+// as a trimmed string. The trimming matters: sysfs values end in a
+// newline, and SCSI model strings are padded with spaces to their
+// on-wire field width; transport artifacts, not data.
 func sysfsString(dir string, names ...string) string {
 	for _, name := range names {
 		if raw, err := os.ReadFile(filepath.Join(dir, name)); err == nil {
@@ -89,8 +89,8 @@ func sysfsString(dir string, names ...string) string {
 	return ""
 }
 
-// reportBlockDevices answers the world report's newest question: what
-// disks did this machine wake up with?
+// reportBlockDevices is the world report's storage section: every
+// disk attached to this machine.
 func reportBlockDevices() {
 	disks := discoverBlockDevices()
 	if len(disks) == 0 {
@@ -109,10 +109,10 @@ func reportBlockDevices() {
 	}
 }
 
-// gib renders a byte count the way disks are talked about. Sizes here
-// are binary (GiB = 2^30), which is why a "20G" drive from QEMU reads
-// as exactly 20.0 — unlike retail drives, which are labeled in
-// decimal gigabytes and read smaller than the sticker.
+// gib renders a byte count in binary gigabytes (GiB = 2^30), which is
+// why a "20G" drive from QEMU reads as exactly 20.0, unlike retail
+// drives, which are labeled in decimal gigabytes and read smaller
+// than the sticker.
 func gib(b uint64) string {
 	return fmt.Sprintf("%.1f GiB", float64(b)/(1<<30))
 }

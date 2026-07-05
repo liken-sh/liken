@@ -1,14 +1,14 @@
-# The Machine manifest: the one document that tells a liken machine who
-# it is. It's shaped exactly like a Kubernetes resource on purpose —
-# init reads it from this file at boot (there's no API server when PID 1
-# wakes up), and once the cluster is up, the liken operator seeds this
-# same document into it as a real Machine resource and publishes the
-# machine's live facts into its status. From then on the cluster's copy
-# is the authoritative one: `kubectl edit machine` wins over this file,
-# which only seeds clusters that don't know the machine yet.
+# The Machine manifest: the one document that configures a liken
+# machine. It's shaped like a Kubernetes resource on purpose: init
+# reads it from this file at boot (there's no API server yet), and once
+# the cluster is up, the liken operator seeds this same document into
+# it as a real Machine resource and publishes the machine's live facts
+# into its status. From then on the cluster's copy is the authoritative
+# one: `kubectl edit machine` wins over this file, which only seeds
+# clusters that don't have the Machine yet.
 #
-# liken's defaults are deliberately aggressive: an empty spec means
-# DHCP on the first real network interface, DNS from the lease, done.
+# The defaults are deliberately minimal: an empty spec means DHCP on
+# the first real network interface, DNS from the lease, done.
 # Configuration is for exceptions.
 apiVersion: liken.sh/v1alpha1
 kind: Machine
@@ -17,18 +17,19 @@ metadata:
   name: liken-dev
 spec:
   network: {}
-  # Storage is declared by purpose, not by mount path — the paths are
+  # Storage is declared by purpose, not by mount path; the paths are
   # liken's implementation details. Each role names the device it lives
   # on and, when sharing a disk, how much of it to take; one role per
   # disk may omit its size and take the remainder. The device path only
   # matters on the boot that claims the disk (kernel names are probe
-  # order, not identity): claiming stamps each partition with the role's
-  # name, and every boot after finds it by that name wherever it
-  # enumerates. A declared role that can't be honored fails the boot —
-  # a machine promised persistent state must not come up ephemeral.
+  # order, not identity): claiming writes the role's name onto each
+  # partition, and every boot after finds it by that name wherever the
+  # disk enumerates. A declared role that can't be satisfied fails the
+  # boot: a machine declared to have persistent state must not come up
+  # ephemeral.
   storage:
-    # The cluster's world: k3s's state, etcd/sqlite, and containerd's
-    # images — the reason a reboot no longer means re-importing every
+    # k3s's state: its database, TLS material, and containerd's
+    # images. Persisting this is why a reboot doesn't re-import every
     # container image.
     clusterState:
       device: /dev/vda
@@ -41,16 +42,17 @@ spec:
     podStorage:
       device: /dev/vdb
       size: 2Gi
-    # kubelet's working space: emptyDirs and per-pod scratch — the pool
-    # pods meter with ephemeral-storage requests and limits.
+    # kubelet's working space: emptyDirs and per-pod scratch, the pool
+    # that pods meter with ephemeral-storage requests and limits.
     podEphemeral:
       device: /dev/vdb
-  # Kernel tuning rides the same document as everything else. Each
+  # Kernel tuning lives in the same document as everything else. Each
   # parameter is applied twice on purpose: by init at boot (so it holds
-  # before k3s starts) and by the liken operator ever after (so editing
-  # the Machine in-cluster takes effect without a reboot, and drift gets
-  # corrected). The kernel's default of 128 inotify instances per user
-  # goes quickly on a node where every log-follower and config-watcher
-  # holds one; raising it is the classic first node tune.
+  # before k3s starts) and by the liken operator from then on (so
+  # editing the Machine in-cluster takes effect without a reboot, and
+  # drift gets corrected). The kernel's default of 128 inotify
+  # instances per user runs out quickly on a node where every
+  # log-follower and config-watcher holds one; raising it is a common
+  # first node tune.
   sysctls:
     fs.inotify.max_user_instances: "8192"

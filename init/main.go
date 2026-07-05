@@ -1,31 +1,30 @@
-// liken — the first and only program the kernel starts.
+// liken: the first and only program the kernel starts.
 //
-// When the kernel finishes its own boot, it unpacks the initramfs into an
-// in-memory root filesystem and executes one program as process ID 1. We
-// name ours liken and point the kernel at it with rdinit=/liken on the
-// kernel command line. That exec is the entire handoff from kernelspace:
-// a bare-bones environment, any boot parameters the kernel itself didn't
-// recognize passed as arguments, no other processes, and almost no
-// filesystem — just this program, alone, in a world it must finish
-// building itself.
+// When the kernel finishes its own boot, it unpacks the initramfs into
+// an in-memory root filesystem and executes one program as process ID
+// 1. We name ours liken and point the kernel at it with rdinit=/liken
+// on the kernel command line. That exec is the entire handoff from
+// kernelspace: a bare environment, any boot parameters the kernel
+// itself didn't recognize passed as arguments, no other processes, and
+// almost no filesystem. Everything else, init has to set up itself.
 //
-// PID 1 is special to the kernel in three ways, and each one shapes this
-// program:
+// PID 1 is special to the kernel in three ways, and each one shapes
+// this program:
 //
-//   - It cannot die. If PID 1 exits for any reason, the kernel panics.
-//     There is no one to fall back to; init is load-bearing by decree.
+//   - It cannot exit. If PID 1 exits for any reason, the kernel
+//     panics. There is no fallback.
 //
-//   - It inherits everyone. When a process dies, its children are
+//   - It inherits every orphan. When a process dies, its children are
 //     re-parented to PID 1, which must collect ("reap") their exit
 //     statuses or they linger forever as zombies in the process table.
 //
 //   - It is unsignalable by default. The kernel delivers a signal to
-//     PID 1 only if init explicitly installed a handler for it — a
+//     PID 1 only if init explicitly installed a handler for it, a
 //     safety measure so a stray kill -9 can't panic the machine.
 //
 // A traditional init grows from here into a service manager. liken's
-// does not: its whole job is to make a world just barely habitable for
-// k3s, start it, and keep it running — Kubernetes is the service
+// does not: its whole job is to set up the minimum environment k3s
+// needs, start it, and keep it running. Kubernetes is the service
 // manager. When the image carries no k3s, a boot is a self-test: mount
 // the essentials, read the Machine manifest, join the network, prove
 // the connection with a DNS lookup, power off.
@@ -45,9 +44,9 @@ import (
 
 func main() {
 	// The kernel opened /dev/console for us before the exec, so file
-	// descriptors 0, 1, and 2 already point somewhere real — with
-	// console=ttyS0 on the kernel command line, that's the serial port.
-	// Ordinary prints are all it takes to be heard.
+	// descriptors 0, 1, and 2 already point somewhere real; with
+	// console=ttyS0 on the kernel command line, that's the serial
+	// port. Ordinary prints reach it directly.
 	fmt.Println("liken: hello from userspace")
 
 	// Refuse to run as an ordinary process. Everything below assumes
@@ -61,8 +60,8 @@ func main() {
 
 	// Before any mount or any child process: trade the kernel's rootfs
 	// for a real root filesystem. On success this re-execs the program
-	// from the new root and main starts over — which is why the console
-	// says hello twice. switchroot.go tells the whole story.
+	// from the new root and main starts over, which is why the console
+	// says hello twice. switchroot.go explains why and how.
 	maybeSwitchRoot()
 
 	// Reaping starts before anything else: the moment we spawn a child
@@ -72,36 +71,36 @@ func main() {
 
 	mountEssentials()
 
-	// Who is this machine? The manifest is allowed to be missing (all
-	// defaults) but not malformed — though even then, liken carries on
-	// with defaults rather than dying: a misconfigured machine that
-	// reaches the console beats a kernel panic.
+	// The manifest is allowed to be missing (all defaults) but not
+	// malformed. Even then, liken carries on with defaults rather
+	// than dying: a misconfigured machine that reaches the console
+	// beats a kernel panic.
 	m, err := machine.Load(machine.ManifestPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "liken: machine manifest: %v\n", err)
 		m = &machine.Machine{}
 	}
 	if name := m.Metadata.Name; name != "" {
-		// Sethostname is PID 1 privilege in action: one syscall, no
-		// hostnamectl, no daemon. The kernel simply keeps a string.
+		// Sethostname is one syscall: no hostnamectl, no daemon. The
+		// kernel simply keeps a string.
 		if err := unix.Sethostname([]byte(name)); err != nil {
 			fmt.Fprintf(os.Stderr, "liken: sethostname %q: %v\n", name, err)
 		} else {
-			fmt.Printf("liken: i am %s\n", name)
+			fmt.Printf("liken: hostname is %s\n", name)
 		}
 	}
 
-	// Kernel tuning is part of who the machine is, so it happens right
-	// after identity: early enough that every value holds before k3s
-	// starts. The operator re-asserts the same spec once the cluster is
-	// up, which is what makes a live kubectl edit stick without a
-	// reboot.
+	// Sysctls are applied early so every value holds before k3s
+	// starts. The operator re-asserts the same spec once the cluster
+	// is up, which is what makes a live kubectl edit take effect
+	// without a reboot.
 	applySysctls(m.Spec.Sysctls)
 
 	// Storage before anything writes under /var, and long before k3s:
 	// a filesystem can't be swapped under a running cluster. This is
-	// also the one actuator allowed to stop a boot — storage.go
-	// explains why a broken storage promise powers the machine off.
+	// also the one actuator allowed to stop a boot; storage.go
+	// explains why an unsatisfiable storage role powers the machine
+	// off.
 	storage := reconcileStorage(m.Spec.Storage)
 
 	worldReport()
@@ -113,14 +112,14 @@ func main() {
 		conn.report()
 	}
 
-	// If the image carries k3s, liken has its real job: build the rest
-	// of the world Kubernetes expects, then supervise it forever. A
-	// machine without k3s (the image's minimal form) just proves it
-	// can boot and powers off.
+	// If the image carries k3s, liken has its real job: set up the
+	// rest of the environment Kubernetes expects, then supervise it
+	// forever. A machine without k3s (the image's minimal form) just
+	// proves it can boot and powers off.
 	if _, err := os.Stat(k3sBinary); err == nil {
 		prepareForK3s()
 		// Facts wait until here because they live under /run, and
-		// prepareForK3s just mounted a fresh tmpfs there — anything
+		// prepareForK3s just mounted a fresh tmpfs there; anything
 		// written earlier would be shadowed by the mount.
 		publishFacts(conn, storage)
 		loadModules()
@@ -135,11 +134,11 @@ func main() {
 	powerOff()
 }
 
-// powerOff ends the machine's life politely: sync flushes dirty pages
-// to disk — on a machine whose whole world is RAM it's a formality,
-// but it costs nothing and is load-bearing the moment a writable disk
-// exists — and the reboot syscall does the rest. PID 1 must never
-// simply exit; this is the one sanctioned way out.
+// powerOff shuts the machine down cleanly: sync flushes dirty pages
+// to disk (a no-op on a machine with no writable disk, but essential
+// the moment one exists), then the reboot syscall powers off. PID 1
+// must never simply exit; this is the only correct way for init to
+// stop.
 func powerOff() {
 	unix.Sync()
 	if err := unix.Reboot(unix.LINUX_REBOOT_CMD_POWER_OFF); err != nil {
@@ -147,10 +146,10 @@ func powerOff() {
 	}
 }
 
-// bootParam reports whether a word appears on the kernel command line
-// — liken's channel for per-boot behavior that isn't machine identity
-// (that belongs in the Machine manifest). Parameters are namespaced
-// liken.* to stay clear of the kernel's own.
+// bootParam reports whether a word appears on the kernel command
+// line, liken's channel for per-boot behavior that isn't machine
+// configuration (that belongs in the Machine manifest). Parameters
+// are namespaced liken.* to stay clear of the kernel's own.
 func bootParam(name string) bool {
 	raw, err := os.ReadFile("/proc/cmdline")
 	if err != nil {
@@ -160,8 +159,8 @@ func bootParam(name string) bool {
 }
 
 // A mount table rather than a sequence of calls: the essential
-// filesystems are data, and the world report below prints what actually
-// got mounted, so the table and the truth can be compared at a glance.
+// filesystems are data, and the world report below prints what
+// actually got mounted, so the two are easy to compare.
 type mount struct {
 	source string
 	target string
@@ -172,13 +171,13 @@ type mount struct {
 var essentials = []mount{
 	// /proc is two things at once: a directory per running process, and
 	// the kernel's control panel (/proc/sys, /proc/cmdline, ...). Almost
-	// any tool that inspects the system — including our own world report
-	// — reads it, and k3s will refuse to start without it.
+	// any tool that inspects the system reads it (including our own
+	// world report), and k3s will refuse to start without it.
 	{"proc", "/proc", "proc", unix.MS_NOSUID | unix.MS_NOEXEC | unix.MS_NODEV},
 
 	// /sys exposes the kernel's object model: every device, driver, and
-	// bus, as a filesystem. cgroup2 — which Kubernetes uses to account
-	// and limit every container — mounts beneath it later.
+	// bus, as a filesystem. cgroup2, which Kubernetes uses to account
+	// and limit every container, mounts beneath it later.
 	{"sysfs", "/sys", "sysfs", unix.MS_NOSUID | unix.MS_NOEXEC | unix.MS_NODEV},
 
 	// devtmpfs is the kernel's own device catalog: mount it and a node
@@ -191,27 +190,28 @@ var essentials = []mount{
 func mountEssentials() {
 	for _, m := range essentials {
 		// The initramfs root is plain RAM and freely writable, so init
-		// conjures its own mountpoints; the image doesn't need to ship
+		// creates its own mountpoints; the image doesn't need to ship
 		// empty directories.
 		if err := os.MkdirAll(m.target, 0o755); err != nil {
 			fmt.Fprintf(os.Stderr, "liken: mkdir %s: %v\n", m.target, err)
 			continue
 		}
-		// Failures are reported but not fatal: a partially-built world
-		// that can still print its report is worth far more to us than
-		// a kernel panic, because the console is where we debug.
+		// Failures are reported but not fatal: a partial environment
+		// that can still print its report is worth far more than a
+		// kernel panic, because the console is where we debug.
 		if err := unix.Mount(m.source, m.target, m.fstype, m.flags, ""); err != nil {
 			fmt.Fprintf(os.Stderr, "liken: mount %s on %s: %v\n", m.fstype, m.target, err)
 		}
 	}
 }
 
-// The world report is liken's substitute for an interactive shell: every
-// question we would have answered by poking around at a prompt, init
-// answers on the console, every boot. When something goes wrong, the
-// fix starts with teaching the report to answer a new question.
+// The world report is liken's substitute for an interactive shell:
+// every question we would have answered by poking around at a prompt,
+// init answers on the console, every boot. When something goes wrong,
+// the first step is usually extending the report to answer a new
+// question.
 func worldReport() {
-	// Uname fills fixed-size byte arrays rather than returning strings —
+	// Uname fills fixed-size byte arrays rather than returning strings:
 	// it's a thin wrapper over the raw syscall, and the kernel ABI deals
 	// in fixed-size buffers. ByteSliceToString finds the NUL terminator.
 	var u unix.Utsname
@@ -221,9 +221,9 @@ func worldReport() {
 			unix.ByteSliceToString(u.Machine[:]))
 	}
 
-	// The command line is how the outside world parameterizes a boot —
-	// it's where rdinit= points at us, and the natural channel for any
-	// fact a machine must know before it has a filesystem.
+	// The command line is how the outside world parameterizes a boot:
+	// it's where rdinit= points at us, and the channel for any fact a
+	// machine must know before it has a filesystem.
 	if cmdline, err := os.ReadFile("/proc/cmdline"); err == nil {
 		fmt.Printf("liken: cmdline: %s\n", strings.TrimSpace(string(cmdline)))
 	}
@@ -237,8 +237,8 @@ func worldReport() {
 		}
 	}
 
-	// A populated /dev is the visible proof that devtmpfs did its job
-	// without any udev in the picture.
+	// A populated /dev shows that devtmpfs did its job without any
+	// udev in the picture.
 	if entries, err := os.ReadDir("/dev"); err == nil {
 		fmt.Printf("liken: /dev has %d entries\n", len(entries))
 	}
@@ -246,23 +246,23 @@ func worldReport() {
 	reportBlockDevices()
 }
 
-// reap collects the exit status of any child process, forever. SIGCHLD
-// arrives whenever a child dies; because signal coalescing can fold many
-// deaths into one delivery, each wakeup drains every waiting corpse, not
-// just one. This loop is the only place in liken that calls wait — every
-// exit status it collects is posted to the registry in supervisor.go,
-// where whoever started the process can claim it. (Go note:
-// signal.Notify registers a handler with the runtime and forwards
-// deliveries onto a channel, turning an async interrupt into an
-// ordinary receive loop — and satisfying the "PID 1 must install
-// handlers" rule from the header comment.)
+// reap collects the exit status of any child process, forever.
+// SIGCHLD arrives whenever a child dies; because signal coalescing can
+// fold many deaths into one delivery, each wakeup collects every
+// exited child, not just one. This loop is the only place in liken
+// that calls wait; every exit status it collects is posted to the
+// registry in supervisor.go, where whoever started the process can
+// claim it. (Go note: signal.Notify registers a handler with the
+// runtime and forwards deliveries onto a channel, turning an async
+// interrupt into an ordinary receive loop, and satisfying the "PID 1
+// must install handlers" rule from the header comment.)
 func reap() {
 	sigchld := make(chan os.Signal, 1)
 	signal.Notify(sigchld, unix.SIGCHLD)
 	for range sigchld {
 		for {
 			// -1 means "any child"; WNOHANG means "don't block if none
-			// are dead yet" — pid 0 says the living can go on living.
+			// have exited", in which case Wait4 returns pid 0.
 			var status unix.WaitStatus
 			pid, err := unix.Wait4(-1, &status, unix.WNOHANG, nil)
 			if pid <= 0 || err != nil {

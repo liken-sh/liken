@@ -1,27 +1,26 @@
 // Package machine is the Machine API: liken's one configuration
 // document, as Go types.
 //
-// A Machine is shaped exactly like a Kubernetes resource on purpose —
-// kubelet's KubeletConfiguration, k0s's config, and Talos's machine
-// config all made the same move — because a schema-disciplined document
-// can ride two transports. At boot, init reads it from a file baked
-// into the image (there is no API server when PID 1 wakes up). Once the
-// cluster is up, the same document lives in it as a real custom
-// resource, where the liken operator publishes the machine's live facts
-// into its status. One mental model from first boot to fleet: `kubectl
-// get machine -o yaml` on day 300 shows the same shape you hand-wrote
-// on day one.
+// A Machine is shaped like a Kubernetes resource on purpose (kubelet's
+// KubeletConfiguration, k0s's config, and Talos's machine config all
+// use the same shape) because one schema-validated document can be
+// delivered two ways. At boot, init reads it from a file baked into
+// the image (there is no API server yet). Once the cluster is up, the
+// same document exists in it as a custom resource, where the liken
+// operator publishes the machine's live facts into its status. The
+// file you hand-write and the object `kubectl get machine -o yaml`
+// returns are the same document.
 //
-// Two programs speak this API and this package is what they share. Init
+// Two programs use this API and this package is what they share. Init
 // consumes the spec (it applies the network and sysctls at boot) and
 // produces facts; the operator consumes the facts and reconciles the
-// spec for as long as the machine runs. The division of labor is
-// deliberate: init never talks to Kubernetes, the operator never
-// touches boot-time state, and the file at /run/liken/facts.yaml is the
-// one-way channel between them.
+// spec for as long as the machine runs. The division is deliberate:
+// init never talks to Kubernetes, the operator never touches boot-time
+// state, and the file at /run/liken/facts.yaml is the one-way channel
+// between them.
 //
-// The API group is liken.sh — CRD groups are DNS names, and we own that
-// one.
+// The API group is liken.sh: CRD groups are DNS names, and we own
+// that one.
 package machine
 
 import (
@@ -43,9 +42,9 @@ const (
 	ManifestPath = "/etc/liken/machine.yaml"
 
 	// FactsPath is where init publishes what it learned about the
-	// machine, shaped exactly like MachineStatus. /run is cleared by
-	// every boot, which is the point: facts describe this boot, and a
-	// machine that hasn't booted has none.
+	// machine, shaped exactly like MachineStatus. /run is a fresh
+	// tmpfs every boot, which is the point: facts describe the current
+	// boot only, and never survive into the next one.
 	FactsPath = "/run/liken/facts.yaml"
 
 	// SysctlDir is the kernel's tuning interface: one file per
@@ -57,12 +56,12 @@ const (
 
 // Version is the liken release this binary was built from, stamped by
 // the build (-ldflags -X) from the VERSION file at the repo root. It
-// reaches the cluster as status.version.liken; one day, setting a
-// version in the spec is how upgrades will be asked for.
+// reaches the cluster as status.version.liken; eventually a version
+// field in the spec will be how upgrades are requested.
 var Version = "dev"
 
 // The struct tags are json, not yaml, because parsing goes through
-// sigs.k8s.io/yaml — the same converter Kubernetes tooling uses. It
+// sigs.k8s.io/yaml, the same converter Kubernetes tooling uses. It
 // turns YAML into JSON before unmarshalling, which is what gives
 // Kubernetes documents their camelCase convention and means these
 // structs serialize identically whether they're read from a file or
@@ -87,30 +86,31 @@ type ObjectMeta struct {
 
 // MachineSpec is the declared half: what a person (or, eventually, a
 // git repository) asks this machine to be. Each field notes who acts on
-// it and when, because the actuators differ — some state can only be
+// it and when, because the actuators differ: some state can only be
 // set while the machine is being built, some can be reconciled live.
 type MachineSpec struct {
-	// Network is applied by init at boot; there is no changing it from
-	// inside the cluster, because the cluster is on the other side of it.
+	// Network is applied by init at boot. It can't be reconciled from
+	// inside the cluster, because reaching the cluster depends on it;
+	// changes take effect on the next boot.
 	Network NetworkSpec `json:"network,omitzero"`
 
 	// Sysctls is kernel tuning: parameter name to desired value, e.g.
-	// "vm.overcommit_memory": "1". Applied twice, by design — init sets
+	// "vm.overcommit_memory": "1". Applied twice, by design: init sets
 	// them at boot so they hold before k3s starts, and the operator
 	// reconciles them live afterward, so a kubectl edit takes effect
 	// without a reboot.
 	Sysctls map[string]string `json:"sysctls,omitempty"`
 
-	// Storage places purposes onto disks (storage.go tells the story).
-	// Applied by init at boot, before k3s: a filesystem can't be
-	// swapped under a running cluster.
+	// Storage assigns storage roles to disks (see storage.go). Applied
+	// by init at boot, before k3s: a filesystem can't be swapped under
+	// a running cluster.
 	Storage StorageSpec `json:"storage,omitzero"`
 }
 
-// NetworkSpec is deliberately almost empty: liken's default posture is
-// zero-config — DHCP on the first physical interface, hostname from the
-// manifest, DNS from the lease. Fields exist here only for machines
-// that genuinely need to deviate.
+// NetworkSpec is deliberately almost empty: the default is zero
+// configuration: DHCP on the first physical interface, hostname from
+// the manifest, DNS from the lease. Fields exist here only for
+// machines that need to deviate from that.
 type NetworkSpec struct {
 	// Interface pins network bring-up to a specific interface name
 	// (e.g. "eth1"). Empty means: the first interface that looks like
@@ -118,10 +118,10 @@ type NetworkSpec struct {
 	Interface string `json:"interface,omitempty"`
 }
 
-// Load reads a Machine manifest from a file. A machine with no manifest
-// is still a valid machine — everything defaults — but a manifest that
-// exists and doesn't parse, or claims to be something other than a
-// Machine, is a configuration error worth hearing about.
+// Load reads a Machine manifest from a file. A machine with no
+// manifest is still a valid machine (everything defaults), but a
+// manifest that exists and doesn't parse, or declares some other kind,
+// is a configuration error and is reported as one.
 func Load(path string) (*Machine, error) {
 	m := &Machine{}
 	raw, err := os.ReadFile(path)

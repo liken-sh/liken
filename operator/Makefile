@@ -2,8 +2,8 @@
 #
 # Two artifacts: the operator binary (a static Go build, same
 # discipline as init's) and the OCI image tarball that carries it into
-# the cluster (the story is in image.sh). main.go opens with what an
-# operator is and why this one uses no Kubernetes libraries.
+# the cluster (see image.sh). main.go's header comment explains what
+# an operator is and why this one uses no Kubernetes libraries.
 
 VERSION := $(strip $(file <../VERSION))
 

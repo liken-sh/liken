@@ -1,24 +1,24 @@
 # The Machine API, declared to Kubernetes.
 #
-# A CustomResourceDefinition is how Kubernetes learns a new noun: apply
-# this document and the API server starts serving
-# /apis/liken.sh/v1alpha1/machines — storage, validation, watches, RBAC
-# and kubectl support included, with no code written. The schema below
+# A CustomResourceDefinition is how Kubernetes learns a new resource
+# type: apply this document and the API server starts serving
+# /apis/liken.sh/v1alpha1/machines, with storage, validation, watches,
+# RBAC and kubectl support included and no code written. The schema below
 # is the same shape as the Go types in the machine package; the
 # descriptions surface in `kubectl explain machine.spec`, which makes
 # the API self-documenting at the terminal.
 #
 # This file lands in /var/lib/rancher/k3s/server/manifests, k3s's
 # auto-deploy directory: everything there is applied to the cluster at
-# startup and re-applied whenever the file changes — a tiny, built-in
+# startup and re-applied whenever the file changes: a tiny, built-in
 # GitOps loop, and the reason liken needs no `kubectl apply` step
 # anywhere.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   # CRD names are always <plural>.<group>; the group is a DNS name we
-  # own, which is what keeps every organization's custom "Machine" from
-  # colliding.
+  # own, which is what keeps different organizations' custom "Machine"
+  # types from colliding.
   name: machines.liken.sh
 spec:
   group: liken.sh
@@ -38,7 +38,7 @@ spec:
       # with separate write paths: ordinary updates cannot touch
       # status, and status updates cannot touch spec. That boundary is
       # what makes "spec is declared, status is observed" enforceable
-      # rather than just polite.
+      # rather than just a convention.
       subresources:
         status: {}
       # What `kubectl get machines` prints, without -o yaml.
@@ -62,25 +62,25 @@ spec:
         openAPIV3Schema:
           type: object
           description: >-
-            A Machine is one computer running liken: the declared state
-            of the operating system beneath this cluster, and the
-            observed facts of the hardware it woke up on.
+            A Machine is one computer running liken: the declared
+            state of the operating system beneath this cluster, and
+            the observed facts of the hardware it's running on.
           properties:
             spec:
               type: object
               description: >-
-                What this machine is asked to be. Fields differ in when
-                they take effect: network is read by init at boot,
+                The declared state of this machine. Fields differ in
+                when they take effect: network is read by init at boot,
                 sysctls are both applied at boot and reconciled live by
                 the liken operator.
               properties:
                 network:
                   type: object
                   description: >-
-                    How the machine attaches to the world. Empty means
-                    liken's default posture, DHCP on the first interface
-                    that looks like real hardware. Applied by init at
-                    boot; changing it in-cluster takes effect next boot.
+                    The machine's network configuration. Empty means the
+                    default: DHCP on the first interface that looks like
+                    real hardware. Applied by init at boot; changing it
+                    in-cluster takes effect next boot.
                   properties:
                     interface:
                       type: string
@@ -99,26 +99,26 @@ spec:
                 storage:
                   type: object
                   description: >-
-                    Places purposes onto disks. Each role is a
-                    singleton field — a machine has one cluster state,
-                    one pod-storage pool — naming the device it lives
+                    Assigns storage roles to disks. Each role is a
+                    singleton field (a machine has one cluster state,
+                    one pod-storage pool) naming the device it lives
                     on and, when sharing a disk, how much of it to
                     take; one role per disk may omit its size and take
                     the remainder. Applied by init at boot, before k3s.
                     The device path is consulted only on the boot that
                     claims a blank disk; from then on the role's
-                    partition is recognized by the name stamped on it.
-                    A declared role that can't be honored stops the
-                    boot. Roles absent from the spec live on the
-                    machine's RAM root.
+                    partition is recognized by the GPT partition name
+                    written on it. A declared role that can't be
+                    satisfied stops the boot. Roles absent from the
+                    spec are backed by the machine's RAM root.
                   properties:
                     clusterState:
                       type: object
                       description: >-
-                        The cluster's world: k3s's state, its database,
-                        and containerd's images — what makes a reboot
-                        resume the same cluster instead of founding a
-                        new one.
+                        k3s's state: its database, TLS material, and
+                        containerd's images. Persisting this is what
+                        lets a reboot resume the same cluster instead
+                        of starting a new one.
                       required: [device]
                       properties:
                         device:
@@ -151,7 +151,7 @@ spec:
                       type: object
                       description: >-
                         kubelet's working space: emptyDir volumes and
-                        per-pod scratch, the pool pods meter with
+                        per-pod scratch, the pool that pods meter with
                         ephemeral-storage requests and limits.
                       required: [device]
                       properties:
@@ -162,18 +162,18 @@ spec:
             status:
               type: object
               description: >-
-                What the machine observed about itself. Everything here
-                is re-derived on every reconcile pass — nothing is
-                remembered — so it can be trusted as a report of what
-                currently holds, written by init (via the facts file)
-                and published by the liken operator.
+                What the machine observed about itself, written by init
+                (via the facts file) and published by the liken
+                operator. Everything here is re-derived on every
+                reconcile pass (nothing is remembered), so it reports
+                what currently holds, not what once did.
               properties:
                 version:
                   type: object
                   description: >-
-                    What this machine runs. The k3s and kubelet versions
-                    live on the built-in Node object; this covers the
-                    layer beneath it.
+                    The software this machine runs. The k3s and kubelet
+                    versions are reported on the built-in Node object;
+                    this covers the layer beneath it.
                   properties:
                     liken:
                       type: string
@@ -216,12 +216,10 @@ spec:
                       type: array
                       description: >-
                         The machine's storage inventory: every real disk
-                        the kernel found, declared in the spec or not —
-                        an attached-but-undeclared disk showing up here
-                        is how you notice a drive you forgot about. The
-                        name is the kernel's for this boot (assigned in
-                        probe order, so a handle, not an identity); the
-                        model and serial are the disk's own words about
+                        the kernel found, declared in the spec or not.
+                        The name is the kernel's for this boot (assigned
+                        in probe order, so a handle, not an identity);
+                        the model and serial come from the device
                         itself.
                       items:
                         type: object
@@ -238,12 +236,11 @@ spec:
                 storage:
                   type: object
                   description: >-
-                    The landing table: where every storage role
-                    actually lives this boot, declared or not. The
-                    spec says what was asked, hardware.blockDevices
-                    says what's attached; this is the verdict
-                    connecting them. Memory-backed roles report no
-                    capacity on purpose — they all share the one RAM
+                    Where every storage role is actually backed this
+                    boot, declared or not. The spec says what was asked
+                    for and hardware.blockDevices says what's attached;
+                    this connects the two. Memory-backed roles report
+                    no capacity on purpose: they all share the one RAM
                     root, and per-role figures would count it multiple
                     times.
                   properties:
@@ -295,8 +292,9 @@ spec:
                   type: object
                   description: >-
                     The observed value of every parameter named in
-                    spec.sysctls, read back from the kernel — spec and
-                    reality, side by side.
+                    spec.sysctls, read back from the kernel, so the
+                    desired and actual values can be compared in one
+                    place.
                   additionalProperties:
                     type: string
                 bootedAt:

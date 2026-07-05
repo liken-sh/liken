@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# Compute an operator's kubeconfig — offline, from the identity this
+# Compute an operator's kubeconfig offline, from the identity this
 # repo minted. The machine is never asked for a credential; the whole
-# point of pre-seeding the CAs (mint.sh) is that we can do this math
-# without it.
+# point of pre-seeding the CAs (mint.sh) is that the credential can be
+# computed without it.
 #
 # A kubeconfig is three facts:
 #
@@ -15,7 +15,7 @@
 #
 # The identity in a client certificate lives in its subject: the API
 # server takes CN as the username and every O as a group. There is no
-# user database behind this — presenting a cert with O=system:masters
+# user database behind this: presenting a cert with O=system:masters
 # IS being a cluster admin, because RBAC binds that group to
 # cluster-admin. Certificates are the users.
 #
@@ -46,10 +46,10 @@ openssl req -new -nodes \
     -subj "/CN=admin/O=system:masters" \
     2>/dev/null
 
-# A client cert needs the clientAuth extended key usage — the API
+# A client cert needs the clientAuth extended key usage; the API
 # server rejects certificates that don't declare what they're for.
 # One year: generous for a development credential, and re-running
-# `make kubeconfig` mints a new one in a heartbeat.
+# `make kubeconfig` mints a new one in seconds.
 openssl x509 -req \
     -in "$tls/admin.csr" \
     -CA "$tls/client-ca.crt" -CAkey "$tls/client-ca.key" \

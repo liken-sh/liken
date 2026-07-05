@@ -2,7 +2,7 @@
 #
 # The system is an initramfs: a cpio archive the kernel unpacks into an
 # in-memory root filesystem at boot. There is no disk, no bootloader,
-# and no installer — the entire OS is two files, the kernel and this
+# and no installer: the entire OS is two files, the kernel and this
 # archive, and QEMU boots them directly. build.sh tells the full story
 # of what goes in and why.
 

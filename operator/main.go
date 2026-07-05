@@ -1,29 +1,29 @@
-// liken-operator — the program that makes the Kubernetes API the
+// liken-operator: the program that makes the Kubernetes API the
 // machine API.
 //
 // An operator is not a special kind of software. It is an ordinary
-// program that runs in a pod, reads the state of the world, compares it
-// to a declared spec, and acts until they agree — then keeps watching,
-// forever. Kubernetes itself is a building full of these loops
-// (kube-controller-manager is dozens of them in a trenchcoat); this one
-// just happens to reconcile the machine underneath the cluster instead
-// of something inside it.
+// program that runs in a pod, reads the state of the world, compares
+// it to a declared spec, and acts until they agree, then keeps
+// watching, forever. Kubernetes itself is built out of these loops
+// (kube-controller-manager alone runs dozens of them); this one just
+// happens to reconcile the machine underneath the cluster instead of
+// something inside it.
 //
-// This operator is written against the Kubernetes API with nothing but
-// net/http and encoding/json — no client-go, no controller-runtime, no
-// code generation. Production operators use those libraries for good
-// reasons (caching informers, work queues, generated typed clients),
-// but they also bury the lesson: the Kubernetes API is just HTTPS
-// serving JSON, a watch is just a long HTTP response that keeps coming,
-// and everything kubectl does, curl can do. liken hand-rolled its DHCP
-// client for the same reason.
+// This operator is written against the Kubernetes API with nothing
+// but net/http and encoding/json: no client-go, no
+// controller-runtime, no code generation. Production operators use
+// those libraries for good reasons (caching informers, work queues,
+// generated typed clients), but they also hide the lesson: the
+// Kubernetes API is just HTTPS serving JSON, a watch is just a long
+// HTTP response that keeps coming, and everything kubectl does, curl
+// can do. liken speaks DHCP directly for the same reason.
 //
 // The division of labor with init (see the machine package): init
-// witnesses the boot and writes facts to /run/liken; this operator
+// observes the boot and writes facts to /run/liken; this operator
 // reads them through a hostPath mount, folds in what it can observe
 // itself, and publishes the result as the Machine's status. In the
 // other direction it actuates the spec: today that means sysctls,
-// written straight to /proc/sys — which is the host's, because this pod
+// written straight to /proc/sys, which is the host's, because this pod
 // runs privileged in the host's namespaces (see manifests/operator.yaml
 // for what that means and why it's justified here).
 package main
@@ -49,8 +49,8 @@ func main() {
 		fatal("in-cluster config: %v", err)
 	}
 
-	// The manifest file tells the operator which Machine it is — the
-	// same file init booted from, read through a hostPath mount.
+	// The manifest file tells the operator which Machine it manages:
+	// the same file init booted from, read through a hostPath mount.
 	m, err := machine.Load(machine.ManifestPath)
 	if err != nil {
 		fatal("machine manifest: %v", err)
@@ -62,7 +62,7 @@ func main() {
 
 	// The file seeds the cluster: if no Machine object exists yet, the
 	// manifest's spec becomes the first version of it. From then on the
-	// cluster's copy is authoritative — a kubectl edit wins over the
+	// cluster's copy is authoritative: a kubectl edit wins over the
 	// file until someone rebuilds the image. (One day Flux will manage
 	// the in-cluster copy from git and the two sides converge for good.)
 	current, err := ensureMachine(client, m)

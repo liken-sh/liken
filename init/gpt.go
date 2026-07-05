@@ -2,11 +2,10 @@ package main
 
 // Writing GUID Partition Tables, from scratch.
 //
-// A partition table is not an artifact of some tool — it's a few
+// A partition table is not an artifact of some tool; it's a few
 // hundred bytes at well-known offsets that the kernel (and firmware,
 // and every OS) knows how to read. GPT, the modern format, is simple
-// enough to write directly, and writing it is the best way to learn
-// that there's no magic in it:
+// enough to write directly, and writing it shows exactly what it is:
 //
 //   LBA 0        a "protective MBR": a legacy MBR whose single
 //                partition claims the whole disk, so old tools see
@@ -23,9 +22,9 @@ package main
 //                LBA 0/1 is survivable
 //
 // The 36-character partition *name* is the field liken cares most
-// about: it's where a role's identity is stamped (liken:clusterState),
-// which is what lets every boot after the first recognize a partition
-// no matter what device name the kernel hands the disk that day.
+// about: it carries a role's identity (liken:clusterState), which is
+// what lets every boot after the first recognize a partition no
+// matter what device name the kernel assigns the disk that day.
 
 import (
 	"crypto/rand"
@@ -50,7 +49,7 @@ const (
 	gptEntrySectors = gptEntryCount * gptEntrySize / sectorSize
 	gptReservedLBAs = 2 + gptEntrySectors
 
-	// Partitions start on 1MiB boundaries (2048 sectors) — the
+	// Partitions start on 1MiB boundaries (2048 sectors), the
 	// alignment every modern partitioner uses, chosen so partitions
 	// align with any plausible physical block or RAID stripe beneath.
 	partitionAlignment = 2048
@@ -82,9 +81,9 @@ type gptPartition struct {
 var linuxFilesystemData = mustGUID("0FC63DAF-8483-4772-8E79-3D69D8477DE4")
 
 // mustGUID turns a GUID's canonical text into its 16 on-disk bytes.
-// The encoding is a famous historical wart: the first three fields are
+// The encoding is a historical wart: the first three fields are
 // little-endian (GUIDs come from Microsoft, via UEFI) while the rest
-// is byte-for-byte — so the text and the bytes read differently, and
+// is byte-for-byte, so the text and the bytes read differently, and
 // getting this wrong makes every tool misread the type.
 func mustGUID(s string) [16]byte {
 	var canonical [16]byte
@@ -110,14 +109,15 @@ func guidToDisk(canonical [16]byte) [16]byte {
 	}
 }
 
-// randomGUID mints a version-4 (random) GUID in on-disk encoding —
+// randomGUID generates a version-4 (random) GUID in on-disk encoding,
 // for the disk itself and each partition, so every one is globally
 // distinguishable from every other disk and partition in the world.
 func randomGUID() [16]byte {
 	var canonical [16]byte
 	if _, err := rand.Read(canonical[:]); err != nil {
-		// getrandom failing on this kernel would have already hung the
-		// boot at DHCP; treat it as the impossibility it is.
+		// getrandom failing on this kernel would have already hung
+		// the boot at DHCP, so this can't be reached; panic if it
+		// somehow is.
 		panic(err)
 	}
 	canonical[6] = canonical[6]&0x0F | 0x40 // version 4: random
@@ -144,8 +144,8 @@ func writeGPT(devPath string, totalSectors uint64, parts []gptPartition) error {
 		binary.LittleEndian.PutUint64(e[40:48], p.lastLBA)
 		// e[48:56] attributes: none apply to plain data partitions.
 
-		// The name is UTF-16LE — UEFI predates the industry settling
-		// on UTF-8 — in a fixed 72-byte (36-character) field.
+		// The name is UTF-16LE (UEFI predates the industry settling
+		// on UTF-8) in a fixed 72-byte (36-character) field.
 		name := utf16.Encode([]rune(p.name))
 		if len(name) > 36 {
 			return fmt.Errorf("partition name %q exceeds GPT's 36 characters", p.name)
@@ -188,7 +188,7 @@ func writeGPT(devPath string, totalSectors uint64, parts []gptPartition) error {
 	mbr := make([]byte, sectorSize)
 	span := min(totalSectors-1, 0xFFFF_FFFF)
 	entry := mbr[446:]
-	entry[1], entry[2], entry[3] = 0x00, 0x02, 0x00 // CHS start: fossilized filler
+	entry[1], entry[2], entry[3] = 0x00, 0x02, 0x00 // CHS start: legacy filler
 	entry[4] = 0xEE                                 // type: "GPT protective"
 	entry[5], entry[6], entry[7] = 0xFF, 0xFF, 0xFF // CHS end: "beyond CHS"
 	binary.LittleEndian.PutUint32(entry[8:12], 1)
@@ -219,9 +219,9 @@ func writeGPT(devPath string, totalSectors uint64, parts []gptPartition) error {
 		return err
 	}
 
-	// The bytes are on disk, but the kernel's picture of the device
-	// predates them; this ioctl asks it to re-read the table, which is
-	// what makes the vda1, vda2, ... devices appear.
+	// The bytes are on disk, but the kernel's view of the device
+	// predates them; this ioctl asks it to re-read the table, which
+	// is what makes the vda1, vda2, ... devices appear.
 	if _, err := unix.IoctlRetInt(int(f.Fd()), unix.BLKRRPART); err != nil {
 		return fmt.Errorf("re-reading partition table: %w", err)
 	}

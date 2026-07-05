@@ -5,19 +5,19 @@ package main
 // When the kernel unpacks the initramfs, it doesn't mount a filesystem
 // to hold the files. They land in rootfs: the filesystem instance the
 // kernel creates as the root of the mount tree before any userspace
-// exists. rootfs is the bottom of the stack by construction — it can
+// exists. rootfs is the bottom of the stack by construction: it can
 // never be unmounted, and pivot_root refuses to operate on it, because
 // both would leave the mount tree with no root at all.
 //
-// A machine can run this way — but rootfs makes a poor permanent home.
-// It appears in the mount table as device "rootfs", a name nothing can
-// resolve to a measurable filesystem, so anything that wants to account
-// for the root filesystem comes up empty. kubelet minds the most: it
-// meters node ephemeral storage against the root filesystem, and on
-// rootfs that bookkeeping has nothing to stand on.
+// A machine can run this way, but rootfs is a poor place to stay. It
+// appears in the mount table as device "rootfs", a name nothing can
+// resolve to a measurable filesystem, so anything that wants to
+// account for the root filesystem comes up empty. kubelet suffers the
+// most: it meters node ephemeral storage against the root filesystem,
+// and on rootfs that accounting has nothing to measure.
 //
-// The escape is a userspace ritual, named for the util-linux tool that
-// performs it on conventional systems (switch_root):
+// The way out is a userspace procedure, named for the util-linux tool
+// that performs it on conventional systems (switch_root):
 //
 //  1. mount a fresh tmpfs,
 //  2. copy the entire operating system into it,
@@ -25,20 +25,20 @@ package main
 //  4. move the tmpfs mount onto / and chroot into it,
 //  5. re-exec init from the new root.
 //
-// The re-exec is not ceremony. The running program is the last thing
-// pinning the old world: its executable is mapped from rootfs, so those
-// pages can't be freed until something else is running in their place.
-// exec replaces the process image while keeping PID 1 — the second
-// "hello from userspace" on the console is the same program taking its
-// first breath in its new home.
+// The re-exec is required. The running program is the last thing
+// pinning the old root: its executable is mapped from rootfs, so
+// those pages can't be freed until something else is running in their
+// place. exec replaces the process image while keeping PID 1; the
+// second "hello from userspace" on the console is the same program
+// restarting from the new root.
 //
-// Why tmpfs and not just staying on rootfs? Even when rootfs is backed
-// by tmpfs (the kernel's default when no root= is given), the mount
-// entry still says "rootfs" and still can't be unmounted or measured.
-// An ordinary tmpfs mount is a first-class citizen: it has a size (half
-// of RAM by default — an honest cap for an OS that lives in memory),
-// statfs reports real numbers against it, and df would show it if this
-// machine had a df.
+// Why tmpfs and not just staying on rootfs? Even when rootfs is
+// backed by tmpfs (the kernel's default when no root= is given), the
+// mount entry still says "rootfs" and still can't be unmounted or
+// measured. An ordinary tmpfs mount behaves like any other
+// filesystem: it has a size (half of RAM by default, a reasonable
+// cap for an OS that lives in memory) and statfs reports real numbers
+// against it.
 
 import (
 	"fmt"
@@ -52,9 +52,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// switchedMarker is how init tells its post-switch self apart from its
-// first incarnation: the re-exec passes it as an argument. The kernel
-// hands unrecognized non-key=value boot parameters to init as arguments
+// switchedMarker is how init tells its post-switch run apart from its
+// first: the re-exec passes it as an argument. The kernel hands
+// unrecognized non-key=value boot parameters to init as arguments
 // too, but nothing on our command line starts with dashes.
 const switchedMarker = "--switched"
 
@@ -88,7 +88,7 @@ func switchRoot() error {
 	// devtmpfs. Detach any mount so the delete below can't reach into
 	// the kernel's shared device catalog; copyTree skips the directory
 	// entirely, and mountEssentials mounts a fresh devtmpfs in the new
-	// root. The console keeps working throughout — our stdio
+	// root. The console keeps working throughout, because our stdio
 	// descriptors were opened before any of this.
 	_ = unix.Unmount("/dev", unix.MNT_DETACH)
 
@@ -102,7 +102,7 @@ func switchRoot() error {
 		return fmt.Errorf("copying the system: %w", err)
 	}
 
-	// Delete the originals while they're still reachable — after the
+	// Delete the originals while they're still reachable; after the
 	// move below, the old root has no path. This is the step that
 	// actually reclaims the RAM; skipping it would leave the machine
 	// carrying two copies of the OS forever.
@@ -119,7 +119,7 @@ func switchRoot() error {
 		}
 	}
 
-	// The move-and-chroot dance. MS_MOVE grafts the tmpfs onto / (legal
+	// The move and the chroot. MS_MOVE grafts the tmpfs onto / (legal
 	// where pivot_root is not, because nothing has to be unmounted), and
 	// chroot(".") repoints this process's idea of "/" at it. Order
 	// matters: chdir first so "." names the new root throughout.
@@ -154,10 +154,10 @@ func fsTypeName(magic int64) string {
 	}
 }
 
-// copyTree replicates the filesystem tree at src into dst: directories,
-// symlinks, and regular files, with permissions intact. That's the
-// complete inventory of an initramfs built by our image build — anything
-// else showing up is a surprise worth failing loudly over.
+// copyTree replicates the filesystem tree at src into dst:
+// directories, symlinks, and regular files, with permissions intact.
+// That's the complete inventory of an initramfs built by our image
+// build; any other file type is unexpected and fails the copy.
 func copyTree(src, dst string) error {
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {

@@ -2,13 +2,13 @@ package main
 
 // Facts: init's half of the Machine status.
 //
-// Init is the only program that witnesses the boot — the DHCP exchange,
-// the hardware as the kernel first presented it — so it's the only
-// program that can report those facts. It writes them to /run/liken,
-// shaped exactly like the Machine's status block, and the liken
-// operator (which lives in the cluster and can't see any of this
-// firsthand) publishes them to the API. Init never talks to Kubernetes;
-// this file is the entire interface between the two.
+// Init is the only program that observes the boot (the DHCP
+// exchange, the hardware as the kernel first presented it), so it's
+// the only program that can report those facts. It writes them to
+// /run/liken, shaped exactly like the Machine's status block, and the
+// liken operator (which runs in the cluster and can't see any of this
+// firsthand) publishes them to the API. Init never talks to
+// Kubernetes; this file is the entire interface between the two.
 
 import (
 	"fmt"
@@ -29,13 +29,12 @@ func publishFacts(conn *connection, storage machine.StorageStatus) {
 		Hardware: machine.HardwareStatus{
 			CPUs: runtime.NumCPU(),
 			// The same inventory the world report prints, re-derived
-			// rather than remembered — the statelessness that makes
-			// status trustworthy.
+			// rather than remembered, like everything else in status.
 			BlockDevices: discoverBlockDevices(),
 		},
-		// Where every storage role landed — the one block that can't
-		// be re-derived here, because only reconcileStorage witnessed
-		// the claiming.
+		// Where every storage role landed: the one block that can't
+		// be re-derived here, because only reconcileStorage saw the
+		// claiming happen.
 		Storage: storage,
 	}
 
@@ -53,7 +52,7 @@ func publishFacts(conn *connection, storage machine.StorageStatus) {
 	}
 
 	// Sysinfo is one syscall answering two questions: how much memory
-	// the machine has, and how long it's been up — which, subtracted
+	// the machine has, and how long it's been up, which, subtracted
 	// from the clock, is the moment it booted. (The wall clock itself
 	// comes from the hypervisor's RTC; there's no NTP yet.)
 	var si unix.Sysinfo_t

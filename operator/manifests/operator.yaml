@@ -5,13 +5,13 @@
 #
 # The image reference below is the airgapped one: image/build.sh ships
 # the operator as an OCI tarball inside the initramfs, k3s imports it
-# into containerd at start, and imagePullPolicy: Never makes it a hard
-# promise that this machine never reaches out to a registry to become
-# itself. LIKEN_VERSION is substituted with the real version when the
-# image is assembled.
+# into containerd at start, and imagePullPolicy: Never guarantees this
+# machine never contacts a registry to run its own OS components.
+# LIKEN_VERSION is substituted with the real version when the image is
+# assembled.
 ---
-# A namespace of liken's own, so `kubectl get all -n liken-system` is
-# the one-line answer to "what is the OS running in my cluster?"
+# A namespace of liken's own, so `kubectl get all -n liken-system`
+# shows everything the OS runs in the cluster.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -19,7 +19,7 @@ metadata:
 ---
 # The ServiceAccount is the operator's identity: kubelet mounts a token
 # for it into the pod, and every API request the operator makes carries
-# it. See operator/apiclient.go for the client half of this handshake.
+# it. See operator/apiclient.go for the client half.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -78,16 +78,16 @@ spec:
       # this is the same priority class kube-proxy and CNI pods use.
       priorityClassName: system-node-critical
       # Manage the machine even while its node is cordoned or not yet
-      # ready — exactly the moments an OS operator matters most.
+      # ready, exactly the moments an OS operator matters most.
       tolerations:
         - operator: Exists
-      # This pod deliberately sheds most of a container's isolation,
-      # because its subject is the machine itself. hostNetwork puts it
-      # in the host's network namespace, so the net.* sysctls it writes
+      # This pod deliberately gives up most of a container's isolation,
+      # because it manages the machine itself. hostNetwork puts it in
+      # the host's network namespace, so the net.* sysctls it writes
       # tune the real stack, not a pod-private copy; privileged makes
       # the container's /proc/sys writable (unprivileged pods get it
-      # read-only). The trade is contained by RBAC above: powerful on
-      # this machine, narrow in the cluster.
+      # read-only). The RBAC above bounds the trade: powerful on this
+      # machine, narrow in the cluster.
       hostNetwork: true
       containers:
         - name: operator
@@ -96,7 +96,7 @@ spec:
           securityContext:
             privileged: true
           volumeMounts:
-            # The facts init published — the read half of the operator.
+            # The facts init published: the operator's input.
             - name: run-liken
               mountPath: /run/liken
               readOnly: true

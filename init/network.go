@@ -3,12 +3,12 @@ package main
 // Network bring-up, from nothing to routed, in userspace Go.
 //
 // Two different kernel interfaces cooperate here, and neither is a
-// classic syscall. Interface configuration — links up, addresses,
-// routes — happens over netlink, a socket-based protocol the kernel
+// classic syscall. Interface configuration (links up, addresses,
+// routes) happens over netlink, a socket-based protocol the kernel
 // speaks (it's what `ip` does under the hood); the vishvananda/netlink
 // library composes the messages. Getting an address is a different
 // story entirely: DHCP is a network protocol, not a kernel feature, so
-// liken must *speak* it — broadcast DISCOVER, receive OFFER, REQUEST,
+// liken must *speak* it: broadcast DISCOVER, receive OFFER, REQUEST,
 // receive ACK. The insomniacslk/dhcp library (the same one Talos boots
 // with) does this over a raw AF_PACKET socket, which is how a machine
 // can send UDP before it has an IP address to send from.
@@ -27,8 +27,8 @@ import (
 	"github.com/chrisguidry/liken/machine"
 )
 
-// connection is what bringUpNetwork learned: enough to print an honest
-// report of how this machine is attached to the world.
+// connection is what bringUpNetwork learned: enough to print a report
+// of how this machine is attached to the network.
 type connection struct {
 	ifname      string
 	mac         net.HardwareAddr
@@ -40,9 +40,9 @@ type connection struct {
 }
 
 func bringUpNetwork(spec machine.NetworkSpec) (*connection, error) {
-	// Loopback first: 127.0.0.1 is assumed by so much software that a
-	// machine without it barely counts as booted. The kernel creates
-	// the interface; we only have to raise it.
+	// Loopback first: 127.0.0.1 is assumed by nearly all networked
+	// software. The kernel creates the interface; we only have to
+	// raise it.
 	if lo, err := netlink.LinkByName("lo"); err == nil {
 		if err := netlink.LinkSetUp(lo); err != nil {
 			return nil, fmt.Errorf("raising lo: %w", err)
@@ -69,7 +69,7 @@ func bringUpNetwork(spec machine.NetworkSpec) (*connection, error) {
 
 // pickInterface finds the hardware to configure. With no manifest
 // preference, the heuristic is simple: the first link that isn't
-// loopback and has a MAC address — i.e. looks like a real NIC. On the
+// loopback and has a MAC address, i.e. looks like a real NIC. On the
 // hardware liken targets (one machine, one port) there's nothing to
 // disambiguate; when there is, the manifest pins it by name.
 func pickInterface(spec machine.NetworkSpec) (netlink.Link, error) {
@@ -94,18 +94,19 @@ func pickInterface(spec machine.NetworkSpec) (netlink.Link, error) {
 	return nil, fmt.Errorf("no network interface found among %d links", len(links))
 }
 
-// acquireLease runs the DHCP conversation. The library handles the
-// DISCOVER/OFFER/REQUEST/ACK exchange and its retries; we just bound
-// the whole affair with a deadline, because a boot that hangs forever
-// on a dead network is worse than one that reports failure and carries
-// on to the console.
+// acquireLease runs the DHCP exchange. The library handles
+// DISCOVER/OFFER/REQUEST/ACK and its retries; we bound the whole
+// exchange with a deadline, because a boot that hangs forever on a
+// dead network is worse than one that reports failure and carries on
+// to the console.
 //
-// The summary logger prints each packet of the exchange to the console
-// — on a machine with no shell, the boot log is the packet capture.
+// The summary logger prints each packet of the exchange to the
+// console; on a machine with no shell, the boot log is the only
+// packet capture available.
 //
 // A note on entropy: the client draws a random transaction ID via
-// getrandom(2), which blocks — uninterruptibly, immune to our context
-// deadline — until the kernel's RNG has initialized. On hardware with
+// getrandom(2), which blocks (uninterruptibly, immune to our context
+// deadline) until the kernel's RNG has initialized. On hardware with
 // no entropy source (like QEMU's default CPU model, which lacks
 // RDRAND) that is forever. The host must provide entropy: RDRAND,
 // virtio-rng, or patience with the kernel's jitter collector.
@@ -126,10 +127,10 @@ func acquireLease(ifname string) (*nclient4.Lease, error) {
 	return lease, nil
 }
 
-// applyLease turns the DHCP ACK into kernel state: the address goes on
-// the link, the router becomes the default route, and the nameservers
-// are written to /etc/resolv.conf — which is not magic, just a file
-// that resolvers (including Go's) read by convention.
+// applyLease turns the DHCP ACK into kernel state: the address goes
+// on the link, the router becomes the default route, and the
+// nameservers are written to /etc/resolv.conf, an ordinary file that
+// resolvers (including Go's) read by convention.
 func applyLease(link netlink.Link, lease *nclient4.Lease) (*connection, error) {
 	ack := lease.ACK
 

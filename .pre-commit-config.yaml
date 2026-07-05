@@ -1,6 +1,6 @@
 # Quality checks that run before every commit, via pre-commit (or prek,
-# its drop-in replacement). The Go stack here — gofmt, go vet,
-# staticcheck, and a tidy go.mod — is the idiomatic minimum for a Go
+# its drop-in replacement). The Go stack here (gofmt, go vet,
+# staticcheck, and a tidy go.mod) is the idiomatic minimum for a Go
 # project; the rest is repo hygiene and a linter for the shell that
 # implements our Make rules.
 repos:
@@ -33,7 +33,7 @@ repos:
         language: system
         types: [go]
       # The repo is one Go module (see go.mod at the root), so every
-      # check is a single invocation of ./... — Go files in any domain
+      # check is a single invocation of ./...; Go files in any domain
       # directory, present or future, are covered without listing them.
       - id: go-vet
         name: go vet

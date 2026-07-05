@@ -1,6 +1,6 @@
 # The kernel domain: liken does not build Linux, it vendors Linux.
 # Canonical's mainline archive publishes every upstream release as
-# pre-built packages, and fetch.sh (the story lives there) turns one
+# pre-built packages, and fetch.sh (documented there) turns one
 # pinned version of those into the two things the rest of the build
 # needs: a bootable vmlinuz and an indexed module tree.
 
@@ -9,7 +9,7 @@
 # drops the trailing newline.
 VERSION := $(strip $(file <VERSION))
 
-# vmlinuz stands in for the whole extraction — modules, config, and the
+# vmlinuz stands in for the whole extraction: modules, config, and the
 # release string all arrive in the same fetch.sh run. Make only fires
 # this when the pin or the script changes; fetch.sh's own download cache
 # makes even those re-runs cheap.

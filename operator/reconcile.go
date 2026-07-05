@@ -22,11 +22,11 @@ func getMachine(c *apiClient, name string) (*machine.Machine, error) {
 }
 
 // ensureMachine makes the manifest's Machine real in the cluster. The
-// retry-forever loop covers the operator's awkward first minutes: k3s
-// applies the Machine CRD from its manifests directory around the same
-// time it starts this pod, and until the API server has served that
-// CRD, our URLs 404. Waiting patiently beats crashing here, because the
-// 404 is expected, not exceptional.
+// retry-forever loop covers the operator's first minutes: k3s applies
+// the Machine CRD from its manifests directory around the same time
+// it starts this pod, and until the API server is serving that CRD,
+// our URLs 404. Waiting beats crashing here, because the 404 is
+// expected, not exceptional.
 func ensureMachine(c *apiClient, seed *machine.Machine) (*machine.Machine, error) {
 	for {
 		current, err := getMachine(c, seed.Metadata.Name)
@@ -63,7 +63,7 @@ func ensureMachine(c *apiClient, seed *machine.Machine) (*machine.Machine, error
 // reconcile is one full pass of the operator's job, always from
 // absolute state: read the facts init left, actuate the spec's sysctls,
 // read back what actually holds, and publish all of it as status. It
-// deliberately keeps no memory between passes — every value in the
+// deliberately keeps no memory between passes: every value in the
 // status it writes was observed moments ago, which is what the
 // Kubernetes convention means by status being reconstructible.
 func reconcile(c *apiClient, m *machine.Machine) {
@@ -79,17 +79,17 @@ func reconcile(c *apiClient, m *machine.Machine) {
 	status.Sysctls, err = applySysctls(m.Spec.Sysctls)
 	status.Conditions = machine.SetCondition(status.Conditions, sysctlsCondition(err), now)
 
-	// Storage compares promise to landing: the spec's declared roles
-	// against the facts' report of where each actually lives. The
-	// operator can't observe the disks directly — claiming happened
-	// before this cluster existed — so this is init's testimony,
-	// judged against the spec.
+	// Storage compares the spec's declared roles against the facts'
+	// report of where each is actually backed. The operator can't
+	// observe the disks directly (claiming happened before this
+	// cluster existed), so init's facts are the only source, and this
+	// condition checks them against the spec.
 	status.Conditions = machine.SetCondition(status.Conditions,
 		machine.StorageCondition(m.Spec.Storage, status.Storage), now)
 
-	// Ready is the roll-up: True exactly when every other condition is.
-	// The scan skips any prior Ready so last pass's verdict can't veto
-	// this one's.
+	// Ready is the roll-up: True exactly when every other condition
+	// is. The scan skips any prior Ready so the previous pass's value
+	// can't affect this one.
 	ready := machine.Condition{Type: "Ready", Status: "True", Reason: "Reconciled"}
 	for _, condition := range status.Conditions {
 		if condition.Type == "Ready" {
@@ -109,12 +109,12 @@ func reconcile(c *apiClient, m *machine.Machine) {
 	}
 }
 
-// applySysctls actuates spec.sysctls against the host's /proc/sys —
+// applySysctls actuates spec.sysctls against the host's /proc/sys,
 // reachable directly because this pod runs privileged in the host's
-// namespaces — then reads every parameter back. The returned map is
-// what the kernel now says, not what we wrote: if some other agent
-// resets a value, the next pass both re-asserts it and reports the
-// interlude honestly.
+// namespaces, then reads every parameter back. The returned map is
+// what the kernel now reports, not what we wrote: if some other agent
+// resets a value, the next pass both re-asserts it and reports what
+// was actually observed.
 func applySysctls(desired map[string]string) (map[string]string, error) {
 	var firstErr error
 	observed := map[string]string{}
@@ -152,14 +152,14 @@ func sysctlsCondition(err error) machine.Condition {
 	return machine.Condition{Type: "SysctlsApplied", Status: "True", Reason: "Applied"}
 }
 
-// publishStatus writes through the status subresource — a separate
+// publishStatus writes through the status subresource: a separate
 // endpoint (…/machines/<name>/status) that updates *only* the status
 // half of the object, so a controller can never accidentally rewrite
 // the spec it takes orders from, and RBAC can grant the two halves
 // separately. The write is a PUT carrying the object's resourceVersion:
 // if anything else changed the object in between, the server answers
 // 409 Conflict instead of applying our stale copy. The caller's next
-// pass re-reads and tries again — optimistic concurrency, the way every
+// pass re-reads and tries again: optimistic concurrency, the way every
 // Kubernetes controller handles contention.
 func publishStatus(c *apiClient, m *machine.Machine, status *machine.MachineStatus) error {
 	updated := *m
@@ -174,8 +174,8 @@ func publishStatus(c *apiClient, m *machine.Machine, status *machine.MachineStat
 
 // watchMachine turns the API server's watch mechanism into a channel of
 // fresh Machine objects. A watch is an ordinary GET with ?watch=true:
-// the response never ends, and each line of it is a JSON event —
-// {"type": "MODIFIED", "object": {…}} — pushed the moment the object
+// the response never ends, and each line of it is a JSON event like
+// {"type": "MODIFIED", "object": {…}}, pushed the moment the object
 // changes. This is the mechanism informers, kubectl get -w, and every
 // controller's responsiveness are built on.
 //
@@ -183,7 +183,7 @@ func publishStatus(c *apiClient, m *machine.Machine, status *machine.MachineStat
 // missed between reconnects; when history has been compacted away the
 // server says 410 Gone, and the recovery is to re-GET the object and
 // watch from its current version. Stream drops are routine (the server
-// ends watches on its own schedule) — the loop just reconnects.
+// ends watches on its own schedule); the loop just reconnects.
 func watchMachine(c *apiClient, name, resourceVersion string, events chan<- *machine.Machine) {
 	for {
 		path := machinesPath +

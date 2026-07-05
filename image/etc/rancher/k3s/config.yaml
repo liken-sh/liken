@@ -1,19 +1,19 @@
-# k3s's configuration — the file /etc/rancher/k3s/config.yaml, which
+# k3s's configuration: the file /etc/rancher/k3s/config.yaml, which
 # k3s reads on its own; liken passes no flags.
 #
-# The posture is low-frills: k3s bundles several conveniences (Traefik
-# for ingress, a service load balancer, a metrics server) that liken
-# disables. Anything a machine needs beyond the Kubernetes control
-# plane itself should arrive as a declared, visible workload — not as
-# a bundled default. CoreDNS stays: pods without DNS barely count as
-# scheduled.
+# The configuration is minimal: k3s bundles several conveniences
+# (Traefik for ingress, a service load balancer, a metrics server) that
+# liken disables. Anything a machine needs beyond the Kubernetes
+# control plane itself should arrive as a declared, visible workload,
+# not as a bundled default. CoreDNS stays: pods without DNS are barely
+# usable.
 disable:
   - traefik
   - servicelb
   - metrics-server
 
 # The local-path storage provisioner stays: it is how the Machine
-# spec's podStorage role reaches pods — a PersistentVolumeClaim becomes
+# spec's podStorage role reaches pods. A PersistentVolumeClaim becomes
 # a directory under this root, which is where liken mounts that role's
 # partition. On a machine that declares no podStorage the directory is
 # simply part of the RAM root, and PVCs are as ephemeral as everything
@@ -25,8 +25,8 @@ default-local-storage-path: /var/lib/liken/pod-storage
 write-kubeconfig-mode: "0644"
 
 # NodePort services listen only on the primary interface's address.
-# The default — every local IP, including whatever CNI interfaces
-# appear later — is broad enough that kube-proxy logs a complaint
-# about it at startup. One interface is the shape of these machines.
+# The default (every local IP, including whatever CNI interfaces
+# appear later) is broad enough that kube-proxy logs a complaint
+# about it at startup, and these machines have one interface anyway.
 kube-proxy-arg:
   - nodeport-addresses=primary

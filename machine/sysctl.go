@@ -1,15 +1,15 @@
 package machine
 
 // Sysctls: the kernel's runtime tuning knobs, exposed as one file per
-// parameter under /proc/sys. There is no syscall for these — writing
+// parameter under /proc/sys. There is no syscall for these: writing
 // "1" to /proc/sys/vm/overcommit_memory *is* the interface, which is
 // why applying them needs no privileges beyond a writable /proc/sys
 // (PID 1 has it at boot; the operator gets it by running privileged).
 //
-// A note on who else is in this game: kubelet manages a few parameters
+// Other components manage sysctls too: kubelet sets a few parameters
 // itself (vm.overcommit_memory, kernel.panic, ...) and per-pod sysctls
 // exist for the namespaced net.* family. spec.sysctls is for the
-// machine-level knobs neither of those covers.
+// machine-level parameters neither of those covers.
 
 import (
 	"fmt"
@@ -19,12 +19,12 @@ import (
 )
 
 // sysctlPath translates a parameter name to its file. Dots become path
-// separators — unless the name already contains slashes, which is the
+// separators, unless the name already contains slashes, which is the
 // kernel's own escape hatch (documented in sysctl(8)) for path segments
 // with literal dots in them, like an interface named eth0.100.
 //
 // The containment check matters because sysctl names arrive from the
-// Machine spec — user input. A crafted name like "../../etc/passwd"
+// Machine spec, which is user input. A crafted name like "../../etc/passwd"
 // must fail here rather than become a write outside /proc/sys.
 func sysctlPath(dir, name string) (string, error) {
 	rel := name
@@ -33,7 +33,7 @@ func sysctlPath(dir, name string) (string, error) {
 	}
 	// filepath.Join cleans its result, which would quietly *repair* a
 	// malicious name (folding "a/../../b" or rooting an absolute path
-	// inside dir) — so reject anything absolute or upward-pointing
+	// inside dir), so reject anything absolute or upward-pointing
 	// before joining, rather than inspecting after.
 	if filepath.IsAbs(rel) || rel != filepath.Clean(rel) || strings.HasPrefix(rel, "..") {
 		return "", fmt.Errorf("sysctl name %q escapes %s", name, dir)

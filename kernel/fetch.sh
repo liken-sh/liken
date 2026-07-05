@@ -2,19 +2,19 @@
 #
 # Vendor a pre-built Linux kernel from Ubuntu's mainline builds.
 #
-# liken deliberately does not compile kernels. Building Linux once is a
-# fine rite of passage, but *maintaining* kernel builds — configs, CVEs,
-# toolchains — is the grind that has worn down more than one small distro,
-# and it teaches nothing about what liken is here to teach. Instead we
-# ride along with Canonical's kernel team: their mainline archive
-# (https://kernel.ubuntu.com/mainline/) publishes every upstream release —
-# stable, point releases, even RCs — as pre-built Debian packages, usually
+# liken deliberately does not compile kernels. Building Linux once is
+# worth doing, but *maintaining* kernel builds (configs, CVEs,
+# toolchains) is ongoing work that has worn down more than one small
+# distro, and it teaches nothing about what liken is here to teach.
+# Instead we rely on Canonical's kernel team: their mainline archive
+# (https://kernel.ubuntu.com/mainline/) publishes every upstream release
+# (stable, point releases, even RCs) as pre-built Debian packages, usually
 # within a day of the tag. Crucially, these are vanilla kernels: built
 # from Linus's tree with no Ubuntu patches, using Ubuntu's "generic"
 # configuration. What we boot is what upstream shipped.
 #
 # A Debian package needs no Debian tooling to open. A .deb is an `ar`
-# archive — the 1970s static-library format — wrapping a tarball
+# archive, the 1970s static-library format, wrapping a tarball
 # (data.tar.zst) of the package's files. So `ar`, `tar`, and `zstd` are
 # the entire extraction toolchain, and this script works the same on any
 # Linux machine.
@@ -35,7 +35,7 @@
 #   kernel/fetch.sh            fetch the version pinned in kernel/VERSION
 #   kernel/fetch.sh 7.1.1      fetch a specific version instead
 #
-# Upgrading the kernel is a one-line change to kernel/VERSION — the same
+# Upgrading the kernel is a one-line change to kernel/VERSION, the same
 # shape as every other upgrade in liken: edit a pin, commit.
 #
 # Results land in kernel/dist/<version>/:
@@ -44,7 +44,7 @@
 #   config                   the exact build configuration, for answering
 #                            "is that driver built in, a module, or absent?"
 #   release                  the kernel's release string, e.g.
-#                            "7.1.2-070102-generic" — later build steps
+#                            "7.1.2-070102-generic"; later build steps
 #                            need it to find the module directory
 #   lib/modules/<release>/   the module tree, indexed and laid out exactly
 #                            as it will appear in the initramfs
@@ -53,7 +53,7 @@
 # checksums the archive publishes alongside each build, so re-runs are
 # cheap and a torn download can't slip through. (The archive also signs
 # its checksum file with the Ubuntu kernel team's GPG key; we don't
-# verify that signature, a conscious gap — sha256 gives us integrity,
+# verify that signature, a conscious gap: sha256 gives us integrity,
 # not provenance.)
 
 set -euo pipefail
@@ -81,7 +81,7 @@ mkdir -p "$cache"
 
 # The archive publishes a CHECKSUMS file per build: sha1 lines (40 hex
 # chars) followed by sha256 lines (64), each "<digest>  <filename>". It
-# doubles as our package index — the filenames embed a build timestamp we
+# doubles as our package index: the filenames embed a build timestamp we
 # can't otherwise guess, so we discover the exact .deb names by grepping
 # it rather than constructing URLs.
 if ! checksums="$(curl -fsSL "$base/CHECKSUMS")"; then
@@ -110,7 +110,7 @@ fetch() {
     deb="${line##* }"
 
     # A cached file that still matches its checksum is good; anything
-    # else — missing, torn, or tampered — gets re-downloaded and must
+    # else (missing, torn, or tampered) gets re-downloaded and must
     # verify before we touch it.
     if ! sha256sum --check --status <<<"$digest  $cache/$deb" >/dev/null 2>&1; then
         echo "downloading $deb"
@@ -133,10 +133,10 @@ fetch() {
 fetch "linux-image-unsigned-.*-generic_.*_$arch\.deb"
 fetch "linux-modules-.*-generic_.*_$arch\.deb"
 
-# The kernel names its own world: the "release string" (uname -r) is
-# embedded in every artifact's filename and directory layout, and it's
-# how the kernel locates its modules at runtime (/lib/modules/$(uname -r)).
-# Recover it from the image filename rather than guessing.
+# The kernel's "release string" (uname -r) is embedded in every
+# artifact's filename and directory layout, and it's how the kernel
+# locates its modules at runtime (/lib/modules/$(uname -r)). Recover
+# it from the image filename rather than guessing.
 vmlinuz=("$staging"/boot/vmlinuz-*)
 release="$(basename "${vmlinuz[0]}")"
 release="${release#vmlinuz-}"
@@ -154,11 +154,11 @@ cp "$staging"/boot/config-* "$out/config"
 echo "$release" >"$out/release"
 mv "$modules" "$out/lib/modules"
 
-# modprobe never scans the module tree at runtime — it reads an index,
+# modprobe never scans the module tree at runtime; it reads an index,
 # modules.dep(.bin), that maps each module to the modules it depends on.
 # depmod builds that index. Installing the .deb normally would have run
 # this in a post-install hook; since we unpack by hand, we run it by
-# hand — at build time, here on the host, so the booted system never
+# hand, at build time, here on the host, so the booted system never
 # needs depmod at all.
 depmod --basedir "$out" "$release"
 
