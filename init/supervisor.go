@@ -34,6 +34,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/chrisguidry/liken/machine"
 )
 
 // lineWriter forwards each complete line it receives to the console
@@ -115,21 +117,49 @@ func postMortem() {
 	}
 }
 
-// superviseK3s runs k3s forever. It never returns: whenever k3s
-// exits, it gets restarted, with backoff, so a fast crash loop
-// doesn't flood the console.
+// superviseK3s runs k3s forever, with one interruption it honors: a
+// reboot request from the operator. It never returns otherwise:
+// whenever k3s exits, it gets restarted, with backoff, so a fast
+// crash loop doesn't flood the console.
+//
+// The reboot channel is selected in *both* of the supervisor's
+// states: while k3s runs, and during the backoff sleep between
+// restarts. That second select is what makes the request unable to
+// race the restart decision: they're alternatives of one select in
+// one goroutine, so an intent that arrives while k3s is crash-looping
+// neither waits out the sleep nor collides with a restart.
 //
 // The liken.oneshot boot parameter disables the restart: k3s runs
 // once and its exit powers the machine down. That makes a k3s failure
 // observable from outside (QEMU exits, the console is a complete
 // record), which is what debugging and automated runs need from a
-// machine with no shell.
-func superviseK3s() {
+// machine with no shell. A reboot intent is honored even in oneshot:
+// under QEMU's -no-reboot the restart is a clean exit, which is
+// exactly what a bounded harness run wants.
+func superviseK3s(reboot <-chan machine.RebootIntent) {
 	backoff := time.Second
 	for {
 		started := time.Now()
-		if err := runK3sOnce(); err != nil {
+		cmd, logf, err := startK3s()
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "liken: k3s: %v\n", err)
+		} else {
+			// The reaper is the only waiter (see the file comment);
+			// this goroutine just carries its answer into the select.
+			died := make(chan unix.WaitStatus, 1)
+			go func() { died <- awaitDeath(cmd.Process.Pid) }()
+
+			select {
+			case status := <-died:
+				_ = cmd.Process.Release()
+				logf.Close()
+				fmt.Printf("liken: k3s exited (%s)\n", describeExit(status))
+			case intent := <-reboot:
+				stopK3s(cmd.Process.Pid, died)
+				_ = cmd.Process.Release()
+				logf.Close()
+				rebootMachine(intent) // never returns
+			}
 		}
 		if bootParam("liken.oneshot") {
 			postMortem()
@@ -147,20 +177,26 @@ func superviseK3s() {
 			backoff *= 2
 		}
 		fmt.Printf("liken: restarting k3s in %s\n", backoff)
-		time.Sleep(backoff)
+		select {
+		case <-time.After(backoff):
+		case intent := <-reboot:
+			rebootMachine(intent) // k3s is already dead; nothing to stop
+		}
 	}
 }
 
-func runK3sOnce() error {
+// startK3s launches the server and hands back the running command and
+// its log file (which must stay open as long as the process writes;
+// the console copy flows through an in-process pipe).
+func startK3s() (*exec.Cmd, *os.File, error) {
 	// k3s's output goes two places: a file, and the console, where it
 	// arrives live, line-buffered, and prefixed so it's
 	// distinguishable from liken's own messages. On a machine with no
 	// shell, the console is the only way to read a log.
 	logf, err := os.OpenFile(k3sLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	defer logf.Close()
 
 	// k3s reads /etc/rancher/k3s/config.yaml on its own; the empty
 	// argument list is deliberate, because configuration lives in the
@@ -169,18 +205,28 @@ func runK3sOnce() error {
 	cmd.Stdout = io.MultiWriter(logf, &lineWriter{prefix: "k3s | "})
 	cmd.Stderr = io.MultiWriter(logf, &lineWriter{prefix: "k3s | "})
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("starting k3s: %w", err)
+		logf.Close()
+		return nil, nil, fmt.Errorf("starting k3s: %w", err)
 	}
 	fmt.Printf("liken: k3s server started (pid %d), logs in %s\n", cmd.Process.Pid, k3sLog)
+	return cmd, logf, nil
+}
 
-	status := awaitDeath(cmd.Process.Pid)
-	// Release, not Wait: the reaper already collected the status
-	// (that's the single-authority rule), so Wait would error; Release
-	// just lets go of the process handle.
-	_ = cmd.Process.Release()
-
-	fmt.Printf("liken: k3s exited (%s)\n", describeExit(status))
-	return nil
+// stopK3s asks k3s to exit and waits for the reaper's confirmation,
+// escalating to SIGKILL if it dawdles. It only signals and receives;
+// the reaper stays the sole authority on wait (the file comment's one
+// rule).
+func stopK3s(pid int, died <-chan unix.WaitStatus) {
+	fmt.Printf("liken: stopping k3s (pid %d)\n", pid)
+	_ = unix.Kill(pid, unix.SIGTERM)
+	select {
+	case status := <-died:
+		fmt.Printf("liken: k3s exited (%s)\n", describeExit(status))
+	case <-time.After(30 * time.Second):
+		fmt.Fprintln(os.Stderr, "liken: k3s ignored SIGTERM for 30s; killing it")
+		_ = unix.Kill(pid, unix.SIGKILL)
+		fmt.Printf("liken: k3s exited (%s)\n", describeExit(<-died))
+	}
 }
 
 func describeExit(status unix.WaitStatus) string {

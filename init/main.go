@@ -39,6 +39,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/chrisguidry/liken/machine"
 )
 
 func main() {
@@ -119,9 +121,18 @@ func main() {
 		// prepareForK3s just mounted a fresh tmpfs there; anything
 		// written earlier would be shadowed by the mount.
 		publishFacts(conn, storage, actuation)
+		// The reboot channel: init creates the directory (owning its
+		// existence and permissions), the operator writes into it,
+		// and the watcher carries at most one request into the
+		// supervisor (reboot.go).
+		if err := os.MkdirAll(machine.OperatorRunDir, 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "liken: creating %s: %v\n", machine.OperatorRunDir, err)
+		}
+		rebootRequests := make(chan machine.RebootIntent, 1)
+		go watchForRebootIntent(machine.OperatorRunDir, 2*time.Second, rebootRequests)
 		loadModules()
 		go reportWhenReady()
-		superviseK3s() // never returns
+		superviseK3s(rebootRequests) // never returns
 	}
 
 	// With no k3s to supervise, a boot is complete once the report is

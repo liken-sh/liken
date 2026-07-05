@@ -85,7 +85,7 @@
           everything else: a `trust/` domain pinning a dated snapshot
           of the Mozilla bundle, so what the machine trusts is a
           reviewable version bump instead of a build-host accident.
-4. [ ] Storage — which starts with a disk existing at all. The whole
+4. [x] Storage — which starts with a disk existing at all. The whole
        machine is RAM today; the prize is k3s's state on persistent
        storage (container images stop re-importing every boot, cluster
        state survives a reboot). Storage is declared by *purpose*, not
@@ -119,12 +119,57 @@
           small, partial claims) is unit-tested in init/, against
           fake sysfs trees; a refusal halts the boot from one place
           in main.go.
-   3. [ ] Prove persistence: boot, power off, boot again — images
-          import once, the cluster comes back.
+   3. [x] Prove persistence: boot, power off, boot again — images
+          import once, the cluster comes back. (Proven by milestone
+          5's reboot cycles: the cluster survived staged-spec reboots
+          and a hard power cut, on the same disks.)
    4. [x] The API: `spec.storage` and `status.storage` in the Machine
           CRD, the operator publishing the landing table and the
           hardware inventory.
-5. [ ] Bake in Flux bootstrap, so the machine converges to its repo from
+5. [x] The spec becomes editable: a Machine edit in the cluster
+       actually converges, by reboot. The roles speak for their owners
+       now (`machineState` and `machineEphemeral` are the machine's,
+       `clusterState` awaits `kind: Cluster`), and the new
+       `machineState` role holds the machine's manifests: the operator
+       detects drift between the cluster's spec and the boot's
+       actuation record, validates against the machine's reality
+       (grow-only sizes, attached devices; CEL rules refuse shrinks at
+       admission), stages the manifest durably, and per
+       `spec.rebootPolicy` requests a reboot or reports one pending.
+       Init prefers the staged manifest, promotes it on success, and
+       falls back to the proven last-known-good on failure, so a bad
+       edit degrades the machine instead of downing it. Partitions are
+       grow-only: sized roles grow into free space, remainder roles
+       follow a grown disk (relocating the backup GPT), and ext4 grows
+       by ioctl, no resize2fs.
+   1. [x] The `machine*` role vocabulary, and `machineState` first in
+          canonical order so a boot can find it before reading any spec.
+   2. [x] A GPT reader (both copies, CRC-checked, identities preserved
+          through edits) and grow-only partition resize, with the
+          filesystem grown online via EXT4_IOC_RESIZE_FS.
+   3. [x] The manifest lifecycle on machineState: staged/proven/
+          rejected, durable writes, the settle loop with last-known-good
+          fallback, and the actuation record in facts and status.
+   4. [x] The operator's convergence loop: drift detection, staging
+          validation, the SpecConverged condition vocabulary,
+          `spec.rebootPolicy`, and CEL no-shrink rules in the CRD.
+   5. [x] The reboot protocol: the operator's intent file, init's
+          watcher, a graceful k3s stop, and `make run-lab` (a QEMU run
+          that survives reboots) plus `grow-pods` for the disk-growth
+          drill.
+   6. [x] Prove the full cycle in the lab: edit the spec via kubectl,
+          watch the machine stage, reboot, grow, and converge; drill
+          the rejections (CEL refuses a shrink at admission, the
+          operator refuses an invalid spec with StagingRejected, and a
+          staged spec that fails at boot falls back to proven and
+          holds at RejectedLastBoot without a reboot loop). The
+          disk-growth drill grew podEphemeral's partition and
+          filesystem from 1.5 to 5.5 GiB in place. One sharp edge
+          found and accepted: the CEL no-shrink rule compares the spec
+          against its previous self, so backing out an unsatisfiable
+          grow needs `kubectl replace --force` (delete-and-create runs
+          no transition rules), the standard escape for CEL ratchets.
+6. [ ] Bake in Flux bootstrap, so the machine converges to its repo from
        first boot. This is where the Machine manifest's authority story
        resolves: today the file seeds the cluster and the cluster copy
        wins; with GitOps, git wins and both are downstream of it. Open
@@ -132,7 +177,7 @@
        (they're identity, like the CA bundle), and how a machine learns
        *which* repo — another field the image carries, or part of the
        Machine manifest itself.
-6. [ ] Growing the cluster past one node, driven by a `kind: Cluster`
+7. [ ] Growing the cluster past one node, driven by a `kind: Cluster`
        resource: what a machine needs to form or join a cluster — the
        k3s join token (or a reference to it; a token in plain YAML is a
        secrets problem), the server URL, and which machines are servers
@@ -143,7 +188,7 @@
        can reach each other is its own networking lesson (user-mode
        networking isolates guests; joining them takes a socket network
        or a bridge).
-7. [ ] Explore device management: how does a shell-less, udev-less OS
+8. [ ] Explore device management: how does a shell-less, udev-less OS
        expose `/dev` beyond the basics — USB devices arriving after
        boot, GPUs, serial adapters? devtmpfs gives us the nodes, but
        hotplug means fielding kernel uevents and loading modules,
@@ -151,7 +196,7 @@
        how workloads get to the hardware (device plugins, dynamic
        resource allocation) and whether devices belong in
        `status.hardware` alongside CPUs and memory.
-8. [ ] Explore declarative upgrades: setting `spec.version` on a Machine
+9. [ ] Explore declarative upgrades: setting `spec.version` on a Machine
        should upgrade the machine — liken's version drives the k3s
        version, so one field moves the whole stack. For a two-file OS an
        upgrade is "replace vmlinuz and liken.cpio and reboot", which

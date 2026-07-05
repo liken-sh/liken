@@ -242,6 +242,44 @@ func TestGPTNamesUseTheWholeField(t *testing.T) {
 	}
 }
 
+func TestWriteGPTWritesEverythingButNeedsARealDevice(t *testing.T) {
+	// writeGPT against a regular file lays down every byte of the
+	// table (round-trippable by the reader), and then fails at the
+	// last step: BLKRRPART is a block-device ioctl, and a file has no
+	// kernel partition view to re-read. That failure is the boundary
+	// between what a unit test can prove and what the QEMU harness
+	// owns.
+	path := filepath.Join(t.TempDir(), "disk")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(testDiskSectors * sectorSize); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	parts := []gptPartition{{name: "liken:machineState", firstLBA: 2_048, lastLBA: 4_095}}
+	err = writeGPT(path, testDiskSectors, parts)
+	if err == nil || !strings.Contains(err.Error(), "re-reading partition table") {
+		t.Fatalf("expected the ioctl boundary failure: %v", err)
+	}
+
+	// The bytes made it regardless: the reader sees a valid table.
+	r, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	table, err := readGPT(r, testDiskSectors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(table.entries) != 1 || table.entries[0].name != "liken:machineState" {
+		t.Errorf("the written table should read back: %+v", table.entries)
+	}
+}
+
 func TestGPTReaderRejectsForeignGeometry(t *testing.T) {
 	f := diskFile(t, sampleTable(), testDiskSectors)
 	// Rewrite the primary header claiming a 64-entry array, with a

@@ -130,6 +130,12 @@ run: $(KERNEL_DIST)/vmlinuz image/dist/liken.cpio
 run-once: $(KERNEL_DIST)/vmlinuz image/dist/liken.cpio
 	$(MAKE) -C dev-machine run-once
 
+# The reboot-capable run: a guest-initiated restart resets the VM in
+# place instead of ending it, which is how to watch a staged spec
+# apply: shutdown and next boot in one console stream.
+run-lab: $(KERNEL_DIST)/vmlinuz image/dist/liken.cpio
+	$(MAKE) -C dev-machine run-lab
+
 # Cleaning includes the dev machine's disks: with every domain's
 # artifacts gone, stale machine state would be the only survivor, and
 # a "clean" boot that remembers its last cluster isn't clean.
@@ -145,4 +151,4 @@ clean:
 	$(MAKE) -C identity clean
 	$(MAKE) -C image clean
 
-.PHONY: all kernel k3s xtables trust e2fsprogs init operator identity kubeconfig image run run-once clean
+.PHONY: all kernel k3s xtables trust e2fsprogs init operator identity kubeconfig image run run-once run-lab clean

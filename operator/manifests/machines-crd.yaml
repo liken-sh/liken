@@ -141,31 +141,39 @@ spec:
                   # refused by the operator before staging, and init
                   # itself never shrinks anything at boot. Three
                   # layers, one rule.
+                  #
+                  # One consequence to know: these rules ratchet the
+                  # *spec*, so after declaring a size the machine
+                  # turned out unable to satisfy, backing the number
+                  # out is also refused. The escape is
+                  # `kubectl replace --force`: delete-and-create runs
+                  # no transition rules, the standard exit from any
+                  # CEL ratchet.
                   x-kubernetes-validations:
                     - rule: >-
                         !has(oldSelf.machineState) || !has(self.machineState) ||
                         !has(oldSelf.machineState.size) || !has(self.machineState.size) ||
-                        quantity(self.machineState.size) >= quantity(oldSelf.machineState.size)
+                        !quantity(self.machineState.size).isLessThan(quantity(oldSelf.machineState.size))
                       message: machineState may not shrink; storage roles are grow-only
                     - rule: >-
                         !has(oldSelf.machineEphemeral) || !has(self.machineEphemeral) ||
                         !has(oldSelf.machineEphemeral.size) || !has(self.machineEphemeral.size) ||
-                        quantity(self.machineEphemeral.size) >= quantity(oldSelf.machineEphemeral.size)
+                        !quantity(self.machineEphemeral.size).isLessThan(quantity(oldSelf.machineEphemeral.size))
                       message: machineEphemeral may not shrink; storage roles are grow-only
                     - rule: >-
                         !has(oldSelf.clusterState) || !has(self.clusterState) ||
                         !has(oldSelf.clusterState.size) || !has(self.clusterState.size) ||
-                        quantity(self.clusterState.size) >= quantity(oldSelf.clusterState.size)
+                        !quantity(self.clusterState.size).isLessThan(quantity(oldSelf.clusterState.size))
                       message: clusterState may not shrink; storage roles are grow-only
                     - rule: >-
                         !has(oldSelf.podStorage) || !has(self.podStorage) ||
                         !has(oldSelf.podStorage.size) || !has(self.podStorage.size) ||
-                        quantity(self.podStorage.size) >= quantity(oldSelf.podStorage.size)
+                        !quantity(self.podStorage.size).isLessThan(quantity(oldSelf.podStorage.size))
                       message: podStorage may not shrink; storage roles are grow-only
                     - rule: >-
                         !has(oldSelf.podEphemeral) || !has(self.podEphemeral) ||
                         !has(oldSelf.podEphemeral.size) || !has(self.podEphemeral.size) ||
-                        quantity(self.podEphemeral.size) >= quantity(oldSelf.podEphemeral.size)
+                        !quantity(self.podEphemeral.size).isLessThan(quantity(oldSelf.podEphemeral.size))
                       message: podEphemeral may not shrink; storage roles are grow-only
                   properties:
                     machineState:

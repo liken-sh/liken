@@ -60,7 +60,9 @@ dist/pods.qcow2:
 #   -monitor none            don't multiplex QEMU's own control console
 #                            onto the same stream; tests read pure liken
 #   -no-reboot               a guest-initiated reboot ends QEMU instead
-#                            of looping, so boots terminate cleanly
+#                            of looping, so boots terminate cleanly.
+#                            `run-lab` drops this flag (see below): a
+#                            reboot then resets the VM in place
 #   -netdev user             QEMU's built-in user-mode network: it plays
 #                            DHCP server, router, NAT, and DNS proxy for
 #                            the guest (the 10.0.2.0/24 network), no root
@@ -90,6 +92,8 @@ dist/pods.qcow2:
 #                            drive would carry, so identifying a disk
 #                            by identity rather than by kernel name
 #                            works in the lab too
+QEMU_EXIT_ON_REBOOT := -no-reboot
+
 run: dist/state.qcow2 dist/pods.qcow2
 	qemu-system-x86_64 \
 		-accel kvm -accel tcg \
@@ -101,7 +105,7 @@ run: dist/state.qcow2 dist/pods.qcow2
 		-display none \
 		-serial stdio \
 		-monitor none \
-		-no-reboot \
+		$(QEMU_EXIT_ON_REBOOT) \
 		-netdev user,id=net0,hostfwd=tcp:127.0.0.1:16443-:6443 \
 		-device virtio-net-pci,netdev=net0 \
 		-drive file=dist/state.qcow2,format=qcow2,if=none,id=state \
@@ -115,7 +119,23 @@ run: dist/state.qcow2 dist/pods.qcow2
 run-once: LIKEN_BOOT_ARGS = liken.oneshot
 run-once: run
 
-.PHONY: run run-once clean
+# A reboot-capable run: identical to `run` but without -no-reboot, so
+# a guest-initiated restart resets the VM in place. QEMU reloads
+# -kernel and -initrd on reset, the qcow2 disks persist, and the
+# serial console shows the shutdown and the next boot as one stream:
+# the way to watch a staged spec get applied end to end.
+run-lab: QEMU_EXIT_ON_REBOOT :=
+run-lab: run
+
+# Grow the pods disk under the machine, the lab's stand-in for a
+# bigger drive or an expanded cloud volume. Only ever run this with
+# the machine off: resizing a live qcow2 corrupts it. The next boot
+# notices the disk outgrew its partition table, relocates the backup
+# GPT to the new end, and grows the remainder role into the new space.
+grow-pods:
+	qemu-img resize dist/pods.qcow2 +4G
+
+.PHONY: run run-once run-lab grow-pods clean
 
 clean:
 	rm -rf dist
