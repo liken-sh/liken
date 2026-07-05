@@ -224,7 +224,7 @@ func TestReconcileStorageRejectsInvalidSpec(t *testing.T) {
 	}
 }
 
-func TestClaimDiskRefusesPartialClaim(t *testing.T) {
+func TestPlanClaimRefusesPartialClaim(t *testing.T) {
 	// One of this disk's roles was recognized but another is missing:
 	// the table was liken's and then something changed, which is not
 	// safe to repair automatically.
@@ -235,7 +235,7 @@ func TestClaimDiskRefusesPartialClaim(t *testing.T) {
 	found := map[string]partition{
 		"clusterState": {name: "vda1", partName: "liken:clusterState"},
 	}
-	err := claimDisk("/dev/vda", roles, found)
+	_, err := planClaim("/dev/vda", roles, found)
 	if err == nil {
 		t.Fatal("expected an error for a partially-claimed disk")
 	}
@@ -246,16 +246,16 @@ func TestClaimDiskRefusesPartialClaim(t *testing.T) {
 	}
 }
 
-func TestClaimDiskRefusesUnattachedDevices(t *testing.T) {
+func TestPlanClaimRefusesUnattachedDevices(t *testing.T) {
 	fakeMachine(t) // a machine with no disks at all
 	roles := []machine.DeclaredRole{declared("clusterState", "/dev/vda", "")}
-	err := claimDisk("/dev/vda", roles, nil)
+	_, err := planClaim("/dev/vda", roles, nil)
 	if err == nil || !strings.Contains(err.Error(), "not attached") {
 		t.Errorf("expected a not-attached error: %v", err)
 	}
 }
 
-func TestClaimDiskRefusesForeignDisks(t *testing.T) {
+func TestPlanClaimRefusesForeignDisks(t *testing.T) {
 	cases := []struct {
 		name  string
 		stamp func(b []byte)
@@ -272,7 +272,7 @@ func TestClaimDiskRefusesForeignDisks(t *testing.T) {
 			addDisk(t, sys, dev, "vda", 1<<30, contents)
 			device := filepath.Join(dev, "vda")
 			roles := []machine.DeclaredRole{declared("clusterState", device, "")}
-			err := claimDisk(device, roles, nil)
+			_, err := planClaim(device, roles, nil)
 			if err == nil || !strings.Contains(err.Error(), "refusing to touch") {
 				t.Errorf("expected a refusal for a foreign disk: %v", err)
 			}
@@ -280,7 +280,7 @@ func TestClaimDiskRefusesForeignDisks(t *testing.T) {
 	}
 }
 
-func TestClaimDiskReportsUnreadableDevices(t *testing.T) {
+func TestPlanClaimReportsUnreadableDevices(t *testing.T) {
 	// The disk shows up in sysfs but its device node can't supply
 	// enough bytes to judge blankness; an unjudgeable disk must not
 	// be claimed.
@@ -288,7 +288,7 @@ func TestClaimDiskReportsUnreadableDevices(t *testing.T) {
 	addDisk(t, sys, dev, "vda", 1<<30, make([]byte, 100))
 	device := filepath.Join(dev, "vda")
 	roles := []machine.DeclaredRole{declared("clusterState", device, "")}
-	err := claimDisk(device, roles, nil)
+	_, err := planClaim(device, roles, nil)
 	if err == nil || !strings.Contains(err.Error(), "examining") {
 		t.Errorf("expected an examination error: %v", err)
 	}
@@ -300,8 +300,9 @@ func TestWaitForPartitionsReportsMissingPartitions(t *testing.T) {
 	addPartition(t, sys, "vda", "vda1", "liken:clusterState", 1<<20)
 
 	parts := []gptPartition{
-		{name: "liken:clusterState"},
-		{name: "liken:podStorage"},
+		// clusterState's extent matches the 1 MiB the fixture reports.
+		{name: "liken:clusterState", firstLBA: 2_048, lastLBA: 2_048 + (1<<20)/sectorSize - 1},
+		{name: "liken:podStorage", firstLBA: 4_096, lastLBA: 8_191},
 	}
 	err := waitForPartitions(parts, 50*time.Millisecond)
 	if err == nil {
@@ -312,6 +313,25 @@ func TestWaitForPartitionsReportsMissingPartitions(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "liken:clusterState") {
 		t.Errorf("error should not name the partition that did appear: %v", err)
+	}
+}
+
+func TestWaitForPartitionsReportsStaleSizes(t *testing.T) {
+	// The partition exists but sysfs still shows its old geometry: as
+	// wrong as no partition at all, and named as such.
+	sys, dev := fakeMachine(t)
+	addDisk(t, sys, dev, "vda", 1<<30, nil)
+	addPartition(t, sys, "vda", "vda1", "liken:clusterState", 1<<20)
+
+	parts := []gptPartition{
+		{name: "liken:clusterState", firstLBA: 2_048, lastLBA: 2_048 + (2<<20)/sectorSize - 1},
+	}
+	err := waitForPartitions(parts, 50*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected an error for a stale partition size")
+	}
+	if !strings.Contains(err.Error(), "liken:clusterState") || !strings.Contains(err.Error(), "still") {
+		t.Errorf("error should describe the stale size: %v", err)
 	}
 }
 

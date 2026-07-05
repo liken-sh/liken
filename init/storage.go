@@ -67,6 +67,7 @@ var roleMounts = map[string]roleMount{
 // re-reading any partition table ourselves.
 type partition struct {
 	name      string // the kernel's node name: vda1, nvme0n1p2
+	disk      string // the parent disk's node name: vda, nvme0n1
 	partName  string // the GPT partition name, "" if the table has none
 	sizeBytes uint64
 }
@@ -86,7 +87,7 @@ func discoverPartitions() []partition {
 			if _, err := os.Stat(filepath.Join(dir, entry.Name(), "partition")); err != nil {
 				continue
 			}
-			p := partition{name: entry.Name()}
+			p := partition{name: entry.Name(), disk: disk.Name}
 			if raw, err := os.ReadFile(filepath.Join(dir, entry.Name(), "size")); err == nil {
 				if sectors, err := strconv.ParseUint(strings.TrimSpace(string(raw)), 10, 64); err == nil {
 					p.sizeBytes = sectors * sectorSize
@@ -136,23 +137,6 @@ func isBlank(devPath string) (bool, error) {
 	return true, nil
 }
 
-// hasExt4 checks a partition for ext4's superblock magic: two bytes,
-// 0xEF53 little-endian, at offset 1080 (the superblock starts at 1024;
-// the magic is 56 bytes in). This is the same check blkid makes; a
-// filesystem's identity really is this shallow.
-func hasExt4(devPath string) bool {
-	f, err := os.Open(devPath)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	magic := make([]byte, 2)
-	if _, err := f.ReadAt(magic, 1080); err != nil {
-		return false
-	}
-	return magic[0] == 0x53 && magic[1] == 0xEF
-}
-
 // reconcileStorage actuates the storage spec. On success every
 // declared role is an ext4 filesystem mounted at its role's path, and
 // the returned status records where each role landed: the same facts
@@ -162,6 +146,17 @@ func hasExt4(devPath string) bool {
 // can't be satisfied, and the caller (main, the only place with the
 // authority) stops the boot rather than let k3s start with that
 // state in RAM.
+//
+// The shape is plan-everything-then-apply: every claim's layout and
+// every growth's table edit is computed before the first byte is
+// written to any disk. A spec that will fail should fail before it
+// changes the world, because the boot may go on to try a different
+// spec (the proven manifest, after a staged one is rejected), and
+// partitions half-created under the failed spec would poison that
+// attempt. What remains unavoidable is a genuine mid-write I/O
+// failure; a disk claimed by a failed attempt stays claimed, and if
+// that leaves two partitions carrying one role's name, recognition
+// refuses to guess and the boot stops, the honest outcome.
 func reconcileStorage(spec machine.StorageSpec) (machine.StorageStatus, error) {
 	status := machine.AllRolesInMemory()
 	roles := spec.Roles()
@@ -181,25 +176,44 @@ func reconcileStorage(spec machine.StorageSpec) (machine.StorageStatus, error) {
 		return status, err
 	}
 
-	// Claiming: any role still missing must point at a blank disk.
-	// Group by device, since roles sharing a disk are claimed together
-	// in one partition table.
-	var missing []machine.DeclaredRole
+	// Plan the claims: any role still missing must point at a blank
+	// disk. Group by device, since roles sharing a disk are claimed
+	// together in one partition table.
+	var claims []claimPlan
+	planned := map[string]bool{}
 	for _, role := range roles {
-		if _, ok := found[role.Name]; !ok {
-			missing = append(missing, role)
+		if _, ok := found[role.Name]; ok || planned[role.Device] {
+			continue
+		}
+		plan, err := planClaim(role.Device, roles, found)
+		if err != nil {
+			return status, err
+		}
+		claims = append(claims, plan)
+		planned[role.Device] = true
+	}
+
+	// Plan the growth: recognized partitions may be smaller than the
+	// spec now declares, or their disks may have grown underneath
+	// them. grow.go explains the rules.
+	grows, err := planAllGrowth(roles, found)
+	if err != nil {
+		return status, err
+	}
+
+	// Apply. Every plan already validated; from here failures are
+	// real I/O trouble.
+	for _, plan := range claims {
+		if err := applyClaim(plan); err != nil {
+			return status, err
 		}
 	}
-	if len(missing) > 0 {
-		claimed := map[string]bool{}
-		for _, role := range missing {
-			if !claimed[role.Device] {
-				if err := claimDisk(role.Device, roles, found); err != nil {
-					return status, err
-				}
-				claimed[role.Device] = true
-			}
+	for _, plan := range grows {
+		if err := applyGrowth(plan); err != nil {
+			return status, err
 		}
+	}
+	if len(claims) > 0 || len(grows) > 0 {
 		if found, err = recognizeRoles(roles); err != nil {
 			return status, err
 		}
@@ -254,11 +268,21 @@ func matchRoles(roles []machine.DeclaredRole, parts []partition) (map[string]par
 	return found, nil
 }
 
-// claimDisk gives a blank disk its partition table: every declared
-// role that names this device, laid down in canonical order, sized
-// roles first at their exact sizes and the remainder role taking
-// whatever is left.
-func claimDisk(device string, roles []machine.DeclaredRole, found map[string]partition) error {
+// A claimPlan is one blank disk's pending partition table: validated
+// and laid out up front, written only after every disk's plan
+// succeeded.
+type claimPlan struct {
+	device       string
+	totalSectors uint64
+	parts        []gptPartition
+	roleCount    int
+}
+
+// planClaim validates that a disk may be claimed for every declared
+// role naming it, and lays out its table: sized roles first at their
+// exact sizes, in canonical order, and the remainder role taking
+// whatever is left. Nothing is written.
+func planClaim(device string, roles []machine.DeclaredRole, found map[string]partition) (claimPlan, error) {
 	var mine []machine.DeclaredRole
 	for _, role := range roles {
 		if role.Device == device {
@@ -267,7 +291,7 @@ func claimDisk(device string, roles []machine.DeclaredRole, found map[string]par
 			// something changed: not blank, not claimable, and not
 			// safe to fix automatically.
 			if _, ok := found[role.Name]; ok {
-				return fmt.Errorf("disk %s already carries %s but is missing other declared roles; refusing to modify it",
+				return claimPlan{}, fmt.Errorf("disk %s already carries %s but is missing other declared roles; refusing to modify it",
 					device, role.PartitionName())
 			}
 			mine = append(mine, role)
@@ -276,27 +300,33 @@ func claimDisk(device string, roles []machine.DeclaredRole, found map[string]par
 
 	disk := diskByPath(device)
 	if disk == nil {
-		return fmt.Errorf("declared device %s is not attached", device)
+		return claimPlan{}, fmt.Errorf("declared device %s is not attached", device)
 	}
 	blank, err := isBlank(device)
 	if err != nil {
-		return fmt.Errorf("examining %s: %w", device, err)
+		return claimPlan{}, fmt.Errorf("examining %s: %w", device, err)
 	}
 	if !blank {
-		return fmt.Errorf("%s carries a partition table or filesystem liken doesn't recognize; refusing to touch it (wipe it yourself if it's expendable)", device)
+		return claimPlan{}, fmt.Errorf("%s carries a partition table or filesystem liken doesn't recognize; refusing to touch it (wipe it yourself if it's expendable)", device)
 	}
 
 	totalSectors := disk.SizeBytes / sectorSize
 	parts, err := planPartitions(device, mine, totalSectors)
 	if err != nil {
-		return err
+		return claimPlan{}, err
 	}
+	return claimPlan{device: device, totalSectors: totalSectors, parts: parts, roleCount: len(mine)}, nil
+}
 
-	fmt.Printf("liken: storage: claiming %s (%s) for %d role(s)\n", device, gib(disk.SizeBytes), len(mine))
-	if err := writeGPT(device, totalSectors, parts); err != nil {
-		return fmt.Errorf("partitioning %s: %w", device, err)
+// applyClaim writes one planned table and waits for the kernel to
+// surface its partitions.
+func applyClaim(plan claimPlan) error {
+	fmt.Printf("liken: storage: claiming %s (%s) for %d role(s)\n",
+		plan.device, gib(plan.totalSectors*sectorSize), plan.roleCount)
+	if err := writeGPT(plan.device, plan.totalSectors, plan.parts); err != nil {
+		return fmt.Errorf("partitioning %s: %w", plan.device, err)
 	}
-	return waitForPartitions(parts, 5*time.Second)
+	return waitForPartitions(plan.parts, 5*time.Second)
 }
 
 // planPartitions lays out a claimed disk's table: sized roles pack
@@ -335,22 +365,27 @@ func planPartitions(device string, mine []machine.DeclaredRole, totalSectors uin
 
 // waitForPartitions gives the kernel a moment to surface the devices
 // for a table just written: BLKRRPART is synchronous but the devtmpfs
-// nodes and sysfs entries appear slightly later. Running out of
-// patience is an error that names which partitions never showed:
-// "the kernel wouldn't surface the table" is a different problem
-// from "the table was never written", and the console should say
-// which one happened.
+// nodes and sysfs entries appear slightly later. Each partition must
+// appear at its planned size, which is what makes this wait serve
+// growth as well as claiming: an old geometry still showing is as
+// wrong as no partition at all. Running out of patience is an error
+// that names exactly what never showed.
 func waitForPartitions(parts []gptPartition, patience time.Duration) error {
 	deadline := time.Now().Add(patience)
 	for {
-		visible := map[string]bool{}
+		visible := map[string]uint64{}
 		for _, p := range discoverPartitions() {
-			visible[p.partName] = true
+			visible[p.partName] = p.sizeBytes
 		}
 		var missing []string
 		for _, want := range parts {
-			if !visible[want.name] {
+			wantBytes := (want.lastLBA - want.firstLBA + 1) * sectorSize
+			got, ok := visible[want.name]
+			switch {
+			case !ok:
 				missing = append(missing, want.name)
+			case got != wantBytes:
+				missing = append(missing, fmt.Sprintf("%s (still %d bytes, want %d)", want.name, got, wantBytes))
 			}
 		}
 		if len(missing) == 0 {
@@ -428,6 +463,13 @@ func mountRole(role machine.DeclaredRole, p partition) error {
 			return fmt.Errorf("mounting %s for %s: %w", dev, role.Name, err)
 		}
 	}
+	// A partition grown this boot still carries a filesystem sized for
+	// the old extent; now that it's mounted, ext4 can be grown online
+	// to fill it (ext4.go explains why mounted is the easy case).
+	if err := maybeGrowFilesystem(role, p, target); err != nil {
+		return err
+	}
+
 	// A freshly-made ext4 root is 0755 root-only; roles like /tmp need
 	// their conventional permissions applied to the mounted root.
 	if rm.mode != 0 {
