@@ -132,7 +132,7 @@
        `clusterState` awaits `kind: Cluster`), and the new
        `machineState` role holds the machine's manifests: the operator
        detects drift between the cluster's spec and the boot's
-       actuation record, validates against the machine's reality
+       boot record, validates against the machine's reality
        (grow-only sizes, attached devices; CEL rules refuse shrinks at
        admission), stages the manifest durably, and per
        `spec.rebootPolicy` requests a reboot or reports one pending.
@@ -149,7 +149,7 @@
           filesystem grown online via EXT4_IOC_RESIZE_FS.
    3. [x] The manifest lifecycle on machineState: staged/proven/
           rejected, durable writes, the settle loop with last-known-good
-          fallback, and the actuation record in facts and status.
+          fallback, and the boot record in facts and status.
    4. [x] The operator's convergence loop: drift detection, staging
           validation, the SpecConverged condition vocabulary,
           `spec.rebootPolicy`, and CEL no-shrink rules in the CRD.

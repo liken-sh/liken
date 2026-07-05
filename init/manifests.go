@@ -227,15 +227,15 @@ func attemptOrder(c manifestCandidates, seed *manifestChoice) []*manifestChoice 
 // settleStorage actuates storage under the best available manifest
 // and reports which one won. An error means even the last manifest in
 // the attempt order failed; the caller stops the boot.
-func settleStorage() (*machine.Machine, machine.StorageStatus, machine.ActuationStatus, error) {
+func settleStorage() (*machine.Machine, machine.StorageStatus, machine.BootStatus, error) {
 	status := machine.AllRolesInMemory()
-	actuation := machine.ActuationStatus{}
+	boot := machine.BootStatus{}
 
 	candidates, err := loadManifestCandidates()
 	if err != nil {
-		return nil, status, actuation, err
+		return nil, status, boot, err
 	}
-	actuation.Rejection = candidates.rejection
+	boot.Rejection = candidates.rejection
 
 	attempts := attemptOrder(candidates, loadSeed())
 	for i, choice := range attempts {
@@ -244,11 +244,11 @@ func settleStorage() (*machine.Machine, machine.StorageStatus, machine.Actuation
 		}
 		status, err = reconcileStorage(choice.m.Spec.Storage)
 		if err == nil {
-			actuation.ManifestSource = choice.source
-			actuation.ManifestHash = choice.hash
-			actuation.Storage = choice.m.Spec.Storage
-			settleManifests(choice, status, &actuation)
-			return choice.m, status, actuation, nil
+			boot.ManifestSource = choice.source
+			boot.ManifestHash = choice.hash
+			boot.Storage = choice.m.Spec.Storage
+			settleManifests(choice, status, &boot)
+			return choice.m, status, boot, nil
 		}
 		if choice.source == machine.ManifestSourceStaged && i+1 < len(attempts) {
 			fmt.Fprintf(os.Stderr, "liken: storage: the staged manifest failed: %v\n", err)
@@ -264,10 +264,10 @@ func settleStorage() (*machine.Machine, machine.StorageStatus, machine.Actuation
 			}); terr != nil {
 				fmt.Fprintf(os.Stderr, "liken: storage: recording the rejection: %v\n", terr)
 			}
-			actuation.Rejection = &rejection
+			boot.Rejection = &rejection
 			continue
 		}
-		return choice.m, status, actuation, err
+		return choice.m, status, boot, err
 	}
 	// attemptOrder never returns an empty list; the loop always returns.
 	panic("unreachable")
@@ -279,7 +279,7 @@ func settleStorage() (*machine.Machine, machine.StorageStatus, machine.Actuation
 // manifest. Failures here are loud but not fatal: the machine is up,
 // and the next boot simply repeats the step (a staged manifest that
 // boots once boots again).
-func settleManifests(choice *manifestChoice, status machine.StorageStatus, actuation *machine.ActuationStatus) {
+func settleManifests(choice *manifestChoice, status machine.StorageStatus, boot *machine.BootStatus) {
 	if status.MachineState.Backing != machine.BackingPartition {
 		return // nothing durable to keep manifests on
 	}
@@ -290,8 +290,8 @@ func settleManifests(choice *manifestChoice, status machine.StorageStatus, actua
 			return
 		}
 		fmt.Printf("liken: storage: the staged manifest is now proven (%.12s)\n", choice.hash)
-		actuation.ManifestSource = machine.ManifestSourceProven
-		actuation.Rejection = nil // a success supersedes old history
+		boot.ManifestSource = machine.ManifestSourceProven
+		boot.Rejection = nil // a success supersedes old history
 	case machine.ManifestSourceSeed:
 		if len(choice.raw) == 0 {
 			return
@@ -301,6 +301,6 @@ func settleManifests(choice *manifestChoice, status machine.StorageStatus, actua
 			return
 		}
 		fmt.Printf("liken: storage: the seed manifest is now proven (%.12s)\n", choice.hash)
-		actuation.ManifestSource = machine.ManifestSourceProven
+		boot.ManifestSource = machine.ManifestSourceProven
 	}
 }

@@ -378,7 +378,7 @@ spec:
                           type: string
                         capacityBytes:
                           type: integer
-                actuation:
+                boot:
                   type: object
                   description: >-
                     Which manifest this boot actually ran under: the

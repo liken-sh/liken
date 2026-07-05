@@ -28,7 +28,7 @@ func labStorage() machine.StorageSpec {
 }
 
 // labFacts builds the facts a healthy boot of the lab machine
-// publishes: every role placed, actuation recorded.
+// publishes: every role placed, the boot record filled in.
 func labFacts() *machine.MachineStatus {
 	facts := &machine.MachineStatus{
 		Hardware: machine.HardwareStatus{
@@ -44,7 +44,7 @@ func labFacts() *machine.MachineStatus {
 			PodStorage:       machine.StorageRoleStatus{Backing: machine.BackingPartition, Device: "vdb2", CapacityBytes: 2 << 30},
 			PodEphemeral:     machine.StorageRoleStatus{Backing: machine.BackingPartition, Device: "vdb3", CapacityBytes: 1 << 30},
 		},
-		Actuation: machine.ActuationStatus{
+		Boot: machine.BootStatus{
 			ManifestSource: machine.ManifestSourceProven,
 			ManifestHash:   "abc123",
 			Storage:        labStorage(),
@@ -192,9 +192,9 @@ func TestDecideConvergenceWithoutFacts(t *testing.T) {
 	}
 }
 
-func TestDecideConvergenceWithoutAnActuationRecord(t *testing.T) {
+func TestDecideConvergenceWithoutABootRecord(t *testing.T) {
 	facts := labFacts()
-	facts.Actuation = machine.ActuationStatus{}
+	facts.Boot = machine.BootStatus{}
 	conv := decideConvergence(labMachine(), facts, "")
 	if conv.condition.Reason != "FactsIncomplete" {
 		t.Errorf("got %+v", conv.condition)
@@ -267,7 +267,7 @@ func TestDecideConvergenceHonorsARejection(t *testing.T) {
 		t.Fatal(err)
 	}
 	facts := labFacts()
-	facts.Actuation.Rejection = &machine.Rejection{Hash: hash, Reason: "disk on fire"}
+	facts.Boot.Rejection = &machine.Rejection{Hash: hash, Reason: "disk on fire"}
 
 	conv := decideConvergence(m, facts, "")
 	if conv.condition.Reason != "RejectedLastBoot" {
@@ -286,7 +286,7 @@ func TestDecideConvergenceStagesAgainForADifferentEdit(t *testing.T) {
 	// edit clears it naturally.
 	m := grownLabMachine()
 	facts := labFacts()
-	facts.Actuation.Rejection = &machine.Rejection{Hash: "some-other-hash", Reason: "old news"}
+	facts.Boot.Rejection = &machine.Rejection{Hash: "some-other-hash", Reason: "old news"}
 	conv := decideConvergence(m, facts, "")
 	if conv.condition.Reason != "RebootPending" || !conv.stage {
 		t.Errorf("a different spec should stage normally: %+v", conv)
@@ -301,10 +301,10 @@ func TestDecideConvergenceRefusesToLoopOnAContradiction(t *testing.T) {
 		t.Fatal(err)
 	}
 	facts := labFacts()
-	facts.Actuation.ManifestHash = hash // "I actuated that" — yet drift computes
+	facts.Boot.ManifestHash = hash // "I actuated that" — yet drift computes
 
 	conv := decideConvergence(m, facts, "")
-	if conv.condition.Reason != "ActuationMismatch" {
+	if conv.condition.Reason != "BootMismatch" {
 		t.Fatalf("got %+v", conv.condition)
 	}
 	if conv.stage || conv.requestReboot {

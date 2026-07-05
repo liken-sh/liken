@@ -189,9 +189,9 @@ func notConverged(reason, message string) machine.Condition {
 // decideConvergence is the whole feature as one decision. The cases,
 // in the order they short-circuit:
 //
-//  1. No facts, or facts without an actuation record (an older init,
-//     a machine mid-upgrade): Unknown. Guessing could reboot a
-//     machine over a misreading.
+//  1. No facts, or facts without a boot record (an older init, a
+//     machine mid-upgrade): Unknown. Guessing could reboot a machine
+//     over a misreading.
 //  2. No drift: converged, done. The overwhelmingly common pass.
 //  3. The desired spec is the one init rejected last boot: refuse to
 //     re-stage it. Facts die with every boot but the quarantine file
@@ -207,14 +207,14 @@ func notConverged(reason, message string) machine.Condition {
 //     per rebootPolicy either request the reboot or report one
 //     pending.
 func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, stagedHash string) convergence {
-	if facts == nil || facts.Actuation.ManifestSource == "" {
+	if facts == nil || facts.Boot.ManifestSource == "" {
 		return convergence{condition: machine.Condition{
 			Type: "SpecConverged", Status: "Unknown", Reason: "FactsIncomplete",
-			Message: "the machine's facts carry no actuation record yet",
+			Message: "the machine's facts carry no boot record yet",
 		}}
 	}
 
-	drift := storageDrift(m.Spec.Storage, facts.Actuation.Storage)
+	drift := storageDrift(m.Spec.Storage, facts.Boot.Storage)
 	if len(drift) == 0 {
 		return convergence{condition: converged("BootCurrent", "this boot actuated the current spec")}
 	}
@@ -225,12 +225,12 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, stagedH
 		return convergence{condition: notConverged("StagingFailed", err.Error())}
 	}
 
-	if r := facts.Actuation.Rejection; r != nil && r.Hash == hash {
+	if r := facts.Boot.Rejection; r != nil && r.Hash == hash {
 		return convergence{condition: notConverged("RejectedLastBoot",
 			fmt.Sprintf("init rejected this exact spec at boot: %s; edit the spec to something different", r.Reason))}
 	}
-	if facts.Actuation.ManifestHash == hash {
-		return convergence{condition: notConverged("ActuationMismatch",
+	if facts.Boot.ManifestHash == hash {
+		return convergence{condition: notConverged("BootMismatch",
 			fmt.Sprintf("facts claim this spec was actuated, yet it differs from the boot's storage (%s); refusing to reboot over a contradiction — this is a liken bug", diffs))}
 	}
 	if facts.Storage.MachineState.Backing != machine.BackingPartition {

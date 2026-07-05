@@ -33,11 +33,11 @@ type MachineStatus struct {
 	// side by side in one kubectl get.
 	Sysctls map[string]string `json:"sysctls,omitempty"`
 
-	// Actuation reports which manifest this boot actually ran under:
-	// the reference point that lets the operator compare the cluster's
+	// Boot reports which manifest this boot actually ran under: the
+	// reference point that lets the operator compare the cluster's
 	// spec against what the machine actuated, and see any rejection
 	// that happened on the way up.
-	Actuation ActuationStatus `json:"actuation,omitzero"`
+	Boot BootStatus `json:"boot,omitzero"`
 
 	BootedAt *time.Time `json:"bootedAt,omitempty"`
 
@@ -159,12 +159,12 @@ const (
 	ManifestSourceSeed   = "Seed"
 )
 
-// ActuationStatus is the boot's account of its own configuration:
-// which manifest won, identified by the hash of its exact bytes, and
-// the storage spec it actuated. This is the half of drift detection
-// only init can supply; the operator compares it against the
-// cluster's spec.
-type ActuationStatus struct {
+// BootStatus is the boot's account of its own configuration: which
+// manifest won, identified by the hash of its exact bytes, and the
+// storage spec it actuated. This is the half of drift detection only
+// init can supply; the operator compares it against the cluster's
+// spec.
+type BootStatus struct {
 	ManifestSource string      `json:"manifestSource,omitempty"`
 	ManifestHash   string      `json:"manifestHash,omitempty"`
 	Storage        StorageSpec `json:"storage,omitzero"`

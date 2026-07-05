@@ -22,7 +22,7 @@ import (
 	"github.com/chrisguidry/liken/machine"
 )
 
-func publishFacts(conn *connection, storage machine.StorageStatus, actuation machine.ActuationStatus) {
+func publishFacts(conn *connection, storage machine.StorageStatus, boot machine.BootStatus) {
 	now := time.Now()
 	facts := &machine.MachineStatus{
 		Version: machine.VersionStatus{Liken: machine.Version},
@@ -35,8 +35,8 @@ func publishFacts(conn *connection, storage machine.StorageStatus, actuation mac
 		// Where every storage role landed, and under which manifest:
 		// the blocks that can't be re-derived here, because only the
 		// settling saw them happen.
-		Storage:   storage,
-		Actuation: actuation,
+		Storage: storage,
+		Boot:    boot,
 	}
 
 	var u unix.Utsname

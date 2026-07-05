@@ -81,7 +81,7 @@ func main() {
 	// way. This is also the one actuator allowed to stop a boot;
 	// storage.go explains why an unsatisfiable role powers the
 	// machine off.
-	m, storage, actuation, err := settleStorage()
+	m, storage, boot, err := settleStorage()
 	if err != nil {
 		failBoot("%v", err)
 	}
@@ -120,7 +120,7 @@ func main() {
 		// Facts wait until here because they live under /run, and
 		// prepareForK3s just mounted a fresh tmpfs there; anything
 		// written earlier would be shadowed by the mount.
-		publishFacts(conn, storage, actuation)
+		publishFacts(conn, storage, boot)
 		// The reboot channel: init creates the directory (owning its
 		// existence and permissions), the operator writes into it,
 		// and the watcher carries at most one request into the
