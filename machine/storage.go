@@ -1,0 +1,189 @@
+package machine
+
+// The storage half of the Machine spec.
+//
+// Storage is declared by purpose, not by mount path. The manifest
+// never says "/var/lib/rancher" — that's a k3s implementation detail
+// liken owns — it says "this disk holds the cluster's state", and
+// liken translates. The roles are fields rather than a list on
+// purpose: each is a singleton (a machine has one cluster state, one
+// pod-storage pool), so making them schema means a duplicate role
+// can't even be expressed, and a new role is visibly an API change.
+//
+// The device path in each role matters only on the boot that claims
+// the disk: kernel device names are assigned in driver probe order,
+// which is a handle, not an identity. Claiming stamps the role's name
+// onto the partition itself (its GPT partition name), and every boot
+// after finds it by that name, wherever the disk enumerates.
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+// PartitionPrefix namespaces liken's GPT partition names, so a glance
+// at any partition table shows which partitions belong to liken and
+// which role each serves.
+const PartitionPrefix = "liken:"
+
+type StorageSpec struct {
+	// ClusterState is the cluster's world — k3s's state, the etcd or
+	// sqlite database, and containerd's images. Persisting it is what
+	// makes a reboot resume the same cluster instead of founding a
+	// new one.
+	ClusterState *StorageRole `json:"clusterState,omitempty"`
+
+	// SystemEphemeral is the operating system's own scratch space:
+	// /tmp. Small but load-bearing — the container runtime stages
+	// exec sessions there — and on a RAM-rooted machine, moving it to
+	// disk is memory back in the pods' pockets.
+	SystemEphemeral *StorageRole `json:"systemEphemeral,omitempty"`
+
+	// PodStorage is durable storage pods claim by name: the
+	// PersistentVolumeClaim pool, served by k3s's local-path
+	// provisioner from this role's filesystem.
+	PodStorage *StorageRole `json:"podStorage,omitempty"`
+
+	// PodEphemeral is kubelet's working space: emptyDir volumes and
+	// per-pod scratch — the pool pods meter with ephemeral-storage
+	// requests and limits.
+	PodEphemeral *StorageRole `json:"podEphemeral,omitempty"`
+}
+
+// StorageRole places one role onto hardware. A role missing from the
+// spec isn't an error — it simply lives on the machine's RAM root,
+// like everything did before disks existed.
+type StorageRole struct {
+	// Device is the disk this role lives on, as a device path
+	// (/dev/vda). Consulted only when claiming a blank disk.
+	Device string `json:"device"`
+
+	// Size is how much of the device this role takes, as a binary
+	// quantity ("2Gi") — an exact allocation, not a request. Omitted,
+	// the role takes the rest of its disk; only one role per disk may
+	// do that.
+	Size string `json:"size,omitempty"`
+}
+
+// A DeclaredRole is one role present in the spec, paired with its
+// name — the form the rest of liken consumes, since the name becomes
+// the partition's on-disk identity.
+type DeclaredRole struct {
+	Name string
+	StorageRole
+}
+
+// PartitionName is the role's on-disk identity: the GPT partition
+// name claiming stamps, and recognition looks for.
+func (r DeclaredRole) PartitionName() string {
+	return PartitionPrefix + r.Name
+}
+
+// Roles returns the declared roles in canonical order. The order is
+// load-bearing: it's the order partitions are laid down when roles
+// share a disk, fixed here rather than by YAML map order, which
+// Kubernetes doesn't preserve.
+func (s StorageSpec) Roles() []DeclaredRole {
+	var roles []DeclaredRole
+	for _, candidate := range []struct {
+		name string
+		role *StorageRole
+	}{
+		{"clusterState", s.ClusterState},
+		{"systemEphemeral", s.SystemEphemeral},
+		{"podStorage", s.PodStorage},
+		{"podEphemeral", s.PodEphemeral},
+	} {
+		if candidate.role != nil {
+			roles = append(roles, DeclaredRole{candidate.name, *candidate.role})
+		}
+	}
+	return roles
+}
+
+// Validate checks the spec's internal consistency — the errors a
+// person can fix in the manifest, caught before any disk is touched.
+func (s StorageSpec) Validate() error {
+	remainders := map[string]string{}
+	for _, role := range s.Roles() {
+		if role.Device == "" {
+			return fmt.Errorf("storage role %s: no device", role.Name)
+		}
+		if role.Size == "" {
+			if other, ok := remainders[role.Device]; ok {
+				return fmt.Errorf(
+					"storage roles %s and %s both want the rest of %s; only one role per disk may omit its size",
+					other, role.Name, role.Device)
+			}
+			remainders[role.Device] = role.Name
+			continue
+		}
+		if _, err := ParseSize(role.Size); err != nil {
+			return fmt.Errorf("storage role %s: %w", role.Name, err)
+		}
+	}
+	return nil
+}
+
+// StorageCondition summarizes the whole storage story as one standard
+// Kubernetes condition, comparing what the spec promised against
+// where each role actually landed. True means every declared role sits
+// on its partition. False should be unreachable on a running machine —
+// init stops the boot rather than break a storage promise — but a
+// condition must be able to say every state it names, and a future,
+// softer failure mode will find this one waiting.
+func StorageCondition(spec StorageSpec, status StorageStatus) Condition {
+	var placed, inMemory []string
+	for _, role := range spec.Roles() {
+		rs := status.Role(role.Name)
+		if rs != nil && rs.Backing == BackingPartition {
+			placed = append(placed, fmt.Sprintf("%s on %s", role.Name, rs.Device))
+		} else {
+			inMemory = append(inMemory, role.Name)
+		}
+	}
+	switch {
+	case len(inMemory) > 0:
+		return Condition{
+			Type: "StorageReady", Status: "False", Reason: "RolesInMemory",
+			Message: fmt.Sprintf("declared roles living in memory: %s", strings.Join(inMemory, ", ")),
+		}
+	case len(placed) > 0:
+		return Condition{
+			Type: "StorageReady", Status: "True", Reason: "AllRolesPlaced",
+			Message: strings.Join(placed, ", "),
+		}
+	default:
+		return Condition{
+			Type: "StorageReady", Status: "True", Reason: "NothingDeclared",
+			Message: "no storage declared; everything lives in memory",
+		}
+	}
+}
+
+// ParseSize reads a binary quantity — "2Gi", "512Mi", or a plain
+// count of bytes — into bytes. Only the power-of-two suffixes are
+// accepted: disks are carved in the same units their partition math
+// uses, and accepting "2G" (decimal) alongside "2Gi" (binary) invites
+// off-by-7% surprises.
+func ParseSize(s string) (uint64, error) {
+	digits := s
+	var unit uint64 = 1
+	for suffix, size := range map[string]uint64{
+		"Ki": 1 << 10,
+		"Mi": 1 << 20,
+		"Gi": 1 << 30,
+		"Ti": 1 << 40,
+	} {
+		if rest, ok := strings.CutSuffix(s, suffix); ok {
+			digits, unit = rest, size
+			break
+		}
+	}
+	n, err := strconv.ParseUint(digits, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("size %q: expected bytes or a Ki/Mi/Gi/Ti quantity", s)
+	}
+	return n * unit, nil
+}

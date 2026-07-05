@@ -1,0 +1,444 @@
+package main
+
+// Actuating spec.storage: the machine meets its disks.
+//
+// The contract (machine/storage.go has the API's side of the story):
+// every boot, each declared role is *recognized* — found by the GPT
+// partition name claiming stamped on it — or, exactly once, *claimed*:
+// a blank disk gets a partition table, fresh filesystems, and the
+// roles' names written into it. Two rules make this safe to run on
+// every machine, every boot:
+//
+//   - Reconciling never destroys data. Only a disk with no partition
+//     table and no filesystem — nothing we or anyone else ever wrote —
+//     may be claimed. Anything unrecognized is refused, out loud.
+//
+//   - A broken promise stops the boot. If a declared role can't be
+//     recognized or claimed, the machine powers off rather than start
+//     k3s on RAM where persistence was promised. A machine that's
+//     down is recoverable; a cluster that silently wrote its state to
+//     memory is not. (Roles *absent* from the spec are no promise at
+//     all: those directories simply stay on the RAM root.)
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"golang.org/x/sys/unix"
+
+	"github.com/chrisguidry/liken/machine"
+)
+
+// Where each role lands in the filesystem — liken's private
+// translation, deliberately absent from the Machine API:
+//
+//	clusterState     /var/lib/rancher — k3s's whole world: its
+//	                 database, its TLS material, containerd's images
+//	systemEphemeral  /tmp — the OS's own scratch; nosuid/nodev and
+//	                 world-writable-with-sticky-bit, per long Unix
+//	                 tradition
+//	podStorage       the local-path provisioner's root; the path also
+//	                 appears in the image's k3s config.yaml
+//	podEphemeral     kubelet's root directory: emptyDirs, pod scratch
+type roleMount struct {
+	path  string
+	flags uintptr
+	mode  os.FileMode // applied to the mounted root; 0 leaves the default
+}
+
+var roleMounts = map[string]roleMount{
+	"clusterState":    {path: "/var/lib/rancher"},
+	"systemEphemeral": {path: "/tmp", flags: unix.MS_NOSUID | unix.MS_NODEV, mode: 0o1777},
+	"podStorage":      {path: "/var/lib/liken/pod-storage"},
+	"podEphemeral":    {path: "/var/lib/kubelet"},
+}
+
+// A partition as sysfs presents it: a subdirectory of its disk's
+// /sys/block entry. The kernel parsed the GPT; the name it read is in
+// the partition's uevent, which is how recognition works without
+// re-reading any partition table ourselves.
+type partition struct {
+	name      string // the kernel's node name: vda1, nvme0n1p2
+	partName  string // the GPT partition name, "" if the table has none
+	sizeBytes uint64
+}
+
+func discoverPartitions() []partition {
+	var parts []partition
+	for _, disk := range discoverBlockDevices() {
+		dir := filepath.Join("/sys/block", disk.Name)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			// A disk's partitions appear as subdirectories named after
+			// their device (vda → vda1); the `partition` file inside is
+			// what distinguishes them from the disk's other attributes.
+			if _, err := os.Stat(filepath.Join(dir, entry.Name(), "partition")); err != nil {
+				continue
+			}
+			p := partition{name: entry.Name()}
+			if raw, err := os.ReadFile(filepath.Join(dir, entry.Name(), "size")); err == nil {
+				var sectors uint64
+				fmt.Sscanf(string(raw), "%d", &sectors)
+				p.sizeBytes = sectors * sectorSize
+			}
+			// The uevent file is KEY=value lines; PARTNAME appears
+			// only for tables that carry names, which GPT does.
+			if raw, err := os.ReadFile(filepath.Join(dir, entry.Name(), "uevent")); err == nil {
+				for line := range strings.SplitSeq(strings.TrimSpace(string(raw)), "\n") {
+					if v, ok := strings.CutPrefix(line, "PARTNAME="); ok {
+						p.partName = v
+					}
+				}
+			}
+			parts = append(parts, p)
+		}
+	}
+	return parts
+}
+
+// isBlank reports whether a disk carries nothing recognizable: no MBR
+// or GPT, no ext4 filesystem written straight to the device. This is
+// the entire license to claim — a disk something else formatted fails
+// every one of these checks' inverses and is left alone.
+func isBlank(devPath string) (bool, error) {
+	f, err := os.Open(devPath)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	// Enough to cover all three signatures: the MBR's 0x55AA at 510,
+	// GPT's "EFI PART" at 512, ext4's magic at 1080.
+	head := make([]byte, 2048)
+	if _, err := f.ReadAt(head, 0); err != nil {
+		return false, err
+	}
+	switch {
+	case head[510] == 0x55 && head[511] == 0xAA:
+		return false, nil
+	case string(head[512:520]) == "EFI PART":
+		return false, nil
+	case head[1080] == 0x53 && head[1081] == 0xEF:
+		return false, nil
+	}
+	return true, nil
+}
+
+// hasExt4 checks a partition for ext4's superblock magic — two bytes,
+// 0xEF53 little-endian, at offset 1080 (the superblock starts at 1024;
+// the magic is 56 bytes in). This is the same check blkid makes; a
+// filesystem's identity really is this shallow.
+func hasExt4(devPath string) bool {
+	f, err := os.Open(devPath)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	magic := make([]byte, 2)
+	if _, err := f.ReadAt(magic, 1080); err != nil {
+		return false
+	}
+	return magic[0] == 0x53 && magic[1] == 0xEF
+}
+
+// reconcileStorage actuates the storage spec, or stops the boot
+// trying. On success every declared role is an ext4 filesystem
+// mounted at its role's path, and the returned landing table says so
+// — the same facts the console narrates, headed for the Machine's
+// status, because a story only told to the serial port is invisible
+// to everyone operating the machine from afar.
+func reconcileStorage(spec machine.StorageSpec) machine.StorageStatus {
+	landings := machine.AllRolesInMemory()
+	roles := spec.Roles()
+	if len(roles) == 0 {
+		return landings
+	}
+	if err := spec.Validate(); err != nil {
+		failBoot("%v", err)
+	}
+
+	// Recognition: each declared role, found by the name stamped on
+	// its partition. The device in the spec is not consulted — a disk
+	// that moved controllers since it was claimed is still itself.
+	found := recognizeRoles(roles)
+
+	// Claiming: any role still missing had better point at a blank
+	// disk. Group by device, since roles sharing a disk are claimed
+	// together in one partition table.
+	var missing []machine.DeclaredRole
+	for _, role := range roles {
+		if _, ok := found[role.Name]; !ok {
+			missing = append(missing, role)
+		}
+	}
+	if len(missing) > 0 {
+		claimed := map[string]bool{}
+		for _, role := range missing {
+			if !claimed[role.Device] {
+				claimDisk(role.Device, roles, found)
+				claimed[role.Device] = true
+			}
+		}
+		found = recognizeRoles(roles)
+		for _, role := range roles {
+			if _, ok := found[role.Name]; !ok {
+				failBoot("role %s: partition %s did not appear after claiming %s",
+					role.Name, role.PartitionName(), role.Device)
+			}
+		}
+	}
+
+	for _, role := range roles {
+		p := found[role.Name]
+		mountRole(role, p)
+		*landings.Role(role.Name) = machine.StorageRoleStatus{
+			Backing:       machine.BackingPartition,
+			Device:        p.name,
+			Partition:     p.partName,
+			CapacityBytes: p.sizeBytes,
+		}
+	}
+	return landings
+}
+
+// recognizeRoles matches declared roles to partitions by name. Two
+// partitions answering to the same role is unresolvable ambiguity — a
+// transplanted or cloned disk — and guessing which one holds the real
+// cluster is how data dies, so the boot stops instead.
+func recognizeRoles(roles []machine.DeclaredRole) map[string]partition {
+	parts := discoverPartitions()
+	found := map[string]partition{}
+	for _, role := range roles {
+		for _, p := range parts {
+			if p.partName != role.PartitionName() {
+				continue
+			}
+			if existing, ok := found[role.Name]; ok {
+				failBoot("two partitions claim to be %s (%s and %s); refusing to guess",
+					role.PartitionName(), existing.name, p.name)
+			}
+			found[role.Name] = p
+		}
+	}
+	return found
+}
+
+// claimDisk gives a blank disk its partition table: every declared
+// role that names this device, laid down in canonical order, sized
+// roles first at their exact sizes and the remainder role taking
+// whatever is left.
+func claimDisk(device string, roles []machine.DeclaredRole, found map[string]partition) {
+	var mine []machine.DeclaredRole
+	for _, role := range roles {
+		if role.Device == device {
+			// A disk where some roles are recognized but others need
+			// claiming is a disk whose table liken wrote and then
+			// something changed — not blank, not claimable, a human's
+			// problem.
+			if _, ok := found[role.Name]; ok {
+				failBoot("disk %s already carries %s but is missing other declared roles; refusing to modify it",
+					device, role.PartitionName())
+			}
+			mine = append(mine, role)
+		}
+	}
+
+	disk := diskByPath(device)
+	if disk == nil {
+		failBoot("declared device %s is not attached", device)
+	}
+	blank, err := isBlank(device)
+	if err != nil {
+		failBoot("examining %s: %v", device, err)
+	}
+	if !blank {
+		failBoot("%s carries a partition table or filesystem liken doesn't recognize; refusing to touch it (wipe it yourself if it's expendable)", device)
+	}
+
+	totalSectors := disk.SizeBytes / sectorSize
+	lastUsable := gptLastUsableLBA(totalSectors)
+
+	// Lay out the table: sized roles pack from the front, each start
+	// aligned to 1MiB; the (single, validated) sizeless role takes the
+	// rest of the disk.
+	var parts []gptPartition
+	next := uint64(partitionAlignment)
+	var remainder *machine.DeclaredRole
+	for _, role := range mine {
+		if role.Size == "" {
+			remainder = &role
+			continue
+		}
+		bytes, _ := machine.ParseSize(role.Size) // validated above
+		sectors := (bytes + sectorSize - 1) / sectorSize
+		p := gptPartition{name: role.PartitionName(), firstLBA: next, lastLBA: next + sectors - 1}
+		if p.lastLBA > lastUsable {
+			failBoot("disk %s is too small: %s wants %s at sector %d but the disk's usable space ends at %d",
+				device, role.Name, role.Size, p.firstLBA, lastUsable)
+		}
+		parts = append(parts, p)
+		next = alignLBA(p.lastLBA + 1)
+	}
+	if remainder != nil {
+		if next > lastUsable {
+			failBoot("disk %s is too small: nothing left for %s", device, remainder.Name)
+		}
+		parts = append(parts, gptPartition{name: remainder.PartitionName(), firstLBA: next, lastLBA: lastUsable})
+	}
+
+	fmt.Printf("liken: storage: claiming %s (%s) for %d role(s)\n", device, gib(disk.SizeBytes), len(mine))
+	if err := writeGPT(device, totalSectors, parts); err != nil {
+		failBoot("partitioning %s: %v", device, err)
+	}
+	waitForPartitions(parts)
+}
+
+// waitForPartitions gives the kernel a moment to surface the devices
+// for a table just written: BLKRRPART is synchronous but devtmpfs
+// nodes and sysfs entries land a beat later.
+func waitForPartitions(parts []gptPartition) {
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		visible := map[string]bool{}
+		for _, p := range discoverPartitions() {
+			visible[p.partName] = true
+		}
+		all := true
+		for _, want := range parts {
+			all = all && visible[want.name]
+		}
+		if all {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func diskByPath(device string) *machine.BlockDevice {
+	for _, d := range discoverBlockDevices() {
+		if devicePath(d) == device {
+			return &d
+		}
+	}
+	return nil
+}
+
+// mountRole puts a role's filesystem where its purpose says it goes,
+// making the filesystem first if the partition is fresh from a claim
+// (recognizing our own name on a partition with no filesystem also
+// covers a boot that died between partitioning and mkfs — claiming is
+// resumable because the name goes on first).
+func mountRole(role machine.DeclaredRole, p partition) {
+	dev := "/dev/" + p.name
+	if !hasExt4(dev) {
+		fmt.Printf("liken: storage: making an ext4 filesystem on %s for %s\n", dev, role.Name)
+		if !runNarrated("mke2fs | ", "/sbin/mke2fs", "-t", "ext4", dev) {
+			failBoot("mke2fs on %s for %s failed", dev, role.Name)
+		}
+	}
+
+	rm, ok := roleMounts[role.Name]
+	if !ok {
+		failBoot("role %s has no mount translation; liken and its manifest disagree about the role vocabulary", role.Name)
+	}
+	target := rm.path
+
+	// clusterState is special: the image bakes the cluster's seeds —
+	// the pre-minted CAs, the operator's manifests and container image
+	// — underneath this very mountpoint, and mounting over them would
+	// hide every one. So the filesystem is first mounted to the side,
+	// seeded from the image's copies, and only then moved into place;
+	// MS_MOVE re-hangs a live mount atomically.
+	if role.Name == "clusterState" {
+		staging := "/.liken-claim"
+		if err := os.MkdirAll(staging, 0o755); err != nil {
+			failBoot("mkdir %s: %v", staging, err)
+		}
+		if err := unix.Mount(dev, staging, "ext4", 0, ""); err != nil {
+			failBoot("mounting %s for %s: %v", dev, role.Name, err)
+		}
+		if err := seedClusterState(staging); err != nil {
+			failBoot("seeding %s: %v", role.Name, err)
+		}
+		if err := os.MkdirAll(target, 0o755); err != nil {
+			failBoot("mkdir %s: %v", target, err)
+		}
+		if err := unix.Mount(staging, target, "", unix.MS_MOVE, ""); err != nil {
+			failBoot("moving %s into place at %s: %v", role.Name, target, err)
+		}
+		_ = os.Remove(staging)
+	} else {
+		if err := os.MkdirAll(target, 0o755); err != nil {
+			failBoot("mkdir %s: %v", target, err)
+		}
+		if err := unix.Mount(dev, target, "ext4", rm.flags, ""); err != nil {
+			failBoot("mounting %s for %s: %v", dev, role.Name, err)
+		}
+	}
+	// A freshly-made ext4 root is 0755 root-only; roles like /tmp need
+	// their conventional permissions applied to the mounted root.
+	if rm.mode != 0 {
+		if err := os.Chmod(target, rm.mode); err != nil {
+			fmt.Fprintf(os.Stderr, "liken: storage: chmod %s: %v\n", target, err)
+		}
+	}
+	fmt.Printf("liken: storage: %s is %s (%s) on %s\n",
+		role.Name, dev, p.partName, target)
+}
+
+// seedClusterState plants the image's cluster seeds into a
+// clusterState filesystem. The TLS material is copied only if the
+// disk has none: those keys are the cluster's identity, and a disk
+// that already has an identity keeps it. The manifests and the
+// operator image are refreshed every boot: they're pinned to the
+// liken version of the running image, and an upgraded image must
+// deliver its upgraded operator.
+func seedClusterState(root string) error {
+	for _, seed := range []struct {
+		rel     string
+		refresh bool
+	}{
+		{"k3s/server/tls", false},
+		{"k3s/server/manifests", true},
+		{"k3s/agent/images", true},
+	} {
+		src := filepath.Join("/var/lib/rancher", seed.rel)
+		if _, err := os.Stat(src); err != nil {
+			continue // an image without k3s has no seeds, and that's fine
+		}
+		dst := filepath.Join(root, seed.rel)
+		if seed.refresh {
+			if err := os.RemoveAll(dst); err != nil {
+				return err
+			}
+		} else if _, err := os.Stat(dst); err == nil {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		if err := os.CopyFS(dst, os.DirFS(src)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// failBoot is the fail-stop: narrate the problem, then power off
+// instead of starting a cluster on a broken storage promise.
+func failBoot(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "liken: storage: "+format+"\n", args...)
+	fmt.Fprintln(os.Stderr, "liken: storage: a declared role can't be honored, and a machine promised persistent state must not come up ephemeral; powering off")
+	powerOff()
+	// powerOff only returns if the reboot syscall failed; PID 1 still
+	// must never exit, so hold the machine here for a human.
+	for {
+		time.Sleep(time.Hour)
+	}
+}

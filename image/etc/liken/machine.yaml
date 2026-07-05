@@ -17,6 +17,34 @@ metadata:
   name: liken-dev
 spec:
   network: {}
+  # Storage is declared by purpose, not by mount path — the paths are
+  # liken's implementation details. Each role names the device it lives
+  # on and, when sharing a disk, how much of it to take; one role per
+  # disk may omit its size and take the remainder. The device path only
+  # matters on the boot that claims the disk (kernel names are probe
+  # order, not identity): claiming stamps each partition with the role's
+  # name, and every boot after finds it by that name wherever it
+  # enumerates. A declared role that can't be honored fails the boot —
+  # a machine promised persistent state must not come up ephemeral.
+  storage:
+    # The cluster's world: k3s's state, etcd/sqlite, and containerd's
+    # images — the reason a reboot no longer means re-importing every
+    # container image.
+    clusterState:
+      device: /dev/vda
+    # The operating system's own scratch space: /tmp.
+    systemEphemeral:
+      device: /dev/vdb
+      size: 512Mi
+    # Durable storage pods claim by name: the PersistentVolumeClaim
+    # pool, served by k3s's local-path provisioner.
+    podStorage:
+      device: /dev/vdb
+      size: 2Gi
+    # kubelet's working space: emptyDirs and per-pod scratch — the pool
+    # pods meter with ephemeral-storage requests and limits.
+    podEphemeral:
+      device: /dev/vdb
   # Kernel tuning rides the same document as everything else. Each
   # parameter is applied twice on purpose: by init at boot (so it holds
   # before k3s starts) and by the liken operator ever after (so editing

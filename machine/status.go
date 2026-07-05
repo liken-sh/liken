@@ -22,6 +22,12 @@ type MachineStatus struct {
 	// Hardware is what the machine found itself running on.
 	Hardware HardwareStatus `json:"hardware,omitzero"`
 
+	// Storage is the landing table: where every storage role actually
+	// lives this boot, declared or not. Spec says what was asked;
+	// hardware.blockDevices says what's attached; this is the verdict
+	// connecting them.
+	Storage StorageStatus `json:"storage,omitzero"`
+
 	// Sysctls echoes the *observed* value of every parameter named in
 	// spec.sysctls, read back from /proc/sys — so spec and reality sit
 	// side by side in one kubectl get.
@@ -74,6 +80,62 @@ type BlockDevice struct {
 	SizeBytes uint64 `json:"sizeBytes,omitempty"`
 	Model     string `json:"model,omitempty"`
 	Serial    string `json:"serial,omitempty"`
+}
+
+// Backings a storage role can land on. There are exactly two: a
+// partition claimed for the role, or the machine's RAM root — the
+// universal default, and the fallback nothing has to arrange.
+const (
+	BackingPartition = "Partition"
+	BackingMemory    = "Memory"
+)
+
+// StorageStatus enumerates every role liken knows, whether declared or
+// not — absence should be visible in one kubectl get, not implied. The
+// fields mirror the spec's keys exactly, so spec and landing line up
+// name for name.
+type StorageStatus struct {
+	ClusterState    StorageRoleStatus `json:"clusterState"`
+	SystemEphemeral StorageRoleStatus `json:"systemEphemeral"`
+	PodStorage      StorageRoleStatus `json:"podStorage"`
+	PodEphemeral    StorageRoleStatus `json:"podEphemeral"`
+}
+
+// StorageRoleStatus is one role's landing. A memory-backed role
+// reports no capacity on purpose: all memory-backed roles share the
+// one RAM root, and per-role figures would triple-count it.
+type StorageRoleStatus struct {
+	Backing       string `json:"backing"`
+	Device        string `json:"device,omitempty"`    // the partition's node this boot: vda1
+	Partition     string `json:"partition,omitempty"` // its on-disk name: liken:clusterState
+	CapacityBytes uint64 `json:"capacityBytes,omitempty"`
+}
+
+// Role addresses one role's landing by its spec name; nil for names
+// outside the vocabulary.
+func (s *StorageStatus) Role(name string) *StorageRoleStatus {
+	switch name {
+	case "clusterState":
+		return &s.ClusterState
+	case "systemEphemeral":
+		return &s.SystemEphemeral
+	case "podStorage":
+		return &s.PodStorage
+	case "podEphemeral":
+		return &s.PodEphemeral
+	}
+	return nil
+}
+
+// AllRolesInMemory marks every role as living on the RAM root — the
+// truthful starting point that reconciliation then improves upon.
+func AllRolesInMemory() StorageStatus {
+	return StorageStatus{
+		ClusterState:    StorageRoleStatus{Backing: BackingMemory},
+		SystemEphemeral: StorageRoleStatus{Backing: BackingMemory},
+		PodStorage:      StorageRoleStatus{Backing: BackingMemory},
+		PodEphemeral:    StorageRoleStatus{Backing: BackingMemory},
+	}
 }
 
 // Condition mirrors the shape Kubernetes uses everywhere (Pods, Nodes,

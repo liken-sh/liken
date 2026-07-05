@@ -22,7 +22,7 @@ import (
 	"github.com/chrisguidry/liken/machine"
 )
 
-func publishFacts(conn *connection) {
+func publishFacts(conn *connection, storage machine.StorageStatus) {
 	now := time.Now()
 	facts := &machine.MachineStatus{
 		Version: machine.VersionStatus{Liken: machine.Version},
@@ -33,6 +33,10 @@ func publishFacts(conn *connection) {
 			// status trustworthy.
 			BlockDevices: discoverBlockDevices(),
 		},
+		// Where every storage role landed — the one block that can't
+		// be re-derived here, because only reconcileStorage witnessed
+		// the claiming.
+		Storage: storage,
 	}
 
 	var u unix.Utsname

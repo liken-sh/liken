@@ -116,4 +116,14 @@ func prepareForK3s() {
 
 	_ = os.MkdirAll("/root", 0o700)
 	_ = os.MkdirAll("/var/log", 0o755)
+
+	// /tmp exists on every machine — the container runtime stages
+	// kubectl exec sessions there, of all things — world-writable with
+	// the sticky bit, per Unix tradition. On a machine that declares
+	// the systemEphemeral storage role, a disk partition is already
+	// mounted here and this is a no-op; everywhere else it's RAM like
+	// the rest of the root. (Chmod because MkdirAll filters modes
+	// through the umask, and the sticky bit matters.)
+	_ = os.MkdirAll("/tmp", 0o1777)
+	_ = os.Chmod("/tmp", 0o1777)
 }

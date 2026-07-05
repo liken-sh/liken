@@ -267,6 +267,25 @@ func containsReady(out string) bool {
 	return false
 }
 
+// runNarrated executes a command with its output quoted live on the
+// console, k3s-style, and reports whether it exited cleanly — for
+// commands whose words matter to someone watching a boot (mke2fs
+// announcing a new filesystem), where run's captured-output shape
+// would swallow them.
+func runNarrated(prefix, path string, args ...string) bool {
+	cmd := exec.Command(path, args...)
+	w := &lineWriter{prefix: prefix}
+	cmd.Stdout = w
+	cmd.Stderr = w
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "liken: starting %s: %v\n", path, err)
+		return false
+	}
+	status := awaitDeath(cmd.Process.Pid)
+	_ = cmd.Process.Release()
+	return status.Exited() && status.ExitStatus() == 0
+}
+
 // run executes a command and returns its output, waiting for it via
 // the reaper (see the file comment — nobody but the reaper calls
 // wait). Reading the pipe to EOF tells us the process is done writing;

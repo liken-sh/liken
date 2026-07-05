@@ -2,16 +2,23 @@
 # k3s reads on its own; liken passes no flags.
 #
 # The posture is low-frills: k3s bundles several conveniences (Traefik
-# for ingress, a service load balancer, a metrics server, a local-path
-# storage provisioner) that liken disables. Anything a machine needs
-# beyond the Kubernetes control plane itself should arrive as a
-# declared, visible workload — not as a bundled default. CoreDNS stays:
-# pods without DNS barely count as scheduled.
+# for ingress, a service load balancer, a metrics server) that liken
+# disables. Anything a machine needs beyond the Kubernetes control
+# plane itself should arrive as a declared, visible workload — not as
+# a bundled default. CoreDNS stays: pods without DNS barely count as
+# scheduled.
 disable:
   - traefik
   - servicelb
   - metrics-server
-  - local-storage
+
+# The local-path storage provisioner stays: it is how the Machine
+# spec's podStorage role reaches pods — a PersistentVolumeClaim becomes
+# a directory under this root, which is where liken mounts that role's
+# partition. On a machine that declares no podStorage the directory is
+# simply part of the RAM root, and PVCs are as ephemeral as everything
+# else.
+default-local-storage-path: /var/lib/liken/pod-storage
 
 # The admin kubeconfig k3s writes; group-readable is fine on a machine
 # with exactly one user, who is root.

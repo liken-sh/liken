@@ -96,6 +96,69 @@ spec:
                     so an edit here takes effect without a reboot.
                   additionalProperties:
                     type: string
+                storage:
+                  type: object
+                  description: >-
+                    Places purposes onto disks. Each role is a
+                    singleton field — a machine has one cluster state,
+                    one pod-storage pool — naming the device it lives
+                    on and, when sharing a disk, how much of it to
+                    take; one role per disk may omit its size and take
+                    the remainder. Applied by init at boot, before k3s.
+                    The device path is consulted only on the boot that
+                    claims a blank disk; from then on the role's
+                    partition is recognized by the name stamped on it.
+                    A declared role that can't be honored stops the
+                    boot. Roles absent from the spec live on the
+                    machine's RAM root.
+                  properties:
+                    clusterState:
+                      type: object
+                      description: >-
+                        The cluster's world: k3s's state, its database,
+                        and containerd's images — what makes a reboot
+                        resume the same cluster instead of founding a
+                        new one.
+                      required: [device]
+                      properties:
+                        device:
+                          type: string
+                        size:
+                          type: string
+                    systemEphemeral:
+                      type: object
+                      description: >-
+                        The operating system's own scratch space (/tmp).
+                      required: [device]
+                      properties:
+                        device:
+                          type: string
+                        size:
+                          type: string
+                    podStorage:
+                      type: object
+                      description: >-
+                        Durable storage pods claim by name: the
+                        PersistentVolumeClaim pool, served by the
+                        local-path provisioner.
+                      required: [device]
+                      properties:
+                        device:
+                          type: string
+                        size:
+                          type: string
+                    podEphemeral:
+                      type: object
+                      description: >-
+                        kubelet's working space: emptyDir volumes and
+                        per-pod scratch, the pool pods meter with
+                        ephemeral-storage requests and limits.
+                      required: [device]
+                      properties:
+                        device:
+                          type: string
+                        size:
+                          type: string
             status:
               type: object
               description: >-
@@ -172,6 +235,62 @@ spec:
                             type: string
                           serial:
                             type: string
+                storage:
+                  type: object
+                  description: >-
+                    The landing table: where every storage role
+                    actually lives this boot, declared or not. The
+                    spec says what was asked, hardware.blockDevices
+                    says what's attached; this is the verdict
+                    connecting them. Memory-backed roles report no
+                    capacity on purpose — they all share the one RAM
+                    root, and per-role figures would count it multiple
+                    times.
+                  properties:
+                    clusterState:
+                      type: object
+                      properties:
+                        backing:
+                          type: string
+                        device:
+                          type: string
+                        partition:
+                          type: string
+                        capacityBytes:
+                          type: integer
+                    systemEphemeral:
+                      type: object
+                      properties:
+                        backing:
+                          type: string
+                        device:
+                          type: string
+                        partition:
+                          type: string
+                        capacityBytes:
+                          type: integer
+                    podStorage:
+                      type: object
+                      properties:
+                        backing:
+                          type: string
+                        device:
+                          type: string
+                        partition:
+                          type: string
+                        capacityBytes:
+                          type: integer
+                    podEphemeral:
+                      type: object
+                      properties:
+                        backing:
+                          type: string
+                        device:
+                          type: string
+                        partition:
+                          type: string
+                        capacityBytes:
+                          type: integer
                 sysctls:
                   type: object
                   description: >-

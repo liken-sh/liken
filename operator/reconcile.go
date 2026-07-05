@@ -79,6 +79,14 @@ func reconcile(c *apiClient, m *machine.Machine) {
 	status.Sysctls, err = applySysctls(m.Spec.Sysctls)
 	status.Conditions = machine.SetCondition(status.Conditions, sysctlsCondition(err), now)
 
+	// Storage compares promise to landing: the spec's declared roles
+	// against the facts' report of where each actually lives. The
+	// operator can't observe the disks directly — claiming happened
+	// before this cluster existed — so this is init's testimony,
+	// judged against the spec.
+	status.Conditions = machine.SetCondition(status.Conditions,
+		machine.StorageCondition(m.Spec.Storage, status.Storage), now)
+
 	// Ready is the roll-up: True exactly when every other condition is.
 	// The scan skips any prior Ready so last pass's verdict can't veto
 	// this one's.

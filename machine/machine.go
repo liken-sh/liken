@@ -100,6 +100,11 @@ type MachineSpec struct {
 	// reconciles them live afterward, so a kubectl edit takes effect
 	// without a reboot.
 	Sysctls map[string]string `json:"sysctls,omitempty"`
+
+	// Storage places purposes onto disks (storage.go tells the story).
+	// Applied by init at boot, before k3s: a filesystem can't be
+	// swapped under a running cluster.
+	Storage StorageSpec `json:"storage,omitzero"`
 }
 
 // NetworkSpec is deliberately almost empty: liken's default posture is

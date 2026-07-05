@@ -23,8 +23,10 @@ XTABLES_VERSION := $(strip $(file <xtables/VERSION))
 XTABLES_DIST := xtables/dist/$(XTABLES_VERSION)
 TRUST_VERSION := $(strip $(file <trust/VERSION))
 TRUST_DIST := trust/dist/$(TRUST_VERSION)
+E2FSPROGS_VERSION := $(strip $(file <e2fsprogs/VERSION))
+E2FSPROGS_DIST := e2fsprogs/dist/$(E2FSPROGS_VERSION)
 
-all: kernel k3s xtables trust init operator identity image
+all: kernel k3s xtables trust e2fsprogs init operator identity image
 
 # Because the version is part of the artifact's name, a pin bump changes
 # the target path itself and Make rebuilds without any staleness
@@ -55,6 +57,13 @@ $(TRUST_DIST)/cacert.pem: trust/VERSION trust/fetch.sh
 	$(MAKE) -C trust
 
 trust: $(TRUST_DIST)/cacert.pem
+
+# mke2fs, the program init execs to make a filesystem on a claimed
+# disk — static, vendored (the story is in e2fsprogs/fetch.sh).
+$(E2FSPROGS_DIST)/mke2fs: e2fsprogs/VERSION e2fsprogs/fetch.sh
+	$(MAKE) -C e2fsprogs
+
+e2fsprogs: $(E2FSPROGS_DIST)/mke2fs
 
 # liken itself: the Go program that boots as PID 1 (the story is in
 # init/main.go's header comment). It shares the machine package — the
@@ -99,6 +108,7 @@ kubeconfig: identity/dist/tls/server-ca.crt
 image/dist/liken.cpio: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s \
 		$(XTABLES_DIST)/bin/xtables-legacy-multi \
 		$(TRUST_DIST)/cacert.pem \
+		$(E2FSPROGS_DIST)/mke2fs \
 		identity/dist/tls/server-ca.crt \
 		operator/dist/liken-operator-image.tar \
 		$(wildcard operator/manifests/*.yaml) \
@@ -130,9 +140,10 @@ clean:
 	$(MAKE) -C k3s clean
 	$(MAKE) -C xtables clean
 	$(MAKE) -C trust clean
+	$(MAKE) -C e2fsprogs clean
 	$(MAKE) -C init clean
 	$(MAKE) -C operator clean
 	$(MAKE) -C identity clean
 	$(MAKE) -C image clean
 
-.PHONY: all kernel k3s xtables trust init operator identity kubeconfig image run run-once clean
+.PHONY: all kernel k3s xtables trust e2fsprogs init operator identity kubeconfig image run run-once clean

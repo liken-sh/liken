@@ -29,6 +29,12 @@
 #                                 matters because the bundled iptables
 #                                 is a #!/bin/sh script, and there is no
 #                                 shell here to run it
+#   /sbin/mke2fs                  makes ext4 filesystems on the disks
+#                                 init claims — static, vendored from
+#                                 gokrazy's reproducible e2fsprogs build
+#                                 (the story is in e2fsprogs/fetch.sh).
+#                                 It carries its own built-in default
+#                                 profile, so no mke2fs.conf ships
 #   /etc/ssl/certs/               CA certificates (vendored by the trust
 #                                 domain), so pulling images over TLS
 #                                 can verify who it's talking to
@@ -89,6 +95,10 @@ for tool in iptables iptables-save iptables-restore \
             ip6tables ip6tables-save ip6tables-restore; do
     ln -s xtables-legacy-multi "$root/sbin/$tool"
 done
+
+# The filesystem maker, for the disks init claims.
+e2fsprogs_version="$(cat "$here/../e2fsprogs/VERSION")"
+cp "$here/../e2fsprogs/dist/$e2fsprogs_version/mke2fs" "$root/sbin/mke2fs"
 
 # The pre-minted certificate authorities, placed exactly where k3s
 # looks before generating its own.

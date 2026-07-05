@@ -98,6 +98,12 @@ func main() {
 	// reboot.
 	applySysctls(m.Spec.Sysctls)
 
+	// Storage before anything writes under /var, and long before k3s:
+	// a filesystem can't be swapped under a running cluster. This is
+	// also the one actuator allowed to stop a boot — storage.go
+	// explains why a broken storage promise powers the machine off.
+	storage := reconcileStorage(m.Spec.Storage)
+
 	worldReport()
 
 	conn, err := bringUpNetwork(m.Spec.Network)
@@ -116,7 +122,7 @@ func main() {
 		// Facts wait until here because they live under /run, and
 		// prepareForK3s just mounted a fresh tmpfs there — anything
 		// written earlier would be shadowed by the mount.
-		publishFacts(conn)
+		publishFacts(conn, storage)
 		loadModules()
 		go reportWhenReady()
 		superviseK3s() // never returns

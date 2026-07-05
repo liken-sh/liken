@@ -31,6 +31,14 @@ func someFacts(t *testing.T) *MachineStatus {
 				{Name: "sda", SizeBytes: 4_294_967_296, Model: "QEMU HARDDISK"},
 			},
 		},
+		Storage: func() StorageStatus {
+			s := AllRolesInMemory()
+			s.ClusterState = StorageRoleStatus{
+				Backing: BackingPartition, Device: "vda1",
+				Partition: "liken:clusterState", CapacityBytes: 2_146_435_072,
+			}
+			return s
+		}(),
 		BootedAt: &booted,
 	}
 }
