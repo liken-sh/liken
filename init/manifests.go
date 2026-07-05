@@ -7,10 +7,10 @@ package main
 // drives all of storage: the machineState partition is found by the
 // name written on it, which needs no spec at all. Init peeks at it
 // first thing: mount read-only, read the staged and proven manifests,
-// unmount. The unmount is load-bearing: the same disk may need its
-// partition table rewritten minutes later (a grow), and the kernel
-// refuses to re-read the table of a disk in use. Because the peek
-// leaves nothing mounted, machineState's own disk stays growable.
+// unmount. The unmount matters: the same disk may need its partition
+// table rewritten minutes later (a grow), and the kernel refuses to
+// re-read the table of a disk in use. Because the peek leaves nothing
+// mounted, machineState's own disk stays growable.
 //
 // Then the attempt order: a staged manifest gets tried first, and if
 // its storage can't be reconciled, the boot does not stop. The staged
