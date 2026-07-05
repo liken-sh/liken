@@ -23,7 +23,14 @@ func someFacts(t *testing.T) *MachineStatus {
 			Nameservers:  []string{"10.0.2.3"},
 			LeaseExpires: &expires,
 		},
-		Hardware: HardwareStatus{CPUs: 4, MemoryBytes: 4_294_967_296},
+		Hardware: HardwareStatus{
+			CPUs:        4,
+			MemoryBytes: 4_294_967_296,
+			BlockDevices: []BlockDevice{
+				{Name: "vda", SizeBytes: 2_147_483_648, Serial: "liken-lab-state"},
+				{Name: "sda", SizeBytes: 4_294_967_296, Model: "QEMU HARDDISK"},
+			},
+		},
 		BootedAt: &booted,
 	}
 }

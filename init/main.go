@@ -236,6 +236,8 @@ func worldReport() {
 	if entries, err := os.ReadDir("/dev"); err == nil {
 		fmt.Printf("liken: /dev has %d entries\n", len(entries))
 	}
+
+	reportBlockDevices()
 }
 
 // reap collects the exit status of any child process, forever. SIGCHLD

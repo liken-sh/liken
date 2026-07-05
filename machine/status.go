@@ -57,6 +57,23 @@ type NetworkStatus struct {
 type HardwareStatus struct {
 	CPUs        int    `json:"cpus,omitempty"`
 	MemoryBytes uint64 `json:"memoryBytes,omitempty"`
+
+	// BlockDevices is the machine's storage inventory: every real disk
+	// the kernel found, whether or not the spec says anything about it
+	// — an attached-but-undeclared disk showing up here is how you
+	// notice a drive you forgot about.
+	BlockDevices []BlockDevice `json:"blockDevices,omitempty"`
+}
+
+// BlockDevice is one disk as the machine observed it, straight from
+// sysfs. Name is the kernel's name for this boot (vda, nvme0n1) —
+// assigned in driver probe order, so it's a handle, not an identity;
+// the model and serial are the disk's own words about itself.
+type BlockDevice struct {
+	Name      string `json:"name"`
+	SizeBytes uint64 `json:"sizeBytes,omitempty"`
+	Model     string `json:"model,omitempty"`
+	Serial    string `json:"serial,omitempty"`
 }
 
 // Condition mirrors the shape Kubernetes uses everywhere (Pods, Nodes,

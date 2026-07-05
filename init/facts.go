@@ -25,8 +25,14 @@ import (
 func publishFacts(conn *connection) {
 	now := time.Now()
 	facts := &machine.MachineStatus{
-		Version:  machine.VersionStatus{Liken: machine.Version},
-		Hardware: machine.HardwareStatus{CPUs: runtime.NumCPU()},
+		Version: machine.VersionStatus{Liken: machine.Version},
+		Hardware: machine.HardwareStatus{
+			CPUs: runtime.NumCPU(),
+			// The same inventory the world report prints, re-derived
+			// rather than remembered — the statelessness that makes
+			// status trustworthy.
+			BlockDevices: discoverBlockDevices(),
+		},
 	}
 
 	var u unix.Utsname

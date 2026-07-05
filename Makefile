@@ -107,69 +107,25 @@ image/dist/liken.cpio: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s \
 
 image: image/dist/liken.cpio
 
-# Boot the whole thing. QEMU acts as the bootloader here: -kernel and
-# -initrd load the two files that are the entire operating system, per
-# the x86 Linux boot protocol — no disk, no GRUB, no UEFI. Flag by flag:
-#
-#   -accel kvm -accel tcg    hardware virtualization when available
-#                            (near-native speed), pure emulation when
-#                            not (CI), in that order of preference
-#   -cpu max                 the fullest CPU the accelerator can offer —
-#                            crucially including RDRAND. QEMU's default
-#                            model lacks it, and without any entropy
-#                            source the kernel RNG never initializes, so
-#                            the first getrandom() in userspace blocks
-#                            forever (liken's DHCP client draws one for
-#                            its transaction IDs)
-#   -m 4096                  Kubernetes-sized memory: the root
-#                            filesystem, container images, and every
-#                            workload all live in RAM here
-#   -append                  the kernel command line: put the kernel's
-#                            console on the first serial port, then run
-#                            our program — by name — as PID 1
-#   -display none            there is no screen; liken speaks serial only
-#   -serial stdio            ...and that serial port is this terminal
-#   -monitor none            don't multiplex QEMU's own control console
-#                            onto the same stream; tests read pure liken
-#   -no-reboot               a guest-initiated reboot ends QEMU instead
-#                            of looping, so boots terminate cleanly
-#   -netdev user             QEMU's built-in user-mode network: it plays
-#                            DHCP server, router, NAT, and DNS proxy for
-#                            the guest (the 10.0.2.0/24 world), no root
-#                            or bridges required on the host. hostfwd
-#                            punches one hole inward: host 127.0.0.1:16443
-#                            forwards to the guest's API server on 6443,
-#                            which is what lets kubectl on the host reach
-#                            the cluster (see identity/kubeconfig.sh). A
-#                            non-default host port, bound to loopback
-#                            only, so it can't collide with any other
-#                            cluster the host talks to
-#   -device virtio-net-pci   the NIC we attach it to — virtio because
-#                            our vendored kernel builds that driver in
-#                            (CONFIG_VIRTIO_NET=y); QEMU's default e1000
-#                            is a module we don't ship
+# Boot the whole thing on the dev machine — the QEMU guest that stands
+# in for the physical and cloud machines liken really targets (the
+# story, the virtual hardware, and every QEMU flag live in
+# dev-machine/Makefile). The root's job is what it always is here:
+# making sure the artifacts exist, in order, before handing off.
 run: $(KERNEL_DIST)/vmlinuz image/dist/liken.cpio
-	qemu-system-x86_64 \
-		-accel kvm -accel tcg \
-		-cpu max \
-		-m 4096 \
-		-kernel $(KERNEL_DIST)/vmlinuz \
-		-initrd image/dist/liken.cpio \
-		-append "console=ttyS0 rdinit=/liken $(LIKEN_BOOT_ARGS)" \
-		-display none \
-		-serial stdio \
-		-monitor none \
-		-no-reboot \
-		-netdev user,id=net0,hostfwd=tcp:127.0.0.1:16443-:6443 \
-		-device virtio-net-pci,netdev=net0
+	$(MAKE) -C dev-machine run
 
 # One-shot boots for debugging and automation: liken.oneshot tells init
 # not to resurrect k3s — its first death powers the machine off, QEMU
 # exits, and the console log is a complete, bounded record of the boot.
-run-once: LIKEN_BOOT_ARGS = liken.oneshot
-run-once: run
+run-once: $(KERNEL_DIST)/vmlinuz image/dist/liken.cpio
+	$(MAKE) -C dev-machine run-once
 
+# Cleaning includes the dev machine's disks: with every domain's
+# artifacts gone, stale machine state would be the only survivor, and
+# a "clean" boot that remembers its last cluster isn't clean.
 clean:
+	$(MAKE) -C dev-machine clean
 	$(MAKE) -C kernel clean
 	$(MAKE) -C k3s clean
 	$(MAKE) -C xtables clean

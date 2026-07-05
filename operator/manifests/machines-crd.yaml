@@ -149,6 +149,29 @@ spec:
                       type: integer
                     memoryBytes:
                       type: integer
+                    blockDevices:
+                      type: array
+                      description: >-
+                        The machine's storage inventory: every real disk
+                        the kernel found, declared in the spec or not —
+                        an attached-but-undeclared disk showing up here
+                        is how you notice a drive you forgot about. The
+                        name is the kernel's for this boot (assigned in
+                        probe order, so a handle, not an identity); the
+                        model and serial are the disk's own words about
+                        itself.
+                      items:
+                        type: object
+                        required: [name]
+                        properties:
+                          name:
+                            type: string
+                          sizeBytes:
+                            type: integer
+                          model:
+                            type: string
+                          serial:
+                            type: string
                 sysctls:
                   type: object
                   description: >-

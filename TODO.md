@@ -85,16 +85,41 @@
           everything else: a `trust/` domain pinning a dated snapshot
           of the Mozilla bundle, so what the machine trusts is a
           reviewable version bump instead of a build-host accident.
-4. [ ] Volumes — which starts with a disk existing at all. The whole
-       machine is RAM today; attach a real disk to `make run` (a qcow2)
-       and learn what liken must do about it: discover the block device,
-       decide whether to partition, make a filesystem, mount it — all
-       before k3s starts, because the prize is `/var/lib/rancher` on
-       persistent storage (container images stop re-importing every
-       boot, cluster state survives a reboot). Then design the API
-       against the real thing: `spec.volumes` declares what the machine
-       should do with its disks, `status.hardware.blockDevices` reports
-       what's actually attached.
+4. [ ] Storage — which starts with a disk existing at all. The whole
+       machine is RAM today; the prize is k3s's state on persistent
+       storage (container images stop re-importing every boot, cluster
+       state survives a reboot). Storage is declared by *purpose*, not
+       by mount path: `spec.storage` is a map keyed by singleton role
+       (`clusterState` first), each entry naming a device and an
+       optional fixed size. liken derives GPT partition tables from the
+       roles grouped by device, formats blank disks at runtime, and
+       names each partition `liken:<role>` — so recognition on every
+       later boot is by partition name read from sysfs (no udev;
+       `device:` is first-boot claiming input only, since kernel
+       enumeration order is not a promise). Reconciling never destroys
+       data — blank → claim, ours → mount, anything foreign or
+       ambiguous → refuse — and never serves on a broken promise: a
+       declared role that can't be reconciled stops the boot (the full
+       story on the console, then power off, never k3s), because a
+       machine promised persistent cluster state that boots ephemeral
+       anyway is a data-loss machine; down is recoverable, wrong is
+       not. Undeclared roles simply land where everything lands today
+       — the root tmpfs — and `status.storage` enumerates where every
+       role actually landed (`Partition` or `Memory`), while
+       `status.hardware.blockDevices` reports the raw inventory.
+   1. [ ] A disk exists: `make run` attaches a gitignored qcow2, and
+          init discovers block devices from `/sys/block` — the world
+          report learns a new question.
+   2. [ ] Claiming: init writes the GPT itself (it's a small,
+          checksummed binary format — a good lesson), makes the
+          filesystem (the one open mechanism: the image has no libc,
+          so mkfs must be static or Go), and mounts `clusterState`
+          under k3s's world, all before k3s starts.
+   3. [ ] Prove persistence: boot, power off, boot again — images
+          import once, the cluster comes back.
+   4. [ ] The API: `spec.storage` and `status.storage` in the Machine
+          CRD, the operator publishing the landing table and the
+          hardware inventory.
 5. [ ] Bake in Flux bootstrap, so the machine converges to its repo from
        first boot. This is where the Machine manifest's authority story
        resolves: today the file seeds the cluster and the cluster copy
