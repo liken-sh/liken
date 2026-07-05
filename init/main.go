@@ -36,6 +36,7 @@ import (
 	"os/signal"
 	"slices"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -101,7 +102,10 @@ func main() {
 	// also the one actuator allowed to stop a boot; storage.go
 	// explains why an unsatisfiable storage role powers the machine
 	// off.
-	storage := reconcileStorage(m.Spec.Storage)
+	storage, err := reconcileStorage(m.Spec.Storage)
+	if err != nil {
+		failBoot("%v", err)
+	}
 
 	worldReport()
 
@@ -143,6 +147,24 @@ func powerOff() {
 	unix.Sync()
 	if err := unix.Reboot(unix.LINUX_REBOOT_CMD_POWER_OFF); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: power off failed: %v\n", err)
+	}
+}
+
+// failBoot is the fail-stop for storage: print the problem, then
+// power off instead of starting a cluster with declared storage
+// unsatisfied. It lives here rather than in storage.go because it is
+// boot policy, not storage logic: storage reports what it couldn't
+// do, and main decides that a machine declared to have persistent
+// state must not come up ephemeral.
+func failBoot(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "liken: storage: "+format+"\n", args...)
+	fmt.Fprintln(os.Stderr, "liken: storage: a declared role can't be satisfied, and a machine declared to have persistent state must not come up ephemeral; powering off")
+	powerOff()
+	// powerOff only returns if the reboot syscall failed; PID 1 still
+	// must never exit, so hold the machine here for a person to
+	// investigate.
+	for {
+		time.Sleep(time.Hour)
 	}
 }
 

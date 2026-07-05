@@ -107,17 +107,21 @@
        — the root tmpfs — and `status.storage` enumerates where every
        role actually landed (`Partition` or `Memory`), while
        `status.hardware.blockDevices` reports the raw inventory.
-   1. [ ] A disk exists: `make run` attaches a gitignored qcow2, and
+   1. [x] A disk exists: `make run` attaches a gitignored qcow2, and
           init discovers block devices from `/sys/block` — the world
           report learns a new question.
-   2. [ ] Claiming: init writes the GPT itself (it's a small,
+   2. [x] Claiming: init writes the GPT itself (it's a small,
           checksummed binary format — a good lesson), makes the
           filesystem (the one open mechanism: the image has no libc,
           so mkfs must be static or Go), and mounts `clusterState`
-          under k3s's world, all before k3s starts.
+          under k3s's world, all before k3s starts. Every reason a
+          spec can be refused (foreign disks, cloned disks, disks too
+          small, partial claims) is unit-tested in init/, against
+          fake sysfs trees; a refusal halts the boot from one place
+          in main.go.
    3. [ ] Prove persistence: boot, power off, boot again — images
           import once, the cluster comes back.
-   4. [ ] The API: `spec.storage` and `status.storage` in the Machine
+   4. [x] The API: `spec.storage` and `status.storage` in the Machine
           CRD, the operator publishing the landing table and the
           hardware inventory.
 5. [ ] Bake in Flux bootstrap, so the machine converges to its repo from

@@ -186,5 +186,11 @@ func ParseSize(s string) (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("size %q: expected bytes or a Ki/Mi/Gi/Ti quantity", s)
 	}
+	// Zero is rejected here rather than left for the partition math to
+	// trip over: a zero-sector partition would have an end before its
+	// start, and a zero-byte role is always a manifest mistake.
+	if n == 0 {
+		return 0, fmt.Errorf("size %q: a storage role can't be zero bytes", s)
+	}
 	return n * unit, nil
 }

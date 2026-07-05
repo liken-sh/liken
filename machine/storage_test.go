@@ -30,7 +30,7 @@ func TestParseSize(t *testing.T) {
 }
 
 func TestParseSizeRejectsNonsense(t *testing.T) {
-	for _, in := range []string{"", "Gi", "2GB", "2G", "-1Gi", "0x10", "2.5Gi"} {
+	for _, in := range []string{"", "Gi", "2GB", "2G", "-1Gi", "0x10", "2.5Gi", "0", "0Gi"} {
 		t.Run(in, func(t *testing.T) {
 			if _, err := ParseSize(in); err == nil {
 				t.Errorf("ParseSize(%q) succeeded, want error", in)
@@ -114,6 +114,13 @@ func TestValidateRejectsUnparseableSizes(t *testing.T) {
 	spec := StorageSpec{ClusterState: &StorageRole{Device: "/dev/vda", Size: "lots"}}
 	if err := spec.Validate(); err == nil {
 		t.Error("expected an error for an unparseable size")
+	}
+}
+
+func TestValidateRejectsZeroSizes(t *testing.T) {
+	spec := StorageSpec{ClusterState: &StorageRole{Device: "/dev/vda", Size: "0Gi"}}
+	if err := spec.Validate(); err == nil {
+		t.Error("expected an error for a zero size")
 	}
 }
 

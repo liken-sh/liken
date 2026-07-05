@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -70,7 +71,7 @@ type partition struct {
 func discoverPartitions() []partition {
 	var parts []partition
 	for _, disk := range discoverBlockDevices() {
-		dir := filepath.Join("/sys/block", disk.Name)
+		dir := filepath.Join(sysBlock, disk.Name)
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			continue
@@ -84,9 +85,9 @@ func discoverPartitions() []partition {
 			}
 			p := partition{name: entry.Name()}
 			if raw, err := os.ReadFile(filepath.Join(dir, entry.Name(), "size")); err == nil {
-				var sectors uint64
-				fmt.Sscanf(string(raw), "%d", &sectors)
-				p.sizeBytes = sectors * sectorSize
+				if sectors, err := strconv.ParseUint(strings.TrimSpace(string(raw)), 10, 64); err == nil {
+					p.sizeBytes = sectors * sectorSize
+				}
 			}
 			// The uevent file is KEY=value lines; PARTNAME appears
 			// only for tables that carry names, which GPT does.
@@ -149,27 +150,33 @@ func hasExt4(devPath string) bool {
 	return magic[0] == 0x53 && magic[1] == 0xEF
 }
 
-// reconcileStorage actuates the storage spec, or stops the boot
-// trying. On success every declared role is an ext4 filesystem
-// mounted at its role's path, and the returned status records where
-// each role landed: the same facts printed to the console, bound for
-// the Machine's status, because anything reported only to the serial
-// port is invisible to anyone operating the machine remotely.
-func reconcileStorage(spec machine.StorageSpec) machine.StorageStatus {
+// reconcileStorage actuates the storage spec. On success every
+// declared role is an ext4 filesystem mounted at its role's path, and
+// the returned status records where each role landed: the same facts
+// printed to the console, bound for the Machine's status, because
+// anything reported only to the serial port is invisible to anyone
+// operating the machine remotely. An error means a declared role
+// can't be satisfied, and the caller (main, the only place with the
+// authority) stops the boot rather than let k3s start with that
+// state in RAM.
+func reconcileStorage(spec machine.StorageSpec) (machine.StorageStatus, error) {
 	status := machine.AllRolesInMemory()
 	roles := spec.Roles()
 	if len(roles) == 0 {
-		return status
+		return status, nil
 	}
 	if err := spec.Validate(); err != nil {
-		failBoot("%v", err)
+		return status, err
 	}
 
 	// Recognition: each declared role, found by the name written on
 	// its partition. The device in the spec is not consulted; a disk
 	// that moved controllers since it was claimed is still the same
 	// disk.
-	found := recognizeRoles(roles)
+	found, err := recognizeRoles(roles)
+	if err != nil {
+		return status, err
+	}
 
 	// Claiming: any role still missing must point at a blank disk.
 	// Group by device, since roles sharing a disk are claimed together
@@ -184,14 +191,18 @@ func reconcileStorage(spec machine.StorageSpec) machine.StorageStatus {
 		claimed := map[string]bool{}
 		for _, role := range missing {
 			if !claimed[role.Device] {
-				claimDisk(role.Device, roles, found)
+				if err := claimDisk(role.Device, roles, found); err != nil {
+					return status, err
+				}
 				claimed[role.Device] = true
 			}
 		}
-		found = recognizeRoles(roles)
+		if found, err = recognizeRoles(roles); err != nil {
+			return status, err
+		}
 		for _, role := range roles {
 			if _, ok := found[role.Name]; !ok {
-				failBoot("role %s: partition %s did not appear after claiming %s",
+				return status, fmt.Errorf("role %s: partition %s did not appear after claiming %s",
 					role.Name, role.PartitionName(), role.Device)
 			}
 		}
@@ -199,7 +210,9 @@ func reconcileStorage(spec machine.StorageSpec) machine.StorageStatus {
 
 	for _, role := range roles {
 		p := found[role.Name]
-		mountRole(role, p)
+		if err := mountRole(role, p); err != nil {
+			return status, err
+		}
 		*status.Role(role.Name) = machine.StorageRoleStatus{
 			Backing:       machine.BackingPartition,
 			Device:        p.name,
@@ -207,16 +220,21 @@ func reconcileStorage(spec machine.StorageSpec) machine.StorageStatus {
 			CapacityBytes: p.sizeBytes,
 		}
 	}
-	return status
+	return status, nil
 }
 
-// recognizeRoles matches declared roles to partitions by name. Two
+// recognizeRoles matches the declared roles against the machine's
+// partitions as sysfs reports them.
+func recognizeRoles(roles []machine.DeclaredRole) (map[string]partition, error) {
+	return matchRoles(roles, discoverPartitions())
+}
+
+// matchRoles matches declared roles to partitions by name. Two
 // partitions carrying the same role name is unresolvable ambiguity (a
 // transplanted or cloned disk), and guessing wrong about which one
-// holds the real cluster would destroy data, so the boot stops
-// instead.
-func recognizeRoles(roles []machine.DeclaredRole) map[string]partition {
-	parts := discoverPartitions()
+// holds the real cluster would destroy data, so that's an error
+// rather than a choice.
+func matchRoles(roles []machine.DeclaredRole, parts []partition) (map[string]partition, error) {
 	found := map[string]partition{}
 	for _, role := range roles {
 		for _, p := range parts {
@@ -224,20 +242,20 @@ func recognizeRoles(roles []machine.DeclaredRole) map[string]partition {
 				continue
 			}
 			if existing, ok := found[role.Name]; ok {
-				failBoot("two partitions claim to be %s (%s and %s); refusing to guess",
+				return nil, fmt.Errorf("two partitions claim to be %s (%s and %s); refusing to guess",
 					role.PartitionName(), existing.name, p.name)
 			}
 			found[role.Name] = p
 		}
 	}
-	return found
+	return found, nil
 }
 
 // claimDisk gives a blank disk its partition table: every declared
 // role that names this device, laid down in canonical order, sized
 // roles first at their exact sizes and the remainder role taking
 // whatever is left.
-func claimDisk(device string, roles []machine.DeclaredRole, found map[string]partition) {
+func claimDisk(device string, roles []machine.DeclaredRole, found map[string]partition) error {
 	var mine []machine.DeclaredRole
 	for _, role := range roles {
 		if role.Device == device {
@@ -246,7 +264,7 @@ func claimDisk(device string, roles []machine.DeclaredRole, found map[string]par
 			// something changed: not blank, not claimable, and not
 			// safe to fix automatically.
 			if _, ok := found[role.Name]; ok {
-				failBoot("disk %s already carries %s but is missing other declared roles; refusing to modify it",
+				return fmt.Errorf("disk %s already carries %s but is missing other declared roles; refusing to modify it",
 					device, role.PartitionName())
 			}
 			mine = append(mine, role)
@@ -255,22 +273,36 @@ func claimDisk(device string, roles []machine.DeclaredRole, found map[string]par
 
 	disk := diskByPath(device)
 	if disk == nil {
-		failBoot("declared device %s is not attached", device)
+		return fmt.Errorf("declared device %s is not attached", device)
 	}
 	blank, err := isBlank(device)
 	if err != nil {
-		failBoot("examining %s: %v", device, err)
+		return fmt.Errorf("examining %s: %w", device, err)
 	}
 	if !blank {
-		failBoot("%s carries a partition table or filesystem liken doesn't recognize; refusing to touch it (wipe it yourself if it's expendable)", device)
+		return fmt.Errorf("%s carries a partition table or filesystem liken doesn't recognize; refusing to touch it (wipe it yourself if it's expendable)", device)
 	}
 
 	totalSectors := disk.SizeBytes / sectorSize
-	lastUsable := gptLastUsableLBA(totalSectors)
+	parts, err := planPartitions(device, mine, totalSectors)
+	if err != nil {
+		return err
+	}
 
-	// Lay out the table: sized roles pack from the front, each start
-	// aligned to 1MiB; the (single, validated) sizeless role takes the
-	// rest of the disk.
+	fmt.Printf("liken: storage: claiming %s (%s) for %d role(s)\n", device, gib(disk.SizeBytes), len(mine))
+	if err := writeGPT(device, totalSectors, parts); err != nil {
+		return fmt.Errorf("partitioning %s: %w", device, err)
+	}
+	return waitForPartitions(parts, 5*time.Second)
+}
+
+// planPartitions lays out a claimed disk's table: sized roles pack
+// from the front in canonical order, each start aligned to 1MiB, and
+// the (single, validated) sizeless role takes the rest of the disk.
+// The device name appears only in the errors; the math cares about
+// sectors alone.
+func planPartitions(device string, mine []machine.DeclaredRole, totalSectors uint64) ([]gptPartition, error) {
+	lastUsable := gptLastUsableLBA(totalSectors)
 	var parts []gptPartition
 	next := uint64(partitionAlignment)
 	var remainder *machine.DeclaredRole
@@ -279,11 +311,11 @@ func claimDisk(device string, roles []machine.DeclaredRole, found map[string]par
 			remainder = &role
 			continue
 		}
-		bytes, _ := machine.ParseSize(role.Size) // validated above
+		bytes, _ := machine.ParseSize(role.Size) // validated before any disk is touched
 		sectors := (bytes + sectorSize - 1) / sectorSize
 		p := gptPartition{name: role.PartitionName(), firstLBA: next, lastLBA: next + sectors - 1}
 		if p.lastLBA > lastUsable {
-			failBoot("disk %s is too small: %s wants %s at sector %d but the disk's usable space ends at %d",
+			return nil, fmt.Errorf("disk %s is too small: %s wants %s at sector %d but the disk's usable space ends at %d",
 				device, role.Name, role.Size, p.firstLBA, lastUsable)
 		}
 		parts = append(parts, p)
@@ -291,34 +323,39 @@ func claimDisk(device string, roles []machine.DeclaredRole, found map[string]par
 	}
 	if remainder != nil {
 		if next > lastUsable {
-			failBoot("disk %s is too small: nothing left for %s", device, remainder.Name)
+			return nil, fmt.Errorf("disk %s is too small: nothing left for %s", device, remainder.Name)
 		}
 		parts = append(parts, gptPartition{name: remainder.PartitionName(), firstLBA: next, lastLBA: lastUsable})
 	}
-
-	fmt.Printf("liken: storage: claiming %s (%s) for %d role(s)\n", device, gib(disk.SizeBytes), len(mine))
-	if err := writeGPT(device, totalSectors, parts); err != nil {
-		failBoot("partitioning %s: %v", device, err)
-	}
-	waitForPartitions(parts)
+	return parts, nil
 }
 
 // waitForPartitions gives the kernel a moment to surface the devices
 // for a table just written: BLKRRPART is synchronous but the devtmpfs
-// nodes and sysfs entries appear slightly later.
-func waitForPartitions(parts []gptPartition) {
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+// nodes and sysfs entries appear slightly later. Running out of
+// patience is an error that names which partitions never showed:
+// "the kernel wouldn't surface the table" is a different problem
+// from "the table was never written", and the console should say
+// which one happened.
+func waitForPartitions(parts []gptPartition, patience time.Duration) error {
+	deadline := time.Now().Add(patience)
+	for {
 		visible := map[string]bool{}
 		for _, p := range discoverPartitions() {
 			visible[p.partName] = true
 		}
-		all := true
+		var missing []string
 		for _, want := range parts {
-			all = all && visible[want.name]
+			if !visible[want.name] {
+				missing = append(missing, want.name)
+			}
 		}
-		if all {
-			return
+		if len(missing) == 0 {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("partitions never appeared after their table was written: %s",
+				strings.Join(missing, ", "))
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -338,20 +375,23 @@ func diskByPath(device string) *machine.BlockDevice {
 // (Recognizing our own name on a partition with no filesystem also
 // covers a boot that died between partitioning and mkfs; claiming is
 // resumable because the name goes on first.)
-func mountRole(role machine.DeclaredRole, p partition) {
-	dev := "/dev/" + p.name
+func mountRole(role machine.DeclaredRole, p partition) error {
+	// The role's translation to a mount is looked up before anything
+	// touches the partition: a role liken doesn't know how to mount
+	// must be refused before mke2fs writes a filesystem onto it.
+	rm, ok := roleMounts[role.Name]
+	if !ok {
+		return fmt.Errorf("role %s has no mount translation; liken and its manifest disagree about the role vocabulary", role.Name)
+	}
+	target := rm.path
+
+	dev := devRoot + "/" + p.name
 	if !hasExt4(dev) {
 		fmt.Printf("liken: storage: making an ext4 filesystem on %s for %s\n", dev, role.Name)
 		if !runNarrated("mke2fs | ", "/sbin/mke2fs", "-t", "ext4", dev) {
-			failBoot("mke2fs on %s for %s failed", dev, role.Name)
+			return fmt.Errorf("mke2fs on %s for %s failed", dev, role.Name)
 		}
 	}
-
-	rm, ok := roleMounts[role.Name]
-	if !ok {
-		failBoot("role %s has no mount translation; liken and its manifest disagree about the role vocabulary", role.Name)
-	}
-	target := rm.path
 
 	// clusterState is special: the image bakes its seed files (the
 	// pre-generated CAs, the operator's manifests and container
@@ -362,27 +402,27 @@ func mountRole(role machine.DeclaredRole, p partition) {
 	if role.Name == "clusterState" {
 		staging := "/.liken-claim"
 		if err := os.MkdirAll(staging, 0o755); err != nil {
-			failBoot("mkdir %s: %v", staging, err)
+			return fmt.Errorf("mkdir %s: %w", staging, err)
 		}
 		if err := unix.Mount(dev, staging, "ext4", 0, ""); err != nil {
-			failBoot("mounting %s for %s: %v", dev, role.Name, err)
+			return fmt.Errorf("mounting %s for %s: %w", dev, role.Name, err)
 		}
 		if err := seedClusterState(staging); err != nil {
-			failBoot("seeding %s: %v", role.Name, err)
+			return fmt.Errorf("seeding %s: %w", role.Name, err)
 		}
 		if err := os.MkdirAll(target, 0o755); err != nil {
-			failBoot("mkdir %s: %v", target, err)
+			return fmt.Errorf("mkdir %s: %w", target, err)
 		}
 		if err := unix.Mount(staging, target, "", unix.MS_MOVE, ""); err != nil {
-			failBoot("moving %s into place at %s: %v", role.Name, target, err)
+			return fmt.Errorf("moving %s into place at %s: %w", role.Name, target, err)
 		}
 		_ = os.Remove(staging)
 	} else {
 		if err := os.MkdirAll(target, 0o755); err != nil {
-			failBoot("mkdir %s: %v", target, err)
+			return fmt.Errorf("mkdir %s: %w", target, err)
 		}
 		if err := unix.Mount(dev, target, "ext4", rm.flags, ""); err != nil {
-			failBoot("mounting %s for %s: %v", dev, role.Name, err)
+			return fmt.Errorf("mounting %s for %s: %w", dev, role.Name, err)
 		}
 	}
 	// A freshly-made ext4 root is 0755 root-only; roles like /tmp need
@@ -394,6 +434,7 @@ func mountRole(role machine.DeclaredRole, p partition) {
 	}
 	fmt.Printf("liken: storage: %s is %s (%s) on %s\n",
 		role.Name, dev, p.partName, target)
+	return nil
 }
 
 // seedClusterState copies the image's seed files into a clusterState
@@ -432,18 +473,4 @@ func seedClusterState(root string) error {
 		}
 	}
 	return nil
-}
-
-// failBoot is the fail-stop: print the problem, then power off
-// instead of starting a cluster with declared storage unsatisfied.
-func failBoot(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "liken: storage: "+format+"\n", args...)
-	fmt.Fprintln(os.Stderr, "liken: storage: a declared role can't be satisfied, and a machine declared to have persistent state must not come up ephemeral; powering off")
-	powerOff()
-	// powerOff only returns if the reboot syscall failed; PID 1 still
-	// must never exit, so hold the machine here for a person to
-	// investigate.
-	for {
-		time.Sleep(time.Hour)
-	}
 }

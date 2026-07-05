@@ -21,11 +21,19 @@ import (
 	"github.com/chrisguidry/liken/machine"
 )
 
+// The roots discovery reads from. Variables rather than constants so
+// tests can stand up a fake machine in a tempdir; on a real boot they
+// are never anything else.
+var (
+	sysBlock = "/sys/block"
+	devRoot  = "/dev"
+)
+
 // devicePath is the node devtmpfs maintains for a disk; the name
 // under /dev is the same name sysfs lists, kernel-assigned in both
 // places.
 func devicePath(d machine.BlockDevice) string {
-	return "/dev/" + d.Name
+	return devRoot + "/" + d.Name
 }
 
 // discoverBlockDevices enumerates the machine's disks: one entry per
@@ -33,16 +41,16 @@ func devicePath(d machine.BlockDevice) string {
 // the status type directly: this same inventory is a section of the
 // world report and a block of the facts init publishes.
 func discoverBlockDevices() []machine.BlockDevice {
-	entries, err := os.ReadDir("/sys/block")
+	entries, err := os.ReadDir(sysBlock)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "liken: reading /sys/block: %v\n", err)
+		fmt.Fprintf(os.Stderr, "liken: reading %s: %v\n", sysBlock, err)
 		return nil
 	}
 
 	var disks []machine.BlockDevice
 	for _, entry := range entries {
 		name := entry.Name()
-		dir := filepath.Join("/sys/block", name)
+		dir := filepath.Join(sysBlock, name)
 
 		// /sys/block lists every block device, including the purely
 		// virtual ones the kernel can create without hardware (loop,

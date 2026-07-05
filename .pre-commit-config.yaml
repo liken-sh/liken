@@ -41,11 +41,23 @@ repos:
         language: system
         files: \.go$|^go\.(mod|sum)$
         pass_filenames: false
+      # The tests write a coverage profile so the next hook can gate
+      # on it; the profile itself is gitignored.
       - id: go-test
         name: go test
-        entry: bash -c 'go test ./...'
+        entry: bash -c 'go test -coverprofile=coverage.out ./...'
         language: system
         files: \.go$|^go\.(mod|sum)$
+        pass_filenames: false
+      # go-test-coverage is a pinned tool dependency (the `tool`
+      # directive in go.mod), so the gate needs nothing installed
+      # beyond the Go toolchain. Its thresholds live in
+      # .testcoverage.yml, which explains how they're chosen.
+      - id: go-test-coverage
+        name: go test coverage
+        entry: bash -c 'go tool go-test-coverage --config=.testcoverage.yml'
+        language: system
+        files: \.go$|^go\.(mod|sum)$|^\.testcoverage\.yml$
         pass_filenames: false
       - id: staticcheck
         name: staticcheck
