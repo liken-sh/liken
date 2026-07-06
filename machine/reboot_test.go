@@ -66,3 +66,12 @@ func TestRebootPolicyDefaultsToManual(t *testing.T) {
 		}
 	}
 }
+
+func TestWriteRebootIntentNeedsItsChannel(t *testing.T) {
+	// The channel directory is init's to create; an operator writing
+	// before it exists is a bug to surface, not a directory to invent.
+	intent := &RebootIntent{Reason: "testing"}
+	if err := WriteRebootIntent(filepath.Join(t.TempDir(), "absent"), intent); err == nil {
+		t.Error("a missing channel directory must be an error")
+	}
+}

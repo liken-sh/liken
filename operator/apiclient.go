@@ -119,8 +119,9 @@ func (c *apiClient) do(method, path, contentType string, body []byte) (*http.Res
 // operator hits the same not-served-yet CRDs and dropped watches at
 // the same moments (a fleet reboots together), and identical retry
 // delays would keep them knocking in unison. A random share spreads
-// the load.
-func retryPause() {
+// the load. A variable so tests can wait for nothing — the same seam
+// init's disk code leaves with sysBlock and devRoot.
+var retryPause = func() {
 	base := 5 * time.Second
 	time.Sleep(base + rand.N(base/2))
 }

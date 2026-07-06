@@ -6,6 +6,8 @@ package main
 
 import (
 	"encoding/binary"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -83,5 +85,41 @@ func TestParseExt4SuperblockRejectsAbsurdBlockSizes(t *testing.T) {
 func TestParseExt4SuperblockRejectsTruncation(t *testing.T) {
 	if _, err := parseExt4Superblock(make([]byte, 100)); err == nil {
 		t.Error("expected an error for a truncated superblock")
+	}
+}
+
+func TestReadExt4GeometryFromADevice(t *testing.T) {
+	// A device node is just something to ReadAt; a file stands in.
+	dev := filepath.Join(t.TempDir(), "vda1")
+	image := make([]byte, 2048)
+	sb := image[ext4SuperblockOffset:]
+	sb[56], sb[57] = 0x53, 0xEF // s_magic
+	sb[4] = 100                 // s_blocks_count_lo
+	sb[24] = 2                  // s_log_block_size: 1024 << 2 = 4096
+	if err := os.WriteFile(dev, image, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g, err := readExt4Geometry(dev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.blockSize != 4096 || g.blockCount != 100 {
+		t.Errorf("got %+v", g)
+	}
+}
+
+func TestReadExt4GeometryReportsMissingDevices(t *testing.T) {
+	if _, err := readExt4Geometry(filepath.Join(t.TempDir(), "absent")); err == nil {
+		t.Error("a missing device is an error, not empty geometry")
+	}
+}
+
+func TestReadExt4GeometryReportsTruncatedDevices(t *testing.T) {
+	dev := filepath.Join(t.TempDir(), "tiny")
+	if err := os.WriteFile(dev, make([]byte, 512), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readExt4Geometry(dev); err == nil {
+		t.Error("a device too small for a superblock is an error")
 	}
 }

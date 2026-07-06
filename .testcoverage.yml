@@ -18,7 +18,7 @@ profile: coverage.out
 
 threshold:
   # The whole module, everything counted.
-  total: 37
+  total: 50
 
 override:
   # The Machine API: pure functions over declared types. (Paths here
@@ -26,8 +26,14 @@ override:
   - path: ^machine$
     threshold: 85
   # The operator: its decisions (drift, staging validation, the
-  # convergence truth table) are pure and tested, and the API client
-  # and seeding loops are exercised against a real HTTP test server;
-  # the watch loop stays e2e territory.
+  # convergence truth table, the fleet sweep, the lease election) are
+  # pure and tested, and everything that speaks HTTP — the API
+  # client, the seeding loops, the watch stream, the leases — is
+  # exercised against a real HTTP test server.
   - path: ^operator$
-    threshold: 43
+    threshold: 57
+  # Init: the boot machinery itself (mounting, DHCP, the reboot
+  # syscall) is exercised by the QEMU harness, not unit tests; the
+  # parsers, planners, and derivations around it are tested here.
+  - path: ^init$
+    threshold: 41

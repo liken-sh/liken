@@ -182,3 +182,26 @@ func TestPlanGrowthIgnoresRolesOnOtherDisks(t *testing.T) {
 		t.Errorf("another disk's role must not affect this plan: edits=%v rewrite=%v", edits, rewrite)
 	}
 }
+
+func TestPlanAllGrowthWithNothingRecognized(t *testing.T) {
+	// Roles whose partitions weren't found have nothing to grow; the
+	// plan is empty and no disk is ever opened.
+	roles := []machine.DeclaredRole{declared("clusterState", "/dev/vda", "1Gi")}
+	plans, err := planAllGrowth(roles, map[machine.StorageRoleName]partition{})
+	if err != nil || plans != nil {
+		t.Errorf("got %v, %v", plans, err)
+	}
+}
+
+func TestPlanAllGrowthNeedsTheDiskInTheInventory(t *testing.T) {
+	// A recognized partition on a disk the inventory doesn't show is
+	// a contradiction worth stopping on, not planning around.
+	fakeMachine(t)
+	roles := []machine.DeclaredRole{declared("clusterState", "/dev/vda", "1Gi")}
+	found := map[machine.StorageRoleName]partition{
+		"clusterState": {name: "vda1", disk: "vda", partName: "liken:clusterState"},
+	}
+	if _, err := planAllGrowth(roles, found); err == nil {
+		t.Error("an uninventoried disk must be an error")
+	}
+}

@@ -88,3 +88,19 @@ func TestReadSysctlTrimsValue(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestApplySysctlRefusesToInventParameters(t *testing.T) {
+	// The open deliberately does not create: a parameter file the
+	// kernel didn't put there is a parameter this kernel doesn't
+	// have, and inventing it would silently swallow the typo.
+	err := ApplySysctl(t.TempDir(), "vm.nonsense", "1")
+	if err == nil {
+		t.Error("an unknown parameter must be an error someone sees")
+	}
+}
+
+func TestReadSysctlReportsUnknownParameters(t *testing.T) {
+	if _, err := ReadSysctl(t.TempDir(), "vm.nonsense"); err == nil {
+		t.Error("an unknown parameter must be an error someone sees")
+	}
+}

@@ -158,3 +158,13 @@ func TestEnsureClusterTreatsLosingTheRaceAsSuccess(t *testing.T) {
 		t.Fatalf("a lost race is a seeded cluster: %v", err)
 	}
 }
+
+func TestDoNeedsAServiceAccountToken(t *testing.T) {
+	// The token is re-read from disk on every request (kubelet
+	// refreshes it as it approaches expiry); a missing token is a
+	// broken pod, reported as one.
+	client := &apiClient{base: "http://unreachable", http: http.DefaultClient, credentials: t.TempDir()}
+	if _, err := client.do(http.MethodGet, "/x", "", nil); err == nil {
+		t.Error("a missing token must fail the request")
+	}
+}

@@ -134,3 +134,17 @@ func TestShutdownIsBoundedWhenAComponentIsStuck(t *testing.T) {
 	}
 	close(forever)
 }
+
+func TestSleepUnlessCancelledHearsTheShutdown(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if sleepUnlessCancelled(ctx, time.Hour) {
+		t.Error("a cancelled context must interrupt the sleep")
+	}
+}
+
+func TestSleepUnlessCancelledWakesNormally(t *testing.T) {
+	if !sleepUnlessCancelled(context.Background(), time.Millisecond) {
+		t.Error("an undisturbed sleep reports true")
+	}
+}
