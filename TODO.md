@@ -271,7 +271,111 @@
           is the node's kube-node-lease renewTime, because Node
           status replayed from the persisted datastore reads Ready
           for a while whether the kubelet came back or not.)
-7. [ ] Multiple servers: quorum for the control plane. sqlite (via
+7. [ ] Cluster time: the servers sync from NTP upstreams declared on
+       the Cluster — declared, never defaulted, because a distro that
+       ships pool.ntp.org as a default volunteers every deployment's
+       machines to a volunteer service without asking — and serve
+       time to the rest of the fleet, so agents need no internet
+       access at all. Agents find their time source the way they find
+       their cluster: the declared endpoint, port 123. There is no
+       discovery mechanism, on purpose; every hop in the hierarchy is
+       somebody's explicit input. The client rides a vendored library
+       (beevik/ntp — what Talos uses, the same call as the DHCP
+       client: take the blessed protocol library, teach the protocol
+       in the comments), while the respond-from-my-own-clock server
+       on the leads is written, a 48-byte format in the same genre as
+       the GPT writer. The client runs before k3s starts, because TLS
+       fails on a skewed clock: a machine with bad time can't even
+       join the cluster it means to serve. (Deliberately ahead of
+       multiple servers: it needs only the topology milestone 6
+       built, the lab can fake a broken clock with QEMU's -rtc base=,
+       and etcd — coming next-plus-one — is the first component in
+       the stack that genuinely cares how clocks behave.)
+   1. [ ] The precedent, written down before it's built on: liken has
+          two planes and no third. Machine-plane concerns are
+          goroutines in init; workload-plane software runs under k3s;
+          k3s is the only child process init supervises. Init grows a
+          small component framework — each loop is a `Run(ctx) error`,
+          started by a supervisor that recovers panics and restarts
+          with backoff, stopped by context cancellation and awaited
+          with a bounded timeout so a stuck loop can't hang a reboot —
+          and the loops init already runs informally (reaper, reboot
+          watcher) become its first registered components. Shutdown
+          runs the dependency stack in reverse: stop k3s, cancel the
+          machine plane, unmount, reboot. The escape hatch is part of
+          the precedent: a component earns promotion to a child
+          process (the same binary re-exec'd, busybox multi-call
+          style — one artifact, still one program to read) only when
+          it parses untrusted network input, needs fewer privileges
+          than PID 1, or must not take the machine down when it
+          fatals; the time responder is the first named candidate,
+          promoted in a hardening pass, not now. All of this lands in
+          init's package documentation.
+   2. [ ] The API: `spec.time` on the Cluster (the upstream list —
+          empty is legal and means the fleet free-runs), and
+          `status.time` on the Machine (synchronized, source, stratum,
+          offset, lastSync) under the console-parity rule: whatever
+          init prints about time also reaches the cluster. A
+          free-running fleet agrees with itself but not the world —
+          fine until something checks a certificate's notBefore
+          against a clock that never met one, so status must make
+          free-running visible rather than dress it up as synced.
+   3. [ ] The discipline loop, one goroutine on every machine:
+          measure with beevik/ntp (the four-timestamp exchange and
+          why symmetric delay cancels belongs in the comments), step
+          the clock once at boot before k3s starts, then only ever
+          slew (adjtimex) for the life of the machine — stepping a
+          running node yanks time out from under lease renewals and
+          etcd heartbeats, so the one step happens while nobody is
+          watching the clock yet. Sources differ by role: servers ask
+          the declared upstreams, agents ask the endpoint. Failure is
+          humble: bounded attempts at boot, then keep trying forever,
+          never touch the clock on bad data, never block the boot.
+   4. [ ] The responder, a second goroutine on servers only: hold UDP
+          :123, answer each 48-byte query from the machine's own
+          clock — a responder, not a proxy; the lead serves the clock
+          its discipline loop maintains and never forwards a query
+          upstream — advertising stratum upstream+1 when synced and
+          the local-clock convention (~10) when free-running, so
+          agents can always tell pedigree from confidence. Agents run
+          no responder: nothing in the design ever asks an agent for
+          time, and a shell-less OS should have no listener without a
+          caller. (The known wrinkle, owed to milestone 9: when the
+          endpoint becomes a VIP or load balancer for HA, UDP 123 may
+          not ride along, and agents may want the server list
+          instead — the same question k3s registration faces there.)
+   5. [ ] The RTC: Linux never writes the hardware clock back on its
+          own — that's a distro's shutdown script elsewhere, so here
+          it's init's job. Write it (RTC_SET_TIME) at exactly two
+          moments: once after the first successful sync, so even a
+          machine that later loses power dirty carries decent time
+          into its next boot, and once at clean shutdown, so the RTC
+          holds the best final estimate.
+   6. [ ] Prove it in the lab: boot a node with QEMU's -rtc base= set
+          years wrong, watch the console tell the story — the skewed
+          clock, the sync, the step — and watch k3s join a cluster it
+          could not have joined before the step, because the CA's
+          certificates would not exist yet. Then check `kubectl get
+          machines` reports the agent following the server and the
+          server following its upstreams.
+8. [ ] The Cluster converges: today the in-cluster Cluster resource
+       is seed-only. Init reads the image's cluster.yaml every boot,
+       the operator seeds the API copy once, and nothing ever
+       compares the two — so `kubectl edit cluster` changes a
+       document no machine consults. The Machine already has the
+       whole lifecycle this needs (drift detection, durable staging
+       on machineState, proven fallback, SpecConverged); the Cluster
+       document should ride the same machinery, staged per machine
+       and applied by the next boot. The new question it forces: the
+       convergence machinery is per-machine but the Cluster is
+       cluster-scoped, so every machine stages its own copy, machines
+       can transiently disagree about which Cluster spec they booted,
+       and status has to make that visible. This lands before HA
+       servers on purpose (growing spec.servers is precisely a
+       Cluster edit — the HA milestone needs edits that converge) and
+       before GitOps (git will own the Cluster document, and a
+       document git owns must actually take effect).
+9. [ ] Multiple servers: quorum for the control plane. sqlite (via
        kine) serves one server; more than one means embedded etcd —
        `--cluster-init` on the first, `--server` on the rest, and an
        odd number of voices to vote. k3s can migrate a sqlite cluster
@@ -281,36 +385,26 @@
        cluster's address was that server's address; with several, the
        Cluster resource needs a better answer (every server listed, a
        DNS name, or a virtual IP).
-8. [ ] Cluster time: the servers sync from public NTP (upstreams
-       declared on the Cluster) and serve time to the rest of the
-       fleet, so agents need no internet access at all. Agents derive
-       their time sources the way they derive their role: my NTP
-       servers are my cluster's servers. SNTP is a 48-byte packet
-       format in the same genre as the DHCP client and the GPT reader
-       — a client in init and a respond-with-my-own-clock server on
-       the leads, written rather than vendored. The client runs before
-       k3s starts, because TLS fails on a skewed clock: a machine with
-       bad time can't even join the cluster it means to serve.
-9. [ ] GitOps from first boot — without baking an engine into the OS.
-       The OS grows two generic primitives rather than Flux support: a
-       seed channel (manifests delivered alongside the Machine manifest
-       land in k3s's auto-manifests directory, applied at first boot
-       and owned by the repo afterward — which needs the same staged/
-       promoted care the Machine manifest gets) and a minting primitive
-       (the machine creates an SSH keypair in a Secret if one is
-       missing and publishes the public half in status and on the
-       console, so the user registers a deploy key at the forge without
-       ever handling private material; the key may be read-write, since
-       image-update automation will eventually commit tag bumps back to
-       the repo). Flux itself is blessed content, not a vendored
-       domain: its install manifest and sync objects ride the seed
-       channel, that first apply plays the part `flux bootstrap`'s CLI
-       plays, and Flux self-manages from the repo afterward — the
-       standard pattern, and another engine could ride the same
-       channel. This is where the manifest authority story resolves:
-       git wins, and the seeded Machine and Cluster copies are
-       downstream of it.
-10. [ ] Explore device management: how does a shell-less, udev-less OS
+10. [ ] GitOps from first boot — without baking an engine into the OS.
+        The OS grows two generic primitives rather than Flux support: a
+        seed channel (manifests delivered alongside the Machine manifest
+        land in k3s's auto-manifests directory, applied at first boot
+        and owned by the repo afterward — which needs the same staged/
+        promoted care the Machine manifest gets) and a minting primitive
+        (the machine creates an SSH keypair in a Secret if one is
+        missing and publishes the public half in status and on the
+        console, so the user registers a deploy key at the forge without
+        ever handling private material; the key may be read-write, since
+        image-update automation will eventually commit tag bumps back to
+        the repo). Flux itself is blessed content, not a vendored
+        domain: its install manifest and sync objects ride the seed
+        channel, that first apply plays the part `flux bootstrap`'s CLI
+        plays, and Flux self-manages from the repo afterward — the
+        standard pattern, and another engine could ride the same
+        channel. This is where the manifest authority story resolves:
+        git wins, and the seeded Machine and Cluster copies are
+        downstream of it.
+11. [ ] Explore device management: how does a shell-less, udev-less OS
         expose `/dev` beyond the basics — USB devices arriving after
         boot, GPUs, serial adapters? devtmpfs gives us the nodes, but
         hotplug means fielding kernel uevents and loading modules,
@@ -318,7 +412,7 @@
         how workloads get to the hardware (device plugins, dynamic
         resource allocation) and whether devices belong in
         `status.hardware` alongside CPUs and memory.
-11. [ ] Explore declarative upgrades: setting `spec.version` on a
+12. [ ] Explore declarative upgrades: setting `spec.version` on a
         Machine should upgrade the machine — liken's version drives the
         k3s version, so one field moves the whole stack. For a two-file
         OS an upgrade is "replace vmlinuz and liken.cpio and reboot",
