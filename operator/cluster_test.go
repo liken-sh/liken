@@ -148,7 +148,7 @@ func TestClusterConvergedWhenTheBootRunsTheCurrentDocument(t *testing.T) {
 	facts := partitionBackedFacts(machine.ManifestSourceProven, hash)
 
 	conv := decideClusterConvergence(cluster, machineWithPolicy(""), facts, nil, hash, "")
-	if conv.condition.Status != "True" || conv.condition.Reason != "BootCurrent" {
+	if conv.condition.Status != "True" || conv.condition.Reason != "Converged" {
 		t.Errorf("got %+v", conv.condition)
 	}
 	if conv.condition.Type != "ClusterConverged" {

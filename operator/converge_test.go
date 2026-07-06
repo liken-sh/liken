@@ -240,7 +240,7 @@ func TestDecideConvergenceWithoutABootRecord(t *testing.T) {
 
 func TestDecideConvergenceWhenTheBootIsCurrent(t *testing.T) {
 	conv := decideConvergence(labMachine(), labFacts(), nil, "")
-	if conv.condition.Status != "True" || conv.condition.Reason != "BootCurrent" {
+	if conv.condition.Status != "True" || conv.condition.Reason != "Converged" {
 		t.Errorf("got %+v", conv.condition)
 	}
 	if conv.stage || conv.requestReboot || conv.withdraw || conv.clearRejection {
@@ -253,7 +253,7 @@ func TestDecideConvergenceWithdrawsAStagedManifestNobodyWants(t *testing.T) {
 	// drift, but the earlier edit still sits staged. Left there, the
 	// next boot would apply it.
 	conv := decideConvergence(labMachine(), labFacts(), nil, "some-staged-hash")
-	if conv.condition.Reason != "BootCurrent" {
+	if conv.condition.Reason != "Converged" {
 		t.Fatalf("got %+v", conv.condition)
 	}
 	if !conv.withdraw {
@@ -270,7 +270,7 @@ func TestDecideConvergenceClearsARejectionOnceTheSpecMovesOn(t *testing.T) {
 	// blocked exactly that abandoned spec; it has nothing left to do.
 	rejection := &machine.Rejection{Hash: "the-abandoned-spec", Reason: "could not grow"}
 	conv := decideConvergence(labMachine(), labFacts(), rejection, "")
-	if conv.condition.Reason != "BootCurrent" {
+	if conv.condition.Reason != "Converged" {
 		t.Fatalf("got %+v", conv.condition)
 	}
 	if !conv.clearRejection {

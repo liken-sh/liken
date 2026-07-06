@@ -41,13 +41,18 @@ import (
 // a version, which is what "core" means in the URL scheme.
 const nodesPath = "/api/v1/nodes"
 
-// nodeObject is the sliver of a Kubernetes Node the cleanup needs:
-// its labels, where the old role still shows.
+// nodeObject is the sliver of a Kubernetes Node the operator needs:
+// the labels, where a demoted machine's old role still shows, and the
+// conditions, where the kubelet's health shows (reconcile.go mirrors
+// the Node's Ready condition onto the Machine).
 type nodeObject struct {
 	Metadata struct {
 		Name   string            `json:"name"`
 		Labels map[string]string `json:"labels"`
 	} `json:"metadata"`
+	Status struct {
+		Conditions []machine.Condition `json:"conditions"`
+	} `json:"status"`
 }
 
 func getNode(c *apiClient, name string) (*nodeObject, error) {

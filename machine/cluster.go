@@ -45,10 +45,43 @@ const (
 )
 
 type Cluster struct {
-	APIVersion string      `json:"apiVersion"`
-	Kind       string      `json:"kind"`
-	Metadata   ObjectMeta  `json:"metadata"`
-	Spec       ClusterSpec `json:"spec,omitzero"`
+	APIVersion string        `json:"apiVersion"`
+	Kind       string        `json:"kind"`
+	Metadata   ObjectMeta    `json:"metadata"`
+	Spec       ClusterSpec   `json:"spec,omitzero"`
+	Status     ClusterStatus `json:"status,omitzero"`
+}
+
+// ClusterStatus is what can be observed about the cluster as a whole,
+// written by the leaders (see operator/fleet.go): they are the only
+// machines positioned to observe the fleet, because a follower that
+// can reach the API is by definition reaching a leader. The staged
+// and proven copies of the Cluster document carry spec only — status
+// never lands in the lifecycle bytes, because observations aren't
+// part of the document's identity.
+//
+// Phase is the fleet's phases rolled up into one word, in the same
+// vocabulary: Ready when every machine is Ready, Updating when the
+// only machines not Ready are mid-transition (rebooting into a
+// change, waiting on one, or booting), and Degraded when any machine
+// is Lost, Blocked, or otherwise unwell. One phase this status can
+// never honestly show: quorum lost. Losing a majority of leaders
+// takes the API server down with it, so there is nobody left to
+// write — a frozen status is itself the symptom.
+type ClusterStatus struct {
+	Phase    string       `json:"phase,omitempty"`
+	Machines MachineTally `json:"machines,omitzero"`
+}
+
+// MachineTally is the cluster's headcount: how many of its Machines
+// are fully healthy (phase Ready with a fresh heartbeat) out of how
+// many exist. Summary is the same two numbers as "4/5", stored
+// because a CRD printer column can read one field but can't combine
+// two.
+type MachineTally struct {
+	Ready   int    `json:"ready"`
+	Total   int    `json:"total"`
+	Summary string `json:"summary,omitempty"`
 }
 
 type ClusterSpec struct {

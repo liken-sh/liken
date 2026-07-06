@@ -28,12 +28,14 @@ metadata:
 ---
 # The operator's permissions, and deliberately nothing more: full
 # control of Machines and their status, creation of the Cluster it
-# seeds, and Node get/delete for demotion cleanup. RBAC can grant
-# spec and status separately precisely because the Machine CRD
-# declares status as a subresource. Note what's absent for clusters:
-# no update — the operator seeds the Cluster once and may never
-# rewrite what a person (or one day a git repository) edits
-# afterward.
+# seeds plus its status (the leaders' fleet sweep writes the
+# headcount there), and Node get/delete for demotion cleanup. RBAC
+# can grant spec and status separately precisely because both CRDs
+# declare status as a subresource. Note what's absent for clusters:
+# no update on the resource itself — the operator seeds the Cluster
+# once and may never rewrite the spec a person (or one day a git
+# repository) edits afterward. Status is the operator's to write;
+# spec never is.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -48,6 +50,9 @@ rules:
   - apiGroups: [liken.sh]
     resources: [clusters]
     verbs: [get, list, watch, create]
+  - apiGroups: [liken.sh]
+    resources: [clusters/status]
+    verbs: [get, update]
   # Nodes, for demotion cleanup (demotion.go): a machine demoted from
   # leader to follower deletes its own stale Node object, which is
   # what triggers k3s's etcd member removal. get to see the stale
@@ -65,6 +70,37 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: liken-operator
+subjects:
+  - kind: ServiceAccount
+    name: liken-operator
+    namespace: liken-system
+---
+# The fleet sweep's leader-election lease (operator/lease.go): every
+# leader's operator is a candidate, one holds it at a time — the same
+# mechanism kube-controller-manager and kube-scheduler use to run hot
+# standbys on every control-plane node. A namespaced Role rather than
+# another ClusterRole rule, deliberately: leases exist all over a
+# cluster (every kubelet heartbeats through one in kube-node-lease),
+# and the operator has no business with any lease but its own.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: liken-operator-leases
+  namespace: liken-system
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, create, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: liken-operator-leases
+  namespace: liken-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: liken-operator-leases
 subjects:
   - kind: ServiceAccount
     name: liken-operator

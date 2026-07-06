@@ -183,25 +183,24 @@ func declaredNodeAddress(cluster *machine.Cluster, manifestDir, name string) str
 
 // timeStatus is the clock's story as status: the same facts the
 // console prints, made queryable. A machine with sources that hasn't
-// synced yet is unsynchronized (16); a machine with no sources at
-// all is free-running on purpose (10); neither claims synchronized,
-// because that word is reserved for a clock currently following a
-// source that is itself synchronized.
+// synced yet is Unsynchronized (stratum 16); a machine with no
+// sources at all is FreeRunning on purpose (stratum 10); neither
+// claims Synchronized, because that word is reserved for a clock
+// currently following a source that is itself synchronized.
 func timeStatus(sync *timeSync, sources []string) machine.TimeStatus {
 	if sync == nil {
-		stratum := stratumUnsynchronized
 		if len(sources) == 0 {
-			stratum = stratumFreeRunning
+			return machine.TimeStatus{State: machine.TimeFreeRunning, Stratum: stratumFreeRunning}
 		}
-		return machine.TimeStatus{Stratum: stratum}
+		return machine.TimeStatus{State: machine.TimeUnsynchronized, Stratum: stratumUnsynchronized}
 	}
 	at := sync.at
 	return machine.TimeStatus{
-		Synchronized: true,
-		Source:       sync.source,
-		Stratum:      sync.stratum + 1,
-		Offset:       sync.offset.Round(10 * time.Microsecond).String(),
-		LastSync:     &at,
+		State:    machine.TimeSynchronized,
+		Source:   sync.source,
+		Stratum:  sync.stratum + 1,
+		Offset:   sync.offset.Round(10 * time.Microsecond).String(),
+		LastSync: &at,
 	}
 }
 
@@ -354,7 +353,7 @@ func disciplineClock(clk *clock, facts *machine.MachineStatus) func(context.Cont
 		// been written yet; a boot that came up on a wrong hardware
 		// clock gets its RTC corrected at the first sync this loop
 		// achieves instead.
-		rtcWritten := facts.Time.Synchronized
+		rtcWritten := facts.Time.State == machine.TimeSynchronized
 		for {
 			if !sleepUnlessCancelled(ctx, timePollInterval) {
 				// Clean shutdown: leave the hardware clock holding
@@ -369,9 +368,9 @@ func disciplineClock(clk *clock, facts *machine.MachineStatus) func(context.Cont
 				// A failed poll is only news when it changes the
 				// story: past the staleness window, the machine
 				// stops claiming a synchronized clock.
-				if facts.Time.Synchronized && time.Since(lastGood) > syncStaleAfter {
+				if facts.Time.State == machine.TimeSynchronized && time.Since(lastGood) > syncStaleAfter {
 					fmt.Fprintf(os.Stderr, "liken: time: lost every source (%v); the clock is on its own\n", err)
-					facts.Time.Synchronized = false
+					facts.Time.State = machine.TimeUnsynchronized
 					facts.Time.Stratum = stratumUnsynchronized
 					publishTimeFacts(facts)
 				}
@@ -381,7 +380,7 @@ func disciplineClock(clk *clock, facts *machine.MachineStatus) func(context.Cont
 			if err := slewClock(sync.offset); err != nil {
 				fmt.Fprintf(os.Stderr, "liken: time: slewing the clock: %v\n", err)
 			}
-			if !facts.Time.Synchronized {
+			if facts.Time.State != machine.TimeSynchronized {
 				fmt.Printf("liken: time: synchronized to %s (stratum %d), offset %s\n",
 					sync.source, sync.stratum, sync.offset.Round(10*time.Microsecond))
 			} else if sync.offset.Abs() >= stepThreshold {

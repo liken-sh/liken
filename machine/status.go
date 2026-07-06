@@ -10,6 +10,13 @@ package machine
 import "time"
 
 type MachineStatus struct {
+	// Phase is the machine's whole story in one word, computed from
+	// the conditions below on every pass — never remembered, so it can
+	// never go stale relative to them. Conditions are for programs
+	// (kubectl wait, controllers); the phase is for the human scanning
+	// a fleet listing. See the Phase constants for the vocabulary.
+	Phase string `json:"phase,omitempty"`
+
 	// Version reports what this machine is running. The k3s and kubelet
 	// versions aren't here because Kubernetes already reports them on
 	// the built-in Node object; this covers the layer below it.
@@ -58,11 +65,40 @@ type MachineStatus struct {
 	// machines` renders it as a live elapsed time (the Uptime column).
 	BootedAt *time.Time `json:"bootedAt,omitempty"`
 
+	// ObservedAt is the machine's heartbeat: the moment the operator
+	// last reconciled and republished this status. It exists so the
+	// rest of the fleet can tell a healthy machine from a dead one
+	// whose last written status still reads fine — the same problem
+	// the kubelet solves with its node lease, solved the same way: a
+	// timestamp renewed on a schedule, where a stale value means the
+	// writer is gone. The leaders watch it and mark a silent machine
+	// Lost.
+	ObservedAt *time.Time `json:"observedAt,omitempty"`
+
 	// Conditions follow the standard Kubernetes idiom: a set of typed,
 	// timestamped observations ("Ready", "SysctlsApplied") that
 	// controllers maintain and humans and tooling read.
 	Conditions []Condition `json:"conditions,omitempty"`
 }
+
+// The phases a machine can report, most severe first. Each is a
+// summary of the conditions, not a fact of its own; the operator
+// derives the phase from the conditions on every pass, and the table
+// that does so (operator/phase.go) is the authority on which
+// condition puts a machine in which phase. Lost is the exception to
+// "derived from own conditions": a machine cannot report its own
+// death, so a leader writes Lost on its behalf when its heartbeat
+// (ObservedAt) goes silent.
+const (
+	PhaseUnknown       = "Unknown"       // the facts are unreadable; the operator can't tell anything
+	PhaseBooting       = "Booting"       // init hasn't finished publishing this boot's record yet
+	PhaseLost          = "Lost"          // the heartbeat went silent; a leader wrote this, not the machine
+	PhaseBlocked       = "Blocked"       // drift exists but can't be staged; it needs a different edit, not time
+	PhaseUpdating      = "Updating"      // a reboot is in flight to apply a staged change
+	PhaseUpdatePending = "UpdatePending" // a change is staged, waiting on a Manual reboot
+	PhaseDegraded      = "Degraded"      // something is wrong that isn't one of the specific states above
+	PhaseReady         = "Ready"         // every condition is True
+)
 
 type VersionStatus struct {
 	Liken  string `json:"liken,omitempty"`
@@ -108,15 +144,30 @@ type InterfaceStatus struct {
 	LeaseExpires *time.Time `json:"leaseExpires,omitempty"`
 }
 
-// TimeStatus is the machine's account of its own clock. Synchronized
-// is deliberately honest: a fleet with no upstreams free-runs, agrees
-// with itself, and still reports false here, because agreeing with
-// the world is a different claim than agreeing with each other and
-// certificate validation cares about the difference.
+// The states a machine's clock can be in. FreeRunning and
+// Unsynchronized both mean "not following anyone" but tell different
+// stories: a free-running machine was never given sources and runs on
+// its hardware clock by design, while an unsynchronized one has
+// sources it currently can't reach. The distinction matters when
+// you're deciding whether a fleet listing shows a configuration
+// choice or an outage.
+const (
+	TimeSynchronized   = "Synchronized"
+	TimeFreeRunning    = "FreeRunning"
+	TimeUnsynchronized = "Unsynchronized"
+)
+
+// TimeStatus is the machine's account of its own clock. State is
+// deliberately honest: a fleet with no upstreams free-runs, agrees
+// with itself, and still doesn't claim Synchronized, because agreeing
+// with the world is a different claim than agreeing with each other
+// and certificate validation cares about the difference.
 type TimeStatus struct {
-	// Synchronized reports whether the clock is currently being
-	// disciplined against a source that is itself synchronized.
-	Synchronized bool `json:"synchronized"`
+	// State reports whether the clock is currently being disciplined
+	// against a source that is itself synchronized, and when it isn't,
+	// whether that's by design (FreeRunning) or by outage
+	// (Unsynchronized).
+	State string `json:"state,omitempty"`
 
 	// Source is who this machine follows: an upstream's name on a
 	// leader, one of the cluster's leaders on a follower.

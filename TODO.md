@@ -442,7 +442,7 @@
           machine at once, and with Auto everywhere that's a
           simultaneous fleet reboot — Manual stays the default,
           pending reboots are visible per machine, and rolling
-          coordination is milestone 13's job.
+          coordination is milestone 14's job.
    5. [x] Guardrails: the five network-plan fields (nodeCIDR,
           clusterCIDR, serviceCIDR, clusterDNS, clusterDomain) become
           immutable-once-set via CEL oldSelf rules — k3s can't
@@ -500,7 +500,7 @@
           future migration shouldn't be refused at admission. A
           simultaneous all-leader reboot loses quorum transiently
           and reforms from disk; Manual stays the sane policy for
-          leaders until milestone 13 does rolling reboots.
+          leaders until milestone 14 does rolling reboots.
    4. [x] The lab grows to five machines: three leaders (node-1
           founding, node-3 and node-4 fresh) and two followers (node-2
           staying, node-5 new) — MACs, dist dirs, and manifests
@@ -554,7 +554,49 @@
           relaunching the leaders reformed etcd from disk — the
           cluster re-established itself and the followers
           reconnected without rebooting.)
-10. [ ] GitOps from first boot — without baking an engine into the OS.
+10. [x] Say it in words, not booleans: every state a fleet listing
+        shows is now an enumerated word. Machines carry
+        `status.phase` — Ready, UpdatePending, Updating, Blocked,
+        Degraded, Booting, Unknown, or Lost — derived from the
+        conditions on every pass (the Ready condition remains for
+        `kubectl wait`; only its printer column went). The time
+        boolean became `status.time.state`
+        (Synchronized/FreeRunning/Unsynchronized — by-design and
+        by-outage are different stories), and the convergence columns
+        print the conditions' *reasons* (Converged, RebootPending,
+        RejectedLastBoot, …), which say what kind of wrong and what
+        would fix it. The fleet also learned to notice its dead:
+        every operator heartbeats `status.observedAt`, and the
+        leaders' fleet sweep — leaders because a follower that can
+        reach the API is by definition reaching a leader — marks a
+        silent machine Lost (safe multi-writer: the sweep only
+        touches machines whose own writer has provably stopped) and
+        publishes the Cluster's first status: a phase
+        (Ready/Updating/Degraded) and a ready-out-of-total headcount
+        ("4/5" in `kubectl get clusters`). A NodeHealthy condition
+        mirrors the Node's Ready onto the Machine, catching the one
+        gap the heartbeat can't: the operator lives on the host
+        network and can keep reporting while the kubelet under it is
+        dead. Deliberately not shown: quorum lost — losing a leader
+        majority takes the API (and thus the status writer) down with
+        it; a frozen status is itself the symptom. Health checks
+        surveyed and deferred: leaders cross-checking each other's
+        clocks, etcd quorum margin as a Cluster condition (pairs with
+        milestone 14), and storage-capacity watermarks (a full
+        machineState silently breaks staging). (Two findings from the
+        first lab run. The heartbeat found a feedback loop: the
+        operator reconciles on every watch event, including the event
+        its own status write causes, and a timestamp that moved every
+        pass made every write real — the operator spun flat-out
+        against the API server. Renewing observedAt on a cadence
+        instead restores the no-op writes that let the loop settle.
+        And three leaders sweeping at once worked — the verdicts are
+        deterministic and optimistic concurrency serialized the
+        writes — but filled the logs with 409s that were all noise;
+        the sweep now runs under a coordination.k8s.io Lease, the
+        same leader election kube-controller-manager uses to run hot
+        standbys, built here from a GET and two conditional writes.)
+11. [ ] GitOps from first boot — without baking an engine into the OS.
         The OS grows two generic primitives rather than Flux support: a
         seed channel (manifests delivered alongside the Machine manifest
         land in k3s's auto-manifests directory, applied at first boot
@@ -573,7 +615,7 @@
         channel. This is where the manifest authority story resolves:
         git wins, and the seeded Machine and Cluster copies are
         downstream of it.
-11. [ ] Explore device management: how does a shell-less, udev-less OS
+12. [ ] Explore device management: how does a shell-less, udev-less OS
         expose `/dev` beyond the basics — USB devices arriving after
         boot, GPUs, serial adapters? devtmpfs gives us the nodes, but
         hotplug means fielding kernel uevents and loading modules,
@@ -581,14 +623,14 @@
         how workloads get to the hardware (device plugins, dynamic
         resource allocation) and whether devices belong in
         `status.hardware` alongside CPUs and memory.
-12. [ ] Explore declarative upgrades: setting `spec.version` on a
+13. [ ] Explore declarative upgrades: setting `spec.version` on a
         Machine should upgrade the machine — liken's version drives the
         k3s version, so one field moves the whole stack. For a two-file
         OS an upgrade is "replace vmlinuz and liken.cpio and reboot",
         which makes A/B slots and roll-back-on-failed-boot the natural
         shape — but it also means liken finally needs a bootloader
         story, since QEMU's `-kernel` has been playing that role.
-13. [ ] Rolling upgrades at the *cluster* level: once one machine can
+14. [ ] Rolling upgrades at the *cluster* level: once one machine can
         upgrade itself, the cluster should upgrade its fleet without an
         operator babysitting it — cordon a node, drain its workloads,
         upgrade, restart, confirm it rejoined healthy, then move to the
@@ -598,7 +640,17 @@
         once parked here, got automated during milestone 9 instead:
         the demoted machine's operator cleans up its own Node and
         datastore. What remains here is the fleet-level sequencing —
-        making sure only one leader is ever down at a time.)
+        making sure only one leader is ever down at a time.) Most of
+        the raw material now exists: staged changes wait per machine
+        behind rebootPolicy, the phase and heartbeat say who is
+        mid-transition and who came back, and the Cluster's headcount
+        watches the whole fleet. The missing pieces are the ones
+        Kubernetes workloads get from a PodDisruptionBudget and
+        kubectl drain: a disruption budget for machines (how many may
+        be down at once, with the leaders' quorum as a floor), and
+        cordoning each node before its reboot and uncordoning it
+        after it rejoins, so workloads drain gracefully instead of
+        dying with the machine.
 
 Deferred until the fundamentals above are proven — the
 public-consumption tier:

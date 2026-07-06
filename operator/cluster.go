@@ -107,7 +107,7 @@ func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, fact
 
 	if hash == bootHash {
 		return convergence{
-			condition:      clusterConverged("BootCurrent", "this boot ran the current cluster document"),
+			condition:      clusterConverged("Converged", "this boot ran the current cluster document"),
 			withdraw:       stagedHash != "",
 			clearRejection: rejection != nil,
 		}

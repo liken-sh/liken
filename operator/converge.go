@@ -227,7 +227,7 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 	drift := storageDrift(m.Spec.Storage, facts.Boot.Storage)
 	if len(drift) == 0 {
 		return convergence{
-			condition:      converged("BootCurrent", "this boot actuated the current spec"),
+			condition:      converged("Converged", "this boot actuated the current spec"),
 			withdraw:       stagedHash != "",
 			clearRejection: rejection != nil,
 		}

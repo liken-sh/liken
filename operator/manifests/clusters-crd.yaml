@@ -14,11 +14,6 @@
 # liken operator (every machine's operator tries; the first wins, and
 # an already-seeded cluster is left exactly as it stands, kubectl
 # edits and all).
-#
-# There is no status subresource yet, on purpose: nothing observes the
-# cluster as a whole today. Machines report their own facts; when
-# something can meaningfully observe cluster-wide state (which
-# machines have joined, whether quorum holds), status arrives with it.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -37,8 +32,23 @@ spec:
     - name: v1alpha1
       served: true
       storage: true
+      # The status subresource splits the object the same way the
+      # Machine's does: spec is declared (by a person, or one day a
+      # git repository), status is observed (by the leaders' fleet
+      # sweep), and the API server enforces that neither write path
+      # can touch the other's half.
+      subresources:
+        status: {}
       # What `kubectl get clusters` prints, without -o yaml.
       additionalPrinterColumns:
+        - name: Status
+          type: string
+          jsonPath: .status.phase
+        # The headcount: how many machines are fully healthy out of
+        # how many exist, as the leaders last observed it.
+        - name: Machines
+          type: string
+          jsonPath: .status.machines.summary
         - name: Leaders
           type: string
           jsonPath: .spec.leaders
@@ -158,3 +168,45 @@ spec:
                         only if the hardware clocks happen to be.
                       items:
                         type: string
+            status:
+              type: object
+              description: >-
+                What can be observed about the cluster as a whole,
+                written by the leaders: each leader's operator sweeps
+                the Machine list every pass and publishes what it
+                found. Only the leaders are positioned to do this — a
+                follower that can reach the API is by definition
+                reaching a leader.
+              properties:
+                phase:
+                  type: string
+                  enum: [Ready, Updating, Degraded]
+                  description: >-
+                    The fleet's phases rolled up into one word. Ready
+                    means every machine is Ready. Updating means the
+                    only machines not Ready are mid-transition
+                    (rebooting into a change, waiting on one, or
+                    booting) — the expected look of a Cluster edit
+                    rolling through the fleet. Degraded means at
+                    least one machine is Lost, Blocked, or otherwise
+                    unwell. One phase this field can never honestly
+                    show is quorum lost: losing a majority of leaders
+                    takes the API server down with it, so nobody is
+                    left to write here — a status that has stopped
+                    updating is itself the symptom.
+                machines:
+                  type: object
+                  description: >-
+                    The headcount: how many machines are fully
+                    healthy (phase Ready, with a heartbeat fresh
+                    enough to believe) out of how many exist. The
+                    summary is the same two numbers as "4/5", stored
+                    because a printer column can read one field but
+                    cannot combine two.
+                  properties:
+                    ready:
+                      type: integer
+                    total:
+                      type: integer
+                    summary:
+                      type: string

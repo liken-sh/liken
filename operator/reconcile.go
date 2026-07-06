@@ -196,9 +196,10 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string) {
 	// machine: this machine stages its own copy and reboots on its own
 	// policy, and this condition is where the fleet's transient
 	// disagreement about the Cluster is visible.
+	var liveCluster *machine.Cluster
 	if clusterName != "" {
 		var cconv convergence
-		if liveCluster, err := getCluster(c, clusterName); err != nil {
+		if liveCluster, err = getCluster(c, clusterName); err != nil {
 			cconv = convergence{condition: machine.Condition{
 				Type: "ClusterConverged", Status: "Unknown", Reason: "ClusterUnavailable",
 				Message: fmt.Sprintf("reading cluster %s: %v", clusterName, err),
@@ -210,18 +211,30 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string) {
 		}
 		condition := carryOutConvergence(cconv, machine.ClusterManifests(machine.MachineStateDir), "cluster document", now)
 		status.Conditions = machine.SetCondition(status.Conditions, condition, now)
+	}
+
+	// The machine's own Node, read once for two conditions. The read
+	// can fail benignly (mid-demotion, the Node is deleted and not yet
+	// re-registered); that pass just skips both conditions and the
+	// next one settles them.
+	if node, err := getNode(c, m.Metadata.Name); err == nil {
+		// NodeHealthy mirrors the Node's Ready condition onto the
+		// Machine. This catches the one failure the heartbeat can't:
+		// this operator runs on the host's network and talks to the
+		// API directly, so it can keep reporting a healthy-looking
+		// machine while the kubelet beneath it is dead. The kubelet's
+		// own heartbeat (its node lease, which the node controller
+		// turns into the Node's Ready condition) is the witness that
+		// the machine is actually serving the cluster, not just
+		// reachable.
+		status.Conditions = machine.SetCondition(status.Conditions, nodeHealthyCondition(node), now)
 
 		// Demotion cleanup (demotion.go): a follower whose Node object
 		// still claims control-plane was just demoted, and the stale
-		// Node — with its registered etcd membership — must go. The
-		// node read can fail benignly (mid-cleanup, the Node is
-		// deleted and not yet re-registered); that pass just skips the
-		// condition and the next one settles it.
-		if node, err := getNode(c, m.Metadata.Name); err == nil {
-			d := decideDemotion(status.Role, node.Metadata.Labels, m.Spec.RebootPolicyOrDefault())
-			condition := carryOutDemotion(c, m.Metadata.Name, d)
-			status.Conditions = machine.SetCondition(status.Conditions, condition, now)
-		}
+		// Node — with its registered etcd membership — must go.
+		d := decideDemotion(status.Role, node.Metadata.Labels, m.Spec.RebootPolicyOrDefault())
+		condition := carryOutDemotion(c, m.Metadata.Name, d)
+		status.Conditions = machine.SetCondition(status.Conditions, condition, now)
 	}
 
 	// Ready is the roll-up: True exactly when every other condition
@@ -241,9 +254,62 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string) {
 	}
 	status.Conditions = machine.SetCondition(status.Conditions, ready, now)
 
+	// The phase compresses the conditions into the one word a fleet
+	// listing shows (phase.go), and observedAt is the heartbeat that
+	// proves this machine computed it recently — the leaders treat its
+	// silence as the machine's death (fleet.go).
+	//
+	// The heartbeat renews on a cadence, not on every pass, and the
+	// reason is a feedback loop worth knowing about: this operator
+	// reconciles on every watch event, including the event caused by
+	// its own status write. When nothing changed, the write is a no-op
+	// the API server doesn't even version — no event, and the loop
+	// settles until the ticker. A timestamp that moved on every pass
+	// would make every write real, every write an event, and every
+	// event another pass: the operator would spin flat-out against
+	// the API server forever. Aging the heartbeat past the renewal
+	// window before touching it keeps event-driven passes as no-ops,
+	// and the 30-second ticker guarantees the renewals keep coming.
+	status.Phase = decidePhase(status.Conditions)
+	status.ObservedAt = m.Status.ObservedAt
+	if status.ObservedAt == nil || now.Sub(*status.ObservedAt) >= heartbeatRenewAfter {
+		observedAt := now
+		status.ObservedAt = &observedAt
+	}
+
 	if err := publishStatus(c, m, status); err != nil {
 		fmt.Printf("publishing status: %v\n", err)
 	}
+
+	// Fleet-level work is the leaders': mark silent machines Lost and
+	// keep the Cluster's headcount current. Every leader is *able* to
+	// sweep, but only the one holding the lease does (lease.go), so
+	// the fleet has one watcher at a time and a warm line of
+	// successors. This machine's own status write has already landed,
+	// so the sweep sees its own heartbeat fresh like everyone else's.
+	if liveCluster != nil && status.Role == machine.RoleLeader && holdFleetLease(c, m.Metadata.Name, now) {
+		sweepFleet(c, m.Metadata.Name, liveCluster, now)
+	}
+}
+
+// nodeHealthyCondition translates the Node's Ready condition into the
+// Machine's vocabulary. A missing Ready condition on the Node reads
+// as unhealthy: a kubelet that has never reported in cannot be
+// assumed to be serving.
+func nodeHealthyCondition(node *nodeObject) machine.Condition {
+	for _, c := range node.Status.Conditions {
+		if c.Type != "Ready" {
+			continue
+		}
+		if c.Status == "True" {
+			return machine.Condition{Type: "NodeHealthy", Status: "True", Reason: "KubeletReady",
+				Message: "the Node reports Ready; the kubelet is serving this machine to the cluster"}
+		}
+		return machine.Condition{Type: "NodeHealthy", Status: "False", Reason: "NodeNotReady",
+			Message: fmt.Sprintf("the Node reports Ready=%s: %s", c.Status, c.Message)}
+	}
+	return machine.Condition{Type: "NodeHealthy", Status: "False", Reason: "NodeNotReady",
+		Message: "the Node carries no Ready condition; the kubelet has never reported in"}
 }
 
 // applySysctls actuates spec.sysctls against the host's /proc/sys,

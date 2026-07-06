@@ -41,11 +41,28 @@ spec:
       # rather than just a convention.
       subresources:
         status: {}
-      # What `kubectl get machines` prints, without -o yaml.
+      # What `kubectl get machines` prints, without -o yaml. Every
+      # column here is a word, not a boolean, on purpose: True/False
+      # can only say whether something is wrong, while an enumerated
+      # state says what kind of wrong and what would fix it.
       additionalPrinterColumns:
         - name: Role
           type: string
           jsonPath: .status.role
+        # The machine's whole story in one word (see status.phase
+        # below); the Ready condition still exists for programs, but
+        # the phase is what a human scans a fleet listing for.
+        - name: Status
+          type: string
+          jsonPath: .status.phase
+        # Uptime is computed by kubectl at read time, exactly like the
+        # Age column: a date-typed column renders as the time elapsed
+        # since its timestamp. Deriving it from bootedAt means it is
+        # always current — a literal uptime figure written into status
+        # would be stale the moment the operator wrote it.
+        - name: Uptime
+          type: date
+          jsonPath: .status.bootedAt
         - name: Address
           type: string
           jsonPath: .status.network.addresses[0]
@@ -55,38 +72,28 @@ spec:
         - name: Kernel
           type: string
           jsonPath: .status.version.kernel
-        # Uptime is computed by kubectl at read time, exactly like the
-        # Age column: a date-typed column renders as the time elapsed
-        # since its timestamp. Deriving it from bootedAt means it is
-        # always current — a literal uptime figure written into status
-        # would be stale the moment the operator wrote it.
-        - name: Uptime
-          type: date
-          jsonPath: .status.bootedAt
-        - name: Ready
-          type: string
-          jsonPath: .status.conditions[?(@.type=="Ready")].status
-        # The two convergence conditions, one per document: Spec is
-        # the Machine manifest (SpecConverged), Cluster is the
-        # Cluster document (ClusterConverged). Ready already rolls
-        # them up; these columns say which one is dragging when it's
-        # False.
-        - name: Spec
-          type: string
-          jsonPath: .status.conditions[?(@.type=="SpecConverged")].status
+        # The two convergence conditions, one per document: Cluster is
+        # the Cluster document (ClusterConverged), Spec is the Machine
+        # manifest (SpecConverged). The columns show the condition's
+        # *reason* rather than its True/False, because the reasons are
+        # already an enumerated vocabulary that says why: Converged at
+        # rest, RebootPending when a change waits on a Manual reboot,
+        # RejectedLastBoot when an edit was quarantined, and so on.
         - name: Cluster
           type: string
-          jsonPath: .status.conditions[?(@.type=="ClusterConverged")].status
-        # The clock's health, at priority 1: shown only with -o wide,
-        # because the default table is already at the width where
-        # every new column costs an old one.
-        - name: Synced
-          type: boolean
-          priority: 1
-          jsonPath: .status.time.synchronized
+          jsonPath: .status.conditions[?(@.type=="ClusterConverged")].reason
+        - name: Spec
+          type: string
+          jsonPath: .status.conditions[?(@.type=="SpecConverged")].reason
+        # The clock's story: Synchronized, FreeRunning (no upstreams,
+        # by design), or Unsynchronized (sources declared but
+        # unreachable — an outage), and the measured offset from the
+        # last exchange.
+        - name: Time
+          type: string
+          jsonPath: .status.time.state
         - name: Offset
           type: string
-          priority: 1
           jsonPath: .status.time.offset
         - name: Age
           type: date
@@ -318,6 +325,25 @@ spec:
                 reconcile pass (nothing is remembered), so it reports
                 what currently holds, not what once did.
               properties:
+                phase:
+                  type: string
+                  enum: [Unknown, Booting, Lost, Blocked, Updating, UpdatePending, Degraded, Ready]
+                  description: >-
+                    The machine's whole story in one word, derived
+                    from the conditions on every reconcile pass (so it
+                    can never disagree with them). Ready means every
+                    condition holds. UpdatePending and Updating mean a
+                    staged change is waiting on a reboot (Manual) or
+                    one is in flight (Auto). Blocked means drift
+                    exists that liken refuses or is unable to stage —
+                    it needs a different edit, not time. Degraded is
+                    everything else wrong; Booting means init hasn't
+                    finished publishing this boot; Unknown means the
+                    operator can't read the machine's facts at all.
+                    Lost is the exception to self-reporting: a leader
+                    writes it when this machine's heartbeat
+                    (observedAt) goes silent, because a dead machine
+                    can't report its own death.
                 role:
                   type: string
                   description: >-
@@ -400,16 +426,22 @@ spec:
                     because the clock is disciplined continuously,
                     not configured once at boot.
                   properties:
-                    synchronized:
-                      type: boolean
+                    state:
+                      type: string
+                      enum: [Synchronized, FreeRunning, Unsynchronized]
                       description: >-
                         Whether the clock is currently disciplined
-                        against a source that is itself synchronized.
-                        A free-running fleet agrees with itself and
-                        still reports false: agreeing with the world
-                        is a different claim than agreeing with each
-                        other, and certificate validation cares about
-                        the difference.
+                        against a source that is itself synchronized,
+                        and when it isn't, whether that's by design or
+                        by outage. FreeRunning means no sources were
+                        ever declared: the machine runs on its
+                        hardware clock on purpose. Unsynchronized
+                        means sources are declared but none currently
+                        answers. A free-running fleet agrees with
+                        itself and still doesn't claim Synchronized:
+                        agreeing with the world is a different claim
+                        than agreeing with each other, and certificate
+                        validation cares about the difference.
                     source:
                       type: string
                       description: >-
@@ -631,6 +663,16 @@ spec:
                     from the kernel's uptime counter. The Uptime
                     printer column is this timestamp rendered as an
                     elapsed time.
+                observedAt:
+                  type: string
+                  format: date-time
+                  description: >-
+                    The machine's heartbeat: when its operator last
+                    reconciled and republished this status. A dead
+                    machine's status otherwise reads healthy forever;
+                    the leaders watch this timestamp and mark a silent
+                    machine Lost, the same way the node controller
+                    turns a stale kubelet lease into a NotReady Node.
                 conditions:
                   type: array
                   items:

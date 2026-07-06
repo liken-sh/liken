@@ -116,8 +116,8 @@ func TestTimeStatusAfterASync(t *testing.T) {
 		at:      at,
 	}
 	status := timeStatus(sync, []string{"time.cloudflare.com"})
-	if !status.Synchronized {
-		t.Error("a fresh sync should report synchronized")
+	if status.State != machine.TimeSynchronized {
+		t.Errorf("a fresh sync should report Synchronized, got %q", status.State)
 	}
 	if status.Source != "time.cloudflare.com" {
 		t.Errorf("source: got %q", status.Source)
@@ -135,8 +135,8 @@ func TestTimeStatusAfterASync(t *testing.T) {
 
 func TestTimeStatusFreeRunning(t *testing.T) {
 	status := timeStatus(nil, nil)
-	if status.Synchronized {
-		t.Error("free-running must not claim synchronized")
+	if status.State != machine.TimeFreeRunning {
+		t.Errorf("no sources means free-running by design, got %q", status.State)
 	}
 	if status.Stratum != 10 {
 		t.Errorf("free-running reports the local-clock convention, got %d", status.Stratum)
@@ -145,8 +145,8 @@ func TestTimeStatusFreeRunning(t *testing.T) {
 
 func TestTimeStatusNeverSynced(t *testing.T) {
 	status := timeStatus(nil, []string{"10.10.0.1"})
-	if status.Synchronized {
-		t.Error("no sync yet must not claim synchronized")
+	if status.State != machine.TimeUnsynchronized {
+		t.Errorf("sources declared but never reached is an outage, got %q", status.State)
 	}
 	if status.Stratum != 16 {
 		t.Errorf("unsynchronized reports stratum 16, got %d", status.Stratum)
