@@ -436,6 +436,13 @@
         which makes A/B slots and roll-back-on-failed-boot the natural
         shape — but it also means liken finally needs a bootloader
         story, since QEMU's `-kernel` has been playing that role.
+13. [ ] Rolling upgrades at the *cluster* level: once one machine can
+        upgrade itself, the cluster should upgrade its fleet without an
+        operator babysitting it — cordon a node, drain its workloads,
+        upgrade, restart, confirm it rejoined healthy, then move to the
+        next, honoring quorum on the servers. Not designed yet, just
+        owed: it's the layer where the Machine's upgrade machinery and
+        the Cluster's convergence machinery meet.
 
 Deferred until the fundamentals above are proven — the
 public-consumption tier:
