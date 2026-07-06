@@ -373,6 +373,49 @@ spec:
                           leaseExpires:
                             type: string
                             format: date-time
+                time:
+                  type: object
+                  description: >-
+                    How this machine's clock is doing. Unlike most of
+                    status it changes for the machine's whole life,
+                    because the clock is disciplined continuously,
+                    not configured once at boot.
+                  properties:
+                    synchronized:
+                      type: boolean
+                      description: >-
+                        Whether the clock is currently disciplined
+                        against a source that is itself synchronized.
+                        A free-running fleet agrees with itself and
+                        still reports false: agreeing with the world
+                        is a different claim than agreeing with each
+                        other, and certificate validation cares about
+                        the difference.
+                    source:
+                      type: string
+                      description: >-
+                        Who this machine follows: an upstream's name
+                        on a server, the cluster endpoint's host on
+                        an agent.
+                    stratum:
+                      type: integer
+                      description: >-
+                        Distance from a reference clock, in NTP's
+                        vocabulary: a source at stratum n makes this
+                        machine n+1. A server free-running on purpose
+                        reports the local-clock convention (10); 16
+                        means unsynchronized.
+                    offset:
+                      type: string
+                      description: >-
+                        The clock error measured at the last exchange,
+                        as a duration ("1.28ms"): positive when this
+                        machine was behind its source.
+                    lastSync:
+                      type: string
+                      format: date-time
+                      description: >-
+                        When the clock last agreed with its source.
                 hardware:
                   type: object
                   properties:

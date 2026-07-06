@@ -68,6 +68,27 @@ type ClusterSpec struct {
 	// on: cluster-scoped truths that would otherwise masquerade as
 	// per-node flags.
 	Network ClusterNetworkSpec `json:"network,omitzero"`
+
+	// Time is the cluster's time hierarchy: where the servers get
+	// their time. It lives on the Cluster for the same reason the
+	// network plan does — clocks are a fact the whole fleet must
+	// agree on, and TLS (so the cluster itself) stops working when
+	// they don't.
+	Time ClusterTimeSpec `json:"time,omitzero"`
+}
+
+// ClusterTimeSpec declares where time comes from. Only the servers
+// consult it: agents always sync from their cluster's endpoint, the
+// same explicit input that tells them where to join, so the hierarchy
+// is upstreams, then servers, then everyone else.
+type ClusterTimeSpec struct {
+	// Upstreams are the NTP servers the cluster's servers sync from,
+	// as hostnames or addresses. There is no default — a distro that
+	// shipped pool.ntp.org here would volunteer every deployment's
+	// machines to a volunteer service without asking. An empty list
+	// is legal and means the fleet free-runs: internally consistent,
+	// correct only if the hardware clocks happen to be.
+	Upstreams []string `json:"upstreams,omitempty"`
 }
 
 // ClusterNetworkSpec is the cluster's address plan. Every field is

@@ -25,6 +25,12 @@ type MachineStatus struct {
 	// made queryable.
 	Network NetworkStatus `json:"network,omitzero"`
 
+	// Time reports how this machine's clock is doing: the same facts
+	// the time loop prints to the console, made queryable. Unlike most
+	// of status it changes for the machine's whole life, because the
+	// clock is disciplined continuously, not configured once at boot.
+	Time TimeStatus `json:"time,omitzero"`
+
 	// Hardware is what the machine found itself running on.
 	Hardware HardwareStatus `json:"hardware,omitzero"`
 
@@ -99,6 +105,36 @@ type InterfaceStatus struct {
 	Gateway      string     `json:"gateway,omitempty"`
 	Nameservers  []string   `json:"nameservers,omitempty"`
 	LeaseExpires *time.Time `json:"leaseExpires,omitempty"`
+}
+
+// TimeStatus is the machine's account of its own clock. Synchronized
+// is deliberately honest: a fleet with no upstreams free-runs, agrees
+// with itself, and still reports false here, because agreeing with
+// the world is a different claim than agreeing with each other and
+// certificate validation cares about the difference.
+type TimeStatus struct {
+	// Synchronized reports whether the clock is currently being
+	// disciplined against a source that is itself synchronized.
+	Synchronized bool `json:"synchronized"`
+
+	// Source is who this machine follows: an upstream's name on a
+	// server, the cluster endpoint's host on an agent.
+	Source string `json:"source,omitempty"`
+
+	// Stratum is the machine's distance from a reference clock in
+	// NTP's own vocabulary: a source at stratum n makes this machine
+	// stratum n+1. A server free-running on purpose reports the
+	// local-clock convention (10); 16 means unsynchronized with no
+	// pretense of serving anyone.
+	Stratum int `json:"stratum,omitempty"`
+
+	// Offset is the clock error measured at the last exchange, as a
+	// human-readable duration ("1.28ms"): positive when this machine
+	// was behind its source.
+	Offset string `json:"offset,omitempty"`
+
+	// LastSync is when the clock last agreed with its source.
+	LastSync *time.Time `json:"lastSync,omitempty"`
 }
 
 type HardwareStatus struct {

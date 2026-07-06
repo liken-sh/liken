@@ -109,3 +109,24 @@ spec:
                       description: >-
                         The DNS suffix cluster-internal names live
                         under (k3s default cluster.local).
+                time:
+                  type: object
+                  description: >-
+                    The cluster's time hierarchy: where the servers
+                    get their time. Only the servers consult it —
+                    agents always sync from the cluster's endpoint,
+                    so time flows upstreams, then servers, then
+                    everyone else.
+                  properties:
+                    upstreams:
+                      type: array
+                      description: >-
+                        The NTP servers the cluster's servers sync
+                        from, as hostnames or addresses. No default,
+                        deliberately: volunteering a deployment's
+                        machines to a public pool is the deployment's
+                        choice to make. Empty means the fleet
+                        free-runs — internally consistent, correct
+                        only if the hardware clocks happen to be.
+                      items:
+                        type: string

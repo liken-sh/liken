@@ -40,6 +40,8 @@ spec:
     serviceCIDR: 10.43.0.0/16
     clusterDNS: 10.43.0.10
     clusterDomain: cluster.local
+  time:
+    upstreams: [time.cloudflare.com, 192.168.1.1]
 `)
 	c, err := LoadCluster(path)
 	if err != nil {
@@ -59,6 +61,9 @@ spec:
 	}
 	if c.Spec.Network.ClusterDomain != "cluster.local" {
 		t.Errorf("clusterDomain: got %q", c.Spec.Network.ClusterDomain)
+	}
+	if len(c.Spec.Time.Upstreams) != 2 || c.Spec.Time.Upstreams[0] != "time.cloudflare.com" {
+		t.Errorf("time upstreams: got %v", c.Spec.Time.Upstreams)
 	}
 }
 

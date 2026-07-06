@@ -317,7 +317,7 @@
           fatals; the time responder is the first named candidate,
           promoted in a hardening pass, not now. All of this lands in
           init's package documentation.
-   2. [ ] The API: `spec.time` on the Cluster (the upstream list —
+   2. [x] The API: `spec.time` on the Cluster (the upstream list —
           empty is legal and means the fleet free-runs), and
           `status.time` on the Machine (synchronized, source, stratum,
           offset, lastSync) under the console-parity rule: whatever
