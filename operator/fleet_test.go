@@ -15,7 +15,7 @@ var sweepNow = time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
 // fleetMachine builds one machine as the sweep would see it: a name,
 // a phase, and a heartbeat some age ago (negative means no heartbeat
 // was ever written).
-func fleetMachine(name, phase string, heartbeatAge time.Duration) machine.Machine {
+func fleetMachine(name string, phase machine.Phase, heartbeatAge time.Duration) machine.Machine {
 	m := machine.Machine{Metadata: machine.ObjectMeta{Name: name}}
 	m.Status.Phase = phase
 	if heartbeatAge >= 0 {

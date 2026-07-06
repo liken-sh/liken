@@ -248,7 +248,7 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string) {
 		if condition.Status != "True" {
 			ready = machine.Condition{
 				Type: "Ready", Status: "False",
-				Reason: "Degraded", Message: condition.Type + " is " + condition.Status,
+				Reason: "Degraded", Message: condition.Type + " is " + string(condition.Status),
 			}
 		}
 	}

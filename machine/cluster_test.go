@@ -99,7 +99,7 @@ func TestRoleDerivation(t *testing.T) {
 		name    string
 		cluster *Cluster
 		machine string
-		want    string
+		want    Role
 	}{
 		{"named leader", cluster, "node-1", RoleLeader},
 		{"unnamed machine is a follower", cluster, "node-2", RoleFollower},

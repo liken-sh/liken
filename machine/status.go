@@ -15,7 +15,7 @@ type MachineStatus struct {
 	// never go stale relative to them. Conditions are for programs
 	// (kubectl wait, controllers); the phase is for the human scanning
 	// a fleet listing. See the Phase constants for the vocabulary.
-	Phase string `json:"phase,omitempty"`
+	Phase Phase `json:"phase,omitempty"`
 
 	// Version reports what this machine is running. The k3s and kubelet
 	// versions aren't here because Kubernetes already reports them on
@@ -26,7 +26,7 @@ type MachineStatus struct {
 	// a control plane) or a follower (it runs workloads). Derived at
 	// boot from the Cluster manifest's leaders list, never declared
 	// here.
-	Role string `json:"role,omitempty"`
+	Role Role `json:"role,omitempty"`
 
 	// Network is the boot's networking outcome, DHCP leases and static
 	// assignments alike: the same facts init prints to the console,
@@ -81,6 +81,14 @@ type MachineStatus struct {
 	Conditions []Condition `json:"conditions,omitempty"`
 }
 
+// Phase is a machine's whole story in one word. Named string types
+// are how Go models a closed vocabulary: the constants below are the
+// only values, the compiler catches a Phase handed where a Role
+// belongs, and the wire format is unchanged (a named string marshals
+// exactly like a bare one). Kubernetes' own API types use the same
+// idiom (v1.PodPhase, metav1.ConditionStatus).
+type Phase string
+
 // The phases a machine can report, most severe first. Each is a
 // summary of the conditions, not a fact of its own; the operator
 // derives the phase from the conditions on every pass, and the table
@@ -88,16 +96,16 @@ type MachineStatus struct {
 // condition puts a machine in which phase. Lost is the exception to
 // "derived from own conditions": a machine cannot report its own
 // death, so a leader writes Lost on its behalf when its heartbeat
-// (ObservedAt) goes silent.
+// goes silent.
 const (
-	PhaseUnknown       = "Unknown"       // the facts are unreadable; the operator can't tell anything
-	PhaseBooting       = "Booting"       // init hasn't finished publishing this boot's record yet
-	PhaseLost          = "Lost"          // the heartbeat went silent; a leader wrote this, not the machine
-	PhaseBlocked       = "Blocked"       // drift exists but can't be staged; it needs a different edit, not time
-	PhaseUpdating      = "Updating"      // a reboot is in flight to apply a staged change
-	PhaseUpdatePending = "UpdatePending" // a change is staged, waiting on a Manual reboot
-	PhaseDegraded      = "Degraded"      // something is wrong that isn't one of the specific states above
-	PhaseReady         = "Ready"         // every condition is True
+	PhaseUnknown       Phase = "Unknown"       // the facts are unreadable; the operator can't tell anything
+	PhaseBooting       Phase = "Booting"       // init hasn't finished publishing this boot's record yet
+	PhaseLost          Phase = "Lost"          // the heartbeat went silent; a leader wrote this, not the machine
+	PhaseBlocked       Phase = "Blocked"       // drift exists but can't be staged; it needs a different edit, not time
+	PhaseUpdating      Phase = "Updating"      // a reboot is in flight to apply a staged change
+	PhaseUpdatePending Phase = "UpdatePending" // a change is staged, waiting on a Manual reboot
+	PhaseDegraded      Phase = "Degraded"      // something is wrong that isn't one of the specific states above
+	PhaseReady         Phase = "Ready"         // every condition is True
 )
 
 type VersionStatus struct {
@@ -126,35 +134,39 @@ type NetworkStatus struct {
 	Interfaces []InterfaceStatus `json:"interfaces,omitempty"`
 }
 
-// How an interface got its address: a DHCP lease, or a static
-// assignment from the Machine spec.
+// AddressMethod is how an interface got its address: a DHCP lease,
+// or a static assignment from the Machine spec.
+type AddressMethod string
+
 const (
-	MethodDHCP   = "DHCP"
-	MethodStatic = "Static"
+	MethodDHCP   AddressMethod = "DHCP"
+	MethodStatic AddressMethod = "Static"
 )
 
 // InterfaceStatus is one interface as the boot configured it.
 type InterfaceStatus struct {
-	Name         string     `json:"name"`
-	MAC          string     `json:"mac,omitempty"`
-	Address      string     `json:"address,omitempty"`
-	Method       string     `json:"method,omitempty"`
-	Gateway      string     `json:"gateway,omitempty"`
-	Nameservers  []string   `json:"nameservers,omitempty"`
-	LeaseExpires *time.Time `json:"leaseExpires,omitempty"`
+	Name         string        `json:"name"`
+	MAC          string        `json:"mac,omitempty"`
+	Address      string        `json:"address,omitempty"`
+	Method       AddressMethod `json:"method,omitempty"`
+	Gateway      string        `json:"gateway,omitempty"`
+	Nameservers  []string      `json:"nameservers,omitempty"`
+	LeaseExpires *time.Time    `json:"leaseExpires,omitempty"`
 }
 
-// The states a machine's clock can be in. FreeRunning and
+// TimeState is a machine clock's condition. FreeRunning and
 // Unsynchronized both mean "not following anyone" but tell different
 // stories: a free-running machine was never given sources and runs on
 // its hardware clock by design, while an unsynchronized one has
 // sources it currently can't reach. The distinction matters when
 // you're deciding whether a fleet listing shows a configuration
 // choice or an outage.
+type TimeState string
+
 const (
-	TimeSynchronized   = "Synchronized"
-	TimeFreeRunning    = "FreeRunning"
-	TimeUnsynchronized = "Unsynchronized"
+	TimeSynchronized   TimeState = "Synchronized"
+	TimeFreeRunning    TimeState = "FreeRunning"
+	TimeUnsynchronized TimeState = "Unsynchronized"
 )
 
 // TimeStatus is the machine's account of its own clock. State is
@@ -167,7 +179,7 @@ type TimeStatus struct {
 	// against a source that is itself synchronized, and when it isn't,
 	// whether that's by design (FreeRunning) or by outage
 	// (Unsynchronized).
-	State string `json:"state,omitempty"`
+	State TimeState `json:"state,omitempty"`
 
 	// Source is who this machine follows: an upstream's name on a
 	// leader, one of the cluster's leaders on a follower.
@@ -211,12 +223,14 @@ type BlockDevice struct {
 	Serial    string `json:"serial,omitempty"`
 }
 
-// Backings a storage role can have. There are exactly two: a
-// partition claimed for the role, or the machine's RAM root, which is
-// the default and requires no setup.
+// Backing is where a storage role's data actually lives. There are
+// exactly two: a partition claimed for the role, or the machine's RAM
+// root, which is the default and requires no setup.
+type Backing string
+
 const (
-	BackingPartition = "Partition"
-	BackingMemory    = "Memory"
+	BackingPartition Backing = "Partition"
+	BackingMemory    Backing = "Memory"
 )
 
 // StorageStatus enumerates every role liken knows, whether declared or
@@ -236,25 +250,25 @@ type StorageStatus struct {
 // one RAM root, and per-role figures would count it several times
 // over.
 type StorageRoleStatus struct {
-	Backing       string `json:"backing"`
-	Device        string `json:"device,omitempty"`    // the partition's node this boot: vda1
-	Partition     string `json:"partition,omitempty"` // its on-disk name: liken:clusterState
-	CapacityBytes uint64 `json:"capacityBytes,omitempty"`
+	Backing       Backing `json:"backing"`
+	Device        string  `json:"device,omitempty"`    // the partition's node this boot: vda1
+	Partition     string  `json:"partition,omitempty"` // its on-disk name: liken:clusterState
+	CapacityBytes uint64  `json:"capacityBytes,omitempty"`
 }
 
 // Role addresses one role's status by its spec name; nil for names
 // outside the vocabulary.
-func (s *StorageStatus) Role(name string) *StorageRoleStatus {
+func (s *StorageStatus) Role(name StorageRoleName) *StorageRoleStatus {
 	switch name {
-	case "machineState":
+	case MachineStateRole:
 		return &s.MachineState
-	case "machineEphemeral":
+	case MachineEphemeralRole:
 		return &s.MachineEphemeral
-	case "clusterState":
+	case ClusterStateRole:
 		return &s.ClusterState
-	case "podStorage":
+	case PodStorageRole:
 		return &s.PodStorage
-	case "podEphemeral":
+	case PodEphemeralRole:
 		return &s.PodEphemeral
 	}
 	return nil
@@ -273,13 +287,16 @@ func AllRolesInMemory() StorageStatus {
 	}
 }
 
-// The manifests a boot can run under, in preference order: a staged
-// manifest awaiting its proving boot, the proven last-known-good, or
-// the image's seed (first boot only; see staging.go).
+// ManifestSource is which copy of a document a boot ran under, in
+// preference order: a staged manifest awaiting its proving boot, the
+// proven last-known-good, or the image's seed (first boot only; see
+// staging.go).
+type ManifestSource string
+
 const (
-	ManifestSourceStaged = "Staged"
-	ManifestSourceProven = "Proven"
-	ManifestSourceSeed   = "Seed"
+	ManifestSourceStaged ManifestSource = "Staged"
+	ManifestSourceProven ManifestSource = "Proven"
+	ManifestSourceSeed   ManifestSource = "Seed"
 )
 
 // BootStatus is the boot's account of its own configuration: which
@@ -289,16 +306,16 @@ const (
 // cluster's copies.
 type BootStatus struct {
 	// The Machine manifest this boot ran under.
-	ManifestSource string      `json:"manifestSource,omitempty"`
-	ManifestHash   string      `json:"manifestHash,omitempty"`
-	Storage        StorageSpec `json:"storage,omitzero"`
+	ManifestSource ManifestSource `json:"manifestSource,omitempty"`
+	ManifestHash   string         `json:"manifestHash,omitempty"`
+	Storage        StorageSpec    `json:"storage,omitzero"`
 
 	// The Cluster manifest this boot ran under: the same lifecycle,
 	// recorded separately, because the two documents stage and prove
 	// independently and a machine can be current on one while drifted
 	// on the other.
-	ClusterManifestSource string `json:"clusterManifestSource,omitempty"`
-	ClusterManifestHash   string `json:"clusterManifestHash,omitempty"`
+	ClusterManifestSource ManifestSource `json:"clusterManifestSource,omitempty"`
+	ClusterManifestHash   string         `json:"clusterManifestHash,omitempty"`
 
 	// Rejection is the standing quarantine record for the Machine
 	// manifest, republished every boot until a promotion clears it,
@@ -309,16 +326,25 @@ type BootStatus struct {
 	ClusterRejection *Rejection `json:"clusterRejection,omitempty"`
 }
 
+// ConditionStatus is a condition's verdict: a string, not a bool,
+// precisely because of the third state — a controller that can't
+// currently tell must be able to say so.
+type ConditionStatus string
+
+const (
+	ConditionTrue    ConditionStatus = "True"
+	ConditionFalse   ConditionStatus = "False"
+	ConditionUnknown ConditionStatus = "Unknown"
+)
+
 // Condition mirrors the shape Kubernetes uses everywhere (Pods, Nodes,
-// Deployments all carry these). Status is "True", "False", or
-// "Unknown": a string, not a bool, precisely because of that third
-// state: a controller that can't currently tell must be able to say so.
+// Deployments all carry these).
 type Condition struct {
-	Type               string    `json:"type"`
-	Status             string    `json:"status"`
-	Reason             string    `json:"reason,omitempty"`
-	Message            string    `json:"message,omitempty"`
-	LastTransitionTime time.Time `json:"lastTransitionTime"`
+	Type               string          `json:"type"`
+	Status             ConditionStatus `json:"status"`
+	Reason             string          `json:"reason,omitempty"`
+	Message            string          `json:"message,omitempty"`
+	LastTransitionTime time.Time       `json:"lastTransitionTime"`
 }
 
 // SetCondition upserts a condition by type, preserving the Kubernetes

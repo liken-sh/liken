@@ -87,8 +87,8 @@ type demotion struct {
 // The other direction — a leader whose Node lacks the labels — is
 // just a control plane still coming up, and k3s finishes that on
 // its own.
-func decideDemotion(role string, nodeLabels map[string]string, rebootPolicy string) demotion {
-	nodeCurrent := func(status, reason, message string) machine.Condition {
+func decideDemotion(role machine.Role, nodeLabels map[string]string, rebootPolicy machine.RebootPolicy) demotion {
+	nodeCurrent := func(status machine.ConditionStatus, reason, message string) machine.Condition {
 		return machine.Condition{Type: "NodeCurrent", Status: status, Reason: reason, Message: message}
 	}
 

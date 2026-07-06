@@ -25,7 +25,7 @@ import (
 // publishFacts returns the facts it wrote: the time component takes
 // over as their sole owner afterward, folding in each new clock
 // measurement and rewriting the file.
-func publishFacts(cluster *machine.Cluster, role string, choice *manifestChoice,
+func publishFacts(cluster *machine.Cluster, role machine.Role, choice *manifestChoice,
 	conns []*connection, storage machine.StorageStatus, boot machine.BootStatus,
 	firstSync *timeSync, timeSources []string) *machine.MachineStatus {
 	now := time.Now()

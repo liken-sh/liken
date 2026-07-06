@@ -62,7 +62,7 @@ func TestSetConditionKeepsDistinctTypesApart(t *testing.T) {
 
 func TestRoleAddressesEveryRoleAndNothingElse(t *testing.T) {
 	s := AllRolesInMemory()
-	for _, name := range []string{"machineState", "machineEphemeral", "clusterState", "podStorage", "podEphemeral"} {
+	for _, name := range StorageRoleNames {
 		rs := s.Role(name)
 		if rs == nil {
 			t.Fatalf("role %s should be addressable", name)

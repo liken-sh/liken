@@ -66,21 +66,21 @@ func TestAttemptOrder(t *testing.T) {
 	cases := []struct {
 		name string
 		c    manifestCandidates
-		want []string
+		want []machine.ManifestSource
 	}{
 		// The normal steady state: nothing staged, boot the proven.
-		{"proven only", manifestCandidates{proven: proven}, []string{"Proven"}},
+		{"proven only", manifestCandidates{proven: proven}, []machine.ManifestSource{"Proven"}},
 		// An edit awaits its proving boot, with the last-known-good behind it.
-		{"staged then proven", manifestCandidates{staged: staged, proven: proven}, []string{"Staged", "Proven"}},
+		{"staged then proven", manifestCandidates{staged: staged, proven: proven}, []machine.ManifestSource{"Staged", "Proven"}},
 		// A staged file with no proven behind it: nothing to fall back to.
-		{"staged alone", manifestCandidates{staged: staged}, []string{"Staged"}},
+		{"staged alone", manifestCandidates{staged: staged}, []machine.ManifestSource{"Staged"}},
 		// First boot: no durable candidates at all, which is
 		// settleStorage's cue to consult the image's seed.
 		{"first boot", manifestCandidates{}, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			var got []string
+			var got []machine.ManifestSource
 			for _, choice := range attemptOrder(c.c) {
 				got = append(got, choice.source)
 			}

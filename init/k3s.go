@@ -103,7 +103,7 @@ func nodeAddress(cluster *machine.Cluster, conns []*connection) (ip, ifname stri
 // k3sBootConfig renders the drop-in: everything k3s must be told that
 // only this boot could decide. Plain key: value lines, because every
 // value here is a string k3s maps onto one of its flags.
-func k3sBootConfig(role string, cluster *machine.Cluster, nodeIP, nodeInterface string, haveToken, clusterInit bool, joinURL string) string {
+func k3sBootConfig(role machine.Role, cluster *machine.Cluster, nodeIP, nodeInterface string, haveToken, clusterInit bool, joinURL string) string {
 	var b strings.Builder
 	b.WriteString("# Written by liken at boot: the configuration only the boot can\n")
 	b.WriteString("# derive, joined with the static file this directory sits beside.\n")
@@ -176,7 +176,7 @@ const k3sServerDB = "/var/lib/rancher/k3s/server/db"
 // proved out — the machine joined its cluster as a follower and the
 // operator promoted the document — earns the cleanup, on the boot
 // after.
-func purgeLeaderLeftovers(role, clusterManifestSource, dbDir string) {
+func purgeLeaderLeftovers(role machine.Role, clusterManifestSource machine.ManifestSource, dbDir string) {
 	if role != machine.RoleFollower || clusterManifestSource != machine.ManifestSourceProven {
 		return
 	}
@@ -226,7 +226,7 @@ func persistNodePassword(storage machine.StorageStatus) {
 // configuration and writes the drop-in beside the role's static
 // config file. It returns the role so the supervisor knows which k3s
 // to start.
-func writeK3sBootConfig(cluster *machine.Cluster, name string, conns []*connection) (string, error) {
+func writeK3sBootConfig(cluster *machine.Cluster, name string, conns []*connection) (machine.Role, error) {
 	role := cluster.Role(name)
 	if cluster != nil {
 		fmt.Printf("liken: this machine is a cluster %s (cluster %s)\n", role, cluster.Metadata.Name)

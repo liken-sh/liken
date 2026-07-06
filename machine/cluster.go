@@ -33,15 +33,17 @@ import (
 // Cluster resource.
 const ClusterManifestPath = "/etc/liken/cluster.yaml"
 
-// The two roles a machine can play in a cluster: leaders run a
-// control plane (an API server, a scheduler, the datastore),
-// followers run workloads and take direction from the leaders. k3s
-// calls these "server" and "agent"; liken translates at exactly one
-// place, the moment it execs k3s (supervisor.go), and speaks
-// leader/follower everywhere else.
+// Role is what a machine is in its cluster. There are exactly two:
+// leaders run a control plane (an API server, a scheduler, the
+// datastore), followers run workloads and take direction from the
+// leaders. k3s calls these "server" and "agent"; liken translates at
+// exactly one place, the moment it execs k3s (supervisor.go), and
+// speaks leader/follower everywhere else.
+type Role string
+
 const (
-	RoleLeader   = "leader"
-	RoleFollower = "follower"
+	RoleLeader   Role = "leader"
+	RoleFollower Role = "follower"
 )
 
 type Cluster struct {
@@ -69,7 +71,7 @@ type Cluster struct {
 // takes the API server down with it, so there is nobody left to
 // write — a frozen status is itself the symptom.
 type ClusterStatus struct {
-	Phase    string       `json:"phase,omitempty"`
+	Phase    Phase        `json:"phase,omitempty"`
 	Machines MachineTally `json:"machines,omitzero"`
 }
 
@@ -159,7 +161,7 @@ type ClusterNetworkSpec struct {
 // answers leader: a machine with no cluster manifest is alone, and a
 // machine alone is its own single-node cluster, which is exactly what
 // liken has always booted.
-func (c *Cluster) Role(machineName string) string {
+func (c *Cluster) Role(machineName string) Role {
 	if c == nil || slices.Contains(c.Spec.Leaders, machineName) {
 		return RoleLeader
 	}

@@ -115,7 +115,7 @@ type growPlan struct {
 
 // planAllGrowth reads each recognized disk's table and plans its
 // growth, without writing anything.
-func planAllGrowth(roles []machine.DeclaredRole, found map[string]partition) ([]growPlan, error) {
+func planAllGrowth(roles []machine.DeclaredRole, found map[machine.StorageRoleName]partition) ([]growPlan, error) {
 	byDisk := map[string][]machine.DeclaredRole{}
 	var order []string
 	for _, role := range roles {

@@ -135,17 +135,19 @@ type MachineSpec struct {
 	// Manual is the default because on a single-node cluster a reboot
 	// is a total outage, and a typo'd edit should never bounce the
 	// machine on its own authority.
-	RebootPolicy string `json:"rebootPolicy,omitempty"`
+	RebootPolicy RebootPolicy `json:"rebootPolicy,omitempty"`
 }
 
-// The reboot policies. Anything unrecognized reads as Manual: when in
-// doubt, don't reboot.
+// RebootPolicy is who initiates the reboot a staged change waits on.
+// Anything unrecognized reads as Manual: when in doubt, don't reboot.
+type RebootPolicy string
+
 const (
-	RebootAuto   = "Auto"
-	RebootManual = "Manual"
+	RebootAuto   RebootPolicy = "Auto"
+	RebootManual RebootPolicy = "Manual"
 )
 
-func (s MachineSpec) RebootPolicyOrDefault() string {
+func (s MachineSpec) RebootPolicyOrDefault() RebootPolicy {
 	if s.RebootPolicy == RebootAuto {
 		return RebootAuto
 	}

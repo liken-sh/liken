@@ -25,7 +25,7 @@ import "github.com/chrisguidry/liken/machine"
 // one. A machine that is both waiting on a Manual reboot and failing
 // a sysctl is UpdatePending *and* Degraded; the listing should show
 // the one that needs a human soonest.
-var phasePrecedence = []string{
+var phasePrecedence = []machine.Phase{
 	machine.PhaseUnknown,
 	machine.PhaseBooting,
 	machine.PhaseBlocked,
@@ -41,7 +41,7 @@ var phasePrecedence = []string{
 // the boolean status can't: RebootPending and RejectedLastBoot are
 // both "not converged", but one resolves with a reboot and the other
 // never will without a different edit.
-func conditionPhase(c machine.Condition) string {
+func conditionPhase(c machine.Condition) machine.Phase {
 	if c.Type == "Ready" || c.Status == "True" {
 		return ""
 	}
@@ -69,8 +69,8 @@ func conditionPhase(c machine.Condition) string {
 
 // decidePhase reduces the conditions to the single gravest phase,
 // Ready when nothing argues otherwise.
-func decidePhase(conditions []machine.Condition) string {
-	argued := map[string]bool{}
+func decidePhase(conditions []machine.Condition) machine.Phase {
+	argued := map[machine.Phase]bool{}
 	for _, c := range conditions {
 		if phase := conditionPhase(c); phase != "" {
 			argued[phase] = true

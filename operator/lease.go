@@ -72,19 +72,29 @@ type leaseObject struct {
 	} `json:"spec"`
 }
 
-// leaseAction is the election's pure half: given the lease as it
-// stands, what should this contender do? "renew" (we hold it),
-// "take" (nobody does, or the holder went silent), or "standby"
-// (someone else holds a live claim).
-func leaseAction(l *leaseObject, self string, now time.Time) string {
+// A leaseVerdict is what a contender should do about the lease as it
+// stands: renew it (this machine holds it), take it (nobody does, or
+// the holder went silent), or stand by (someone else holds a live
+// claim).
+type leaseVerdict string
+
+const (
+	leaseRenew   leaseVerdict = "renew"
+	leaseTake    leaseVerdict = "take"
+	leaseStandby leaseVerdict = "standby"
+)
+
+// leaseAction is the election's pure half: the verdict for this
+// contender given the lease as it stands.
+func leaseAction(l *leaseObject, self string, now time.Time) leaseVerdict {
 	if l.Spec.HolderIdentity == self {
-		return "renew"
+		return leaseRenew
 	}
 	renewed, err := time.Parse(microTime, l.Spec.RenewTime)
 	if l.Spec.HolderIdentity == "" || err != nil || now.Sub(renewed) > fleetLeaseDuration {
-		return "take"
+		return leaseTake
 	}
-	return "standby"
+	return leaseStandby
 }
 
 // holdFleetLease returns whether this machine holds the sweep lease,
@@ -105,13 +115,13 @@ func holdFleetLease(c *apiClient, self string, now time.Time) bool {
 	}
 
 	action := leaseAction(lease, self, now)
-	if action == "standby" {
+	if action == leaseStandby {
 		return false
 	}
 	lease.Spec.HolderIdentity = self
 	lease.Spec.LeaseDurationSeconds = int(fleetLeaseDuration.Seconds())
 	lease.Spec.RenewTime = now.UTC().Format(microTime)
-	if action == "take" {
+	if action == leaseTake {
 		lease.Spec.AcquireTime = lease.Spec.RenewTime
 	}
 	body, err := json.Marshal(lease)
@@ -124,7 +134,7 @@ func holdFleetLease(c *apiClient, self string, now time.Time) bool {
 		}
 		return false
 	}
-	if action == "take" {
+	if action == leaseTake {
 		fmt.Println("holding the fleet sweep lease; this machine watches the fleet now")
 	}
 	return true

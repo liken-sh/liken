@@ -43,7 +43,7 @@ type connection struct {
 	ifname      string
 	mac         net.HardwareAddr
 	addr        *net.IPNet
-	method      string // how the address arrived: DHCP or Static
+	method      machine.AddressMethod // how the address arrived: DHCP or Static
 	gateway     net.IP
 	nameservers []net.IP
 	leaseTime   time.Duration
@@ -272,7 +272,7 @@ func writeResolvConf(content string) error {
 }
 
 func (c *connection) report() {
-	fmt.Printf("liken: %s (%s) is %s (%s)\n", c.ifname, c.mac, c.addr, strings.ToLower(c.method))
+	fmt.Printf("liken: %s (%s) is %s (%s)\n", c.ifname, c.mac, c.addr, strings.ToLower(string(c.method)))
 	if c.method == machine.MethodDHCP {
 		fmt.Printf("liken:   gateway %s, dhcp server %s, lease %s\n",
 			c.gateway, c.server, c.leaseTime)

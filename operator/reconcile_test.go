@@ -9,7 +9,7 @@ import (
 	"github.com/chrisguidry/liken/machine"
 )
 
-func nodeWithReady(status string) *nodeObject {
+func nodeWithReady(status machine.ConditionStatus) *nodeObject {
 	n := &nodeObject{}
 	n.Status.Conditions = []machine.Condition{
 		{Type: "MemoryPressure", Status: "False"},

@@ -582,8 +582,12 @@
         it; a frozen status is itself the symptom. Health checks
         surveyed and deferred: leaders cross-checking each other's
         clocks, etcd quorum margin as a Cluster condition (pairs with
-        milestone 14), and storage-capacity watermarks (a full
-        machineState silently breaks staging). (Two findings from the
+        milestone 14), storage-capacity watermarks (a full
+        machineState silently breaks staging), and the cluster-wide
+        clock spread — the fleet sweep already reads every Machine's
+        status, so it could publish max minus min of the reported
+        time offsets on the Cluster, one number that says how well
+        timekeeping is working across the whole fleet. (Two findings from the
         first lab run. The heartbeat found a feedback loop: the
         operator reconciles on every watch event, including the event
         its own status write causes, and a timestamp that moved every

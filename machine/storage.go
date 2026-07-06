@@ -28,6 +28,34 @@ import (
 // which role each serves.
 const PartitionPrefix = "liken:"
 
+// StorageRoleName names one of the storage roles. The vocabulary is
+// closed: these five names are the spec's field names, the GPT
+// partition names (behind PartitionPrefix), and the status's keys,
+// so they are defined once here and everything else ranges over
+// StorageRoleNames instead of respelling them.
+type StorageRoleName string
+
+const (
+	MachineStateRole     StorageRoleName = "machineState"
+	MachineEphemeralRole StorageRoleName = "machineEphemeral"
+	ClusterStateRole     StorageRoleName = "clusterState"
+	PodStorageRole       StorageRoleName = "podStorage"
+	PodEphemeralRole     StorageRoleName = "podEphemeral"
+)
+
+// StorageRoleNames is the canonical order: the order partitions are
+// laid down when roles share a disk (fixed here rather than by YAML
+// map order, which Kubernetes doesn't preserve), with machineState
+// first, so the partition a future boot must find before it has read
+// any spec is the first one on its disk.
+var StorageRoleNames = []StorageRoleName{
+	MachineStateRole,
+	MachineEphemeralRole,
+	ClusterStateRole,
+	PodStorageRole,
+	PodEphemeralRole,
+}
+
 type StorageSpec struct {
 	// MachineState is the machine's own durable data: the manifests
 	// that configure it (the staged and proven copies that let a spec
@@ -79,7 +107,7 @@ type StorageRole struct {
 // name: the form the rest of liken works with, since the name becomes
 // the partition's on-disk identity.
 type DeclaredRole struct {
-	Name string
+	Name StorageRoleName
 	StorageRole
 }
 
@@ -87,29 +115,34 @@ type DeclaredRole struct {
 // name written when the role's disk is claimed, and matched on every
 // boot after.
 func (r DeclaredRole) PartitionName() string {
-	return PartitionPrefix + r.Name
+	return PartitionPrefix + string(r.Name)
 }
 
-// Roles returns the declared roles in canonical order. The order
-// matters twice: it's the order partitions are laid down when roles
-// share a disk (fixed here rather than by YAML map order, which
-// Kubernetes doesn't preserve), and it puts machineState first, so
-// the partition a future boot must find before it has read any spec
-// is the first one on its disk.
+// Role addresses one role's declaration by name; nil for names
+// outside the vocabulary and for roles the spec leaves out.
+func (s *StorageSpec) Role(name StorageRoleName) *StorageRole {
+	switch name {
+	case MachineStateRole:
+		return s.MachineState
+	case MachineEphemeralRole:
+		return s.MachineEphemeral
+	case ClusterStateRole:
+		return s.ClusterState
+	case PodStorageRole:
+		return s.PodStorage
+	case PodEphemeralRole:
+		return s.PodEphemeral
+	}
+	return nil
+}
+
+// Roles returns the declared roles in StorageRoleNames' canonical
+// order.
 func (s StorageSpec) Roles() []DeclaredRole {
 	var roles []DeclaredRole
-	for _, candidate := range []struct {
-		name string
-		role *StorageRole
-	}{
-		{"machineState", s.MachineState},
-		{"machineEphemeral", s.MachineEphemeral},
-		{"clusterState", s.ClusterState},
-		{"podStorage", s.PodStorage},
-		{"podEphemeral", s.PodEphemeral},
-	} {
-		if candidate.role != nil {
-			roles = append(roles, DeclaredRole{candidate.name, *candidate.role})
+	for _, name := range StorageRoleNames {
+		if role := s.Role(name); role != nil {
+			roles = append(roles, DeclaredRole{name, *role})
 		}
 	}
 	return roles
@@ -118,7 +151,7 @@ func (s StorageSpec) Roles() []DeclaredRole {
 // Validate checks the spec's internal consistency: the errors a
 // person can fix in the manifest, caught before any disk is touched.
 func (s StorageSpec) Validate() error {
-	remainders := map[string]string{}
+	remainders := map[string]StorageRoleName{}
 	for _, role := range s.Roles() {
 		if role.Device == "" {
 			return fmt.Errorf("storage role %s: no device", role.Name)
@@ -153,7 +186,7 @@ func StorageCondition(spec StorageSpec, status StorageStatus) Condition {
 		if rs != nil && rs.Backing == BackingPartition {
 			placed = append(placed, fmt.Sprintf("%s on %s", role.Name, rs.Device))
 		} else {
-			inMemory = append(inMemory, role.Name)
+			inMemory = append(inMemory, string(role.Name))
 		}
 	}
 	switch {

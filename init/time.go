@@ -127,7 +127,7 @@ func (c *clock) record(measured *timeSync) {
 // to find), so "who has the time?" never needs an answer "where is
 // my cluster?" didn't already give. nil means free-running: a
 // leader with no upstreams declared.
-func timeSources(cluster *machine.Cluster, role string, manifestDir string) []string {
+func timeSources(cluster *machine.Cluster, role machine.Role, manifestDir string) []string {
 	if cluster == nil {
 		return nil
 	}

@@ -68,7 +68,7 @@ func listMachines(c *apiClient) ([]machine.Machine, error) {
 type fleetSweep struct {
 	lost  []string
 	tally machine.MachineTally
-	phase string
+	phase machine.Phase
 }
 
 // decideFleetSweep judges every machine by its heartbeat. A machine

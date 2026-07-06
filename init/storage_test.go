@@ -22,7 +22,7 @@ import (
 
 // declared builds the DeclaredRole the spec's Roles() would produce,
 // letting each test state just the fields it's about.
-func declared(name, device, size string) machine.DeclaredRole {
+func declared(name machine.StorageRoleName, device, size string) machine.DeclaredRole {
 	return machine.DeclaredRole{
 		Name:        name,
 		StorageRole: machine.StorageRole{Device: device, Size: size},
@@ -232,7 +232,7 @@ func TestPlanClaimRefusesPartialClaim(t *testing.T) {
 		declared("clusterState", "/dev/vda", "1Mi"),
 		declared("podStorage", "/dev/vda", ""),
 	}
-	found := map[string]partition{
+	found := map[machine.StorageRoleName]partition{
 		"clusterState": {name: "vda1", partName: "liken:clusterState"},
 	}
 	_, err := planClaim("/dev/vda", roles, found)

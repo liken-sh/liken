@@ -53,7 +53,7 @@ func TestWriteRebootIntentNeedsItsDirectory(t *testing.T) {
 }
 
 func TestRebootPolicyDefaultsToManual(t *testing.T) {
-	cases := map[string]string{
+	cases := map[RebootPolicy]RebootPolicy{
 		"":           RebootManual,
 		"Manual":     RebootManual,
 		"Auto":       RebootAuto,

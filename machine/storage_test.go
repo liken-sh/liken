@@ -66,7 +66,7 @@ func TestRolesCanonicalOrder(t *testing.T) {
 		PodStorage:       one,
 		PodEphemeral:     one,
 	}
-	want := []string{"machineState", "machineEphemeral", "clusterState", "podStorage", "podEphemeral"}
+	want := StorageRoleNames
 	roles := spec.Roles()
 	if len(roles) != len(want) {
 		t.Fatalf("got %d roles, want %d", len(roles), len(want))

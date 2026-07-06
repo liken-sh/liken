@@ -9,7 +9,7 @@ import (
 	"github.com/chrisguidry/liken/machine"
 )
 
-func condition(ctype, status, reason string) machine.Condition {
+func condition(ctype string, status machine.ConditionStatus, reason string) machine.Condition {
 	return machine.Condition{Type: ctype, Status: status, Reason: reason}
 }
 
@@ -25,7 +25,7 @@ func TestDecidePhase(t *testing.T) {
 	tests := []struct {
 		name       string
 		conditions []machine.Condition
-		want       string
+		want       machine.Phase
 	}{
 		{"everything true is ready", allTrue, machine.PhaseReady},
 		{"no conditions at all is ready", nil, machine.PhaseReady},

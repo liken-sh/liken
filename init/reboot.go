@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -98,7 +99,7 @@ func killEverything() {
 // detachment lets the kernel finish the job as those references
 // drain, after the sync has already made the data safe.
 func unmountRoles() {
-	for _, name := range []string{"podEphemeral", "podStorage", "clusterState", "machineEphemeral", "machineState"} {
+	for _, name := range slices.Backward(machine.StorageRoleNames) {
 		target := roleMounts[name].path
 		if err := unix.Unmount(target, unix.MNT_DETACH); err == nil {
 			fmt.Printf("liken: unmounted %s\n", target)

@@ -20,25 +20,25 @@ func lease(holder string, renewedAgo time.Duration) *leaseObject {
 }
 
 func TestLeaseHolderRenews(t *testing.T) {
-	if got := leaseAction(lease("node-1", 10*time.Second), "node-1", sweepNow); got != "renew" {
+	if got := leaseAction(lease("node-1", 10*time.Second), "node-1", sweepNow); got != leaseRenew {
 		t.Errorf("got %s", got)
 	}
 }
 
 func TestLeaseWithALiveHolderMeansStandBy(t *testing.T) {
-	if got := leaseAction(lease("node-2", 10*time.Second), "node-1", sweepNow); got != "standby" {
+	if got := leaseAction(lease("node-2", 10*time.Second), "node-1", sweepNow); got != leaseStandby {
 		t.Errorf("got %s", got)
 	}
 }
 
 func TestLeaseWithASilentHolderIsTaken(t *testing.T) {
-	if got := leaseAction(lease("node-2", 5*time.Minute), "node-1", sweepNow); got != "take" {
+	if got := leaseAction(lease("node-2", 5*time.Minute), "node-1", sweepNow); got != leaseTake {
 		t.Errorf("a holder past the lease duration has lost it, got %s", got)
 	}
 }
 
 func TestLeaseWithNoHolderIsTaken(t *testing.T) {
-	if got := leaseAction(lease("", -1), "node-1", sweepNow); got != "take" {
+	if got := leaseAction(lease("", -1), "node-1", sweepNow); got != leaseTake {
 		t.Errorf("got %s", got)
 	}
 }
@@ -46,7 +46,7 @@ func TestLeaseWithNoHolderIsTaken(t *testing.T) {
 func TestLeaseWithAnUnreadableRenewTimeIsTaken(t *testing.T) {
 	l := lease("node-2", -1)
 	l.Spec.RenewTime = "not a timestamp"
-	if got := leaseAction(l, "node-1", sweepNow); got != "take" {
+	if got := leaseAction(l, "node-1", sweepNow); got != leaseTake {
 		t.Errorf("a claim whose renewal can't be read is no claim, got %s", got)
 	}
 }

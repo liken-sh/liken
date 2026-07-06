@@ -137,7 +137,7 @@ func postMortem() {
 // machine with no shell. A reboot intent is honored even in oneshot:
 // under QEMU's -no-reboot the restart is a clean exit, which is
 // exactly what a bounded harness run wants.
-func superviseK3s(role string, reboot <-chan machine.RebootIntent) {
+func superviseK3s(role machine.Role, reboot <-chan machine.RebootIntent) {
 	backoff := time.Second
 	for {
 		started := time.Now()
@@ -190,7 +190,7 @@ func superviseK3s(role string, reboot <-chan machine.RebootIntent) {
 // running command and its log file (which must stay open as long as
 // the process writes; the console copy flows through an in-process
 // pipe).
-func startK3s(role string) (*exec.Cmd, *os.File, error) {
+func startK3s(role machine.Role) (*exec.Cmd, *os.File, error) {
 	// k3s's output goes two places: a file, and the console, where it
 	// arrives live, line-buffered, and prefixed so it's
 	// distinguishable from liken's own messages. On a machine with no

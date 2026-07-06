@@ -57,7 +57,7 @@ const manifestPeekPoint = "/.liken-machine-state"
 type manifestChoice struct {
 	m      *machine.Machine
 	raw    []byte
-	source string
+	source machine.ManifestSource
 	hash   string
 }
 

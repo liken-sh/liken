@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -53,12 +54,12 @@ type roleMount struct {
 	mode  os.FileMode // applied to the mounted root; 0 leaves the default
 }
 
-var roleMounts = map[string]roleMount{
-	"machineState":     {path: machine.MachineStateDir},
-	"machineEphemeral": {path: "/tmp", flags: unix.MS_NOSUID | unix.MS_NODEV, mode: 0o1777},
-	"clusterState":     {path: "/var/lib/rancher"},
-	"podStorage":       {path: "/var/lib/liken/pod-storage"},
-	"podEphemeral":     {path: "/var/lib/kubelet"},
+var roleMounts = map[machine.StorageRoleName]roleMount{
+	machine.MachineStateRole:     {path: machine.MachineStateDir},
+	machine.MachineEphemeralRole: {path: "/tmp", flags: unix.MS_NOSUID | unix.MS_NODEV, mode: 0o1777},
+	machine.ClusterStateRole:     {path: "/var/lib/rancher"},
+	machine.PodStorageRole:       {path: "/var/lib/liken/pod-storage"},
+	machine.PodEphemeralRole:     {path: "/var/lib/kubelet"},
 }
 
 // teardownStorage unmounts whatever reconciliation may have mounted,
@@ -73,7 +74,7 @@ func teardownStorage() {
 	// mountRole parks clusterState's filesystem here while seeding; a
 	// failure mid-dance leaves it parked.
 	_ = unix.Unmount("/.liken-claim", 0)
-	for _, name := range []string{"podEphemeral", "podStorage", "clusterState", "machineEphemeral", "machineState"} {
+	for _, name := range slices.Backward(machine.StorageRoleNames) {
 		target := roleMounts[name].path
 		err := unix.Unmount(target, 0)
 		if err == nil {
@@ -265,7 +266,7 @@ func reconcileStorage(spec machine.StorageSpec) (machine.StorageStatus, error) {
 
 // recognizeRoles matches the declared roles against the machine's
 // partitions as sysfs reports them.
-func recognizeRoles(roles []machine.DeclaredRole) (map[string]partition, error) {
+func recognizeRoles(roles []machine.DeclaredRole) (map[machine.StorageRoleName]partition, error) {
 	return matchRoles(roles, discoverPartitions())
 }
 
@@ -274,8 +275,8 @@ func recognizeRoles(roles []machine.DeclaredRole) (map[string]partition, error) 
 // transplanted or cloned disk), and guessing wrong about which one
 // holds the real cluster would destroy data, so that's an error
 // rather than a choice.
-func matchRoles(roles []machine.DeclaredRole, parts []partition) (map[string]partition, error) {
-	found := map[string]partition{}
+func matchRoles(roles []machine.DeclaredRole, parts []partition) (map[machine.StorageRoleName]partition, error) {
+	found := map[machine.StorageRoleName]partition{}
 	for _, role := range roles {
 		for _, p := range parts {
 			if p.partName != role.PartitionName() {
@@ -305,7 +306,7 @@ type claimPlan struct {
 // role naming it, and lays out its table: sized roles first at their
 // exact sizes, in canonical order, and the remainder role taking
 // whatever is left. Nothing is written.
-func planClaim(device string, roles []machine.DeclaredRole, found map[string]partition) (claimPlan, error) {
+func planClaim(device string, roles []machine.DeclaredRole, found map[machine.StorageRoleName]partition) (claimPlan, error) {
 	var mine []machine.DeclaredRole
 	for _, role := range roles {
 		if role.Device == device {

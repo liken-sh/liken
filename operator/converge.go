@@ -38,7 +38,7 @@ func storageDrift(desired, actuated machine.StorageSpec) []string {
 	var diffs []string
 	desiredRoles := rolesByName(desired)
 	actuatedRoles := rolesByName(actuated)
-	for _, name := range []string{"machineState", "machineEphemeral", "clusterState", "podStorage", "podEphemeral"} {
+	for _, name := range machine.StorageRoleNames {
 		d, dok := desiredRoles[name]
 		a, aok := actuatedRoles[name]
 		switch {
@@ -58,8 +58,8 @@ func storageDrift(desired, actuated machine.StorageSpec) []string {
 	return diffs
 }
 
-func rolesByName(spec machine.StorageSpec) map[string]machine.DeclaredRole {
-	byName := map[string]machine.DeclaredRole{}
+func rolesByName(spec machine.StorageSpec) map[machine.StorageRoleName]machine.DeclaredRole {
+	byName := map[machine.StorageRoleName]machine.DeclaredRole{}
 	for _, role := range spec.Roles() {
 		byName[role.Name] = role
 	}

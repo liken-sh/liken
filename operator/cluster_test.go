@@ -21,7 +21,7 @@ spec:
   leaders: [node-1]
 `
 
-func partitionBackedFacts(source, hash string) *machine.MachineStatus {
+func partitionBackedFacts(source machine.ManifestSource, hash string) *machine.MachineStatus {
 	return &machine.MachineStatus{
 		Storage: machine.StorageStatus{
 			MachineState: machine.StorageRoleStatus{Backing: machine.BackingPartition},
@@ -132,7 +132,7 @@ func decisionCluster() *machine.Cluster {
 	}
 }
 
-func machineWithPolicy(policy string) *machine.Machine {
+func machineWithPolicy(policy machine.RebootPolicy) *machine.Machine {
 	return &machine.Machine{
 		Metadata: machine.ObjectMeta{Name: "node-1"},
 		Spec:     machine.MachineSpec{RebootPolicy: policy},
