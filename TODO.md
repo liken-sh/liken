@@ -177,15 +177,7 @@
           spec returns to what the machine runs, the operator also
           withdraws any manifest still staged (the next boot would
           have applied it) and clears the standing rejection.
-6. [ ] Bake in Flux bootstrap, so the machine converges to its repo from
-       first boot. This is where the Machine manifest's authority story
-       resolves: today the file seeds the cluster and the cluster copy
-       wins; with GitOps, git wins and both are downstream of it. Open
-       questions to answer on the way: where the git credentials live
-       (they're identity, like the CA bundle), and how a machine learns
-       *which* repo — another field the image carries, or part of the
-       Machine manifest itself.
-7. [ ] Growing the cluster past one node, driven by a `kind: Cluster`
+6. [ ] Growing the cluster past one node, driven by a `kind: Cluster`
        resource: what a machine needs to form or join a cluster — the
        k3s join token (or a reference to it; a token in plain YAML is a
        secrets problem), the server URL, and which machines are servers
@@ -196,6 +188,25 @@
        can reach each other is its own networking lesson (user-mode
        networking isolates guests; joining them takes a socket network
        or a bridge).
+7. [ ] GitOps from first boot — without baking an engine into the OS.
+       The OS grows two generic primitives rather than Flux support: a
+       seed channel (manifests delivered alongside the Machine manifest
+       land in k3s's auto-manifests directory, applied at first boot
+       and owned by the repo afterward — which needs the same staged/
+       promoted care the Machine manifest gets) and a minting primitive
+       (the machine creates an SSH keypair in a Secret if one is
+       missing and publishes the public half in status and on the
+       console, so the user registers a deploy key at the forge without
+       ever handling private material; the key may be read-write, since
+       image-update automation will eventually commit tag bumps back to
+       the repo). Flux itself is blessed content, not a vendored
+       domain: its install manifest and sync objects ride the seed
+       channel, that first apply plays the part `flux bootstrap`'s CLI
+       plays, and Flux self-manages from the repo afterward — the
+       standard pattern, and another engine could ride the same
+       channel. This is where the manifest authority story resolves:
+       git wins, and the seeded Machine and Cluster copies are
+       downstream of it.
 8. [ ] Explore device management: how does a shell-less, udev-less OS
        expose `/dev` beyond the basics — USB devices arriving after
        boot, GPUs, serial adapters? devtmpfs gives us the nodes, but
