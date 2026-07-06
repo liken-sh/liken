@@ -107,9 +107,13 @@ type Machine struct {
 // name. ResourceVersion only matters on the API-server transport: it's
 // the cluster's optimistic-concurrency counter, and the operator hands
 // it back when watching so the server knows where to resume.
+// Generation counts spec changes (the API server bumps it on spec
+// writes and leaves it alone on status writes), which is what lets a
+// condition say which version of the spec it judged.
 type ObjectMeta struct {
 	Name            string `json:"name"`
 	ResourceVersion string `json:"resourceVersion,omitempty"`
+	Generation      int64  `json:"generation,omitempty"`
 }
 
 // MachineSpec is the declared half: what a person (or, eventually, a

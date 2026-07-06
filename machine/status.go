@@ -337,11 +337,19 @@ const (
 	ConditionUnknown ConditionStatus = "Unknown"
 )
 
-// Condition mirrors the shape Kubernetes uses everywhere (Pods, Nodes,
-// Deployments all carry these).
+// Condition mirrors metav1.Condition, the shape Kubernetes uses
+// everywhere (Pods, Nodes, Deployments all carry these).
+// ObservedGeneration records which metadata.generation the condition
+// judged: generation counts spec edits, so a consumer can tell
+// "Ready, for the spec as it stands" from "Ready, but for a spec two
+// edits ago" — a distinction that matters in liken, where edits wait
+// for a reboot to take effect. (The convergence conditions make the
+// stronger, content-hashed version of this claim; the generation is
+// for tooling that speaks the convention.)
 type Condition struct {
 	Type               string          `json:"type"`
 	Status             ConditionStatus `json:"status"`
+	ObservedGeneration int64           `json:"observedGeneration,omitempty"`
 	Reason             string          `json:"reason,omitempty"`
 	Message            string          `json:"message,omitempty"`
 	LastTransitionTime time.Time       `json:"lastTransitionTime"`

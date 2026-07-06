@@ -71,14 +71,25 @@ spec:
               properties:
                 leaders:
                   type: array
+                  # Atomic, not a set: order carries meaning. The
+                  # first entry is the founding leader — the machine
+                  # that renders cluster-init and creates (or, on the
+                  # migration boot, converts to) the embedded etcd
+                  # datastore.
+                  x-kubernetes-list-type: atomic
                   description: >-
                     The machines that run control planes, by Machine
                     name. A machine derives its role from this list:
                     named here means leader, absent means follower.
+                    The first entry is the founding leader, whose
+                    address the other leaders join through.
                   items:
                     type: string
+                    maxLength: 253
                 endpoint:
                   type: string
+                  maxLength: 2048
+                  pattern: ^https://.+$
                   description: >-
                     The URL followers join the cluster through, e.g.
                     https://10.10.0.1:6443. With one leader this is
@@ -106,6 +117,8 @@ spec:
                   properties:
                     nodeCIDR:
                       type: string
+                      maxLength: 64
+                      pattern: ^[0-9a-fA-F:.]+/[0-9]{1,3}$
                       description: >-
                         The subnet the nodes address each other on. A
                         machine's interface whose address falls inside
@@ -116,6 +129,8 @@ spec:
                           message: nodeCIDR is immutable once set; re-addressing the node network means new Machine manifests, not a Cluster edit
                     clusterCIDR:
                       type: string
+                      maxLength: 64
+                      pattern: ^[0-9a-fA-F:.]+/[0-9]{1,3}$
                       description: >-
                         The range pod addresses are drawn from
                         (k3s default 10.42.0.0/16).
@@ -124,6 +139,8 @@ spec:
                           message: clusterCIDR is immutable once set; k3s cannot renumber pod addresses on a live cluster
                     serviceCIDR:
                       type: string
+                      maxLength: 64
+                      pattern: ^[0-9a-fA-F:.]+/[0-9]{1,3}$
                       description: >-
                         The range service addresses are drawn from
                         (k3s default 10.43.0.0/16).
@@ -132,6 +149,8 @@ spec:
                           message: serviceCIDR is immutable once set; k3s cannot renumber service addresses on a live cluster
                     clusterDNS:
                       type: string
+                      maxLength: 64
+                      pattern: ^[0-9a-fA-F:.]+$
                       description: >-
                         The service address of the cluster's DNS
                         resolver, inside serviceCIDR (k3s default
@@ -141,6 +160,7 @@ spec:
                           message: clusterDNS is immutable once set; every pod's resolv.conf already points at it
                     clusterDomain:
                       type: string
+                      maxLength: 253
                       description: >-
                         The DNS suffix cluster-internal names live
                         under (k3s default cluster.local).
@@ -158,6 +178,8 @@ spec:
                   properties:
                     upstreams:
                       type: array
+                      # Atomic: source order is preference order.
+                      x-kubernetes-list-type: atomic
                       description: >-
                         The NTP servers the cluster's servers sync
                         from, as hostnames or addresses. No default,
@@ -168,6 +190,7 @@ spec:
                         only if the hardware clocks happen to be.
                       items:
                         type: string
+                        maxLength: 253
             status:
               type: object
               description: >-

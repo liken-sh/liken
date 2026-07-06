@@ -188,6 +188,11 @@ spec:
                         typically declares two: a DHCP uplink, and the
                         cluster-facing interface with the static
                         address its peers were told to find it at.
+                      # One entry per interface: a map keyed by name,
+                      # which the API server can now enforce instead
+                      # of trusting.
+                      x-kubernetes-list-type: map
+                      x-kubernetes-list-map-keys: [name]
                       items:
                         type: object
                         required: [name]
@@ -199,6 +204,8 @@ spec:
                               names it (e.g. eth1).
                           address:
                             type: string
+                            maxLength: 64
+                            pattern: ^[0-9a-fA-F:.]+/[0-9]{1,3}$
                             description: >-
                               A static address in CIDR form
                               (10.10.0.1/24); the prefix length is how
@@ -206,14 +213,20 @@ spec:
                               DHCP on this interface.
                           gateway:
                             type: string
+                            maxLength: 64
+                            pattern: ^[0-9a-fA-F:.]+$
                             description: >-
                               Makes this interface the default route.
                               Optional even for static addresses; a
                               DHCP lease elsewhere may supply it.
                           nameservers:
                             type: array
+                            # Atomic: nameserver order is preference
+                            # order, so the list replaces as a whole.
+                            x-kubernetes-list-type: atomic
                             items:
                               type: string
+                              maxLength: 253
                 sysctls:
                   type: object
                   description: >-
@@ -267,8 +280,12 @@ spec:
                       properties:
                         device:
                           type: string
+                          maxLength: 128
+                          pattern: ^/dev/[a-zA-Z0-9/_-]+$
                         size:
                           type: string
+                          maxLength: 32
+                          pattern: ^[0-9]+(Ki|Mi|Gi|Ti)?$
                     machineEphemeral:
                       type: object
                       description: >-
@@ -277,8 +294,12 @@ spec:
                       properties:
                         device:
                           type: string
+                          maxLength: 128
+                          pattern: ^/dev/[a-zA-Z0-9/_-]+$
                         size:
                           type: string
+                          maxLength: 32
+                          pattern: ^[0-9]+(Ki|Mi|Gi|Ti)?$
                     clusterState:
                       type: object
                       description: >-
@@ -290,8 +311,12 @@ spec:
                       properties:
                         device:
                           type: string
+                          maxLength: 128
+                          pattern: ^/dev/[a-zA-Z0-9/_-]+$
                         size:
                           type: string
+                          maxLength: 32
+                          pattern: ^[0-9]+(Ki|Mi|Gi|Ti)?$
                     podStorage:
                       type: object
                       description: >-
@@ -302,8 +327,12 @@ spec:
                       properties:
                         device:
                           type: string
+                          maxLength: 128
+                          pattern: ^/dev/[a-zA-Z0-9/_-]+$
                         size:
                           type: string
+                          maxLength: 32
+                          pattern: ^[0-9]+(Ki|Mi|Gi|Ti)?$
                     podEphemeral:
                       type: object
                       description: >-
@@ -314,8 +343,12 @@ spec:
                       properties:
                         device:
                           type: string
+                          maxLength: 128
+                          pattern: ^/dev/[a-zA-Z0-9/_-]+$
                         size:
                           type: string
+                          maxLength: 32
+                          pattern: ^[0-9]+(Ki|Mi|Gi|Ti)?$
             status:
               type: object
               description: >-
@@ -382,12 +415,14 @@ spec:
                       type: string
                     addresses:
                       type: array
+                      x-kubernetes-list-type: atomic
                       items:
                         type: string
                     gateway:
                       type: string
                     nameservers:
                       type: array
+                      x-kubernetes-list-type: atomic
                       items:
                         type: string
                     leaseExpires:
@@ -395,6 +430,8 @@ spec:
                       format: date-time
                     interfaces:
                       type: array
+                      x-kubernetes-list-type: map
+                      x-kubernetes-list-map-keys: [name]
                       items:
                         type: object
                         required: [name]
@@ -413,6 +450,7 @@ spec:
                             type: string
                           nameservers:
                             type: array
+                            x-kubernetes-list-type: atomic
                             items:
                               type: string
                           leaseExpires:
@@ -483,6 +521,8 @@ spec:
                         in probe order, so a handle, not an identity);
                         the model and serial come from the device
                         itself.
+                      x-kubernetes-list-type: map
+                      x-kubernetes-list-map-keys: [name]
                       items:
                         type: object
                         required: [name]
@@ -675,18 +715,47 @@ spec:
                     turns a stale kubelet lease into a NotReady Node.
                 conditions:
                   type: array
+                  # A conditions array is a map in list's clothing:
+                  # one entry per type. Declaring that (list-type map,
+                  # keyed by type) lets the API server reject
+                  # duplicate types and, under server-side apply,
+                  # merge writes per condition instead of clobbering
+                  # the whole list. The field constraints below are
+                  # metav1.Condition's own, so these conditions
+                  # validate exactly like the ones on Pods and Nodes,
+                  # not just resemble them.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
                   items:
                     type: object
-                    required: [type, status]
+                    required: [type, status, reason, lastTransitionTime]
                     properties:
                       type:
                         type: string
+                        maxLength: 316
+                        pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
                       status:
                         type: string
+                        enum: ["True", "False", "Unknown"]
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        minimum: 0
+                        description: >-
+                          The metadata.generation this condition
+                          judged. Generation counts spec edits, so
+                          this is how a consumer tells a verdict on
+                          the current spec from a verdict on one
+                          already edited past — a live distinction
+                          here, where edits wait for a reboot.
                       reason:
                         type: string
+                        minLength: 1
+                        maxLength: 1024
+                        pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
                       message:
                         type: string
+                        maxLength: 32768
                       lastTransitionTime:
                         type: string
                         format: date-time

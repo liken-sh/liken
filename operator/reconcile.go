@@ -255,6 +255,15 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string) {
 	}
 	status.Conditions = machine.SetCondition(status.Conditions, ready, now)
 
+	// Every condition this pass publishes judged the spec at this
+	// generation: the API server bumps metadata.generation on spec
+	// writes only, so stamping it here is what lets a consumer tell a
+	// verdict on the current spec from a verdict on one already
+	// edited past.
+	for i := range status.Conditions {
+		status.Conditions[i].ObservedGeneration = m.Metadata.Generation
+	}
+
 	// The phase compresses the conditions into the one word a fleet
 	// listing shows (phase.go), and observedAt is the heartbeat that
 	// proves this machine computed it recently — the leaders treat its

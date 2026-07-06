@@ -135,7 +135,8 @@ func sweepFleet(c *apiClient, self string, cluster *machine.Cluster, now time.Ti
 		status.Phase = machine.PhaseLost
 		status.Conditions = machine.SetCondition(status.Conditions, machine.Condition{
 			Type: "Ready", Status: "Unknown", Reason: "HeartbeatStale",
-			Message: "the machine's operator has stopped renewing status.observedAt; the machine is presumed down",
+			ObservedGeneration: m.Metadata.Generation,
+			Message:            "the machine's operator has stopped renewing status.observedAt; the machine is presumed down",
 		}, now)
 		if err := publishStatus(c, &m, &status); err != nil {
 			// A conflict here usually means the machine just came
