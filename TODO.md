@@ -398,7 +398,7 @@
        Cluster edit — the HA milestone needs edits that converge) and
        before GitOps (git will own the Cluster document, and a
        document git owns must actually take effect).
-   1. [ ] The staging store generalizes: machine/staging.go operates
+   1. [x] The staging store generalizes: machine/staging.go operates
           on a directory instead of the hardcoded manifests/ path, so
           machine manifests stay at machineState's manifests/ and
           cluster manifests land beside them at cluster/, with the

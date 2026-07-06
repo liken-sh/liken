@@ -2,7 +2,8 @@ package machine
 
 // Tests for the manifest lifecycle, including every crash window
 // staging.go's comments describe: each half-done state must converge
-// on retry, never strand a boot without a manifest.
+// on retry, never strand a boot without a manifest. The store deals
+// in bytes; parsing belongs to its callers, so nothing here parses.
 
 import (
 	"os"
@@ -23,88 +24,110 @@ spec:
 `
 
 func TestManifestLifecycleStartsEmpty(t *testing.T) {
-	root := t.TempDir()
-	if m, raw, err := LoadStaged(root); m != nil || raw != nil || err != nil {
-		t.Errorf("an empty root should have nothing staged: %v %v %v", m, raw, err)
+	s := MachineManifests(t.TempDir())
+	if raw, err := s.LoadStaged(); raw != nil || err != nil {
+		t.Errorf("an empty root should have nothing staged: %v %v", raw, err)
 	}
-	if m, raw, err := LoadProven(root); m != nil || raw != nil || err != nil {
-		t.Errorf("an empty root should have nothing proven: %v %v %v", m, raw, err)
+	if raw, err := s.LoadProven(); raw != nil || err != nil {
+		t.Errorf("an empty root should have nothing proven: %v %v", raw, err)
 	}
-	if r, err := LoadRejection(root); r != nil || err != nil {
+	if r, err := s.LoadRejection(); r != nil || err != nil {
 		t.Errorf("an empty root should have no rejection: %v %v", r, err)
 	}
 }
 
 func TestWriteStagedRoundTrips(t *testing.T) {
-	root := t.TempDir()
-	if err := WriteStaged(root, []byte(sampleManifest)); err != nil {
+	s := MachineManifests(t.TempDir())
+	if err := s.WriteStaged([]byte(sampleManifest)); err != nil {
 		t.Fatal(err)
 	}
-	m, raw, err := LoadStaged(root)
+	raw, err := s.LoadStaged()
 	if err != nil {
 		t.Fatal(err)
-	}
-	if m.Metadata.Name != "liken-test" {
-		t.Errorf("staged manifest lost its content: %+v", m)
 	}
 	if ManifestHash(raw) != ManifestHash([]byte(sampleManifest)) {
 		t.Error("the bytes read back must hash identically to the bytes written")
 	}
 }
 
-func TestPromoteMakesStagedProven(t *testing.T) {
+func TestTheTwoStoresNeverCollide(t *testing.T) {
 	root := t.TempDir()
-	if err := WriteStaged(root, []byte(sampleManifest)); err != nil {
+	machines := MachineManifests(root)
+	clusters := ClusterManifests(root)
+	if err := machines.WriteStaged([]byte("kind: Machine\n")); err != nil {
 		t.Fatal(err)
 	}
-	if err := Promote(root); err != nil {
+	if err := clusters.WriteStaged([]byte("kind: Cluster\n")); err != nil {
 		t.Fatal(err)
 	}
-	if m, _, _ := LoadStaged(root); m != nil {
+	if raw, _ := machines.LoadStaged(); string(raw) != "kind: Machine\n" {
+		t.Errorf("the Machine store read back %q", raw)
+	}
+	if raw, _ := clusters.LoadStaged(); string(raw) != "kind: Cluster\n" {
+		t.Errorf("the Cluster store read back %q", raw)
+	}
+	if err := machines.WithdrawStaged(); err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := clusters.LoadStaged(); raw == nil {
+		t.Error("withdrawing one document's staged file must not touch the other's")
+	}
+}
+
+func TestPromoteMakesStagedProven(t *testing.T) {
+	s := MachineManifests(t.TempDir())
+	if err := s.WriteStaged([]byte(sampleManifest)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Promote(); err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := s.LoadStaged(); raw != nil {
 		t.Error("promotion should consume the staged manifest")
 	}
-	m, _, err := LoadProven(root)
-	if err != nil || m == nil || m.Metadata.Name != "liken-test" {
-		t.Errorf("promotion should install the proven manifest: %v %v", m, err)
+	raw, err := s.LoadProven()
+	if err != nil || ManifestHash(raw) != ManifestHash([]byte(sampleManifest)) {
+		t.Errorf("promotion should install the proven manifest: %v %v", raw, err)
 	}
 }
 
 func TestPromoteReplacesTheOldProvenAndClearsRejections(t *testing.T) {
-	root := t.TempDir()
-	if err := WriteProven(root, []byte(sampleManifest)); err != nil {
+	s := MachineManifests(t.TempDir())
+	if err := s.WriteProven([]byte(sampleManifest)); err != nil {
 		t.Fatal(err)
 	}
 	// An earlier staged manifest was rejected; its quarantine stands.
-	if err := WriteStaged(root, []byte(sampleManifest)); err != nil {
+	if err := s.WriteStaged([]byte(sampleManifest)); err != nil {
 		t.Fatal(err)
 	}
-	if err := Reject(root, Rejection{Hash: "bad", Reason: "did not fit", RejectedAt: time.Now()}); err != nil {
+	if err := s.Reject(Rejection{Hash: "bad", Reason: "did not fit", RejectedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	// A new staged manifest arrives and proves out.
 	newer := sampleManifest + "  sysctls:\n    vm.overcommit_memory: \"1\"\n"
-	if err := WriteStaged(root, []byte(newer)); err != nil {
+	if err := s.WriteStaged([]byte(newer)); err != nil {
 		t.Fatal(err)
 	}
-	if err := Promote(root); err != nil {
+	if err := s.Promote(); err != nil {
 		t.Fatal(err)
 	}
 
-	m, raw, err := LoadProven(root)
-	if err != nil || m == nil {
+	raw, err := s.LoadProven()
+	if err != nil || raw == nil {
 		t.Fatal(err)
 	}
 	if ManifestHash(raw) != ManifestHash([]byte(newer)) {
 		t.Error("promotion should replace the old proven manifest")
 	}
-	if r, _ := LoadRejection(root); r != nil {
+	if r, _ := s.LoadRejection(); r != nil {
 		t.Error("a success supersedes the standing rejection")
 	}
 }
 
 func TestRejectQuarantinesTheStagedManifest(t *testing.T) {
 	root := t.TempDir()
-	if err := WriteStaged(root, []byte(sampleManifest)); err != nil {
+	s := MachineManifests(root)
+	if err := s.WriteStaged([]byte(sampleManifest)); err != nil {
 		t.Fatal(err)
 	}
 	rejection := Rejection{
@@ -112,14 +135,14 @@ func TestRejectQuarantinesTheStagedManifest(t *testing.T) {
 		Reason:     "disk /dev/vdc is not attached",
 		RejectedAt: time.Now().UTC(),
 	}
-	if err := Reject(root, rejection); err != nil {
+	if err := s.Reject(rejection); err != nil {
 		t.Fatal(err)
 	}
 
-	if m, _, _ := LoadStaged(root); m != nil {
+	if raw, _ := s.LoadStaged(); raw != nil {
 		t.Error("rejection should consume the staged manifest")
 	}
-	r, err := LoadRejection(root)
+	r, err := s.LoadRejection()
 	if err != nil || r == nil {
 		t.Fatal(err)
 	}
@@ -136,7 +159,8 @@ func TestCrashBetweenRejectionNoteAndRename(t *testing.T) {
 	// The crash window in Reject: the note landed, the rename didn't.
 	// The next boot must still see the staged manifest and retry it.
 	root := t.TempDir()
-	if err := WriteStaged(root, []byte(sampleManifest)); err != nil {
+	s := MachineManifests(root)
+	if err := s.WriteStaged([]byte(sampleManifest)); err != nil {
 		t.Fatal(err)
 	}
 	note := filepath.Join(root, "manifests", "rejection.yaml")
@@ -144,82 +168,66 @@ func TestCrashBetweenRejectionNoteAndRename(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if m, _, err := LoadStaged(root); m == nil || err != nil {
-		t.Errorf("staged must survive the half-done rejection: %v %v", m, err)
+	if raw, err := s.LoadStaged(); raw == nil || err != nil {
+		t.Errorf("staged must survive the half-done rejection: %v %v", raw, err)
 	}
 	// Retrying the rejection completes it.
-	if err := Reject(root, Rejection{Hash: "h", Reason: "still broken", RejectedAt: time.Now()}); err != nil {
+	if err := s.Reject(Rejection{Hash: "h", Reason: "still broken", RejectedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	if m, _, _ := LoadStaged(root); m != nil {
+	if raw, _ := s.LoadStaged(); raw != nil {
 		t.Error("the retried rejection should complete the quarantine")
-	}
-}
-
-func TestLoadStagedReturnsBytesEvenWhenParsingFails(t *testing.T) {
-	// A staged file that won't parse must still yield its bytes: the
-	// rejection that follows records the hash of exactly what was read.
-	root := t.TempDir()
-	garbage := []byte("not: [valid")
-	if err := WriteStaged(root, garbage); err != nil {
-		t.Fatal(err)
-	}
-	m, raw, err := LoadStaged(root)
-	if err == nil || m != nil {
-		t.Fatal("garbage should not parse")
-	}
-	if ManifestHash(raw) != ManifestHash(garbage) {
-		t.Error("the unparseable bytes must come back for hashing")
 	}
 }
 
 func TestPromoteWithoutAStagedManifestFails(t *testing.T) {
 	// Promotion is only ever called on the manifest that just booted;
 	// a missing staged file at that moment is a bug worth hearing about.
-	if err := Promote(t.TempDir()); err == nil {
+	if err := MachineManifests(t.TempDir()).Promote(); err == nil {
 		t.Error("expected an error promoting nothing")
 	}
 }
 
 func TestRejectWithoutAStagedManifestFails(t *testing.T) {
-	root := t.TempDir()
-	err := Reject(root, Rejection{Reason: "nothing to reject", RejectedAt: time.Now()})
+	s := MachineManifests(t.TempDir())
+	err := s.Reject(Rejection{Reason: "nothing to reject", RejectedAt: time.Now()})
 	if err == nil {
 		t.Error("expected an error rejecting nothing")
 	}
 }
 
 func TestWithdrawStagedRemovesTheStagedManifest(t *testing.T) {
-	root := t.TempDir()
-	if err := WriteStaged(root, []byte(sampleManifest)); err != nil {
+	s := MachineManifests(t.TempDir())
+	if err := s.WriteStaged([]byte(sampleManifest)); err != nil {
 		t.Fatal(err)
 	}
-	if err := WithdrawStaged(root); err != nil {
+	if err := s.WithdrawStaged(); err != nil {
 		t.Fatal(err)
 	}
-	if m, raw, _ := LoadStaged(root); m != nil || raw != nil {
+	if raw, _ := s.LoadStaged(); raw != nil {
 		t.Error("withdrawal should remove the staged manifest")
 	}
 }
 
 func TestWithdrawStagedWithNothingStagedIsFine(t *testing.T) {
-	if err := WithdrawStaged(t.TempDir()); err != nil {
+	if err := MachineManifests(t.TempDir()).WithdrawStaged(); err != nil {
 		t.Errorf("nothing to withdraw is not an error: %v", err)
 	}
 }
 
 func TestClearRejectionRemovesBothFiles(t *testing.T) {
 	root := t.TempDir()
-	if err := WriteStaged(root, []byte(sampleManifest)); err != nil {
+	s := MachineManifests(root)
+	if err := s.WriteStaged([]byte(sampleManifest)); err != nil {
 		t.Fatal(err)
 	}
-	if err := Reject(root, Rejection{Hash: "h", Reason: "did not fit", RejectedAt: time.Now()}); err != nil {
+	if err := s.Reject(Rejection{Hash: "h", Reason: "did not fit", RejectedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ClearRejection(root); err != nil {
+	if err := s.ClearRejection(); err != nil {
 		t.Fatal(err)
 	}
-	if r, _ := LoadRejection(root); r != nil {
+	if r, _ := s.LoadRejection(); r != nil {
 		t.Error("the rejection note should be gone")
 	}
 	if _, err := os.Stat(filepath.Join(root, "manifests", "rejected.yaml")); !os.IsNotExist(err) {
@@ -228,7 +236,7 @@ func TestClearRejectionRemovesBothFiles(t *testing.T) {
 }
 
 func TestClearRejectionWithNoRejectionIsFine(t *testing.T) {
-	if err := ClearRejection(t.TempDir()); err != nil {
+	if err := MachineManifests(t.TempDir()).ClearRejection(); err != nil {
 		t.Errorf("nothing to clear is not an error: %v", err)
 	}
 }
@@ -242,7 +250,7 @@ func TestLoadRejectionRejectsGarbage(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "rejection.yaml"), []byte("not: [valid"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadRejection(root); err == nil {
+	if _, err := MachineManifests(root).LoadRejection(); err == nil {
 		t.Error("expected an error for an unparseable rejection note")
 	}
 }

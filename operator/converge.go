@@ -272,7 +272,7 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, stagedH
 // machineState filesystem, "" when nothing does. Unparseable staged
 // bytes still hash: idempotence is about bytes, not meaning.
 func readStagedHash() string {
-	_, raw, _ := machine.LoadStaged(machine.MachineStateDir)
+	raw, _ := machine.MachineManifests(machine.MachineStateDir).LoadStaged()
 	if raw == nil {
 		return ""
 	}

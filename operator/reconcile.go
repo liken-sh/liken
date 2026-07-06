@@ -135,21 +135,22 @@ func reconcile(c *apiClient, m *machine.Machine) {
 	// Convergence: does the cluster's spec match what this boot
 	// actuated, and if not, stage the difference for the next boot
 	// (converge.go). The decision is pure; these lines carry it out.
+	store := machine.MachineManifests(machine.MachineStateDir)
 	conv := decideConvergence(m, facts, readStagedHash())
 	if conv.withdraw {
-		if err := machine.WithdrawStaged(machine.MachineStateDir); err != nil {
+		if err := store.WithdrawStaged(); err != nil {
 			fmt.Printf("withdrawing the staged manifest: %v\n", err)
 		} else {
 			fmt.Println("withdrew the staged manifest; the spec matches this boot again")
 		}
 	}
 	if conv.clearRejection {
-		if err := machine.ClearRejection(machine.MachineStateDir); err != nil {
+		if err := store.ClearRejection(); err != nil {
 			fmt.Printf("clearing the rejection record: %v\n", err)
 		}
 	}
 	if conv.stage {
-		if err := machine.WriteStaged(machine.MachineStateDir, conv.manifest); err != nil {
+		if err := store.WriteStaged(conv.manifest); err != nil {
 			conv = convergence{condition: notConverged("StagingFailed", err.Error())}
 		} else {
 			fmt.Printf("staged spec %.12s for the next boot\n", conv.hash)

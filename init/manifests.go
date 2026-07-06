@@ -117,9 +117,12 @@ func loadManifestCandidates() (manifestCandidates, error) {
 	if err := unix.Mount(dev, manifestPeekPoint, "ext4", unix.MS_RDONLY, ""); err != nil {
 		return c, fmt.Errorf("peeking at machineState on %s: %w", dev, err)
 	}
-	staged, stagedRaw, stagedErr := machine.LoadStaged(manifestPeekPoint)
-	proven, provenRaw, provenErr := machine.LoadProven(manifestPeekPoint)
-	c.rejection, _ = machine.LoadRejection(manifestPeekPoint)
+	// The store hands back bytes; whether they parse as a Machine is
+	// this caller's question, asked below after the peek unmounts.
+	store := machine.MachineManifests(manifestPeekPoint)
+	stagedRaw, stagedErr := store.LoadStaged()
+	provenRaw, provenErr := store.LoadProven()
+	c.rejection, _ = store.LoadRejection()
 	if err := unix.Unmount(manifestPeekPoint, 0); err != nil {
 		// Loud but not fatal: if this mount lingers, a later rewrite
 		// of this disk's table fails with EBUSY and names the problem.
@@ -128,12 +131,18 @@ func loadManifestCandidates() (manifestCandidates, error) {
 	_ = os.Remove(manifestPeekPoint)
 
 	if provenErr != nil {
-		// A proven manifest that won't parse is a corrupted
-		// last-known-good: report it and carry on without one, rather
-		// than dying over a file whose whole job is recovery.
 		fmt.Fprintf(os.Stderr, "liken: storage: the proven manifest is unreadable: %v\n", provenErr)
-	} else if proven != nil {
-		c.proven = &manifestChoice{m: proven, raw: provenRaw, source: machine.ManifestSourceProven, hash: machine.ManifestHash(provenRaw)}
+	} else if provenRaw != nil {
+		proven, err := machine.Parse(provenRaw)
+		if err != nil {
+			// A proven manifest that won't parse is a corrupted
+			// last-known-good: report it and carry on without one,
+			// rather than dying over a file whose whole job is
+			// recovery.
+			fmt.Fprintf(os.Stderr, "liken: storage: the proven manifest is unreadable: %v\n", err)
+		} else {
+			c.proven = &manifestChoice{m: proven, raw: provenRaw, source: machine.ManifestSourceProven, hash: machine.ManifestHash(provenRaw)}
+		}
 	}
 
 	// A staged manifest is vetted before it's even a candidate: one
@@ -141,11 +150,17 @@ func loadManifestCandidates() (manifestCandidates, error) {
 	// its own lifecycle lives on, would fail every future boot the
 	// same way, so it is rejected without being tried.
 	if stagedErr != nil {
-		c.rejection = rejectStaged(part, stagedRaw, fmt.Sprintf("the staged manifest does not parse: %v", stagedErr))
-	} else if staged != nil && staged.Spec.Storage.MachineState == nil {
-		c.rejection = rejectStaged(part, stagedRaw, "the staged manifest does not declare the machineState role its own lifecycle lives on")
-	} else if staged != nil {
-		c.staged = &manifestChoice{m: staged, raw: stagedRaw, source: machine.ManifestSourceStaged, hash: machine.ManifestHash(stagedRaw)}
+		c.rejection = rejectStaged(part, nil, fmt.Sprintf("the staged manifest is unreadable: %v", stagedErr))
+	} else if stagedRaw != nil {
+		staged, err := machine.Parse(stagedRaw)
+		switch {
+		case err != nil:
+			c.rejection = rejectStaged(part, stagedRaw, fmt.Sprintf("the staged manifest does not parse: %v", err))
+		case staged.Spec.Storage.MachineState == nil:
+			c.rejection = rejectStaged(part, stagedRaw, "the staged manifest does not declare the machineState role its own lifecycle lives on")
+		default:
+			c.staged = &manifestChoice{m: staged, raw: stagedRaw, source: machine.ManifestSourceStaged, hash: machine.ManifestHash(stagedRaw)}
+		}
 	}
 	return c, nil
 }
@@ -160,7 +175,7 @@ func rejectStaged(part *partition, raw []byte, reason string) *machine.Rejection
 		RejectedAt: time.Now().UTC(),
 	}
 	if err := touchMachineState(*part, func(root string) error {
-		return machine.Reject(root, rejection)
+		return machine.MachineManifests(root).Reject(rejection)
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: storage: recording the rejection: %v\n", err)
 	}
@@ -329,7 +344,7 @@ func settleStorage() (*manifestChoice, machine.StorageStatus, machine.BootStatus
 				RejectedAt: time.Now().UTC(),
 			}
 			if terr := touchMachineState(*candidates.part, func(root string) error {
-				return machine.Reject(root, rejection)
+				return machine.MachineManifests(root).Reject(rejection)
 			}); terr != nil {
 				fmt.Fprintf(os.Stderr, "liken: storage: recording the rejection: %v\n", terr)
 			}
@@ -352,9 +367,10 @@ func settleManifests(choice *manifestChoice, status machine.StorageStatus, boot 
 	if status.MachineState.Backing != machine.BackingPartition {
 		return // nothing durable to keep manifests on
 	}
+	store := machine.MachineManifests(machine.MachineStateDir)
 	switch choice.source {
 	case machine.ManifestSourceStaged:
-		if err := machine.Promote(machine.MachineStateDir); err != nil {
+		if err := store.Promote(); err != nil {
 			fmt.Fprintf(os.Stderr, "liken: storage: promoting the staged manifest: %v\n", err)
 			return
 		}
@@ -365,7 +381,7 @@ func settleManifests(choice *manifestChoice, status machine.StorageStatus, boot 
 		if len(choice.raw) == 0 {
 			return
 		}
-		if err := machine.WriteProven(machine.MachineStateDir, choice.raw); err != nil {
+		if err := store.WriteProven(choice.raw); err != nil {
 			fmt.Fprintf(os.Stderr, "liken: storage: recording the seed as proven: %v\n", err)
 			return
 		}
