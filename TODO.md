@@ -178,17 +178,73 @@
           withdraws any manifest still staged (the next boot would
           have applied it) and clears the standing rejection.
 6. [ ] Growing the cluster past one node, driven by a `kind: Cluster`
-       resource: what a machine needs to form or join a cluster — the
-       k3s join token (or a reference to it; a token in plain YAML is a
-       secrets problem), the server URL, and which machines are servers
-       vs. agents. The Cluster could carry a template for `kind:
-       Machine` resources that a new, unknown node *claims* on first
-       boot — which is also where the "which machine am I?" open problem
-       gets a real answer. The lab has to grow too: two QEMU guests that
-       can reach each other is its own networking lesson (user-mode
-       networking isolates guests; joining them takes a socket network
-       or a bridge).
-7. [ ] GitOps from first boot — without baking an engine into the OS.
+       resource: one server and one agent, with every decision made
+       explicitly rather than discovered at runtime. The join token is
+       an input like the rest of identity: k3s's secure token format
+       is `K10<CA-hash>::user:pass`, and the CA it hashes is the
+       server CA that identity/ already mints — so make can compute
+       the whole token offline and bake it into the identity bundle.
+       The spec carries topology; the identity bundle carries secrets;
+       nothing is ever extracted from a running machine (which a
+       machine with no shell could never hand over anyway). Machines
+       get static addresses declared in their manifests, and a machine
+       finds its own manifest by `liken.machine=<name>` on the kernel
+       command line — the one channel the bootloader already owns. One
+       boot medium carries cluster.yml and a manifest per machine
+       (node-1.yml, node-2.yml, ...), so a single image can boot the
+       whole fleet.
+   1. [ ] The Cluster CRD (cluster.yml, file-delivered like the
+          Machine manifest and seeded by the operator): spec.servers
+          names the machines that run control planes, and spec.network
+          holds the facts k3s requires every node to agree on (cluster
+          CIDR, service CIDR, cluster DNS, cluster domain) —
+          cluster-scoped truths that masquerade as per-node flags. A
+          machine's role is derived, not declared: am I named in
+          spec.servers? Promoting an agent is then a Cluster edit, not
+          a coordinated pair of Machine edits.
+   2. [ ] The token joins the identity bundle: mint.sh hashes the
+          server CA, appends a random secret, and writes the token
+          next to the TLS material; init hands it to k3s (`--token` on
+          servers, `--token` plus `--server` on agents).
+   3. [ ] Static networking: spec.network grows address, gateway, and
+          nameservers (DHCP remains the default when they're omitted).
+          This was an open problem; the lab forces it onto the
+          critical path, because the shared segment joining two QEMU
+          guests is a dumb wire with no DHCP server on it.
+   4. [ ] liken.machine=: init reads its name from the kernel command
+          line and selects its manifest from the set the image
+          carries; after first boot, machineState carries the proven
+          manifest forward exactly as today.
+   5. [ ] The lab grows a node dimension: per-node dist directories,
+          MACs, and command lines. Two NICs per guest — user-mode NAT
+          stays as each guest's internet uplink, and a multicast
+          socket segment (no root, no bridges) is the wire the cluster
+          speaks over. The API-server hostfwd lives on the server node
+          only. Two terminals, two serial consoles, side by side.
+   6. [ ] Prove it: `kubectl get nodes` shows two Ready nodes, a pod
+          lands on the agent, and both machines come back from a
+          reboot still remembering the cluster.
+7. [ ] Multiple servers: quorum for the control plane. sqlite (via
+       kine) serves one server; more than one means embedded etcd —
+       `--cluster-init` on the first, `--server` on the rest, and an
+       odd number of voices to vote. k3s can migrate a sqlite cluster
+       in place by restarting it with `--cluster-init`, which is what
+       makes starting on sqlite safe rather than a dead end. This is
+       also where the endpoint question gets real: with one server the
+       cluster's address was that server's address; with several, the
+       Cluster resource needs a better answer (every server listed, a
+       DNS name, or a virtual IP).
+8. [ ] Cluster time: the servers sync from public NTP (upstreams
+       declared on the Cluster) and serve time to the rest of the
+       fleet, so agents need no internet access at all. Agents derive
+       their time sources the way they derive their role: my NTP
+       servers are my cluster's servers. SNTP is a 48-byte packet
+       format in the same genre as the DHCP client and the GPT reader
+       — a client in init and a respond-with-my-own-clock server on
+       the leads, written rather than vendored. The client runs before
+       k3s starts, because TLS fails on a skewed clock: a machine with
+       bad time can't even join the cluster it means to serve.
+9. [ ] GitOps from first boot — without baking an engine into the OS.
        The OS grows two generic primitives rather than Flux support: a
        seed channel (manifests delivered alongside the Machine manifest
        land in k3s's auto-manifests directory, applied at first boot
@@ -207,21 +263,21 @@
        channel. This is where the manifest authority story resolves:
        git wins, and the seeded Machine and Cluster copies are
        downstream of it.
-8. [ ] Explore device management: how does a shell-less, udev-less OS
-       expose `/dev` beyond the basics — USB devices arriving after
-       boot, GPUs, serial adapters? devtmpfs gives us the nodes, but
-       hotplug means fielding kernel uevents and loading modules,
-       which is the job udev does elsewhere. Then the Kubernetes half:
-       how workloads get to the hardware (device plugins, dynamic
-       resource allocation) and whether devices belong in
-       `status.hardware` alongside CPUs and memory.
-9. [ ] Explore declarative upgrades: setting `spec.version` on a Machine
-       should upgrade the machine — liken's version drives the k3s
-       version, so one field moves the whole stack. For a two-file OS an
-       upgrade is "replace vmlinuz and liken.cpio and reboot", which
-       makes A/B slots and roll-back-on-failed-boot the natural shape —
-       but it also means liken finally needs a bootloader story, since
-       QEMU's `-kernel` has been playing that role.
+10. [ ] Explore device management: how does a shell-less, udev-less OS
+        expose `/dev` beyond the basics — USB devices arriving after
+        boot, GPUs, serial adapters? devtmpfs gives us the nodes, but
+        hotplug means fielding kernel uevents and loading modules,
+        which is the job udev does elsewhere. Then the Kubernetes half:
+        how workloads get to the hardware (device plugins, dynamic
+        resource allocation) and whether devices belong in
+        `status.hardware` alongside CPUs and memory.
+11. [ ] Explore declarative upgrades: setting `spec.version` on a
+        Machine should upgrade the machine — liken's version drives the
+        k3s version, so one field moves the whole stack. For a two-file
+        OS an upgrade is "replace vmlinuz and liken.cpio and reboot",
+        which makes A/B slots and roll-back-on-failed-boot the natural
+        shape — but it also means liken finally needs a bootloader
+        story, since QEMU's `-kernel` has been playing that role.
 
 Deferred until the fundamentals above are proven — the
 public-consumption tier:
@@ -236,14 +292,12 @@ public-consumption tier:
 
 Questions we know we owe answers, without pretending to have them yet:
 
-* **Which machine am I?** One image may boot many machines, so something
-  has to definitively identify a machine and select its Machine manifest.
-  Candidates for the identity signal: the kernel command line (a
-  `liken.machine=` parameter the bootloader owns), a hardware fact (MAC
-  address, DMI serial, TPM identity), or a config partition per machine.
-  Related: where do many manifests live — many files in one image, or
-  fetched by identity at boot? The cluster-growth milestone's claim flow
-  is the current best candidate for the answer.
-* **Static networking.** `spec.network` today only picks an interface and
-  assumes DHCP. Static addressing needs address/gateway/nameserver fields
-  and a story for machines that must come up when no DHCP exists.
+* **Claiming unknown machines.** `liken.machine=` identifies machines
+  someone declared ahead of time. The deferred half is the machine
+  nobody declared: a Machine template carried on the Cluster that an
+  unknown node claims on first boot — named from a hardware fact
+  (probably its MAC, the one identity the network already forces to be
+  unique), addressed from a pool (probably by ARP-probe claiming, in
+  the same spirit as storage claiming: probe reality, take what's
+  free, refuse ambiguity). Waits until the declared-machine flow is
+  proven.
