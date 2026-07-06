@@ -79,7 +79,20 @@ spec:
                     The cluster's address plan: facts k3s requires
                     every node to agree on, declared once here rather
                     than repeated per machine. Unset fields fall to
-                    k3s's defaults.
+                    k3s's defaults. Every field is immutable once
+                    set: k3s cannot re-plumb any of them on a live
+                    cluster, so an edit here would be a lie waiting
+                    for a reboot to expose. The CEL transition rules
+                    (self == oldSelf) only evaluate when the old
+                    value exists, which is exactly
+                    "immutable once set": a cluster born without a
+                    field may still gain it, and from then on it
+                    holds. (oldSelf is the right comparison here,
+                    unlike the Machine's grow-only storage rules,
+                    which compare against status precisely so a
+                    failed aspiration can be edited back to reality —
+                    these facts have no aspiration to walk back,
+                    because their reality never changes.)
                   properties:
                     nodeCIDR:
                       type: string
@@ -88,27 +101,42 @@ spec:
                         machine's interface whose address falls inside
                         it carries cluster traffic, and that address
                         becomes the machine's node IP.
+                      x-kubernetes-validations:
+                        - rule: self == oldSelf
+                          message: nodeCIDR is immutable once set; re-addressing the node network means new Machine manifests, not a Cluster edit
                     clusterCIDR:
                       type: string
                       description: >-
                         The range pod addresses are drawn from
                         (k3s default 10.42.0.0/16).
+                      x-kubernetes-validations:
+                        - rule: self == oldSelf
+                          message: clusterCIDR is immutable once set; k3s cannot renumber pod addresses on a live cluster
                     serviceCIDR:
                       type: string
                       description: >-
                         The range service addresses are drawn from
                         (k3s default 10.43.0.0/16).
+                      x-kubernetes-validations:
+                        - rule: self == oldSelf
+                          message: serviceCIDR is immutable once set; k3s cannot renumber service addresses on a live cluster
                     clusterDNS:
                       type: string
                       description: >-
                         The service address of the cluster's DNS
                         resolver, inside serviceCIDR (k3s default
                         10.43.0.10).
+                      x-kubernetes-validations:
+                        - rule: self == oldSelf
+                          message: clusterDNS is immutable once set; every pod's resolv.conf already points at it
                     clusterDomain:
                       type: string
                       description: >-
                         The DNS suffix cluster-internal names live
                         under (k3s default cluster.local).
+                      x-kubernetes-validations:
+                        - rule: self == oldSelf
+                          message: clusterDomain is immutable once set; certificates and service names throughout the cluster embed it
                 time:
                   type: object
                   description: >-

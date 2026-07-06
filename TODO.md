@@ -443,7 +443,7 @@
           simultaneous fleet reboot — Manual stays the default,
           pending reboots are visible per machine, and rolling
           coordination is milestone 13's job.
-   5. [ ] Guardrails: the five network-plan fields (nodeCIDR,
+   5. [x] Guardrails: the five network-plan fields (nodeCIDR,
           clusterCIDR, serviceCIDR, clusterDNS, clusterDomain) become
           immutable-once-set via CEL oldSelf rules — k3s can't
           re-plumb any of them in place, so an edit there is a lie
