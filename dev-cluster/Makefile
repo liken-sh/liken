@@ -18,8 +18,8 @@
 # knows which Machine manifest is this machine's. Boot the cluster by
 # running each node in its own terminal:
 #
-#   make run                    the server, node-1
-#   make run NODE=node-2        the agent, in a second terminal
+#   make run                    the leader, node-1
+#   make run NODE=node-2        a follower, in a second terminal
 #
 # The OS artifacts are other domains' work; this Makefile only points
 # at them. The root Makefile is the orchestrator that makes sure they
@@ -59,7 +59,7 @@ dist/$(NODE)/pods.qcow2:
 	mkdir -p dist/$(NODE)
 	qemu-img create -f qcow2 $@ 4G
 
-# Only the server node forwards the API port to the host: kubectl on
+# Only the leader node forwards the API port to the host: kubectl on
 # the host reaches the cluster through the control plane, and there is
 # exactly one (see ../identity/kubeconfig.sh). Forwarding the same
 # host port from every node would collide anyway — a useful reminder
@@ -112,7 +112,7 @@ endif
 #                            gets its own private copy — user-mode NAT
 #                            isolates guests from each other, which is
 #                            exactly why it can't be the cluster's
-#                            wire. On the server, hostfwd punches one
+#                            wire. On the leader, hostfwd punches one
 #                            hole inward: host 127.0.0.1:16443 forwards
 #                            to the guest's API server on 6443, which
 #                            is what lets kubectl on the host reach the

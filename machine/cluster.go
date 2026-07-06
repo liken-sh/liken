@@ -8,7 +8,7 @@ package machine
 // ClusterSpec is a fact that every node must hold identically (which
 // machines run control planes, the address ranges pods and services
 // live in) or a fact about the group that no single machine owns (the
-// endpoint agents join through). Everything per-machine (this NIC,
+// endpoint followers join through). Everything per-machine (this NIC,
 // this address, these disks) stays on the Machine.
 //
 // Like the Machine manifest, the Cluster manifest is delivered as a
@@ -33,13 +33,15 @@ import (
 // Cluster resource.
 const ClusterManifestPath = "/etc/liken/cluster.yaml"
 
-// The two roles a machine can play in a cluster, in k3s's own
-// vocabulary: servers run a control plane (an API server, a
-// scheduler, the datastore), agents run workloads and take direction
-// from the servers.
+// The two roles a machine can play in a cluster: leaders run a
+// control plane (an API server, a scheduler, the datastore),
+// followers run workloads and take direction from the leaders. k3s
+// calls these "server" and "agent"; liken translates at exactly one
+// place, the moment it execs k3s (supervisor.go), and speaks
+// leader/follower everywhere else.
 const (
-	RoleServer = "server"
-	RoleAgent  = "agent"
+	RoleLeader   = "leader"
+	RoleFollower = "follower"
 )
 
 type Cluster struct {
@@ -50,17 +52,17 @@ type Cluster struct {
 }
 
 type ClusterSpec struct {
-	// Servers names the machines that run control planes, by their
+	// Leaders names the machines that run control planes, by their
 	// Machine names. A machine's role is derived, never declared: it
-	// is a server exactly when its name appears here, so promoting an
-	// agent is one Cluster edit, not a coordinated pair of Machine
+	// is a leader exactly when its name appears here, so promoting a
+	// follower is one Cluster edit, not a coordinated pair of Machine
 	// edits.
-	Servers []string `json:"servers,omitempty"`
+	Leaders []string `json:"leaders,omitempty"`
 
-	// Endpoint is the URL agents join the cluster through, e.g.
-	// https://10.10.0.1:6443. With a single server this is that
-	// server's address; a highly-available control plane will need a
-	// better answer here (every server listed, a DNS name, or a
+	// Endpoint is the URL followers join the cluster through, e.g.
+	// https://10.10.0.1:6443. With a single leader this is that
+	// leader's address; a highly-available control plane will need a
+	// better answer here (every leader listed, a DNS name, or a
 	// virtual IP), which is a later milestone's problem.
 	Endpoint string `json:"endpoint,omitempty"`
 
@@ -69,7 +71,7 @@ type ClusterSpec struct {
 	// per-node flags.
 	Network ClusterNetworkSpec `json:"network,omitzero"`
 
-	// Time is the cluster's time hierarchy: where the servers get
+	// Time is the cluster's time hierarchy: where the leaders get
 	// their time. It lives on the Cluster for the same reason the
 	// network plan does — clocks are a fact the whole fleet must
 	// agree on, and TLS (so the cluster itself) stops working when
@@ -77,12 +79,13 @@ type ClusterSpec struct {
 	Time ClusterTimeSpec `json:"time,omitzero"`
 }
 
-// ClusterTimeSpec declares where time comes from. Only the servers
-// consult it: agents sync from the servers themselves (resolved from
-// the fleet's Machine manifests, with the endpoint as the fallback),
-// so the hierarchy is upstreams, then servers, then everyone else.
+// ClusterTimeSpec declares where time comes from. Only the leaders
+// consult it: followers sync from the leaders themselves (resolved
+// from the fleet's Machine manifests, with the endpoint as the
+// fallback), so the hierarchy is upstreams, then leaders, then
+// everyone else.
 type ClusterTimeSpec struct {
-	// Upstreams are the NTP servers the cluster's servers sync from,
+	// Upstreams are the NTP servers the cluster's leaders sync from,
 	// as hostnames or addresses. There is no default — a distro that
 	// shipped pool.ntp.org here would volunteer every deployment's
 	// machines to a volunteer service without asking. An empty list
@@ -120,14 +123,14 @@ type ClusterNetworkSpec struct {
 }
 
 // Role is what a machine should be in this cluster. A nil Cluster
-// answers server: a machine with no cluster manifest is alone, and a
+// answers leader: a machine with no cluster manifest is alone, and a
 // machine alone is its own single-node cluster, which is exactly what
 // liken has always booted.
 func (c *Cluster) Role(machineName string) string {
-	if c == nil || slices.Contains(c.Spec.Servers, machineName) {
-		return RoleServer
+	if c == nil || slices.Contains(c.Spec.Leaders, machineName) {
+		return RoleLeader
 	}
-	return RoleAgent
+	return RoleFollower
 }
 
 // ParseCluster reads a Cluster manifest from its bytes, strictly, for

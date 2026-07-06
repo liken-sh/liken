@@ -127,8 +127,8 @@ image: image/dist/liken.cpio
 # the physical and cloud machines liken really targets (the virtual
 # hardware and every QEMU flag are documented in dev-cluster/
 # Makefile). NODE picks which machine this terminal becomes; the
-# cluster is one `make run` (the server) plus one `make run
-# NODE=node-2` (the agent) in a second terminal. The root's job here,
+# cluster is one `make run` (the leader) plus one `make run
+# NODE=node-2` (a follower) in a second terminal. The root's job here,
 # as everywhere, is making sure the artifacts exist, in order, before
 # handing off.
 run: $(KERNEL_DIST)/vmlinuz image/dist/liken.cpio

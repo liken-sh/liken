@@ -17,11 +17,12 @@ metadata:
 spec:
   # The machines that run control planes, by Machine name. A machine
   # derives its role by looking for its own name here: listed means
-  # server, absent means agent. One server for now; a second entry is
-  # a later milestone (quorum needs etcd, and two servers can't vote).
-  servers: [node-1]
+  # leader, absent means follower. One leader for now; a second entry
+  # is a later milestone (quorum needs etcd, and two leaders can't
+  # vote).
+  leaders: [node-1]
 
-  # Where agents join: the one server's address on the cluster
+  # Where followers join: the one leader's address on the cluster
   # segment, which its Machine manifest promises below in
   # machines/node-1.yaml. Port 6443 is the Kubernetes API's
   # conventional port, and k3s's join protocol rides the same
@@ -47,8 +48,8 @@ spec:
     clusterDomain: cluster.local
 
   time:
-    # Where the servers get their time; agents don't appear here
-    # because they sync from the servers themselves. Declaring an
+    # Where the leaders get their time; followers don't appear here
+    # because they sync from the leaders themselves. Declaring an
     # upstream is the deployment's choice, never the OS's default —
     # this lab picks Cloudflare's public NTP service, which (unlike
     # the NTP pool) is run for exactly this kind of anonymous use.

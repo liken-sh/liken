@@ -27,7 +27,7 @@ func labCluster() *machine.Cluster {
 	return &machine.Cluster{
 		Metadata: machine.ObjectMeta{Name: "lab"},
 		Spec: machine.ClusterSpec{
-			Servers:  []string{"node-1"},
+			Leaders:  []string{"node-1"},
 			Endpoint: "https://10.10.0.1:6443",
 			Network: machine.ClusterNetworkSpec{
 				NodeCIDR:      "10.10.0.0/24",
@@ -65,8 +65,8 @@ func TestNodeAddressOutsideTheNodeCIDRIsUndecided(t *testing.T) {
 	}
 }
 
-func TestK3sBootConfigForAServer(t *testing.T) {
-	got := k3sBootConfig(machine.RoleServer, labCluster(), "10.10.0.1", "eth1", true)
+func TestK3sBootConfigForALeader(t *testing.T) {
+	got := k3sBootConfig(machine.RoleLeader, labCluster(), "10.10.0.1", "eth1", true)
 	for _, want := range []string{
 		"token-file: /etc/liken/token\n",
 		"cluster-cidr: 10.42.0.0/16\n",
@@ -77,16 +77,16 @@ func TestK3sBootConfigForAServer(t *testing.T) {
 		"flannel-iface: eth1\n",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("server config should carry %q:\n%s", want, got)
+			t.Errorf("leader config should carry %q:\n%s", want, got)
 		}
 	}
 	if strings.Contains(got, "server:") {
-		t.Errorf("a server doesn't join an endpoint:\n%s", got)
+		t.Errorf("a leader doesn't join an endpoint:\n%s", got)
 	}
 }
 
-func TestK3sBootConfigForAnAgent(t *testing.T) {
-	got := k3sBootConfig(machine.RoleAgent, labCluster(), "10.10.0.2", "eth1", true)
+func TestK3sBootConfigForAFollower(t *testing.T) {
+	got := k3sBootConfig(machine.RoleFollower, labCluster(), "10.10.0.2", "eth1", true)
 	for _, want := range []string{
 		"token-file: /etc/liken/token\n",
 		"server: https://10.10.0.1:6443\n",
@@ -94,20 +94,20 @@ func TestK3sBootConfigForAnAgent(t *testing.T) {
 		"flannel-iface: eth1\n",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("agent config should carry %q:\n%s", want, got)
+			t.Errorf("follower config should carry %q:\n%s", want, got)
 		}
 	}
-	// The address plan is the control plane's to declare; an agent
+	// The address plan is the control plane's to declare; a follower
 	// telling k3s about it would be misread as unknown flags.
 	for _, reject := range []string{"cluster-cidr", "service-cidr", "cluster-dns", "cluster-domain"} {
 		if strings.Contains(got, reject) {
-			t.Errorf("agent config should not carry %s:\n%s", reject, got)
+			t.Errorf("follower config should not carry %s:\n%s", reject, got)
 		}
 	}
 }
 
 func TestK3sBootConfigWithNoClusterIsNearlyEmpty(t *testing.T) {
-	got := k3sBootConfig(machine.RoleServer, nil, "", "", true)
+	got := k3sBootConfig(machine.RoleLeader, nil, "", "", true)
 	if !strings.Contains(got, "token-file:") {
 		t.Errorf("even a machine alone holds its token:\n%s", got)
 	}
@@ -119,7 +119,7 @@ func TestK3sBootConfigWithNoClusterIsNearlyEmpty(t *testing.T) {
 }
 
 func TestK3sBootConfigWithoutAToken(t *testing.T) {
-	got := k3sBootConfig(machine.RoleServer, labCluster(), "10.10.0.1", "eth1", false)
+	got := k3sBootConfig(machine.RoleLeader, labCluster(), "10.10.0.1", "eth1", false)
 	if strings.Contains(got, "token-file") {
 		t.Errorf("no token file means no token-file entry:\n%s", got)
 	}

@@ -313,10 +313,10 @@ spec:
                 role:
                   type: string
                   description: >-
-                    What this machine is in its cluster: a server (it
-                    runs a control plane) or an agent (it runs
+                    What this machine is in its cluster: a leader (it
+                    runs a control plane) or a follower (it runs
                     workloads). Derived at boot from the Cluster
-                    manifest's servers list, never declared here.
+                    manifest's leaders list, never declared here.
                 version:
                   type: object
                   description: >-
@@ -406,8 +406,8 @@ spec:
                       type: string
                       description: >-
                         Who this machine follows: an upstream's name
-                        on a server, one of the cluster's servers on
-                        an agent.
+                        on a leader, one of the cluster's leaders on
+                        a follower.
                     stratum:
                       type: integer
                       description: >-

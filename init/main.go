@@ -93,7 +93,7 @@ func main() {
 	m := choice.m
 
 	// The cluster manifest rides in every machine's image: it says
-	// which machines are servers, and from it this machine derives
+	// which machines are leaders, and from it this machine derives
 	// what it is. Reading it can also stop the boot (a cluster
 	// manifest that won't parse leaves the machine unable to know its
 	// role), which is why it's read here, before anything acts on it.
@@ -135,8 +135,8 @@ func main() {
 	if _, err := os.Stat(k3sBinary); err == nil {
 		// The machine's role and k3s's boot-derived configuration
 		// come from the cluster manifest (k3s.go). A failure here is
-		// an identity problem too: an agent that can't say where its
-		// cluster is must not come up pretending otherwise.
+		// an identity problem too: a follower that can't say where
+		// its cluster is must not come up pretending otherwise.
 		role, err := writeK3sBootConfig(cluster, m.Metadata.Name, conns)
 		if err != nil {
 			failBoot(fmt.Errorf("%w: %v", errIdentity, err))
@@ -170,11 +170,11 @@ func main() {
 		if len(clk.sources) > 0 {
 			plane.start("the clock", disciplineClock(clk, facts))
 		}
-		// Only servers serve time, because only servers are asked:
-		// agents sync from the endpoint, which is a server. Serving
-		// works even free-running — a fleet with no upstreams still
-		// agrees with itself (responder.go).
-		if role == machine.RoleServer {
+		// Only leaders serve time, because only leaders are asked:
+		// followers sync from the leaders themselves. Serving works
+		// even free-running — a fleet with no upstreams still agrees
+		// with itself (responder.go).
+		if role == machine.RoleLeader {
 			plane.start("the time responder", serveTime(clk))
 		}
 		// The reboot channel: init creates the directory (owning its
@@ -189,11 +189,11 @@ func main() {
 			return watchForRebootIntent(ctx, machine.OperatorRunDir, 2*time.Second, rebootRequests)
 		})
 		loadModules()
-		// Only a server can narrate cluster state: the admin
-		// kubeconfig is a control-plane artifact, and agents hold no
-		// credentials of their own. An agent's join shows up on the
-		// server's console (and in the agent's own k3s log lines).
-		if role == machine.RoleServer {
+		// Only a leader can narrate cluster state: the admin
+		// kubeconfig is a control-plane artifact, and followers hold
+		// no credentials of their own. A follower's join shows up on
+		// the leader's console (and in its own k3s log lines).
+		if role == machine.RoleLeader {
 			plane.start("the node report", reportWhenReady)
 		}
 		superviseK3s(role, rebootRequests) // never returns

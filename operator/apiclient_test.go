@@ -125,7 +125,7 @@ func seedCluster() *machine.Cluster {
 	return &machine.Cluster{
 		Kind:     "Cluster",
 		Metadata: machine.ObjectMeta{Name: "lab"},
-		Spec:     machine.ClusterSpec{Servers: []string{"node-1"}},
+		Spec:     machine.ClusterSpec{Leaders: []string{"node-1"}},
 	}
 }
 

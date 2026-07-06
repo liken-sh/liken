@@ -2,13 +2,13 @@ package main
 
 // Serving time to the fleet.
 //
-// This is the other half of the time hierarchy: servers answer the
-// agents' SNTP queries from their own disciplined clocks. A
+// This is the other half of the time hierarchy: leaders answer the
+// followers' SNTP queries from their own disciplined clocks. A
 // *responder*, not a proxy — no query is ever forwarded upstream.
 // Each stratum serves the clock it keeps and advertises where its
 // pedigree came from, which is how the real NTP hierarchy works and
-// what makes a lead self-sufficient once synced: agents can boot,
-// join, and stay disciplined with no internet access at all.
+// what makes a leader self-sufficient once synced: followers can
+// boot, join, and stay disciplined with no internet access at all.
 //
 // The packet is 48 bytes, fixed layout, big-endian — the same genre
 // as the GPT header: small enough to build by hand, documented
@@ -18,8 +18,8 @@ package main
 // (t2), and when the reply left (t3); the client supplies its
 // receipt (t4) and does the offset algebra time.go describes.
 //
-// Only servers run this component, and only servers are ever asked:
-// agents sync from the cluster endpoint, so a responder on an agent
+// Only leaders run this component, and only leaders are ever asked:
+// followers sync from the leaders, so a responder on a follower
 // would be a listener with no caller — and a shell-less OS should
 // have no port open without someone who's supposed to knock. This
 // is also the machine plane's named candidate for promotion to a

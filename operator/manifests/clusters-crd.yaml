@@ -5,7 +5,7 @@
 # split follows who must agree on what — everything here is a fact
 # the whole fleet holds identically (which machines run control
 # planes, the address ranges pods and services live in) or a fact
-# about the group no single machine owns (the endpoint agents join
+# about the group no single machine owns (the endpoint followers join
 # through).
 #
 # Like the Machine CRD, this file lands in k3s's auto-deploy manifests
@@ -39,9 +39,9 @@ spec:
       storage: true
       # What `kubectl get clusters` prints, without -o yaml.
       additionalPrinterColumns:
-        - name: Servers
+        - name: Leaders
           type: string
-          jsonPath: .spec.servers
+          jsonPath: .spec.leaders
         - name: Endpoint
           type: string
           jsonPath: .spec.endpoint
@@ -59,20 +59,20 @@ spec:
             spec:
               type: object
               properties:
-                servers:
+                leaders:
                   type: array
                   description: >-
                     The machines that run control planes, by Machine
                     name. A machine derives its role from this list:
-                    named here means server, absent means agent.
+                    named here means leader, absent means follower.
                   items:
                     type: string
                 endpoint:
                   type: string
                   description: >-
-                    The URL agents join the cluster through, e.g.
-                    https://10.10.0.1:6443. With one server this is
-                    that server's address on the node network.
+                    The URL followers join the cluster through, e.g.
+                    https://10.10.0.1:6443. With one leader this is
+                    that leader's address on the node network.
                 network:
                   type: object
                   description: >-
@@ -112,10 +112,10 @@ spec:
                 time:
                   type: object
                   description: >-
-                    The cluster's time hierarchy: where the servers
-                    get their time. Only the servers consult it —
-                    agents sync from the servers themselves, so time
-                    flows upstreams, then servers, then everyone
+                    The cluster's time hierarchy: where the leaders
+                    get their time. Only the leaders consult it —
+                    followers sync from the leaders themselves, so
+                    time flows upstreams, then leaders, then everyone
                     else.
                   properties:
                     upstreams:

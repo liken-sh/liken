@@ -178,7 +178,7 @@
           withdraws any manifest still staged (the next boot would
           have applied it) and clears the standing rejection.
 6. [x] Growing the cluster past one node, driven by a `kind: Cluster`
-       resource: one server and one agent, with every decision made
+       resource: one leader and one follower, with every decision made
        explicitly rather than discovered at runtime. The join token is
        an input like the rest of identity: k3s's secure token format
        is `K10<CA-hash>::user:pass`, and the CA it hashes is the
@@ -199,14 +199,14 @@
    1. [x] The Cluster CRD (cluster.yaml, file-delivered like the
           Machine manifest and seeded by the operator, every node's
           operator racing to create it and the losers' 409s reading
-          as success): spec.servers names the machines that run
+          as success): spec.leaders names the machines that run
           control planes, and spec.network holds the facts k3s
           requires every node to agree on (cluster CIDR, service
           CIDR, cluster DNS, cluster domain) — cluster-scoped truths
           that masquerade as per-node flags — plus nodeCIDR, the
           subnet nodes address each other on. A machine's role is
-          derived, not declared: am I named in spec.servers?
-          Promoting an agent is then a Cluster edit, not a
+          derived, not declared: am I named in spec.leaders?
+          Promoting a follower is then a Cluster edit, not a
           coordinated pair of Machine edits.
    2. [x] The token joins the identity bundle: mint.sh hashes the
           server CA, appends a random secret, and writes the token
@@ -237,25 +237,25 @@
           the wrong cluster or claim another machine's disks; wrong
           is worse than down). A cluster manifest that won't parse is
           fatal the same way: a machine that can't tell if it's a
-          server must not guess, because guessing "server" starts a
+          leader must not guess, because guessing "leader" starts a
           rival control plane.
    5. [x] The lab grows a node dimension: per-node dist directories,
           MACs, and command lines. Two NICs per guest — user-mode NAT
           stays as each guest's internet uplink, and a multicast
           socket segment (no root, no bridges: every QEMU naming the
           same group is one virtual hub) is the wire the cluster
-          speaks over. The API-server hostfwd lives on the server
+          speaks over. The API-server hostfwd lives on the leader
           node only. Two terminals (`make run`, `make run
           NODE=node-2`), two serial consoles, side by side. (The
           quiet supporting discovery: k3s reads drop-in config from
           <config>.yaml.d/, so the image's static files stay
           untouched and init writes only a boot.yaml drop-in of
-          derived facts — and agents need their own config file
-          entirely, because `k3s agent` refuses server-only keys.)
+          derived facts — and followers need their own config file
+          entirely, because `k3s agent` refuses leader-only keys.)
    6. [x] Prove it: `kubectl get nodes` shows two Ready nodes,
-          `kubectl get machines` shows a server and an agent with
+          `kubectl get machines` shows a leader and a follower with
           their segment addresses, `kubectl get clusters` shows the
-          topology, a pod pinned to the agent runs with a
+          topology, a pod pinned to the follower runs with a
           cluster-CIDR address and resolves cluster DNS across the
           VXLAN, and both machines come back from a power cut booting
           their Proven manifests, still remembering the cluster and
@@ -264,7 +264,7 @@
           demands the same one on every reconnect — it's what stops a
           stranger from registering as an existing node. k3s keeps it
           at /etc/rancher/node/password, which on liken is the RAM
-          root, so a rebooted agent knocked on its own cluster's door
+          root, so a rebooted follower knocked on its own cluster's door
           with a fresh secret and was refused. The password is
           machine identity, so /etc/rancher/node is now a symlink
           onto machineState — and the honest way to verify a re-join
@@ -275,21 +275,21 @@
        the Cluster — declared, never defaulted, because a distro that
        ships pool.ntp.org as a default volunteers every deployment's
        machines to a volunteer service without asking — and serve
-       time to the rest of the fleet, so agents need no internet
-       access at all. Agents ask the servers themselves — every one
+       time to the rest of the fleet, so followers need no internet
+       access at all. Followers ask the leaders themselves — every one
        of them, resolved from the Machine manifests the image already
-       carries, with the endpoint's host as the fallback for servers
+       carries, with the endpoint's host as the fallback for leaders
        that declare no address. There is no discovery mechanism, on
        purpose; every hop in the hierarchy is somebody's explicit
        input. The client uses a vendored library
        (beevik/ntp — what Talos uses, the same call as the DHCP
        client: take the blessed protocol library, teach the protocol
        in the comments), while the respond-from-my-own-clock server
-       on the leads is written by hand, a 48-byte format in the same
+       on the leaders is written by hand, a 48-byte format in the same
        genre as the GPT writer. The client runs before k3s starts, because TLS
        fails on a skewed clock: a machine with bad time can't even
        join the cluster it means to serve. (Deliberately ahead of
-       multiple servers: it needs only the topology milestone 6
+       multiple leaders: it needs only the topology milestone 6
        built, the lab can fake a broken clock with QEMU's -rtc base=,
        and etcd — coming next-plus-one — is the first component in
        the stack that genuinely cares how clocks behave.)
@@ -335,24 +335,24 @@
           slew (adjtimex) for the life of the machine — stepping a
           running node yanks time out from under lease renewals and
           etcd heartbeats, so the one step happens while nobody is
-          watching the clock yet. Sources differ by role: servers ask
-          the declared upstreams; agents ask every server, resolved
+          watching the clock yet. Sources differ by role: leaders ask
+          the declared upstreams; followers ask every leader, resolved
           from the image's Machine manifests, with the endpoint's
           host as the fallback. Failure is humble: bounded attempts
           at boot, then keep trying forever, never touch the clock on
           bad data, never block the boot.
-   4. [x] The responder, a second goroutine on servers only: hold UDP
+   4. [x] The responder, a second goroutine on leaders only: hold UDP
           :123, answer each 48-byte query from the machine's own
           clock — a responder, not a proxy; the lead serves the clock
           its discipline loop maintains and never forwards a query
           upstream — advertising stratum upstream+1 when synced and
           the local-clock convention (~10) when free-running, so
-          agents can always tell pedigree from confidence. Agents run
-          no responder: nothing in the design ever asks an agent for
-          time, and a shell-less OS should have no listener without a
+          followers can always tell pedigree from confidence.
+          Followers run no responder: nothing in the design ever asks
+          a follower for time, and a shell-less OS should have no listener without a
           caller. (The known wrinkle, owed to milestone 9: when the
           endpoint becomes a VIP or load balancer for HA, UDP 123 may
-          not ride along, and agents may want the server list
+          not ride along, and followers may want the leader list
           instead — the same question k3s registration faces there.)
    5. [x] The RTC: Linux never writes the hardware clock back on its
           own — that's a distro's shutdown script elsewhere, so here
@@ -366,8 +366,8 @@
           clock, the sync, the step — and watch k3s join a cluster it
           could not have joined before the step, because the CA's
           certificates would not exist yet. Then check `kubectl get
-          machines` reports the agent following the server and the
-          server following its upstreams. (Proven with `make run-lab
+          machines` reports the follower following the leader and
+          the leader following its upstreams. (Proven with `make run-lab
           RTC=2001-01-01`: node-1 stepped 25.5 years from Cloudflare,
           node-2 — booted believing 1999 — stepped 27 years from
           node-1's responder, both before k3s, and both wrote the
@@ -389,12 +389,12 @@
        about which Cluster spec they booted, and status makes that
        visible per machine. Fetching cluster config live at boot was
        considered and rejected: it's circular (the endpoint is inside
-       the document being fetched), agents hold no API credentials,
-       and it would make a server outage block agent boots — while
+       the document being fetched), followers hold no API credentials,
+       and it would make a leader outage block follower boots — while
        the operator pod on every node already IS the live,
        credentialed reader; disk is just the crash-safe handoff from
        runtime read to boot-time consumer. This lands before HA
-       servers on purpose (growing spec.servers is precisely a
+       leaders on purpose (growing spec.leaders is precisely a
        Cluster edit — the HA milestone needs edits that converge) and
        before GitOps (git will own the Cluster document, and a
        document git owns must actually take effect).
@@ -415,7 +415,7 @@
           proof. A machine manifest is proven by storage
           reconciliation within the boot, but a cluster manifest's
           failure modes are downstream (a bad endpoint means the
-          agent never joins), so init can't prove it at settle time.
+          follower never joins), so init can't prove it at settle time.
           Init boots a staged cluster document tentatively and writes
           an attempted marker (the staged hash); the operator — whose
           own existence as a pod proves containerd, kubelet, and the
@@ -446,61 +446,64 @@
           waiting for a reboot to expose. (oldSelf is correct here,
           unlike the storage rules of milestone 5.7: these facts can
           never be edited "back to reality," because their reality
-          never changes.) servers, endpoint, and time stay freely
+          never changes.) leaders, endpoint, and time stay freely
           editable.
    6. [ ] Drill it on the two-node lab: add a second NTP upstream via
           kubectl edit cluster and watch both machines stage, report
           RebootPending, apply on reboot, and show the new source in
           status.time with ClusterConverged True. Point the endpoint
-          somewhere dead and reboot the agent: no join, no operator,
+          somewhere dead and reboot the follower: no join, no operator,
           no promotion, and the next boot rejects on the attempted
           marker and falls back to proven, rejoining the real cluster
           with the rejection visible in status. Then edit back to
           good and watch staged withdraw and the rejection clear with
           no reboot.
-9. [ ] Multiple servers: quorum for the control plane, and the whole
-       growth story is one Cluster edit converging — spec.servers
+9. [ ] Multiple leaders: quorum for the control plane, and the whole
+       growth story is one Cluster edit converging — spec.leaders
        grows from [node-1] to three names, every machine stages the
-       new document via milestone 8, and no separate "add a server"
-       mechanism exists. sqlite (via kine) serves one server; more
+       new document via milestone 8, and no separate "add a leader"
+       mechanism exists. sqlite (via kine) serves one leader; more
        than one means embedded etcd.
-   1. [ ] Config derivation by server count (init/k3s.go): one
-          server means exactly today's config — sqlite, no etcd
+   1. [ ] Config derivation by leader count (init/k3s.go): one
+          leader means exactly today's config — sqlite, no etcd
           keys, single-node stays cheap on purpose. More than one:
-          the first entry in spec.servers is the founder and renders
-          cluster-init: true (on the migration boot, k3s migrates
+          the first entry in spec.leaders is the founding leader and
+          renders cluster-init: true (on the migration boot, k3s migrates
           the sqlite datastore into embedded etcd in place, which is
           what made starting on sqlite safe rather than a dead end);
-          every other server renders server: pointing at the
-          founder, resolved from the fleet's Machine manifests the
-          way time sources already are (reuse serverAddresses).
-          Agents are unchanged. Rejoins keep the same flags every
-          boot — founder keeps cluster-init, joiners keep server: —
-          which is k3s's recommended steady state.
-   2. [ ] The endpoint stays one explicit input. Agents use it for
+          every other leader renders server: pointing at the founder,
+          resolved from the fleet's Machine manifests the way time
+          sources already are (reuse leaderAddresses). Followers are
+          unchanged. Rejoins keep the same flags every boot — the
+          founder keeps cluster-init, the rest keep server: — which
+          is k3s's recommended steady state. (The founding leader is
+          a config-derivation role — the first name in the list —
+          not etcd's raft leader, which is elected and moves; the
+          comment must draw that line.)
+   2. [ ] The endpoint stays one explicit input. Followers use it for
           first contact only: after joining, k3s agents maintain a
-          client-side load balancer that learns every server, so a
-          dead endpoint strands only new agents, never running ones
-          (and time queries already bypass it, asking each server by
+          client-side load balancer that learns every leader, so a
+          dead endpoint strands only new followers, never running
+          ones (and time queries already bypass it, asking each by
           address). A VIP or DNS name is a deployment's choice to
           make; the manifest documents the tradeoff.
    3. [ ] Quorum, plainly: three voices, odd on purpose. No CEL rule
-          on server-count parity — growing 1→3 in one edit never
+          on leader-count parity — growing 1→3 in one edit never
           passes through two, and a transient even state during some
           future migration shouldn't be refused at admission. A
-          simultaneous all-server reboot loses quorum transiently
+          simultaneous all-leader reboot loses quorum transiently
           and reforms from disk; Manual stays the sane policy for
-          servers until milestone 13 does rolling reboots.
-   4. [ ] The lab grows to five machines: three servers (node-1
-          founding, node-3 and node-4 fresh) and two agents (node-2
+          leaders until milestone 13 does rolling reboots.
+   4. [ ] The lab grows to five machines: three leaders (node-1
+          founding, node-3 and node-4 fresh) and two followers (node-2
           staying, node-5 new) — MACs, dist dirs, and manifests
           extending the existing NODE dimension. If five 4G guests
-          crowd the host, agents run at 2G.
+          crowd the host, followers run at 2G.
    5. [ ] Drills: the 1→3 growth edit end to end (migration on
-          node-1, two joiners, agents riding through it); kill one
-          server and watch the cluster keep serving while machine
-          status tells the story; then ATTEMPT agent→server
-          promotion on node-2 by growing spec.servers to include it
+          node-1, two joiners, followers riding through it); kill one
+          leader and watch the cluster keep serving while machine
+          status tells the story; then ATTEMPT follower→leader
+          promotion on node-2 by growing spec.leaders to include it
           — k3s's tolerance for a same-name role flip is uncertain,
           so recorded findings are the deliverable, and node-2 can
           be rebuilt fresh if it balks.
@@ -542,7 +545,7 @@
         upgrade itself, the cluster should upgrade its fleet without an
         operator babysitting it — cordon a node, drain its workloads,
         upgrade, restart, confirm it rejoined healthy, then move to the
-        next, honoring quorum on the servers. Not designed yet, just
+        next, honoring quorum on the leaders. Not designed yet, just
         owed: it's the layer where the Machine's upgrade machinery and
         the Cluster's convergence machinery meet.
 

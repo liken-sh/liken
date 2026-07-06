@@ -28,10 +28,10 @@ package main
 // plain sight here.
 //
 // The hierarchy is liken's usual shape: explicit inputs, no
-// discovery. Servers ask the upstreams declared on the Cluster;
-// agents ask the servers themselves — resolved from the fleet's
+// discovery. Leaders ask the upstreams declared on the Cluster;
+// followers ask the leaders themselves — resolved from the fleet's
 // Machine manifests, with the endpoint's host as the fallback — and
-// a server answers from its own disciplined clock (responder.go's
+// a leader answers from its own disciplined clock (responder.go's
 // story). A cluster with no upstreams free-runs: internally
 // consistent, correct only if the hardware clocks happen to be, and
 // status says so honestly.
@@ -96,7 +96,7 @@ type timeSync struct {
 
 // clock is the machine's account of its own timekeeping, shared by
 // the two components that care: the discipline loop records each
-// measurement, and (on a server) the responder reads the latest to
+// measurement, and (on a leader) the responder reads the latest to
 // know what to advertise. This is what running the machine plane in
 // one process buys: two daemons would need a socket between them;
 // two goroutines need a mutex.
@@ -117,24 +117,24 @@ func (c *clock) record(measured *timeSync) {
 }
 
 // timeSources derives where this machine gets its time, the same way
-// it derives everything: from declared inputs, by role. Servers ask
-// the Cluster's upstreams. Agents ask the servers — every one of
+// it derives everything: from declared inputs, by role. Leaders ask
+// the Cluster's upstreams. Followers ask the leaders — every one of
 // them, resolved from the Machine manifests the image already
-// carries (one boot medium holds the whole fleet's), each server
+// carries (one boot medium holds the whole fleet's), each leader
 // identified by its declared address on the node network. The
-// endpoint's host is appended as the fallback for servers that
-// couldn't be resolved (a DHCP-addressed server declares no address
+// endpoint's host is appended as the fallback for leaders that
+// couldn't be resolved (a DHCP-addressed leader declares no address
 // to find), so "who has the time?" never needs an answer "where is
 // my cluster?" didn't already give. nil means free-running: a
-// server with no upstreams declared.
+// leader with no upstreams declared.
 func timeSources(cluster *machine.Cluster, role string, manifestDir string) []string {
 	if cluster == nil {
 		return nil
 	}
-	if role == machine.RoleServer {
+	if role == machine.RoleLeader {
 		return cluster.Spec.Time.Upstreams
 	}
-	sources := serverAddresses(cluster, manifestDir)
+	sources := leaderAddresses(cluster, manifestDir)
 	endpoint, err := url.Parse(cluster.Spec.Endpoint)
 	if err == nil && endpoint.Hostname() != "" && !slices.Contains(sources, endpoint.Hostname()) {
 		sources = append(sources, endpoint.Hostname())
@@ -142,19 +142,19 @@ func timeSources(cluster *machine.Cluster, role string, manifestDir string) []st
 	return sources
 }
 
-// serverAddresses resolves each machine named in spec.servers to its
+// leaderAddresses resolves each machine named in spec.leaders to its
 // static address on the node network, by reading its manifest from
-// the image. A server that can't be resolved (no manifest, no
+// the image. A leader that can't be resolved (no manifest, no
 // address inside nodeCIDR) is simply skipped: the endpoint fallback
 // covers it, and a time source list is a preference order, not a
 // promise.
-func serverAddresses(cluster *machine.Cluster, manifestDir string) []string {
+func leaderAddresses(cluster *machine.Cluster, manifestDir string) []string {
 	_, subnet, err := net.ParseCIDR(cluster.Spec.Network.NodeCIDR)
 	if err != nil {
 		return nil
 	}
 	var addresses []string
-	for _, name := range cluster.Spec.Servers {
+	for _, name := range cluster.Spec.Leaders {
 		m, err := machine.Load(filepath.Join(manifestDir, name+".yaml"))
 		if err != nil {
 			continue

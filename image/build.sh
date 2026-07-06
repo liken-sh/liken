@@ -34,8 +34,8 @@
 #   /lib/modules/<release>/       those modules and their dependencies,
 #                                 exactly as Ubuntu built them
 #   /bin/k3s                      all of Kubernetes, in one binary
-#   /etc/rancher/k3s/config.yaml  k3s's server-role configuration
-#   /etc/rancher/k3s/agent.yaml   k3s's agent-role configuration (init
+#   /etc/rancher/k3s/config.yaml  k3s's configuration for leaders
+#   /etc/rancher/k3s/agent.yaml   the followers' configuration (init
 #                                 starts the role the cluster manifest
 #                                 implies, and each role reads its own
 #                                 file plus a boot-derived drop-in)

@@ -15,9 +15,10 @@ type MachineStatus struct {
 	// the built-in Node object; this covers the layer below it.
 	Version VersionStatus `json:"version,omitzero"`
 
-	// Role is what this machine is in its cluster: a server (it runs a
-	// control plane) or an agent (it runs workloads). Derived at boot
-	// from the Cluster manifest's servers list, never declared here.
+	// Role is what this machine is in its cluster: a leader (it runs
+	// a control plane) or a follower (it runs workloads). Derived at
+	// boot from the Cluster manifest's leaders list, never declared
+	// here.
 	Role string `json:"role,omitempty"`
 
 	// Network is the boot's networking outcome, DHCP leases and static
@@ -118,12 +119,12 @@ type TimeStatus struct {
 	Synchronized bool `json:"synchronized"`
 
 	// Source is who this machine follows: an upstream's name on a
-	// server, one of the cluster's servers on an agent.
+	// leader, one of the cluster's leaders on a follower.
 	Source string `json:"source,omitempty"`
 
 	// Stratum is the machine's distance from a reference clock in
 	// NTP's own vocabulary: a source at stratum n makes this machine
-	// stratum n+1. A server free-running on purpose reports the
+	// stratum n+1. A leader free-running on purpose reports the
 	// local-clock convention (10); 16 means unsynchronized with no
 	// pretense of serving anyone.
 	Stratum int `json:"stratum,omitempty"`

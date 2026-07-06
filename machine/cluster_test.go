@@ -32,7 +32,7 @@ kind: Cluster
 metadata:
   name: lab
 spec:
-  servers: [node-1]
+  leaders: [node-1]
   endpoint: https://10.10.0.1:6443
   network:
     nodeCIDR: 10.10.0.0/24
@@ -50,8 +50,8 @@ spec:
 	if c.Metadata.Name != "lab" {
 		t.Errorf("name: got %q", c.Metadata.Name)
 	}
-	if len(c.Spec.Servers) != 1 || c.Spec.Servers[0] != "node-1" {
-		t.Errorf("servers: got %v", c.Spec.Servers)
+	if len(c.Spec.Leaders) != 1 || c.Spec.Leaders[0] != "node-1" {
+		t.Errorf("leaders: got %v", c.Spec.Leaders)
 	}
 	if c.Spec.Endpoint != "https://10.10.0.1:6443" {
 		t.Errorf("endpoint: got %q", c.Spec.Endpoint)
@@ -86,7 +86,7 @@ kind: Cluster
 metadata:
   name: lab
 spec:
-  serverss: [node-1]
+  leaderss: [node-1]
 `)
 	if _, err := LoadCluster(path); err == nil {
 		t.Fatal("expected an error for the misspelled field")
@@ -94,16 +94,16 @@ spec:
 }
 
 func TestRoleDerivation(t *testing.T) {
-	cluster := &Cluster{Spec: ClusterSpec{Servers: []string{"node-1"}}}
+	cluster := &Cluster{Spec: ClusterSpec{Leaders: []string{"node-1"}}}
 	for _, tc := range []struct {
 		name    string
 		cluster *Cluster
 		machine string
 		want    string
 	}{
-		{"named server", cluster, "node-1", RoleServer},
-		{"unnamed machine is an agent", cluster, "node-2", RoleAgent},
-		{"no cluster manifest means a machine alone", nil, "node-1", RoleServer},
+		{"named leader", cluster, "node-1", RoleLeader},
+		{"unnamed machine is a follower", cluster, "node-2", RoleFollower},
+		{"no cluster manifest means a machine alone", nil, "node-1", RoleLeader},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.cluster.Role(tc.machine); got != tc.want {

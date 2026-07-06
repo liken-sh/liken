@@ -3,7 +3,7 @@ package main
 // Tests for the time responder, exercised the strongest way
 // available: over a real UDP socket on loopback, with the same
 // vendored client the machines themselves use. If beevik/ntp is
-// satisfied, an agent will be too.
+// satisfied, a follower will be too.
 
 import (
 	"net"

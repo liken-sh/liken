@@ -200,13 +200,16 @@ func startK3s(role string) (*exec.Cmd, *os.File, error) {
 		return nil, nil, err
 	}
 
-	// Configuration lives in files, not flags: a server reads
-	// /etc/rancher/k3s/config.yaml on its own, and an agent is pointed
-	// at its own file (whose server-only sibling would otherwise be
-	// misread as unknown flags). Both were joined with this boot's
-	// derived drop-in by k3s.go before we got here.
+	// This is the one place liken's role vocabulary meets k3s's: a
+	// leader runs `k3s server`, a follower runs `k3s agent`
+	// (machine/cluster.go). Configuration lives in files, not flags:
+	// a leader's k3s reads /etc/rancher/k3s/config.yaml on its own,
+	// and a follower's is pointed at its own file (whose leader-only
+	// sibling would otherwise be misread as unknown flags). Both were
+	// joined with this boot's derived drop-in by k3s.go before we got
+	// here.
 	args := []string{"server"}
-	if role == machine.RoleAgent {
+	if role == machine.RoleFollower {
 		args = []string{"agent", "--config", k3sAgentConfig}
 	}
 	cmd := exec.Command(k3sBinary, args...)
