@@ -335,18 +335,6 @@ public-consumption tier:
   openssl recipe.
 * The mastery tier: UKIs, dm-verity, secure boot, TPM-sealed secrets.
 
-# Small things
-
-Improvements that don't need a milestone:
-
-* **Machine uptime on the Machine resource.** status.bootedAt is
-  already published (init derives it from sysinfo's uptime counter);
-  surface uptime in the Machine's status and as a `kubectl get
-  machines` printer column. A date-typed column on .status.bootedAt
-  renders as a live age ("14m"), which *is* uptime and never goes
-  stale; decide whether that carries it or status wants an explicit
-  uptime field too.
-
 # Open problems
 
 Questions we know we owe answers, without pretending to have them yet:

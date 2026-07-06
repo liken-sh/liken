@@ -55,6 +55,14 @@ spec:
         - name: Kernel
           type: string
           jsonPath: .status.version.kernel
+        # Uptime is computed by kubectl at read time, exactly like the
+        # Age column: a date-typed column renders as the time elapsed
+        # since its timestamp. Deriving it from bootedAt means it is
+        # always current — a literal uptime figure written into status
+        # would be stale the moment the operator wrote it.
+        - name: Uptime
+          type: date
+          jsonPath: .status.bootedAt
         - name: Ready
           type: string
           jsonPath: .status.conditions[?(@.type=="Ready")].status
@@ -539,6 +547,11 @@ spec:
                 bootedAt:
                   type: string
                   format: date-time
+                  description: >-
+                    The moment this machine booted, derived by init
+                    from the kernel's uptime counter. The Uptime
+                    printer column is this timestamp rendered as an
+                    elapsed time.
                 conditions:
                   type: array
                   items:

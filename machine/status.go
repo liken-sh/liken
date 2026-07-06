@@ -45,6 +45,10 @@ type MachineStatus struct {
 	// that happened on the way up.
 	Boot BootStatus `json:"boot,omitzero"`
 
+	// BootedAt is the moment the machine booted, derived by init from
+	// the kernel's uptime counter. A timestamp rather than a duration
+	// on purpose: it never goes stale in the cluster, and `kubectl get
+	// machines` renders it as a live elapsed time (the Uptime column).
 	BootedAt *time.Time `json:"bootedAt,omitempty"`
 
 	// Conditions follow the standard Kubernetes idiom: a set of typed,
