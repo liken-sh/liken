@@ -118,7 +118,7 @@ type TimeStatus struct {
 	Synchronized bool `json:"synchronized"`
 
 	// Source is who this machine follows: an upstream's name on a
-	// server, the cluster endpoint's host on an agent.
+	// server, one of the cluster's servers on an agent.
 	Source string `json:"source,omitempty"`
 
 	// Stratum is the machine's distance from a reference clock in

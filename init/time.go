@@ -29,11 +29,12 @@ package main
 //
 // The hierarchy is liken's usual shape: explicit inputs, no
 // discovery. Servers ask the upstreams declared on the Cluster;
-// agents ask the cluster's endpoint (the same address they join k3s
-// through), which a server answers from its own disciplined clock
-// (responder.go's story). A cluster with no upstreams free-runs:
-// internally consistent, correct only if the hardware clocks happen
-// to be, and status says so honestly.
+// agents ask the servers themselves — resolved from the fleet's
+// Machine manifests, with the endpoint's host as the fallback — and
+// a server answers from its own disciplined clock (responder.go's
+// story). A cluster with no upstreams free-runs: internally
+// consistent, correct only if the hardware clocks happen to be, and
+// status says so honestly.
 //
 // Correction comes in two strengths, chosen by whether anyone is
 // watching. At boot, before k3s, the clock simply *steps* to the
@@ -48,8 +49,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
+	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -93,9 +97,9 @@ type timeSync struct {
 // clock is the machine's account of its own timekeeping, shared by
 // the two components that care: the discipline loop records each
 // measurement, and (on a server) the responder reads the latest to
-// know what to advertise. This is the machine plane's shared-structs
-// dividend — two daemons would need a socket between them; two
-// goroutines need a mutex.
+// know what to advertise. This is what running the machine plane in
+// one process buys: two daemons would need a socket between them;
+// two goroutines need a mutex.
 type clock struct {
 	mu      sync.Mutex
 	sources []string
@@ -114,24 +118,56 @@ func (c *clock) record(measured *timeSync) {
 
 // timeSources derives where this machine gets its time, the same way
 // it derives everything: from declared inputs, by role. Servers ask
-// the Cluster's upstreams; agents ask the endpoint they join k3s
-// through, so "who has the time?" and "where is my cluster?" are one
-// answer. nil means free-running — for a server, because no
-// upstreams were declared; for an agent, only when the endpoint is
-// missing or unparseable, which an agent boot has already refused to
-// run with (k3s.go).
-func timeSources(cluster *machine.Cluster, role string) []string {
+// the Cluster's upstreams. Agents ask the servers — every one of
+// them, resolved from the Machine manifests the image already
+// carries (one boot medium holds the whole fleet's), each server
+// identified by its declared address on the node network. The
+// endpoint's host is appended as the fallback for servers that
+// couldn't be resolved (a DHCP-addressed server declares no address
+// to find), so "who has the time?" never needs an answer "where is
+// my cluster?" didn't already give. nil means free-running: a
+// server with no upstreams declared.
+func timeSources(cluster *machine.Cluster, role string, manifestDir string) []string {
 	if cluster == nil {
 		return nil
 	}
 	if role == machine.RoleServer {
 		return cluster.Spec.Time.Upstreams
 	}
+	sources := serverAddresses(cluster, manifestDir)
 	endpoint, err := url.Parse(cluster.Spec.Endpoint)
-	if err != nil || endpoint.Hostname() == "" {
+	if err == nil && endpoint.Hostname() != "" && !slices.Contains(sources, endpoint.Hostname()) {
+		sources = append(sources, endpoint.Hostname())
+	}
+	return sources
+}
+
+// serverAddresses resolves each machine named in spec.servers to its
+// static address on the node network, by reading its manifest from
+// the image. A server that can't be resolved (no manifest, no
+// address inside nodeCIDR) is simply skipped: the endpoint fallback
+// covers it, and a time source list is a preference order, not a
+// promise.
+func serverAddresses(cluster *machine.Cluster, manifestDir string) []string {
+	_, subnet, err := net.ParseCIDR(cluster.Spec.Network.NodeCIDR)
+	if err != nil {
 		return nil
 	}
-	return []string{endpoint.Hostname()}
+	var addresses []string
+	for _, name := range cluster.Spec.Servers {
+		m, err := machine.Load(filepath.Join(manifestDir, name+".yaml"))
+		if err != nil {
+			continue
+		}
+		for _, iface := range m.Spec.Network.Interfaces {
+			ip, _, err := net.ParseCIDR(iface.Address)
+			if err == nil && subnet.Contains(ip) {
+				addresses = append(addresses, ip.String())
+				break
+			}
+		}
+	}
+	return addresses
 }
 
 // timeStatus is the clock's story as status: the same facts the
@@ -255,6 +291,42 @@ func slewClock(offset time.Duration) error {
 // otherwise.
 const syncStaleAfter = 3 * timePollInterval
 
+// writeRTC copies the system clock into the hardware clock. Linux
+// never does this on its own — on a traditional distro it's a
+// shutdown script's job, so here it's init's. The RTC is what the
+// machine wakes up with: writing it after a sync means even a
+// power-cut machine boots with roughly right time, and writing it
+// at clean shutdown carries the best final estimate into the next
+// boot. Those are the only two moments; the RTC ticks on its own
+// battery between them. The value written is UTC: storing local
+// time in the RTC is a desktop-PC legacy, and a fleet spanning time
+// zones needs the hardware to speak one.
+func writeRTC() {
+	f, err := os.OpenFile("/dev/rtc0", os.O_WRONLY, 0)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "liken: time: opening the RTC: %v\n", err)
+		return
+	}
+	defer f.Close()
+	now := time.Now().UTC()
+	// The RTC speaks a broken-down calendar time, tm-struct style:
+	// months count from zero and years from 1900, quirks the ioctl
+	// inherits from four decades of C.
+	rt := unix.RTCTime{
+		Sec:  int32(now.Second()),
+		Min:  int32(now.Minute()),
+		Hour: int32(now.Hour()),
+		Mday: int32(now.Day()),
+		Mon:  int32(now.Month() - 1),
+		Year: int32(now.Year() - 1900),
+	}
+	if err := unix.IoctlSetRTCTime(int(f.Fd()), &rt); err != nil {
+		fmt.Fprintf(os.Stderr, "liken: time: writing the RTC: %v\n", err)
+		return
+	}
+	fmt.Printf("liken: time: hardware clock set to %s\n", now.Format(time.RFC3339))
+}
+
 // disciplineClock builds the machine plane's time component: measure,
 // slew, publish, sleep, forever. It owns facts.Time — and, from the
 // moment it starts, the facts file — as the only writer, so no lock.
@@ -267,8 +339,18 @@ func disciplineClock(clk *clock, facts *machine.MachineStatus) func(context.Cont
 		if facts.Time.LastSync != nil {
 			lastGood = *facts.Time.LastSync
 		}
+		// The boot step (or its absence) decided whether the RTC has
+		// been written yet; a boot that came up on a wrong hardware
+		// clock gets its RTC corrected at the first sync this loop
+		// achieves instead.
+		rtcWritten := facts.Time.Synchronized
 		for {
 			if !sleepUnlessCancelled(ctx, timePollInterval) {
+				// Clean shutdown: leave the hardware clock holding
+				// the best estimate this machine ever had.
+				if !lastGood.IsZero() {
+					writeRTC()
+				}
 				return nil
 			}
 			sync, err := querySources(clk.sources)
@@ -297,6 +379,10 @@ func disciplineClock(clk *clock, facts *machine.MachineStatus) func(context.Cont
 			}
 			lastGood = sync.at
 			clk.record(sync)
+			if !rtcWritten {
+				writeRTC()
+				rtcWritten = true
+			}
 			facts.Time = timeStatus(sync, clk.sources)
 			publishTimeFacts(facts)
 		}

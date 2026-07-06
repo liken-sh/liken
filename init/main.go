@@ -150,9 +150,15 @@ func main() {
 		// like it's from the future. This is the only moment liken
 		// ever steps the clock; from here on it only slews (time.go
 		// tells the whole story).
-		clk := newClock(timeSources(cluster, role))
+		clk := newClock(timeSources(cluster, role, machine.MachineManifestDir))
 		firstSync := stepClockAtBoot(clk.sources)
 		clk.record(firstSync)
+		// A successful boot measurement is worth persisting at once:
+		// a machine that later loses power dirty still wakes up with
+		// roughly right time (time.go on the RTC's two moments).
+		if firstSync != nil {
+			writeRTC()
+		}
 		prepareForK3s()
 		// Facts wait until here because they live under /run, and
 		// prepareForK3s just mounted a fresh tmpfs there; anything

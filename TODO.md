@@ -271,20 +271,22 @@
           is the node's kube-node-lease renewTime, because Node
           status replayed from the persisted datastore reads Ready
           for a while whether the kubelet came back or not.)
-7. [ ] Cluster time: the servers sync from NTP upstreams declared on
+7. [x] Cluster time: the servers sync from NTP upstreams declared on
        the Cluster — declared, never defaulted, because a distro that
        ships pool.ntp.org as a default volunteers every deployment's
        machines to a volunteer service without asking — and serve
        time to the rest of the fleet, so agents need no internet
-       access at all. Agents find their time source the way they find
-       their cluster: the declared endpoint, port 123. There is no
-       discovery mechanism, on purpose; every hop in the hierarchy is
-       somebody's explicit input. The client rides a vendored library
+       access at all. Agents ask the servers themselves — every one
+       of them, resolved from the Machine manifests the image already
+       carries, with the endpoint's host as the fallback for servers
+       that declare no address. There is no discovery mechanism, on
+       purpose; every hop in the hierarchy is somebody's explicit
+       input. The client uses a vendored library
        (beevik/ntp — what Talos uses, the same call as the DHCP
        client: take the blessed protocol library, teach the protocol
        in the comments), while the respond-from-my-own-clock server
-       on the leads is written, a 48-byte format in the same genre as
-       the GPT writer. The client runs before k3s starts, because TLS
+       on the leads is written by hand, a 48-byte format in the same
+       genre as the GPT writer. The client runs before k3s starts, because TLS
        fails on a skewed clock: a machine with bad time can't even
        join the cluster it means to serve. (Deliberately ahead of
        multiple servers: it needs only the topology milestone 6
@@ -334,9 +336,11 @@
           running node yanks time out from under lease renewals and
           etcd heartbeats, so the one step happens while nobody is
           watching the clock yet. Sources differ by role: servers ask
-          the declared upstreams, agents ask the endpoint. Failure is
-          humble: bounded attempts at boot, then keep trying forever,
-          never touch the clock on bad data, never block the boot.
+          the declared upstreams; agents ask every server, resolved
+          from the image's Machine manifests, with the endpoint's
+          host as the fallback. Failure is humble: bounded attempts
+          at boot, then keep trying forever, never touch the clock on
+          bad data, never block the boot.
    4. [x] The responder, a second goroutine on servers only: hold UDP
           :123, answer each 48-byte query from the machine's own
           clock — a responder, not a proxy; the lead serves the clock
@@ -350,20 +354,27 @@
           endpoint becomes a VIP or load balancer for HA, UDP 123 may
           not ride along, and agents may want the server list
           instead — the same question k3s registration faces there.)
-   5. [ ] The RTC: Linux never writes the hardware clock back on its
+   5. [x] The RTC: Linux never writes the hardware clock back on its
           own — that's a distro's shutdown script elsewhere, so here
           it's init's job. Write it (RTC_SET_TIME) at exactly two
           moments: once after the first successful sync, so even a
           machine that later loses power dirty carries decent time
           into its next boot, and once at clean shutdown, so the RTC
           holds the best final estimate.
-   6. [ ] Prove it in the lab: boot a node with QEMU's -rtc base= set
+   6. [x] Prove it in the lab: boot a node with QEMU's -rtc base= set
           years wrong, watch the console tell the story — the skewed
           clock, the sync, the step — and watch k3s join a cluster it
           could not have joined before the step, because the CA's
           certificates would not exist yet. Then check `kubectl get
           machines` reports the agent following the server and the
-          server following its upstreams.
+          server following its upstreams. (Proven with `make run-lab
+          RTC=2001-01-01`: node-1 stepped 25.5 years from Cloudflare,
+          node-2 — booted believing 1999 — stepped 27 years from
+          node-1's responder, both before k3s, and both wrote the
+          correction to their RTCs. A node-1 reboot then booted just
+          -574ms off, the written RTC having carried real time
+          through, and `kubectl get machines -o wide` showed both
+          nodes synchronized at sub-millisecond offsets.)
 8. [ ] The Cluster converges: today the in-cluster Cluster resource
        is seed-only. Init reads the image's cluster.yaml every boot,
        the operator seeds the API copy once, and nothing ever

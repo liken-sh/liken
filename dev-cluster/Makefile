@@ -155,6 +155,16 @@ endif
 #                            works in the lab too
 QEMU_EXIT_ON_REBOOT := -no-reboot
 
+# A deliberately wrong hardware clock: `make run RTC=2001-01-01` boots
+# the guest believing it's the turn of the millennium, which is the
+# milestone-7 drill — watch init's SNTP client discover a
+# quarter-century of error, step the clock before k3s starts, and
+# write the corrected time back to the RTC. QEMU's default
+# (-rtc base=utc) hands the guest the host's clock, so an unset RTC
+# means a normal boot.
+RTC ?= utc
+RTC_BASE := -rtc base=$(RTC)
+
 run: dist/$(NODE)/state.qcow2 dist/$(NODE)/pods.qcow2
 	qemu-system-x86_64 \
 		-accel kvm -accel tcg \
@@ -166,6 +176,7 @@ run: dist/$(NODE)/state.qcow2 dist/$(NODE)/pods.qcow2
 		-display none \
 		-serial stdio \
 		-monitor none \
+		$(RTC_BASE) \
 		$(QEMU_EXIT_ON_REBOOT) \
 		-netdev user,id=uplink$(API_FORWARD) \
 		-device virtio-net-pci,netdev=uplink,mac=$(UPLINK_MAC) \

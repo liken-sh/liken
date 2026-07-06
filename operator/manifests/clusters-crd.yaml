@@ -114,9 +114,9 @@ spec:
                   description: >-
                     The cluster's time hierarchy: where the servers
                     get their time. Only the servers consult it —
-                    agents always sync from the cluster's endpoint,
-                    so time flows upstreams, then servers, then
-                    everyone else.
+                    agents sync from the servers themselves, so time
+                    flows upstreams, then servers, then everyone
+                    else.
                   properties:
                     upstreams:
                       type: array

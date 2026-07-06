@@ -96,10 +96,9 @@ func (c *clock) advertise() (stratum, leap byte, lastSync *timeSync) {
 }
 
 // respondTo builds the 48-byte answer to one query, or nil for
-// anything that isn't a plausible client request — silence, not an
-// error, because port 123 on an open network hears all sorts of
-// things and owes none of them a syscall's more effort than a
-// length check.
+// anything that isn't a plausible client request. Garbage gets
+// silence rather than an error: port 123 on an open network hears
+// all sorts of things, and the cheapest response is none.
 func respondTo(request []byte, clk *clock, now time.Time) []byte {
 	if len(request) < 48 {
 		return nil

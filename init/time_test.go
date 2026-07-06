@@ -7,25 +7,57 @@ package main
 // to the QEMU harness.
 
 import (
+	"os"
+	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/chrisguidry/liken/machine"
 )
 
-func clusterWithTime(upstreams []string, endpoint string) *machine.Cluster {
+func clusterWithTime(upstreams []string, endpoint string, servers ...string) *machine.Cluster {
+	if servers == nil {
+		servers = []string{"node-1"}
+	}
 	return &machine.Cluster{
 		Spec: machine.ClusterSpec{
-			Servers:  []string{"node-1"},
+			Servers:  servers,
 			Endpoint: endpoint,
+			Network:  machine.ClusterNetworkSpec{NodeCIDR: "10.10.0.0/24"},
 			Time:     machine.ClusterTimeSpec{Upstreams: upstreams},
 		},
 	}
 }
 
+// manifestsDir builds an image-style machines directory: one Machine
+// manifest per name, each declaring a static address on the node
+// network.
+func manifestsDir(t *testing.T, addresses map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, address := range addresses {
+		doc := `
+apiVersion: liken.sh/v1alpha1
+kind: Machine
+metadata:
+  name: ` + name + `
+spec:
+  network:
+    interfaces:
+      - name: eth1
+        address: ` + address + `
+`
+		if err := os.WriteFile(filepath.Join(dir, name+".yaml"), []byte(doc), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
 func TestTimeSourcesServerAsksTheUpstreams(t *testing.T) {
 	c := clusterWithTime([]string{"time.cloudflare.com", "192.168.1.1"}, "https://10.10.0.1:6443")
-	sources := timeSources(c, machine.RoleServer)
+	sources := timeSources(c, machine.RoleServer, t.TempDir())
 	if len(sources) != 2 || sources[0] != "time.cloudflare.com" || sources[1] != "192.168.1.1" {
 		t.Errorf("got %v", sources)
 	}
@@ -33,29 +65,44 @@ func TestTimeSourcesServerAsksTheUpstreams(t *testing.T) {
 
 func TestTimeSourcesServerWithoutUpstreamsFreeRuns(t *testing.T) {
 	c := clusterWithTime(nil, "https://10.10.0.1:6443")
-	if sources := timeSources(c, machine.RoleServer); sources != nil {
+	if sources := timeSources(c, machine.RoleServer, t.TempDir()); sources != nil {
 		t.Errorf("expected free-running, got %v", sources)
 	}
 }
 
 func TestTimeSourcesNilClusterFreeRuns(t *testing.T) {
-	if sources := timeSources(nil, machine.RoleServer); sources != nil {
+	if sources := timeSources(nil, machine.RoleServer, t.TempDir()); sources != nil {
 		t.Errorf("expected free-running, got %v", sources)
 	}
 }
 
-func TestTimeSourcesAgentAsksTheEndpoint(t *testing.T) {
-	c := clusterWithTime([]string{"time.cloudflare.com"}, "https://10.10.0.1:6443")
-	sources := timeSources(c, machine.RoleAgent)
-	if len(sources) != 1 || sources[0] != "10.10.0.1" {
+func TestTimeSourcesAgentAsksEveryServer(t *testing.T) {
+	c := clusterWithTime(nil, "https://cluster.example.com:6443", "node-1", "node-3")
+	dir := manifestsDir(t, map[string]string{
+		"node-1": "10.10.0.1/24",
+		"node-2": "10.10.0.2/24", // an agent: present in the image, not a source
+		"node-3": "10.10.0.3/24",
+	})
+	sources := timeSources(c, machine.RoleAgent, dir)
+	want := []string{"10.10.0.1", "10.10.0.3", "cluster.example.com"}
+	if !slices.Equal(sources, want) {
+		t.Errorf("got %v, want %v", sources, want)
+	}
+}
+
+func TestTimeSourcesAgentDoesNotAskTheEndpointTwice(t *testing.T) {
+	c := clusterWithTime(nil, "https://10.10.0.1:6443")
+	dir := manifestsDir(t, map[string]string{"node-1": "10.10.0.1/24"})
+	sources := timeSources(c, machine.RoleAgent, dir)
+	if !slices.Equal(sources, []string{"10.10.0.1"}) {
 		t.Errorf("got %v", sources)
 	}
 }
 
-func TestTimeSourcesAgentAsksTheEndpointByName(t *testing.T) {
-	c := clusterWithTime(nil, "https://cluster.example.com:6443")
-	sources := timeSources(c, machine.RoleAgent)
-	if len(sources) != 1 || sources[0] != "cluster.example.com" {
+func TestTimeSourcesAgentFallsBackToTheEndpoint(t *testing.T) {
+	c := clusterWithTime(nil, "https://10.10.0.1:6443")
+	sources := timeSources(c, machine.RoleAgent, t.TempDir())
+	if !slices.Equal(sources, []string{"10.10.0.1"}) {
 		t.Errorf("got %v", sources)
 	}
 }

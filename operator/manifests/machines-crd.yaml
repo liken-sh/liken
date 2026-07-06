@@ -69,6 +69,17 @@ spec:
         - name: Converged
           type: string
           jsonPath: .status.conditions[?(@.type=="SpecConverged")].status
+        # The clock's health, at priority 1: shown only with -o wide,
+        # because the default table is already at the width where
+        # every new column costs an old one.
+        - name: Synced
+          type: boolean
+          priority: 1
+          jsonPath: .status.time.synchronized
+        - name: Offset
+          type: string
+          priority: 1
+          jsonPath: .status.time.offset
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -395,7 +406,7 @@ spec:
                       type: string
                       description: >-
                         Who this machine follows: an upstream's name
-                        on a server, the cluster endpoint's host on
+                        on a server, one of the cluster's servers on
                         an agent.
                     stratum:
                       type: integer

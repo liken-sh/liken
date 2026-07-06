@@ -48,7 +48,7 @@ spec:
 
   time:
     # Where the servers get their time; agents don't appear here
-    # because they always sync from the endpoint above. Declaring an
+    # because they sync from the servers themselves. Declaring an
     # upstream is the deployment's choice, never the OS's default —
     # this lab picks Cloudflare's public NTP service, which (unlike
     # the NTP pool) is run for exactly this kind of anonymous use.

@@ -78,9 +78,9 @@ type ClusterSpec struct {
 }
 
 // ClusterTimeSpec declares where time comes from. Only the servers
-// consult it: agents always sync from their cluster's endpoint, the
-// same explicit input that tells them where to join, so the hierarchy
-// is upstreams, then servers, then everyone else.
+// consult it: agents sync from the servers themselves (resolved from
+// the fleet's Machine manifests, with the endpoint as the fallback),
+// so the hierarchy is upstreams, then servers, then everyone else.
 type ClusterTimeSpec struct {
 	// Upstreams are the NTP servers the cluster's servers sync from,
 	// as hostnames or addresses. There is no default — a distro that
