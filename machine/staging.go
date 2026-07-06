@@ -45,6 +45,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"sigs.k8s.io/yaml"
@@ -60,6 +61,7 @@ const (
 	provenManifest   = "proven.yaml"
 	rejectedManifest = "rejected.yaml"
 	rejectionNote    = "rejection.yaml"
+	attemptedMarker  = "attempted"
 )
 
 // A ManifestStore is one document's lifecycle home: a directory on
@@ -177,6 +179,7 @@ func (s ManifestStore) Promote() error {
 	}
 	_ = os.Remove(filepath.Join(s.dir, rejectedManifest))
 	_ = os.Remove(filepath.Join(s.dir, rejectionNote))
+	_ = os.Remove(filepath.Join(s.dir, attemptedMarker))
 	return syncDir(s.dir)
 }
 
@@ -197,7 +200,38 @@ func (s ManifestStore) Reject(r Rejection) error {
 	if err := os.Rename(filepath.Join(s.dir, stagedManifest), filepath.Join(s.dir, rejectedManifest)); err != nil {
 		return err
 	}
+	_ = os.Remove(filepath.Join(s.dir, attemptedMarker))
 	return syncDir(s.dir)
+}
+
+// The attempted marker is how a trial that never reaches its verdict
+// still gets one. Some documents can't be proven by the boot that
+// runs them (a cluster document's failure modes are downstream: a bad
+// endpoint just means the machine never joins), so init marks the
+// staged document attempted when it boots it, and whoever holds the
+// proof — for the cluster document, the operator, whose existence as
+// a pod demonstrates the join — promotes and clears the marker. A
+// boot that finds the marker still matching the staged document knows
+// the last try was never proven: reject and fall back. One proving
+// boot, no counters, and a crash anywhere leaves a state the next
+// boot reads correctly.
+
+// WriteAttempted marks the staged document as being tried by this
+// boot, identified by its hash.
+func (s ManifestStore) WriteAttempted(hash string) error {
+	if err := os.MkdirAll(s.dir, 0o755); err != nil {
+		return err
+	}
+	return writeDurable(filepath.Join(s.dir, attemptedMarker), []byte(hash+"\n"))
+}
+
+// LoadAttempted reads the marker; "" means no trial is underway.
+func (s ManifestStore) LoadAttempted() (string, error) {
+	raw, err := s.load(attemptedMarker)
+	if raw == nil || err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(raw)), nil
 }
 
 // WithdrawStaged removes the staged document. The operator calls this

@@ -184,6 +184,52 @@ func TestChooseClusterRepublishesAStandingRejection(t *testing.T) {
 	}
 }
 
+func TestChooseClusterMarksTheStagedDocumentAttempted(t *testing.T) {
+	root := t.TempDir()
+	store := machine.ClusterManifests(root)
+	if err := store.WriteStaged([]byte(editedCluster)); err != nil {
+		t.Fatal(err)
+	}
+	boot := &machine.BootStatus{}
+	if _, err := chooseCluster(root, writeSeed(t, sampleCluster), true, boot); err != nil {
+		t.Fatal(err)
+	}
+	h, err := store.LoadAttempted()
+	if err != nil || h != machine.ManifestHash([]byte(editedCluster)) {
+		t.Errorf("booting a staged document must mark it attempted: %q %v", h, err)
+	}
+}
+
+func TestChooseClusterRejectsAStagedDocumentThatWasNeverProven(t *testing.T) {
+	root := t.TempDir()
+	store := machine.ClusterManifests(root)
+	if err := store.WriteProven([]byte(sampleCluster)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteStaged([]byte(editedCluster)); err != nil {
+		t.Fatal(err)
+	}
+	// The previous boot tried this exact document and nobody promoted
+	// it: the machine never joined its cluster under it.
+	if err := store.WriteAttempted(machine.ManifestHash([]byte(editedCluster))); err != nil {
+		t.Fatal(err)
+	}
+	boot := &machine.BootStatus{}
+	c, err := chooseCluster(root, writeSeed(t, sampleCluster), true, boot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if boot.ClusterManifestSource != machine.ManifestSourceProven || len(c.Spec.Time.Upstreams) != 0 {
+		t.Fatalf("the unproven staged document should be rejected: %q %+v", boot.ClusterManifestSource, c.Spec)
+	}
+	if boot.ClusterRejection == nil || boot.ClusterRejection.Hash != machine.ManifestHash([]byte(editedCluster)) {
+		t.Errorf("the rejection should identify the unproven document: %+v", boot.ClusterRejection)
+	}
+	if h, _ := store.LoadAttempted(); h != "" {
+		t.Errorf("the trial is over; the marker should be gone, got %q", h)
+	}
+}
+
 func TestChooseClusterFailsOnAnUnparseableSeed(t *testing.T) {
 	boot := &machine.BootStatus{}
 	if _, err := chooseCluster(t.TempDir(), writeSeed(t, "not: [valid"), true, boot); err == nil {

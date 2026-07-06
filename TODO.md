@@ -415,7 +415,7 @@
           drive storage, so by the time it's read, machineState is
           an ordinary mounted filesystem and no peek mount is
           needed.)
-   3. [ ] Promotion, the genuinely new mechanism: the join is the
+   3. [x] Promotion, the genuinely new mechanism: the join is the
           proof. A machine manifest is proven by storage
           reconciliation within the boot, but a cluster manifest's
           failure modes are downstream (a bad endpoint means the

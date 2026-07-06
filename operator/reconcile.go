@@ -121,6 +121,11 @@ func reconcile(c *apiClient, m *machine.Machine) {
 	}
 	status.Conditions = machine.SetCondition(m.Status.Conditions, factsCondition(err), now)
 
+	// The operator's existence is the proof a staged cluster document
+	// was waiting for: if this line runs, the machine joined its
+	// cluster under whatever document this boot ran (cluster.go).
+	settleClusterLifecycle(machine.MachineStateDir, machine.ClusterManifestPath, facts)
+
 	status.Sysctls, err = applySysctls(m.Spec.Sysctls)
 	status.Conditions = machine.SetCondition(status.Conditions, sysctlsCondition(err), now)
 

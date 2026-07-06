@@ -49,13 +49,25 @@ func chooseCluster(stateRoot, seedPath string, durable bool, boot *machine.BootS
 		if raw, err := store.LoadStaged(); err != nil {
 			fmt.Fprintf(os.Stderr, "liken: cluster: the staged document is unreadable: %v\n", err)
 		} else if raw != nil {
+			hash := machine.ManifestHash(raw)
+			attempted, _ := store.LoadAttempted()
 			c, perr := machine.ParseCluster(raw)
-			if perr != nil {
+			switch {
+			case perr != nil:
 				boot.ClusterRejection = rejectStagedCluster(store, raw, fmt.Sprintf("the staged cluster document does not parse: %v", perr))
-			} else {
+			case attempted == hash:
+				// A previous boot ran this exact document and nobody
+				// promoted it — the machine never joined its cluster
+				// under it, and the operator that would have carried
+				// the proof never ran. One trial is the whole budget.
+				boot.ClusterRejection = rejectStagedCluster(store, raw, "the last boot ran this staged cluster document and never joined the cluster under it")
+			default:
+				if err := store.WriteAttempted(hash); err != nil {
+					fmt.Fprintf(os.Stderr, "liken: cluster: marking the staged document attempted: %v\n", err)
+				}
 				boot.ClusterManifestSource = machine.ManifestSourceStaged
-				boot.ClusterManifestHash = machine.ManifestHash(raw)
-				fmt.Printf("liken: cluster: booting under the Staged document (%.12s)\n", boot.ClusterManifestHash)
+				boot.ClusterManifestHash = hash
+				fmt.Printf("liken: cluster: booting under the Staged document (%.12s); the operator's first pass is the proof\n", hash)
 				return c, nil
 			}
 		}

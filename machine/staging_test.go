@@ -255,6 +255,52 @@ func TestLoadRejectionRejectsGarbage(t *testing.T) {
 	}
 }
 
+func TestAttemptedMarkerRoundTrips(t *testing.T) {
+	s := MachineManifests(t.TempDir())
+	if h, err := s.LoadAttempted(); h != "" || err != nil {
+		t.Errorf("an empty store has no attempted marker: %q %v", h, err)
+	}
+	if err := s.WriteAttempted("abc123"); err != nil {
+		t.Fatal(err)
+	}
+	h, err := s.LoadAttempted()
+	if err != nil || h != "abc123" {
+		t.Errorf("got %q %v", h, err)
+	}
+}
+
+func TestPromoteClearsTheAttemptedMarker(t *testing.T) {
+	s := MachineManifests(t.TempDir())
+	if err := s.WriteStaged([]byte(sampleManifest)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WriteAttempted(ManifestHash([]byte(sampleManifest))); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Promote(); err != nil {
+		t.Fatal(err)
+	}
+	if h, _ := s.LoadAttempted(); h != "" {
+		t.Errorf("promotion ends the trial; the marker should be gone, got %q", h)
+	}
+}
+
+func TestRejectClearsTheAttemptedMarker(t *testing.T) {
+	s := MachineManifests(t.TempDir())
+	if err := s.WriteStaged([]byte(sampleManifest)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WriteAttempted(ManifestHash([]byte(sampleManifest))); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Reject(Rejection{Hash: "h", Reason: "never joined", RejectedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if h, _ := s.LoadAttempted(); h != "" {
+		t.Errorf("rejection ends the trial; the marker should be gone, got %q", h)
+	}
+}
+
 func TestManifestHashIsStable(t *testing.T) {
 	a := ManifestHash([]byte(sampleManifest))
 	b := ManifestHash([]byte(sampleManifest))
