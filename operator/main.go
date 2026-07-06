@@ -92,6 +92,14 @@ func main() {
 		}
 	}
 
+	// The cluster's name is the operator's handle for reading the live
+	// Cluster resource each pass (cluster convergence); a machine with
+	// no cluster manifest has no document to converge.
+	clusterName := ""
+	if cluster != nil {
+		clusterName = cluster.Metadata.Name
+	}
+
 	// The core of every operator: a level-triggered loop. Watch events
 	// tell us *when* to look; the ticker guarantees we look even when
 	// nothing happened (facts can change without the object changing,
@@ -103,7 +111,7 @@ func main() {
 
 	ticker := time.NewTicker(30 * time.Second)
 	for {
-		reconcile(client, current)
+		reconcile(client, current, clusterName)
 		select {
 		case m := <-events:
 			current = m

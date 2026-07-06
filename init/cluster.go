@@ -31,14 +31,16 @@ import (
 	"github.com/chrisguidry/liken/machine"
 )
 
-// chooseCluster returns the cluster document this boot runs under and
-// records the choice in the boot record: staged (vetted) over proven
-// over the image's seed. A memory-backed machine has no durable
-// store, so it reads only the seed, every boot. No document anywhere
-// is a valid answer — a machine alone is its own cluster — but a
-// seed that exists and won't parse is an error the caller treats as
-// fatal, because a machine that can't tell its role must not guess.
-func chooseCluster(stateRoot, seedPath string, durable bool, boot *machine.BootStatus) (*machine.Cluster, error) {
+// chooseCluster returns the cluster document this boot runs under —
+// both parsed and as its exact bytes, which are published to /run for
+// the operator's drift detection — and records the choice in the boot
+// record: staged (vetted) over proven over the image's seed. A
+// memory-backed machine has no durable store, so it reads only the
+// seed, every boot. No document anywhere is a valid answer — a
+// machine alone is its own cluster — but a seed that exists and won't
+// parse is an error the caller treats as fatal, because a machine
+// that can't tell its role must not guess.
+func chooseCluster(stateRoot, seedPath string, durable bool, boot *machine.BootStatus) (*machine.Cluster, []byte, error) {
 	if durable {
 		store := machine.ClusterManifests(stateRoot)
 
@@ -68,7 +70,7 @@ func chooseCluster(stateRoot, seedPath string, durable bool, boot *machine.BootS
 				boot.ClusterManifestSource = machine.ManifestSourceStaged
 				boot.ClusterManifestHash = hash
 				fmt.Printf("liken: cluster: booting under the Staged document (%.12s); the operator's first pass is the proof\n", hash)
-				return c, nil
+				return c, raw, nil
 			}
 		}
 
@@ -84,25 +86,25 @@ func chooseCluster(stateRoot, seedPath string, durable bool, boot *machine.BootS
 			} else {
 				boot.ClusterManifestSource = machine.ManifestSourceProven
 				boot.ClusterManifestHash = machine.ManifestHash(raw)
-				return c, nil
+				return c, raw, nil
 			}
 		}
 	}
 
 	raw, err := os.ReadFile(seedPath)
 	if os.IsNotExist(err) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	c, err := machine.ParseCluster(raw)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", seedPath, err)
+		return nil, nil, fmt.Errorf("%s: %w", seedPath, err)
 	}
 	boot.ClusterManifestSource = machine.ManifestSourceSeed
 	boot.ClusterManifestHash = machine.ManifestHash(raw)
-	return c, nil
+	return c, raw, nil
 }
 
 // rejectStagedCluster quarantines a staged cluster document with its

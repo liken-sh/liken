@@ -98,7 +98,7 @@ func main() {
 	// (cluster.go), and reading it can stop the boot: a machine whose
 	// only cluster document won't parse cannot know its role, and a
 	// machine that can't tell its role must not guess.
-	cluster, err := chooseCluster(machine.MachineStateDir, machine.ClusterManifestPath,
+	cluster, clusterRaw, err := chooseCluster(machine.MachineStateDir, machine.ClusterManifestPath,
 		storage.MachineState.Backing == machine.BackingPartition, &boot)
 	if err != nil {
 		failBoot(fmt.Errorf("%w: %v", errIdentity, err))
@@ -166,6 +166,7 @@ func main() {
 		// prepareForK3s just mounted a fresh tmpfs there; anything
 		// written earlier would be shadowed by the mount.
 		facts := publishFacts(cluster, role, choice, conns, storage, boot, firstSync, clk.sources)
+		publishBootClusterManifest(clusterRaw)
 		// A machine with time sources disciplines its clock for the
 		// rest of its life; a free-running machine has nothing to
 		// follow, and its status already says so.

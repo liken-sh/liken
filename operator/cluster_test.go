@@ -27,6 +27,10 @@ func partitionBackedFacts(source, hash string) *machine.MachineStatus {
 			MachineState: machine.StorageRoleStatus{Backing: machine.BackingPartition},
 		},
 		Boot: machine.BootStatus{
+			// The machine manifest's record is what says "this init
+			// publishes boot records at all"; the cluster fields ride
+			// beside it.
+			ManifestSource:        machine.ManifestSourceProven,
 			ClusterManifestSource: source,
 			ClusterManifestHash:   hash,
 		},
@@ -111,6 +115,117 @@ func TestDoesNotRecordASeedTheBootDidNotRun(t *testing.T) {
 
 	if raw, _ := store.LoadProven(); raw != nil {
 		t.Error("a seed the boot did not run must not become proven")
+	}
+}
+
+// decisionCluster builds the in-cluster Cluster document the operator
+// would be comparing against.
+func decisionCluster() *machine.Cluster {
+	return &machine.Cluster{
+		APIVersion: machine.APIVersion,
+		Kind:       "Cluster",
+		Metadata:   machine.ObjectMeta{Name: "lab"},
+		Spec: machine.ClusterSpec{
+			Leaders:  []string{"node-1"},
+			Endpoint: "https://10.10.0.1:6443",
+		},
+	}
+}
+
+func machineWithPolicy(policy string) *machine.Machine {
+	return &machine.Machine{
+		Metadata: machine.ObjectMeta{Name: "node-1"},
+		Spec:     machine.MachineSpec{RebootPolicy: policy},
+	}
+}
+
+func TestClusterConvergedWhenTheBootRunsTheCurrentDocument(t *testing.T) {
+	cluster := decisionCluster()
+	_, hash, err := renderCluster(cluster.Metadata.Name, cluster.Spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := partitionBackedFacts(machine.ManifestSourceProven, hash)
+
+	conv := decideClusterConvergence(cluster, machineWithPolicy(""), facts, hash, "")
+	if conv.condition.Status != "True" || conv.condition.Reason != "BootCurrent" {
+		t.Errorf("got %+v", conv.condition)
+	}
+	if conv.condition.Type != "ClusterConverged" {
+		t.Errorf("condition type: got %q", conv.condition.Type)
+	}
+}
+
+func TestClusterConvergedWithdrawsAStaleStagedDocument(t *testing.T) {
+	cluster := decisionCluster()
+	_, hash, _ := renderCluster(cluster.Metadata.Name, cluster.Spec)
+	facts := partitionBackedFacts(machine.ManifestSourceProven, hash)
+	facts.Boot.ClusterRejection = &machine.Rejection{Hash: "old", Reason: "history"}
+
+	conv := decideClusterConvergence(cluster, machineWithPolicy(""), facts, hash, "some-other-hash")
+	if !conv.withdraw || !conv.clearRejection {
+		t.Errorf("an edit taken back should withdraw and clear: %+v", conv)
+	}
+}
+
+func TestClusterDriftStagesAndReportsAPendingReboot(t *testing.T) {
+	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-hash")
+
+	conv := decideClusterConvergence(decisionCluster(), machineWithPolicy(""), facts, "some-old-hash", "")
+	if conv.condition.Status != "False" || conv.condition.Reason != "RebootPending" {
+		t.Errorf("got %+v", conv.condition)
+	}
+	if !conv.stage || conv.requestReboot {
+		t.Errorf("Manual policy stages without rebooting: %+v", conv)
+	}
+}
+
+func TestClusterDriftRequestsARebootUnderAutoPolicy(t *testing.T) {
+	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-hash")
+
+	conv := decideClusterConvergence(decisionCluster(), machineWithPolicy(machine.RebootAuto), facts, "some-old-hash", "")
+	if conv.condition.Reason != "RebootRequested" || !conv.requestReboot {
+		t.Errorf("got %+v", conv)
+	}
+}
+
+func TestClusterDriftDoesNotRestageTheSameBytes(t *testing.T) {
+	cluster := decisionCluster()
+	_, hash, _ := renderCluster(cluster.Metadata.Name, cluster.Spec)
+	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-hash")
+
+	conv := decideClusterConvergence(cluster, machineWithPolicy(""), facts, "some-old-hash", hash)
+	if conv.stage {
+		t.Error("the exact bytes already wait; staging again is disk churn")
+	}
+}
+
+func TestClusterRejectedLastBootHolds(t *testing.T) {
+	cluster := decisionCluster()
+	_, hash, _ := renderCluster(cluster.Metadata.Name, cluster.Spec)
+	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-hash")
+	facts.Boot.ClusterRejection = &machine.Rejection{Hash: hash, Reason: "never joined"}
+
+	conv := decideClusterConvergence(cluster, machineWithPolicy(machine.RebootAuto), facts, "some-old-hash", "")
+	if conv.condition.Reason != "RejectedLastBoot" || conv.stage || conv.requestReboot {
+		t.Errorf("a rejected document must not be re-staged: %+v", conv)
+	}
+}
+
+func TestClusterConvergenceIsUnknownWithoutFacts(t *testing.T) {
+	conv := decideClusterConvergence(decisionCluster(), machineWithPolicy(""), nil, "", "")
+	if conv.condition.Status != "Unknown" {
+		t.Errorf("got %+v", conv.condition)
+	}
+}
+
+func TestClusterConvergenceRefusesMemoryBackedStaging(t *testing.T) {
+	facts := partitionBackedFacts(machine.ManifestSourceSeed, "some-old-hash")
+	facts.Storage.MachineState.Backing = machine.BackingMemory
+
+	conv := decideClusterConvergence(decisionCluster(), machineWithPolicy(""), facts, "some-old-hash", "")
+	if conv.condition.Reason != "MachineStateEphemeral" || conv.stage {
+		t.Errorf("got %+v", conv)
 	}
 }
 

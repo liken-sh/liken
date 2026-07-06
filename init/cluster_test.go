@@ -37,7 +37,7 @@ func writeSeed(t *testing.T, content string) string {
 
 func TestChooseClusterFromTheSeed(t *testing.T) {
 	boot := &machine.BootStatus{}
-	c, err := chooseCluster(t.TempDir(), writeSeed(t, sampleCluster), true, boot)
+	c, _, err := chooseCluster(t.TempDir(), writeSeed(t, sampleCluster), true, boot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestChooseClusterFromTheSeed(t *testing.T) {
 
 func TestChooseClusterWithNoManifestAnywhereIsAMachineAlone(t *testing.T) {
 	boot := &machine.BootStatus{}
-	c, err := chooseCluster(t.TempDir(), filepath.Join(t.TempDir(), "absent.yaml"), true, boot)
+	c, _, err := chooseCluster(t.TempDir(), filepath.Join(t.TempDir(), "absent.yaml"), true, boot)
 	if err != nil || c != nil {
 		t.Fatalf("no manifest anywhere should be a valid lone machine: %v %v", c, err)
 	}
@@ -69,7 +69,7 @@ func TestChooseClusterPrefersProvenOverSeed(t *testing.T) {
 		t.Fatal(err)
 	}
 	boot := &machine.BootStatus{}
-	c, err := chooseCluster(root, writeSeed(t, sampleCluster), true, boot)
+	c, _, err := chooseCluster(root, writeSeed(t, sampleCluster), true, boot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestChooseClusterPrefersStagedOverProven(t *testing.T) {
 		t.Fatal(err)
 	}
 	boot := &machine.BootStatus{}
-	c, err := chooseCluster(root, writeSeed(t, sampleCluster), true, boot)
+	c, _, err := chooseCluster(root, writeSeed(t, sampleCluster), true, boot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestChooseClusterRejectsAStagedDocumentThatWontParse(t *testing.T) {
 		t.Fatal(err)
 	}
 	boot := &machine.BootStatus{}
-	c, err := chooseCluster(root, writeSeed(t, sampleCluster), true, boot)
+	c, _, err := chooseCluster(root, writeSeed(t, sampleCluster), true, boot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestChooseClusterRejectsAStagedDocumentOfTheWrongKind(t *testing.T) {
 		t.Fatal(err)
 	}
 	boot := &machine.BootStatus{}
-	c, err := chooseCluster(root, writeSeed(t, sampleCluster), true, boot)
+	c, _, err := chooseCluster(root, writeSeed(t, sampleCluster), true, boot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestChooseClusterOnAMemoryBackedMachineIsSeedOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	boot := &machine.BootStatus{}
-	c, err := chooseCluster(root, writeSeed(t, sampleCluster), false, boot)
+	c, _, err := chooseCluster(root, writeSeed(t, sampleCluster), false, boot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,13 +170,13 @@ func TestChooseClusterRepublishesAStandingRejection(t *testing.T) {
 		t.Fatal(err)
 	}
 	boot := &machine.BootStatus{}
-	if _, err := chooseCluster(root, writeSeed(t, sampleCluster), true, boot); err != nil {
+	if _, _, err := chooseCluster(root, writeSeed(t, sampleCluster), true, boot); err != nil {
 		t.Fatal(err)
 	}
 	// The next boot finds no staged document, but the quarantine
 	// record still stands and must be reported again.
 	nextBoot := &machine.BootStatus{}
-	if _, err := chooseCluster(root, writeSeed(t, sampleCluster), true, nextBoot); err != nil {
+	if _, _, err := chooseCluster(root, writeSeed(t, sampleCluster), true, nextBoot); err != nil {
 		t.Fatal(err)
 	}
 	if nextBoot.ClusterRejection == nil {
@@ -191,7 +191,7 @@ func TestChooseClusterMarksTheStagedDocumentAttempted(t *testing.T) {
 		t.Fatal(err)
 	}
 	boot := &machine.BootStatus{}
-	if _, err := chooseCluster(root, writeSeed(t, sampleCluster), true, boot); err != nil {
+	if _, _, err := chooseCluster(root, writeSeed(t, sampleCluster), true, boot); err != nil {
 		t.Fatal(err)
 	}
 	h, err := store.LoadAttempted()
@@ -215,7 +215,7 @@ func TestChooseClusterRejectsAStagedDocumentThatWasNeverProven(t *testing.T) {
 		t.Fatal(err)
 	}
 	boot := &machine.BootStatus{}
-	c, err := chooseCluster(root, writeSeed(t, sampleCluster), true, boot)
+	c, _, err := chooseCluster(root, writeSeed(t, sampleCluster), true, boot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestChooseClusterRejectsAStagedDocumentThatWasNeverProven(t *testing.T) {
 
 func TestChooseClusterFailsOnAnUnparseableSeed(t *testing.T) {
 	boot := &machine.BootStatus{}
-	if _, err := chooseCluster(t.TempDir(), writeSeed(t, "not: [valid"), true, boot); err == nil {
+	if _, _, err := chooseCluster(t.TempDir(), writeSeed(t, "not: [valid"), true, boot); err == nil {
 		t.Fatal("an unparseable seed leaves the machine unable to know its role; that is an error")
 	}
 }

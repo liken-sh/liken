@@ -98,6 +98,19 @@ func publishFacts(cluster *machine.Cluster, role string, choice *manifestChoice,
 	return facts
 }
 
+// publishBootClusterManifest is the cluster document's version of the
+// boot manifest publication: the exact bytes this boot derived its
+// role from, for the operator's drift detection (which compares
+// documents by meaning, and needs bytes to parse, not just a hash).
+func publishBootClusterManifest(raw []byte) {
+	if len(raw) == 0 {
+		return
+	}
+	if err := os.WriteFile(machine.BootClusterManifestPath, raw, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "liken: writing the boot cluster manifest: %v\n", err)
+	}
+}
+
 // networkFacts folds every connection into a NetworkStatus.
 func networkFacts(cluster *machine.Cluster, conns []*connection, now time.Time) machine.NetworkStatus {
 	status := machine.NetworkStatus{}

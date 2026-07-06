@@ -105,13 +105,54 @@ func getCluster(c *apiClient, name string) (*machine.Cluster, error) {
 	return cluster, nil
 }
 
+// carryOutConvergence performs one convergence decision's side
+// effects against one document's store, and returns the condition to
+// publish (an I/O failure downgrades it to StagingFailed on the same
+// condition type, so the report stays attached to the right
+// document).
+func carryOutConvergence(conv convergence, store machine.ManifestStore, what string, now time.Time) machine.Condition {
+	failed := func(err error) machine.Condition {
+		return machine.Condition{Type: conv.condition.Type, Status: "False", Reason: "StagingFailed", Message: err.Error()}
+	}
+	if conv.withdraw {
+		if err := store.WithdrawStaged(); err != nil {
+			fmt.Printf("withdrawing the staged %s: %v\n", what, err)
+		} else {
+			fmt.Printf("withdrew the staged %s; the cluster's copy matches this boot again\n", what)
+		}
+	}
+	if conv.clearRejection {
+		if err := store.ClearRejection(); err != nil {
+			fmt.Printf("clearing the %s rejection record: %v\n", what, err)
+		}
+	}
+	if conv.stage {
+		if err := store.WriteStaged(conv.manifest); err != nil {
+			return failed(err)
+		}
+		fmt.Printf("staged %s %.12s for the next boot\n", what, conv.hash)
+	}
+	if conv.requestReboot {
+		intent := &machine.RebootIntent{
+			Reason:       "applying the staged " + what,
+			ManifestHash: conv.hash,
+			RequestedAt:  now,
+		}
+		if err := machine.WriteRebootIntent(machine.OperatorRunDir, intent); err != nil {
+			return failed(err)
+		}
+		fmt.Printf("requested a reboot to apply %s %.12s\n", what, conv.hash)
+	}
+	return conv.condition
+}
+
 // reconcile is one full pass of the operator's job, always from
 // absolute state: read the facts init left, actuate the spec's sysctls,
 // read back what actually holds, and publish all of it as status. It
 // deliberately keeps no memory between passes: every value in the
 // status it writes was observed moments ago, which is what the
 // Kubernetes convention means by status being reconstructible.
-func reconcile(c *apiClient, m *machine.Machine) {
+func reconcile(c *apiClient, m *machine.Machine, clusterName string) {
 	now := time.Now()
 	status := &machine.MachineStatus{}
 
@@ -137,43 +178,33 @@ func reconcile(c *apiClient, m *machine.Machine) {
 	status.Conditions = machine.SetCondition(status.Conditions,
 		machine.StorageCondition(m.Spec.Storage, status.Storage), now)
 
-	// Convergence: does the cluster's spec match what this boot
-	// actuated, and if not, stage the difference for the next boot
-	// (converge.go). The decision is pure; these lines carry it out.
-	store := machine.MachineManifests(machine.MachineStateDir)
+	// Convergence: does the cluster's copy of each document match what
+	// this boot actuated, and if not, stage the difference for the
+	// next boot (converge.go for the Machine, cluster.go for the
+	// Cluster). The decisions are pure; carryOutConvergence performs
+	// their side effects against each document's own store.
 	conv := decideConvergence(m, facts, readStagedHash())
-	if conv.withdraw {
-		if err := store.WithdrawStaged(); err != nil {
-			fmt.Printf("withdrawing the staged manifest: %v\n", err)
+	condition := carryOutConvergence(conv, machine.MachineManifests(machine.MachineStateDir), "spec", now)
+	status.Conditions = machine.SetCondition(status.Conditions, condition, now)
+
+	// The cluster document converges through the same machinery, per
+	// machine: this machine stages its own copy and reboots on its own
+	// policy, and this condition is where the fleet's transient
+	// disagreement about the Cluster is visible.
+	if clusterName != "" {
+		var cconv convergence
+		if liveCluster, err := getCluster(c, clusterName); err != nil {
+			cconv = convergence{condition: machine.Condition{
+				Type: "ClusterConverged", Status: "Unknown", Reason: "ClusterUnavailable",
+				Message: fmt.Sprintf("reading cluster %s: %v", clusterName, err),
+			}}
 		} else {
-			fmt.Println("withdrew the staged manifest; the spec matches this boot again")
+			cconv = decideClusterConvergence(liveCluster, m, facts,
+				bootClusterHash(machine.BootClusterManifestPath), readStagedClusterHash())
 		}
+		condition := carryOutConvergence(cconv, machine.ClusterManifests(machine.MachineStateDir), "cluster document", now)
+		status.Conditions = machine.SetCondition(status.Conditions, condition, now)
 	}
-	if conv.clearRejection {
-		if err := store.ClearRejection(); err != nil {
-			fmt.Printf("clearing the rejection record: %v\n", err)
-		}
-	}
-	if conv.stage {
-		if err := store.WriteStaged(conv.manifest); err != nil {
-			conv = convergence{condition: notConverged("StagingFailed", err.Error())}
-		} else {
-			fmt.Printf("staged spec %.12s for the next boot\n", conv.hash)
-		}
-	}
-	if conv.requestReboot {
-		intent := &machine.RebootIntent{
-			Reason:       "applying the staged spec",
-			ManifestHash: conv.hash,
-			RequestedAt:  now,
-		}
-		if err := machine.WriteRebootIntent(machine.OperatorRunDir, intent); err != nil {
-			conv.condition = notConverged("StagingFailed", err.Error())
-		} else {
-			fmt.Printf("requested a reboot to apply spec %.12s\n", conv.hash)
-		}
-	}
-	status.Conditions = machine.SetCondition(status.Conditions, conv.condition, now)
 
 	// Ready is the roll-up: True exactly when every other condition
 	// is. The scan skips any prior Ready so the previous pass's value

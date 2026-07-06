@@ -428,7 +428,7 @@
           marker still matching the staged hash knows the last try
           never got promoted: reject, fall back to proven. One
           proving boot, crash-only, no boot counters.
-   4. [ ] The operator's other half: read the Cluster resource every
+   4. [x] The operator's other half: read the Cluster resource every
           pass (RBAC already allows it; seeding stays create-only and
           the operator still never writes spec), render canonical
           bytes, compare against the boot record, and run the same

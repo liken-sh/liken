@@ -52,6 +52,15 @@ const (
 	// it lives under /run because it describes the current boot only.
 	BootManifestPath = "/run/liken/machine.yaml"
 
+	// BootClusterManifestPath is the same publication for the cluster
+	// document: the exact bytes this boot derived its role from. The
+	// operator needs the bytes, not just their hash, because drift
+	// detection compares documents by meaning — a hand-written seed
+	// and the operator's canonical rendering of the same spec are
+	// different bytes saying the same thing, and rebooting the fleet
+	// over formatting would be absurd.
+	BootClusterManifestPath = "/run/liken/cluster.yaml"
+
 	// FactsPath is where init publishes what it learned about the
 	// machine, shaped exactly like MachineStatus. /run is a fresh
 	// tmpfs every boot, which is the point: facts describe the current
