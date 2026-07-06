@@ -150,18 +150,26 @@ func main() {
 		// like it's from the future. This is the only moment liken
 		// ever steps the clock; from here on it only slews (time.go
 		// tells the whole story).
-		sources := timeSources(cluster, role)
-		firstSync := stepClockAtBoot(sources)
+		clk := newClock(timeSources(cluster, role))
+		firstSync := stepClockAtBoot(clk.sources)
+		clk.record(firstSync)
 		prepareForK3s()
 		// Facts wait until here because they live under /run, and
 		// prepareForK3s just mounted a fresh tmpfs there; anything
 		// written earlier would be shadowed by the mount.
-		facts := publishFacts(cluster, role, choice, conns, storage, boot, firstSync, sources)
+		facts := publishFacts(cluster, role, choice, conns, storage, boot, firstSync, clk.sources)
 		// A machine with time sources disciplines its clock for the
 		// rest of its life; a free-running machine has nothing to
 		// follow, and its status already says so.
-		if len(sources) > 0 {
-			plane.start("the clock", disciplineClock(sources, facts))
+		if len(clk.sources) > 0 {
+			plane.start("the clock", disciplineClock(clk, facts))
+		}
+		// Only servers serve time, because only servers are asked:
+		// agents sync from the endpoint, which is a server. Serving
+		// works even free-running — a fleet with no upstreams still
+		// agrees with itself (responder.go).
+		if role == machine.RoleServer {
+			plane.start("the time responder", serveTime(clk))
 		}
 		// The reboot channel: init creates the directory (owning its
 		// existence and permissions), the operator writes into it,

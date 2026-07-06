@@ -337,7 +337,7 @@
           the declared upstreams, agents ask the endpoint. Failure is
           humble: bounded attempts at boot, then keep trying forever,
           never touch the clock on bad data, never block the boot.
-   4. [ ] The responder, a second goroutine on servers only: hold UDP
+   4. [x] The responder, a second goroutine on servers only: hold UDP
           :123, answer each 48-byte query from the machine's own
           clock — a responder, not a proxy; the lead serves the clock
           its discipline loop maintains and never forwards a query

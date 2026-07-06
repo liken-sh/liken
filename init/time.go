@@ -50,6 +50,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/beevik/ntp"
@@ -87,6 +88,28 @@ type timeSync struct {
 	stratum int
 	offset  time.Duration
 	at      time.Time
+}
+
+// clock is the machine's account of its own timekeeping, shared by
+// the two components that care: the discipline loop records each
+// measurement, and (on a server) the responder reads the latest to
+// know what to advertise. This is the machine plane's shared-structs
+// dividend — two daemons would need a socket between them; two
+// goroutines need a mutex.
+type clock struct {
+	mu      sync.Mutex
+	sources []string
+	last    *timeSync
+}
+
+func newClock(sources []string) *clock {
+	return &clock{sources: sources}
+}
+
+func (c *clock) record(measured *timeSync) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.last = measured
 }
 
 // timeSources derives where this machine gets its time, the same way
@@ -238,7 +261,7 @@ const syncStaleAfter = 3 * timePollInterval
 // It narrates transitions rather than every poll: a sync gained, a
 // sync lost, and an offset only when it exceeds the step threshold,
 // which means drift is outrunning the slew.
-func disciplineClock(sources []string, facts *machine.MachineStatus) func(context.Context) error {
+func disciplineClock(clk *clock, facts *machine.MachineStatus) func(context.Context) error {
 	return func(ctx context.Context) error {
 		lastGood := time.Time{}
 		if facts.Time.LastSync != nil {
@@ -248,7 +271,7 @@ func disciplineClock(sources []string, facts *machine.MachineStatus) func(contex
 			if !sleepUnlessCancelled(ctx, timePollInterval) {
 				return nil
 			}
-			sync, err := querySources(sources)
+			sync, err := querySources(clk.sources)
 			if err != nil {
 				// A failed poll is only news when it changes the
 				// story: past the staleness window, the machine
@@ -273,7 +296,8 @@ func disciplineClock(sources []string, facts *machine.MachineStatus) func(contex
 					sync.offset.Round(time.Millisecond), sync.source)
 			}
 			lastGood = sync.at
-			facts.Time = timeStatus(sync, sources)
+			clk.record(sync)
+			facts.Time = timeStatus(sync, clk.sources)
 			publishTimeFacts(facts)
 		}
 	}
