@@ -156,6 +156,40 @@ func k3sBootConfig(role string, cluster *machine.Cluster, nodeIP, nodeInterface 
 	return b.String()
 }
 
+// k3sServerDB is where k3s keeps the control plane's datastore —
+// sqlite via kine, or embedded etcd — on the clusterState filesystem.
+const k3sServerDB = "/var/lib/rancher/k3s/server/db"
+
+// purgeLeaderLeftovers removes a demoted machine's old control-plane
+// datastore. A machine that served as a leader and was demoted keeps
+// its etcd data on clusterState, and etcd refuses to let a
+// permanently-removed member rejoin with its old data-dir — so a
+// later re-promotion would wedge on the corpse of the first stint.
+// A follower has no business keeping a datastore, and deleting it is
+// what makes demotion truly reversible.
+//
+// The proven-source guard is what makes this safe to automate: a
+// *staged* document that demotes this machine is still on trial, and
+// if it fails to prove (imagine an edit that wrongly demotes the
+// only leader), the fallback boots the leader role again and needs
+// its datastore exactly where it was. Only a demotion that already
+// proved out — the machine joined its cluster as a follower and the
+// operator promoted the document — earns the cleanup, on the boot
+// after.
+func purgeLeaderLeftovers(role, clusterManifestSource, dbDir string) {
+	if role != machine.RoleFollower || clusterManifestSource != machine.ManifestSourceProven {
+		return
+	}
+	if _, err := os.Stat(dbDir); err != nil {
+		return
+	}
+	if err := os.RemoveAll(dbDir); err != nil {
+		fmt.Fprintf(os.Stderr, "liken: purging the old control-plane datastore: %v\n", err)
+		return
+	}
+	fmt.Println("liken: this follower once served as a leader; its old control-plane datastore is purged so a future promotion starts clean")
+}
+
 // persistNodePassword gives k3s's node password a durable home. On
 // its first join, a machine mints a random secret (its "node
 // password"), the leader records it, and every reconnect after must

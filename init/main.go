@@ -147,6 +147,10 @@ func main() {
 		// this boot, or the machine can never rejoin its own cluster
 		// (k3s.go tells the story).
 		persistNodePassword(storage)
+		// A proven demotion also cleans up after the machine's leader
+		// days: etcd won't let a removed member rejoin over its old
+		// data, so the datastore goes before k3s starts (k3s.go).
+		purgeLeaderLeftovers(role, boot.ClusterManifestSource, k3sServerDB)
 		// The clock is corrected before k3s starts, because a wrong
 		// clock fails TLS: every certificate the CA minted looks
 		// like it's from the future. This is the only moment liken

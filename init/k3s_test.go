@@ -6,6 +6,8 @@ package main
 
 import (
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -176,6 +178,42 @@ func TestK3sBootConfigWithNoClusterIsNearlyEmpty(t *testing.T) {
 		if strings.Contains(got, reject) {
 			t.Errorf("a machine alone derives no %s:\n%s", reject, got)
 		}
+	}
+}
+
+func leaderDB(t *testing.T) string {
+	t.Helper()
+	db := filepath.Join(t.TempDir(), "db")
+	if err := os.MkdirAll(filepath.Join(db, "etcd", "member"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
+
+func TestAProvenFollowerPurgesLeaderLeftovers(t *testing.T) {
+	db := leaderDB(t)
+	purgeLeaderLeftovers(machine.RoleFollower, machine.ManifestSourceProven, db)
+	if _, err := os.Stat(db); !os.IsNotExist(err) {
+		t.Error("a proven follower keeps no control-plane datastore")
+	}
+}
+
+func TestAStagedFollowerBootKeepsTheDatastore(t *testing.T) {
+	// The trial boot of a document that demotes this machine must not
+	// destroy anything: if the document fails to prove, the fallback
+	// boots the leader role again and needs its datastore intact.
+	db := leaderDB(t)
+	purgeLeaderLeftovers(machine.RoleFollower, machine.ManifestSourceStaged, db)
+	if _, err := os.Stat(db); err != nil {
+		t.Error("an unproven demotion must leave the datastore alone")
+	}
+}
+
+func TestALeaderKeepsItsDatastore(t *testing.T) {
+	db := leaderDB(t)
+	purgeLeaderLeftovers(machine.RoleLeader, machine.ManifestSourceProven, db)
+	if _, err := os.Stat(db); err != nil {
+		t.Error("a leader's datastore is the cluster; hands off")
 	}
 }
 

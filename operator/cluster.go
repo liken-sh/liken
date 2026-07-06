@@ -86,7 +86,7 @@ func clusterNotConverged(reason, message string) machine.Condition {
 // rendering of the same spec are different bytes saying the same
 // thing. Drift is a difference in meaning; rebooting a fleet over
 // formatting would be absurd.
-func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, facts *machine.MachineStatus, bootHash, stagedHash string) convergence {
+func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, facts *machine.MachineStatus, rejection *machine.Rejection, bootHash, stagedHash string) convergence {
 	if facts == nil || facts.Boot.ManifestSource == "" {
 		return convergence{condition: machine.Condition{
 			Type: "ClusterConverged", Status: "Unknown", Reason: "FactsIncomplete",
@@ -109,11 +109,14 @@ func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, fact
 		return convergence{
 			condition:      clusterConverged("BootCurrent", "this boot ran the current cluster document"),
 			withdraw:       stagedHash != "",
-			clearRejection: facts.Boot.ClusterRejection != nil,
+			clearRejection: rejection != nil,
 		}
 	}
 
-	if r := facts.Boot.ClusterRejection; r != nil && r.Hash == hash {
+	// The rejection comes from the durable record, not from facts:
+	// facts are the boot's frozen memory, and a rejection cleared by
+	// a revert must unblock a retry within the same boot.
+	if r := rejection; r != nil && r.Hash == hash {
 		return convergence{condition: clusterNotConverged("RejectedLastBoot",
 			fmt.Sprintf("init rejected this exact cluster document at boot: %s; edit the cluster to something different", r.Reason))}
 	}

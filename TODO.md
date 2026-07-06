@@ -533,8 +533,20 @@
           triggers k3s's etcd member-removal controller, but a
           kubelet whose Node vanishes mid-run won't re-register, so
           the full demotion recipe today is: Cluster edit, reboot,
-          delete the Node object, one more boot. Automating that
-          cleanup belongs to the rolling-upgrades milestone. The
+          delete the Node object, one more boot. (That recipe is now
+          fully automated: the demoted machine's own operator notices
+          its Node still claims control-plane, writes the reboot
+          intent, and deletes its own Node — intent first, since the
+          delete kills the very pod doing it — and the next proven
+          follower boot also purges the leftover etcd datastore,
+          which etcd would otherwise refuse to let rejoin. The drill
+          re-ran hands-off in both directions: promote node-4 with
+          one edit, demote it with another. It also flushed out a
+          rejection-authority bug: the decision tables read the
+          quarantine record from facts, which are frozen at boot, so
+          a rejection cleared by a revert kept blocking a retry until
+          reboot — the durable record on machineState is the
+          authority now.) The
           loss drills: with one leader dead the cluster kept
           serving and scheduling (quorum 2 of 3) and the revived
           leader rejoined; with ALL THREE leaders dead the API went
@@ -582,12 +594,11 @@
         upgrade, restart, confirm it rejoined healthy, then move to the
         next, honoring quorum on the leaders. Not designed yet, just
         owed: it's the layer where the Machine's upgrade machinery and
-        the Cluster's convergence machinery meet. This is also where
-        leader demotion gets finished: milestone 9's drill showed a
-        demoted machine leaves a stale Node object and etcd membership
-        behind, and the cleanup (delete the Node, let k3s remove the
-        member, boot once more) is exactly the kind of sequenced,
-        quorum-aware choreography this milestone exists for.
+        the Cluster's convergence machinery meet. (Leader demotion,
+        once parked here, got automated during milestone 9 instead:
+        the demoted machine's operator cleans up its own Node and
+        datastore. What remains here is the fleet-level sequencing —
+        making sure only one leader is ever down at a time.)
 
 Deferred until the fundamentals above are proven — the
 public-consumption tier:

@@ -183,7 +183,12 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string) {
 	// next boot (converge.go for the Machine, cluster.go for the
 	// Cluster). The decisions are pure; carryOutConvergence performs
 	// their side effects against each document's own store.
-	conv := decideConvergence(m, facts, readStagedHash())
+	// The rejection records come from the durable store, not from
+	// facts: facts are the boot's frozen memory, and a rejection
+	// cleared mid-boot (by an edit that reverted) must unblock a
+	// retry without waiting for a reboot to refresh the facts.
+	machineRejection, _ := machine.MachineManifests(machine.MachineStateDir).LoadRejection()
+	conv := decideConvergence(m, facts, machineRejection, readStagedHash())
 	condition := carryOutConvergence(conv, machine.MachineManifests(machine.MachineStateDir), "spec", now)
 	status.Conditions = machine.SetCondition(status.Conditions, condition, now)
 
@@ -199,11 +204,24 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string) {
 				Message: fmt.Sprintf("reading cluster %s: %v", clusterName, err),
 			}}
 		} else {
-			cconv = decideClusterConvergence(liveCluster, m, facts,
+			clusterRejection, _ := machine.ClusterManifests(machine.MachineStateDir).LoadRejection()
+			cconv = decideClusterConvergence(liveCluster, m, facts, clusterRejection,
 				bootClusterHash(machine.BootClusterManifestPath), readStagedClusterHash())
 		}
 		condition := carryOutConvergence(cconv, machine.ClusterManifests(machine.MachineStateDir), "cluster document", now)
 		status.Conditions = machine.SetCondition(status.Conditions, condition, now)
+
+		// Demotion cleanup (demotion.go): a follower whose Node object
+		// still claims control-plane was just demoted, and the stale
+		// Node — with its registered etcd membership — must go. The
+		// node read can fail benignly (mid-cleanup, the Node is
+		// deleted and not yet re-registered); that pass just skips the
+		// condition and the next one settles it.
+		if node, err := getNode(c, m.Metadata.Name); err == nil {
+			d := decideDemotion(status.Role, node.Metadata.Labels, m.Spec.RebootPolicyOrDefault())
+			condition := carryOutDemotion(c, m.Metadata.Name, d)
+			status.Conditions = machine.SetCondition(status.Conditions, condition, now)
+		}
 	}
 
 	// Ready is the roll-up: True exactly when every other condition

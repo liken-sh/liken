@@ -200,10 +200,13 @@ func notConverged(reason, message string) machine.Condition {
 //     would otherwise apply it. A standing rejection is cleared for
 //     the same reason: the spec it blocks is no longer being asked
 //     for, so the record has nothing left to do.
-//  3. The desired spec is the one init rejected last boot: refuse to
-//     re-stage it. Facts die with every boot but the quarantine file
-//     doesn't, so this holds across power cycles; only a genuinely
-//     different edit clears it.
+//  3. The desired spec is the one init rejected: refuse to re-stage
+//     it. The rejection parameter is read from the durable quarantine
+//     record on machineState, not from facts — facts are the boot's
+//     frozen memory, and an edit that reverts and then retries within
+//     one boot must see the clearing take effect immediately, not at
+//     the next reboot. Only a genuinely different edit (or clearing
+//     the record by converging) unblocks the hash.
 //  4. Facts claim this exact manifest was actuated, yet drift still
 //     computes: a contradiction, necessarily a liken bug. A wedged
 //     condition beats a machine rebooting every reconcile pass.
@@ -213,7 +216,7 @@ func notConverged(reason, message string) machine.Condition {
 //  7. Valid drift: stage (unless these exact bytes already are), and
 //     per rebootPolicy either request the reboot or report one
 //     pending.
-func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, stagedHash string) convergence {
+func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejection *machine.Rejection, stagedHash string) convergence {
 	if facts == nil || facts.Boot.ManifestSource == "" {
 		return convergence{condition: machine.Condition{
 			Type: "SpecConverged", Status: "Unknown", Reason: "FactsIncomplete",
@@ -226,7 +229,7 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, stagedH
 		return convergence{
 			condition:      converged("BootCurrent", "this boot actuated the current spec"),
 			withdraw:       stagedHash != "",
-			clearRejection: facts.Boot.Rejection != nil,
+			clearRejection: rejection != nil,
 		}
 	}
 	diffs := strings.Join(drift, "; ")
@@ -236,7 +239,7 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, stagedH
 		return convergence{condition: notConverged("StagingFailed", err.Error())}
 	}
 
-	if r := facts.Boot.Rejection; r != nil && r.Hash == hash {
+	if r := rejection; r != nil && r.Hash == hash {
 		return convergence{condition: notConverged("RejectedLastBoot",
 			fmt.Sprintf("init rejected this exact spec at boot: %s; edit the spec to something different", r.Reason))}
 	}

@@ -28,11 +28,12 @@ metadata:
 ---
 # The operator's permissions, and deliberately nothing more: full
 # control of Machines and their status, creation of the Cluster it
-# seeds, and no other resource. RBAC can grant spec and status
-# separately precisely because the Machine CRD declares status as a
-# subresource. Note what's absent for clusters: no update — the
-# operator seeds the Cluster once and may never rewrite what a person
-# (or one day a git repository) edits afterward.
+# seeds, and Node get/delete for demotion cleanup. RBAC can grant
+# spec and status separately precisely because the Machine CRD
+# declares status as a subresource. Note what's absent for clusters:
+# no update — the operator seeds the Cluster once and may never
+# rewrite what a person (or one day a git repository) edits
+# afterward.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -47,6 +48,14 @@ rules:
   - apiGroups: [liken.sh]
     resources: [clusters]
     verbs: [get, list, watch, create]
+  # Nodes, for demotion cleanup (demotion.go): a machine demoted from
+  # leader to follower deletes its own stale Node object, which is
+  # what triggers k3s's etcd member removal. get to see the stale
+  # role labels, delete to finish the demotion, and never update —
+  # the operator doesn't manage Nodes.
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get, delete]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
