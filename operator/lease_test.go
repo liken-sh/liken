@@ -187,3 +187,14 @@ func (api *leaseListAPI) handler() http.Handler {
 		_ = json.NewEncoder(w).Encode(&list)
 	})
 }
+
+func TestTakingTheLeaseCountsTheTransition(t *testing.T) {
+	api := &leaseAPI{lease: lease("node-2", 5*time.Minute)}
+	client := testClient(t, api.handler())
+	if !holdFleetLease(client, "node-1", sweepNow) {
+		t.Fatal("a stale claim is there for the taking")
+	}
+	if api.lease.Spec.LeaseTransitions != 1 {
+		t.Errorf("a takeover is a transition: %d", api.lease.Spec.LeaseTransitions)
+	}
+}

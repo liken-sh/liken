@@ -27,6 +27,9 @@ spec:
     listKind: MachineList
     plural: machines
     singular: machine
+    # `kubectl get liken` shows the whole OS layer at once, the way
+    # `kubectl get all` shows workloads.
+    categories: [liken]
   # Cluster-scoped, like Node: a machine underlies the cluster and
   # belongs to no namespace within it.
   scope: Cluster

@@ -389,10 +389,19 @@ func publishStatus(c *apiClient, m *machine.Machine, status *machine.MachineStat
 // server says 410 Gone, and the recovery is to re-GET the object and
 // watch from its current version. Stream drops are routine (the server
 // ends watches on its own schedule); the loop just reconnects.
+//
+// allowWatchBookmarks asks the server to send an occasional BOOKMARK
+// event: no object change, just "you are current through version X."
+// A watch on a quiet object would otherwise sit on an ever-staler
+// resourceVersion, and the next reconnect would be more likely to
+// find that version compacted away (the 410 above). Bookmarks keep
+// the resume point fresh for free; informers request them for
+// exactly this reason.
 func watchMachine(c *apiClient, name, resourceVersion string, events chan<- *machine.Machine) {
 	for {
 		path := machinesPath +
-			"?watch=true&fieldSelector=metadata.name%3D" + name +
+			"?watch=true&allowWatchBookmarks=true" +
+			"&fieldSelector=metadata.name%3D" + name +
 			"&resourceVersion=" + resourceVersion
 
 		resp, err := c.do(http.MethodGet, path, "", nil)
@@ -412,6 +421,11 @@ func watchMachine(c *apiClient, name, resourceVersion string, events chan<- *mac
 					break
 				}
 				resourceVersion = event.Object.Metadata.ResourceVersion
+				if event.Type == "BOOKMARK" {
+					// A resume-point refresh, not a change: nothing to
+					// reconcile.
+					continue
+				}
 				events <- &event.Object
 			}
 		}

@@ -25,6 +25,9 @@ spec:
     listKind: ClusterList
     plural: clusters
     singular: cluster
+    # `kubectl get liken` shows the whole OS layer at once, the way
+    # `kubectl get all` shows workloads.
+    categories: [liken]
   # Cluster-scoped, even more literally than Machine: the cluster
   # can't very well live inside a namespace inside itself.
   scope: Cluster

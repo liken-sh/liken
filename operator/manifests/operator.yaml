@@ -152,6 +152,13 @@ kind: DaemonSet
 metadata:
   name: liken-operator
   namespace: liken-system
+  # The recommended app.kubernetes.io labels, for every tool that
+  # keys on them. The selector below stays the minimal app: label —
+  # a DaemonSet's selector is immutable after creation, so it should
+  # carry identity only, never anything that might want to change.
+  labels:
+    app.kubernetes.io/name: liken-operator
+    app.kubernetes.io/part-of: liken
 spec:
   selector:
     matchLabels:
@@ -160,6 +167,8 @@ spec:
     metadata:
       labels:
         app: liken-operator
+        app.kubernetes.io/name: liken-operator
+        app.kubernetes.io/part-of: liken
     spec:
       serviceAccountName: liken-operator
       # The OS layer should outrank workloads when memory gets tight;

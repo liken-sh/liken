@@ -83,6 +83,11 @@ type leaseObject struct {
 		LeaseDurationSeconds int    `json:"leaseDurationSeconds,omitempty"`
 		AcquireTime          string `json:"acquireTime,omitempty"`
 		RenewTime            string `json:"renewTime,omitempty"`
+
+		// LeaseTransitions counts changes of holder: the lease's
+		// flap odometer, incremented on every takeover. A high
+		// number on a long-lived lease says the holders keep dying.
+		LeaseTransitions int `json:"leaseTransitions,omitempty"`
 	} `json:"spec"`
 }
 
@@ -137,6 +142,7 @@ func holdFleetLease(c *apiClient, self string, now time.Time) bool {
 	lease.Spec.RenewTime = now.UTC().Format(microTime)
 	if action == leaseTake {
 		lease.Spec.AcquireTime = lease.Spec.RenewTime
+		lease.Spec.LeaseTransitions++
 	}
 	body, err := json.Marshal(lease)
 	if err != nil {
