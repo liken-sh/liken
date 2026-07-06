@@ -232,20 +232,30 @@ const (
 )
 
 // BootStatus is the boot's account of its own configuration: which
-// manifest won, identified by the hash of its exact bytes, and the
-// storage spec it actuated. This is the half of drift detection only
-// init can supply; the operator compares it against the cluster's
-// spec.
+// documents won, identified by the hashes of their exact bytes, and
+// the storage spec it actuated. This is the half of drift detection
+// only init can supply; the operator compares it against the
+// cluster's copies.
 type BootStatus struct {
+	// The Machine manifest this boot ran under.
 	ManifestSource string      `json:"manifestSource,omitempty"`
 	ManifestHash   string      `json:"manifestHash,omitempty"`
 	Storage        StorageSpec `json:"storage,omitzero"`
 
-	// Rejection is the standing quarantine record, republished every
-	// boot until a promotion clears it, so a rejected spec stays
-	// visible in the cluster no matter how many times the machine
-	// power-cycles.
-	Rejection *Rejection `json:"rejection,omitempty"`
+	// The Cluster manifest this boot ran under: the same lifecycle,
+	// recorded separately, because the two documents stage and prove
+	// independently and a machine can be current on one while drifted
+	// on the other.
+	ClusterManifestSource string `json:"clusterManifestSource,omitempty"`
+	ClusterManifestHash   string `json:"clusterManifestHash,omitempty"`
+
+	// Rejection is the standing quarantine record for the Machine
+	// manifest, republished every boot until a promotion clears it,
+	// so a rejected spec stays visible in the cluster no matter how
+	// many times the machine power-cycles. ClusterRejection is the
+	// same record for the Cluster document.
+	Rejection        *Rejection `json:"rejection,omitempty"`
+	ClusterRejection *Rejection `json:"clusterRejection,omitempty"`
 }
 
 // Condition mirrors the shape Kubernetes uses everywhere (Pods, Nodes,

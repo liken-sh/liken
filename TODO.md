@@ -405,12 +405,16 @@
           same four files, the same hashing, and the same durable
           writes. A memory-backed machine stays seed-only for both
           kinds, exactly as today.
-   2. [ ] Init selects the cluster manifest staged → proven → seed,
-          beside the machine manifest peek. A staged document that
-          won't parse (or isn't kind: Cluster) is rejected at
-          vetting. The boot record grows clusterManifestSource and
-          clusterManifestHash next to the machine fields, through
-          facts and the CRD schema as usual.
+   2. [x] Init selects the cluster manifest staged → proven → seed. A
+          staged document that won't parse (or isn't kind: Cluster)
+          is rejected at vetting. The boot record grows
+          clusterManifestSource, clusterManifestHash, and
+          clusterRejection next to the machine fields, through facts
+          and the CRD schema as usual. (Simpler than the machine
+          manifest's peek on purpose: the Cluster document doesn't
+          drive storage, so by the time it's read, machineState is
+          an ordinary mounted filesystem and no peek mount is
+          needed.)
    3. [ ] Promotion, the genuinely new mechanism: the join is the
           proof. A machine manifest is proven by storage
           reconciliation within the boot, but a cluster manifest's

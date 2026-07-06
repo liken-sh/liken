@@ -45,21 +45,6 @@ const (
 	tokenPath = "/etc/liken/token"
 )
 
-// loadCluster reads the cluster manifest the image carries. No
-// manifest is fine (a machine alone is its own cluster), but one that
-// exists and doesn't parse is fatal to the boot: a machine that can't
-// tell whether it is a leader or a follower must not guess, because
-// guessing "leader" starts a rival control plane and guessing
-// "follower" points a workload machine at a control plane that may
-// not exist.
-func loadCluster() (*machine.Cluster, error) {
-	cluster, err := machine.LoadCluster(machine.ClusterManifestPath)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", errIdentity, err)
-	}
-	return cluster, nil
-}
-
 // nodeAddress picks which of the machine's addresses is its node IP:
 // the address Kubernetes traffic uses, and the one other nodes are
 // told to reach it at. The Cluster's nodeCIDR decides: the interface

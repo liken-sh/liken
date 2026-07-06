@@ -92,14 +92,16 @@ func main() {
 	}
 	m := choice.m
 
-	// The cluster manifest rides in every machine's image: it says
-	// which machines are leaders, and from it this machine derives
-	// what it is. Reading it can also stop the boot (a cluster
-	// manifest that won't parse leaves the machine unable to know its
-	// role), which is why it's read here, before anything acts on it.
-	cluster, err := loadCluster()
+	// The cluster document says which machines are leaders, and from
+	// it this machine derives what it is. It goes through the same
+	// staged/proven/seed lifecycle as the Machine manifest
+	// (cluster.go), and reading it can stop the boot: a machine whose
+	// only cluster document won't parse cannot know its role, and a
+	// machine that can't tell its role must not guess.
+	cluster, err := chooseCluster(machine.MachineStateDir, machine.ClusterManifestPath,
+		storage.MachineState.Backing == machine.BackingPartition, &boot)
 	if err != nil {
-		failBoot(err)
+		failBoot(fmt.Errorf("%w: %v", errIdentity, err))
 	}
 
 	if name := m.Metadata.Name; name != "" {

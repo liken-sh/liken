@@ -524,22 +524,29 @@ spec:
                 boot:
                   type: object
                   description: >-
-                    Which manifest this boot actually ran under: the
-                    staged one awaiting its proving boot, the proven
+                    Which documents this boot actually ran under: the
+                    staged copy awaiting its proving boot, the proven
                     last-known-good, or (first boot only) the seed
-                    baked into the image. The hash identifies the
-                    manifest's exact bytes, and the storage block is
-                    the spec as actuated: together they are the
-                    reference point for detecting drift between what
-                    the cluster asks and what the machine did. A
-                    rejection reports a staged manifest that failed
-                    its boot and was quarantined; it stands until a
-                    different spec proves out.
+                    baked into the image — recorded separately for
+                    the Machine manifest and the Cluster document,
+                    because the two stage and prove independently.
+                    The hashes identify exact bytes, and the storage
+                    block is the spec as actuated: together they are
+                    the reference point for detecting drift between
+                    what the cluster asks and what the machine did.
+                    A rejection reports a staged document that failed
+                    and was quarantined; it stands until a different
+                    edit proves out.
                   properties:
                     manifestSource:
                       type: string
                       enum: [Staged, Proven, Seed]
                     manifestHash:
+                      type: string
+                    clusterManifestSource:
+                      type: string
+                      enum: [Staged, Proven, Seed]
+                    clusterManifestHash:
                       type: string
                     storage:
                       type: object
@@ -580,6 +587,16 @@ spec:
                             size:
                               type: string
                     rejection:
+                      type: object
+                      properties:
+                        hash:
+                          type: string
+                        reason:
+                          type: string
+                        rejectedAt:
+                          type: string
+                          format: date-time
+                    clusterRejection:
                       type: object
                       properties:
                         hash:
