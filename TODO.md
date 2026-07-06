@@ -382,26 +382,128 @@
        document no machine consults. The Machine already has the
        whole lifecycle this needs (drift detection, durable staging
        on machineState, proven fallback, SpecConverged); the Cluster
-       document should ride the same machinery, staged per machine
-       and applied by the next boot. The new question it forces: the
-       convergence machinery is per-machine but the Cluster is
-       cluster-scoped, so every machine stages its own copy, machines
-       can transiently disagree about which Cluster spec they booted,
-       and status has to make that visible. This lands before HA
+       document rides the same machinery, staged per machine and
+       applied by the next boot. The convergence machinery is
+       per-machine but the Cluster is cluster-scoped, so every
+       machine stages its own copy, machines can transiently disagree
+       about which Cluster spec they booted, and status makes that
+       visible per machine. Fetching cluster config live at boot was
+       considered and rejected: it's circular (the endpoint is inside
+       the document being fetched), agents hold no API credentials,
+       and it would make a server outage block agent boots — while
+       the operator pod on every node already IS the live,
+       credentialed reader; disk is just the crash-safe handoff from
+       runtime read to boot-time consumer. This lands before HA
        servers on purpose (growing spec.servers is precisely a
        Cluster edit — the HA milestone needs edits that converge) and
        before GitOps (git will own the Cluster document, and a
        document git owns must actually take effect).
-9. [ ] Multiple servers: quorum for the control plane. sqlite (via
-       kine) serves one server; more than one means embedded etcd —
-       `--cluster-init` on the first, `--server` on the rest, and an
-       odd number of voices to vote. k3s can migrate a sqlite cluster
-       in place by restarting it with `--cluster-init`, which is what
-       makes starting on sqlite safe rather than a dead end. This is
-       also where the endpoint question gets real: with one server the
-       cluster's address was that server's address; with several, the
-       Cluster resource needs a better answer (every server listed, a
-       DNS name, or a virtual IP).
+   1. [ ] The staging store generalizes: machine/staging.go operates
+          on a directory instead of the hardcoded manifests/ path, so
+          machine manifests stay at machineState's manifests/ and
+          cluster manifests land beside them at cluster/, with the
+          same four files, the same hashing, and the same durable
+          writes. A memory-backed machine stays seed-only for both
+          kinds, exactly as today.
+   2. [ ] Init selects the cluster manifest staged → proven → seed,
+          beside the machine manifest peek. A staged document that
+          won't parse (or isn't kind: Cluster) is rejected at
+          vetting. The boot record grows clusterManifestSource and
+          clusterManifestHash next to the machine fields, through
+          facts and the CRD schema as usual.
+   3. [ ] Promotion, the genuinely new mechanism: the join is the
+          proof. A machine manifest is proven by storage
+          reconciliation within the boot, but a cluster manifest's
+          failure modes are downstream (a bad endpoint means the
+          agent never joins), so init can't prove it at settle time.
+          Init boots a staged cluster document tentatively and writes
+          an attempted marker (the staged hash); the operator — whose
+          own existence as a pod proves containerd, kubelet, and the
+          join all worked under this config — promotes on its first
+          reconcile pass and clears the marker. A boot that finds the
+          marker still matching the staged hash knows the last try
+          never got promoted: reject, fall back to proven. One
+          proving boot, crash-only, no boot counters.
+   4. [ ] The operator's other half: read the Cluster resource every
+          pass (RBAC already allows it; seeding stays create-only and
+          the operator still never writes spec), render canonical
+          bytes, compare against the boot record, and run the same
+          decision table as the Machine — withdraw stale staged specs
+          and clear rejections when current, hold on
+          rejected-last-boot, stage drift and request a reboot per
+          the Machine's spec.rebootPolicy (one knob governs both
+          kinds of staging). A new ClusterConverged condition with
+          the same reason vocabulary; Ready rolls it up. Deliberately
+          NO fleet orchestration: a Cluster edit is drift on every
+          machine at once, and with Auto everywhere that's a
+          simultaneous fleet reboot — Manual stays the default,
+          pending reboots are visible per machine, and rolling
+          coordination is milestone 13's job.
+   5. [ ] Guardrails: the five network-plan fields (nodeCIDR,
+          clusterCIDR, serviceCIDR, clusterDNS, clusterDomain) become
+          immutable-once-set via CEL oldSelf rules — k3s can't
+          re-plumb any of them in place, so an edit there is a lie
+          waiting for a reboot to expose. (oldSelf is correct here,
+          unlike the storage rules of milestone 5.7: these facts can
+          never be edited "back to reality," because their reality
+          never changes.) servers, endpoint, and time stay freely
+          editable.
+   6. [ ] Drill it on the two-node lab: add a second NTP upstream via
+          kubectl edit cluster and watch both machines stage, report
+          RebootPending, apply on reboot, and show the new source in
+          status.time with ClusterConverged True. Point the endpoint
+          somewhere dead and reboot the agent: no join, no operator,
+          no promotion, and the next boot rejects on the attempted
+          marker and falls back to proven, rejoining the real cluster
+          with the rejection visible in status. Then edit back to
+          good and watch staged withdraw and the rejection clear with
+          no reboot.
+9. [ ] Multiple servers: quorum for the control plane, and the whole
+       growth story is one Cluster edit converging — spec.servers
+       grows from [node-1] to three names, every machine stages the
+       new document via milestone 8, and no separate "add a server"
+       mechanism exists. sqlite (via kine) serves one server; more
+       than one means embedded etcd.
+   1. [ ] Config derivation by server count (init/k3s.go): one
+          server means exactly today's config — sqlite, no etcd
+          keys, single-node stays cheap on purpose. More than one:
+          the first entry in spec.servers is the founder and renders
+          cluster-init: true (on the migration boot, k3s migrates
+          the sqlite datastore into embedded etcd in place, which is
+          what made starting on sqlite safe rather than a dead end);
+          every other server renders server: pointing at the
+          founder, resolved from the fleet's Machine manifests the
+          way time sources already are (reuse serverAddresses).
+          Agents are unchanged. Rejoins keep the same flags every
+          boot — founder keeps cluster-init, joiners keep server: —
+          which is k3s's recommended steady state.
+   2. [ ] The endpoint stays one explicit input. Agents use it for
+          first contact only: after joining, k3s agents maintain a
+          client-side load balancer that learns every server, so a
+          dead endpoint strands only new agents, never running ones
+          (and time queries already bypass it, asking each server by
+          address). A VIP or DNS name is a deployment's choice to
+          make; the manifest documents the tradeoff.
+   3. [ ] Quorum, plainly: three voices, odd on purpose. No CEL rule
+          on server-count parity — growing 1→3 in one edit never
+          passes through two, and a transient even state during some
+          future migration shouldn't be refused at admission. A
+          simultaneous all-server reboot loses quorum transiently
+          and reforms from disk; Manual stays the sane policy for
+          servers until milestone 13 does rolling reboots.
+   4. [ ] The lab grows to five machines: three servers (node-1
+          founding, node-3 and node-4 fresh) and two agents (node-2
+          staying, node-5 new) — MACs, dist dirs, and manifests
+          extending the existing NODE dimension. If five 4G guests
+          crowd the host, agents run at 2G.
+   5. [ ] Drills: the 1→3 growth edit end to end (migration on
+          node-1, two joiners, agents riding through it); kill one
+          server and watch the cluster keep serving while machine
+          status tells the story; then ATTEMPT agent→server
+          promotion on node-2 by growing spec.servers to include it
+          — k3s's tolerance for a same-name role flip is uncertain,
+          so recorded findings are the deliverable, and node-2 can
+          be rebuilt fresh if it balks.
 10. [ ] GitOps from first boot — without baking an engine into the OS.
         The OS grows two generic primitives rather than Flux support: a
         seed channel (manifests delivered alongside the Machine manifest
