@@ -21,8 +21,10 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"time"
@@ -112,14 +114,25 @@ func (c *apiClient) do(method, path, contentType string, body []byte) (*http.Res
 	return c.http.Do(req)
 }
 
+// retryPause sleeps about five seconds, randomized upward by as much
+// as half again. The jitter is fleet manners: every machine's
+// operator hits the same not-served-yet CRDs and dropped watches at
+// the same moments (a fleet reboots together), and identical retry
+// delays would keep them knocking in unison. A random share spreads
+// the load.
+func retryPause() {
+	base := 5 * time.Second
+	time.Sleep(base + rand.N(base/2))
+}
+
 // errNotFound distinguishes "this object doesn't exist" (an ordinary
 // state the caller handles by creating it) from real failures, and
 // errConflict distinguishes "something else wrote first" (an ordinary
 // state under optimistic concurrency, handled by re-reading) the same
 // way.
 var (
-	errNotFound = fmt.Errorf("not found")
-	errConflict = fmt.Errorf("conflict: something else wrote this object first")
+	errNotFound = errors.New("not found")
+	errConflict = errors.New("conflict: something else wrote this object first")
 )
 
 // requestJSON runs a request and decodes the JSON response into out,

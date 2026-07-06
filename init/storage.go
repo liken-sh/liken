@@ -22,7 +22,9 @@ package main
 //     those directories simply stay on the RAM root.)
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -79,7 +81,7 @@ func teardownStorage() {
 		err := unix.Unmount(target, 0)
 		if err == nil {
 			fmt.Printf("liken: storage: unmounted %s\n", target)
-		} else if err != unix.EINVAL && !os.IsNotExist(err) {
+		} else if !errors.Is(err, unix.EINVAL) && !errors.Is(err, fs.ErrNotExist) {
 			fmt.Fprintf(os.Stderr, "liken: storage: unmounting %s: %v\n", target, err)
 		}
 	}

@@ -24,7 +24,9 @@ package main
 // marker, are the next chapter of this story).
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"time"
 
@@ -92,7 +94,7 @@ func chooseCluster(stateRoot, seedPath string, durable bool, boot *machine.BootS
 	}
 
 	raw, err := os.ReadFile(seedPath)
-	if os.IsNotExist(err) {
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil, nil
 	}
 	if err != nil {

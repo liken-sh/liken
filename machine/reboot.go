@@ -12,6 +12,8 @@ package machine
 // survive the reboot it asked for and fire twice.
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -61,7 +63,7 @@ func WriteRebootIntent(dir string, intent *RebootIntent) error {
 // has been requested.
 func ReadRebootIntent(dir string) (*RebootIntent, error) {
 	raw, err := os.ReadFile(filepath.Join(dir, rebootIntentFile))
-	if os.IsNotExist(err) {
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {

@@ -62,35 +62,45 @@ func (w *lineWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-var (
-	deathsMu  sync.Mutex
-	waiters   = map[int]chan unix.WaitStatus{}
-	unclaimed = map[int]unix.WaitStatus{}
-)
+// deathRegistry connects the reaper (the only place wait() happens)
+// to everyone awaiting an exit: the reaper records each death, and a
+// waiter either picks up a status already parked or leaves a channel
+// to be filled. One value with methods, mirroring how machinePlane
+// encapsulates the other half of init's shared state.
+type deathRegistry struct {
+	mu        sync.Mutex
+	waiters   map[int]chan unix.WaitStatus
+	unclaimed map[int]unix.WaitStatus
+}
 
-// recordDeath is called by the reaper, the only place wait() happens.
-func recordDeath(pid int, status unix.WaitStatus) {
-	deathsMu.Lock()
-	defer deathsMu.Unlock()
-	if ch, ok := waiters[pid]; ok {
+var deaths = &deathRegistry{
+	waiters:   map[int]chan unix.WaitStatus{},
+	unclaimed: map[int]unix.WaitStatus{},
+}
+
+// record is called by the reaper as it collects each exit.
+func (d *deathRegistry) record(pid int, status unix.WaitStatus) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if ch, ok := d.waiters[pid]; ok {
 		ch <- status
-		delete(waiters, pid)
+		delete(d.waiters, pid)
 	} else {
-		unclaimed[pid] = status
+		d.unclaimed[pid] = status
 	}
 }
 
-// awaitDeath blocks until the reaper has collected the given pid.
-func awaitDeath(pid int) unix.WaitStatus {
-	deathsMu.Lock()
-	if status, ok := unclaimed[pid]; ok {
-		delete(unclaimed, pid)
-		deathsMu.Unlock()
+// await blocks until the reaper has collected the given pid.
+func (d *deathRegistry) await(pid int) unix.WaitStatus {
+	d.mu.Lock()
+	if status, ok := d.unclaimed[pid]; ok {
+		delete(d.unclaimed, pid)
+		d.mu.Unlock()
 		return status
 	}
 	ch := make(chan unix.WaitStatus, 1)
-	waiters[pid] = ch
-	deathsMu.Unlock()
+	d.waiters[pid] = ch
+	d.mu.Unlock()
 	return <-ch
 }
 
@@ -148,7 +158,7 @@ func superviseK3s(role machine.Role, reboot <-chan machine.RebootIntent) {
 			// The reaper is the only waiter (see the file comment);
 			// this goroutine just carries its answer into the select.
 			died := make(chan unix.WaitStatus, 1)
-			go func() { died <- awaitDeath(cmd.Process.Pid) }()
+			go func() { died <- deaths.await(cmd.Process.Pid) }()
 
 			select {
 			case status := <-died:
@@ -177,9 +187,10 @@ func superviseK3s(role machine.Role, reboot <-chan machine.RebootIntent) {
 		} else if backoff < 30*time.Second {
 			backoff *= 2
 		}
-		fmt.Printf("liken: restarting k3s in %s\n", backoff)
+		delay := withJitter(backoff)
+		fmt.Printf("liken: restarting k3s in %s\n", delay.Round(time.Millisecond))
 		select {
-		case <-time.After(backoff):
+		case <-time.After(delay):
 		case intent := <-reboot:
 			rebootMachine(intent) // k3s is already dead; nothing to stop
 		}
@@ -345,7 +356,7 @@ func runNarrated(prefix, path string, args ...string) bool {
 		fmt.Fprintf(os.Stderr, "liken: starting %s: %v\n", path, err)
 		return false
 	}
-	status := awaitDeath(cmd.Process.Pid)
+	status := deaths.await(cmd.Process.Pid)
 	_ = cmd.Process.Release()
 	return status.Exited() && status.ExitStatus() == 0
 }
@@ -364,16 +375,10 @@ func run(path string, args ...string) (string, bool) {
 	if err := cmd.Start(); err != nil {
 		return "", false
 	}
-	buf := make([]byte, 0, 4096)
-	tmp := make([]byte, 1024)
-	for {
-		n, err := out.Read(tmp)
-		buf = append(buf, tmp[:n]...)
-		if err != nil {
-			break
-		}
-	}
-	status := awaitDeath(cmd.Process.Pid)
+	// Reading the pipe to EOF is how we know the process is done
+	// writing; the reaper tells us how it died.
+	buf, _ := io.ReadAll(out)
+	status := deaths.await(cmd.Process.Pid)
 	_ = cmd.Process.Release()
 	return strings.TrimRight(string(buf), "\r\n"), status.Exited() && status.ExitStatus() == 0
 }

@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -33,7 +34,7 @@ func ensureMachine(c *apiClient, seed *machine.Machine) (*machine.Machine, error
 		if err == nil {
 			return current, nil
 		}
-		if err != errNotFound {
+		if !errors.Is(err, errNotFound) {
 			return nil, err
 		}
 
@@ -51,9 +52,9 @@ func ensureMachine(c *apiClient, seed *machine.Machine) (*machine.Machine, error
 			fmt.Printf("created machine %s from %s\n", seed.Metadata.Name, machine.BootManifestPath)
 			continue // re-GET so we return the server's copy, resourceVersion and all
 		}
-		if err == errNotFound {
+		if errors.Is(err, errNotFound) {
 			fmt.Println("machine API not served yet; waiting")
-			time.Sleep(5 * time.Second)
+			retryPause()
 			continue
 		}
 		return nil, err
@@ -70,7 +71,7 @@ func ensureCluster(c *apiClient, seed *machine.Cluster) error {
 	for {
 		if _, err := getCluster(c, seed.Metadata.Name); err == nil {
 			return nil
-		} else if err != errNotFound {
+		} else if !errors.Is(err, errNotFound) {
 			return err
 		}
 
@@ -83,13 +84,13 @@ func ensureCluster(c *apiClient, seed *machine.Cluster) error {
 		if err != nil {
 			return err
 		}
-		switch err := c.requestJSON(http.MethodPost, clustersPath, body, nil); err {
-		case nil:
+		switch err := c.requestJSON(http.MethodPost, clustersPath, body, nil); {
+		case err == nil:
 			fmt.Printf("created cluster %s from %s\n", seed.Metadata.Name, machine.ClusterManifestPath)
-		case errNotFound:
+		case errors.Is(err, errNotFound):
 			fmt.Println("cluster API not served yet; waiting")
-			time.Sleep(5 * time.Second)
-		case errConflict:
+			retryPause()
+		case errors.Is(err, errConflict):
 			// Another machine's operator got there first.
 		default:
 			return err
@@ -417,7 +418,7 @@ func watchMachine(c *apiClient, name, resourceVersion string, events chan<- *mac
 			resp.Body.Close()
 		}
 
-		time.Sleep(5 * time.Second)
+		retryPause()
 		if current, err := getMachine(c, name); err == nil {
 			resourceVersion = current.Metadata.ResourceVersion
 			events <- current

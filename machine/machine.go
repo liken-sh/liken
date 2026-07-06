@@ -21,10 +21,18 @@
 //
 // The API group is liken.sh: CRD groups are DNS names, and we own
 // that one.
+//
+// A note on naming: machine.MachineSpec and machine.MachineStatus
+// stutter against Go's naming advice, deliberately. The types mirror
+// the CRD kind (Machine) and Kubernetes' XxxSpec/XxxStatus
+// convention, and matching what `kubectl explain machine.spec` shows
+// is worth more here than avoiding the echo.
 package machine
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 
 	"sigs.k8s.io/yaml"
@@ -210,7 +218,7 @@ func Parse(raw []byte) (*Machine, error) {
 // is a configuration error and is reported as one.
 func Load(path string) (*Machine, error) {
 	raw, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
+	if errors.Is(err, fs.ErrNotExist) {
 		return &Machine{}, nil
 	}
 	if err != nil {

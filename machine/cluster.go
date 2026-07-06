@@ -20,7 +20,9 @@ package machine
 // carries the cluster's CA and join token).
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"slices"
 
@@ -189,7 +191,7 @@ func ParseCluster(raw []byte) (*Cluster, error) {
 // error and is reported as one.
 func LoadCluster(path string) (*Cluster, error) {
 	raw, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {

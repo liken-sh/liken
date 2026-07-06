@@ -37,6 +37,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -226,7 +227,7 @@ func seedPath(dir, requested string) (string, error) {
 		return path, nil
 	}
 	entries, err := os.ReadDir(dir)
-	if os.IsNotExist(err) {
+	if errors.Is(err, fs.ErrNotExist) {
 		return "", nil
 	}
 	if err != nil {

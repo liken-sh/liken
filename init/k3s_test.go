@@ -105,7 +105,7 @@ func TestLeaderJoinConfigFallsBackToTheEndpoint(t *testing.T) {
 }
 
 func TestK3sBootConfigForTheFoundingLeader(t *testing.T) {
-	got := k3sBootConfig(machine.RoleLeader, haCluster(), "10.10.0.1", "eth1", true, true, "")
+	got := k3sBootConfig(k3sBootInputs{role: machine.RoleLeader, cluster: haCluster(), nodeIP: "10.10.0.1", nodeInterface: "eth1", haveToken: true, clusterInit: true})
 	if !strings.Contains(got, "cluster-init: true\n") {
 		t.Errorf("the founding leader migrates to embedded etcd:\n%s", got)
 	}
@@ -115,7 +115,7 @@ func TestK3sBootConfigForTheFoundingLeader(t *testing.T) {
 }
 
 func TestK3sBootConfigForAJoiningLeader(t *testing.T) {
-	got := k3sBootConfig(machine.RoleLeader, haCluster(), "10.10.0.3", "eth1", true, false, "https://10.10.0.1:6443")
+	got := k3sBootConfig(k3sBootInputs{role: machine.RoleLeader, cluster: haCluster(), nodeIP: "10.10.0.3", nodeInterface: "eth1", haveToken: true, joinURL: "https://10.10.0.1:6443"})
 	if !strings.Contains(got, "server: https://10.10.0.1:6443\n") {
 		t.Errorf("a joining leader points at the founder:\n%s", got)
 	}
@@ -129,7 +129,7 @@ func TestK3sBootConfigForAJoiningLeader(t *testing.T) {
 }
 
 func TestK3sBootConfigForALeader(t *testing.T) {
-	got := k3sBootConfig(machine.RoleLeader, labCluster(), "10.10.0.1", "eth1", true, false, "")
+	got := k3sBootConfig(k3sBootInputs{role: machine.RoleLeader, cluster: labCluster(), nodeIP: "10.10.0.1", nodeInterface: "eth1", haveToken: true})
 	for _, want := range []string{
 		"token-file: /etc/liken/token\n",
 		"cluster-cidr: 10.42.0.0/16\n",
@@ -149,7 +149,7 @@ func TestK3sBootConfigForALeader(t *testing.T) {
 }
 
 func TestK3sBootConfigForAFollower(t *testing.T) {
-	got := k3sBootConfig(machine.RoleFollower, labCluster(), "10.10.0.2", "eth1", true, false, "")
+	got := k3sBootConfig(k3sBootInputs{role: machine.RoleFollower, cluster: labCluster(), nodeIP: "10.10.0.2", nodeInterface: "eth1", haveToken: true})
 	for _, want := range []string{
 		"token-file: /etc/liken/token\n",
 		"server: https://10.10.0.1:6443\n",
@@ -170,7 +170,7 @@ func TestK3sBootConfigForAFollower(t *testing.T) {
 }
 
 func TestK3sBootConfigWithNoClusterIsNearlyEmpty(t *testing.T) {
-	got := k3sBootConfig(machine.RoleLeader, nil, "", "", true, false, "")
+	got := k3sBootConfig(k3sBootInputs{role: machine.RoleLeader, haveToken: true})
 	if !strings.Contains(got, "token-file:") {
 		t.Errorf("even a machine alone holds its token:\n%s", got)
 	}
@@ -218,7 +218,7 @@ func TestALeaderKeepsItsDatastore(t *testing.T) {
 }
 
 func TestK3sBootConfigWithoutAToken(t *testing.T) {
-	got := k3sBootConfig(machine.RoleLeader, labCluster(), "10.10.0.1", "eth1", false, false, "")
+	got := k3sBootConfig(k3sBootInputs{role: machine.RoleLeader, cluster: labCluster(), nodeIP: "10.10.0.1", nodeInterface: "eth1"})
 	if strings.Contains(got, "token-file") {
 		t.Errorf("no token file means no token-file entry:\n%s", got)
 	}

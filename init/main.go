@@ -403,7 +403,7 @@ func reap(ctx context.Context) error {
 			if pid <= 0 || err != nil {
 				break
 			}
-			recordDeath(pid, status)
+			deaths.record(pid, status)
 		}
 	}
 }

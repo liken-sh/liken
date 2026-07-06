@@ -35,6 +35,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -106,7 +107,7 @@ func leaseAction(l *leaseObject, self string, now time.Time) leaseVerdict {
 func holdFleetLease(c *apiClient, self string, now time.Time) bool {
 	lease := &leaseObject{}
 	err := c.requestJSON(http.MethodGet, fleetLeasePath, nil, lease)
-	if err == errNotFound {
+	if errors.Is(err, errNotFound) {
 		return createFleetLease(c, self, now)
 	}
 	if err != nil {
@@ -129,7 +130,7 @@ func holdFleetLease(c *apiClient, self string, now time.Time) bool {
 		return false
 	}
 	if err := c.requestJSON(http.MethodPut, fleetLeasePath, body, nil); err != nil {
-		if err != errConflict {
+		if !errors.Is(err, errConflict) {
 			fmt.Printf("writing the fleet sweep lease: %v\n", err)
 		}
 		return false
@@ -154,7 +155,7 @@ func createFleetLease(c *apiClient, self string, now time.Time) bool {
 	createPath := "/apis/coordination.k8s.io/v1/namespaces/liken-system/leases"
 	if err := c.requestJSON(http.MethodPost, createPath, body, nil); err != nil {
 		// errConflict here is another leader creating first: they won.
-		if err != errConflict {
+		if !errors.Is(err, errConflict) {
 			fmt.Printf("creating the fleet sweep lease: %v\n", err)
 		}
 		return false

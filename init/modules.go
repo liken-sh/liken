@@ -30,7 +30,9 @@ package main
 // fixed, reviewable list than a hidden runtime dependency.
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,7 +76,7 @@ func loadModules() {
 // documentation.
 func readModuleList(path string) ([]string, error) {
 	raw, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
@@ -142,7 +144,7 @@ func loadModule(base, name string, deps map[string][]string, loaded map[string]b
 		}
 		err = unix.FinitModule(int(f.Fd()), "", unix.MODULE_INIT_COMPRESSED_FILE)
 		f.Close()
-		if err != nil && err != unix.EEXIST {
+		if err != nil && !errors.Is(err, unix.EEXIST) {
 			return fmt.Errorf("finit_module %s: %w", file, err)
 		}
 		if err == nil {

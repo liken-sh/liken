@@ -43,6 +43,8 @@ package machine
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,7 +114,7 @@ func ManifestHash(raw []byte) string {
 // staged.
 func (s ManifestStore) load(name string) ([]byte, error) {
 	raw, err := os.ReadFile(filepath.Join(s.dir, name))
-	if os.IsNotExist(err) {
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
@@ -241,7 +243,7 @@ func (s ManifestStore) LoadAttempted() (string, error) {
 // is not an error; there is nothing to withdraw.
 func (s ManifestStore) WithdrawStaged() error {
 	if err := os.Remove(filepath.Join(s.dir, stagedManifest)); err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
 		return err
@@ -258,7 +260,7 @@ func (s ManifestStore) ClearRejection() error {
 	removed := false
 	for _, name := range []string{rejectedManifest, rejectionNote} {
 		err := os.Remove(filepath.Join(s.dir, name))
-		if err != nil && !os.IsNotExist(err) {
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 		removed = removed || err == nil

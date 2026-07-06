@@ -56,9 +56,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"runtime/debug"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -123,7 +124,7 @@ func (p *machinePlane) start(name string, run func(context.Context) error) {
 		backoff := p.backoff
 		for {
 			started := time.Now()
-			err := runComponent(run, p.ctx)
+			err := runComponent(p.ctx, run)
 			if p.ctx.Err() != nil || err == nil {
 				return
 			}
@@ -134,9 +135,10 @@ func (p *machinePlane) start(name string, run func(context.Context) error) {
 			} else if backoff < p.maxBackoff {
 				backoff *= 2
 			}
-			fmt.Printf("liken: restarting %s in %s\n", name, backoff)
+			delay := withJitter(backoff)
+			fmt.Printf("liken: restarting %s in %s\n", name, delay.Round(time.Millisecond))
 			select {
-			case <-time.After(backoff):
+			case <-time.After(delay):
 			case <-p.ctx.Done():
 				return
 			}
@@ -150,13 +152,24 @@ func (p *machinePlane) start(name string, run func(context.Context) error) {
 // panics. It cannot catch everything — a fatal runtime error still
 // ends the process, the imperfect fault isolation the header
 // comment describes.
-func runComponent(run func(context.Context) error, ctx context.Context) (err error) {
+func runComponent(ctx context.Context, run func(context.Context) error) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panicked: %v\n%s", r, debug.Stack())
 		}
 	}()
 	return run(ctx)
+}
+
+// withJitter randomizes a delay upward by as much as half again.
+// The point is fleet behavior, not this machine: a power event
+// reboots every machine together, their components fail together
+// (the network isn't up, a leader isn't back), and identical backoff
+// keeps the whole herd retrying in lockstep. A random share spreads
+// the retries out, so recovery arrives as a trickle instead of a
+// stampede.
+func withJitter(d time.Duration) time.Duration {
+	return d + rand.N(d/2)
 }
 
 // sleepUnlessCancelled is the pause a polling component takes between
@@ -195,7 +208,7 @@ func (p *machinePlane) shutdown(timeout time.Duration) {
 			names = append(names, name)
 		}
 		p.mu.Unlock()
-		sort.Strings(names)
+		slices.Sort(names)
 		fmt.Fprintf(os.Stderr, "liken: shutdown proceeding without: %s\n", strings.Join(names, ", "))
 	}
 }

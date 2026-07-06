@@ -100,10 +100,26 @@ func nodeAddress(cluster *machine.Cluster, conns []*connection) (ip, ifname stri
 	return "", ""
 }
 
+// k3sBootInputs gathers everything the drop-in needs that only this
+// boot could decide: writeK3sBootConfig fills it in, k3sBootConfig
+// renders it. A struct rather than a parameter list because seven
+// positional arguments with adjacent strings and bools invite
+// transposition; named fields read correctly at the call site.
+type k3sBootInputs struct {
+	role          machine.Role
+	cluster       *machine.Cluster
+	nodeIP        string
+	nodeInterface string
+	haveToken     bool
+	clusterInit   bool
+	joinURL       string
+}
+
 // k3sBootConfig renders the drop-in: everything k3s must be told that
 // only this boot could decide. Plain key: value lines, because every
 // value here is a string k3s maps onto one of its flags.
-func k3sBootConfig(role machine.Role, cluster *machine.Cluster, nodeIP, nodeInterface string, haveToken, clusterInit bool, joinURL string) string {
+func k3sBootConfig(in k3sBootInputs) string {
+	role, cluster := in.role, in.cluster
 	var b strings.Builder
 	b.WriteString("# Written by liken at boot: the configuration only the boot can\n")
 	b.WriteString("# derive, joined with the static file this directory sits beside.\n")
@@ -112,7 +128,7 @@ func k3sBootConfig(role machine.Role, cluster *machine.Cluster, nodeIP, nodeInte
 	// token from anyone joining, and a follower presents it. Because
 	// the token embeds a hash of the cluster CA, a follower also uses
 	// it to verify it is joining the cluster it thinks it is.
-	if haveToken {
+	if in.haveToken {
 		fmt.Fprintf(&b, "token-file: %s\n", tokenPath)
 	}
 
@@ -125,10 +141,10 @@ func k3sBootConfig(role machine.Role, cluster *machine.Cluster, nodeIP, nodeInte
 		// founding leader of a multi-leader cluster runs (and, on the
 		// migration boot, creates) embedded etcd; the other leaders
 		// join it. A single leader renders neither and stays sqlite.
-		if clusterInit {
+		if in.clusterInit {
 			b.WriteString("cluster-init: true\n")
-		} else if joinURL != "" {
-			fmt.Fprintf(&b, "server: %s\n", joinURL)
+		} else if in.joinURL != "" {
+			fmt.Fprintf(&b, "server: %s\n", in.joinURL)
 		}
 		// The cluster's address plan is leader configuration;
 		// followers learn it from the control plane they join.
@@ -149,9 +165,9 @@ func k3sBootConfig(role machine.Role, cluster *machine.Cluster, nodeIP, nodeInte
 	// nodeCIDR identified one. node-ip is what the kubelet advertises;
 	// flannel-iface is which wire pod-to-pod traffic rides. They must
 	// agree, and they must both point at the cluster segment.
-	if nodeIP != "" {
-		fmt.Fprintf(&b, "node-ip: %s\n", nodeIP)
-		fmt.Fprintf(&b, "flannel-iface: %s\n", nodeInterface)
+	if in.nodeIP != "" {
+		fmt.Fprintf(&b, "node-ip: %s\n", in.nodeIP)
+		fmt.Fprintf(&b, "flannel-iface: %s\n", in.nodeInterface)
 	}
 	return b.String()
 }
@@ -265,7 +281,15 @@ func writeK3sBootConfig(cluster *machine.Cluster, name string, conns []*connecti
 	if err := os.MkdirAll(dropInDir, 0o755); err != nil {
 		return role, err
 	}
-	content := k3sBootConfig(role, cluster, nodeIP, nodeInterface, haveToken, clusterInit, joinURL)
+	content := k3sBootConfig(k3sBootInputs{
+		role:          role,
+		cluster:       cluster,
+		nodeIP:        nodeIP,
+		nodeInterface: nodeInterface,
+		haveToken:     haveToken,
+		clusterInit:   clusterInit,
+		joinURL:       joinURL,
+	})
 	if err := os.WriteFile(filepath.Join(dropInDir, "boot.yaml"), []byte(content), 0o644); err != nil {
 		return role, err
 	}
