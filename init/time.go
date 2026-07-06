@@ -149,25 +149,36 @@ func timeSources(cluster *machine.Cluster, role string, manifestDir string) []st
 // covers it, and a time source list is a preference order, not a
 // promise.
 func leaderAddresses(cluster *machine.Cluster, manifestDir string) []string {
-	_, subnet, err := net.ParseCIDR(cluster.Spec.Network.NodeCIDR)
-	if err != nil {
-		return nil
-	}
 	var addresses []string
 	for _, name := range cluster.Spec.Leaders {
-		m, err := machine.Load(filepath.Join(manifestDir, name+".yaml"))
-		if err != nil {
-			continue
-		}
-		for _, iface := range m.Spec.Network.Interfaces {
-			ip, _, err := net.ParseCIDR(iface.Address)
-			if err == nil && subnet.Contains(ip) {
-				addresses = append(addresses, ip.String())
-				break
-			}
+		if addr := declaredNodeAddress(cluster, manifestDir, name); addr != "" {
+			addresses = append(addresses, addr)
 		}
 	}
 	return addresses
+}
+
+// declaredNodeAddress resolves one machine's declared address on the
+// node network from its manifest in the image, "" when the machine
+// declares none (a DHCP machine has no address to find). This is how
+// machines find each other before any of them is up: the fleet's
+// declared inputs, not discovery.
+func declaredNodeAddress(cluster *machine.Cluster, manifestDir, name string) string {
+	_, subnet, err := net.ParseCIDR(cluster.Spec.Network.NodeCIDR)
+	if err != nil {
+		return ""
+	}
+	m, err := machine.Load(filepath.Join(manifestDir, name+".yaml"))
+	if err != nil {
+		return ""
+	}
+	for _, iface := range m.Spec.Network.Interfaces {
+		ip, _, err := net.ParseCIDR(iface.Address)
+		if err == nil && subnet.Contains(ip) {
+			return ip.String()
+		}
+	}
+	return ""
 }
 
 // timeStatus is the clock's story as status: the same facts the

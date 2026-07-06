@@ -65,8 +65,69 @@ func TestNodeAddressOutsideTheNodeCIDRIsUndecided(t *testing.T) {
 	}
 }
 
+func TestLeaderJoinConfigWithOneLeaderStaysAlone(t *testing.T) {
+	clusterInit, joinURL := leaderJoinConfig(labCluster(), "node-1", t.TempDir())
+	if clusterInit || joinURL != "" {
+		t.Errorf("a single leader is sqlite-backed and joins nothing: %v %q", clusterInit, joinURL)
+	}
+}
+
+func haCluster() *machine.Cluster {
+	c := labCluster()
+	c.Spec.Leaders = []string{"node-1", "node-3", "node-4"}
+	return c
+}
+
+func TestLeaderJoinConfigForTheFoundingLeader(t *testing.T) {
+	clusterInit, joinURL := leaderJoinConfig(haCluster(), "node-1", t.TempDir())
+	if !clusterInit || joinURL != "" {
+		t.Errorf("the founding leader renders cluster-init and joins nothing: %v %q", clusterInit, joinURL)
+	}
+}
+
+func TestLeaderJoinConfigForAJoiningLeader(t *testing.T) {
+	dir := manifestsDir(t, map[string]string{"node-1": "10.10.0.1/24"})
+	clusterInit, joinURL := leaderJoinConfig(haCluster(), "node-3", dir)
+	if clusterInit || joinURL != "https://10.10.0.1:6443" {
+		t.Errorf("a joining leader points at the founder: %v %q", clusterInit, joinURL)
+	}
+}
+
+func TestLeaderJoinConfigFallsBackToTheEndpoint(t *testing.T) {
+	// The founder declares no static address (DHCP); the endpoint is
+	// the one address the deployment promised is reachable.
+	clusterInit, joinURL := leaderJoinConfig(haCluster(), "node-3", t.TempDir())
+	if clusterInit || joinURL != "https://10.10.0.1:6443" {
+		t.Errorf("an unresolvable founder falls back to the endpoint: %v %q", clusterInit, joinURL)
+	}
+}
+
+func TestK3sBootConfigForTheFoundingLeader(t *testing.T) {
+	got := k3sBootConfig(machine.RoleLeader, haCluster(), "10.10.0.1", "eth1", true, true, "")
+	if !strings.Contains(got, "cluster-init: true\n") {
+		t.Errorf("the founding leader migrates to embedded etcd:\n%s", got)
+	}
+	if strings.Contains(got, "server:") {
+		t.Errorf("the founding leader joins nothing:\n%s", got)
+	}
+}
+
+func TestK3sBootConfigForAJoiningLeader(t *testing.T) {
+	got := k3sBootConfig(machine.RoleLeader, haCluster(), "10.10.0.3", "eth1", true, false, "https://10.10.0.1:6443")
+	if !strings.Contains(got, "server: https://10.10.0.1:6443\n") {
+		t.Errorf("a joining leader points at the founder:\n%s", got)
+	}
+	if strings.Contains(got, "cluster-init") {
+		t.Errorf("only the founding leader renders cluster-init:\n%s", got)
+	}
+	// Every leader carries the address plan; they must all agree.
+	if !strings.Contains(got, "cluster-cidr: 10.42.0.0/16\n") {
+		t.Errorf("a joining leader still declares the address plan:\n%s", got)
+	}
+}
+
 func TestK3sBootConfigForALeader(t *testing.T) {
-	got := k3sBootConfig(machine.RoleLeader, labCluster(), "10.10.0.1", "eth1", true)
+	got := k3sBootConfig(machine.RoleLeader, labCluster(), "10.10.0.1", "eth1", true, false, "")
 	for _, want := range []string{
 		"token-file: /etc/liken/token\n",
 		"cluster-cidr: 10.42.0.0/16\n",
@@ -86,7 +147,7 @@ func TestK3sBootConfigForALeader(t *testing.T) {
 }
 
 func TestK3sBootConfigForAFollower(t *testing.T) {
-	got := k3sBootConfig(machine.RoleFollower, labCluster(), "10.10.0.2", "eth1", true)
+	got := k3sBootConfig(machine.RoleFollower, labCluster(), "10.10.0.2", "eth1", true, false, "")
 	for _, want := range []string{
 		"token-file: /etc/liken/token\n",
 		"server: https://10.10.0.1:6443\n",
@@ -107,7 +168,7 @@ func TestK3sBootConfigForAFollower(t *testing.T) {
 }
 
 func TestK3sBootConfigWithNoClusterIsNearlyEmpty(t *testing.T) {
-	got := k3sBootConfig(machine.RoleLeader, nil, "", "", true)
+	got := k3sBootConfig(machine.RoleLeader, nil, "", "", true, false, "")
 	if !strings.Contains(got, "token-file:") {
 		t.Errorf("even a machine alone holds its token:\n%s", got)
 	}
@@ -119,7 +180,7 @@ func TestK3sBootConfigWithNoClusterIsNearlyEmpty(t *testing.T) {
 }
 
 func TestK3sBootConfigWithoutAToken(t *testing.T) {
-	got := k3sBootConfig(machine.RoleLeader, labCluster(), "10.10.0.1", "eth1", false)
+	got := k3sBootConfig(machine.RoleLeader, labCluster(), "10.10.0.1", "eth1", false, false, "")
 	if strings.Contains(got, "token-file") {
 		t.Errorf("no token file means no token-file entry:\n%s", got)
 	}

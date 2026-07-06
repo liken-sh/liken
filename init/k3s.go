@@ -45,6 +45,37 @@ const (
 	tokenPath = "/etc/liken/token"
 )
 
+// leaderJoinConfig decides a leader's datastore keys, by leader
+// count. One leader is exactly the cluster liken has always run:
+// sqlite (via kine), no etcd, nothing to join — single-node stays
+// cheap on purpose. More than one means embedded etcd, and the first
+// entry in spec.leaders is the founding leader: it renders
+// cluster-init: true, which on the migration boot tells k3s to move
+// the existing sqlite datastore into etcd in place (the documented
+// path that made starting on sqlite safe rather than a dead end).
+// Every other leader points server: at the founder — its declared
+// address on the node network, or the endpoint when it declares none
+// — and joins. Rejoins keep the same flags every boot, which is
+// k3s's recommended steady state.
+//
+// The founding leader is a config-derivation role, nothing more: the
+// first name in a list. etcd's raft leader is elected and moves
+// between members; the founder holds no such office, and once the
+// cluster is up it is one voice among an odd number.
+func leaderJoinConfig(cluster *machine.Cluster, name, manifestDir string) (clusterInit bool, joinURL string) {
+	if cluster == nil || len(cluster.Spec.Leaders) < 2 {
+		return false, ""
+	}
+	founder := cluster.Spec.Leaders[0]
+	if name == founder {
+		return true, ""
+	}
+	if addr := declaredNodeAddress(cluster, manifestDir, founder); addr != "" {
+		return false, fmt.Sprintf("https://%s:6443", addr)
+	}
+	return false, cluster.Spec.Endpoint
+}
+
 // nodeAddress picks which of the machine's addresses is its node IP:
 // the address Kubernetes traffic uses, and the one other nodes are
 // told to reach it at. The Cluster's nodeCIDR decides: the interface
@@ -72,7 +103,7 @@ func nodeAddress(cluster *machine.Cluster, conns []*connection) (ip, ifname stri
 // k3sBootConfig renders the drop-in: everything k3s must be told that
 // only this boot could decide. Plain key: value lines, because every
 // value here is a string k3s maps onto one of its flags.
-func k3sBootConfig(role string, cluster *machine.Cluster, nodeIP, nodeInterface string, haveToken bool) string {
+func k3sBootConfig(role string, cluster *machine.Cluster, nodeIP, nodeInterface string, haveToken, clusterInit bool, joinURL string) string {
 	var b strings.Builder
 	b.WriteString("# Written by liken at boot: the configuration only the boot can\n")
 	b.WriteString("# derive, joined with the static file this directory sits beside.\n")
@@ -90,6 +121,15 @@ func k3sBootConfig(role string, cluster *machine.Cluster, nodeIP, nodeInterface 
 		// direction from": a follower points at the endpoint.
 		fmt.Fprintf(&b, "server: %s\n", cluster.Spec.Endpoint)
 	} else if cluster != nil {
+		// The datastore keys, decided by leaderJoinConfig: the
+		// founding leader of a multi-leader cluster runs (and, on the
+		// migration boot, creates) embedded etcd; the other leaders
+		// join it. A single leader renders neither and stays sqlite.
+		if clusterInit {
+			b.WriteString("cluster-init: true\n")
+		} else if joinURL != "" {
+			fmt.Fprintf(&b, "server: %s\n", joinURL)
+		}
 		// The cluster's address plan is leader configuration;
 		// followers learn it from the control plane they join.
 		net := cluster.Spec.Network
@@ -176,6 +216,13 @@ func writeK3sBootConfig(cluster *machine.Cluster, name string, conns []*connecti
 		fmt.Fprintf(os.Stderr, "liken: no address falls inside the cluster's nodeCIDR; k3s will guess a node IP\n")
 	}
 
+	clusterInit, joinURL := leaderJoinConfig(cluster, name, machine.MachineManifestDir)
+	if clusterInit {
+		fmt.Println("liken: this machine is the founding leader; embedded etcd runs here")
+	} else if joinURL != "" {
+		fmt.Printf("liken: joining the control plane at %s\n", joinURL)
+	}
+
 	base := k3sServerConfig
 	if role == machine.RoleFollower {
 		base = k3sAgentConfig
@@ -184,7 +231,7 @@ func writeK3sBootConfig(cluster *machine.Cluster, name string, conns []*connecti
 	if err := os.MkdirAll(dropInDir, 0o755); err != nil {
 		return role, err
 	}
-	content := k3sBootConfig(role, cluster, nodeIP, nodeInterface, haveToken)
+	content := k3sBootConfig(role, cluster, nodeIP, nodeInterface, haveToken, clusterInit, joinURL)
 	if err := os.WriteFile(filepath.Join(dropInDir, "boot.yaml"), []byte(content), 0o644); err != nil {
 		return role, err
 	}
