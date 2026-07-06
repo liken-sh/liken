@@ -599,7 +599,17 @@
         writes — but filled the logs with 409s that were all noise;
         the sweep now runs under a coordination.k8s.io Lease, the
         same leader election kube-controller-manager uses to run hot
-        standbys, built here from a GET and two conditional writes.)
+        standbys, built here from a GET and two conditional writes.
+        An idiom review pass later finished the thought: the
+        heartbeat itself moved out of status into a per-machine
+        Lease in liken-machine-lease — kube-node-lease's
+        arrangement, escaping the same write amplification — and
+        the whole API grew up to metav1's conventions: typed string
+        vocabularies, conditions validated like metav1.Condition
+        with observedGeneration, list-type annotations, admission
+        patterns on spec strings, Cluster conditions beneath its
+        phase, watch bookmarks, and a coverage gate ratcheted past
+        half.)
 11. [ ] GitOps from first boot — without baking an engine into the OS.
         The OS grows two generic primitives rather than Flux support: a
         seed channel (manifests delivered alongside the Machine manifest
