@@ -13,25 +13,38 @@ import (
 
 var sweepNow = time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
 
-// fleetMachine builds one machine as the sweep would see it: a name,
-// a phase, and a heartbeat some age ago (negative means no heartbeat
-// was ever written).
-func fleetMachine(name string, phase machine.Phase, heartbeatAge time.Duration) machine.Machine {
-	m := machine.Machine{Metadata: machine.ObjectMeta{Name: name}}
-	m.Status.Phase = phase
-	if heartbeatAge >= 0 {
-		at := sweepNow.Add(-heartbeatAge)
-		m.Status.ObservedAt = &at
+// A fleetEntry is one machine as the sweep would see it: a name, a
+// phase, and a heartbeat lease renewed some age ago (negative means
+// the machine has no lease at all).
+type fleetEntry struct {
+	name  string
+	phase machine.Phase
+	age   time.Duration
+}
+
+// fleetInputs builds the sweep's two inputs together: the Machine
+// list and the heartbeat renewals read from the machines' leases.
+func fleetInputs(entries ...fleetEntry) ([]machine.Machine, map[string]time.Time) {
+	var machines []machine.Machine
+	renewals := map[string]time.Time{}
+	for _, e := range entries {
+		m := machine.Machine{Metadata: machine.ObjectMeta{Name: e.name}}
+		m.Status.Phase = e.phase
+		machines = append(machines, m)
+		if e.age >= 0 {
+			renewals[e.name] = sweepNow.Add(-e.age)
+		}
 	}
-	return m
+	return machines, renewals
 }
 
 func TestSweepCountsFreshReadyMachines(t *testing.T) {
-	s := decideFleetSweep([]machine.Machine{
-		fleetMachine("node-1", machine.PhaseReady, 10*time.Second),
-		fleetMachine("node-2", machine.PhaseReady, 30*time.Second),
-		fleetMachine("node-3", machine.PhaseUpdatePending, 10*time.Second),
-	}, "node-1", sweepNow)
+	machines, renewals := fleetInputs(
+		fleetEntry{"node-1", machine.PhaseReady, 10 * time.Second},
+		fleetEntry{"node-2", machine.PhaseReady, 30 * time.Second},
+		fleetEntry{"node-3", machine.PhaseUpdatePending, 10 * time.Second},
+	)
+	s := decideFleetSweep(machines, renewals, "node-1", sweepNow)
 	if s.tally.Ready != 2 || s.tally.Total != 3 || s.tally.Summary != "2/3" {
 		t.Errorf("got %+v", s.tally)
 	}
@@ -50,10 +63,11 @@ func TestSweepCountsFreshReadyMachines(t *testing.T) {
 }
 
 func TestSweepOfAWhollyReadyFleet(t *testing.T) {
-	s := decideFleetSweep([]machine.Machine{
-		fleetMachine("node-1", machine.PhaseReady, 10*time.Second),
-		fleetMachine("node-2", machine.PhaseReady, 30*time.Second),
-	}, "node-1", sweepNow)
+	machines, renewals := fleetInputs(
+		fleetEntry{"node-1", machine.PhaseReady, 10 * time.Second},
+		fleetEntry{"node-2", machine.PhaseReady, 30 * time.Second},
+	)
+	s := decideFleetSweep(machines, renewals, "node-1", sweepNow)
 	if s.phase != machine.PhaseReady {
 		t.Errorf("everyone ready means the cluster is, got %s", s.phase)
 	}
@@ -63,10 +77,11 @@ func TestSweepOfAWhollyReadyFleet(t *testing.T) {
 }
 
 func TestSweepDeclaresSilentMachinesLost(t *testing.T) {
-	s := decideFleetSweep([]machine.Machine{
-		fleetMachine("node-1", machine.PhaseReady, 10*time.Second),
-		fleetMachine("node-2", machine.PhaseReady, 5*time.Minute),
-	}, "node-1", sweepNow)
+	machines, renewals := fleetInputs(
+		fleetEntry{"node-1", machine.PhaseReady, 10 * time.Second},
+		fleetEntry{"node-2", machine.PhaseReady, 5 * time.Minute},
+	)
+	s := decideFleetSweep(machines, renewals, "node-1", sweepNow)
 	if s.tally.Summary != "1/2" {
 		t.Errorf("a stale Ready must not count: %+v", s.tally)
 	}
@@ -82,21 +97,23 @@ func TestSweepDeclaresSilentMachinesLost(t *testing.T) {
 }
 
 func TestSweepDegradedOutweighsUpdating(t *testing.T) {
-	s := decideFleetSweep([]machine.Machine{
-		fleetMachine("node-1", machine.PhaseReady, 10*time.Second),
-		fleetMachine("node-2", machine.PhaseBlocked, 10*time.Second),
-		fleetMachine("node-3", machine.PhaseUpdatePending, 10*time.Second),
-	}, "node-1", sweepNow)
+	machines, renewals := fleetInputs(
+		fleetEntry{"node-1", machine.PhaseReady, 10 * time.Second},
+		fleetEntry{"node-2", machine.PhaseBlocked, 10 * time.Second},
+		fleetEntry{"node-3", machine.PhaseUpdatePending, 10 * time.Second},
+	)
+	s := decideFleetSweep(machines, renewals, "node-1", sweepNow)
 	if s.phase != machine.PhaseDegraded {
 		t.Errorf("a blocked machine outweighs a rolling update, got %s", s.phase)
 	}
 }
 
 func TestSweepLeavesAlreadyLostMachinesAlone(t *testing.T) {
-	s := decideFleetSweep([]machine.Machine{
-		fleetMachine("node-1", machine.PhaseReady, 10*time.Second),
-		fleetMachine("node-2", machine.PhaseLost, 5*time.Minute),
-	}, "node-1", sweepNow)
+	machines, renewals := fleetInputs(
+		fleetEntry{"node-1", machine.PhaseReady, 10 * time.Second},
+		fleetEntry{"node-2", machine.PhaseLost, 5 * time.Minute},
+	)
+	s := decideFleetSweep(machines, renewals, "node-1", sweepNow)
 	if len(s.lost) != 0 {
 		t.Errorf("re-marking a Lost machine is churn: %v", s.lost)
 	}
@@ -110,11 +127,12 @@ func TestSweepLeavesAlreadyLostMachinesAlone(t *testing.T) {
 
 func TestSweepNeverDeclaresItselfLost(t *testing.T) {
 	// The sweeper's own heartbeat may look stale in the list it just
-	// read (its status write could still be landing), but it is
-	// running this very code: its liveness is not in question.
-	s := decideFleetSweep([]machine.Machine{
-		fleetMachine("node-1", machine.PhaseReady, 5*time.Minute),
-	}, "node-1", sweepNow)
+	// read (its renewal could still be landing), but it is running
+	// this very code: its liveness is not in question.
+	machines, renewals := fleetInputs(
+		fleetEntry{"node-1", machine.PhaseReady, 5 * time.Minute},
+	)
+	s := decideFleetSweep(machines, renewals, "node-1", sweepNow)
 	if len(s.lost) != 0 {
 		t.Errorf("the sweeper is self-evidently alive: %v", s.lost)
 	}
@@ -124,12 +142,13 @@ func TestSweepNeverDeclaresItselfLost(t *testing.T) {
 }
 
 func TestSweepTreatsAMissingHeartbeatAsSilence(t *testing.T) {
-	// A Machine with no observedAt at all has never had an operator
+	// A Machine with no lease at all has never had an operator
 	// heartbeat: declared, perhaps, but never heard from.
-	s := decideFleetSweep([]machine.Machine{
-		fleetMachine("node-1", machine.PhaseReady, 10*time.Second),
-		fleetMachine("node-2", "", -1),
-	}, "node-1", sweepNow)
+	machines, renewals := fleetInputs(
+		fleetEntry{"node-1", machine.PhaseReady, 10 * time.Second},
+		fleetEntry{"node-2", "", -1},
+	)
+	s := decideFleetSweep(machines, renewals, "node-1", sweepNow)
 	if len(s.lost) != 1 || s.lost[0] != "node-2" {
 		t.Errorf("got %v", s.lost)
 	}

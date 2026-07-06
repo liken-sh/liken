@@ -9,8 +9,8 @@ package main
 // problem with kubelets and solves it with heartbeats: the kubelet
 // renews a lease every few seconds, and the node controller turns a
 // silent lease into a NotReady Node. The Machine gets the same
-// treatment here: every operator renews status.observedAt each pass
-// (reconcile.go), and the leaders turn silence into a Lost phase.
+// treatment here: every operator renews its machine's lease
+// (lease.go), and the leaders turn silence into a Lost phase.
 //
 // Only the leaders sweep. They're the machines positioned to observe
 // the fleet — a follower that can reach the API is by definition
@@ -41,12 +41,11 @@ import (
 // heartbeatRenewAfter is how old the heartbeat must be before the
 // machine's own operator renews it: shy of the 30-second reconcile
 // ticker, so every ticker pass renews but the event-driven passes in
-// between leave it alone (reconcile.go explains the feedback loop
-// that cadence prevents). heartbeatStaleAfter is how long a machine
-// may then go silent before the sweep declares it Lost: three missed
-// renewals, the same threshold the time loop uses before declaring
-// its NTP sources gone. One missed renewal is a busy moment; three
-// is a machine that's down.
+// between get by on a read. heartbeatStaleAfter is how long a
+// machine may then go silent before the sweep declares it Lost:
+// three missed renewals, the same threshold the time loop uses
+// before declaring its NTP sources gone. One missed renewal is a
+// busy moment; three is a machine that's down.
 const (
 	heartbeatRenewAfter = 20 * time.Second
 	heartbeatStaleAfter = 90 * time.Second
@@ -75,12 +74,14 @@ type fleetSweep struct {
 	phase     machine.Phase
 }
 
-// decideFleetSweep judges every machine by its heartbeat. A machine
-// counts toward ready only when it says Ready *and* said so recently:
-// a frozen status is only as current as the machine that wrote it,
-// and that machine may no longer exist. The sweeping leader exempts
-// itself — it is running this very code, so its liveness isn't in
-// question, only how recently its status write landed.
+// decideFleetSweep judges every machine by its heartbeat: the last
+// renewal of its lease, from listMachineHeartbeats. A machine counts
+// toward ready only when it says Ready *and* its lease says so
+// recently: a frozen status is only as current as the machine that
+// wrote it, and that machine may no longer exist. A machine with no
+// lease at all has never been heard from. The sweeping leader
+// exempts itself — it is running this very code, so its liveness
+// isn't in question, only how recently its renewal landed.
 //
 // The verdict reads the same effective phases (a silent machine
 // counts as Lost even before the Lost write lands) and sorts every
@@ -89,12 +90,12 @@ type fleetSweep struct {
 // (Lost, Blocked, or otherwise degraded). Unwell outranks
 // mid-transition, and the MachinesReady condition names the machines
 // so nobody has to go looking.
-func decideFleetSweep(machines []machine.Machine, self string, now time.Time) fleetSweep {
+func decideFleetSweep(machines []machine.Machine, renewals map[string]time.Time, self string, now time.Time) fleetSweep {
 	s := fleetSweep{tally: machine.MachineTally{Total: len(machines)}}
 	var transitioning, unwell []string
 	for _, m := range machines {
-		fresh := m.Metadata.Name == self ||
-			(m.Status.ObservedAt != nil && now.Sub(*m.Status.ObservedAt) <= heartbeatStaleAfter)
+		renewed, heard := renewals[m.Metadata.Name]
+		fresh := m.Metadata.Name == self || (heard && now.Sub(renewed) <= heartbeatStaleAfter)
 		if !fresh && m.Status.Phase != machine.PhaseLost {
 			s.lost = append(s.lost, m.Metadata.Name)
 		}
@@ -137,15 +138,21 @@ func decideFleetSweep(machines []machine.Machine, self string, now time.Time) fl
 	return s
 }
 
-// sweepFleet is the acting half: list the fleet, decide, mark the
-// silent machines Lost, and publish the headcount on the Cluster.
+// sweepFleet is the acting half: list the fleet and its heartbeats,
+// decide, mark the silent machines Lost, and publish the verdict on
+// the Cluster.
 func sweepFleet(c *apiClient, self string, cluster *machine.Cluster, now time.Time) {
 	machines, err := listMachines(c)
 	if err != nil {
 		fmt.Printf("listing machines for the fleet sweep: %v\n", err)
 		return
 	}
-	s := decideFleetSweep(machines, self, now)
+	renewals, err := listMachineHeartbeats(c)
+	if err != nil {
+		fmt.Printf("listing heartbeats for the fleet sweep: %v\n", err)
+		return
+	}
+	s := decideFleetSweep(machines, renewals, self, now)
 
 	for _, m := range machines {
 		if !slices.Contains(s.lost, m.Metadata.Name) {
@@ -161,7 +168,7 @@ func sweepFleet(c *apiClient, self string, cluster *machine.Cluster, now time.Ti
 		status.Conditions = machine.SetCondition(status.Conditions, machine.Condition{
 			Type: "Ready", Status: "Unknown", Reason: "HeartbeatStale",
 			ObservedGeneration: m.Metadata.Generation,
-			Message:            "the machine's operator has stopped renewing status.observedAt; the machine is presumed down",
+			Message:            "the machine's operator has stopped renewing its heartbeat lease; the machine is presumed down",
 		}, now)
 		if err := publishStatus(c, &m, &status); err != nil {
 			// A conflict here usually means the machine just came

@@ -122,3 +122,68 @@ func TestHoldFleetLeaseTakesOverFromASilentHolder(t *testing.T) {
 		t.Errorf("a takeover is a fresh acquisition: %+v", api.lease.Spec)
 	}
 }
+
+func TestHeartbeatCreatesTheFirstLease(t *testing.T) {
+	api := &leaseAPI{}
+	client := testClient(t, api.handler())
+	renewMachineHeartbeat(client, "node-1", sweepNow)
+	if api.lease == nil || api.lease.Spec.HolderIdentity != "node-1" {
+		t.Fatalf("the first pass creates the machine's lease: %+v", api.lease)
+	}
+}
+
+func TestHeartbeatRenewsAnAgedLease(t *testing.T) {
+	api := &leaseAPI{lease: lease("node-1", 30*time.Second)}
+	client := testClient(t, api.handler())
+	renewMachineHeartbeat(client, "node-1", sweepNow)
+	if api.lease.Spec.RenewTime != sweepNow.UTC().Format(microTime) {
+		t.Errorf("an aged lease should renew: %s", api.lease.Spec.RenewTime)
+	}
+}
+
+func TestHeartbeatLeavesAFreshLeaseAlone(t *testing.T) {
+	// Most reconcile passes are event-driven and land seconds apart;
+	// the heartbeat costs them a read, never a write.
+	api := &leaseAPI{lease: lease("node-1", 5*time.Second)}
+	client := testClient(t, api.handler())
+	before := api.lease.Spec.RenewTime
+	renewMachineHeartbeat(client, "node-1", sweepNow)
+	if api.lease.Spec.RenewTime != before {
+		t.Errorf("a fresh lease should not be rewritten: %s", api.lease.Spec.RenewTime)
+	}
+}
+
+func TestListMachineHeartbeatsReadsRenewals(t *testing.T) {
+	api := &leaseListAPI{leases: []*leaseObject{
+		lease("node-1", 10*time.Second),
+		lease("node-2", 5*time.Minute),
+	}}
+	api.leases[0].Metadata.Name = "node-1"
+	api.leases[1].Metadata.Name = "node-2"
+	client := testClient(t, api.handler())
+	renewals, err := listMachineHeartbeats(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(renewals) != 2 {
+		t.Fatalf("got %v", renewals)
+	}
+	if !renewals["node-1"].Equal(sweepNow.Add(-10 * time.Second)) {
+		t.Errorf("node-1 renewed at %v", renewals["node-1"])
+	}
+}
+
+// leaseListAPI answers a list request with a fixed set of leases.
+type leaseListAPI struct {
+	leases []*leaseObject
+}
+
+func (api *leaseListAPI) handler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var list struct {
+			Items []*leaseObject `json:"items"`
+		}
+		list.Items = api.leases
+		_ = json.NewEncoder(w).Encode(&list)
+	})
+}

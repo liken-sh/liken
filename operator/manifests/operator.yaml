@@ -17,6 +17,16 @@ kind: Namespace
 metadata:
   name: liken-system
 ---
+# The machines' heartbeat leases live in a namespace of their own,
+# one Lease per machine — the arrangement of kube-node-lease, and for
+# the same reasons (operator/lease.go tells the story). A dedicated
+# namespace keeps the heartbeats from mingling with anything else and
+# makes `kubectl get leases -n liken-machine-lease` the fleet's pulse.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: liken-machine-lease
+---
 # The ServiceAccount is the operator's identity: kubelet mounts a token
 # for it into the pod, and every API request the operator makes carries
 # it. See operator/apiclient.go for the client half.
@@ -101,6 +111,33 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: liken-operator-leases
+subjects:
+  - kind: ServiceAccount
+    name: liken-operator
+    namespace: liken-system
+---
+# The heartbeat leases: every operator renews its own machine's, and
+# the sweeping leader lists them all to judge the fleet's liveness —
+# the one extra verb this Role has that the election's doesn't.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: liken-operator-heartbeats
+  namespace: liken-machine-lease
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, list, create, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: liken-operator-heartbeats
+  namespace: liken-machine-lease
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: liken-operator-heartbeats
 subjects:
   - kind: ServiceAccount
     name: liken-operator

@@ -50,6 +50,19 @@ import (
 // namespaces.
 const fleetLeasePath = "/apis/coordination.k8s.io/v1/namespaces/liken-system/leases/liken-fleet-sweep"
 
+// The machines' heartbeat leases live in a namespace of their own,
+// one Lease per machine, named for it — the arrangement of
+// kube-node-lease, for the same reasons. A heartbeat must renew on a
+// schedule forever, so it should be the cheapest write the API
+// server offers: a Lease is a few dozen bytes with no watchers,
+// where a timestamp inside Machine status would rewrite the whole
+// object — hardware inventory, boot record, conditions — and wake
+// every watcher, every renewal, machine after machine. Kubernetes
+// moved the kubelet's heartbeats out of Node status and into
+// kube-node-lease to escape exactly that; liken heartbeats through a
+// lease from the start.
+const machineLeaseDir = "/apis/coordination.k8s.io/v1/namespaces/liken-machine-lease/leases"
+
 // fleetLeaseDuration is how long a holder's claim stands without a
 // renewal: three missed renewals, the same threshold the machine
 // heartbeats use, and for the same reason.
@@ -142,13 +155,7 @@ func holdFleetLease(c *apiClient, self string, now time.Time) bool {
 }
 
 func createFleetLease(c *apiClient, self string, now time.Time) bool {
-	lease := &leaseObject{APIVersion: "coordination.k8s.io/v1", Kind: "Lease"}
-	lease.Metadata.Name = "liken-fleet-sweep"
-	lease.Spec.HolderIdentity = self
-	lease.Spec.LeaseDurationSeconds = int(fleetLeaseDuration.Seconds())
-	lease.Spec.AcquireTime = now.UTC().Format(microTime)
-	lease.Spec.RenewTime = lease.Spec.AcquireTime
-	body, err := json.Marshal(lease)
+	body, err := json.Marshal(newLease("liken-fleet-sweep", self, fleetLeaseDuration, now))
 	if err != nil {
 		return false
 	}
@@ -162,4 +169,74 @@ func createFleetLease(c *apiClient, self string, now time.Time) bool {
 	}
 	fmt.Println("holding the fleet sweep lease; this machine watches the fleet now")
 	return true
+}
+
+// newLease is a fresh claim: held by holder as of now.
+func newLease(name, holder string, duration time.Duration, now time.Time) *leaseObject {
+	lease := &leaseObject{APIVersion: "coordination.k8s.io/v1", Kind: "Lease"}
+	lease.Metadata.Name = name
+	lease.Spec.HolderIdentity = holder
+	lease.Spec.LeaseDurationSeconds = int(duration.Seconds())
+	lease.Spec.AcquireTime = now.UTC().Format(microTime)
+	lease.Spec.RenewTime = lease.Spec.AcquireTime
+	return lease
+}
+
+// renewMachineHeartbeat keeps this machine's own lease fresh: create
+// it if it doesn't exist, renew it once it has aged past
+// heartbeatRenewAfter, and leave it alone otherwise, so most passes
+// cost one read and no write. Unlike the sweep's lease there is no
+// election here — this machine is its lease's only writer, the way a
+// kubelet is its node lease's — so every failure mode is just "try
+// again next pass."
+func renewMachineHeartbeat(c *apiClient, name string, now time.Time) {
+	path := machineLeaseDir + "/" + name
+	lease := &leaseObject{}
+	err := c.requestJSON(http.MethodGet, path, nil, lease)
+	if errors.Is(err, errNotFound) {
+		body, err := json.Marshal(newLease(name, name, heartbeatStaleAfter, now))
+		if err != nil {
+			return
+		}
+		if err := c.requestJSON(http.MethodPost, machineLeaseDir, body, nil); err != nil && !errors.Is(err, errConflict) {
+			fmt.Printf("creating the heartbeat lease: %v\n", err)
+		}
+		return
+	}
+	if err != nil {
+		fmt.Printf("reading the heartbeat lease: %v\n", err)
+		return
+	}
+	if renewed, err := time.Parse(microTime, lease.Spec.RenewTime); err == nil && now.Sub(renewed) < heartbeatRenewAfter {
+		return
+	}
+	lease.Spec.HolderIdentity = name
+	lease.Spec.LeaseDurationSeconds = int(heartbeatStaleAfter.Seconds())
+	lease.Spec.RenewTime = now.UTC().Format(microTime)
+	body, err := json.Marshal(lease)
+	if err != nil {
+		return
+	}
+	if err := c.requestJSON(http.MethodPut, path, body, nil); err != nil {
+		fmt.Printf("renewing the heartbeat lease: %v\n", err)
+	}
+}
+
+// listMachineHeartbeats reads every machine's last renewal, for the
+// sweep: the fleet's liveness in one cheap list, machine name to the
+// moment it last spoke.
+func listMachineHeartbeats(c *apiClient) (map[string]time.Time, error) {
+	var list struct {
+		Items []leaseObject `json:"items"`
+	}
+	if err := c.requestJSON(http.MethodGet, machineLeaseDir, nil, &list); err != nil {
+		return nil, err
+	}
+	renewals := map[string]time.Time{}
+	for _, l := range list.Items {
+		if renewed, err := time.Parse(microTime, l.Spec.RenewTime); err == nil {
+			renewals[l.Metadata.Name] = renewed
+		}
+	}
+	return renewals, nil
 }

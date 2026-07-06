@@ -63,17 +63,14 @@ type MachineStatus struct {
 	// the kernel's uptime counter. A timestamp rather than a duration
 	// on purpose: it never goes stale in the cluster, and `kubectl get
 	// machines` renders it as a live elapsed time (the Uptime column).
+	//
+	// Deliberately absent: a heartbeat. The machine's liveness signal
+	// is a Lease in the liken-machine-lease namespace, not a status
+	// field, because a heartbeat must renew forever and a status
+	// write rewrites this whole object and wakes every watcher — the
+	// reason kube-node-lease exists (see operator/lease.go). The
+	// leaders watch the leases and mark a silent machine Lost.
 	BootedAt *time.Time `json:"bootedAt,omitempty"`
-
-	// ObservedAt is the machine's heartbeat: the moment the operator
-	// last reconciled and republished this status. It exists so the
-	// rest of the fleet can tell a healthy machine from a dead one
-	// whose last written status still reads fine — the same problem
-	// the kubelet solves with its node lease, solved the same way: a
-	// timestamp renewed on a schedule, where a stale value means the
-	// writer is gone. The leaders watch it and mark a silent machine
-	// Lost.
-	ObservedAt *time.Time `json:"observedAt,omitempty"`
 
 	// Conditions follow the standard Kubernetes idiom: a set of typed,
 	// timestamped observations ("Ready", "SysctlsApplied") that

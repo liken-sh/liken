@@ -265,31 +265,23 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string) {
 	}
 
 	// The phase compresses the conditions into the one word a fleet
-	// listing shows (phase.go), and observedAt is the heartbeat that
-	// proves this machine computed it recently — the leaders treat its
-	// silence as the machine's death (fleet.go).
-	//
-	// The heartbeat renews on a cadence, not on every pass, and the
-	// reason is a feedback loop worth knowing about: this operator
-	// reconciles on every watch event, including the event caused by
-	// its own status write. When nothing changed, the write is a no-op
-	// the API server doesn't even version — no event, and the loop
-	// settles until the ticker. A timestamp that moved on every pass
-	// would make every write real, every write an event, and every
-	// event another pass: the operator would spin flat-out against
-	// the API server forever. Aging the heartbeat past the renewal
-	// window before touching it keeps event-driven passes as no-ops,
-	// and the 30-second ticker guarantees the renewals keep coming.
+	// listing shows (phase.go).
 	status.Phase = decidePhase(status.Conditions)
-	status.ObservedAt = m.Status.ObservedAt
-	if status.ObservedAt == nil || now.Sub(*status.ObservedAt) >= heartbeatRenewAfter {
-		observedAt := now
-		status.ObservedAt = &observedAt
-	}
 
 	if err := publishStatus(c, m, status); err != nil {
 		fmt.Printf("publishing status: %v\n", err)
 	}
+
+	// The heartbeat: renew this machine's lease so the fleet can tell
+	// this status is current and not the last words of a dead machine
+	// (lease.go on why a lease and not a status field). Deliberately
+	// separate from the status write above: status changes when the
+	// machine's story changes, the heartbeat proves the storyteller
+	// is alive, and conflating them made every heartbeat rewrite the
+	// whole object. A status write can fail while the heartbeat
+	// stands, and that's correct — the machine is alive and will
+	// retry.
+	renewMachineHeartbeat(c, m.Metadata.Name, now)
 
 	// Fleet-level work is the leaders': mark silent machines Lost and
 	// keep the Cluster's headcount current. Every leader is *able* to

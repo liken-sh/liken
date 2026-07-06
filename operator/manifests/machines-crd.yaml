@@ -374,9 +374,9 @@ spec:
                     finished publishing this boot; Unknown means the
                     operator can't read the machine's facts at all.
                     Lost is the exception to self-reporting: a leader
-                    writes it when this machine's heartbeat
-                    (observedAt) goes silent, because a dead machine
-                    can't report its own death.
+                    writes it when this machine's heartbeat lease
+                    (in liken-machine-lease) goes silent, because a
+                    dead machine can't report its own death.
                 role:
                   type: string
                   description: >-
@@ -703,16 +703,6 @@ spec:
                     from the kernel's uptime counter. The Uptime
                     printer column is this timestamp rendered as an
                     elapsed time.
-                observedAt:
-                  type: string
-                  format: date-time
-                  description: >-
-                    The machine's heartbeat: when its operator last
-                    reconciled and republished this status. A dead
-                    machine's status otherwise reads healthy forever;
-                    the leaders watch this timestamp and mark a silent
-                    machine Lost, the same way the node controller
-                    turns a stale kubelet lease into a NotReady Node.
                 conditions:
                   type: array
                   # A conditions array is a map in list's clothing:
