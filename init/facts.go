@@ -22,8 +22,12 @@ import (
 	"github.com/chrisguidry/liken/machine"
 )
 
+// publishFacts returns the facts it wrote: the time component takes
+// over as their sole owner afterward, folding in each new clock
+// measurement and rewriting the file.
 func publishFacts(cluster *machine.Cluster, role string, choice *manifestChoice,
-	conns []*connection, storage machine.StorageStatus, boot machine.BootStatus) {
+	conns []*connection, storage machine.StorageStatus, boot machine.BootStatus,
+	firstSync *timeSync, timeSources []string) *machine.MachineStatus {
 	now := time.Now()
 	facts := &machine.MachineStatus{
 		Role:    role,
@@ -72,9 +76,13 @@ func publishFacts(cluster *machine.Cluster, role string, choice *manifestChoice,
 	// that came up.
 	facts.Network = networkFacts(cluster, conns, now)
 
+	// The clock's story so far: the boot-time measurement if one
+	// succeeded, or an honest unsynchronized/free-running report.
+	facts.Time = timeStatus(firstSync, timeSources)
+
 	if err := machine.WriteFacts(machine.FactsPath, facts); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: writing facts: %v\n", err)
-		return
+		return facts
 	}
 	fmt.Printf("liken: facts published to %s\n", machine.FactsPath)
 
@@ -87,6 +95,7 @@ func publishFacts(cluster *machine.Cluster, role string, choice *manifestChoice,
 			fmt.Fprintf(os.Stderr, "liken: writing the boot manifest: %v\n", err)
 		}
 	}
+	return facts
 }
 
 // networkFacts folds every connection into a NetworkStatus.

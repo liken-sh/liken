@@ -326,7 +326,7 @@
           fine until something checks a certificate's notBefore
           against a clock that never met one, so status must make
           free-running visible rather than dress it up as synced.
-   3. [ ] The discipline loop, one goroutine on every machine:
+   3. [x] The discipline loop, one goroutine on every machine:
           measure with beevik/ntp (the four-timestamp exchange and
           why symmetric delay cancels belongs in the comments), step
           the clock once at boot before k3s starts, then only ever

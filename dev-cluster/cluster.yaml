@@ -45,3 +45,11 @@ spec:
     serviceCIDR: 10.43.0.0/16
     clusterDNS: 10.43.0.10
     clusterDomain: cluster.local
+
+  time:
+    # Where the servers get their time; agents don't appear here
+    # because they always sync from the endpoint above. Declaring an
+    # upstream is the deployment's choice, never the OS's default —
+    # this lab picks Cloudflare's public NTP service, which (unlike
+    # the NTP pool) is run for exactly this kind of anonymous use.
+    upstreams: [time.cloudflare.com]

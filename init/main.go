@@ -145,11 +145,24 @@ func main() {
 		// this boot, or the machine can never rejoin its own cluster
 		// (k3s.go tells the story).
 		persistNodePassword(storage)
+		// The clock is corrected before k3s starts, because a wrong
+		// clock fails TLS: every certificate the CA minted looks
+		// like it's from the future. This is the only moment liken
+		// ever steps the clock; from here on it only slews (time.go
+		// tells the whole story).
+		sources := timeSources(cluster, role)
+		firstSync := stepClockAtBoot(sources)
 		prepareForK3s()
 		// Facts wait until here because they live under /run, and
 		// prepareForK3s just mounted a fresh tmpfs there; anything
 		// written earlier would be shadowed by the mount.
-		publishFacts(cluster, role, choice, conns, storage, boot)
+		facts := publishFacts(cluster, role, choice, conns, storage, boot, firstSync, sources)
+		// A machine with time sources disciplines its clock for the
+		// rest of its life; a free-running machine has nothing to
+		// follow, and its status already says so.
+		if len(sources) > 0 {
+			plane.start("the clock", disciplineClock(sources, facts))
+		}
 		// The reboot channel: init creates the directory (owning its
 		// existence and permissions), the operator writes into it,
 		// and the watcher carries at most one request into the

@@ -12,6 +12,7 @@ module github.com/chrisguidry/liken
 go 1.26.4
 
 require (
+	github.com/beevik/ntp v1.5.0
 	github.com/insomniacslk/dhcp v0.0.0-20260603135910-a415979eb11e
 	github.com/vishvananda/netlink v1.3.1
 	golang.org/x/sys v0.46.0
@@ -40,7 +41,7 @@ require (
 	github.com/vladopajic/go-test-coverage/v2 v2.18.8 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	golang.org/x/image v0.38.0 // indirect
-	golang.org/x/net v0.38.0 // indirect
+	golang.org/x/net v0.44.0 // indirect
 	golang.org/x/sync v0.8.0 // indirect
 	golang.org/x/tools v0.26.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
