@@ -36,6 +36,13 @@
 # Everything is ECDSA P-256, matching what k3s generates for itself.
 # Ten-year lifetimes: these are roots for a learning distro, and
 # rotation is a problem for a later milestone.
+#
+# Each artifact is minted only if it doesn't already exist, so adding
+# a new artifact to this script (or re-running it for any reason)
+# never replaces an identity that machines already carry: replacing
+# the CAs would orphan every kubeconfig computed from them, and
+# replacing the token would strand any machine that hasn't joined
+# yet. `make clean` here is the deliberate way to become someone new.
 
 set -euo pipefail
 
@@ -48,6 +55,10 @@ mkdir -p "$tls/etcd"
 # mark it as a CA whose key may sign other certificates.
 new_ca() {
     local path="$1" cn="$2"
+    if [[ -f "$tls/$path.crt" ]]; then
+        echo "keeping $path: $cn"
+        return
+    fi
     openssl req -x509 -new -nodes \
         -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
         -keyout "$tls/$path.key" \
@@ -73,6 +84,36 @@ new_ca etcd/peer-ca "liken etcd peer CA"
 # ("EC PRIVATE KEY", which ecparam emits) but not PKCS#8 ("PRIVATE
 # KEY", which genpkey emits); with PKCS#8 it dies on startup claiming
 # the file contains no valid keys.
-openssl ecparam -name prime256v1 -genkey -noout \
-    -out "$tls/service.key" 2>/dev/null
-echo "minted service.key: the ServiceAccount token signing key"
+if [[ -f "$tls/service.key" ]]; then
+    echo "keeping service.key: the ServiceAccount token signing key"
+else
+    openssl ecparam -name prime256v1 -genkey -noout \
+        -out "$tls/service.key" 2>/dev/null
+    echo "minted service.key: the ServiceAccount token signing key"
+fi
+
+# The cluster's join token, in k3s's "secure" format:
+#
+#   K10<CA-HASH>::<user>:<password>
+#
+# Normally this has to be scraped off a running server
+# (/var/lib/rancher/k3s/server/node-token), because the CA it hashes
+# doesn't exist until k3s invents it at first boot. liken inverted
+# that: the server CA is minted above, before any machine exists, so
+# the whole token is computable right here. The CA-HASH is the SHA256
+# of the cluster CA certificate; a joining machine fetches the
+# server's CA bundle, hashes it, and compares before it trusts the
+# endpoint or presents the secret, so the token authenticates the
+# cluster to the machine as much as the machine to the cluster. The
+# secret half is 32 hex characters of real randomness, the same shape
+# k3s generates. "server" is the credential's username: whoever bears
+# this token may join machines to the cluster.
+if [[ -f "$here/dist/token" ]]; then
+    echo "keeping token: the cluster join token"
+else
+    ca_hash="$(sha256sum "$tls/server-ca.crt" | cut -d' ' -f1)"
+    secret="$(openssl rand -hex 16)"
+    printf 'K10%s::server:%s\n' "$ca_hash" "$secret" >"$here/dist/token"
+    chmod 600 "$here/dist/token"
+    echo "minted token: the cluster join token"
+fi

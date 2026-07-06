@@ -15,8 +15,14 @@ type MachineStatus struct {
 	// the built-in Node object; this covers the layer below it.
 	Version VersionStatus `json:"version,omitzero"`
 
-	// Network is the boot's DHCP outcome: the same facts init prints to
-	// the console, made queryable.
+	// Role is what this machine is in its cluster: a server (it runs a
+	// control plane) or an agent (it runs workloads). Derived at boot
+	// from the Cluster manifest's servers list, never declared here.
+	Role string `json:"role,omitempty"`
+
+	// Network is the boot's networking outcome, DHCP leases and static
+	// assignments alike: the same facts init prints to the console,
+	// made queryable.
 	Network NetworkStatus `json:"network,omitzero"`
 
 	// Hardware is what the machine found itself running on.
@@ -57,10 +63,35 @@ type VersionStatus struct {
 	Xtables string `json:"xtables,omitempty"`
 }
 
+// NetworkStatus reports how the boot attached this machine to the
+// network. The top-level fields summarize the *primary* interface:
+// the cluster-facing one when the Cluster's nodeCIDR identifies it,
+// otherwise the first that came up. Interfaces carries the full
+// per-interface detail when a machine has more than one.
 type NetworkStatus struct {
 	Interface    string     `json:"interface,omitempty"`
 	MAC          string     `json:"mac,omitempty"`
 	Addresses    []string   `json:"addresses,omitempty"`
+	Gateway      string     `json:"gateway,omitempty"`
+	Nameservers  []string   `json:"nameservers,omitempty"`
+	LeaseExpires *time.Time `json:"leaseExpires,omitempty"`
+
+	Interfaces []InterfaceStatus `json:"interfaces,omitempty"`
+}
+
+// How an interface got its address: a DHCP lease, or a static
+// assignment from the Machine spec.
+const (
+	MethodDHCP   = "DHCP"
+	MethodStatic = "Static"
+)
+
+// InterfaceStatus is one interface as the boot configured it.
+type InterfaceStatus struct {
+	Name         string     `json:"name"`
+	MAC          string     `json:"mac,omitempty"`
+	Address      string     `json:"address,omitempty"`
+	Method       string     `json:"method,omitempty"`
 	Gateway      string     `json:"gateway,omitempty"`
 	Nameservers  []string   `json:"nameservers,omitempty"`
 	LeaseExpires *time.Time `json:"leaseExpires,omitempty"`

@@ -27,9 +27,12 @@ metadata:
   namespace: liken-system
 ---
 # The operator's permissions, and deliberately nothing more: full
-# control of Machines and their status, and no other resource. RBAC can
-# grant spec and status separately precisely because the CRD declares
-# status as a subresource.
+# control of Machines and their status, creation of the Cluster it
+# seeds, and no other resource. RBAC can grant spec and status
+# separately precisely because the Machine CRD declares status as a
+# subresource. Note what's absent for clusters: no update — the
+# operator seeds the Cluster once and may never rewrite what a person
+# (or one day a git repository) edits afterward.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -41,6 +44,9 @@ rules:
   - apiGroups: [liken.sh]
     resources: [machines/status]
     verbs: [get, update]
+  - apiGroups: [liken.sh]
+    resources: [clusters]
+    verbs: [get, list, watch, create]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -96,14 +102,16 @@ spec:
           securityContext:
             privileged: true
           volumeMounts:
-            # The facts init published: the operator's input. Read-only
-            # by mount, not by convention: status is observed, never
+            # The facts init published, and beside them the manifest
+            # this boot ran under (which tells the operator which
+            # Machine it manages): the operator's inputs. Read-only by
+            # mount, not by convention: status is observed, never
             # asserted, and the operator cannot rewrite its own input.
             - name: run-liken
               mountPath: /run/liken
               readOnly: true
-            # The machine manifest the image booted from, to seed the
-            # in-cluster Machine on first boot.
+            # The cluster manifest the image carries, to seed the
+            # in-cluster Cluster on first boot.
             - name: etc-liken
               mountPath: /etc/liken
               readOnly: true

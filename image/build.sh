@@ -12,12 +12,33 @@
 #
 #   /liken                        init; the kernel runs it as PID 1
 #                                 (rdinit=/liken)
-#   /etc/liken/machine.yaml       the machine's configuration
+#   /etc/liken/cluster.yaml       what the machines form together: the
+#                                 cluster's topology and address plan
+#   /etc/liken/machines/          one Machine manifest per machine; a
+#                                 boot selects its own by the
+#                                 liken.machine=<name> kernel parameter,
+#                                 which is how one image boots a fleet.
+#                                 The manifests (and cluster.yaml) are
+#                                 an *input* to this build, not part of
+#                                 this domain: which machines exist and
+#                                 what they form is a deployment's
+#                                 decision, so the caller points the
+#                                 build at a directory carrying them
+#                                 (the repo's own lab is dev-cluster/)
+#   /etc/liken/token              the cluster's join token, minted
+#                                 offline by identity/mint.sh: it
+#                                 embeds a hash of the server CA below,
+#                                 so a joining machine can verify the
+#                                 cluster before presenting the secret
 #   /etc/liken/modules.conf       which kernel modules init loads
 #   /lib/modules/<release>/       those modules and their dependencies,
 #                                 exactly as Ubuntu built them
 #   /bin/k3s                      all of Kubernetes, in one binary
-#   /etc/rancher/k3s/config.yaml  k3s's configuration
+#   /etc/rancher/k3s/config.yaml  k3s's server-role configuration
+#   /etc/rancher/k3s/agent.yaml   k3s's agent-role configuration (init
+#                                 starts the role the cluster manifest
+#                                 implies, and each role reads its own
+#                                 file plus a boot-derived drop-in)
 #   /sbin/iptables (& friends)    the netfilter userspace kube-proxy and
 #                                 the CNI exec to program the kernel's
 #                                 packet filter: one static multi-call
@@ -70,6 +91,12 @@
 
 set -euo pipefail
 
+# Where the Machine and Cluster manifests come from: the build's one
+# argument. Omitted, the image carries no manifests at all, which is
+# still a valid machine (everything defaults, DHCP and RAM root) —
+# the deployment decided nothing, so nothing is baked in.
+manifests="${1:-}"
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 kernel_version="$(cat "$here/../kernel/VERSION")"
 k3s_version="$(cat "$here/../k3s/VERSION")"
@@ -84,6 +111,19 @@ mkdir -p "$root/etc/ssl/certs" "$root/bin" "$root/sbin"
 cp -r "$here/etc" "$root/"
 cp "$here/../init/dist/liken" "$root/liken"
 cp "$here/../k3s/dist/$k3s_version/k3s" "$root/bin/k3s"
+
+# The deployment's manifests, staged at the paths init reads. Copied
+# file by file rather than as a tree, so what the image can carry is
+# explicit: one cluster document, one manifest per machine.
+if [[ -n "$manifests" ]]; then
+    if [[ -f "$manifests/cluster.yaml" ]]; then
+        cp "$manifests/cluster.yaml" "$root/etc/liken/cluster.yaml"
+    fi
+    if [[ -d "$manifests/machines" ]]; then
+        mkdir -p "$root/etc/liken/machines"
+        cp "$manifests"/machines/*.yaml "$root/etc/liken/machines/"
+    fi
+fi
 
 # The netfilter userspace: one real static binary, then a symlink per
 # tool name: the multi-call binary reads argv[0] to know which tool to
@@ -103,6 +143,14 @@ cp "$here/../e2fsprogs/dist/$e2fsprogs_version/mke2fs" "$root/sbin/mke2fs"
 # looks before generating its own.
 mkdir -p "$root/var/lib/rancher/k3s/server"
 cp -r "$here/../identity/dist/tls" "$root/var/lib/rancher/k3s/server/tls"
+
+# The join token, minted alongside the CAs (identity/mint.sh explains
+# the format). It lives under /etc/liken rather than k3s's data
+# directory because the clusterState filesystem mounts over the
+# latter: a boot input has to sit where no disk will shadow it. Init
+# hands k3s the path (token-file), never the value.
+cp "$here/../identity/dist/token" "$root/etc/liken/token"
+chmod 600 "$root/etc/liken/token"
 
 # The Machine API and its operator, delivered the Kubernetes way: the
 # manifests go where k3s auto-applies them, the operator's image goes

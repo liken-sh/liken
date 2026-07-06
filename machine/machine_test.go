@@ -35,7 +35,12 @@ metadata:
   name: liken-dev
 spec:
   network:
-    interface: eth1
+    interfaces:
+      - name: eth0
+      - name: eth1
+        address: 10.10.0.1/24
+        gateway: 10.10.0.254
+        nameservers: [9.9.9.9]
   sysctls:
     vm.overcommit_memory: "1"
 `)
@@ -46,8 +51,21 @@ spec:
 	if m.Metadata.Name != "liken-dev" {
 		t.Errorf("name: got %q", m.Metadata.Name)
 	}
-	if m.Spec.Network.Interface != "eth1" {
-		t.Errorf("interface: got %q", m.Spec.Network.Interface)
+	interfaces := m.Spec.Network.Interfaces
+	if len(interfaces) != 2 {
+		t.Fatalf("interfaces: got %v", interfaces)
+	}
+	if interfaces[0].Name != "eth0" || interfaces[0].Address != "" {
+		t.Errorf("eth0 should default to DHCP: got %+v", interfaces[0])
+	}
+	if interfaces[1].Address != "10.10.0.1/24" {
+		t.Errorf("eth1 address: got %q", interfaces[1].Address)
+	}
+	if interfaces[1].Gateway != "10.10.0.254" {
+		t.Errorf("eth1 gateway: got %q", interfaces[1].Gateway)
+	}
+	if len(interfaces[1].Nameservers) != 1 || interfaces[1].Nameservers[0] != "9.9.9.9" {
+		t.Errorf("eth1 nameservers: got %v", interfaces[1].Nameservers)
 	}
 	if got := m.Spec.Sysctls["vm.overcommit_memory"]; got != "1" {
 		t.Errorf("sysctl: got %q", got)

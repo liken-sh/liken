@@ -136,11 +136,11 @@ func postMortem() {
 // machine with no shell. A reboot intent is honored even in oneshot:
 // under QEMU's -no-reboot the restart is a clean exit, which is
 // exactly what a bounded harness run wants.
-func superviseK3s(reboot <-chan machine.RebootIntent) {
+func superviseK3s(role string, reboot <-chan machine.RebootIntent) {
 	backoff := time.Second
 	for {
 		started := time.Now()
-		cmd, logf, err := startK3s()
+		cmd, logf, err := startK3s(role)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "liken: k3s: %v\n", err)
 		} else {
@@ -185,10 +185,11 @@ func superviseK3s(reboot <-chan machine.RebootIntent) {
 	}
 }
 
-// startK3s launches the server and hands back the running command and
-// its log file (which must stay open as long as the process writes;
-// the console copy flows through an in-process pipe).
-func startK3s() (*exec.Cmd, *os.File, error) {
+// startK3s launches k3s in the machine's role and hands back the
+// running command and its log file (which must stay open as long as
+// the process writes; the console copy flows through an in-process
+// pipe).
+func startK3s(role string) (*exec.Cmd, *os.File, error) {
 	// k3s's output goes two places: a file, and the console, where it
 	// arrives live, line-buffered, and prefixed so it's
 	// distinguishable from liken's own messages. On a machine with no
@@ -198,17 +199,23 @@ func startK3s() (*exec.Cmd, *os.File, error) {
 		return nil, nil, err
 	}
 
-	// k3s reads /etc/rancher/k3s/config.yaml on its own; the empty
-	// argument list is deliberate, because configuration lives in the
-	// file, not in flags.
-	cmd := exec.Command(k3sBinary, "server")
+	// Configuration lives in files, not flags: a server reads
+	// /etc/rancher/k3s/config.yaml on its own, and an agent is pointed
+	// at its own file (whose server-only sibling would otherwise be
+	// misread as unknown flags). Both were joined with this boot's
+	// derived drop-in by k3s.go before we got here.
+	args := []string{"server"}
+	if role == machine.RoleAgent {
+		args = []string{"agent", "--config", k3sAgentConfig}
+	}
+	cmd := exec.Command(k3sBinary, args...)
 	cmd.Stdout = io.MultiWriter(logf, &lineWriter{prefix: "k3s | "})
 	cmd.Stderr = io.MultiWriter(logf, &lineWriter{prefix: "k3s | "})
 	if err := cmd.Start(); err != nil {
 		logf.Close()
 		return nil, nil, fmt.Errorf("starting k3s: %w", err)
 	}
-	fmt.Printf("liken: k3s server started (pid %d), logs in %s\n", cmd.Process.Pid, k3sLog)
+	fmt.Printf("liken: k3s %s started (pid %d), logs in %s\n", role, cmd.Process.Pid, k3sLog)
 	return cmd, logf, nil
 }
 

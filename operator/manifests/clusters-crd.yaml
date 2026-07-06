@@ -1,0 +1,111 @@
+# The Cluster API, declared to Kubernetes.
+#
+# The second of liken's two resource kinds: a Machine describes one
+# computer, a Cluster describes what the machines form together. The
+# split follows who must agree on what — everything here is a fact
+# the whole fleet holds identically (which machines run control
+# planes, the address ranges pods and services live in) or a fact
+# about the group no single machine owns (the endpoint agents join
+# through).
+#
+# Like the Machine CRD, this file lands in k3s's auto-deploy manifests
+# directory and is applied at every startup. The in-cluster Cluster
+# object is seeded from the image's /etc/liken/cluster.yaml by the
+# liken operator (every machine's operator tries; the first wins, and
+# an already-seeded cluster is left exactly as it stands, kubectl
+# edits and all).
+#
+# There is no status subresource yet, on purpose: nothing observes the
+# cluster as a whole today. Machines report their own facts; when
+# something can meaningfully observe cluster-wide state (which
+# machines have joined, whether quorum holds), status arrives with it.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: clusters.liken.sh
+spec:
+  group: liken.sh
+  names:
+    kind: Cluster
+    listKind: ClusterList
+    plural: clusters
+    singular: cluster
+  # Cluster-scoped, even more literally than Machine: the cluster
+  # can't very well live inside a namespace inside itself.
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      # What `kubectl get clusters` prints, without -o yaml.
+      additionalPrinterColumns:
+        - name: Servers
+          type: string
+          jsonPath: .spec.servers
+        - name: Endpoint
+          type: string
+          jsonPath: .spec.endpoint
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            A Cluster is what liken machines form together: the
+            topology (which machines run control planes) and the
+            network facts every node must agree on.
+          properties:
+            spec:
+              type: object
+              properties:
+                servers:
+                  type: array
+                  description: >-
+                    The machines that run control planes, by Machine
+                    name. A machine derives its role from this list:
+                    named here means server, absent means agent.
+                  items:
+                    type: string
+                endpoint:
+                  type: string
+                  description: >-
+                    The URL agents join the cluster through, e.g.
+                    https://10.10.0.1:6443. With one server this is
+                    that server's address on the node network.
+                network:
+                  type: object
+                  description: >-
+                    The cluster's address plan: facts k3s requires
+                    every node to agree on, declared once here rather
+                    than repeated per machine. Unset fields fall to
+                    k3s's defaults.
+                  properties:
+                    nodeCIDR:
+                      type: string
+                      description: >-
+                        The subnet the nodes address each other on. A
+                        machine's interface whose address falls inside
+                        it carries cluster traffic, and that address
+                        becomes the machine's node IP.
+                    clusterCIDR:
+                      type: string
+                      description: >-
+                        The range pod addresses are drawn from
+                        (k3s default 10.42.0.0/16).
+                    serviceCIDR:
+                      type: string
+                      description: >-
+                        The range service addresses are drawn from
+                        (k3s default 10.43.0.0/16).
+                    clusterDNS:
+                      type: string
+                      description: >-
+                        The service address of the cluster's DNS
+                        resolver, inside serviceCIDR (k3s default
+                        10.43.0.10).
+                    clusterDomain:
+                      type: string
+                      description: >-
+                        The DNS suffix cluster-internal names live
+                        under (k3s default cluster.local).

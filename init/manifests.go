@@ -35,8 +35,11 @@ package main
 // directory just re-selects the seed.
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -183,34 +186,88 @@ func touchMachineState(p partition, fn func(root string) error) error {
 	return ferr
 }
 
-// loadSeed reads the image's baked-in manifest. Like today's boot, a
-// malformed seed is reported and defaulted, not fatal: a
-// misconfigured machine that reaches the console beats a kernel
-// panic.
-func loadSeed() *manifestChoice {
-	choice := &manifestChoice{m: &machine.Machine{}, source: machine.ManifestSourceSeed}
-	raw, err := os.ReadFile(machine.ManifestPath)
+// errIdentity marks the failures where a machine could not tell
+// which manifest is its own. main treats these differently from
+// storage failures when it explains the power-off on the console.
+var errIdentity = errors.New("machine identity")
+
+// seedPath answers "which file in the manifests directory is mine?".
+// One image boots many machines, so the image carries a manifest per
+// machine and each boot selects its own: explicitly, by the
+// liken.machine=<name> kernel parameter (the one channel the
+// bootloader already owns), or implicitly when there is exactly one
+// manifest to choose. Anything else is refused rather than guessed:
+// a name that matches no manifest is a typo someone must see, and a
+// directory of manifests with no name is ambiguity, the same
+// situation as two disks claiming the same partition name. An empty
+// (or absent) directory is no error: a machine with no manifest is
+// still a valid machine.
+func seedPath(dir, requested string) (string, error) {
+	if requested != "" {
+		path := filepath.Join(dir, requested+".yaml")
+		if _, err := os.Stat(path); err != nil {
+			return "", fmt.Errorf("%w: liken.machine=%s names no manifest at %s", errIdentity, requested, path)
+		}
+		return path, nil
+	}
+	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
-		return choice
+		return "", nil
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "liken: machine manifest: %v\n", err)
-		return choice
+		return "", err
+	}
+	var names []string
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".yaml") {
+			names = append(names, entry.Name())
+		}
+	}
+	switch len(names) {
+	case 0:
+		return "", nil
+	case 1:
+		return filepath.Join(dir, names[0]), nil
+	default:
+		return "", fmt.Errorf("%w: %d manifests in %s and no liken.machine=<name> on the kernel command line to choose among %s; refusing to guess",
+			errIdentity, len(names), dir, strings.Join(names, ", "))
+	}
+}
+
+// loadSeed reads the image's baked-in manifest for this machine. A
+// seed that can't be selected or parsed is an error rather than a
+// silent default: loadSeed only runs on a boot with no proven
+// manifest to fall back to, and a first boot under the wrong (or
+// empty) identity could join the wrong cluster or claim the wrong
+// disks. Wrong is worse than down.
+func loadSeed() (*manifestChoice, error) {
+	choice := &manifestChoice{m: &machine.Machine{}, source: machine.ManifestSourceSeed}
+	path, err := seedPath(machine.MachineManifestDir, bootParamValue("liken.machine"))
+	if err != nil {
+		return nil, err
+	}
+	if path == "" {
+		return choice, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("%w: reading %s: %v", errIdentity, path, err)
 	}
 	m, err := machine.Parse(raw)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "liken: machine manifest: %v\n", err)
-		return choice
+		return nil, fmt.Errorf("%w: %s: %v", errIdentity, path, err)
 	}
+	fmt.Printf("liken: this is %s (manifest %s)\n", m.Metadata.Name, path)
 	choice.m, choice.raw, choice.hash = m, raw, machine.ManifestHash(raw)
-	return choice
+	return choice, nil
 }
 
 // attemptOrder is the whole preference policy in one place: staged
-// before proven, and the seed only for a machine with neither (the
-// seed is a first-boot input, not a fallback; a machine that has ever
-// proven a manifest never consults the image again).
-func attemptOrder(c manifestCandidates, seed *manifestChoice) []*manifestChoice {
+// before proven. The seed isn't among the candidates on purpose: it
+// is a first-boot input, not a fallback (a machine that has ever
+// proven a manifest never consults the image again), so settleStorage
+// loads it only when this comes back empty.
+func attemptOrder(c manifestCandidates) []*manifestChoice {
 	switch {
 	case c.staged != nil && c.proven != nil:
 		return []*manifestChoice{c.staged, c.proven}
@@ -219,14 +276,17 @@ func attemptOrder(c manifestCandidates, seed *manifestChoice) []*manifestChoice 
 	case c.proven != nil:
 		return []*manifestChoice{c.proven}
 	default:
-		return []*manifestChoice{seed}
+		return nil
 	}
 }
 
 // settleStorage actuates storage under the best available manifest
 // and reports which one won. An error means even the last manifest in
-// the attempt order failed; the caller stops the boot.
-func settleStorage() (*machine.Machine, machine.StorageStatus, machine.BootStatus, error) {
+// the attempt order failed (or, wrapped as errIdentity, that a first
+// boot couldn't tell which manifest is its own); the caller stops the
+// boot. The winning choice comes back whole, raw bytes and all,
+// because init later publishes those exact bytes for the operator.
+func settleStorage() (*manifestChoice, machine.StorageStatus, machine.BootStatus, error) {
 	status := machine.AllRolesInMemory()
 	boot := machine.BootStatus{}
 
@@ -236,7 +296,17 @@ func settleStorage() (*machine.Machine, machine.StorageStatus, machine.BootStatu
 	}
 	boot.Rejection = candidates.rejection
 
-	attempts := attemptOrder(candidates, loadSeed())
+	attempts := attemptOrder(candidates)
+	if len(attempts) == 0 {
+		// A machine with no durable manifests is on its first boot;
+		// only now does the image's seed matter, and with it the
+		// question of which seed is ours.
+		seed, err := loadSeed()
+		if err != nil {
+			return nil, status, boot, err
+		}
+		attempts = []*manifestChoice{seed}
+	}
 	for i, choice := range attempts {
 		if choice.source != machine.ManifestSourceSeed {
 			fmt.Printf("liken: storage: booting under the %s manifest (%.12s)\n", choice.source, choice.hash)
@@ -247,7 +317,7 @@ func settleStorage() (*machine.Machine, machine.StorageStatus, machine.BootStatu
 			boot.ManifestHash = choice.hash
 			boot.Storage = choice.m.Spec.Storage
 			settleManifests(choice, status, &boot)
-			return choice.m, status, boot, nil
+			return choice, status, boot, nil
 		}
 		if choice.source == machine.ManifestSourceStaged && i+1 < len(attempts) {
 			fmt.Fprintf(os.Stderr, "liken: storage: the staged manifest failed: %v\n", err)
@@ -266,7 +336,7 @@ func settleStorage() (*machine.Machine, machine.StorageStatus, machine.BootStatu
 			boot.Rejection = &rejection
 			continue
 		}
-		return choice.m, status, boot, err
+		return choice, status, boot, err
 	}
 	// attemptOrder never returns an empty list; the loop always returns.
 	panic("unreachable")

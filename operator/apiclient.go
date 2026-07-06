@@ -32,15 +32,24 @@ import (
 
 const serviceAccountDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 
-// machinesPath is where our CRD's objects live. The URL structure is
-// the same for every resource in Kubernetes: built-ins just use the
-// legacy /api/v1 root instead of /apis/<group>. Machines are
-// cluster-scoped, so there's no /namespaces/<ns>/ segment.
-const machinesPath = "/apis/" + machine.APIVersion + "/machines"
+// machinesPath and clustersPath are where our CRDs' objects live. The
+// URL structure is the same for every resource in Kubernetes:
+// built-ins just use the legacy /api/v1 root instead of
+// /apis/<group>. Both kinds are cluster-scoped, so there's no
+// /namespaces/<ns>/ segment.
+const (
+	machinesPath = "/apis/" + machine.APIVersion + "/machines"
+	clustersPath = "/apis/" + machine.APIVersion + "/clusters"
+)
 
 type apiClient struct {
 	base string
 	http *http.Client
+
+	// credentials is the directory holding the ServiceAccount token,
+	// a field rather than the constant above so tests can hand the
+	// client a directory of their own making.
+	credentials string
 }
 
 func inClusterClient() (*apiClient, error) {
@@ -74,6 +83,7 @@ func inClusterClient() (*apiClient, error) {
 				ResponseHeaderTimeout: 30 * time.Second,
 			},
 		},
+		credentials: serviceAccountDir,
 	}, nil
 }
 
@@ -82,7 +92,7 @@ func inClusterClient() (*apiClient, error) {
 // refreshes the mounted file as they approach expiry), and a client
 // that caches one in memory eventually starts getting 401s.
 func (c *apiClient) do(method, path, contentType string, body []byte) (*http.Response, error) {
-	token, err := os.ReadFile(serviceAccountDir + "/token")
+	token, err := os.ReadFile(c.credentials + "/token")
 	if err != nil {
 		return nil, fmt.Errorf("reading service account token: %w", err)
 	}
@@ -103,8 +113,14 @@ func (c *apiClient) do(method, path, contentType string, body []byte) (*http.Res
 }
 
 // errNotFound distinguishes "this object doesn't exist" (an ordinary
-// state the caller handles by creating it) from real failures.
-var errNotFound = fmt.Errorf("not found")
+// state the caller handles by creating it) from real failures, and
+// errConflict distinguishes "something else wrote first" (an ordinary
+// state under optimistic concurrency, handled by re-reading) the same
+// way.
+var (
+	errNotFound = fmt.Errorf("not found")
+	errConflict = fmt.Errorf("conflict: something else wrote this object first")
+)
 
 // requestJSON runs a request and decodes the JSON response into out,
 // turning non-2xx statuses into errors that carry the server's own
@@ -122,6 +138,9 @@ func (c *apiClient) requestJSON(method, path string, body []byte, out any) error
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
 		return errNotFound
+	}
+	if resp.StatusCode == http.StatusConflict {
+		return errConflict
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		message, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))

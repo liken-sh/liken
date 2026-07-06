@@ -36,10 +36,21 @@ const (
 	// server: /apis/liken.sh/v1alpha1/machines.
 	APIVersion = "liken.sh/v1alpha1"
 
-	// ManifestPath is where the image carries the machine's manifest.
-	// Init reads it directly; the operator reads the same file through
-	// a hostPath mount, to seed the in-cluster Machine on first boot.
-	ManifestPath = "/etc/liken/machine.yaml"
+	// MachineManifestDir is where the image carries Machine manifests,
+	// one file per machine (<name>.yaml). One image boots a whole
+	// fleet, so the image carries every machine's manifest and each
+	// boot selects its own: by the liken.machine=<name> kernel
+	// parameter, or, on a machine with exactly one manifest, by its
+	// being the only choice.
+	MachineManifestDir = "/etc/liken/machines"
+
+	// BootManifestPath is where init publishes the manifest this boot
+	// actually ran under (the staged or proven copy from machineState,
+	// or the image's seed on a first boot). The operator reads it
+	// through a hostPath mount to know which Machine it manages and to
+	// seed the in-cluster Machine on first boot. Like the facts file,
+	// it lives under /run because it describes the current boot only.
+	BootManifestPath = "/run/liken/machine.yaml"
 
 	// FactsPath is where init publishes what it learned about the
 	// machine, shaped exactly like MachineStatus. /run is a fresh
@@ -137,10 +148,35 @@ func (s MachineSpec) RebootPolicyOrDefault() string {
 // the manifest, DNS from the lease. Fields exist here only for
 // machines that need to deviate from that.
 type NetworkSpec struct {
-	// Interface pins network bring-up to a specific interface name
-	// (e.g. "eth1"). Empty means: the first interface that looks like
-	// real hardware.
-	Interface string `json:"interface,omitempty"`
+	// Interfaces configures the machine's interfaces explicitly, each
+	// by name. Empty means the zero-configuration default above. A
+	// machine in a cluster typically declares two: an uplink that
+	// still speaks DHCP, and the cluster-facing interface with the
+	// static address its peers were told to find it at.
+	Interfaces []InterfaceSpec `json:"interfaces,omitempty"`
+}
+
+// InterfaceSpec configures one interface. The zero value beyond Name
+// means DHCP: static addressing is the deviation, so it's the part
+// that must be spelled out.
+type InterfaceSpec struct {
+	// Name is the interface to configure (e.g. "eth1"), as the kernel
+	// names it. With no udev to rename anything, kernel names follow
+	// hardware enumeration order, which is stable for fixed hardware.
+	Name string `json:"name"`
+
+	// Address is a static address in CIDR form ("10.10.0.1/24"); the
+	// prefix length is how the kernel learns the subnet, so it is not
+	// optional. Empty means DHCP on this interface.
+	Address string `json:"address,omitempty"`
+
+	// Gateway makes this interface the default route. Optional even
+	// for static addresses: a cluster segment with nothing to route to
+	// declares none, and the uplink's DHCP lease supplies the real one.
+	Gateway string `json:"gateway,omitempty"`
+
+	// Nameservers to use alongside whatever DHCP leases supply.
+	Nameservers []string `json:"nameservers,omitempty"`
 }
 
 // Parse reads a Machine manifest from its bytes. Strict on purpose:

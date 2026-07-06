@@ -49,15 +49,20 @@ func main() {
 		fatal("in-cluster config: %v", err)
 	}
 
-	// The manifest file tells the operator which Machine it manages:
-	// the same file init booted from, read through a hostPath mount.
-	m, err := machine.Load(machine.ManifestPath)
+	// The boot manifest tells the operator which Machine it manages:
+	// the exact bytes init booted under (the proven or staged copy
+	// from machineState, or the image's seed on a first boot),
+	// published to /run/liken and read here through a hostPath mount.
+	// One image carries manifests for a whole fleet, and init already
+	// did the work of selecting this machine's; the operator trusts
+	// that selection rather than repeating it.
+	m, err := machine.Load(machine.BootManifestPath)
 	if err != nil {
-		fatal("machine manifest: %v", err)
+		fatal("boot manifest: %v", err)
 	}
 	name := m.Metadata.Name
 	if name == "" {
-		fatal("machine manifest names no machine; nothing to operate")
+		fatal("the boot manifest names no machine; nothing to operate")
 	}
 
 	// The file seeds the cluster: if no Machine object exists yet, the
@@ -70,6 +75,22 @@ func main() {
 		fatal("ensuring machine %s exists: %v", name, err)
 	}
 	fmt.Printf("operating machine %s\n", name)
+
+	// The Cluster resource gets the same treatment as the Machine: the
+	// image's cluster.yaml seeds it if it doesn't exist. Every
+	// machine's operator tries this (the manifest rides in every
+	// image), so most lose the race and find it already there, which
+	// is success: what matters is that the cluster's topology is
+	// queryable, not who published it.
+	cluster, err := machine.LoadCluster(machine.ClusterManifestPath)
+	if err != nil {
+		fatal("cluster manifest: %v", err)
+	}
+	if cluster != nil {
+		if err := ensureCluster(client, cluster); err != nil {
+			fatal("ensuring cluster %s exists: %v", cluster.Metadata.Name, err)
+		}
+	}
 
 	// The core of every operator: a level-triggered loop. Watch events
 	// tell us *when* to look; the ticker guarantees we look even when

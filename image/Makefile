@@ -5,6 +5,14 @@
 # and no installer: the entire OS is two files, the kernel and this
 # archive, and QEMU boots them directly. build.sh tells the full story
 # of what goes in and why.
+#
+# MANIFESTS points the build at the deployment's Cluster and Machine
+# manifests (a directory carrying cluster.yaml and machines/*.yaml).
+# It has no default on purpose: this domain is the production OS, and
+# which machines exist is a deployment's decision, not the OS's. The
+# root Makefile passes the repo's own lab (dev-cluster/); without it
+# the image carries no manifests, which is still a valid machine.
+MANIFESTS ?=
 
 KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 K3S_VERSION := $(strip $(file <../k3s/VERSION))
@@ -18,10 +26,11 @@ dist/liken.cpio: build.sh $(shell find etc -type f) \
 		../xtables/dist/$(XTABLES_VERSION)/bin/xtables-legacy-multi \
 		../trust/dist/$(TRUST_VERSION)/cacert.pem \
 		../identity/dist/tls/server-ca.crt \
+		../identity/dist/token \
 		../operator/dist/liken-operator-image.tar \
 		$(wildcard ../operator/manifests/*.yaml) \
 		../VERSION
-	./build.sh
+	./build.sh $(MANIFESTS)
 
 .PHONY: all clean
 

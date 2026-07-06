@@ -22,9 +22,11 @@ import (
 	"github.com/chrisguidry/liken/machine"
 )
 
-func publishFacts(conn *connection, storage machine.StorageStatus, boot machine.BootStatus) {
+func publishFacts(cluster *machine.Cluster, role string, choice *manifestChoice,
+	conns []*connection, storage machine.StorageStatus, boot machine.BootStatus) {
 	now := time.Now()
 	facts := &machine.MachineStatus{
+		Role:    role,
 		Version: machine.VersionStatus{Liken: machine.Version},
 		Hardware: machine.HardwareStatus{
 			CPUs: runtime.NumCPU(),
@@ -63,28 +65,78 @@ func publishFacts(conn *connection, storage machine.StorageStatus, boot machine.
 		facts.BootedAt = &booted
 	}
 
-	// Network facts only exist if the network came up; a machine that
-	// failed DHCP still publishes what it knows.
-	if conn != nil {
-		expires := now.Add(conn.leaseTime)
-		facts.Network = machine.NetworkStatus{
-			Interface:    conn.ifname,
-			MAC:          conn.mac.String(),
-			Addresses:    []string{conn.addr.String()},
-			Nameservers:  make([]string, 0, len(conn.nameservers)),
-			LeaseExpires: &expires,
-		}
-		if conn.gateway != nil {
-			facts.Network.Gateway = conn.gateway.String()
-		}
-		for _, ns := range conn.nameservers {
-			facts.Network.Nameservers = append(facts.Network.Nameservers, ns.String())
-		}
-	}
+	// Network facts only exist for interfaces that came up; a machine
+	// that failed DHCP still publishes what it knows. The top-level
+	// summary describes the primary interface: the cluster-facing one
+	// when the Cluster's nodeCIDR identifies it, otherwise the first
+	// that came up.
+	facts.Network = networkFacts(cluster, conns, now)
 
 	if err := machine.WriteFacts(machine.FactsPath, facts); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: writing facts: %v\n", err)
 		return
 	}
 	fmt.Printf("liken: facts published to %s\n", machine.FactsPath)
+
+	// The manifest this boot ran under, byte for byte: the operator's
+	// way to know which Machine it manages (and, on a first boot, the
+	// spec to seed the in-cluster Machine from). Published beside the
+	// facts because it shares their lifetime: it describes this boot.
+	if len(choice.raw) > 0 {
+		if err := os.WriteFile(machine.BootManifestPath, choice.raw, 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "liken: writing the boot manifest: %v\n", err)
+		}
+	}
+}
+
+// networkFacts folds every connection into a NetworkStatus.
+func networkFacts(cluster *machine.Cluster, conns []*connection, now time.Time) machine.NetworkStatus {
+	status := machine.NetworkStatus{}
+	if len(conns) == 0 {
+		return status
+	}
+
+	for _, conn := range conns {
+		status.Interfaces = append(status.Interfaces, interfaceFacts(conn, now))
+	}
+
+	primary := conns[0]
+	if _, ifname := nodeAddress(cluster, conns); ifname != "" {
+		for _, conn := range conns {
+			if conn.ifname == ifname {
+				primary = conn
+			}
+		}
+	}
+	summary := interfaceFacts(primary, now)
+	status.Interface = summary.Name
+	status.MAC = summary.MAC
+	status.Addresses = []string{summary.Address}
+	status.Gateway = summary.Gateway
+	status.Nameservers = summary.Nameservers
+	status.LeaseExpires = summary.LeaseExpires
+	return status
+}
+
+// interfaceFacts is one connection as status: the same facts the
+// console report prints, made queryable.
+func interfaceFacts(conn *connection, now time.Time) machine.InterfaceStatus {
+	status := machine.InterfaceStatus{
+		Name:        conn.ifname,
+		MAC:         conn.mac.String(),
+		Address:     conn.addr.String(),
+		Method:      conn.method,
+		Nameservers: make([]string, 0, len(conn.nameservers)),
+	}
+	if conn.method == machine.MethodDHCP {
+		expires := now.Add(conn.leaseTime)
+		status.LeaseExpires = &expires
+	}
+	if conn.gateway != nil {
+		status.Gateway = conn.gateway.String()
+	}
+	for _, ns := range conn.nameservers {
+		status.Nameservers = append(status.Nameservers, ns.String())
+	}
+	return status
 }

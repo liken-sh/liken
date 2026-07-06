@@ -6,6 +6,9 @@ package main
 // the decisions they act on are pinned here.
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -59,7 +62,6 @@ func TestFindMachineStatePartitionRefusesDuplicates(t *testing.T) {
 func TestAttemptOrder(t *testing.T) {
 	staged := &manifestChoice{source: machine.ManifestSourceStaged}
 	proven := &manifestChoice{source: machine.ManifestSourceProven}
-	seed := &manifestChoice{source: machine.ManifestSourceSeed}
 
 	cases := []struct {
 		name string
@@ -72,13 +74,14 @@ func TestAttemptOrder(t *testing.T) {
 		{"staged then proven", manifestCandidates{staged: staged, proven: proven}, []string{"Staged", "Proven"}},
 		// A staged file with no proven behind it: nothing to fall back to.
 		{"staged alone", manifestCandidates{staged: staged}, []string{"Staged"}},
-		// First boot: the seed's one appearance.
-		{"first boot", manifestCandidates{}, []string{"Seed"}},
+		// First boot: no durable candidates at all, which is
+		// settleStorage's cue to consult the image's seed.
+		{"first boot", manifestCandidates{}, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var got []string
-			for _, choice := range attemptOrder(c.c, seed) {
+			for _, choice := range attemptOrder(c.c) {
 				got = append(got, choice.source)
 			}
 			if len(got) != len(c.want) {
@@ -90,5 +93,70 @@ func TestAttemptOrder(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// seedDir builds a manifests directory with the given file names, so
+// each selection case reads as data.
+func seedDir(t *testing.T, names ...string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestSeedPathSelection(t *testing.T) {
+	cases := []struct {
+		name      string
+		files     []string
+		requested string
+		want      string // the base name of the chosen path; "" for none
+		wantErr   string // a fragment the error must carry; "" for success
+	}{
+		{"explicit selection", []string{"node-1.yaml", "node-2.yaml"}, "node-2", "node-2.yaml", ""},
+		{"explicit selection among one", []string{"node-1.yaml"}, "node-1", "node-1.yaml", ""},
+		{"a lone manifest needs no name", []string{"node-1.yaml"}, "", "node-1.yaml", ""},
+		{"no manifests is a valid machine", nil, "", "", ""},
+		{"a name that matches nothing", []string{"node-1.yaml"}, "node-9", "", "liken.machine=node-9"},
+		{"many manifests and no name", []string{"node-1.yaml", "node-2.yaml"}, "", "", "refusing to guess"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := seedDir(t, c.files...)
+			got, err := seedPath(dir, c.requested)
+			if c.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected an error mentioning %q, got path %q", c.wantErr, got)
+				}
+				if !errors.Is(err, errIdentity) {
+					t.Errorf("selection failures should be identity errors: %v", err)
+				}
+				if !strings.Contains(err.Error(), c.wantErr) {
+					t.Errorf("error should mention %q: %v", c.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := ""
+			if c.want != "" {
+				want = filepath.Join(dir, c.want)
+			}
+			if got != want {
+				t.Errorf("got %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestSeedPathMissingDirectoryIsNoManifest(t *testing.T) {
+	got, err := seedPath(filepath.Join(t.TempDir(), "does-not-exist"), "")
+	if err != nil || got != "" {
+		t.Errorf("a missing directory should mean no manifest: %q, %v", got, err)
 	}
 }

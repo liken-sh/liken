@@ -1,7 +1,14 @@
-# k3s's configuration: the file /etc/rancher/k3s/config.yaml, which
-# k3s reads on its own; liken passes no flags.
+# k3s's configuration for a machine in the server role: the file
+# /etc/rancher/k3s/config.yaml, which `k3s server` reads on its own;
+# liken passes no flags. (A machine in the agent role reads agent.yaml
+# beside this file instead: k3s maps config keys onto flags, and an
+# agent would refuse the server-only ones here.) Everything only the
+# boot can derive — the join token, the cluster's address plan, this
+# machine's node IP — lands in config.yaml.d/boot.yaml, a drop-in
+# directory k3s reads alongside this file; init writes it fresh every
+# boot (see init/k3s.go).
 #
-# The configuration is minimal: k3s bundles several conveniences
+# The static configuration is minimal: k3s bundles several conveniences
 # (Traefik for ingress, a service load balancer, a metrics server) that
 # liken disables. Anything a machine needs beyond the Kubernetes
 # control plane itself should arrive as a declared, visible workload,
@@ -24,9 +31,10 @@ default-local-storage-path: /var/lib/liken/pod-storage
 # with exactly one user, who is root.
 write-kubeconfig-mode: "0644"
 
-# NodePort services listen only on the primary interface's address.
-# The default (every local IP, including whatever CNI interfaces
-# appear later) is broad enough that kube-proxy logs a complaint
-# about it at startup, and these machines have one interface anyway.
+# NodePort services listen only on the node IP's interface: the
+# cluster segment, where the rest of the cluster expects to find this
+# node. The default (every local IP, including the uplink and
+# whatever CNI interfaces appear later) is broad enough that
+# kube-proxy logs a complaint about it at startup.
 kube-proxy-arg:
   - nodeport-addresses=primary

@@ -1,26 +1,35 @@
-# The Machine manifest: the one document that configures a liken
-# machine. It's shaped like a Kubernetes resource on purpose: the same
-# document exists in the cluster as a real Machine resource, where the
-# liken operator publishes the machine's live facts into its status.
+# node-1: the lab's first machine, and (per cluster.yaml's servers
+# list) its control plane.
 #
-# This file is a seed, consulted exactly once. The first boot runs
-# under it, and that boot's success writes it to the machineState
-# filesystem as the first *proven* manifest; every boot after reads
-# its manifests from that disk, not from here. Editing the Machine in
-# the cluster is how configuration changes from then on: the operator
-# stages the edited spec to the same disk, and the next boot applies
-# it (or falls back to the proven copy if it can't).
-#
-# The defaults are deliberately minimal: an empty spec means DHCP on
-# the first real network interface, DNS from the lease, done.
-# Configuration is for exceptions.
+# One image boots the whole fleet, so this directory carries a
+# manifest per machine and each boot selects its own by the
+# liken.machine=<name> kernel parameter — the bootloader's channel,
+# configured per machine even when the image is shared. This file is
+# a seed, consulted exactly once: the first boot runs under it, and
+# that boot's success writes it to the machineState filesystem as the
+# first *proven* manifest; every boot after reads its manifests from
+# that disk, not from here. Editing the Machine in the cluster is how
+# configuration changes from then on.
 apiVersion: liken.sh/v1alpha1
 kind: Machine
 metadata:
-  # The machine's name: its hostname, and its Kubernetes node name.
-  name: liken-dev
+  # The machine's name: its hostname, its Kubernetes node name, and
+  # the name the cluster.yaml servers list refers to.
+  name: node-1
 spec:
-  network: {}
+  network:
+    # Two interfaces, two jobs. eth0 is the uplink: it speaks DHCP to
+    # whatever network the machine is plugged into and carries traffic
+    # to the outside world. eth1 is the cluster segment: its address
+    # is static because it is a *promise* — cluster.yaml's endpoint
+    # tells every agent to find the control plane at 10.10.0.1, so
+    # that address has to exist before any negotiation could assign
+    # it. (In the lab, the segment is a dumb wire between QEMU guests
+    # with no DHCP server on it anyway; see dev-cluster/Makefile.)
+    interfaces:
+      - name: eth0
+      - name: eth1
+        address: 10.10.0.1/24
   # Storage is declared by purpose, not by mount path; the paths are
   # liken's implementation details. Each role names the device it lives
   # on and, when sharing a disk, how much of it to take; one role per

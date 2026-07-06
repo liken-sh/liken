@@ -1,0 +1,19 @@
+# k3s's configuration for a machine in the agent role.
+#
+# An agent cannot read the server's config.yaml sitting next to this
+# file: k3s maps config keys onto command-line flags, and `k3s agent`
+# treats server-only flags (disable, default-local-storage-path, ...)
+# as unknown. So each role gets its own static file, and init points
+# the agent here explicitly (`k3s agent --config`). Everything only
+# the boot can derive — which server to join, the token, this
+# machine's node IP — lands in agent.yaml.d/boot.yaml, a drop-in
+# directory k3s reads alongside this file; init writes it fresh every
+# boot (see init/k3s.go).
+
+# NodePort services listen only on the node IP's interface: the
+# cluster segment, where the rest of the cluster expects to find this
+# node. The default (every local IP, including the uplink and
+# whatever CNI interfaces appear later) is broad enough that
+# kube-proxy logs a complaint about it at startup.
+kube-proxy-arg:
+  - nodeport-addresses=primary

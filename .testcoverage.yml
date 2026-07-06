@@ -17,10 +17,8 @@
 profile: coverage.out
 
 threshold:
-  # The whole module, everything counted, including the operator
-  # (currently untested; its watch loop wants the same
-  # decisions-from-actions split init's storage got).
-  total: 36
+  # The whole module, everything counted.
+  total: 37
 
 override:
   # The Machine API: pure functions over declared types. (Paths here
@@ -28,7 +26,8 @@ override:
   - path: ^machine$
     threshold: 85
   # The operator: its decisions (drift, staging validation, the
-  # convergence truth table) are pure and tested; the floor holds
-  # them while the watch loop and API client stay e2e territory.
+  # convergence truth table) are pure and tested, and the API client
+  # and seeding loops are exercised against a real HTTP test server;
+  # the watch loop stays e2e territory.
   - path: ^operator$
-    threshold: 31
+    threshold: 43

@@ -1,0 +1,2 @@
+# The dev cluster's disks: state, not source; `make` creates them blank.
+dist/

@@ -7,7 +7,7 @@ package main
 // from the machinery they authorize. The actions themselves (writing
 // a GPT through the kernel, mke2fs, the mount syscalls, and the
 // power-off a refusal triggers) need a real machine, and belong to
-// the QEMU harness in dev-machine/, which watches for the same
+// the QEMU harness in dev-cluster/, which watches for the same
 // refusal messages these tests pin, on the serial console.
 
 import (

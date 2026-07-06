@@ -8,25 +8,28 @@
 # harmless for now: the next build mints a new identity and the next
 # boot uses it.
 
-# All the authorities are minted by one script run, which GNU make
+# The whole identity is minted by one script run, which GNU make
 # expresses as a grouped target (&:): one recipe that produces the
-# whole set, rather than five rules racing to run the same script.
-CAS := dist/tls/server-ca.crt \
-       dist/tls/client-ca.crt \
-       dist/tls/request-header-ca.crt \
-       dist/tls/etcd/server-ca.crt \
-       dist/tls/etcd/peer-ca.crt \
-       dist/tls/service.key
+# whole set, rather than several rules racing to run the same script.
+# mint.sh is idempotent per artifact, so a re-run (say, after the set
+# grows a new artifact) fills gaps without replacing what exists.
+IDENTITY := dist/tls/server-ca.crt \
+            dist/tls/client-ca.crt \
+            dist/tls/request-header-ca.crt \
+            dist/tls/etcd/server-ca.crt \
+            dist/tls/etcd/peer-ca.crt \
+            dist/tls/service.key \
+            dist/token
 
-$(CAS) &: mint.sh
+$(IDENTITY) &: mint.sh
 	./mint.sh
 
-dist/kubeconfig: kubeconfig.sh $(CAS)
+dist/kubeconfig: kubeconfig.sh $(IDENTITY)
 	./kubeconfig.sh
 
 .PHONY: all kubeconfig clean
 
-all: $(CAS)
+all: $(IDENTITY)
 
 kubeconfig: dist/kubeconfig
 

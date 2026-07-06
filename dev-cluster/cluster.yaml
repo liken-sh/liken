@@ -1,0 +1,47 @@
+# The Cluster manifest: the document that describes what the machines
+# form together. Everything here is a fact the whole fleet must agree
+# on, which is why it lives in its own document rather than being
+# repeated (and inevitably diverging) across Machine manifests. The
+# same file rides in every machine's image — cluster-scoped truth has
+# exactly one copy — and, like the Machine manifest, it is seeded into
+# the cluster as a real resource once the API is up, so `kubectl get
+# clusters` answers the question "what is this fleet?".
+#
+# What is deliberately NOT here: the join token. The spec carries
+# topology; secrets ride in the identity bundle (/etc/liken/token,
+# minted offline by identity/mint.sh alongside the CAs it hashes).
+apiVersion: liken.sh/v1alpha1
+kind: Cluster
+metadata:
+  name: lab
+spec:
+  # The machines that run control planes, by Machine name. A machine
+  # derives its role by looking for its own name here: listed means
+  # server, absent means agent. One server for now; a second entry is
+  # a later milestone (quorum needs etcd, and two servers can't vote).
+  servers: [node-1]
+
+  # Where agents join: the one server's address on the cluster
+  # segment, which its Machine manifest promises below in
+  # machines/node-1.yaml. Port 6443 is the Kubernetes API's
+  # conventional port, and k3s's join protocol rides the same
+  # listener.
+  endpoint: https://10.10.0.1:6443
+
+  network:
+    # The subnet the nodes speak Kubernetes over. A machine may have
+    # several interfaces (the lab gives each an internet uplink too);
+    # the one whose address falls inside this subnet carries cluster
+    # traffic, and that address becomes the machine's node IP.
+    nodeCIDR: 10.10.0.0/24
+
+    # The cluster's internal address plan. These are k3s's defaults,
+    # written out rather than assumed: every node must agree on them,
+    # and a fact the whole fleet depends on shouldn't be implicit.
+    # Pod addresses come from clusterCIDR, service addresses from
+    # serviceCIDR, and clusterDNS is the address every pod's
+    # resolv.conf points at (it must sit inside serviceCIDR).
+    clusterCIDR: 10.42.0.0/16
+    serviceCIDR: 10.43.0.0/16
+    clusterDNS: 10.43.0.10
+    clusterDomain: cluster.local

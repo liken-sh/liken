@@ -48,7 +48,7 @@ func ensureMachine(c *apiClient, seed *machine.Machine) (*machine.Machine, error
 		}
 		err = c.requestJSON(http.MethodPost, machinesPath, body, nil)
 		if err == nil {
-			fmt.Printf("created machine %s from %s\n", seed.Metadata.Name, machine.ManifestPath)
+			fmt.Printf("created machine %s from %s\n", seed.Metadata.Name, machine.BootManifestPath)
 			continue // re-GET so we return the server's copy, resourceVersion and all
 		}
 		if err == errNotFound {
@@ -58,6 +58,51 @@ func ensureMachine(c *apiClient, seed *machine.Machine) (*machine.Machine, error
 		}
 		return nil, err
 	}
+}
+
+// ensureCluster makes the manifest's Cluster real in the cluster,
+// with the same wait-for-the-CRD patience as ensureMachine and one
+// extra tolerated answer: 409 Conflict. Every machine's operator
+// races to create the same object at boot; the losers' POSTs conflict
+// with the winner's, and the loop's next GET confirms the object
+// exists, which is all anyone wanted.
+func ensureCluster(c *apiClient, seed *machine.Cluster) error {
+	for {
+		if _, err := getCluster(c, seed.Metadata.Name); err == nil {
+			return nil
+		} else if err != errNotFound {
+			return err
+		}
+
+		body, err := json.Marshal(&machine.Cluster{
+			APIVersion: machine.APIVersion,
+			Kind:       "Cluster",
+			Metadata:   machine.ObjectMeta{Name: seed.Metadata.Name},
+			Spec:       seed.Spec,
+		})
+		if err != nil {
+			return err
+		}
+		switch err := c.requestJSON(http.MethodPost, clustersPath, body, nil); err {
+		case nil:
+			fmt.Printf("created cluster %s from %s\n", seed.Metadata.Name, machine.ClusterManifestPath)
+		case errNotFound:
+			fmt.Println("cluster API not served yet; waiting")
+			time.Sleep(5 * time.Second)
+		case errConflict:
+			// Another machine's operator got there first.
+		default:
+			return err
+		}
+	}
+}
+
+func getCluster(c *apiClient, name string) (*machine.Cluster, error) {
+	cluster := &machine.Cluster{}
+	if err := c.requestJSON(http.MethodGet, clustersPath+"/"+name, nil, cluster); err != nil {
+		return nil, err
+	}
+	return cluster, nil
 }
 
 // reconcile is one full pass of the operator's job, always from

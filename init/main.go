@@ -31,6 +31,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -75,15 +76,26 @@ func main() {
 	// Storage settles first, and with it the question of which
 	// manifest this boot runs under: the staged one awaiting its
 	// proving boot, the proven last-known-good, or (first boot only)
-	// the seed baked into the image. manifests.go tells that story.
-	// Everything after this line configures the machine from the
-	// manifest that *won*, never from one that was rejected along the
-	// way. This is also the one actuator allowed to stop a boot;
-	// storage.go explains why an unsatisfiable role powers the
-	// machine off.
-	m, storage, boot, err := settleStorage()
+	// the seed baked into the image — selected by liken.machine= when
+	// the image carries manifests for many machines. manifests.go
+	// tells that story. Everything after this line configures the
+	// machine from the manifest that *won*, never from one that was
+	// rejected along the way. This is also one of the two actuators
+	// allowed to stop a boot; failBoot's rationales explain both.
+	choice, storage, boot, err := settleStorage()
 	if err != nil {
-		failBoot("%v", err)
+		failBoot(err)
+	}
+	m := choice.m
+
+	// The cluster manifest rides in every machine's image: it says
+	// which machines are servers, and from it this machine derives
+	// what it is. Reading it can also stop the boot (a cluster
+	// manifest that won't parse leaves the machine unable to know its
+	// role), which is why it's read here, before anything acts on it.
+	cluster, err := loadCluster()
+	if err != nil {
+		failBoot(err)
 	}
 
 	if name := m.Metadata.Name; name != "" {
@@ -104,10 +116,11 @@ func main() {
 
 	worldReport()
 
-	conn, err := bringUpNetwork(m.Spec.Network)
+	conns, err := bringUpNetwork(m.Spec.Network)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "liken: network: %v\n", err)
-	} else {
+	}
+	for _, conn := range conns {
 		conn.report()
 	}
 
@@ -116,11 +129,23 @@ func main() {
 	// forever. A machine without k3s (the image's minimal form) just
 	// proves it can boot and powers off.
 	if _, err := os.Stat(k3sBinary); err == nil {
+		// The machine's role and k3s's boot-derived configuration
+		// come from the cluster manifest (k3s.go). A failure here is
+		// an identity problem too: an agent that can't say where its
+		// cluster is must not come up pretending otherwise.
+		role, err := writeK3sBootConfig(cluster, m.Metadata.Name, conns)
+		if err != nil {
+			failBoot(fmt.Errorf("%w: %v", errIdentity, err))
+		}
+		// The node password k3s mints on first join has to outlive
+		// this boot, or the machine can never rejoin its own cluster
+		// (k3s.go tells the story).
+		persistNodePassword(storage)
 		prepareForK3s()
 		// Facts wait until here because they live under /run, and
 		// prepareForK3s just mounted a fresh tmpfs there; anything
 		// written earlier would be shadowed by the mount.
-		publishFacts(conn, storage, boot)
+		publishFacts(cluster, role, choice, conns, storage, boot)
 		// The reboot channel: init creates the directory (owning its
 		// existence and permissions), the operator writes into it,
 		// and the watcher carries at most one request into the
@@ -131,8 +156,14 @@ func main() {
 		rebootRequests := make(chan machine.RebootIntent, 1)
 		go watchForRebootIntent(machine.OperatorRunDir, 2*time.Second, rebootRequests)
 		loadModules()
-		go reportWhenReady()
-		superviseK3s(rebootRequests) // never returns
+		// Only a server can narrate cluster state: the admin
+		// kubeconfig is a control-plane artifact, and agents hold no
+		// credentials of their own. An agent's join shows up on the
+		// server's console (and in the agent's own k3s log lines).
+		if role == machine.RoleServer {
+			go reportWhenReady()
+		}
+		superviseK3s(role, rebootRequests) // never returns
 	}
 
 	// With no k3s to supervise, a boot is complete once the report is
@@ -154,15 +185,26 @@ func powerOff() {
 	}
 }
 
-// failBoot is the fail-stop for storage: print the problem, then
-// power off instead of starting a cluster with declared storage
-// unsatisfied. It lives here rather than in storage.go because it is
-// boot policy, not storage logic: storage reports what it couldn't
-// do, and main decides that a machine declared to have persistent
-// state must not come up ephemeral.
-func failBoot(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "liken: storage: "+format+"\n", args...)
-	fmt.Fprintln(os.Stderr, "liken: storage: a declared role can't be satisfied, and a machine declared to have persistent state must not come up ephemeral; powering off")
+// failBoot is the fail-stop: print the problem and why it warrants a
+// power-off, then power off. It lives here rather than in storage.go
+// or manifests.go because it is boot policy, not domain logic: the
+// domains report what they couldn't do, and main decides which
+// failures a machine must not run through. There are two:
+//
+//   - identity: the machine can't tell which manifest, or which role,
+//     is its own. Guessing could join the wrong cluster, start a
+//     rival control plane, or claim another machine's disks.
+//   - storage: a declared role can't be satisfied, and a machine
+//     declared to have persistent state must not come up ephemeral.
+//
+// Both are cases of the same rule: down is recoverable, wrong is not.
+func failBoot(err error) {
+	rationale := "storage: a declared role can't be satisfied, and a machine declared to have persistent state must not come up ephemeral; powering off"
+	if errors.Is(err, errIdentity) {
+		rationale = "identity: one image boots many machines, and a machine that can't tell which configuration is its own must not guess; powering off"
+	}
+	fmt.Fprintf(os.Stderr, "liken: %v\n", err)
+	fmt.Fprintf(os.Stderr, "liken: %s\n", rationale)
 	powerOff()
 	// powerOff only returns if the reboot syscall failed; PID 1 still
 	// must never exit, so hold the machine here for a person to
@@ -170,6 +212,25 @@ func failBoot(format string, args ...any) {
 	for {
 		time.Sleep(time.Hour)
 	}
+}
+
+// bootParamValue returns the value of a name=value parameter on the
+// kernel command line ("" when absent): the channel for facts a
+// machine must know before it has read any file, like which machine
+// it is. The bootloader owns the command line, which is exactly why
+// it can carry identity: it's configured per machine even when the
+// image is shared by a fleet.
+func bootParamValue(name string) string {
+	raw, err := os.ReadFile("/proc/cmdline")
+	if err != nil {
+		return ""
+	}
+	for _, field := range strings.Fields(string(raw)) {
+		if value, ok := strings.CutPrefix(field, name+"="); ok {
+			return value
+		}
+	}
+	return ""
 }
 
 // bootParam reports whether a word appears on the kernel command

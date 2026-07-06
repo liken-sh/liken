@@ -43,6 +43,9 @@ spec:
         status: {}
       # What `kubectl get machines` prints, without -o yaml.
       additionalPrinterColumns:
+        - name: Role
+          type: string
+          jsonPath: .status.role
         - name: Address
           type: string
           jsonPath: .status.network.addresses[0]
@@ -143,11 +146,40 @@ spec:
                     real hardware. Applied by init at boot; changing it
                     in-cluster takes effect next boot.
                   properties:
-                    interface:
-                      type: string
+                    interfaces:
+                      type: array
                       description: >-
-                        Pins network bring-up to a specific interface
-                        name, e.g. eth1.
+                        Configures the machine's interfaces explicitly,
+                        each by its kernel name. A clustered machine
+                        typically declares two: a DHCP uplink, and the
+                        cluster-facing interface with the static
+                        address its peers were told to find it at.
+                      items:
+                        type: object
+                        required: [name]
+                        properties:
+                          name:
+                            type: string
+                            description: >-
+                              The interface to configure, as the kernel
+                              names it (e.g. eth1).
+                          address:
+                            type: string
+                            description: >-
+                              A static address in CIDR form
+                              (10.10.0.1/24); the prefix length is how
+                              the kernel learns the subnet. Empty means
+                              DHCP on this interface.
+                          gateway:
+                            type: string
+                            description: >-
+                              Makes this interface the default route.
+                              Optional even for static addresses; a
+                              DHCP lease elsewhere may supply it.
+                          nameservers:
+                            type: array
+                            items:
+                              type: string
                 sysctls:
                   type: object
                   description: >-
@@ -259,6 +291,13 @@ spec:
                 reconcile pass (nothing is remembered), so it reports
                 what currently holds, not what once did.
               properties:
+                role:
+                  type: string
+                  description: >-
+                    What this machine is in its cluster: a server (it
+                    runs a control plane) or an agent (it runs
+                    workloads). Derived at boot from the Cluster
+                    manifest's servers list, never declared here.
                 version:
                   type: object
                   description: >-
@@ -277,7 +316,12 @@ spec:
                         it: version and variant (legacy vs nft).
                 network:
                   type: object
-                  description: The boot's DHCP outcome.
+                  description: >-
+                    The boot's networking outcome, DHCP leases and
+                    static assignments alike. The top-level fields
+                    summarize the primary interface (the cluster-facing
+                    one when the Cluster's nodeCIDR identifies it);
+                    interfaces carries the full per-interface detail.
                   properties:
                     interface:
                       type: string
@@ -296,6 +340,31 @@ spec:
                     leaseExpires:
                       type: string
                       format: date-time
+                    interfaces:
+                      type: array
+                      items:
+                        type: object
+                        required: [name]
+                        properties:
+                          name:
+                            type: string
+                          mac:
+                            type: string
+                          address:
+                            type: string
+                          method:
+                            type: string
+                            description: >-
+                              How the address arrived: DHCP or Static.
+                          gateway:
+                            type: string
+                          nameservers:
+                            type: array
+                            items:
+                              type: string
+                          leaseExpires:
+                            type: string
+                            format: date-time
                 hardware:
                   type: object
                   properties:

@@ -84,14 +84,16 @@ operator/dist/liken-operator-image.tar: $(wildcard operator/*.go) \
 
 operator: operator/dist/liken-operator-image.tar
 
-# The cluster's identity: certificate authorities minted here, in the
-# repo, before any machine boots (see identity/mint.sh). The keys are
-# gitignored and the artifacts carry no version; losing or remaking
-# them just gives the next boot a new identity.
-identity/dist/tls/server-ca.crt: identity/mint.sh
+# The cluster's identity: certificate authorities and the join token,
+# minted here, in the repo, before any machine boots (see
+# identity/mint.sh; the token can exist this early precisely because
+# the CA it hashes does). The keys are gitignored and the artifacts
+# carry no version; losing or remaking them just gives the next boot
+# a new identity.
+identity/dist/tls/server-ca.crt identity/dist/token &: identity/mint.sh
 	$(MAKE) -C identity
 
-identity: identity/dist/tls/server-ca.crt
+identity: identity/dist/tls/server-ca.crt identity/dist/token
 
 # An operator's admin credential, computed offline from the client
 # CA; the machine is never asked for it (see identity/kubeconfig.sh).
@@ -103,44 +105,52 @@ kubeconfig: identity/dist/tls/server-ca.crt
 	$(MAKE) -C identity kubeconfig
 
 # The bootable initramfs: the image domain packs liken and everything
-# k3s needs into the cpio archive the kernel unpacks at boot.
+# k3s needs into the cpio archive the kernel unpacks at boot. The
+# image domain is production code and carries no manifests of its
+# own; the root is where the OS meets this repo's own deployment, so
+# it points the build at the dev cluster's Cluster and Machine
+# manifests here.
 image/dist/liken.cpio: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s \
 		$(XTABLES_DIST)/bin/xtables-legacy-multi \
 		$(TRUST_DIST)/cacert.pem \
 		$(E2FSPROGS_DIST)/mke2fs \
-		identity/dist/tls/server-ca.crt \
+		identity/dist/tls/server-ca.crt identity/dist/token \
 		operator/dist/liken-operator-image.tar \
 		$(wildcard operator/manifests/*.yaml) \
+		dev-cluster/cluster.yaml $(wildcard dev-cluster/machines/*.yaml) \
 		image/build.sh $(shell find image/etc -type f) image/Makefile
-	$(MAKE) -C image
+	$(MAKE) -C image MANIFESTS=../dev-cluster
 
 image: image/dist/liken.cpio
 
-# Boot the whole thing on the dev machine, the QEMU guest that stands
-# in for the physical and cloud machines liken really targets (the
-# virtual hardware and every QEMU flag are documented in
-# dev-machine/Makefile). The root's job here, as everywhere, is making
-# sure the artifacts exist, in order, before handing off.
+# Boot the dev cluster's machines, the QEMU guests that stand in for
+# the physical and cloud machines liken really targets (the virtual
+# hardware and every QEMU flag are documented in dev-cluster/
+# Makefile). NODE picks which machine this terminal becomes; the
+# cluster is one `make run` (the server) plus one `make run
+# NODE=node-2` (the agent) in a second terminal. The root's job here,
+# as everywhere, is making sure the artifacts exist, in order, before
+# handing off.
 run: $(KERNEL_DIST)/vmlinuz image/dist/liken.cpio
-	$(MAKE) -C dev-machine run
+	$(MAKE) -C dev-cluster run
 
 # One-shot boots for debugging and automation: liken.oneshot tells init
 # not to restart k3s: its first exit powers the machine off, QEMU
 # exits, and the console log is a complete, bounded record of the boot.
 run-once: $(KERNEL_DIST)/vmlinuz image/dist/liken.cpio
-	$(MAKE) -C dev-machine run-once
+	$(MAKE) -C dev-cluster run-once
 
 # The reboot-capable run: a guest-initiated restart resets the VM in
 # place instead of ending it, which is how to watch a staged spec
 # apply: shutdown and next boot in one console stream.
 run-lab: $(KERNEL_DIST)/vmlinuz image/dist/liken.cpio
-	$(MAKE) -C dev-machine run-lab
+	$(MAKE) -C dev-cluster run-lab
 
-# Cleaning includes the dev machine's disks: with every domain's
+# Cleaning includes the dev cluster's disks: with every domain's
 # artifacts gone, stale machine state would be the only survivor, and
 # a "clean" boot that remembers its last cluster isn't clean.
 clean:
-	$(MAKE) -C dev-machine clean
+	$(MAKE) -C dev-cluster clean
 	$(MAKE) -C kernel clean
 	$(MAKE) -C k3s clean
 	$(MAKE) -C xtables clean

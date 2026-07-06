@@ -177,53 +177,100 @@
           spec returns to what the machine runs, the operator also
           withdraws any manifest still staged (the next boot would
           have applied it) and clears the standing rejection.
-6. [ ] Growing the cluster past one node, driven by a `kind: Cluster`
+6. [x] Growing the cluster past one node, driven by a `kind: Cluster`
        resource: one server and one agent, with every decision made
        explicitly rather than discovered at runtime. The join token is
        an input like the rest of identity: k3s's secure token format
        is `K10<CA-hash>::user:pass`, and the CA it hashes is the
-       server CA that identity/ already mints — so make can compute
-       the whole token offline and bake it into the identity bundle.
+       server CA that identity/ already mints — so make computes the
+       whole token offline and bakes it into the identity bundle.
        The spec carries topology; the identity bundle carries secrets;
        nothing is ever extracted from a running machine (which a
        machine with no shell could never hand over anyway). Machines
        get static addresses declared in their manifests, and a machine
        finds its own manifest by `liken.machine=<name>` on the kernel
        command line — the one channel the bootloader already owns. One
-       boot medium carries cluster.yml and a manifest per machine
-       (node-1.yml, node-2.yml, ...), so a single image can boot the
-       whole fleet.
-   1. [ ] The Cluster CRD (cluster.yml, file-delivered like the
-          Machine manifest and seeded by the operator): spec.servers
-          names the machines that run control planes, and spec.network
-          holds the facts k3s requires every node to agree on (cluster
-          CIDR, service CIDR, cluster DNS, cluster domain) —
-          cluster-scoped truths that masquerade as per-node flags. A
-          machine's role is derived, not declared: am I named in
-          spec.servers? Promoting an agent is then a Cluster edit, not
-          a coordinated pair of Machine edits.
-   2. [ ] The token joins the identity bundle: mint.sh hashes the
+       boot medium carries cluster.yaml and a manifest per machine
+       (node-1.yaml, node-2.yaml, ...), so a single image boots the
+       whole fleet. Which fleet is a *deployment's* decision, not the
+       OS's: the manifests are an input to the image build, and the
+       repo's own deployment is the dev-cluster/ domain — the
+       manifests and the QEMU guests that boot them, together.
+   1. [x] The Cluster CRD (cluster.yaml, file-delivered like the
+          Machine manifest and seeded by the operator, every node's
+          operator racing to create it and the losers' 409s reading
+          as success): spec.servers names the machines that run
+          control planes, and spec.network holds the facts k3s
+          requires every node to agree on (cluster CIDR, service
+          CIDR, cluster DNS, cluster domain) — cluster-scoped truths
+          that masquerade as per-node flags — plus nodeCIDR, the
+          subnet nodes address each other on. A machine's role is
+          derived, not declared: am I named in spec.servers?
+          Promoting an agent is then a Cluster edit, not a
+          coordinated pair of Machine edits.
+   2. [x] The token joins the identity bundle: mint.sh hashes the
           server CA, appends a random secret, and writes the token
-          next to the TLS material; init hands it to k3s (`--token` on
-          servers, `--token` plus `--server` on agents).
-   3. [ ] Static networking: spec.network grows address, gateway, and
-          nameservers (DHCP remains the default when they're omitted).
-          This was an open problem; the lab forces it onto the
-          critical path, because the shared segment joining two QEMU
-          guests is a dumb wire with no DHCP server on it.
-   4. [ ] liken.machine=: init reads its name from the kernel command
-          line and selects its manifest from the set the image
+          next to the TLS material (idempotently — re-running mint.sh
+          fills gaps but never replaces an identity machines already
+          carry). It rides at /etc/liken/token, outside k3s's data
+          directory, because the clusterState filesystem mounts over
+          that; init hands k3s the *path* (token-file), so the secret
+          never appears in a config file or on a command line.
+   3. [x] Static networking: spec.network grows an interfaces list
+          (name, address in CIDR form, optional gateway and
+          nameservers; no address means DHCP, and an empty spec still
+          means DHCP on the first real NIC). This was an open
+          problem; the lab forced it onto the critical path, because
+          the shared segment joining two QEMU guests is a dumb wire
+          with no DHCP server on it. Each machine runs two
+          interfaces: a DHCP uplink and the statically-addressed
+          cluster segment, and the Cluster's nodeCIDR is what picks
+          which address becomes the node IP (k3s left to itself picks
+          the default-route interface — the uplink, exactly wrong).
+   4. [x] liken.machine=: init reads its name from the kernel command
+          line and selects its seed from the manifests the image
           carries; after first boot, machineState carries the proven
-          manifest forward exactly as today.
-   5. [ ] The lab grows a node dimension: per-node dist directories,
+          manifest forward exactly as before. Selection refuses to
+          guess: a name matching no manifest, or many manifests with
+          no name, powers the machine off with the story on the
+          console (a first boot under the wrong identity could join
+          the wrong cluster or claim another machine's disks; wrong
+          is worse than down). A cluster manifest that won't parse is
+          fatal the same way: a machine that can't tell if it's a
+          server must not guess, because guessing "server" starts a
+          rival control plane.
+   5. [x] The lab grows a node dimension: per-node dist directories,
           MACs, and command lines. Two NICs per guest — user-mode NAT
           stays as each guest's internet uplink, and a multicast
-          socket segment (no root, no bridges) is the wire the cluster
-          speaks over. The API-server hostfwd lives on the server node
-          only. Two terminals, two serial consoles, side by side.
-   6. [ ] Prove it: `kubectl get nodes` shows two Ready nodes, a pod
-          lands on the agent, and both machines come back from a
-          reboot still remembering the cluster.
+          socket segment (no root, no bridges: every QEMU naming the
+          same group is one virtual hub) is the wire the cluster
+          speaks over. The API-server hostfwd lives on the server
+          node only. Two terminals (`make run`, `make run
+          NODE=node-2`), two serial consoles, side by side. (The
+          quiet supporting discovery: k3s reads drop-in config from
+          <config>.yaml.d/, so the image's static files stay
+          untouched and init writes only a boot.yaml drop-in of
+          derived facts — and agents need their own config file
+          entirely, because `k3s agent` refuses server-only keys.)
+   6. [x] Prove it: `kubectl get nodes` shows two Ready nodes,
+          `kubectl get machines` shows a server and an agent with
+          their segment addresses, `kubectl get clusters` shows the
+          topology, a pod pinned to the agent runs with a
+          cluster-CIDR address and resolves cluster DNS across the
+          VXLAN, and both machines come back from a power cut booting
+          their Proven manifests, still remembering the cluster and
+          the pod. (The hard-way discovery: on first join, k3s mints
+          each node a "node password", records it server-side, and
+          demands the same one on every reconnect — it's what stops a
+          stranger from registering as an existing node. k3s keeps it
+          at /etc/rancher/node/password, which on liken is the RAM
+          root, so a rebooted agent knocked on its own cluster's door
+          with a fresh secret and was refused. The password is
+          machine identity, so /etc/rancher/node is now a symlink
+          onto machineState — and the honest way to verify a re-join
+          is the node's kube-node-lease renewTime, because Node
+          status replayed from the persisted datastore reads Ready
+          for a while whether the kubelet came back or not.)
 7. [ ] Multiple servers: quorum for the control plane. sqlite (via
        kine) serves one server; more than one means embedded etcd —
        `--cluster-init` on the first, `--server` on the rest, and an
@@ -287,6 +334,18 @@ public-consumption tier:
   to mint theirs — an installer step, a tiny CLI, or a documented
   openssl recipe.
 * The mastery tier: UKIs, dm-verity, secure boot, TPM-sealed secrets.
+
+# Small things
+
+Improvements that don't need a milestone:
+
+* **Machine uptime on the Machine resource.** status.bootedAt is
+  already published (init derives it from sysinfo's uptime counter);
+  surface uptime in the Machine's status and as a `kubectl get
+  machines` printer column. A date-typed column on .status.bootedAt
+  renders as a live age ("14m"), which *is* uptime and never goes
+  stale; decide whether that carries it or status wants an explicit
+  uptime field too.
 
 # Open problems
 
