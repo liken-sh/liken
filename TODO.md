@@ -291,10 +291,16 @@
        built, the lab can fake a broken clock with QEMU's -rtc base=,
        and etcd — coming next-plus-one — is the first component in
        the stack that genuinely cares how clocks behave.)
-   1. [ ] The precedent, written down before it's built on: liken has
+   1. [x] The precedent, written down before it's built on: liken has
           two planes and no third. Machine-plane concerns are
           goroutines in init; workload-plane software runs under k3s;
-          k3s is the only child process init supervises. Init grows a
+          k3s is the only child process init supervises. Admission to
+          the machine plane is strict: a concern belongs in init only
+          when k3s depends on it to exist — anything the cluster
+          could host for itself belongs in the cluster. Time
+          qualifies only because a machine with a skewed clock fails
+          TLS and can't join; a concern without that kind of claim
+          gets pushed in-cluster, not adopted by init. Init grows a
           small component framework — each loop is a `Run(ctx) error`,
           started by a supervisor that recovers panics and restarts
           with backoff, stopped by context cancellation and awaited

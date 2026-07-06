@@ -14,7 +14,7 @@ import (
 func TestWatchForRebootIntentDeliversExactlyOne(t *testing.T) {
 	dir := t.TempDir()
 	requests := make(chan machine.RebootIntent, 1)
-	go watchForRebootIntent(dir, time.Millisecond, requests)
+	go watchForRebootIntent(t.Context(), dir, time.Millisecond, requests)
 
 	// A few empty polls happen first: no file, no delivery.
 	select {

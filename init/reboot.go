@@ -9,14 +9,16 @@ package main
 // anyone can read, and a 2-second delay is nothing next to the reboot
 // it triggers.
 //
-// The shutdown sequence is four steps: signal every process (k3s was
-// already stopped gracefully, but its containers outlive it and get
-// their own warning here), wait a fixed grace period, detach the role
-// filesystems, sync, and ask the kernel to restart. Under QEMU's
-// -no-reboot flag a restart becomes a clean exit instead, which is
-// what a bounded test run wants to observe.
+// The shutdown sequence runs the dependency stack in reverse: signal
+// every process (k3s was already stopped gracefully, but its
+// containers outlive it and get their own warning here) and wait a
+// fixed grace period, stop the machine plane's own components, detach
+// the role filesystems, sync, and ask the kernel to restart. Under
+// QEMU's -no-reboot flag a restart becomes a clean exit instead,
+// which is what a bounded test run wants to observe.
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -28,15 +30,20 @@ import (
 
 // watchForRebootIntent polls the operator's channel and delivers at
 // most one intent: a reboot always follows, so there is nothing left
-// to watch for afterward. The file's presence is the trigger; its
-// content only enriches the narration, so an unreadable intent is
-// honored rather than stranding a requested reboot (atomic writes
-// make that case a bug, not a race, but a bug must not wedge the
-// machine). The directory and interval are parameters so tests can
-// watch a tempdir quickly; the boot passes the real channel.
-func watchForRebootIntent(dir string, interval time.Duration, requests chan<- machine.RebootIntent) {
+// to watch for afterward, and returning nil tells the machine plane
+// this component's work is complete. The file's presence is the
+// trigger; its content only enriches the narration, so an unreadable
+// intent is honored rather than stranding a requested reboot (atomic
+// writes make that case a bug, not a race, but a bug must not wedge
+// the machine). The directory and interval are parameters so tests
+// can watch a tempdir quickly; the boot passes the real channel.
+func watchForRebootIntent(ctx context.Context, dir string, interval time.Duration, requests chan<- machine.RebootIntent) error {
 	for {
-		time.Sleep(interval)
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(interval):
+		}
 		intent, err := machine.ReadRebootIntent(dir)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "liken: reading the reboot intent: %v\n", err)
@@ -46,16 +53,23 @@ func watchForRebootIntent(dir string, interval time.Duration, requests chan<- ma
 			continue
 		}
 		requests <- *intent
-		return
+		return nil
 	}
 }
 
-// rebootMachine is init's shutdown sequence. Like failBoot, it never
-// returns: PID 1 must never exit, so if the reboot syscall itself
-// fails, the machine parks here for a person to investigate.
+// rebootMachine is init's shutdown sequence, the dependency stack in
+// reverse: k3s was already stopped gracefully by the supervisor, so
+// what remains is its containers, then the machine plane's own loops,
+// then the filesystems. Like failBoot, it never returns: PID 1 must
+// never exit, so if the reboot syscall itself fails, the machine
+// parks here for a person to investigate.
 func rebootMachine(intent machine.RebootIntent) {
 	fmt.Printf("liken: rebooting: %s\n", intent.Reason)
 	killEverything()
+	// The machine plane stops only after every process is dead: the
+	// reaper is one of its components, and corpses need collecting
+	// right up to the end.
+	plane.shutdown(10 * time.Second)
 	unmountRoles()
 	unix.Sync()
 	if err := unix.Reboot(unix.LINUX_REBOOT_CMD_RESTART); err != nil {

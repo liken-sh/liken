@@ -24,6 +24,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -251,12 +252,15 @@ func describeExit(status unix.WaitStatus) string {
 // working Kubernetes node: it polls `k3s kubectl get nodes` (which
 // reads the admin kubeconfig k3s writes once its API is serving) and
 // prints the node's status as it changes: registering, NotReady, and
-// finally Ready.
-func reportWhenReady() {
+// finally Ready. It's a machine-plane component whose work completes
+// when the story has been told, so every exit path returns nil.
+func reportWhenReady(ctx context.Context) error {
 	last := ""
 	deadline := time.Now().Add(5 * time.Minute)
 	for time.Now().Before(deadline) {
-		time.Sleep(3 * time.Second)
+		if !sleepUnlessCancelled(ctx, 3*time.Second) {
+			return nil
+		}
 		out, ok := run(k3sBinary, "kubectl", "get", "nodes", "--no-headers")
 		if !ok || out == "" {
 			continue
@@ -269,21 +273,24 @@ func reportWhenReady() {
 		}
 		if containsReady(out) {
 			fmt.Println("liken: kubernetes is up")
-			reportPods()
-			return
+			reportPods(ctx)
+			return nil
 		}
 	}
 	fmt.Println("liken: gave up waiting for the node to be Ready (k3s may still get there)")
+	return nil
 }
 
 // reportPods prints the system pods starting up after the node goes
 // Ready, then goes quiet once everything is Running: the console
 // equivalent of watching `kubectl get pods -A` settle.
-func reportPods() {
+func reportPods(ctx context.Context) {
 	last := ""
 	deadline := time.Now().Add(5 * time.Minute)
 	for time.Now().Before(deadline) {
-		time.Sleep(5 * time.Second)
+		if !sleepUnlessCancelled(ctx, 5*time.Second) {
+			return
+		}
 		out, ok := run(k3sBinary, "kubectl", "get", "pods", "-A", "--no-headers")
 		if !ok || out == "" {
 			continue

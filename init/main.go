@@ -25,12 +25,16 @@
 // A traditional init grows from here into a service manager. liken's
 // does not: its whole job is to set up the minimum environment k3s
 // needs, start it, and keep it running. Kubernetes is the service
-// manager. When the image carries no k3s, a boot is a self-test: mount
-// the essentials, read the Machine manifest, join the network, prove
-// the connection with a DNS lookup, power off.
+// manager. The few loops init runs for itself — the machine plane —
+// are goroutines registered in components.go, which states the rule
+// for what is allowed to live there and what must run in the cluster
+// instead. When the image carries no k3s, a boot is a self-test:
+// mount the essentials, read the Machine manifest, join the network,
+// prove the connection with a DNS lookup, power off.
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -69,7 +73,7 @@ func main() {
 	// Reaping starts before anything else: the moment we spawn a child
 	// (or inherit an orphan), collecting its exit status is our job and
 	// no one else's.
-	go reap()
+	plane.start("the reaper", reap)
 
 	mountEssentials()
 
@@ -154,14 +158,16 @@ func main() {
 			fmt.Fprintf(os.Stderr, "liken: creating %s: %v\n", machine.OperatorRunDir, err)
 		}
 		rebootRequests := make(chan machine.RebootIntent, 1)
-		go watchForRebootIntent(machine.OperatorRunDir, 2*time.Second, rebootRequests)
+		plane.start("the reboot watch", func(ctx context.Context) error {
+			return watchForRebootIntent(ctx, machine.OperatorRunDir, 2*time.Second, rebootRequests)
+		})
 		loadModules()
 		// Only a server can narrate cluster state: the admin
 		// kubeconfig is a control-plane artifact, and agents hold no
 		// credentials of their own. An agent's join shows up on the
 		// server's console (and in the agent's own k3s log lines).
 		if role == machine.RoleServer {
-			go reportWhenReady()
+			plane.start("the node report", reportWhenReady)
 		}
 		superviseK3s(role, rebootRequests) // never returns
 	}
@@ -333,20 +339,28 @@ func worldReport() {
 	reportBlockDevices()
 }
 
-// reap collects the exit status of any child process, forever.
-// SIGCHLD arrives whenever a child dies; because signal coalescing can
-// fold many deaths into one delivery, each wakeup collects every
-// exited child, not just one. This loop is the only place in liken
-// that calls wait; every exit status it collects is posted to the
-// registry in supervisor.go, where whoever started the process can
-// claim it. (Go note: signal.Notify registers a handler with the
-// runtime and forwards deliveries onto a channel, turning an async
-// interrupt into an ordinary receive loop, and satisfying the "PID 1
-// must install handlers" rule from the header comment.)
-func reap() {
+// reap collects the exit status of any child process, for as long as
+// the machine plane runs — which is to say until shutdown, after
+// every process it might collect has already been stopped. SIGCHLD
+// arrives whenever a child dies; because signal coalescing can fold
+// many deaths into one delivery, each wakeup collects every exited
+// child, not just one. This loop is the only place in liken that
+// calls wait; every exit status it collects is posted to the registry
+// in supervisor.go, where whoever started the process can claim it.
+// (Go note: signal.Notify registers a handler with the runtime and
+// forwards deliveries onto a channel, turning an async interrupt into
+// an ordinary receive loop, and satisfying the "PID 1 must install
+// handlers" rule from the header comment.)
+func reap(ctx context.Context) error {
 	sigchld := make(chan os.Signal, 1)
 	signal.Notify(sigchld, unix.SIGCHLD)
-	for range sigchld {
+	defer signal.Stop(sigchld)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-sigchld:
+		}
 		for {
 			// -1 means "any child"; WNOHANG means "don't block if none
 			// have exited", in which case Wait4 returns pid 0.
