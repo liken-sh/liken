@@ -465,7 +465,7 @@
           boot was recovered by power cut — the honest way, since a
           machine that never joined has no operator to ask for a
           reboot.)
-9. [ ] Multiple leaders: quorum for the control plane, and the whole
+9. [x] Multiple leaders: quorum for the control plane, and the whole
        growth story is one Cluster edit converging — spec.leaders
        grows from [node-1] to three names, every machine stages the
        new document via milestone 8, and no separate "add a leader"
@@ -501,19 +501,47 @@
           simultaneous all-leader reboot loses quorum transiently
           and reforms from disk; Manual stays the sane policy for
           leaders until milestone 13 does rolling reboots.
-   4. [ ] The lab grows to five machines: three leaders (node-1
+   4. [x] The lab grows to five machines: three leaders (node-1
           founding, node-3 and node-4 fresh) and two followers (node-2
           staying, node-5 new) — MACs, dist dirs, and manifests
-          extending the existing NODE dimension. If five 4G guests
-          crowd the host, followers run at 2G.
-   5. [ ] Drills: the 1→3 growth edit end to end (migration on
+          extending the existing NODE dimension, plus a MEM knob on
+          the Makefile since five 4G guests don't fit a 30G laptop
+          (followers run at 2G, leaders-to-be at 3G). All five came
+          up Ready and Converged on the existing cluster in under a
+          minute, node-3/4/5 booting as followers until the growth
+          edit promotes them.
+   5. [x] Drills: the 1→3 growth edit end to end (migration on
           node-1, two joiners, followers riding through it); kill one
           leader and watch the cluster keep serving while machine
           status tells the story; then ATTEMPT follower→leader
           promotion on node-2 by growing spec.leaders to include it
           — k3s's tolerance for a same-name role flip is uncertain,
           so recorded findings are the deliverable, and node-2 can
-          be rebuilt fresh if it balks.
+          be rebuilt fresh if it balks. (All of it ran, and the
+          findings were better than feared. The growth edit converged
+          machine by machine: node-1's migration boot moved sqlite
+          into embedded etcd in place, node-3 and node-4 joined at
+          the founder's address, and the whole thing was one kubectl
+          patch plus per-machine reboot policies. Promotion of
+          node-2 — a follower since milestone 6, same name, same
+          disks — worked cleanly: it rebooted straight into
+          control-plane,etcd. DEMOTION is the rough edge: rebooting
+          node-4 as a follower left its Node object claiming
+          control-plane,etcd and, worse, its etcd membership
+          registered — a phantom voice that would have broken quorum
+          math on the next leader reboot. `kubectl delete node`
+          triggers k3s's etcd member-removal controller, but a
+          kubelet whose Node vanishes mid-run won't re-register, so
+          the full demotion recipe today is: Cluster edit, reboot,
+          delete the Node object, one more boot. Automating that
+          cleanup belongs to the rolling-upgrades milestone. The
+          loss drills: with one leader dead the cluster kept
+          serving and scheduling (quorum 2 of 3) and the revived
+          leader rejoined; with ALL THREE leaders dead the API went
+          dark while the followers' machines stayed up, and
+          relaunching the leaders reformed etcd from disk — the
+          cluster re-established itself and the followers
+          reconnected without rebooting.)
 10. [ ] GitOps from first boot — without baking an engine into the OS.
         The OS grows two generic primitives rather than Flux support: a
         seed channel (manifests delivered alongside the Machine manifest
@@ -554,7 +582,12 @@
         upgrade, restart, confirm it rejoined healthy, then move to the
         next, honoring quorum on the leaders. Not designed yet, just
         owed: it's the layer where the Machine's upgrade machinery and
-        the Cluster's convergence machinery meet.
+        the Cluster's convergence machinery meet. This is also where
+        leader demotion gets finished: milestone 9's drill showed a
+        demoted machine leaves a stale Node object and etcd membership
+        behind, and the cleanup (delete the Node, let k3s remove the
+        member, boot once more) is exactly the kind of sequenced,
+        quorum-aware choreography this milestone exists for.
 
 Deferred until the fundamentals above are proven — the
 public-consumption tier:

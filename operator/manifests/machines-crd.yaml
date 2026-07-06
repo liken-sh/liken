@@ -66,9 +66,17 @@ spec:
         - name: Ready
           type: string
           jsonPath: .status.conditions[?(@.type=="Ready")].status
-        - name: Converged
+        # The two convergence conditions, one per document: Spec is
+        # the Machine manifest (SpecConverged), Cluster is the
+        # Cluster document (ClusterConverged). Ready already rolls
+        # them up; these columns say which one is dragging when it's
+        # False.
+        - name: Spec
           type: string
           jsonPath: .status.conditions[?(@.type=="SpecConverged")].status
+        - name: Cluster
+          type: string
+          jsonPath: .status.conditions[?(@.type=="ClusterConverged")].status
         # The clock's health, at priority 1: shown only with -o wide,
         # because the default table is already at the width where
         # every new column costs an old one.
