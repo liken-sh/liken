@@ -64,17 +64,19 @@ type Cluster struct {
 // never lands in the lifecycle bytes, because observations aren't
 // part of the document's identity.
 //
-// Phase is the fleet's phases rolled up into one word, in the same
-// vocabulary: Ready when every machine is Ready, Updating when the
-// only machines not Ready are mid-transition (rebooting into a
-// change, waiting on one, or booting), and Degraded when any machine
-// is Lost, Blocked, or otherwise unwell. One phase this status can
-// never honestly show: quorum lost. Losing a majority of leaders
-// takes the API server down with it, so there is nobody left to
-// write — a frozen status is itself the symptom.
+// The conditions are the real observations and the phase is their
+// one-word summary, exactly the Machine's arrangement: Ready when
+// every machine is Ready, Updating when the only machines not Ready
+// are mid-transition (rebooting into a change, waiting on one, or
+// booting), and Degraded when any machine is Lost, Blocked, or
+// otherwise unwell. One thing this status can never honestly show:
+// quorum lost. Losing a majority of leaders takes the API server
+// down with it, so there is nobody left to write — a frozen status
+// is itself the symptom.
 type ClusterStatus struct {
-	Phase    Phase        `json:"phase,omitempty"`
-	Machines MachineTally `json:"machines,omitzero"`
+	Phase      Phase        `json:"phase,omitempty"`
+	Machines   MachineTally `json:"machines,omitzero"`
+	Conditions []Condition  `json:"conditions,omitempty"`
 }
 
 // MachineTally is the cluster's headcount: how many of its Machines

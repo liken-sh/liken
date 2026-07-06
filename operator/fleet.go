@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/chrisguidry/liken/machine"
@@ -63,12 +64,15 @@ func listMachines(c *apiClient) ([]machine.Machine, error) {
 
 // A fleetSweep is one pass's verdict over the whole fleet: which
 // machines to declare Lost, the headcount for the Cluster's status,
-// and the fleet's phases rolled up into the cluster's one word.
-// decideFleetSweep is pure; sweepFleet acts.
+// the MachinesReady condition that carries the full story, and the
+// phase that summarizes it in one word — the same
+// conditions-then-phase arrangement every Machine has, applied to
+// the fleet. decideFleetSweep is pure; sweepFleet acts.
 type fleetSweep struct {
-	lost  []string
-	tally machine.MachineTally
-	phase machine.Phase
+	lost      []string
+	tally     machine.MachineTally
+	condition machine.Condition
+	phase     machine.Phase
 }
 
 // decideFleetSweep judges every machine by its heartbeat. A machine
@@ -78,14 +82,16 @@ type fleetSweep struct {
 // itself — it is running this very code, so its liveness isn't in
 // question, only how recently its status write landed.
 //
-// The cluster's phase reads the same effective phases (a silent
-// machine counts as Lost even before the Lost write lands): Ready
-// when everyone is, Updating when the only exceptions are machines
-// mid-transition — rebooting into a change, waiting on one, or
-// booting — and Degraded the moment anything is Lost, Blocked, or
-// otherwise unwell.
+// The verdict reads the same effective phases (a silent machine
+// counts as Lost even before the Lost write lands) and sorts every
+// machine that isn't Ready into one of two stories: mid-transition
+// (rebooting into a change, waiting on one, or booting), or unwell
+// (Lost, Blocked, or otherwise degraded). Unwell outranks
+// mid-transition, and the MachinesReady condition names the machines
+// so nobody has to go looking.
 func decideFleetSweep(machines []machine.Machine, self string, now time.Time) fleetSweep {
-	s := fleetSweep{tally: machine.MachineTally{Total: len(machines)}, phase: machine.PhaseReady}
+	s := fleetSweep{tally: machine.MachineTally{Total: len(machines)}}
+	var transitioning, unwell []string
 	for _, m := range machines {
 		fresh := m.Metadata.Name == self ||
 			(m.Status.ObservedAt != nil && now.Sub(*m.Status.ObservedAt) <= heartbeatStaleAfter)
@@ -101,14 +107,33 @@ func decideFleetSweep(machines []machine.Machine, self string, now time.Time) fl
 		case machine.PhaseReady:
 			s.tally.Ready++
 		case machine.PhaseUpdating, machine.PhaseUpdatePending, machine.PhaseBooting:
-			if s.phase != machine.PhaseDegraded {
-				s.phase = machine.PhaseUpdating
-			}
+			transitioning = append(transitioning, m.Metadata.Name)
 		default:
-			s.phase = machine.PhaseDegraded
+			unwell = append(unwell, m.Metadata.Name)
 		}
 	}
 	s.tally.Summary = fmt.Sprintf("%d/%d", s.tally.Ready, s.tally.Total)
+
+	switch {
+	case len(unwell) > 0:
+		s.phase = machine.PhaseDegraded
+		s.condition = machine.Condition{
+			Type: "MachinesReady", Status: "False", Reason: "MachinesDegraded",
+			Message: fmt.Sprintf("%s machines ready; unwell: %s", s.tally.Summary, strings.Join(unwell, ", ")),
+		}
+	case len(transitioning) > 0:
+		s.phase = machine.PhaseUpdating
+		s.condition = machine.Condition{
+			Type: "MachinesReady", Status: "False", Reason: "MachinesUpdating",
+			Message: fmt.Sprintf("%s machines ready; mid-transition: %s", s.tally.Summary, strings.Join(transitioning, ", ")),
+		}
+	default:
+		s.phase = machine.PhaseReady
+		s.condition = machine.Condition{
+			Type: "MachinesReady", Status: "True", Reason: "AllMachinesReady",
+			Message: fmt.Sprintf("all %d machines are ready", s.tally.Total),
+		}
+	}
 	return s
 }
 
@@ -147,10 +172,19 @@ func sweepFleet(c *apiClient, self string, cluster *machine.Cluster, now time.Ti
 		}
 	}
 
-	if cluster.Status.Machines != s.tally || cluster.Status.Phase != s.phase {
+	// The cluster's status: the MachinesReady condition carries the
+	// observation (stamped with the generation of the spec it
+	// judged), the phase summarizes it, and the tally is the
+	// headcount the printer shows. Written only when something
+	// actually changed, so a settled fleet writes nothing.
+	s.condition.ObservedGeneration = cluster.Metadata.Generation
+	conditions := machine.SetCondition(slices.Clone(cluster.Status.Conditions), s.condition, now)
+	if cluster.Status.Machines != s.tally || cluster.Status.Phase != s.phase ||
+		!slices.Equal(conditions, cluster.Status.Conditions) {
 		updated := *cluster
 		updated.Status.Machines = s.tally
 		updated.Status.Phase = s.phase
+		updated.Status.Conditions = conditions
 		body, err := json.Marshal(&updated)
 		if err != nil {
 			fmt.Printf("rendering cluster status: %v\n", err)

@@ -205,18 +205,54 @@ spec:
                   type: string
                   enum: [Ready, Updating, Degraded]
                   description: >-
-                    The fleet's phases rolled up into one word. Ready
-                    means every machine is Ready. Updating means the
-                    only machines not Ready are mid-transition
-                    (rebooting into a change, waiting on one, or
-                    booting) — the expected look of a Cluster edit
-                    rolling through the fleet. Degraded means at
-                    least one machine is Lost, Blocked, or otherwise
-                    unwell. One phase this field can never honestly
-                    show is quorum lost: losing a majority of leaders
-                    takes the API server down with it, so nobody is
-                    left to write here — a status that has stopped
-                    updating is itself the symptom.
+                    The conditions below rolled up into one word,
+                    derived on every sweep and never stored as truth
+                    of its own. Ready means every machine is Ready.
+                    Updating means the only machines not Ready are
+                    mid-transition (rebooting into a change, waiting
+                    on one, or booting) — the expected look of a
+                    Cluster edit rolling through the fleet. Degraded
+                    means at least one machine is Lost, Blocked, or
+                    otherwise unwell. One thing this field can never
+                    honestly show is quorum lost: losing a majority
+                    of leaders takes the API server down with it, so
+                    nobody is left to write here — a status that has
+                    stopped updating is itself the symptom.
+                conditions:
+                  type: array
+                  # The same metav1.Condition schema the Machine's
+                  # conditions use: a map keyed by type, validated
+                  # like the conditions on Pods and Nodes. Today the
+                  # sweep maintains one entry, MachinesReady; quorum
+                  # margin and clock spread are candidates for later.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  items:
+                    type: object
+                    required: [type, status, reason, lastTransitionTime]
+                    properties:
+                      type:
+                        type: string
+                        maxLength: 316
+                        pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        minimum: 0
+                      reason:
+                        type: string
+                        minLength: 1
+                        maxLength: 1024
+                        pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      message:
+                        type: string
+                        maxLength: 32768
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
                 machines:
                   type: object
                   description: >-

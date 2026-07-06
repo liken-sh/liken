@@ -4,6 +4,7 @@ package main
 // declared Lost, and who is left alone.
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -40,6 +41,12 @@ func TestSweepCountsFreshReadyMachines(t *testing.T) {
 	if s.phase != machine.PhaseUpdating {
 		t.Errorf("a fleet whose only exception is mid-update is Updating, got %s", s.phase)
 	}
+	if s.condition.Status != "False" || s.condition.Reason != "MachinesUpdating" {
+		t.Errorf("got %s/%s", s.condition.Status, s.condition.Reason)
+	}
+	if !strings.Contains(s.condition.Message, "node-3") {
+		t.Errorf("the condition should name who is mid-transition: %s", s.condition.Message)
+	}
 }
 
 func TestSweepOfAWhollyReadyFleet(t *testing.T) {
@@ -49,6 +56,9 @@ func TestSweepOfAWhollyReadyFleet(t *testing.T) {
 	}, "node-1", sweepNow)
 	if s.phase != machine.PhaseReady {
 		t.Errorf("everyone ready means the cluster is, got %s", s.phase)
+	}
+	if s.condition.Status != "True" || s.condition.Reason != "AllMachinesReady" {
+		t.Errorf("got %s/%s", s.condition.Status, s.condition.Reason)
 	}
 }
 
@@ -65,6 +75,9 @@ func TestSweepDeclaresSilentMachinesLost(t *testing.T) {
 	}
 	if s.phase != machine.PhaseDegraded {
 		t.Errorf("a lost machine degrades the cluster, got %s", s.phase)
+	}
+	if s.condition.Reason != "MachinesDegraded" || !strings.Contains(s.condition.Message, "node-2") {
+		t.Errorf("the condition should name the unwell machine: %s/%s", s.condition.Reason, s.condition.Message)
 	}
 }
 
