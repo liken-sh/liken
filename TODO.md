@@ -375,10 +375,10 @@
           -574ms off, the written RTC having carried real time
           through, and `kubectl get machines -o wide` showed both
           nodes synchronized at sub-millisecond offsets.)
-8. [ ] The Cluster converges: today the in-cluster Cluster resource
-       is seed-only. Init reads the image's cluster.yaml every boot,
-       the operator seeds the API copy once, and nothing ever
-       compares the two — so `kubectl edit cluster` changes a
+8. [x] The Cluster converges: the in-cluster Cluster resource was
+       seed-only — init read the image's cluster.yaml every boot,
+       the operator seeded the API copy once, and nothing ever
+       compared the two, so `kubectl edit cluster` changed a
        document no machine consults. The Machine already has the
        whole lifecycle this needs (drift detection, durable staging
        on machineState, proven fallback, SpecConverged); the Cluster
@@ -452,7 +452,7 @@
           never be edited "back to reality," because their reality
           never changes.) leaders, endpoint, and time stay freely
           editable.
-   6. [ ] Drill it on the two-node lab: add a second NTP upstream via
+   6. [x] Drill it on the two-node lab: add a second NTP upstream via
           kubectl edit cluster and watch both machines stage, report
           RebootPending, apply on reboot, and show the new source in
           status.time with ClusterConverged True. Point the endpoint
@@ -461,7 +461,10 @@
           marker and falls back to proven, rejoining the real cluster
           with the rejection visible in status. Then edit back to
           good and watch staged withdraw and the rejection clear with
-          no reboot.
+          no reboot. (All three ran as designed; the doomed-endpoint
+          boot was recovered by power cut — the honest way, since a
+          machine that never joined has no operator to ask for a
+          reboot.)
 9. [ ] Multiple leaders: quorum for the control plane, and the whole
        growth story is one Cluster edit converging — spec.leaders
        grows from [node-1] to three names, every machine stages the
