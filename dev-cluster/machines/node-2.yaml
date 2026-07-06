@@ -1,7 +1,7 @@
 # node-2: the lab's second machine. Its name is not in cluster.yaml's
-# servers list, so it derives the agent role: it runs workloads and
-# takes direction from node-1's control plane, which it joins through
-# the cluster's endpoint bearing the token from the identity bundle.
+# leaders list, so it derives the follower role: it runs workloads and
+# takes direction from the control plane, which it joins through the
+# cluster's endpoint bearing the token from the identity bundle.
 #
 # Selected at boot by liken.machine=node-2 on the kernel command
 # line; node-1.yaml explains the seed lifecycle and the storage
@@ -21,10 +21,10 @@ spec:
       - name: eth1
         address: 10.10.0.2/24
   # The same storage shape as node-1: every machine owns its own
-  # disks, agent or not. clusterState matters on an agent too: it
-  # holds containerd's images and the kubelet's bookkeeping, which is
-  # what saves an agent from re-importing every container image on
-  # every boot.
+  # disks, follower or not. clusterState matters on a follower too:
+  # it holds containerd's images and the kubelet's bookkeeping, which
+  # is what saves a follower from re-importing every container image
+  # on every boot.
   storage:
     machineState:
       device: /dev/vda

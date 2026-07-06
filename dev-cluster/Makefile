@@ -21,10 +21,17 @@
 #   make run                    the leader, node-1
 #   make run NODE=node-2        a follower, in a second terminal
 #
+# The full lab is five machines (node-1 leading, node-3 and node-4
+# leaders-to-be, node-2 and node-5 followers), which is more RAM than
+# most laptops want to give QEMU at the default size — MEM sizes each
+# guest, and followers are fine at 2048: nothing heavy is pinned to
+# them, and the kubelet's own overhead is what's being hosted.
+#
 # The OS artifacts are other domains' work; this Makefile only points
 # at them. The root Makefile is the orchestrator that makes sure they
 # exist before booting; run `make run` from the repo root.
 NODE ?= node-1
+MEM ?= 4096
 KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 VMLINUZ := ../kernel/dist/$(KERNEL_VERSION)/vmlinuz
 INITRD := ../image/dist/liken.cpio
@@ -82,7 +89,7 @@ endif
 #                            the first getrandom() in userspace blocks
 #                            forever (liken's DHCP client draws one for
 #                            its transaction IDs)
-#   -m 4096                  Kubernetes-sized memory: the root
+#   -m $(MEM)                Kubernetes-sized memory: the root
 #                            filesystem, container images, and every
 #                            workload all live in RAM here
 #   -append                  the kernel command line: put the kernel's
@@ -169,7 +176,7 @@ run: dist/$(NODE)/state.qcow2 dist/$(NODE)/pods.qcow2
 	qemu-system-x86_64 \
 		-accel kvm -accel tcg \
 		-cpu max \
-		-m 4096 \
+		-m $(MEM) \
 		-kernel $(VMLINUZ) \
 		-initrd $(INITRD) \
 		-append "console=ttyS0 rdinit=/liken liken.machine=$(NODE) $(LIKEN_BOOT_ARGS)" \

@@ -1,0 +1,29 @@
+# node-4: the other leader-to-be; node-3.yaml tells the story. With
+# node-1 founding, these three are the odd number of voices embedded
+# etcd needs to vote.
+apiVersion: liken.sh/v1alpha1
+kind: Machine
+metadata:
+  name: node-4
+spec:
+  network:
+    interfaces:
+      - name: eth0
+      - name: eth1
+        address: 10.10.0.4/24
+  storage:
+    machineState:
+      device: /dev/vda
+      size: 64Mi
+    machineEphemeral:
+      device: /dev/vdb
+      size: 512Mi
+    clusterState:
+      device: /dev/vda
+    podStorage:
+      device: /dev/vdb
+      size: 2Gi
+    podEphemeral:
+      device: /dev/vdb
+  sysctls:
+    fs.inotify.max_user_instances: "8192"

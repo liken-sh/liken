@@ -53,4 +53,4 @@ spec:
     # upstream is the deployment's choice, never the OS's default —
     # this lab picks Cloudflare's public NTP service, which (unlike
     # the NTP pool) is run for exactly this kind of anonymous use.
-    upstreams: [time.cloudflare.com]
+    upstreams: [time.cloudflare.com, time.nist.gov]

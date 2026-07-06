@@ -1,0 +1,31 @@
+# node-3: a leader-to-be. It boots as a follower — its name is not in
+# cluster.yaml's leaders list yet — and the HA drill promotes it by
+# growing that list to [node-1, node-3, node-4], which converges like
+# any other Cluster edit and reboots it into a control-plane role.
+# Same shape as every other machine; only the name and address differ.
+apiVersion: liken.sh/v1alpha1
+kind: Machine
+metadata:
+  name: node-3
+spec:
+  network:
+    interfaces:
+      - name: eth0
+      - name: eth1
+        address: 10.10.0.3/24
+  storage:
+    machineState:
+      device: /dev/vda
+      size: 64Mi
+    machineEphemeral:
+      device: /dev/vdb
+      size: 512Mi
+    clusterState:
+      device: /dev/vda
+    podStorage:
+      device: /dev/vdb
+      size: 2Gi
+    podEphemeral:
+      device: /dev/vdb
+  sysctls:
+    fs.inotify.max_user_instances: "8192"

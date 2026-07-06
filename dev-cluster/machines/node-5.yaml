@@ -1,0 +1,30 @@
+# node-5: the lab's second follower. It exists so the HA drills can
+# watch workload machines ride through control-plane changes: the
+# growth from one leader to three, and the loss of a leader, should
+# both be invisible from down here.
+apiVersion: liken.sh/v1alpha1
+kind: Machine
+metadata:
+  name: node-5
+spec:
+  network:
+    interfaces:
+      - name: eth0
+      - name: eth1
+        address: 10.10.0.5/24
+  storage:
+    machineState:
+      device: /dev/vda
+      size: 64Mi
+    machineEphemeral:
+      device: /dev/vdb
+      size: 512Mi
+    clusterState:
+      device: /dev/vda
+    podStorage:
+      device: /dev/vdb
+      size: 2Gi
+    podEphemeral:
+      device: /dev/vdb
+  sysctls:
+    fs.inotify.max_user_instances: "8192"

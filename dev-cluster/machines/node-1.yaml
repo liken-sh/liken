@@ -1,4 +1,4 @@
-# node-1: the lab's first machine, and (per cluster.yaml's servers
+# node-1: the lab's first machine, and (per cluster.yaml's leaders
 # list) its control plane.
 #
 # One image boots the whole fleet, so this directory carries a
@@ -14,7 +14,7 @@ apiVersion: liken.sh/v1alpha1
 kind: Machine
 metadata:
   # The machine's name: its hostname, its Kubernetes node name, and
-  # the name the cluster.yaml servers list refers to.
+  # the name the cluster.yaml leaders list refers to.
   name: node-1
 spec:
   network:
@@ -22,7 +22,7 @@ spec:
     # whatever network the machine is plugged into and carries traffic
     # to the outside world. eth1 is the cluster segment: its address
     # is static because it is a *promise* — cluster.yaml's endpoint
-    # tells every agent to find the control plane at 10.10.0.1, so
+    # tells every follower to find the control plane at 10.10.0.1, so
     # that address has to exist before any negotiation could assign
     # it. (In the lab, the segment is a dumb wire between QEMU guests
     # with no DHCP server on it anyway; see dev-cluster/Makefile.)
