@@ -9,6 +9,14 @@
 # machine never contacts a registry to run its own OS components.
 # LIKEN_VERSION is substituted with the real version when the image is
 # assembled.
+#
+# That arrangement makes the operator's image part of the OS, and the
+# DaemonSet below is shaped around the consequence: a node can only
+# run the operator its own OS carries. In a fleet mid-upgrade the
+# nodes carry *different* versions, and any leader's k3s re-applies
+# this file at startup — so the template must never demand an image
+# some node doesn't have. See the DaemonSet's own comments and
+# operator/steward.go for how the pieces fit.
 ---
 # A namespace of liken's own, so `kubectl get all -n liken-system`
 # shows everything the OS runs in the cluster.
@@ -78,13 +86,21 @@ rules:
   # each pod to leave. Eviction-by-subresource rather than pod
   # delete, deliberately: an eviction is refused while it would
   # violate the workload's PodDisruptionBudget, which is the entire
-  # difference between draining a node and killing it.
+  # difference between draining a node and killing it. The pod
+  # steward (steward.go) reuses both verbs to refresh the operator's
+  # own pods after their machines upgrade.
   - apiGroups: [""]
     resources: [pods]
     verbs: [list]
   - apiGroups: [""]
     resources: [pods/eviction]
     verbs: [create]
+  # The steward reads its own DaemonSet to learn which release's
+  # manifests are actually applied (the liken.sh/os-version
+  # annotation): the authority its pod refreshes converge toward.
+  - apiGroups: [apps]
+    resources: [daemonsets]
+    verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -173,16 +189,35 @@ metadata:
   labels:
     app.kubernetes.io/name: liken-operator
     app.kubernetes.io/part-of: liken
+  # The release these manifests shipped with. The pod steward
+  # (operator/steward.go) compares this against each machine's
+  # running version to know when a machine is ready for a pod from
+  # this template — the annotation is the authority, the pods below
+  # inherit it, and the difference between the two is what "stale"
+  # means.
+  annotations:
+    liken.sh/os-version: "LIKEN_VERSION"
 spec:
   selector:
     matchLabels:
       app: liken-operator
+  # OnDelete, never a rolling update: the image is baked into each
+  # node's OS, so a template change must not recreate pods on nodes
+  # that haven't rebooted into the release that carries it — that
+  # would kill the one operator a machine needs to drive its own
+  # upgrade, and imagePullPolicy: Never means the replacement could
+  # never start. Pods are refreshed by the steward, one machine at a
+  # time, only after each machine's own upgrade lands.
+  updateStrategy:
+    type: OnDelete
   template:
     metadata:
       labels:
         app: liken-operator
         app.kubernetes.io/name: liken-operator
         app.kubernetes.io/part-of: liken
+      annotations:
+        liken.sh/os-version: "LIKEN_VERSION"
     spec:
       serviceAccountName: liken-operator
       # The OS layer should outrank workloads when memory gets tight;
@@ -202,7 +237,14 @@ spec:
       hostNetwork: true
       containers:
         - name: operator
-          image: liken.sh/operator:LIKEN_VERSION
+          # The stable tag: every release tags its own operator build
+          # liken.sh/operator:installed (operator/image.sh), so this
+          # same pod spec resolves to whatever build each node's OS
+          # imported — and applying a new release's manifests never
+          # changes the image field at all. A versioned tag here
+          # would demand one specific build on every node at once,
+          # which a fleet mid-upgrade cannot satisfy.
+          image: liken.sh/operator:installed
           imagePullPolicy: Never
           securityContext:
             privileged: true

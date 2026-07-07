@@ -7,6 +7,11 @@ kind: Machine
 metadata:
   name: node-5
 spec:
+  # The lab exists to drill automated rollouts, so its machines let
+  # the operator reboot them on a granted turn. Real fleets choose
+  # this deliberately; the default (Manual) stages changes and waits
+  # for a person.
+  rebootPolicy: Auto
   network:
     interfaces:
       - name: eth0

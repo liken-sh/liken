@@ -172,6 +172,11 @@ func sweepFleet(c *apiClient, self string, cluster *machine.Cluster, now time.Ti
 	r := decideRollout(machines, renewals, cluster, self, now)
 	carryOutRollout(c, machines, r, now)
 
+	// The operator's own pods are fleet state too: upgraded machines
+	// carry pods from before their upgrade until the steward refreshes
+	// them (steward.go).
+	stewardOperatorPods(c, machines)
+
 	for _, m := range machines {
 		if !slices.Contains(s.lost, m.Metadata.Name) {
 			continue

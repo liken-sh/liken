@@ -69,6 +69,9 @@ type podObject struct {
 		Annotations     map[string]string `json:"annotations"`
 		OwnerReferences []ownerReference  `json:"ownerReferences"`
 	} `json:"metadata"`
+	Spec struct {
+		NodeName string `json:"nodeName"`
+	} `json:"spec"`
 	Status struct {
 		Phase string `json:"phase"`
 	} `json:"status"`

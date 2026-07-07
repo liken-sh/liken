@@ -18,6 +18,11 @@ metadata:
   # the name the cluster.yaml leaders list refers to.
   name: node-1
 spec:
+  # The lab exists to drill automated rollouts, so its machines let
+  # the operator reboot them on a granted turn. Real fleets choose
+  # this deliberately; the default (Manual) stages changes and waits
+  # for a person.
+  rebootPolicy: Auto
   network:
     # Two interfaces, two jobs. eth0 is the uplink: it speaks DHCP to
     # whatever network the machine is plugged into and carries traffic

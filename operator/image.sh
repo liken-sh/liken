@@ -111,6 +111,14 @@ manifest_digest="$(add_blob "$dist/manifest.json")"
 # annotation is how the image keeps its name through an import: an
 # OCI layout has no registry to imply one, so the reference rides
 # along inside the archive.
+#
+# The same manifest is named twice — two references, one image. The
+# versioned tag says what this build is; the stable "installed" tag
+# is the one the operator's DaemonSet pins (operator/manifests/
+# operator.yaml): every release tags its own build "installed", so
+# one unchanging pod spec resolves, on every node, to the operator
+# that node's own OS imported. Content addressing makes the aliasing
+# free: both names point at the same digest.
 cat >"$layout/index.json" <<EOF
 {
   "schemaVersion": 2,
@@ -123,6 +131,16 @@ cat >"$layout/index.json" <<EOF
       "annotations": {
         "io.containerd.image.name": "liken.sh/operator:$version",
         "org.opencontainers.image.ref.name": "$version"
+      }
+    },
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:$manifest_digest",
+      "size": $manifest_size,
+      "platform": {"architecture": "amd64", "os": "linux"},
+      "annotations": {
+        "io.containerd.image.name": "liken.sh/operator:installed",
+        "org.opencontainers.image.ref.name": "installed"
       }
     }
   ]

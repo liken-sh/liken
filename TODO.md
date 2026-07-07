@@ -618,7 +618,7 @@
         how workloads get to the hardware (device plugins, dynamic
         resource allocation) and whether devices belong in
         `status.hardware` alongside CPUs and memory.
-12. [ ] Declarative upgrades: one field on the Cluster moves the whole
+12. [x] Declarative upgrades: one field on the Cluster moves the whole
         fleet to a new liken version. `spec.version` names the target —
         on the Cluster, not the Machines, because a fleet should be
         retargeted in one edit; a machine's version belongs in its
@@ -876,16 +876,40 @@
            serving the cluster the whole time — and a retarget edit
            cleared each verdict. Machines report the standing
            rejection in status.boot.systemRejection.)
-    8. [ ] The fleet: migrate the five-node lab to disk boot — a
-           Machine edit adds the slot roles on a new disk, one install
-           boot per node, no fresh claims, no data loss — then the
-           grand drill: one Cluster edit (a catalog append and the
+    8. [x] The fleet: migrate the five-node lab to disk boot, then
+           the grand drill: one Cluster edit (a catalog append and the
            target bump) rolls all five machines through milestone 13's
            rollout, the cluster serving throughout, `kubectl get
            machines -o wide` narrating the walk from AwaitingTurn to
-           Ready on the new version. Then the power-cut drills: cut
-           mid-download (resumes by re-verification) and mid-install
-           (re-running the installer converges).
+           Ready on the new version. (Migrating the pre-slot lab
+           in place lost to a rebuild: the old builds' operators
+           couldn't even see the slot roles in their specs, and every
+           old leader's k3s restart re-applied its baked CRDs,
+           pruning the new schema fleet-wide — so the lab factory-
+           reset and every node took the designed path instead, one
+           `make install` and a firmware boot each, five machines
+           Ready in ninety seconds. The first grand drill then found
+           the milestone's last real bug: the operator's DaemonSet
+           pinned a versioned image, so the first upgraded leader's
+           manifests rolled a 0.2.1 pod onto a node still running
+           0.1.0 — which, with imagePullPolicy: Never, could not
+           start, and had just killed the one operator that machine
+           needed to drive its own upgrade. A machine deadlocked by
+           its own update mechanism. The fix makes the operator pod
+           part of the OS in earnest: every release tags its build
+           liken.sh/operator:installed so one unchanging pod spec
+           resolves per-node to that node's own baked image, the
+           DaemonSet updates OnDelete so applying manifests never
+           kills a pod, and the sweep leader's pod steward refreshes
+           each machine's pod only after its upgrade lands
+           (operator/steward.go tells the whole story). The proof was
+           the 0.2.3 drill: one patch, zero manual actions — five
+           machines walked workers-first through the rollout in under
+           four minutes, every one flipping to its inactive slot, and
+           the steward refreshed all five operator pods behind them.
+           A power cut afterward booted straight to the proven slot
+           via its firmware entry: the path verified, not just the
+           outcome.)
 13. [x] Rolling reboots at the *cluster* level: the fleet applies
         staged changes without an operator babysitting it, one
         machine at a time. (This milestone was written as "rolling

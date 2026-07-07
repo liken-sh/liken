@@ -197,21 +197,25 @@ endif
 #                            works in the lab too
 QEMU_EXIT_ON_REBOOT := -no-reboot
 
-# Where the boot comes from. BOOT=kernel (the default while the fleet
-# migrates to its own disks) is the direct-kernel arrangement: QEMU
-# loads vmlinuz and the initramfs itself, playing bootloader — or,
-# with OVMF in the picture, playing the USB stick the firmware boots
-# from. BOOT=disk hands the whole job to the firmware: no -kernel, no
-# -append; OVMF consults its boot entries and loads the OS from the
-# machine's own system slots, exactly as real hardware would.
+# Where the boot comes from. BOOT=disk (the default) hands the whole
+# job to the firmware: no -kernel, no -append; OVMF consults its boot
+# entries and loads the OS from the machine's own system slots,
+# exactly as real hardware would — which is why a machine must be
+# installed (`make install NODE=x`, once) before its first disk boot.
+# BOOT=kernel is the direct-kernel arrangement: QEMU loads vmlinuz
+# and the initramfs itself, playing bootloader — the fallback for
+# machines that haven't installed yet, and what run-once still uses
+# (its command-line knob can't ride a baked boot entry).
 # Recursive (=) on purpose: LIKEN_BOOT_ARGS is set per target
 # (run-once, install) and must be picked up at recipe expansion.
-BOOT ?= kernel
-ifeq ($(BOOT),disk)
-QEMU_BOOT =
-else
-QEMU_BOOT = -kernel $(VMLINUZ) -initrd $(INITRD) -append "console=ttyS0 rdinit=/liken liken.machine=$(NODE) $(LIKEN_BOOT_ARGS)"
-endif
+BOOT ?= disk
+
+# Selected by name at recipe expansion (never ifeq, which evaluates
+# at parse time and would ignore the target-specific BOOT overrides
+# install and run-once rely on).
+QEMU_BOOT_kernel = -kernel $(VMLINUZ) -initrd $(INITRD) -append "console=ttyS0 rdinit=/liken liken.machine=$(NODE) $(LIKEN_BOOT_ARGS)"
+QEMU_BOOT_disk =
+QEMU_BOOT = $(QEMU_BOOT_$(BOOT))
 
 # A deliberately wrong hardware clock: `make run RTC=2001-01-01` boots
 # the guest believing it's the turn of the millennium, which is the
@@ -250,6 +254,7 @@ run: dist/$(NODE)/state.qcow2 dist/$(NODE)/pods.qcow2 dist/$(NODE)/boot.qcow2 di
 # One-shot boots for debugging and automation: liken.oneshot tells init
 # not to restart k3s: its first exit powers the machine off, QEMU
 # exits, and the console log is a complete, bounded record of the boot.
+run-once: BOOT = kernel
 run-once: LIKEN_BOOT_ARGS = liken.oneshot
 run-once: run
 
@@ -268,6 +273,7 @@ run-lab: run
 # and powers off — which ends QEMU. `make run BOOT=disk` then boots
 # the machine from its own disk forever after. Idempotent: a killed
 # install converges by running again.
+install: BOOT = kernel
 install: INITRD = ../image/dist/install.cpio
 install: LIKEN_BOOT_ARGS = liken.install
 install: run
