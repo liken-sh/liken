@@ -625,27 +625,43 @@
         which makes A/B slots and roll-back-on-failed-boot the natural
         shape — but it also means liken finally needs a bootloader
         story, since QEMU's `-kernel` has been playing that role.
-13. [ ] Rolling upgrades at the *cluster* level: once one machine can
-        upgrade itself, the cluster should upgrade its fleet without an
-        operator babysitting it — cordon a node, drain its workloads,
-        upgrade, restart, confirm it rejoined healthy, then move to the
-        next, honoring quorum on the leaders. Not designed yet, just
-        owed: it's the layer where the Machine's upgrade machinery and
-        the Cluster's convergence machinery meet. (Leader demotion,
-        once parked here, got automated during milestone 9 instead:
-        the demoted machine's operator cleans up its own Node and
-        datastore. What remains here is the fleet-level sequencing —
-        making sure only one leader is ever down at a time.) Most of
-        the raw material now exists: staged changes wait per machine
-        behind rebootPolicy, the phase and heartbeat say who is
-        mid-transition and who came back, and the Cluster's headcount
-        watches the whole fleet. The missing pieces are the ones
-        Kubernetes workloads get from a PodDisruptionBudget and
-        kubectl drain: a disruption budget for machines (how many may
-        be down at once, with the leaders' quorum as a floor), and
-        cordoning each node before its reboot and uncordoning it
-        after it rejoins, so workloads drain gracefully instead of
-        dying with the machine.
+13. [x] Rolling reboots at the *cluster* level: the fleet applies
+        staged changes without an operator babysitting it, one
+        machine at a time. (This milestone was written as "rolling
+        upgrades," but the sequencing turned out to be independent of
+        what the reboot applies — a config change today, a version
+        upgrade once milestone 12 exists. The machinery is the same
+        either way.) On a cluster member, rebootPolicy: Auto now
+        means "reboot when the cluster says it's safe": the machine
+        stages its change, publishes AwaitingTurn, and waits for the
+        sweep leader — already elected, already reading the whole
+        fleet — to grant its turn by writing a RebootApproved
+        condition onto the Machine, the way the scheduler owns
+        PodScheduled on Pods it doesn't manage. The budget is one
+        field, spec.disruption.maxUnavailable (default 1), a
+        machine-level PodDisruptionBudget reduced to one number; it
+        counts unplanned trouble too, so a hurting fleet pauses its
+        own rollout, and the leaders have an automatic floor no
+        budget can raise: one leader down at a time, because quorum
+        is arithmetic. A granted machine drains itself first —
+        cordon its own Node, evict everything movable through the
+        Eviction API so workloads' own PDBs hold, then write the
+        reboot intent — incrementally across reconcile passes, since
+        a blocked pass would stop the heartbeat and read as a death.
+        It uncordons itself after converging; a human's cordon stays
+        put. The sweep reads granted silence as the reboot it asked
+        for, and a machine that never returns flips the Cluster's
+        Progressing condition to False/RolloutStalled (Deployment's
+        vocabulary) and halts granting until someone looks.
+        Demotion reboots join the same queue. Still owed, someday:
+        workload-aware ordering; a drain that waits on more than a
+        deadline when a PDB can never be satisfied; and strict
+        workers-first ordering at rollout start — today the order is
+        among machines that have *asked* by sweep time, so a leader
+        that stages fast (the conductor itself, whose sweep runs in
+        the same pass as its own staging) can take the first turn
+        before a slower worker has raised its hand. Safe either way;
+        one leader at a time holds regardless.
 14. [ ] GitOps from first boot — without baking an engine into the OS.
         Deferred on purpose: git-driven delivery is one way to feed
         this system, not its core mode — the Machine and Cluster
