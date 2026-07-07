@@ -39,8 +39,8 @@ import (
 func main() {
 	fmt.Println("liken-operator", machine.Version)
 
-	// Failures during setup end the process, on purpose. There is no
-	// retry logic here because kubelet *is* the retry logic: a pod that
+	// Failures during setup end the process deliberately. There is no
+	// retry logic here because kubelet already provides it: a pod that
 	// exits nonzero is restarted with backoff, and the failure is
 	// visible in `kubectl get pods` instead of buried in a log. This is
 	// the "crash-only" style most Kubernetes components use.
@@ -78,10 +78,11 @@ func main() {
 
 	// The Cluster resource gets the same treatment as the Machine: the
 	// image's cluster.yaml seeds it if it doesn't exist. Every
-	// machine's operator tries this (the manifest rides in every
-	// image), so most lose the race and find it already there, which
-	// is success: what matters is that the cluster's topology is
-	// queryable, not who published it.
+	// machine's operator tries this, because every image carries the
+	// manifest, so most of them lose the race and find the object
+	// already there. That still counts as success. What matters is
+	// that the cluster's topology is queryable, not which machine
+	// published it.
 	cluster, err := machine.LoadCluster(machine.ClusterManifestPath)
 	if err != nil {
 		fatal("cluster manifest: %v", err)
@@ -100,12 +101,12 @@ func main() {
 		clusterName = cluster.Metadata.Name
 	}
 
-	// The core of every operator: a level-triggered loop. Watch events
-	// tell us *when* to look; the ticker guarantees we look even when
-	// nothing happened (facts can change without the object changing,
-	// and drift doesn't announce itself); and every pass reconciles from
-	// absolute current state, never from the event that woke us. Missing
-	// one event must never matter.
+	// The core of every operator is a level-triggered loop. Watch
+	// events tell us *when* to look. The ticker guarantees we look
+	// even when nothing happened, because facts can change without the
+	// object changing, and there is no event for drift. Every pass
+	// reconciles from absolute current state, never from the event
+	// that woke us, so that missing one event can never matter.
 	events := make(chan *machine.Machine, 1)
 	go watchMachine(client, name, current.Metadata.ResourceVersion, events)
 

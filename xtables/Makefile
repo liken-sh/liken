@@ -1,5 +1,5 @@
 # The xtables domain: the netfilter userspace, vendored like the
-# kernel and k3s: one pinned version, static binaries, fetched and
+# kernel and k3s. One pinned version, static binaries, fetched and
 # verified by fetch.sh (documented there).
 VERSION := $(strip $(file <VERSION))
 

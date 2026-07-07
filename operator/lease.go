@@ -3,12 +3,12 @@ package main
 // Leader election for the fleet sweep.
 //
 // Every leader carries the sweep's code, but only one should run it
-// at a time. Not for safety — every sweeper computes the same
-// verdicts from the same data, and the API server's optimistic
+// at a time. The reason is not safety: every sweeper computes the
+// same verdicts from the same data, and the API server's optimistic
 // concurrency (resourceVersion, 409 Conflict) already serializes the
-// writes — but for quiet: concurrent sweepers reject each other's
-// writes on every change and fill the logs with conflicts that are
-// all working as intended and all noise.
+// writes. The reason is noise: concurrent sweepers reject each
+// other's writes on every change and fill the logs with conflicts
+// that are working as intended but tell nobody anything.
 //
 // Kubernetes has a standard answer, and it's the same one it uses for
 // its own control plane: a Lease. kube-controller-manager and
@@ -18,7 +18,7 @@ package main
 // contender that holds the lease works and keeps renewing; one that
 // doesn't stands by; one that finds the claim gone stale takes it.
 // client-go wraps this in its leaderelection package; underneath, it
-// is nothing but the reads and conditional writes below — the same
+// is nothing but the reads and conditional writes below: the same
 // optimistic concurrency as everything else, pointed at an object
 // whose only content is the holder's name and the time of its last
 // renewal. The mechanism is the same one the machine heartbeats use:
@@ -27,7 +27,7 @@ package main
 //
 // Losing the holder costs nothing but latency: its renewals stop,
 // the lease ages past its duration, and the next leader's pass takes
-// over — the sweep pauses for at most a lease duration, and a
+// over. The sweep pauses for at most one lease duration, and a
 // machine's Lost verdict arrives a minute late. The election
 // deliberately runs on the reconcile loop's own cadence rather than
 // a dedicated goroutine: the sweep happens at most once per pass, so
@@ -51,13 +51,13 @@ import (
 const fleetLeasePath = "/apis/coordination.k8s.io/v1/namespaces/liken-system/leases/liken-fleet-sweep"
 
 // The machines' heartbeat leases live in a namespace of their own,
-// one Lease per machine, named for it — the arrangement of
-// kube-node-lease, for the same reasons. A heartbeat must renew on a
-// schedule forever, so it should be the cheapest write the API
-// server offers: a Lease is a few dozen bytes with no watchers,
-// where a timestamp inside Machine status would rewrite the whole
-// object — hardware inventory, boot record, conditions — and wake
-// every watcher, every renewal, machine after machine. Kubernetes
+// one Lease per machine, named for it. This is the arrangement of
+// kube-node-lease, adopted for the same reasons. A heartbeat must
+// renew on a schedule forever, so it should be the cheapest write
+// the API server offers, and a Lease is a few dozen bytes with no
+// watchers. A timestamp inside Machine status would instead rewrite
+// the whole object (hardware inventory, boot record, conditions) and
+// wake every watcher on every renewal of every machine. Kubernetes
 // moved the kubelet's heartbeats out of Node status and into
 // kube-node-lease to escape exactly that; liken heartbeats through a
 // lease from the start.
@@ -84,9 +84,9 @@ type leaseObject struct {
 		AcquireTime          string `json:"acquireTime,omitempty"`
 		RenewTime            string `json:"renewTime,omitempty"`
 
-		// LeaseTransitions counts changes of holder: the lease's
-		// flap odometer, incremented on every takeover. A high
-		// number on a long-lived lease says the holders keep dying.
+		// LeaseTransitions counts changes of holder, incremented on
+		// every takeover. A high count on a long-lived lease means
+		// the holders keep dying.
 		LeaseTransitions int `json:"leaseTransitions,omitempty"`
 	} `json:"spec"`
 }
@@ -117,11 +117,12 @@ func leaseAction(l *leaseObject, self string, now time.Time) leaseVerdict {
 }
 
 // holdFleetLease returns whether this machine holds the sweep lease,
-// acquiring or renewing it if it can. Every write is conditional —
-// the create fails if someone else created first, the update carries
-// the resourceVersion we read — so two leaders grabbing at the same
-// moment resolve the way all contended writes do: one wins, the
-// other reads the winner's claim next pass and stands by.
+// acquiring or renewing it if it can. Every write is conditional:
+// the create fails if someone else created first, and the update
+// carries the resourceVersion we read. Two leaders grabbing at the
+// same moment therefore resolve the way all contended writes do: one
+// wins, and the other reads the winner's claim next pass and stands
+// by.
 func holdFleetLease(c *apiClient, self string, now time.Time) bool {
 	lease := &leaseObject{}
 	err := c.requestJSON(http.MethodGet, fleetLeasePath, nil, lease)
@@ -192,9 +193,9 @@ func newLease(name, holder string, duration time.Duration, now time.Time) *lease
 // it if it doesn't exist, renew it once it has aged past
 // heartbeatRenewAfter, and leave it alone otherwise, so most passes
 // cost one read and no write. Unlike the sweep's lease there is no
-// election here — this machine is its lease's only writer, the way a
-// kubelet is its node lease's — so every failure mode is just "try
-// again next pass."
+// election here: this machine is its lease's only writer, the way a
+// kubelet is the only writer of its node lease. Every failure mode
+// is therefore just "try again next pass."
 func renewMachineHeartbeat(c *apiClient, name string, now time.Time) {
 	path := machineLeaseDir + "/" + name
 	lease := &leaseObject{}
@@ -228,9 +229,9 @@ func renewMachineHeartbeat(c *apiClient, name string, now time.Time) {
 	}
 }
 
-// listMachineHeartbeats reads every machine's last renewal, for the
-// sweep: the fleet's liveness in one cheap list, machine name to the
-// moment it last spoke.
+// listMachineHeartbeats reads every machine's last renewal for the
+// sweep: one cheap list yields the fleet's liveness, mapping each
+// machine's name to the moment of its last renewal.
 func listMachineHeartbeats(c *apiClient) (map[string]time.Time, error) {
 	var list struct {
 		Items []leaseObject `json:"items"`

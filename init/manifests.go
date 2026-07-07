@@ -71,9 +71,9 @@ type manifestCandidates struct {
 }
 
 // findMachineStatePartition scans for the one partition named
-// liken:machineState. Absent is a first boot, not an error; two of
-// them is the same cloned-disk ambiguity matchRoles refuses, refused
-// here for the same reason.
+// liken:machineState. A missing partition means a first boot, not an
+// error. Two of them is the same cloned-disk ambiguity matchRoles
+// refuses, and it is refused here for the same reason.
 func findMachineStatePartition() (*partition, error) {
 	var found *partition
 	for _, p := range discoverPartitions() {
@@ -89,10 +89,10 @@ func findMachineStatePartition() (*partition, error) {
 	return found, nil
 }
 
-// loadManifestCandidates is the peek. A machineState partition with
-// no filesystem yet (a boot that died between claim and mkfs) yields
-// no candidates; the seed carries that boot and mountRole's resumable
-// claiming makes the filesystem.
+// loadManifestCandidates performs the peek. A machineState partition
+// with no filesystem yet (a boot that died between claim and mkfs)
+// yields no candidates; the seed carries that boot and mountRole's
+// resumable claiming makes the filesystem.
 func loadManifestCandidates() (manifestCandidates, error) {
 	var c manifestCandidates
 	part, err := findMachineStatePartition()
@@ -113,8 +113,8 @@ func loadManifestCandidates() (manifestCandidates, error) {
 	}
 	// Read-only means "we write nothing", not "the device is
 	// untouched": mounting ext4 replays its journal if the last boot
-	// died mid-write, which is the filesystem healing itself and
-	// exactly what we want.
+	// died mid-write, which is the filesystem's recovery mechanism
+	// working exactly as we want.
 	if err := unix.Mount(dev, manifestPeekPoint, "ext4", unix.MS_RDONLY, ""); err != nil {
 		return c, fmt.Errorf("peeking at machineState on %s: %w", dev, err)
 	}
@@ -207,9 +207,9 @@ func touchMachineState(p partition, fn func(root string) error) error {
 // storage failures when it explains the power-off on the console.
 var errIdentity = errors.New("machine identity")
 
-// seedPath answers "which file in the manifests directory is mine?".
-// One image boots many machines, so the image carries a manifest per
-// machine and each boot selects its own: explicitly, by the
+// seedPath selects this machine's own file from the manifests
+// directory. One image boots many machines, so the image carries a
+// manifest per machine and each boot selects its own: explicitly, by the
 // liken.machine=<name> kernel parameter (the one channel the
 // bootloader already owns), or implicitly when there is exactly one
 // manifest to choose. Anything else is refused rather than guessed:
@@ -255,7 +255,8 @@ func seedPath(dir, requested string) (string, error) {
 // silent default: loadSeed only runs on a boot with no proven
 // manifest to fall back to, and a first boot under the wrong (or
 // empty) identity could join the wrong cluster or claim the wrong
-// disks. Wrong is worse than down.
+// disks. A machine that stays down can be fixed; a machine running
+// under the wrong identity can do real damage.
 func loadSeed() (*manifestChoice, error) {
 	choice := &manifestChoice{m: &machine.Machine{}, source: machine.ManifestSourceSeed}
 	path, err := seedPath(machine.MachineManifestDir, bootParamValue("liken.machine"))
@@ -279,8 +280,8 @@ func loadSeed() (*manifestChoice, error) {
 }
 
 // attemptOrder is the whole preference policy in one place: staged
-// before proven. The seed isn't among the candidates on purpose: it
-// is a first-boot input, not a fallback (a machine that has ever
+// before proven. The seed is deliberately not among the candidates:
+// it is a first-boot input, not a fallback (a machine that has ever
 // proven a manifest never consults the image again), so settleStorage
 // loads it only when this comes back empty.
 func attemptOrder(c manifestCandidates) []*manifestChoice {

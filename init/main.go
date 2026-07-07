@@ -25,10 +25,10 @@
 // A traditional init grows from here into a service manager. liken's
 // does not: its whole job is to set up the minimum environment k3s
 // needs, start it, and keep it running. Kubernetes is the service
-// manager. The few loops init runs for itself — the machine plane —
-// are goroutines registered in components.go, which states the rule
-// for what is allowed to live there and what must run in the cluster
-// instead. When the image carries no k3s, a boot is a self-test:
+// manager. The few loops init runs for itself, called the machine
+// plane, are goroutines registered in components.go, which states the
+// rule for what is allowed to live there and what must run in the
+// cluster instead. When the image carries no k3s, a boot is a self-test:
 // mount the essentials, read the Machine manifest, join the network,
 // prove the connection with a DNS lookup, power off.
 package main
@@ -55,11 +55,11 @@ func main() {
 	// port. Ordinary prints reach it directly.
 	fmt.Println("liken: hello from userspace")
 
-	// The panic fault fires at first breath, before anything is
-	// mounted or supervised: PID 1 dying panics the kernel, panic=10
-	// reboots it, and the firmware's consumed BootNext lands the
-	// machine back on its proven slot with no liken code involved in
-	// the recovery (fault.go).
+	// The panic fault fires immediately, before anything is mounted
+	// or supervised: PID 1 dying panics the kernel, panic=10 reboots
+	// it, and the firmware's consumed BootNext lands the machine back
+	// on its proven slot with no liken code involved in the recovery
+	// (fault.go).
 	if fault == "panic" {
 		panic("liken: fault injection: this release panics at first breath")
 	}
@@ -96,30 +96,31 @@ func main() {
 	// mounting vfat pulls in its default character-encoding table
 	// (nls_iso8859-1), which Ubuntu's config builds as a module.
 	// Everything else on the list is for k3s, which starts much
-	// later; loading it all in one early pass keeps module loading
-	// one story instead of two.
+	// later. Loading it all in one early pass means there is a single
+	// place where modules load, rather than two.
 	loadModules()
 
 	// Storage settles first, and with it the question of which
 	// manifest this boot runs under: the staged one awaiting its
 	// proving boot, the proven last-known-good, or (first boot only)
-	// the seed baked into the image — selected by liken.machine= when
-	// the image carries manifests for many machines. manifests.go
-	// tells that story. Everything after this line configures the
-	// machine from the manifest that *won*, never from one that was
-	// rejected along the way. This is also one of the two actuators
-	// allowed to stop a boot; failBoot's rationales explain both.
+	// the seed baked into the image. When the image carries manifests
+	// for many machines, liken.machine= selects among them.
+	// manifests.go explains the whole selection. Everything after
+	// this line configures the machine from the manifest that *won*,
+	// never from one that was rejected along the way. This is also
+	// one of the two actuators allowed to stop a boot; failBoot's
+	// rationales explain both.
 	choice, storage, boot, err := settleStorage()
 	if err != nil {
 		failBoot(err)
 	}
 	m := choice.m
 
-	// Which system slot this boot came from, when it came from one:
-	// the installer bakes liken.slot= into each boot entry's command
+	// The installer bakes liken.slot= into each boot entry's command
 	// line, so a from-disk boot always knows which half of blue-green
-	// it stands on. The fact rides to the cluster in the boot record,
-	// where the operator uses it to aim downloads at the other slot.
+	// it is running from. The boot record carries the fact to the
+	// cluster, where the operator uses it to aim downloads at the
+	// other slot.
 	if slot := bootParamValue("liken.slot"); slot != "" {
 		boot.Slot = slot
 		fmt.Printf("liken: firmware: running from system slot %s\n", slot)
@@ -127,10 +128,10 @@ func main() {
 
 	// An install boot does exactly one job and stops: put this
 	// running version on the machine's own disk (install.go). It
-	// runs this early because nothing after it — network, time,
-	// k3s — is its business, and it must power off rather than
-	// reboot: the install medium is still first in line, and a
-	// reboot would just run the installer again.
+	// runs this early because nothing after it (network, time, k3s)
+	// is its business. It must power off rather than reboot: the
+	// install medium is still first in line, and a reboot would just
+	// run the installer again.
 	if bootParam(installParam) {
 		if err := installToDisk(m.Metadata.Name); err != nil {
 			fmt.Fprintf(os.Stderr, "liken: %v\n", err)
@@ -144,10 +145,10 @@ func main() {
 		}
 	}
 
-	// The system release lifecycle: is this boot the trial of a
-	// staged release, the fallback from one, or an ordinary boot
-	// whose only job is to keep the firmware's BootOrder agreeing
-	// with the store (proving.go)?
+	// Settle where this boot sits in the system release lifecycle: it
+	// may be the trial of a staged release, the fallback from one, or
+	// an ordinary boot whose only job is to keep the firmware's
+	// BootOrder agreeing with the store (proving.go).
 	proving := settleSystemRelease(machine.MachineStateDir, boot.Slot,
 		storage.MachineState.Backing == machine.BackingPartition, &boot)
 
@@ -204,23 +205,25 @@ func main() {
 		}
 		// The node password k3s mints on first join has to outlive
 		// this boot, or the machine can never rejoin its own cluster
-		// (k3s.go tells the story).
+		// (k3s.go explains).
 		persistNodePassword(storage)
-		// A proven demotion also cleans up after the machine's leader
-		// days: etcd won't let a removed member rejoin over its old
-		// data, so the datastore goes before k3s starts (k3s.go).
+		// A proven demotion also removes the datastore left over from
+		// when this machine was a leader: etcd won't let a removed
+		// member rejoin over its old data, so the datastore must be
+		// deleted before k3s starts (k3s.go).
 		purgeLeaderLeftovers(role, boot.ClusterManifestSource, k3sServerDB)
 		// The clock is corrected before k3s starts, because a wrong
 		// clock fails TLS: every certificate the CA minted looks
 		// like it's from the future. This is the only moment liken
 		// ever steps the clock; from here on it only slews (time.go
-		// tells the whole story).
+		// explains both corrections).
 		clk := newClock(timeSources(cluster, role, machine.MachineManifestDir))
 		firstSync := stepClockAtBoot(clk.sources)
 		clk.record(firstSync)
 		// A successful boot measurement is worth persisting at once:
-		// a machine that later loses power dirty still wakes up with
-		// roughly right time (time.go on the RTC's two moments).
+		// a machine that later loses power without a clean shutdown
+		// still boots with roughly the right time (time.go describes
+		// the two moments the RTC is written).
 		if firstSync != nil {
 			writeRTC()
 		}
@@ -230,16 +233,16 @@ func main() {
 		// written earlier would be shadowed by the mount.
 		facts := publishFacts(cluster, role, choice, conns, storage, boot, firstSync, clk.sources)
 		publishBootClusterManifest(clusterRaw)
-		// A machine with time sources disciplines its clock for the
-		// rest of its life; a free-running machine has nothing to
-		// follow, and its status already says so.
+		// A machine with time sources keeps disciplining its clock
+		// for as long as it runs; a free-running machine has nothing
+		// to follow, and its status already says so.
 		if len(clk.sources) > 0 {
 			plane.start("the clock", disciplineClock(clk, facts))
 		}
 		// Only leaders serve time, because only leaders are asked:
 		// followers sync from the leaders themselves. Serving works
-		// even free-running — a fleet with no upstreams still agrees
-		// with itself (responder.go).
+		// even when free-running: a fleet with no upstreams still
+		// keeps one consistent time across its machines (responder.go).
 		if role == machine.RoleLeader {
 			plane.start("the time responder", serveTime(clk))
 		}
@@ -256,12 +259,12 @@ func main() {
 		})
 		// A proving boot watches for its own promotion: when the
 		// operator's first reconcile proves the staged release, init
-		// flips the firmware's BootOrder to lead with the slot that
-		// just earned it (proving.go).
+		// rewrites the firmware's BootOrder to put the newly proven
+		// slot first (proving.go).
 		if proving {
 			plane.start("the proving watch", provingWatch)
 		}
-		// Only a leader can narrate cluster state: the admin
+		// Only a leader can report cluster state: the admin
 		// kubeconfig is a control-plane artifact, and followers hold
 		// no credentials of their own. A follower's join shows up on
 		// the leader's console (and in its own k3s log lines).
@@ -269,10 +272,10 @@ func main() {
 			plane.start("the node report", reportWhenReady)
 		}
 		// The wedge fault boots everything except k3s: the node never
-		// joins, the operator never runs, no promotion ever lands —
-		// the exact failure the proving watchdog exists to catch
-		// (fault.go). The machine plane keeps running, so the
-		// watchdog's reboot still works.
+		// joins, the operator never runs, and no promotion ever
+		// lands. That is exactly the failure the proving watchdog
+		// exists to catch (fault.go). The machine plane keeps
+		// running, so the watchdog's reboot still works.
 		if fault == "wedge-k3s" {
 			fmt.Println("liken: fault injection: wedging instead of starting k3s")
 			select {}
@@ -311,7 +314,9 @@ func powerOff() {
 //   - storage: a declared role can't be satisfied, and a machine
 //     declared to have persistent state must not come up ephemeral.
 //
-// Both are cases of the same rule: down is recoverable, wrong is not.
+// The reasoning is the same in both cases: a machine that is down can
+// be fixed and booted again, but a machine running with the wrong
+// configuration can do damage that a reboot won't undo.
 func failBoot(err error) {
 	rationale := "storage: a declared role can't be satisfied, and a machine declared to have persistent state must not come up ephemeral; powering off"
 	if errors.Is(err, errIdentity) {
@@ -329,11 +334,11 @@ func failBoot(err error) {
 }
 
 // bootParamValue returns the value of a name=value parameter on the
-// kernel command line ("" when absent): the channel for facts a
-// machine must know before it has read any file, like which machine
-// it is. The bootloader owns the command line, which is exactly why
-// it can carry identity: it's configured per machine even when the
-// image is shared by a fleet.
+// kernel command line ("" when absent). The command line is where a
+// machine learns facts it needs before it has read any file, like
+// which machine it is. The bootloader owns the command line, which is
+// exactly why it can carry identity: it's configured per machine even
+// when the image is shared by a fleet.
 func bootParamValue(name string) string {
 	raw, err := os.ReadFile("/proc/cmdline")
 	if err != nil {
@@ -359,9 +364,9 @@ func bootParam(name string) bool {
 	return slices.Contains(strings.Fields(string(raw)), name)
 }
 
-// A mount table rather than a sequence of calls: the essential
-// filesystems are data, and the world report below prints what
-// actually got mounted, so the two are easy to compare.
+// The essential filesystems are declared as a table rather than a
+// sequence of calls: they are data, and the world report below prints
+// what actually got mounted, so the two are easy to compare.
 type mount struct {
 	source string
 	target string
@@ -449,8 +454,8 @@ func worldReport() {
 	reportBlockDevices()
 }
 
-// reap collects the exit status of any child process, for as long as
-// the machine plane runs — which is to say until shutdown, after
+// reap collects the exit status of any child process for as long as
+// the machine plane runs. The plane only stops at shutdown, after
 // every process it might collect has already been stopped. SIGCHLD
 // arrives whenever a child dies; because signal coalescing can fold
 // many deaths into one delivery, each wakeup collects every exited

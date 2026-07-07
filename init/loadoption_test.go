@@ -9,9 +9,9 @@ import (
 // A hand-assembled EFI_LOAD_OPTION, byte for byte from the UEFI
 // specification, mirroring the structure of a real "ubuntu" entry
 // read from a laptop's firmware: active, named, pointing at a file
-// on one GPT partition, no optional data. Building it by hand (not
-// with our encoder) is the point: the decoder is tested against the
-// specification, not against our own reflection.
+// on one GPT partition, no optional data. Building it by hand rather
+// than with our encoder is the point: the decoder is tested against
+// the specification, not against our own encoder's output.
 func specFixture() []byte {
 	var b bytes.Buffer
 	b.Write([]byte{0x01, 0x00, 0x00, 0x00}) // attributes: LOAD_OPTION_ACTIVE

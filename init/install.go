@@ -13,15 +13,17 @@ package main
 // The installer is liken itself, not a separate program: the same
 // init, the same storage reconciliation (which is what claimed and
 // formatted the slots moments earlier, on a fresh machine), the same
-// manifest selection. Only the destination differs — and the ending,
-// a power-off, because the install medium must not boot again: with
-// QEMU's -kernel present, a reboot would just re-run the installer.
+// manifest selection. Two things differ: the destination, and the
+// ending. An install boot ends in a power-off because the install
+// medium must not boot again; with QEMU's -kernel present, a reboot
+// would just re-run the installer.
 //
-// Idempotence is the crash story: a power cut mid-install leaves
-// claimed slots (claiming is resumable by name), half-copied files
-// that fail verification and are copied again, and boot entries that
-// are found by description and rewritten in place. Running the
-// installer twice converges; there is no state to clean up first.
+// Idempotence is what makes a crash safe. A power cut mid-install
+// leaves claimed slots (claiming is resumable by name), half-copied
+// files that fail verification and are copied again, and boot
+// entries that are found by description and rewritten in place.
+// Running the installer twice converges; there is no state to clean
+// up first.
 
 import (
 	"fmt"
@@ -33,17 +35,17 @@ import (
 )
 
 // installParam is the command-line flag that makes a boot an
-// install. A flag rather than a separate image, because the
-// installer *is* the OS; the bootloader (the person, really) decides
+// install. It is a flag rather than a separate image because the
+// installer *is* the OS; whoever configures the bootloader decides
 // which job this boot performs.
 const installParam = "liken.install"
 
 // releasePayloadDir is where the install image carries the release
 // it installs: the exact artifacts, byte for byte, that the release's
 // own document describes. image/build.sh assembles this as a second
-// cpio concatenated onto the ordinary image — the kernel unpacks
+// cpio concatenated onto the ordinary image; the kernel unpacks
 // concatenated archives in order, the same mechanism early microcode
-// updates ride.
+// updates use.
 const releasePayloadDir = "/usr/share/liken/release"
 
 // installToDisk performs the whole install against the slots that
@@ -55,9 +57,9 @@ func installToDisk(machineName string) error {
 		return fmt.Errorf("install: this machine has no name (liken.machine= or a manifest must supply one); boot entries carry identity, so an anonymous install would be wrong on every later boot")
 	}
 
-	// The slots must both exist before anything is copied: an
-	// install that can't register a fallback slot isn't the design,
-	// it's half of it.
+	// The slots must both exist before anything is copied. The design
+	// depends on a fallback slot being registered from the start, so
+	// an install that can only register one slot must not proceed.
 	parts := discoverPartitions()
 	slotA, err := findSlotPartition(parts, machine.SystemARole)
 	if err != nil {
@@ -68,7 +70,7 @@ func installToDisk(machineName string) error {
 		return err
 	}
 
-	// The payload vouches for itself before a single byte moves: the
+	// The payload is verified before a single byte is copied: the
 	// release document names each artifact's digest, and the copies
 	// this image carries must match it exactly.
 	raw, err := os.ReadFile(filepath.Join(releasePayloadDir, "release.yaml"))
@@ -92,8 +94,9 @@ func installToDisk(machineName string) error {
 			return fmt.Errorf("install: copying %s: %w", artifact.Name, err)
 		}
 		// Verify what was written, not what was meant: the copy is
-		// re-read from the slot and hashed again. Milestone 12.1's
-		// power-cut drill is why this paranoia is cheap at the price.
+		// re-read from the slot and hashed again, so a torn or
+		// corrupted write is caught now rather than on some later
+		// boot.
 		if err := verifyFile(artifact, dest); err != nil {
 			return fmt.Errorf("install: the copy on the slot doesn't verify: %w", err)
 		}
@@ -101,8 +104,8 @@ func installToDisk(machineName string) error {
 	}
 
 	// Register both slots with the firmware. Slot B's entry points
-	// at a file that doesn't exist yet — its slot is empty until the
-	// first upgrade fills it — and that's fine: a firmware that
+	// at a file that doesn't exist yet, because its slot stays empty
+	// until the first upgrade fills it. That's fine: a firmware that
 	// can't load an entry's file moves on down BootOrder.
 	entryA, err := writeSlotBootEntry(efiVarsDir, "liken slot A", "A", slotA, machineName)
 	if err != nil {
@@ -113,8 +116,8 @@ func installToDisk(machineName string) error {
 		return err
 	}
 
-	// BootOrder: our slots first (A then B — B only matters when a
-	// proving boot armed it via BootNext or A is broken), then
+	// BootOrder: our slots first, A then B (B only matters when a
+	// proving boot armed it via BootNext, or when A is broken), then
 	// whatever the firmware already had, in its old order. The
 	// firmware's own entries (setup menus, shells) stay reachable,
 	// just never preferred.
@@ -142,8 +145,8 @@ func installToDisk(machineName string) error {
 }
 
 // findSlotPartition locates one slot by the name written on it at
-// claim time, and reads its GPT identity — the unique GUID a boot
-// entry pins the partition by, position-independent.
+// claim time, and reads its GPT identity: the unique GUID a boot
+// entry uses to pin the partition regardless of device position.
 func findSlotPartition(parts []partition, role machine.StorageRoleName) (*slotPartition, error) {
 	declared := machine.DeclaredRole{Name: role}
 	for _, p := range parts {
@@ -200,20 +203,22 @@ func partitionNumber(p partition) uint32 {
 }
 
 // writeSlotBootEntry writes one slot's firmware entry: boot \vmlinuz
-// from this partition, with a command line assembled from scratch —
-// every argument accounted for, none inherited by accident:
+// from this partition, with a command line assembled from scratch so
+// that every argument is deliberate and none is inherited by
+// accident:
 //
-//	console=...      copied from this boot, so the machine keeps
-//	                 speaking on whatever console its operator wired
-//	rdinit=/liken    run our program as PID 1, as ever
-//	initrd=\vmlinuz's neighbor — the EFI stub loads the initramfs
-//	                 from the same filesystem it loaded the kernel from
+//	console=...      copied from this boot, so the installed system
+//	                 keeps using whatever console its operator wired
+//	rdinit=/liken    run our program as PID 1
+//	initrd=          \liken.cpio, next to the kernel; the EFI stub
+//	                 loads the initramfs from the same filesystem it
+//	                 loaded the kernel from
 //	liken.machine=   identity, the bootloader's channel; the entry
 //	                 inherits it from the installer boot
 //	liken.slot=      which slot this entry boots, so a running system
-//	                 knows which half of blue-green it stands on
+//	                 knows which half of blue-green it is on
 //	panic=10         reboot ten seconds after a kernel panic, instead
-//	                 of hanging forever. Load-bearing for upgrades: a
+//	                 of hanging forever. Upgrades depend on this: a
 //	                 panicking trial slot must reset so the firmware's
 //	                 consumed BootNext can fall back to the proven one
 func writeSlotBootEntry(dir, description, slot string, part *slotPartition, machineName string) (uint16, error) {
@@ -248,7 +253,7 @@ func writeSlotBootEntry(dir, description, slot string, part *slotPartition, mach
 
 // consoleArgs copies every console= argument from the running
 // command line: the installer was told where this machine's console
-// is, and the installed system should keep talking there.
+// is, and the installed system should keep using the same one.
 func consoleArgs() []string {
 	raw, err := os.ReadFile("/proc/cmdline")
 	if err != nil {
@@ -273,11 +278,12 @@ func verifyFile(artifact machine.ReleaseArtifact, path string) error {
 	return artifact.Verify(f)
 }
 
-// copyDurably copies through a temporary name, fsyncs, and renames:
-// the slot never holds a file that looks final but isn't. FAT has no
-// journal, so durability here is nothing but discipline — the sync
-// before the rename is what milestone 12.1's power-cut drill showed
-// the page cache won't do for us.
+// copyDurably copies through a temporary name, fsyncs, and renames,
+// so the slot never holds a file that looks final but isn't. FAT has
+// no journal, so durability here is purely discipline: without the
+// explicit sync before the rename, the page cache may still hold the
+// file's bytes when the rename lands, and a power cut then leaves a
+// final-looking file with incomplete contents.
 func copyDurably(source, dest string) error {
 	src, err := os.Open(source)
 	if err != nil {

@@ -1,8 +1,8 @@
 package main
 
 // Tests for the cluster document's boot-time selection: staged over
-// proven over seed, vetting at the door, and the boot record telling
-// the truth about which copy won.
+// proven over seed, vetting before the trial, and the boot record
+// accurately recording which copy won.
 
 import (
 	"os"

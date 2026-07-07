@@ -6,22 +6,23 @@ package main
 // The Cluster declares one target version (spec.version) and the
 // catalog that vouches for it; each machine's operator compares the
 // version its boot reported against that target, live, every pass.
-// There is nothing to compare on the Machine's spec — machines carry
-// no version field, which is what makes an upgrade one edit instead
-// of one per machine.
+// There is nothing to compare on the Machine's spec, because machines
+// carry no version field. That is what makes an upgrade one edit
+// instead of one per machine.
 //
 // Convergence here is a download, not a reboot: the operator brings
 // the release's artifacts onto the machine's inactive system slot and
 // verifies every byte against the catalog's digest chain. The reboot
-// that makes the downloaded release the running one is the next
-// chapter (the proving reboot); this file's job ends with verified
-// bytes waiting on the other slot.
+// that makes the downloaded release the running one comes later (the
+// proving reboot); this file's job ends with verified bytes sitting
+// on the other slot.
 //
 // The decisions are pure functions, reconcile supplies the I/O, and
-// the fetch itself runs on its own goroutine (fetch.go) — a blocking
-// 100MB GET inside a reconcile pass would starve the heartbeat lease
-// and read as a death, which is milestone 10's lesson made
-// structural.
+// the fetch itself runs on its own goroutine (fetch.go). A blocking
+// 100MB GET inside a reconcile pass would starve the heartbeat lease,
+// and the fleet would read the silence as a dead machine. Milestone
+// 10 demonstrated that failure; the separate goroutine is the
+// structural fix.
 
 import (
 	"fmt"
@@ -36,13 +37,14 @@ func versionConverged(status machine.ConditionStatus, reason, message string) ma
 
 // versionAsk decides whether this machine should be downloading a
 // release, and which one: the ask is the fetcher's work order. When
-// the answer is no — converged, no target, or a machine that can't
-// take a release — the returned condition is the whole verdict and
+// the answer is no (converged, no target, or a machine that can't
+// take a release), the returned condition is the whole verdict and
 // ok is false.
 //
-// The short-circuit order mirrors decideConvergence's: tell the
-// blocked stories before the busy ones, so a machine that can never
-// comply says so instead of pretending to try.
+// The short-circuit order mirrors decideConvergence's: the
+// permanently blocked cases are checked before the in-progress ones,
+// so a machine that can never comply reports that instead of
+// reporting an attempt that could not succeed.
 func versionAsk(cluster *machine.Cluster, facts *machine.MachineStatus) (fetchAsk, machine.Condition, bool) {
 	none := fetchAsk{}
 	if facts == nil {
@@ -61,8 +63,9 @@ func versionAsk(cluster *machine.Cluster, facts *machine.MachineStatus) (fetchAs
 	}
 
 	// The catalog admission rule makes this unreachable through the
-	// API, but the operator checks anyway: an API server's promise is
-	// not a substitute for handling the lookup that failed.
+	// API, but the operator checks anyway: the lookup can fail, so
+	// the failure has to be handled, whatever the API server
+	// promised.
 	entry := cluster.Spec.Releases.Entry(target)
 	if entry == nil {
 		return none, versionConverged("False", "VersionNotInCatalog",
@@ -73,10 +76,11 @@ func versionAsk(cluster *machine.Cluster, facts *machine.MachineStatus) (fetchAs
 			"the catalog names releases but spec.releases.source gives nowhere to fetch them from"), false
 	}
 
-	// A release needs somewhere to land (both slots, claimed and
-	// partition-backed) and a running slot to be the other half of:
-	// a machine that didn't boot from a slot has no boot entries to
-	// reboot through, so a download could never become a boot.
+	// A release needs somewhere to land: both slots claimed and
+	// partition-backed. It also needs the machine to be running from
+	// a slot, because a machine that didn't boot from a slot has no
+	// boot entries to reboot through, so a download could never
+	// become a boot.
 	if facts.Storage.SystemA.Backing != machine.BackingPartition ||
 		facts.Storage.SystemB.Backing != machine.BackingPartition {
 		return none, versionConverged("False", "NoSystemSlots",
@@ -98,16 +102,17 @@ func versionAsk(cluster *machine.Cluster, facts *machine.MachineStatus) (fetchAs
 }
 
 // versionCondition turns the fetcher's answer about an ask into the
-// VersionConverged condition, for every state short of verified
-// (decideSystemStaging owns that one — a verified download's story is
-// the staged record's). Every state here is "not converged yet"; what
-// differs is whether time will fix it. A failed fetch reads as
-// Downloading on purpose: a down release server is transient by
-// definition, the fetcher retries every pass, and the condition's
-// message carries the story. A digest mismatch is the opposite —
-// refetching can't change what the server publishes, so the machine
-// holds at DigestMismatch (phase Blocked) until the catalog names
-// different bytes, and nothing is ever staged.
+// VersionConverged condition, for every state short of verified.
+// (decideSystemStaging owns the verified state, because a verified
+// download is reported through its staged record.) Every state here
+// means "not converged yet"; what differs is whether time will fix
+// it. A failed fetch deliberately reads as Downloading: a down
+// release server is transient by definition, the fetcher retries
+// every pass, and the condition's message says what failed. A digest
+// mismatch is the opposite. Refetching can't change what the server
+// publishes, so the machine holds at DigestMismatch (phase Blocked)
+// until the catalog names different bytes, and nothing is ever
+// staged.
 func versionCondition(ask fetchAsk, snap fetchSnapshot) machine.Condition {
 	switch snap.state {
 	case fetchRejected:
@@ -122,9 +127,9 @@ func versionCondition(ask fetchAsk, snap fetchSnapshot) machine.Condition {
 
 // versionConvergence wraps a short-circuit verdict from versionAsk
 // into a convergence. A True verdict (converged, or no target at all)
-// tidies as it goes: a staged record left behind would reboot the
+// also cleans up: a staged record left behind would reboot the
 // machine into an upgrade nobody is asking for anymore, and a
-// standing rejection has nothing left to block.
+// standing rejection no longer blocks anything.
 func versionConvergence(cond machine.Condition, stagedHash string, rejection *machine.Rejection) convergence {
 	c := convergence{condition: cond}
 	if cond.Status == "True" {
@@ -134,15 +139,16 @@ func versionConvergence(cond machine.Condition, stagedHash string, rejection *ma
 	return c
 }
 
-// decideSystemStaging is the tail of the version story: a verified
-// download becomes a staged SystemRelease record, and the record
-// rides exactly the reboot machinery every other staged document
-// rides — Manual policy reports RebootPending, a cluster member
-// awaits its turn from the rollout conductor, a granted turn requests
-// the reboot (gated through the drain like all the rest). The proving
-// boot is the reboot itself: init arms the firmware's BootNext at the
-// staged slot on the way down, and the operator that comes up running
-// the new release is the proof that promotes the record.
+// decideSystemStaging finishes version convergence: a verified
+// download becomes a staged SystemRelease record, and that record
+// goes through exactly the reboot machinery every other staged
+// document does. Manual policy reports RebootPending, a cluster
+// member awaits its turn from the rollout conductor, and a granted
+// turn requests the reboot, gated through the drain like all the
+// rest. The proving boot is the reboot itself: init arms the
+// firmware's BootNext at the staged slot on the way down, and the
+// operator that comes up running the new release is the proof that
+// promotes the record.
 func decideSystemStaging(ask fetchAsk, snap fetchSnapshot, m *machine.Machine, rejection *machine.Rejection, stagedHash string, t turn) convergence {
 	if snap.state != fetchVerified {
 		return convergence{condition: versionCondition(ask, snap)}
@@ -179,8 +185,9 @@ func decideSystemStaging(ask fetchAsk, snap fetchSnapshot, m *machine.Machine, r
 	return c
 }
 
-// readStagedSystemHash is the system store's readStagedHash: the
-// identity of whatever record waits there, "" when nothing does.
+// readStagedSystemHash is readStagedHash for the system release
+// store: the hash of whatever record is staged there, or "" when
+// nothing is.
 func readStagedSystemHash() string {
 	raw, _ := machine.SystemReleases(machine.MachineStateDir).LoadStaged()
 	if raw == nil {
@@ -193,21 +200,23 @@ func readStagedSystemHash() string {
 // way settleClusterLifecycle does for the cluster document: the
 // operator's own existence is the evidence. If this pass is
 // executing, then the kernel, init, k3s, and the machine's place in
-// its cluster all work — and if the version this boot reported
-// matches the staged record for the very slot it came from, the
-// trial release is the thing that's working. That is promotion.
+// its cluster all work. And if the version this boot reported
+// matches the staged record for the very slot it came from, then the
+// trial release is what is doing that work, so the record is
+// promoted.
 //
-// The comparison is against the *facts* — init's version stamp, the
-// OS actually running — and deliberately not this binary's own
-// (machine.Version). The operator pod comes from whatever image the
-// cluster's DaemonSet pins, and in a mixed fleet that pin lags the
-// OS: the proving boot of a new release runs the *old* operator
-// until the leaders themselves upgrade. Judging by the pod's stamp
-// would then veto every promotion a mixed fleet ever attempts —
-// which is exactly the failure that once let a converged-looking
-// machine withdraw its own trial paperwork and re-upgrade itself on
-// every boot, forever. The pod is a bystander; the machine is what's
-// on trial.
+// The comparison is against the *facts*, meaning init's version
+// stamp for the OS actually running, and deliberately not this
+// binary's own stamp (machine.Version). The operator pod comes from
+// whatever image the cluster's DaemonSet pins, and in a mixed fleet
+// that pin lags the OS: the proving boot of a new release runs the
+// *old* operator until the leaders themselves upgrade. Judging by
+// the pod's stamp would therefore veto every promotion a mixed fleet
+// attempts. Worse, the unpromoted staged record would look stale to
+// a machine that considers itself converged, be withdrawn, and be
+// re-staged on the next pass, so the machine would re-upgrade itself
+// on every boot, forever. The pod is a bystander to the trial; the
+// machine is what is being proved.
 //
 // A machine running from a slot with no record at all (its install
 // predates any catalog) writes its current standing down as the first
@@ -223,7 +232,7 @@ func settleSystemReleaseLifecycle(root string, facts *machine.MachineStatus) {
 	if staged, _ := store.LoadStaged(); staged != nil {
 		record, err := machine.ParseSystemRelease(staged)
 		if err != nil {
-			return // init vets staged records at boot; not this side's call
+			return // init vets staged records at boot; the operator doesn't judge them
 		}
 		if record.Slot != facts.Boot.Slot || record.Version != facts.Version.Liken {
 			return // not this boot's trial; nothing proved

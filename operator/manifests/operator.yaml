@@ -13,8 +13,8 @@
 # That arrangement makes the operator's image part of the OS, and the
 # DaemonSet below is shaped around the consequence: a node can only
 # run the operator its own OS carries. In a fleet mid-upgrade the
-# nodes carry *different* versions, and any leader's k3s re-applies
-# this file at startup — so the template must never demand an image
+# nodes carry different versions, and any leader's k3s re-applies
+# this file at startup, so the template must never demand an image
 # some node doesn't have. See the DaemonSet's own comments and
 # operator/steward.go for how the pieces fit.
 ---
@@ -26,10 +26,11 @@ metadata:
   name: liken-system
 ---
 # The machines' heartbeat leases live in a namespace of their own,
-# one Lease per machine — the arrangement of kube-node-lease, and for
-# the same reasons (operator/lease.go tells the story). A dedicated
-# namespace keeps the heartbeats from mingling with anything else and
-# makes `kubectl get leases -n liken-machine-lease` the fleet's pulse.
+# one Lease per machine. This is the arrangement of kube-node-lease,
+# adopted for the same reasons (operator/lease.go explains them). A
+# dedicated namespace keeps the heartbeats from mingling with anything
+# else and makes `kubectl get leases -n liken-machine-lease` a quick
+# view of the whole fleet's liveness.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -50,7 +51,7 @@ metadata:
 # headcount there), and Node get/delete for demotion cleanup. RBAC
 # can grant spec and status separately precisely because both CRDs
 # declare status as a subresource. Note what's absent for clusters:
-# no update on the resource itself — the operator seeds the Cluster
+# no update on the resource itself. The operator seeds the Cluster
 # once and may never rewrite the spec a person (or one day a git
 # repository) edits afterward. Status is the operator's to write;
 # spec never is.
@@ -72,7 +73,7 @@ rules:
     resources: [clusters/status]
     verbs: [get, update]
   # Nodes: get to see role labels and cordon state, delete for
-  # demotion cleanup (demotion.go — deleting the stale Node is what
+  # demotion cleanup (demotion.go; deleting the stale Node is what
   # triggers k3s's etcd member removal), and patch for the drain's
   # cordon and uncordon (drain.go). Patch rather than update,
   # deliberately: the operator touches only the fields it owns (the
@@ -116,12 +117,13 @@ subjects:
     namespace: liken-system
 ---
 # The fleet sweep's leader-election lease (operator/lease.go): every
-# leader's operator is a candidate, one holds it at a time — the same
-# mechanism kube-controller-manager and kube-scheduler use to run hot
-# standbys on every control-plane node. A namespaced Role rather than
-# another ClusterRole rule, deliberately: leases exist all over a
-# cluster (every kubelet heartbeats through one in kube-node-lease),
-# and the operator has no business with any lease but its own.
+# leader's operator is a candidate, and one holds it at a time. This
+# is the same mechanism kube-controller-manager and kube-scheduler
+# use to run hot standbys on every control-plane node. A namespaced
+# Role rather than another ClusterRole rule, deliberately: leases
+# exist all over a cluster (every kubelet heartbeats through one in
+# kube-node-lease), and the operator has no business with any lease
+# but its own.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -147,8 +149,9 @@ subjects:
     namespace: liken-system
 ---
 # The heartbeat leases: every operator renews its own machine's, and
-# the sweeping leader lists them all to judge the fleet's liveness —
-# the one extra verb this Role has that the election's doesn't.
+# the sweeping leader lists them all to judge the fleet's liveness.
+# That list is the one extra verb this Role has that the election's
+# doesn't.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -183,18 +186,19 @@ metadata:
   name: liken-operator
   namespace: liken-system
   # The recommended app.kubernetes.io labels, for every tool that
-  # keys on them. The selector below stays the minimal app: label —
-  # a DaemonSet's selector is immutable after creation, so it should
-  # carry identity only, never anything that might want to change.
+  # keys on them. The selector below stays the minimal app: label,
+  # because a DaemonSet's selector is immutable after creation and
+  # should carry identity only, never anything that might want to
+  # change.
   labels:
     app.kubernetes.io/name: liken-operator
     app.kubernetes.io/part-of: liken
   # The release these manifests shipped with. The pod steward
   # (operator/steward.go) compares this against each machine's
   # running version to know when a machine is ready for a pod from
-  # this template — the annotation is the authority, the pods below
-  # inherit it, and the difference between the two is what "stale"
-  # means.
+  # this template. This annotation is the authority, the pods below
+  # inherit it, and a pod is stale exactly when its inherited copy
+  # differs from the DaemonSet's.
   annotations:
     liken.sh/os-version: "LIKEN_VERSION"
 spec:
@@ -203,7 +207,7 @@ spec:
       app: liken-operator
   # OnDelete, never a rolling update: the image is baked into each
   # node's OS, so a template change must not recreate pods on nodes
-  # that haven't rebooted into the release that carries it — that
+  # that haven't rebooted into the release that carries it. Doing so
   # would kill the one operator a machine needs to drive its own
   # upgrade, and imagePullPolicy: Never means the replacement could
   # never start. Pods are refreshed by the steward, one machine at a
@@ -232,15 +236,15 @@ spec:
       # the host's network namespace, so the net.* sysctls it writes
       # tune the real stack, not a pod-private copy; privileged makes
       # the container's /proc/sys writable (unprivileged pods get it
-      # read-only). The RBAC above bounds the trade: powerful on this
-      # machine, narrow in the cluster.
+      # read-only). The RBAC above bounds the trade: the pod is
+      # powerful on this machine but narrow in the cluster.
       hostNetwork: true
       containers:
         - name: operator
           # The stable tag: every release tags its own operator build
           # liken.sh/operator:installed (operator/image.sh), so this
           # same pod spec resolves to whatever build each node's OS
-          # imported — and applying a new release's manifests never
+          # imported, and applying a new release's manifests never
           # changes the image field at all. A versioned tag here
           # would demand one specific build on every node at once,
           # which a fleet mid-upgrade cannot satisfy.
@@ -249,11 +253,12 @@ spec:
           securityContext:
             privileged: true
           volumeMounts:
-            # The facts init published, and beside them the manifest
-            # this boot ran under (which tells the operator which
-            # Machine it manages): the operator's inputs. Read-only by
-            # mount, not by convention: status is observed, never
-            # asserted, and the operator cannot rewrite its own input.
+            # These are the operator's inputs: the facts init
+            # published and, beside them, the manifest this boot ran
+            # under (which tells the operator which Machine it
+            # manages). Read-only by mount rather than by convention:
+            # status is observed, never asserted, and the operator
+            # cannot rewrite its own input.
             - name: run-liken
               mountPath: /run/liken
               readOnly: true
@@ -264,25 +269,26 @@ spec:
               readOnly: true
             # The machineState filesystem, where the operator stages a
             # manifest for the next boot: its one output channel to
-            # init's future self.
+            # the init program of the next boot.
             - name: machine-state
               mountPath: /var/lib/liken/machine
             # The reboot channel: a subdirectory of /run/liken the
             # operator may write while the facts above stay behind a
-            # read-only mount. Two mounts, two directions: facts flow
-            # init to operator, intents flow operator to init.
+            # read-only mount. There are two mounts because data flows
+            # in two directions: facts flow from init to the operator,
+            # and intents flow from the operator to init.
             - name: run-liken-operator
               mountPath: /run/liken/operator
             # The system slots, where downloaded releases land: the
             # operator writes the inactive slot's filesystem (init
             # mounted both under here at boot). Writable because the
-            # download *is* the actuation — the same reason
-            # machine-state is.
+            # download is itself the actuation, for the same reason
+            # machine-state is writable.
             - name: system-slots
               mountPath: /var/lib/liken/system
-      # Note what this feature did NOT need: any new RBAC. Staging and
-      # rebooting are host-filesystem acts, bounded by these mounts,
-      # not cluster permissions.
+      # Staging and rebooting need no RBAC at all: they are
+      # host-filesystem acts, bounded by these mounts rather than by
+      # cluster permissions.
       volumes:
         - name: run-liken
           hostPath:

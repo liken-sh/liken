@@ -1,21 +1,22 @@
-# The image domain: where the pieces become a bootable system.
+# The image domain, where the pieces are assembled into a bootable
+# system.
 #
 # The system is an initramfs: a cpio archive the kernel unpacks into an
 # in-memory root filesystem at boot. There is no disk, no bootloader,
 # and no installer: the entire OS is two files, the kernel and this
-# archive, and QEMU boots them directly. build.sh tells the full story
-# of what goes in and why.
+# archive, and QEMU boots them directly. build.sh documents everything
+# that goes in and why.
 #
 # MANIFESTS points the build at the deployment's Cluster and Machine
 # manifests (a directory carrying cluster.yaml and machines/*.yaml).
-# It has no default on purpose: this domain is the production OS, and
+# It deliberately has no default: this domain is the production OS, and
 # which machines exist is a deployment's decision, not the OS's. The
 # root Makefile passes the repo's own lab (dev-cluster/); without it
 # the image carries no manifests, which is still a valid machine.
 MANIFESTS ?=
 
-# The version baked into the image and where the archive lands, plus
-# where the liken binary and the operator image come from — all
+# The version baked into the image, where the archive lands, and where
+# the liken binary and the operator image come from. All of these are
 # overridable because the releases domain assembles release-stamped
 # images through these same rules, from its own copies of the inputs,
 # into its own tree.
@@ -50,7 +51,7 @@ all: $(DIST)/liken.cpio
 
 # The install image: liken.cpio plus a concatenated wrapper archive
 # carrying the release payload the installer verifies and copies to
-# disk. install.sh tells the story.
+# disk. install.sh explains how it fits together.
 $(DIST)/install.cpio: $(DIST)/liken.cpio ../kernel/dist/$(KERNEL_VERSION)/vmlinuz install.sh
 	LIKEN_VERSION=$(LIKEN_VERSION) DIST=$(abspath $(DIST)) ./install.sh
 

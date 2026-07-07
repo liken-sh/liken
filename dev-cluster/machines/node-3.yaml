@@ -1,7 +1,7 @@
-# node-3: the third leader. With node-1 founding and node-2 beside
-# it, these three are the odd number of voices embedded etcd needs to
-# vote. Same shape as every other machine; only the name and address
-# differ.
+# node-3: the third leader. Together with node-1 and node-2, these
+# three are the odd number of members embedded etcd needs for
+# majority voting. The manifest is the same shape as every other
+# machine's; only the name and address differ.
 apiVersion: liken.sh/v1alpha1
 kind: Machine
 metadata:

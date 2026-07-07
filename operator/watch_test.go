@@ -79,7 +79,7 @@ func TestWatchDeliversEventsAndRecoversFromADrop(t *testing.T) {
 		t.Errorf("got %s", first.Metadata.ResourceVersion)
 	}
 
-	// The stream then ends — an ordinary drop — and the loop recovers
+	// The stream then ends, an ordinary drop, and the loop recovers
 	// with a fresh GET, whose answer also lands as an event.
 	second := <-events
 	if second.Metadata.ResourceVersion != "99" {

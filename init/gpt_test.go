@@ -2,10 +2,9 @@ package main
 
 // Tests for the GPT machinery: the layout arithmetic the partition
 // planner builds on, and the reader/serializer pair that lets a
-// table be edited in place. The round-trip tests are the backbone:
-// what serializeGPT writes, readGPT must read back identically,
-// GUIDs and all, because preserved identity is the whole point of
-// having a reader.
+// table be edited in place. The round-trip tests matter most: what
+// serializeGPT writes, readGPT must read back identically, GUIDs and
+// all, because the reader exists to preserve identity through edits.
 
 import (
 	"encoding/binary"
@@ -205,10 +204,10 @@ func TestSerializeGPTRelocatesTheBackupWhenTheDiskGrows(t *testing.T) {
 		t.Error("growing the disk must not change any identity or extent")
 	}
 
-	// And the old backup location must not still parse as a header:
-	// the stale copy at the old end is dead bytes... which is fine,
-	// because nothing looks there anymore. Confirm the *new* end is
-	// what readGPT consults by corrupting the primary.
+	// The stale backup at the old end still exists as bytes, which is
+	// fine, because nothing looks there anymore. Confirm the *new*
+	// end is what readGPT consults by corrupting the primary and
+	// checking that recovery still works.
 	if _, err := grown.WriteAt([]byte{0xFF}, 1*sectorSize+40); err != nil {
 		t.Fatal(err)
 	}

@@ -8,9 +8,9 @@ package main
 // enough to handle directly, and doing so shows exactly what it is:
 //
 //	LBA 0        a "protective MBR": a legacy MBR whose single
-//	             partition claims the whole disk, so old tools see
-//	             "something's here" instead of "free space, help
-//	             yourself"
+//	             partition claims the whole disk, so tools that don't
+//	             understand GPT see an occupied disk rather than free
+//	             space
 //	LBA 1        the GPT header: where everything else is, plus CRC32
 //	             checksums of itself and of the entry array
 //	LBA 2..33    the partition entry array: 128 slots of 128 bytes,
@@ -18,8 +18,8 @@ package main
 //	             and 36-character name
 //	...          the partitions themselves
 //	end of disk  a mirror of the entries and header (in that order,
-//	             header last at the very final sector), so a wrecked
-//	             LBA 0/1 is survivable
+//	             header last at the very final sector), so the table
+//	             survives damage to LBA 0 and 1
 //
 // The 36-character partition *name* is the field liken cares most
 // about: it carries a role's identity (liken:clusterState), which is
@@ -30,8 +30,8 @@ package main
 // from nothing, minting fresh GUIDs. Growing a partition *edits* the
 // table that exists, which is why there's a reader here too: an edit
 // must carry every identity (the disk's GUID, each partition's unique
-// GUID) through unchanged. Those GUIDs are how other tools tell disks
-// and partitions apart; they are not ours to refresh.
+// GUID) through unchanged. Other tools rely on those GUIDs to tell
+// disks and partitions apart, so an edit must never regenerate them.
 
 import (
 	"crypto/rand"
@@ -104,8 +104,8 @@ type gptEntry struct {
 }
 
 // A gptTable is a whole partition table in memory: what readGPT
-// returns and serializeGPT lays out. The two header facts are kept
-// because they're how a grown disk announces itself: a table whose
+// returns and serializeGPT lays out. The two header fields are kept
+// because they are how a grown disk is detected: a table whose
 // alternate (backup) header is no longer at the disk's final sector
 // was written when the disk was smaller.
 type gptTable struct {
@@ -129,18 +129,17 @@ type gptChunk struct {
 var linuxFilesystemData = mustGUID("0FC63DAF-8483-4772-8E79-3D69D8477DE4")
 
 // efiSystemPartition is the type GUID that makes a partition an ESP:
-// the one partition type UEFI firmware itself reads. The type is the
-// entire signal — firmware doesn't inspect contents to find boot
-// candidates, it looks for this GUID and expects FAT inside. This is
-// the GUID's most consequential job anywhere in the format, and why
-// the type is planned per role rather than assumed.
+// the one partition type UEFI firmware itself reads. The type GUID is
+// the entire signal: firmware doesn't inspect contents to find boot
+// candidates, it looks for this GUID and expects FAT inside. That is
+// why the type is planned per role rather than assumed.
 var efiSystemPartition = mustGUID("C12A7328-F81F-11D2-BA4B-00A0C93EC93B")
 
 // mustGUID turns a GUID's canonical text into its 16 on-disk bytes.
-// The encoding is a historical wart: the first three fields are
+// The encoding is a historical quirk: the first three fields are
 // little-endian (GUIDs come from Microsoft, via UEFI) while the rest
-// is byte-for-byte, so the text and the bytes read differently, and
-// getting this wrong makes every tool misread the type.
+// is byte-for-byte, so the text and the bytes read differently.
+// Getting this wrong makes every tool misread the type.
 func mustGUID(s string) [16]byte {
 	var canonical [16]byte
 	n, err := fmt.Sscanf(s,
@@ -215,8 +214,9 @@ func serializeGPT(t *gptTable, totalSectors uint64) ([]gptChunk, error) {
 	backupHeaderLBA := totalSectors - 1
 	backupEntriesLBA := totalSectors - 1 - gptEntrySectors
 
-	// Each header names its own location and its twin's; the backup is
-	// not a byte copy but the same facts from the other end of the disk.
+	// Each header records its own location and the other copy's. The
+	// backup is not a byte-for-byte copy of the primary; it holds the
+	// same facts written from the other end of the disk.
 	header := func(currentLBA, otherLBA, entriesLBA uint64) []byte {
 		h := make([]byte, sectorSize)
 		copy(h[0:8], "EFI PART")
@@ -284,9 +284,9 @@ func readGPTCopy(r io.ReaderAt, headerLBA uint64) (*gptTable, error) {
 		return nil, fmt.Errorf("header checksum mismatch at sector %d", headerLBA)
 	}
 
-	// liken only ever writes the standard 128×128 array; a table with
-	// other geometry wasn't ours, and a foreign disk was already
-	// refused at claim time, so refuse the surprise here too.
+	// liken only ever writes the standard 128×128 array. A table with
+	// any other geometry is not one liken wrote, and foreign disks
+	// are refused at claim time, so refuse this one too.
 	entryCount := binary.LittleEndian.Uint32(h[80:84])
 	entrySize := binary.LittleEndian.Uint32(h[84:88])
 	if entryCount != gptEntryCount || entrySize != gptEntrySize {
@@ -357,9 +357,9 @@ func readGPT(r io.ReaderAt, totalSectors uint64) (*gptTable, error) {
 		fmt.Printf("liken: storage: the primary partition table is unreadable (%v); recovered from the backup\n", perr)
 		return backup, nil
 	default:
-		// The one corner both copies can't save you from: if the disk
-		// was grown while the primary was already dead, the backup is
-		// stranded mid-disk where nothing can find it.
+		// Redundancy can't cover one case: if the disk was grown while
+		// the primary was already unreadable, the backup is still at
+		// the old end of the disk, where nothing looks for it.
 		return nil, fmt.Errorf("neither partition table copy is readable: primary: %v; backup at sector %d: %v (a grown disk's backup is no longer at the end)",
 			perr, totalSectors-1, berr)
 	}
@@ -367,8 +367,8 @@ func readGPT(r io.ReaderAt, totalSectors uint64) (*gptTable, error) {
 
 // writeGPTTable is the I/O half of writing: serialize the table for
 // this disk size, put the chunks where they go, then ask the kernel
-// to re-read the result. Deliberately thin; everything interesting
-// happened in serializeGPT.
+// to re-read the result. It is deliberately thin; everything
+// interesting happens in serializeGPT.
 func writeGPTTable(devPath string, totalSectors uint64, t *gptTable) error {
 	chunks, err := serializeGPT(t, totalSectors)
 	if err != nil {
@@ -400,8 +400,8 @@ func writeGPTTable(devPath string, totalSectors uint64, t *gptTable) error {
 }
 
 // writeGPT lays a brand-new partition table onto a blank disk being
-// claimed: fresh GUIDs for the disk and every partition, because a
-// claim is the moment these identities are born.
+// claimed: fresh GUIDs for the disk and every partition, because
+// claiming is when these identities are created.
 func writeGPT(devPath string, totalSectors uint64, parts []gptPartition) error {
 	t := &gptTable{diskGUID: randomGUID()}
 	for _, p := range parts {

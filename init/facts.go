@@ -38,12 +38,12 @@ func publishFacts(cluster *machine.Cluster, role machine.Role, choice *manifestC
 			// rather than remembered, like everything else in status.
 			BlockDevices: discoverBlockDevices(),
 		},
-		// The firmware's boot story, the same one reportFirmware
+		// The firmware's boot facts, the same ones reportFirmware
 		// printed at boot: console parity, as always.
 		Firmware: firmwareFacts(efiVarsDir),
-		// Where every storage role landed, and under which manifest:
-		// the blocks that can't be re-derived here, because only the
-		// settling saw them happen.
+		// Where every storage role landed, and under which manifest.
+		// These blocks can't be re-derived here, because they were
+		// only observable while storage was settling.
 		Storage: storage,
 		Boot:    boot,
 	}
@@ -53,7 +53,7 @@ func publishFacts(cluster *machine.Cluster, role machine.Role, choice *manifestC
 		facts.Version.Kernel = unix.ByteSliceToString(u.Release[:])
 	}
 
-	// The netfilter userspace introduces itself as "iptables vX.Y.Z
+	// The netfilter userspace reports itself as "iptables vX.Y.Z
 	// (legacy)"; the version and variant are the interesting part. Like
 	// the kernel release, this is asked of the running machine, not
 	// copied from a build pin.
@@ -79,8 +79,8 @@ func publishFacts(cluster *machine.Cluster, role machine.Role, choice *manifestC
 	// that came up.
 	facts.Network = networkFacts(cluster, conns, now)
 
-	// The clock's story so far: the boot-time measurement if one
-	// succeeded, or an honest unsynchronized/free-running report.
+	// The clock's state so far: the boot-time measurement if one
+	// succeeded, or an accurate unsynchronized/free-running report.
 	facts.Time = timeStatus(firstSync, timeSources)
 
 	if err := machine.WriteFacts(machine.FactsPath, facts); err != nil {

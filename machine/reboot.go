@@ -1,9 +1,9 @@
 package machine
 
-// The reboot channel: how the operator asks init to reboot.
+// The reboot channel is how the operator asks init to reboot.
 //
-// Only PID 1 can shut a machine down properly, so a reboot is a
-// request, not an act: the operator writes an intent file, and init
+// Only PID 1 can shut a machine down properly, so the operator never
+// reboots the machine itself. It writes an intent file, and init
 // (which polls for it) stops k3s cleanly and reboots. The channel is
 // a directory of its own under /run/liken because the two programs'
 // mounts enforce the two directions: facts flow init → operator
@@ -28,8 +28,9 @@ const OperatorRunDir = "/run/liken/operator"
 const rebootIntentFile = "reboot-intent.yaml"
 
 // A RebootIntent says why the machine should reboot and which staged
-// manifest the reboot is meant to apply; the content only enriches
-// the console narration, since the file's presence is the trigger.
+// manifest the reboot is meant to apply. The file's presence is the
+// trigger; the content only adds detail to what init prints on the
+// console.
 type RebootIntent struct {
 	Reason       string    `json:"reason"`
 	ManifestHash string    `json:"manifestHash,omitempty"`

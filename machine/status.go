@@ -10,9 +10,9 @@ package machine
 import "time"
 
 type MachineStatus struct {
-	// Phase is the machine's whole story in one word, computed from
-	// the conditions below on every pass — never remembered, so it can
-	// never go stale relative to them. Conditions are for programs
+	// Phase summarizes the machine's state in one word, computed from
+	// the conditions below on every pass. It is never remembered, so
+	// it can never go stale relative to them. Conditions are for programs
 	// (kubectl wait, controllers); the phase is for the human scanning
 	// a fleet listing. See the Phase constants for the vocabulary.
 	Phase Phase `json:"phase,omitempty"`
@@ -43,14 +43,15 @@ type MachineStatus struct {
 	Hardware HardwareStatus `json:"hardware,omitzero"`
 
 	// Firmware is the machine's standing firmware state: the mode it
-	// boots in and the boot menu from its non-volatile store — UEFI
-	// with its variables decoded into words, or BIOS, shorthand for
-	// any world without firmware variables to consult (a legacy
-	// server, a direct-kernel boot under a hypervisor). It sits
-	// beside Hardware because it describes the machine, not the
-	// boot: BootOrder is a standing preference and BootNext is about
-	// the *next* boot; only bootCurrent is this boot's fact, kept
-	// here with its family. Contrast Boot, the per-boot record.
+	// boots in and the boot menu from its non-volatile store. On UEFI
+	// machines the variables are decoded into words; BIOS is
+	// shorthand for any machine without firmware variables to consult
+	// (a legacy server, a direct-kernel boot under a hypervisor).
+	// Firmware sits beside Hardware because it describes the machine,
+	// not the boot: BootOrder is a standing preference and BootNext
+	// is about the next boot. Only bootCurrent is a fact about this
+	// boot, and it stays here so the firmware fields read together.
+	// Contrast Boot, the per-boot record.
 	Firmware FirmwareStatus `json:"firmware,omitzero"`
 
 	// Storage reports where every storage role is actually backed this
@@ -65,25 +66,27 @@ type MachineStatus struct {
 	Sysctls map[string]string `json:"sysctls,omitempty"`
 
 	// Boot is what this boot ran under: which documents, and the
-	// storage as actuated — the perishable record, re-made every
-	// boot, that the operator diffs the spec against. Its lifetime
-	// is what separates it from Firmware: power-cut the machine and
-	// boot it unchanged, and everything here is freshly re-derived
-	// (a staged manifest applies, a rejection lands), while Firmware
-	// reports the standing state that rode through.
+	// storage as actuated. It is re-derived on every boot, and it is
+	// the record the operator diffs the spec against. Lifetime is
+	// what separates it from Firmware: power-cut the machine and boot
+	// it unchanged, and everything here is freshly re-derived (a
+	// staged manifest applies, a rejection lands), while Firmware
+	// reports the standing state that carried across the reboot.
 	Boot BootStatus `json:"boot,omitzero"`
 
 	// BootedAt is the moment the machine booted, derived by init from
-	// the kernel's uptime counter. A timestamp rather than a duration
-	// on purpose: it never goes stale in the cluster, and `kubectl get
-	// machines` renders it as a live elapsed time (the Uptime column).
+	// the kernel's uptime counter. It is a timestamp rather than a
+	// duration because a timestamp never goes stale in the cluster,
+	// and `kubectl get machines` renders it as a live elapsed time
+	// (the Uptime column).
 	//
-	// Deliberately absent: a heartbeat. The machine's liveness signal
-	// is a Lease in the liken-machine-lease namespace, not a status
-	// field, because a heartbeat must renew forever and a status
-	// write rewrites this whole object and wakes every watcher — the
-	// reason kube-node-lease exists (see operator/lease.go). The
-	// leaders watch the leases and mark a silent machine Lost.
+	// There is deliberately no heartbeat here. The machine's liveness
+	// signal is a Lease in the liken-machine-lease namespace, not a
+	// status field, because a heartbeat must renew forever, and every
+	// status write rewrites this whole object and wakes every
+	// watcher. That is the same reason kube-node-lease exists (see
+	// operator/lease.go). The leaders watch the leases and mark a
+	// silent machine Lost.
 	BootedAt *time.Time `json:"bootedAt,omitempty"`
 
 	// Conditions follow the standard Kubernetes idiom: a set of typed,
@@ -92,7 +95,7 @@ type MachineStatus struct {
 	Conditions []Condition `json:"conditions,omitempty"`
 }
 
-// Phase is a machine's whole story in one word. Named string types
+// Phase summarizes a machine's state in one word. Named string types
 // are how Go models a closed vocabulary: the constants below are the
 // only values, the compiler catches a Phase handed where a Role
 // belongs, and the wire format is unchanged (a named string marshals
@@ -166,12 +169,12 @@ type InterfaceStatus struct {
 }
 
 // TimeState is a machine clock's condition. FreeRunning and
-// Unsynchronized both mean "not following anyone" but tell different
-// stories: a free-running machine was never given sources and runs on
-// its hardware clock by design, while an unsynchronized one has
-// sources it currently can't reach. The distinction matters when
-// you're deciding whether a fleet listing shows a configuration
-// choice or an outage.
+// Unsynchronized both mean the clock is not following any source, but
+// for different reasons: a free-running machine was never given
+// sources and runs on its hardware clock by design, while an
+// unsynchronized one has sources it currently can't reach. The
+// distinction matters when you're deciding whether a fleet listing
+// shows a configuration choice or an outage.
 type TimeState string
 
 const (
@@ -180,11 +183,11 @@ const (
 	TimeUnsynchronized TimeState = "Unsynchronized"
 )
 
-// TimeStatus is the machine's account of its own clock. State is
-// deliberately honest: a fleet with no upstreams free-runs, agrees
-// with itself, and still doesn't claim Synchronized, because agreeing
-// with the world is a different claim than agreeing with each other
-// and certificate validation cares about the difference.
+// TimeStatus reports the state of the machine's clock. A fleet with
+// no upstreams free-runs and agrees with itself, but still doesn't
+// report Synchronized: machines agreeing with each other is a
+// different claim than agreeing with the rest of the world, and
+// certificate validation cares about the difference.
 type TimeStatus struct {
 	// State reports whether the clock is currently being disciplined
 	// against a source that is itself synchronized, and when it isn't,
@@ -198,9 +201,9 @@ type TimeStatus struct {
 
 	// Stratum is the machine's distance from a reference clock in
 	// NTP's own vocabulary: a source at stratum n makes this machine
-	// stratum n+1. A leader free-running on purpose reports the
-	// local-clock convention (10); 16 means unsynchronized with no
-	// pretense of serving anyone.
+	// stratum n+1. A leader that free-runs by design reports the
+	// local-clock convention (10); 16 means unsynchronized, the value
+	// NTP reserves for a clock that should not be used as a source.
 	Stratum int `json:"stratum,omitempty"`
 
 	// Offset is the clock error measured at the last exchange, as a
@@ -225,8 +228,9 @@ type HardwareStatus struct {
 
 // BlockDevice is one disk as the machine observed it, straight from
 // sysfs. Name is the kernel's name for this boot (vda, nvme0n1),
-// assigned in driver probe order, so it's a handle, not an identity.
-// Model and serial come from the device itself.
+// assigned in driver probe order, so it addresses the device within
+// this boot but does not identify it across boots. Model and serial
+// come from the device itself.
 type BlockDevice struct {
 	Name      string `json:"name"`
 	SizeBytes uint64 `json:"sizeBytes,omitempty"`
@@ -244,9 +248,9 @@ const (
 	BackingMemory    Backing = "Memory"
 )
 
-// FirmwareMode is which kind of firmware booted the machine. Named
-// string types over bare strings, as everywhere in this API: the
-// vocabulary is closed and the compiler can hold it.
+// FirmwareMode is which kind of firmware booted the machine. It is a
+// named string type, like every closed vocabulary in this API, so the
+// compiler can catch a value used in the wrong place.
 type FirmwareMode string
 
 const (
@@ -254,10 +258,10 @@ const (
 	FirmwareBIOS FirmwareMode = "BIOS"
 )
 
-// FirmwareStatus is the firmware's boot story, read from its
-// variable store. Each entry field renders as the variable's own
-// name plus the entry's decoded description ("Boot0001 (liken slot
-// A)"), because a fleet listing should read in words.
+// FirmwareStatus reports the firmware's boot configuration, read
+// from its variable store. Each entry field renders as the variable's
+// own name plus the entry's decoded description ("Boot0001 (liken
+// slot A)"), because a fleet listing should read in words.
 type FirmwareStatus struct {
 	Mode FirmwareMode `json:"mode,omitempty"`
 
@@ -291,7 +295,7 @@ type StorageStatus struct {
 }
 
 // StorageRoleStatus is where one role is backed. A memory-backed role
-// reports no capacity on purpose: all memory-backed roles share the
+// deliberately reports no capacity: all memory-backed roles share the
 // one RAM root, and per-role figures would count it several times
 // over.
 type StorageRoleStatus struct {
@@ -350,23 +354,23 @@ const (
 	ManifestSourceSeed   ManifestSource = "Seed"
 )
 
-// BootStatus is the boot's account of its own configuration: which
-// documents won, identified by the hashes of their exact bytes, and
-// the storage spec it actuated. This is the half of drift detection
-// only init can supply; the operator compares it against the
-// cluster's copies.
+// BootStatus records the configuration this boot actually used:
+// which copy of each document, identified by the hashes of their
+// exact bytes, and the storage spec it actuated. This is the half of
+// drift detection only init can supply; the operator compares it
+// against the cluster's copies.
 type BootStatus struct {
 	// The Machine manifest this boot ran under.
 	ManifestSource ManifestSource `json:"manifestSource,omitempty"`
 	ManifestHash   string         `json:"manifestHash,omitempty"`
 	Storage        StorageSpec    `json:"storage,omitzero"`
 
-	// Slot is the system slot this boot came from — "A" or "B", read
+	// Slot is the system slot this boot came from, "A" or "B", read
 	// from the liken.slot= parameter the installer baked into each
 	// boot entry's command line; empty when the boot didn't come from
 	// a slot at all (direct-kernel boots, install media). This is how
-	// a machine knows which half of blue-green it stands on: releases
-	// download to the other slot.
+	// a machine knows which side of the blue-green pair it is running
+	// from: releases download to the other slot.
 	Slot string `json:"slot,omitempty"`
 
 	// The Cluster manifest this boot ran under: the same lifecycle,
@@ -387,8 +391,8 @@ type BootStatus struct {
 	SystemRejection  *Rejection `json:"systemRejection,omitempty"`
 }
 
-// ConditionStatus is a condition's verdict: a string, not a bool,
-// precisely because of the third state — a controller that can't
+// ConditionStatus is a condition's verdict. It is a string rather
+// than a bool because there is a third state: a controller that can't
 // currently tell must be able to say so.
 type ConditionStatus string
 
@@ -403,7 +407,7 @@ const (
 // ObservedGeneration records which metadata.generation the condition
 // judged: generation counts spec edits, so a consumer can tell
 // "Ready, for the spec as it stands" from "Ready, but for a spec two
-// edits ago" — a distinction that matters in liken, where edits wait
+// edits ago". That distinction matters in liken, where edits wait
 // for a reboot to take effect. (The convergence conditions make the
 // stronger, content-hashed version of this claim; the generation is
 // for tooling that speaks the convention.)
@@ -448,11 +452,11 @@ func FindCondition(conditions []Condition, conditionType string) *Condition {
 }
 
 // RemoveCondition drops the condition of the named type. Most
-// conditions are observations and live forever, flipping between True
-// and False; removal exists for the ones that are grants — present
-// while extended, gone when revoked — so their absence can carry
-// meaning without a False state that other machinery would read as
-// trouble.
+// conditions are observations: they stay in the list forever and flip
+// between True and False. Removal exists for the conditions that are
+// grants, which are present while extended and gone when revoked.
+// Their absence carries the meaning, so there is no False state for
+// other machinery to misread as trouble.
 func RemoveCondition(conditions []Condition, conditionType string) []Condition {
 	for i := range conditions {
 		if conditions[i].Type == conditionType {

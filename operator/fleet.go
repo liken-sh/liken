@@ -1,6 +1,6 @@
 package main
 
-// The leader sweep: the fleet-level half of the operator's job.
+// The leader sweep is the fleet-level half of the operator's job.
 //
 // Every machine's operator reports on itself, which leaves one gap
 // nothing else covers: a dead machine can't report that it's dead.
@@ -10,22 +10,24 @@ package main
 // renews a lease every few seconds, and the node controller turns a
 // silent lease into a NotReady Node. The Machine gets the same
 // treatment here: every operator renews its machine's lease
-// (lease.go), and the leaders turn silence into a Lost phase.
+// (lease.go), and the leaders mark machines whose leases have gone
+// silent with the Lost phase.
 //
-// Only the leaders sweep. They're the machines positioned to observe
-// the fleet — a follower that can reach the API is by definition
-// reaching a leader, so follower sweeps could never report anything
-// a leader sweep couldn't. The sweep is also where the cluster's
-// headcount comes from: the same pass over the Machine list yields
-// the ready-out-of-total tally the Cluster's status carries.
+// Only the leaders sweep, because they are the machines positioned
+// to observe the fleet. A follower that can reach the API is by
+// definition reaching a leader, so a follower's sweep could never
+// report anything a leader's sweep couldn't. The sweep is also where
+// the cluster's headcount comes from: the same pass over the Machine
+// list yields the ready-out-of-total tally the Cluster's status
+// carries.
 //
 // Writing another machine's status breaks the one-writer-per-object
 // rule this operator otherwise keeps, so the sweep is careful about
-// when: it only writes a machine whose heartbeat is already stale,
-// which means its own operator has stopped writing — the two writers
-// can never actually contend. The moment the machine returns, its
-// own operator's next pass overwrites the Lost verdict with fresh
-// observations, no cleanup required.
+// when: it only writes a machine whose heartbeat is already stale. A
+// stale heartbeat means the machine's own operator has stopped
+// writing, so the two writers can never actually contend. The moment
+// the machine returns, its own operator's next pass overwrites the
+// Lost verdict with fresh observations, no cleanup required.
 
 import (
 	"encoding/json"
@@ -39,13 +41,14 @@ import (
 )
 
 // heartbeatRenewAfter is how old the heartbeat must be before the
-// machine's own operator renews it: shy of the 30-second reconcile
-// ticker, so every ticker pass renews but the event-driven passes in
-// between get by on a read. heartbeatStaleAfter is how long a
-// machine may then go silent before the sweep declares it Lost:
-// three missed renewals, the same threshold the time loop uses
-// before declaring its NTP sources gone. One missed renewal is a
-// busy moment; three is a machine that's down.
+// machine's own operator renews it: just under the 30-second
+// reconcile ticker, so every ticker pass renews but the event-driven
+// passes in between get by on a read. heartbeatStaleAfter is how
+// long a machine may then go silent before the sweep declares it
+// Lost: three missed renewals, the same threshold the time loop uses
+// before declaring its NTP sources gone. A single missed renewal may
+// just mean a busy moment; three missed renewals mean the machine is
+// down.
 const (
 	heartbeatRenewAfter = 20 * time.Second
 	heartbeatStaleAfter = 90 * time.Second
@@ -63,8 +66,8 @@ func listMachines(c *apiClient) ([]machine.Machine, error) {
 
 // A fleetSweep is one pass's verdict over the whole fleet: which
 // machines to declare Lost, the headcount for the Cluster's status,
-// the MachinesReady condition that carries the full story, and the
-// phase that summarizes it in one word — the same
+// the MachinesReady condition that carries the full detail, and the
+// phase that summarizes it in one word. This is the same
 // conditions-then-phase arrangement every Machine has, applied to
 // the fleet. decideFleetSweep is pure; sweepFleet acts.
 type fleetSweep struct {
@@ -76,15 +79,16 @@ type fleetSweep struct {
 
 // effectivePhase is a machine's phase as the fleet should read it: its
 // own claim when its heartbeat is fresh, and Lost when it has gone
-// silent — a frozen status is only as current as the machine that
-// wrote it, and that machine may no longer exist. A machine with no
-// lease at all has never been heard from. The sweeping leader exempts
-// itself: it is running this very code, so its liveness isn't in
-// question, only how recently its renewal landed.
+// silent. A written status is only as current as the machine that
+// wrote it, and a silent machine may no longer exist. A machine with
+// no lease at all has never been heard from. The sweeping leader
+// exempts itself: it is running this very code, so its liveness isn't
+// in question, only how recently its renewal landed.
 //
-// One silence is not suspicious: a machine holding a reboot grant
-// (rollout.go) was *told* to go down, so until the grant is old enough
-// to be a stall, its silence reads as the reboot in progress.
+// Silence is not always trouble: a machine holding a reboot grant
+// (rollout.go) was told to go down, so until the grant is old enough
+// to count as a stall, the sweep treats its silence as the reboot in
+// progress.
 func effectivePhase(m *machine.Machine, renewals map[string]time.Time, self string, now time.Time) machine.Phase {
 	renewed, heard := renewals[m.Metadata.Name]
 	if m.Metadata.Name == self || (heard && now.Sub(renewed) <= heartbeatStaleAfter) {
@@ -98,12 +102,13 @@ func effectivePhase(m *machine.Machine, renewals map[string]time.Time, self stri
 }
 
 // decideFleetSweep judges every machine by its effective phase: a
-// machine counts toward ready only when it says Ready *and* its lease
-// says so recently. The verdict sorts every machine that isn't Ready
-// into one of two stories: mid-transition (rebooting into a change,
-// waiting on one, or booting), or unwell (Lost, Blocked, or otherwise
-// degraded). Unwell outranks mid-transition, and the MachinesReady
-// condition names the machines so nobody has to go looking.
+// machine counts toward ready only when its phase is Ready and its
+// heartbeat is fresh. The verdict sorts every machine that isn't
+// Ready into one of two groups: mid-transition (rebooting into a
+// change, waiting on one, or booting), or unwell (Lost, Blocked, or
+// otherwise degraded). Unwell outranks mid-transition, and the
+// MachinesReady condition names the machines so nobody has to go
+// looking.
 func decideFleetSweep(machines []machine.Machine, renewals map[string]time.Time, self string, now time.Time) fleetSweep {
 	s := fleetSweep{tally: machine.MachineTally{Total: len(machines)}}
 	var transitioning, unwell []string
@@ -167,7 +172,7 @@ func sweepFleet(c *apiClient, self string, cluster *machine.Cluster, now time.Ti
 	// The rollout is decided from the same listing: which machines may
 	// take their reboot turn now, and which spent grants come back
 	// (rollout.go). Sequencing belongs here for the same reason the
-	// tally does — the sweep is the one place with the whole fleet in
+	// tally does. The sweep is the one place with the whole fleet in
 	// view, and the lease already guarantees a single conductor.
 	r := decideRollout(machines, renewals, cluster, self, now)
 	carryOutRollout(c, machines, r, now)
@@ -195,21 +200,22 @@ func sweepFleet(c *apiClient, self string, cluster *machine.Cluster, now time.Ti
 		}, now)
 		if err := publishStatus(c, &m, &status); err != nil {
 			// A conflict here usually means the machine just came
-			// back and wrote first — exactly the outcome we wanted.
+			// back and wrote first, which is the outcome we wanted
+			// anyway.
 			fmt.Printf("marking %s lost: %v\n", m.Metadata.Name, err)
 		} else {
 			fmt.Printf("machine %s has gone silent; marked Lost\n", m.Metadata.Name)
 		}
 	}
 
-	// The cluster's status: the MachinesReady condition carries the
-	// observation (stamped with the generation of the spec it
-	// judged), Progressing carries the rollout's story, the phase
-	// summarizes, and the tally is the headcount the printer shows.
-	// The catalog's newest version is derived here too — the sweep is
-	// the one writer the Cluster's status has, so every derived field
-	// is its job. Written only when something actually changed, so a
-	// settled fleet writes nothing.
+	// Publish the cluster's status. The MachinesReady condition
+	// carries the observation (stamped with the generation of the
+	// spec it judged), Progressing reports the rollout, the phase
+	// summarizes both, and the tally is the headcount the printer
+	// shows. The catalog's newest version is derived here too: the
+	// sweep is the one writer the Cluster's status has, so every
+	// derived field is its job. The write happens only when something
+	// actually changed, so a settled fleet writes nothing.
 	newest := machine.NewestVersion(cluster.Spec.Releases.Catalog)
 	s.condition.ObservedGeneration = cluster.Metadata.Generation
 	r.progressing.ObservedGeneration = cluster.Metadata.Generation

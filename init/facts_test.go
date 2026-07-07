@@ -16,7 +16,7 @@ var factsNow = time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
 
 // fullConn builds a connection the way DHCP or static assignment
 // would have: k3s_test's conn covers derivations that only need an
-// address; these tests need the whole story.
+// address; these tests need every field filled in.
 func fullConn(t *testing.T, ifname, cidr string, method machine.AddressMethod) *connection {
 	t.Helper()
 	c := conn(t, ifname, cidr)

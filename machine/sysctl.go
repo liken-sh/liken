@@ -1,10 +1,11 @@
 package machine
 
-// Sysctls: the kernel's runtime tuning knobs, exposed as one file per
-// parameter under /proc/sys. There is no syscall for these: writing
-// "1" to /proc/sys/vm/overcommit_memory *is* the interface, which is
-// why applying them needs no privileges beyond a writable /proc/sys
-// (PID 1 has it at boot; the operator gets it by running privileged).
+// Sysctls are the kernel's runtime tuning parameters, exposed as one
+// file each under /proc/sys. There is no syscall for these: writing
+// "1" to /proc/sys/vm/overcommit_memory is the interface itself,
+// which is why applying them needs no privileges beyond a writable
+// /proc/sys (PID 1 has it at boot; the operator gets it by running
+// privileged).
 //
 // Other components manage sysctls too: kubelet sets a few parameters
 // itself (vm.overcommit_memory, kernel.panic, ...) and per-pod sysctls
@@ -44,7 +45,7 @@ func sysctlPath(dir, name string) (string, error) {
 // ApplySysctl sets one parameter. The open deliberately does not
 // create: a parameter file the kernel didn't put there is a parameter
 // this kernel doesn't have, and inventing the file would silently
-// swallow the typo.
+// hide the typo.
 func ApplySysctl(dir, name, value string) error {
 	path, err := sysctlPath(dir, name)
 	if err != nil {
@@ -63,8 +64,8 @@ func ApplySysctl(dir, name, value string) error {
 
 // ReadSysctl reads a parameter's current value, trimmed of the newline
 // the kernel appends. This is how the operator builds status.sysctls:
-// not by remembering what it wrote, but by asking the kernel what
-// holds.
+// it reads the kernel's current values rather than remembering what
+// it wrote.
 func ReadSysctl(dir, name string) (string, error) {
 	path, err := sysctlPath(dir, name)
 	if err != nil {

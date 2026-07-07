@@ -1,16 +1,16 @@
 package machine
 
-// The release document: what one version of liken *is*, by digest.
+// The release document defines what one version of liken is, by
+// digest.
 //
-// A liken release is two files — vmlinuz and liken.cpio — and this
+// A liken release is two files, vmlinuz and liken.cpio, and this
 // document names them with their sha256 digests and sizes. It is the
 // middle link of the trust chain: the Cluster's release catalog pins
 // a version to the digest of this document's exact bytes, and this
-// document pins every artifact's exact bytes, so a machine that
-// verifies the chain end to end has proven that what it is about to
-// boot is what the catalog vouched for. Nothing here is signed; the
-// Kubernetes API is the thing liken already trusts, and the catalog
-// rides in it.
+// document pins every artifact's exact bytes. A machine that verifies
+// the chain end to end has proven that what it is about to boot is
+// exactly what the catalog named. Nothing here is signed; liken
+// already trusts the Kubernetes API, and the catalog lives in it.
 //
 // Two consumers read it: the installer (a copy baked beside the
 // artifacts it describes, verified before anything is copied to a
@@ -43,9 +43,10 @@ type ReleaseArtifact struct {
 	Size   int64  `json:"size"`
 }
 
-// ParseRelease vets a release document at the door, the way Parse
-// and ParseCluster do for theirs: a document that isn't exactly what
-// it claims to be is refused with the reason, never squinted at.
+// ParseRelease validates a release document as it is read, the way
+// Parse and ParseCluster do for theirs: a document that isn't exactly
+// what it claims to be is rejected with the reason, never partially
+// accepted.
 func ParseRelease(raw []byte) (*Release, error) {
 	r := &Release{}
 	if err := yaml.UnmarshalStrict(raw, r); err != nil {
@@ -86,10 +87,10 @@ func (r *Release) Artifact(name string) *ReleaseArtifact {
 }
 
 // Verify streams a reader through sha256 and compares the result
-// against this artifact's declared digest and size. Verification by
-// streaming, so a 100MB artifact never needs to be in memory — and
-// callers verify what they *wrote*, not what they meant to write, by
-// re-reading it through here.
+// against this artifact's declared digest and size. Streaming means a
+// 100MB artifact never needs to be held in memory. Callers verify by
+// re-reading the file they wrote, which checks the bytes that
+// actually landed rather than the bytes they meant to write.
 func (a ReleaseArtifact) Verify(r io.Reader) error {
 	h := sha256.New()
 	n, err := io.Copy(h, r)

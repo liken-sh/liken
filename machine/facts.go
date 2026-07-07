@@ -1,6 +1,6 @@
 package machine
 
-// The facts file: how init passes what it observed to the operator.
+// The facts file is how init passes what it observed to the operator.
 //
 // Init learns things no in-cluster program can observe firsthand: the
 // DHCP exchange, the moment of boot, the hardware as the kernel first

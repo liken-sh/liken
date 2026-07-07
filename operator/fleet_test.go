@@ -143,7 +143,8 @@ func TestSweepNeverDeclaresItselfLost(t *testing.T) {
 
 func TestSweepTreatsAMissingHeartbeatAsSilence(t *testing.T) {
 	// A Machine with no lease at all has never had an operator
-	// heartbeat: declared, perhaps, but never heard from.
+	// heartbeat: it may have been declared, but it has never
+	// reported in.
 	machines, renewals := fleetInputs(
 		fleetEntry{"node-1", machine.PhaseReady, 10 * time.Second},
 		fleetEntry{"node-2", "", -1},

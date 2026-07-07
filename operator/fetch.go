@@ -1,38 +1,40 @@
 package main
 
-// The release fetcher: one background download at a time, never in
-// the reconcile loop's way.
+// The release fetcher runs one background download at a time, and
+// never blocks the reconcile loop.
 //
-// Reconcile passes don't download; they *ask*. Ensure records what
-// the machine currently wants (an ask: version, digest, source,
-// destination slot), starts the download on its own goroutine if one
-// isn't already running, and returns immediately with the current
-// state. The pass that started a download and the pass that finds it
-// verified are different passes, minutes apart, and every pass in
-// between kept the heartbeat fresh — the lease must never wait on a
-// socket.
+// Reconcile passes never download anything themselves; they ask the
+// fetcher. Ensure records what the machine currently wants (an ask:
+// version, digest, source, destination slot), starts the download on
+// its own goroutine if one isn't already running, and returns
+// immediately with the current state. The pass that started a
+// download and the pass that finds it verified are different passes,
+// minutes apart, and every pass in between kept the heartbeat fresh.
+// The lease must never wait on a socket.
 //
 // Downloads are resumable by re-verification rather than by byte
 // ranges: each run first verifies whatever the slot already holds
 // against the release document and fetches only what fails. A torn
-// download (a power cut, a killed server) is just a .partial file
-// nobody counts and a final file that verifies or doesn't; the next
-// run converges. FAT has no journal, so every file lands the way the
-// installer's copies do — temp, fsync, rename — and is re-read and
-// verified after writing, because milestone 12.1's power-cut drill
-// showed what the page cache is worth without the discipline.
+// download (a power cut, a killed server) leaves either a .partial
+// file, which no verification ever counts, or a final file that
+// either verifies or doesn't; the next run converges either way. FAT
+// has no journal, so every file lands the way the installer's copies
+// do (temp file, fsync, rename) and is re-read and verified after
+// writing, because milestone 12.1's power-cut drill showed that bytes
+// sitting in the page cache are not durable until they are synced and
+// re-read.
 //
 // Failure comes in two kinds, and the distinction runs through
-// everything here: *transient* (the server is down, the network
-// dropped — retried every pass, forever) and *corrupt* (the bytes
-// don't match the digests the catalog promised — held, without
-// retrying, until the ask itself changes, because refetching cannot
-// change what the server publishes). Corruption is why the whole
-// chain exists: the API named the document, the document named the
-// artifacts, and a mismatch anywhere means someone's bytes are wrong.
-// A corrupt release is abandoned, never patched: the recovery is to
-// publish a corrected release under a new version and point the
-// catalog at it.
+// everything here. A *transient* failure means the server is down or
+// the network dropped; it is retried every pass, forever. A *corrupt*
+// failure means the bytes don't match the digests the catalog
+// promised; it is held, without retrying, until the ask itself
+// changes, because refetching cannot change what the server
+// publishes. Corruption is why the whole chain exists: the API named
+// the document, the document named the artifacts, and a mismatch
+// anywhere means someone's bytes are wrong. A corrupt release is
+// abandoned, never patched: the recovery is to publish a corrected
+// release under a new version and point the catalog at it.
 
 import (
 	"crypto/sha256"
@@ -51,8 +53,9 @@ import (
 
 // A fetchAsk is one reconcile decision's work order: fetch this
 // version, vouched for by this digest, from this source, onto this
-// slot. Asks compare by value — a changed catalog digest is a
-// different ask, which is what clears a corruption hold.
+// slot. Asks compare by value, so a changed catalog digest is a
+// different ask, and a different ask is what clears a corruption
+// hold.
 type fetchAsk struct {
 	version string
 	digest  string // the catalog's "sha256:<hex>" over release.yaml
@@ -85,9 +88,10 @@ type fetcher struct {
 	busy bool
 }
 
-// errCorrupt marks verification failures apart from transport
-// failures: wrapped into any error whose right answer is "stop
-// retrying", it is what parks the fetcher at Rejected.
+// errCorrupt distinguishes verification failures from transport
+// failures. It is wrapped into any error that should stop the
+// retries, and an error carrying it is what holds the fetcher at
+// Rejected.
 var errCorrupt = errors.New("the bytes do not match the release's digests")
 
 // Ensure records the ask, starts a download when one is needed and
@@ -100,19 +104,20 @@ func (f *fetcher) Ensure(ask fetchAsk) fetchSnapshot {
 	if f.snap.ask != ask {
 		// A different release, digest, or destination: everything
 		// known so far was about the old ask, including a Rejected
-		// hold — a changed catalog is exactly what forgiveness looks
-		// like.
+		// hold. A changed catalog is precisely the event that should
+		// clear the hold, so the state resets with the ask.
 		f.snap = fetchSnapshot{ask: ask, state: fetchIdle, detail: "waiting to start"}
 	}
 	if f.busy || f.snap.state == fetchVerified || f.snap.state == fetchRejected {
 		return f.snap
 	}
 
-	// A restart after a transient failure keeps the failure's story:
-	// the restarted state is what every condition read will see (a
-	// Failed verdict lives only between passes, and the pass is what
-	// reads it), so the reason the last attempt died must ride along
-	// or it was never observable at all.
+	// A restart after a transient failure keeps the failure's reason.
+	// A Failed state only exists between passes, and the pass that
+	// reads it is the same pass that restarts the download, so the
+	// restarted Running state is the only one any condition will ever
+	// see. If that state didn't carry the reason the last attempt
+	// failed, the reason would never be observable at all.
 	detail := "starting"
 	if f.snap.state == fetchFailed {
 		detail = "retrying after: " + f.snap.detail
@@ -131,10 +136,9 @@ func (f *fetcher) Snapshot() fetchSnapshot {
 	return f.snap
 }
 
-// run is the goroutine: do the fetch, then record the verdict —
-// unless the world moved on to a different ask while we worked, in
-// which case the verdict describes bytes nobody wants and is
-// discarded.
+// run is the goroutine: do the fetch, then record the verdict. If
+// the ask changed while the fetch ran, the verdict describes a
+// release the machine no longer wants, so it is discarded.
 func (f *fetcher) run(ask fetchAsk) {
 	fetched, err := fetchRelease(ask)
 
@@ -172,7 +176,8 @@ func fetchRelease(ask fetchAsk) (int, error) {
 	}
 
 	// The trust chain's first link: the document's bytes must hash to
-	// exactly what the catalog promised, or nothing it says matters.
+	// exactly what the catalog promised. Until that holds, nothing
+	// the document says can be trusted.
 	sum := sha256.Sum256(raw)
 	if digest := "sha256:" + hex.EncodeToString(sum[:]); digest != ask.digest {
 		return 0, fmt.Errorf("the release document's digest %s does not match the catalog's %s: %w", digest, ask.digest, errCorrupt)
@@ -198,8 +203,8 @@ func fetchRelease(ask fetchAsk) (int, error) {
 	}
 
 	// The document lands after the artifacts it describes, durably,
-	// so the slot is self-describing: what release is this, byte for
-	// byte, without asking the network.
+	// which makes the slot self-describing: it records which release
+	// it holds, byte for byte, without asking the network.
 	if err := writeDurably(filepath.Join(ask.slotDir, "release.yaml"), raw); err != nil {
 		return fetched, fmt.Errorf("writing the release document to the slot: %w", err)
 	}
@@ -225,9 +230,9 @@ func fetchArtifact(base string, artifact machine.ReleaseArtifact, dest string) e
 	if err != nil {
 		return err
 	}
-	// The size cap is a courtesy to the slot: an artifact that runs
-	// past its declared size is already wrong, and a 512Mi filesystem
-	// shouldn't have to absorb the whole mistake to find out.
+	// The size cap protects the slot: an artifact that runs past its
+	// declared size is already wrong, and there is no reason to fill
+	// a 512Mi filesystem with the rest of it before finding out.
 	_, err = io.Copy(f, io.LimitReader(resp.Body, artifact.Size+1))
 	if err == nil {
 		err = f.Sync()
@@ -248,8 +253,9 @@ func fetchArtifact(base string, artifact machine.ReleaseArtifact, dest string) e
 }
 
 // verifySlotFile checks one file on the slot against its artifact's
-// digest and size, err for any reason it doesn't hold up (including
-// not existing, the common first-run case).
+// digest and size, returning an error for any reason the file fails,
+// including that it doesn't exist, which is the common case on a
+// first run.
 func verifySlotFile(artifact machine.ReleaseArtifact, path string) error {
 	f, err := os.Open(path)
 	if err != nil {
@@ -259,8 +265,9 @@ func verifySlotFile(artifact machine.ReleaseArtifact, path string) error {
 	return artifact.Verify(f)
 }
 
-// fetchBytes GETs a small document whole. The limit is far above any
-// sane release.yaml and far below anything that could hurt.
+// fetchBytes GETs a small document whole. The 1MiB limit is far
+// larger than any reasonable release.yaml and small enough to read
+// into memory without concern.
 func fetchBytes(url string) ([]byte, error) {
 	resp, err := http.Get(url)
 	if err != nil {
@@ -273,8 +280,8 @@ func fetchBytes(url string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 }
 
-// writeDurably is copyDurably's little sibling for bytes already in
-// hand: temp, fsync, rename.
+// writeDurably writes bytes already in memory with the same
+// discipline copyDurably applies to files: temp file, fsync, rename.
 func writeDurably(dest string, contents []byte) error {
 	tmp := dest + ".partial"
 	f, err := os.Create(tmp)

@@ -11,7 +11,7 @@ import (
 )
 
 // fakeEFIVars builds a directory standing in for efivarfs, each
-// variable a file of 4 attribute bytes plus payload — exactly the
+// variable a file of 4 attribute bytes plus payload, exactly the
 // shape the kernel presents.
 func fakeEFIVars(t *testing.T, vars map[string][]byte) string {
 	t.Helper()
@@ -72,7 +72,7 @@ func TestFirmwareFactsReportsAnArmedBootNext(t *testing.T) {
 
 func TestFirmwareFactsNamesUndecodableEntriesHonestly(t *testing.T) {
 	// An entry in the order whose variable is missing or mangled
-	// still shows its ID: an honest listing beats a hidden one.
+	// still shows its ID, so nothing in the order is hidden.
 	dir := fakeEFIVars(t, map[string][]byte{
 		"BootOrder": u16le(0x2001, 0x2002),
 		"Boot2002":  {0xFF}, // too short to even carry attributes

@@ -3,13 +3,14 @@
 # Vendor mke2fs: the program that creates ext4 filesystems, statically
 # linked, for init to exec when it claims a blank disk.
 #
-# Making a filesystem is a userspace job. The kernel can read and write
-# ext4 (our vendored kernel builds the driver in), but it has no code
-# to *create* one: laying down superblocks, block groups, inode tables
-# and the journal has always belonged to mke2fs, from the e2fsprogs
-# package every distribution ships. liken's image has no libc and no
-# shell, so a distro's dynamically-linked mke2fs can't even exec here;
-# the binary has to be static, like everything else on this machine.
+# Making a filesystem is a userspace job. The kernel can read and
+# write ext4 (our vendored kernel builds the driver in), but it has no
+# code to create one. Laying down superblocks, block groups, inode
+# tables and the journal has always belonged to mke2fs, from the
+# e2fsprogs package every distribution ships. liken's image has no
+# libc and no shell, so a distro's dynamically-linked mke2fs can't
+# even exec here; the binary has to be static, like everything else on
+# this machine.
 #
 # There is no pure-Go implementation to reach for instead, and the
 # strongest evidence comes from gokrazy, the appliance Linux whose
@@ -24,10 +25,10 @@
 #
 # gokrazy publishes no checksum manifest, so the digest is recorded
 # here, computed when this pin was chosen. That protects against the
-# artifact changing out from under the pin, and anyone who'd rather
-# not take gokrazy's word for the original bytes can run their
-# Dockerfile and byte-compare; the reproducible build is the audit
-# trail.
+# artifact changing out from under the pin. Anyone who'd rather not
+# take gokrazy's word for the original bytes can run their Dockerfile
+# and compare the results byte for byte; the reproducible build is
+# what makes that audit possible.
 #
 # Usage:
 #   e2fsprogs/fetch.sh    fetch the version pinned in e2fsprogs/VERSION

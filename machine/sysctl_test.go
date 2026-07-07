@@ -92,7 +92,7 @@ func TestReadSysctlTrimsValue(t *testing.T) {
 func TestApplySysctlRefusesToInventParameters(t *testing.T) {
 	// The open deliberately does not create: a parameter file the
 	// kernel didn't put there is a parameter this kernel doesn't
-	// have, and inventing it would silently swallow the typo.
+	// have, and inventing it would silently hide the typo.
 	err := ApplySysctl(t.TempDir(), "vm.nonsense", "1")
 	if err == nil {
 		t.Error("an unknown parameter must be an error someone sees")

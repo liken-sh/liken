@@ -1,7 +1,7 @@
 # node-5: the lab's second follower. It exists so drills can watch
-# workload machines ride through control-plane changes: a leader's
-# rolling reboot, or its outright loss, should be invisible from down
-# here.
+# workload machines run through control-plane changes: a leader's
+# rolling reboot, or its outright loss, should be invisible to a
+# follower.
 apiVersion: liken.sh/v1alpha1
 kind: Machine
 metadata:

@@ -44,7 +44,7 @@ func labCluster() *machine.Cluster {
 
 func TestNodeAddressPicksTheClusterFacingInterface(t *testing.T) {
 	conns := []*connection{
-		conn(t, "eth0", "10.0.2.15/24"), // the uplink: right machine, wrong wire
+		conn(t, "eth0", "10.0.2.15/24"), // the uplink, outside the nodeCIDR
 		conn(t, "eth1", "10.10.0.2/24"), // the cluster segment
 	}
 	ip, ifname := nodeAddress(labCluster(), conns)

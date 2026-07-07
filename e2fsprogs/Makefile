@@ -1,5 +1,5 @@
 # The e2fsprogs domain: the filesystem-creation userspace, vendored
-# like the kernel, k3s, and xtables: one pinned version, one static
+# like the kernel, k3s, and xtables. One pinned version, one static
 # binary, fetched and verified by fetch.sh (documented there).
 VERSION := $(strip $(file <VERSION))
 

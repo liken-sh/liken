@@ -4,12 +4,13 @@ package main
 //
 // A filesystem's size lives in its superblock, not its partition:
 // growing the partition changes nothing until the filesystem is told
-// there's more room. The usual messenger is resize2fs, but for online
-// growth (the filesystem mounted, which is the only state liken needs)
-// resize2fs is just a thin wrapper: the kernel has done the actual
-// work since ext3, and the message is one ioctl carrying the new block
-// count. liken sends it directly, which spares the image a second
-// e2fsprogs binary and shows what "resizing a filesystem" actually is.
+// there's more room. The usual tool for telling it is resize2fs, but
+// for online growth (the filesystem mounted, which is the only state
+// liken needs) resize2fs is just a thin wrapper: the kernel has done
+// the actual work since ext3, and asking takes one ioctl carrying the
+// new block count. liken issues the ioctl directly, which spares the
+// image a second e2fsprogs binary and shows what "resizing a
+// filesystem" actually is.
 //
 // The superblock sits 1024 bytes into the device, whatever the block
 // size: the first KiB is left alone for boot sectors, a convention
@@ -28,8 +29,8 @@ import (
 
 // hasExt4 checks a device for ext4's superblock magic: two bytes,
 // 0xEF53 little-endian, at offset 1080 (the superblock starts at 1024;
-// the magic is 56 bytes in). This is the same check blkid makes; a
-// filesystem's identity really is this shallow.
+// the magic is 56 bytes in). This is the same check blkid makes;
+// identifying a filesystem takes nothing more than this.
 func hasExt4(devPath string) bool {
 	f, err := os.Open(devPath)
 	if err != nil {
@@ -128,9 +129,9 @@ func growExt4(mountpoint string, newBlocks uint64) error {
 // partition's size, if the partition outgrew it. mke2fs's defaults
 // reserve resize headroom (the resize_inode) for growth of roughly a
 // thousandfold, far beyond anything a disk will actually do, so a
-// grow that fits the partition is expected to succeed; failure means
-// the declared capacity is unsatisfied, which fails reconciliation
-// with everything that implies.
+// grow that fits the partition is expected to succeed. Failure means
+// the declared capacity can't be satisfied, and that fails
+// reconciliation like any other unsatisfiable role.
 func maybeGrowFilesystem(role machine.DeclaredRole, p partition, mountpoint string) error {
 	g, err := readExt4Geometry(devRoot + "/" + p.name)
 	if err != nil {

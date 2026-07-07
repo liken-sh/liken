@@ -1,22 +1,21 @@
 package main
 
-// Speaking to the firmware.
+// Reading and writing the firmware's variables.
 //
 // A UEFI machine's firmware keeps a small store of variables in
-// non-volatile memory — the modern descendant of "BIOS settings" —
+// non-volatile memory (the modern descendant of "BIOS settings"),
 // and the boot menu lives there (loadoption.go describes the
 // records). The kernel exposes the store as efivarfs, a tiny
-// filesystem where every variable is a file: read the file, read the
-// variable. Each file's first four bytes are the variable's attribute
-// flags (non-volatile, visible at boot-time, visible at runtime);
-// the payload follows.
+// filesystem where every variable is a file, so reading a variable
+// is just reading its file. Each file's first four bytes are the
+// variable's attribute flags (non-volatile, visible at boot-time,
+// visible at runtime); the payload follows.
 //
-// Whether any of this exists is the firmware's call, not ours:
-// /sys/firmware/efi appears only when the kernel was actually booted
-// by UEFI. Its absence is a fact worth reporting, not an error — a
-// direct-kernel QEMU boot and an old BIOS server are both real
-// machines liken runs on. Everything here degrades to "the firmware
-// has nothing to say."
+// None of this is guaranteed to exist: /sys/firmware/efi appears only
+// when the kernel was actually booted by UEFI. Its absence is a fact
+// worth reporting, not an error; a direct-kernel QEMU boot and an old
+// BIOS server are both real machines liken runs on. Everything here
+// handles a machine with no variable store by reporting nothing.
 
 import (
 	"encoding/binary"
@@ -82,7 +81,7 @@ func readEFIVar(dir, name string) ([]byte, error) {
 }
 
 // fsImmutableFlag is the kernel's per-file immutable bit
-// (FS_IMMUTABLE_FL), part of the fixed ioctl ABI chattr speaks;
+// (FS_IMMUTABLE_FL), part of the fixed ioctl ABI that chattr uses;
 // x/sys doesn't export it, so it's spelled out here the way the
 // ext4 superblock offsets are.
 const fsImmutableFlag = 0x00000010
@@ -90,20 +89,21 @@ const fsImmutableFlag = 0x00000010
 // efiVarAttrs is the attribute word every liken-written variable
 // carries: stored in NVRAM (survives power loss), visible to the
 // firmware's boot services, visible to the running OS. Boot entries
-// need all three — an entry the boot manager can't see boots nothing.
+// need all three; an entry the boot manager can't see can never be
+// chosen.
 const efiVarAttrs = 0x00000007 // NON_VOLATILE | BOOTSERVICE_ACCESS | RUNTIME_ACCESS
 
 // writeEFIVar writes one global variable: the attribute word and the
-// payload in a single write, which is how efivarfs insists variables
-// change (a partial variable is worse than none, so the filesystem
-// refuses piecemeal writes).
+// payload in a single write, which is the only way efivarfs lets a
+// variable change (a partial variable is worse than none, so the
+// filesystem refuses piecemeal writes).
 //
-// The wrinkle is the immutable flag: the kernel marks every variable
-// file immutable so a stray `rm -rf /` can't brick the motherboard —
-// a real failure mode on early UEFI machines, and the reason this
-// helper exists instead of a plain WriteFile. Clearing it is two
-// ioctls on the existing file; a variable that doesn't exist yet has
-// no flag to clear.
+// The complication is the immutable flag. The kernel marks every
+// variable file immutable so that a stray `rm -rf /` can't brick the
+// motherboard, a real failure mode on early UEFI machines, and that
+// flag is why this helper exists instead of a plain WriteFile.
+// Clearing it takes two ioctls on the existing file; a variable that
+// doesn't exist yet has no flag to clear.
 func writeEFIVar(dir, name string, payload []byte) error {
 	path := filepath.Join(dir, name+"-"+efiGlobalVariable)
 	if f, err := os.Open(path); err == nil {
@@ -126,9 +126,10 @@ func writeEFIVar(dir, name string, payload []byte) error {
 	return nil
 }
 
-// deleteEFIVar removes a variable — which, for firmware, means
-// writing it with no payload; efivarfs translates an unlink into
-// exactly that, after the same immutable dance.
+// deleteEFIVar removes a variable. For firmware, removal means
+// writing the variable with no payload; efivarfs translates an
+// unlink into exactly that, after the same immutable-flag clearing
+// writeEFIVar does.
 func deleteEFIVar(dir, name string) error {
 	path := filepath.Join(dir, name+"-"+efiGlobalVariable)
 	f, err := os.Open(path)
@@ -148,9 +149,9 @@ func deleteEFIVar(dir, name string) error {
 }
 
 // listBootEntries reads every Boot#### variable, decoded, keyed by
-// entry number. Entries that won't decode are skipped — they're the
-// firmware's business, not ours, and liken finds its own entries by
-// description, never by assuming a number.
+// entry number. Entries that won't decode are skipped: they belong
+// to the firmware, and liken finds its own entries by description,
+// never by assuming a number.
 func listBootEntries(dir string) map[uint16]loadOption {
 	entries := map[uint16]loadOption{}
 	files, err := os.ReadDir(dir)
@@ -176,9 +177,10 @@ func listBootEntries(dir string) map[uint16]loadOption {
 }
 
 // setBootEntry writes a boot entry under the number that already
-// carries its description, or the lowest free number — recognition
-// by name, exactly like partitions: the number is a handle the
-// firmware owns, the description is the identity liken owns.
+// carries its description, or under the lowest free number. This is
+// recognition by name, exactly like partitions: the number is a
+// handle the firmware owns, and the description is the identity
+// liken owns.
 func setBootEntry(dir string, option loadOption) (uint16, error) {
 	entries := listBootEntries(dir)
 	number := uint16(0)
@@ -197,16 +199,18 @@ func setBootEntry(dir string, option loadOption) (uint16, error) {
 	return number, writeEFIVar(dir, bootEntryID(number), encodeLoadOption(option))
 }
 
-// firmwareFacts reads the machine's boot story from its firmware:
+// firmwareFacts reads the machine's boot facts from its firmware:
 // which mode it booted in, which entry the firmware used, and the
-// standing preference order — each entry decoded to its name, so a
+// standing preference order. Each entry is decoded to its name, so a
 // fleet listing reads "liken slot A", not a hex dump. Console parity
-// as usual: reportFirmware prints these same facts at boot.
+// holds here as everywhere: reportFirmware prints these same facts
+// at boot.
 //
 // The mode is decided by the variable store's presence: efivarfs
 // exists exactly when UEFI booted this kernel. "BIOS" is shorthand
-// for everything else — a legacy server, QEMU's direct-kernel boot —
-// any world with no firmware variables to consult.
+// for everything else, whether a legacy server or QEMU's
+// direct-kernel boot: any machine with no firmware variables to
+// consult.
 func firmwareFacts(dir string) machine.FirmwareStatus {
 	if _, err := os.Stat(dir); err != nil {
 		return machine.FirmwareStatus{Mode: machine.FirmwareBIOS}
@@ -233,7 +237,8 @@ func firmwareFacts(dir string) machine.FirmwareStatus {
 // describeBootEntry renders one entry the way a person wants to read
 // it: the firmware's own name for the variable, plus the entry's
 // description when it can be decoded. An entry that's missing or
-// mangled still gets its ID — an honest listing beats a hidden one.
+// mangled is still listed by its ID, so nothing in the order is
+// hidden.
 func describeBootEntry(dir string, n uint16) string {
 	id := bootEntryID(n)
 	payload, err := readEFIVar(dir, id)
@@ -247,8 +252,9 @@ func describeBootEntry(dir string, n uint16) string {
 	return fmt.Sprintf("%s (%s)", id, option.description)
 }
 
-// reportFirmware narrates the firmware's story on the console: the
-// same facts firmwareFacts publishes, in the world report's voice.
+// reportFirmware prints the firmware's facts on the console: the
+// same facts firmwareFacts publishes, formatted for the world
+// report.
 func reportFirmware() {
 	fw := firmwareFacts(efiVarsDir)
 	if fw.Mode != machine.FirmwareUEFI {

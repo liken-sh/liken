@@ -16,21 +16,23 @@
 # trees are gitignored: releases are build products, hundreds of
 # megabytes each, reproducible from the sources that are committed.
 #
-# A release is an ordinary build wearing a different version stamp:
-# the init, operator, and image domains all accept LIKEN_VERSION and
-# DIST overrides, so this Makefile re-runs their own rules into
-# build/<version>/ and never disturbs the normal dist/ trees — after
+# A release is an ordinary build with a different version stamp: the
+# init, operator, and image domains all accept LIKEN_VERSION and DIST
+# overrides, so this Makefile re-runs their own rules into
+# build/<version>/ and never disturbs the normal dist/ trees. After
 # cutting a release, a plain `make run` still boots exactly what it
 # always did.
 
-# Which version to produce: `make release VERSION=0.2.0`. No default,
-# because naming a release is the whole point of the command.
+# Which version to produce: `make release VERSION=0.2.0`. There is no
+# default, because the command exists to name a release, so the name
+# must be given.
 VERSION ?=
 
-# The fault knob: `make release VERSION=x FAULT=panic` (or wedge-k3s)
-# builds a release that fails on purpose, for drilling the fallback
-# machinery (init/fault.go). Only init carries the fault — the point
-# is a broken *boot*, and init is the boot.
+# FAULT selects a deliberate failure: `make release VERSION=x
+# FAULT=panic` (or wedge-k3s) builds a release that fails, for
+# drilling the fallback machinery (init/fault.go). Only init carries
+# the fault, because the drill is about a broken boot, and init is
+# the program that boots.
 FAULT ?=
 
 BUILD = build/$(VERSION)
@@ -46,17 +48,17 @@ release:
 	./publish.sh $(VERSION)
 
 # The release server: a logged file server over dist/, listening on
-# 0.0.0.0:8017. The lab's guests reach it at http://10.0.2.2:8017 —
-# QEMU's built-in address for "the host" on a user-mode network — which
+# 0.0.0.0:8017. The lab's guests reach it at http://10.0.2.2:8017,
+# QEMU's built-in address for "the host" on a user-mode network. That
 # is the source URL dev-cluster/cluster.yaml seeds.
 serve:
 	go run ./serve
 
 # Deliberately damage a published release: flip one byte in the middle
 # of its liken.cpio without touching release.yaml, so the document
-# promises bytes the server no longer has. This is the drill for the
-# trust chain's whole reason to exist — a machine must hold at
-# DigestMismatch with nothing staged, never boot the damage.
+# describes bytes the server no longer has. This drills the case the
+# trust chain exists for: a machine must hold at DigestMismatch with
+# nothing staged, and must never boot the damaged release.
 corrupt:
 	@test -n "$(VERSION)" || { echo "usage: make corrupt VERSION=x.y.z"; exit 1; }
 	./corrupt.sh $(VERSION)

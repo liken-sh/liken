@@ -96,9 +96,9 @@ func TestRespondToIgnoresGarbage(t *testing.T) {
 }
 
 func TestNTPTimestampEncoding(t *testing.T) {
-	// The NTP epoch is 1900-01-01; Unix's is 1970-01-01. The moment
-	// Unix calls zero, NTP calls 2,208,988,800 seconds — the
-	// canonical check for the conversion.
+	// The NTP epoch is 1900-01-01; Unix's is 1970-01-01. Unix time
+	// zero corresponds to NTP second 2,208,988,800, the canonical
+	// check for the conversion.
 	epoch := time.Unix(0, 0)
 	if got := ntpTimestamp(epoch); got != 2_208_988_800<<32 {
 		t.Errorf("got %d", got)

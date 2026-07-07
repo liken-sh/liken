@@ -1,7 +1,7 @@
 # node-4: a follower. Its name is not in cluster.yaml's leaders list,
 # so it derives the follower role: it runs workloads and takes
 # direction from the control plane, which it joins through the
-# cluster's endpoint bearing the token from the identity bundle.
+# cluster's endpoint, presenting the token from the identity bundle.
 apiVersion: liken.sh/v1alpha1
 kind: Machine
 metadata:

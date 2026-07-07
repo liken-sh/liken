@@ -2,12 +2,12 @@
 # .pre-commit-config.yaml, which runs go-test-coverage over the
 # profile the test hook writes).
 #
-# The thresholds are a ratchet, not an aspiration: each one is set
-# just under what the tests actually measure today, so a change that
-# loses coverage fails loudly, and a change that gains it should
-# raise the number here to bank the gain. Numbers only go up.
+# The thresholds are a ratchet: each one is set just under what the
+# tests actually measure today, so a change that loses coverage fails
+# loudly, and a change that gains coverage should raise the number
+# here to keep the gain. Numbers only go up.
 #
-# The numbers differ by package on purpose. machine/ is pure types
+# The numbers deliberately differ by package. machine/ is pure types
 # and parsing, testable to the last line. init/ is mostly boot
 # machinery (mounting, supervising k3s, the reboot syscall) that only
 # a real machine can exercise; what's unit-testable there is the
@@ -27,8 +27,8 @@ override:
     threshold: 85
   # The operator: its decisions (drift, staging validation, the
   # convergence truth table, the fleet sweep, the lease election) are
-  # pure and tested, and everything that speaks HTTP — the API
-  # client, the seeding loops, the watch stream, the leases — is
+  # pure and tested, and everything that makes HTTP calls (the API
+  # client, the seeding loops, the watch stream, the leases) is
   # exercised against a real HTTP test server.
   - path: ^operator$
     threshold: 62

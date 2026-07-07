@@ -3,8 +3,9 @@ package main
 // Tests for the demotion cleanup decision: a machine whose derived
 // role is follower but whose Node object still claims control-plane
 // was demoted, and the leftover Node (with its etcd membership) must
-// go — automatically, because a phantom etcd voice breaks quorum
-// math the next time a real leader reboots.
+// be removed automatically, because a dead etcd member still counts
+// toward the quorum size and breaks the majority math the next time
+// a real leader reboots.
 
 import (
 	"testing"

@@ -1,31 +1,32 @@
 package main
 
-// Boot entries: the firmware's menu, one binary record apiece.
+// Boot entries: the firmware's menu, one binary record per entry.
 //
 // A UEFI machine keeps its boot menu in firmware variables named
-// Boot0000, Boot0001, and so on, each holding one EFI_LOAD_OPTION —
-// "here is a bootable thing": a human-readable name, where to find
-// the executable, and what arguments to hand it. Three companions
-// make the list mean something: BootOrder (the durable preference
-// list), BootNext (try this one next boot, once — the firmware erases
-// it after use, which is the entire blue-green fallback), and
+// Boot0000, Boot0001, and so on, each holding one EFI_LOAD_OPTION:
+// the record for one bootable thing, carrying a human-readable name,
+// the location of the executable, and the arguments to hand it.
+// Three companion variables make the list mean something: BootOrder
+// (the durable preference list), BootNext (the entry to try on the
+// next boot, once; the firmware erases it after use, and that
+// one-shot behavior is what makes the blue-green fallback work), and
 // BootCurrent (read-only: the entry actually used this boot).
 //
-// The record is a packed binary format in the GPT's genre, with the
-// same Microsoft heritage showing: strings are UTF-16LE, and the
-// interesting part — *where* — is a "device path", a chain of
-// variable-length nodes narrowing from hardware to file. liken's
-// entries need exactly two: a hard-drive node that pins one GPT
-// partition by its unique GUID (position-independent, like liken's
-// own recognition-by-name), and a file-path node naming the
-// executable inside it, backslashes and all. Whatever follows the
-// path list is "optional data", which for a Linux EFI-stub kernel is
-// simply the kernel command line.
+// The record is a packed binary format much like the GPT's, with the
+// same Microsoft heritage: strings are UTF-16LE, and the location of
+// the executable is a "device path", a chain of variable-length
+// nodes narrowing from hardware to file. liken's entries need
+// exactly two nodes: a hard-drive node that pins one GPT partition
+// by its unique GUID (position-independent, like liken's own
+// recognition-by-name), and a file-path node naming the executable
+// inside it, backslashes and all. Whatever follows the path list is
+// "optional data", which for a Linux EFI-stub kernel is simply the
+// kernel command line.
 //
-// The encoder writes only what liken writes; the parser must also
-// survive what it merely reads, because real firmware fills these
-// variables with vendor nodes of every flavor — so unknown node
-// types are skipped by their declared lengths, kept in no one's way.
+// The encoder writes only the entries liken itself creates. The
+// parser must handle more, because real firmware fills these
+// variables with vendor nodes of every kind; unknown node types are
+// skipped by their declared lengths and otherwise ignored.
 
 import (
 	"encoding/binary"
@@ -34,12 +35,12 @@ import (
 )
 
 // loadOptionActive marks an entry the boot manager may use on its
-// own; without it an entry is parked — listed, but never chosen.
+// own; without it an entry is listed but never chosen automatically.
 const loadOptionActive = 0x00000001
 
 // A loadOption is one Boot#### variable, decoded. Fields liken
 // doesn't model (vendor device-path nodes, exotic attributes) survive
-// a decode only as much as noted on each field.
+// a decode only to the extent each field's comment describes.
 type loadOption struct {
 	attributes  uint32
 	description string
@@ -55,8 +56,8 @@ type loadOption struct {
 	optionalData []byte
 }
 
-// A hardDriveNode identifies one partition three redundant ways —
-// index, extent, and GUID. The GUID is the one that matters: it's
+// A hardDriveNode identifies one partition three redundant ways: by
+// index, by extent, and by GUID. The GUID is the one that matters: it's
 // the partition's unique GUID from the GPT itself, so the entry
 // survives disks being reordered, exactly like liken's
 // recognition-by-partition-name.
@@ -143,8 +144,8 @@ func encodeLoadOption(o loadOption) []byte {
 	var paths []byte
 	if o.hardDrive != nil {
 		// 42 bytes exactly: the 4-byte header plus 38 of payload. The
-		// length field counts the header too — the first mistake
-		// everyone makes with this format.
+		// length field counts the header too, which is the easiest
+		// detail to get wrong in this format.
 		node := make([]byte, 42)
 		node[0], node[1] = dpTypeMedia, dpSubtypeHardDrive
 		binary.LittleEndian.PutUint16(node[2:4], 42)
@@ -181,9 +182,9 @@ func bootEntryID(n uint16) string {
 }
 
 // decodeUTF16Z reads a NUL-terminated UTF-16LE string and returns
-// what follows it. UTF-16 because these formats are Microsoft's
-// lineage; the terminator is load-bearing, since the description's
-// length is recorded nowhere else in the record.
+// what follows it. UTF-16 because these formats come from Microsoft.
+// The terminator carries real information: the description's length
+// is recorded nowhere else in the record.
 func decodeUTF16Z(b []byte) (string, []byte, error) {
 	var units []uint16
 	for i := 0; ; i += 2 {

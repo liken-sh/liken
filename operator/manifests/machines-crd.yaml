@@ -10,9 +10,9 @@
 #
 # This file lands in /var/lib/rancher/k3s/server/manifests, k3s's
 # auto-deploy directory: everything there is applied to the cluster at
-# startup and re-applied whenever the file changes: a tiny, built-in
-# GitOps loop, and the reason liken needs no `kubectl apply` step
-# anywhere.
+# startup and re-applied whenever the file changes. That is a tiny,
+# built-in GitOps loop, and it is the reason liken needs no
+# `kubectl apply` step anywhere.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -45,14 +45,14 @@ spec:
       subresources:
         status: {}
       # What `kubectl get machines` prints, without -o yaml. Every
-      # column here is a word, not a boolean, on purpose: True/False
-      # can only say whether something is wrong, while an enumerated
-      # state says what kind of wrong and what would fix it.
+      # column here is deliberately a word rather than a boolean:
+      # True/False can only say whether something is wrong, while an
+      # enumerated state says what kind of wrong and what would fix it.
       additionalPrinterColumns:
         - name: Role
           type: string
           jsonPath: .status.role
-        # The machine's whole story in one word (see status.phase
+        # The machine's state summarized in one word (see status.phase
         # below); the Ready condition still exists for programs, but
         # the phase is what a human scans a fleet listing for.
         - name: Status
@@ -61,7 +61,7 @@ spec:
         # Uptime is computed by kubectl at read time, exactly like the
         # Age column: a date-typed column renders as the time elapsed
         # since its timestamp. Deriving it from bootedAt means it is
-        # always current — a literal uptime figure written into status
+        # always current; a literal uptime figure written into status
         # would be stale the moment the operator wrote it.
         - name: Uptime
           type: date
@@ -88,10 +88,10 @@ spec:
         - name: Spec
           type: string
           jsonPath: .status.conditions[?(@.type=="SpecConverged")].reason
-        # The clock's story: Synchronized, FreeRunning (no upstreams,
-        # by design), or Unsynchronized (sources declared but
-        # unreachable — an outage), and the measured offset from the
-        # last exchange.
+        # The clock's state: Synchronized, FreeRunning (no upstreams
+        # declared, by design), or Unsynchronized (sources declared
+        # but unreachable, which is an outage), plus the measured
+        # offset from the last exchange.
         - name: Time
           type: string
           jsonPath: .status.time.state
@@ -290,11 +290,11 @@ spec:
                         The first of the operating system's two boot
                         slots. Each slot holds one complete liken
                         version; the machine runs from one while
-                        upgrades are written to the other. EFI system
-                        partitions carrying FAT32, because the
-                        firmware itself is their first reader. Fixed
-                        in size once claimed: FAT32 doesn't grow in
-                        place.
+                        upgrades are written to the other. The slots
+                        are EFI system partitions carrying FAT32,
+                        because the firmware itself is their first
+                        reader. They are fixed in size once claimed:
+                        FAT32 doesn't grow in place.
                       required: [device]
                       properties:
                         device:
@@ -308,7 +308,8 @@ spec:
                     systemB:
                       type: object
                       description: >-
-                        The second boot slot; systemA tells the story.
+                        The second boot slot; the systemA description
+                        explains how the two slots work.
                       required: [device]
                       properties:
                         device:
@@ -325,9 +326,9 @@ spec:
                         The machine's own durable data, chiefly the
                         staged and proven manifests that let a spec
                         edit survive a reboot and apply at the next
-                        one. First among the data roles in the
-                        canonical partition order, so a future boot
-                        can find it before it has read any spec.
+                        one. It comes first among the data roles in
+                        the canonical partition order, so a future
+                        boot can find it before it has read any spec.
                       required: [device]
                       properties:
                         device:
@@ -414,13 +415,13 @@ spec:
                   type: string
                   enum: [Unknown, Booting, Lost, Blocked, Updating, UpdatePending, Degraded, Ready]
                   description: >-
-                    The machine's whole story in one word, derived
+                    The machine's state in one word, derived
                     from the conditions on every reconcile pass (so it
                     can never disagree with them). Ready means every
                     condition holds. UpdatePending and Updating mean a
                     staged change is waiting on a reboot (Manual) or
                     one is in flight (Auto). Blocked means drift
-                    exists that liken refuses or is unable to stage —
+                    exists that liken refuses or is unable to stage;
                     it needs a different edit, not time. Degraded is
                     everything else wrong; Booting means init hasn't
                     finished publishing this boot; Unknown means the
@@ -511,7 +512,7 @@ spec:
                 time:
                   type: object
                   description: >-
-                    How this machine's clock is doing. Unlike most of
+                    The state of this machine's clock. Unlike most of
                     status it changes for the machine's whole life,
                     because the clock is disciplined continuously,
                     not configured once at boot.
@@ -524,26 +525,27 @@ spec:
                         against a source that is itself synchronized,
                         and when it isn't, whether that's by design or
                         by outage. FreeRunning means no sources were
-                        ever declared: the machine runs on its
-                        hardware clock on purpose. Unsynchronized
-                        means sources are declared but none currently
-                        answers. A free-running fleet agrees with
-                        itself and still doesn't claim Synchronized:
-                        agreeing with the world is a different claim
-                        than agreeing with each other, and certificate
-                        validation cares about the difference.
+                        ever declared: the machine deliberately runs
+                        on its hardware clock. Unsynchronized means
+                        sources are declared but none currently
+                        answers. A free-running fleet may agree with
+                        itself, but it still doesn't claim
+                        Synchronized: agreement within the fleet is a
+                        different claim from agreement with real-world
+                        time, and certificate validation cares about
+                        the difference.
                     source:
                       type: string
                       description: >-
-                        Who this machine follows: an upstream's name
-                        on a leader, one of the cluster's leaders on
-                        a follower.
+                        The source this machine syncs from: an
+                        upstream's name on a leader, or one of the
+                        cluster's leaders on a follower.
                     stratum:
                       type: integer
                       description: >-
                         Distance from a reference clock, in NTP's
                         vocabulary: a source at stratum n makes this
-                        machine n+1. A server free-running on purpose
+                        machine n+1. A server that free-runs by design
                         reports the local-clock convention (10); 16
                         means unsynchronized.
                     offset:
@@ -569,9 +571,10 @@ spec:
                       description: >-
                         The machine's storage inventory: every real disk
                         the kernel found, declared in the spec or not.
-                        The name is the kernel's for this boot (assigned
-                        in probe order, so a handle, not an identity);
-                        the model and serial come from the device
+                        The name is the kernel's for this boot; it is
+                        assigned in probe order, so it identifies the
+                        device for this boot only, not permanently.
+                        The model and serial come from the device
                         itself.
                       x-kubernetes-list-type: map
                       x-kubernetes-list-map-keys: [name]
@@ -592,16 +595,16 @@ spec:
                   description: >-
                     The machine's standing firmware state: its boot
                     mode and the boot menu from its non-volatile
-                    store — UEFI with its variables decoded into
-                    words, or BIOS, shorthand for any world without
-                    firmware variables to consult (a legacy server, a
-                    direct-kernel boot under a hypervisor). This
-                    describes the machine, not the boot: power-cut
-                    and boot unchanged, and everything here rides
-                    through, while status.boot is freshly re-made.
-                    Each entry renders as the firmware's variable
-                    name plus the entry's own description, e.g.
-                    "Boot0001 (liken slot A)".
+                    store. UEFI mode reports the firmware's variables
+                    decoded into words; BIOS is shorthand for any
+                    environment without firmware variables to consult,
+                    such as a legacy server or a direct-kernel boot
+                    under a hypervisor. This describes the machine,
+                    not the boot: everything here survives a power
+                    cycle unchanged, while status.boot is freshly
+                    re-made every boot. Each entry renders as the
+                    firmware's variable name plus the entry's own
+                    description, e.g. "Boot0001 (liken slot A)".
                   properties:
                     mode:
                       type: string
@@ -624,10 +627,10 @@ spec:
                     Where every storage role is actually backed this
                     boot, declared or not. The spec says what was asked
                     for and hardware.blockDevices says what's attached;
-                    this connects the two. Memory-backed roles report
-                    no capacity on purpose: they all share the one RAM
-                    root, and per-role figures would count it multiple
-                    times.
+                    this connects the two. Memory-backed roles
+                    deliberately report no capacity: they all share
+                    the one RAM root, and per-role figures would count
+                    it multiple times.
                   properties:
                     systemA:
                       type: object
@@ -709,18 +712,19 @@ spec:
                 boot:
                   type: object
                   description: >-
-                    What this boot ran under — the perishable record,
+                    What this boot ran under: the perishable record,
                     re-made every boot, that the operator diffs the
                     spec against (contrast firmware, the standing
-                    state that rides through reboots). Which
-                    documents: the staged copy awaiting its proving
-                    boot, the proven last-known-good, or (first boot
-                    only) the seed baked into the image — recorded
+                    state that survives reboots). The manifest
+                    sources say which documents the boot used: the
+                    staged copy awaiting its proving boot, the proven
+                    last-known-good, or, on the first boot only, the
+                    seed baked into the image. They are recorded
                     separately for the Machine manifest and the
                     Cluster document, because the two stage and prove
                     independently.
                     The hashes identify exact bytes, and the storage
-                    block is the spec as actuated: together they are
+                    block is the spec as actuated; together they are
                     the reference point for detecting drift between
                     what the cluster asks and what the machine did.
                     A rejection reports a staged document that failed
@@ -745,8 +749,9 @@ spec:
                         the liken.slot= parameter the installer baked
                         into each boot entry. Absent when the boot
                         didn't come from a slot (direct-kernel boots,
-                        install media). Releases download to the other
-                        slot — blue-green's whole idea.
+                        install media). Releases download to the slot
+                        the machine is not running from, which is the
+                        point of the blue-green arrangement.
                     storage:
                       type: object
                       properties:
@@ -825,8 +830,9 @@ spec:
                         The standing verdict on a system release whose
                         proving boot fell back: the machine booted the
                         staged slot, never proved out, and the
-                        firmware returned it to the proven one. Holds
-                        until the catalog names a different release.
+                        firmware returned it to the proven one. It
+                        holds until the catalog names a different
+                        release.
                       properties:
                         hash:
                           type: string
@@ -854,15 +860,15 @@ spec:
                     elapsed time.
                 conditions:
                   type: array
-                  # A conditions array is a map in list's clothing:
-                  # one entry per type. Declaring that (list-type map,
-                  # keyed by type) lets the API server reject
-                  # duplicate types and, under server-side apply,
-                  # merge writes per condition instead of clobbering
-                  # the whole list. The field constraints below are
-                  # metav1.Condition's own, so these conditions
-                  # validate exactly like the ones on Pods and Nodes,
-                  # not just resemble them.
+                  # A conditions array is really a map with one entry
+                  # per type. Declaring that (list-type map, keyed by
+                  # type) lets the API server reject duplicate types
+                  # and, under server-side apply, merge writes per
+                  # condition instead of clobbering the whole list.
+                  # The field constraints below are metav1.Condition's
+                  # own, so these conditions validate exactly like the
+                  # ones on Pods and Nodes rather than just resembling
+                  # them.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:
@@ -885,8 +891,8 @@ spec:
                           judged. Generation counts spec edits, so
                           this is how a consumer tells a verdict on
                           the current spec from a verdict on one
-                          already edited past — a live distinction
-                          here, where edits wait for a reboot.
+                          already edited past. That distinction
+                          matters here, where edits wait for a reboot.
                       reason:
                         type: string
                         minLength: 1

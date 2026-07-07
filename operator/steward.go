@@ -1,6 +1,6 @@
 package main
 
-// The pod steward: keeping the operator's own pods in step with the
+// The pod steward keeps the operator's own pods in step with the
 // operating systems under them.
 //
 // The operator's container image is part of the OS: image/build.sh
@@ -18,25 +18,24 @@ package main
 //     all.
 //   - updateStrategy: OnDelete, so applying manifests never deletes
 //     a running pod. A rolling update would recreate pods on nodes
-//     whose OS doesn't carry the new image yet — killing the very
-//     operator that machine needs to drive its own upgrade, and
-//     leaving it unable to ever take one (a deadlock this fleet has
-//     lived through).
+//     whose OS doesn't carry the new image yet, killing the very
+//     operator each of those machines needs to drive its own
+//     upgrade and leaving the machine unable to ever take one.
 //
 // What's left is freshness: after a machine reboots into a new
 // release, its existing pod object predates the new manifests, and
-// somebody has to delete it so the DaemonSet can recreate it from
-// the current template. That somebody is the sweep leader, right
-// here. The DaemonSet carries a liken.sh/os-version annotation
-// naming the release that shipped it, stamped onto its pods through
-// the template; the steward refreshes a pod exactly when its machine
-// reports that version in its facts but the pod predates it. Both
-// halves of that condition are load-bearing: a machine still on the
-// old OS keeps its old pod (evicting it would orphan the machine),
-// and a machine *ahead* of the applied manifests keeps its old pod
-// too (a refresh would recreate another stale one, thrashing every
-// sweep until a new-release leader applies the manifests that can
-// actually satisfy it).
+// the sweep leader, right here, deletes it so the DaemonSet can
+// recreate it from the current template. The DaemonSet carries a
+// liken.sh/os-version annotation naming the release that shipped
+// it, stamped onto its pods through the template; the steward
+// refreshes a pod exactly when its machine reports that version in
+// its facts but the pod predates it. Both halves of that condition
+// matter. A machine still on the old OS keeps its old pod, because
+// evicting it would leave the machine with no operator at all. A
+// machine ahead of the applied manifests keeps its old pod too,
+// because a refresh would recreate another stale one, thrashing
+// every sweep until a new-release leader applies the manifests that
+// can actually satisfy it.
 
 import (
 	"fmt"
@@ -56,8 +55,8 @@ const operatorPodsPath = "/api/v1/namespaces/liken-system/pods?labelSelector=app
 // decideOperatorRefresh is the steward's whole judgment, pure over
 // the sweep's inputs: which operator pods to evict so the DaemonSet
 // recreates them from the current template. dsVersion is the
-// os-version annotation on the DaemonSet itself — the release whose
-// manifests are actually applied — and "" (no annotation, or no
+// os-version annotation on the DaemonSet itself, naming the release
+// whose manifests are actually applied; "" (no annotation, or no
 // DaemonSet) means there is no authority to refresh toward.
 func decideOperatorRefresh(dsVersion string, machines []machine.Machine, pods []podObject) []podObject {
 	if dsVersion == "" {
@@ -83,11 +82,12 @@ func decideOperatorRefresh(dsVersion string, machines []machine.Machine, pods []
 
 // stewardOperatorPods is the acting half, run by the sweep leader:
 // read the DaemonSet's shipped version, list its pods, and evict the
-// stale ones. Eviction rather than delete on purpose — it's the verb
-// the operator already holds for drains, and the DaemonSet recreates
-// the pod either way. The eviction may take the sweep leader's own
-// pod (an upgraded leader's old operator is exactly a stale pod);
-// the lease passes and the recreated pod picks the sweep back up.
+// stale ones. Eviction rather than delete, deliberately: it is the
+// verb the operator already holds for drains, and the DaemonSet
+// recreates the pod either way. The eviction may take the sweep
+// leader's own pod (an upgraded leader's old operator is exactly a
+// stale pod); the lease passes and the recreated pod picks the sweep
+// back up.
 func stewardOperatorPods(c *apiClient, machines []machine.Machine) {
 	var ds struct {
 		Metadata struct {

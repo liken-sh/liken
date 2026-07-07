@@ -2,8 +2,8 @@
 #
 # Deliberately damage a published release, for drilling the trust
 # chain: flip one byte a megabyte into liken.cpio, leaving
-# release.yaml promising a digest the bytes no longer match. A machine
-# asked to run this release must refuse to stage it — the download
+# release.yaml declaring a digest the bytes no longer match. A machine
+# asked to run this release must refuse to stage it: the download
 # completes, the verification fails, and the VersionConverged
 # condition holds at DigestMismatch with nothing written to a slot.
 #

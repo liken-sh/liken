@@ -1,18 +1,18 @@
 // The lab's release server: the dist/ tree over HTTP, every request
 // logged.
 //
-// A real release server is nothing more than this — static files
-// under stable URLs — because the trust chain makes the transport
-// boring on purpose: every byte a machine downloads is verified
-// against a digest it got from the cluster's API, so the server needs
-// no authentication, no TLS, and no smarts to be safe to upgrade
-// from. (Integrity comes from the digests; *privacy* would take TLS,
-// but there is nothing private about an OS image.)
+// A real release server is nothing more than this: static files under
+// stable URLs. The trust chain deliberately asks nothing of the
+// transport. Every byte a machine downloads is verified against a
+// digest it got from the cluster's API, so the server needs no
+// authentication, no TLS, and no logic of its own to be safe to
+// upgrade from. (Integrity comes from the digests; privacy would take
+// TLS, but there is nothing private about an OS image.)
 //
-// The logging is the point of writing this instead of gesturing at
-// python3 -m http.server: upgrade drills watch this terminal to see
-// machines fetch — which release, which artifact, how many bytes —
-// so a stalled download or a re-fetch after a corruption drill is
+// The logging is why this program exists instead of using something
+// like python3 -m http.server. Upgrade drills watch this terminal to
+// see machines fetch: which release, which artifact, how many bytes.
+// A stalled download or a re-fetch after a corruption drill is
 // visible the moment it happens.
 package main
 
@@ -26,7 +26,7 @@ import (
 
 // handler serves the published releases under /releases/, mirroring
 // the source URL the Cluster's spec declares, and logs one line per
-// request. Split from main so the tests can stand the whole thing up
+// request. It is separate from main so the tests can run the server
 // against a throwaway directory.
 func handler(dir string) http.Handler {
 	files := http.StripPrefix("/releases/", http.FileServer(http.Dir(dir)))
@@ -40,9 +40,10 @@ func handler(dir string) http.Handler {
 	})
 }
 
-// responseRecorder wraps a ResponseWriter to remember what was sent:
-// the standard library's handlers write directly to the socket, so
-// the only way to log a response is to sit in the middle of it.
+// responseRecorder wraps a ResponseWriter to remember what was sent.
+// The standard library's handlers write directly to the socket, so
+// the only way to log a response is to wrap the writer and observe
+// what passes through it.
 type responseRecorder struct {
 	http.ResponseWriter
 	status int

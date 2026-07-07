@@ -2,14 +2,14 @@
 # form together. Everything here is a fact the whole fleet must agree
 # on, which is why it lives in its own document rather than being
 # repeated (and inevitably diverging) across Machine manifests. The
-# same file rides in every machine's image — cluster-scoped truth has
-# exactly one copy — and, like the Machine manifest, it is seeded into
+# same file travels in every machine's image, so cluster-scoped facts
+# have exactly one copy. Like the Machine manifest, it is seeded into
 # the cluster as a real resource once the API is up, so `kubectl get
 # clusters` answers the question "what is this fleet?".
 #
-# What is deliberately NOT here: the join token. The spec carries
-# topology; secrets ride in the identity bundle (/etc/liken/token,
-# minted offline by identity/mint.sh alongside the CAs it hashes).
+# The join token is deliberately not here. The spec carries topology;
+# secrets travel in the identity bundle (/etc/liken/token, minted
+# offline by identity/mint.sh alongside the CAs it hashes).
 apiVersion: liken.sh/v1alpha1
 kind: Cluster
 metadata:
@@ -19,25 +19,25 @@ spec:
   # derives its role by looking for its own name here: listed means
   # leader, absent means follower. One name means k3s keeps its state
   # in sqlite; more than one means embedded etcd, whose majority
-  # quorum wants an odd count — three voices, not two or four. The
-  # first name is the founding leader: it initializes etcd (or, if it
-  # began life as a lone sqlite leader, migrates that datastore into
-  # etcd in place on the boot where the list first grows), and every
-  # other leader joins through it. This lab seeds three leaders and
-  # two followers; changing the list is an ordinary Cluster edit,
+  # quorum needs an odd member count: three members, not two or four.
+  # The first name is the founding leader: it initializes etcd (or, if
+  # it originally ran as a lone sqlite leader, migrates that datastore
+  # into etcd in place on the boot where the list first grows), and
+  # every other leader joins through it. This lab seeds three leaders
+  # and two followers; changing the list is an ordinary Cluster edit,
   # which the fleet stages and applies machine by machine.
   leaders: [node-1, node-2, node-3]
 
   # Where followers make first contact: a leader's address on the
-  # cluster segment, which its Machine manifest promises below in
+  # cluster segment, which its Machine manifest declares in
   # machines/node-1.yaml. Port 6443 is the Kubernetes API's
-  # conventional port, and k3s's join protocol rides the same
-  # listener. First contact is all this is — after joining, k3s
-  # agents maintain a client-side load balancer that learns every
-  # leader, so a dead endpoint strands only brand-new followers. A
-  # deployment that wants the endpoint itself to survive its first
-  # leader points a DNS name or virtual IP here instead; that choice
-  # belongs to the deployment, never the OS.
+  # conventional port, and k3s's join protocol uses the same
+  # listener. This endpoint only matters for first contact: after
+  # joining, k3s agents maintain a client-side load balancer that
+  # learns every leader, so a dead endpoint strands only brand-new
+  # followers. A deployment that wants the endpoint itself to survive
+  # its first leader points a DNS name or virtual IP here instead;
+  # that choice belongs to the deployment, never the OS.
   endpoint: https://10.10.0.1:6443
 
   network:
@@ -61,8 +61,8 @@ spec:
   time:
     # Where the leaders get their time; followers don't appear here
     # because they sync from the leaders themselves. Declaring an
-    # upstream is the deployment's choice, never the OS's default —
-    # this lab picks Cloudflare's public NTP service, which (unlike
+    # upstream is the deployment's choice, never the OS's default.
+    # This lab picks Cloudflare's public NTP service, which (unlike
     # the NTP pool) is run for exactly this kind of anonymous use.
     upstreams: [time.cloudflare.com, time.nist.gov]
 
@@ -70,13 +70,13 @@ spec:
     # Where release artifacts come from: the lab's release server
     # (releases/serve, started with `make serve`), reached at QEMU's
     # built-in address for "the host machine" on a user-mode network.
-    # What is deliberately NOT seeded here: the catalog, or a target
-    # version. A catalog entry is the digest of a release document,
-    # and releases built from this repo embed the checkout's own
-    # identity artifacts (the cluster CA, the join token — gitignored,
-    # minted per checkout), so no digest is stable enough to commit.
-    # Publishing a release prints its catalog entry; adding it and
-    # setting spec.version are live edits to the Cluster resource,
-    # which is the point — an upgrade is an API conversation, not an
-    # image rebuild.
+    # The catalog and a target version are deliberately not seeded
+    # here. A catalog entry is the digest of a release document, and
+    # releases built from this repo embed the checkout's own identity
+    # artifacts (the cluster CA and the join token, both gitignored
+    # and minted per checkout), so no digest is stable enough to
+    # commit. Publishing a release prints its catalog entry; adding it
+    # and setting spec.version are live edits to the Cluster resource.
+    # That is deliberate: an upgrade happens through the API, not
+    # through an image rebuild.
     source: http://10.0.2.2:8017/releases

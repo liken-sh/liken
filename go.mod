@@ -1,12 +1,12 @@
-// One module for the whole repo. liken's Go programs — the init that
+// One module for the whole repo. liken's Go programs, the init that
 // boots the machine (init/) and the operator that manages it from
-// inside the cluster (operator/) — version together (one VERSION file
+// inside the cluster (operator/), version together (one VERSION file
 // stamps both binaries), release together (one initramfs), and share
 // the machine package (machine/, the Machine API as Go types). Multiple
-// modules are for code that versions and releases independently;
-// nothing here does, so a single module is the honest arrangement — and
-// it means a shared package is just an import, no publishing or replace
-// directives required.
+// modules are for code that versions and releases independently, and
+// nothing here does, so a single module fits. It also means a shared
+// package is just an import, with no publishing or replace directives
+// required.
 module github.com/chrisguidry/liken
 
 go 1.26.4

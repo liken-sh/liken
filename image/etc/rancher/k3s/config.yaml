@@ -3,8 +3,8 @@
 # liken passes no flags. (A machine in the agent role reads agent.yaml
 # beside this file instead: k3s maps config keys onto flags, and an
 # agent would refuse the server-only ones here.) Everything only the
-# boot can derive — the join token, the cluster's address plan, this
-# machine's node IP — lands in config.yaml.d/boot.yaml, a drop-in
+# boot can derive (the join token, the cluster's address plan, this
+# machine's node IP) lands in config.yaml.d/boot.yaml, a drop-in
 # directory k3s reads alongside this file; init writes it fresh every
 # boot (see init/k3s.go).
 #
@@ -35,6 +35,6 @@ write-kubeconfig-mode: "0644"
 # cluster segment, where the rest of the cluster expects to find this
 # node. The default (every local IP, including the uplink and
 # whatever CNI interfaces appear later) is broad enough that
-# kube-proxy logs a complaint about it at startup.
+# kube-proxy logs a warning about it at startup.
 kube-proxy-arg:
   - nodeport-addresses=primary

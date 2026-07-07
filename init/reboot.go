@@ -5,7 +5,7 @@ package main
 // Only PID 1 can take a machine down properly, so the operator never
 // reboots anything itself: it writes an intent file (machine/reboot.go
 // describes the channel) and init does the rest. The watching is a
-// 2-second poll, chosen over inotify on purpose: it's a few lines
+// 2-second poll, deliberately chosen over inotify: it's a few lines
 // anyone can read, and a 2-second delay is nothing next to the reboot
 // it triggers.
 //
@@ -33,11 +33,12 @@ import (
 // most one intent: a reboot always follows, so there is nothing left
 // to watch for afterward, and returning nil tells the machine plane
 // this component's work is complete. The file's presence is the
-// trigger; its content only enriches the narration, so an unreadable
-// intent is honored rather than stranding a requested reboot (atomic
-// writes make that case a bug, not a race, but a bug must not wedge
-// the machine). The directory and interval are parameters so tests
-// can watch a tempdir quickly; the boot passes the real channel.
+// trigger; its content only improves the console message, so an
+// unreadable intent is honored rather than stranding a requested
+// reboot (atomic writes make that case a bug, not a race, but a bug
+// must not wedge the machine). The directory and interval are
+// parameters so tests can watch a tempdir quickly; the boot passes
+// the real channel.
 func watchForRebootIntent(ctx context.Context, dir string, interval time.Duration, requests chan<- machine.RebootIntent) error {
 	for {
 		select {
@@ -74,8 +75,8 @@ func rebootMachine(intent machine.RebootIntent) {
 	armProvingBoot(efiVarsDir, machine.MachineStateDir, bootParamValue("liken.slot"))
 	killEverything()
 	// The machine plane stops only after every process is dead: the
-	// reaper is one of its components, and corpses need collecting
-	// right up to the end.
+	// reaper is one of its components, and exited processes need
+	// collecting right up to the end.
 	plane.shutdown(10 * time.Second)
 	unmountRoles()
 	unix.Sync()
@@ -88,10 +89,11 @@ func rebootMachine(intent machine.RebootIntent) {
 }
 
 // killEverything signals every process on the machine: kill(-1) from
-// PID 1 reaches all of them (except init itself). SIGTERM first,
-// because containers deserve the same graceful warning k3s got; a
-// fixed grace period rather than tracking every straggler, because
-// SIGKILL is coming and the reaper collects them all either way.
+// PID 1 reaches all of them (except init itself). SIGTERM comes
+// first, so containers get the same graceful warning k3s got. A
+// fixed grace period is enough; there is no need to track every
+// straggler, because SIGKILL follows and the reaper collects them
+// all either way.
 func killEverything() {
 	fmt.Println("liken: stopping every remaining process")
 	_ = unix.Kill(-1, unix.SIGTERM)

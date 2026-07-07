@@ -1,5 +1,5 @@
-# The identity domain: the cluster's identity, decided before it
-# boots.
+# The identity domain: the cluster's certificate authorities and join
+# token, generated before any machine boots.
 #
 # mint.sh explains the certificate authorities; kubeconfig.sh explains
 # how an operator's credential is computed from them without asking

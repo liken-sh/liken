@@ -1,12 +1,12 @@
 package machine
 
-// The manifest lifecycle: how a document edit survives a reboot.
+// The manifest lifecycle is how a document edit survives a reboot.
 //
 // A machine with a machineState storage role keeps its manifests on
-// that filesystem, one directory per document. Two documents ride
-// this lifecycle today — the Machine manifest (manifests/) and the
-// Cluster manifest (cluster/) — and each directory holds the same
-// three files, telling the same story:
+// that filesystem, one directory per document. Two documents go
+// through this lifecycle today, the Machine manifest (manifests/) and
+// the Cluster manifest (cluster/), and each directory holds the same
+// three files with the same meanings:
 //
 //	staged.yaml    a document awaiting its first successful boot,
 //	               written by the operator when the cluster's copy
@@ -25,14 +25,14 @@ package machine
 // none of these files exist: it seeds the very first boot, and the
 // first success writes it down as the first proven.yaml.
 //
-// A store deals in bytes, never parsed documents: the lifecycle's
-// whole job is that the right bytes survive reboots and power loss,
-// and which kind those bytes are (a Machine, a Cluster) is the
-// caller's business. That's also why rejections hash raw bytes — a
-// document that won't even parse must still be identifiable as
-// exactly the bytes that were refused.
+// A store deals in bytes, never parsed documents. The lifecycle's
+// whole job is that the right bytes survive reboots and power loss;
+// which kind those bytes are (a Machine, a Cluster) is for the caller
+// to know. That is also why rejections hash raw bytes: a document
+// that won't even parse must still be identifiable as exactly the
+// bytes that were refused.
 //
-// Every write here is atomic *and* durable: temp file, fsync the
+// Every write here is both atomic and durable: temp file, fsync the
 // file, rename, fsync the directory. Rename alone makes a write
 // atomic against crashes of the writer, but not against power loss:
 // the rename itself lives in the directory, and an unsynced directory
@@ -66,7 +66,7 @@ const (
 	attemptedMarker  = "attempted"
 )
 
-// A ManifestStore is one document's lifecycle home: a directory on
+// A ManifestStore is one document's lifecycle storage: a directory on
 // machineState holding that document's staged, proven, and rejected
 // files. The two constructors below are the only places the
 // directories are named, so the Machine's and the Cluster's
@@ -82,16 +82,16 @@ func MachineManifests(root string) ManifestStore {
 }
 
 // ClusterManifests is the Cluster manifest's store under the same
-// root: the same lifecycle beside the Machine's, never entangled
-// with it.
+// root. It runs the same lifecycle as the Machine's, in its own
+// directory.
 func ClusterManifests(root string) ManifestStore {
 	return ManifestStore{dir: filepath.Join(root, "cluster")}
 }
 
 // A Rejection records why a staged document was refused. One type
-// serves as both rejection.yaml's schema and the facts entry, so what
-// the console said, what the disk remembers, and what the cluster
-// sees are one record. The hash identifies exactly which bytes were
+// serves as both rejection.yaml's schema and the facts entry, so the
+// console message, the on-disk record, and the cluster's status all
+// carry the same record. The hash identifies exactly which bytes were
 // rejected: the operator refuses to re-stage a document matching it,
 // and only a genuinely different edit clears the block.
 type Rejection struct {
@@ -109,9 +109,9 @@ func ManifestHash(raw []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// load reads one lifecycle file. A missing file is not an error, it's
-// an absence (nil bytes): most machines most of the time have nothing
-// staged.
+// load reads one lifecycle file. A missing file is not an error; it
+// returns nil bytes, because most machines have nothing staged most
+// of the time.
 func (s ManifestStore) load(name string) ([]byte, error) {
 	raw, err := os.ReadFile(filepath.Join(s.dir, name))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -131,11 +131,11 @@ func (s ManifestStore) LoadProven() ([]byte, error) {
 	return s.load(provenManifest)
 }
 
-// LoadRejection reads the standing rejection, if any. It stands until
-// a later promotion removes it: facts live on tmpfs and die with
-// every boot, so this file is the durable memory that lets every boot
-// keep reporting "this document was rejected" until something
-// supersedes it.
+// LoadRejection reads the standing rejection, if any. A rejection
+// stands until a later promotion removes it. The facts file lives on
+// tmpfs and is lost at every reboot, so this file is the durable
+// record that lets every boot keep reporting "this document was
+// rejected" until something supersedes it.
 func (s ManifestStore) LoadRejection() (*Rejection, error) {
 	raw, err := s.load(rejectionNote)
 	if raw == nil || err != nil {
@@ -168,9 +168,10 @@ func (s ManifestStore) WriteProven(raw []byte) error {
 	return writeDurable(filepath.Join(s.dir, provenManifest), raw)
 }
 
-// Promote marks the staged document proven: one rename, atomic by the
-// filesystem's own guarantee, replacing the old proven in the same
-// motion (there is never a moment with neither). A success supersedes
+// Promote marks the staged document proven with one rename. The
+// rename is atomic by the filesystem's own guarantee and replaces the
+// old proven file in the same step, so there is never a moment with
+// neither. A success supersedes
 // any old rejection, so those files go too; a crash between the
 // rename and that cleanup leaves a stale rejection note beside a
 // newer proven, which is harmless (the boot that just succeeded
@@ -185,7 +186,7 @@ func (s ManifestStore) Promote() error {
 	return syncDir(s.dir)
 }
 
-// Reject quarantines the staged document: the note lands durably
+// Reject quarantines the staged document: the note is written durably
 // first, then staged becomes rejected. A crash between the two leaves
 // staged.yaml in place, and the next boot simply retries it: a
 // persistent failure re-records this same rejection and finishes the
@@ -206,17 +207,19 @@ func (s ManifestStore) Reject(r Rejection) error {
 	return syncDir(s.dir)
 }
 
-// The attempted marker is how a trial that never reaches its verdict
-// still gets one. Some documents can't be proven by the boot that
-// runs them (a cluster document's failure modes are downstream: a bad
-// endpoint just means the machine never joins), so init marks the
-// staged document attempted when it boots it, and whoever holds the
-// proof — for the cluster document, the operator, whose existence as
-// a pod demonstrates the join — promotes and clears the marker. A
-// boot that finds the marker still matching the staged document knows
-// the last try was never proven: reject and fall back. One proving
-// boot, no counters, and a crash anywhere leaves a state the next
-// boot reads correctly.
+// The attempted marker gives a verdict to a trial that could not
+// reach one on its own. Some documents can't be proven by the boot
+// that runs them; a cluster document's failure modes show up
+// downstream, since a bad endpoint just means the machine never
+// joins. So init marks the staged document attempted when it boots
+// it, and the component that can observe the proof promotes the
+// document and clears the marker. For the cluster document that
+// component is the operator, whose existence as a pod demonstrates
+// the join. A boot that finds the marker still matching the staged
+// document knows the last try was never proven, so it rejects the
+// document and falls back. Each staged document gets exactly one
+// proving boot, no retry counters are needed, and a crash at any
+// point leaves a state the next boot reads correctly.
 
 // WriteAttempted marks the staged document as being tried by this
 // boot, identified by its hash.
@@ -241,10 +244,10 @@ func (s ManifestStore) LoadAttempted() (string, error) {
 // already running: if the staged file stayed behind, the next boot
 // would apply an edit the cluster no longer asks for. The attempted
 // marker goes with it: it described a trial of the withdrawn
-// document, and left behind it would read as "tried and failed" the
-// next time the identical document is staged — a false rejection for
-// a trial that never rendered a verdict. A missing file is not an
-// error; there is nothing to withdraw.
+// document, and if it were left behind, it would read as "tried and
+// failed" the next time the identical document is staged. That would
+// be a false rejection, because the trial never reached a verdict. A
+// missing file is not an error; there is nothing to withdraw.
 func (s ManifestStore) WithdrawStaged() error {
 	if err := os.Remove(filepath.Join(s.dir, stagedManifest)); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {

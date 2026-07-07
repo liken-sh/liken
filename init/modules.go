@@ -13,7 +13,8 @@ package main
 //      Nobody scans the module tree at runtime to figure this out: at
 //      image build time, depmod wrote an index, modules.dep, mapping
 //      every module to the full list of modules it needs, already
-//      ordered so that loading right-to-left satisfies everyone.
+//      ordered so that loading right-to-left satisfies every
+//      dependency.
 //
 //   2. Ask the kernel to load each file. That's the finit_module
 //      syscall: "here's an open file descriptor, it's a kernel module,

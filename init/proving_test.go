@@ -129,8 +129,8 @@ func TestArmProvingBootWritesTheMarkerThenBootNext(t *testing.T) {
 func TestArmProvingBootRefusesWithoutAVerifiedFallback(t *testing.T) {
 	root := t.TempDir()
 	// No proven record at all: the fallback can't be verified, so the
-	// trial must be refused — a trial without a fallback is a machine
-	// bricked by its own upgrade.
+	// trial must be refused; arming it anyway could brick the machine
+	// with its own upgrade.
 	stagedRelease(t, root, "0.2.0", "B")
 	dir := slotFirmware(t, 0x0002, 0x0003)
 

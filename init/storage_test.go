@@ -205,7 +205,7 @@ func TestIsBlankReportsMissingDevices(t *testing.T) {
 
 func TestIsBlankReportsUnreadableDevices(t *testing.T) {
 	// A device that can't supply even the first 2 KiB can't be judged
-	// blank, and claiming an unjudgeable disk is not allowed.
+	// blank, and a disk that can't be judged must not be claimed.
 	path := filepath.Join(t.TempDir(), "truncated")
 	if err := os.WriteFile(path, make([]byte, 100), 0o600); err != nil {
 		t.Fatal(err)
@@ -308,8 +308,8 @@ func TestPlanClaimRefusesForeignDisks(t *testing.T) {
 
 func TestPlanClaimReportsUnreadableDevices(t *testing.T) {
 	// The disk shows up in sysfs but its device node can't supply
-	// enough bytes to judge blankness; an unjudgeable disk must not
-	// be claimed.
+	// enough bytes to judge blankness; a disk that can't be judged
+	// must not be claimed.
 	sys, dev := fakeMachine(t)
 	addDisk(t, sys, dev, "vda", 1<<30, make([]byte, 100))
 	device := filepath.Join(dev, "vda")

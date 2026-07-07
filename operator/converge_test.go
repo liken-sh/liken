@@ -1,9 +1,9 @@
 package main
 
-// The operator's first tests, and they follow the same rule as
-// init's: decisions are pure functions over plain values, so every
-// row of the convergence truth table runs without a cluster, a disk,
-// or a mount in sight.
+// Tests for the convergence decisions. They follow the same rule as
+// init's tests: decisions are pure functions over plain values, so
+// every row of the convergence truth table runs without a cluster, a
+// disk, or a mount.
 
 import (
 	"strings"
@@ -114,7 +114,7 @@ func TestStorageDriftSeesADeviceChange(t *testing.T) {
 
 func TestStorageDriftFallsBackToStringsForUnparseableSizes(t *testing.T) {
 	// Validation will refuse these anyway; drift detection just has to
-	// not panic on them, and string equality is the honest comparison
+	// not panic on them, and string equality is the only comparison
 	// left.
 	desired := labStorage()
 	desired.PodStorage.Size = "a-whole-bunch"
@@ -366,7 +366,7 @@ func TestDecideConvergenceRefusesToLoopOnAContradiction(t *testing.T) {
 		t.Fatal(err)
 	}
 	facts := labFacts()
-	facts.Boot.ManifestHash = hash // "I actuated that" — yet drift computes
+	facts.Boot.ManifestHash = hash // the facts claim this exact spec was actuated, yet drift computes
 
 	conv := decideConvergence(m, facts, nil, "", turnStandalone)
 	if conv.condition.Reason != "BootMismatch" {

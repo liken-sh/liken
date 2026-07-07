@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
 # Compute an operator's kubeconfig offline, from the identity this
-# repo minted. The machine is never asked for a credential; the whole
-# point of pre-seeding the CAs (mint.sh) is that the credential can be
-# computed without it.
+# repo minted. The machine is never asked for a credential. Pre-seeding
+# the CAs (mint.sh) exists precisely so that the credential can be
+# computed without the machine's help.
 #
 # A kubeconfig is three facts:
 #
@@ -15,9 +15,9 @@
 #
 # The identity in a client certificate lives in its subject: the API
 # server takes CN as the username and every O as a group. There is no
-# user database behind this: presenting a cert with O=system:masters
-# IS being a cluster admin, because RBAC binds that group to
-# cluster-admin. Certificates are the users.
+# user database behind this. Presenting a cert with O=system:masters
+# makes the bearer a cluster admin, because RBAC binds that group to
+# cluster-admin; the certificates themselves are the only user records.
 #
 # The result is written to dist/kubeconfig and nowhere else: liken
 # never touches ~/.kube/config or any other kubeconfig the operator
@@ -31,14 +31,14 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 tls="$here/dist/tls"
 
 # Where the cluster is: QEMU forwards this host port to the guest's
-# API server (the Makefile's `run` target owns that mapping). The
+# API server (the Makefile's `run` target defines that mapping). The
 # serving cert k3s mints covers 127.0.0.1 by default, so the forwarded
 # connection verifies without any extra SANs.
 server="https://127.0.0.1:16443"
 
 # Who we are: a fresh keypair, and a certificate for it signed by the
-# client CA. The CSR carries the subject; the CA's signature is what
-# makes the claim mean something.
+# client CA. The CSR carries the subject, but the subject is only a
+# claim; the CA's signature is what makes the API server accept it.
 openssl req -new -nodes \
     -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
     -keyout "$tls/admin.key" \
@@ -48,8 +48,8 @@ openssl req -new -nodes \
 
 # A client cert needs the clientAuth extended key usage; the API
 # server rejects certificates that don't declare what they're for.
-# One year: generous for a development credential, and re-running
-# `make kubeconfig` mints a new one in seconds.
+# The certificate lasts one year, which is generous for a development
+# credential; re-running `make kubeconfig` mints a new one in seconds.
 openssl x509 -req \
     -in "$tls/admin.csr" \
     -CA "$tls/client-ca.crt" -CAkey "$tls/client-ca.key" \

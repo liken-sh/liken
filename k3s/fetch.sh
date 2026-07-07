@@ -2,11 +2,11 @@
 #
 # Vendor k3s, the entire Kubernetes distribution, as one static binary.
 #
-# k3s is the reason liken's architecture works at all: containerd,
-# kubelet, the API server, scheduler, controller manager, flannel,
-# CoreDNS, and a sqlite-backed datastore, compiled into a single
-# self-contained executable with no expectations of the host beyond a
-# kernel; it even unpacks its own userland (mount, iptables, and
+# k3s is the reason liken's architecture works at all. It compiles
+# containerd, kubelet, the API server, scheduler, controller manager,
+# flannel, CoreDNS, and a sqlite-backed datastore into a single
+# self-contained executable that requires nothing from the host beyond
+# a kernel. It even unpacks its own userland (mount, iptables, and
 # more) under /var/lib/rancher at runtime. One file in the image
 # provides the whole service manager.
 #

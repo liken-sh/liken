@@ -58,7 +58,8 @@ func TestCarryOutConvergenceWithdrawsAndClears(t *testing.T) {
 
 func TestCarryOutConvergenceReportsAFailedStaging(t *testing.T) {
 	// A store rooted somewhere unwritable can't stage; the condition
-	// downgrades to StagingFailed rather than lying about a reboot.
+	// downgrades to StagingFailed rather than reporting a reboot that
+	// will not happen.
 	parent := t.TempDir()
 	if err := os.Chmod(parent, 0o555); err != nil {
 		t.Fatal(err)

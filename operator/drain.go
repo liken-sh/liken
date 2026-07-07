@@ -1,24 +1,25 @@
 package main
 
-// Drain: emptying a node of workloads before its granted reboot.
+// Draining empties a node of workloads before its granted reboot.
 //
-// A reboot that just happens takes every pod on the machine down with
-// it, mid-request. Kubernetes' answer is `kubectl drain`: mark the
-// node unschedulable so nothing new lands (cordon), then ask each pod
-// to leave through the Eviction API — *ask*, because an eviction is
-// refused (429) while it would violate the workload's own
+// An unannounced reboot takes every pod on the machine down with it,
+// mid-request. Kubernetes' answer is `kubectl drain`: mark the node
+// unschedulable so nothing new lands (cordon), then ask each pod to
+// leave through the Eviction API. Asking is the point, because an
+// eviction is refused (429) while it would violate the workload's own
 // PodDisruptionBudget. That refusal is the entire value over plain
 // deletion: the workload's availability promise holds while the
 // machine empties. This file is that procedure, run by the machine's
 // own operator on itself when the rollout conductor grants its turn
 // (rollout.go).
 //
-// The drain is incremental on purpose: one reconcile pass cordons and
-// asks, the next pass sees what's left and asks again. Blocking a
+// The drain is deliberately incremental: one reconcile pass cordons
+// and asks, the next pass sees what's left and asks again. Blocking a
 // pass until the node empties would stop the operator's heartbeat,
-// and a machine that stops heartbeating gets declared Lost — the
-// drain must never look like a death. State lives on the Node itself
-// (annotations), so a restarted operator resumes where it left off.
+// and a machine that stops heartbeating gets declared Lost, so the
+// drain must never make a healthy machine look dead. State lives on
+// the Node itself (annotations), so a restarted operator resumes
+// where it left off.
 
 import (
 	"encoding/json"
@@ -47,8 +48,8 @@ const (
 	mirrorPodAnnotation = "kubernetes.io/config.mirror"
 
 	// drainDeadline bounds how long workloads may hold the reboot. A
-	// pod that won't move by then — a PodDisruptionBudget that can
-	// never be satisfied, a workload with nowhere to go — rides
+	// pod that won't move by then (a PodDisruptionBudget that can
+	// never be satisfied, or a workload with nowhere to go) rides
 	// through the reboot instead, because a machine that can never
 	// apply its staged change is worse than a pod restarting.
 	drainDeadline = 5 * time.Minute
@@ -89,9 +90,9 @@ func listPodsOnNode(c *apiClient, node string) ([]podObject, error) {
 }
 
 // evictPod asks a pod to leave through the eviction subresource. The
-// Eviction API is what makes a drain polite: the request is refused
-// while removing the pod would violate its PodDisruptionBudget, and
-// the caller simply asks again later.
+// Eviction API is what separates a drain from plain deletion: the
+// request is refused while removing the pod would violate its
+// PodDisruptionBudget, and the caller simply asks again later.
 func evictPod(c *apiClient, p podObject) error {
 	body, err := json.Marshal(map[string]any{
 		"apiVersion": "policy/v1",
@@ -106,10 +107,10 @@ func evictPod(c *apiClient, p podObject) error {
 }
 
 // evictablePods is the set a drain actually has to move: not
-// DaemonSet pods (the daemon controller ignores the cordon and would
-// just recreate them — this operator is itself one), not mirror pods
-// (the kubelet recreates those from disk), and not pods that already
-// ran to completion.
+// DaemonSet pods (the DaemonSet controller ignores the cordon and
+// would just recreate them; this operator is itself one), not mirror
+// pods (the kubelet recreates those from disk), and not pods that
+// already ran to completion.
 func evictablePods(pods []podObject) []podObject {
 	var evictable []podObject
 	for _, p := range pods {
@@ -135,8 +136,8 @@ func evictablePods(pods []podObject) []podObject {
 
 // A drainStep is one pass's worth of drain: the Node patch to apply
 // (nil when the cordon and deadline anchor are already in place), the
-// pods to ask to leave, and whether the node is clear — nothing left
-// holding the reboot.
+// pods to ask to leave, and whether the node is clear, meaning
+// nothing is left holding the reboot.
 type drainStep struct {
 	patch []byte
 	evict []podObject
@@ -203,7 +204,7 @@ func gateThroughDrain(c *apiClient, node *nodeObject, conv convergence, now time
 	return holdForDrain(conv, fmt.Sprintf("draining this node ahead of the reboot; %d pods still to move", len(step.evict)))
 }
 
-// holdForDrain keeps the convergence's story on its own condition
+// holdForDrain keeps reporting the convergence on its own condition
 // while the drain works: same type, reboot withheld, reason Draining.
 func holdForDrain(conv convergence, message string) convergence {
 	conv.requestReboot = false
@@ -213,9 +214,10 @@ func holdForDrain(conv convergence, message string) convergence {
 	return conv
 }
 
-// decideUncordon reports whether a node is wearing a cordon this
-// operator put there. True only for our own: the annotation is the
-// claim, and a cordon without it belongs to a human.
+// decideUncordon reports whether a node carries a cordon this
+// operator put there. True only for our own cordon: the annotation
+// records that this operator set it, and a cordon without the
+// annotation belongs to a human.
 func decideUncordon(node *nodeObject) bool {
 	return node.Spec.Unschedulable && node.Metadata.Annotations[cordonedAnnotation] == "true"
 }

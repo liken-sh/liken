@@ -1,28 +1,28 @@
 package main
 
-// Demotion cleanup: finishing what a role change starts.
+// Demotion cleanup finishes what a role change starts.
 //
 // Promotion is self-completing: a follower rebooted into the leader
 // role starts a control plane, and k3s labels the Node and registers
 // the etcd member on its own. Demotion is not. A leader rebooted
 // into the follower role runs `k3s agent`, but the Kubernetes Node
-// object it re-attaches to still claims control-plane and etcd, and
-// — far worse — its etcd membership stays registered: a phantom
-// voice that counts toward quorum while never voting, which breaks
-// the arithmetic the next time a real leader reboots.
+// object it re-attaches to still claims control-plane and etcd, and,
+// worse, its etcd membership stays registered. A registered member
+// that never votes still counts toward the quorum size, so it breaks
+// the majority math the next time a real leader reboots.
 //
 // The demoted machine's own operator holds everything needed to
 // finish the job: the facts say what this machine is (follower), and
 // the Node object says what the cluster still thinks it is. When
 // they disagree, the operator requests a reboot through the intent
-// channel it already owns, then deletes its own Node object —
-// deleting the Node is what triggers k3s's etcd member-removal
+// channel it already owns, then deletes its own Node object.
+// Deleting the Node is what triggers k3s's etcd member-removal
 // controller. The intent is written first, deliberately: deleting
 // the Node kills this very pod (pods bound to a deleted Node are
 // garbage-collected), and a machine whose Node is gone cannot
 // re-register without a reboot, so the reboot must already be in
 // flight before the delete lands. If the delete itself fails, the
-// next boot simply detects the same mismatch and retries — each
+// next boot simply detects the same mismatch and retries. Each
 // retry costs a reboot, but the state converges.
 //
 // The reboot policy gates all of it, same as every other staged
@@ -44,9 +44,9 @@ const nodesPath = "/api/v1/nodes"
 // nodeObject is the sliver of a Kubernetes Node the operator needs:
 // the labels, where a demoted machine's old role still shows; the
 // conditions, where the kubelet's health shows (reconcile.go mirrors
-// the Node's Ready condition onto the Machine); and the cordon state
-// — unschedulable plus the annotations that record whether liken set
-// it (drain.go).
+// the Node's Ready condition onto the Machine); and the cordon
+// state, meaning the unschedulable flag plus the annotations that
+// record whether liken set it (drain.go).
 type nodeObject struct {
 	Metadata struct {
 		Name        string            `json:"name"`
@@ -74,7 +74,8 @@ func deleteNode(c *apiClient, name string) error {
 }
 
 // The role labels k3s stamps on a Node when it runs a control plane.
-// Their presence on a follower's Node is the demotion leftovers.
+// Their presence on a follower's Node is what a demotion leaves
+// behind.
 var leaderNodeLabels = []string{
 	"node-role.kubernetes.io/control-plane",
 	"node-role.kubernetes.io/etcd",
@@ -90,7 +91,7 @@ type demotion struct {
 // decideDemotion compares what this machine is (the derived role)
 // against what its Node object claims. Only one mismatch is the
 // operator's to fix: a follower whose Node still says control-plane.
-// The other direction — a leader whose Node lacks the labels — is
+// The other direction, a leader whose Node lacks the labels, is
 // just a control plane still coming up, and k3s finishes that on
 // its own.
 //

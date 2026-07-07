@@ -4,7 +4,7 @@
 #
 # This directory is organized as a mirror of the filesystem it
 # produces: image/etc/rancher/k3s/config.yaml is the file the machine
-# sees at /etc/rancher/k3s/config.yaml, and so on: configuration lives
+# sees at /etc/rancher/k3s/config.yaml, and so on. Configuration lives
 # at its destination path, reviewable with plain ls. The build stages
 # that tree plus the built and vendored artifacts in dist/root, then
 # archives it with cpio. The complete inventory of the operating
@@ -39,7 +39,8 @@
 #                                 starts the role the cluster manifest
 #                                 implies, and each role reads its own
 #                                 file plus a boot-derived drop-in)
-#   /sbin/iptables (& friends)    the netfilter userspace kube-proxy and
+#   /sbin/iptables (and the       the netfilter userspace kube-proxy and
+#     related tools)
 #                                 the CNI exec to program the kernel's
 #                                 packet filter: one static multi-call
 #                                 binary (vendored from k3s-root by
@@ -72,8 +73,8 @@
 #                                 operator's kubeconfig computable
 #                                 offline (identity/mint.sh). It also
 #                                 means the image contains private keys:
-#                                 whoever holds this file owns the
-#                                 cluster it boots
+#                                 anyone who holds this file controls
+#                                 the cluster it boots
 #   /var/lib/rancher/k3s/         the Machine CRD and the liken operator's
 #     server/manifests/           deployment: k3s applies everything in
 #                                 this directory to the cluster at
@@ -86,15 +87,17 @@
 #                                 so the machine never pulls its own OS
 #                                 components from a registry
 #
-# Nothing else. No shell, no coreutils, no libc: every file above is
-# either written in this repo or vendored by a pinned, verified fetch.
+# That is the complete list. There is no shell, no coreutils, and no
+# libc: every file above is either written in this repo or vendored by
+# a pinned, verified fetch.
 
 set -euo pipefail
 
-# Where the Machine and Cluster manifests come from: the build's one
-# argument. Omitted, the image carries no manifests at all, which is
-# still a valid machine (everything defaults, DHCP and RAM root) —
-# the deployment decided nothing, so nothing is baked in.
+# The build's one argument says where the Machine and Cluster
+# manifests come from. When it is omitted, the image carries no
+# manifests at all, and that is still a valid machine: everything
+# defaults, with DHCP and a RAM root. The deployment declared nothing,
+# so nothing is baked in.
 manifests="${1:-}"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -105,10 +108,10 @@ kdist="$here/../kernel/dist/$kernel_version"
 release="$(cat "$kdist/release")"
 
 # The version this image claims to be, where the archive lands, and
-# where the liken binary and operator image come from — overridable
-# from the environment because the releases domain assembles
-# release-stamped images through this same script, from its own
-# copies of the inputs, into its own tree (see the Makefile).
+# where the liken binary and operator image come from. All of these can
+# be overridden from the environment, because the releases domain
+# assembles release-stamped images through this same script, from its
+# own copies of the inputs, into its own tree (see the Makefile).
 liken_version="${LIKEN_VERSION:-$(cat "$here/../VERSION")}"
 dist="${DIST:-$here/dist}"
 init_dist="${INIT_DIST:-$here/../init/dist}"
@@ -136,16 +139,16 @@ if [[ -n "$manifests" ]]; then
 fi
 
 # The netfilter userspace: one real static binary, then a symlink per
-# tool name: the multi-call binary reads argv[0] to know which tool to
-# be. Only the legacy variant ships, matching the iptable_* kernel
-# modules in modules.conf.
+# tool name. The multi-call binary reads argv[0] to decide which tool
+# to behave as. Only the legacy variant ships, matching the iptable_*
+# kernel modules in modules.conf.
 cp "$here/../xtables/dist/$xtables_version/bin/xtables-legacy-multi" "$root/sbin/"
 for tool in iptables iptables-save iptables-restore \
             ip6tables ip6tables-save ip6tables-restore; do
     ln -s xtables-legacy-multi "$root/sbin/$tool"
 done
 
-# The filesystem maker, for the disks init claims.
+# mke2fs creates the ext4 filesystems on the disks init claims.
 e2fsprogs_version="$(cat "$here/../e2fsprogs/VERSION")"
 cp "$here/../e2fsprogs/dist/$e2fsprogs_version/mke2fs" "$root/sbin/mke2fs"
 
@@ -162,10 +165,11 @@ cp -r "$here/../identity/dist/tls" "$root/var/lib/rancher/k3s/server/tls"
 cp "$here/../identity/dist/token" "$root/etc/liken/token"
 chmod 600 "$root/etc/liken/token"
 
-# The Machine API and its operator, delivered the Kubernetes way: the
-# manifests go where k3s auto-applies them, the operator's image goes
-# where k3s auto-imports it. The LIKEN_VERSION substitution pins the
-# DaemonSet to exactly the image version this build ships alongside it.
+# The Machine API and its operator, delivered through k3s's own
+# mechanisms: the manifests go where k3s auto-applies them, and the
+# operator's image goes where k3s auto-imports it. The LIKEN_VERSION
+# substitution pins the DaemonSet to exactly the image version this
+# build ships alongside it.
 mkdir -p "$root/var/lib/rancher/k3s/server/manifests"
 for manifest in "$here"/../operator/manifests/*.yaml; do
     sed "s/LIKEN_VERSION/$liken_version/g" "$manifest" \

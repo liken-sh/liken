@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 #
 # Mint a machine's identity: the certificate authorities k3s would
-# otherwise invent for itself on first boot.
+# otherwise generate for itself on first boot.
 #
-# Kubernetes trust is a handful of tiny PKIs, each guarding one
+# Kubernetes trust is built from several small PKIs, each covering one
 # relationship. k3s checks for these files before generating its own,
 # so placing them in /var/lib/rancher/k3s/server/tls ahead of first
-# start inverts the usual flow: identity becomes an input the image
-# carries, not an output that has to be extracted from a running
-# machine (which a machine with no shell could never hand over
-# anyway). Everything k3s signs from here on (the API server's
+# start reverses the usual flow. Normally the identity is an output
+# that has to be extracted from a running machine, which a machine
+# with no shell could never hand over anyway; here it is an input the
+# image carries. Everything k3s signs from here on (the API server's
 # serving cert, kubelet certs, all of it) chains up to keys we held
 # before the machine ever booted, which is what lets an operator's
 # kubeconfig be computed offline (see kubeconfig.sh).
@@ -30,8 +30,8 @@
 #   etcd/peer-ca       sqlite via kine, not etcd, but k3s manages the
 #                      full CA family as a set
 #   service.key        not a CA: the key that signs every
-#                      ServiceAccount token. Possession of this key is
-#                      the power to mint valid identities for any pod
+#                      ServiceAccount token. Whoever holds this key
+#                      can mint valid identities for any pod
 #
 # Everything is ECDSA P-256, matching what k3s generates for itself.
 # Ten-year lifetimes: these are roots for a learning distro, and
@@ -42,7 +42,8 @@
 # never replaces an identity that machines already carry: replacing
 # the CAs would orphan every kubeconfig computed from them, and
 # replacing the token would strand any machine that hasn't joined
-# yet. `make clean` here is the deliberate way to become someone new.
+# yet. Replacing the identity is a deliberate act: run `make clean`
+# here, and the next build mints a new one.
 
 set -euo pipefail
 
@@ -77,13 +78,13 @@ new_ca request-header-ca "liken request-header CA"
 new_ca etcd/server-ca "liken etcd server CA"
 new_ca etcd/peer-ca "liken etcd peer CA"
 
-# The ServiceAccount signing key stands alone: tokens are JWTs, so
-# there's no certificate, just a keypair the API server signs with and
-# verifies against. The encoding matters: kube-apiserver reads this
+# The ServiceAccount signing key is not like the CAs above: tokens are
+# JWTs, so there's no certificate, just a keypair the API server signs
+# with and verifies against. The encoding matters: kube-apiserver reads this
 # file with a parser that understands the older SEC1 encoding
 # ("EC PRIVATE KEY", which ecparam emits) but not PKCS#8 ("PRIVATE
-# KEY", which genpkey emits); with PKCS#8 it dies on startup claiming
-# the file contains no valid keys.
+# KEY", which genpkey emits); given PKCS#8 it fails on startup with an
+# error that the file contains no valid keys.
 if [[ -f "$tls/service.key" ]]; then
     echo "keeping service.key: the ServiceAccount token signing key"
 else
@@ -96,18 +97,19 @@ fi
 #
 #   K10<CA-HASH>::<user>:<password>
 #
-# Normally this has to be scraped off a running server
+# Normally this has to be copied off a running server
 # (/var/lib/rancher/k3s/server/node-token), because the CA it hashes
-# doesn't exist until k3s invents it at first boot. liken inverted
+# doesn't exist until k3s generates it at first boot. liken reverses
 # that: the server CA is minted above, before any machine exists, so
 # the whole token is computable right here. The CA-HASH is the SHA256
-# of the cluster CA certificate; a joining machine fetches the
+# of the cluster CA certificate. A joining machine fetches the
 # server's CA bundle, hashes it, and compares before it trusts the
-# endpoint or presents the secret, so the token authenticates the
-# cluster to the machine as much as the machine to the cluster. The
-# secret half is 32 hex characters of real randomness, the same shape
-# k3s generates. "server" is the credential's username: whoever bears
-# this token may join machines to the cluster.
+# endpoint or presents the secret, so the token authenticates in both
+# directions: the machine proves itself to the cluster, and the
+# cluster proves itself to the machine. The secret half is 32 hex
+# characters of real randomness, the same format k3s generates.
+# "server" is the credential's username: whoever bears this token may
+# join machines to the cluster.
 if [[ -f "$here/dist/token" ]]; then
     echo "keeping token: the cluster join token"
 else

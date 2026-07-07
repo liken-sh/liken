@@ -47,21 +47,22 @@ const (
 
 // leaderJoinConfig decides a leader's datastore keys, by leader
 // count. One leader is exactly the cluster liken has always run:
-// sqlite (via kine), no etcd, nothing to join — single-node stays
-// cheap on purpose. More than one means embedded etcd, and the first
-// entry in spec.leaders is the founding leader: it renders
+// sqlite (via kine), no etcd, nothing to join. Keeping single-node
+// cheap is deliberate. More than one leader means embedded etcd, and
+// the first entry in spec.leaders is the founding leader: it renders
 // cluster-init: true, which on the migration boot tells k3s to move
 // the existing sqlite datastore into etcd in place (the documented
 // path that made starting on sqlite safe rather than a dead end).
-// Every other leader points server: at the founder — its declared
-// address on the node network, or the endpoint when it declares none
-// — and joins. Rejoins keep the same flags every boot, which is
-// k3s's recommended steady state.
+// Every other leader points server: at the founder, using the
+// founder's declared address on the node network, or the endpoint
+// when it declares none, and joins. Rejoins keep the same flags
+// every boot, which is k3s's recommended steady state.
 //
-// The founding leader is a config-derivation role, nothing more: the
-// first name in a list. etcd's raft leader is elected and moves
-// between members; the founder holds no such office, and once the
-// cluster is up it is one voice among an odd number.
+// The founding leader matters only for deriving configuration: it is
+// the first name in a list, nothing more. etcd's raft leader is
+// elected and moves between members; the founder holds no ongoing
+// special position, and once the cluster is up it is an ordinary
+// member among an odd number of them.
 func leaderJoinConfig(cluster *machine.Cluster, name, manifestDir string) (clusterInit bool, joinURL string) {
 	if cluster == nil || len(cluster.Spec.Leaders) < 2 {
 		return false, ""
@@ -172,26 +173,26 @@ func k3sBootConfig(in k3sBootInputs) string {
 	return b.String()
 }
 
-// k3sServerDB is where k3s keeps the control plane's datastore —
-// sqlite via kine, or embedded etcd — on the clusterState filesystem.
+// k3sServerDB is where k3s keeps the control plane's datastore
+// (sqlite via kine, or embedded etcd) on the clusterState filesystem.
 const k3sServerDB = "/var/lib/rancher/k3s/server/db"
 
 // purgeLeaderLeftovers removes a demoted machine's old control-plane
 // datastore. A machine that served as a leader and was demoted keeps
 // its etcd data on clusterState, and etcd refuses to let a
-// permanently-removed member rejoin with its old data-dir — so a
-// later re-promotion would wedge on the corpse of the first stint.
-// A follower has no business keeping a datastore, and deleting it is
+// permanently-removed member rejoin with its old data-dir, so a
+// later re-promotion would fail against the leftover data. A
+// follower has no reason to keep a datastore, and deleting it is
 // what makes demotion truly reversible.
 //
 // The proven-source guard is what makes this safe to automate: a
 // *staged* document that demotes this machine is still on trial, and
 // if it fails to prove (imagine an edit that wrongly demotes the
 // only leader), the fallback boots the leader role again and needs
-// its datastore exactly where it was. Only a demotion that already
-// proved out — the machine joined its cluster as a follower and the
-// operator promoted the document — earns the cleanup, on the boot
-// after.
+// its datastore exactly where it was. The cleanup happens only after
+// a demotion has already proved out, meaning the machine joined its
+// cluster as a follower and the operator promoted the document; it
+// runs on the boot after that.
 func purgeLeaderLeftovers(role machine.Role, clusterManifestSource machine.ManifestSource, dbDir string) {
 	if role != machine.RoleFollower || clusterManifestSource != machine.ManifestSourceProven {
 		return
@@ -206,18 +207,19 @@ func purgeLeaderLeftovers(role machine.Role, clusterManifestSource machine.Manif
 	fmt.Println("liken: this follower once served as a leader; its old control-plane datastore is purged so a future promotion starts clean")
 }
 
-// persistNodePassword gives k3s's node password a durable home. On
+// persistNodePassword gives k3s's node password durable storage. On
 // its first join, a machine mints a random secret (its "node
 // password"), the leader records it, and every reconnect after must
 // present the same one: it's what stops a stranger from registering
 // as an existing node and receiving its kubelet certificates. k3s
-// keeps it at /etc/rancher/node/password — which on liken is the RAM
-// root, where it would vanish every reboot and the machine would
-// knock on its own cluster's door with the wrong secret. The password
-// is machine identity, and the machine's durable identity data lives
-// on machineState, so /etc/rancher/node becomes a symlink onto that
-// filesystem. A machine whose machineState is memory-backed keeps the
-// tmpfs default: nothing about it survives reboots anyway.
+// keeps it at /etc/rancher/node/password, which on liken is the RAM
+// root: the password would vanish every reboot, and the machine
+// would present the wrong secret when it tried to rejoin its own
+// cluster. The password is machine identity, and the machine's
+// durable identity data lives on machineState, so /etc/rancher/node
+// becomes a symlink onto that filesystem. A machine whose
+// machineState is memory-backed keeps the tmpfs default: nothing
+// about it survives reboots anyway.
 func persistNodePassword(storage machine.StorageStatus) {
 	if storage.MachineState.Backing != machine.BackingPartition {
 		return

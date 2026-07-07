@@ -1,34 +1,37 @@
 package main
 
-// The rollout conductor: how the cluster sequences its fleet's reboots.
+// The rollout conductor is how the cluster sequences its fleet's
+// reboots.
 //
 // A staged change that needs a reboot is drift on every affected
-// machine at once, and machines that reboot the moment they're ready
-// reboot together — a whole fleet down simultaneously, quorum
-// surviving on luck. Kubernetes workloads get protection from this
-// through PodDisruptionBudgets and kubectl drain; machines deserve the
-// same, so the Cluster carries a machine-level maxUnavailable
-// (spec.disruption) and the sweep leader hands out reboot turns one
-// budget-slot at a time.
+// machine at once. If each machine rebooted the moment it was ready,
+// they would all reboot together, taking the whole fleet down at once
+// and leaving quorum to survive by luck. Kubernetes workloads get
+// protection from this through PodDisruptionBudgets and kubectl
+// drain; machines deserve the same, so the Cluster carries a
+// machine-level maxUnavailable (spec.disruption) and the sweep leader
+// hands out reboot turns one budget-slot at a time.
 //
-// The conversation is held in conditions. A machine that wants to
-// reboot says so with reason AwaitingTurn on its convergence condition
-// and waits. The conductor answers by writing a RebootApproved
-// condition onto that Machine — a grant, present while extended and
-// removed when spent, never False. Writing one condition type you own
+// The coordination happens through conditions. A machine that wants
+// to reboot says so with reason AwaitingTurn on its convergence
+// condition and waits. The conductor responds by writing a
+// RebootApproved condition onto that Machine. That condition is a
+// grant: present while the turn is extended, removed when it is
+// spent, and never set to False. Writing one condition type you own
 // onto an object another controller manages is the native arrangement:
 // the scheduler writes PodScheduled onto Pods the kubelet owns. The
 // machine's own operator carries the grant along untouched (its status
 // writes preserve condition types it doesn't set) and acts on it:
 // cordon, drain, reboot (drain.go).
 //
-// The budget counts *all* unavailability, planned or not. A machine
+// The budget counts all unavailability, planned or not. A machine
 // that is Lost or Degraded occupies a slot just like one that is
-// rebooting on request, so a fleet that is already hurting pauses its
-// own rollout instead of making things worse. The leaders have a
-// stricter floor that no budget can override: only one leader may be
-// down or granted at a time, because the datastore's quorum is
-// arithmetic, and this is the arithmetic.
+// rebooting on request, so a fleet that already has machines down
+// pauses its own rollout instead of making things worse. The leaders
+// have a stricter floor that no budget can override: only one leader
+// may be down or granted at a time, because the datastore keeps
+// quorum only while a majority of leaders is up, and letting a second
+// leader go down could break that majority.
 
 import (
 	"fmt"
@@ -40,11 +43,13 @@ import (
 )
 
 // rolloutStallAfter is how long a granted machine may be unavailable
-// before the rollout declares itself stalled: generous next to a
-// normal reboot (minutes), short next to a human noticing a machine
-// that never came back. While stalled, no new turns are granted — a
-// halted rollout someone can see beats an automated one that keeps
-// marching through a fleet that isn't coming back.
+// before the rollout declares itself stalled: long compared to a
+// normal reboot, which takes a couple of minutes, and short compared
+// to how long a person takes to notice a machine that never came
+// back. While the rollout is stalled, no new turns are granted. A
+// halted rollout someone can see is better than an automated one that
+// keeps granting turns across a fleet whose machines are not coming
+// back.
 const rolloutStallAfter = 10 * time.Minute
 
 // rebootApprovedCondition is the grant's condition type, owned by the
@@ -53,9 +58,9 @@ const rebootApprovedCondition = "RebootApproved"
 
 // A rollout is one sweep's sequencing verdict: which machines to
 // grant a reboot turn, which spent grants to take back, and the
-// Progressing condition that tells the Cluster's rollout story —
-// deliberately the Deployment vocabulary (Progressing, with False
-// meaning the rollout has stopped making progress).
+// Progressing condition that reports the rollout on the Cluster. The
+// condition deliberately uses the Deployment vocabulary: Progressing,
+// with False meaning the rollout has stopped making progress.
 type rollout struct {
 	grant       []string
 	revoke      []string
@@ -75,9 +80,9 @@ func wantsTurn(m *machine.Machine) bool {
 }
 
 // available reports whether a machine is serving the cluster right
-// now. Blocked and UpdatePending machines are up — their trouble is
-// administrative, not operational — while everything else that isn't
-// Ready is some flavor of absent or unwell.
+// now. Blocked and UpdatePending machines are up; their trouble is
+// administrative, not operational. Everything else that isn't Ready
+// is either absent or unwell.
 func available(phase machine.Phase) bool {
 	switch phase {
 	case machine.PhaseReady, machine.PhaseUpdatePending, machine.PhaseBlocked:
@@ -88,9 +93,10 @@ func available(phase machine.Phase) bool {
 
 // decideRollout is the conductor's whole decision, pure over the same
 // inputs the fleet sweep reads. The order of granting is workers
-// first, then leaders, each in name order: workers are cheap to be
-// wrong about, leaders each carry a share of quorum, and determinism
-// means two sweeps of the same fleet agree.
+// first, then leaders, each in name order. Workers go first because a
+// mistake with a worker costs little, while every leader carries a
+// share of quorum. Name order makes the decision deterministic, so
+// two sweeps of the same fleet agree.
 func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cluster *machine.Cluster, self string, now time.Time) rollout {
 	var r rollout
 	inFlight := 0 // budget slots occupied: unavailable machines and unspent grants
@@ -112,13 +118,15 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 			// grant returns to the budget.
 			r.revoke = append(r.revoke, name)
 		case grant != nil && !available(phase) && now.Sub(grant.LastTransitionTime) > rolloutStallAfter:
-			// Granted, gone, and gone too long: this is no longer a
-			// reboot, it's an outage wearing a grant.
+			// This machine was granted a turn, went down, and has
+			// stayed down too long. That is no longer a reboot in
+			// progress; it is an outage.
 			stalled = append(stalled, name)
 			inFlight++
 		case grant != nil || !available(phase):
 			// A machine mid-turn or unwell occupies a budget slot
-			// either way — the budget counts absence, not intent.
+			// either way: the budget counts unavailability itself,
+			// not whether it was planned.
 			inFlight++
 			if grant != nil {
 				inProgress = append(inProgress, name)

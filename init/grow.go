@@ -25,8 +25,8 @@ package main
 // volume expansion) needs its table rewritten even when no partition
 // changes: the backup table belongs at the end of the disk, and the
 // end just moved. Remainder roles (no declared size) grow to the new
-// last usable sector when that happens; their size was always "the
-// rest of the disk", and the rest of the disk got bigger.
+// last usable sector when that happens; their size was always defined
+// as the rest of the disk, so when the disk grows, they grow with it.
 
 import (
 	"fmt"
@@ -44,10 +44,10 @@ type growth struct {
 }
 
 // planGrowth compares each declared role recognized on this disk
-// against its table entry and decides what must grow. Pure: the
-// device name appears only in errors. rewrite reports whether the
-// table needs rewriting even with no extents changing, which is how
-// a grown disk gets its backup table relocated to the new end.
+// against its table entry and decides what must grow. It is pure; the
+// device name appears only in error messages. rewrite reports whether
+// the table needs rewriting even with no extents changing, which is
+// how a grown disk gets its backup table relocated to the new end.
 func planGrowth(device string, roles []machine.DeclaredRole, t *gptTable, totalSectors uint64) (edits []growth, rewrite bool, err error) {
 	lastUsable := gptLastUsableLBA(totalSectors)
 	for _, role := range roles {
@@ -126,9 +126,9 @@ func planAllGrowth(roles []machine.DeclaredRole, found map[machine.StorageRoleNa
 		// The system slots never grow: ext4 grows in place by ioctl,
 		// but FAT's geometry is fixed at format time, so a slot's size
 		// is settled the day it's claimed. A spec asking for more is
-		// refused here at planning — before anything is written — and
-		// the refusal follows the usual staged-spec path: rejected,
-		// fall back to proven.
+		// refused here at planning time, before anything is written,
+		// and the refusal follows the usual staged-spec path: the spec
+		// is rejected and the boot falls back to the proven manifest.
 		if roleMounts[role.Name].fstype == "vfat" {
 			if role.Size != "" {
 				if bytes, _ := machine.ParseSize(role.Size); bytes > p.sizeBytes {

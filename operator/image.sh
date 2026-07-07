@@ -20,7 +20,7 @@
 # in the initramfs at /var/lib/rancher/k3s/agent/images/, where k3s
 # imports every archive it finds into containerd at startup. That is
 # liken's entire image distribution mechanism: no registry, no pull,
-# no network. Whoever holds the OS image holds every byte the machine
+# no network. The OS image therefore carries every byte the machine
 # will run.
 
 set -euo pipefail
@@ -109,10 +109,10 @@ manifest_digest="$(add_blob "$dist/manifest.json")"
 
 # The index: the entry point a consumer reads first. The containerd
 # annotation is how the image keeps its name through an import: an
-# OCI layout has no registry to imply one, so the reference rides
-# along inside the archive.
+# OCI layout has no registry to imply one, so the reference travels
+# inside the archive itself.
 #
-# The same manifest is named twice — two references, one image. The
+# The same manifest is named twice: two references to one image. The
 # versioned tag says what this build is; the stable "installed" tag
 # is the one the operator's DaemonSet pins (operator/manifests/
 # operator.yaml): every release tags its own build "installed", so
@@ -147,8 +147,8 @@ cat >"$layout/index.json" <<EOF
 }
 EOF
 
-# The layout marker file that declares "this directory is an OCI image
-# layout", and then the whole thing becomes one archive.
+# The marker file declares that this directory is an OCI image
+# layout; the whole layout then becomes one archive.
 echo '{"imageLayoutVersion": "1.0.0"}' >"$layout/oci-layout"
 tar --create --file "$dist/liken-operator-image.tar" \
     --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \

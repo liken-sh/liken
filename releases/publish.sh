@@ -9,14 +9,14 @@
 # the exact bytes it packed, so publishing the same files under the
 # same document means the installer's copy and the server's copy are
 # one document, byte for byte. A machine installed from the "USB
-# stick" and a machine that downloaded the release verified the very
-# same promises.
+# stick" and a machine that downloaded the release verified the same
+# digests against the same document.
 #
 # The last thing printed is the catalog entry: the release document's
 # own sha256, which is what goes into the Cluster's
-# spec.releases.catalog. That digest is the root of the trust chain —
-# the API names the document, the document names the artifacts — and
-# it exists only here, at publish time, because the artifacts embed
+# spec.releases.catalog. That digest is the root of the trust chain:
+# the API names the document, and the document names the artifacts.
+# It exists only here, at publish time, because the artifacts embed
 # this checkout's identity (the cluster CA, the join token) and so no
 # digest is stable enough to commit to git.
 set -euo pipefail

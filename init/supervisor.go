@@ -235,7 +235,7 @@ func startK3s(role machine.Role) (*exec.Cmd, *os.File, error) {
 }
 
 // stopK3s asks k3s to exit and waits for the reaper's confirmation,
-// escalating to SIGKILL if it dawdles. It only signals and receives;
+// escalating to SIGKILL if it takes too long. It only signals and receives;
 // the reaper stays the sole authority on wait (the file comment's one
 // rule).
 func stopK3s(pid int, died <-chan unix.WaitStatus) {
@@ -267,7 +267,7 @@ func describeExit(status unix.WaitStatus) string {
 // reads the admin kubeconfig k3s writes once its API is serving) and
 // prints the node's status as it changes: registering, NotReady, and
 // finally Ready. It's a machine-plane component whose work completes
-// when the story has been told, so every exit path returns nil.
+// once the report is finished, so every exit path returns nil.
 func reportWhenReady(ctx context.Context) error {
 	last := ""
 	deadline := time.Now().Add(5 * time.Minute)
@@ -345,7 +345,7 @@ func containsReady(out string) bool {
 // runNarrated executes a command with its output echoed live to the
 // console, prefixed like k3s's, and reports whether it exited
 // cleanly. It's for commands whose output matters to someone watching
-// a boot (mke2fs describing the filesystem it's making), where run's
+// a boot (mke2fs reporting on the filesystem it's making), where run's
 // captured-output shape would hide it.
 func runNarrated(prefix, path string, args ...string) bool {
 	cmd := exec.Command(path, args...)

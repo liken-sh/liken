@@ -1,5 +1,5 @@
-# The k3s domain: liken does not build Kubernetes, it vendors k3s.
-# One pinned version, one static binary, fetched and verified by
+# The k3s domain. liken vendors k3s rather than building Kubernetes:
+# one pinned version, one static binary, fetched and verified by
 # fetch.sh (documented there).
 VERSION := $(strip $(file <VERSION))
 

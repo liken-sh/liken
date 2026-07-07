@@ -1,6 +1,6 @@
 # node-2: the second leader. Its name is in cluster.yaml's leaders
 # list, so it derives the leader role: it runs a control plane and an
-# etcd voice of its own, joining through the founding leader.
+# etcd member of its own, joining through the founding leader.
 #
 # Selected at boot by liken.machine=node-2 on the kernel command
 # line; node-1.yaml explains the seed lifecycle and the storage

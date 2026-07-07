@@ -1,7 +1,7 @@
 package main
 
 // The rollout conductor's decision table: who gets a reboot turn, in
-// what order, and when the whole procession pauses.
+// what order, and when the rollout pauses entirely.
 
 import (
 	"slices"
@@ -187,7 +187,7 @@ func TestRolloutAnOutstandingGrantConsumesTheBudget(t *testing.T) {
 }
 
 func TestRolloutKeepsTheGrantThroughTheReboot(t *testing.T) {
-	// The granted machine has gone silent — that silence is the reboot
+	// The granted machine has gone silent. That silence is the reboot
 	// the conductor asked for, not a loss, so the grant stands and the
 	// budget stays consumed.
 	machines, renewals := rolloutInputs(

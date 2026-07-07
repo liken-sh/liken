@@ -12,8 +12,8 @@ package main
 // A machine can run this way, but rootfs is a poor place to stay. It
 // appears in the mount table as device "rootfs", a name nothing can
 // resolve to a measurable filesystem, so anything that wants to
-// account for the root filesystem comes up empty. kubelet suffers the
-// most: it meters node ephemeral storage against the root filesystem,
+// account for the root filesystem comes up empty. kubelet is affected
+// worst: it meters node ephemeral storage against the root filesystem,
 // and on rootfs that accounting has nothing to measure.
 //
 // The way out is a userspace procedure, named for the util-linux tool
@@ -62,7 +62,7 @@ const newRoot = "/newroot"
 
 // maybeSwitchRoot runs once, before init touches anything else: the
 // switch must happen while the mount tree is empty (one moved mount is
-// simple; a forest of them is not) and before any child processes exist.
+// simple; many of them are not) and before any child processes exist.
 func maybeSwitchRoot() {
 	if slices.Contains(os.Args[1:], switchedMarker) {
 		return
@@ -119,10 +119,11 @@ func switchRoot() error {
 		}
 	}
 
-	// The move and the chroot. MS_MOVE grafts the tmpfs onto / (legal
-	// where pivot_root is not, because nothing has to be unmounted), and
-	// chroot(".") repoints this process's idea of "/" at it. Order
-	// matters: chdir first so "." names the new root throughout.
+	// Now the move and the chroot. MS_MOVE grafts the tmpfs onto /
+	// (legal where pivot_root is not, because nothing has to be
+	// unmounted), and chroot(".") repoints this process's idea of "/"
+	// at it. Order matters: chdir first so "." names the new root
+	// throughout.
 	if err := os.Chdir(newRoot); err != nil {
 		return err
 	}
@@ -142,7 +143,7 @@ func switchRoot() error {
 
 // fsTypeName decodes the statfs filesystem magic numbers this boot can
 // actually encounter: rootfs is ramfs unless the kernel was built with
-// tmpfs support, in which case tmpfs quietly backs it.
+// tmpfs support, in which case tmpfs backs it.
 func fsTypeName(magic int64) string {
 	switch magic {
 	case unix.TMPFS_MAGIC:

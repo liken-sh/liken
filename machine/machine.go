@@ -1,10 +1,10 @@
 // Package machine is the Machine API: liken's one configuration
 // document, as Go types.
 //
-// A Machine is shaped like a Kubernetes resource on purpose (kubelet's
-// KubeletConfiguration, k0s's config, and Talos's machine config all
-// use the same shape) because one schema-validated document can be
-// delivered two ways. At boot, init reads it from a file baked into
+// A Machine is deliberately shaped like a Kubernetes resource
+// (kubelet's KubeletConfiguration, k0s's config, and Talos's machine
+// config all use the same shape) because one schema-validated
+// document can be delivered two ways. At boot, init reads it from a file baked into
 // the image (there is no API server yet). Once the cluster is up, the
 // same document exists in it as a custom resource, where the liken
 // operator publishes the machine's live facts into its status. The
@@ -63,16 +63,16 @@ const (
 	// BootClusterManifestPath is the same publication for the cluster
 	// document: the exact bytes this boot derived its role from. The
 	// operator needs the bytes, not just their hash, because drift
-	// detection compares documents by meaning — a hand-written seed
+	// detection compares documents by meaning. A hand-written seed
 	// and the operator's canonical rendering of the same spec are
-	// different bytes saying the same thing, and rebooting the fleet
-	// over formatting would be absurd.
+	// different bytes that say the same thing, and a formatting
+	// difference should never reboot the fleet.
 	BootClusterManifestPath = "/run/liken/cluster.yaml"
 
 	// FactsPath is where init publishes what it learned about the
 	// machine, shaped exactly like MachineStatus. /run is a fresh
-	// tmpfs every boot, which is the point: facts describe the current
-	// boot only, and never survive into the next one.
+	// tmpfs every boot, which suits the facts exactly: they describe
+	// the current boot only, and never survive into the next one.
 	FactsPath = "/run/liken/facts.yaml"
 
 	// SysctlDir is the kernel's tuning interface: one file per
@@ -145,13 +145,14 @@ type MachineSpec struct {
 	// default, stages the change and reports it; any next boot
 	// applies it. Auto lets the operator reboot the machine itself.
 	// Manual is the default because on a single-node cluster a reboot
-	// is a total outage, and a typo'd edit should never bounce the
-	// machine on its own authority.
+	// is a total outage, and a mistyped edit should never reboot the
+	// machine automatically.
 	RebootPolicy RebootPolicy `json:"rebootPolicy,omitempty"`
 }
 
 // RebootPolicy is who initiates the reboot a staged change waits on.
-// Anything unrecognized reads as Manual: when in doubt, don't reboot.
+// Anything unrecognized reads as Manual, so an unrecognized value can
+// never cause an automatic reboot.
 type RebootPolicy string
 
 const (
@@ -166,7 +167,7 @@ func (s MachineSpec) RebootPolicyOrDefault() RebootPolicy {
 	return RebootManual
 }
 
-// NetworkSpec is deliberately almost empty: the default is zero
+// NetworkSpec is deliberately almost empty. The default is zero
 // configuration: DHCP on the first physical interface, hostname from
 // the manifest, DNS from the lease. Fields exist here only for
 // machines that need to deviate from that.
@@ -202,9 +203,10 @@ type InterfaceSpec struct {
 	Nameservers []string `json:"nameservers,omitempty"`
 }
 
-// Parse reads a Machine manifest from its bytes. Strict on purpose:
-// a misspelled field name in a manifest should be an error someone
-// sees, not a setting that silently never applies.
+// Parse reads a Machine manifest from its bytes. Parsing is strict
+// because a misspelled field name in a manifest should produce an
+// error someone sees, rather than becoming a setting that silently
+// never applies.
 func Parse(raw []byte) (*Machine, error) {
 	m := &Machine{}
 	if err := yaml.UnmarshalStrict(raw, m); err != nil {

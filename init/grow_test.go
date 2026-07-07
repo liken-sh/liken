@@ -195,7 +195,7 @@ func TestPlanAllGrowthWithNothingRecognized(t *testing.T) {
 
 func TestPlanAllGrowthNeedsTheDiskInTheInventory(t *testing.T) {
 	// A recognized partition on a disk the inventory doesn't show is
-	// a contradiction worth stopping on, not planning around.
+	// a contradiction; stop rather than plan around it.
 	fakeMachine(t)
 	roles := []machine.DeclaredRole{declared("clusterState", "/dev/vda", "1Gi")}
 	found := map[machine.StorageRoleName]partition{

@@ -2,7 +2,7 @@ package main
 
 // Tests for the API client and the seeding loops, against a real HTTP
 // server (net/http/httptest) rather than mocks: the client's whole
-// job is speaking HTTP, so the test speaks it back.
+// job is HTTP, so the tests exercise real requests and responses.
 
 import (
 	"encoding/json"
@@ -87,7 +87,8 @@ func TestRequestJSONCarriesTheServersWords(t *testing.T) {
 
 // clusterAPI is a miniature API server for the seeding loop: it
 // remembers whether the Cluster exists and can be told to answer the
-// first create with a conflict, the way a rival operator's win would.
+// first create with a conflict, as the real server would when another
+// machine's operator created the object first.
 type clusterAPI struct {
 	exists   bool
 	conflict bool

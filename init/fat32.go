@@ -4,35 +4,33 @@ package main
 //
 // The system slots need FAT because the firmware is their first
 // reader: UEFI promises to understand exactly one filesystem, and
-// this is it. Like the GPT (gpt.go), FAT32 is a small, fixed,
-// checksummed-in-spirit binary format that rewards being written out
-// by hand rather than shelling out to a tool — the whole filesystem
-// is three structures:
+// this is it. Like the GPT (gpt.go), FAT32 is a small, fixed binary
+// format, simple enough to write directly rather than by shelling
+// out to a tool. The whole filesystem is three structures:
 //
 //   - A boot sector describing the geometry: how big a sector is, how
 //     many sectors make a cluster (the allocation unit), where the
 //     tables live. Everything else is computed from these numbers, so
-//     every reader — firmware, the kernel, this code — derives the
-//     same layout from the same 90 bytes.
+//     every reader (firmware, the kernel, this code) derives the same
+//     layout from the same 90 bytes.
 //
 //   - The file allocation table itself, twice. The FAT is the
 //     filesystem's entire notion of allocation: one 32-bit entry per
 //     cluster, each holding the number of the next cluster in its
 //     file (a linked list drawn in a table) or an end-of-chain mark.
-//     The second copy is FAT's one nod to durability — no journal,
-//     just a spare.
+//     The second copy is FAT's only durability measure: there is no
+//     journal, just a spare copy of the table.
 //
 //   - A root directory, which under FAT32 is an ordinary cluster
 //     chain like any file's, starting (by universal convention) at
 //     cluster 2. Clusters 0 and 1 don't exist; their table entries
 //     are repurposed as signature and health flags.
 //
-// What FAT does not have is as instructive as what it does: no
-// permissions, no owners, no symlinks, no journal. It is a format for
-// interchange, which is exactly why firmware standardized on it — and
-// why nothing liken cares about lives on a slot except the OS
-// artifacts themselves, whose integrity is proven by digest, not
-// trusted to the filesystem.
+// What FAT lacks is worth noticing too: no permissions, no owners,
+// no symlinks, no journal. It is a format for interchange, which is
+// why firmware standardized on it. It is also why the slots hold
+// nothing but the OS artifacts themselves, whose integrity is proven
+// by digest rather than trusted to the filesystem.
 
 import (
 	"encoding/binary"
@@ -61,18 +59,18 @@ const (
 	fat32NumFATs = 2
 
 	// fat32MinClusters is the line below which a volume is legally
-	// FAT16: the FAT *type* is determined by cluster count alone —
-	// nothing in the header says "this is FAT32" authoritatively —
-	// so a too-small volume formatted with FAT32 structures would be
-	// misparsed as FAT16 by any spec-faithful reader.
+	// FAT16. The FAT *type* is determined by cluster count alone;
+	// nothing in the header declares the type authoritatively. A
+	// volume below this line but formatted with FAT32 structures
+	// would be misparsed as FAT16 by any spec-faithful reader.
 	fat32MinClusters = 65_525
 )
 
 // formatFAT32 writes a fresh, empty FAT32 filesystem across the given
 // device or file. The volume ID is FAT's only identity field (there
-// are no UUIDs here); the label is cosmetic, up to 11 bytes, and shows
-// up in directory listings on other machines — worth setting to
-// something that says whose partition this is.
+// are no UUIDs here). The label is cosmetic, up to 11 bytes, and
+// shows up in directory listings on other machines, so it is worth
+// setting to something that says whose partition this is.
 //
 // Ordering doesn't matter for crash safety: this only ever runs
 // against a partition being claimed, where a torn write leaves the
@@ -82,10 +80,10 @@ func formatFAT32(f *os.File, totalBytes uint64, label string, volumeID uint32) e
 	totalSectors := totalBytes / sectorSize
 
 	// Microsoft's own FAT-size formula, verbatim from the
-	// specification. It slightly overestimates (a sector or two of
-	// table nobody will ever index) in exchange for closing the
-	// circularity that the table's size depends on the cluster count,
-	// which depends on the space left after the table.
+	// specification. The table's size depends on the cluster count,
+	// which depends on the space left after the table; the formula
+	// resolves that circularity by slightly overestimating, wasting
+	// at most a sector or two of table that nothing will ever index.
 	tmp1 := totalSectors - fat32ReservedSectors
 	tmp2 := uint64(256*fat32SectorsPerCluster+fat32NumFATs) / 2
 	fatSectors := (tmp1 + tmp2 - 1) / tmp2
@@ -133,17 +131,17 @@ func formatFAT32(f *os.File, totalBytes uint64, label string, volumeID uint32) e
 	binary.LittleEndian.PutUint32(head[8:12], 0x0FFFFFFF)
 
 	// The label lives in two places: the boot sector field above, and
-	// a special entry in the root directory — a 32-byte directory
-	// entry whose attribute byte (0x08) says "I am the volume's name,
-	// not a file". Tools expect the pair to agree; fsck flags a
-	// volume that has one without the other.
+	// a special entry in the root directory, a 32-byte directory
+	// entry whose attribute byte (0x08) marks it as the volume's name
+	// rather than a file. Tools expect the pair to agree; fsck flags
+	// a volume that has one without the other.
 	labelEntry := make([]byte, 32)
 	copy(labelEntry[0:11], "           ")
 	copy(labelEntry[0:11], label)
 	labelEntry[11] = 0x08
 
-	// Primary and backup copies of everything. The backups earn
-	// their sectors: fsck tools really do recover boot sectors from
+	// Primary and backup copies of everything. The backups are worth
+	// writing: fsck tools really do recover boot sectors from
 	// sector 6.
 	writes := []struct {
 		lba  uint64
@@ -167,8 +165,9 @@ func formatFAT32(f *os.File, totalBytes uint64, label string, volumeID uint32) e
 
 // buildFAT32BootSector lays out the 90 bytes of geometry every FAT
 // reader parses, padded to a full sector ending in the 0x55AA mark
-// that says "structured, not blank" (the same two bytes an MBR ends
-// with, which is why isBlank needs no special case for FAT).
+// that distinguishes a structured sector from a blank one. Those are
+// the same two bytes an MBR ends with, which is why isBlank needs no
+// special case for FAT.
 func buildFAT32BootSector(totalSectors, fatSectors uint64, label string, volumeID uint32) []byte {
 	bs := make([]byte, sectorSize)
 
@@ -182,14 +181,15 @@ func buildFAT32BootSector(totalSectors, fatSectors uint64, label string, volumeI
 	bs[13] = fat32SectorsPerCluster
 	binary.LittleEndian.PutUint16(bs[14:16], fat32ReservedSectors)
 	bs[16] = fat32NumFATs
-	// Offsets 17-23 are the FAT12/16 fields — root entry count,
-	// 16-bit totals, 16-bit FAT size — all zero on FAT32, which is
-	// one of the ways readers tell the generations apart. The media
-	// byte at 21 survives from the diskette era; 0xF8 means "fixed
-	// disk" and must match FAT entry 0.
+	// Offsets 17-23 are the FAT12/16 fields (root entry count,
+	// 16-bit totals, 16-bit FAT size), all zero on FAT32; zeroing
+	// them is one of the ways readers tell the FAT variants apart.
+	// The media byte at 21 survives from the diskette era; 0xF8 means
+	// "fixed disk" and must match FAT entry 0.
 	bs[21] = 0xF8
 	// Sectors-per-track and head counts for CHS addressing, which
-	// nothing has used this century; conventional filler values.
+	// nothing has used this century; these are conventional filler
+	// values.
 	binary.LittleEndian.PutUint16(bs[24:26], 32)
 	binary.LittleEndian.PutUint16(bs[26:28], 64)
 	// "Hidden sectors": the partition's offset on its disk, consulted
@@ -204,15 +204,15 @@ func buildFAT32BootSector(totalSectors, fatSectors uint64, label string, volumeI
 	binary.LittleEndian.PutUint16(bs[40:42], 0)
 	binary.LittleEndian.PutUint16(bs[42:44], 0)
 	// The root directory starts at cluster 2 because clusters 0 and 1
-	// don't exist — their FAT entries are the flag words above.
+	// don't exist; their FAT entries are the flag words above.
 	binary.LittleEndian.PutUint32(bs[44:48], 2)
 	binary.LittleEndian.PutUint16(bs[48:50], 1) // FSInfo lives at sector 1
 	binary.LittleEndian.PutUint16(bs[50:52], 6) // its backup, and the boot sector's, at 6
 	// 12 reserved bytes, then the extended boot signature block: a
 	// BIOS drive number (0x80, first fixed disk), the 0x29 mark that
 	// says the three fields after it are present, the volume's ID and
-	// label, and the type string — informational only, but everything
-	// writes it and some tools read it.
+	// label, and the type string. The type string is informational
+	// only, but everything writes it and some tools read it.
 	bs[64] = 0x80
 	bs[66] = 0x29
 	binary.LittleEndian.PutUint32(bs[67:71], volumeID)
@@ -225,7 +225,8 @@ func buildFAT32BootSector(totalSectors, fatSectors uint64, label string, volumeI
 }
 
 // buildFAT32FSInfo lays out the free-space hint sector: three
-// signatures bracketing two numbers.
+// signature words with the free-cluster count and the next-free hint
+// between them.
 func buildFAT32FSInfo(freeClusters, nextFree uint32) []byte {
 	info := make([]byte, sectorSize)
 	binary.LittleEndian.PutUint32(info[0:4], 0x41615252)
@@ -254,8 +255,8 @@ func zeroRange(f *os.File, offset, length int64) error {
 
 // formatSlot formats a system slot's partition, labeled for the role
 // it serves so the slot identifies itself in any directory listing.
-// The volume ID — FAT's only identity field, no UUIDs here — takes
-// the traditional derivation, a timestamp.
+// The volume ID (FAT's only identity field; there are no UUIDs) is
+// derived from a timestamp, the traditional choice.
 func formatSlot(devPath string, sizeBytes uint64, role machine.StorageRoleName) error {
 	f, err := os.OpenFile(devPath, os.O_RDWR, 0)
 	if err != nil {
@@ -271,10 +272,10 @@ func formatSlot(devPath string, sizeBytes uint64, role machine.StorageRoleName) 
 
 // hasFAT32 checks a device for a FAT32 filesystem liken wrote: the
 // boot signature plus the type string. Microsoft's specification
-// warns that the type string is not how FAT *type* is determined —
-// that's the cluster count — but the question here is narrower and
-// different: "did we already format this slot?", and we write both
-// marks ourselves.
+// warns that the type string is not how the FAT *type* is determined
+// (cluster count is), but the question here is narrower: has liken
+// already formatted this slot? liken writes both marks itself, so
+// checking for them is enough.
 func hasFAT32(devPath string) bool {
 	f, err := os.Open(devPath)
 	if err != nil {

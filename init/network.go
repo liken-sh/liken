@@ -5,22 +5,22 @@ package main
 // Two different kernel interfaces cooperate here, and neither is a
 // classic syscall. Interface configuration (links up, addresses,
 // routes) happens over netlink, a socket-based protocol the kernel
-// speaks (it's what `ip` does under the hood); the vishvananda/netlink
-// library composes the messages. Getting an address by DHCP is a
-// different story entirely: DHCP is a network protocol, not a kernel
-// feature, so liken must *speak* it: broadcast DISCOVER, receive
-// OFFER, REQUEST, receive ACK. The insomniacslk/dhcp library (the same
-// one Talos boots with) does this over a raw AF_PACKET socket, which
-// is how a machine can send UDP before it has an IP address to send
-// from.
+// implements (it's what `ip` uses under the hood); the
+// vishvananda/netlink library composes the messages. Getting an
+// address by DHCP works differently: DHCP is a network protocol, not
+// a kernel feature, so liken must implement the client side itself:
+// broadcast DISCOVER, receive OFFER, send REQUEST, receive ACK. The
+// insomniacslk/dhcp library (the same one Talos boots with) does this
+// over a raw AF_PACKET socket, which is how a machine can send UDP
+// before it has an IP address to send from.
 //
 // A static address is the degenerate case: no protocol at all, just
-// the netlink calls, applying an address someone already decided. It
-// exists because clustering demands it: a machine's peers are told
-// where to find it before it boots, so its address is a promise made
-// in the manifest, not an outcome negotiated on the wire. (The lab
-// forces the same conclusion from below: the segment joining the QEMU
-// guests is a dumb wire with no DHCP server on it.)
+// the netlink calls, applying an address someone already decided.
+// It exists because clustering demands it: a machine's peers are
+// told where to find it before it boots, so its address must be
+// declared in the manifest rather than negotiated on the wire. (The
+// lab requires static addressing for its own reason: the segment
+// joining the QEMU guests is a dumb wire with no DHCP server on it.)
 
 import (
 	"context"
@@ -36,9 +36,9 @@ import (
 	"github.com/chrisguidry/liken/machine"
 )
 
-// connection is what bringing up one interface learned: enough to
-// print a report of how this machine is attached to the network, and
-// to publish the same facts to the Machine's status.
+// connection holds the facts learned while bringing up one interface:
+// enough to print a report of how this machine is attached to the
+// network, and to publish the same facts to the Machine's status.
 type connection struct {
 	ifname      string
 	mac         net.HardwareAddr

@@ -214,10 +214,10 @@ func slotFacts(version, slot string) *machine.MachineStatus {
 	}
 }
 
-// The tests promote records for version 0.2.0 while this test
-// binary's own machine.Version is "dev" — deliberately. Promotion
-// judges the OS the facts report, never the operator's own stamp: in
-// a mixed fleet the pod comes from whatever image the cluster's
+// The tests deliberately promote records for version 0.2.0 while
+// this test binary's own machine.Version is "dev". Promotion judges
+// the OS the facts report, never the operator's own stamp: in a
+// mixed fleet the pod comes from whatever image the cluster's
 // DaemonSet still pins, and the pod is a bystander to the machine's
 // trial.
 func TestPromotesTheReleaseThisBootProves(t *testing.T) {

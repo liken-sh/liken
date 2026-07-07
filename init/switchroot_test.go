@@ -1,7 +1,7 @@
 package main
 
 // Tests for the tree copy that carries the initramfs onto the new
-// root, against real temporary directories. The switch_root dance
+// root, against real temporary directories. The switch_root procedure
 // itself (mounts, chroot, exec) is QEMU territory.
 
 import (

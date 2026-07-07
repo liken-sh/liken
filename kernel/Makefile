@@ -1,6 +1,6 @@
-# The kernel domain: liken does not build Linux, it vendors Linux.
+# The kernel domain. liken vendors Linux rather than building it:
 # Canonical's mainline archive publishes every upstream release as
-# pre-built packages, and fetch.sh (documented there) turns one
+# pre-built packages, and fetch.sh (documented there) extracts one
 # pinned version of those into the two things the rest of the build
 # needs: a bootable vmlinuz and an indexed module tree.
 
@@ -9,10 +9,10 @@
 # drops the trailing newline.
 VERSION := $(strip $(file <VERSION))
 
-# vmlinuz stands in for the whole extraction: modules, config, and the
-# release string all arrive in the same fetch.sh run. Make only fires
-# this when the pin or the script changes; fetch.sh's own download cache
-# makes even those re-runs cheap.
+# vmlinuz represents the whole extraction: modules, config, and the
+# release string all arrive in the same fetch.sh run. Make only runs
+# this when the pin or the script changes, and fetch.sh's own download
+# cache makes even those re-runs cheap.
 dist/$(VERSION)/vmlinuz: VERSION fetch.sh
 	./fetch.sh
 
@@ -20,7 +20,8 @@ dist/$(VERSION)/vmlinuz: VERSION fetch.sh
 
 all: dist/$(VERSION)/vmlinuz
 
-# Extracted kernels are cheap to recreate (the downloads are cached), so
-# clean sweeps them all; the cache is precious bandwidth and survives.
+# Extracted kernels are cheap to recreate because the downloads are
+# cached, so clean removes them all. The cache itself is kept: deleting
+# it would only cost bandwidth to rebuild.
 clean:
 	rm -rf dist

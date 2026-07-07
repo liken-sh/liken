@@ -3,9 +3,9 @@
 # Vendor a pre-built Linux kernel from Ubuntu's mainline builds.
 #
 # liken deliberately does not compile kernels. Building Linux once is
-# worth doing, but *maintaining* kernel builds (configs, CVEs,
-# toolchains) is ongoing work that has worn down more than one small
-# distro, and it teaches nothing about what liken is here to teach.
+# worth doing, but maintaining kernel builds (configs, CVEs,
+# toolchains) is ongoing work that has exhausted many small distros,
+# and it teaches nothing about what liken is here to teach.
 # Instead we rely on Canonical's kernel team: their mainline archive
 # (https://kernel.ubuntu.com/mainline/) publishes every upstream release
 # (stable, point releases, even RCs) as pre-built Debian packages, usually
@@ -35,8 +35,8 @@
 #   kernel/fetch.sh            fetch the version pinned in kernel/VERSION
 #   kernel/fetch.sh 7.1.1      fetch a specific version instead
 #
-# Upgrading the kernel is a one-line change to kernel/VERSION, the same
-# shape as every other upgrade in liken: edit a pin, commit.
+# Upgrading the kernel is a one-line change to kernel/VERSION. Every
+# other upgrade in liken works the same way: edit a pin and commit it.
 #
 # Results land in kernel/dist/<version>/:
 #
@@ -52,9 +52,10 @@
 # Downloads are cached in kernel/cache/ and verified against the sha256
 # checksums the archive publishes alongside each build, so re-runs are
 # cheap and a torn download can't slip through. (The archive also signs
-# its checksum file with the Ubuntu kernel team's GPG key; we don't
-# verify that signature, a conscious gap: sha256 gives us integrity,
-# not provenance.)
+# its checksum file with the Ubuntu kernel team's GPG key. We don't
+# verify that signature, and that gap is deliberate: the sha256 check
+# proves the file arrived intact, but it does not prove who published
+# it.)
 
 set -euo pipefail
 
@@ -63,7 +64,8 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Everything we need is stock on an ordinary Linux development machine:
 # curl to fetch, ar (binutils) to open the .deb wrapper, tar + zstd to
 # unpack the payload, sha256sum to verify it, and depmod (kmod) to index
-# the modules at the end. Fail up front, not mid-download.
+# the modules at the end. Checking for them up front means a missing
+# tool fails immediately instead of partway through a download.
 for tool in curl ar tar zstd sha256sum depmod; do
     command -v "$tool" >/dev/null || {
         echo "fetch.sh: missing required tool: $tool" >&2

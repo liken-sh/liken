@@ -3,15 +3,15 @@ package main
 // Convergence: closing the loop between the cluster's spec and the
 // machine's boot.
 //
-// Sysctls reconcile live; storage cannot (a filesystem can't be
-// swapped under a running cluster), so a storage edit converges by
-// reboot: the operator stages the desired manifest onto the
-// machineState filesystem, where the next boot finds it, tries it,
-// and promotes or rejects it (machine/staging.go tells that side).
-// This file is the operator's half: notice drift, refuse what the
-// machine can't satisfy, stage what it can, and either request the
-// reboot (rebootPolicy: Auto) or report that one is pending (Manual,
-// the default).
+// Sysctls reconcile live; storage cannot, because a filesystem can't
+// be swapped under a running cluster. A storage edit therefore
+// converges by reboot: the operator stages the desired manifest onto
+// the machineState filesystem, where the next boot finds it, tries
+// it, and promotes or rejects it (machine/staging.go covers that
+// side). This file is the operator's half: notice drift, refuse what
+// the machine can't satisfy, stage what it can, and either request
+// the reboot (rebootPolicy: Auto) or report that one is pending
+// (Manual, the default).
 //
 // Every decision here is a pure function over the cluster's Machine
 // and the boot's facts; reconcile() supplies the few lines of I/O.
@@ -29,11 +29,11 @@ import (
 )
 
 // storageDrift compares the declared storage against what the boot
-// actuated, role by role, sizes normalized (2048Mi and 2Gi are the
-// same ask). The returned diffs are written for humans; they appear
-// verbatim in condition messages. Sysctls never count as drift: the
-// operator already reconciles those live, and rebooting to apply
-// something already applied would be absurd.
+// actuated, role by role, with sizes normalized (2048Mi and 2Gi
+// declare the same thing). The returned diffs are written for humans;
+// they appear verbatim in condition messages. Sysctls never count as
+// drift: the operator already reconciles those live, so a reboot
+// would apply nothing that isn't already applied.
 func storageDrift(desired, actuated machine.StorageSpec) []string {
 	var diffs []string
 	desiredRoles := rolesByName(desired)
@@ -66,9 +66,10 @@ func rolesByName(spec machine.StorageSpec) map[machine.StorageRoleName]machine.D
 	return byName
 }
 
-// sameSize compares two size declarations by what they mean, not how
-// they're spelled. An unparseable size (which validation will refuse
-// anyway) falls back to string comparison rather than panicking here.
+// sameSize compares two size declarations by the number of bytes they
+// describe rather than by their spelling. An unparseable size (which
+// validation will refuse anyway) falls back to string comparison
+// rather than panicking here.
 func sameSize(a, b string) bool {
 	if a == "" || b == "" {
 		return a == b
@@ -88,10 +89,10 @@ func orRemainder(size string) string {
 	return size
 }
 
-// validateStaging is everything admission can't check, because it
-// takes the actual machine: CEL rules in the CRD compare the spec
-// against the last boot's published status, but only the facts know
-// what partitions exist and what disks are attached.
+// validateStaging checks everything admission can't, because these
+// checks need the actual machine: CEL rules in the CRD compare the
+// spec against the last boot's published status, but only the facts
+// record what partitions exist and what disks are attached.
 func validateStaging(spec machine.StorageSpec, facts *machine.MachineStatus) error {
 	if err := spec.Validate(); err != nil {
 		return err
@@ -149,10 +150,11 @@ func deviceNames(disks []machine.BlockDevice) string {
 // renderManifest produces the canonical bytes to stage: a complete
 // Machine document carrying the whole spec (sysctls and network
 // included, so the reboot converges everything even though only
-// storage triggers it) and no status. Deterministic: sigs.k8s.io/yaml
-// marshals through JSON with sorted keys, so the same spec always
-// yields the same bytes, and the hash of those bytes is the spec's
-// identity everywhere (staging idempotence, rejections, facts).
+// storage triggers it) and no status. The rendering is deterministic:
+// sigs.k8s.io/yaml marshals through JSON with sorted keys, so the
+// same spec always yields the same bytes, and the hash of those bytes
+// is the spec's identity everywhere (staging idempotence, rejections,
+// facts).
 func renderManifest(name string, spec machine.MachineSpec) ([]byte, string, error) {
 	doc := machine.Machine{
 		APIVersion: machine.APIVersion,
@@ -169,10 +171,10 @@ func renderManifest(name string, spec machine.MachineSpec) ([]byte, string, erro
 
 // A turn is the machine's standing with the rollout conductor
 // (rollout.go): whether it may reboot right now. A machine with no
-// cluster document answers to nobody and reboots at will; a cluster
+// cluster document has no conductor and reboots at will; a cluster
 // member waits until the conductor writes a RebootApproved condition
-// onto it. Only rebootPolicy: Auto ever consults this — a Manual
-// machine waits for its human regardless.
+// onto it. Only rebootPolicy: Auto ever consults this. A Manual
+// machine waits for a person regardless.
 type turn int
 
 const (
@@ -202,8 +204,8 @@ func notConverged(reason, message string) machine.Condition {
 	return machine.Condition{Type: "SpecConverged", Status: "False", Reason: reason, Message: message}
 }
 
-// decideConvergence is the whole feature as one decision. The cases,
-// in the order they short-circuit:
+// decideConvergence makes the whole convergence decision in one pure
+// function. The cases, in the order they short-circuit:
 //
 //  1. No facts, or facts without a boot record (an older init, a
 //     machine mid-upgrade): Unknown. Guessing could reboot a machine
@@ -213,17 +215,19 @@ func notConverged(reason, message string) machine.Condition {
 //     cluster no longer wants is withdrawn, because the next boot
 //     would otherwise apply it. A standing rejection is cleared for
 //     the same reason: the spec it blocks is no longer being asked
-//     for, so the record has nothing left to do.
+//     for, so the record no longer blocks anything.
 //  3. The desired spec is the one init rejected: refuse to re-stage
 //     it. The rejection parameter is read from the durable quarantine
-//     record on machineState, not from facts — facts are the boot's
-//     frozen memory, and an edit that reverts and then retries within
-//     one boot must see the clearing take effect immediately, not at
-//     the next reboot. Only a genuinely different edit (or clearing
-//     the record by converging) unblocks the hash.
+//     record on machineState, not from facts. Facts are a snapshot
+//     taken at boot and never change while the machine runs, but an
+//     edit that reverts and then retries within one boot must see the
+//     clearing take effect immediately, not at the next reboot. Only
+//     a genuinely different edit (or clearing the record by
+//     converging) unblocks the hash.
 //  4. Facts claim this exact manifest was actuated, yet drift still
-//     computes: a contradiction, necessarily a liken bug. A wedged
-//     condition beats a machine rebooting every reconcile pass.
+//     computes: a contradiction, necessarily a liken bug. Holding in
+//     a wedged condition is better than rebooting the machine on
+//     every reconcile pass.
 //  5. machineState is memory-backed: there is nowhere durable to
 //     stage into.
 //  6. The spec fails validation against the machine's reality.
@@ -272,7 +276,7 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 	c := convergence{
 		manifest: manifest,
 		hash:     hash,
-		stage:    stagedHash != hash, // idempotence: no disk churn when these bytes already wait
+		stage:    stagedHash != hash, // idempotence: skip the write when these exact bytes are already staged
 	}
 	switch {
 	case m.Spec.RebootPolicyOrDefault() != machine.RebootAuto:
@@ -289,9 +293,10 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 	return c
 }
 
-// readStagedHash is the identity of whatever currently waits on the
-// machineState filesystem, "" when nothing does. Unparseable staged
-// bytes still hash: idempotence is about bytes, not meaning.
+// readStagedHash returns the hash of whatever manifest is currently
+// staged on the machineState filesystem, or "" when nothing is
+// staged. Staged bytes that fail to parse still get hashed, because
+// the idempotence check compares bytes, not parsed meaning.
 func readStagedHash() string {
 	raw, _ := machine.MachineManifests(machine.MachineStateDir).LoadStaged()
 	if raw == nil {

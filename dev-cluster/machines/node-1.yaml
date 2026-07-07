@@ -1,16 +1,17 @@
 # node-1: the lab's first machine, and the first name in
-# cluster.yaml's leaders list — the founding leader, whose control
-# plane the other leaders join through.
+# cluster.yaml's leaders list. That makes it the founding leader,
+# whose control plane the other leaders join through.
 #
 # One image boots the whole fleet, so this directory carries a
 # manifest per machine and each boot selects its own by the
-# liken.machine=<name> kernel parameter — the bootloader's channel,
-# configured per machine even when the image is shared. This file is
-# a seed, consulted exactly once: the first boot runs under it, and
-# that boot's success writes it to the machineState filesystem as the
-# first *proven* manifest; every boot after reads its manifests from
-# that disk, not from here. Editing the Machine in the cluster is how
-# configuration changes from then on.
+# liken.machine=<name> kernel parameter. That parameter is the
+# bootloader's channel for identity, configured per machine even when
+# the image is shared. This file is a seed, consulted exactly once:
+# the first boot runs under it, and that boot's success writes it to
+# the machineState filesystem as the first proven manifest. Every
+# boot after reads its manifests from that disk, not from here.
+# Editing the Machine in the cluster is how configuration changes
+# from then on.
 apiVersion: liken.sh/v1alpha1
 kind: Machine
 metadata:
@@ -24,11 +25,11 @@ spec:
   # for a person.
   rebootPolicy: Auto
   network:
-    # Two interfaces, two jobs. eth0 is the uplink: it speaks DHCP to
+    # Two interfaces, two jobs. eth0 is the uplink: it uses DHCP on
     # whatever network the machine is plugged into and carries traffic
-    # to the outside world. eth1 is the cluster segment: its address
-    # is static because it is a *promise* — cluster.yaml's endpoint
-    # tells every follower to find the control plane at 10.10.0.1, so
+    # to the outside world. eth1 is the cluster segment. Its address
+    # is static because cluster.yaml's endpoint depends on it: every
+    # follower is told to find the control plane at 10.10.0.1, so
     # that address has to exist before any negotiation could assign
     # it. (In the lab, the segment is a dumb wire between QEMU guests
     # with no DHCP server on it anyway; see dev-cluster/Makefile.)
@@ -51,8 +52,8 @@ spec:
     # on the boot disk, each big enough to hold one complete liken
     # version (the kernel plus the initramfs, with headroom). The
     # machine runs from one slot and writes upgrades into the other.
-    # Sized explicitly and fixed at claim — FAT32, the one filesystem
-    # firmware reads, doesn't grow in place.
+    # They are sized explicitly and fixed at claim, because FAT32 (the
+    # one filesystem firmware reads) doesn't grow in place.
     systemA:
       device: /dev/vdc
       size: 512Mi
@@ -60,10 +61,10 @@ spec:
       device: /dev/vdc
       size: 512Mi
     # The machine's own durable data: the staged and proven manifests
-    # that let a spec edit survive a reboot. First among the data
-    # roles in the canonical order, so it's an early partition on its
-    # disk: the one a future boot must find before it has read any
-    # spec.
+    # that let a spec edit survive a reboot. This role comes first
+    # among the data roles in the canonical order, so it's an early
+    # partition on its disk: the one a future boot must find before it
+    # has read any spec.
     machineState:
       device: /dev/vda
       size: 64Mi
@@ -86,12 +87,12 @@ spec:
     podEphemeral:
       device: /dev/vdb
   # Kernel tuning lives in the same document as everything else. Each
-  # parameter is applied twice on purpose: by init at boot (so it holds
-  # before k3s starts) and by the liken operator from then on (so
-  # editing the Machine in-cluster takes effect without a reboot, and
-  # drift gets corrected). The kernel's default of 128 inotify
+  # parameter is deliberately applied twice: by init at boot (so it
+  # holds before k3s starts) and by the liken operator from then on
+  # (so editing the Machine in-cluster takes effect without a reboot,
+  # and drift gets corrected). The kernel's default of 128 inotify
   # instances per user runs out quickly on a node where every
-  # log-follower and config-watcher holds one; raising it is a common
-  # first node tune.
+  # log-follower and config-watcher holds one; raising it is one of
+  # the most common node tunings.
   sysctls:
     fs.inotify.max_user_instances: "8192"

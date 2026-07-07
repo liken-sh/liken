@@ -51,10 +51,10 @@ func TestLeaseWithAnUnreadableRenewTimeIsTaken(t *testing.T) {
 	}
 }
 
-// leaseAPI is a miniature API server holding one Lease, the acting
-// half's counterpart to the pure table above: it answers GETs with
-// the standing lease (404 when there is none) and remembers whatever
-// a create or update writes.
+// leaseAPI is a miniature API server holding one Lease, used to test
+// the acting half against the pure decisions above: it answers GETs
+// with the standing lease (404 when there is none) and remembers
+// whatever a create or update writes.
 type leaseAPI struct {
 	lease *leaseObject
 }

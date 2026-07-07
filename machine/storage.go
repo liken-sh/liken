@@ -5,14 +5,15 @@ package machine
 // Storage is declared by purpose, not by mount path. The manifest
 // never says "/var/lib/rancher" (that's a k3s implementation detail
 // liken owns); it says "this disk holds the cluster's state", and
-// liken translates. The roles are fields rather than a list on
-// purpose: each is a singleton (a machine has one cluster state, one
+// liken translates. The roles are deliberately fields rather than a
+// list: each is a singleton (a machine has one cluster state, one
 // pod-storage pool), so making them schema means a duplicate role
 // can't even be expressed, and a new role is visibly an API change.
 //
 // The device path in each role matters only on the boot that claims
 // the disk: kernel device names are assigned in driver probe order,
-// which makes them a handle, not an identity. Claiming writes the
+// so a name addresses a disk within one boot but does not identify
+// it across boots. Claiming writes the
 // role's name onto the partition itself (its GPT partition name), and
 // every boot after finds it by that name, wherever the disk
 // enumerates.
@@ -50,11 +51,11 @@ const (
 // map order, which Kubernetes doesn't preserve). The system slots
 // come first, because the firmware is the earliest reader of any
 // partition liken owns and an EFI system partition conventionally
-// leads its disk; machineState comes next, ahead of all the data
-// roles, so the partition a future boot must find before it has read
-// any spec sits at the front of them. (Recognition is by partition
-// name, never by position — the order is layout convention, not a
-// discovery mechanism.)
+// leads its disk. machineState comes next, ahead of all the data
+// roles, because it holds the partition a future boot must find
+// before it has read any spec. Recognition is by partition name,
+// never by position; the order is a layout convention, not a
+// discovery mechanism.
 var StorageRoleNames = []StorageRoleName{
 	SystemARole,
 	SystemBRole,
@@ -69,21 +70,22 @@ type StorageSpec struct {
 	// SystemA and SystemB are the operating system's own boot slots:
 	// each holds one complete liken version (the kernel and the
 	// initramfs that is the rest of the OS), and the machine runs
-	// from one while upgrades are written to the other — blue-green,
-	// at the scale of the whole operating system. They are EFI system
-	// partitions carrying FAT32, because the firmware itself is their
-	// first reader and FAT is the only filesystem it promises to
-	// understand. A machine without them boots from external media
-	// forever (the lab's -kernel flag, a USB stick); a machine with
-	// them can be installed once and upgraded declaratively.
+	// from one while upgrades are written to the other: a blue-green
+	// deployment at the scale of the whole operating system. They are
+	// EFI system partitions carrying FAT32, because the firmware
+	// itself is their first reader and FAT is the only filesystem it
+	// promises to understand. A machine without them boots from
+	// external media forever (the lab's -kernel flag, a USB stick); a
+	// machine with them can be installed once and upgraded
+	// declaratively.
 	SystemA *StorageRole `json:"systemA,omitempty"`
 	SystemB *StorageRole `json:"systemB,omitempty"`
 
 	// MachineState is the machine's own durable data: the manifests
 	// that configure it (the staged and proven copies that let a spec
-	// edit survive a reboot and apply at the next one). Small, but it
-	// changes what the machine *is*: with it, configuration outlives
-	// the image that first delivered it.
+	// edit survive a reboot and apply at the next one). The data is
+	// small, but it changes the machine fundamentally: with it,
+	// configuration outlives the image that first delivered it.
 	MachineState *StorageRole `json:"machineState,omitempty"`
 
 	// MachineEphemeral is the operating system's own scratch space:
@@ -95,8 +97,8 @@ type StorageSpec struct {
 	// ClusterState is k3s's state: the etcd or sqlite database, TLS
 	// material, and containerd's images. Persisting it is what lets a
 	// reboot resume the same cluster instead of starting a new one.
-	// (Named for the cluster, not the machine, on purpose: this data
-	// belongs to the future kind: Cluster story.)
+	// (It is named for the cluster, not the machine, because this
+	// data belongs to the cluster rather than to any one machine.)
 	ClusterState *StorageRole `json:"clusterState,omitempty"`
 
 	// PodStorage is durable storage pods claim by name: the
@@ -149,17 +151,17 @@ const SystemSlotsDir = "/var/lib/liken/system"
 
 // SystemSlotDir is one slot's mountpoint. Slots are named "A" and
 // "B" everywhere a person sees them (boot entries, conditions, the
-// liken.slot= parameter); the directory names are their lowercase
-// twins.
+// liken.slot= parameter); the directory names are the same letters
+// in lowercase.
 func SystemSlotDir(slot string) string {
 	return SystemSlotsDir + "/" + strings.ToLower(slot)
 }
 
-// InactiveSlot is the slot a machine is *not* running from: where a
-// downloaded release lands, blue-green's whole idea. "" for a machine
-// whose boot didn't come from a slot at all — such a machine has no
-// inactive side, and no business downloading releases it could never
-// boot.
+// InactiveSlot is the slot a machine is not running from, which is
+// where a downloaded release lands: that is the point of the
+// blue-green arrangement. It returns "" for a machine whose boot
+// didn't come from a slot at all. Such a machine has no inactive
+// side, and should never download releases it could not boot.
 func InactiveSlot(running string) string {
 	switch running {
 	case "A":
@@ -267,8 +269,8 @@ func StorageCondition(spec StorageSpec, status StorageStatus) Condition {
 // ParseSize reads a binary quantity ("2Gi", "512Mi", or a plain
 // count of bytes) into bytes. Only the power-of-two suffixes are
 // accepted: disks are carved in the same units their partition math
-// uses, and accepting "2G" (decimal) alongside "2Gi" (binary) invites
-// off-by-7% surprises.
+// uses, and accepting "2G" (decimal) alongside "2Gi" (binary) would
+// invite subtle mistakes, since the two differ by about 7%.
 func ParseSize(s string) (uint64, error) {
 	digits := s
 	var unit uint64 = 1
@@ -288,7 +290,7 @@ func ParseSize(s string) (uint64, error) {
 		return 0, fmt.Errorf("size %q: expected bytes or a Ki/Mi/Gi/Ti quantity", s)
 	}
 	// Zero is rejected here rather than left for the partition math to
-	// trip over: a zero-sector partition would have an end before its
+	// fail on: a zero-sector partition would have an end before its
 	// start, and a zero-byte role is always a manifest mistake.
 	if n == 0 {
 		return 0, fmt.Errorf("size %q: a storage role can't be zero bytes", s)

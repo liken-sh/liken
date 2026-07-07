@@ -2,8 +2,8 @@ package main
 
 // Tests for the operator's half of the cluster document lifecycle:
 // promotion. The operator's own existence proves the join, so these
-// tests simulate "I am running and the facts say which document this
-// boot ran" and check what happens to the store.
+// tests simulate a running operator with facts naming the document
+// this boot ran, and check what happens to the store.
 
 import (
 	"os"
@@ -27,9 +27,9 @@ func partitionBackedFacts(source machine.ManifestSource, hash string) *machine.M
 			MachineState: machine.StorageRoleStatus{Backing: machine.BackingPartition},
 		},
 		Boot: machine.BootStatus{
-			// The machine manifest's record is what says "this init
-			// publishes boot records at all"; the cluster fields ride
-			// beside it.
+			// The machine manifest's record is what indicates that
+			// this init publishes boot records at all; the cluster
+			// fields sit beside it.
 			ManifestSource:        machine.ManifestSourceProven,
 			ClusterManifestSource: source,
 			ClusterManifestHash:   hash,

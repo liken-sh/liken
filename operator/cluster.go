@@ -3,16 +3,16 @@ package main
 // The operator's half of the cluster document lifecycle: promotion
 // and convergence.
 //
-// Init boots a staged cluster document tentatively — it cannot prove
+// Init boots a staged cluster document tentatively. Init cannot prove
 // one, because the document's failure modes are downstream of the
-// boot (a bad endpoint just means the machine never joins, which init
-// only sees as k3s never settling). The proof is the operator itself:
-// it runs as a pod, so if this code is executing, then containerd,
+// boot: a bad endpoint just means the machine never joins, which init
+// only sees as k3s never settling. The proof is the operator itself.
+// It runs as a pod, so if this code is executing, then containerd,
 // the kubelet, and the machine's registration with its cluster all
-// work under the document this boot ran. That is the moment the
-// staged document has earned proven, and the operator holds the pen
-// (it already has the read-write machineState mount it stages
-// through).
+// work under the document this boot ran. At that point the staged
+// document is proven, and the operator is the right component to
+// record it: it already has the read-write machineState mount it
+// stages through.
 //
 // The same authority records a first boot's seed as the first proven
 // copy, which is what closes the loop for a machine that has never
@@ -23,17 +23,17 @@ package main
 // document: read the in-cluster Cluster resource, render it
 // canonically, compare against what this boot ran, and stage the
 // difference for the next boot. The one structural difference is
-// scope: the Cluster is one document but the machinery is
+// scope. The Cluster is one document but the machinery is
 // per-machine, so every machine stages its own copy on its own
 // schedule, machines can transiently run different cluster documents,
 // and each Machine's ClusterConverged condition is where that
-// disagreement is visible. Deliberately absent here: any fleet
+// disagreement is visible. This file deliberately contains no fleet
 // orchestration. A Cluster edit is drift on every machine at once,
-// and this path only stages the change and asks for a reboot — on a
-// cluster member with rebootPolicy Auto, "asks" means awaiting a
+// and this path only stages the change and asks for a reboot. On a
+// cluster member with rebootPolicy Auto, asking means awaiting a
 // turn from the sweep leader's rollout (rollout.go), which grants
 // reboots one machine at a time, so a fleet-wide edit rolls through
-// the fleet instead of rebooting it all together. Manual (the
+// the fleet instead of rebooting every machine together. Manual (the
 // default) leaves each machine's pending reboot visible and waiting
 // for a person.
 
@@ -46,26 +46,22 @@ import (
 	"github.com/chrisguidry/liken/machine"
 )
 
-// settleClusterLifecycle promotes whatever this boot proved. It runs
-// every reconcile pass and is idempotent: once promoted (or when a
-// newer document is staged for its own proving boot), there is
-// nothing left to do. The facts identify exactly which bytes this
-// boot ran; the operator promotes those bytes and nothing else.
 // renderCluster produces the canonical bytes to stage: a Cluster
 // document with no status, deterministic for the same reason
 // renderManifest is (yaml marshals through JSON with sorted keys), so
 // the hash of these bytes is the document's identity everywhere.
 //
-// The release feed — spec.version and spec.releases — is excluded
-// before rendering. Those fields are live-consumed (the operator
-// reads them from the in-cluster resource every pass), and the drift
-// comparison here is a whole-document hash: if they rode along the
-// way the Machine's sysctls ride its staged manifest, every catalog
-// append and every retargeting would change the hash, read as drift
-// on every machine at once, and stage a fleet-wide reboot for a
-// change whose entire actuation is a download. (The Machine gets
-// away with carrying sysctls because its drift check is
-// field-selective — storageDrift — not a hash of the document.)
+// The release feed (spec.version and spec.releases) is excluded
+// before rendering. Those fields are live-consumed: the operator
+// reads them from the in-cluster resource every pass, so they never
+// need a reboot to take effect. And the drift comparison here is a
+// whole-document hash, so if those fields were included, every
+// catalog append and every retargeting would change the hash, read
+// as drift on every machine at once, and stage a fleet-wide reboot
+// for a change whose entire actuation is a download. (The Machine
+// can carry sysctls in its staged manifest because its drift check,
+// storageDrift, is field-selective rather than a hash of the whole
+// document.)
 func renderCluster(name string, spec machine.ClusterSpec) ([]byte, string, error) {
 	spec.Version = ""
 	spec.Releases = machine.ClusterReleasesSpec{}
@@ -91,20 +87,23 @@ func clusterNotConverged(reason, message string) machine.Condition {
 }
 
 // decideClusterConvergence mirrors decideConvergence's short-circuit
-// order for the cluster document: no facts → Unknown; current →
-// converged (withdrawing a stale staged copy and clearing a spent
-// rejection); rejected-last-boot → hold; nowhere durable to stage →
-// say so; drift → stage and reboot per the Machine's rebootPolicy
-// (the one knob governing both kinds of staging) and its turn with
-// the rollout conductor — a cluster document edit is drift on every
-// machine at once, which is exactly the case the conductor sequences.
+// order for the cluster document. With no facts, the verdict is
+// Unknown. When the boot ran the current document, the machine is
+// converged, and this case also withdraws a stale staged copy and
+// clears a spent rejection. A document init rejected last boot holds
+// rather than re-staging. With nowhere durable to stage, the
+// condition says so. Otherwise the drift is staged, and the reboot
+// follows the Machine's rebootPolicy (the one knob governing both
+// kinds of staging) and its turn with the rollout conductor. A
+// cluster document edit is drift on every machine at once, which is
+// exactly the case the conductor sequences.
 //
 // bootHash is the *canonical* hash of the document this boot ran
-// (bootClusterHash below), never facts.Boot.ClusterManifestHash: the
+// (bootClusterHash below), never facts.Boot.ClusterManifestHash. The
 // facts hash raw bytes, and a hand-written seed and the operator's
-// rendering of the same spec are different bytes saying the same
-// thing. Drift is a difference in meaning; rebooting a fleet over
-// formatting would be absurd.
+// rendering of the same spec are different bytes with the same
+// meaning. Drift is a difference in meaning, and a difference in
+// formatting alone must never reboot a fleet.
 func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, facts *machine.MachineStatus, rejection *machine.Rejection, bootHash, stagedHash string, t turn) convergence {
 	if facts == nil || facts.Boot.ManifestSource == "" {
 		return convergence{condition: machine.Condition{
@@ -132,9 +131,10 @@ func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, fact
 		}
 	}
 
-	// The rejection comes from the durable record, not from facts:
-	// facts are the boot's frozen memory, and a rejection cleared by
-	// a revert must unblock a retry within the same boot.
+	// The rejection comes from the durable record, not from facts.
+	// Facts are a snapshot taken at boot and never change while the
+	// machine runs, but a rejection cleared by a revert must unblock
+	// a retry within the same boot.
 	if r := rejection; r != nil && r.Hash == hash {
 		return convergence{condition: clusterNotConverged("RejectedLastBoot",
 			fmt.Sprintf("init rejected this exact cluster document at boot: %s; edit the cluster to something different", r.Reason))}
@@ -165,7 +165,7 @@ func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, fact
 }
 
 // readStagedClusterHash is readStagedHash for the cluster document's
-// store: the identity of whatever waits there, "" when nothing does.
+// store: the hash of whatever is staged there, or "" when nothing is.
 func readStagedClusterHash() string {
 	raw, _ := machine.ClusterManifests(machine.MachineStateDir).LoadStaged()
 	if raw == nil {
@@ -177,8 +177,9 @@ func readStagedClusterHash() string {
 // bootClusterHash canonicalizes the document this boot ran: read the
 // bytes init published, parse them, re-render them the way the
 // operator renders everything, and hash that. Both sides of the
-// drift comparison pass through the same rendering, so only meaning
-// can differ. "" means the publication is missing or unreadable.
+// drift comparison pass through the same rendering, so any remaining
+// difference is a difference in content, not formatting. "" means
+// the publication is missing or unreadable.
 func bootClusterHash(path string) string {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -195,6 +196,11 @@ func bootClusterHash(path string) string {
 	return hash
 }
 
+// settleClusterLifecycle promotes whatever this boot proved. It runs
+// every reconcile pass and is idempotent: once promoted (or when a
+// newer document is staged for its own proving boot), there is
+// nothing left to do. The facts identify exactly which bytes this
+// boot ran; the operator promotes those bytes and nothing else.
 func settleClusterLifecycle(root, seedPath string, facts *machine.MachineStatus) {
 	if facts == nil || facts.Storage.MachineState.Backing != machine.BackingPartition {
 		return // nothing durable to settle
@@ -205,7 +211,7 @@ func settleClusterLifecycle(root, seedPath string, facts *machine.MachineStatus)
 	case machine.ManifestSourceStaged:
 		raw, err := store.LoadStaged()
 		if err != nil || raw == nil {
-			return // already promoted, or nothing to see
+			return // already promoted, or nothing staged
 		}
 		if machine.ManifestHash(raw) != facts.Boot.ClusterManifestHash {
 			// A newer document arrived since this boot: it hasn't had

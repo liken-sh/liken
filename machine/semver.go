@@ -1,17 +1,16 @@
 package machine
 
-// Comparing liken version numbers.
+// This file compares liken version numbers.
 //
 // The catalog on the Cluster names releases by version, and two
 // questions need an ordering over them: which catalog entry is the
 // newest (the NEWEST printer column), and later, whether a machine is
-// behind its target. Semantic versioning answers both, and the subset
-// liken needs — dotted numeric segments, with an optional pre-release
-// suffix that sorts before its release — is small enough to write
-// down rather than take a dependency for. What matters is that the
+// behind its target. Semantic versioning answers both. The subset
+// liken needs (dotted numeric segments, with an optional pre-release
+// suffix that sorts before its release) is small enough to write down
+// rather than take a dependency for. What matters is that the
 // comparison is numeric: as strings, "0.10.0" sorts before "0.9.0",
-// which is exactly the bug that makes naive version comparisons
-// famous.
+// which is the classic bug in naive version comparisons.
 
 import (
 	"strconv"
@@ -25,8 +24,8 @@ import (
 // "-") sorts before the release it precedes, pre-releases among
 // themselves comparing as plain strings. Full semver splits the
 // pre-release into dot-separated identifiers with their own numeric
-// rules; liken's releases don't lean on that, so string comparison
-// serves.
+// rules; liken's releases don't use that, so plain string comparison
+// is enough.
 func CompareVersions(a, b string) int {
 	aCore, aPre, _ := strings.Cut(a, "-")
 	bCore, bPre, _ := strings.Cut(b, "-")
@@ -58,9 +57,9 @@ func segment(parts []string, i int) string {
 }
 
 // compareSegments compares one dotted segment numerically, falling
-// back to string order when a segment isn't a number at all — a
-// malformed version still gets a stable, documented ordering instead
-// of a panic.
+// back to string order when a segment isn't a number at all, so that
+// a malformed version still gets a stable, documented ordering
+// instead of a panic.
 func compareSegments(a, b string) int {
 	an, aerr := strconv.Atoi(a)
 	bn, berr := strconv.Atoi(b)

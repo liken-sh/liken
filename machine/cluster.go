@@ -1,23 +1,24 @@
 package machine
 
-// The Cluster API: the document that describes what the machines
+// The Cluster API is the document that describes what the machines
 // form together.
 //
 // A Machine describes one computer; a Cluster describes the group.
-// The split follows who has to agree on what. Everything in a
-// ClusterSpec is a fact that every node must hold identically (which
-// machines run control planes, the address ranges pods and services
-// live in) or a fact about the group that no single machine owns (the
-// endpoint followers join through). Everything per-machine (this NIC,
-// this address, these disks) stays on the Machine.
+// What goes where is decided by who has to agree on it. Everything in
+// a ClusterSpec is either a fact that every node must hold identically
+// (which machines run control planes, the address ranges pods and
+// services live in) or a fact about the group that no single machine
+// owns (the endpoint followers join through). Everything specific to
+// one machine (its interfaces, its addresses, its disks) stays on the
+// Machine.
 //
 // Like the Machine manifest, the Cluster manifest is delivered as a
 // file in the image and seeded into the cluster as a custom resource
 // by the liken operator once the API is up. Unlike the Machine
-// manifest, the same cluster.yaml rides in every machine's image:
-// it's cluster-scoped truth, so there is exactly one, and "same image
-// = same cluster" is already how liken's identity works (the image
-// carries the cluster's CA and join token).
+// manifest, the same cluster.yaml is included in every machine's
+// image. The document is cluster-scoped, so there is exactly one, and
+// liken already equates "same image" with "same cluster": the image
+// carries the cluster's CA and join token.
 
 import (
 	"errors"
@@ -38,9 +39,9 @@ const ClusterManifestPath = "/etc/liken/cluster.yaml"
 // Role is what a machine is in its cluster. There are exactly two:
 // leaders run a control plane (an API server, a scheduler, the
 // datastore), followers run workloads and take direction from the
-// leaders. k3s calls these "server" and "agent"; liken translates at
+// leaders. k3s calls these "server" and "agent". liken translates in
 // exactly one place, the moment it execs k3s (supervisor.go), and
-// speaks leader/follower everywhere else.
+// uses leader/follower everywhere else.
 type Role string
 
 const (
@@ -60,19 +61,19 @@ type Cluster struct {
 // written by the leaders (see operator/fleet.go): they are the only
 // machines positioned to observe the fleet, because a follower that
 // can reach the API is by definition reaching a leader. The staged
-// and proven copies of the Cluster document carry spec only — status
-// never lands in the lifecycle bytes, because observations aren't
+// and proven copies of the Cluster document carry spec only. Status
+// never appears in the lifecycle bytes, because observations aren't
 // part of the document's identity.
 //
 // The conditions are the real observations and the phase is their
-// one-word summary, exactly the Machine's arrangement: Ready when
+// one-word summary, the same arrangement the Machine uses: Ready when
 // every machine is Ready, Updating when the only machines not Ready
 // are mid-transition (rebooting into a change, waiting on one, or
 // booting), and Degraded when any machine is Lost, Blocked, or
-// otherwise unwell. One thing this status can never honestly show:
-// quorum lost. Losing a majority of leaders takes the API server
-// down with it, so there is nobody left to write — a frozen status
-// is itself the symptom.
+// otherwise unhealthy. One state this status can never show is quorum
+// loss. Losing a majority of leaders takes the API server down with
+// it, so there is nobody left to write the status; when quorum is
+// lost, the symptom is a status that stops updating.
 type ClusterStatus struct {
 	Phase      Phase                 `json:"phase,omitempty"`
 	Machines   MachineTally          `json:"machines,omitzero"`
@@ -81,17 +82,17 @@ type ClusterStatus struct {
 }
 
 // ClusterReleasesStatus is what the sweep observes about the release
-// catalog. Newest is the catalog's highest version — derived, like
-// every status field, so a printer column can show "the catalog
-// offers 0.3.0" next to "the target is 0.2.0" without anyone doing
-// version arithmetic at the terminal.
+// catalog. Newest is the catalog's highest version. Like every status
+// field it is derived, and it exists so a printer column can show
+// "the catalog offers 0.3.0" next to "the target is 0.2.0" without
+// anyone comparing versions at the terminal.
 type ClusterReleasesStatus struct {
 	Newest string `json:"newest,omitempty"`
 }
 
-// MachineTally is the cluster's headcount: how many of its Machines
-// are fully healthy (phase Ready with a fresh heartbeat) out of how
-// many exist. Summary is the same two numbers as "4/5", stored
+// MachineTally counts the cluster's Machines: how many are fully
+// healthy (phase Ready with a fresh heartbeat) out of how many exist.
+// Summary holds the same two numbers formatted as "4/5", stored
 // because a CRD printer column can read one field but can't combine
 // two.
 type MachineTally struct {
@@ -106,22 +107,23 @@ type ClusterSpec struct {
 	// is a leader exactly when its name appears here, so promoting a
 	// follower is one Cluster edit, not a coordinated pair of Machine
 	// edits. One name means k3s keeps its state in sqlite; more than
-	// one means embedded etcd, whose majority quorum wants an odd
-	// count — three voices, not two or four. No admission rule
-	// enforces that, on purpose: growing one leader to three in a
-	// single edit never passes through two, and a transient even
-	// state is not worth refusing at the door.
+	// one means embedded etcd, whose majority quorum calls for an odd
+	// count of leaders: three, not two or four. No admission rule
+	// enforces the odd count, deliberately. Growing from one leader
+	// to three in a single edit never passes through two, and a
+	// transient even state is not worth rejecting.
 	Leaders []string `json:"leaders,omitempty"`
 
 	// Endpoint is the URL followers join the cluster through, e.g.
-	// https://10.10.0.1:6443. It is first contact only: after
-	// joining, k3s agents maintain a client-side load balancer that
-	// learns every leader's address, so a dead endpoint strands only
-	// brand-new followers, never running ones (and followers' time
-	// queries ask each leader by its own address, bypassing this
-	// entirely). It stays one explicit input on purpose: an endpoint
-	// that should outlive any single leader — a DNS name, a virtual
-	// IP — is a deployment's choice to make, never the OS's.
+	// https://10.10.0.1:6443. It is used for first contact only:
+	// after joining, k3s agents maintain a client-side load balancer
+	// that learns every leader's address, so a dead endpoint strands
+	// only brand-new followers, never running ones. (Followers' time
+	// queries ask each leader by its own address and bypass the
+	// endpoint entirely.) It is deliberately a single explicit input.
+	// An endpoint that should outlive any single leader, such as a
+	// DNS name or a virtual IP, is a choice for the deployment to
+	// make, never the OS.
 	Endpoint string `json:"endpoint,omitempty"`
 
 	// Network holds the network facts k3s requires every node to agree
@@ -131,8 +133,8 @@ type ClusterSpec struct {
 
 	// Time is the cluster's time hierarchy: where the leaders get
 	// their time. It lives on the Cluster for the same reason the
-	// network plan does — clocks are a fact the whole fleet must
-	// agree on, and TLS (so the cluster itself) stops working when
+	// network plan does: clocks are a fact the whole fleet must agree
+	// on, and TLS (and with it the cluster itself) stops working when
 	// they don't.
 	Time ClusterTimeSpec `json:"time,omitzero"`
 
@@ -141,30 +143,30 @@ type ClusterSpec struct {
 	Disruption ClusterDisruptionSpec `json:"disruption,omitzero"`
 
 	// Version is the fleet's target liken release: the one field an
-	// upgrade edits. Machines carry no version in their specs — each
-	// machine's operator compares the version its boot reported
-	// (status.version.liken) against this target, live, and moves
-	// toward it through the same staged-change-and-granted-reboot
-	// machinery every other change rides. Declaring it here and only
-	// here is what makes an upgrade one edit instead of one per
-	// machine.
+	// upgrade edits. Machines carry no version in their specs.
+	// Instead, each machine's operator compares the version its boot
+	// reported (status.version.liken) against this target, live, and
+	// moves toward it through the same staged-change-and-granted-reboot
+	// machinery that applies every other change. Declaring the version
+	// here and only here is what makes an upgrade one edit instead of
+	// one per machine.
 	Version string `json:"version,omitempty"`
 
 	// Releases is where release artifacts come from and which
-	// releases exist: the catalog Version must name its target in
-	// (an admission rule on the CRD enforces that, so a typo'd
-	// target is refused at the door instead of blocking machines).
+	// releases exist: the catalog Version must name its target in.
+	// An admission rule on the CRD enforces that, so a mistyped
+	// target is rejected at admission instead of blocking machines.
 	Releases ClusterReleasesSpec `json:"releases,omitzero"`
 }
 
 // ClusterReleasesSpec is the cluster's release feed. Version and
-// Releases are deliberately *live-consumed*: the operator reads them
+// Releases are deliberately consumed live: the operator reads them
 // from the in-cluster resource on every pass, and the canonical
 // cluster document that machines stage and reboot into excludes them
-// (operator/cluster.go's renderCluster) — publishing a release or
-// retargeting the fleet must move machines through downloads and
-// sequenced reboots, never stage a fleet-wide configuration change of
-// its own.
+// (operator/cluster.go's renderCluster). This split means publishing
+// a release or retargeting the fleet moves machines through downloads
+// and sequenced reboots, and never stages a fleet-wide configuration
+// change of its own.
 type ClusterReleasesSpec struct {
 	// Source is the base URL releases are served under. A release's
 	// artifacts live at <source>/<version>/, starting with
@@ -187,10 +189,10 @@ type ReleaseCatalogEntry struct {
 }
 
 // Entry finds one version's catalog entry, nil when the catalog
-// doesn't list it. The CRD holds spec.version to catalog membership
-// at admission, so for the target this lookup should always succeed;
-// callers still handle nil, because an API server's promise is not a
-// substitute for a nil check.
+// doesn't list it. The CRD requires spec.version to be a catalog
+// member at admission, so for the target this lookup should always
+// succeed. Callers still handle nil rather than relying on that
+// admission rule.
 func (s ClusterReleasesSpec) Entry(version string) *ReleaseCatalogEntry {
 	for i := range s.Catalog {
 		if s.Catalog[i].Version == version {
@@ -205,16 +207,18 @@ func (s ClusterReleasesSpec) Entry(version string) *ReleaseCatalogEntry {
 // fleet: how many machines may be voluntarily down at the same time.
 // It governs only disruptions the cluster chooses (rolling reboots to
 // apply staged changes); it cannot promise anything about machines
-// that fail on their own — though the rollout counts those against
-// the budget too, so a hurting fleet pauses its own rollout.
+// that fail on their own. The rollout does count failed machines
+// against the budget, though, so a fleet that is already losing
+// machines pauses its own rollout.
 type ClusterDisruptionSpec struct {
 	// MaxUnavailable is how many machines may be unavailable at once,
 	// planned and unplanned together. Zero means unset and defaults
 	// to 1: one machine at a time is the safest rollout and the right
 	// answer for small fleets. The leaders have a stricter, automatic
 	// floor regardless of this number: only one leader may ever be
-	// down at a time, because the datastore's quorum is arithmetic,
-	// not policy.
+	// down at a time. That floor is not a policy choice; losing more
+	// leaders at once could cost the datastore its majority quorum,
+	// and no budget setting can change that arithmetic.
 	MaxUnavailable int `json:"maxUnavailable,omitempty"`
 }
 
@@ -233,11 +237,12 @@ func (d ClusterDisruptionSpec) MaxUnavailableOrDefault() int {
 // everyone else.
 type ClusterTimeSpec struct {
 	// Upstreams are the NTP servers the cluster's leaders sync from,
-	// as hostnames or addresses. There is no default — a distro that
-	// shipped pool.ntp.org here would volunteer every deployment's
-	// machines to a volunteer service without asking. An empty list
-	// is legal and means the fleet free-runs: internally consistent,
-	// correct only if the hardware clocks happen to be.
+	// as hostnames or addresses. There is no default: a distro that
+	// shipped pool.ntp.org here would sign every deployment's
+	// machines up for a volunteer-run service without asking. An
+	// empty list is legal and means the fleet free-runs: the machines
+	// stay consistent with each other, but they are only correct if
+	// the hardware clocks happen to be.
 	Upstreams []string `json:"upstreams,omitempty"`
 }
 
@@ -245,11 +250,11 @@ type ClusterTimeSpec struct {
 // optional: whatever is left unset falls to k3s's defaults, and the
 // value of writing one here is that every node provably agrees on it.
 type ClusterNetworkSpec struct {
-	// NodeCIDR is the subnet the nodes address each other on: the wire
-	// the cluster speaks over. A machine may have several interfaces
-	// (an internet uplink, a management port); the one whose address
-	// falls inside this subnet is the one Kubernetes traffic uses, and
-	// its address becomes the machine's node IP.
+	// NodeCIDR is the subnet the nodes address each other on: the
+	// network all cluster traffic crosses. A machine may have several
+	// interfaces (an internet uplink, a management port); the one
+	// whose address falls inside this subnet is the one Kubernetes
+	// traffic uses, and its address becomes the machine's node IP.
 	NodeCIDR string `json:"nodeCIDR,omitempty"`
 
 	// ClusterCIDR is the range pod addresses are drawn from
@@ -270,9 +275,9 @@ type ClusterNetworkSpec struct {
 }
 
 // Role is what a machine should be in this cluster. A nil Cluster
-// answers leader: a machine with no cluster manifest is alone, and a
-// machine alone is its own single-node cluster, which is exactly what
-// liken has always booted.
+// answers leader: a machine with no cluster manifest is on its own,
+// and a machine on its own runs as its own single-node cluster, which
+// is liken's default arrangement.
 func (c *Cluster) Role(machineName string) Role {
 	if c == nil || slices.Contains(c.Spec.Leaders, machineName) {
 		return RoleLeader
@@ -282,8 +287,8 @@ func (c *Cluster) Role(machineName string) Role {
 
 // ParseCluster reads a Cluster manifest from its bytes, strictly, for
 // the same reason Machine parsing is strict: a misspelled field
-// should be an error someone sees, not a setting that silently never
-// applies.
+// should produce an error someone sees, rather than becoming a
+// setting that silently never applies.
 func ParseCluster(raw []byte) (*Cluster, error) {
 	c := &Cluster{}
 	if err := yaml.UnmarshalStrict(raw, c); err != nil {
@@ -296,9 +301,9 @@ func ParseCluster(raw []byte) (*Cluster, error) {
 }
 
 // LoadCluster reads the Cluster manifest from a file. A machine with
-// no cluster manifest gets nil: a valid, single-node arrangement (see
-// Role). A manifest that exists but doesn't parse is a configuration
-// error and is reported as one.
+// no cluster manifest gets nil, which is a valid, single-node
+// arrangement (see Role). A manifest that exists but doesn't parse is
+// a configuration error and is reported as one.
 func LoadCluster(path string) (*Cluster, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {

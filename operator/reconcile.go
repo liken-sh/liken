@@ -1,6 +1,7 @@
 package main
 
-// The reconcile loop's working half: observe, act, report.
+// This file is the working half of the reconcile loop: each pass
+// observes the machine, acts on the spec, and reports status.
 
 import (
 	"encoding/json"
@@ -26,8 +27,8 @@ func getMachine(c *apiClient, name string) (*machine.Machine, error) {
 // retry-forever loop covers the operator's first minutes: k3s applies
 // the Machine CRD from its manifests directory around the same time
 // it starts this pod, and until the API server is serving that CRD,
-// our URLs 404. Waiting beats crashing here, because the 404 is
-// expected, not exceptional.
+// our URLs 404. The loop waits instead of crashing because that 404
+// is expected during startup, not a sign of anything wrong.
 func ensureMachine(c *apiClient, seed *machine.Machine) (*machine.Machine, error) {
 	for {
 		current, err := getMachine(c, seed.Metadata.Name)
@@ -61,12 +62,12 @@ func ensureMachine(c *apiClient, seed *machine.Machine) (*machine.Machine, error
 	}
 }
 
-// ensureCluster makes the manifest's Cluster real in the cluster,
-// with the same wait-for-the-CRD patience as ensureMachine and one
-// extra tolerated answer: 409 Conflict. Every machine's operator
-// races to create the same object at boot; the losers' POSTs conflict
-// with the winner's, and the loop's next GET confirms the object
-// exists, which is all anyone wanted.
+// ensureCluster makes the manifest's Cluster real in the cluster. It
+// waits out an unserved CRD the same way ensureMachine does, and it
+// tolerates one extra answer: 409 Conflict. Every machine's operator
+// races to create the same object at boot, so all but one of those
+// POSTs will conflict. That conflict is harmless: the loop's next GET
+// confirms the object exists, which is the only outcome that matters.
 func ensureCluster(c *apiClient, seed *machine.Cluster) error {
 	for {
 		if _, err := getCluster(c, seed.Metadata.Name); err == nil {
@@ -163,11 +164,12 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 	}
 	status.Conditions = machine.SetCondition(m.Status.Conditions, factsCondition(err), now)
 
-	// The operator's existence is the proof a staged cluster document
-	// was waiting for: if this line runs, the machine joined its
-	// cluster under whatever document this boot ran (cluster.go). The
-	// same evidence, plus this binary's own version stamp, is what
-	// promotes a system release's proving boot (release.go).
+	// The operator's own existence is the evidence that promotes a
+	// staged cluster document: if this line runs, the machine joined
+	// its cluster under whatever document this boot ran (cluster.go).
+	// The same evidence, together with the version this boot reported
+	// in the facts, is what promotes a system release's proving boot
+	// (release.go).
 	settleClusterLifecycle(machine.MachineStateDir, machine.ClusterManifestPath, facts)
 	settleSystemReleaseLifecycle(machine.MachineStateDir, facts)
 
@@ -182,11 +184,12 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 	status.Conditions = machine.SetCondition(status.Conditions,
 		machine.StorageCondition(m.Spec.Storage, status.Storage), now)
 
-	// The machine's standing with the rollout conductor: a standalone
-	// machine reboots at will, a cluster member only on a granted
-	// turn. The grant is a condition the conductor wrote onto this
-	// Machine (rollout.go); this operator reads it, carries it along
-	// in its own status writes, and never sets or clears it.
+	// t is this machine's standing with the rollout conductor. A
+	// standalone machine reboots at will; a cluster member reboots
+	// only on a granted turn. The grant is a condition the conductor
+	// wrote onto this Machine (rollout.go); this operator reads it,
+	// carries it along in its own status writes, and never sets or
+	// clears it.
 	t := turnStandalone
 	if clusterName != "" {
 		t = turnAwaiting
@@ -195,25 +198,27 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 		}
 	}
 
-	// The machine's own Node, read once and used three ways: the
+	// Read the machine's own Node once; it serves three purposes: the
 	// NodeHealthy condition, demotion cleanup, and the cordon state
-	// the drain works through. The read can fail benignly
-	// (mid-demotion, the Node is deleted and not yet re-registered);
-	// that pass just skips all three and the next one settles them.
+	// the drain works through. The read can fail benignly, because
+	// mid-demotion the Node is deleted and not yet re-registered. A
+	// pass where the read fails simply skips all three, and the next
+	// pass settles them.
 	node, nodeErr := getNode(c, m.Metadata.Name)
 
-	// Convergence: does the cluster's copy of each document match what
-	// this boot actuated, and if not, stage the difference for the
-	// next boot (converge.go for the Machine, cluster.go for the
-	// Cluster). The decisions are pure; carryOutConvergence performs
-	// their side effects against each document's own store.
-	// The rejection records come from the durable store, not from
-	// facts: facts are the boot's frozen memory, and a rejection
-	// cleared mid-boot (by an edit that reverted) must unblock a
-	// retry without waiting for a reboot to refresh the facts.
-	// A granted reboot goes through the drain first (drain.go): the
-	// node is cordoned and emptied before the intent is written, so
-	// workloads move instead of dying with the machine.
+	// Convergence checks whether the cluster's copy of each document
+	// matches what this boot actuated, and if not, stages the
+	// difference for the next boot (converge.go for the Machine,
+	// cluster.go for the Cluster). The decisions are pure functions;
+	// carryOutConvergence performs their side effects against each
+	// document's own store. The rejection records come from the
+	// durable store, not from facts: facts are a snapshot taken at
+	// boot and never change while the machine runs, but a rejection
+	// cleared mid-boot (by an edit that reverted) must unblock a retry
+	// without waiting for a reboot to refresh the facts. A granted
+	// reboot goes through the drain first (drain.go): the node is
+	// cordoned and emptied before the intent is written, so workloads
+	// move to other nodes instead of being killed by the reboot.
 	draining := false
 	gate := func(conv convergence) convergence {
 		if !conv.requestReboot || t != turnGranted || nodeErr != nil {
@@ -251,13 +256,13 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 		rebooting = rebooting || cconv.requestReboot
 
 		// The version target converges through its own machinery: a
-		// download aimed at the inactive slot, running on the
-		// fetcher's goroutine so this pass — and the heartbeat below —
-		// never waits on a socket (release.go decides, fetch.go moves
-		// the bytes). Once the download verifies, the story rejoins
-		// the common road: a staged SystemRelease record, the reboot
-		// chain, the drain gate — the same carryOutConvergence as the
-		// other two documents.
+		// download aimed at the inactive slot. The download runs on
+		// the fetcher's goroutine so that this pass, and the heartbeat
+		// below, never wait on a socket (release.go decides, fetch.go
+		// moves the bytes). Once the download verifies, the rest works
+		// like the other two documents: a staged SystemRelease record,
+		// the reboot chain, the drain gate, and the same
+		// carryOutConvergence.
 		if liveCluster != nil {
 			systemStore := machine.SystemReleases(machine.MachineStateDir)
 			systemRejection, _ := systemStore.LoadRejection()
@@ -280,23 +285,25 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 		// API directly, so it can keep reporting a healthy-looking
 		// machine while the kubelet beneath it is dead. The kubelet's
 		// own heartbeat (its node lease, which the node controller
-		// turns into the Node's Ready condition) is the witness that
+		// turns into the Node's Ready condition) is the evidence that
 		// the machine is actually serving the cluster, not just
 		// reachable.
 		status.Conditions = machine.SetCondition(status.Conditions, nodeHealthyCondition(node), now)
 
 		// Demotion cleanup (demotion.go): a follower whose Node object
-		// still claims control-plane was just demoted, and the stale
-		// Node — with its registered etcd membership — must go.
+		// still claims control-plane was just demoted. That stale Node
+		// carries a registered etcd membership, so it has to be
+		// deleted.
 		d := decideDemotion(status.Role, node.Metadata.Labels, m.Spec.RebootPolicyOrDefault(), t)
 		condition := carryOutDemotion(c, m.Metadata.Name, d)
 		status.Conditions = machine.SetCondition(status.Conditions, condition, now)
 		rebooting = rebooting || d.cleanup
 
-		// A cordon this operator set and no longer needs — the reboot
-		// happened, the machine converged — goes back to the
-		// scheduler. Only our own: decideUncordon leaves a human's
-		// cordon standing.
+		// When this operator set a cordon and no longer needs it,
+		// because the reboot happened and the machine converged, the
+		// node goes back to the scheduler. This only applies to
+		// cordons the operator set itself: decideUncordon leaves a
+		// human's cordon standing.
 		if !rebooting && !draining && decideUncordon(node) {
 			if err := c.patchJSON(nodesPath+"/"+node.Metadata.Name, uncordonPatch()); err != nil {
 				fmt.Printf("uncordoning %s: %v\n", node.Metadata.Name, err)
@@ -308,9 +315,9 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 
 	// Ready is the roll-up: True exactly when every other condition
 	// is. The scan skips any prior Ready so the previous pass's value
-	// can't affect this one, and skips the conductor's grant — a
-	// grant is a token, not an observation about this machine's
-	// health.
+	// can't affect this one. It also skips the conductor's grant,
+	// because the grant is a permission token, not an observation
+	// about this machine's health.
 	ready := machine.Condition{Type: "Ready", Status: "True", Reason: "Reconciled"}
 	for _, condition := range status.Conditions {
 		if condition.Type == "Ready" || condition.Type == rebootApprovedCondition {
@@ -326,11 +333,12 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 	status.Conditions = machine.SetCondition(status.Conditions, ready, now)
 
 	// Every condition this pass publishes judged the spec at this
-	// generation: the API server bumps metadata.generation on spec
-	// writes only, so stamping it here is what lets a consumer tell a
-	// verdict on the current spec from a verdict on one already
-	// edited past. The conductor's grant keeps its own stamp — it
-	// isn't this writer's verdict to restamp.
+	// generation. The API server bumps metadata.generation on spec
+	// writes only, so stamping it here lets a consumer tell a verdict
+	// on the current spec apart from a verdict on a spec that has
+	// since been edited. The conductor's grant keeps its own stamp:
+	// it is the conductor's verdict, and this writer must not restamp
+	// it.
 	for i := range status.Conditions {
 		if status.Conditions[i].Type == rebootApprovedCondition {
 			continue
@@ -347,22 +355,24 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 	}
 
 	// The heartbeat: renew this machine's lease so the fleet can tell
-	// this status is current and not the last words of a dead machine
-	// (lease.go on why a lease and not a status field). Deliberately
-	// separate from the status write above: status changes when the
-	// machine's story changes, the heartbeat proves the storyteller
-	// is alive, and conflating them made every heartbeat rewrite the
-	// whole object. A status write can fail while the heartbeat
-	// stands, and that's correct — the machine is alive and will
-	// retry.
+	// that this status is current, not the final report of a machine
+	// that has since died (lease.go explains why this is a lease and
+	// not a status field). The heartbeat is deliberately separate from
+	// the status write above. Status is written when the machine's
+	// state changes; the heartbeat proves the reporter is alive; and
+	// combining them would make every heartbeat rewrite the whole
+	// object. A status write can fail while the heartbeat still
+	// lands, and that is the correct outcome: the machine is alive
+	// and will retry the status write.
 	renewMachineHeartbeat(c, m.Metadata.Name, now)
 
-	// Fleet-level work is the leaders': mark silent machines Lost and
-	// keep the Cluster's headcount current. Every leader is *able* to
-	// sweep, but only the one holding the lease does (lease.go), so
-	// the fleet has one watcher at a time and a warm line of
-	// successors. This machine's own status write has already landed,
-	// so the sweep sees its own heartbeat fresh like everyone else's.
+	// Fleet-level work belongs to the leaders: mark silent machines
+	// Lost and keep the Cluster's headcount current. Every leader is
+	// *able* to sweep, but only the one holding the lease does
+	// (lease.go). That gives the fleet exactly one sweeper at a time,
+	// with the other leaders ready to take over. This machine's own
+	// status write has already landed, so the sweep sees its own
+	// heartbeat fresh like everyone else's.
 	if liveCluster != nil && status.Role == machine.RoleLeader && holdFleetLease(c, m.Metadata.Name, now) {
 		sweepFleet(c, m.Metadata.Name, liveCluster, now)
 	}
@@ -433,13 +443,13 @@ func sysctlsCondition(err error) machine.Condition {
 
 // publishStatus writes through the status subresource: a separate
 // endpoint (…/machines/<name>/status) that updates *only* the status
-// half of the object, so a controller can never accidentally rewrite
-// the spec it takes orders from, and RBAC can grant the two halves
+// half of the object. That means a controller can never accidentally
+// rewrite the spec it is acting on, and RBAC can grant the two halves
 // separately. The write is a PUT carrying the object's resourceVersion:
 // if anything else changed the object in between, the server answers
 // 409 Conflict instead of applying our stale copy. The caller's next
-// pass re-reads and tries again: optimistic concurrency, the way every
-// Kubernetes controller handles contention.
+// pass re-reads and tries again. This is optimistic concurrency, and
+// it is how every Kubernetes controller handles contention.
 func publishStatus(c *apiClient, m *machine.Machine, status *machine.MachineStatus) error {
 	updated := *m
 	updated.Status = *status
@@ -496,8 +506,8 @@ func watchMachine(c *apiClient, name, resourceVersion string, events chan<- *mac
 				}
 				resourceVersion = event.Object.Metadata.ResourceVersion
 				if event.Type == "BOOKMARK" {
-					// A resume-point refresh, not a change: nothing to
-					// reconcile.
+					// A bookmark only refreshes the resume point; there
+					// is no change to reconcile.
 					continue
 				}
 				events <- &event.Object

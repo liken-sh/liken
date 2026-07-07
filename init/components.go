@@ -2,44 +2,45 @@ package main
 
 // The machine plane.
 //
-// liken has exactly two planes, and no third. Machine-plane concerns
-// — the loops a machine needs to be a machine: reaping, watching for
-// reboot intents, keeping the clock synchronized — run as goroutines
-// inside init, registered here. Workload-plane software runs as processes
-// under k3s, and k3s itself is the only child process init ever
-// supervises. A traditional distro keeps a middle tier of system
-// daemons (a time daemon, a device daemon, a log daemon) under a
-// service manager; liken deliberately has none, which is why this
-// file replaces most of what a service manager does.
+// liken has exactly two planes. Machine-plane concerns are the loops
+// a machine needs in order to function as a machine: reaping,
+// watching for reboot intents, keeping the clock synchronized. They
+// run as goroutines inside init, registered here. Workload-plane
+// software runs as processes under k3s, and k3s itself is the only
+// child process init ever supervises. A traditional distro keeps a
+// middle tier of system daemons (a time daemon, a device daemon, a
+// log daemon) under a service manager; liken deliberately has none,
+// which is why this file replaces most of what a service manager
+// does.
 //
-// Admission to the machine plane is strict: a concern belongs here
-// only when k3s depends on it to exist. Anything the cluster could
-// host for itself belongs in the cluster, where Kubernetes is the
-// supervisor. Time qualifies because a machine with a skewed clock
-// fails TLS and can't join the cluster that would have fixed it; a
-// concern without that kind of claim gets pushed in-cluster, not
-// adopted by init.
+// A concern belongs on the machine plane only when k3s depends on it
+// to exist. Anything the cluster could host for itself belongs in
+// the cluster, where Kubernetes is the supervisor. Time qualifies
+// because a machine with a skewed clock fails TLS and can't join the
+// cluster, so the cluster can never correct the clock for it. A
+// concern that k3s doesn't depend on runs in the cluster instead of
+// in init.
 //
-// Running everything in one process is a real trade. What it buys:
-// dependency ordering is program order, restart policy is a for
-// loop, state is shared structs instead of IPC, and the whole
-// machine plane ships and upgrades as one binary. What it costs: no
-// privilege separation (every goroutine is PID 1, all root), and
-// imperfect fault isolation — recover catches a panic, but a fatal
-// runtime error (concurrent map misuse, out of memory) ends all of
-// PID 1, which the kernel answers with a panic of its own. liken
-// accepts that because it is crash-only by design: the root is RAM,
-// manifests are proven before they're trusted, and a reboot lands
-// the machine in a known-good state.
+// Running everything in one process is a real trade-off. It buys
+// simplicity: dependency ordering is program order, restart policy
+// is a for loop, state is shared structs instead of IPC, and the
+// whole machine plane ships and upgrades as one binary. It costs
+// isolation: there is no privilege separation (every goroutine is
+// PID 1, all root), and fault isolation is imperfect. recover
+// catches a panic, but a fatal runtime error (concurrent map misuse,
+// out of memory) ends all of PID 1, which the kernel answers with a
+// panic of its own. liken accepts that because it is crash-only by
+// design: the root is RAM, manifests are proven before they're
+// trusted, and a reboot lands the machine in a known-good state.
 //
-// The escape hatch is part of the rule: a component earns promotion
-// to a child process — this same binary re-exec'd with an argv verb,
-// the multi-call pattern, so the OS stays one artifact — only when
-// it parses untrusted network input, needs fewer privileges than
-// PID 1, or must not take the machine down when it fatals. The NTP
-// responder, which reads unauthenticated UDP, is the first named
-// candidate; it starts as a goroutine and is promoted in a hardening
-// pass, not before.
+// The rule includes an escape hatch. A component is promoted to a
+// child process only when it parses untrusted network input, needs
+// fewer privileges than PID 1, or must not take the machine down
+// when it fatals. The child is this same binary re-exec'd with an
+// argv verb (the multi-call pattern), so the OS stays one artifact.
+// The NTP responder, which reads unauthenticated UDP, is the first
+// named candidate; it starts as a goroutine and is promoted in a
+// hardening pass, not before.
 //
 // The contract with a component is small: it's a function of a
 // context, and it runs until its work is done or the context is
@@ -48,10 +49,10 @@ package main
 // component that reports on a boot milestone simply returns when
 // the milestone is reached. A panic is logged with its stack and
 // restarted with backoff, instead of unwinding PID 1 into a kernel
-// panic. Shutdown runs the dependency stack in reverse — k3s and
-// its containers stop first, then this plane is cancelled, then
-// filesystems unmount — and the wait is bounded, so one stuck loop
-// can't stall a reboot.
+// panic. Shutdown runs the dependency stack in reverse: k3s and its
+// containers stop first, then this plane is cancelled, then
+// filesystems unmount. The wait is bounded, so one stuck loop can't
+// stall a reboot.
 
 import (
 	"context"
@@ -84,7 +85,7 @@ type machinePlane struct {
 	maxBackoff time.Duration
 
 	// The names still running, so a shutdown that times out can say
-	// *which* component ignored it — on a machine with no shell, the
+	// *which* component ignored it. On a machine with no shell, the
 	// console message is the only place that fact can surface.
 	mu      sync.Mutex
 	running map[string]bool
@@ -103,7 +104,7 @@ func newMachinePlane() *machinePlane {
 
 // start registers a component and runs it until it finishes or the
 // plane shuts down, restarting it on failure. start returns
-// immediately and there is no way to await a component, on purpose:
+// immediately, and there is deliberately no way to await a component:
 // nothing in a boot sequences on another component's progress, and
 // anything that must happen before k3s starts is called
 // synchronously from main instead.
@@ -165,9 +166,9 @@ func runComponent(ctx context.Context, run func(context.Context) error) (err err
 // The point is fleet behavior, not this machine: a power event
 // reboots every machine together, their components fail together
 // (the network isn't up, a leader isn't back), and identical backoff
-// keeps the whole herd retrying in lockstep. A random share spreads
-// the retries out, so recovery arrives as a trickle instead of a
-// stampede.
+// would have every machine retrying at the same instants. A random
+// share spreads the retries out, so recovery load arrives gradually
+// rather than all at once.
 func withJitter(d time.Duration) time.Duration {
 	return d + rand.N(d/2)
 }
@@ -175,8 +176,8 @@ func withJitter(d time.Duration) time.Duration {
 // sleepUnlessCancelled is the pause a polling component takes between
 // looks: it reports false when the plane is shutting down, the
 // signal to return instead of polling again. Plain time.Sleep is off
-// limits inside a component for exactly this reason — a sleeping
-// loop can't hear its cancellation.
+// limits inside a component for exactly this reason: a loop blocked
+// in time.Sleep cannot observe its cancellation.
 func sleepUnlessCancelled(ctx context.Context, d time.Duration) bool {
 	select {
 	case <-ctx.Done():

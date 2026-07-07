@@ -222,8 +222,8 @@ func TestAChangedAskClearsTheHold(t *testing.T) {
 	f.Ensure(askFor(bad, server.URL, slot))
 	awaitSettled(t, f)
 
-	// The corrected release is published under a new version — the
-	// recovery the design prescribes — and the new ask fetches.
+	// The corrected release is published under a new version, which
+	// is the recovery the design prescribes, and the new ask fetches.
 	good := makeRelease("0.2.1")
 	goodServer := serveRelease(t, good, new(atomic.Int64))
 	f.Ensure(askFor(good, goodServer.URL, slot))
@@ -263,9 +263,9 @@ func TestServerFailuresAreTransientAndRetried(t *testing.T) {
 		t.Fatalf("a down server is a transient failure: %+v", snap)
 	}
 
-	// The retry must carry the failure's story: the restarted state is
-	// the only one a reconcile pass ever reads, so the reason the last
-	// attempt died has to ride along in it.
+	// The retry must carry the failure's reason: the restarted state
+	// is the only one a reconcile pass ever reads, so the reason the
+	// last attempt failed has to appear in it.
 	broken.Store(false)
 	if snap := f.Ensure(ask); snap.state != fetchRunning || !strings.Contains(snap.detail, "retrying after") {
 		t.Errorf("a retry should say what it's retrying after: %+v", snap)
@@ -290,8 +290,8 @@ func TestEnsureNeverBlocksOnTheDownload(t *testing.T) {
 	done := make(chan fetchSnapshot, 1)
 	go func() { done <- f.Ensure(ask) }()
 
-	// The heartbeat's guarantee, in miniature: Ensure returns while
-	// the server still hasn't answered a byte.
+	// This is the heartbeat's guarantee in miniature: Ensure must
+	// return while the server still hasn't answered a byte.
 	select {
 	case snap := <-done:
 		if snap.state != fetchRunning {

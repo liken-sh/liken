@@ -45,7 +45,8 @@ func TestReadRebootIntentRejectsGarbage(t *testing.T) {
 
 func TestWriteRebootIntentNeedsItsDirectory(t *testing.T) {
 	// The channel directory is init's to create; writing into a
-	// missing one is an error the operator reports, not papers over.
+	// missing one is an error the operator should report rather than
+	// hide.
 	err := WriteRebootIntent(filepath.Join(t.TempDir(), "absent"), &RebootIntent{Reason: "test"})
 	if err == nil {
 		t.Error("expected an error for a missing channel directory")
@@ -57,7 +58,7 @@ func TestRebootPolicyDefaultsToManual(t *testing.T) {
 		"":           RebootManual,
 		"Manual":     RebootManual,
 		"Auto":       RebootAuto,
-		"aggressive": RebootManual, // when in doubt, don't reboot
+		"aggressive": RebootManual, // an unrecognized policy must never reboot automatically
 	}
 	for in, want := range cases {
 		spec := MachineSpec{RebootPolicy: in}
@@ -68,8 +69,9 @@ func TestRebootPolicyDefaultsToManual(t *testing.T) {
 }
 
 func TestWriteRebootIntentNeedsItsChannel(t *testing.T) {
-	// The channel directory is init's to create; an operator writing
-	// before it exists is a bug to surface, not a directory to invent.
+	// The channel directory is init's to create. If the operator
+	// writes before it exists, that is a bug to surface, not a reason
+	// to create the directory.
 	intent := &RebootIntent{Reason: "testing"}
 	if err := WriteRebootIntent(filepath.Join(t.TempDir(), "absent"), intent); err == nil {
 		t.Error("a missing channel directory must be an error")

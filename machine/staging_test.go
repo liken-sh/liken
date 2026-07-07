@@ -182,7 +182,7 @@ func TestCrashBetweenRejectionNoteAndRename(t *testing.T) {
 
 func TestPromoteWithoutAStagedManifestFails(t *testing.T) {
 	// Promotion is only ever called on the manifest that just booted;
-	// a missing staged file at that moment is a bug worth hearing about.
+	// a missing staged file at that moment is a bug worth reporting.
 	if err := MachineManifests(t.TempDir()).Promote(); err == nil {
 		t.Error("expected an error promoting nothing")
 	}
