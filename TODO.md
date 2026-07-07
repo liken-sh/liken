@@ -699,7 +699,7 @@
            installer's first from-disk boot, the first moment a
            file-path boot exists to test; nothing beyond that boot
            builds on it untested.)
-    3. [ ] Self-install, the USB-stick story: `make install NODE=x`
+    3. [x] Self-install, the USB-stick story: `make install NODE=x`
            boots via -kernel one last time — QEMU playing the install
            medium the way an installer stick or PXE would — and init,
            seeing liken.install, claims the boot disk, verifies the
@@ -719,7 +719,15 @@
            entry). Prove it: a fresh node installs and boots to Ready
            from disk; killing QEMU mid-install and re-running
            converges, since claiming skips claimed disks and copying
-           re-verifies.
+           re-verifies. (Proven on node-5: the installer verified and
+           copied both artifacts, wrote Boot0002/Boot0003, and the
+           firmware boot came up "booted via Boot0002 (liken slot A)"
+           with the baked command line intact, rejoining the cluster
+           Ready — which also answered milestone risk 3: the EFI
+           stub's initrd= argument works under OVMF. A second install
+           run converged onto the same entry numbers with everything
+           re-verified in place. BOOT=disk is a knob rather than the
+           default until step 8 migrates the fleet.)
     4. [ ] The releases domain and the API: `make release VERSION=x`
            rebuilds init, operator, and image with the overridden
            version stamp into a separate build tree (the domain

@@ -146,6 +146,18 @@ run-once: $(KERNEL_DIST)/vmlinuz image/dist/liken.cpio
 run-lab: $(KERNEL_DIST)/vmlinuz image/dist/liken.cpio
 	$(MAKE) -C dev-cluster run-lab
 
+# The install image: liken.cpio carrying the release payload the
+# installer verifies and copies onto a machine's own disk.
+image/dist/install.cpio: image/dist/liken.cpio $(KERNEL_DIST)/vmlinuz image/install.sh
+	$(MAKE) -C image dist/install.cpio
+
+# Install a machine: boot it once from the "USB stick" (the install
+# image via -kernel), let it put this release on its own system
+# slots, and power off. `make run NODE=x BOOT=disk` boots it from
+# that disk ever after.
+install: image/dist/install.cpio
+	$(MAKE) -C dev-cluster install
+
 # Cleaning includes the dev cluster's disks: with every domain's
 # artifacts gone, stale machine state would be the only survivor, and
 # a "clean" boot that remembers its last cluster isn't clean.

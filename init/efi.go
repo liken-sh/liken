@@ -81,6 +81,122 @@ func readEFIVar(dir, name string) ([]byte, error) {
 	return raw[4:], nil
 }
 
+// fsImmutableFlag is the kernel's per-file immutable bit
+// (FS_IMMUTABLE_FL), part of the fixed ioctl ABI chattr speaks;
+// x/sys doesn't export it, so it's spelled out here the way the
+// ext4 superblock offsets are.
+const fsImmutableFlag = 0x00000010
+
+// efiVarAttrs is the attribute word every liken-written variable
+// carries: stored in NVRAM (survives power loss), visible to the
+// firmware's boot services, visible to the running OS. Boot entries
+// need all three — an entry the boot manager can't see boots nothing.
+const efiVarAttrs = 0x00000007 // NON_VOLATILE | BOOTSERVICE_ACCESS | RUNTIME_ACCESS
+
+// writeEFIVar writes one global variable: the attribute word and the
+// payload in a single write, which is how efivarfs insists variables
+// change (a partial variable is worse than none, so the filesystem
+// refuses piecemeal writes).
+//
+// The wrinkle is the immutable flag: the kernel marks every variable
+// file immutable so a stray `rm -rf /` can't brick the motherboard —
+// a real failure mode on early UEFI machines, and the reason this
+// helper exists instead of a plain WriteFile. Clearing it is two
+// ioctls on the existing file; a variable that doesn't exist yet has
+// no flag to clear.
+func writeEFIVar(dir, name string, payload []byte) error {
+	path := filepath.Join(dir, name+"-"+efiGlobalVariable)
+	if f, err := os.Open(path); err == nil {
+		flags, err := unix.IoctlGetInt(int(f.Fd()), unix.FS_IOC_GETFLAGS)
+		if err == nil && flags&fsImmutableFlag != 0 {
+			err = unix.IoctlSetPointerInt(int(f.Fd()), unix.FS_IOC_SETFLAGS, flags&^fsImmutableFlag)
+			if err != nil {
+				f.Close()
+				return fmt.Errorf("clearing the immutable flag on %s: %w", name, err)
+			}
+		}
+		f.Close()
+	}
+	b := make([]byte, 4, 4+len(payload))
+	binary.LittleEndian.PutUint32(b, efiVarAttrs)
+	b = append(b, payload...)
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", name, err)
+	}
+	return nil
+}
+
+// deleteEFIVar removes a variable — which, for firmware, means
+// writing it with no payload; efivarfs translates an unlink into
+// exactly that, after the same immutable dance.
+func deleteEFIVar(dir, name string) error {
+	path := filepath.Join(dir, name+"-"+efiGlobalVariable)
+	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err == nil {
+		if flags, ferr := unix.IoctlGetInt(int(f.Fd()), unix.FS_IOC_GETFLAGS); ferr == nil && flags&fsImmutableFlag != 0 {
+			_ = unix.IoctlSetPointerInt(int(f.Fd()), unix.FS_IOC_SETFLAGS, flags&^fsImmutableFlag)
+		}
+		f.Close()
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("deleting %s: %w", name, err)
+	}
+	return nil
+}
+
+// listBootEntries reads every Boot#### variable, decoded, keyed by
+// entry number. Entries that won't decode are skipped — they're the
+// firmware's business, not ours, and liken finds its own entries by
+// description, never by assuming a number.
+func listBootEntries(dir string) map[uint16]loadOption {
+	entries := map[uint16]loadOption{}
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return entries
+	}
+	for _, f := range files {
+		var n uint16
+		if _, err := fmt.Sscanf(f.Name(), "Boot%04X-"+efiGlobalVariable, &n); err != nil {
+			continue
+		}
+		payload, err := readEFIVar(dir, bootEntryID(n))
+		if err != nil {
+			continue
+		}
+		option, err := parseLoadOption(payload)
+		if err != nil {
+			continue
+		}
+		entries[n] = option
+	}
+	return entries
+}
+
+// setBootEntry writes a boot entry under the number that already
+// carries its description, or the lowest free number — recognition
+// by name, exactly like partitions: the number is a handle the
+// firmware owns, the description is the identity liken owns.
+func setBootEntry(dir string, option loadOption) (uint16, error) {
+	entries := listBootEntries(dir)
+	number := uint16(0)
+	for {
+		existing, taken := entries[number]
+		if taken && existing.description == option.description {
+			break // ours already; overwrite in place
+		}
+		if !taken {
+			if _, err := readEFIVar(dir, bootEntryID(number)); err != nil {
+				break // genuinely free, not just undecodable
+			}
+		}
+		number++
+	}
+	return number, writeEFIVar(dir, bootEntryID(number), encodeLoadOption(option))
+}
+
 // firmwareFacts reads the machine's boot story from its firmware:
 // which mode it booted in, which entry the firmware used, and the
 // standing preference order — each entry decoded to its name, so a

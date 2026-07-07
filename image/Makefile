@@ -36,5 +36,11 @@ dist/liken.cpio: build.sh $(shell find etc -type f) \
 
 all: dist/liken.cpio
 
+# The install image: liken.cpio plus a concatenated wrapper archive
+# carrying the release payload the installer verifies and copies to
+# disk. install.sh tells the story.
+dist/install.cpio: dist/liken.cpio ../kernel/dist/$(KERNEL_VERSION)/vmlinuz install.sh
+	./install.sh
+
 clean:
 	rm -rf dist

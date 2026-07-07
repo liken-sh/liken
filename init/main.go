@@ -106,6 +106,25 @@ func main() {
 	}
 	m := choice.m
 
+	// An install boot does exactly one job and stops: put this
+	// running version on the machine's own disk (install.go). It
+	// runs this early because nothing after it — network, time,
+	// k3s — is its business, and it must power off rather than
+	// reboot: the install medium is still first in line, and a
+	// reboot would just run the installer again.
+	if bootParam(installParam) {
+		if err := installToDisk(m.Metadata.Name); err != nil {
+			fmt.Fprintf(os.Stderr, "liken: %v\n", err)
+			fmt.Fprintln(os.Stderr, "liken: install failed; powering off (installs are idempotent: fix the cause and boot the installer again)")
+		} else {
+			fmt.Println("liken: install complete; powering off — the next boot comes from the disk")
+		}
+		powerOff()
+		for {
+			time.Sleep(time.Hour) // PID 1 must never exit, even here
+		}
+	}
+
 	// The cluster document says which machines are leaders, and from
 	// it this machine derives what it is. It goes through the same
 	// staged/proven/seed lifecycle as the Machine manifest

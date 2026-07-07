@@ -197,6 +197,22 @@ endif
 #                            works in the lab too
 QEMU_EXIT_ON_REBOOT := -no-reboot
 
+# Where the boot comes from. BOOT=kernel (the default while the fleet
+# migrates to its own disks) is the direct-kernel arrangement: QEMU
+# loads vmlinuz and the initramfs itself, playing bootloader — or,
+# with OVMF in the picture, playing the USB stick the firmware boots
+# from. BOOT=disk hands the whole job to the firmware: no -kernel, no
+# -append; OVMF consults its boot entries and loads the OS from the
+# machine's own system slots, exactly as real hardware would.
+# Recursive (=) on purpose: LIKEN_BOOT_ARGS is set per target
+# (run-once, install) and must be picked up at recipe expansion.
+BOOT ?= kernel
+ifeq ($(BOOT),disk)
+QEMU_BOOT =
+else
+QEMU_BOOT = -kernel $(VMLINUZ) -initrd $(INITRD) -append "console=ttyS0 rdinit=/liken liken.machine=$(NODE) $(LIKEN_BOOT_ARGS)"
+endif
+
 # A deliberately wrong hardware clock: `make run RTC=2001-01-01` boots
 # the guest believing it's the turn of the millennium, which is the
 # milestone-7 drill — watch init's SNTP client discover a
@@ -214,9 +230,7 @@ run: dist/$(NODE)/state.qcow2 dist/$(NODE)/pods.qcow2 dist/$(NODE)/boot.qcow2 di
 		-m $(MEM) \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
 		-drive if=pflash,format=raw,file=dist/$(NODE)/OVMF_VARS.fd \
-		-kernel $(VMLINUZ) \
-		-initrd $(INITRD) \
-		-append "console=ttyS0 rdinit=/liken liken.machine=$(NODE) $(LIKEN_BOOT_ARGS)" \
+		$(QEMU_BOOT) \
 		-display none \
 		-serial stdio \
 		-monitor none \
@@ -246,6 +260,17 @@ run-once: run
 # the way to watch a staged spec get applied end to end.
 run-lab: QEMU_EXIT_ON_REBOOT :=
 run-lab: run
+
+# The install boot: the USB-stick moment. Boots the install image
+# (liken.cpio carrying the release payload) with liken.install on the
+# command line; init claims the boot disk if it's blank, verifies and
+# copies the release into slot A, writes the firmware's boot entries,
+# and powers off — which ends QEMU. `make run BOOT=disk` then boots
+# the machine from its own disk forever after. Idempotent: a killed
+# install converges by running again.
+install: INITRD = ../image/dist/install.cpio
+install: LIKEN_BOOT_ARGS = liken.install
+install: run
 
 # Grow a node's pods disk under the machine, the lab's stand-in for a
 # bigger drive or an expanded cloud volume. Only ever run this with

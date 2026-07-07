@@ -105,3 +105,68 @@ func TestReadEFIVarStripsAttributes(t *testing.T) {
 		t.Errorf("payload: got % X", b)
 	}
 }
+
+func TestWriteEFIVarRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeEFIVar(dir, "BootNext", u16le(3)); err != nil {
+		t.Fatal(err)
+	}
+	b, err := readEFIVar(dir, "BootNext")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b) != 2 || binary.LittleEndian.Uint16(b) != 3 {
+		t.Errorf("payload: got % X", b)
+	}
+	// Overwriting must replace, not append: efivarfs semantics.
+	if err := writeEFIVar(dir, "BootNext", u16le(7)); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ = readEFIVar(dir, "BootNext"); binary.LittleEndian.Uint16(b) != 7 {
+		t.Errorf("overwrite: got % X", b)
+	}
+}
+
+func TestDeleteEFIVar(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeEFIVar(dir, "BootNext", u16le(3)); err != nil {
+		t.Fatal(err)
+	}
+	if err := deleteEFIVar(dir, "BootNext"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readEFIVar(dir, "BootNext"); err == nil {
+		t.Error("the variable should be gone")
+	}
+	// Deleting a variable that never existed is quietly fine.
+	if err := deleteEFIVar(dir, "BootNext"); err != nil {
+		t.Errorf("double delete: %v", err)
+	}
+}
+
+func TestSetBootEntryFindsItsOwnByDescription(t *testing.T) {
+	dir := fakeEFIVars(t, map[string][]byte{
+		"Boot0000": encodeLoadOption(loadOption{description: "BootManagerMenuApp"}),
+		"Boot0001": encodeLoadOption(loadOption{description: "liken slot A"}),
+	})
+	// Rewriting slot A lands on its existing number, not a new one.
+	n, err := setBootEntry(dir, loadOption{description: "liken slot A", filePath: `\vmlinuz`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("slot A should overwrite Boot0001, landed on Boot%04X", n)
+	}
+	// A new description takes the lowest free number, skipping the
+	// firmware's entries rather than clobbering them.
+	n, err = setBootEntry(dir, loadOption{description: "liken slot B"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Errorf("slot B should land on Boot0002, landed on Boot%04X", n)
+	}
+	if got := listBootEntries(dir)[0].description; got != "BootManagerMenuApp" {
+		t.Errorf("the firmware's entry should be untouched: %q", got)
+	}
+}
