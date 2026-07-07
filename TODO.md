@@ -1082,6 +1082,16 @@
            all per-container. Container identity is the source tag,
            and privilege follows the source: the kmsg containers run
            privileged, the tailers with only a read-only hostPath.
+           The consolidation rollout taught one thing about k3s's
+           deploy controller: it applies each manifest file as an
+           object set (wrangler stamps everything it creates with
+           the file's identity), so when logs.yaml's contents went
+           from four DaemonSets to one, the superseded four were
+           garbage-collected by the same apply that created
+           machine-logs, no manual deletion needed. The folklore
+           that k3s never prunes is about removing a manifest file,
+           whose resources do linger; within a still-present file,
+           removed objects are cleaned up.
            The privilege was a lab lesson: CAP_SYSLOG (which the
            kernel demands for /dev/kmsg under dmesg_restrict) is
            necessary but not sufficient, because the container
