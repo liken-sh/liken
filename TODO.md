@@ -832,7 +832,7 @@
            re-cutting 0.2.0 flipped the digest, and the machine held
            at DigestMismatch until the catalog was updated to match —
            the API, not the server, decides what runs.)
-    7. [ ] The fallbacks: a proving-boot watchdog in init — armed only
+    7. [x] The fallbacks: a proving-boot watchdog in init — armed only
            when the running slot's record is still staged, disarmed by
            promotion, ten minutes of patience, the fleet's established
            RolloutStalled number — reboots a machine that came up but
@@ -845,7 +845,37 @@
            one built to panic at first breath (the firmware-fallback
            drill) and one built to wedge k3s (the watchdog drill),
            both ending Ready on the old version with the rejection
-           visible in status.
+           visible in status. (Proven on node-5, but only after the
+           drills earned their keep by exposing the milestone's
+           deepest bug: the fallback they depend on had never existed.
+           BootOrder had never once been rewritten after install,
+           because promotion had never once happened — the cluster's
+           DaemonSet, applied by the old leaders, pins the old
+           operator image, so every proving boot ran the *old*
+           operator, which rightly refused to promote a record that
+           didn't match its own version stamp; the convergence
+           tidy-up, judging by init's version, then read the machine
+           as converged and withdrew the trial's paperwork; and the
+           proving watch trusted the staged file's absence as
+           promotion. The first panic drill therefore looped — 41
+           panics, fallback aimed at the panicking slot — the exact
+           loop this step exists to forbid. Three root fixes: the pod
+           is a bystander, so promotion judges facts.version.liken,
+           the OS actually booted; the proving watch flips BootOrder
+           only when the proven record matches its own trial; and
+           withdrawal clears the attempted marker. Arming is also
+           hardened: fallbackInPlace re-asserts BootOrder and
+           verifies it by readback before any trial arms. The re-run
+           told the story straight: promotion narrated, "BootOrder
+           now leads with Boot0003" confirmed in the NVRAM file
+           itself, a power-cycle booting slot B first try — then the
+           panic release panicked exactly once and fell back, and the
+           wedge release sat unpromoted for its ten minutes before
+           the watchdog rebooted it onto the proven slot. Both ended
+           on the old version, RejectedLastBoot, phase Blocked —
+           serving the cluster the whole time — and a retarget edit
+           cleared each verdict. Machines report the standing
+           rejection in status.boot.systemRejection.)
     8. [ ] The fleet: migrate the five-node lab to disk boot — a
            Machine edit adds the slot roles on a new disk, one install
            boot per node, no fresh claims, no data loss — then the
