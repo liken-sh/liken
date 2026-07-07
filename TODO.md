@@ -618,13 +618,170 @@
         how workloads get to the hardware (device plugins, dynamic
         resource allocation) and whether devices belong in
         `status.hardware` alongside CPUs and memory.
-12. [ ] Explore declarative upgrades: setting `spec.version` on a
-        Machine should upgrade the machine — liken's version drives the
-        k3s version, so one field moves the whole stack. For a two-file
-        OS an upgrade is "replace vmlinuz and liken.cpio and reboot",
-        which makes A/B slots and roll-back-on-failed-boot the natural
-        shape — but it also means liken finally needs a bootloader
-        story, since QEMU's `-kernel` has been playing that role.
+12. [ ] Declarative upgrades: one field on the Cluster moves the whole
+        fleet to a new liken version. `spec.version` names the target —
+        on the Cluster, not the Machines, because a fleet should be
+        retargeted in one edit; a machine's version belongs in its
+        status, where reality is reported, not its spec. Machines that
+        aren't running the target download the release, write it into
+        the boot slot they are *not* running from, and reboot into it
+        through milestone 13's rollout — workers first, leaders one at
+        a time, nobody babysitting. For a two-file OS an upgrade really
+        is "replace vmlinuz and liken.cpio and reboot", which makes A/B
+        slots and roll-back-on-failed-boot the natural shape — and it
+        finally answers the bootloader question QEMU's `-kernel` flag
+        has been deferring. The answer is that there is no bootloader:
+        the kernel is already an EFI executable (the stub), UEFI
+        firmware's own boot menu picks a slot, and "try the new one
+        once, fall back if it dies" is the firmware's BootNext —
+        fallback as firmware arithmetic, not software cleverness. Trust
+        stays where liken's trust already lives, in explicit inputs:
+        the Cluster carries a release source URL and a catalog mapping
+        each version to the digest of its release manifest, which in
+        turn carries every artifact's sha256 — API → catalog digest →
+        manifest → bytes, no signatures until the mastery tier. The
+        target and catalog are read live and never count as
+        cluster-document drift (the sysctls precedent: a catalog append
+        must not stage a fleet-wide reboot). Promotion mirrors the
+        cluster document exactly: boot the staged slot tentatively
+        (attempted marker + BootNext), let the operator's first
+        reconcile be the proof, and let init re-assert BootOrder from
+        the durable record every boot — machineState is the authority,
+        the firmware a cache of it.
+    1. [ ] The slot vocabulary and the FAT32 formatter: `systemA` and
+           `systemB` join the storage roles at the head of the
+           canonical order (the firmware is the earliest reader of any
+           partition liken owns), typed in the GPT as EFI System
+           Partitions — the first roles whose partition type isn't
+           "Linux filesystem data", because the type GUID is precisely
+           how firmware recognizes a candidate. Formatting is a
+           hand-written FAT32 formatter in the GPT-writer genre (a boot
+           sector describing the geometry, two copies of the allocation
+           table, a root directory that is just cluster 2), because
+           FAT is the only filesystem firmware promises to read; the
+           kernel's vfat module handles file I/O afterward, which
+           moves module loading ahead of storage settling in init —
+           some roles' filesystems are modules now. Prove it: a node
+           with a blank third disk claims both slots into
+           status.storage, and a file written to a mounted slot
+           survives a reboot.
+    2. [ ] Speaking EFI: init mounts efivarfs when the firmware is
+           UEFI and learns the boot variables — each a small binary
+           format (EFI_LOAD_OPTION: attributes, a UTF-16 name, a
+           device path ending at a file on a partition, and free-form
+           arguments that are exactly a kernel command line),
+           unit-tested against known-good bytes, with the immutable
+           flag the kernel puts on every variable handled in one
+           narrated helper. The lab gains OVMF: real UEFI firmware,
+           split as read-only code shared by every guest plus a
+           per-node writable variable store — the "CMOS" where boot
+           entries live, surviving reboots the way a motherboard's
+           does (and removed by `make clean`, so factory reset forgets
+           firmware memory too). Verify here, before anything is built
+           on it, that the EFI stub's initrd= argument works under
+           OVMF, since upstream calls it deprecated. Prove it: the
+           console and Machine status report the firmware, BootCurrent,
+           and a decoded BootOrder — console parity as always.
+    3. [ ] Self-install, the USB-stick story: `make install NODE=x`
+           boots via -kernel one last time — QEMU playing the install
+           medium the way an installer stick or PXE would — and init,
+           seeing liken.install, claims the boot disk, verifies the
+           release payload the installer carries, copies it into slot
+           A, writes both boot entries and BootOrder, and powers off.
+           install.cpio is liken.cpio with a second archive
+           concatenated on, carrying vmlinuz, liken.cpio, and
+           release.yaml — the kernel unpacks concatenated cpios, the
+           same mechanism early microcode rides, so the installer's
+           payload is byte-identical to what the digest chain
+           describes. Each entry's baked command line carries the
+           machine's name, its slot, and panic=10 — load-bearing,
+           because a panicking trial kernel must reset into the
+           firmware's fallback rather than hang. `make run` becomes
+           firmware-from-disk: no -kernel, no -append (`run-once`
+           keeps direct boot; its oneshot knob can't ride a baked
+           entry). Prove it: a fresh node installs and boots to Ready
+           from disk; killing QEMU mid-install and re-running
+           converges, since claiming skips claimed disks and copying
+           re-verifies.
+    4. [ ] The releases domain and the API: `make release VERSION=x`
+           rebuilds init, operator, and image with the overridden
+           version stamp into a separate build tree (the domain
+           Makefiles learn overridable version and output knobs; the
+           everyday dist/ trees are never touched) and publishes
+           releases/dist/<v>/ — vmlinuz, liken.cpio, install.cpio, and
+           release.yaml listing every artifact's sha256; the digest a
+           catalog carries is the sha256 of that file's exact bytes.
+           `make serve` is a small logged file server the guests reach
+           at the host's NAT address, the lab's stand-in for a release
+           host on the internet. The Cluster grows spec.version and
+           spec.releases (source plus catalog); CEL holds the target
+           to catalog membership at admission — a same-object check,
+           so it can never wedge the way the storage rules once did —
+           and a machine with no slots reports NoSystemSlots rather
+           than pretending it can comply. The fleet sweep computes
+           status.releases.newest (a hand-written semver comparison),
+           and the printer columns say it plainly: the Cluster shows
+           the target VERSION and the NEWEST the catalog offers, while
+           each Machine's LIKEN column shows who has arrived. Prove
+           it: an edit whose target names no catalog entry is refused
+           at the door, and `kubectl get clusters` tells the
+           target-versus-newest story at a glance.
+    5. [ ] The download: an asynchronous fetcher in the operator — a
+           blocking 116MB GET inside a reconcile pass would starve the
+           heartbeat and read as a death, milestone 10's lesson made
+           structural — streams each artifact through sha256 into the
+           inactive slot, temp-and-rename, resumable by
+           re-verification: FAT has no journal, so a torn download is
+           just files that fail their hashes and are fetched again.
+           Nothing is ever staged until every byte on the slot
+           verifies against the catalog's chain. Downloading and
+           DigestMismatch join the condition vocabulary — a down
+           server is transient by definition, so retry forever with
+           the story in the message; a wrong digest is Blocked until
+           the catalog itself changes, and is never staged. Prove it:
+           the serve log shows the fetch; killing the server
+           mid-download and restarting it converges; a deliberately
+           corrupted publish holds at DigestMismatch with nothing
+           staged.
+    6. [ ] The proving reboot: a verified download becomes a staged
+           record in a third staging store — system/ beside manifests/
+           and cluster/ on machineState, the same four files, the same
+           durable writes. Init's reboot path finds it, writes the
+           attempted marker and the firmware's BootNext (boot the
+           other slot, once), and reboots. The proving boot knows
+           itself by liken.slot=; the operator's first reconcile —
+           living proof that the new kernel, init, k3s, and the join
+           all work — promotes the record; and init flips BootOrder
+           when promotion lands, re-asserting it from the durable
+           record on every boot thereafter. Every power-cut gap in
+           that timeline boots something proven. Prove it: one Cluster
+           edit upgrades one node — the LIKEN column flips, BootOrder
+           prefers the new slot, and a plain reboot stays on the new
+           version.
+    7. [ ] The fallbacks: a proving-boot watchdog in init — armed only
+           when the running slot's record is still staged, disarmed by
+           promotion, ten minutes of patience, the fleet's established
+           RolloutStalled number — reboots a machine that came up but
+           never settled, and the already-consumed BootNext lands it
+           back on the proven slot, where the attempted marker renders
+           the verdict: RejectedLastBoot, no reboot loop, cleared by
+           the next version edit. A kernel that panics outright
+           funnels into the same verdict through panic=10, with no
+           software involved at all. Prove it with two fault releases:
+           one built to panic at first breath (the firmware-fallback
+           drill) and one built to wedge k3s (the watchdog drill),
+           both ending Ready on the old version with the rejection
+           visible in status.
+    8. [ ] The fleet: migrate the five-node lab to disk boot — a
+           Machine edit adds the slot roles on a new disk, one install
+           boot per node, no fresh claims, no data loss — then the
+           grand drill: one Cluster edit (a catalog append and the
+           target bump) rolls all five machines through milestone 13's
+           rollout, the cluster serving throughout, `kubectl get
+           machines -o wide` narrating the walk from AwaitingTurn to
+           Ready on the new version. Then the power-cut drills: cut
+           mid-download (resumes by re-verification) and mid-install
+           (re-running the installer converges).
 13. [x] Rolling reboots at the *cluster* level: the fleet applies
         staged changes without an operator babysitting it, one
         machine at a time. (This milestone was written as "rolling
