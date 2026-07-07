@@ -170,16 +170,35 @@ func armProvingBoot(efiDir, stateRoot, runningSlot string) {
 		bootEntryID(entry), record.Version, record.Slot)
 }
 
-// provingWatch runs only on proving boots: poll the store until the
-// operator promotes the staged record (its disappearance is the
-// signal), then flip BootOrder so the slot that just proved itself
-// leads. The firmware's one-shot BootNext is already consumed; this
-// write is what makes the new release the machine's standing answer.
+// provingPatience is how long a proving boot may run unpromoted
+// before the watchdog gives up on it: the same ten minutes the
+// rollout conductor waits before calling a reboot stalled. A machine
+// that can't join its cluster in ten minutes isn't warming up, it's
+// wedged.
+const provingPatience = 10 * time.Minute
+
+// provingWatch runs only on proving boots, and it is two fallbacks in
+// one loop. The happy half: poll the store until the operator
+// promotes the staged record (its disappearance is the signal), then
+// flip BootOrder so the slot that just proved itself leads. The
+// watchdog half: a trial that reaches provingPatience unpromoted gets
+// a deliberate reboot — the firmware's one-shot BootNext is already
+// consumed, so the machine lands on the proven slot, where the
+// attempted marker renders the verdict (RejectedLastBoot) and breaks
+// any possibility of a loop. This is the fallback for the failure
+// BootNext can't see: a kernel that boots fine into a system that
+// never serves.
 func provingWatch(ctx context.Context) error {
+	deadline := time.After(provingPatience)
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-deadline:
+			fmt.Fprintf(os.Stderr, "liken: system: the proving boot never settled within %s; rebooting onto the proven slot\n", provingPatience)
+			rebootMachine(machine.RebootIntent{
+				Reason: "the proving boot never settled; the firmware's consumed BootNext falls back to the proven slot",
+			}) // never returns
 		case <-time.After(5 * time.Second):
 		}
 		staged, err := machine.SystemReleases(machine.MachineStateDir).LoadStaged()

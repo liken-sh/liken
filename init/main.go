@@ -55,6 +55,15 @@ func main() {
 	// port. Ordinary prints reach it directly.
 	fmt.Println("liken: hello from userspace")
 
+	// The panic fault fires at first breath, before anything is
+	// mounted or supervised: PID 1 dying panics the kernel, panic=10
+	// reboots it, and the firmware's consumed BootNext lands the
+	// machine back on its proven slot with no liken code involved in
+	// the recovery (fault.go).
+	if fault == "panic" {
+		panic("liken: fault injection: this release panics at first breath")
+	}
+
 	// Refuse to run as an ordinary process. Everything below assumes
 	// the authority (and duties) of PID 1, and exercising it from a
 	// shell on a development machine would try to mount filesystems at
@@ -258,6 +267,15 @@ func main() {
 		// the leader's console (and in its own k3s log lines).
 		if role == machine.RoleLeader {
 			plane.start("the node report", reportWhenReady)
+		}
+		// The wedge fault boots everything except k3s: the node never
+		// joins, the operator never runs, no promotion ever lands —
+		// the exact failure the proving watchdog exists to catch
+		// (fault.go). The machine plane keeps running, so the
+		// watchdog's reboot still works.
+		if fault == "wedge-k3s" {
+			fmt.Println("liken: fault injection: wedging instead of starting k3s")
+			select {}
 		}
 		superviseK3s(role, rebootRequests) // never returns
 	}

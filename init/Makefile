@@ -12,6 +12,10 @@
 LIKEN_VERSION ?= $(strip $(file <../VERSION))
 DIST ?= dist
 
+# The fault knob, for releases built to fail on purpose (fault.go):
+# empty for every real build, panic or wedge-k3s for the drills.
+LIKEN_FAULT ?=
+
 # CGO_ENABLED=0 forbids C bindings, which makes Go emit a fully static
 # binary: no libc, no dynamic loader. That's not an optimization here,
 # it's a requirement: the initramfs contains no libraries to load, and
@@ -20,7 +24,7 @@ DIST ?= dist
 # builds.
 $(DIST)/liken: ../go.mod ../go.sum $(wildcard *.go) $(wildcard ../machine/*.go) ../VERSION
 	CGO_ENABLED=0 go build -trimpath \
-		-ldflags "-X github.com/chrisguidry/liken/machine.Version=$(LIKEN_VERSION)" \
+		-ldflags "-X github.com/chrisguidry/liken/machine.Version=$(LIKEN_VERSION) -X main.fault=$(LIKEN_FAULT)" \
 		-o $(DIST)/liken .
 
 .PHONY: all clean
