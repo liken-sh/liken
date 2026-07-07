@@ -165,8 +165,11 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 
 	// The operator's existence is the proof a staged cluster document
 	// was waiting for: if this line runs, the machine joined its
-	// cluster under whatever document this boot ran (cluster.go).
+	// cluster under whatever document this boot ran (cluster.go). The
+	// same evidence, plus this binary's own version stamp, is what
+	// promotes a system release's proving boot (release.go).
 	settleClusterLifecycle(machine.MachineStateDir, machine.ClusterManifestPath, facts)
+	settleSystemReleaseLifecycle(machine.MachineStateDir, facts)
 
 	status.Sysctls, err = applySysctls(m.Spec.Sysctls)
 	status.Conditions = machine.SetCondition(status.Conditions, sysctlsCondition(err), now)
@@ -247,17 +250,26 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 		status.Conditions = machine.SetCondition(status.Conditions, condition, now)
 		rebooting = rebooting || cconv.requestReboot
 
-		// The version target converges through its own machinery: not
-		// a staged document but a download, aimed at the inactive slot
-		// and running on the fetcher's goroutine so this pass — and
-		// the heartbeat below — never waits on a socket (release.go
-		// decides, fetch.go moves the bytes).
+		// The version target converges through its own machinery: a
+		// download aimed at the inactive slot, running on the
+		// fetcher's goroutine so this pass — and the heartbeat below —
+		// never waits on a socket (release.go decides, fetch.go moves
+		// the bytes). Once the download verifies, the story rejoins
+		// the common road: a staged SystemRelease record, the reboot
+		// chain, the drain gate — the same carryOutConvergence as the
+		// other two documents.
 		if liveCluster != nil {
+			systemStore := machine.SystemReleases(machine.MachineStateDir)
+			systemRejection, _ := systemStore.LoadRejection()
+			stagedSystemHash := readStagedSystemHash()
 			ask, vcond, ok := versionAsk(liveCluster, facts)
+			vconv := versionConvergence(vcond, stagedSystemHash, systemRejection)
 			if ok {
-				vcond = versionCondition(ask, f.Ensure(ask))
+				vconv = gate(decideSystemStaging(ask, f.Ensure(ask), m, systemRejection, stagedSystemHash, t))
 			}
-			status.Conditions = machine.SetCondition(status.Conditions, vcond, now)
+			condition := carryOutConvergence(vconv, systemStore, "system release", now)
+			status.Conditions = machine.SetCondition(status.Conditions, condition, now)
+			rebooting = rebooting || vconv.requestReboot
 		}
 	}
 

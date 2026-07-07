@@ -135,6 +135,13 @@ func main() {
 		}
 	}
 
+	// The system release lifecycle: is this boot the trial of a
+	// staged release, the fallback from one, or an ordinary boot
+	// whose only job is to keep the firmware's BootOrder agreeing
+	// with the store (proving.go)?
+	proving := settleSystemRelease(machine.MachineStateDir, boot.Slot,
+		storage.MachineState.Backing == machine.BackingPartition, &boot)
+
 	// The cluster document says which machines are leaders, and from
 	// it this machine derives what it is. It goes through the same
 	// staged/proven/seed lifecycle as the Machine manifest
@@ -238,6 +245,13 @@ func main() {
 		plane.start("the reboot watch", func(ctx context.Context) error {
 			return watchForRebootIntent(ctx, machine.OperatorRunDir, 2*time.Second, rebootRequests)
 		})
+		// A proving boot watches for its own promotion: when the
+		// operator's first reconcile proves the staged release, init
+		// flips the firmware's BootOrder to lead with the slot that
+		// just earned it (proving.go).
+		if proving {
+			plane.start("the proving watch", provingWatch)
+		}
 		// Only a leader can narrate cluster state: the admin
 		// kubeconfig is a control-plane artifact, and followers hold
 		// no credentials of their own. A follower's join shows up on

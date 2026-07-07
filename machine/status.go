@@ -380,9 +380,11 @@ type BootStatus struct {
 	// manifest, republished every boot until a promotion clears it,
 	// so a rejected spec stays visible in the cluster no matter how
 	// many times the machine power-cycles. ClusterRejection is the
-	// same record for the Cluster document.
+	// same record for the Cluster document, and SystemRejection for
+	// a system release whose proving boot fell back.
 	Rejection        *Rejection `json:"rejection,omitempty"`
 	ClusterRejection *Rejection `json:"clusterRejection,omitempty"`
+	SystemRejection  *Rejection `json:"systemRejection,omitempty"`
 }
 
 // ConditionStatus is a condition's verdict: a string, not a bool,

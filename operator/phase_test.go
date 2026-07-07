@@ -73,8 +73,8 @@ func TestDecidePhase(t *testing.T) {
 			machine.PhaseBlocked,
 		},
 		{
-			"a fetched release waits like any staged change",
-			[]machine.Condition{condition("VersionConverged", "False", "Fetched")},
+			"a staged release waits like any staged change",
+			[]machine.Condition{condition("VersionConverged", "False", "RebootPending")},
 			machine.PhaseUpdatePending,
 		},
 		{

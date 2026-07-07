@@ -72,11 +72,11 @@ func conditionPhase(c machine.Condition) machine.Phase {
 		// the network instead of waiting on a reboot, but the machine
 		// is just as much mid-change.
 		return machine.PhaseUpdating
-	case "RebootPending", "DemotionPending", "AwaitingTurn", "Fetched":
-		// A change is staged and waiting — on a Manual reboot, on the
-		// cluster granting this machine its reboot turn, or (Fetched)
-		// on the machinery that turns a verified download into a
-		// proving reboot.
+	case "RebootPending", "DemotionPending", "AwaitingTurn":
+		// A change is staged and waiting — on a Manual reboot, or on
+		// the cluster granting this machine its reboot turn. A
+		// verified release waiting for its proving reboot reads the
+		// same way, because it *is* the same wait.
 		return machine.PhaseUpdatePending
 	}
 	return machine.PhaseDegraded

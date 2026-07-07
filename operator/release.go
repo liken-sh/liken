@@ -25,6 +25,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/chrisguidry/liken/machine"
 )
@@ -97,8 +98,10 @@ func versionAsk(cluster *machine.Cluster, facts *machine.MachineStatus) (fetchAs
 }
 
 // versionCondition turns the fetcher's answer about an ask into the
-// VersionConverged condition. Every state here is "not converged yet";
-// what differs is whether time will fix it. A failed fetch reads as
+// VersionConverged condition, for every state short of verified
+// (decideSystemStaging owns that one — a verified download's story is
+// the staged record's). Every state here is "not converged yet"; what
+// differs is whether time will fix it. A failed fetch reads as
 // Downloading on purpose: a down release server is transient by
 // definition, the fetcher retries every pass, and the condition's
 // message carries the story. A digest mismatch is the opposite —
@@ -107,9 +110,6 @@ func versionAsk(cluster *machine.Cluster, facts *machine.MachineStatus) (fetchAs
 // different bytes, and nothing is ever staged.
 func versionCondition(ask fetchAsk, snap fetchSnapshot) machine.Condition {
 	switch snap.state {
-	case fetchVerified:
-		return versionConverged("False", "Fetched",
-			fmt.Sprintf("release %s is verified on slot %s; %s", ask.version, ask.slot, snap.detail))
 	case fetchRejected:
 		return versionConverged("False", "DigestMismatch", snap.detail)
 	case fetchFailed:
@@ -118,4 +118,122 @@ func versionCondition(ask fetchAsk, snap fetchSnapshot) machine.Condition {
 	}
 	return versionConverged("False", "Downloading",
 		fmt.Sprintf("downloading release %s to slot %s: %s", ask.version, ask.slot, snap.detail))
+}
+
+// versionConvergence wraps a short-circuit verdict from versionAsk
+// into a convergence. A True verdict (converged, or no target at all)
+// tidies as it goes: a staged record left behind would reboot the
+// machine into an upgrade nobody is asking for anymore, and a
+// standing rejection has nothing left to block.
+func versionConvergence(cond machine.Condition, stagedHash string, rejection *machine.Rejection) convergence {
+	c := convergence{condition: cond}
+	if cond.Status == "True" {
+		c.withdraw = stagedHash != ""
+		c.clearRejection = rejection != nil
+	}
+	return c
+}
+
+// decideSystemStaging is the tail of the version story: a verified
+// download becomes a staged SystemRelease record, and the record
+// rides exactly the reboot machinery every other staged document
+// rides — Manual policy reports RebootPending, a cluster member
+// awaits its turn from the rollout conductor, a granted turn requests
+// the reboot (gated through the drain like all the rest). The proving
+// boot is the reboot itself: init arms the firmware's BootNext at the
+// staged slot on the way down, and the operator that comes up running
+// the new release is the proof that promotes the record.
+func decideSystemStaging(ask fetchAsk, snap fetchSnapshot, m *machine.Machine, rejection *machine.Rejection, stagedHash string, t turn) convergence {
+	if snap.state != fetchVerified {
+		return convergence{condition: versionCondition(ask, snap)}
+	}
+
+	record, hash, err := machine.RenderSystemRelease(ask.version, ask.slot, ask.digest)
+	if err != nil {
+		return convergence{condition: versionConverged("False", "StagingFailed", err.Error())}
+	}
+	// The rejection is durable memory of a trial that fell back: the
+	// machine booted the staged slot and the firmware returned it to
+	// the proven one. Refusing to re-stage the identical decision is
+	// what breaks the reboot loop; a new version or a republished
+	// digest is a different decision and passes.
+	if rejection != nil && rejection.Hash == hash {
+		return convergence{condition: versionConverged("False", "RejectedLastBoot",
+			fmt.Sprintf("the machine tried release %s on slot %s and fell back: %s; publish a corrected release under a new version",
+				ask.version, ask.slot, rejection.Reason))}
+	}
+
+	c := convergence{manifest: record, hash: hash, stage: stagedHash != hash}
+	switch {
+	case m.Spec.RebootPolicyOrDefault() != machine.RebootAuto:
+		c.condition = versionConverged("False", "RebootPending",
+			fmt.Sprintf("release %s is verified on slot %s and staged (%.12s); rebootPolicy is Manual, so reboot the machine (or set rebootPolicy: Auto) to prove it", ask.version, ask.slot, hash))
+	case t == turnAwaiting:
+		c.condition = versionConverged("False", "AwaitingTurn",
+			fmt.Sprintf("release %s is verified on slot %s and staged (%.12s); waiting for the cluster to grant a reboot turn", ask.version, ask.slot, hash))
+	default:
+		c.requestReboot = true
+		c.condition = versionConverged("False", "RebootRequested",
+			fmt.Sprintf("reboot requested to prove release %s on slot %s (%.12s)", ask.version, ask.slot, hash))
+	}
+	return c
+}
+
+// readStagedSystemHash is the system store's readStagedHash: the
+// identity of whatever record waits there, "" when nothing does.
+func readStagedSystemHash() string {
+	raw, _ := machine.SystemReleases(machine.MachineStateDir).LoadStaged()
+	if raw == nil {
+		return ""
+	}
+	return machine.ManifestHash(raw)
+}
+
+// settleSystemReleaseLifecycle promotes what this boot proved, the
+// way settleClusterLifecycle does for the cluster document: the
+// operator's own existence is the evidence. If this pass is
+// executing, then the kernel, init, k3s, and the machine's place in
+// its cluster all work — and if this binary's own version stamp
+// matches the staged record for the very slot this boot came from,
+// the trial release is the thing that's working. That is promotion.
+//
+// A machine running from a slot with no record at all (its install
+// predates any catalog) writes its current standing down as the first
+// proven record, so init's every-boot BootOrder repair has an
+// authority to enforce from the start.
+func settleSystemReleaseLifecycle(root string, facts *machine.MachineStatus) {
+	if facts == nil || facts.Storage.MachineState.Backing != machine.BackingPartition || facts.Boot.Slot == "" {
+		return
+	}
+	store := machine.SystemReleases(root)
+
+	if staged, _ := store.LoadStaged(); staged != nil {
+		record, err := machine.ParseSystemRelease(staged)
+		if err != nil {
+			return // init vets staged records at boot; not this side's call
+		}
+		if record.Slot != facts.Boot.Slot || record.Version != machine.Version {
+			return // not this boot's trial; nothing proved
+		}
+		if err := store.Promote(); err != nil {
+			fmt.Fprintf(os.Stderr, "promoting the system release: %v\n", err)
+			return
+		}
+		fmt.Printf("release %s proved out on slot %s; the store now names it proven\n",
+			record.Version, record.Slot)
+		return
+	}
+
+	if proven, err := store.LoadProven(); proven != nil || err != nil {
+		return
+	}
+	raw, _, err := machine.RenderSystemRelease(machine.Version, facts.Boot.Slot, "")
+	if err != nil {
+		return
+	}
+	if err := store.WriteProven(raw); err != nil {
+		fmt.Fprintf(os.Stderr, "recording the running release as proven: %v\n", err)
+		return
+	}
+	fmt.Printf("recorded the running release %s on slot %s as proven\n", machine.Version, facts.Boot.Slot)
 }

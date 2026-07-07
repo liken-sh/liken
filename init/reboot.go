@@ -66,6 +66,12 @@ func watchForRebootIntent(ctx context.Context, dir string, interval time.Duratio
 // parks here for a person to investigate.
 func rebootMachine(intent machine.RebootIntent) {
 	fmt.Printf("liken: rebooting: %s\n", intent.Reason)
+	// The firmware conversation happens first, while machineState and
+	// efivarfs are still mounted: if a release is staged for the other
+	// slot, this reboot is its proving boot, and the firmware's
+	// BootNext must be armed before the machine goes down
+	// (proving.go).
+	armProvingBoot(efiVarsDir, machine.MachineStateDir, bootParamValue("liken.slot"))
 	killEverything()
 	// The machine plane stops only after every process is dead: the
 	// reaper is one of its components, and corpses need collecting

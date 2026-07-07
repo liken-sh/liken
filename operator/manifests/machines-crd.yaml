@@ -819,6 +819,22 @@ spec:
                         rejectedAt:
                           type: string
                           format: date-time
+                    systemRejection:
+                      type: object
+                      description: >-
+                        The standing verdict on a system release whose
+                        proving boot fell back: the machine booted the
+                        staged slot, never proved out, and the
+                        firmware returned it to the proven one. Holds
+                        until the catalog names a different release.
+                      properties:
+                        hash:
+                          type: string
+                        reason:
+                          type: string
+                        rejectedAt:
+                          type: string
+                          format: date-time
                 sysctls:
                   type: object
                   description: >-
