@@ -104,12 +104,22 @@ xtables_version="$(cat "$here/../xtables/VERSION")"
 kdist="$here/../kernel/dist/$kernel_version"
 release="$(cat "$kdist/release")"
 
-root="$here/dist/root"
-rm -rf "$here/dist"
+# The version this image claims to be, where the archive lands, and
+# where the liken binary and operator image come from — overridable
+# from the environment because the releases domain assembles
+# release-stamped images through this same script, from its own
+# copies of the inputs, into its own tree (see the Makefile).
+liken_version="${LIKEN_VERSION:-$(cat "$here/../VERSION")}"
+dist="${DIST:-$here/dist}"
+init_dist="${INIT_DIST:-$here/../init/dist}"
+operator_dist="${OPERATOR_DIST:-$here/../operator/dist}"
+
+root="$dist/root"
+rm -rf "$dist"
 mkdir -p "$root/etc/ssl/certs" "$root/bin" "$root/sbin"
 
 cp -r "$here/etc" "$root/"
-cp "$here/../init/dist/liken" "$root/liken"
+cp "$init_dist/liken" "$root/liken"
 cp "$here/../k3s/dist/$k3s_version/k3s" "$root/bin/k3s"
 
 # The deployment's manifests, staged at the paths init reads. Copied
@@ -156,14 +166,13 @@ chmod 600 "$root/etc/liken/token"
 # manifests go where k3s auto-applies them, the operator's image goes
 # where k3s auto-imports it. The LIKEN_VERSION substitution pins the
 # DaemonSet to exactly the image version this build ships alongside it.
-liken_version="$(cat "$here/../VERSION")"
 mkdir -p "$root/var/lib/rancher/k3s/server/manifests"
 for manifest in "$here"/../operator/manifests/*.yaml; do
     sed "s/LIKEN_VERSION/$liken_version/g" "$manifest" \
         >"$root/var/lib/rancher/k3s/server/manifests/$(basename "$manifest")"
 done
 mkdir -p "$root/var/lib/rancher/k3s/agent/images"
-cp "$here/../operator/dist/liken-operator-image.tar" \
+cp "$operator_dist/liken-operator-image.tar" \
    "$root/var/lib/rancher/k3s/agent/images/liken-operator.tar"
 
 # The machine's trust store, vendored by the trust domain (where these
@@ -206,7 +215,7 @@ depmod --basedir "$root" "$release"
 # (the archive's contents are an explicit, reviewable stream); -H newc
 # is the one format the kernel's unpacker accepts; -R +0:+0 makes root
 # own everything, whoever ran the build.
-(cd "$root" && find . | cpio --quiet -o -H newc -R +0:+0) >"$here/dist/liken.cpio"
+(cd "$root" && find . | cpio --quiet -o -H newc -R +0:+0) >"$dist/liken.cpio"
 
 echo "image for kernel $release, k3s $k3s_version:"
-du -sh "$here/dist/liken.cpio"
+du -sh "$dist/liken.cpio"

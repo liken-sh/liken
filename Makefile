@@ -158,10 +158,27 @@ image/dist/install.cpio: image/dist/liken.cpio $(KERNEL_DIST)/vmlinuz image/inst
 install: image/dist/install.cpio
 	$(MAKE) -C dev-cluster install
 
+# Produce a liken release: the same system rebuilt under a different
+# version stamp, published to releases/dist/<version>/ the way a
+# release webserver lays it out (the releases/ Makefile tells the
+# whole story). The root's contribution is the vendored inputs: a
+# release rebuilds init, the operator, and the image, but the kernel,
+# k3s, and friends are pinned by their own domains and shared by
+# every release.
+release: kernel k3s xtables trust e2fsprogs identity
+	$(MAKE) -C releases release
+
+# Serve the published releases to the lab over HTTP; the guests reach
+# this at http://10.0.2.2:8017, the source URL the dev cluster's
+# Cluster document declares.
+serve:
+	$(MAKE) -C releases serve
+
 # Cleaning includes the dev cluster's disks: with every domain's
 # artifacts gone, stale machine state would be the only survivor, and
 # a "clean" boot that remembers its last cluster isn't clean.
 clean:
+	$(MAKE) -C releases clean
 	$(MAKE) -C dev-cluster clean
 	$(MAKE) -C kernel clean
 	$(MAKE) -C k3s clean
@@ -173,4 +190,4 @@ clean:
 	$(MAKE) -C identity clean
 	$(MAKE) -C image clean
 
-.PHONY: all kernel k3s xtables trust e2fsprogs init operator identity kubeconfig image run run-once run-lab clean
+.PHONY: all kernel k3s xtables trust e2fsprogs init operator identity kubeconfig image run run-once run-lab release serve clean

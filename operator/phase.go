@@ -53,14 +53,23 @@ func conditionPhase(c machine.Condition) machine.Phase {
 		// Facts exist but carry no boot record yet: init is still
 		// working its way up.
 		return machine.PhaseBooting
-	case "RejectedLastBoot", "StagingRejected", "BootMismatch", "MachineStateEphemeral":
+	case "RejectedLastBoot", "StagingRejected", "BootMismatch", "MachineStateEphemeral",
+		"NoSystemSlots", "DigestMismatch":
 		// Drift exists but liken refuses or is unable to stage it.
-		// Time won't fix these; a different edit will.
+		// Time won't fix these; a different edit will. The last two
+		// are the version target's flavors of stuck: a machine with
+		// no system slots has nowhere to put a release, and a
+		// download whose bytes don't match the catalog's digest is
+		// corrupt at the source — refetching won't change what the
+		// server publishes.
 		return machine.PhaseBlocked
-	case "RebootRequested", "DemotionRebooting", "Draining":
+	case "RebootRequested", "DemotionRebooting", "Draining", "Downloading":
 		// A reboot is in flight; the machine is mid-change. Draining
 		// is its opening move: the node is cordoned and its workloads
-		// are being evicted ahead of the reboot.
+		// are being evicted ahead of the reboot. Downloading is the
+		// version target's equivalent — the change is arriving over
+		// the network instead of waiting on a reboot, but the machine
+		// is just as much mid-change.
 		return machine.PhaseUpdating
 	case "RebootPending", "DemotionPending", "AwaitingTurn":
 		// A change is staged and waiting — on a Manual reboot, or on

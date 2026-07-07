@@ -201,17 +201,22 @@ func sweepFleet(c *apiClient, self string, cluster *machine.Cluster, now time.Ti
 	// observation (stamped with the generation of the spec it
 	// judged), Progressing carries the rollout's story, the phase
 	// summarizes, and the tally is the headcount the printer shows.
-	// Written only when something actually changed, so a settled
-	// fleet writes nothing.
+	// The catalog's newest version is derived here too — the sweep is
+	// the one writer the Cluster's status has, so every derived field
+	// is its job. Written only when something actually changed, so a
+	// settled fleet writes nothing.
+	newest := machine.NewestVersion(cluster.Spec.Releases.Catalog)
 	s.condition.ObservedGeneration = cluster.Metadata.Generation
 	r.progressing.ObservedGeneration = cluster.Metadata.Generation
 	conditions := machine.SetCondition(slices.Clone(cluster.Status.Conditions), s.condition, now)
 	conditions = machine.SetCondition(conditions, r.progressing, now)
 	if cluster.Status.Machines != s.tally || cluster.Status.Phase != s.phase ||
+		cluster.Status.Releases.Newest != newest ||
 		!slices.Equal(conditions, cluster.Status.Conditions) {
 		updated := *cluster
 		updated.Status.Machines = s.tally
 		updated.Status.Phase = s.phase
+		updated.Status.Releases.Newest = newest
 		updated.Status.Conditions = conditions
 		body, err := json.Marshal(&updated)
 		if err != nil {

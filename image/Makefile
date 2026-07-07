@@ -14,33 +14,45 @@
 # the image carries no manifests, which is still a valid machine.
 MANIFESTS ?=
 
+# The version baked into the image and where the archive lands, plus
+# where the liken binary and the operator image come from — all
+# overridable because the releases domain assembles release-stamped
+# images through these same rules, from its own copies of the inputs,
+# into its own tree.
+LIKEN_VERSION ?= $(strip $(file <../VERSION))
+DIST ?= dist
+INIT_DIST ?= ../init/dist
+OPERATOR_DIST ?= ../operator/dist
+
 KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 K3S_VERSION := $(strip $(file <../k3s/VERSION))
 XTABLES_VERSION := $(strip $(file <../xtables/VERSION))
 TRUST_VERSION := $(strip $(file <../trust/VERSION))
 
-dist/liken.cpio: build.sh $(shell find etc -type f) \
-		../init/dist/liken \
+$(DIST)/liken.cpio: build.sh $(shell find etc -type f) \
+		$(INIT_DIST)/liken \
 		../kernel/dist/$(KERNEL_VERSION)/vmlinuz \
 		../k3s/dist/$(K3S_VERSION)/k3s \
 		../xtables/dist/$(XTABLES_VERSION)/bin/xtables-legacy-multi \
 		../trust/dist/$(TRUST_VERSION)/cacert.pem \
 		../identity/dist/tls/server-ca.crt \
 		../identity/dist/token \
-		../operator/dist/liken-operator-image.tar \
+		$(OPERATOR_DIST)/liken-operator-image.tar \
 		$(wildcard ../operator/manifests/*.yaml) \
 		../VERSION
-	./build.sh $(MANIFESTS)
+	LIKEN_VERSION=$(LIKEN_VERSION) DIST=$(abspath $(DIST)) \
+		INIT_DIST=$(abspath $(INIT_DIST)) OPERATOR_DIST=$(abspath $(OPERATOR_DIST)) \
+		./build.sh $(MANIFESTS)
 
 .PHONY: all clean
 
-all: dist/liken.cpio
+all: $(DIST)/liken.cpio
 
 # The install image: liken.cpio plus a concatenated wrapper archive
 # carrying the release payload the installer verifies and copies to
 # disk. install.sh tells the story.
-dist/install.cpio: dist/liken.cpio ../kernel/dist/$(KERNEL_VERSION)/vmlinuz install.sh
-	./install.sh
+$(DIST)/install.cpio: $(DIST)/liken.cpio ../kernel/dist/$(KERNEL_VERSION)/vmlinuz install.sh
+	LIKEN_VERSION=$(LIKEN_VERSION) DIST=$(abspath $(DIST)) ./install.sh
 
 clean:
 	rm -rf dist

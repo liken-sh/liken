@@ -51,11 +51,24 @@ import (
 // newer document is staged for its own proving boot), there is
 // nothing left to do. The facts identify exactly which bytes this
 // boot ran; the operator promotes those bytes and nothing else.
-// renderCluster produces the canonical bytes to stage: a complete
-// Cluster document with no status, deterministic for the same reason
+// renderCluster produces the canonical bytes to stage: a Cluster
+// document with no status, deterministic for the same reason
 // renderManifest is (yaml marshals through JSON with sorted keys), so
 // the hash of these bytes is the document's identity everywhere.
+//
+// The release feed — spec.version and spec.releases — is excluded
+// before rendering. Those fields are live-consumed (the operator
+// reads them from the in-cluster resource every pass), and the drift
+// comparison here is a whole-document hash: if they rode along the
+// way the Machine's sysctls ride its staged manifest, every catalog
+// append and every retargeting would change the hash, read as drift
+// on every machine at once, and stage a fleet-wide reboot for a
+// change whose entire actuation is a download. (The Machine gets
+// away with carrying sysctls because its drift check is
+// field-selective — storageDrift — not a hash of the document.)
 func renderCluster(name string, spec machine.ClusterSpec) ([]byte, string, error) {
+	spec.Version = ""
+	spec.Releases = machine.ClusterReleasesSpec{}
 	doc := machine.Cluster{
 		APIVersion: machine.APIVersion,
 		Kind:       "Cluster",

@@ -18,7 +18,7 @@ profile: coverage.out
 
 threshold:
   # The whole module, everything counted.
-  total: 51
+  total: 52
 
 override:
   # The Machine API: pure functions over declared types. (Paths here

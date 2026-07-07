@@ -22,12 +22,16 @@ set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 kernel_version="$(<"$here/../kernel/VERSION")"
-liken_version="$(<"$here/../VERSION")"
+
+# Overridable for the same reason build.sh's are: a release build
+# wraps its own liken.cpio, under its own version, in its own tree.
+liken_version="${LIKEN_VERSION:-$(<"$here/../VERSION")}"
+dist="${DIST:-$here/dist}"
 
 vmlinuz="$here/../kernel/dist/$kernel_version/vmlinuz"
-cpio="$here/dist/liken.cpio"
+cpio="$dist/liken.cpio"
 
-payload="$here/dist/install-root"
+payload="$dist/install-root"
 release="$payload/usr/share/liken/release"
 rm -rf "$payload"
 mkdir -p "$release"
@@ -57,8 +61,8 @@ EOF
 # The wrapper archive, then the concatenation. Same cpio flags as
 # build.sh: newc is the format the kernel accepts, and root owns
 # everything regardless of who ran the build.
-(cd "$payload" && find . | cpio --quiet -o -H newc -R +0:+0) >"$here/dist/install-wrapper.cpio"
-cat "$cpio" "$here/dist/install-wrapper.cpio" >"$here/dist/install.cpio"
+(cd "$payload" && find . | cpio --quiet -o -H newc -R +0:+0) >"$dist/install-wrapper.cpio"
+cat "$cpio" "$dist/install-wrapper.cpio" >"$dist/install.cpio"
 
 echo "install image for liken $liken_version:"
-du -sh "$here/dist/install.cpio"
+du -sh "$dist/install.cpio"

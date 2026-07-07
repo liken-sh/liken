@@ -74,9 +74,19 @@ type Cluster struct {
 // down with it, so there is nobody left to write — a frozen status
 // is itself the symptom.
 type ClusterStatus struct {
-	Phase      Phase        `json:"phase,omitempty"`
-	Machines   MachineTally `json:"machines,omitzero"`
-	Conditions []Condition  `json:"conditions,omitempty"`
+	Phase      Phase                 `json:"phase,omitempty"`
+	Machines   MachineTally          `json:"machines,omitzero"`
+	Releases   ClusterReleasesStatus `json:"releases,omitzero"`
+	Conditions []Condition           `json:"conditions,omitempty"`
+}
+
+// ClusterReleasesStatus is what the sweep observes about the release
+// catalog. Newest is the catalog's highest version — derived, like
+// every status field, so a printer column can show "the catalog
+// offers 0.3.0" next to "the target is 0.2.0" without anyone doing
+// version arithmetic at the terminal.
+type ClusterReleasesStatus struct {
+	Newest string `json:"newest,omitempty"`
 }
 
 // MachineTally is the cluster's headcount: how many of its Machines
@@ -129,6 +139,51 @@ type ClusterSpec struct {
 	// Disruption bounds how much of the fleet may be down at once
 	// when the cluster sequences reboots (operator/rollout.go).
 	Disruption ClusterDisruptionSpec `json:"disruption,omitzero"`
+
+	// Version is the fleet's target liken release: the one field an
+	// upgrade edits. Machines carry no version in their specs — each
+	// machine's operator compares the version its boot reported
+	// (status.version.liken) against this target, live, and moves
+	// toward it through the same staged-change-and-granted-reboot
+	// machinery every other change rides. Declaring it here and only
+	// here is what makes an upgrade one edit instead of one per
+	// machine.
+	Version string `json:"version,omitempty"`
+
+	// Releases is where release artifacts come from and which
+	// releases exist: the catalog Version must name its target in
+	// (an admission rule on the CRD enforces that, so a typo'd
+	// target is refused at the door instead of blocking machines).
+	Releases ClusterReleasesSpec `json:"releases,omitzero"`
+}
+
+// ClusterReleasesSpec is the cluster's release feed. Version and
+// Releases are deliberately *live-consumed*: the operator reads them
+// from the in-cluster resource on every pass, and the canonical
+// cluster document that machines stage and reboot into excludes them
+// (operator/cluster.go's renderCluster) — publishing a release or
+// retargeting the fleet must move machines through downloads and
+// sequenced reboots, never stage a fleet-wide configuration change of
+// its own.
+type ClusterReleasesSpec struct {
+	// Source is the base URL releases are served under. A release's
+	// artifacts live at <source>/<version>/, starting with
+	// release.yaml, the document that names every artifact by digest.
+	Source string `json:"source,omitempty"`
+
+	// Catalog is the set of releases machines may be asked to run.
+	// The digest is the sha256 of the release.yaml's exact bytes,
+	// which is the root of the trust chain: the API names the
+	// document, the document names the artifacts, and every byte
+	// downloaded is checked against one or the other.
+	Catalog []ReleaseCatalogEntry `json:"catalog,omitempty"`
+}
+
+// ReleaseCatalogEntry names one release: its version and the digest
+// of its release document, as "sha256:<64 hex digits>".
+type ReleaseCatalogEntry struct {
+	Version string `json:"version"`
+	Digest  string `json:"digest"`
 }
 
 // ClusterDisruptionSpec is the machine-level analogue of a workload's

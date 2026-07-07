@@ -251,3 +251,25 @@ func TestClusterConvergenceWaitsForItsTurn(t *testing.T) {
 		t.Errorf("an ungranted member stages but never reboots: %+v", conv)
 	}
 }
+
+func TestRenderClusterExcludesTheReleaseFeed(t *testing.T) {
+	base := machine.ClusterSpec{Leaders: []string{"node-1"}}
+	upgraded := base
+	upgraded.Version = "0.2.0"
+	upgraded.Releases = machine.ClusterReleasesSpec{
+		Source:  "http://10.0.2.2:8017/releases",
+		Catalog: []machine.ReleaseCatalogEntry{{Version: "0.2.0", Digest: "sha256:abcd"}},
+	}
+
+	baseBytes, baseHash, err := renderCluster("lab", base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upgradedBytes, upgradedHash, err := renderCluster("lab", upgraded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upgradedHash != baseHash || string(upgradedBytes) != string(baseBytes) {
+		t.Error("publishing a release or retargeting the fleet must not change the canonical cluster document; that would stage a fleet-wide reboot")
+	}
+}

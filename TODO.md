@@ -728,7 +728,7 @@
            run converged onto the same entry numbers with everything
            re-verified in place. BOOT=disk is a knob rather than the
            default until step 8 migrates the fleet.)
-    4. [ ] The releases domain and the API: `make release VERSION=x`
+    4. [x] The releases domain and the API: `make release VERSION=x`
            rebuilds init, operator, and image with the overridden
            version stamp into a separate build tree (the domain
            Makefiles learn overridable version and output knobs; the
@@ -750,7 +750,20 @@
            each Machine's LIKEN column shows who has arrived. Prove
            it: an edit whose target names no catalog entry is refused
            at the door, and `kubectl get clusters` tells the
-           target-versus-newest story at a glance.
+           target-versus-newest story at a glance. (Proven on the lab:
+           0.1.0 and 0.2.0 published with the stamp riding through the
+           init binary, the operator image's name, and the DaemonSet's
+           pin; the everyday dist/ trees untouched. Setting
+           spec.version with no catalog was refused at admission, the
+           catalog entry plus target landed in one edit and the
+           VERSION column showed 0.1.0, and a bogus 9.9.9 target was
+           refused even with a catalog present. `make corrupt` flipped
+           one byte and the published digest promise broke exactly as
+           designed. The publish reuses the install payload's own
+           release.yaml, so the stick's document and the server's are
+           byte-identical. NEWEST stays blank until a leader runs this
+           build's operator — the sweep is its writer — which the
+           fleet migration in step 8 delivers.)
     5. [ ] The download: an asynchronous fetcher in the operator — a
            blocking 116MB GET inside a reconcile pass would starve the
            heartbeat and read as a death, milestone 10's lesson made

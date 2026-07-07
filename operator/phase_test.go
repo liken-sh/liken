@@ -58,8 +58,23 @@ func TestDecidePhase(t *testing.T) {
 			machine.PhaseBlocked,
 		},
 		{
+			"a machine with no system slots can never take a release",
+			[]machine.Condition{condition("VersionConverged", "False", "NoSystemSlots")},
+			machine.PhaseBlocked,
+		},
+		{
+			"a corrupt release blocks until the catalog changes",
+			[]machine.Condition{condition("VersionConverged", "False", "DigestMismatch")},
+			machine.PhaseBlocked,
+		},
+		{
 			"a requested reboot is an update in flight",
 			[]machine.Condition{condition("SpecConverged", "False", "RebootRequested")},
+			machine.PhaseUpdating,
+		},
+		{
+			"a release downloading is an update in flight",
+			[]machine.Condition{condition("VersionConverged", "False", "Downloading")},
 			machine.PhaseUpdating,
 		},
 		{

@@ -1,0 +1,4 @@
+# Release build products: hundreds of megabytes per version, all
+# reproducible from committed sources with `make release VERSION=x`.
+build/
+dist/

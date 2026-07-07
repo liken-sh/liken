@@ -26,9 +26,15 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-version="$(cat "$here/../VERSION")"
 
-layout="$here/dist/oci"
+# The version stamped into the image's name and the directory the
+# artifacts land in, both overridable from the environment: the
+# releases domain runs this same script to package a release-stamped
+# operator into its own tree (see the Makefile's LIKEN_VERSION/DIST).
+version="${LIKEN_VERSION:-$(cat "$here/../VERSION")}"
+dist="${DIST:-$here/dist}"
+
+layout="$dist/oci"
 blobs="$layout/blobs/sha256"
 rm -rf "$layout"
 mkdir -p "$blobs"
@@ -47,22 +53,22 @@ add_blob() {
 # make the archive a pure function of its contents (fixed timestamps,
 # numeric ownership, sorted names), so rebuilding an unchanged binary
 # yields a byte-identical layer and therefore the same digest.
-rootfs="$here/dist/rootfs"
+rootfs="$dist/rootfs"
 rm -rf "$rootfs"
 mkdir -p "$rootfs"
-cp "$here/dist/liken-operator" "$rootfs/liken-operator"
-tar --create --file "$here/dist/layer.tar" \
+cp "$dist/liken-operator" "$rootfs/liken-operator"
+tar --create --file "$dist/layer.tar" \
     --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
     -C "$rootfs" .
-layer_size="$(stat -c%s "$here/dist/layer.tar")"
-layer_digest="$(add_blob "$here/dist/layer.tar")"
+layer_size="$(stat -c%s "$dist/layer.tar")"
+layer_digest="$(add_blob "$dist/layer.tar")"
 
 # The config: the runtime half of the image. diff_ids are digests of
 # the *uncompressed* layer tars; ours is stored uncompressed, so the
 # same digest appears in both the manifest and here. There is no base
 # image and no shell to name; the Entrypoint is the entire runtime
 # configuration.
-cat >"$here/dist/config.json" <<EOF
+cat >"$dist/config.json" <<EOF
 {
   "created": "1970-01-01T00:00:00Z",
   "architecture": "amd64",
@@ -76,11 +82,11 @@ cat >"$here/dist/config.json" <<EOF
   }
 }
 EOF
-config_size="$(stat -c%s "$here/dist/config.json")"
-config_digest="$(add_blob "$here/dist/config.json")"
+config_size="$(stat -c%s "$dist/config.json")"
+config_digest="$(add_blob "$dist/config.json")"
 
 # The manifest: config plus layers, each named by digest and size.
-cat >"$here/dist/manifest.json" <<EOF
+cat >"$dist/manifest.json" <<EOF
 {
   "schemaVersion": 2,
   "mediaType": "application/vnd.oci.image.manifest.v1+json",
@@ -98,8 +104,8 @@ cat >"$here/dist/manifest.json" <<EOF
   ]
 }
 EOF
-manifest_size="$(stat -c%s "$here/dist/manifest.json")"
-manifest_digest="$(add_blob "$here/dist/manifest.json")"
+manifest_size="$(stat -c%s "$dist/manifest.json")"
+manifest_digest="$(add_blob "$dist/manifest.json")"
 
 # The index: the entry point a consumer reads first. The containerd
 # annotation is how the image keeps its name through an import: an
@@ -126,9 +132,9 @@ EOF
 # The layout marker file that declares "this directory is an OCI image
 # layout", and then the whole thing becomes one archive.
 echo '{"imageLayoutVersion": "1.0.0"}' >"$layout/oci-layout"
-tar --create --file "$here/dist/liken-operator-image.tar" \
+tar --create --file "$dist/liken-operator-image.tar" \
     --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
     -C "$layout" oci-layout index.json blobs
 
 echo "liken.sh/operator:$version:"
-du -sh "$here/dist/liken-operator-image.tar"
+du -sh "$dist/liken-operator-image.tar"

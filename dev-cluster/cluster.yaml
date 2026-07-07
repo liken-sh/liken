@@ -65,3 +65,18 @@ spec:
     # this lab picks Cloudflare's public NTP service, which (unlike
     # the NTP pool) is run for exactly this kind of anonymous use.
     upstreams: [time.cloudflare.com, time.nist.gov]
+
+  releases:
+    # Where release artifacts come from: the lab's release server
+    # (releases/serve, started with `make serve`), reached at QEMU's
+    # built-in address for "the host machine" on a user-mode network.
+    # What is deliberately NOT seeded here: the catalog, or a target
+    # version. A catalog entry is the digest of a release document,
+    # and releases built from this repo embed the checkout's own
+    # identity artifacts (the cluster CA, the join token — gitignored,
+    # minted per checkout), so no digest is stable enough to commit.
+    # Publishing a release prints its catalog entry; adding it and
+    # setting spec.version are live edits to the Cluster resource,
+    # which is the point — an upgrade is an API conversation, not an
+    # image rebuild.
+    source: http://10.0.2.2:8017/releases
