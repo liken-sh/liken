@@ -200,15 +200,21 @@ func provingWatch(ctx context.Context) error {
 // the setup menu) heals on the next boot.
 func repairBootOrder(efiDir, stateRoot string) {
 	proven, err := machine.SystemReleases(stateRoot).LoadProven()
-	if proven == nil || err != nil {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "liken: system: the proven release record is unreadable: %v\n", err)
 		return
+	}
+	if proven == nil {
+		return // no record yet; the firmware's order is the only opinion
 	}
 	record, err := machine.ParseSystemRelease(proven)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "liken: system: the proven release record does not parse: %v\n", err)
 		return
 	}
 	leader, ok := findSlotEntry(efiDir, record.Slot)
 	if !ok {
+		fmt.Fprintf(os.Stderr, "liken: system: the store says slot %s is proven, but no boot entry answers to it; leaving BootOrder alone\n", record.Slot)
 		return
 	}
 

@@ -801,7 +801,7 @@
            left node-5's operator pod without its slots mount until
            the new manifests were re-applied by hand. The schema is
            part of the OS image; a fleet upgrade is a schema upgrade.)
-    6. [ ] The proving reboot: a verified download becomes a staged
+    6. [x] The proving reboot: a verified download becomes a staged
            record in a third staging store — system/ beside manifests/
            and cluster/ on machineState, the same four files, the same
            durable writes. Init's reboot path finds it, writes the
@@ -815,7 +815,23 @@
            that timeline boots something proven. Prove it: one Cluster
            edit upgrades one node — the LIKEN column flips, BootOrder
            prefers the new slot, and a plain reboot stays on the new
-           version.
+           version. (Proven on node-5: one catalog edit ran the whole
+           chain unattended — download, staged record, the conductor's
+           turn, the drain, "BootNext armed at Boot0003 ... once", the
+           proving boot on slot B, promotion by the 0.2.0-stamped
+           operator's first pass, and the LIKEN column flipping to
+           0.2.0. A power cut landed by accident in the exact gap the
+           design worries about — promoted but not yet flipped — and
+           the machine healed itself: booted the old slot, re-staged,
+           re-proved, and a deliberate power-cycle after that came up
+           straight on slot B. One anomaly to watch in step 7's
+           drills: the old-slot boot's BootOrder repair didn't
+           visibly fire; its early returns were silent, and now they
+           narrate, so a recurrence will explain itself. The catalog
+           digest also earned its place in the record's identity:
+           re-cutting 0.2.0 flipped the digest, and the machine held
+           at DigestMismatch until the catalog was updated to match —
+           the API, not the server, decides what runs.)
     7. [ ] The fallbacks: a proving-boot watchdog in init — armed only
            when the running slot's record is still staged, disarmed by
            promotion, ten minutes of patience, the fleet's established
