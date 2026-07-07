@@ -128,9 +128,11 @@ image: image/dist/liken.cpio
 # hardware and every QEMU flag are documented in dev-cluster/
 # Makefile). NODE picks which machine this terminal becomes; the
 # cluster is one `make run` (the founding leader) plus a `make run
-# NODE=node-N` per remaining machine, each in its own terminal. The
-# root's job here, as everywhere, is making sure the artifacts exist,
-# in order, before handing off.
+# NODE=node-N` per remaining machine, each in its own terminal. A
+# guest reboot resets the VM in place, so the console shows a staged
+# spec or a release upgrade applied end to end: shutdown and next
+# boot in one stream. The root's job here, as everywhere, is making
+# sure the artifacts exist, in order, before handing off.
 run: $(KERNEL_DIST)/vmlinuz image/dist/liken.cpio
 	$(MAKE) -C dev-cluster run
 
@@ -140,12 +142,6 @@ run: $(KERNEL_DIST)/vmlinuz image/dist/liken.cpio
 run-once: $(KERNEL_DIST)/vmlinuz image/dist/liken.cpio
 	$(MAKE) -C dev-cluster run-once
 
-# The reboot-capable run: a guest-initiated restart resets the VM in
-# place instead of ending it, which is how to watch a staged spec
-# apply: shutdown and next boot in one console stream.
-run-lab: $(KERNEL_DIST)/vmlinuz image/dist/liken.cpio
-	$(MAKE) -C dev-cluster run-lab
-
 # The install image: liken.cpio carrying the release payload the
 # installer verifies and copies onto a machine's own disk.
 image/dist/install.cpio: image/dist/liken.cpio $(KERNEL_DIST)/vmlinuz image/install.sh
@@ -153,8 +149,8 @@ image/dist/install.cpio: image/dist/liken.cpio $(KERNEL_DIST)/vmlinuz image/inst
 
 # Install a machine: boot it once from the "USB stick" (the install
 # image via -kernel), let it put this release on its own system
-# slots, and power off. `make run NODE=x BOOT=disk` boots it from
-# that disk ever after.
+# slots, and power off. `make run NODE=x` boots it from that disk
+# ever after.
 install: image/dist/install.cpio
 	$(MAKE) -C dev-cluster install
 
@@ -190,4 +186,4 @@ clean:
 	$(MAKE) -C identity clean
 	$(MAKE) -C image clean
 
-.PHONY: all kernel k3s xtables trust e2fsprogs init operator identity kubeconfig image run run-once run-lab release serve clean
+.PHONY: all kernel k3s xtables trust e2fsprogs init operator identity kubeconfig image run run-once release serve clean
