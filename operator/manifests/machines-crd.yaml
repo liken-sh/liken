@@ -590,13 +590,18 @@ spec:
                 firmware:
                   type: object
                   description: >-
-                    How the machine was booted: UEFI with its boot
-                    variables decoded into words, or BIOS — shorthand
-                    for any world without firmware variables to
-                    consult (a legacy server, a direct-kernel boot
-                    under a hypervisor). Each entry renders as the
-                    firmware's variable name plus the entry's own
-                    description, e.g. "Boot0001 (liken slot A)".
+                    The machine's standing firmware state: its boot
+                    mode and the boot menu from its non-volatile
+                    store — UEFI with its variables decoded into
+                    words, or BIOS, shorthand for any world without
+                    firmware variables to consult (a legacy server, a
+                    direct-kernel boot under a hypervisor). This
+                    describes the machine, not the boot: power-cut
+                    and boot unchanged, and everything here rides
+                    through, while status.boot is freshly re-made.
+                    Each entry renders as the firmware's variable
+                    name plus the entry's own description, e.g.
+                    "Boot0001 (liken slot A)".
                   properties:
                     mode:
                       type: string
@@ -704,12 +709,16 @@ spec:
                 boot:
                   type: object
                   description: >-
-                    Which documents this boot actually ran under: the
-                    staged copy awaiting its proving boot, the proven
-                    last-known-good, or (first boot only) the seed
-                    baked into the image — recorded separately for
-                    the Machine manifest and the Cluster document,
-                    because the two stage and prove independently.
+                    What this boot ran under — the perishable record,
+                    re-made every boot, that the operator diffs the
+                    spec against (contrast firmware, the standing
+                    state that rides through reboots). Which
+                    documents: the staged copy awaiting its proving
+                    boot, the proven last-known-good, or (first boot
+                    only) the seed baked into the image — recorded
+                    separately for the Machine manifest and the
+                    Cluster document, because the two stage and prove
+                    independently.
                     The hashes identify exact bytes, and the storage
                     block is the spec as actuated: together they are
                     the reference point for detecting drift between

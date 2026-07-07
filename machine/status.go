@@ -42,10 +42,15 @@ type MachineStatus struct {
 	// Hardware is what the machine found itself running on.
 	Hardware HardwareStatus `json:"hardware,omitzero"`
 
-	// Firmware is how the machine was booted: UEFI with its boot
-	// variables decoded into words, or BIOS — shorthand for any world
-	// without firmware variables to consult (a legacy server, a
-	// direct-kernel boot under a hypervisor).
+	// Firmware is the machine's standing firmware state: the mode it
+	// boots in and the boot menu from its non-volatile store — UEFI
+	// with its variables decoded into words, or BIOS, shorthand for
+	// any world without firmware variables to consult (a legacy
+	// server, a direct-kernel boot under a hypervisor). It sits
+	// beside Hardware because it describes the machine, not the
+	// boot: BootOrder is a standing preference and BootNext is about
+	// the *next* boot; only bootCurrent is this boot's fact, kept
+	// here with its family. Contrast Boot, the per-boot record.
 	Firmware FirmwareStatus `json:"firmware,omitzero"`
 
 	// Storage reports where every storage role is actually backed this
@@ -59,10 +64,13 @@ type MachineStatus struct {
 	// side by side in one kubectl get.
 	Sysctls map[string]string `json:"sysctls,omitempty"`
 
-	// Boot reports which manifest this boot actually ran under: the
-	// reference point that lets the operator compare the cluster's
-	// spec against what the machine actuated, and see any rejection
-	// that happened on the way up.
+	// Boot is what this boot ran under: which documents, and the
+	// storage as actuated — the perishable record, re-made every
+	// boot, that the operator diffs the spec against. Its lifetime
+	// is what separates it from Firmware: power-cut the machine and
+	// boot it unchanged, and everything here is freshly re-derived
+	// (a staged manifest applies, a rejection lands), while Firmware
+	// reports the standing state that rode through.
 	Boot BootStatus `json:"boot,omitzero"`
 
 	// BootedAt is the moment the machine booted, derived by init from
