@@ -1006,7 +1006,7 @@
         engine could ride the same channel. This is also where the
         question of manifest authority resolves: git wins, and the
         seeded Machine and Cluster copies are downstream of it.
-15. [ ] Observability for everything below Kubernetes. The kernel,
+15. [x] Observability for everything below Kubernetes. The kernel,
         init, k3s, and containerd log only to the serial console, and
         for the first two the console is the only copy that exists. A
         collector cannot tail a serial port, so nothing standard can
@@ -1026,7 +1026,7 @@
         that die before k3s starts, which leave only the console as
         witness. The follow-ons for that last gap are persisting
         init's log to disk and efi-pstore for kernel panics.
-    1. [ ] Init logs to /dev/kmsg instead of writing the console
+    1. [x] Init logs to /dev/kmsg instead of writing the console
            directly. The kernel echoes kmsg writes back to the
            console (gaining printk timestamps), so console behavior
            is preserved, and every liken line also lands in the ring
@@ -1046,7 +1046,7 @@
            lines printed before /dev exists (hello, the switch_root
            narration) stay console-only; there is nowhere else for
            them to go yet.
-    2. [ ] The k3s log moves to clusterState, at a liken-owned path
+    2. [x] The k3s log moves to clusterState, at a liken-owned path
            (/var/lib/rancher/k3s/liken/k3s.log) so it can't be
            mistaken for a file k3s manages. Storage settles before
            k3s starts, so the mount is always there first, and a
@@ -1063,7 +1063,7 @@
            load-bearing: the open log handle must close after k3s
            exits and before clusterState unmounts, or shutdown's
            unmount fails busy.
-    3. [ ] The relay, hand-rolled: the kmsg record format and a
+    3. [x] The relay, hand-rolled: the kmsg record format and a
            rotation-aware tail (notice the inode change, reopen; the
            lesson tail -F embodies) are each small formats in the
            GPT-writer family, and the relay must live in the baked
@@ -1094,7 +1094,7 @@
            checkpointing them through etcd is milestone 10's
            write-amplification lesson again, and a PVC can't be
            expressed per-DaemonSet-pod anyway.
-    4. [ ] The output contract: a structured envelope around a
+    4. [x] The output contract: a structured envelope around a
            verbatim body. Event time must ride in the payload,
            because the kmsg reader replays from the head of the
            buffer and the container runtime stamps lines at read
@@ -1114,7 +1114,7 @@
            and `jq -r .message` gives a human the prose back. The
            console stays the literate, human surface; pod logs are
            the machine-readable one.
-    5. [ ] Prove it in the lab: `kubectl logs` on each DaemonSet
+    5. [x] Prove it in the lab: `kubectl logs` on each DaemonSet
            shows its stream from the head of the boot, a reboot
            shows rotation keeping the prior boot's k3s and
            containerd logs, a relay pod deleted mid-run comes back
@@ -1122,7 +1122,23 @@
            container restarts (pod intact) resumes from its cursor
            without replaying, and a fresh
            `kubectl logs --since` after settling shows the fleet
-           quiet, not chattering.
+           quiet, not chattering. Proven across two releases rolled
+           onto the live five-node lab. 0.3.0 carried the relays and
+           found the privilege bug above; 0.3.1 carried the fix, and
+           the whole fleet walked the rollout with all twenty-five
+           OS pods (operator plus four relays, five nodes) refreshed
+           by the steward and settling at zero restarts. kernel-logs
+           ships the boot from sequence 0 ("Linux version ...");
+           liken-logs opens with exactly the console-only boundary
+           marker; k3s-logs shows the severity mix lifted from
+           logrus (info, warning, err) and starts at offset 0 on the
+           fresh boot's file, which is rotation working across a
+           real reboot; and a deleted kernel-logs pod replayed
+           byte-identical records under the same sequence numbers.
+           The one behavior left to unit tests alone is cursor
+           resume across a container restart: with no shell in the
+           relay's image there is no way to kill just the container,
+           and the tailer tests cover the resume path directly.
 
 Deferred until the fundamentals above are proven, the
 public-consumption tier:
