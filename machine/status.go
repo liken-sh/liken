@@ -371,3 +371,29 @@ func SetCondition(conditions []Condition, c Condition, now time.Time) []Conditio
 	}
 	return append(conditions, c)
 }
+
+// FindCondition reports the condition of the named type, nil when the
+// list carries none.
+func FindCondition(conditions []Condition, conditionType string) *Condition {
+	for i := range conditions {
+		if conditions[i].Type == conditionType {
+			return &conditions[i]
+		}
+	}
+	return nil
+}
+
+// RemoveCondition drops the condition of the named type. Most
+// conditions are observations and live forever, flipping between True
+// and False; removal exists for the ones that are grants — present
+// while extended, gone when revoked — so their absence can carry
+// meaning without a False state that other machinery would read as
+// trouble.
+func RemoveCondition(conditions []Condition, conditionType string) []Condition {
+	for i := range conditions {
+		if conditions[i].Type == conditionType {
+			return append(conditions[:i], conditions[i+1:]...)
+		}
+	}
+	return conditions
+}

@@ -63,14 +63,28 @@ rules:
   - apiGroups: [liken.sh]
     resources: [clusters/status]
     verbs: [get, update]
-  # Nodes, for demotion cleanup (demotion.go): a machine demoted from
-  # leader to follower deletes its own stale Node object, which is
-  # what triggers k3s's etcd member removal. get to see the stale
-  # role labels, delete to finish the demotion, and never update —
-  # the operator doesn't manage Nodes.
+  # Nodes: get to see role labels and cordon state, delete for
+  # demotion cleanup (demotion.go — deleting the stale Node is what
+  # triggers k3s's etcd member removal), and patch for the drain's
+  # cordon and uncordon (drain.go). Patch rather than update,
+  # deliberately: the operator touches only the fields it owns (the
+  # unschedulable flag, its own annotations) and never rewrites a
+  # whole Node.
   - apiGroups: [""]
     resources: [nodes]
-    verbs: [get, delete]
+    verbs: [get, delete, patch]
+  # The drain (drain.go): list to see what still runs on this
+  # machine's node, and create on the eviction subresource to ask
+  # each pod to leave. Eviction-by-subresource rather than pod
+  # delete, deliberately: an eviction is refused while it would
+  # violate the workload's PodDisruptionBudget, which is the entire
+  # difference between draining a node and killing it.
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [list]
+  - apiGroups: [""]
+    resources: [pods/eviction]
+    verbs: [create]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

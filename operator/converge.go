@@ -167,6 +167,20 @@ func renderManifest(name string, spec machine.MachineSpec) ([]byte, string, erro
 	return body, machine.ManifestHash(body), nil
 }
 
+// A turn is the machine's standing with the rollout conductor
+// (rollout.go): whether it may reboot right now. A machine with no
+// cluster document answers to nobody and reboots at will; a cluster
+// member waits until the conductor writes a RebootApproved condition
+// onto it. Only rebootPolicy: Auto ever consults this — a Manual
+// machine waits for its human regardless.
+type turn int
+
+const (
+	turnStandalone turn = iota // no cluster: reboot at will
+	turnAwaiting               // cluster member, not yet granted
+	turnGranted                // cluster member, grant in hand
+)
+
 // A convergence is one reconcile pass's decision: the condition to
 // publish, and which side effects to perform. decideConvergence is
 // pure; reconcile() acts.
@@ -214,9 +228,9 @@ func notConverged(reason, message string) machine.Condition {
 //     stage into.
 //  6. The spec fails validation against the machine's reality.
 //  7. Valid drift: stage (unless these exact bytes already are), and
-//     per rebootPolicy either request the reboot or report one
-//     pending.
-func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejection *machine.Rejection, stagedHash string) convergence {
+//     per rebootPolicy and the machine's turn either request the
+//     reboot, wait for the cluster's grant, or report one pending.
+func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejection *machine.Rejection, stagedHash string, t turn) convergence {
 	if facts == nil || facts.Boot.ManifestSource == "" {
 		return convergence{condition: machine.Condition{
 			Type: "SpecConverged", Status: "Unknown", Reason: "FactsIncomplete",
@@ -260,13 +274,17 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 		hash:     hash,
 		stage:    stagedHash != hash, // idempotence: no disk churn when these bytes already wait
 	}
-	if m.Spec.RebootPolicyOrDefault() == machine.RebootAuto {
+	switch {
+	case m.Spec.RebootPolicyOrDefault() != machine.RebootAuto:
+		c.condition = notConverged("RebootPending",
+			fmt.Sprintf("spec staged for the next boot (%.12s); rebootPolicy is Manual, so reboot the machine (or set rebootPolicy: Auto) to apply: %s", hash, diffs))
+	case t == turnAwaiting:
+		c.condition = notConverged("AwaitingTurn",
+			fmt.Sprintf("spec staged for the next boot (%.12s); waiting for the cluster to grant a reboot turn: %s", hash, diffs))
+	default:
 		c.requestReboot = true
 		c.condition = notConverged("RebootRequested",
 			fmt.Sprintf("reboot requested to apply the staged spec (%.12s): %s", hash, diffs))
-	} else {
-		c.condition = notConverged("RebootPending",
-			fmt.Sprintf("spec staged for the next boot (%.12s); rebootPolicy is Manual, so reboot the machine (or set rebootPolicy: Auto) to apply: %s", hash, diffs))
 	}
 	return c
 }

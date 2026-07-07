@@ -60,6 +60,36 @@ func TestSetConditionKeepsDistinctTypesApart(t *testing.T) {
 	}
 }
 
+func TestRemoveConditionDropsTheNamedType(t *testing.T) {
+	conditions := SetCondition(nil, Condition{Type: "Ready", Status: "True"}, t0)
+	conditions = SetCondition(conditions, Condition{Type: "RebootApproved", Status: "True"}, t0)
+	conditions = RemoveCondition(conditions, "RebootApproved")
+	if len(conditions) != 1 || conditions[0].Type != "Ready" {
+		t.Errorf("got %+v", conditions)
+	}
+}
+
+func TestRemoveConditionLeavesOthersAloneWhenTypeIsAbsent(t *testing.T) {
+	conditions := SetCondition(nil, Condition{Type: "Ready", Status: "True"}, t0)
+	conditions = RemoveCondition(conditions, "RebootApproved")
+	if len(conditions) != 1 {
+		t.Errorf("got %+v", conditions)
+	}
+}
+
+func TestFindConditionReportsTheNamedType(t *testing.T) {
+	conditions := SetCondition(nil, Condition{Type: "Ready", Status: "True"}, t0)
+	if c := FindCondition(conditions, "Ready"); c == nil || c.Status != "True" {
+		t.Errorf("got %+v", c)
+	}
+}
+
+func TestFindConditionReportsNilWhenAbsent(t *testing.T) {
+	if c := FindCondition(nil, "Ready"); c != nil {
+		t.Errorf("got %+v", c)
+	}
+}
+
 func TestRoleAddressesEveryRoleAndNothingElse(t *testing.T) {
 	s := AllRolesInMemory()
 	for _, name := range StorageRoleNames {

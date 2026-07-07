@@ -112,3 +112,17 @@ func TestRoleDerivation(t *testing.T) {
 		})
 	}
 }
+
+func TestMaxUnavailableDefaultsToOne(t *testing.T) {
+	var spec ClusterSpec
+	if got := spec.Disruption.MaxUnavailableOrDefault(); got != 1 {
+		t.Errorf("got %d", got)
+	}
+}
+
+func TestMaxUnavailableHonorsTheDeclaredBudget(t *testing.T) {
+	spec := ClusterSpec{Disruption: ClusterDisruptionSpec{MaxUnavailable: 2}}
+	if got := spec.Disruption.MaxUnavailableOrDefault(); got != 2 {
+		t.Errorf("got %d", got)
+	}
+}

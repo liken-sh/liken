@@ -74,36 +74,46 @@ type fleetSweep struct {
 	phase     machine.Phase
 }
 
-// decideFleetSweep judges every machine by its heartbeat: the last
-// renewal of its lease, from listMachineHeartbeats. A machine counts
-// toward ready only when it says Ready *and* its lease says so
-// recently: a frozen status is only as current as the machine that
+// effectivePhase is a machine's phase as the fleet should read it: its
+// own claim when its heartbeat is fresh, and Lost when it has gone
+// silent — a frozen status is only as current as the machine that
 // wrote it, and that machine may no longer exist. A machine with no
-// lease at all has never been heard from. The sweeping leader
-// exempts itself — it is running this very code, so its liveness
-// isn't in question, only how recently its renewal landed.
+// lease at all has never been heard from. The sweeping leader exempts
+// itself: it is running this very code, so its liveness isn't in
+// question, only how recently its renewal landed.
 //
-// The verdict reads the same effective phases (a silent machine
-// counts as Lost even before the Lost write lands) and sorts every
-// machine that isn't Ready into one of two stories: mid-transition
-// (rebooting into a change, waiting on one, or booting), or unwell
-// (Lost, Blocked, or otherwise degraded). Unwell outranks
-// mid-transition, and the MachinesReady condition names the machines
-// so nobody has to go looking.
+// One silence is not suspicious: a machine holding a reboot grant
+// (rollout.go) was *told* to go down, so until the grant is old enough
+// to be a stall, its silence reads as the reboot in progress.
+func effectivePhase(m *machine.Machine, renewals map[string]time.Time, self string, now time.Time) machine.Phase {
+	renewed, heard := renewals[m.Metadata.Name]
+	if m.Metadata.Name == self || (heard && now.Sub(renewed) <= heartbeatStaleAfter) {
+		return m.Status.Phase
+	}
+	if grant := machine.FindCondition(m.Status.Conditions, rebootApprovedCondition); grant != nil &&
+		now.Sub(grant.LastTransitionTime) <= rolloutStallAfter {
+		return machine.PhaseUpdating
+	}
+	return machine.PhaseLost
+}
+
+// decideFleetSweep judges every machine by its effective phase: a
+// machine counts toward ready only when it says Ready *and* its lease
+// says so recently. The verdict sorts every machine that isn't Ready
+// into one of two stories: mid-transition (rebooting into a change,
+// waiting on one, or booting), or unwell (Lost, Blocked, or otherwise
+// degraded). Unwell outranks mid-transition, and the MachinesReady
+// condition names the machines so nobody has to go looking.
 func decideFleetSweep(machines []machine.Machine, renewals map[string]time.Time, self string, now time.Time) fleetSweep {
 	s := fleetSweep{tally: machine.MachineTally{Total: len(machines)}}
 	var transitioning, unwell []string
-	for _, m := range machines {
-		renewed, heard := renewals[m.Metadata.Name]
-		fresh := m.Metadata.Name == self || (heard && now.Sub(renewed) <= heartbeatStaleAfter)
-		if !fresh && m.Status.Phase != machine.PhaseLost {
+	for i := range machines {
+		m := &machines[i]
+		effective := effectivePhase(m, renewals, self, now)
+		if effective == machine.PhaseLost && m.Status.Phase != machine.PhaseLost {
 			s.lost = append(s.lost, m.Metadata.Name)
 		}
 
-		effective := m.Status.Phase
-		if !fresh {
-			effective = machine.PhaseLost
-		}
 		switch effective {
 		case machine.PhaseReady:
 			s.tally.Ready++
@@ -154,6 +164,14 @@ func sweepFleet(c *apiClient, self string, cluster *machine.Cluster, now time.Ti
 	}
 	s := decideFleetSweep(machines, renewals, self, now)
 
+	// The rollout is decided from the same listing: which machines may
+	// take their reboot turn now, and which spent grants come back
+	// (rollout.go). Sequencing belongs here for the same reason the
+	// tally does — the sweep is the one place with the whole fleet in
+	// view, and the lease already guarantees a single conductor.
+	r := decideRollout(machines, renewals, cluster, self, now)
+	carryOutRollout(c, machines, r, now)
+
 	for _, m := range machines {
 		if !slices.Contains(s.lost, m.Metadata.Name) {
 			continue
@@ -181,11 +199,14 @@ func sweepFleet(c *apiClient, self string, cluster *machine.Cluster, now time.Ti
 
 	// The cluster's status: the MachinesReady condition carries the
 	// observation (stamped with the generation of the spec it
-	// judged), the phase summarizes it, and the tally is the
-	// headcount the printer shows. Written only when something
-	// actually changed, so a settled fleet writes nothing.
+	// judged), Progressing carries the rollout's story, the phase
+	// summarizes, and the tally is the headcount the printer shows.
+	// Written only when something actually changed, so a settled
+	// fleet writes nothing.
 	s.condition.ObservedGeneration = cluster.Metadata.Generation
+	r.progressing.ObservedGeneration = cluster.Metadata.Generation
 	conditions := machine.SetCondition(slices.Clone(cluster.Status.Conditions), s.condition, now)
+	conditions = machine.SetCondition(conditions, r.progressing, now)
 	if cluster.Status.Machines != s.tally || cluster.Status.Phase != s.phase ||
 		!slices.Equal(conditions, cluster.Status.Conditions) {
 		updated := *cluster

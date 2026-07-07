@@ -116,6 +116,36 @@ type ClusterSpec struct {
 	// agree on, and TLS (so the cluster itself) stops working when
 	// they don't.
 	Time ClusterTimeSpec `json:"time,omitzero"`
+
+	// Disruption bounds how much of the fleet may be down at once
+	// when the cluster sequences reboots (operator/rollout.go).
+	Disruption ClusterDisruptionSpec `json:"disruption,omitzero"`
+}
+
+// ClusterDisruptionSpec is the machine-level analogue of a workload's
+// PodDisruptionBudget, reduced to the one number that matters for a
+// fleet: how many machines may be voluntarily down at the same time.
+// It governs only disruptions the cluster chooses (rolling reboots to
+// apply staged changes); it cannot promise anything about machines
+// that fail on their own — though the rollout counts those against
+// the budget too, so a hurting fleet pauses its own rollout.
+type ClusterDisruptionSpec struct {
+	// MaxUnavailable is how many machines may be unavailable at once,
+	// planned and unplanned together. Zero means unset and defaults
+	// to 1: one machine at a time is the safest rollout and the right
+	// answer for small fleets. The leaders have a stricter, automatic
+	// floor regardless of this number: only one leader may ever be
+	// down at a time, because the datastore's quorum is arithmetic,
+	// not policy.
+	MaxUnavailable int `json:"maxUnavailable,omitempty"`
+}
+
+// MaxUnavailableOrDefault applies the default: an unset budget is 1.
+func (d ClusterDisruptionSpec) MaxUnavailableOrDefault() int {
+	if d.MaxUnavailable < 1 {
+		return 1
+	}
+	return d.MaxUnavailable
 }
 
 // ClusterTimeSpec declares where time comes from. Only the leaders

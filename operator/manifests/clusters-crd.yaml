@@ -194,6 +194,32 @@ spec:
                       items:
                         type: string
                         maxLength: 253
+                disruption:
+                  type: object
+                  description: >-
+                    How much of the fleet may be down at once when the
+                    cluster sequences reboots: the machine-level
+                    analogue of a workload's PodDisruptionBudget,
+                    reduced to one number. Staged changes that need a
+                    reboot wait for the cluster to grant each machine
+                    a turn (a RebootApproved condition written onto
+                    the Machine), and this budget is how many turns
+                    may be outstanding — counting machines that are
+                    down for any other reason, so a hurting fleet
+                    pauses its own rollout.
+                  properties:
+                    maxUnavailable:
+                      type: integer
+                      minimum: 1
+                      default: 1
+                      description: >-
+                        How many machines may be unavailable at once,
+                        planned and unplanned together. Defaults to
+                        one, the safest rollout. The leaders have a
+                        stricter automatic floor this number cannot
+                        raise: only one leader is ever down at a
+                        time, because the datastore's quorum is
+                        arithmetic, not policy.
             status:
               type: object
               description: >-
@@ -225,9 +251,12 @@ spec:
                   type: array
                   # The same metav1.Condition schema the Machine's
                   # conditions use: a map keyed by type, validated
-                  # like the conditions on Pods and Nodes. Today the
-                  # sweep maintains one entry, MachinesReady; quorum
-                  # margin and clock spread are candidates for later.
+                  # like the conditions on Pods and Nodes. The sweep
+                  # maintains MachinesReady (the headcount's story)
+                  # and Progressing (the rollout's — Deployment's
+                  # vocabulary, False meaning a rollout has stalled);
+                  # quorum margin and clock spread are candidates for
+                  # later.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:

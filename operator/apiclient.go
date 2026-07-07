@@ -136,6 +136,26 @@ var (
 	errConflict = errors.New("conflict: something else wrote this object first")
 )
 
+// patchJSON applies a JSON merge patch (RFC 7386): send only the
+// fields to change, and the server merges them into the object —
+// null deletes a key. This sidesteps optimistic concurrency
+// deliberately: a merge patch has no resourceVersion, so it can't
+// conflict, which is the right tool when the caller owns the specific
+// fields it's touching (a cordon flag, an annotation) and doesn't
+// care what the rest of the object looks like.
+func (c *apiClient) patchJSON(path string, patch []byte) error {
+	resp, err := c.do(http.MethodPatch, path, "application/merge-patch+json", patch)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		message, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return fmt.Errorf("PATCH %s: %s: %s", path, resp.Status, message)
+	}
+	return nil
+}
+
 // requestJSON runs a request and decodes the JSON response into out,
 // turning non-2xx statuses into errors that carry the server's own
 // words. Kubernetes API errors are structured JSON with a message

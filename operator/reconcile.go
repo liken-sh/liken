@@ -179,6 +179,26 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string) {
 	status.Conditions = machine.SetCondition(status.Conditions,
 		machine.StorageCondition(m.Spec.Storage, status.Storage), now)
 
+	// The machine's standing with the rollout conductor: a standalone
+	// machine reboots at will, a cluster member only on a granted
+	// turn. The grant is a condition the conductor wrote onto this
+	// Machine (rollout.go); this operator reads it, carries it along
+	// in its own status writes, and never sets or clears it.
+	t := turnStandalone
+	if clusterName != "" {
+		t = turnAwaiting
+		if g := machine.FindCondition(m.Status.Conditions, rebootApprovedCondition); g != nil && g.Status == "True" {
+			t = turnGranted
+		}
+	}
+
+	// The machine's own Node, read once and used three ways: the
+	// NodeHealthy condition, demotion cleanup, and the cordon state
+	// the drain works through. The read can fail benignly
+	// (mid-demotion, the Node is deleted and not yet re-registered);
+	// that pass just skips all three and the next one settles them.
+	node, nodeErr := getNode(c, m.Metadata.Name)
+
 	// Convergence: does the cluster's copy of each document match what
 	// this boot actuated, and if not, stage the difference for the
 	// next boot (converge.go for the Machine, cluster.go for the
@@ -188,8 +208,20 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string) {
 	// facts: facts are the boot's frozen memory, and a rejection
 	// cleared mid-boot (by an edit that reverted) must unblock a
 	// retry without waiting for a reboot to refresh the facts.
+	// A granted reboot goes through the drain first (drain.go): the
+	// node is cordoned and emptied before the intent is written, so
+	// workloads move instead of dying with the machine.
+	draining := false
+	gate := func(conv convergence) convergence {
+		if !conv.requestReboot || t != turnGranted || nodeErr != nil {
+			return conv
+		}
+		gated := gateThroughDrain(c, node, conv, now)
+		draining = draining || !gated.requestReboot
+		return gated
+	}
 	machineRejection, _ := machine.MachineManifests(machine.MachineStateDir).LoadRejection()
-	conv := decideConvergence(m, facts, machineRejection, readStagedHash())
+	conv := gate(decideConvergence(m, facts, machineRejection, readStagedHash(), t))
 	condition := carryOutConvergence(conv, machine.MachineManifests(machine.MachineStateDir), "spec", now)
 	status.Conditions = machine.SetCondition(status.Conditions, condition, now)
 
@@ -198,6 +230,7 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string) {
 	// policy, and this condition is where the fleet's transient
 	// disagreement about the Cluster is visible.
 	var liveCluster *machine.Cluster
+	rebooting := conv.requestReboot
 	if clusterName != "" {
 		var cconv convergence
 		if liveCluster, err = getCluster(c, clusterName); err != nil {
@@ -207,18 +240,15 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string) {
 			}}
 		} else {
 			clusterRejection, _ := machine.ClusterManifests(machine.MachineStateDir).LoadRejection()
-			cconv = decideClusterConvergence(liveCluster, m, facts, clusterRejection,
-				bootClusterHash(machine.BootClusterManifestPath), readStagedClusterHash())
+			cconv = gate(decideClusterConvergence(liveCluster, m, facts, clusterRejection,
+				bootClusterHash(machine.BootClusterManifestPath), readStagedClusterHash(), t))
 		}
 		condition := carryOutConvergence(cconv, machine.ClusterManifests(machine.MachineStateDir), "cluster document", now)
 		status.Conditions = machine.SetCondition(status.Conditions, condition, now)
+		rebooting = rebooting || cconv.requestReboot
 	}
 
-	// The machine's own Node, read once for two conditions. The read
-	// can fail benignly (mid-demotion, the Node is deleted and not yet
-	// re-registered); that pass just skips both conditions and the
-	// next one settles them.
-	if node, err := getNode(c, m.Metadata.Name); err == nil {
+	if nodeErr == nil {
 		// NodeHealthy mirrors the Node's Ready condition onto the
 		// Machine. This catches the one failure the heartbeat can't:
 		// this operator runs on the host's network and talks to the
@@ -233,17 +263,32 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string) {
 		// Demotion cleanup (demotion.go): a follower whose Node object
 		// still claims control-plane was just demoted, and the stale
 		// Node — with its registered etcd membership — must go.
-		d := decideDemotion(status.Role, node.Metadata.Labels, m.Spec.RebootPolicyOrDefault())
+		d := decideDemotion(status.Role, node.Metadata.Labels, m.Spec.RebootPolicyOrDefault(), t)
 		condition := carryOutDemotion(c, m.Metadata.Name, d)
 		status.Conditions = machine.SetCondition(status.Conditions, condition, now)
+		rebooting = rebooting || d.cleanup
+
+		// A cordon this operator set and no longer needs — the reboot
+		// happened, the machine converged — goes back to the
+		// scheduler. Only our own: decideUncordon leaves a human's
+		// cordon standing.
+		if !rebooting && !draining && decideUncordon(node) {
+			if err := c.patchJSON(nodesPath+"/"+node.Metadata.Name, uncordonPatch()); err != nil {
+				fmt.Printf("uncordoning %s: %v\n", node.Metadata.Name, err)
+			} else {
+				fmt.Printf("uncordoned %s; its reboot is complete\n", node.Metadata.Name)
+			}
+		}
 	}
 
 	// Ready is the roll-up: True exactly when every other condition
 	// is. The scan skips any prior Ready so the previous pass's value
-	// can't affect this one.
+	// can't affect this one, and skips the conductor's grant — a
+	// grant is a token, not an observation about this machine's
+	// health.
 	ready := machine.Condition{Type: "Ready", Status: "True", Reason: "Reconciled"}
 	for _, condition := range status.Conditions {
-		if condition.Type == "Ready" {
+		if condition.Type == "Ready" || condition.Type == rebootApprovedCondition {
 			continue
 		}
 		if condition.Status != "True" {
@@ -259,8 +304,12 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string) {
 	// generation: the API server bumps metadata.generation on spec
 	// writes only, so stamping it here is what lets a consumer tell a
 	// verdict on the current spec from a verdict on one already
-	// edited past.
+	// edited past. The conductor's grant keeps its own stamp — it
+	// isn't this writer's verdict to restamp.
 	for i := range status.Conditions {
+		if status.Conditions[i].Type == rebootApprovedCondition {
+			continue
+		}
 		status.Conditions[i].ObservedGeneration = m.Metadata.Generation
 	}
 

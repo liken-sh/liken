@@ -2,3 +2,4 @@
 # lives at the root because it profiles the whole module; everything
 # else gitignored in this repo is ignored by its own domain's file.
 coverage.out
+operator/operator

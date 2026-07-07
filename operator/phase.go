@@ -57,11 +57,14 @@ func conditionPhase(c machine.Condition) machine.Phase {
 		// Drift exists but liken refuses or is unable to stage it.
 		// Time won't fix these; a different edit will.
 		return machine.PhaseBlocked
-	case "RebootRequested", "DemotionRebooting":
-		// A reboot is in flight; the machine is mid-change.
+	case "RebootRequested", "DemotionRebooting", "Draining":
+		// A reboot is in flight; the machine is mid-change. Draining
+		// is its opening move: the node is cordoned and its workloads
+		// are being evicted ahead of the reboot.
 		return machine.PhaseUpdating
-	case "RebootPending", "DemotionPending":
-		// A change is staged and waiting on a Manual reboot.
+	case "RebootPending", "DemotionPending", "AwaitingTurn":
+		// A change is staged and waiting — on a Manual reboot, or on
+		// the cluster granting this machine its reboot turn.
 		return machine.PhaseUpdatePending
 	}
 	return machine.PhaseDegraded

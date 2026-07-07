@@ -220,7 +220,7 @@ func TestRenderManifestIsDeterministicAndCarriesNoStatus(t *testing.T) {
 // The decideConvergence truth table, one test per row.
 
 func TestDecideConvergenceWithoutFacts(t *testing.T) {
-	conv := decideConvergence(labMachine(), nil, nil, "")
+	conv := decideConvergence(labMachine(), nil, nil, "", turnStandalone)
 	if conv.condition.Status != "Unknown" || conv.condition.Reason != "FactsIncomplete" {
 		t.Errorf("got %+v", conv.condition)
 	}
@@ -232,14 +232,14 @@ func TestDecideConvergenceWithoutFacts(t *testing.T) {
 func TestDecideConvergenceWithoutABootRecord(t *testing.T) {
 	facts := labFacts()
 	facts.Boot = machine.BootStatus{}
-	conv := decideConvergence(labMachine(), facts, nil, "")
+	conv := decideConvergence(labMachine(), facts, nil, "", turnStandalone)
 	if conv.condition.Reason != "FactsIncomplete" {
 		t.Errorf("got %+v", conv.condition)
 	}
 }
 
 func TestDecideConvergenceWhenTheBootIsCurrent(t *testing.T) {
-	conv := decideConvergence(labMachine(), labFacts(), nil, "")
+	conv := decideConvergence(labMachine(), labFacts(), nil, "", turnStandalone)
 	if conv.condition.Status != "True" || conv.condition.Reason != "Converged" {
 		t.Errorf("got %+v", conv.condition)
 	}
@@ -252,7 +252,7 @@ func TestDecideConvergenceWithdrawsAStagedManifestNobodyWants(t *testing.T) {
 	// The spec was edited and then edited back before any reboot: no
 	// drift, but the earlier edit still sits staged. Left there, the
 	// next boot would apply it.
-	conv := decideConvergence(labMachine(), labFacts(), nil, "some-staged-hash")
+	conv := decideConvergence(labMachine(), labFacts(), nil, "some-staged-hash", turnStandalone)
 	if conv.condition.Reason != "Converged" {
 		t.Fatalf("got %+v", conv.condition)
 	}
@@ -269,7 +269,7 @@ func TestDecideConvergenceClearsARejectionOnceTheSpecMovesOn(t *testing.T) {
 	// since been edited back to what the machine runs. The rejection
 	// blocked exactly that abandoned spec; it has nothing left to do.
 	rejection := &machine.Rejection{Hash: "the-abandoned-spec", Reason: "could not grow"}
-	conv := decideConvergence(labMachine(), labFacts(), rejection, "")
+	conv := decideConvergence(labMachine(), labFacts(), rejection, "", turnStandalone)
 	if conv.condition.Reason != "Converged" {
 		t.Fatalf("got %+v", conv.condition)
 	}
@@ -287,7 +287,7 @@ func grownLabMachine() *machine.Machine {
 
 func TestDecideConvergenceStagesAndWaitsUnderManualPolicy(t *testing.T) {
 	m := grownLabMachine()
-	conv := decideConvergence(m, labFacts(), nil, "")
+	conv := decideConvergence(m, labFacts(), nil, "", turnStandalone)
 	if conv.condition.Reason != "RebootPending" {
 		t.Fatalf("got %+v", conv.condition)
 	}
@@ -302,7 +302,7 @@ func TestDecideConvergenceStagesAndWaitsUnderManualPolicy(t *testing.T) {
 func TestDecideConvergenceRequestsARebootUnderAutoPolicy(t *testing.T) {
 	m := grownLabMachine()
 	m.Spec.RebootPolicy = machine.RebootAuto
-	conv := decideConvergence(m, labFacts(), nil, "")
+	conv := decideConvergence(m, labFacts(), nil, "", turnStandalone)
 	if conv.condition.Reason != "RebootRequested" {
 		t.Fatalf("got %+v", conv.condition)
 	}
@@ -317,7 +317,7 @@ func TestDecideConvergenceIsIdempotentAboutStaging(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	conv := decideConvergence(m, labFacts(), nil, hash)
+	conv := decideConvergence(m, labFacts(), nil, hash, turnStandalone)
 	if conv.stage {
 		t.Error("bytes already staged must not be rewritten every pass")
 	}
@@ -335,7 +335,7 @@ func TestDecideConvergenceHonorsARejection(t *testing.T) {
 	}
 	rejection := &machine.Rejection{Hash: hash, Reason: "disk on fire"}
 
-	conv := decideConvergence(m, labFacts(), rejection, "")
+	conv := decideConvergence(m, labFacts(), rejection, "", turnStandalone)
 	if conv.condition.Reason != "RejectedLastBoot" {
 		t.Fatalf("got %+v", conv.condition)
 	}
@@ -352,7 +352,7 @@ func TestDecideConvergenceStagesAgainForADifferentEdit(t *testing.T) {
 	// edit clears it naturally.
 	m := grownLabMachine()
 	rejection := &machine.Rejection{Hash: "some-other-hash", Reason: "old news"}
-	conv := decideConvergence(m, labFacts(), rejection, "")
+	conv := decideConvergence(m, labFacts(), rejection, "", turnStandalone)
 	if conv.condition.Reason != "RebootPending" || !conv.stage {
 		t.Errorf("a different spec should stage normally: %+v", conv)
 	}
@@ -368,7 +368,7 @@ func TestDecideConvergenceRefusesToLoopOnAContradiction(t *testing.T) {
 	facts := labFacts()
 	facts.Boot.ManifestHash = hash // "I actuated that" — yet drift computes
 
-	conv := decideConvergence(m, facts, nil, "")
+	conv := decideConvergence(m, facts, nil, "", turnStandalone)
 	if conv.condition.Reason != "BootMismatch" {
 		t.Fatalf("got %+v", conv.condition)
 	}
@@ -381,7 +381,7 @@ func TestDecideConvergenceNeedsADurableMachineState(t *testing.T) {
 	m := grownLabMachine()
 	facts := labFacts()
 	facts.Storage.MachineState = machine.StorageRoleStatus{Backing: machine.BackingMemory}
-	conv := decideConvergence(m, facts, nil, "")
+	conv := decideConvergence(m, facts, nil, "", turnStandalone)
 	if conv.condition.Reason != "MachineStateEphemeral" {
 		t.Fatalf("got %+v", conv.condition)
 	}
@@ -393,7 +393,7 @@ func TestDecideConvergenceNeedsADurableMachineState(t *testing.T) {
 func TestDecideConvergenceRefusesInvalidStaging(t *testing.T) {
 	m := labMachine()
 	m.Spec.Storage.PodStorage.Size = "1Gi" // a shrink
-	conv := decideConvergence(m, labFacts(), nil, "")
+	conv := decideConvergence(m, labFacts(), nil, "", turnStandalone)
 	if conv.condition.Reason != "StagingRejected" {
 		t.Fatalf("got %+v", conv.condition)
 	}
@@ -402,5 +402,34 @@ func TestDecideConvergenceRefusesInvalidStaging(t *testing.T) {
 	}
 	if !strings.Contains(conv.condition.Message, "grow-only") {
 		t.Errorf("the message should carry the validation error: %q", conv.condition.Message)
+	}
+}
+
+func TestDecideConvergenceWaitsForItsTurnAsAClusterMember(t *testing.T) {
+	m := grownLabMachine()
+	m.Spec.RebootPolicy = machine.RebootAuto
+	conv := decideConvergence(m, labFacts(), nil, "", turnAwaiting)
+	if conv.condition.Reason != "AwaitingTurn" {
+		t.Fatalf("got %+v", conv.condition)
+	}
+	if !conv.stage || conv.requestReboot {
+		t.Errorf("an ungranted member stages but never reboots: %+v", conv)
+	}
+}
+
+func TestDecideConvergenceRebootsOnItsGrantedTurn(t *testing.T) {
+	m := grownLabMachine()
+	m.Spec.RebootPolicy = machine.RebootAuto
+	conv := decideConvergence(m, labFacts(), nil, "", turnGranted)
+	if conv.condition.Reason != "RebootRequested" || !conv.requestReboot {
+		t.Fatalf("a granted turn is taken: %+v", conv.condition)
+	}
+}
+
+func TestDecideConvergenceManualPolicyIgnoresTheGrant(t *testing.T) {
+	m := grownLabMachine()
+	conv := decideConvergence(m, labFacts(), nil, "", turnGranted)
+	if conv.condition.Reason != "RebootPending" || conv.requestReboot {
+		t.Fatalf("Manual means the human decides, grant or not: %+v", conv.condition)
 	}
 }

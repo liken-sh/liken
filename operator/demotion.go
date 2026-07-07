@@ -42,14 +42,20 @@ import (
 const nodesPath = "/api/v1/nodes"
 
 // nodeObject is the sliver of a Kubernetes Node the operator needs:
-// the labels, where a demoted machine's old role still shows, and the
+// the labels, where a demoted machine's old role still shows; the
 // conditions, where the kubelet's health shows (reconcile.go mirrors
-// the Node's Ready condition onto the Machine).
+// the Node's Ready condition onto the Machine); and the cordon state
+// — unschedulable plus the annotations that record whether liken set
+// it (drain.go).
 type nodeObject struct {
 	Metadata struct {
-		Name   string            `json:"name"`
-		Labels map[string]string `json:"labels"`
+		Name        string            `json:"name"`
+		Labels      map[string]string `json:"labels"`
+		Annotations map[string]string `json:"annotations"`
 	} `json:"metadata"`
+	Spec struct {
+		Unschedulable bool `json:"unschedulable"`
+	} `json:"spec"`
 	Status struct {
 		Conditions []machine.Condition `json:"conditions"`
 	} `json:"status"`
@@ -87,7 +93,12 @@ type demotion struct {
 // The other direction — a leader whose Node lacks the labels — is
 // just a control plane still coming up, and k3s finishes that on
 // its own.
-func decideDemotion(role machine.Role, nodeLabels map[string]string, rebootPolicy machine.RebootPolicy) demotion {
+//
+// The demotion's reboot waits its turn like any other: a demotion is
+// always the aftermath of a Cluster edit, which means other machines
+// are converging on the same edit at the same time, and this is
+// exactly the traffic the rollout conductor sequences.
+func decideDemotion(role machine.Role, nodeLabels map[string]string, rebootPolicy machine.RebootPolicy, t turn) demotion {
 	nodeCurrent := func(status machine.ConditionStatus, reason, message string) machine.Condition {
 		return machine.Condition{Type: "NodeCurrent", Status: status, Reason: reason, Message: message}
 	}
@@ -108,6 +119,10 @@ func decideDemotion(role machine.Role, nodeLabels map[string]string, rebootPolic
 	if rebootPolicy != machine.RebootAuto {
 		return demotion{condition: nodeCurrent("False", "DemotionPending",
 			"this machine was demoted to follower but its Node object still claims control-plane; set rebootPolicy: Auto to let the operator delete the Node and reboot, completing the demotion")}
+	}
+	if t == turnAwaiting {
+		return demotion{condition: nodeCurrent("False", "AwaitingTurn",
+			"this machine was demoted to follower; waiting for the cluster to grant a reboot turn to complete the demotion")}
 	}
 	return demotion{
 		cleanup: true,

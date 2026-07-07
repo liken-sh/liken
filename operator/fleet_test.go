@@ -156,3 +156,38 @@ func TestSweepTreatsAMissingHeartbeatAsSilence(t *testing.T) {
 		t.Errorf("got %+v", s.tally)
 	}
 }
+
+func TestSweepReadsGrantedSilenceAsTheRebootInProgress(t *testing.T) {
+	// A machine holding a fresh reboot grant that goes silent is doing
+	// exactly what it was told; the sweep counts it mid-transition and
+	// does not declare it Lost until the grant is old enough to be a
+	// stall.
+	machines, renewals := fleetInputs(
+		fleetEntry{"node-1", machine.PhaseReady, 10 * time.Second},
+		fleetEntry{"node-2", machine.PhaseUpdating, 3 * time.Minute},
+	)
+	machines[1].Status.Conditions = machine.SetCondition(nil, machine.Condition{
+		Type: "RebootApproved", Status: "True", Reason: "DisruptionBudgetAllows",
+	}, sweepNow.Add(-3*time.Minute))
+	s := decideFleetSweep(machines, renewals, "node-1", sweepNow)
+	if len(s.lost) != 0 {
+		t.Errorf("this silence was requested: %v", s.lost)
+	}
+	if s.phase != machine.PhaseUpdating {
+		t.Errorf("a granted reboot is a transition, not an illness: %s", s.phase)
+	}
+}
+
+func TestSweepDeclaresAGrantedMachineLostAfterTheStallWindow(t *testing.T) {
+	machines, renewals := fleetInputs(
+		fleetEntry{"node-1", machine.PhaseReady, 10 * time.Second},
+		fleetEntry{"node-2", machine.PhaseUpdating, 12 * time.Minute},
+	)
+	machines[1].Status.Conditions = machine.SetCondition(nil, machine.Condition{
+		Type: "RebootApproved", Status: "True", Reason: "DisruptionBudgetAllows",
+	}, sweepNow.Add(-12*time.Minute))
+	s := decideFleetSweep(machines, renewals, "node-1", sweepNow)
+	if len(s.lost) != 1 || s.lost[0] != "node-2" {
+		t.Errorf("past the stall window the honest word is Lost: %v", s.lost)
+	}
+}

@@ -115,3 +115,21 @@ func TestDecidePhase(t *testing.T) {
 		})
 	}
 }
+
+func TestAwaitingTurnIsUpdatePending(t *testing.T) {
+	phase := decidePhase([]machine.Condition{
+		{Type: "ClusterConverged", Status: "False", Reason: "AwaitingTurn"},
+	})
+	if phase != machine.PhaseUpdatePending {
+		t.Errorf("waiting on the cluster's grant is a pending update: %s", phase)
+	}
+}
+
+func TestDrainingIsUpdating(t *testing.T) {
+	phase := decidePhase([]machine.Condition{
+		{Type: "SpecConverged", Status: "False", Reason: "Draining"},
+	})
+	if phase != machine.PhaseUpdating {
+		t.Errorf("draining is the reboot's opening move: %s", phase)
+	}
+}

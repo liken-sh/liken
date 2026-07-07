@@ -147,7 +147,7 @@ func TestClusterConvergedWhenTheBootRunsTheCurrentDocument(t *testing.T) {
 	}
 	facts := partitionBackedFacts(machine.ManifestSourceProven, hash)
 
-	conv := decideClusterConvergence(cluster, machineWithPolicy(""), facts, nil, hash, "")
+	conv := decideClusterConvergence(cluster, machineWithPolicy(""), facts, nil, hash, "", turnGranted)
 	if conv.condition.Status != "True" || conv.condition.Reason != "Converged" {
 		t.Errorf("got %+v", conv.condition)
 	}
@@ -162,7 +162,7 @@ func TestClusterConvergedWithdrawsAStaleStagedDocument(t *testing.T) {
 	facts := partitionBackedFacts(machine.ManifestSourceProven, hash)
 	rejection := &machine.Rejection{Hash: "old", Reason: "history"}
 
-	conv := decideClusterConvergence(cluster, machineWithPolicy(""), facts, rejection, hash, "some-other-hash")
+	conv := decideClusterConvergence(cluster, machineWithPolicy(""), facts, rejection, hash, "some-other-hash", turnGranted)
 	if !conv.withdraw || !conv.clearRejection {
 		t.Errorf("an edit taken back should withdraw and clear: %+v", conv)
 	}
@@ -171,7 +171,7 @@ func TestClusterConvergedWithdrawsAStaleStagedDocument(t *testing.T) {
 func TestClusterDriftStagesAndReportsAPendingReboot(t *testing.T) {
 	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-hash")
 
-	conv := decideClusterConvergence(decisionCluster(), machineWithPolicy(""), facts, nil, "some-old-hash", "")
+	conv := decideClusterConvergence(decisionCluster(), machineWithPolicy(""), facts, nil, "some-old-hash", "", turnGranted)
 	if conv.condition.Status != "False" || conv.condition.Reason != "RebootPending" {
 		t.Errorf("got %+v", conv.condition)
 	}
@@ -183,7 +183,7 @@ func TestClusterDriftStagesAndReportsAPendingReboot(t *testing.T) {
 func TestClusterDriftRequestsARebootUnderAutoPolicy(t *testing.T) {
 	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-hash")
 
-	conv := decideClusterConvergence(decisionCluster(), machineWithPolicy(machine.RebootAuto), facts, nil, "some-old-hash", "")
+	conv := decideClusterConvergence(decisionCluster(), machineWithPolicy(machine.RebootAuto), facts, nil, "some-old-hash", "", turnGranted)
 	if conv.condition.Reason != "RebootRequested" || !conv.requestReboot {
 		t.Errorf("got %+v", conv)
 	}
@@ -194,7 +194,7 @@ func TestClusterDriftDoesNotRestageTheSameBytes(t *testing.T) {
 	_, hash, _ := renderCluster(cluster.Metadata.Name, cluster.Spec)
 	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-hash")
 
-	conv := decideClusterConvergence(cluster, machineWithPolicy(""), facts, nil, "some-old-hash", hash)
+	conv := decideClusterConvergence(cluster, machineWithPolicy(""), facts, nil, "some-old-hash", hash, turnGranted)
 	if conv.stage {
 		t.Error("the exact bytes already wait; staging again is disk churn")
 	}
@@ -206,14 +206,14 @@ func TestClusterRejectedLastBootHolds(t *testing.T) {
 	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-hash")
 	rejection := &machine.Rejection{Hash: hash, Reason: "never joined"}
 
-	conv := decideClusterConvergence(cluster, machineWithPolicy(machine.RebootAuto), facts, rejection, "some-old-hash", "")
+	conv := decideClusterConvergence(cluster, machineWithPolicy(machine.RebootAuto), facts, rejection, "some-old-hash", "", turnGranted)
 	if conv.condition.Reason != "RejectedLastBoot" || conv.stage || conv.requestReboot {
 		t.Errorf("a rejected document must not be re-staged: %+v", conv)
 	}
 }
 
 func TestClusterConvergenceIsUnknownWithoutFacts(t *testing.T) {
-	conv := decideClusterConvergence(decisionCluster(), machineWithPolicy(""), nil, nil, "", "")
+	conv := decideClusterConvergence(decisionCluster(), machineWithPolicy(""), nil, nil, "", "", turnGranted)
 	if conv.condition.Status != "Unknown" {
 		t.Errorf("got %+v", conv.condition)
 	}
@@ -223,7 +223,7 @@ func TestClusterConvergenceRefusesMemoryBackedStaging(t *testing.T) {
 	facts := partitionBackedFacts(machine.ManifestSourceSeed, "some-old-hash")
 	facts.Storage.MachineState.Backing = machine.BackingMemory
 
-	conv := decideClusterConvergence(decisionCluster(), machineWithPolicy(""), facts, nil, "some-old-hash", "")
+	conv := decideClusterConvergence(decisionCluster(), machineWithPolicy(""), facts, nil, "some-old-hash", "", turnGranted)
 	if conv.condition.Reason != "MachineStateEphemeral" || conv.stage {
 		t.Errorf("got %+v", conv)
 	}
@@ -238,5 +238,16 @@ func TestDoesNotTouchAMemoryBackedMachine(t *testing.T) {
 
 	if entries, _ := os.ReadDir(filepath.Join(root, "cluster")); len(entries) != 0 {
 		t.Error("a memory-backed machine has no durable lifecycle to settle")
+	}
+}
+
+func TestClusterConvergenceWaitsForItsTurn(t *testing.T) {
+	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-raw-hash")
+	conv := decideClusterConvergence(decisionCluster(), machineWithPolicy(machine.RebootAuto), facts, nil, "some-old-hash", "", turnAwaiting)
+	if conv.condition.Reason != "AwaitingTurn" {
+		t.Fatalf("got %+v", conv.condition)
+	}
+	if !conv.stage || conv.requestReboot {
+		t.Errorf("an ungranted member stages but never reboots: %+v", conv)
 	}
 }

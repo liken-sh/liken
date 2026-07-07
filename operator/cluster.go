@@ -77,8 +77,10 @@ func clusterNotConverged(reason, message string) machine.Condition {
 // order for the cluster document: no facts → Unknown; current →
 // converged (withdrawing a stale staged copy and clearing a spent
 // rejection); rejected-last-boot → hold; nowhere durable to stage →
-// say so; drift → stage and reboot per the Machine's rebootPolicy,
-// the one knob governing both kinds of staging.
+// say so; drift → stage and reboot per the Machine's rebootPolicy
+// (the one knob governing both kinds of staging) and its turn with
+// the rollout conductor — a cluster document edit is drift on every
+// machine at once, which is exactly the case the conductor sequences.
 //
 // bootHash is the *canonical* hash of the document this boot ran
 // (bootClusterHash below), never facts.Boot.ClusterManifestHash: the
@@ -86,7 +88,7 @@ func clusterNotConverged(reason, message string) machine.Condition {
 // rendering of the same spec are different bytes saying the same
 // thing. Drift is a difference in meaning; rebooting a fleet over
 // formatting would be absurd.
-func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, facts *machine.MachineStatus, rejection *machine.Rejection, bootHash, stagedHash string) convergence {
+func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, facts *machine.MachineStatus, rejection *machine.Rejection, bootHash, stagedHash string, t turn) convergence {
 	if facts == nil || facts.Boot.ManifestSource == "" {
 		return convergence{condition: machine.Condition{
 			Type: "ClusterConverged", Status: "Unknown", Reason: "FactsIncomplete",
@@ -130,13 +132,17 @@ func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, fact
 		hash:     hash,
 		stage:    stagedHash != hash,
 	}
-	if m.Spec.RebootPolicyOrDefault() == machine.RebootAuto {
+	switch {
+	case m.Spec.RebootPolicyOrDefault() != machine.RebootAuto:
+		c.condition = clusterNotConverged("RebootPending",
+			fmt.Sprintf("cluster document staged for the next boot (%.12s); rebootPolicy is Manual, so reboot the machine (or set rebootPolicy: Auto) to apply", hash))
+	case t == turnAwaiting:
+		c.condition = clusterNotConverged("AwaitingTurn",
+			fmt.Sprintf("cluster document staged for the next boot (%.12s); waiting for the cluster to grant a reboot turn", hash))
+	default:
 		c.requestReboot = true
 		c.condition = clusterNotConverged("RebootRequested",
 			fmt.Sprintf("reboot requested to apply the staged cluster document (%.12s)", hash))
-	} else {
-		c.condition = clusterNotConverged("RebootPending",
-			fmt.Sprintf("cluster document staged for the next boot (%.12s); rebootPolicy is Manual, so reboot the machine (or set rebootPolicy: Auto) to apply", hash))
 	}
 	return c
 }
