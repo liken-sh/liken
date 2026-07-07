@@ -24,6 +24,7 @@ LIKEN_VERSION ?= $(strip $(file <../VERSION))
 DIST ?= dist
 INIT_DIST ?= ../init/dist
 OPERATOR_DIST ?= ../operator/dist
+LOGS_DIST ?= ../logs/dist
 
 KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 K3S_VERSION := $(strip $(file <../k3s/VERSION))
@@ -40,9 +41,12 @@ $(DIST)/liken.cpio: build.sh $(shell find etc -type f) \
 		../identity/dist/token \
 		$(OPERATOR_DIST)/liken-operator-image.tar \
 		$(wildcard ../operator/manifests/*.yaml) \
+		$(LOGS_DIST)/liken-logs-image.tar \
+		$(wildcard ../logs/manifests/*.yaml) \
 		../VERSION
 	LIKEN_VERSION=$(LIKEN_VERSION) DIST=$(abspath $(DIST)) \
 		INIT_DIST=$(abspath $(INIT_DIST)) OPERATOR_DIST=$(abspath $(OPERATOR_DIST)) \
+		LOGS_DIST=$(abspath $(LOGS_DIST)) \
 		./build.sh $(MANIFESTS)
 
 .PHONY: all clean

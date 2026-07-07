@@ -42,8 +42,10 @@ release:
 	@test -n "$(VERSION)" || { echo "usage: make release VERSION=x.y.z"; exit 1; }
 	$(MAKE) -C ../init LIKEN_VERSION=$(VERSION) LIKEN_FAULT=$(FAULT) DIST=$(abspath $(BUILD)/init)
 	$(MAKE) -C ../operator LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/operator)
+	$(MAKE) -C ../logs LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/logs)
 	$(MAKE) -C ../image LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/image) \
 		INIT_DIST=$(abspath $(BUILD)/init) OPERATOR_DIST=$(abspath $(BUILD)/operator) \
+		LOGS_DIST=$(abspath $(BUILD)/logs) \
 		MANIFESTS=../dev-cluster $(abspath $(BUILD)/image)/install.cpio
 	./publish.sh $(VERSION)
 

@@ -3,8 +3,8 @@
 # the natural way to drive the build. The inputs come two ways. Most
 # of the system is vendored: the kernel, k3s, the xtables binaries,
 # and the trust store are each fetched at a pinned version and
-# verified. The parts that are liken itself, the init and the
-# operator, are the two Go programs compiled here.
+# verified. The parts that are liken itself, the init, the operator,
+# and the log relays, are the Go programs compiled here.
 #
 # The structure follows the repo's rule of organizing by domain: each
 # domain directory (kernel/, k3s/, init/, image/, ...) has its own
@@ -26,7 +26,7 @@ TRUST_DIST := trust/dist/$(TRUST_VERSION)
 E2FSPROGS_VERSION := $(strip $(file <e2fsprogs/VERSION))
 E2FSPROGS_DIST := e2fsprogs/dist/$(E2FSPROGS_VERSION)
 
-all: kernel k3s xtables trust e2fsprogs init operator identity image
+all: kernel k3s xtables trust e2fsprogs init operator logs identity image
 
 # Because the version is part of the artifact's name, a pin bump
 # changes the target path itself and Make rebuilds with no extra
@@ -85,6 +85,17 @@ operator/dist/liken-operator-image.tar: $(wildcard operator/*.go) \
 
 operator: operator/dist/liken-operator-image.tar
 
+# The log relays carry the machine's host-level log streams (the
+# kernel's, init's, k3s's, containerd's) into the cluster as pod
+# logs. Packaged exactly like the operator: one static binary in a
+# hand-assembled OCI image (see logs/main.go and logs/image.sh).
+logs/dist/liken-logs-image.tar: $(wildcard logs/*.go) \
+		go.mod go.sum logs/image.sh \
+		$(wildcard machine/*.go) VERSION
+	$(MAKE) -C logs
+
+logs: logs/dist/liken-logs-image.tar
+
 # The cluster's identity is a set of certificate authorities and the
 # join token, minted here, in the repo, before any machine boots (see
 # identity/mint.sh). The token can exist this early because the CA it
@@ -118,6 +129,8 @@ image/dist/liken.cpio: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s \
 		identity/dist/tls/server-ca.crt identity/dist/token \
 		operator/dist/liken-operator-image.tar \
 		$(wildcard operator/manifests/*.yaml) \
+		logs/dist/liken-logs-image.tar \
+		$(wildcard logs/manifests/*.yaml) \
 		dev-cluster/cluster.yaml $(wildcard dev-cluster/machines/*.yaml) \
 		image/build.sh $(shell find image/etc -type f) image/Makefile
 	$(MAKE) -C image MANIFESTS=../dev-cluster
@@ -187,7 +200,8 @@ clean:
 	$(MAKE) -C e2fsprogs clean
 	$(MAKE) -C init clean
 	$(MAKE) -C operator clean
+	$(MAKE) -C logs clean
 	$(MAKE) -C identity clean
 	$(MAKE) -C image clean
 
-.PHONY: all kernel k3s xtables trust e2fsprogs init operator identity kubeconfig image run run-once release serve clean
+.PHONY: all kernel k3s xtables trust e2fsprogs init operator logs identity kubeconfig image run run-once release serve clean

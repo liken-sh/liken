@@ -1,7 +1,8 @@
 // One module for the whole repo. liken's Go programs, the init that
-// boots the machine (init/) and the operator that manages it from
-// inside the cluster (operator/), version together (one VERSION file
-// stamps both binaries), release together (one initramfs), and share
+// boots the machine (init/), the operator that manages it from inside
+// the cluster (operator/), and the log relays that carry its streams
+// into the cluster (logs/), version together (one VERSION file stamps
+// every binary), release together (one initramfs), and share
 // the machine package (machine/, the Machine API as Go types). Multiple
 // modules are for code that versions and releases independently, and
 // nothing here does, so a single module fits. It also means a shared

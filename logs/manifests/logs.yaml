@@ -1,0 +1,255 @@
+# The log relay DaemonSets: one per host log stream, so that reading
+# any stream is `kubectl logs` against the pod named for it.
+#
+#   kernel-logs      /dev/kmsg, records with syslog facility 0
+#   liken-logs       /dev/kmsg, records with syslog facility 1
+#   k3s-logs         the k3s log on clusterState
+#   containerd-logs  containerd's log on clusterState
+#
+# One relay per source is the design, not an accident of packaging.
+# Pod identity is the tag (no consumer parses a source field to tell
+# streams apart), privilege follows the source (the kmsg relays need
+# one capability, the tailers only read-only mounts of one directory
+# each), and a bug in one parser blinds one stream instead of all of
+# them. All four run the same liken.sh/logs image (logs/image.sh),
+# differing only in the verb passed as args and in what they mount.
+#
+# Everything these pods emit is a JSON envelope around a verbatim log
+# line (logs/envelope.go documents the contract), so any log stack
+# someone later runs consumes the machine's own streams the way it
+# consumes every other pod's logs, with no host privileges of its own.
+#
+# Delivery follows the operator wholesale, and the reasoning lives in
+# operator/manifests/operator.yaml: the "installed" tag resolving
+# per-node to that node's baked build, imagePullPolicy Never,
+# updateStrategy OnDelete so applying manifests never kills a pod on
+# a node that hasn't upgraded yet, and the liken.sh/os-version
+# annotation the pod steward (operator/steward.go) uses to refresh
+# each machine's pods after its upgrade lands.
+#
+# Unlike the operator, the relays hold no cluster credentials at all:
+# they read host files and write their own stdout, so there is no
+# ServiceAccount, no RBAC, and no token mounted. The /cursor emptyDir
+# is each relay's resume point; its lifecycle is the design (it
+# survives container restarts and dies with the pod or a reboot,
+# which are exactly the moments a replay from the head is correct).
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kernel-logs
+  namespace: liken-system
+  labels:
+    app.kubernetes.io/name: kernel-logs
+    app.kubernetes.io/part-of: liken
+  annotations:
+    liken.sh/os-version: "LIKEN_VERSION"
+spec:
+  selector:
+    matchLabels:
+      app: kernel-logs
+  updateStrategy:
+    type: OnDelete
+  template:
+    metadata:
+      labels:
+        app: kernel-logs
+        app.kubernetes.io/name: kernel-logs
+        app.kubernetes.io/part-of: liken
+      annotations:
+        liken.sh/os-version: "LIKEN_VERSION"
+    spec:
+      automountServiceAccountToken: false
+      priorityClassName: system-node-critical
+      # Relay logs even from a cordoned or NotReady node: a sick
+      # machine's logs are the ones somebody is looking for.
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: relay
+          image: liken.sh/logs:installed
+          imagePullPolicy: Never
+          args: ["kernel"]
+          securityContext:
+            # Reading /dev/kmsg requires CAP_SYSLOG: the vendored
+            # kernel sets CONFIG_SECURITY_DMESG_RESTRICT, so even
+            # uid 0 is refused without it. One capability, not
+            # privileged: this pod reads one device and writes its
+            # own stdout.
+            capabilities:
+              add: ["SYSLOG"]
+          volumeMounts:
+            - name: kmsg
+              mountPath: /dev/kmsg
+              readOnly: true
+            - name: cursor
+              mountPath: /cursor
+      volumes:
+        - name: kmsg
+          hostPath:
+            path: /dev/kmsg
+            type: CharDevice
+        - name: cursor
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: liken-logs
+  namespace: liken-system
+  labels:
+    app.kubernetes.io/name: liken-logs
+    app.kubernetes.io/part-of: liken
+  annotations:
+    liken.sh/os-version: "LIKEN_VERSION"
+spec:
+  selector:
+    matchLabels:
+      app: liken-logs
+  updateStrategy:
+    type: OnDelete
+  template:
+    metadata:
+      labels:
+        app: liken-logs
+        app.kubernetes.io/name: liken-logs
+        app.kubernetes.io/part-of: liken
+      annotations:
+        liken.sh/os-version: "LIKEN_VERSION"
+    spec:
+      automountServiceAccountToken: false
+      priorityClassName: system-node-critical
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: relay
+          image: liken.sh/logs:installed
+          imagePullPolicy: Never
+          # Same device as kernel-logs, the other facility: init
+          # writes its lines to /dev/kmsg precisely so they interleave
+          # with the kernel's in true order (init/console.go), and the
+          # facility field is what splits the two voices back apart.
+          args: ["liken"]
+          securityContext:
+            capabilities:
+              add: ["SYSLOG"]
+          volumeMounts:
+            - name: kmsg
+              mountPath: /dev/kmsg
+              readOnly: true
+            - name: cursor
+              mountPath: /cursor
+      volumes:
+        - name: kmsg
+          hostPath:
+            path: /dev/kmsg
+            type: CharDevice
+        - name: cursor
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: k3s-logs
+  namespace: liken-system
+  labels:
+    app.kubernetes.io/name: k3s-logs
+    app.kubernetes.io/part-of: liken
+  annotations:
+    liken.sh/os-version: "LIKEN_VERSION"
+spec:
+  selector:
+    matchLabels:
+      app: k3s-logs
+  updateStrategy:
+    type: OnDelete
+  template:
+    metadata:
+      labels:
+        app: k3s-logs
+        app.kubernetes.io/name: k3s-logs
+        app.kubernetes.io/part-of: liken
+      annotations:
+        liken.sh/os-version: "LIKEN_VERSION"
+    spec:
+      automountServiceAccountToken: false
+      priorityClassName: system-node-critical
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: relay
+          image: liken.sh/logs:installed
+          imagePullPolicy: Never
+          args: ["k3s"]
+          volumeMounts:
+            # The parent directory, never the file: a hostPath of the
+            # file itself would bind-mount the inode present when the
+            # pod started, and after init's size-cap rotation renames
+            # it the pod would follow the old generation forever. A
+            # directory mount resolves the name on every open, so the
+            # tailer's reopen lands on each new file.
+            - name: liken-logs-dir
+              mountPath: /var/lib/rancher/k3s/liken
+              readOnly: true
+            - name: cursor
+              mountPath: /cursor
+      volumes:
+        - name: liken-logs-dir
+          hostPath:
+            path: /var/lib/rancher/k3s/liken
+            # init creates this directory before k3s starts;
+            # DirectoryOrCreate keeps the pod startable in odd states
+            # (the tailer waits politely for the file either way).
+            type: DirectoryOrCreate
+        - name: cursor
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: containerd-logs
+  namespace: liken-system
+  labels:
+    app.kubernetes.io/name: containerd-logs
+    app.kubernetes.io/part-of: liken
+  annotations:
+    liken.sh/os-version: "LIKEN_VERSION"
+spec:
+  selector:
+    matchLabels:
+      app: containerd-logs
+  updateStrategy:
+    type: OnDelete
+  template:
+    metadata:
+      labels:
+        app: containerd-logs
+        app.kubernetes.io/name: containerd-logs
+        app.kubernetes.io/part-of: liken
+      annotations:
+        liken.sh/os-version: "LIKEN_VERSION"
+    spec:
+      automountServiceAccountToken: false
+      priorityClassName: system-node-critical
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: relay
+          image: liken.sh/logs:installed
+          imagePullPolicy: Never
+          args: ["containerd"]
+          volumeMounts:
+            - name: containerd-dir
+              mountPath: /var/lib/rancher/k3s/agent/containerd
+              readOnly: true
+            - name: cursor
+              mountPath: /cursor
+      volumes:
+        - name: containerd-dir
+          hostPath:
+            path: /var/lib/rancher/k3s/agent/containerd
+            # k3s creates this directory when it first starts
+            # containerd, which is after these manifests apply.
+            type: DirectoryOrCreate
+        - name: cursor
+          emptyDir: {}

@@ -116,6 +116,7 @@ liken_version="${LIKEN_VERSION:-$(cat "$here/../VERSION")}"
 dist="${DIST:-$here/dist}"
 init_dist="${INIT_DIST:-$here/../init/dist}"
 operator_dist="${OPERATOR_DIST:-$here/../operator/dist}"
+logs_dist="${LOGS_DIST:-$here/../logs/dist}"
 
 root="$dist/root"
 rm -rf "$dist"
@@ -165,19 +166,22 @@ cp -r "$here/../identity/dist/tls" "$root/var/lib/rancher/k3s/server/tls"
 cp "$here/../identity/dist/token" "$root/etc/liken/token"
 chmod 600 "$root/etc/liken/token"
 
-# The Machine API and its operator, delivered through k3s's own
-# mechanisms: the manifests go where k3s auto-applies them, and the
-# operator's image goes where k3s auto-imports it. The LIKEN_VERSION
-# substitution pins the DaemonSet to exactly the image version this
-# build ships alongside it.
+# The Machine API, its operator, and the log relays, all delivered
+# through k3s's own mechanisms: the manifests go where k3s
+# auto-applies them, and the OCI images go where k3s auto-imports
+# them. The LIKEN_VERSION substitution stamps each manifest with the
+# release it shipped in, which is what the pod steward compares
+# against a machine's running version.
 mkdir -p "$root/var/lib/rancher/k3s/server/manifests"
-for manifest in "$here"/../operator/manifests/*.yaml; do
+for manifest in "$here"/../operator/manifests/*.yaml "$here"/../logs/manifests/*.yaml; do
     sed "s/LIKEN_VERSION/$liken_version/g" "$manifest" \
         >"$root/var/lib/rancher/k3s/server/manifests/$(basename "$manifest")"
 done
 mkdir -p "$root/var/lib/rancher/k3s/agent/images"
 cp "$operator_dist/liken-operator-image.tar" \
    "$root/var/lib/rancher/k3s/agent/images/liken-operator.tar"
+cp "$logs_dist/liken-logs-image.tar" \
+   "$root/var/lib/rancher/k3s/agent/images/liken-logs.tar"
 
 # The machine's trust store, vendored by the trust domain (where these
 # roots come from is explained in trust/fetch.sh). The staged name is
