@@ -25,6 +25,12 @@ spec:
   # is what saves a follower from re-importing every container image
   # on every boot.
   storage:
+    systemA:
+      device: /dev/vdc
+      size: 512Mi
+    systemB:
+      device: /dev/vdc
+      size: 512Mi
     machineState:
       device: /dev/vda
       size: 64Mi

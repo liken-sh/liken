@@ -13,6 +13,12 @@ spec:
       - name: eth1
         address: 10.10.0.5/24
   storage:
+    systemA:
+      device: /dev/vdc
+      size: 512Mi
+    systemB:
+      device: /dev/vdc
+      size: 512Mi
     machineState:
       device: /dev/vda
       size: 64Mi

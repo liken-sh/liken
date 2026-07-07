@@ -42,10 +42,23 @@ spec:
   # boot: a machine declared to have persistent state must not come up
   # ephemeral.
   storage:
+    # The operating system's own boot slots: two EFI system partitions
+    # on the boot disk, each big enough to hold one complete liken
+    # version (the kernel plus the initramfs, with headroom). The
+    # machine runs from one slot and writes upgrades into the other.
+    # Sized explicitly and fixed at claim — FAT32, the one filesystem
+    # firmware reads, doesn't grow in place.
+    systemA:
+      device: /dev/vdc
+      size: 512Mi
+    systemB:
+      device: /dev/vdc
+      size: 512Mi
     # The machine's own durable data: the staged and proven manifests
-    # that let a spec edit survive a reboot. First in the canonical
-    # order, so it's the first partition on its disk: the one a future
-    # boot must find before it has read any spec.
+    # that let a spec edit survive a reboot. First among the data
+    # roles in the canonical order, so it's an early partition on its
+    # disk: the one a future boot must find before it has read any
+    # spec.
     machineState:
       device: /dev/vda
       size: 64Mi
