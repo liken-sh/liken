@@ -205,3 +205,35 @@ func TestPlanAllGrowthNeedsTheDiskInTheInventory(t *testing.T) {
 		t.Error("an uninventoried disk must be an error")
 	}
 }
+
+func TestPlanAllGrowthRefusesToGrowSystemSlots(t *testing.T) {
+	// ext4 grows in place by ioctl; FAT's geometry is fixed at format
+	// time, so a spec asking a slot to grow is refused at planning,
+	// before anything is written.
+	roles := []machine.DeclaredRole{declared("systemA", "/dev/vdc", "1Gi")}
+	found := map[machine.StorageRoleName]partition{
+		"systemA": {name: "vdc1", disk: "vdc", partName: "liken:systemA", sizeBytes: 512 << 20},
+	}
+	_, err := planAllGrowth(roles, found)
+	if err == nil {
+		t.Fatal("expected an error growing a system slot")
+	}
+	for _, want := range []string{"systemA", "fixed when claimed"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q: %v", want, err)
+		}
+	}
+}
+
+func TestPlanAllGrowthLeavesRightSizedSystemSlotsAlone(t *testing.T) {
+	// A slot at its declared size has nothing to grow and never
+	// enters the plan; no disk is opened.
+	roles := []machine.DeclaredRole{declared("systemA", "/dev/vdc", "512Mi")}
+	found := map[machine.StorageRoleName]partition{
+		"systemA": {name: "vdc1", disk: "vdc", partName: "liken:systemA", sizeBytes: 512 << 20},
+	}
+	plans, err := planAllGrowth(roles, found)
+	if err != nil || plans != nil {
+		t.Errorf("got %v, %v", plans, err)
+	}
+}

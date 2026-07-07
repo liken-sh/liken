@@ -66,6 +66,16 @@ dist/$(NODE)/pods.qcow2:
 	mkdir -p dist/$(NODE)
 	qemu-img create -f qcow2 $@ 4G
 
+# The boot disk: where the machine will keep its own operating system
+# once it installs itself (milestone 12's story). Blank like the
+# others — the machine claims it, formats the two FAT32 system slots,
+# and eventually boots from it. Attached third, so the data disks
+# keep the /dev/vda and /dev/vdb handles their claims were declared
+# with.
+dist/$(NODE)/boot.qcow2:
+	mkdir -p dist/$(NODE)
+	qemu-img create -f qcow2 $@ 2G
+
 # Only the leader node forwards the API port to the host: kubectl on
 # the host reaches the cluster through the control plane, and there is
 # exactly one (see ../identity/kubeconfig.sh). Forwarding the same
@@ -172,7 +182,7 @@ QEMU_EXIT_ON_REBOOT := -no-reboot
 RTC ?= utc
 RTC_BASE := -rtc base=$(RTC)
 
-run: dist/$(NODE)/state.qcow2 dist/$(NODE)/pods.qcow2
+run: dist/$(NODE)/state.qcow2 dist/$(NODE)/pods.qcow2 dist/$(NODE)/boot.qcow2
 	qemu-system-x86_64 \
 		-accel kvm -accel tcg \
 		-cpu max \
@@ -192,7 +202,9 @@ run: dist/$(NODE)/state.qcow2 dist/$(NODE)/pods.qcow2
 		-drive file=dist/$(NODE)/state.qcow2,format=qcow2,if=none,id=state \
 		-device virtio-blk-pci,drive=state,serial=liken-$(NODE)-state \
 		-drive file=dist/$(NODE)/pods.qcow2,format=qcow2,if=none,id=pods \
-		-device virtio-blk-pci,drive=pods,serial=liken-$(NODE)-pods
+		-device virtio-blk-pci,drive=pods,serial=liken-$(NODE)-pods \
+		-drive file=dist/$(NODE)/boot.qcow2,format=qcow2,if=none,id=boot \
+		-device virtio-blk-pci,drive=boot,serial=liken-$(NODE)-boot
 
 # One-shot boots for debugging and automation: liken.oneshot tells init
 # not to restart k3s: its first exit powers the machine off, QEMU

@@ -77,6 +77,15 @@ func main() {
 
 	mountEssentials()
 
+	// Kernel modules load before storage settles because some roles'
+	// filesystems arrive as modules: the system slots are FAT32, and
+	// mounting vfat pulls in its default character-encoding table
+	// (nls_iso8859-1), which Ubuntu's config builds as a module.
+	// Everything else on the list is for k3s, which starts much
+	// later; loading it all in one early pass keeps module loading
+	// one story instead of two.
+	loadModules()
+
 	// Storage settles first, and with it the question of which
 	// manifest this boot runs under: the staged one awaiting its
 	// proving boot, the proven last-known-good, or (first boot only)
@@ -195,7 +204,6 @@ func main() {
 		plane.start("the reboot watch", func(ctx context.Context) error {
 			return watchForRebootIntent(ctx, machine.OperatorRunDir, 2*time.Second, rebootRequests)
 		})
-		loadModules()
 		// Only a leader can narrate cluster state: the admin
 		// kubeconfig is a control-plane artifact, and followers hold
 		// no credentials of their own. A follower's join shows up on

@@ -54,12 +54,15 @@ func TestRolesAreOrderedAndSkipUndeclared(t *testing.T) {
 }
 
 // The canonical order is load-bearing twice: it's the partition
-// layout when roles share a disk, and it puts machineState first, so
-// the partition a boot must find before reading any spec is the
-// first one on its disk.
+// layout when roles share a disk, and it front-loads the earliest
+// readers — the system slots for the firmware, then machineState so
+// the partition a boot must find before reading any spec leads the
+// data roles.
 func TestRolesCanonicalOrder(t *testing.T) {
 	one := &StorageRole{Device: "/dev/vda"}
 	spec := StorageSpec{
+		SystemA:          one,
+		SystemB:          one,
 		MachineState:     one,
 		MachineEphemeral: one,
 		ClusterState:     one,

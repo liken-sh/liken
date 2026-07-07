@@ -133,6 +133,20 @@ spec:
           x-kubernetes-validations:
             - rule: >-
                 !has(self.spec) || !has(self.spec.storage) ||
+                !has(self.spec.storage.systemA) || !has(self.spec.storage.systemA.size) ||
+                !has(self.status) || !has(self.status.boot) || !has(self.status.boot.storage) ||
+                !has(self.status.boot.storage.systemA) || !has(self.status.boot.storage.systemA.size) ||
+                !quantity(self.spec.storage.systemA.size).isLessThan(quantity(self.status.boot.storage.systemA.size))
+              message: systemA may not shrink below the size this machine booted with; partitions are grow-only
+            - rule: >-
+                !has(self.spec) || !has(self.spec.storage) ||
+                !has(self.spec.storage.systemB) || !has(self.spec.storage.systemB.size) ||
+                !has(self.status) || !has(self.status.boot) || !has(self.status.boot.storage) ||
+                !has(self.status.boot.storage.systemB) || !has(self.status.boot.storage.systemB.size) ||
+                !quantity(self.spec.storage.systemB.size).isLessThan(quantity(self.status.boot.storage.systemB.size))
+              message: systemB may not shrink below the size this machine booted with; partitions are grow-only
+            - rule: >-
+                !has(self.spec) || !has(self.spec.storage) ||
                 !has(self.spec.storage.machineState) || !has(self.spec.storage.machineState.size) ||
                 !has(self.status) || !has(self.status.boot) || !has(self.status.boot.storage) ||
                 !has(self.status.boot.storage.machineState) || !has(self.status.boot.storage.machineState.size) ||
@@ -270,15 +284,50 @@ spec:
                     boot. Roles absent from the spec are backed by the
                     machine's RAM root.
                   properties:
+                    systemA:
+                      type: object
+                      description: >-
+                        The first of the operating system's two boot
+                        slots. Each slot holds one complete liken
+                        version; the machine runs from one while
+                        upgrades are written to the other. EFI system
+                        partitions carrying FAT32, because the
+                        firmware itself is their first reader. Fixed
+                        in size once claimed: FAT32 doesn't grow in
+                        place.
+                      required: [device]
+                      properties:
+                        device:
+                          type: string
+                          maxLength: 128
+                          pattern: ^/dev/[a-zA-Z0-9/_-]+$
+                        size:
+                          type: string
+                          maxLength: 32
+                          pattern: ^[0-9]+(Ki|Mi|Gi|Ti)?$
+                    systemB:
+                      type: object
+                      description: >-
+                        The second boot slot; systemA tells the story.
+                      required: [device]
+                      properties:
+                        device:
+                          type: string
+                          maxLength: 128
+                          pattern: ^/dev/[a-zA-Z0-9/_-]+$
+                        size:
+                          type: string
+                          maxLength: 32
+                          pattern: ^[0-9]+(Ki|Mi|Gi|Ti)?$
                     machineState:
                       type: object
                       description: >-
                         The machine's own durable data, chiefly the
                         staged and proven manifests that let a spec
                         edit survive a reboot and apply at the next
-                        one. First in the canonical partition order,
-                        so a future boot can find it before it has
-                        read any spec.
+                        one. First among the data roles in the
+                        canonical partition order, so a future boot
+                        can find it before it has read any spec.
                       required: [device]
                       properties:
                         device:
@@ -549,6 +598,28 @@ spec:
                     root, and per-role figures would count it multiple
                     times.
                   properties:
+                    systemA:
+                      type: object
+                      properties:
+                        backing:
+                          type: string
+                        device:
+                          type: string
+                        partition:
+                          type: string
+                        capacityBytes:
+                          type: integer
+                    systemB:
+                      type: object
+                      properties:
+                        backing:
+                          type: string
+                        device:
+                          type: string
+                        partition:
+                          type: string
+                        capacityBytes:
+                          type: integer
                     machineState:
                       type: object
                       properties:
@@ -634,6 +705,20 @@ spec:
                     storage:
                       type: object
                       properties:
+                        systemA:
+                          type: object
+                          properties:
+                            device:
+                              type: string
+                            size:
+                              type: string
+                        systemB:
+                          type: object
+                          properties:
+                            device:
+                              type: string
+                            size:
+                              type: string
                         machineState:
                           type: object
                           properties:

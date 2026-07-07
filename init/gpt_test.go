@@ -259,7 +259,7 @@ func TestWriteGPTWritesEverythingButNeedsARealDevice(t *testing.T) {
 	}
 	f.Close()
 
-	parts := []gptPartition{{name: "liken:machineState", firstLBA: 2_048, lastLBA: 4_095}}
+	parts := []gptPartition{{name: "liken:machineState", firstLBA: 2_048, lastLBA: 4_095, typeGUID: linuxFilesystemData}}
 	err = writeGPT(path, testDiskSectors, parts)
 	if err == nil || !strings.Contains(err.Error(), "re-reading partition table") {
 		t.Fatalf("expected the ioctl boundary failure: %v", err)

@@ -36,6 +36,8 @@ const PartitionPrefix = "liken:"
 type StorageRoleName string
 
 const (
+	SystemARole          StorageRoleName = "systemA"
+	SystemBRole          StorageRoleName = "systemB"
 	MachineStateRole     StorageRoleName = "machineState"
 	MachineEphemeralRole StorageRoleName = "machineEphemeral"
 	ClusterStateRole     StorageRoleName = "clusterState"
@@ -45,10 +47,17 @@ const (
 
 // StorageRoleNames is the canonical order: the order partitions are
 // laid down when roles share a disk (fixed here rather than by YAML
-// map order, which Kubernetes doesn't preserve), with machineState
-// first, so the partition a future boot must find before it has read
-// any spec is the first one on its disk.
+// map order, which Kubernetes doesn't preserve). The system slots
+// come first, because the firmware is the earliest reader of any
+// partition liken owns and an EFI system partition conventionally
+// leads its disk; machineState comes next, ahead of all the data
+// roles, so the partition a future boot must find before it has read
+// any spec sits at the front of them. (Recognition is by partition
+// name, never by position — the order is layout convention, not a
+// discovery mechanism.)
 var StorageRoleNames = []StorageRoleName{
+	SystemARole,
+	SystemBRole,
 	MachineStateRole,
 	MachineEphemeralRole,
 	ClusterStateRole,
@@ -57,6 +66,19 @@ var StorageRoleNames = []StorageRoleName{
 }
 
 type StorageSpec struct {
+	// SystemA and SystemB are the operating system's own boot slots:
+	// each holds one complete liken version (the kernel and the
+	// initramfs that is the rest of the OS), and the machine runs
+	// from one while upgrades are written to the other — blue-green,
+	// at the scale of the whole operating system. They are EFI system
+	// partitions carrying FAT32, because the firmware itself is their
+	// first reader and FAT is the only filesystem it promises to
+	// understand. A machine without them boots from external media
+	// forever (the lab's -kernel flag, a USB stick); a machine with
+	// them can be installed once and upgraded declaratively.
+	SystemA *StorageRole `json:"systemA,omitempty"`
+	SystemB *StorageRole `json:"systemB,omitempty"`
+
 	// MachineState is the machine's own durable data: the manifests
 	// that configure it (the staged and proven copies that let a spec
 	// edit survive a reboot and apply at the next one). Small, but it
@@ -122,6 +144,10 @@ func (r DeclaredRole) PartitionName() string {
 // outside the vocabulary and for roles the spec leaves out.
 func (s *StorageSpec) Role(name StorageRoleName) *StorageRole {
 	switch name {
+	case SystemARole:
+		return s.SystemA
+	case SystemBRole:
+		return s.SystemB
 	case MachineStateRole:
 		return s.MachineState
 	case MachineEphemeralRole:

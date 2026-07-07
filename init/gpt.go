@@ -79,12 +79,16 @@ func alignLBA(lba uint64) uint64 {
 	return (lba + partitionAlignment - 1) / partitionAlignment * partitionAlignment
 }
 
-// A gptPartition is one entry as liken declares it when claiming; the
-// type GUID and a fresh unique GUID are filled in at write time.
+// A gptPartition is one entry as liken declares it when claiming; a
+// fresh unique GUID is filled in at write time. The type GUID is part
+// of the plan: most roles are ordinary Linux data, but the system
+// slots must be typed as EFI system partitions or the firmware will
+// never look at them.
 type gptPartition struct {
 	name     string
 	firstLBA uint64
 	lastLBA  uint64
+	typeGUID [16]byte
 }
 
 // A gptEntry is one occupied slot of the entry array, everything the
@@ -123,6 +127,14 @@ type gptChunk struct {
 // this exact GUID is what lsblk, blkid, and installers everywhere
 // recognize as a Linux data partition.
 var linuxFilesystemData = mustGUID("0FC63DAF-8483-4772-8E79-3D69D8477DE4")
+
+// efiSystemPartition is the type GUID that makes a partition an ESP:
+// the one partition type UEFI firmware itself reads. The type is the
+// entire signal — firmware doesn't inspect contents to find boot
+// candidates, it looks for this GUID and expects FAT inside. This is
+// the GUID's most consequential job anywhere in the format, and why
+// the type is planned per role rather than assumed.
+var efiSystemPartition = mustGUID("C12A7328-F81F-11D2-BA4B-00A0C93EC93B")
 
 // mustGUID turns a GUID's canonical text into its 16 on-disk bytes.
 // The encoding is a historical wart: the first three fields are
@@ -394,7 +406,7 @@ func writeGPT(devPath string, totalSectors uint64, parts []gptPartition) error {
 	t := &gptTable{diskGUID: randomGUID()}
 	for _, p := range parts {
 		t.entries = append(t.entries, gptEntry{
-			typeGUID:   linuxFilesystemData,
+			typeGUID:   p.typeGUID,
 			uniqueGUID: randomGUID(),
 			firstLBA:   p.firstLBA,
 			lastLBA:    p.lastLBA,

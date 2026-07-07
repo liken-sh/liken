@@ -119,12 +119,30 @@ func planAllGrowth(roles []machine.DeclaredRole, found map[machine.StorageRoleNa
 	byDisk := map[string][]machine.DeclaredRole{}
 	var order []string
 	for _, role := range roles {
-		if p, ok := found[role.Name]; ok {
-			if _, seen := byDisk[p.disk]; !seen {
-				order = append(order, p.disk)
-			}
-			byDisk[p.disk] = append(byDisk[p.disk], role)
+		p, ok := found[role.Name]
+		if !ok {
+			continue
 		}
+		// The system slots never grow: ext4 grows in place by ioctl,
+		// but FAT's geometry is fixed at format time, so a slot's size
+		// is settled the day it's claimed. A spec asking for more is
+		// refused here at planning — before anything is written — and
+		// the refusal follows the usual staged-spec path: rejected,
+		// fall back to proven.
+		if roleMounts[role.Name].fstype == "vfat" {
+			if role.Size != "" {
+				if bytes, _ := machine.ParseSize(role.Size); bytes > p.sizeBytes {
+					return nil, fmt.Errorf(
+						"%s is %s and can't grow to %s: system slots are fixed when claimed (FAT32 doesn't grow in place)",
+						role.Name, gib(p.sizeBytes), role.Size)
+				}
+			}
+			continue
+		}
+		if _, seen := byDisk[p.disk]; !seen {
+			order = append(order, p.disk)
+		}
+		byDisk[p.disk] = append(byDisk[p.disk], role)
 	}
 
 	var plans []growPlan

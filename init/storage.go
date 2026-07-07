@@ -40,6 +40,10 @@ import (
 // Where each role lands in the filesystem: liken's private
 // translation, deliberately absent from the Machine API.
 //
+//	systemA/systemB  /var/lib/liken/system/{a,b}: the OS's own boot
+//	                 slots, FAT32 because the firmware reads them;
+//	                 no suid, no devices, no executables — nothing
+//	                 runs *from* a slot, the firmware only loads it
 //	machineState     /var/lib/liken/machine: the machine's own durable
 //	                 data, chiefly the staged and proven manifests
 //	machineEphemeral /tmp, the OS's own scratch; nosuid/nodev and
@@ -51,17 +55,32 @@ import (
 //	                 appears in the image's k3s config.yaml
 //	podEphemeral     kubelet's root directory: emptyDirs, pod scratch
 type roleMount struct {
-	path  string
-	flags uintptr
-	mode  os.FileMode // applied to the mounted root; 0 leaves the default
+	path   string
+	flags  uintptr
+	mode   os.FileMode // applied to the mounted root; 0 leaves the default
+	fstype string      // "" means ext4, the default for data roles
 }
 
+const slotMountFlags = unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC
+
 var roleMounts = map[machine.StorageRoleName]roleMount{
+	machine.SystemARole:          {path: "/var/lib/liken/system/a", flags: slotMountFlags, fstype: "vfat"},
+	machine.SystemBRole:          {path: "/var/lib/liken/system/b", flags: slotMountFlags, fstype: "vfat"},
 	machine.MachineStateRole:     {path: machine.MachineStateDir},
 	machine.MachineEphemeralRole: {path: "/tmp", flags: unix.MS_NOSUID | unix.MS_NODEV, mode: 0o1777},
 	machine.ClusterStateRole:     {path: "/var/lib/rancher"},
 	machine.PodStorageRole:       {path: "/var/lib/liken/pod-storage"},
 	machine.PodEphemeralRole:     {path: "/var/lib/kubelet"},
+}
+
+// partitionTypeFor picks a role's GPT partition type: the system
+// slots are EFI system partitions (the type GUID is how firmware
+// finds them), everything else is ordinary Linux data.
+func partitionTypeFor(name machine.StorageRoleName) [16]byte {
+	if name == machine.SystemARole || name == machine.SystemBRole {
+		return efiSystemPartition
+	}
+	return linuxFilesystemData
 }
 
 // teardownStorage unmounts whatever reconciliation may have mounted,
@@ -164,7 +183,8 @@ func isBlank(devPath string) (bool, error) {
 }
 
 // reconcileStorage actuates the storage spec. On success every
-// declared role is an ext4 filesystem mounted at its role's path, and
+// declared role is a filesystem mounted at its role's path (ext4 for
+// the data roles, FAT32 for the system slots the firmware reads), and
 // the returned status records where each role landed: the same facts
 // printed to the console, bound for the Machine's status, because
 // anything reported only to the serial port is invisible to anyone
@@ -372,7 +392,8 @@ func planPartitions(device string, mine []machine.DeclaredRole, totalSectors uin
 		}
 		bytes, _ := machine.ParseSize(role.Size) // validated before any disk is touched
 		sectors := (bytes + sectorSize - 1) / sectorSize
-		p := gptPartition{name: role.PartitionName(), firstLBA: next, lastLBA: next + sectors - 1}
+		p := gptPartition{name: role.PartitionName(), firstLBA: next, lastLBA: next + sectors - 1,
+			typeGUID: partitionTypeFor(role.Name)}
 		if p.lastLBA > lastUsable {
 			return nil, fmt.Errorf("disk %s is too small: %s wants %s at sector %d but the disk's usable space ends at %d",
 				device, role.Name, role.Size, p.firstLBA, lastUsable)
@@ -384,7 +405,8 @@ func planPartitions(device string, mine []machine.DeclaredRole, totalSectors uin
 		if next > lastUsable {
 			return nil, fmt.Errorf("disk %s is too small: nothing left for %s", device, remainder.Name)
 		}
-		parts = append(parts, gptPartition{name: remainder.PartitionName(), firstLBA: next, lastLBA: lastUsable})
+		parts = append(parts, gptPartition{name: remainder.PartitionName(), firstLBA: next, lastLBA: lastUsable,
+			typeGUID: partitionTypeFor(remainder.Name)})
 	}
 	return parts, nil
 }
@@ -449,8 +471,21 @@ func mountRole(role machine.DeclaredRole, p partition) error {
 	}
 	target := rm.path
 
+	// Two filesystems, two makers: the system slots get FAT32 from
+	// our own formatter (fat32.go — the firmware reads them, and FAT
+	// is all it reads), everything else gets ext4 from the vendored
+	// static mke2fs. Recognizing our own name on a partition with no
+	// filesystem covers a boot that died between partitioning and
+	// mkfs either way.
 	dev := devRoot + "/" + p.name
-	if !hasExt4(dev) {
+	if rm.fstype == "vfat" {
+		if !hasFAT32(dev) {
+			fmt.Printf("liken: storage: making a FAT32 filesystem on %s for %s\n", dev, role.Name)
+			if err := formatSlot(dev, p.sizeBytes, role.Name); err != nil {
+				return fmt.Errorf("formatting %s for %s: %w", dev, role.Name, err)
+			}
+		}
+	} else if !hasExt4(dev) {
 		fmt.Printf("liken: storage: making an ext4 filesystem on %s for %s\n", dev, role.Name)
 		if !runNarrated("mke2fs | ", "/sbin/mke2fs", "-t", "ext4", dev) {
 			return fmt.Errorf("mke2fs on %s for %s failed", dev, role.Name)
@@ -482,18 +517,26 @@ func mountRole(role machine.DeclaredRole, p partition) error {
 		}
 		_ = os.Remove(staging)
 	} else {
+		fstype := rm.fstype
+		if fstype == "" {
+			fstype = "ext4"
+		}
 		if err := os.MkdirAll(target, 0o755); err != nil {
 			return fmt.Errorf("mkdir %s: %w", target, err)
 		}
-		if err := unix.Mount(dev, target, "ext4", rm.flags, ""); err != nil {
+		if err := unix.Mount(dev, target, fstype, rm.flags, ""); err != nil {
 			return fmt.Errorf("mounting %s for %s: %w", dev, role.Name, err)
 		}
 	}
 	// A partition grown this boot still carries a filesystem sized for
 	// the old extent; now that it's mounted, ext4 can be grown online
-	// to fill it (ext4.go explains why mounted is the easy case).
-	if err := maybeGrowFilesystem(role, p, target); err != nil {
-		return err
+	// to fill it (ext4.go explains why mounted is the easy case). FAT
+	// has no such move, which is fine: slots are fixed-size by design,
+	// and planAllGrowth refuses to grow them at the planning stage.
+	if rm.fstype == "" {
+		if err := maybeGrowFilesystem(role, p, target); err != nil {
+			return err
+		}
 	}
 
 	// A freshly-made ext4 root is 0755 root-only; roles like /tmp need

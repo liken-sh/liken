@@ -235,6 +235,8 @@ const (
 // fields mirror the spec's keys exactly, so spec and status line up
 // name for name.
 type StorageStatus struct {
+	SystemA          StorageRoleStatus `json:"systemA"`
+	SystemB          StorageRoleStatus `json:"systemB"`
 	MachineState     StorageRoleStatus `json:"machineState"`
 	MachineEphemeral StorageRoleStatus `json:"machineEphemeral"`
 	ClusterState     StorageRoleStatus `json:"clusterState"`
@@ -257,6 +259,10 @@ type StorageRoleStatus struct {
 // outside the vocabulary.
 func (s *StorageStatus) Role(name StorageRoleName) *StorageRoleStatus {
 	switch name {
+	case SystemARole:
+		return &s.SystemA
+	case SystemBRole:
+		return &s.SystemB
 	case MachineStateRole:
 		return &s.MachineState
 	case MachineEphemeralRole:
@@ -276,6 +282,8 @@ func (s *StorageStatus) Role(name StorageRoleName) *StorageRoleStatus {
 // places each on a partition.
 func AllRolesInMemory() StorageStatus {
 	return StorageStatus{
+		SystemA:          StorageRoleStatus{Backing: BackingMemory},
+		SystemB:          StorageRoleStatus{Backing: BackingMemory},
 		MachineState:     StorageRoleStatus{Backing: BackingMemory},
 		MachineEphemeral: StorageRoleStatus{Backing: BackingMemory},
 		ClusterState:     StorageRoleStatus{Backing: BackingMemory},

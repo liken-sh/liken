@@ -86,9 +86,35 @@ func TestPlanPartitionsPacksSizedRolesAligned(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []gptPartition{
-		{name: "liken:machineEphemeral", firstLBA: 2_048, lastLBA: 2_049},
-		{name: "liken:podStorage", firstLBA: 4_096, lastLBA: 1_052_671},
-		{name: "liken:podEphemeral", firstLBA: 1_052_672, lastLBA: 4_194_269},
+		{name: "liken:machineEphemeral", firstLBA: 2_048, lastLBA: 2_049, typeGUID: linuxFilesystemData},
+		{name: "liken:podStorage", firstLBA: 4_096, lastLBA: 1_052_671, typeGUID: linuxFilesystemData},
+		{name: "liken:podEphemeral", firstLBA: 1_052_672, lastLBA: 4_194_269, typeGUID: linuxFilesystemData},
+	}
+	if len(parts) != len(want) {
+		t.Fatalf("planned %d partitions, want %d: %v", len(parts), len(want), parts)
+	}
+	for i, w := range want {
+		if parts[i] != w {
+			t.Errorf("partition %d: got %+v, want %+v", i, parts[i], w)
+		}
+	}
+}
+
+func TestPlanPartitionsTypesSystemSlotsAsESP(t *testing.T) {
+	// The system slots must be typed as EFI system partitions — the
+	// type GUID is how firmware finds boot candidates — while every
+	// data role stays ordinary Linux filesystem data.
+	mine := []machine.DeclaredRole{
+		declared("systemA", "/dev/vdc", "512Mi"),
+		declared("systemB", "/dev/vdc", "512Mi"),
+	}
+	parts, err := planPartitions("/dev/vdc", mine, 4_194_304)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []gptPartition{
+		{name: "liken:systemA", firstLBA: 2_048, lastLBA: 1_050_623, typeGUID: efiSystemPartition},
+		{name: "liken:systemB", firstLBA: 1_050_624, lastLBA: 2_099_199, typeGUID: efiSystemPartition},
 	}
 	if len(parts) != len(want) {
 		t.Fatalf("planned %d partitions, want %d: %v", len(parts), len(want), parts)
