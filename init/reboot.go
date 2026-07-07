@@ -79,6 +79,7 @@ func rebootMachine(intent machine.RebootIntent) {
 	// collecting right up to the end.
 	plane.shutdown(10 * time.Second)
 	unmountRoles()
+	syncLogs()
 	unix.Sync()
 	if err := unix.Reboot(unix.LINUX_REBOOT_CMD_RESTART); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: reboot failed: %v\n", err)

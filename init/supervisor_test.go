@@ -5,6 +5,7 @@ package main
 // itself is QEMU territory.
 
 import (
+	"bytes"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -45,7 +46,8 @@ func TestContainsReadyRejectsNotReady(t *testing.T) {
 }
 
 func TestLineWriterBuffersPartialLines(t *testing.T) {
-	w := &lineWriter{prefix: "k3s | "}
+	var dest bytes.Buffer
+	w := &lineWriter{dest: &dest, prefix: "k3s | "}
 	if n, err := w.Write([]byte("partial")); n != 7 || err != nil {
 		t.Fatalf("got %d, %v", n, err)
 	}
@@ -57,6 +59,9 @@ func TestLineWriterBuffersPartialLines(t *testing.T) {
 	}
 	if w.buf.String() != "next" {
 		t.Errorf("completed lines flush, the remainder waits: %q", w.buf.String())
+	}
+	if dest.String() != "k3s | partial line\n" {
+		t.Errorf("the complete line lands on the destination: %q", dest.String())
 	}
 }
 

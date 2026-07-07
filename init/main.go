@@ -79,12 +79,19 @@ func main() {
 	// says hello twice. switchroot.go explains why and how.
 	maybeSwitchRoot()
 
-	// Reaping starts before anything else: the moment we spawn a child
-	// (or inherit an orphan), collecting its exit status is our job and
-	// no one else's.
-	plane.start("the reaper", reap)
-
 	mountEssentials()
+
+	// With /proc and /dev mounted, init's own output moves to
+	// /dev/kmsg (console.go). This happens before the first
+	// machine-plane component starts, so the os.Stdout and os.Stderr
+	// variables are reassigned while main is still the only goroutine
+	// reading them.
+	redirectToKmsg()
+
+	// Reaping starts before any child process exists: the moment we
+	// spawn one (or inherit an orphan), collecting its exit status is
+	// our job and no one else's. Nothing above this line forks.
+	plane.start("the reaper", reap)
 
 	// The firmware's variable store, when there is one: boot entries
 	// and boot order live there, and both the world report and the
@@ -302,6 +309,7 @@ func main() {
 // must never simply exit; this is the only correct way for init to
 // stop.
 func powerOff() {
+	syncLogs()
 	unix.Sync()
 	if err := unix.Reboot(unix.LINUX_REBOOT_CMD_POWER_OFF); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: power off failed: %v\n", err)

@@ -39,11 +39,16 @@ import (
 	"github.com/chrisguidry/liken/machine"
 )
 
-// lineWriter forwards each complete line it receives to the console
-// with a prefix. Child processes write in arbitrary chunks; buffering
-// to line boundaries keeps their output and liken's own messages from
-// interleaving mid-line.
+// lineWriter forwards each complete line it receives to its
+// destination with a prefix. Child processes write in arbitrary
+// chunks; buffering to line boundaries keeps their output and
+// liken's own messages from interleaving mid-line. The destination
+// is the raw console, not init's kmsg-routed stdout: k3s's volume
+// would churn the kernel's small ring buffer in seconds, and its
+// lines already reach the cluster from the log file the k3s-logs
+// relay tails, so buffering the echo would ship everything twice.
 type lineWriter struct {
+	dest   io.Writer
 	prefix string
 	buf    bytes.Buffer
 }
@@ -57,7 +62,7 @@ func (w *lineWriter) Write(p []byte) (int, error) {
 			w.buf.WriteString(line)
 			break
 		}
-		fmt.Printf("%s%s", w.prefix, line)
+		fmt.Fprintf(w.dest, "%s%s", w.prefix, line)
 	}
 	return len(p), nil
 }
@@ -241,8 +246,8 @@ func startK3s(role machine.Role) (*exec.Cmd, io.Closer, error) {
 		args = []string{"agent", "--config", k3sAgentConfig}
 	}
 	cmd := exec.Command(k3sBinary, args...)
-	cmd.Stdout = io.MultiWriter(logf, &lineWriter{prefix: "k3s | "})
-	cmd.Stderr = io.MultiWriter(logf, &lineWriter{prefix: "k3s | "})
+	cmd.Stdout = io.MultiWriter(logf, &lineWriter{dest: console, prefix: "k3s | "})
+	cmd.Stderr = io.MultiWriter(logf, &lineWriter{dest: console, prefix: "k3s | "})
 	if err := cmd.Start(); err != nil {
 		logf.Close()
 		return nil, nil, fmt.Errorf("starting k3s: %w", err)
@@ -366,7 +371,7 @@ func containsReady(out string) bool {
 // captured-output shape would hide it.
 func runNarrated(prefix, path string, args ...string) bool {
 	cmd := exec.Command(path, args...)
-	w := &lineWriter{prefix: prefix}
+	w := &lineWriter{dest: console, prefix: prefix}
 	cmd.Stdout = w
 	cmd.Stderr = w
 	if err := cmd.Start(); err != nil {
