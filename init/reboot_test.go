@@ -5,6 +5,9 @@ package main
 // reboot syscall) is PID-1 territory and belongs to the QEMU harness.
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -34,5 +37,25 @@ func TestWatchForRebootIntentDeliversExactlyOne(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("the watcher never delivered the intent")
+	}
+}
+
+func TestWatchForRebootIntentHonorsAnUnreadableIntent(t *testing.T) {
+	// The file's presence is the trigger; content only improves the
+	// message. A garbled intent must still reboot the machine rather
+	// than strand a request.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "reboot-intent.yaml"), []byte("{garbled"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	requests := make(chan machine.RebootIntent, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := watchForRebootIntent(ctx, dir, time.Millisecond, requests); err != nil {
+		t.Fatal(err)
+	}
+	intent := <-requests
+	if intent.Reason == "" {
+		t.Error("an unreadable intent still carries a reason for the console")
 	}
 }

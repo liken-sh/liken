@@ -19,7 +19,7 @@ var lifecycleNow = time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
 func TestCarryOutConvergenceStages(t *testing.T) {
 	store := machine.ClusterManifests(t.TempDir())
 	conv := convergence{
-		condition: clusterNotConverged("RebootPending", "staged"),
+		condition: notConverged("ClusterConverged", "RebootPending", "staged"),
 		stage:     true,
 		manifest:  []byte("kind: Cluster\n"),
 		hash:      "abc123",
@@ -43,7 +43,7 @@ func TestCarryOutConvergenceWithdrawsAndClears(t *testing.T) {
 		t.Fatal(err)
 	}
 	conv := convergence{
-		condition:      clusterConverged("Converged", "current"),
+		condition:      converged("ClusterConverged", "Converged", "current"),
 		withdraw:       true,
 		clearRejection: true,
 	}
@@ -67,7 +67,7 @@ func TestCarryOutConvergenceReportsAFailedStaging(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
 	store := machine.ClusterManifests(filepath.Join(parent, "unwritable"))
 	conv := convergence{
-		condition: clusterNotConverged("RebootPending", "staged"),
+		condition: notConverged("ClusterConverged", "RebootPending", "staged"),
 		stage:     true,
 		manifest:  []byte("kind: Cluster\n"),
 	}

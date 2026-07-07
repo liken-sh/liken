@@ -10,6 +10,7 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/chrisguidry/liken/machine"
@@ -99,14 +100,6 @@ func ensureCluster(c *apiClient, seed *machine.Cluster) error {
 	}
 }
 
-func getCluster(c *apiClient, name string) (*machine.Cluster, error) {
-	cluster := &machine.Cluster{}
-	if err := c.requestJSON(http.MethodGet, clustersPath+"/"+name, nil, cluster); err != nil {
-		return nil, err
-	}
-	return cluster, nil
-}
-
 // carryOutConvergence performs one convergence decision's side
 // effects against one document's store, and returns the condition to
 // publish (an I/O failure downgrades it to StagingFailed on the same
@@ -114,7 +107,7 @@ func getCluster(c *apiClient, name string) (*machine.Cluster, error) {
 // document).
 func carryOutConvergence(conv convergence, store machine.ManifestStore, what string, now time.Time) machine.Condition {
 	failed := func(err error) machine.Condition {
-		return machine.Condition{Type: conv.condition.Type, Status: "False", Reason: "StagingFailed", Message: err.Error()}
+		return machine.Condition{Type: conv.condition.Type, Status: machine.ConditionFalse, Reason: "StagingFailed", Message: err.Error()}
 	}
 	if conv.withdraw {
 		if err := store.WithdrawStaged(); err != nil {
@@ -182,7 +175,7 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 	// cluster existed), so init's facts are the only source, and this
 	// condition checks them against the spec.
 	status.Conditions = machine.SetCondition(status.Conditions,
-		machine.StorageCondition(m.Spec.Storage, status.Storage), now)
+		storageCondition(m.Spec.Storage, status.Storage), now)
 
 	// t is this machine's standing with the rollout conductor. A
 	// standalone machine reboots at will; a cluster member reboots
@@ -193,7 +186,7 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 	t := turnStandalone
 	if clusterName != "" {
 		t = turnAwaiting
-		if g := machine.FindCondition(m.Status.Conditions, rebootApprovedCondition); g != nil && g.Status == "True" {
+		if g := machine.FindCondition(m.Status.Conditions, rebootApprovedCondition); g != nil && g.Status == machine.ConditionTrue {
 			t = turnGranted
 		}
 	}
@@ -228,9 +221,10 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 		draining = draining || !gated.requestReboot
 		return gated
 	}
-	machineRejection, _ := machine.MachineManifests(machine.MachineStateDir).LoadRejection()
-	conv := gate(decideConvergence(m, facts, machineRejection, readStagedHash(), t))
-	condition := carryOutConvergence(conv, machine.MachineManifests(machine.MachineStateDir), "spec", now)
+	machineStore := machine.MachineManifests(machine.MachineStateDir)
+	machineRejection, _ := machineStore.LoadRejection()
+	conv := gate(decideConvergence(m, facts, machineRejection, readStagedHash(machineStore), t))
+	condition := carryOutConvergence(conv, machineStore, "spec", now)
 	status.Conditions = machine.SetCondition(status.Conditions, condition, now)
 
 	// The cluster document converges through the same machinery, per
@@ -241,17 +235,16 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 	rebooting := conv.requestReboot
 	if clusterName != "" {
 		var cconv convergence
+		clusterStore := machine.ClusterManifests(machine.MachineStateDir)
 		if liveCluster, err = getCluster(c, clusterName); err != nil {
-			cconv = convergence{condition: machine.Condition{
-				Type: "ClusterConverged", Status: "Unknown", Reason: "ClusterUnavailable",
-				Message: fmt.Sprintf("reading cluster %s: %v", clusterName, err),
-			}}
+			cconv = convergence{condition: convergenceUnknown("ClusterConverged", "ClusterUnavailable",
+				fmt.Sprintf("reading cluster %s: %v", clusterName, err))}
 		} else {
-			clusterRejection, _ := machine.ClusterManifests(machine.MachineStateDir).LoadRejection()
+			clusterRejection, _ := clusterStore.LoadRejection()
 			cconv = gate(decideClusterConvergence(liveCluster, m, facts, clusterRejection,
-				bootClusterHash(machine.BootClusterManifestPath), readStagedClusterHash(), t))
+				bootClusterHash(machine.BootClusterManifestPath), readStagedHash(clusterStore), t))
 		}
-		condition := carryOutConvergence(cconv, machine.ClusterManifests(machine.MachineStateDir), "cluster document", now)
+		condition := carryOutConvergence(cconv, clusterStore, "cluster document", now)
 		status.Conditions = machine.SetCondition(status.Conditions, condition, now)
 		rebooting = rebooting || cconv.requestReboot
 
@@ -266,7 +259,7 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 		if liveCluster != nil {
 			systemStore := machine.SystemReleases(machine.MachineStateDir)
 			systemRejection, _ := systemStore.LoadRejection()
-			stagedSystemHash := readStagedSystemHash()
+			stagedSystemHash := readStagedHash(systemStore)
 			ask, vcond, ok := versionAsk(liveCluster, facts)
 			vconv := versionConvergence(vcond, stagedSystemHash, systemRejection)
 			if ok {
@@ -318,14 +311,14 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 	// can't affect this one. It also skips the conductor's grant,
 	// because the grant is a permission token, not an observation
 	// about this machine's health.
-	ready := machine.Condition{Type: "Ready", Status: "True", Reason: "Reconciled"}
+	ready := machine.Condition{Type: "Ready", Status: machine.ConditionTrue, Reason: "Reconciled"}
 	for _, condition := range status.Conditions {
 		if condition.Type == "Ready" || condition.Type == rebootApprovedCondition {
 			continue
 		}
-		if condition.Status != "True" {
+		if condition.Status != machine.ConditionTrue {
 			ready = machine.Condition{
-				Type: "Ready", Status: "False",
+				Type: "Ready", Status: machine.ConditionFalse,
 				Reason: "Degraded", Message: condition.Type + " is " + string(condition.Status),
 			}
 		}
@@ -387,14 +380,14 @@ func nodeHealthyCondition(node *nodeObject) machine.Condition {
 		if c.Type != "Ready" {
 			continue
 		}
-		if c.Status == "True" {
-			return machine.Condition{Type: "NodeHealthy", Status: "True", Reason: "KubeletReady",
+		if c.Status == machine.ConditionTrue {
+			return machine.Condition{Type: "NodeHealthy", Status: machine.ConditionTrue, Reason: "KubeletReady",
 				Message: "the Node reports Ready; the kubelet is serving this machine to the cluster"}
 		}
-		return machine.Condition{Type: "NodeHealthy", Status: "False", Reason: "NodeNotReady",
+		return machine.Condition{Type: "NodeHealthy", Status: machine.ConditionFalse, Reason: "NodeNotReady",
 			Message: fmt.Sprintf("the Node reports Ready=%s: %s", c.Status, c.Message)}
 	}
-	return machine.Condition{Type: "NodeHealthy", Status: "False", Reason: "NodeNotReady",
+	return machine.Condition{Type: "NodeHealthy", Status: machine.ConditionFalse, Reason: "NodeNotReady",
 		Message: "the Node carries no Ready condition; the kubelet has never reported in"}
 }
 
@@ -421,24 +414,60 @@ func applySysctls(desired map[string]string) (map[string]string, error) {
 	return observed, firstErr
 }
 
+// storageCondition summarizes storage as one standard Kubernetes
+// condition, comparing what the spec declared against where each role
+// is actually backed. True means every declared role sits on its
+// partition. False should be unreachable on a running machine, since
+// init powers off rather than boot with a declared role unsatisfied.
+// But a condition has to be able to express every state it names, and
+// a future, softer failure mode may need it.
+func storageCondition(spec machine.StorageSpec, status machine.StorageStatus) machine.Condition {
+	var placed, inMemory []string
+	for _, role := range spec.Roles() {
+		rs := status.Role(role.Name)
+		if rs != nil && rs.Backing == machine.BackingPartition {
+			placed = append(placed, fmt.Sprintf("%s on %s", role.Name, rs.Device))
+		} else {
+			inMemory = append(inMemory, string(role.Name))
+		}
+	}
+	switch {
+	case len(inMemory) > 0:
+		return machine.Condition{
+			Type: "StorageReady", Status: machine.ConditionFalse, Reason: "RolesInMemory",
+			Message: fmt.Sprintf("declared roles backed by memory: %s", strings.Join(inMemory, ", ")),
+		}
+	case len(placed) > 0:
+		return machine.Condition{
+			Type: "StorageReady", Status: machine.ConditionTrue, Reason: "AllRolesPlaced",
+			Message: strings.Join(placed, ", "),
+		}
+	default:
+		return machine.Condition{
+			Type: "StorageReady", Status: machine.ConditionTrue, Reason: "NothingDeclared",
+			Message: "no storage declared; all roles backed by memory",
+		}
+	}
+}
+
 func factsCondition(err error) machine.Condition {
 	if err != nil {
 		return machine.Condition{
-			Type: "FactsPublished", Status: "False",
+			Type: "FactsPublished", Status: machine.ConditionFalse,
 			Reason: "FactsUnreadable", Message: err.Error(),
 		}
 	}
-	return machine.Condition{Type: "FactsPublished", Status: "True", Reason: "FactsRead"}
+	return machine.Condition{Type: "FactsPublished", Status: machine.ConditionTrue, Reason: "FactsRead"}
 }
 
 func sysctlsCondition(err error) machine.Condition {
 	if err != nil {
 		return machine.Condition{
-			Type: "SysctlsApplied", Status: "False",
+			Type: "SysctlsApplied", Status: machine.ConditionFalse,
 			Reason: "ApplyFailed", Message: err.Error(),
 		}
 	}
-	return machine.Condition{Type: "SysctlsApplied", Status: "True", Reason: "Applied"}
+	return machine.Condition{Type: "SysctlsApplied", Status: machine.ConditionTrue, Reason: "Applied"}
 }
 
 // publishStatus writes through the status subresource: a separate

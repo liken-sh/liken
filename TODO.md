@@ -983,11 +983,12 @@
         turn before a slower worker has asked. That is safe either
         way; one leader at a time holds regardless.
 14. [ ] GitOps from first boot, without baking an engine into the OS.
-        This is deliberately deferred: git-driven delivery is one way
+        This is now an exercise for the reader, to be covered by
+        documentation rather than code: git-driven delivery is one way
         to feed this system, not its core mode. The Machine and
         Cluster resources are the real interface, and everything
-        above works without a repo in the loop. When it lands, the OS
-        grows two generic primitives rather than Flux support. The
+        above works without a repo in the loop. If someone builds it,
+        the OS grows two generic primitives rather than Flux support. The
         first is a seed channel: manifests delivered alongside the
         Machine manifest land in k3s's auto-manifests directory,
         applied at first boot and owned by the repo afterward, which

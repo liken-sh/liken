@@ -68,8 +68,10 @@ func main() {
 	// The file seeds the cluster: if no Machine object exists yet, the
 	// manifest's spec becomes the first version of it. From then on the
 	// cluster's copy is authoritative: a kubectl edit wins over the
-	// file until someone rebuilds the image. (One day Flux will manage
-	// the in-cluster copy from git and the two sides converge for good.)
+	// file until someone rebuilds the image. (A GitOps engine running
+	// in the cluster could own the in-cluster copy and converge the two
+	// sides for good; that delivery choice belongs to the deployment,
+	// not the OS.)
 	current, err := ensureMachine(client, m)
 	if err != nil {
 		fatal("ensuring machine %s exists: %v", name, err)

@@ -170,3 +170,42 @@ func TestSlewAmountClampsLargeOffsets(t *testing.T) {
 		t.Errorf("got %v", got)
 	}
 }
+
+func TestStepClockAtBootWithNoSourcesFreeRuns(t *testing.T) {
+	if sync := stepClockAtBoot(nil); sync != nil {
+		t.Errorf("no sources means no measurement, not a fake one: %+v", sync)
+	}
+}
+
+func TestQuerySourcesTakesTheFirstAnswer(t *testing.T) {
+	addr := startResponder(t, syncedClock())
+	sync, err := querySources([]string{addr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sync.source != addr || sync.stratum != 4 {
+		t.Errorf("the answer names its source and stratum: %+v", sync)
+	}
+	if sync.offset.Abs() > 250*time.Millisecond {
+		t.Errorf("a loopback measurement is near zero: %v", sync.offset)
+	}
+}
+
+func TestQuerySourcesReportsTheLastFailure(t *testing.T) {
+	if _, err := querySources([]string{"not::a::valid::address::"}); err == nil {
+		t.Error("an unreachable source is an error, never a fake measurement")
+	}
+}
+
+func TestStepClockAtBootSlewsWhenTheClockIsClose(t *testing.T) {
+	// The responder answers from this same machine's clock, so the
+	// measured offset is microseconds: far under the step threshold,
+	// which means stepClockAtBoot returns the measurement without ever
+	// calling clock_settime. (An actual step needs a wrong clock,
+	// which only the QEMU harness's -rtc drills can arrange.)
+	addr := startResponder(t, syncedClock())
+	sync := stepClockAtBoot([]string{addr})
+	if sync == nil || sync.source != addr {
+		t.Fatalf("the first sync comes back for status: %+v", sync)
+	}
+}

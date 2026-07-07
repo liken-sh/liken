@@ -48,13 +48,6 @@ type envelope struct {
 	Message string `json:"message"`
 }
 
-// severityNames are the syslog severity words, indexed by the numeric
-// severity (RFC 5424's table). The envelope carries words rather than
-// numbers so a human reading raw pod logs doesn't need the table.
-var severityNames = [8]string{
-	"emerg", "alert", "crit", "err", "warning", "notice", "info", "debug",
-}
-
 // envelopeWriter encodes envelopes one per line, each delivered to
 // the underlying writer in a single Write call. That single call
 // matters: the container runtime treats each write to the pod's

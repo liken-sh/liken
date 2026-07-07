@@ -61,9 +61,9 @@ func main() {
 	var err error
 	switch os.Args[1] {
 	case "kernel":
-		err = relayKmsg(0)
+		err = relayKmsg(machine.FacilityKernel)
 	case "liken":
-		err = relayKmsg(1)
+		err = relayKmsg(machine.FacilityUser)
 	case "k3s":
 		err = relayFile(k3sLogPath)
 	case "containerd":

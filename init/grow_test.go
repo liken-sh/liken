@@ -6,6 +6,8 @@ package main
 // QEMU-harness territory.
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -235,5 +237,71 @@ func TestPlanAllGrowthLeavesRightSizedSystemSlotsAlone(t *testing.T) {
 	plans, err := planAllGrowth(roles, found)
 	if err != nil || plans != nil {
 		t.Errorf("got %v, %v", plans, err)
+	}
+}
+
+func TestPlanAllGrowthRefusesToGrowASystemSlot(t *testing.T) {
+	roles := []machine.DeclaredRole{declared(machine.SystemARole, "/dev/vdc", "1Gi")}
+	found := map[machine.StorageRoleName]partition{
+		machine.SystemARole: {name: "vdc1", disk: "vdc", sizeBytes: 512 << 20},
+	}
+	_, err := planAllGrowth(roles, found)
+	if err == nil || !strings.Contains(err.Error(), "FAT32 doesn't grow in place") {
+		t.Errorf("slots are fixed when claimed: %v", err)
+	}
+}
+
+func TestPlanAllGrowthAcceptsASlotAtItsClaimedSize(t *testing.T) {
+	// Declaring the size a slot already has is not a grow; the slot
+	// simply doesn't participate in growth planning.
+	roles := []machine.DeclaredRole{declared(machine.SystemARole, "/dev/vdc", "512Mi")}
+	found := map[machine.StorageRoleName]partition{
+		machine.SystemARole: {name: "vdc1", disk: "vdc", sizeBytes: 512 << 20},
+	}
+	plans, err := planAllGrowth(roles, found)
+	if err != nil || len(plans) != 0 {
+		t.Errorf("a satisfied slot plans nothing: %v, %v", plans, err)
+	}
+}
+
+func TestPlanAllGrowthReadsASatisfiedDiskAndPlansNothing(t *testing.T) {
+	// The whole walk against a fake disk: inventory, the table read
+	// back from the device file, and planGrowth concluding there is
+	// nothing to do because the disk never grew.
+	sys, dev := fakeMachine(t)
+	table := grownTable(testDiskSectors)
+	addDisk(t, sys, dev, "vda", testDiskSectors*sectorSize, nil)
+	f := diskFile(t, table, testDiskSectors)
+	if err := os.Rename(f.Name(), filepath.Join(dev, "vda")); err != nil {
+		t.Fatal(err)
+	}
+	roles := []machine.DeclaredRole{
+		declared(machine.MachineStateRole, "/dev/vda", "64Mi"),
+		declared(machine.ClusterStateRole, "/dev/vda", ""),
+	}
+	found := map[machine.StorageRoleName]partition{
+		machine.MachineStateRole: {name: "vda1", disk: "vda"},
+		machine.ClusterStateRole: {name: "vda2", disk: "vda"},
+	}
+	plans, err := planAllGrowth(roles, found)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plans) != 0 {
+		t.Errorf("an unchanged disk plans no rewrites: %+v", plans)
+	}
+}
+
+func TestPlanAllGrowthReportsAnUnreadableDisk(t *testing.T) {
+	// The disk is in the inventory but its device won't open: growth
+	// planning must surface that rather than plan around it.
+	sys, dev := fakeMachine(t)
+	addDisk(t, sys, dev, "vda", 1<<30, nil) // sysfs entry, no device file
+	roles := []machine.DeclaredRole{declared(machine.MachineStateRole, "/dev/vda", "")}
+	found := map[machine.StorageRoleName]partition{
+		machine.MachineStateRole: {name: "vda1", disk: "vda"},
+	}
+	if _, err := planAllGrowth(roles, found); err == nil {
+		t.Error("an unexaminable disk is an error")
 	}
 }

@@ -193,12 +193,12 @@ func TestAFallenBackTrialHolds(t *testing.T) {
 }
 
 func TestAConvergedTargetTidiesTheStore(t *testing.T) {
-	cond := versionConverged("True", "Converged", "running the target")
+	cond := converged("VersionConverged", "Converged", "running the target")
 	conv := versionConvergence(cond, "somehash", &machine.Rejection{Hash: "old"})
 	if !conv.withdraw || !conv.clearRejection {
 		t.Errorf("a converged machine withdraws its staged record and clears rejections: %+v", conv)
 	}
-	conv = versionConvergence(versionConverged("False", "Downloading", "busy"), "", nil)
+	conv = versionConvergence(notConverged("VersionConverged", "Downloading", "busy"), "", nil)
 	if conv.withdraw || conv.clearRejection {
 		t.Error("an unconverged machine tidies nothing")
 	}

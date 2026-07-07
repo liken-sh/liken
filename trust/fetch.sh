@@ -56,6 +56,7 @@ if ! sha256sum --check --status <<<"$digest  $cache/cacert.pem" >/dev/null 2>&1;
     sha256sum --check --quiet <<<"$digest  $cache/cacert.pem"
 fi
 
+rm -rf "$out"
 mkdir -p "$out"
 cp "$cache/cacert.pem" "$out/cacert.pem"
 

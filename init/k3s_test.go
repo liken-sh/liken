@@ -223,3 +223,169 @@ func TestK3sBootConfigWithoutAToken(t *testing.T) {
 		t.Errorf("no token file means no token-file entry:\n%s", got)
 	}
 }
+
+// fakeK3sConfigs points the drop-in writers at a tempdir standing in
+// for /etc/rancher/k3s, and the token path at a tempdir file (present
+// or not), restoring the real paths when the test ends.
+func fakeK3sConfigs(t *testing.T, withToken bool) (serverDropIns, agentDropIns string) {
+	t.Helper()
+	dir := t.TempDir()
+	oldServer, oldAgent, oldToken := k3sServerConfig, k3sAgentConfig, tokenPath
+	k3sServerConfig = filepath.Join(dir, "config.yaml")
+	k3sAgentConfig = filepath.Join(dir, "agent.yaml")
+	tokenPath = filepath.Join(dir, "token")
+	t.Cleanup(func() { k3sServerConfig, k3sAgentConfig, tokenPath = oldServer, oldAgent, oldToken })
+	if withToken {
+		if err := os.WriteFile(tokenPath, []byte("K10abc::server:secret\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return k3sServerConfig + ".d", k3sAgentConfig + ".d"
+}
+
+func TestWriteK3sBootConfigForALeader(t *testing.T) {
+	serverDropIns, _ := fakeK3sConfigs(t, true)
+	conns := []*connection{conn(t, "eth1", "10.10.0.1/24")}
+
+	role, err := writeK3sBootConfig(labCluster(), "node-1", conns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if role != machine.RoleLeader {
+		t.Errorf("node-1 is in spec.leaders: %s", role)
+	}
+	raw, err := os.ReadFile(filepath.Join(serverDropIns, "boot.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(raw)
+	for _, want := range []string{"token-file:", "cluster-cidr: 10.42.0.0/16", "node-ip: 10.10.0.1", "flannel-iface: eth1"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("the leader drop-in should carry %q:\n%s", want, content)
+		}
+	}
+}
+
+func TestWriteK3sBootConfigForAFollower(t *testing.T) {
+	_, agentDropIns := fakeK3sConfigs(t, true)
+	cluster := labCluster()
+	conns := []*connection{conn(t, "eth1", "10.10.0.2/24")}
+
+	role, err := writeK3sBootConfig(cluster, "node-2", conns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if role != machine.RoleFollower {
+		t.Errorf("node-2 is not in spec.leaders: %s", role)
+	}
+	raw, err := os.ReadFile(filepath.Join(agentDropIns, "boot.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "server: https://10.10.0.1:6443") {
+		t.Errorf("a follower points at the endpoint:\n%s", raw)
+	}
+}
+
+func TestWriteK3sBootConfigRefusesAFollowerWithoutAnEndpoint(t *testing.T) {
+	fakeK3sConfigs(t, true)
+	cluster := labCluster()
+	cluster.Spec.Endpoint = ""
+	if _, err := writeK3sBootConfig(cluster, "node-2", nil); err == nil {
+		t.Error("a follower with nowhere to join must refuse")
+	}
+}
+
+func TestWriteK3sBootConfigRefusesAFollowerWithoutAToken(t *testing.T) {
+	fakeK3sConfigs(t, false)
+	if _, err := writeK3sBootConfig(labCluster(), "node-2", nil); err == nil {
+		t.Error("a follower with no join token can never register")
+	}
+}
+
+// fakeSeedSource stands in for the image's /var/lib/rancher tree.
+func fakeSeedSource(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, rel := range []string{"k3s/server/tls", "k3s/server/manifests", "k3s/agent/images"} {
+		if err := os.MkdirAll(filepath.Join(dir, rel), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, rel, "seeded"), []byte(rel+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := seedSourceDir
+	seedSourceDir = dir
+	t.Cleanup(func() { seedSourceDir = old })
+	return dir
+}
+
+func TestSeedClusterStateCopiesTheSeeds(t *testing.T) {
+	fakeSeedSource(t)
+	root := t.TempDir()
+	if err := seedClusterState(root); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"k3s/server/tls", "k3s/server/manifests", "k3s/agent/images"} {
+		if _, err := os.Stat(filepath.Join(root, rel, "seeded")); err != nil {
+			t.Errorf("%s should be seeded: %v", rel, err)
+		}
+	}
+}
+
+func TestSeedClusterStateKeepsIdentityAndRefreshesManifests(t *testing.T) {
+	fakeSeedSource(t)
+	root := t.TempDir()
+	// The disk already carries an identity and an old manifest tree.
+	for _, rel := range []string{"k3s/server/tls", "k3s/server/manifests"} {
+		if err := os.MkdirAll(filepath.Join(root, rel), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, rel, "existing"), []byte("mine\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := seedClusterState(root); err != nil {
+		t.Fatal(err)
+	}
+	// TLS is identity: the disk's copy wins, and the seed never lands.
+	if _, err := os.Stat(filepath.Join(root, "k3s/server/tls", "existing")); err != nil {
+		t.Error("a disk that has an identity keeps it")
+	}
+	if _, err := os.Stat(filepath.Join(root, "k3s/server/tls", "seeded")); err == nil {
+		t.Error("the seed must not overwrite existing TLS material")
+	}
+	// Manifests are the running image's: refreshed wholesale.
+	if _, err := os.Stat(filepath.Join(root, "k3s/server/manifests", "existing")); err == nil {
+		t.Error("old manifests are replaced by the image's")
+	}
+	if _, err := os.Stat(filepath.Join(root, "k3s/server/manifests", "seeded")); err != nil {
+		t.Error("the image's manifests land on every boot")
+	}
+}
+
+func TestSeedClusterStateWithoutSeedsIsANoOp(t *testing.T) {
+	old := seedSourceDir
+	seedSourceDir = filepath.Join(t.TempDir(), "nothing")
+	t.Cleanup(func() { seedSourceDir = old })
+	if err := seedClusterState(t.TempDir()); err != nil {
+		t.Errorf("an image without k3s has no seed files, and that's fine: %v", err)
+	}
+}
+
+func TestPurgeLeaderLeftoversReportsAFailedRemoval(t *testing.T) {
+	parent := t.TempDir()
+	db := filepath.Join(parent, "db")
+	if err := os.MkdirAll(filepath.Join(db, "etcd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(parent, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
+	purgeLeaderLeftovers(machine.RoleFollower, machine.ManifestSourceProven, db)
+	if _, err := os.Stat(db); err != nil {
+		t.Error("a failed purge leaves the datastore; the error is reported, not hidden")
+	}
+}

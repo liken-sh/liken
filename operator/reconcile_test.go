@@ -6,10 +6,42 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/chrisguidry/liken/machine"
 )
+
+func TestStorageConditionAllPlaced(t *testing.T) {
+	spec := machine.StorageSpec{ClusterState: &machine.StorageRole{Device: "/dev/vda"}}
+	status := machine.AllRolesInMemory()
+	status.ClusterState = machine.StorageRoleStatus{Backing: machine.BackingPartition, Device: "vda1"}
+	c := storageCondition(spec, status)
+	if c.Type != "StorageReady" || c.Status != machine.ConditionTrue || c.Reason != "AllRolesPlaced" {
+		t.Errorf("got %+v", c)
+	}
+	if !strings.Contains(c.Message, "clusterState on vda1") {
+		t.Errorf("message should name the landing: %q", c.Message)
+	}
+}
+
+func TestStorageConditionDeclaredButInMemory(t *testing.T) {
+	spec := machine.StorageSpec{ClusterState: &machine.StorageRole{Device: "/dev/vda"}}
+	c := storageCondition(spec, machine.AllRolesInMemory())
+	if c.Status != machine.ConditionFalse || c.Reason != "RolesInMemory" {
+		t.Errorf("got %+v", c)
+	}
+	if !strings.Contains(c.Message, "clusterState") {
+		t.Errorf("message should name the role: %q", c.Message)
+	}
+}
+
+func TestStorageConditionNothingDeclared(t *testing.T) {
+	c := storageCondition(machine.StorageSpec{}, machine.AllRolesInMemory())
+	if c.Status != machine.ConditionTrue || c.Reason != "NothingDeclared" {
+		t.Errorf("got %+v", c)
+	}
+}
 
 func nodeWithReady(status machine.ConditionStatus) *nodeObject {
 	n := &nodeObject{}

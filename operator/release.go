@@ -31,10 +31,6 @@ import (
 	"github.com/chrisguidry/liken/machine"
 )
 
-func versionConverged(status machine.ConditionStatus, reason, message string) machine.Condition {
-	return machine.Condition{Type: "VersionConverged", Status: status, Reason: reason, Message: message}
-}
-
 // versionAsk decides whether this machine should be downloading a
 // release, and which one: the ask is the fetcher's work order. When
 // the answer is no (converged, no target, or a machine that can't
@@ -48,17 +44,17 @@ func versionConverged(status machine.ConditionStatus, reason, message string) ma
 func versionAsk(cluster *machine.Cluster, facts *machine.MachineStatus) (fetchAsk, machine.Condition, bool) {
 	none := fetchAsk{}
 	if facts == nil {
-		return none, versionConverged("Unknown", "FactsIncomplete",
+		return none, convergenceUnknown("VersionConverged", "FactsIncomplete",
 			"the machine's facts haven't been read yet"), false
 	}
 
 	target := cluster.Spec.Version
 	if target == "" {
-		return none, versionConverged("True", "NoTarget",
+		return none, converged("VersionConverged", "NoTarget",
 			"the cluster declares no target version"), false
 	}
 	if facts.Version.Liken == target {
-		return none, versionConverged("True", "Converged",
+		return none, converged("VersionConverged", "Converged",
 			fmt.Sprintf("this machine runs the cluster's target version %s", target)), false
 	}
 
@@ -68,11 +64,11 @@ func versionAsk(cluster *machine.Cluster, facts *machine.MachineStatus) (fetchAs
 	// promised.
 	entry := cluster.Spec.Releases.Entry(target)
 	if entry == nil {
-		return none, versionConverged("False", "VersionNotInCatalog",
+		return none, notConverged("VersionConverged", "VersionNotInCatalog",
 			fmt.Sprintf("the target version %s is not in the release catalog", target)), false
 	}
 	if cluster.Spec.Releases.Source == "" {
-		return none, versionConverged("False", "NoReleaseSource",
+		return none, notConverged("VersionConverged", "NoReleaseSource",
 			"the catalog names releases but spec.releases.source gives nowhere to fetch them from"), false
 	}
 
@@ -83,12 +79,12 @@ func versionAsk(cluster *machine.Cluster, facts *machine.MachineStatus) (fetchAs
 	// become a boot.
 	if facts.Storage.SystemA.Backing != machine.BackingPartition ||
 		facts.Storage.SystemB.Backing != machine.BackingPartition {
-		return none, versionConverged("False", "NoSystemSlots",
+		return none, notConverged("VersionConverged", "NoSystemSlots",
 			"this machine has no system slots to hold a release; declare systemA and systemB in its manifest"), false
 	}
 	slot := machine.InactiveSlot(facts.Boot.Slot)
 	if slot == "" {
-		return none, versionConverged("False", "NotInstalled",
+		return none, notConverged("VersionConverged", "NotInstalled",
 			"this boot didn't come from a system slot; install the machine (make install) before it can take releases"), false
 	}
 
@@ -116,12 +112,12 @@ func versionAsk(cluster *machine.Cluster, facts *machine.MachineStatus) (fetchAs
 func versionCondition(ask fetchAsk, snap fetchSnapshot) machine.Condition {
 	switch snap.state {
 	case fetchRejected:
-		return versionConverged("False", "DigestMismatch", snap.detail)
+		return notConverged("VersionConverged", "DigestMismatch", snap.detail)
 	case fetchFailed:
-		return versionConverged("False", "Downloading",
+		return notConverged("VersionConverged", "Downloading",
 			fmt.Sprintf("downloading release %s to slot %s; will retry: %s", ask.version, ask.slot, snap.detail))
 	}
-	return versionConverged("False", "Downloading",
+	return notConverged("VersionConverged", "Downloading",
 		fmt.Sprintf("downloading release %s to slot %s: %s", ask.version, ask.slot, snap.detail))
 }
 
@@ -132,7 +128,7 @@ func versionCondition(ask fetchAsk, snap fetchSnapshot) machine.Condition {
 // standing rejection no longer blocks anything.
 func versionConvergence(cond machine.Condition, stagedHash string, rejection *machine.Rejection) convergence {
 	c := convergence{condition: cond}
-	if cond.Status == "True" {
+	if cond.Status == machine.ConditionTrue {
 		c.withdraw = stagedHash != ""
 		c.clearRejection = rejection != nil
 	}
@@ -156,7 +152,7 @@ func decideSystemStaging(ask fetchAsk, snap fetchSnapshot, m *machine.Machine, r
 
 	record, hash, err := machine.RenderSystemRelease(ask.version, ask.slot, ask.digest)
 	if err != nil {
-		return convergence{condition: versionConverged("False", "StagingFailed", err.Error())}
+		return convergence{condition: notConverged("VersionConverged", "StagingFailed", err.Error())}
 	}
 	// The rejection is durable memory of a trial that fell back: the
 	// machine booted the staged slot and the firmware returned it to
@@ -164,36 +160,17 @@ func decideSystemStaging(ask fetchAsk, snap fetchSnapshot, m *machine.Machine, r
 	// what breaks the reboot loop; a new version or a republished
 	// digest is a different decision and passes.
 	if rejection != nil && rejection.Hash == hash {
-		return convergence{condition: versionConverged("False", "RejectedLastBoot",
+		return convergence{condition: notConverged("VersionConverged", "RejectedLastBoot",
 			fmt.Sprintf("the machine tried release %s on slot %s and fell back: %s; publish a corrected release under a new version",
 				ask.version, ask.slot, rejection.Reason))}
 	}
 
 	c := convergence{manifest: record, hash: hash, stage: stagedHash != hash}
-	switch {
-	case m.Spec.RebootPolicyOrDefault() != machine.RebootAuto:
-		c.condition = versionConverged("False", "RebootPending",
-			fmt.Sprintf("release %s is verified on slot %s and staged (%.12s); rebootPolicy is Manual, so reboot the machine (or set rebootPolicy: Auto) to prove it", ask.version, ask.slot, hash))
-	case t == turnAwaiting:
-		c.condition = versionConverged("False", "AwaitingTurn",
-			fmt.Sprintf("release %s is verified on slot %s and staged (%.12s); waiting for the cluster to grant a reboot turn", ask.version, ask.slot, hash))
-	default:
-		c.requestReboot = true
-		c.condition = versionConverged("False", "RebootRequested",
-			fmt.Sprintf("reboot requested to prove release %s on slot %s (%.12s)", ask.version, ask.slot, hash))
-	}
+	gateReboot(&c, "VersionConverged", m.Spec.RebootPolicyOrDefault(), t,
+		fmt.Sprintf("release %s is verified on slot %s and staged (%.12s); rebootPolicy is Manual, so reboot the machine (or set rebootPolicy: Auto) to prove it", ask.version, ask.slot, hash),
+		fmt.Sprintf("release %s is verified on slot %s and staged (%.12s); waiting for the cluster to grant a reboot turn", ask.version, ask.slot, hash),
+		fmt.Sprintf("reboot requested to prove release %s on slot %s (%.12s)", ask.version, ask.slot, hash))
 	return c
-}
-
-// readStagedSystemHash is readStagedHash for the system release
-// store: the hash of whatever record is staged there, or "" when
-// nothing is.
-func readStagedSystemHash() string {
-	raw, _ := machine.SystemReleases(machine.MachineStateDir).LoadStaged()
-	if raw == nil {
-		return ""
-	}
-	return machine.ManifestHash(raw)
 }
 
 // settleSystemReleaseLifecycle promotes what this boot proved, the

@@ -141,7 +141,7 @@ func carryOutDemotion(c *apiClient, name string, d demotion) machine.Condition {
 	}
 	intent := &machine.RebootIntent{Reason: "completing the demotion to follower"}
 	if err := machine.WriteRebootIntent(machine.OperatorRunDir, intent); err != nil {
-		return machine.Condition{Type: "NodeCurrent", Status: "False", Reason: "DemotionFailed",
+		return machine.Condition{Type: "NodeCurrent", Status: machine.ConditionFalse, Reason: "DemotionFailed",
 			Message: fmt.Sprintf("writing the reboot intent: %v", err)}
 	}
 	if err := deleteNode(c, name); err != nil {

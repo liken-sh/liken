@@ -5,40 +5,47 @@
 # The thresholds are a ratchet: each one is set just under what the
 # tests actually measure today, so a change that loses coverage fails
 # loudly, and a change that gains coverage should raise the number
-# here to keep the gain. Numbers only go up.
+# here to keep the gain. Numbers only go up, and no package sits
+# below 60.
 #
 # The numbers deliberately differ by package. machine/ is pure types
 # and parsing, testable to the last line. init/ is mostly boot
 # machinery (mounting, supervising k3s, the reboot syscall) that only
 # a real machine can exercise; what's unit-testable there is the
 # decision-making, which is why the decisions live in separate
-# functions from the syscalls that act on them.
+# functions from the syscalls that act on them, and why the fake
+# sysfs, efivars, and command-line fixtures exist.
 
 profile: coverage.out
 
 threshold:
   # The whole module, everything counted.
-  total: 54
+  total: 64
 
 override:
   # The Machine API: pure functions over declared types. (Paths here
   # are regexes over module-relative package paths.)
   - path: ^machine$
-    threshold: 85
+    threshold: 87
   # The operator: its decisions (drift, staging validation, the
   # convergence truth table, the fleet sweep, the lease election) are
   # pure and tested, and everything that makes HTTP calls (the API
   # client, the seeding loops, the watch stream, the leases) is
   # exercised against a real HTTP test server.
   - path: ^operator$
-    threshold: 62
+    threshold: 63
   # Init: the boot machinery itself (mounting, DHCP, the reboot
   # syscall) is exercised by the QEMU harness, not unit tests; the
-  # parsers, planners, and derivations around it are tested here.
+  # parsers, planners, derivations, and file-shaped actuators around
+  # it are tested here against fakes.
   - path: ^init$
-    threshold: 41
+    threshold: 60
   # The log relays: parsing and tailing are pure or run against real
   # temp files; what goes untested is the real /dev/kmsg device and
   # the clock syscalls.
   - path: ^logs$
-    threshold: 75
+    threshold: 77
+  # The release file server: one handler and its logging, exercised
+  # against httptest.
+  - path: ^releases/serve$
+    threshold: 68

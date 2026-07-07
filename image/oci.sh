@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
 #
-# Package the operator as a container image, by hand.
+# Package one static liken binary as a container image, by hand.
 #
-# A container image is a simple artifact: a tarball of
-# tarballs plus three small JSON documents, laid out the way the OCI
-# image spec describes. Each *layer* is a tar of a filesystem tree
-# (ours has exactly one file in it, the static operator binary); the
-# *config* records how to run it and which layers stack into the root
-# filesystem; the *manifest* binds config and layers together; and the
-# *index* is the entry point that names the manifest. Every blob is
-# stored under the SHA-256 of its bytes and referred to only by that
-# digest. An image is a small content-addressed database, which is
-# why layers dedupe, caches work, and digests can be trusted end to
-# end.
+# A container image is a simple artifact: a tarball of tarballs plus
+# three small JSON documents, laid out the way the OCI image spec
+# describes. Each *layer* is a tar of a filesystem tree (ours has
+# exactly one file in it, the static binary); the *config* records how
+# to run it and which layers stack into the root filesystem; the
+# *manifest* binds config and layers together; and the *index* is the
+# entry point that names the manifest. Every blob is stored under the
+# SHA-256 of its bytes and referred to only by that digest. An image
+# is a small content-addressed database, which is why layers dedupe,
+# caches work, and digests can be trusted end to end.
 #
 # Docker would produce this same structure through BuildKit; we write
 # it out directly for the same reason image/build.sh drives cpio
@@ -22,17 +21,25 @@
 # liken's entire image distribution mechanism: no registry, no pull,
 # no network. The OS image therefore carries every byte the machine
 # will run.
+#
+# Two of liken's programs ship this way, the operator and the log
+# relays, and their recipes are identical, so the recipe lives here in
+# the image domain and each program's Makefile invokes it:
+#
+#   oci.sh <binary> <image>     e.g. oci.sh liken-operator liken.sh/operator
+#
+# with DIST naming the directory that holds <binary> and receives
+# <binary>-image.tar, and LIKEN_VERSION the version to stamp into the
+# image's name.
 
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# The version stamped into the image's name and the directory the
-# artifacts land in, both overridable from the environment: the
-# releases domain runs this same script to package a release-stamped
-# operator into its own tree (see the Makefile's LIKEN_VERSION/DIST).
+binary="${1:?usage: oci.sh <binary> <image>}"
+image="${2:?usage: oci.sh <binary> <image>}"
 version="${LIKEN_VERSION:-$(cat "$here/../VERSION")}"
-dist="${DIST:-$here/dist}"
+dist="${DIST:?DIST must name the directory holding $binary}"
 
 layout="$dist/oci"
 blobs="$layout/blobs/sha256"
@@ -49,14 +56,14 @@ add_blob() {
     echo "$digest"
 }
 
-# The layer: one file, /liken-operator, owned by root. The tar flags
-# make the archive a pure function of its contents (fixed timestamps,
-# numeric ownership, sorted names), so rebuilding an unchanged binary
-# yields a byte-identical layer and therefore the same digest.
+# The layer: one file, owned by root. The tar flags make the archive a
+# pure function of its contents (fixed timestamps, numeric ownership,
+# sorted names), so rebuilding an unchanged binary yields a
+# byte-identical layer and therefore the same digest.
 rootfs="$dist/rootfs"
 rm -rf "$rootfs"
 mkdir -p "$rootfs"
-cp "$dist/liken-operator" "$rootfs/liken-operator"
+cp "$dist/$binary" "$rootfs/$binary"
 tar --create --file "$dist/layer.tar" \
     --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
     -C "$rootfs" .
@@ -67,14 +74,15 @@ layer_digest="$(add_blob "$dist/layer.tar")"
 # the *uncompressed* layer tars; ours is stored uncompressed, so the
 # same digest appears in both the manifest and here. There is no base
 # image and no shell to name; the Entrypoint is the entire runtime
-# configuration.
+# configuration. A pod that needs to vary behavior varies its args,
+# the way the machine-logs DaemonSet passes each container its verb.
 cat >"$dist/config.json" <<EOF
 {
   "created": "1970-01-01T00:00:00Z",
   "architecture": "amd64",
   "os": "linux",
   "config": {
-    "Entrypoint": ["/liken-operator"]
+    "Entrypoint": ["/$binary"]
   },
   "rootfs": {
     "type": "layers",
@@ -114,11 +122,11 @@ manifest_digest="$(add_blob "$dist/manifest.json")"
 #
 # The same manifest is named twice: two references to one image. The
 # versioned tag says what this build is; the stable "installed" tag
-# is the one the operator's DaemonSet pins (operator/manifests/
-# operator.yaml): every release tags its own build "installed", so
-# one unchanging pod spec resolves, on every node, to the operator
-# that node's own OS imported. Content addressing makes the aliasing
-# free: both names point at the same digest.
+# is the one the OS DaemonSets pin (operator/manifests/operator.yaml,
+# logs/manifests/logs.yaml): every release tags its own build
+# "installed", so one unchanging pod spec resolves, on every node, to
+# the build that node's own OS imported. Content addressing makes the
+# aliasing free: both names point at the same digest.
 cat >"$layout/index.json" <<EOF
 {
   "schemaVersion": 2,
@@ -129,7 +137,7 @@ cat >"$layout/index.json" <<EOF
       "size": $manifest_size,
       "platform": {"architecture": "amd64", "os": "linux"},
       "annotations": {
-        "io.containerd.image.name": "liken.sh/operator:$version",
+        "io.containerd.image.name": "$image:$version",
         "org.opencontainers.image.ref.name": "$version"
       }
     },
@@ -139,7 +147,7 @@ cat >"$layout/index.json" <<EOF
       "size": $manifest_size,
       "platform": {"architecture": "amd64", "os": "linux"},
       "annotations": {
-        "io.containerd.image.name": "liken.sh/operator:installed",
+        "io.containerd.image.name": "$image:installed",
         "org.opencontainers.image.ref.name": "installed"
       }
     }
@@ -150,9 +158,9 @@ EOF
 # The marker file declares that this directory is an OCI image
 # layout; the whole layout then becomes one archive.
 echo '{"imageLayoutVersion": "1.0.0"}' >"$layout/oci-layout"
-tar --create --file "$dist/liken-operator-image.tar" \
+tar --create --file "$dist/$binary-image.tar" \
     --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
     -C "$layout" oci-layout index.json blobs
 
-echo "liken.sh/operator:$version:"
-du -sh "$dist/liken-operator-image.tar"
+echo "$image:$version:"
+du -sh "$dist/$binary-image.tar"

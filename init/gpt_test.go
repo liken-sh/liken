@@ -306,3 +306,10 @@ func TestGPTReaderRejectsForeignGeometry(t *testing.T) {
 		t.Errorf("expected a geometry refusal: %v", err)
 	}
 }
+
+func TestWriteGPTTableReportsAMissingDevice(t *testing.T) {
+	err := writeGPTTable(filepath.Join(t.TempDir(), "absent"), testDiskSectors, sampleTable())
+	if err == nil {
+		t.Error("a device that won't open is an error")
+	}
+}

@@ -30,8 +30,7 @@ import (
 )
 
 const (
-	efiSysDir  = "/sys/firmware/efi"
-	efiVarsDir = efiSysDir + "/efivars"
+	efiSysDir = "/sys/firmware/efi"
 
 	// Every variable's filename carries its owner's GUID, because
 	// variable names are only unique per vendor. The boot manager's
@@ -39,6 +38,11 @@ const (
 	// forever as EFI_GLOBAL_VARIABLE.
 	efiGlobalVariable = "8be4df61-93ca-11d2-aa0d-00e098032b8c"
 )
+
+// efiVarsDir is a variable rather than a constant so tests can stand
+// up a directory of fake variables and exercise everything above the
+// mount itself.
+var efiVarsDir = efiSysDir + "/efivars"
 
 // firmwareIsUEFI reports whether this kernel was booted by UEFI
 // firmware: the kernel creates /sys/firmware/efi only when the EFI
@@ -126,28 +130,6 @@ func writeEFIVar(dir, name string, payload []byte) error {
 	return nil
 }
 
-// deleteEFIVar removes a variable. For firmware, removal means
-// writing the variable with no payload; efivarfs translates an
-// unlink into exactly that, after the same immutable-flag clearing
-// writeEFIVar does.
-func deleteEFIVar(dir, name string) error {
-	path := filepath.Join(dir, name+"-"+efiGlobalVariable)
-	f, err := os.Open(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err == nil {
-		if flags, ferr := unix.IoctlGetInt(int(f.Fd()), unix.FS_IOC_GETFLAGS); ferr == nil && flags&fsImmutableFlag != 0 {
-			_ = unix.IoctlSetPointerInt(int(f.Fd()), unix.FS_IOC_SETFLAGS, flags&^fsImmutableFlag)
-		}
-		f.Close()
-	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("deleting %s: %w", name, err)
-	}
-	return nil
-}
-
 // listBootEntries reads every Boot#### variable, decoded, keyed by
 // entry number. Entries that won't decode are skipped: they belong
 // to the firmware, and liken finds its own entries by description,
@@ -199,6 +181,33 @@ func setBootEntry(dir string, option loadOption) (uint16, error) {
 	return number, writeEFIVar(dir, bootEntryID(number), encodeLoadOption(option))
 }
 
+// readBootOrder decodes the firmware's standing preference list.
+// BootOrder is a packed array of 16-bit little-endian entry numbers,
+// first preference first; nil when the variable is missing or
+// unreadable, which reads the same as an empty order everywhere it
+// matters.
+func readBootOrder(dir string) []uint16 {
+	b, err := readEFIVar(dir, "BootOrder")
+	if err != nil {
+		return nil
+	}
+	var order []uint16
+	for i := 0; i+2 <= len(b); i += 2 {
+		order = append(order, binary.LittleEndian.Uint16(b[i:i+2]))
+	}
+	return order
+}
+
+// writeBootOrder packs a preference list back into the firmware's
+// format and writes it.
+func writeBootOrder(dir string, order []uint16) error {
+	payload := make([]byte, len(order)*2)
+	for i, n := range order {
+		binary.LittleEndian.PutUint16(payload[i*2:], n)
+	}
+	return writeEFIVar(dir, "BootOrder", payload)
+}
+
 // firmwareFacts reads the machine's boot facts from its firmware:
 // which mode it booted in, which entry the firmware used, and the
 // standing preference order. Each entry is decoded to its name, so a
@@ -226,10 +235,8 @@ func firmwareFacts(dir string) machine.FirmwareStatus {
 	if b, err := readEFIVar(dir, "BootNext"); err == nil && len(b) >= 2 {
 		fw.BootNext = describeBootEntry(dir, binary.LittleEndian.Uint16(b))
 	}
-	if b, err := readEFIVar(dir, "BootOrder"); err == nil {
-		for i := 0; i+2 <= len(b); i += 2 {
-			fw.BootOrder = append(fw.BootOrder, describeBootEntry(dir, binary.LittleEndian.Uint16(b[i:i+2])))
-		}
+	for _, n := range readBootOrder(dir) {
+		fw.BootOrder = append(fw.BootOrder, describeBootEntry(dir, n))
 	}
 	return fw
 }

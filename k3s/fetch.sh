@@ -59,6 +59,7 @@ if ! sha256sum --check --status <<<"$digest  $cache/k3s" >/dev/null 2>&1; then
     sha256sum --check --quiet <<<"$digest  $cache/k3s"
 fi
 
+rm -rf "$out"
 mkdir -p "$out"
 cp "$cache/k3s" "$out/k3s"
 chmod +x "$out/k3s"

@@ -3,10 +3,10 @@
 #
 # Two artifacts, on the operator's exact pattern: the liken-logs
 # binary (a static Go build; main.go explains the four relays it
-# carries) and the OCI image tarball that delivers it (image.sh). The
-# machine-logs DaemonSet in manifests/ runs this one image in four
-# containers, differing only in the verb they pass and the host
-# paths they mount.
+# carries) and the OCI image tarball that delivers it, packaged by
+# the shared recipe (image/oci.sh). The machine-logs DaemonSet in
+# manifests/ runs this one image in four containers, differing only
+# in the verb they pass and the host paths they mount.
 #
 # The version and output directory are overridable for the same
 # reason the operator's are: the releases domain rebuilds these
@@ -22,8 +22,8 @@ $(DIST)/liken-logs: ../go.mod ../go.sum $(wildcard *.go) $(wildcard ../machine/*
 		-ldflags "-X github.com/chrisguidry/liken/machine.Version=$(LIKEN_VERSION)" \
 		-o $(DIST)/liken-logs .
 
-$(DIST)/liken-logs-image.tar: $(DIST)/liken-logs image.sh
-	DIST=$(abspath $(DIST)) LIKEN_VERSION=$(LIKEN_VERSION) ./image.sh
+$(DIST)/liken-logs-image.tar: $(DIST)/liken-logs ../image/oci.sh
+	DIST=$(abspath $(DIST)) LIKEN_VERSION=$(LIKEN_VERSION) ../image/oci.sh liken-logs liken.sh/logs
 
 .PHONY: all clean
 

@@ -99,12 +99,28 @@ func teardownStorage() {
 	// mountRole temporarily mounts clusterState's filesystem here
 	// while seeding it; a failure partway through leaves it mounted.
 	_ = unix.Unmount("/.liken-claim", 0)
+	unmountRoleMounts(0, true)
+}
+
+// unmountRoleMounts detaches every role filesystem in reverse
+// canonical order: the shared tail of two different shutdowns.
+// Boot-time teardown unmounts plainly and wants to hear about
+// failures, because nothing else is running this early and a failed
+// unmount is information. The reboot path (reboot.go) passes
+// MNT_DETACH and tolerates errors: a just-killed container's mount
+// namespace can pin a filesystem for a moment longer, and lazy
+// detachment lets the kernel finish the job as those references
+// drain, after the sync has already made the data safe. Unmounting a
+// path that isn't a mountpoint returns EINVAL, which just means there
+// was nothing to unmount.
+func unmountRoleMounts(flags int, reportErrors bool) {
 	for _, name := range slices.Backward(machine.StorageRoleNames) {
 		target := roleMounts[name].path
-		err := unix.Unmount(target, 0)
-		if err == nil {
+		err := unix.Unmount(target, flags)
+		switch {
+		case err == nil:
 			fmt.Printf("liken: storage: unmounted %s\n", target)
-		} else if !errors.Is(err, unix.EINVAL) && !errors.Is(err, fs.ErrNotExist) {
+		case reportErrors && !errors.Is(err, unix.EINVAL) && !errors.Is(err, fs.ErrNotExist):
 			fmt.Fprintf(os.Stderr, "liken: storage: unmounting %s: %v\n", target, err)
 		}
 	}
@@ -496,30 +512,13 @@ func mountRole(role machine.DeclaredRole, p partition) error {
 		}
 	}
 
-	// clusterState is special: the image bakes its seed files (the
-	// pre-generated CAs, the operator's manifests and container
-	// image) underneath this very mountpoint, and mounting over them
-	// would hide them all. So the filesystem is first mounted to the
-	// side, seeded from the image's copies, and only then moved into place;
-	// MS_MOVE re-attaches a live mount atomically.
-	if role.Name == "clusterState" {
-		staging := "/.liken-claim"
-		if err := os.MkdirAll(staging, 0o755); err != nil {
-			return fmt.Errorf("mkdir %s: %w", staging, err)
+	// clusterState mounts through its own path: the image bakes k3s's
+	// seed files underneath its mountpoint, and layering them in is
+	// k3s's business, not partition mechanics (k3s.go owns it).
+	if role.Name == machine.ClusterStateRole {
+		if err := mountAndSeedClusterState(dev, target); err != nil {
+			return err
 		}
-		if err := unix.Mount(dev, staging, "ext4", 0, ""); err != nil {
-			return fmt.Errorf("mounting %s for %s: %w", dev, role.Name, err)
-		}
-		if err := seedClusterState(staging); err != nil {
-			return fmt.Errorf("seeding %s: %w", role.Name, err)
-		}
-		if err := os.MkdirAll(target, 0o755); err != nil {
-			return fmt.Errorf("mkdir %s: %w", target, err)
-		}
-		if err := unix.Mount(staging, target, "", unix.MS_MOVE, ""); err != nil {
-			return fmt.Errorf("moving %s into place at %s: %w", role.Name, target, err)
-		}
-		_ = os.Remove(staging)
 	} else {
 		fstype := rm.fstype
 		if fstype == "" {
@@ -553,43 +552,5 @@ func mountRole(role machine.DeclaredRole, p partition) error {
 	}
 	fmt.Printf("liken: storage: %s is %s (%s) on %s\n",
 		role.Name, dev, p.partName, target)
-	return nil
-}
-
-// seedClusterState copies the image's seed files into a clusterState
-// filesystem. The TLS material is copied only if the disk has none:
-// those keys are the cluster's identity, and a disk that already has
-// an identity keeps it. The manifests and the operator image are
-// refreshed every boot: they're pinned to the liken version of the
-// running image, and an upgraded image must deliver its upgraded
-// operator.
-func seedClusterState(root string) error {
-	for _, seed := range []struct {
-		rel     string
-		refresh bool
-	}{
-		{"k3s/server/tls", false},
-		{"k3s/server/manifests", true},
-		{"k3s/agent/images", true},
-	} {
-		src := filepath.Join("/var/lib/rancher", seed.rel)
-		if _, err := os.Stat(src); err != nil {
-			continue // an image without k3s has no seed files
-		}
-		dst := filepath.Join(root, seed.rel)
-		if seed.refresh {
-			if err := os.RemoveAll(dst); err != nil {
-				return err
-			}
-		} else if _, err := os.Stat(dst); err == nil {
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return err
-		}
-		if err := os.CopyFS(dst, os.DirFS(src)); err != nil {
-			return err
-		}
-	}
 	return nil
 }

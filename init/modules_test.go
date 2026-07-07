@@ -65,3 +65,9 @@ func TestModuleNameStripsExtensionsAndNormalizes(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestKernelReleaseAsksTheKernel(t *testing.T) {
+	if release := kernelRelease(); release == "" {
+		t.Error("uname always has a release string")
+	}
+}

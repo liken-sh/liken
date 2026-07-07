@@ -160,3 +160,146 @@ func TestSeedPathMissingDirectoryIsNoManifest(t *testing.T) {
 		t.Errorf("a missing directory should mean no manifest: %q, %v", got, err)
 	}
 }
+
+func TestLoadSeedReadsTheNamedManifest(t *testing.T) {
+	dir := t.TempDir()
+	doc := "apiVersion: liken.sh/v1alpha1\nkind: Machine\nmetadata:\n  name: node-2\n"
+	if err := os.WriteFile(filepath.Join(dir, "node-2.yaml"), []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	choice, err := loadSeed(dir, "node-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if choice.m.Metadata.Name != "node-2" || choice.source != machine.ManifestSourceSeed {
+		t.Errorf("the seed carries the named machine: %+v", choice)
+	}
+	if choice.hash == "" || string(choice.raw) != doc {
+		t.Error("the exact bytes and their hash travel with the choice")
+	}
+}
+
+func TestLoadSeedWithNoManifestIsAnEmptyMachine(t *testing.T) {
+	choice, err := loadSeed(t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if choice.m.Metadata.Name != "" || choice.raw != nil {
+		t.Errorf("no manifest is a valid machine with an empty spec: %+v", choice)
+	}
+}
+
+func TestLoadSeedRefusesAnUnknownName(t *testing.T) {
+	if _, err := loadSeed(t.TempDir(), "node-9"); !errors.Is(err, errIdentity) {
+		t.Errorf("a name matching no manifest is an identity failure: %v", err)
+	}
+}
+
+func TestLoadSeedRefusesAManifestThatWontParse(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "node-1.yaml"), []byte("{not yaml"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadSeed(dir, "node-1"); !errors.Is(err, errIdentity) {
+		t.Errorf("a seed that won't parse is an identity failure: %v", err)
+	}
+}
+
+func TestSettleStorageFirstBootRunsTheSeed(t *testing.T) {
+	// A machine with no machineState partition, no manifests baked
+	// into its image, and no name on its command line: the emptiest
+	// possible first boot. The seed choice is an empty machine, no
+	// storage is declared, and everything stays on the RAM root.
+	fakeMachine(t)
+	fakeCmdline(t, "console=ttyS0\n")
+
+	choice, status, boot, err := settleStorage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if choice.source != machine.ManifestSourceSeed {
+		t.Errorf("a first boot runs the seed: %s", choice.source)
+	}
+	if status != machine.AllRolesInMemory() {
+		t.Errorf("nothing declared, everything in memory: %+v", status)
+	}
+	if boot.ManifestSource != machine.ManifestSourceSeed || boot.ManifestHash != "" {
+		t.Errorf("the boot record names the seed: %+v", boot)
+	}
+}
+
+func TestSettleManifestsPromotesTheStagedWinner(t *testing.T) {
+	store := machine.MachineManifests(t.TempDir())
+	raw := []byte("kind: Machine\n")
+	if err := store.WriteStaged(raw); err != nil {
+		t.Fatal(err)
+	}
+	status := machine.AllRolesInMemory()
+	status.MachineState = machine.StorageRoleStatus{Backing: machine.BackingPartition}
+	boot := machine.BootStatus{ManifestSource: machine.ManifestSourceStaged, Rejection: &machine.Rejection{Reason: "old news"}}
+	choice := &manifestChoice{raw: raw, source: machine.ManifestSourceStaged, hash: machine.ManifestHash(raw)}
+
+	settleManifests(store, choice, status, &boot)
+
+	if proven, _ := store.LoadProven(); string(proven) != string(raw) {
+		t.Error("the staged manifest that booted becomes proven")
+	}
+	if staged, _ := store.LoadStaged(); staged != nil {
+		t.Error("promotion consumes the staged copy")
+	}
+	if boot.ManifestSource != machine.ManifestSourceProven || boot.Rejection != nil {
+		t.Errorf("the boot record reflects the promotion: %+v", boot)
+	}
+}
+
+func TestSettleManifestsRecordsTheSeedAsFirstProven(t *testing.T) {
+	store := machine.MachineManifests(t.TempDir())
+	raw := []byte("kind: Machine\n")
+	status := machine.AllRolesInMemory()
+	status.MachineState = machine.StorageRoleStatus{Backing: machine.BackingPartition}
+	boot := machine.BootStatus{ManifestSource: machine.ManifestSourceSeed}
+	choice := &manifestChoice{raw: raw, source: machine.ManifestSourceSeed, hash: machine.ManifestHash(raw)}
+
+	settleManifests(store, choice, status, &boot)
+
+	if proven, _ := store.LoadProven(); string(proven) != string(raw) {
+		t.Error("the seed's first success is the first proven manifest")
+	}
+	if boot.ManifestSource != machine.ManifestSourceProven {
+		t.Errorf("the boot record reads proven from here on: %s", boot.ManifestSource)
+	}
+}
+
+func TestSettleManifestsWithNoDurableStorageDoesNothing(t *testing.T) {
+	store := machine.MachineManifests(t.TempDir())
+	boot := machine.BootStatus{ManifestSource: machine.ManifestSourceSeed}
+	choice := &manifestChoice{raw: []byte("kind: Machine\n"), source: machine.ManifestSourceSeed}
+
+	settleManifests(store, choice, machine.AllRolesInMemory(), &boot)
+
+	if proven, _ := store.LoadProven(); proven != nil {
+		t.Error("a memory-backed machine has nowhere to record anything")
+	}
+}
+
+func TestLoadManifestCandidatesBeforeTheFilesystemExists(t *testing.T) {
+	// A machineState partition with no ext4 yet: the boot that
+	// claimed it died between partitioning and mkfs. The peek yields
+	// no candidates, and the seed carries this boot instead.
+	sys, dev := fakeMachine(t)
+	addDisk(t, sys, dev, "vda", 2<<30, make([]byte, 4096))
+	addPartition(t, sys, "vda", "vda1", "liken:machineState", 1<<30)
+	if err := os.WriteFile(filepath.Join(dev, "vda1"), make([]byte, 4096), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := loadManifestCandidates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.part == nil {
+		t.Error("the partition is recognized by name even without a filesystem")
+	}
+	if c.staged != nil || c.proven != nil {
+		t.Error("no filesystem means no candidates")
+	}
+}

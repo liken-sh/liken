@@ -77,9 +77,9 @@ init: init/dist/liken
 
 # The liken operator is the in-cluster half of the Machine API. It is
 # packaged as a hand-assembled OCI image (see operator/main.go and
-# operator/image.sh).
+# image/oci.sh, the recipe both in-cluster binaries share).
 operator/dist/liken-operator-image.tar: $(wildcard operator/*.go) \
-		go.mod go.sum operator/image.sh \
+		go.mod go.sum image/oci.sh \
 		$(wildcard machine/*.go) VERSION
 	$(MAKE) -C operator
 
@@ -88,9 +88,9 @@ operator: operator/dist/liken-operator-image.tar
 # The log relays carry the machine's host-level log streams (the
 # kernel's, init's, k3s's, containerd's) into the cluster as pod
 # logs. Packaged exactly like the operator: one static binary in a
-# hand-assembled OCI image (see logs/main.go and logs/image.sh).
+# hand-assembled OCI image (see logs/main.go and image/oci.sh).
 logs/dist/liken-logs-image.tar: $(wildcard logs/*.go) \
-		go.mod go.sum logs/image.sh \
+		go.mod go.sum image/oci.sh \
 		$(wildcard machine/*.go) VERSION
 	$(MAKE) -C logs
 
@@ -204,4 +204,4 @@ clean:
 	$(MAKE) -C identity clean
 	$(MAKE) -C image clean
 
-.PHONY: all kernel k3s xtables trust e2fsprogs init operator logs identity kubeconfig image run run-once release serve clean
+.PHONY: all kernel k3s xtables trust e2fsprogs init operator logs identity kubeconfig image run run-once install release serve clean

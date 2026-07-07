@@ -170,11 +170,7 @@ func loadManifestCandidates() (manifestCandidates, error) {
 // reports the rejection for this boot's facts.
 func rejectStaged(part *partition, raw []byte, reason string) *machine.Rejection {
 	fmt.Fprintf(os.Stderr, "liken: storage: rejecting the staged manifest: %s\n", reason)
-	rejection := machine.Rejection{
-		Hash:       machine.ManifestHash(raw),
-		Reason:     reason,
-		RejectedAt: time.Now().UTC(),
-	}
+	rejection := machine.NewRejection(raw, reason, time.Now().UTC())
 	if err := touchMachineState(*part, func(root string) error {
 		return machine.MachineManifests(root).Reject(rejection)
 	}); err != nil {
@@ -250,16 +246,17 @@ func seedPath(dir, requested string) (string, error) {
 	}
 }
 
-// loadSeed reads the image's baked-in manifest for this machine. A
-// seed that can't be selected or parsed is an error rather than a
-// silent default: loadSeed only runs on a boot with no proven
-// manifest to fall back to, and a first boot under the wrong (or
-// empty) identity could join the wrong cluster or claim the wrong
-// disks. A machine that stays down can be fixed; a machine running
-// under the wrong identity can do real damage.
-func loadSeed() (*manifestChoice, error) {
+// loadSeed reads the image's baked-in manifest for this machine,
+// selecting by the requested name within the given directory. A seed
+// that can't be selected or parsed is an error rather than a silent
+// default: loadSeed only runs on a boot with no proven manifest to
+// fall back to, and a first boot under the wrong (or empty) identity
+// could join the wrong cluster or claim the wrong disks. A machine
+// that stays down can be fixed; a machine running under the wrong
+// identity can do real damage.
+func loadSeed(dir, requested string) (*manifestChoice, error) {
 	choice := &manifestChoice{m: &machine.Machine{}, source: machine.ManifestSourceSeed}
-	path, err := seedPath(machine.MachineManifestDir, bootParamValue("liken.machine"))
+	path, err := seedPath(dir, requested)
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +315,7 @@ func settleStorage() (*manifestChoice, machine.StorageStatus, machine.BootStatus
 		// A machine with no durable manifests is on its first boot;
 		// only now does the image's seed matter, and with it the
 		// question of which seed is ours.
-		seed, err := loadSeed()
+		seed, err := loadSeed(machine.MachineManifestDir, bootParamValue("liken.machine"))
 		if err != nil {
 			return nil, status, boot, err
 		}
@@ -333,18 +330,14 @@ func settleStorage() (*manifestChoice, machine.StorageStatus, machine.BootStatus
 			boot.ManifestSource = choice.source
 			boot.ManifestHash = choice.hash
 			boot.Storage = choice.m.Spec.Storage
-			settleManifests(choice, status, &boot)
+			settleManifests(machine.MachineManifests(machine.MachineStateDir), choice, status, &boot)
 			return choice, status, boot, nil
 		}
 		if choice.source == machine.ManifestSourceStaged && i+1 < len(attempts) {
 			fmt.Fprintf(os.Stderr, "liken: storage: the staged manifest failed: %v\n", err)
 			fmt.Fprintln(os.Stderr, "liken: storage: falling back to the proven manifest")
 			teardownStorage()
-			rejection := machine.Rejection{
-				Hash:       choice.hash,
-				Reason:     err.Error(),
-				RejectedAt: time.Now().UTC(),
-			}
+			rejection := machine.NewRejection(choice.raw, err.Error(), time.Now().UTC())
 			if terr := touchMachineState(*candidates.part, func(root string) error {
 				return machine.MachineManifests(root).Reject(rejection)
 			}); terr != nil {
@@ -365,11 +358,10 @@ func settleStorage() (*manifestChoice, machine.StorageStatus, machine.BootStatus
 // manifest. Failures here are loud but not fatal: the machine is up,
 // and the next boot simply repeats the step (a staged manifest that
 // boots once boots again).
-func settleManifests(choice *manifestChoice, status machine.StorageStatus, boot *machine.BootStatus) {
+func settleManifests(store machine.ManifestStore, choice *manifestChoice, status machine.StorageStatus, boot *machine.BootStatus) {
 	if status.MachineState.Backing != machine.BackingPartition {
 		return // nothing durable to keep manifests on
 	}
-	store := machine.MachineManifests(machine.MachineStateDir)
 	switch choice.source {
 	case machine.ManifestSourceStaged:
 		if err := store.Promote(); err != nil {

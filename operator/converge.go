@@ -196,12 +196,43 @@ type convergence struct {
 	hash           string // their identity
 }
 
-func converged(reason, message string) machine.Condition {
-	return machine.Condition{Type: "SpecConverged", Status: "True", Reason: reason, Message: message}
+// The condition constructors for every convergence verdict. Three
+// documents converge through this machinery, each under its own
+// condition type (SpecConverged, ClusterConverged, VersionConverged),
+// and all three share one reason vocabulary, so the constructors take
+// the type rather than hard-coding it.
+func converged(condType, reason, message string) machine.Condition {
+	return machine.Condition{Type: condType, Status: machine.ConditionTrue, Reason: reason, Message: message}
 }
 
-func notConverged(reason, message string) machine.Condition {
-	return machine.Condition{Type: "SpecConverged", Status: "False", Reason: reason, Message: message}
+func notConverged(condType, reason, message string) machine.Condition {
+	return machine.Condition{Type: condType, Status: machine.ConditionFalse, Reason: reason, Message: message}
+}
+
+func convergenceUnknown(condType, reason, message string) machine.Condition {
+	return machine.Condition{Type: condType, Status: machine.ConditionUnknown, Reason: reason, Message: message}
+}
+
+// gateReboot finishes a staged document's convergence: the staged
+// bytes are already in the convergence, and what remains is whether
+// this machine may reboot to apply them right now. The decision
+// table is identical for every staged document and is the safety
+// core of the rollout design, so it lives here once: Manual policy
+// always waits for a person (RebootPending), a cluster member on
+// Auto waits for the conductor's turn (AwaitingTurn), and only a
+// standalone or granted machine actually asks init to reboot
+// (RebootRequested). The messages differ per document; the reasons
+// and their order of precedence must not.
+func gateReboot(c *convergence, condType string, policy machine.RebootPolicy, t turn, pending, awaiting, requested string) {
+	switch {
+	case policy != machine.RebootAuto:
+		c.condition = notConverged(condType, "RebootPending", pending)
+	case t == turnAwaiting:
+		c.condition = notConverged(condType, "AwaitingTurn", awaiting)
+	default:
+		c.requestReboot = true
+		c.condition = notConverged(condType, "RebootRequested", requested)
+	}
 }
 
 // decideConvergence makes the whole convergence decision in one pure
@@ -236,16 +267,14 @@ func notConverged(reason, message string) machine.Condition {
 //     reboot, wait for the cluster's grant, or report one pending.
 func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejection *machine.Rejection, stagedHash string, t turn) convergence {
 	if facts == nil || facts.Boot.ManifestSource == "" {
-		return convergence{condition: machine.Condition{
-			Type: "SpecConverged", Status: "Unknown", Reason: "FactsIncomplete",
-			Message: "the machine's facts carry no boot record yet",
-		}}
+		return convergence{condition: convergenceUnknown("SpecConverged", "FactsIncomplete",
+			"the machine's facts carry no boot record yet")}
 	}
 
 	drift := storageDrift(m.Spec.Storage, facts.Boot.Storage)
 	if len(drift) == 0 {
 		return convergence{
-			condition:      converged("Converged", "this boot actuated the current spec"),
+			condition:      converged("SpecConverged", "Converged", "this boot actuated the current spec"),
 			withdraw:       stagedHash != "",
 			clearRejection: rejection != nil,
 		}
@@ -254,23 +283,23 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 
 	manifest, hash, err := renderManifest(m.Metadata.Name, m.Spec)
 	if err != nil {
-		return convergence{condition: notConverged("StagingFailed", err.Error())}
+		return convergence{condition: notConverged("SpecConverged", "StagingFailed", err.Error())}
 	}
 
 	if r := rejection; r != nil && r.Hash == hash {
-		return convergence{condition: notConverged("RejectedLastBoot",
+		return convergence{condition: notConverged("SpecConverged", "RejectedLastBoot",
 			fmt.Sprintf("init rejected this exact spec at boot: %s; edit the spec to something different", r.Reason))}
 	}
 	if facts.Boot.ManifestHash == hash {
-		return convergence{condition: notConverged("BootMismatch",
+		return convergence{condition: notConverged("SpecConverged", "BootMismatch",
 			fmt.Sprintf("facts claim this spec was actuated, yet it differs from the boot's storage (%s); refusing to reboot over a contradiction — this is a liken bug", diffs))}
 	}
 	if facts.Storage.MachineState.Backing != machine.BackingPartition {
-		return convergence{condition: notConverged("MachineStateEphemeral",
+		return convergence{condition: notConverged("SpecConverged", "MachineStateEphemeral",
 			"machineState is backed by memory; there is no durable filesystem to stage a manifest into — declare machineState in the machine's manifest")}
 	}
 	if err := validateStaging(m.Spec.Storage, facts); err != nil {
-		return convergence{condition: notConverged("StagingRejected", err.Error())}
+		return convergence{condition: notConverged("SpecConverged", "StagingRejected", err.Error())}
 	}
 
 	c := convergence{
@@ -278,27 +307,19 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 		hash:     hash,
 		stage:    stagedHash != hash, // idempotence: skip the write when these exact bytes are already staged
 	}
-	switch {
-	case m.Spec.RebootPolicyOrDefault() != machine.RebootAuto:
-		c.condition = notConverged("RebootPending",
-			fmt.Sprintf("spec staged for the next boot (%.12s); rebootPolicy is Manual, so reboot the machine (or set rebootPolicy: Auto) to apply: %s", hash, diffs))
-	case t == turnAwaiting:
-		c.condition = notConverged("AwaitingTurn",
-			fmt.Sprintf("spec staged for the next boot (%.12s); waiting for the cluster to grant a reboot turn: %s", hash, diffs))
-	default:
-		c.requestReboot = true
-		c.condition = notConverged("RebootRequested",
-			fmt.Sprintf("reboot requested to apply the staged spec (%.12s): %s", hash, diffs))
-	}
+	gateReboot(&c, "SpecConverged", m.Spec.RebootPolicyOrDefault(), t,
+		fmt.Sprintf("spec staged for the next boot (%.12s); rebootPolicy is Manual, so reboot the machine (or set rebootPolicy: Auto) to apply: %s", hash, diffs),
+		fmt.Sprintf("spec staged for the next boot (%.12s); waiting for the cluster to grant a reboot turn: %s", hash, diffs),
+		fmt.Sprintf("reboot requested to apply the staged spec (%.12s): %s", hash, diffs))
 	return c
 }
 
-// readStagedHash returns the hash of whatever manifest is currently
-// staged on the machineState filesystem, or "" when nothing is
-// staged. Staged bytes that fail to parse still get hashed, because
-// the idempotence check compares bytes, not parsed meaning.
-func readStagedHash() string {
-	raw, _ := machine.MachineManifests(machine.MachineStateDir).LoadStaged()
+// readStagedHash returns the hash of whatever document is currently
+// staged in the store, or "" when nothing is staged. Staged bytes
+// that fail to parse still get hashed, because the idempotence check
+// compares bytes, not parsed meaning.
+func readStagedHash(store machine.ManifestStore) string {
+	raw, _ := store.LoadStaged()
 	if raw == nil {
 		return ""
 	}

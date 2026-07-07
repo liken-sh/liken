@@ -180,3 +180,32 @@ func TestKmsgPriorities(t *testing.T) {
 		t.Error("the prefix format changed")
 	}
 }
+
+func TestDrainToKmsgCarriesWholeLines(t *testing.T) {
+	var kmsg bytes.Buffer
+	// Two complete lines and a trailing fragment: the fragment must
+	// wait for its newline, which EOF never delivers, so exactly two
+	// records come out.
+	drainToKmsg(strings.NewReader("first\nsecond\nfragment"), &kmsg, kmsgInfo)
+	want := "<14>first<14>second"
+	if kmsg.String() != want {
+		t.Errorf("got %q, want %q", kmsg.String(), want)
+	}
+}
+
+// panickingWriter stands in for a kmsg device so broken that writing
+// panics, the worst case emitKmsgLine promises to absorb.
+type panickingWriter struct{}
+
+func (panickingWriter) Write([]byte) (int, error) { panic("the device is gone") }
+
+func TestEmitKmsgLineSurvivesAPanickingWriter(t *testing.T) {
+	old := console
+	var fallback bytes.Buffer
+	console = &fallback
+	t.Cleanup(func() { console = old })
+	emitKmsgLine(panickingWriter{}, kmsgWarning, []byte("must not be lost"))
+	if !strings.Contains(fallback.String(), "must not be lost") {
+		t.Errorf("the line falls back to the raw console: %q", fallback.String())
+	}
+}

@@ -30,10 +30,14 @@ import (
 	"path/filepath"
 	"strings"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/chrisguidry/liken/machine"
 )
 
-const (
+// Package variables rather than constants so tests can point the
+// derivations at files of their own making.
+var (
 	// The static halves, shipped in the image.
 	k3sServerConfig = "/etc/rancher/k3s/config.yaml"
 	k3sAgentConfig  = "/etc/rancher/k3s/agent.yaml"
@@ -43,6 +47,10 @@ const (
 	// Handed to k3s as a token-file so the secret itself never
 	// appears in a config file or on a command line.
 	tokenPath = "/etc/liken/token"
+
+	// seedSourceDir is where the image bakes k3s's seed files, the
+	// tree seedClusterState copies onto the clusterState filesystem.
+	seedSourceDir = "/var/lib/rancher"
 )
 
 // leaderJoinConfig decides a leader's datastore keys, by leader
@@ -301,4 +309,73 @@ func writeK3sBootConfig(cluster *machine.Cluster, name string, conns []*connecti
 		}
 	}
 	return role, nil
+}
+
+// mountAndSeedClusterState mounts clusterState's filesystem with the
+// image's seed files layered in. The image bakes the seeds (the
+// pre-generated CAs, the operator's manifests and container image)
+// underneath clusterState's very mountpoint, and mounting over them
+// would hide them all. So the filesystem is first mounted to the
+// side, seeded from the image's copies, and only then moved into
+// place; MS_MOVE re-attaches a live mount atomically. This lives here
+// rather than with the partition machinery because everything it
+// knows — the seed paths, what refreshes and what persists — is k3s's
+// on-disk layout.
+func mountAndSeedClusterState(dev, target string) error {
+	staging := "/.liken-claim"
+	if err := os.MkdirAll(staging, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", staging, err)
+	}
+	if err := unix.Mount(dev, staging, "ext4", 0, ""); err != nil {
+		return fmt.Errorf("mounting %s for clusterState: %w", dev, err)
+	}
+	if err := seedClusterState(staging); err != nil {
+		return fmt.Errorf("seeding clusterState: %w", err)
+	}
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", target, err)
+	}
+	if err := unix.Mount(staging, target, "", unix.MS_MOVE, ""); err != nil {
+		return fmt.Errorf("moving clusterState into place at %s: %w", target, err)
+	}
+	_ = os.Remove(staging)
+	return nil
+}
+
+// seedClusterState copies the image's seed files into a clusterState
+// filesystem. The TLS material is copied only if the disk has none:
+// those keys are the cluster's identity, and a disk that already has
+// an identity keeps it. The manifests and the operator image are
+// refreshed every boot: they're pinned to the liken version of the
+// running image, and an upgraded image must deliver its upgraded
+// operator.
+func seedClusterState(root string) error {
+	for _, seed := range []struct {
+		rel     string
+		refresh bool
+	}{
+		{"k3s/server/tls", false},
+		{"k3s/server/manifests", true},
+		{"k3s/agent/images", true},
+	} {
+		src := filepath.Join(seedSourceDir, seed.rel)
+		if _, err := os.Stat(src); err != nil {
+			continue // an image without k3s has no seed files
+		}
+		dst := filepath.Join(root, seed.rel)
+		if seed.refresh {
+			if err := os.RemoveAll(dst); err != nil {
+				return err
+			}
+		} else if _, err := os.Stat(dst); err == nil {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		if err := os.CopyFS(dst, os.DirFS(src)); err != nil {
+			return err
+		}
+	}
+	return nil
 }

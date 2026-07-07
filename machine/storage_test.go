@@ -101,37 +101,6 @@ func TestValidateAcceptsTheLabMachine(t *testing.T) {
 	}
 }
 
-func TestStorageConditionAllPlaced(t *testing.T) {
-	spec := StorageSpec{ClusterState: &StorageRole{Device: "/dev/vda"}}
-	status := AllRolesInMemory()
-	status.ClusterState = StorageRoleStatus{Backing: BackingPartition, Device: "vda1"}
-	c := StorageCondition(spec, status)
-	if c.Type != "StorageReady" || c.Status != "True" || c.Reason != "AllRolesPlaced" {
-		t.Errorf("got %+v", c)
-	}
-	if !strings.Contains(c.Message, "clusterState on vda1") {
-		t.Errorf("message should name the landing: %q", c.Message)
-	}
-}
-
-func TestStorageConditionDeclaredButInMemory(t *testing.T) {
-	spec := StorageSpec{ClusterState: &StorageRole{Device: "/dev/vda"}}
-	c := StorageCondition(spec, AllRolesInMemory())
-	if c.Status != "False" || c.Reason != "RolesInMemory" {
-		t.Errorf("got %+v", c)
-	}
-	if !strings.Contains(c.Message, "clusterState") {
-		t.Errorf("message should name the role: %q", c.Message)
-	}
-}
-
-func TestStorageConditionNothingDeclared(t *testing.T) {
-	c := StorageCondition(StorageSpec{}, AllRolesInMemory())
-	if c.Status != "True" || c.Reason != "NothingDeclared" {
-		t.Errorf("got %+v", c)
-	}
-}
-
 func TestValidateRequiresADevice(t *testing.T) {
 	spec := StorageSpec{ClusterState: &StorageRole{}}
 	if err := spec.Validate(); err == nil {

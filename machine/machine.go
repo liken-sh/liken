@@ -116,8 +116,9 @@ type ObjectMeta struct {
 	Generation      int64  `json:"generation,omitempty"`
 }
 
-// MachineSpec is the declared half: what a person (or, eventually, a
-// git repository) asks this machine to be. Each field notes who acts on
+// MachineSpec is the declared half: what a person (or a git
+// repository, via whatever GitOps engine a deployment chooses) asks
+// this machine to be. Each field notes who acts on
 // it and when, because the actuators differ: some state can only be
 // set while the machine is being built, some can be reconciled live.
 type MachineSpec struct {

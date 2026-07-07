@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"slices"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -78,7 +77,7 @@ func rebootMachine(intent machine.RebootIntent) {
 	// reaper is one of its components, and exited processes need
 	// collecting right up to the end.
 	plane.shutdown(10 * time.Second)
-	unmountRoles()
+	unmountRoleMounts(unix.MNT_DETACH, false)
 	syncLogs()
 	unix.Sync()
 	if err := unix.Reboot(unix.LINUX_REBOOT_CMD_RESTART); err != nil {
@@ -100,18 +99,4 @@ func killEverything() {
 	_ = unix.Kill(-1, unix.SIGTERM)
 	time.Sleep(5 * time.Second)
 	_ = unix.Kill(-1, unix.SIGKILL)
-}
-
-// unmountRoles detaches every role filesystem. MNT_DETACH (a lazy
-// unmount) rather than a plain one: a just-killed container's mount
-// namespace can pin a filesystem for a moment longer, and lazy
-// detachment lets the kernel finish the job as those references
-// drain, after the sync has already made the data safe.
-func unmountRoles() {
-	for _, name := range slices.Backward(machine.StorageRoleNames) {
-		target := roleMounts[name].path
-		if err := unix.Unmount(target, unix.MNT_DETACH); err == nil {
-			fmt.Printf("liken: unmounted %s\n", target)
-		}
-	}
 }

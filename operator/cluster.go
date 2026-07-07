@@ -39,12 +39,21 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 
 	"sigs.k8s.io/yaml"
 
 	"github.com/chrisguidry/liken/machine"
 )
+
+func getCluster(c *apiClient, name string) (*machine.Cluster, error) {
+	cluster := &machine.Cluster{}
+	if err := c.requestJSON(http.MethodGet, clustersPath+"/"+name, nil, cluster); err != nil {
+		return nil, err
+	}
+	return cluster, nil
+}
 
 // renderCluster produces the canonical bytes to stage: a Cluster
 // document with no status, deterministic for the same reason
@@ -78,14 +87,6 @@ func renderCluster(name string, spec machine.ClusterSpec) ([]byte, string, error
 	return body, machine.ManifestHash(body), nil
 }
 
-func clusterConverged(reason, message string) machine.Condition {
-	return machine.Condition{Type: "ClusterConverged", Status: "True", Reason: reason, Message: message}
-}
-
-func clusterNotConverged(reason, message string) machine.Condition {
-	return machine.Condition{Type: "ClusterConverged", Status: "False", Reason: reason, Message: message}
-}
-
 // decideClusterConvergence mirrors decideConvergence's short-circuit
 // order for the cluster document. With no facts, the verdict is
 // Unknown. When the boot ran the current document, the machine is
@@ -106,26 +107,22 @@ func clusterNotConverged(reason, message string) machine.Condition {
 // formatting alone must never reboot a fleet.
 func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, facts *machine.MachineStatus, rejection *machine.Rejection, bootHash, stagedHash string, t turn) convergence {
 	if facts == nil || facts.Boot.ManifestSource == "" {
-		return convergence{condition: machine.Condition{
-			Type: "ClusterConverged", Status: "Unknown", Reason: "FactsIncomplete",
-			Message: "the machine's facts carry no boot record yet",
-		}}
+		return convergence{condition: convergenceUnknown("ClusterConverged", "FactsIncomplete",
+			"the machine's facts carry no boot record yet")}
 	}
 	if facts.Boot.ClusterManifestSource != "" && bootHash == "" {
-		return convergence{condition: machine.Condition{
-			Type: "ClusterConverged", Status: "Unknown", Reason: "FactsIncomplete",
-			Message: "the boot ran a cluster document but its publication is unreadable",
-		}}
+		return convergence{condition: convergenceUnknown("ClusterConverged", "FactsIncomplete",
+			"the boot ran a cluster document but its publication is unreadable")}
 	}
 
 	manifest, hash, err := renderCluster(cluster.Metadata.Name, cluster.Spec)
 	if err != nil {
-		return convergence{condition: clusterNotConverged("StagingFailed", err.Error())}
+		return convergence{condition: notConverged("ClusterConverged", "StagingFailed", err.Error())}
 	}
 
 	if hash == bootHash {
 		return convergence{
-			condition:      clusterConverged("Converged", "this boot ran the current cluster document"),
+			condition:      converged("ClusterConverged", "Converged", "this boot ran the current cluster document"),
 			withdraw:       stagedHash != "",
 			clearRejection: rejection != nil,
 		}
@@ -136,11 +133,11 @@ func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, fact
 	// machine runs, but a rejection cleared by a revert must unblock
 	// a retry within the same boot.
 	if r := rejection; r != nil && r.Hash == hash {
-		return convergence{condition: clusterNotConverged("RejectedLastBoot",
+		return convergence{condition: notConverged("ClusterConverged", "RejectedLastBoot",
 			fmt.Sprintf("init rejected this exact cluster document at boot: %s; edit the cluster to something different", r.Reason))}
 	}
 	if facts.Storage.MachineState.Backing != machine.BackingPartition {
-		return convergence{condition: clusterNotConverged("MachineStateEphemeral",
+		return convergence{condition: notConverged("ClusterConverged", "MachineStateEphemeral",
 			"machineState is backed by memory; there is no durable filesystem to stage the cluster document into — declare machineState in the machine's manifest")}
 	}
 
@@ -149,29 +146,11 @@ func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, fact
 		hash:     hash,
 		stage:    stagedHash != hash,
 	}
-	switch {
-	case m.Spec.RebootPolicyOrDefault() != machine.RebootAuto:
-		c.condition = clusterNotConverged("RebootPending",
-			fmt.Sprintf("cluster document staged for the next boot (%.12s); rebootPolicy is Manual, so reboot the machine (or set rebootPolicy: Auto) to apply", hash))
-	case t == turnAwaiting:
-		c.condition = clusterNotConverged("AwaitingTurn",
-			fmt.Sprintf("cluster document staged for the next boot (%.12s); waiting for the cluster to grant a reboot turn", hash))
-	default:
-		c.requestReboot = true
-		c.condition = clusterNotConverged("RebootRequested",
-			fmt.Sprintf("reboot requested to apply the staged cluster document (%.12s)", hash))
-	}
+	gateReboot(&c, "ClusterConverged", m.Spec.RebootPolicyOrDefault(), t,
+		fmt.Sprintf("cluster document staged for the next boot (%.12s); rebootPolicy is Manual, so reboot the machine (or set rebootPolicy: Auto) to apply", hash),
+		fmt.Sprintf("cluster document staged for the next boot (%.12s); waiting for the cluster to grant a reboot turn", hash),
+		fmt.Sprintf("reboot requested to apply the staged cluster document (%.12s)", hash))
 	return c
-}
-
-// readStagedClusterHash is readStagedHash for the cluster document's
-// store: the hash of whatever is staged there, or "" when nothing is.
-func readStagedClusterHash() string {
-	raw, _ := machine.ClusterManifests(machine.MachineStateDir).LoadStaged()
-	if raw == nil {
-		return ""
-	}
-	return machine.ManifestHash(raw)
 }
 
 // bootClusterHash canonicalizes the document this boot ran: read the

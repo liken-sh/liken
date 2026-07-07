@@ -129,13 +129,6 @@ func (f *fetcher) Ensure(ask fetchAsk) fetchSnapshot {
 	return f.snap
 }
 
-// Snapshot reads the current state without asking for anything.
-func (f *fetcher) Snapshot() fetchSnapshot {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.snap
-}
-
 // run is the goroutine: do the fetch, then record the verdict. If
 // the ask changed while the fetch ran, the verdict describes a
 // release the machine no longer wants, so it is discarded.

@@ -121,11 +121,7 @@ func settleSystemRelease(stateRoot, bootSlot string, durable bool, boot *machine
 // reason, and reports the rejection for this boot's facts.
 func rejectStagedSystem(store machine.ManifestStore, reason string, raw []byte) *machine.Rejection {
 	fmt.Fprintf(os.Stderr, "liken: system: rejecting the staged release: %s\n", reason)
-	rejection := machine.Rejection{
-		Hash:       machine.ManifestHash(raw),
-		Reason:     reason,
-		RejectedAt: time.Now().UTC(),
-	}
+	rejection := machine.NewRejection(raw, reason, time.Now().UTC())
 	if err := store.Reject(rejection); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: system: recording the rejection: %v\n", err)
 	}
@@ -205,11 +201,8 @@ func fallbackInPlace(efiDir, stateRoot string) bool {
 	if !ok {
 		return false
 	}
-	current, err := readEFIVar(efiDir, "BootOrder")
-	if err != nil || len(current) < 2 {
-		return false
-	}
-	return uint16(current[0])|uint16(current[1])<<8 == leader
+	current := readBootOrder(efiDir)
+	return len(current) > 0 && current[0] == leader
 }
 
 // provingPatience is how long a proving boot may run unpromoted
@@ -305,11 +298,7 @@ func repairBootOrder(efiDir, stateRoot string) {
 		return
 	}
 
-	current, _ := readEFIVar(efiDir, "BootOrder")
-	var order []uint16
-	for i := 0; i+2 <= len(current); i += 2 {
-		order = append(order, uint16(current[i])|uint16(current[i+1])<<8)
-	}
+	order := readBootOrder(efiDir)
 	if len(order) > 0 && order[0] == leader {
 		return // the firmware already agrees
 	}
@@ -320,20 +309,14 @@ func repairBootOrder(efiDir, stateRoot string) {
 			repaired = append(repaired, n)
 		}
 	}
-	payload := make([]byte, len(repaired)*2)
-	for i, n := range repaired {
-		payload[i*2] = byte(n)
-		payload[i*2+1] = byte(n >> 8)
-	}
-	if err := writeEFIVar(efiDir, "BootOrder", payload); err != nil {
+	if err := writeBootOrder(efiDir, repaired); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: system: repairing BootOrder: %v\n", err)
 		return
 	}
 	// Trust the readback, not the write: some firmware accepts a
 	// write and then fails to hold it, and every later report would
 	// be wrong if the write were taken at face value.
-	readback, err := readEFIVar(efiDir, "BootOrder")
-	if err != nil || len(readback) < 2 || uint16(readback[0])|uint16(readback[1])<<8 != leader {
+	if readback := readBootOrder(efiDir); len(readback) == 0 || readback[0] != leader {
 		fmt.Fprintf(os.Stderr, "liken: system: BootOrder was written but reads back unchanged; the firmware is not holding it\n")
 		return
 	}

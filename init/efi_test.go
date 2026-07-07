@@ -127,23 +127,6 @@ func TestWriteEFIVarRoundTrips(t *testing.T) {
 	}
 }
 
-func TestDeleteEFIVar(t *testing.T) {
-	dir := t.TempDir()
-	if err := writeEFIVar(dir, "BootNext", u16le(3)); err != nil {
-		t.Fatal(err)
-	}
-	if err := deleteEFIVar(dir, "BootNext"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := readEFIVar(dir, "BootNext"); err == nil {
-		t.Error("the variable should be gone")
-	}
-	// Deleting a variable that never existed is quietly fine.
-	if err := deleteEFIVar(dir, "BootNext"); err != nil {
-		t.Errorf("double delete: %v", err)
-	}
-}
-
 func TestSetBootEntryFindsItsOwnByDescription(t *testing.T) {
 	dir := fakeEFIVars(t, map[string][]byte{
 		"Boot0000": encodeLoadOption(loadOption{description: "BootManagerMenuApp"}),
@@ -168,5 +151,76 @@ func TestSetBootEntryFindsItsOwnByDescription(t *testing.T) {
 	}
 	if got := listBootEntries(dir)[0].description; got != "BootManagerMenuApp" {
 		t.Errorf("the firmware's entry should be untouched: %q", got)
+	}
+}
+
+// fakeFirmwareVars points the package's efivars path at a fake store,
+// restoring the real one afterward; reportFirmware and the facts read
+// through the variable.
+func fakeFirmwareVars(t *testing.T, vars map[string][]byte) string {
+	t.Helper()
+	dir := fakeEFIVars(t, vars)
+	old := efiVarsDir
+	efiVarsDir = dir
+	t.Cleanup(func() { efiVarsDir = old })
+	return dir
+}
+
+func TestReportFirmwareUEFI(t *testing.T) {
+	fakeFirmwareVars(t, map[string][]byte{
+		"Boot0002":    encodeLoadOption(loadOption{attributes: loadOptionActive, description: "liken slot A"}),
+		"BootCurrent": u16le(0x0002),
+		"BootNext":    u16le(0x0002),
+		"BootOrder":   u16le(0x0002),
+	})
+	// The report prints; what the test pins is that the same facts
+	// decode for status, console parity's other half.
+	reportFirmware()
+	fw := firmwareFacts(efiVarsDir)
+	if fw.Mode != machine.FirmwareUEFI {
+		t.Errorf("a variable store means UEFI: %s", fw.Mode)
+	}
+	if fw.BootCurrent != "Boot0002 (liken slot A)" {
+		t.Errorf("entries decode to their names: %q", fw.BootCurrent)
+	}
+	if fw.BootNext != "Boot0002 (liken slot A)" {
+		t.Errorf("BootNext decodes too: %q", fw.BootNext)
+	}
+}
+
+func TestReportFirmwareBIOS(t *testing.T) {
+	old := efiVarsDir
+	efiVarsDir = filepath.Join(t.TempDir(), "no-efivars")
+	t.Cleanup(func() { efiVarsDir = old })
+	reportFirmware()
+	if fw := firmwareFacts(efiVarsDir); fw.Mode != machine.FirmwareBIOS {
+		t.Errorf("no store reads as BIOS: %s", fw.Mode)
+	}
+}
+
+func TestReadEFIVarRejectsATruncatedVariable(t *testing.T) {
+	dir := t.TempDir()
+	// Two bytes can't even hold the attribute word the kernel always
+	// prepends; such a file is mangled, not empty.
+	if err := os.WriteFile(filepath.Join(dir, "BootNext-"+efiGlobalVariable), []byte{1, 2}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readEFIVar(dir, "BootNext"); err == nil {
+		t.Error("a variable shorter than its attributes is an error")
+	}
+}
+
+func TestListBootEntriesSkipsWhatItCannotDecode(t *testing.T) {
+	dir := fakeEFIVars(t, map[string][]byte{
+		"Boot0007": encodeLoadOption(loadOption{attributes: loadOptionActive, description: "liken slot A"}),
+		"Boot0008": {0x01}, // truncated: not even a whole load option header
+	})
+	// Something else's variable, not a Boot#### entry at all.
+	if err := os.WriteFile(filepath.Join(dir, "SecureBoot-"+efiGlobalVariable), []byte{7, 0, 0, 0, 1}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entries := listBootEntries(dir)
+	if len(entries) != 1 || entries[7].description != "liken slot A" {
+		t.Errorf("only decodable Boot entries are listed: %+v", entries)
 	}
 }

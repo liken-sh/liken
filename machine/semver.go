@@ -17,7 +17,7 @@ import (
 	"strings"
 )
 
-// CompareVersions orders two version strings: negative when a is
+// compareVersions orders two version strings: negative when a is
 // older, zero when they are the same version, positive when a is
 // newer. The core segments compare numerically, a missing segment
 // counts as zero (1.0 is 1.0.0), and a pre-release (the part after a
@@ -26,7 +26,7 @@ import (
 // pre-release into dot-separated identifiers with their own numeric
 // rules; liken's releases don't use that, so plain string comparison
 // is enough.
-func CompareVersions(a, b string) int {
+func compareVersions(a, b string) int {
 	aCore, aPre, _ := strings.Cut(a, "-")
 	bCore, bPre, _ := strings.Cut(b, "-")
 
@@ -82,7 +82,7 @@ func compareSegments(a, b string) int {
 func NewestVersion(catalog []ReleaseCatalogEntry) string {
 	newest := ""
 	for _, entry := range catalog {
-		if newest == "" || CompareVersions(entry.Version, newest) > 0 {
+		if newest == "" || compareVersions(entry.Version, newest) > 0 {
 			newest = entry.Version
 		}
 	}

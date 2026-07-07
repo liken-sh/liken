@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/chrisguidry/liken/machine"
 )
 
 // superblock builds 1024 bytes with the fields growth reads.
@@ -121,5 +123,35 @@ func TestReadExt4GeometryReportsTruncatedDevices(t *testing.T) {
 	}
 	if _, err := readExt4Geometry(dev); err == nil {
 		t.Error("a device too small for a superblock is an error")
+	}
+}
+
+func TestMaybeGrowFilesystemLeavesAFullFilesystemAlone(t *testing.T) {
+	// The superblock says 100 blocks of 4096 bytes; the partition is
+	// exactly that size, so there is nothing to grow and no ioctl to
+	// make. (An actual grow needs a mounted filesystem: QEMU's drill.)
+	sys, dev := fakeMachine(t)
+	_ = sys
+	image := make([]byte, 2048)
+	sb := image[ext4SuperblockOffset:]
+	sb[56], sb[57] = 0x53, 0xEF
+	sb[4] = 100
+	sb[24] = 2
+	if err := os.WriteFile(filepath.Join(dev, "vda1"), image, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	role := declared(machine.MachineStateRole, "/dev/vda", "")
+	p := partition{name: "vda1", disk: "vda", sizeBytes: 100 * 4096}
+	if err := maybeGrowFilesystem(role, p, t.TempDir()); err != nil {
+		t.Errorf("a filesystem already filling its partition needs nothing: %v", err)
+	}
+}
+
+func TestMaybeGrowFilesystemReportsAnUnreadableDevice(t *testing.T) {
+	fakeMachine(t)
+	role := declared(machine.MachineStateRole, "/dev/vda", "")
+	p := partition{name: "vda1", disk: "vda", sizeBytes: 1 << 30}
+	if err := maybeGrowFilesystem(role, p, t.TempDir()); err == nil {
+		t.Error("no device, no geometry: the error must surface")
 	}
 }

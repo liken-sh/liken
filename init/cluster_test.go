@@ -236,3 +236,26 @@ func TestChooseClusterFailsOnAnUnparseableSeed(t *testing.T) {
 		t.Fatal("an unparseable seed leaves the machine unable to know its role; that is an error")
 	}
 }
+
+func TestChooseClusterFallsThroughACorruptProvenDocument(t *testing.T) {
+	// A proven document that won't parse is a corrupted
+	// last-known-good: reported, then the seed carries the boot,
+	// because a recovery file must never be the thing a boot dies on.
+	root := t.TempDir()
+	if err := machine.ClusterManifests(root).WriteProven([]byte("{corrupt")); err != nil {
+		t.Fatal(err)
+	}
+	seed := filepath.Join(t.TempDir(), "cluster.yaml")
+	doc := "apiVersion: liken.sh/v1alpha1\nkind: Cluster\nmetadata:\n  name: lab\nspec:\n  leaders: [node-1]\n"
+	if err := os.WriteFile(seed, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	boot := machine.BootStatus{}
+	c, _, err := chooseCluster(root, seed, true, &boot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c == nil || boot.ClusterManifestSource != machine.ManifestSourceSeed {
+		t.Errorf("the seed carries a boot whose proven copy is corrupt: %+v", boot)
+	}
+}

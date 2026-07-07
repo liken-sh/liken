@@ -6,6 +6,8 @@ package main
 
 import (
 	"os"
+	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/chrisguidry/liken/machine"
@@ -32,15 +34,6 @@ func stagedRelease(t *testing.T, root, version, slot string) ([]byte, string) {
 		t.Fatal(err)
 	}
 	return raw, hash
-}
-
-func readBootOrder(t *testing.T, dir string) []byte {
-	t.Helper()
-	raw, err := readEFIVar(dir, "BootOrder")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return raw
 }
 
 func TestABootOnTheStagedSlotIsTheTrial(t *testing.T) {
@@ -154,7 +147,7 @@ func TestArmProvingBootAssertsTheFallbackFirst(t *testing.T) {
 
 	armProvingBoot(dir, root, "B")
 
-	if got := readBootOrder(t, dir); string(got) != string(u16le(0x0003, 0x0002)) {
+	if got := readBootOrder(dir); !slices.Equal(got, []uint16{0x0003, 0x0002}) {
 		t.Errorf("the fallback must lead with the proven slot before the trial arms: % x", got)
 	}
 	next, err := readEFIVar(dir, "BootNext")
@@ -199,13 +192,13 @@ func TestRepairBootOrderAssertsTheProvenSlot(t *testing.T) {
 
 	repairBootOrder(dir, root)
 
-	if got := readBootOrder(t, dir); string(got) != string(u16le(0x0003, 0x0002, 0x0000)) {
+	if got := readBootOrder(dir); !slices.Equal(got, []uint16{0x0003, 0x0002, 0x0000}) {
 		t.Errorf("slot B should lead, everything else in order: % x", got)
 	}
 
 	// Idempotent: a second repair writes nothing new and keeps the order.
 	repairBootOrder(dir, root)
-	if got := readBootOrder(t, dir); string(got) != string(u16le(0x0003, 0x0002, 0x0000)) {
+	if got := readBootOrder(dir); !slices.Equal(got, []uint16{0x0003, 0x0002, 0x0000}) {
 		t.Errorf("repair must be idempotent: % x", got)
 	}
 }
@@ -213,7 +206,7 @@ func TestRepairBootOrderAssertsTheProvenSlot(t *testing.T) {
 func TestRepairBootOrderDoesNothingWithoutAProvenRecord(t *testing.T) {
 	dir := slotFirmware(t, 0x0002, 0x0003)
 	repairBootOrder(dir, t.TempDir())
-	if got := readBootOrder(t, dir); string(got) != string(u16le(0x0002, 0x0003)) {
+	if got := readBootOrder(dir); !slices.Equal(got, []uint16{0x0002, 0x0003}) {
 		t.Errorf("no record, no opinion: % x", got)
 	}
 }
@@ -228,5 +221,47 @@ func TestSettleSystemReleaseIgnoresExternalMediaBoots(t *testing.T) {
 	}
 	if staged, _ := machine.SystemReleases(root).LoadStaged(); staged == nil {
 		t.Error("the record must survive for a from-disk boot to judge")
+	}
+}
+
+func TestRejectStagedSystemSurvivesAFailedRecord(t *testing.T) {
+	// The record's write can fail (machineState remounted read-only by
+	// a dying disk, say); the rejection must still be reported for
+	// this boot's facts.
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
+	store := machine.SystemReleases(filepath.Join(parent, "sealed"))
+	rejection := rejectStagedSystem(store, "the test says no", []byte("staged"))
+	if rejection == nil || rejection.Reason != "the test says no" {
+		t.Errorf("the rejection exists whether or not the disk took it: %+v", rejection)
+	}
+}
+
+func TestAStagedReleaseWaitsForAFromDiskBoot(t *testing.T) {
+	// External media is running (bootSlot is empty): the boot can't
+	// judge a slot trial it isn't part of, so the record just waits.
+	root := t.TempDir()
+	stagedRelease(t, root, "0.2.0", "B")
+	boot := machine.BootStatus{}
+	if settleSystemRelease(root, "", true, &boot) {
+		t.Error("an external-media boot is never the trial")
+	}
+	if staged, _ := machine.SystemReleases(root).LoadStaged(); staged == nil {
+		t.Error("the record stays staged for the from-disk boot")
+	}
+}
+
+func TestArmProvingBootIgnoresARecordForTheRunningSlot(t *testing.T) {
+	// A record staged for the very slot that is running has no trial
+	// to arm: rebooting into yourself proves nothing.
+	root := t.TempDir()
+	stagedRelease(t, root, "0.2.0", "B")
+	dir := slotFirmware(t, 0x0002, 0x0003)
+	armProvingBoot(dir, root, "B")
+	if _, err := readEFIVar(dir, "BootNext"); err == nil {
+		t.Error("no trial, no BootNext")
 	}
 }

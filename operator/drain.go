@@ -209,7 +209,7 @@ func gateThroughDrain(c *apiClient, node *nodeObject, conv convergence, now time
 func holdForDrain(conv convergence, message string) convergence {
 	conv.requestReboot = false
 	conv.condition = machine.Condition{
-		Type: conv.condition.Type, Status: "False", Reason: "Draining", Message: message,
+		Type: conv.condition.Type, Status: machine.ConditionFalse, Reason: "Draining", Message: message,
 	}
 	return conv
 }

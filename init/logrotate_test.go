@@ -171,3 +171,40 @@ func TestCappedLogNeverRotatesMidLine(t *testing.T) {
 		t.Errorf("live file: %q", got)
 	}
 }
+
+func TestCappedLogGoesQuietWhenTheFileBreaks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "k3s.log")
+	c, err := openCappedLog(path, k3sLogCap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The file dies under the writer (a full disk's simplest stand-in
+	// is a closed descriptor). The Write contract holds: no error, the
+	// failure is reported once, and later writes are quiet no-ops so
+	// the console copy keeps flowing.
+	c.f.Close()
+	if n, err := c.Write([]byte("lost line\n")); err != nil || n != len("lost line\n") {
+		t.Errorf("Write never propagates failure: %d, %v", n, err)
+	}
+	if !c.broken {
+		t.Error("the writer marks itself broken")
+	}
+	if _, err := c.Write([]byte("more\n")); err != nil {
+		t.Error("a broken writer stays a quiet no-op")
+	}
+	if err := c.Close(); err != nil {
+		t.Errorf("closing a broken writer is clean: %v", err)
+	}
+}
+
+func TestShiftLogReportsARenameFailure(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "k3s.log"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	shiftLog(filepath.Join(dir, "k3s.log"), filepath.Join(dir, "k3s.log.1"))
+}

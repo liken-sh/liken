@@ -164,7 +164,7 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 	switch {
 	case len(stalled) > 0:
 		r.progressing = machine.Condition{
-			Type: "Progressing", Status: "False", Reason: "RolloutStalled",
+			Type: "Progressing", Status: machine.ConditionFalse, Reason: "RolloutStalled",
 			Message: fmt.Sprintf("granted a reboot turn more than %s ago and not back: %s; no further turns until it returns",
 				rolloutStallAfter, strings.Join(stalled, ", ")),
 		}
@@ -177,11 +177,11 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 			message += "; waiting: " + strings.Join(waiting, ", ")
 		}
 		r.progressing = machine.Condition{
-			Type: "Progressing", Status: "True", Reason: "RollingOut", Message: message,
+			Type: "Progressing", Status: machine.ConditionTrue, Reason: "RollingOut", Message: message,
 		}
 	default:
 		r.progressing = machine.Condition{
-			Type: "Progressing", Status: "True", Reason: "RolloutComplete",
+			Type: "Progressing", Status: machine.ConditionTrue, Reason: "RolloutComplete",
 			Message: "no machines are waiting for a reboot turn",
 		}
 	}
@@ -201,7 +201,7 @@ func carryOutRollout(c *apiClient, machines []machine.Machine, r rollout, now ti
 		switch {
 		case slices.Contains(r.grant, name):
 			status.Conditions = machine.SetCondition(slices.Clone(m.Status.Conditions), machine.Condition{
-				Type: rebootApprovedCondition, Status: "True", Reason: "DisruptionBudgetAllows",
+				Type: rebootApprovedCondition, Status: machine.ConditionTrue, Reason: "DisruptionBudgetAllows",
 				ObservedGeneration: m.Metadata.Generation,
 				Message:            "the cluster's disruption budget allows this machine to take its reboot turn now",
 			}, now)

@@ -129,3 +129,23 @@ func TestDiscoverPartitionsParsesUevent(t *testing.T) {
 		t.Errorf("an unnamed partition should read as empty, not error: %+v", parts[1])
 	}
 }
+
+func TestReportBlockDevicesNarratesTheInventory(t *testing.T) {
+	// The report prints the same inventory the facts publish; both
+	// read the same fake sysfs, which is the parity under test.
+	sys, dev := fakeMachine(t)
+	addDisk(t, sys, dev, "vda", 2<<30, nil)
+	writeSysfs(t, filepath.Join(sys, "vda"), "serial", "liken-lab-state\n")
+	reportBlockDevices()
+}
+
+func TestDiscoverBlockDevicesReadsSCSIModels(t *testing.T) {
+	sys, dev := fakeMachine(t)
+	addDisk(t, sys, dev, "sda", 2<<30, nil)
+	writeSysfs(t, filepath.Join(sys, "sda", "device"), "model", "Samsung SSD 990 \n")
+	disks := discoverBlockDevices()
+	if len(disks) != 1 || disks[0].Model != "Samsung SSD 990" {
+		t.Errorf("the padded model string trims: %+v", disks)
+	}
+	reportBlockDevices()
+}

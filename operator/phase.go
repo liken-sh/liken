@@ -19,7 +19,37 @@ package main
 // leader on a silent machine's behalf (fleet.go), and overwritten by
 // the machine's own operator the moment it reports again.
 
-import "github.com/chrisguidry/liken/machine"
+import (
+	"time"
+
+	"github.com/chrisguidry/liken/machine"
+)
+
+// effectivePhase is a machine's phase as the fleet should read it: its
+// own claim when its heartbeat is fresh, and Lost when it has gone
+// silent. A written status is only as current as the machine that
+// wrote it, and a silent machine may no longer exist. A machine with
+// no lease at all has never been heard from. The sweeping leader
+// exempts itself: it is running this very code, so its liveness isn't
+// in question, only how recently its renewal landed. Both the fleet
+// sweep and the rollout conductor judge machines through this lens,
+// which is why it lives here with the rest of the phase derivations.
+//
+// Silence is not always trouble: a machine holding a reboot grant
+// (rollout.go) was told to go down, so until the grant is old enough
+// to count as a stall, the sweep treats its silence as the reboot in
+// progress.
+func effectivePhase(m *machine.Machine, renewals map[string]time.Time, self string, now time.Time) machine.Phase {
+	renewed, heard := renewals[m.Metadata.Name]
+	if m.Metadata.Name == self || (heard && now.Sub(renewed) <= heartbeatStaleAfter) {
+		return m.Status.Phase
+	}
+	if grant := machine.FindCondition(m.Status.Conditions, rebootApprovedCondition); grant != nil &&
+		now.Sub(grant.LastTransitionTime) <= rolloutStallAfter {
+		return machine.PhaseUpdating
+	}
+	return machine.PhaseLost
+}
 
 // phasePrecedence orders the phases most-severe-first: when several
 // conditions point at different phases, the machine reports the
@@ -43,7 +73,7 @@ var phasePrecedence = []machine.Phase{
 // both "not converged", but one resolves with a reboot and the other
 // never will without a different edit.
 func conditionPhase(c machine.Condition) machine.Phase {
-	if c.Type == "Ready" || c.Status == "True" {
+	if c.Type == "Ready" || c.Status == machine.ConditionTrue {
 		return ""
 	}
 	switch c.Reason {

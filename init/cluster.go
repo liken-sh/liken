@@ -115,11 +115,7 @@ func chooseCluster(stateRoot, seedPath string, durable bool, boot *machine.BootS
 // reason, and reports the rejection for this boot's facts.
 func rejectStagedCluster(store machine.ManifestStore, raw []byte, reason string) *machine.Rejection {
 	fmt.Fprintf(os.Stderr, "liken: cluster: rejecting the staged document: %s\n", reason)
-	rejection := machine.Rejection{
-		Hash:       machine.ManifestHash(raw),
-		Reason:     reason,
-		RejectedAt: time.Now().UTC(),
-	}
+	rejection := machine.NewRejection(raw, reason, time.Now().UTC())
 	if err := store.Reject(rejection); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: cluster: recording the rejection: %v\n", err)
 	}

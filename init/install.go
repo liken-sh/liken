@@ -45,8 +45,8 @@ const installParam = "liken.install"
 // own document describes. image/build.sh assembles this as a second
 // cpio concatenated onto the ordinary image; the kernel unpacks
 // concatenated archives in order, the same mechanism early microcode
-// updates use.
-const releasePayloadDir = "/usr/share/liken/release"
+// updates use. A variable so tests can supply a payload of their own.
+var releasePayloadDir = "/usr/share/liken/release"
 
 // installToDisk performs the whole install against the slots that
 // storage reconciliation just mounted. It returns rather than powers
@@ -122,20 +122,12 @@ func installToDisk(machineName string) error {
 	// firmware's own entries (setup menus, shells) stay reachable,
 	// just never preferred.
 	order := []uint16{entryA, entryB}
-	if b, err := readEFIVar(efiVarsDir, "BootOrder"); err == nil {
-		for i := 0; i+2 <= len(b); i += 2 {
-			n := uint16(b[i]) | uint16(b[i+1])<<8
-			if n != entryA && n != entryB {
-				order = append(order, n)
-			}
+	for _, n := range readBootOrder(efiVarsDir) {
+		if n != entryA && n != entryB {
+			order = append(order, n)
 		}
 	}
-	payload := make([]byte, len(order)*2)
-	for i, n := range order {
-		payload[i*2] = byte(n)
-		payload[i*2+1] = byte(n >> 8)
-	}
-	if err := writeEFIVar(efiVarsDir, "BootOrder", payload); err != nil {
+	if err := writeBootOrder(efiVarsDir, order); err != nil {
 		return fmt.Errorf("install: writing BootOrder: %w", err)
 	}
 
@@ -255,7 +247,7 @@ func writeSlotBootEntry(dir, description, slot string, part *slotPartition, mach
 // command line: the installer was told where this machine's console
 // is, and the installed system should keep using the same one.
 func consoleArgs() []string {
-	raw, err := os.ReadFile("/proc/cmdline")
+	raw, err := os.ReadFile(cmdlinePath)
 	if err != nil {
 		return nil
 	}

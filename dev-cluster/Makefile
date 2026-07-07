@@ -302,7 +302,7 @@ install: run
 grow-pods:
 	qemu-img resize dist/$(NODE)/pods.qcow2 +4G
 
-.PHONY: run run-once grow-pods clean
+.PHONY: run run-once install grow-pods clean
 
 clean:
 	rm -rf dist

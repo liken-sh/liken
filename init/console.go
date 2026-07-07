@@ -43,6 +43,8 @@ import (
 	"io"
 	"os"
 	"time"
+
+	"github.com/chrisguidry/liken/machine"
 )
 
 // console is the raw serial console: file descriptor 1 exactly as
@@ -55,11 +57,13 @@ import (
 var console io.Writer = os.Stdout
 
 const (
-	// Syslog priorities for init's two streams: facility 1
-	// (userspace) shifted past the three severity bits, plus
-	// severity 6 (info) for stdout and 4 (warning) for stderr.
-	kmsgInfo    = 1<<3 | 6
-	kmsgWarning = 1<<3 | 4
+	// Syslog priorities for init's two streams: the userspace
+	// facility shifted past the three severity bits, plus info for
+	// stdout and warning for stderr. The facility and severity
+	// numbers are the wire contract with the log relays, so they
+	// live in the machine package both binaries import.
+	kmsgInfo    = machine.FacilityUser<<3 | machine.SeverityInfo
+	kmsgWarning = machine.FacilityUser<<3 | machine.SeverityWarning
 
 	// The kernel rejects /dev/kmsg writes longer than about 1KB
 	// (LOG_LINE_MAX) with EINVAL; it does not truncate. 800 bytes of

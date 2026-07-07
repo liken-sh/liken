@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/chrisguidry/liken/machine"
 )
 
 // formatTestPartition formats a sparse file standing in for a
@@ -225,5 +227,33 @@ func TestHasFAT32(t *testing.T) {
 	}
 	if hasFAT32(blank.Name()) {
 		t.Error("hasFAT32 should not recognize a blank device")
+	}
+}
+
+func TestFormatSlotLeavesARecognizableFilesystem(t *testing.T) {
+	// formatSlot against a file standing in for the partition: the
+	// same open-and-write path the claim takes, minus the disk.
+	path := filepath.Join(t.TempDir(), "slot")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sparse: FAT32 needs at least ~260Mi of clusters, but the format
+	// only writes the reserved region and the tables.
+	if err := f.Truncate(512 << 20); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	if err := formatSlot(path, 512<<20, machine.SystemBRole); err != nil {
+		t.Fatal(err)
+	}
+	if !hasFAT32(path) {
+		t.Error("a formatted slot must recognize itself")
+	}
+}
+
+func TestHasFAT32ReportsAMissingDevice(t *testing.T) {
+	if hasFAT32(filepath.Join(t.TempDir(), "absent")) {
+		t.Error("no device, no filesystem")
 	}
 }

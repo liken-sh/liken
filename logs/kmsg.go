@@ -44,6 +44,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/chrisguidry/liken/machine"
 )
 
 var kmsgPath = "/dev/kmsg"
@@ -172,7 +174,7 @@ func (r *kmsgRelay) run() error {
 			facility := rec.Facility
 			if err := r.out.emit(envelope{
 				Time:     r.anchor().Add(rec.Stamp).UTC().Format(time.RFC3339Nano),
-				Severity: severityNames[rec.Severity],
+				Severity: machine.SeverityNames[rec.Severity],
 				Facility: &facility,
 				Seq:      rec.Seq,
 				Message:  rec.Message,

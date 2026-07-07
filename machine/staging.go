@@ -3,9 +3,10 @@ package machine
 // The manifest lifecycle is how a document edit survives a reboot.
 //
 // A machine with a machineState storage role keeps its manifests on
-// that filesystem, one directory per document. Two documents go
-// through this lifecycle today, the Machine manifest (manifests/) and
-// the Cluster manifest (cluster/), and each directory holds the same
+// that filesystem, one directory per document. Three documents go
+// through this lifecycle today — the Machine manifest (manifests/),
+// the Cluster manifest (cluster/), and the system-release record
+// (system/, see systemrelease.go) — and each directory holds the same
 // three files with the same meanings:
 //
 //	staged.yaml    a document awaiting its first successful boot,
@@ -107,6 +108,15 @@ type Rejection struct {
 func ManifestHash(raw []byte) string {
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
+}
+
+// NewRejection builds the record for refusing a staged document:
+// exactly these bytes, for this reason, at this moment. It exists
+// apart from Reject because a rejection is reported (on the console,
+// in the boot's facts) even when recording it durably fails; the
+// record's existence must not depend on the write succeeding.
+func NewRejection(raw []byte, reason string, at time.Time) Rejection {
+	return Rejection{Hash: ManifestHash(raw), Reason: reason, RejectedAt: at}
 }
 
 // load reads one lifecycle file. A missing file is not an error; it

@@ -142,19 +142,19 @@ func (r DeclaredRole) PartitionName() string {
 	return PartitionPrefix + string(r.Name)
 }
 
-// SystemSlotsDir is where the system slots' filesystems are mounted:
+// systemSlotsDir is where the system slots' filesystems are mounted:
 // slot A at system/a, slot B at system/b. Init mounts them there
 // (its roleMounts table) and the operator writes downloaded releases
 // there (through a hostPath mount), so the path is defined once, in
 // the package both programs share.
-const SystemSlotsDir = "/var/lib/liken/system"
+const systemSlotsDir = "/var/lib/liken/system"
 
 // SystemSlotDir is one slot's mountpoint. Slots are named "A" and
 // "B" everywhere a person sees them (boot entries, conditions, the
 // liken.slot= parameter); the directory names are the same letters
 // in lowercase.
 func SystemSlotDir(slot string) string {
-	return SystemSlotsDir + "/" + strings.ToLower(slot)
+	return systemSlotsDir + "/" + strings.ToLower(slot)
 }
 
 // InactiveSlot is the slot a machine is not running from, which is
@@ -228,42 +228,6 @@ func (s StorageSpec) Validate() error {
 		}
 	}
 	return nil
-}
-
-// StorageCondition summarizes storage as one standard Kubernetes
-// condition, comparing what the spec declared against where each role
-// is actually backed. True means every declared role sits on its
-// partition. False should be unreachable on a running machine, since
-// init powers off rather than boot with a declared role unsatisfied.
-// But a condition has to be able to express every state it names, and
-// a future, softer failure mode may need it.
-func StorageCondition(spec StorageSpec, status StorageStatus) Condition {
-	var placed, inMemory []string
-	for _, role := range spec.Roles() {
-		rs := status.Role(role.Name)
-		if rs != nil && rs.Backing == BackingPartition {
-			placed = append(placed, fmt.Sprintf("%s on %s", role.Name, rs.Device))
-		} else {
-			inMemory = append(inMemory, string(role.Name))
-		}
-	}
-	switch {
-	case len(inMemory) > 0:
-		return Condition{
-			Type: "StorageReady", Status: "False", Reason: "RolesInMemory",
-			Message: fmt.Sprintf("declared roles backed by memory: %s", strings.Join(inMemory, ", ")),
-		}
-	case len(placed) > 0:
-		return Condition{
-			Type: "StorageReady", Status: "True", Reason: "AllRolesPlaced",
-			Message: strings.Join(placed, ", "),
-		}
-	default:
-		return Condition{
-			Type: "StorageReady", Status: "True", Reason: "NothingDeclared",
-			Message: "no storage declared; all roles backed by memory",
-		}
-	}
 }
 
 // ParseSize reads a binary quantity ("2Gi", "512Mi", or a plain

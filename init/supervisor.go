@@ -29,6 +29,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -65,6 +66,41 @@ func (w *lineWriter) Write(p []byte) (int, error) {
 		fmt.Fprintf(w.dest, "%s%s", w.prefix, line)
 	}
 	return len(p), nil
+}
+
+// reap collects the exit status of any child process for as long as
+// the machine plane runs. The plane only stops at shutdown, after
+// every process it might collect has already been stopped. SIGCHLD
+// arrives whenever a child dies; because signal coalescing can fold
+// many deaths into one delivery, each wakeup collects every exited
+// child, not just one. This loop is the only place in liken that
+// calls wait; every exit status it collects is posted to the death
+// registry below, where whoever started the process can claim it.
+// (Go note: signal.Notify registers a handler with the runtime and
+// forwards deliveries onto a channel, turning an async interrupt into
+// an ordinary receive loop, and satisfying the "PID 1 must install
+// handlers" rule from main.go's header comment.)
+func reap(ctx context.Context) error {
+	sigchld := make(chan os.Signal, 1)
+	signal.Notify(sigchld, unix.SIGCHLD)
+	defer signal.Stop(sigchld)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-sigchld:
+		}
+		for {
+			// -1 means "any child"; WNOHANG means "don't block if none
+			// have exited", in which case Wait4 returns pid 0.
+			var status unix.WaitStatus
+			pid, err := unix.Wait4(-1, &status, unix.WNOHANG, nil)
+			if pid <= 0 || err != nil {
+				break
+			}
+			deaths.record(pid, status)
+		}
+	}
 }
 
 // deathRegistry connects the reaper (the only place wait() happens)
@@ -290,6 +326,16 @@ func describeExit(status unix.WaitStatus) string {
 // prints the node's status as it changes: registering, NotReady, and
 // finally Ready. It's a machine-plane component whose work completes
 // once the report is finished, so every exit path returns nil.
+//
+// This reporter (and reportPods below) is the one resident of the
+// machine plane that k3s does not depend on, which the two-planes
+// rule (components.go) would normally send into the cluster. It
+// stays by deliberate exception: its whole subject is the window
+// before the cluster can speak for itself, when k3s is starting and
+// the operator pod doesn't exist yet, and on a shell-less machine
+// the console is the only place that story can be told. The operator
+// takes over the reporting the moment it runs; this is the bridge to
+// that moment.
 func reportWhenReady(ctx context.Context) error {
 	last := ""
 	deadline := time.Now().Add(5 * time.Minute)

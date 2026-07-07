@@ -24,8 +24,8 @@ func TestCompareVersions(t *testing.T) {
 		{"1.0.0-rc1", "1.0.0-rc1", 0},
 	}
 	for _, c := range cases {
-		if got := CompareVersions(c.a, c.b); got != c.want {
-			t.Errorf("CompareVersions(%q, %q): got %d, want %d", c.a, c.b, got, c.want)
+		if got := compareVersions(c.a, c.b); got != c.want {
+			t.Errorf("compareVersions(%q, %q): got %d, want %d", c.a, c.b, got, c.want)
 		}
 	}
 }

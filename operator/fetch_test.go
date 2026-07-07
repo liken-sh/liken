@@ -87,7 +87,9 @@ func awaitSettled(t *testing.T, f *fetcher) fetchSnapshot {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		snap := f.Snapshot()
+		f.mu.Lock()
+		snap := f.snap
+		f.mu.Unlock()
 		if snap.state != fetchRunning && snap.state != fetchIdle {
 			return snap
 		}

@@ -77,30 +77,6 @@ type fleetSweep struct {
 	phase     machine.Phase
 }
 
-// effectivePhase is a machine's phase as the fleet should read it: its
-// own claim when its heartbeat is fresh, and Lost when it has gone
-// silent. A written status is only as current as the machine that
-// wrote it, and a silent machine may no longer exist. A machine with
-// no lease at all has never been heard from. The sweeping leader
-// exempts itself: it is running this very code, so its liveness isn't
-// in question, only how recently its renewal landed.
-//
-// Silence is not always trouble: a machine holding a reboot grant
-// (rollout.go) was told to go down, so until the grant is old enough
-// to count as a stall, the sweep treats its silence as the reboot in
-// progress.
-func effectivePhase(m *machine.Machine, renewals map[string]time.Time, self string, now time.Time) machine.Phase {
-	renewed, heard := renewals[m.Metadata.Name]
-	if m.Metadata.Name == self || (heard && now.Sub(renewed) <= heartbeatStaleAfter) {
-		return m.Status.Phase
-	}
-	if grant := machine.FindCondition(m.Status.Conditions, rebootApprovedCondition); grant != nil &&
-		now.Sub(grant.LastTransitionTime) <= rolloutStallAfter {
-		return machine.PhaseUpdating
-	}
-	return machine.PhaseLost
-}
-
 // decideFleetSweep judges every machine by its effective phase: a
 // machine counts toward ready only when its phase is Ready and its
 // heartbeat is fresh. The verdict sorts every machine that isn't
@@ -134,19 +110,19 @@ func decideFleetSweep(machines []machine.Machine, renewals map[string]time.Time,
 	case len(unwell) > 0:
 		s.phase = machine.PhaseDegraded
 		s.condition = machine.Condition{
-			Type: "MachinesReady", Status: "False", Reason: "MachinesDegraded",
+			Type: "MachinesReady", Status: machine.ConditionFalse, Reason: "MachinesDegraded",
 			Message: fmt.Sprintf("%s machines ready; unwell: %s", s.tally.Summary, strings.Join(unwell, ", ")),
 		}
 	case len(transitioning) > 0:
 		s.phase = machine.PhaseUpdating
 		s.condition = machine.Condition{
-			Type: "MachinesReady", Status: "False", Reason: "MachinesUpdating",
+			Type: "MachinesReady", Status: machine.ConditionFalse, Reason: "MachinesUpdating",
 			Message: fmt.Sprintf("%s machines ready; mid-transition: %s", s.tally.Summary, strings.Join(transitioning, ", ")),
 		}
 	default:
 		s.phase = machine.PhaseReady
 		s.condition = machine.Condition{
-			Type: "MachinesReady", Status: "True", Reason: "AllMachinesReady",
+			Type: "MachinesReady", Status: machine.ConditionTrue, Reason: "AllMachinesReady",
 			Message: fmt.Sprintf("all %d machines are ready", s.tally.Total),
 		}
 	}
@@ -194,7 +170,7 @@ func sweepFleet(c *apiClient, self string, cluster *machine.Cluster, now time.Ti
 		status := m.Status
 		status.Phase = machine.PhaseLost
 		status.Conditions = machine.SetCondition(status.Conditions, machine.Condition{
-			Type: "Ready", Status: "Unknown", Reason: "HeartbeatStale",
+			Type: "Ready", Status: machine.ConditionUnknown, Reason: "HeartbeatStale",
 			ObservedGeneration: m.Metadata.Generation,
 			Message:            "the machine's operator has stopped renewing its heartbeat lease; the machine is presumed down",
 		}, now)
