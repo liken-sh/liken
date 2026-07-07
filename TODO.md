@@ -1073,8 +1073,15 @@
            (the device supports concurrent readers) and filter by
            facility; k3s-logs and containerd-logs run the same
            tailer at different paths. Pod identity is the source
-           tag, and privilege follows the source: the kmsg pods
-           need CAP_SYSLOG, the tailers only a read-only hostPath.
+           tag, and privilege follows the source: the kmsg pods run
+           privileged, the tailers with only a read-only hostPath.
+           The privilege was a lab lesson: CAP_SYSLOG (which the
+           kernel demands for /dev/kmsg under dmesg_restrict) is
+           necessary but not sufficient, because the container
+           runtime's devices cgroup separately gates every device
+           open through an allowlist Kubernetes cannot extend
+           per-pod. The first drill crash-looped both kmsg relays
+           on EPERM with the capability correctly granted.
            Delivery copies the operator wholesale: the :installed
            image resolution, OnDelete updates, and the steward's
            refresh. Each relay keeps a resume cursor in a per-pod

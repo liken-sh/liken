@@ -8,10 +8,10 @@
 #
 # One relay per source is the design, not an accident of packaging.
 # Pod identity is the tag (no consumer parses a source field to tell
-# streams apart), privilege follows the source (the kmsg relays need
-# one capability, the tailers only read-only mounts of one directory
-# each), and a bug in one parser blinds one stream instead of all of
-# them. All four run the same liken.sh/logs image (logs/image.sh),
+# streams apart), privilege follows the source (the kmsg relays must
+# open a host device, which only privileged can do; the tailers get
+# read-only mounts of one directory each and nothing more), and a
+# bug in one parser blinds one stream instead of all of them. All four run the same liken.sh/logs image (logs/image.sh),
 # differing only in the verb passed as args and in what they mount.
 #
 # Everything these pods emit is a JSON envelope around a verbatim log
@@ -71,13 +71,19 @@ spec:
           imagePullPolicy: Never
           args: ["kernel"]
           securityContext:
-            # Reading /dev/kmsg requires CAP_SYSLOG: the vendored
-            # kernel sets CONFIG_SECURITY_DMESG_RESTRICT, so even
-            # uid 0 is refused without it. One capability, not
-            # privileged: this pod reads one device and writes its
-            # own stdout.
-            capabilities:
-              add: ["SYSLOG"]
+            # Reading /dev/kmsg takes two permissions, and only one
+            # of them can be granted narrowly. CAP_SYSLOG is the
+            # kernel's own check (the vendored kernel sets
+            # CONFIG_SECURITY_DMESG_RESTRICT, so even uid 0 is
+            # refused without it). But the container runtime also
+            # gates every device open through the devices cgroup,
+            # whose allowlist (tty, null, urandom, ...) does not
+            # include kmsg, and Kubernetes offers no per-device
+            # grant: the only spelling that opens a hostPath device
+            # is privileged, which implies every capability too.
+            # The pod still only reads one device and writes its own
+            # stdout; the mount below is what actually bounds it.
+            privileged: true
           volumeMounts:
             - name: kmsg
               mountPath: /dev/kmsg
@@ -131,8 +137,10 @@ spec:
           # facility field is what splits the two voices back apart.
           args: ["liken"]
           securityContext:
-            capabilities:
-              add: ["SYSLOG"]
+            # privileged for the same reason as kernel-logs: the
+            # runtime's devices cgroup gates the /dev/kmsg open, and
+            # privileged is the only per-pod grant Kubernetes has.
+            privileged: true
           volumeMounts:
             - name: kmsg
               mountPath: /dev/kmsg
