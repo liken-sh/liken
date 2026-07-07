@@ -648,7 +648,7 @@
         reconcile be the proof, and let init re-assert BootOrder from
         the durable record every boot — machineState is the authority,
         the firmware a cache of it.
-    1. [ ] The slot vocabulary and the FAT32 formatter: `systemA` and
+    1. [x] The slot vocabulary and the FAT32 formatter: `systemA` and
            `systemB` join the storage roles at the head of the
            canonical order (the firmware is the earliest reader of any
            partition liken owns), typed in the GPT as EFI System
@@ -664,7 +664,16 @@
            some roles' filesystems are modules now. Prove it: a node
            with a blank third disk claims both slots into
            status.storage, and a file written to a mounted slot
-           survives a reboot.
+           survives a reboot. (Proven on node-5 via a live Machine
+           edit riding the milestone-13 rollout: AwaitingTurn, a
+           granted reboot, the claim and both FAT32 formats narrated
+           on the console, both slots Partition-backed at 512Mi. The
+           power-cut drill taught the milestone's next lesson early:
+           an *unsynced* file written seconds before a power cut was
+           gone afterward — FAT has no journal and the page cache is
+           not a promise — while a synced file rode through two
+           power cuts intact. The download step's fsync-and-reverify
+           design is built for exactly this.)
     2. [ ] Speaking EFI: init mounts efivarfs when the firmware is
            UEFI and learns the boot variables — each a small binary
            format (EFI_LOAD_OPTION: attributes, a UTF-16 name, a
