@@ -6,10 +6,14 @@
 # build bakes in) to the virtual hardware that boots them. Physical
 # and cloud machines are the real targets; these QEMU guests are where
 # everything gets tried first: headless, disposable, and observable
-# from the serial console alone. QEMU plays two roles at once here:
-# the hardware (CPU, memory, NICs, disks) and the bootloader: -kernel
-# and -initrd load the two files that are the entire operating system,
-# per the x86 Linux boot protocol. No boot disk, no GRUB, no UEFI.
+# from the serial console alone. QEMU plays the hardware here — CPU,
+# memory, NICs, disks, and OVMF's real UEFI firmware — and each
+# machine boots from its own disk, from the system slots it installed
+# itself onto (`make install NODE=x`, once). BOOT=kernel keeps the
+# older arrangement, where QEMU also plays bootloader and loads the
+# two files that are the entire operating system via -kernel/-initrd,
+# per the x86 Linux boot protocol: the fallback for machines that
+# haven't installed yet, and what run-once and install use.
 #
 # The lab has a node dimension: the same image boots every machine,
 # and NODE picks which machine a given QEMU process is. Each node gets
@@ -138,10 +142,6 @@ endif
 #   -serial stdio            ...and that serial port is this terminal
 #   -monitor none            don't multiplex QEMU's own control console
 #                            onto the same stream; tests read pure liken
-#   -no-reboot               a guest-initiated reboot ends QEMU instead
-#                            of looping, so boots terminate cleanly.
-#                            `run-lab` drops this flag (see below): a
-#                            reboot then resets the VM in place
 #
 # The network is two NICs with two jobs, which is what real fleets
 # look like (a management network and a cluster network):
@@ -195,7 +195,17 @@ endif
 #                            drive would carry, so identifying a disk
 #                            by identity rather than by kernel name
 #                            works in the lab too
-QEMU_EXIT_ON_REBOOT := -no-reboot
+# A guest-initiated reboot resets the VM in place: QEMU reloads the
+# firmware (and -kernel/-initrd when present), the qcow2 disks and
+# NVRAM persist, and the serial console shows the shutdown and the
+# next boot as one stream. That's the behavior a lab machine needs,
+# because reboots are how liken applies staged specs and proves new
+# releases — a machine whose reboot ended its QEMU would power off
+# mid-rollout and leave the fleet. The bounded boots (run-once,
+# install) add -no-reboot instead: they end in a deliberate power
+# off, and if anything reboots unexpectedly they should exit and
+# hand the console log back rather than loop.
+QEMU_EXIT_ON_REBOOT :=
 
 # Where the boot comes from. BOOT=disk (the default) hands the whole
 # job to the firmware: no -kernel, no -append; OVMF consults its boot
@@ -256,15 +266,8 @@ run: dist/$(NODE)/state.qcow2 dist/$(NODE)/pods.qcow2 dist/$(NODE)/boot.qcow2 di
 # exits, and the console log is a complete, bounded record of the boot.
 run-once: BOOT = kernel
 run-once: LIKEN_BOOT_ARGS = liken.oneshot
+run-once: QEMU_EXIT_ON_REBOOT := -no-reboot
 run-once: run
-
-# A reboot-capable run: identical to `run` but without -no-reboot, so
-# a guest-initiated restart resets the VM in place. QEMU reloads
-# -kernel and -initrd on reset, the qcow2 disks persist, and the
-# serial console shows the shutdown and the next boot as one stream:
-# the way to watch a staged spec get applied end to end.
-run-lab: QEMU_EXIT_ON_REBOOT :=
-run-lab: run
 
 # The install boot: the USB-stick moment. Boots the install image
 # (liken.cpio carrying the release payload) with liken.install on the
@@ -276,6 +279,7 @@ run-lab: run
 install: BOOT = kernel
 install: INITRD = ../image/dist/install.cpio
 install: LIKEN_BOOT_ARGS = liken.install
+install: QEMU_EXIT_ON_REBOOT := -no-reboot
 install: run
 
 # Grow a node's pods disk under the machine, the lab's stand-in for a
@@ -286,7 +290,7 @@ install: run
 grow-pods:
 	qemu-img resize dist/$(NODE)/pods.qcow2 +4G
 
-.PHONY: run run-once run-lab grow-pods clean
+.PHONY: run run-once grow-pods clean
 
 clean:
 	rm -rf dist
