@@ -1,41 +1,41 @@
 package main
 
-// The pod steward keeps the operator's own pods in step with the
-// operating systems under them.
+// The pod steward keeps the OS's own pods in step with the operating
+// systems under them.
 //
-// The operator's container image is part of the OS: image/build.sh
-// bakes it into the initramfs, k3s imports it into containerd at
-// boot, and imagePullPolicy: Never means a node can only ever run
-// the operator its own OS carries (or one left in containerd's
-// persistent store by an OS it ran before). That breaks the usual
-// Kubernetes assumption that any node can pull any image, and the
-// DaemonSet has to be arranged around it:
+// Two container images are part of the OS: the operator's and the
+// log relays'. image/build.sh bakes both into the initramfs, k3s
+// imports them into containerd at boot, and imagePullPolicy: Never
+// means a node can only ever run the builds its own OS carries (or
+// ones left in containerd's persistent store by an OS it ran
+// before). That breaks the usual Kubernetes assumption that any node
+// can pull any image, and every OS DaemonSet is arranged around it:
 //
-//   - The template pins a *stable* tag (liken.sh/operator:installed)
-//     that every release tags its own build with, so the same pod
-//     spec resolves to each node's own baked operator, and applying
-//     a new release's manifests doesn't change the image field at
-//     all.
+//   - Each template pins a *stable* tag (liken.sh/operator:installed,
+//     liken.sh/logs:installed) that every release tags its own build
+//     with, so the same pod spec resolves to each node's own baked
+//     image, and applying a new release's manifests doesn't change
+//     the image field at all.
 //   - updateStrategy: OnDelete, so applying manifests never deletes
 //     a running pod. A rolling update would recreate pods on nodes
-//     whose OS doesn't carry the new image yet, killing the very
-//     operator each of those machines needs to drive its own
-//     upgrade and leaving the machine unable to ever take one.
+//     whose OS doesn't carry the new image yet; for the operator that
+//     would kill the very pod each machine needs to drive its own
+//     upgrade and leave it unable to ever take one.
 //
 // What's left is freshness: after a machine reboots into a new
-// release, its existing pod object predates the new manifests, and
-// the sweep leader, right here, deletes it so the DaemonSet can
-// recreate it from the current template. The DaemonSet carries a
-// liken.sh/os-version annotation naming the release that shipped
-// it, stamped onto its pods through the template; the steward
-// refreshes a pod exactly when its machine reports that version in
-// its facts but the pod predates it. Both halves of that condition
-// matter. A machine still on the old OS keeps its old pod, because
-// evicting it would leave the machine with no operator at all. A
-// machine ahead of the applied manifests keeps its old pod too,
-// because a refresh would recreate another stale one, thrashing
-// every sweep until a new-release leader applies the manifests that
-// can actually satisfy it.
+// release, its existing pod objects predate the new manifests, and
+// the sweep leader, right here, deletes them so each DaemonSet can
+// recreate its pod from the current template. Every stewarded
+// DaemonSet carries a liken.sh/os-version annotation naming the
+// release that shipped it, stamped onto its pods through the
+// template; the steward refreshes a pod exactly when its machine
+// reports that version in its facts but the pod predates it. Both
+// halves of that condition matter. A machine still on the old OS
+// keeps its old pod, because evicting it would leave the machine
+// without that pod's function at all. A machine ahead of the applied
+// manifests keeps its old pod too, because a refresh would recreate
+// another stale one, thrashing every sweep until a new-release
+// leader applies the manifests that can actually satisfy it.
 
 import (
 	"fmt"
@@ -46,19 +46,36 @@ import (
 
 // osVersionAnnotation names the liken release a manifest (and the
 // pods created from it) shipped with. image/build.sh substitutes the
-// real version into the DaemonSet at bake time.
+// real version into each DaemonSet at bake time.
 const osVersionAnnotation = "liken.sh/os-version"
 
-const operatorDaemonSetPath = "/apis/apps/v1/namespaces/liken-system/daemonsets/liken-operator"
-const operatorPodsPath = "/api/v1/namespaces/liken-system/pods?labelSelector=app%3Dliken-operator"
+// stewardedDaemonSets are the OS's own DaemonSets, the ones whose
+// images are baked into the initramfs and whose pods therefore need
+// the steward's refresh after an upgrade. Each is expected to label
+// its pods app: <name>, the selector its manifest declares.
+var stewardedDaemonSets = []string{
+	"liken-operator",
+	"kernel-logs",
+	"liken-logs",
+	"k3s-logs",
+	"containerd-logs",
+}
 
-// decideOperatorRefresh is the steward's whole judgment, pure over
-// the sweep's inputs: which operator pods to evict so the DaemonSet
+func daemonSetPath(name string) string {
+	return "/apis/apps/v1/namespaces/liken-system/daemonsets/" + name
+}
+
+func daemonSetPodsPath(name string) string {
+	return "/api/v1/namespaces/liken-system/pods?labelSelector=app%3D" + name
+}
+
+// decideRefresh is the steward's whole judgment, pure over the
+// sweep's inputs: which of one DaemonSet's pods to evict so it
 // recreates them from the current template. dsVersion is the
 // os-version annotation on the DaemonSet itself, naming the release
 // whose manifests are actually applied; "" (no annotation, or no
 // DaemonSet) means there is no authority to refresh toward.
-func decideOperatorRefresh(dsVersion string, machines []machine.Machine, pods []podObject) []podObject {
+func decideRefresh(dsVersion string, machines []machine.Machine, pods []podObject) []podObject {
 	if dsVersion == "" {
 		return nil
 	}
@@ -80,36 +97,46 @@ func decideOperatorRefresh(dsVersion string, machines []machine.Machine, pods []
 	return refresh
 }
 
-// stewardOperatorPods is the acting half, run by the sweep leader:
-// read the DaemonSet's shipped version, list its pods, and evict the
-// stale ones. Eviction rather than delete, deliberately: it is the
-// verb the operator already holds for drains, and the DaemonSet
-// recreates the pod either way. The eviction may take the sweep
-// leader's own pod (an upgraded leader's old operator is exactly a
-// stale pod); the lease passes and the recreated pod picks the sweep
-// back up.
-func stewardOperatorPods(c *apiClient, machines []machine.Machine) {
+// stewardOSPods is the acting half, run by the sweep leader over
+// every stewarded DaemonSet in turn.
+func stewardOSPods(c *apiClient, machines []machine.Machine) {
+	for _, name := range stewardedDaemonSets {
+		stewardDaemonSet(c, machines, name)
+	}
+}
+
+// stewardDaemonSet reads one DaemonSet's shipped version, lists its
+// pods, and evicts the stale ones. Eviction rather than delete,
+// deliberately: it is the verb the operator already holds for
+// drains, and the DaemonSet recreates the pod either way. The
+// eviction may take the sweep leader's own operator pod (an upgraded
+// leader's old operator is exactly a stale pod); the lease passes
+// and the recreated pod picks the sweep back up. For a relay pod the
+// eviction also discards its emptyDir resume cursor, so each OS
+// upgrade re-ships the tail of that machine's streams once, with the
+// envelopes' seq field there to deduplicate.
+func stewardDaemonSet(c *apiClient, machines []machine.Machine, name string) {
 	var ds struct {
 		Metadata struct {
 			Annotations map[string]string `json:"annotations"`
 		} `json:"metadata"`
 	}
-	if err := c.requestJSON(http.MethodGet, operatorDaemonSetPath, nil, &ds); err != nil {
+	if err := c.requestJSON(http.MethodGet, daemonSetPath(name), nil, &ds); err != nil {
 		return // no DaemonSet to steward; nothing to do
 	}
 	dsVersion := ds.Metadata.Annotations[osVersionAnnotation]
 	var pods struct {
 		Items []podObject `json:"items"`
 	}
-	if err := c.requestJSON(http.MethodGet, operatorPodsPath, nil, &pods); err != nil {
-		fmt.Printf("listing operator pods for the steward: %v\n", err)
+	if err := c.requestJSON(http.MethodGet, daemonSetPodsPath(name), nil, &pods); err != nil {
+		fmt.Printf("listing %s pods for the steward: %v\n", name, err)
 		return
 	}
-	for _, p := range decideOperatorRefresh(dsVersion, machines, pods.Items) {
+	for _, p := range decideRefresh(dsVersion, machines, pods.Items) {
 		if err := evictPod(c, p); err != nil {
-			fmt.Printf("refreshing operator pod %s: %v\n", p.Metadata.Name, err)
+			fmt.Printf("refreshing pod %s: %v\n", p.Metadata.Name, err)
 		} else {
-			fmt.Printf("operator pod %s on %s predates release %s; evicted for the DaemonSet to recreate\n",
+			fmt.Printf("pod %s on %s predates release %s; evicted for the DaemonSet to recreate\n",
 				p.Metadata.Name, p.Spec.NodeName, dsVersion)
 		}
 	}
