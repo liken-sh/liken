@@ -37,3 +37,8 @@ override:
   # parsers, planners, and derivations around it are tested here.
   - path: ^init$
     threshold: 41
+  # The log relays: parsing and tailing are pure or run against real
+  # temp files; what goes untested is the real /dev/kmsg device and
+  # the clock syscalls.
+  - path: ^logs$
+    threshold: 75
