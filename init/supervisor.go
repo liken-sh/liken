@@ -106,7 +106,17 @@ func (d *deathRegistry) await(pid int) unix.WaitStatus {
 
 const (
 	k3sBinary = "/bin/k3s"
-	k3sLog    = "/var/log/k3s.log"
+
+	// The k3s log lives on clusterState, in a directory that is
+	// plainly liken's so it can never be mistaken for a file k3s
+	// manages. Landing on the persistent disk (when the machine has
+	// one) is what lets a log survive the boot that wrote it, and
+	// what makes the log relay's mount a stable path. containerd's
+	// log is k3s's own choice of path on the same filesystem; init
+	// only ever touches it at rotation time (logrotate.go).
+	likenLogDir   = "/var/lib/rancher/k3s/liken"
+	k3sLog        = likenLogDir + "/k3s.log"
+	containerdLog = "/var/lib/rancher/k3s/agent/containerd/containerd.log"
 )
 
 // postMortem is the end of a one-shot boot: with no shell to
@@ -168,6 +178,10 @@ func superviseK3s(role machine.Role, reboot <-chan machine.RebootIntent) {
 			case intent := <-reboot:
 				stopK3s(cmd.Process.Pid, died)
 				_ = cmd.Process.Release()
+				// This close is part of the shutdown ordering, not
+				// tidiness: the log lives on clusterState, which
+				// rebootMachine is about to unmount, and an open
+				// handle there would make that unmount fail busy.
 				logf.Close()
 				rebootMachine(intent) // never returns
 			}
@@ -201,12 +215,15 @@ func superviseK3s(role machine.Role, reboot <-chan machine.RebootIntent) {
 // running command and its log file (which must stay open as long as
 // the process writes; the console copy flows through an in-process
 // pipe).
-func startK3s(role machine.Role) (*exec.Cmd, *os.File, error) {
+func startK3s(role machine.Role) (*exec.Cmd, io.Closer, error) {
 	// k3s's output goes two places: a file, and the console, where it
 	// arrives live, line-buffered, and prefixed so it's
 	// distinguishable from liken's own messages. On a machine with no
-	// shell, the console is the only way to read a log.
-	logf, err := os.OpenFile(k3sLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	// shell, the console is the only way to read a log; the file is
+	// what the k3s-logs relay tails into the cluster. The file writer
+	// caps a boot's log so a chatty k3s can't fill the filesystem it
+	// shares with etcd (logrotate.go).
+	logf, err := openCappedLog(k3sLog, k3sLogCap)
 	if err != nil {
 		return nil, nil, err
 	}

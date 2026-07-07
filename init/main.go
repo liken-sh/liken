@@ -228,6 +228,12 @@ func main() {
 			writeRTC()
 		}
 		prepareForK3s()
+		// The previous boot's k3s and containerd logs step aside
+		// before k3s starts writing this boot's. This is a plain call
+		// rather than a component because it must finish before k3s
+		// opens the files, and boot is the only safe moment to rename
+		// them: nothing holds them open (logrotate.go).
+		rotateBootLogs()
 		// Facts wait until here because they live under /run, and
 		// prepareForK3s just mounted a fresh tmpfs there; anything
 		// written earlier would be shadowed by the mount.
