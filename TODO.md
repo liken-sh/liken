@@ -764,7 +764,7 @@
            byte-identical. NEWEST stays blank until a leader runs this
            build's operator — the sweep is its writer — which the
            fleet migration in step 8 delivers.)
-    5. [ ] The download: an asynchronous fetcher in the operator — a
+    5. [x] The download: an asynchronous fetcher in the operator — a
            blocking 116MB GET inside a reconcile pass would starve the
            heartbeat and read as a death, milestone 10's lesson made
            structural — streams each artifact through sha256 into the
@@ -780,7 +780,27 @@
            the serve log shows the fetch; killing the server
            mid-download and restarting it converges; a deliberately
            corrupted publish holds at DigestMismatch with nothing
-           staged.
+           staged. (Proven on node-5, which learned to say which slot
+           it booted from — liken.slot= now lands in
+           status.boot.slot, and downloads aim at the other one. The
+           down-server drill surfaced a real bug: a failed fetch
+           restarts on the next pass, so the Failed state lived only
+           between passes and the condition forever said "starting";
+           now the retry carries its story, and the drill read
+           "retrying after: connection refused". The corrupted 0.1.1
+           fetched once in full, held at DigestMismatch/Blocked with
+           the recovery spelled out — publish a corrected release
+           under a new version — and never touched the network again.
+           Retargeting clean 0.2.0 cleared the hold and converged as
+           "1 artifacts fetched, the rest already verified in place":
+           the two releases share a kernel, so resume-by-verification
+           proved itself without being asked. The drills also taught
+           two mixed-fleet lessons for step 8's migration: a leader's
+           k3s restart re-applies the CRDs and DaemonSet baked into
+           *its* image, which pruned the new fields fleet-wide and
+           left node-5's operator pod without its slots mount until
+           the new manifests were re-applied by hand. The schema is
+           part of the OS image; a fleet upgrade is a schema upgrade.)
     6. [ ] The proving reboot: a verified download becomes a staged
            record in a third staging store — system/ beside manifests/
            and cluster/ on machineState, the same four files, the same

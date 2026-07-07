@@ -361,6 +361,14 @@ type BootStatus struct {
 	ManifestHash   string         `json:"manifestHash,omitempty"`
 	Storage        StorageSpec    `json:"storage,omitzero"`
 
+	// Slot is the system slot this boot came from — "A" or "B", read
+	// from the liken.slot= parameter the installer baked into each
+	// boot entry's command line; empty when the boot didn't come from
+	// a slot at all (direct-kernel boots, install media). This is how
+	// a machine knows which half of blue-green it stands on: releases
+	// download to the other slot.
+	Slot string `json:"slot,omitempty"`
+
 	// The Cluster manifest this boot ran under: the same lifecycle,
 	// recorded separately, because the two documents stage and prove
 	// independently and a machine can be current on one while drifted

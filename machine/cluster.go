@@ -186,6 +186,20 @@ type ReleaseCatalogEntry struct {
 	Digest  string `json:"digest"`
 }
 
+// Entry finds one version's catalog entry, nil when the catalog
+// doesn't list it. The CRD holds spec.version to catalog membership
+// at admission, so for the target this lookup should always succeed;
+// callers still handle nil, because an API server's promise is not a
+// substitute for a nil check.
+func (s ClusterReleasesSpec) Entry(version string) *ReleaseCatalogEntry {
+	for i := range s.Catalog {
+		if s.Catalog[i].Version == version {
+			return &s.Catalog[i]
+		}
+	}
+	return nil
+}
+
 // ClusterDisruptionSpec is the machine-level analogue of a workload's
 // PodDisruptionBudget, reduced to the one number that matters for a
 // fleet: how many machines may be voluntarily down at the same time.

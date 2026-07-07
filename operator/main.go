@@ -109,9 +109,14 @@ func main() {
 	events := make(chan *machine.Machine, 1)
 	go watchMachine(client, name, current.Metadata.ResourceVersion, events)
 
+	// The release fetcher outlives any one pass: downloads take
+	// minutes, passes take milliseconds, and the fetcher is the one
+	// piece of state that bridges them (fetch.go).
+	f := &fetcher{}
+
 	ticker := time.NewTicker(30 * time.Second)
 	for {
-		reconcile(client, current, clusterName)
+		reconcile(client, current, clusterName, f)
 		select {
 		case m := <-events:
 			current = m

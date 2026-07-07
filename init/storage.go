@@ -64,8 +64,8 @@ type roleMount struct {
 const slotMountFlags = unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC
 
 var roleMounts = map[machine.StorageRoleName]roleMount{
-	machine.SystemARole:          {path: "/var/lib/liken/system/a", flags: slotMountFlags, fstype: "vfat"},
-	machine.SystemBRole:          {path: "/var/lib/liken/system/b", flags: slotMountFlags, fstype: "vfat"},
+	machine.SystemARole:          {path: machine.SystemSlotDir("A"), flags: slotMountFlags, fstype: "vfat"},
+	machine.SystemBRole:          {path: machine.SystemSlotDir("B"), flags: slotMountFlags, fstype: "vfat"},
 	machine.MachineStateRole:     {path: machine.MachineStateDir},
 	machine.MachineEphemeralRole: {path: "/tmp", flags: unix.MS_NOSUID | unix.MS_NODEV, mode: 0o1777},
 	machine.ClusterStateRole:     {path: "/var/lib/rancher"},

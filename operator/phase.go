@@ -54,14 +54,15 @@ func conditionPhase(c machine.Condition) machine.Phase {
 		// working its way up.
 		return machine.PhaseBooting
 	case "RejectedLastBoot", "StagingRejected", "BootMismatch", "MachineStateEphemeral",
-		"NoSystemSlots", "DigestMismatch":
+		"NoSystemSlots", "NotInstalled", "NoReleaseSource", "VersionNotInCatalog", "DigestMismatch":
 		// Drift exists but liken refuses or is unable to stage it.
-		// Time won't fix these; a different edit will. The last two
-		// are the version target's flavors of stuck: a machine with
-		// no system slots has nowhere to put a release, and a
-		// download whose bytes don't match the catalog's digest is
-		// corrupt at the source — refetching won't change what the
-		// server publishes.
+		// Time won't fix these; a different edit will. The version
+		// target has several flavors of stuck: no slots to hold a
+		// release, a boot that didn't come from a slot (so no boot
+		// entry could ever run the download), a catalog with no
+		// source or without the target, and a download whose bytes
+		// don't match the catalog's digest — corrupt at the source,
+		// where refetching can't change what the server publishes.
 		return machine.PhaseBlocked
 	case "RebootRequested", "DemotionRebooting", "Draining", "Downloading":
 		// A reboot is in flight; the machine is mid-change. Draining
@@ -71,9 +72,11 @@ func conditionPhase(c machine.Condition) machine.Phase {
 		// the network instead of waiting on a reboot, but the machine
 		// is just as much mid-change.
 		return machine.PhaseUpdating
-	case "RebootPending", "DemotionPending", "AwaitingTurn":
-		// A change is staged and waiting — on a Manual reboot, or on
-		// the cluster granting this machine its reboot turn.
+	case "RebootPending", "DemotionPending", "AwaitingTurn", "Fetched":
+		// A change is staged and waiting — on a Manual reboot, on the
+		// cluster granting this machine its reboot turn, or (Fetched)
+		// on the machinery that turns a verified download into a
+		// proving reboot.
 		return machine.PhaseUpdatePending
 	}
 	return machine.PhaseDegraded

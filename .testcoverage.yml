@@ -18,7 +18,7 @@ profile: coverage.out
 
 threshold:
   # The whole module, everything counted.
-  total: 52
+  total: 54
 
 override:
   # The Machine API: pure functions over declared types. (Paths here
@@ -31,7 +31,7 @@ override:
   # client, the seeding loops, the watch stream, the leases — is
   # exercised against a real HTTP test server.
   - path: ^operator$
-    threshold: 57
+    threshold: 62
   # Init: the boot machinery itself (mounting, DHCP, the reboot
   # syscall) is exercised by the QEMU harness, not unit tests; the
   # parsers, planners, and derivations around it are tested here.

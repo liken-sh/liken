@@ -106,6 +106,16 @@ func main() {
 	}
 	m := choice.m
 
+	// Which system slot this boot came from, when it came from one:
+	// the installer bakes liken.slot= into each boot entry's command
+	// line, so a from-disk boot always knows which half of blue-green
+	// it stands on. The fact rides to the cluster in the boot record,
+	// where the operator uses it to aim downloads at the other slot.
+	if slot := bootParamValue("liken.slot"); slot != "" {
+		boot.Slot = slot
+		fmt.Printf("liken: firmware: running from system slot %s\n", slot)
+	}
+
 	// An install boot does exactly one job and stops: put this
 	// running version on the machine's own disk (install.go). It
 	// runs this early because nothing after it — network, time,

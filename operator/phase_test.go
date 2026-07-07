@@ -68,6 +68,16 @@ func TestDecidePhase(t *testing.T) {
 			machine.PhaseBlocked,
 		},
 		{
+			"a machine not booted from a slot can't take releases",
+			[]machine.Condition{condition("VersionConverged", "False", "NotInstalled")},
+			machine.PhaseBlocked,
+		},
+		{
+			"a fetched release waits like any staged change",
+			[]machine.Condition{condition("VersionConverged", "False", "Fetched")},
+			machine.PhaseUpdatePending,
+		},
+		{
 			"a requested reboot is an update in flight",
 			[]machine.Condition{condition("SpecConverged", "False", "RebootRequested")},
 			machine.PhaseUpdating,

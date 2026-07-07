@@ -737,6 +737,16 @@ spec:
                       enum: [Staged, Proven, Seed]
                     clusterManifestHash:
                       type: string
+                    slot:
+                      type: string
+                      enum: [A, B]
+                      description: >-
+                        The system slot this boot came from, read from
+                        the liken.slot= parameter the installer baked
+                        into each boot entry. Absent when the boot
+                        didn't come from a slot (direct-kernel boots,
+                        install media). Releases download to the other
+                        slot — blue-green's whole idea.
                     storage:
                       type: object
                       properties:

@@ -231,6 +231,13 @@ spec:
             # init to operator, intents flow operator to init.
             - name: run-liken-operator
               mountPath: /run/liken/operator
+            # The system slots, where downloaded releases land: the
+            # operator writes the inactive slot's filesystem (init
+            # mounted both under here at boot). Writable because the
+            # download *is* the actuation — the same reason
+            # machine-state is.
+            - name: system-slots
+              mountPath: /var/lib/liken/system
       # Note what this feature did NOT need: any new RBAC. Staging and
       # rebooting are host-filesystem acts, bounded by these mounts,
       # not cluster permissions.
@@ -253,4 +260,8 @@ spec:
         - name: run-liken-operator
           hostPath:
             path: /run/liken/operator
+            type: DirectoryOrCreate
+        - name: system-slots
+          hostPath:
+            path: /var/lib/liken/system
             type: DirectoryOrCreate

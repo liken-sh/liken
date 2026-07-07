@@ -153,7 +153,7 @@ func carryOutConvergence(conv convergence, store machine.ManifestStore, what str
 // deliberately keeps no memory between passes: every value in the
 // status it writes was observed moments ago, which is what the
 // Kubernetes convention means by status being reconstructible.
-func reconcile(c *apiClient, m *machine.Machine, clusterName string) {
+func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher) {
 	now := time.Now()
 	status := &machine.MachineStatus{}
 
@@ -246,6 +246,19 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string) {
 		condition := carryOutConvergence(cconv, machine.ClusterManifests(machine.MachineStateDir), "cluster document", now)
 		status.Conditions = machine.SetCondition(status.Conditions, condition, now)
 		rebooting = rebooting || cconv.requestReboot
+
+		// The version target converges through its own machinery: not
+		// a staged document but a download, aimed at the inactive slot
+		// and running on the fetcher's goroutine so this pass — and
+		// the heartbeat below — never waits on a socket (release.go
+		// decides, fetch.go moves the bytes).
+		if liveCluster != nil {
+			ask, vcond, ok := versionAsk(liveCluster, facts)
+			if ok {
+				vcond = versionCondition(ask, f.Ensure(ask))
+			}
+			status.Conditions = machine.SetCondition(status.Conditions, vcond, now)
+		}
 	}
 
 	if nodeErr == nil {

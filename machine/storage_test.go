@@ -166,3 +166,21 @@ func TestValidateAllowsOnlyOneRemainderPerDevice(t *testing.T) {
 		t.Errorf("error should name the device: %v", err)
 	}
 }
+
+func TestSystemSlotDirs(t *testing.T) {
+	if got := SystemSlotDir("A"); got != "/var/lib/liken/system/a" {
+		t.Errorf("slot A: %q", got)
+	}
+	if got := SystemSlotDir("B"); got != "/var/lib/liken/system/b" {
+		t.Errorf("slot B: %q", got)
+	}
+}
+
+func TestInactiveSlot(t *testing.T) {
+	cases := map[string]string{"A": "B", "B": "A", "": ""}
+	for running, want := range cases {
+		if got := InactiveSlot(running); got != want {
+			t.Errorf("InactiveSlot(%q): got %q, want %q", running, got, want)
+		}
+	}
+}

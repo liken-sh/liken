@@ -140,6 +140,36 @@ func (r DeclaredRole) PartitionName() string {
 	return PartitionPrefix + string(r.Name)
 }
 
+// SystemSlotsDir is where the system slots' filesystems are mounted:
+// slot A at system/a, slot B at system/b. Init mounts them there
+// (its roleMounts table) and the operator writes downloaded releases
+// there (through a hostPath mount), so the path is defined once, in
+// the package both programs share.
+const SystemSlotsDir = "/var/lib/liken/system"
+
+// SystemSlotDir is one slot's mountpoint. Slots are named "A" and
+// "B" everywhere a person sees them (boot entries, conditions, the
+// liken.slot= parameter); the directory names are their lowercase
+// twins.
+func SystemSlotDir(slot string) string {
+	return SystemSlotsDir + "/" + strings.ToLower(slot)
+}
+
+// InactiveSlot is the slot a machine is *not* running from: where a
+// downloaded release lands, blue-green's whole idea. "" for a machine
+// whose boot didn't come from a slot at all — such a machine has no
+// inactive side, and no business downloading releases it could never
+// boot.
+func InactiveSlot(running string) string {
+	switch running {
+	case "A":
+		return "B"
+	case "B":
+		return "A"
+	}
+	return ""
+}
+
 // Role addresses one role's declaration by name; nil for names
 // outside the vocabulary and for roles the spec leaves out.
 func (s *StorageSpec) Role(name StorageRoleName) *StorageRole {
