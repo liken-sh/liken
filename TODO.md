@@ -1068,12 +1068,19 @@
            lesson tail -F embodies) are each small formats in the
            GPT-writer family, and the relay must live in the baked
            image anyway because what it parses is OS-version-coupled.
-           One multi-call entrypoint, four DaemonSets, one per
-           source: kernel-logs and liken-logs both read /dev/kmsg
-           (the device supports concurrent readers) and filter by
-           facility; k3s-logs and containerd-logs run the same
-           tailer at different paths. Pod identity is the source
-           tag, and privilege follows the source: the kmsg pods run
+           One multi-call entrypoint behind one machine-logs
+           DaemonSet with a container per source: kernel and liken
+           both read /dev/kmsg (the device supports concurrent
+           readers) and filter by facility; k3s and containerd run
+           the same tailer at different paths. This was first built
+           and proven as four separate DaemonSets, then consolidated
+           into one four-container pod: containers share the sandbox
+           and runtime shim (roughly halving the per-node overhead
+           and shrinking the fleet's pod count by fifteen) while
+           keeping every property the per-source split was for,
+           since stdout, securityContext, and restart counters are
+           all per-container. Container identity is the source tag,
+           and privilege follows the source: the kmsg containers run
            privileged, the tailers with only a read-only hostPath.
            The privilege was a lab lesson: CAP_SYSLOG (which the
            kernel demands for /dev/kmsg under dmesg_restrict) is

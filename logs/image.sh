@@ -9,12 +9,13 @@
 # static liken-logs binary), the config names it as the Entrypoint,
 # the manifest binds them, and the index gives the image its names.
 #
-# The image carries one binary but backs four DaemonSets: each relay
-# pod passes a different verb (kernel, liken, k3s, containerd) as its
-# container args, and the Entrypoint stays the same. Like the
-# operator's image, it lands in the initramfs where k3s auto-imports
-# it: no registry, no pull, and the "installed" tag always resolves,
-# on every node, to the build that node's own OS carried in.
+# The image carries one binary but backs all four relay containers
+# of the machine-logs DaemonSet: each passes a different verb
+# (kernel, liken, k3s, containerd) as its args, and the Entrypoint
+# stays the same. Like the operator's image, it lands in the
+# initramfs where k3s auto-imports it: no registry, no pull, and the
+# "installed" tag always resolves, on every node, to the build that
+# node's own OS carried in.
 
 set -euo pipefail
 
@@ -88,7 +89,7 @@ manifest_digest="$(add_blob "$dist/manifest.json")"
 
 # Two names for one image, exactly like the operator's: the versioned
 # tag says what this build is, and the stable "installed" tag is the
-# one the relay DaemonSets pin, so their pod specs never change
+# one the machine-logs DaemonSet pins, so its pod spec never changes
 # across releases while each node runs its own OS's build.
 cat >"$layout/index.json" <<EOF
 {

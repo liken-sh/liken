@@ -102,28 +102,28 @@ func TestStewardIgnoresPodsOnUnknownMachines(t *testing.T) {
 	}
 }
 
-// The acting half sweeps every OS DaemonSet, not just the
-// operator's, and a DaemonSet that doesn't exist (a partial rollout,
-// an old cluster) is skipped without complaint or eviction.
-func TestStewardSweepsEveryOSDaemonSet(t *testing.T) {
-	var evicted []string
-	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// stewardServer fakes the API's steward-facing corner: each named
+// DaemonSet exists with the given os-version annotation, every
+// DaemonSet's listing returns one stale pod on node-1, and evictions
+// are recorded. Lookups of DaemonSets not in the map 404.
+func stewardServer(t *testing.T, daemonSets map[string]string, evicted *[]string) *apiClient {
+	t.Helper()
+	return testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/eviction"):
 			parts := strings.Split(r.URL.Path, "/")
-			evicted = append(evicted, parts[len(parts)-2])
+			*evicted = append(*evicted, parts[len(parts)-2])
 			w.WriteHeader(http.StatusCreated)
 		case strings.Contains(r.URL.Path, "/daemonsets/"):
 			name := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
-			// Only the operator's and kernel-logs' DaemonSets exist;
-			// the other lookups 404 and the steward moves on.
-			if name != "liken-operator" && name != "kernel-logs" {
+			version, ok := daemonSets[name]
+			if !ok {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"metadata": map[string]any{
-					"annotations": map[string]string{osVersionAnnotation: "0.2.2"},
+					"annotations": map[string]string{osVersionAnnotation: version},
 				},
 			})
 		case strings.HasSuffix(r.URL.Path, "/pods"):
@@ -135,14 +135,36 @@ func TestStewardSweepsEveryOSDaemonSet(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
+}
+
+// The acting half sweeps every OS DaemonSet, the operator's and the
+// relays', refreshing each one's stale pods.
+func TestStewardSweepsEveryOSDaemonSet(t *testing.T) {
+	var evicted []string
+	client := stewardServer(t, map[string]string{
+		"liken-operator": "0.2.2",
+		"machine-logs":   "0.2.2",
+	}, &evicted)
 
 	machines := []machine.Machine{machineRunning("node-1", "0.2.2")}
 	stewardOSPods(client, machines)
-	if len(evicted) != 2 {
-		t.Fatalf("expected evictions from both existing DaemonSets, got %v", evicted)
+	if len(evicted) != 2 || evicted[0] != "liken-operator-pod" || evicted[1] != "machine-logs-pod" {
+		t.Errorf("expected evictions from both DaemonSets, got %v", evicted)
 	}
-	if evicted[0] != "liken-operator-pod" || evicted[1] != "kernel-logs-pod" {
-		t.Errorf("evicted: %v", evicted)
+}
+
+// A DaemonSet that doesn't exist (a partial rollout, a cluster from
+// before the relays) is skipped without complaint or eviction.
+func TestStewardSkipsMissingDaemonSets(t *testing.T) {
+	var evicted []string
+	client := stewardServer(t, map[string]string{
+		"liken-operator": "0.2.2",
+	}, &evicted)
+
+	machines := []machine.Machine{machineRunning("node-1", "0.2.2")}
+	stewardOSPods(client, machines)
+	if len(evicted) != 1 || evicted[0] != "liken-operator-pod" {
+		t.Errorf("expected only the operator's eviction, got %v", evicted)
 	}
 }
 

@@ -13,8 +13,8 @@
 //
 // One binary carries all four relays, chosen by an argument verb
 // (the multi-call pattern, the same shape init uses to re-exec
-// itself). The four DaemonSets differ only in their verb and in
-// what they mount:
+// itself). The machine-logs DaemonSet runs all four as containers of
+// one pod, each differing only in its verb and in what it mounts:
 //
 //	liken-logs kernel      /dev/kmsg, records with syslog facility 0
 //	liken-logs liken       /dev/kmsg, records with syslog facility 1

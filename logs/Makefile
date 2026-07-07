@@ -4,8 +4,9 @@
 # Two artifacts, on the operator's exact pattern: the liken-logs
 # binary (a static Go build; main.go explains the four relays it
 # carries) and the OCI image tarball that delivers it (image.sh). The
-# four DaemonSets in manifests/ all run this one image, differing
-# only in the verb they pass and the host paths they mount.
+# machine-logs DaemonSet in manifests/ runs this one image in four
+# containers, differing only in the verb they pass and the host
+# paths they mount.
 #
 # The version and output directory are overridable for the same
 # reason the operator's are: the releases domain rebuilds these

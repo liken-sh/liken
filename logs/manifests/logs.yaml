@@ -1,23 +1,30 @@
-# The log relay DaemonSets: one per host log stream, so that reading
-# any stream is `kubectl logs` against the pod named for it.
+# The machine-logs DaemonSet: one pod per node, one relay container
+# per host log stream, so that reading any stream is `kubectl logs`
+# against the container named for it:
 #
-#   kernel-logs      /dev/kmsg, records with syslog facility 0
-#   liken-logs       /dev/kmsg, records with syslog facility 1
-#   k3s-logs         the k3s log on clusterState
-#   containerd-logs  containerd's log on clusterState
+#   -c kernel      /dev/kmsg, records with syslog facility 0
+#   -c liken       /dev/kmsg, records with syslog facility 1
+#   -c k3s         the k3s log on clusterState
+#   -c containerd  containerd's log on clusterState
 #
-# One relay per source is the design, not an accident of packaging.
-# Pod identity is the tag (no consumer parses a source field to tell
-# streams apart), privilege follows the source (the kmsg relays must
-# open a host device, which only privileged can do; the tailers get
-# read-only mounts of one directory each and nothing more), and a
-# bug in one parser blinds one stream instead of all of them. All four run the same liken.sh/logs image (logs/image.sh),
-# differing only in the verb passed as args and in what they mount.
+# One relay per source is the design; one pod for all four is the
+# packaging. Containers in a pod share the sandbox and the runtime
+# shim, so consolidating cuts the per-node overhead roughly in half
+# versus a DaemonSet per stream, while everything the per-source
+# split exists for survives at container granularity: each container
+# keeps its own stdout (the runtime files them separately, so
+# consumers still see four distinct streams), its own securityContext
+# (privilege follows the source: the kmsg relays run privileged, the
+# tailers get read-only mounts and nothing more), and its own restart
+# counter (a bug in one parser crash-loops one container, not the
+# pod). Container identity is the tag; adding a source is adding a
+# container.
 #
-# Everything these pods emit is a JSON envelope around a verbatim log
-# line (logs/envelope.go documents the contract), so any log stack
-# someone later runs consumes the machine's own streams the way it
-# consumes every other pod's logs, with no host privileges of its own.
+# Everything these containers emit is a JSON envelope around a
+# verbatim log line (logs/envelope.go documents the contract), so any
+# log stack someone later runs consumes the machine's own streams the
+# way it consumes every other pod's logs, with no host privileges of
+# its own.
 #
 # Delivery follows the operator wholesale, and the reasoning lives in
 # operator/manifests/operator.yaml: the "installed" tag resolving
@@ -25,36 +32,36 @@
 # updateStrategy OnDelete so applying manifests never kills a pod on
 # a node that hasn't upgraded yet, and the liken.sh/os-version
 # annotation the pod steward (operator/steward.go) uses to refresh
-# each machine's pods after its upgrade lands.
+# each machine's pod after its upgrade lands.
 #
 # Unlike the operator, the relays hold no cluster credentials at all:
 # they read host files and write their own stdout, so there is no
-# ServiceAccount, no RBAC, and no token mounted. The /cursor emptyDir
-# is each relay's resume point; its lifecycle is the design (it
-# survives container restarts and dies with the pod or a reboot,
-# which are exactly the moments a replay from the head is correct).
----
+# ServiceAccount, no RBAC, and no token mounted. The cursors emptyDir
+# holds each relay's resume point in its own subdirectory; its
+# lifecycle is the design (it survives container restarts and dies
+# with the pod or a reboot, which are exactly the moments a replay
+# from the head is correct).
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: kernel-logs
+  name: machine-logs
   namespace: liken-system
   labels:
-    app.kubernetes.io/name: kernel-logs
+    app.kubernetes.io/name: machine-logs
     app.kubernetes.io/part-of: liken
   annotations:
     liken.sh/os-version: "LIKEN_VERSION"
 spec:
   selector:
     matchLabels:
-      app: kernel-logs
+      app: machine-logs
   updateStrategy:
     type: OnDelete
   template:
     metadata:
       labels:
-        app: kernel-logs
-        app.kubernetes.io/name: kernel-logs
+        app: machine-logs
+        app.kubernetes.io/name: machine-logs
         app.kubernetes.io/part-of: liken
       annotations:
         liken.sh/os-version: "LIKEN_VERSION"
@@ -66,7 +73,7 @@ spec:
       tolerations:
         - operator: Exists
       containers:
-        - name: relay
+        - name: kernel
           image: liken.sh/logs:installed
           imagePullPolicy: Never
           args: ["kernel"]
@@ -81,111 +88,41 @@ spec:
             # include kmsg, and Kubernetes offers no per-device
             # grant: the only spelling that opens a hostPath device
             # is privileged, which implies every capability too.
-            # The pod still only reads one device and writes its own
-            # stdout; the mount below is what actually bounds it.
+            # The container still only reads one device and writes
+            # its own stdout; the mount below is what actually
+            # bounds it, and privilege stays confined to the two
+            # kmsg containers rather than the pod.
             privileged: true
           volumeMounts:
             - name: kmsg
               mountPath: /dev/kmsg
               readOnly: true
-            - name: cursor
+            - name: cursors
               mountPath: /cursor
-      volumes:
-        - name: kmsg
-          hostPath:
-            path: /dev/kmsg
-            type: CharDevice
-        - name: cursor
-          emptyDir: {}
----
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  name: liken-logs
-  namespace: liken-system
-  labels:
-    app.kubernetes.io/name: liken-logs
-    app.kubernetes.io/part-of: liken
-  annotations:
-    liken.sh/os-version: "LIKEN_VERSION"
-spec:
-  selector:
-    matchLabels:
-      app: liken-logs
-  updateStrategy:
-    type: OnDelete
-  template:
-    metadata:
-      labels:
-        app: liken-logs
-        app.kubernetes.io/name: liken-logs
-        app.kubernetes.io/part-of: liken
-      annotations:
-        liken.sh/os-version: "LIKEN_VERSION"
-    spec:
-      automountServiceAccountToken: false
-      priorityClassName: system-node-critical
-      tolerations:
-        - operator: Exists
-      containers:
-        - name: relay
+              subPath: kernel
+        - name: liken
           image: liken.sh/logs:installed
           imagePullPolicy: Never
-          # Same device as kernel-logs, the other facility: init
-          # writes its lines to /dev/kmsg precisely so they interleave
-          # with the kernel's in true order (init/console.go), and the
-          # facility field is what splits the two voices back apart.
+          # Same device as the kernel container, the other facility:
+          # init writes its lines to /dev/kmsg precisely so they
+          # interleave with the kernel's in true order
+          # (init/console.go), and the facility field is what splits
+          # the two voices back apart.
           args: ["liken"]
           securityContext:
-            # privileged for the same reason as kernel-logs: the
-            # runtime's devices cgroup gates the /dev/kmsg open, and
-            # privileged is the only per-pod grant Kubernetes has.
+            # privileged for the same reason as the kernel container:
+            # the runtime's devices cgroup gates the /dev/kmsg open,
+            # and privileged is the only per-container grant
+            # Kubernetes has.
             privileged: true
           volumeMounts:
             - name: kmsg
               mountPath: /dev/kmsg
               readOnly: true
-            - name: cursor
+            - name: cursors
               mountPath: /cursor
-      volumes:
-        - name: kmsg
-          hostPath:
-            path: /dev/kmsg
-            type: CharDevice
-        - name: cursor
-          emptyDir: {}
----
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  name: k3s-logs
-  namespace: liken-system
-  labels:
-    app.kubernetes.io/name: k3s-logs
-    app.kubernetes.io/part-of: liken
-  annotations:
-    liken.sh/os-version: "LIKEN_VERSION"
-spec:
-  selector:
-    matchLabels:
-      app: k3s-logs
-  updateStrategy:
-    type: OnDelete
-  template:
-    metadata:
-      labels:
-        app: k3s-logs
-        app.kubernetes.io/name: k3s-logs
-        app.kubernetes.io/part-of: liken
-      annotations:
-        liken.sh/os-version: "LIKEN_VERSION"
-    spec:
-      automountServiceAccountToken: false
-      priorityClassName: system-node-critical
-      tolerations:
-        - operator: Exists
-      containers:
-        - name: relay
+              subPath: liken
+        - name: k3s
           image: liken.sh/logs:installed
           imagePullPolicy: Never
           args: ["k3s"]
@@ -193,56 +130,16 @@ spec:
             # The parent directory, never the file: a hostPath of the
             # file itself would bind-mount the inode present when the
             # pod started, and after init's size-cap rotation renames
-            # it the pod would follow the old generation forever. A
-            # directory mount resolves the name on every open, so the
-            # tailer's reopen lands on each new file.
+            # it the container would follow the old generation
+            # forever. A directory mount resolves the name on every
+            # open, so the tailer's reopen lands on each new file.
             - name: liken-logs-dir
               mountPath: /var/lib/rancher/k3s/liken
               readOnly: true
-            - name: cursor
+            - name: cursors
               mountPath: /cursor
-      volumes:
-        - name: liken-logs-dir
-          hostPath:
-            path: /var/lib/rancher/k3s/liken
-            # init creates this directory before k3s starts;
-            # DirectoryOrCreate keeps the pod startable in odd states
-            # (the tailer waits politely for the file either way).
-            type: DirectoryOrCreate
-        - name: cursor
-          emptyDir: {}
----
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  name: containerd-logs
-  namespace: liken-system
-  labels:
-    app.kubernetes.io/name: containerd-logs
-    app.kubernetes.io/part-of: liken
-  annotations:
-    liken.sh/os-version: "LIKEN_VERSION"
-spec:
-  selector:
-    matchLabels:
-      app: containerd-logs
-  updateStrategy:
-    type: OnDelete
-  template:
-    metadata:
-      labels:
-        app: containerd-logs
-        app.kubernetes.io/name: containerd-logs
-        app.kubernetes.io/part-of: liken
-      annotations:
-        liken.sh/os-version: "LIKEN_VERSION"
-    spec:
-      automountServiceAccountToken: false
-      priorityClassName: system-node-critical
-      tolerations:
-        - operator: Exists
-      containers:
-        - name: relay
+              subPath: k3s
+        - name: containerd
           image: liken.sh/logs:installed
           imagePullPolicy: Never
           args: ["containerd"]
@@ -250,14 +147,28 @@ spec:
             - name: containerd-dir
               mountPath: /var/lib/rancher/k3s/agent/containerd
               readOnly: true
-            - name: cursor
+            - name: cursors
               mountPath: /cursor
+              subPath: containerd
       volumes:
+        - name: kmsg
+          hostPath:
+            path: /dev/kmsg
+            type: CharDevice
+        - name: liken-logs-dir
+          hostPath:
+            path: /var/lib/rancher/k3s/liken
+            # init creates this directory before k3s starts;
+            # DirectoryOrCreate keeps the pod startable in odd states
+            # (the tailer waits politely for the file either way).
+            type: DirectoryOrCreate
         - name: containerd-dir
           hostPath:
             path: /var/lib/rancher/k3s/agent/containerd
             # k3s creates this directory when it first starts
             # containerd, which is after these manifests apply.
             type: DirectoryOrCreate
-        - name: cursor
+        # One emptyDir, one subdirectory per relay: the cursors are
+        # all "this pod's resume state" and share one lifecycle.
+        - name: cursors
           emptyDir: {}

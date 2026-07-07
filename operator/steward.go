@@ -49,16 +49,14 @@ import (
 // real version into each DaemonSet at bake time.
 const osVersionAnnotation = "liken.sh/os-version"
 
-// stewardedDaemonSets are the OS's own DaemonSets, the ones whose
-// images are baked into the initramfs and whose pods therefore need
-// the steward's refresh after an upgrade. Each is expected to label
-// its pods app: <name>, the selector its manifest declares.
+// stewardedDaemonSets are the OS's own DaemonSets (the operator and
+// the log relays), the ones whose images are baked into the
+// initramfs and whose pods therefore need the steward's refresh
+// after an upgrade. Each is expected to label its pods app: <name>,
+// the selector its manifest declares.
 var stewardedDaemonSets = []string{
 	"liken-operator",
-	"kernel-logs",
-	"liken-logs",
-	"k3s-logs",
-	"containerd-logs",
+	"machine-logs",
 }
 
 func daemonSetPath(name string) string {
@@ -111,8 +109,8 @@ func stewardOSPods(c *apiClient, machines []machine.Machine) {
 // drains, and the DaemonSet recreates the pod either way. The
 // eviction may take the sweep leader's own operator pod (an upgraded
 // leader's old operator is exactly a stale pod); the lease passes
-// and the recreated pod picks the sweep back up. For a relay pod the
-// eviction also discards its emptyDir resume cursor, so each OS
+// and the recreated pod picks the sweep back up. For the relay pod
+// the eviction also discards its emptyDir resume cursors, so each OS
 // upgrade re-ships the tail of that machine's streams once, with the
 // envelopes' seq field there to deduplicate.
 func stewardDaemonSet(c *apiClient, machines []machine.Machine, name string) {

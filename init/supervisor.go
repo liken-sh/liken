@@ -45,7 +45,7 @@ import (
 // liken's own messages from interleaving mid-line. The destination
 // is the raw console, not init's kmsg-routed stdout: k3s's volume
 // would churn the kernel's small ring buffer in seconds, and its
-// lines already reach the cluster from the log file the k3s-logs
+// lines already reach the cluster from the log file the k3s log
 // relay tails, so buffering the echo would ship everything twice.
 type lineWriter struct {
 	dest   io.Writer
@@ -225,7 +225,7 @@ func startK3s(role machine.Role) (*exec.Cmd, io.Closer, error) {
 	// arrives live, line-buffered, and prefixed so it's
 	// distinguishable from liken's own messages. On a machine with no
 	// shell, the console is the only way to read a log; the file is
-	// what the k3s-logs relay tails into the cluster. The file writer
+	// what the k3s log relay tails into the cluster. The file writer
 	// caps a boot's log so a chatty k3s can't fill the filesystem it
 	// shares with etcd (logrotate.go).
 	logf, err := openCappedLog(k3sLog, k3sLogCap)

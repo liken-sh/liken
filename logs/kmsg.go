@@ -209,10 +209,11 @@ func wallAnchor() time.Time {
 }
 
 // relayKmsg is the kernel and liken verbs: follow /dev/kmsg,
-// shipping one facility. Opening the device requires CAP_SYSLOG
-// (the vendored kernel sets CONFIG_SECURITY_DMESG_RESTRICT), which
-// the relay DaemonSets grant explicitly; nothing here needs
-// privileged.
+// shipping one facility. Opening the device takes real privilege:
+// the kernel demands CAP_SYSLOG (CONFIG_SECURITY_DMESG_RESTRICT is
+// set), and the container runtime's devices cgroup separately gates
+// the open, which is why the two kmsg containers run privileged
+// (logs/manifests/logs.yaml tells that story).
 func relayKmsg(facility int) error {
 	f, err := os.Open(kmsgPath)
 	if err != nil {
