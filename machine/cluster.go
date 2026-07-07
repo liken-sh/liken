@@ -95,14 +95,23 @@ type ClusterSpec struct {
 	// Machine names. A machine's role is derived, never declared: it
 	// is a leader exactly when its name appears here, so promoting a
 	// follower is one Cluster edit, not a coordinated pair of Machine
-	// edits.
+	// edits. One name means k3s keeps its state in sqlite; more than
+	// one means embedded etcd, whose majority quorum wants an odd
+	// count — three voices, not two or four. No admission rule
+	// enforces that, on purpose: growing one leader to three in a
+	// single edit never passes through two, and a transient even
+	// state is not worth refusing at the door.
 	Leaders []string `json:"leaders,omitempty"`
 
 	// Endpoint is the URL followers join the cluster through, e.g.
-	// https://10.10.0.1:6443. With a single leader this is that
-	// leader's address; a highly-available control plane will need a
-	// better answer here (every leader listed, a DNS name, or a
-	// virtual IP), which is a later milestone's problem.
+	// https://10.10.0.1:6443. It is first contact only: after
+	// joining, k3s agents maintain a client-side load balancer that
+	// learns every leader's address, so a dead endpoint strands only
+	// brand-new followers, never running ones (and followers' time
+	// queries ask each leader by its own address, bypassing this
+	// entirely). It stays one explicit input on purpose: an endpoint
+	// that should outlive any single leader — a DNS name, a virtual
+	// IP — is a deployment's choice to make, never the OS's.
 	Endpoint string `json:"endpoint,omitempty"`
 
 	// Network holds the network facts k3s requires every node to agree

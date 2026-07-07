@@ -1,5 +1,6 @@
-# node-1: the lab's first machine, and (per cluster.yaml's leaders
-# list) its control plane.
+# node-1: the lab's first machine, and the first name in
+# cluster.yaml's leaders list — the founding leader, whose control
+# plane the other leaders join through.
 #
 # One image boots the whole fleet, so this directory carries a
 # manifest per machine and each boot selects its own by the

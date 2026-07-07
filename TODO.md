@@ -471,7 +471,7 @@
        new document via milestone 8, and no separate "add a leader"
        mechanism exists. sqlite (via kine) serves one leader; more
        than one means embedded etcd.
-   1. [ ] Config derivation by leader count (init/k3s.go): one
+   1. [x] Config derivation by leader count (init/k3s.go): one
           leader means exactly today's config — sqlite, no etcd
           keys, single-node stays cheap on purpose. More than one:
           the first entry in spec.leaders is the founding leader and
@@ -487,20 +487,20 @@
           a config-derivation role — the first name in the list —
           not etcd's raft leader, which is elected and moves; the
           comment must draw that line.)
-   2. [ ] The endpoint stays one explicit input. Followers use it for
+   2. [x] The endpoint stays one explicit input. Followers use it for
           first contact only: after joining, k3s agents maintain a
           client-side load balancer that learns every leader, so a
           dead endpoint strands only new followers, never running
           ones (and time queries already bypass it, asking each by
           address). A VIP or DNS name is a deployment's choice to
           make; the manifest documents the tradeoff.
-   3. [ ] Quorum, plainly: three voices, odd on purpose. No CEL rule
+   3. [x] Quorum, plainly: three voices, odd on purpose. No CEL rule
           on leader-count parity — growing 1→3 in one edit never
           passes through two, and a transient even state during some
           future migration shouldn't be refused at admission. A
           simultaneous all-leader reboot loses quorum transiently
-          and reforms from disk; Manual stays the sane policy for
-          leaders until milestone 13 does rolling reboots.
+          and reforms from disk; milestone 13's rollout now keeps
+          Auto-policy leaders to one at a time regardless of budget.
    4. [x] The lab grows to five machines: three leaders (node-1
           founding, node-3 and node-4 fresh) and two followers (node-2
           staying, node-5 new) — MACs, dist dirs, and manifests

@@ -27,11 +27,15 @@ package main
 // per-machine, so every machine stages its own copy on its own
 // schedule, machines can transiently run different cluster documents,
 // and each Machine's ClusterConverged condition is where that
-// disagreement is visible. Deliberately absent: any fleet
+// disagreement is visible. Deliberately absent here: any fleet
 // orchestration. A Cluster edit is drift on every machine at once,
-// and with rebootPolicy Auto everywhere that is a simultaneous fleet
-// reboot — Manual (the default) leaves reboots visible and pending
-// per machine, and rolling coordination is a later milestone's job.
+// and this path only stages the change and asks for a reboot — on a
+// cluster member with rebootPolicy Auto, "asks" means awaiting a
+// turn from the sweep leader's rollout (rollout.go), which grants
+// reboots one machine at a time, so a fleet-wide edit rolls through
+// the fleet instead of rebooting it all together. Manual (the
+// default) leaves each machine's pending reboot visible and waiting
+// for a person.
 
 import (
 	"fmt"

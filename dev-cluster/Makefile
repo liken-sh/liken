@@ -18,12 +18,12 @@
 # knows which Machine manifest is this machine's. Boot the cluster by
 # running each node in its own terminal:
 #
-#   make run                    the leader, node-1
-#   make run NODE=node-2        a follower, in a second terminal
+#   make run                    the founding leader, node-1
+#   make run NODE=node-4        a follower, in a second terminal
 #
-# The full lab is five machines (node-1 leading, node-3 and node-4
-# leaders-to-be, node-2 and node-5 followers), which is more RAM than
-# most laptops want to give QEMU at the default size — MEM sizes each
+# The full lab is five machines (node-1 through node-3 the leaders,
+# node-4 and node-5 the followers), which is more RAM than most
+# laptops want to give QEMU at the default size — MEM sizes each
 # guest, and followers are fine at 2048: nothing heavy is pinned to
 # them, and the kubelet's own overhead is what's being hosted.
 #

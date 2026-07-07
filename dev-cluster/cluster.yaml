@@ -17,16 +17,27 @@ metadata:
 spec:
   # The machines that run control planes, by Machine name. A machine
   # derives its role by looking for its own name here: listed means
-  # leader, absent means follower. One leader for now; a second entry
-  # is a later milestone (quorum needs etcd, and two leaders can't
-  # vote).
-  leaders: [node-1]
+  # leader, absent means follower. One name means k3s keeps its state
+  # in sqlite; more than one means embedded etcd, whose majority
+  # quorum wants an odd count — three voices, not two or four. The
+  # first name is the founding leader: it initializes etcd (or, if it
+  # began life as a lone sqlite leader, migrates that datastore into
+  # etcd in place on the boot where the list first grows), and every
+  # other leader joins through it. This lab seeds three leaders and
+  # two followers; changing the list is an ordinary Cluster edit,
+  # which the fleet stages and applies machine by machine.
+  leaders: [node-1, node-2, node-3]
 
-  # Where followers join: the one leader's address on the cluster
-  # segment, which its Machine manifest promises below in
+  # Where followers make first contact: a leader's address on the
+  # cluster segment, which its Machine manifest promises below in
   # machines/node-1.yaml. Port 6443 is the Kubernetes API's
   # conventional port, and k3s's join protocol rides the same
-  # listener.
+  # listener. First contact is all this is — after joining, k3s
+  # agents maintain a client-side load balancer that learns every
+  # leader, so a dead endpoint strands only brand-new followers. A
+  # deployment that wants the endpoint itself to survive its first
+  # leader points a DNS name or virtual IP here instead; that choice
+  # belongs to the deployment, never the OS.
   endpoint: https://10.10.0.1:6443
 
   network:

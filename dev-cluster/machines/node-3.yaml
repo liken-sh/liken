@@ -1,8 +1,7 @@
-# node-3: a leader-to-be. It boots as a follower — its name is not in
-# cluster.yaml's leaders list yet — and the HA drill promotes it by
-# growing that list to [node-1, node-3, node-4], which converges like
-# any other Cluster edit and reboots it into a control-plane role.
-# Same shape as every other machine; only the name and address differ.
+# node-3: the third leader. With node-1 founding and node-2 beside
+# it, these three are the odd number of voices embedded etcd needs to
+# vote. Same shape as every other machine; only the name and address
+# differ.
 apiVersion: liken.sh/v1alpha1
 kind: Machine
 metadata:
