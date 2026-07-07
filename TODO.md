@@ -674,7 +674,7 @@
            not a promise — while a synced file rode through two
            power cuts intact. The download step's fsync-and-reverify
            design is built for exactly this.)
-    2. [ ] Speaking EFI: init mounts efivarfs when the firmware is
+    2. [x] Speaking EFI: init mounts efivarfs when the firmware is
            UEFI and learns the boot variables — each a small binary
            format (EFI_LOAD_OPTION: attributes, a UTF-16 name, a
            device path ending at a file on a partition, and free-form
@@ -686,11 +686,19 @@
            per-node writable variable store — the "CMOS" where boot
            entries live, surviving reboots the way a motherboard's
            does (and removed by `make clean`, so factory reset forgets
-           firmware memory too). Verify here, before anything is built
-           on it, that the EFI stub's initrd= argument works under
-           OVMF, since upstream calls it deprecated. Prove it: the
-           console and Machine status report the firmware, BootCurrent,
-           and a decoded BootOrder — console parity as always.
+           firmware memory too). Prove it: the console and Machine
+           status report the firmware, BootCurrent, and a decoded
+           BootOrder — console parity as always. (Proven on node-5
+           under OVMF: efivarfs mounted, mode UEFI, an honest
+           "BootCurrent not set" for the direct-kernel boot, and
+           OVMF's own default entries decoded by name into
+           status.firmware. The codec also decoded every real entry
+           on a physical laptop's firmware, including vendor-only
+           ones. The EFI stub's initrd= argument — deprecated
+           upstream, still shipped — gets its verification at the
+           installer's first from-disk boot, the first moment a
+           file-path boot exists to test; nothing beyond that boot
+           builds on it untested.)
     3. [ ] Self-install, the USB-stick story: `make install NODE=x`
            boots via -kernel one last time — QEMU playing the install
            medium the way an installer stick or PXE would — and init,

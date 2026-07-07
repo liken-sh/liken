@@ -38,6 +38,9 @@ func publishFacts(cluster *machine.Cluster, role machine.Role, choice *manifestC
 			// rather than remembered, like everything else in status.
 			BlockDevices: discoverBlockDevices(),
 		},
+		// The firmware's boot story, the same one reportFirmware
+		// printed at boot: console parity, as always.
+		Firmware: firmwareFacts(efiVarsDir),
 		// Where every storage role landed, and under which manifest:
 		// the blocks that can't be re-derived here, because only the
 		// settling saw them happen.

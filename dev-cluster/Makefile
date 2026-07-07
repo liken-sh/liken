@@ -76,6 +76,22 @@ dist/$(NODE)/boot.qcow2:
 	mkdir -p dist/$(NODE)
 	qemu-img create -f qcow2 $@ 2G
 
+# Real UEFI firmware for the guests: OVMF is TianoCore edk2 — the
+# same codebase physical motherboards ship — built for virtual
+# machines (Ubuntu's ovmf package). It comes as two pflash images,
+# and the split teaches the machine's anatomy: OVMF_CODE is the
+# firmware program itself, read-only and shared by every guest,
+# while OVMF_VARS is the firmware's writable variable store — the
+# battery-backed "CMOS" where boot entries live. Each node gets its
+# own private copy, which survives guest reboots the way a real
+# board's NVRAM survives power cuts; `make clean` deleting it is the
+# lab's version of pulling the CMOS battery.
+OVMF_CODE := /usr/share/OVMF/OVMF_CODE_4M.fd
+
+dist/$(NODE)/OVMF_VARS.fd:
+	mkdir -p dist/$(NODE)
+	cp /usr/share/OVMF/OVMF_VARS_4M.fd $@
+
 # Only the leader node forwards the API port to the host: kubectl on
 # the host reaches the cluster through the control plane, and there is
 # exactly one (see ../identity/kubeconfig.sh). Forwarding the same
@@ -102,6 +118,15 @@ endif
 #   -m $(MEM)                Kubernetes-sized memory: the root
 #                            filesystem, container images, and every
 #                            workload all live in RAM here
+#   -drive if=pflash (x2)    the machine's firmware: OVMF's code and
+#                            this node's private variable store, in
+#                            that order (the firmware expects unit 0
+#                            to be code and unit 1 to be NVRAM). With
+#                            -kernel also present, OVMF boots the
+#                            fw_cfg kernel directly — the "USB stick"
+#                            arrangement that stands in for an
+#                            installer until machines boot from their
+#                            own disks
 #   -append                  the kernel command line: put the kernel's
 #                            console on the first serial port, run our
 #                            program, by name, as PID 1, and tell it
@@ -182,11 +207,13 @@ QEMU_EXIT_ON_REBOOT := -no-reboot
 RTC ?= utc
 RTC_BASE := -rtc base=$(RTC)
 
-run: dist/$(NODE)/state.qcow2 dist/$(NODE)/pods.qcow2 dist/$(NODE)/boot.qcow2
+run: dist/$(NODE)/state.qcow2 dist/$(NODE)/pods.qcow2 dist/$(NODE)/boot.qcow2 dist/$(NODE)/OVMF_VARS.fd
 	qemu-system-x86_64 \
 		-accel kvm -accel tcg \
 		-cpu max \
 		-m $(MEM) \
+		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
+		-drive if=pflash,format=raw,file=dist/$(NODE)/OVMF_VARS.fd \
 		-kernel $(VMLINUZ) \
 		-initrd $(INITRD) \
 		-append "console=ttyS0 rdinit=/liken liken.machine=$(NODE) $(LIKEN_BOOT_ARGS)" \

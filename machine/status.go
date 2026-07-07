@@ -42,6 +42,12 @@ type MachineStatus struct {
 	// Hardware is what the machine found itself running on.
 	Hardware HardwareStatus `json:"hardware,omitzero"`
 
+	// Firmware is how the machine was booted: UEFI with its boot
+	// variables decoded into words, or BIOS — shorthand for any world
+	// without firmware variables to consult (a legacy server, a
+	// direct-kernel boot under a hypervisor).
+	Firmware FirmwareStatus `json:"firmware,omitzero"`
+
 	// Storage reports where every storage role is actually backed this
 	// boot, declared or not. The spec says what was asked for and
 	// hardware.blockDevices says what's attached; this connects the
@@ -229,6 +235,38 @@ const (
 	BackingPartition Backing = "Partition"
 	BackingMemory    Backing = "Memory"
 )
+
+// FirmwareMode is which kind of firmware booted the machine. Named
+// string types over bare strings, as everywhere in this API: the
+// vocabulary is closed and the compiler can hold it.
+type FirmwareMode string
+
+const (
+	FirmwareUEFI FirmwareMode = "UEFI"
+	FirmwareBIOS FirmwareMode = "BIOS"
+)
+
+// FirmwareStatus is the firmware's boot story, read from its
+// variable store. Each entry field renders as the variable's own
+// name plus the entry's decoded description ("Boot0001 (liken slot
+// A)"), because a fleet listing should read in words.
+type FirmwareStatus struct {
+	Mode FirmwareMode `json:"mode,omitempty"`
+
+	// BootCurrent is the entry the firmware reports it used this
+	// boot; empty when the firmware never picked one (direct-kernel
+	// boots) or the machine isn't UEFI at all.
+	BootCurrent string `json:"bootCurrent,omitempty"`
+
+	// BootNext, when present, is a one-shot override armed for the
+	// next boot: the firmware consumes it at power-on. Seeing it here
+	// means a proving boot is queued but hasn't happened yet.
+	BootNext string `json:"bootNext,omitempty"`
+
+	// BootOrder is the firmware's standing preference list, first
+	// choice first.
+	BootOrder []string `json:"bootOrder,omitempty"`
+}
 
 // StorageStatus enumerates every role liken knows, whether declared or
 // not: absence should be visible in one kubectl get, not implied. The

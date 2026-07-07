@@ -587,6 +587,32 @@ spec:
                             type: string
                           serial:
                             type: string
+                firmware:
+                  type: object
+                  description: >-
+                    How the machine was booted: UEFI with its boot
+                    variables decoded into words, or BIOS — shorthand
+                    for any world without firmware variables to
+                    consult (a legacy server, a direct-kernel boot
+                    under a hypervisor). Each entry renders as the
+                    firmware's variable name plus the entry's own
+                    description, e.g. "Boot0001 (liken slot A)".
+                  properties:
+                    mode:
+                      type: string
+                      enum: [UEFI, BIOS]
+                    bootCurrent:
+                      type: string
+                    bootNext:
+                      type: string
+                    bootOrder:
+                      type: array
+                      # Atomic: the order is the point; entries
+                      # replace as a whole list.
+                      x-kubernetes-list-type: atomic
+                      items:
+                        type: string
+                        maxLength: 256
                 storage:
                   type: object
                   description: >-

@@ -77,6 +77,11 @@ func main() {
 
 	mountEssentials()
 
+	// The firmware's variable store, when there is one: boot entries
+	// and boot order live there, and both the world report and the
+	// facts file read them (efi.go).
+	mountEFIVars()
+
 	// Kernel modules load before storage settles because some roles'
 	// filesystems arrive as modules: the system slots are FAT32, and
 	// mounting vfat pulls in its default character-encoding table
@@ -355,6 +360,8 @@ func worldReport() {
 			unix.ByteSliceToString(u.Release[:]),
 			unix.ByteSliceToString(u.Machine[:]))
 	}
+
+	reportFirmware()
 
 	// The command line is how the outside world parameterizes a boot:
 	// it's where rdinit= points at us, and the channel for any fact a
