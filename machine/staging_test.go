@@ -311,3 +311,21 @@ func TestManifestHashIsStable(t *testing.T) {
 		t.Error("different bytes must hash differently")
 	}
 }
+
+func TestWithdrawClearsTheAttemptedMarker(t *testing.T) {
+	store := SystemReleases(t.TempDir())
+	if err := store.WriteStaged([]byte("record")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteAttempted(ManifestHash([]byte("record"))); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.WithdrawStaged(); err != nil {
+		t.Fatal(err)
+	}
+
+	if attempted, _ := store.LoadAttempted(); attempted != "" {
+		t.Error("a withdrawn trial's marker must go with it, or the next staging of the identical record would falsely reject")
+	}
+}

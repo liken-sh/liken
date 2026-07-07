@@ -95,8 +95,22 @@ func TestAStagedReleaseAwaitingItsRebootIsLeftStanding(t *testing.T) {
 	}
 }
 
+// provenRelease records a proven release standing on a slot, the way
+// promotion (or the first reconcile's seed) leaves the store.
+func provenRelease(t *testing.T, root, version, slot string) {
+	t.Helper()
+	raw, _, err := machine.RenderSystemRelease(version, slot, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := machine.SystemReleases(root).WriteProven(raw); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestArmProvingBootWritesTheMarkerThenBootNext(t *testing.T) {
 	root := t.TempDir()
+	provenRelease(t, root, "0.1.0", "A")
 	raw, _ := stagedRelease(t, root, "0.2.0", "B")
 	dir := slotFirmware(t, 0x0002, 0x0003)
 
@@ -109,6 +123,43 @@ func TestArmProvingBootWritesTheMarkerThenBootNext(t *testing.T) {
 	next, err := readEFIVar(dir, "BootNext")
 	if err != nil || len(next) != 2 || next[0] != 0x03 || next[1] != 0x00 {
 		t.Errorf("BootNext should aim at slot B's entry: %v, %v", next, err)
+	}
+}
+
+func TestArmProvingBootRefusesWithoutAVerifiedFallback(t *testing.T) {
+	root := t.TempDir()
+	// No proven record at all: the fallback can't be verified, so the
+	// trial must be refused — a trial without a fallback is a machine
+	// bricked by its own upgrade.
+	stagedRelease(t, root, "0.2.0", "B")
+	dir := slotFirmware(t, 0x0002, 0x0003)
+
+	armProvingBoot(dir, root, "A")
+
+	if attempted, _ := machine.SystemReleases(root).LoadAttempted(); attempted != "" {
+		t.Error("no fallback, no trial")
+	}
+	if _, err := readEFIVar(dir, "BootNext"); !os.IsNotExist(underlying(err)) {
+		t.Errorf("BootNext must not be armed: %v", err)
+	}
+}
+
+func TestArmProvingBootAssertsTheFallbackFirst(t *testing.T) {
+	root := t.TempDir()
+	provenRelease(t, root, "0.2.0", "B")
+	stagedRelease(t, root, "0.3.0", "A")
+	// The firmware still prefers slot A from install time: arming a
+	// trial of slot A must first flip the fallback to proven slot B.
+	dir := slotFirmware(t, 0x0002, 0x0003)
+
+	armProvingBoot(dir, root, "B")
+
+	if got := readBootOrder(t, dir); string(got) != string(u16le(0x0003, 0x0002)) {
+		t.Errorf("the fallback must lead with the proven slot before the trial arms: % x", got)
+	}
+	next, err := readEFIVar(dir, "BootNext")
+	if err != nil || len(next) != 2 || next[0] != 0x02 {
+		t.Errorf("the trial arms at slot A's entry once the fallback holds: %v, %v", next, err)
 	}
 }
 

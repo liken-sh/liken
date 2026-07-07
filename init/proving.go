@@ -92,6 +92,7 @@ func settleSystemRelease(stateRoot, bootSlot string, durable bool, boot *machine
 		// serving its cluster on the new release.
 		fmt.Printf("liken: system: proving boot: release %s on slot %s; the operator's first pass is the proof\n",
 			record.Version, record.Slot)
+		provingTrial = *record
 		return true
 	}
 
@@ -158,6 +159,20 @@ func armProvingBoot(efiDir, stateRoot, runningSlot string) {
 		fmt.Fprintf(os.Stderr, "liken: system: no boot entry answers to \"liken slot %s\"; rebooting without arming the trial\n", record.Slot)
 		return
 	}
+
+	// The fallback is asserted — and *verified* — before the trial is
+	// armed: a trial is only safe when every reset after its one
+	// BootNext chance lands on a proven slot, and that is exactly
+	// BootOrder's job. A firmware that won't hold the order (or a
+	// repair that quietly failed) means the fallback doesn't exist,
+	// and a trial without a fallback is a machine bricked by its own
+	// upgrade: refuse it, visibly, and stay down-but-recoverable on
+	// the version that works.
+	if !fallbackInPlace(efiDir, stateRoot) {
+		fmt.Fprintln(os.Stderr, "liken: system: the fallback BootOrder could not be verified; refusing to arm the trial")
+		return
+	}
+
 	if err := store.WriteAttempted(machine.ManifestHash(staged)); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: system: marking the trial attempted: %v; rebooting without arming it\n", err)
 		return
@@ -170,12 +185,47 @@ func armProvingBoot(efiDir, stateRoot, runningSlot string) {
 		bootEntryID(entry), record.Version, record.Slot)
 }
 
+// fallbackInPlace makes BootOrder lead with the proven slot and then
+// believes only what it can read back: repairBootOrder's write going
+// through the motions is not the same thing as the firmware holding
+// the order.
+func fallbackInPlace(efiDir, stateRoot string) bool {
+	repairBootOrder(efiDir, stateRoot)
+
+	proven, err := machine.SystemReleases(stateRoot).LoadProven()
+	if proven == nil || err != nil {
+		return false
+	}
+	record, err := machine.ParseSystemRelease(proven)
+	if err != nil {
+		return false
+	}
+	leader, ok := findSlotEntry(efiDir, record.Slot)
+	if !ok {
+		return false
+	}
+	current, err := readEFIVar(efiDir, "BootOrder")
+	if err != nil || len(current) < 2 {
+		return false
+	}
+	return uint16(current[0])|uint16(current[1])<<8 == leader
+}
+
 // provingPatience is how long a proving boot may run unpromoted
 // before the watchdog gives up on it: the same ten minutes the
 // rollout conductor waits before calling a reboot stalled. A machine
 // that can't join its cluster in ten minutes isn't warming up, it's
 // wedged.
 const provingPatience = 10 * time.Minute
+
+// provingTrial is the record this boot is trying, set at boot when
+// settleSystemRelease recognizes the trial. The proving watch
+// compares the store's *proven* record against it, because the trial
+// is only over when this exact record earns that word — a staged
+// file that merely disappears was withdrawn, not promoted, and
+// trusting its absence once turned a withdrawal into a celebrated
+// (and entirely fictitious) promotion.
+var provingTrial machine.SystemRelease
 
 // provingWatch runs only on proving boots, and it is two fallbacks in
 // one loop. The happy half: poll the store until the operator
@@ -201,11 +251,28 @@ func provingWatch(ctx context.Context) error {
 			}) // never returns
 		case <-time.After(5 * time.Second):
 		}
-		staged, err := machine.SystemReleases(machine.MachineStateDir).LoadStaged()
+		store := machine.SystemReleases(machine.MachineStateDir)
+		staged, err := store.LoadStaged()
 		if err != nil || staged != nil {
 			continue
 		}
-		fmt.Println("liken: system: the staged release was promoted; asserting BootOrder from the store")
+		// The staged file is gone — but gone is not the same as
+		// promoted. Only the proven record matching this boot's own
+		// trial is the verdict; anything else means the record was
+		// withdrawn out from under the trial (a retargeted cluster,
+		// most likely), and the firmware's order must not change on
+		// a promotion that never happened.
+		proven, err := store.LoadProven()
+		if err != nil || proven == nil {
+			continue
+		}
+		record, err := machine.ParseSystemRelease(proven)
+		if err != nil || record.Version != provingTrial.Version || record.Slot != provingTrial.Slot {
+			fmt.Printf("liken: system: the trial of release %s was withdrawn without promotion; leaving BootOrder alone\n",
+				provingTrial.Version)
+			return nil
+		}
+		fmt.Printf("liken: system: release %s was promoted; asserting BootOrder from the store\n", record.Version)
 		repairBootOrder(efiVarsDir, machine.MachineStateDir)
 		return nil
 	}
@@ -259,6 +326,14 @@ func repairBootOrder(efiDir, stateRoot string) {
 	}
 	if err := writeEFIVar(efiDir, "BootOrder", payload); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: system: repairing BootOrder: %v\n", err)
+		return
+	}
+	// Believe the readback, not the write: a firmware that accepts
+	// the write and forgets it would otherwise turn every later
+	// narration into a lie.
+	readback, err := readEFIVar(efiDir, "BootOrder")
+	if err != nil || len(readback) < 2 || uint16(readback[0])|uint16(readback[1])<<8 != leader {
+		fmt.Fprintf(os.Stderr, "liken: system: BootOrder was written but reads back unchanged; the firmware is not holding it\n")
 		return
 	}
 	fmt.Printf("liken: system: BootOrder now leads with %s (slot %s is proven)\n",

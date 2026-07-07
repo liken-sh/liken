@@ -204,8 +204,9 @@ func TestAConvergedTargetTidiesTheStore(t *testing.T) {
 	}
 }
 
-func slotFacts(slot string) *machine.MachineStatus {
+func slotFacts(version, slot string) *machine.MachineStatus {
 	return &machine.MachineStatus{
+		Version: machine.VersionStatus{Liken: version},
 		Storage: machine.StorageStatus{
 			MachineState: machine.StorageRoleStatus{Backing: machine.BackingPartition},
 		},
@@ -213,10 +214,16 @@ func slotFacts(slot string) *machine.MachineStatus {
 	}
 }
 
+// The tests promote records for version 0.2.0 while this test
+// binary's own machine.Version is "dev" — deliberately. Promotion
+// judges the OS the facts report, never the operator's own stamp: in
+// a mixed fleet the pod comes from whatever image the cluster's
+// DaemonSet still pins, and the pod is a bystander to the machine's
+// trial.
 func TestPromotesTheReleaseThisBootProves(t *testing.T) {
 	root := t.TempDir()
 	store := machine.SystemReleases(root)
-	raw, _, err := machine.RenderSystemRelease(machine.Version, "B", "sha256:abcd")
+	raw, _, err := machine.RenderSystemRelease("0.2.0", "B", "sha256:abcd")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +231,7 @@ func TestPromotesTheReleaseThisBootProves(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	settleSystemReleaseLifecycle(root, slotFacts("B"))
+	settleSystemReleaseLifecycle(root, slotFacts("0.2.0", "B"))
 
 	if staged, _ := store.LoadStaged(); staged != nil {
 		t.Error("promotion consumes the staged record")
@@ -236,11 +243,11 @@ func TestPromotesTheReleaseThisBootProves(t *testing.T) {
 
 func TestPromotionRequiresTheMatchingSlotAndVersion(t *testing.T) {
 	cases := map[string]struct {
-		recordSlot, recordVersion, bootSlot string
+		recordSlot, recordVersion, bootVersion, bootSlot string
 	}{
-		"wrong slot":    {"B", machine.Version, "A"},
-		"wrong version": {"B", "someone-else", "B"},
-		"no slot":       {"B", machine.Version, ""},
+		"wrong slot":    {"B", "0.2.0", "0.2.0", "A"},
+		"wrong version": {"B", "0.2.0", "0.1.0", "B"},
+		"no slot":       {"B", "0.2.0", "0.2.0", ""},
 	}
 	for name, tt := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -254,7 +261,7 @@ func TestPromotionRequiresTheMatchingSlotAndVersion(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			settleSystemReleaseLifecycle(root, slotFacts(tt.bootSlot))
+			settleSystemReleaseLifecycle(root, slotFacts(tt.bootVersion, tt.bootSlot))
 
 			if staged, _ := store.LoadStaged(); staged == nil {
 				t.Error("a trial this boot didn't run must not promote")
@@ -267,19 +274,19 @@ func TestRecordsTheRunningReleaseAsTheFirstProven(t *testing.T) {
 	root := t.TempDir()
 	store := machine.SystemReleases(root)
 
-	settleSystemReleaseLifecycle(root, slotFacts("A"))
+	settleSystemReleaseLifecycle(root, slotFacts("0.1.0", "A"))
 
 	proven, _ := store.LoadProven()
 	if proven == nil {
 		t.Fatal("a slot-booted machine with no record writes its standing down")
 	}
 	record, err := machine.ParseSystemRelease(proven)
-	if err != nil || record.Slot != "A" || record.Version != machine.Version {
+	if err != nil || record.Slot != "A" || record.Version != "0.1.0" {
 		t.Errorf("the seed record names the running release: %+v, %v", record, err)
 	}
 
 	// And only once: a second pass leaves it alone.
-	settleSystemReleaseLifecycle(root, slotFacts("A"))
+	settleSystemReleaseLifecycle(root, slotFacts("0.1.0", "A"))
 	if again, _ := store.LoadProven(); string(again) != string(proven) {
 		t.Error("the seed record is written once, not re-asserted")
 	}

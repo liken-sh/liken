@@ -239,8 +239,12 @@ func (s ManifestStore) LoadAttempted() (string, error) {
 // WithdrawStaged removes the staged document. The operator calls this
 // when the cluster's copy has been edited back to what the machine is
 // already running: if the staged file stayed behind, the next boot
-// would apply an edit the cluster no longer asks for. A missing file
-// is not an error; there is nothing to withdraw.
+// would apply an edit the cluster no longer asks for. The attempted
+// marker goes with it: it described a trial of the withdrawn
+// document, and left behind it would read as "tried and failed" the
+// next time the identical document is staged — a false rejection for
+// a trial that never rendered a verdict. A missing file is not an
+// error; there is nothing to withdraw.
 func (s ManifestStore) WithdrawStaged() error {
 	if err := os.Remove(filepath.Join(s.dir, stagedManifest)); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -248,6 +252,7 @@ func (s ManifestStore) WithdrawStaged() error {
 		}
 		return err
 	}
+	_ = os.Remove(filepath.Join(s.dir, attemptedMarker))
 	return syncDir(s.dir)
 }
 

@@ -193,16 +193,29 @@ func readStagedSystemHash() string {
 // way settleClusterLifecycle does for the cluster document: the
 // operator's own existence is the evidence. If this pass is
 // executing, then the kernel, init, k3s, and the machine's place in
-// its cluster all work — and if this binary's own version stamp
-// matches the staged record for the very slot this boot came from,
-// the trial release is the thing that's working. That is promotion.
+// its cluster all work — and if the version this boot reported
+// matches the staged record for the very slot it came from, the
+// trial release is the thing that's working. That is promotion.
+//
+// The comparison is against the *facts* — init's version stamp, the
+// OS actually running — and deliberately not this binary's own
+// (machine.Version). The operator pod comes from whatever image the
+// cluster's DaemonSet pins, and in a mixed fleet that pin lags the
+// OS: the proving boot of a new release runs the *old* operator
+// until the leaders themselves upgrade. Judging by the pod's stamp
+// would then veto every promotion a mixed fleet ever attempts —
+// which is exactly the failure that once let a converged-looking
+// machine withdraw its own trial paperwork and re-upgrade itself on
+// every boot, forever. The pod is a bystander; the machine is what's
+// on trial.
 //
 // A machine running from a slot with no record at all (its install
 // predates any catalog) writes its current standing down as the first
 // proven record, so init's every-boot BootOrder repair has an
 // authority to enforce from the start.
 func settleSystemReleaseLifecycle(root string, facts *machine.MachineStatus) {
-	if facts == nil || facts.Storage.MachineState.Backing != machine.BackingPartition || facts.Boot.Slot == "" {
+	if facts == nil || facts.Storage.MachineState.Backing != machine.BackingPartition ||
+		facts.Boot.Slot == "" || facts.Version.Liken == "" {
 		return
 	}
 	store := machine.SystemReleases(root)
@@ -212,7 +225,7 @@ func settleSystemReleaseLifecycle(root string, facts *machine.MachineStatus) {
 		if err != nil {
 			return // init vets staged records at boot; not this side's call
 		}
-		if record.Slot != facts.Boot.Slot || record.Version != machine.Version {
+		if record.Slot != facts.Boot.Slot || record.Version != facts.Version.Liken {
 			return // not this boot's trial; nothing proved
 		}
 		if err := store.Promote(); err != nil {
@@ -227,7 +240,7 @@ func settleSystemReleaseLifecycle(root string, facts *machine.MachineStatus) {
 	if proven, err := store.LoadProven(); proven != nil || err != nil {
 		return
 	}
-	raw, _, err := machine.RenderSystemRelease(machine.Version, facts.Boot.Slot, "")
+	raw, _, err := machine.RenderSystemRelease(facts.Version.Liken, facts.Boot.Slot, "")
 	if err != nil {
 		return
 	}
@@ -235,5 +248,5 @@ func settleSystemReleaseLifecycle(root string, facts *machine.MachineStatus) {
 		fmt.Fprintf(os.Stderr, "recording the running release as proven: %v\n", err)
 		return
 	}
-	fmt.Printf("recorded the running release %s on slot %s as proven\n", machine.Version, facts.Boot.Slot)
+	fmt.Printf("recorded the running release %s on slot %s as proven\n", facts.Version.Liken, facts.Boot.Slot)
 }
