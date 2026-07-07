@@ -442,7 +442,7 @@
           machine at once, and with Auto everywhere that's a
           simultaneous fleet reboot — Manual stays the default,
           pending reboots are visible per machine, and rolling
-          coordination is milestone 14's job.
+          coordination is milestone 13's job.
    5. [x] Guardrails: the five network-plan fields (nodeCIDR,
           clusterCIDR, serviceCIDR, clusterDNS, clusterDomain) become
           immutable-once-set via CEL oldSelf rules — k3s can't
@@ -500,7 +500,7 @@
           future migration shouldn't be refused at admission. A
           simultaneous all-leader reboot loses quorum transiently
           and reforms from disk; Manual stays the sane policy for
-          leaders until milestone 14 does rolling reboots.
+          leaders until milestone 13 does rolling reboots.
    4. [x] The lab grows to five machines: three leaders (node-1
           founding, node-3 and node-4 fresh) and two followers (node-2
           staying, node-5 new) — MACs, dist dirs, and manifests
@@ -582,7 +582,7 @@
         it; a frozen status is itself the symptom. Health checks
         surveyed and deferred: leaders cross-checking each other's
         clocks, etcd quorum margin as a Cluster condition (pairs with
-        milestone 14), storage-capacity watermarks (a full
+        milestone 13), storage-capacity watermarks (a full
         machineState silently breaks staging), and the cluster-wide
         clock spread — the fleet sweep already reads every Machine's
         status, so it could publish max minus min of the reported
@@ -610,26 +610,7 @@
         patterns on spec strings, Cluster conditions beneath its
         phase, watch bookmarks, and a coverage gate ratcheted past
         half.)
-11. [ ] GitOps from first boot — without baking an engine into the OS.
-        The OS grows two generic primitives rather than Flux support: a
-        seed channel (manifests delivered alongside the Machine manifest
-        land in k3s's auto-manifests directory, applied at first boot
-        and owned by the repo afterward — which needs the same staged/
-        promoted care the Machine manifest gets) and a minting primitive
-        (the machine creates an SSH keypair in a Secret if one is
-        missing and publishes the public half in status and on the
-        console, so the user registers a deploy key at the forge without
-        ever handling private material; the key may be read-write, since
-        image-update automation will eventually commit tag bumps back to
-        the repo). Flux itself is blessed content, not a vendored
-        domain: its install manifest and sync objects ride the seed
-        channel, that first apply plays the part `flux bootstrap`'s CLI
-        plays, and Flux self-manages from the repo afterward — the
-        standard pattern, and another engine could ride the same
-        channel. This is where the manifest authority story resolves:
-        git wins, and the seeded Machine and Cluster copies are
-        downstream of it.
-12. [ ] Explore device management: how does a shell-less, udev-less OS
+11. [ ] Explore device management: how does a shell-less, udev-less OS
         expose `/dev` beyond the basics — USB devices arriving after
         boot, GPUs, serial adapters? devtmpfs gives us the nodes, but
         hotplug means fielding kernel uevents and loading modules,
@@ -637,14 +618,14 @@
         how workloads get to the hardware (device plugins, dynamic
         resource allocation) and whether devices belong in
         `status.hardware` alongside CPUs and memory.
-13. [ ] Explore declarative upgrades: setting `spec.version` on a
+12. [ ] Explore declarative upgrades: setting `spec.version` on a
         Machine should upgrade the machine — liken's version drives the
         k3s version, so one field moves the whole stack. For a two-file
         OS an upgrade is "replace vmlinuz and liken.cpio and reboot",
         which makes A/B slots and roll-back-on-failed-boot the natural
         shape — but it also means liken finally needs a bootloader
         story, since QEMU's `-kernel` has been playing that role.
-14. [ ] Rolling upgrades at the *cluster* level: once one machine can
+13. [ ] Rolling upgrades at the *cluster* level: once one machine can
         upgrade itself, the cluster should upgrade its fleet without an
         operator babysitting it — cordon a node, drain its workloads,
         upgrade, restart, confirm it rejoined healthy, then move to the
@@ -665,6 +646,29 @@
         cordoning each node before its reboot and uncordoning it
         after it rejoins, so workloads drain gracefully instead of
         dying with the machine.
+14. [ ] GitOps from first boot — without baking an engine into the OS.
+        Deferred on purpose: git-driven delivery is one way to feed
+        this system, not its core mode — the Machine and Cluster
+        resources are the real interface, and everything above works
+        without a repo in the loop. When it lands, the OS grows two
+        generic primitives rather than Flux support: a seed channel
+        (manifests delivered alongside the Machine manifest land in
+        k3s's auto-manifests directory, applied at first boot and
+        owned by the repo afterward — which needs the same staged/
+        promoted care the Machine manifest gets) and a minting
+        primitive (the machine creates an SSH keypair in a Secret if
+        one is missing and publishes the public half in status and on
+        the console, so the user registers a deploy key at the forge
+        without ever handling private material; the key may be
+        read-write, since image-update automation will eventually
+        commit tag bumps back to the repo). Flux itself is blessed
+        content, not a vendored domain: its install manifest and sync
+        objects ride the seed channel, that first apply plays the
+        part `flux bootstrap`'s CLI plays, and Flux self-manages from
+        the repo afterward — the standard pattern, and another engine
+        could ride the same channel. This is where the manifest
+        authority story resolves: git wins, and the seeded Machine
+        and Cluster copies are downstream of it.
 
 Deferred until the fundamentals above are proven — the
 public-consumption tier:
