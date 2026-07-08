@@ -26,7 +26,7 @@ a catalog mapping each version to the digest of its release
 manifest, which in turn carries every artifact's sha256. The
 verification chain runs from the API to the catalog digest to
 the manifest to the bytes, with no signatures until the
-mastery tier. The target and catalog are read live and never
+hardening tier. The target and catalog are read live and never
 count as cluster-document drift (the sysctls precedent: a
 catalog append must not stage a fleet-wide reboot). Promotion
 mirrors the cluster document exactly: boot the staged slot

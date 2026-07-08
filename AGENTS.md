@@ -1,7 +1,7 @@
 # Working on liken
 
-liken is a learning project as much as it is a distro, and that shapes how
-everything here should be written.
+liken aims to be a real, public OS distribution, and one that is written to
+be read. That ambition shapes how everything here should be written.
 
 ## This is a literate project
 

@@ -47,7 +47,8 @@ name, so this milestone likely also decides where the deployment
 channel should live (probably with the deployment, next to its
 identity and image) and lets releases/ come to mean what it says.
 
-Open questions, deliberately unanswered here: signatures (the mastery
-tier already owes them); whether public artifacts are downloads or a
-source tag plus reproducible builds; and how much of "produce your
-own cluster" belongs in this repo versus in documentation.
+Open questions, deliberately unanswered here: signatures (deferred
+with the rest of the hardening tier); whether public artifacts are
+downloads or a source tag plus reproducible builds; and how much of
+"produce your own cluster" belongs in this repo versus in
+documentation.

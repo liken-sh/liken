@@ -57,11 +57,15 @@ defines the OS itself.
 
 ## Status
 
-This is a spike. Nothing works yet; there may not even be code here yet.
-It is first and foremost a learning project: the goal is to understand what
-an init system actually does by building the smallest one that can stand up
-Kubernetes, then letting Kubernetes do the rest. The design overview and the
-milestone-by-milestone story live in [plans/](plans/).
+liken boots machines, so far virtual ones: the milestones in
+[plans/](plans/) walk from a bare PID 1 to a five-node HA cluster
+with declarative upgrades, automated rolling reboots, and adoption of
+existing k3s clusters, each proven in the QEMU lab. It is not yet a
+public distribution: there are no public releases, and it has never
+run on bare metal. Getting there is the current direction; see
+[plans/22-public-releases.md](plans/22-public-releases.md). The
+design overview and the milestone-by-milestone story live in
+[plans/](plans/).
 
 ## License
 

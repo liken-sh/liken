@@ -34,8 +34,9 @@
 #                      can mint valid identities for any pod
 #
 # Everything is ECDSA P-256, matching what k3s generates for itself.
-# Ten-year lifetimes: these are roots for a learning distro, and
-# rotation is a problem for a later milestone.
+# Ten-year lifetimes; rotating these roots is work a later milestone
+# takes up, and until then a long life keeps the identity story
+# simple.
 #
 # Each artifact is minted only if it doesn't already exist, so adding
 # a new artifact to this script (or re-running it for any reason)

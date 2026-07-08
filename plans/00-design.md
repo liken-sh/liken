@@ -1,9 +1,10 @@
 # The design, in one place
 
-liken is a learning project as much as it is a distro: a Linux that
-exists to teach how a system boots and how Kubernetes takes over from
-there. This document is the overview. Each numbered document beside
-it covers one milestone in full: the design, the reasoning, and what
+liken is an operating system distribution for machines whose whole
+job is Kubernetes, and it is written to be read: the repo doubles as
+a course in how a Linux system boots and how Kubernetes takes over
+from there. This document is the overview. Each numbered document
+beside it covers one milestone in full: the design, the reasoning, and what
 the lab showed when it ran. They are ordered the way the work
 happened, and the order matters: storage came before editable specs,
 editable specs before multiple leaders, visibility before automated
@@ -95,4 +96,4 @@ explorations); 17 through 21 are capabilities that surveying a real
 deployment's workloads showed the OS still needs, and 22 is the
 question of releasing liken to the public at all. README.md beside
 this file is the index and holds the shorter-term notes: the deferred
-mastery tier and the open problems.
+hardening tier and the open problems.

@@ -73,8 +73,9 @@ And one that looks past any single deployment:
     itself, with no deployment baked in, and the utilities someone
     needs to produce a cluster of their own from one.
 
-Deferred until the fundamentals above are proven, the mastery tier:
-UKIs, dm-verity, secure boot, TPM-sealed secrets.
+Deferred until the fundamentals above are proven, the hardening
+tier: UKIs, dm-verity, secure boot, TPM-sealed secrets, and signed
+releases.
 
 # Open problems
 
