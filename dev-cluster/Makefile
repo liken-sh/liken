@@ -32,11 +32,25 @@
 # followers are fine at 2048: nothing heavy is pinned to them, so
 # their memory mostly covers the kubelet's own overhead.
 #
+# SMP sizes each guest's CPU count, and it matters more than it looks:
+# QEMU's default is a single vCPU, and a Kubernetes server cannot live
+# on one core. k3s runs the whole control plane in one process, and
+# etcd is in there too, with hard real-time-ish needs: the raft leader
+# must send heartbeats every 500ms and fsync its log promptly, or the
+# other members conclude it has died. On one core those deadlines
+# compete with the apiserver, the scheduler, the kubelet, and every
+# workload on the machine; any burst of work (a compaction, a garbage
+# collection, a log flood) owns the core for seconds, heartbeats go
+# out late, etcd logs "leader is overloaded", and API requests queue
+# up past the apiserver's 60-second limit. Four vCPUs is modest for a
+# server and leaves those deadlines met even when the machine is busy.
+#
 # The OS artifacts are other domains' work; this Makefile only points
 # at them. The root Makefile is the orchestrator that makes sure they
 # exist before booting; run `make run` from the repo root.
 NODE ?= node-1
 MEM ?= 4096
+SMP ?= 4
 KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 VMLINUZ := ../kernel/dist/$(KERNEL_VERSION)/vmlinuz
 INITRD := ../image/dist/liken.cpio
@@ -122,6 +136,10 @@ endif
 #                            the first getrandom() in userspace blocks
 #                            forever (liken's DHCP client draws one for
 #                            its transaction IDs)
+#   -smp $(SMP)              enough cores for Kubernetes: etcd's raft
+#                            deadlines cannot share a single vCPU with
+#                            the rest of the control plane (see SMP
+#                            above)
 #   -m $(MEM)                enough memory for Kubernetes: the root
 #                            filesystem, container images, and every
 #                            workload all live in RAM here
@@ -252,6 +270,7 @@ run: dist/$(NODE)/state.qcow2 dist/$(NODE)/pods.qcow2 dist/$(NODE)/boot.qcow2 di
 	qemu-system-x86_64 \
 		-accel kvm -accel tcg \
 		-cpu max \
+		-smp $(SMP) \
 		-m $(MEM) \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
 		-drive if=pflash,format=raw,file=dist/$(NODE)/OVMF_VARS.fd \
