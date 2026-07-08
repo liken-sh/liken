@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Compute an operator's kubeconfig offline, from the identity this
-# repo minted. The machine is never asked for a credential. Pre-seeding
+# Compute an operator's kubeconfig offline, from a deployment's
+# identity. The machine is never asked for a credential. Pre-seeding
 # the CAs (mint.sh) exists precisely so that the credential can be
 # computed without the machine's help.
 #
@@ -19,16 +19,21 @@
 # makes the bearer a cluster admin, because RBAC binds that group to
 # cluster-admin; the certificates themselves are the only user records.
 #
-# The result is written to dist/kubeconfig and nowhere else: liken
-# never touches ~/.kube/config or any other kubeconfig the operator
-# already has. Point kubectl at it explicitly:
+# The result is written into the identity directory and nowhere
+# else: liken never touches ~/.kube/config or any other kubeconfig
+# the operator already has. Point kubectl at it explicitly:
 #
-#   kubectl --kubeconfig identity/dist/kubeconfig get nodes
+#   kubectl --kubeconfig dev-cluster/identity/kubeconfig get nodes
 
 set -euo pipefail
 
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-tls="$here/dist/tls"
+if [[ $# -ne 1 ]]; then
+    echo "usage: $0 <identity-dir>" >&2
+    exit 64
+fi
+
+out="$1"
+tls="$out/tls"
 
 # Where the cluster is: QEMU forwards this host port to the guest's
 # API server (the Makefile's `run` target defines that mapping). The
@@ -63,7 +68,7 @@ rm "$tls/admin.csr"
 # every kubeconfig) so the file is self-contained and portable.
 b64() { base64 -w0 <"$1"; }
 
-cat >"$here/dist/kubeconfig" <<EOF
+cat >"$out/kubeconfig" <<EOF
 apiVersion: v1
 kind: Config
 clusters:
@@ -84,4 +89,4 @@ users:
       client-key-data: $(b64 "$tls/admin.key")
 EOF
 
-echo "wrote dist/kubeconfig for admin (O=system:masters) at $server"
+echo "wrote $out/kubeconfig for admin (O=system:masters) at $server"

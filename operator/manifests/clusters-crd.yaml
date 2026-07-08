@@ -101,6 +101,22 @@ spec:
                     spec.version must name a release listed in
                     spec.releases.catalog; publish the release and add
                     its catalog entry first
+                # Origin's one legal transition, checked here at the
+                # spec level because the rule needs to see absence:
+                # adoption is declared at the document's birth (the
+                # seed cluster.yaml baked into an adopted image), and
+                # a cluster that has ever been founded can only be
+                # founded. Referencing oldSelf makes this a transition
+                # rule, so creation is unconstrained — which is
+                # exactly how a document born adopted gets in.
+                - rule: >-
+                    !has(self.origin) || self.origin == 'founded' ||
+                    (has(oldSelf.origin) && oldSelf.origin == 'adopted')
+                  message: >-
+                    origin: adopted is declared when the cluster
+                    document is born, never by editing a founded
+                    cluster; the only legal edit is the promotion,
+                    adopted to founded
               properties:
                 version:
                   type: string
@@ -162,13 +178,35 @@ spec:
                             type: string
                             maxLength: 71
                             pattern: ^sha256:[0-9a-f]{64}$
+                origin:
+                  type: string
+                  enum: [founded, adopted]
+                  description: >-
+                    How the cluster's datastore came to exist.
+                    founded (the default when unset) means liken
+                    created it, via the founding leader's
+                    cluster-init. adopted means the datastore already
+                    exists in a cluster liken did not create:
+                    machines built with that cluster's identity join
+                    it as members, the founding leader included, and
+                    none may initialize a new one. Adoption is
+                    declared when the document is born; the one legal
+                    edit is the promotion, adopted to founded, made
+                    after the last foreign member is gone. Promotion
+                    changes nothing on a running fleet, because k3s
+                    ignores cluster-init when the datastore already
+                    exists. It matters when the cluster is rebuilt
+                    from scratch: a founded cluster's founder may
+                    create the datastore again.
                 leaders:
                   type: array
                   # Atomic, not a set: order carries meaning. The
                   # first entry is the founding leader: the machine
                   # that renders cluster-init and creates (or, on the
                   # migration boot, converts to) the embedded etcd
-                  # datastore.
+                  # datastore. (In an adopted cluster nobody creates
+                  # a datastore; the founder joins through the
+                  # endpoint like everyone else.)
                   x-kubernetes-list-type: atomic
                   description: >-
                     The machines that run control planes, by Machine

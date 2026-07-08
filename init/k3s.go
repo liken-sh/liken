@@ -71,8 +71,30 @@ var (
 // elected and moves between members; the founder holds no ongoing
 // special position, and once the cluster is up it is an ordinary
 // member among an odd number of them.
+//
+// An adopted cluster (spec.origin: adopted) changes one assumption:
+// the datastore already exists, in a cluster liken did not create,
+// and initializing a second one next to it would split the cluster
+// in two. So under adoption every leader joins: the founder through
+// the endpoint (the one address the existing control plane is known
+// to be reachable at), the others preferring the founder as usual.
+// Nobody renders cluster-init or falls back to sqlite, not even a
+// lone leader. Each joining leader becomes an etcd member and raft
+// replicates the existing keyspace to it, so the cluster's state
+// carries over without ever being exported or copied.
 func leaderJoinConfig(cluster *machine.Cluster, name, manifestDir string) (clusterInit bool, joinURL string) {
-	if cluster == nil || len(cluster.Spec.Leaders) < 2 {
+	if cluster == nil {
+		return false, ""
+	}
+	if cluster.Spec.Origin == machine.OriginAdopted {
+		if leaders := cluster.Spec.Leaders; len(leaders) > 0 && name != leaders[0] {
+			if addr := declaredNodeAddress(cluster, manifestDir, leaders[0]); addr != "" {
+				return false, fmt.Sprintf("https://%s:6443", addr)
+			}
+		}
+		return false, cluster.Spec.Endpoint
+	}
+	if len(cluster.Spec.Leaders) < 2 {
 		return false, ""
 	}
 	founder := cluster.Spec.Leaders[0]

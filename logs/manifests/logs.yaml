@@ -68,6 +68,11 @@ spec:
     spec:
       automountServiceAccountToken: false
       priorityClassName: system-node-critical
+      # Only liken nodes carry the log relays: the image exists only
+      # in a liken machine's containerd, and in a mixed cluster (a
+      # migration in progress) a foreign node could never start it.
+      nodeSelector:
+        liken.sh/machine: "true"
       # Relay logs even from a cordoned or NotReady node: a sick
       # machine's logs are the ones somebody is looking for.
       tolerations:

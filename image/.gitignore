@@ -1,2 +1,0 @@
-# Built images; `make` recreates them from the other domains' outputs.
-dist/

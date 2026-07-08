@@ -60,8 +60,8 @@ defines the OS itself.
 This is a spike. Nothing works yet; there may not even be code here yet.
 It is first and foremost a learning project: the goal is to understand what
 an init system actually does by building the smallest one that can stand up
-Kubernetes, then letting Kubernetes do the rest. The rough plan is in
-[TODO.md](TODO.md).
+Kubernetes, then letting Kubernetes do the rest. The design overview and the
+milestone-by-milestone story live in [plans/](plans/).
 
 ## License
 

@@ -42,13 +42,23 @@
 # never replaces an identity that machines already carry: replacing
 # the CAs would orphan every kubeconfig computed from them, and
 # replacing the token would strand any machine that hasn't joined
-# yet. Replacing the identity is a deliberate act: run `make clean`
-# here, and the next build mints a new one.
+# yet. Replacing the identity is a deliberate act: delete the
+# identity directory, and the next build mints a new one.
+#
+# The output directory is an argument, because an identity belongs to
+# a deployment, not to the OS: this domain knows how to mint one, and
+# the caller decides which deployment it is for (the root Makefile
+# passes this repo's own, dev-cluster/identity).
 
 set -euo pipefail
 
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-tls="$here/dist/tls"
+if [[ $# -ne 1 ]]; then
+    echo "usage: $0 <identity-dir>" >&2
+    exit 64
+fi
+
+out="$1"
+tls="$out/tls"
 mkdir -p "$tls/etcd"
 
 # One self-signed root per authority. -x509 makes `req` emit a
@@ -110,12 +120,12 @@ fi
 # characters of real randomness, the same format k3s generates.
 # "server" is the credential's username: whoever bears this token may
 # join machines to the cluster.
-if [[ -f "$here/dist/token" ]]; then
+if [[ -f "$out/token" ]]; then
     echo "keeping token: the cluster join token"
 else
     ca_hash="$(sha256sum "$tls/server-ca.crt" | cut -d' ' -f1)"
     secret="$(openssl rand -hex 16)"
-    printf 'K10%s::server:%s\n' "$ca_hash" "$secret" >"$here/dist/token"
-    chmod 600 "$here/dist/token"
+    printf 'K10%s::server:%s\n' "$ca_hash" "$secret" >"$out/token"
+    chmod 600 "$out/token"
     echo "minted token: the cluster join token"
 fi

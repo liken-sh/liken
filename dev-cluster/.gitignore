@@ -1,2 +1,12 @@
-# The dev cluster's disks: state, not source; `make` creates them blank.
-dist/
+# The dev cluster's build products and state, none of it source:
+#
+#   guests/    each QEMU guest's persistent hardware: its disks and
+#              its firmware's variable store; `make` creates them
+#              blank and `make clean` is a factory reset
+#   identity/  the cluster's private keys and join token, minted (or
+#              adopted) by the identity domain; never in history
+#   image/     the assembled boot archives, which bake the identity
+#              and manifests above into the OS the guests boot
+guests/
+identity/
+image/

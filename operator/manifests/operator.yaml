@@ -227,6 +227,16 @@ spec:
       # The OS layer should outrank workloads when memory gets tight;
       # this is the same priority class kube-proxy and CNI pods use.
       priorityClassName: system-node-critical
+      # Only liken nodes run liken's OS components. Every liken
+      # machine registers with this label (image/etc/rancher/k3s); a
+      # node without it belongs to the cluster but not to the fleet,
+      # which happens during a migration, when liken machines and
+      # the nodes they are replacing share one cluster. Without this
+      # selector the pod would be scheduled there and sit in
+      # ErrImageNeverPull forever, since the image below exists only
+      # in a liken machine's containerd.
+      nodeSelector:
+        liken.sh/machine: "true"
       # Manage the machine even while its node is cordoned or not yet
       # ready, exactly the moments an OS operator matters most.
       tolerations:

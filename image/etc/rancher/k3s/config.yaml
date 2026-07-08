@@ -38,3 +38,13 @@ write-kubeconfig-mode: "0644"
 # kube-proxy logs a warning about it at startup.
 kube-proxy-arg:
   - nodeport-addresses=primary
+
+# Every liken machine's Node carries this label, applied by the
+# kubelet when the node registers. The OS DaemonSets (the operator,
+# the log relays) select on it, so they are never scheduled onto a
+# node whose OS is something else. In an all-liken cluster the label
+# is on every node and the selector changes nothing; it matters in a
+# mixed cluster, during a migration, when liken machines and the
+# nodes they are replacing share one cluster.
+node-label:
+  - liken.sh/machine=true

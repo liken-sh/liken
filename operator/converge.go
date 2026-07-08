@@ -292,11 +292,11 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 	}
 	if facts.Boot.ManifestHash == hash {
 		return convergence{condition: notConverged("SpecConverged", "BootMismatch",
-			fmt.Sprintf("facts claim this spec was actuated, yet it differs from the boot's storage (%s); refusing to reboot over a contradiction — this is a liken bug", diffs))}
+			fmt.Sprintf("facts claim this spec was actuated, yet it differs from the boot's storage (%s); refusing to reboot over a contradiction; this is a liken bug", diffs))}
 	}
 	if facts.Storage.MachineState.Backing != machine.BackingPartition {
 		return convergence{condition: notConverged("SpecConverged", "MachineStateEphemeral",
-			"machineState is backed by memory; there is no durable filesystem to stage a manifest into — declare machineState in the machine's manifest")}
+			"machineState is backed by memory; there is no durable filesystem to stage a manifest into; declare machineState in the machine's manifest")}
 	}
 	if err := validateStaging(m.Spec.Storage, facts); err != nil {
 		return convergence{condition: notConverged("SpecConverged", "StagingRejected", err.Error())}

@@ -15,16 +15,33 @@
 # the image carries no manifests, which is still a valid machine.
 MANIFESTS ?=
 
+# IDENTITY points the build at the deployment's identity directory:
+# the CA tree and join token the identity domain minted (or adopted).
+# No default, for the same reason as MANIFESTS. Unlike the manifests,
+# the identity is required, because an image with no CAs and no token
+# could neither form a cluster nor join one.
+IDENTITY ?=
+
+ifeq ($(strip $(IDENTITY)),)
+$(error IDENTITY must name the deployment's identity directory, e.g. IDENTITY=../dev-cluster/identity)
+endif
+
 # The version baked into the image, where the archive lands, and where
-# the liken binary and the operator image come from. All of these are
-# overridable because the releases domain assembles release-stamped
-# images through these same rules, from its own copies of the inputs,
-# into its own tree.
+# the liken binary and the operator image come from. DIST has no
+# default for the same reason MANIFESTS and IDENTITY don't: the
+# assembled image bakes a deployment's manifests and identity, so the
+# archive is the deployment's artifact, and it lands in the
+# deployment's directory (the root Makefile passes dev-cluster/image;
+# the releases domain passes its own build tree).
 LIKEN_VERSION ?= $(strip $(file <../VERSION))
-DIST ?= dist
+DIST ?=
 INIT_DIST ?= ../init/dist
 OPERATOR_DIST ?= ../operator/dist
 LOGS_DIST ?= ../logs/dist
+
+ifeq ($(strip $(DIST)),)
+$(error DIST must name the deployment's image directory, e.g. DIST=../dev-cluster/image)
+endif
 
 KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 K3S_VERSION := $(strip $(file <../k3s/VERSION))
@@ -37,8 +54,8 @@ $(DIST)/liken.cpio: build.sh $(shell find etc -type f) \
 		../k3s/dist/$(K3S_VERSION)/k3s \
 		../xtables/dist/$(XTABLES_VERSION)/bin/xtables-legacy-multi \
 		../trust/dist/$(TRUST_VERSION)/cacert.pem \
-		../identity/dist/tls/server-ca.crt \
-		../identity/dist/token \
+		$(IDENTITY)/tls/server-ca.crt \
+		$(IDENTITY)/token \
 		$(OPERATOR_DIST)/liken-operator-image.tar \
 		$(wildcard ../operator/manifests/*.yaml) \
 		$(LOGS_DIST)/liken-logs-image.tar \
@@ -46,7 +63,7 @@ $(DIST)/liken.cpio: build.sh $(shell find etc -type f) \
 		../VERSION
 	LIKEN_VERSION=$(LIKEN_VERSION) DIST=$(abspath $(DIST)) \
 		INIT_DIST=$(abspath $(INIT_DIST)) OPERATOR_DIST=$(abspath $(OPERATOR_DIST)) \
-		LOGS_DIST=$(abspath $(LOGS_DIST)) \
+		LOGS_DIST=$(abspath $(LOGS_DIST)) IDENTITY=$(abspath $(IDENTITY)) \
 		./build.sh $(MANIFESTS)
 
 .PHONY: all clean
@@ -60,4 +77,4 @@ $(DIST)/install.cpio: $(DIST)/liken.cpio ../kernel/dist/$(KERNEL_VERSION)/vmlinu
 	LIKEN_VERSION=$(LIKEN_VERSION) DIST=$(abspath $(DIST)) ./install.sh
 
 clean:
-	rm -rf dist
+	rm -rf $(DIST)

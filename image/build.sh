@@ -154,16 +154,19 @@ e2fsprogs_version="$(cat "$here/../e2fsprogs/VERSION")"
 cp "$here/../e2fsprogs/dist/$e2fsprogs_version/mke2fs" "$root/sbin/mke2fs"
 
 # The pre-generated certificate authorities, placed exactly where k3s
-# looks before generating its own.
+# looks before generating its own. The identity directory is an input
+# like the manifests: an identity belongs to a deployment, and the
+# caller says which deployment this image is for.
+identity="${IDENTITY:?IDENTITY must name the deployment identity directory}"
 mkdir -p "$root/var/lib/rancher/k3s/server"
-cp -r "$here/../identity/dist/tls" "$root/var/lib/rancher/k3s/server/tls"
+cp -r "$identity/tls" "$root/var/lib/rancher/k3s/server/tls"
 
 # The join token, minted alongside the CAs (identity/mint.sh explains
 # the format). It lives under /etc/liken rather than k3s's data
 # directory because the clusterState filesystem mounts over the
 # latter: a boot input has to sit where no disk will shadow it. Init
 # hands k3s the path (token-file), never the value.
-cp "$here/../identity/dist/token" "$root/etc/liken/token"
+cp "$identity/token" "$root/etc/liken/token"
 chmod 600 "$root/etc/liken/token"
 
 # The Machine API, its operator, and the log relays, all delivered

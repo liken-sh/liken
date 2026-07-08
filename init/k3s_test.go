@@ -104,6 +104,40 @@ func TestLeaderJoinConfigFallsBackToTheEndpoint(t *testing.T) {
 	}
 }
 
+// adoptedCluster is an HA cluster whose datastore liken did not
+// create: the endpoint points at the existing (foreign) control
+// plane, and origin: adopted says nobody may initialize a new one.
+func adoptedCluster() *machine.Cluster {
+	c := haCluster()
+	c.Spec.Origin = machine.OriginAdopted
+	c.Spec.Endpoint = "https://10.10.0.250:6443"
+	return c
+}
+
+func TestLeaderJoinConfigAdoptedFounderJoinsTheEndpoint(t *testing.T) {
+	clusterInit, joinURL := leaderJoinConfig(adoptedCluster(), "node-1", t.TempDir())
+	if clusterInit || joinURL != "https://10.10.0.250:6443" {
+		t.Errorf("an adopted cluster's founding leader joins the existing datastore, never initializes one: %v %q", clusterInit, joinURL)
+	}
+}
+
+func TestLeaderJoinConfigAdoptedSingleLeaderStillJoins(t *testing.T) {
+	c := adoptedCluster()
+	c.Spec.Leaders = []string{"node-1"}
+	clusterInit, joinURL := leaderJoinConfig(c, "node-1", t.TempDir())
+	if clusterInit || joinURL != "https://10.10.0.250:6443" {
+		t.Errorf("adoption is never sqlite: even a lone leader joins the existing datastore: %v %q", clusterInit, joinURL)
+	}
+}
+
+func TestLeaderJoinConfigAdoptedJoiningLeaderPrefersTheFounder(t *testing.T) {
+	dir := manifestsDir(t, map[string]string{"node-1": "10.10.0.1/24"})
+	clusterInit, joinURL := leaderJoinConfig(adoptedCluster(), "node-3", dir)
+	if clusterInit || joinURL != "https://10.10.0.1:6443" {
+		t.Errorf("an adopted joining leader points at the founder like any other: %v %q", clusterInit, joinURL)
+	}
+}
+
 func TestK3sBootConfigForTheFoundingLeader(t *testing.T) {
 	got := k3sBootConfig(k3sBootInputs{role: machine.RoleLeader, cluster: haCluster(), nodeIP: "10.10.0.1", nodeInterface: "eth1", haveToken: true, clusterInit: true})
 	if !strings.Contains(got, "cluster-init: true\n") {

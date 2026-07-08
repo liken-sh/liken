@@ -32,6 +32,7 @@ kind: Cluster
 metadata:
   name: lab
 spec:
+  origin: adopted
   leaders: [node-1]
   endpoint: https://10.10.0.1:6443
   network:
@@ -55,6 +56,9 @@ spec:
 	}
 	if c.Spec.Endpoint != "https://10.10.0.1:6443" {
 		t.Errorf("endpoint: got %q", c.Spec.Endpoint)
+	}
+	if c.Spec.Origin != OriginAdopted {
+		t.Errorf("origin: got %q", c.Spec.Origin)
 	}
 	if c.Spec.Network.NodeCIDR != "10.10.0.0/24" {
 		t.Errorf("nodeCIDR: got %q", c.Spec.Network.NodeCIDR)

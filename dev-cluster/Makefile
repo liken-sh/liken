@@ -18,7 +18,7 @@
 #
 # The lab is parameterized by node: the same image boots every
 # machine, and NODE picks which machine a given QEMU process is. Each
-# node gets its own disks (dist/<node>/), its own MACs, and its own
+# node gets its own disks (guests/<node>/), its own MACs, and its own
 # liken.machine=<node> kernel parameter, which is how the shared image
 # knows which Machine manifest is this machine's. Boot the cluster by
 # running each node in its own terminal:
@@ -53,7 +53,7 @@ MEM ?= 4096
 SMP ?= 4
 KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 VMLINUZ := ../kernel/dist/$(KERNEL_VERSION)/vmlinuz
-INITRD := ../image/dist/liken.cpio
+INITRD := image/liken.cpio
 
 # Each node's MACs are derived from its number so they never collide:
 # QEMU's default would give every guest the same address
@@ -76,15 +76,15 @@ CLUSTER_MAC := 52:54:00:4c:4c:0$(NODE_NUM)
 # state, and a larger one to carve up for pod storage. qcow2 is QEMU's
 # copy-on-write format, allocated sparsely, so the disks cost the host
 # almost nothing until the machine writes to them. Everything lives in
-# the gitignored dist/, one directory per node, and `make clean` acts
+# the gitignored guests/, one directory per node, and `make clean` acts
 # as a factory reset: the next boot finds blank disks and claims them
 # fresh.
-dist/$(NODE)/state.qcow2:
-	mkdir -p dist/$(NODE)
+guests/$(NODE)/state.qcow2:
+	mkdir -p guests/$(NODE)
 	qemu-img create -f qcow2 $@ 2G
 
-dist/$(NODE)/pods.qcow2:
-	mkdir -p dist/$(NODE)
+guests/$(NODE)/pods.qcow2:
+	mkdir -p guests/$(NODE)
 	qemu-img create -f qcow2 $@ 4G
 
 # The boot disk: where the machine will keep its own operating system
@@ -93,8 +93,8 @@ dist/$(NODE)/pods.qcow2:
 # and eventually boots from it. It is attached third, so the data
 # disks keep the /dev/vda and /dev/vdb handles their claims were
 # declared with.
-dist/$(NODE)/boot.qcow2:
-	mkdir -p dist/$(NODE)
+guests/$(NODE)/boot.qcow2:
+	mkdir -p guests/$(NODE)
 	qemu-img create -f qcow2 $@ 2G
 
 # Real UEFI firmware for the guests: OVMF is TianoCore edk2 (the same
@@ -109,8 +109,8 @@ dist/$(NODE)/boot.qcow2:
 # has the same effect as pulling the CMOS battery.
 OVMF_CODE := /usr/share/OVMF/OVMF_CODE_4M.fd
 
-dist/$(NODE)/OVMF_VARS.fd:
-	mkdir -p dist/$(NODE)
+guests/$(NODE)/OVMF_VARS.fd:
+	mkdir -p guests/$(NODE)
 	cp /usr/share/OVMF/OVMF_VARS_4M.fd $@
 
 # Only the leader node forwards the API port to the host: kubectl on
@@ -266,14 +266,14 @@ QEMU_BOOT = $(QEMU_BOOT_$(BOOT))
 RTC ?= utc
 RTC_BASE := -rtc base=$(RTC)
 
-run: dist/$(NODE)/state.qcow2 dist/$(NODE)/pods.qcow2 dist/$(NODE)/boot.qcow2 dist/$(NODE)/OVMF_VARS.fd
+run: guests/$(NODE)/state.qcow2 guests/$(NODE)/pods.qcow2 guests/$(NODE)/boot.qcow2 guests/$(NODE)/OVMF_VARS.fd
 	qemu-system-x86_64 \
 		-accel kvm -accel tcg \
 		-cpu max \
 		-smp $(SMP) \
 		-m $(MEM) \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
-		-drive if=pflash,format=raw,file=dist/$(NODE)/OVMF_VARS.fd \
+		-drive if=pflash,format=raw,file=guests/$(NODE)/OVMF_VARS.fd \
 		$(QEMU_BOOT) \
 		-display none \
 		-serial stdio \
@@ -284,11 +284,11 @@ run: dist/$(NODE)/state.qcow2 dist/$(NODE)/pods.qcow2 dist/$(NODE)/boot.qcow2 di
 		-device virtio-net-pci,netdev=uplink,mac=$(UPLINK_MAC) \
 		-netdev socket,id=cluster,mcast=239.192.76.75:26443 \
 		-device virtio-net-pci,netdev=cluster,mac=$(CLUSTER_MAC) \
-		-drive file=dist/$(NODE)/state.qcow2,format=qcow2,if=none,id=state \
+		-drive file=guests/$(NODE)/state.qcow2,format=qcow2,if=none,id=state \
 		-device virtio-blk-pci,drive=state,serial=liken-$(NODE)-state \
-		-drive file=dist/$(NODE)/pods.qcow2,format=qcow2,if=none,id=pods \
+		-drive file=guests/$(NODE)/pods.qcow2,format=qcow2,if=none,id=pods \
 		-device virtio-blk-pci,drive=pods,serial=liken-$(NODE)-pods \
-		-drive file=dist/$(NODE)/boot.qcow2,format=qcow2,if=none,id=boot \
+		-drive file=guests/$(NODE)/boot.qcow2,format=qcow2,if=none,id=boot \
 		-device virtio-blk-pci,drive=boot,serial=liken-$(NODE)-boot
 
 # One-shot boots for debugging and automation: liken.oneshot tells init
@@ -308,7 +308,7 @@ run-once: run
 # boots the machine from its own disk. The install is idempotent: if
 # it is interrupted, running it again converges.
 install: BOOT = kernel
-install: INITRD = ../image/dist/install.cpio
+install: INITRD = image/install.cpio
 install: LIKEN_BOOT_ARGS = liken.install
 install: QEMU_EXIT_ON_REBOOT := -no-reboot
 install: run
@@ -319,9 +319,9 @@ install: run
 # notices the disk outgrew its partition table, relocates the backup
 # GPT to the new end, and grows the remainder role into the new space.
 grow-pods:
-	qemu-img resize dist/$(NODE)/pods.qcow2 +4G
+	qemu-img resize guests/$(NODE)/pods.qcow2 +4G
 
 .PHONY: run run-once install grow-pods clean
 
 clean:
-	rm -rf dist
+	rm -rf guests

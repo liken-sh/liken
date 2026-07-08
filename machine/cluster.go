@@ -57,6 +57,22 @@ type Cluster struct {
 	Status     ClusterStatus `json:"status,omitzero"`
 }
 
+// ClusterOrigin records how the cluster's datastore came to exist.
+// Founded means liken created it, via the founding leader's
+// cluster-init. Adopted means the datastore already existed in a
+// cluster liken did not create, and liken machines join it as
+// members rather than starting one. The distinction matters in one
+// place, the founding leader's datastore decision (init/k3s.go): an
+// adopted cluster's founder joins like everyone else, because
+// initializing a second datastore next to a live one would split
+// the cluster in two.
+type ClusterOrigin string
+
+const (
+	OriginFounded ClusterOrigin = "founded"
+	OriginAdopted ClusterOrigin = "adopted"
+)
+
 // ClusterStatus is what can be observed about the cluster as a whole,
 // written by the leaders (see operator/fleet.go): they are the only
 // machines positioned to observe the fleet, because a follower that
@@ -102,6 +118,16 @@ type MachineTally struct {
 }
 
 type ClusterSpec struct {
+	// Origin is how the cluster's datastore came to exist: founded
+	// (the default when unset) or adopted. An adopted cluster is one
+	// liken is migrating into rather than one it created: the
+	// machines join an existing datastore through the endpoint, and
+	// no leader ever initializes a new one. The one legal edit is
+	// the promotion, adopted to founded, made once the last foreign
+	// member is gone; after it, a rebuild from scratch behaves like
+	// any founded cluster, with the founder running cluster-init.
+	Origin ClusterOrigin `json:"origin,omitempty"`
+
 	// Leaders names the machines that run control planes, by their
 	// Machine names. A machine's role is derived, never declared: it
 	// is a leader exactly when its name appears here, so promoting a

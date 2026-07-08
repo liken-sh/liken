@@ -138,7 +138,7 @@ func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, fact
 	}
 	if facts.Storage.MachineState.Backing != machine.BackingPartition {
 		return convergence{condition: notConverged("ClusterConverged", "MachineStateEphemeral",
-			"machineState is backed by memory; there is no durable filesystem to stage the cluster document into — declare machineState in the machine's manifest")}
+			"machineState is backed by memory; there is no durable filesystem to stage the cluster document into; declare machineState in the machine's manifest")}
 	}
 
 	c := convergence{

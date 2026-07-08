@@ -97,45 +97,56 @@ logs/dist/liken-logs-image.tar: $(wildcard logs/*.go) \
 logs: logs/dist/liken-logs-image.tar
 
 # The cluster's identity is a set of certificate authorities and the
-# join token, minted here, in the repo, before any machine boots (see
-# identity/mint.sh). The token can exist this early because the CA it
-# hashes already exists. The keys are gitignored and the artifacts
-# carry no version; losing or remaking them just gives the next boot
-# a new identity.
-identity/dist/tls/server-ca.crt identity/dist/token &: identity/mint.sh
-	$(MAKE) -C identity
+# join token, minted before any machine boots (see identity/mint.sh).
+# The token can exist this early because the CA it hashes already
+# exists. An identity belongs to a deployment, not to the OS, so the
+# identity domain takes the output directory as an input, and this
+# root Makefile points it at the repo's own deployment, the same way
+# the image build gets the dev cluster's manifests. The keys are
+# gitignored and the artifacts carry no version; losing or remaking
+# them just gives the next boot a new identity.
+IDENTITY_DIR := dev-cluster/identity
 
-identity: identity/dist/tls/server-ca.crt identity/dist/token
+$(IDENTITY_DIR)/tls/server-ca.crt $(IDENTITY_DIR)/token &: identity/mint.sh
+	$(MAKE) -C identity DIST=$(abspath $(IDENTITY_DIR))
+
+identity: $(IDENTITY_DIR)/tls/server-ca.crt $(IDENTITY_DIR)/token
 
 # This is an operator's admin credential, computed offline from the
 # client CA; the machine never has to provide it (see
 # identity/kubeconfig.sh). Use it explicitly, so no kubeconfig you
 # already have is ever touched:
 #
-#   kubectl --kubeconfig identity/dist/kubeconfig get nodes
-kubeconfig: identity/dist/tls/server-ca.crt
-	$(MAKE) -C identity kubeconfig
+#   kubectl --kubeconfig dev-cluster/identity/kubeconfig get nodes
+kubeconfig: $(IDENTITY_DIR)/tls/server-ca.crt
+	$(MAKE) -C identity DIST=$(abspath $(IDENTITY_DIR)) kubeconfig
 
 # This is the bootable initramfs: the image domain packs liken and
 # everything k3s needs into the cpio archive the kernel unpacks at
 # boot. The image domain is production code and carries no manifests
-# of its own. This root Makefile is where the OS build meets this
+# or identity of its own, and produces nothing of its own either: the
+# assembled archive bakes a deployment's manifests and identity, so
+# it is the deployment's artifact and lands in the deployment's
+# directory. This root Makefile is where the OS build meets this
 # repo's own deployment, so it points the build at the dev cluster's
-# Cluster and Machine manifests.
-image/dist/liken.cpio: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s \
+# manifests and identity and lands the archive beside them.
+IMAGE_DIR := dev-cluster/image
+
+$(IMAGE_DIR)/liken.cpio: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s \
 		$(XTABLES_DIST)/bin/xtables-legacy-multi \
 		$(TRUST_DIST)/cacert.pem \
 		$(E2FSPROGS_DIST)/mke2fs \
-		identity/dist/tls/server-ca.crt identity/dist/token \
+		$(IDENTITY_DIR)/tls/server-ca.crt $(IDENTITY_DIR)/token \
 		operator/dist/liken-operator-image.tar \
 		$(wildcard operator/manifests/*.yaml) \
 		logs/dist/liken-logs-image.tar \
 		$(wildcard logs/manifests/*.yaml) \
 		dev-cluster/cluster.yaml $(wildcard dev-cluster/machines/*.yaml) \
 		image/build.sh $(shell find image/etc -type f) image/Makefile
-	$(MAKE) -C image MANIFESTS=../dev-cluster
+	$(MAKE) -C image MANIFESTS=../dev-cluster \
+		IDENTITY=$(abspath $(IDENTITY_DIR)) DIST=$(abspath $(IMAGE_DIR))
 
-image: image/dist/liken.cpio
+image: $(IMAGE_DIR)/liken.cpio
 
 # Boot the dev cluster's machines, the QEMU guests that stand in for
 # the physical and cloud machines liken really targets (the virtual
@@ -148,26 +159,28 @@ image: image/dist/liken.cpio
 # end, with the shutdown and the next boot in one stream. As with
 # every target here, the root Makefile only makes sure the artifacts
 # exist, in order, before handing off.
-run: $(KERNEL_DIST)/vmlinuz image/dist/liken.cpio
+run: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/liken.cpio
 	$(MAKE) -C dev-cluster run
 
 # One-shot boots are for debugging and automation. The liken.oneshot
 # flag tells init not to restart k3s: when k3s first exits, the
 # machine powers off, QEMU exits, and the console log is a complete,
 # bounded record of the boot.
-run-once: $(KERNEL_DIST)/vmlinuz image/dist/liken.cpio
+run-once: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/liken.cpio
 	$(MAKE) -C dev-cluster run-once
 
 # The install image is liken.cpio carrying the release payload, which
 # the installer verifies and copies onto a machine's own disk.
-image/dist/install.cpio: image/dist/liken.cpio $(KERNEL_DIST)/vmlinuz image/install.sh
-	$(MAKE) -C image dist/install.cpio
+$(IMAGE_DIR)/install.cpio: $(IMAGE_DIR)/liken.cpio $(KERNEL_DIST)/vmlinuz image/install.sh
+	$(MAKE) -C image MANIFESTS=../dev-cluster \
+		IDENTITY=$(abspath $(IDENTITY_DIR)) DIST=$(abspath $(IMAGE_DIR)) \
+		$(abspath $(IMAGE_DIR))/install.cpio
 
 # Install a machine: boot it once from the "USB stick" (the install
 # image via -kernel), let it put this release on its own system
 # slots, and power off. After that, `make run NODE=x` boots it from
 # that disk.
-install: image/dist/install.cpio
+install: $(IMAGE_DIR)/install.cpio
 	$(MAKE) -C dev-cluster install
 
 # Produce a liken release: the same system rebuilt under a different
@@ -201,7 +214,7 @@ clean:
 	$(MAKE) -C init clean
 	$(MAKE) -C operator clean
 	$(MAKE) -C logs clean
-	$(MAKE) -C identity clean
-	$(MAKE) -C image clean
+	$(MAKE) -C identity DIST=$(abspath $(IDENTITY_DIR)) clean
+	$(MAKE) -C image IDENTITY=$(abspath $(IDENTITY_DIR)) DIST=$(abspath $(IMAGE_DIR)) clean
 
 .PHONY: all kernel k3s xtables trust e2fsprogs init operator logs identity kubeconfig image run run-once install release serve clean

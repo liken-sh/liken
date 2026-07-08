@@ -141,7 +141,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "liken: %v\n", err)
 			fmt.Fprintln(os.Stderr, "liken: install failed; powering off (installs are idempotent: fix the cause and boot the installer again)")
 		} else {
-			fmt.Println("liken: install complete; powering off — the next boot comes from the disk")
+			fmt.Println("liken: install complete; powering off; the next boot comes from the disk")
 		}
 		powerOff()
 		for {

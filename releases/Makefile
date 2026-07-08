@@ -46,7 +46,8 @@ release:
 	$(MAKE) -C ../image LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/image) \
 		INIT_DIST=$(abspath $(BUILD)/init) OPERATOR_DIST=$(abspath $(BUILD)/operator) \
 		LOGS_DIST=$(abspath $(BUILD)/logs) \
-		MANIFESTS=../dev-cluster $(abspath $(BUILD)/image)/install.cpio
+		MANIFESTS=../dev-cluster IDENTITY=../dev-cluster/identity \
+		$(abspath $(BUILD)/image)/install.cpio
 	./publish.sh $(VERSION)
 
 # The release server: a logged file server over dist/, listening on

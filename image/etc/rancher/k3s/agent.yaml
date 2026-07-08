@@ -17,3 +17,10 @@
 # kube-proxy logs a warning about it at startup.
 kube-proxy-arg:
   - nodeport-addresses=primary
+
+# Every liken machine's Node wears this label, applied by the kubelet
+# when the node registers; the OS DaemonSets select on it. See the
+# fuller story in config.yaml — the label must be identical for both
+# roles, because the OS components run on leaders and followers alike.
+node-label:
+  - liken.sh/machine=true
