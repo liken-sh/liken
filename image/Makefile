@@ -48,7 +48,14 @@ K3S_VERSION := $(strip $(file <../k3s/VERSION))
 XTABLES_VERSION := $(strip $(file <../xtables/VERSION))
 TRUST_VERSION := $(strip $(file <../trust/VERSION))
 
+# The deployment's manifests are prerequisites, not just an argument:
+# the build bakes them in and reads spec.modules out of them, so an
+# edited manifest must rebuild the archive. With no MANIFESTS the
+# wildcards expand to nothing.
 $(DIST)/liken.cpio: build.sh $(shell find etc -type f) \
+		$(wildcard inventory/*.go) $(wildcard ../machine/*.go) \
+		$(wildcard $(MANIFESTS)/cluster.yaml) \
+		$(wildcard $(MANIFESTS)/machines/*.yaml) \
 		$(INIT_DIST)/liken \
 		../kernel/dist/$(KERNEL_VERSION)/vmlinuz \
 		../k3s/dist/$(K3S_VERSION)/k3s \

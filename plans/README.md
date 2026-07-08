@@ -53,14 +53,16 @@ up capabilities the OS still needs before it can host a working
 cluster's workloads. Each is written as the general capability, not
 the specific workload that revealed it:
 
-17. [ ] [Host clients for network storage](17-network-storage-clients.md) —
-    iSCSI and NFS userspace and modules, so CSI node plugins can
-    actually mount.
-18. [ ] [Requestable kernel modules](18-requestable-kernel-modules.md) —
-    deployments declare the drivers their hardware needs.
+17. [ ] [Opt-in features](17-network-storage-clients.md) — one
+    Cluster vocabulary for optional capabilities: iSCSI and NFS host
+    clients, and the k3s bundled components (absorbing 19). Designed;
+    runs after 18.
+18. [x] [Requestable kernel modules](18-requestable-kernel-modules.md) —
+    machines declare the drivers their hardware needs; the image
+    ships them, init loads them, status reports them. Ran ahead of
+    17, which builds on it.
 19. [ ] [Choosing the bundled components](19-choosing-bundled-components.md) —
-    liken's disable list becomes a Cluster declaration, not an image
-    hardcode.
+    folded into 17's feature vocabulary.
 20. [ ] [Private registries](20-private-registries.md) —
     containerd mirrors and credentials, and k3s's embedded registry.
 21. [ ] [Node labels on the Machine](21-node-labels.md) —

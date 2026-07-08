@@ -43,6 +43,36 @@ func TestStorageConditionNothingDeclared(t *testing.T) {
 	}
 }
 
+func TestModulesConditionAllHealthy(t *testing.T) {
+	c := modulesCondition([]machine.ModuleStatus{
+		{Name: "nvidia", State: machine.ModuleLoaded},
+		{Name: "loop", State: machine.ModuleBuiltin},
+	})
+	if c.Type != "ModulesLoaded" || c.Status != machine.ConditionTrue || c.Reason != "AllLoaded" {
+		t.Errorf("got %+v", c)
+	}
+}
+
+func TestModulesConditionNamesTheFix(t *testing.T) {
+	c := modulesCondition([]machine.ModuleStatus{
+		{Name: "nvidia", State: machine.ModuleLoaded},
+		{Name: "nbd", State: machine.ModuleMissing, Message: "not in this image; rebuild the deployment's image, or upgrade to a release built from manifests that declare it"},
+	})
+	if c.Status != machine.ConditionFalse || c.Reason != "ModulesNotLoaded" {
+		t.Errorf("got %+v", c)
+	}
+	if !strings.Contains(c.Message, "nbd: not in this image; rebuild") {
+		t.Errorf("message should carry init's fix: %q", c.Message)
+	}
+}
+
+func TestModulesConditionNothingDeclared(t *testing.T) {
+	c := modulesCondition(nil)
+	if c.Status != machine.ConditionTrue || c.Reason != "NothingDeclared" {
+		t.Errorf("got %+v", c)
+	}
+}
+
 func nodeWithReady(status machine.ConditionStatus) *nodeObject {
 	n := &nodeObject{}
 	n.Status.Conditions = []machine.Condition{

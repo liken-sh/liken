@@ -30,9 +30,13 @@
 #                                 embeds a hash of the server CA below,
 #                                 so a joining machine can verify the
 #                                 cluster before presenting the secret
-#   /etc/liken/modules.conf       which kernel modules init loads
-#   /lib/modules/<release>/       those modules and their dependencies,
-#                                 exactly as Ubuntu built them
+#   /etc/liken/modules.conf       which kernel modules init loads for
+#                                 the OS's own needs
+#   /lib/modules/<release>/       those modules, any extras the
+#                                 deployment's machines declare
+#                                 (spec.modules), and everything they
+#                                 depend on, exactly as Ubuntu built
+#                                 them
 #   /bin/k3s                      all of Kubernetes, in one binary
 #   /etc/rancher/k3s/config.yaml  k3s's configuration for leaders
 #   /etc/rancher/k3s/agent.yaml   the followers' configuration (init
@@ -193,24 +197,47 @@ trust_version="$(cat "$here/../trust/VERSION")"
 cp "$here/../trust/dist/$trust_version/cacert.pem" \
    "$root/etc/ssl/certs/ca-certificates.crt"
 
-# The image carries only the modules the machine will load (the list
-# in etc/liken/modules.conf) plus everything they depend on. The
-# host's modprobe resolves each name against the vendored kernel's
-# depmod index
-# (--show-depends prints one "insmod <path>" line per file, dependencies
-# first) without loading anything anywhere.
+# The image carries only the modules the machines will load, plus
+# everything those depend on. Two lists feed this: the OS's own fixed
+# needs (etc/liken/modules.conf) and whatever extra modules the
+# deployment's Machine manifests declare (spec.modules), both shipped
+# by the same resolution below. The host's modprobe resolves each name
+# against the vendored kernel's depmod index (--show-depends prints
+# one "insmod <path>" line per file, dependencies first) without
+# loading anything anywhere. A name the vendored kernel doesn't have
+# fails the build right here, which is the point: a deployment learns
+# about a typo'd module at build time, not on a booted fleet.
+ship_modules() {
+    while IFS= read -r name; do
+        [[ -z "$name" || "$name" == \#* ]] && continue
+        modprobe -d "$kdist" -S "$release" --show-depends "$name"
+    done |
+        awk '$1 == "insmod" { print $2 }' |
+        sort -u |
+        while IFS= read -r file; do
+            rel="${file#"$kdist"/lib/modules/"$release"/}"
+            mkdir -p "$root/lib/modules/$release/$(dirname "$rel")"
+            cp "$file" "$root/lib/modules/$release/$rel"
+        done
+}
 mkdir -p "$root/lib/modules/$release"
-while IFS= read -r name; do
-    [[ -z "$name" || "$name" == \#* ]] && continue
-    modprobe -d "$kdist" -S "$release" --show-depends "$name"
-done <"$here/etc/liken/modules.conf" |
-    awk '$1 == "insmod" { print $2 }' |
-    sort -u |
-    while IFS= read -r file; do
-        rel="${file#"$kdist"/lib/modules/"$release"/}"
-        mkdir -p "$root/lib/modules/$release/$(dirname "$rel")"
-        cp "$file" "$root/lib/modules/$release/$rel"
-    done
+ship_modules <"$here/etc/liken/modules.conf"
+
+# The deployment's declared modules, read from the same manifests this
+# build bakes in. The inventory program parses them with the strict
+# parser init uses at boot, so the build and the machine can never
+# disagree about what a manifest says. The union is printed here so
+# the build log completes the review trail: the OS's list is fixed in
+# this repo, the deployment's extras are reviewed in its manifests,
+# and this is where the two meet.
+if [[ -n "$manifests" ]]; then
+    declared="$(go run "$here/inventory" modules "$manifests")"
+    if [[ -n "$declared" ]]; then
+        echo "modules declared by this deployment's machines:"
+        while IFS= read -r name; do echo "  $name"; done <<<"$declared"
+        ship_modules <<<"$declared"
+    fi
+fi
 
 # depmod indexes what actually shipped, so init's dependency resolution
 # (which reads modules.dep) agrees exactly with the files present.

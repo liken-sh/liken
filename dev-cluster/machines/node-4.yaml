@@ -39,3 +39,10 @@ spec:
       device: /dev/vdb
   sysctls:
     fs.inotify.max_user_instances: "8192"
+  # The declared-modules drill (milestone 18): dummy is the kernel's
+  # placeholder network driver, harmless everywhere, so this machine
+  # is the lab's standing proof that a deployment can ask for a
+  # module the OS itself would never load. The image build ships it
+  # because this manifest declares it, and status.modules on this
+  # Machine reports the load.
+  modules: [dummy]

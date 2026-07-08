@@ -72,6 +72,24 @@ spec:
 	}
 }
 
+func TestLoadParsesModules(t *testing.T) {
+	path := writeManifest(t, `
+apiVersion: liken.sh/v1alpha1
+kind: Machine
+metadata:
+  name: liken-dev
+spec:
+  modules: [nvidia, v4l2loopback]
+`)
+	m, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Spec.Modules) != 2 || m.Spec.Modules[0] != "nvidia" || m.Spec.Modules[1] != "v4l2loopback" {
+		t.Errorf("modules: got %v", m.Spec.Modules)
+	}
+}
+
 func TestLoadRejectsWrongKind(t *testing.T) {
 	path := writeManifest(t, `
 apiVersion: liken.sh/v1alpha1

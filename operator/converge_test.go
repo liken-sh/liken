@@ -140,6 +140,48 @@ func TestStorageDriftNamesTheRemainder(t *testing.T) {
 	}
 }
 
+func TestModulesDriftIgnoresOrderAndRepetition(t *testing.T) {
+	diffs := modulesDrift([]string{"nvidia", "zram", "nvidia"}, []string{"zram", "nvidia"})
+	if len(diffs) != 0 {
+		t.Errorf("the lists are the same set: %v", diffs)
+	}
+}
+
+func TestModulesDriftTreatsNilAndEmptyAlike(t *testing.T) {
+	if diffs := modulesDrift(nil, []string{}); len(diffs) != 0 {
+		t.Errorf("nothing declared, nothing actuated: %v", diffs)
+	}
+}
+
+func TestModulesDriftSeesAnAddedModule(t *testing.T) {
+	diffs := modulesDrift([]string{"nvidia"}, nil)
+	if len(diffs) != 1 || !strings.Contains(diffs[0], "nvidia declared but this boot ran without it") {
+		t.Errorf("got %v", diffs)
+	}
+}
+
+func TestModulesDriftSeesARemovedModule(t *testing.T) {
+	diffs := modulesDrift(nil, []string{"zram"})
+	if len(diffs) != 1 || !strings.Contains(diffs[0], "zram no longer declared") {
+		t.Errorf("got %v", diffs)
+	}
+}
+
+func TestDecideConvergenceStagesOnModulesOnlyDrift(t *testing.T) {
+	m := labMachine()
+	m.Spec.Modules = []string{"nvidia"}
+	conv := decideConvergence(m, labFacts(), nil, "", turnStandalone)
+	if conv.condition.Reason != "RebootPending" {
+		t.Fatalf("got %+v", conv.condition)
+	}
+	if !conv.stage {
+		t.Errorf("a modules edit stages like any other machine change: %+v", conv)
+	}
+	if !strings.Contains(conv.condition.Message, "nvidia") {
+		t.Errorf("the message should carry the diff: %q", conv.condition.Message)
+	}
+}
+
 func TestValidateStagingAcceptsAGrow(t *testing.T) {
 	spec := labStorage()
 	spec.PodStorage.Size = "3Gi"

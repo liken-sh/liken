@@ -20,7 +20,7 @@ profile: coverage.out
 
 threshold:
   # The whole module, everything counted.
-  total: 64
+  total: 65
 
 override:
   # The Machine API: pure functions over declared types. (Paths here
@@ -33,13 +33,17 @@ override:
   # client, the seeding loops, the watch stream, the leases) is
   # exercised against a real HTTP test server.
   - path: ^operator$
-    threshold: 63
+    threshold: 64
   # Init: the boot machinery itself (mounting, DHCP, the reboot
   # syscall) is exercised by the QEMU harness, not unit tests; the
   # parsers, planners, derivations, and file-shaped actuators around
   # it are tested here against fakes.
   - path: ^init$
-    threshold: 60
+    threshold: 61
+  # The image inventory: reading the deployment's manifests for the
+  # build; what goes untested is main's argument plumbing.
+  - path: ^image/inventory$
+    threshold: 82
   # The log relays: parsing and tailing are pure or run against real
   # temp files; what goes untested is the real /dev/kmsg device and
   # the clock syscalls.

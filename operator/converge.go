@@ -4,14 +4,16 @@ package main
 // machine's boot.
 //
 // Sysctls reconcile live; storage cannot, because a filesystem can't
-// be swapped under a running cluster. A storage edit therefore
-// converges by reboot: the operator stages the desired manifest onto
-// the machineState filesystem, where the next boot finds it, tries
-// it, and promotes or rejects it (machine/staging.go covers that
-// side). This file is the operator's half: notice drift, refuse what
-// the machine can't satisfy, stage what it can, and either request
-// the reboot (rebootPolicy: Auto) or report that one is pending
-// (Manual, the default).
+// be swapped under a running cluster, and neither can the declared
+// module list, because loading is one-way: the kernel offers no safe
+// way to pull a driver out from under whatever started using it. Both
+// therefore converge by reboot: the operator stages the desired
+// manifest onto the machineState filesystem, where the next boot
+// finds it, tries it, and promotes or rejects it (machine/staging.go
+// covers that side). This file is the operator's half: notice drift,
+// refuse what the machine can't satisfy, stage what it can, and
+// either request the reboot (rebootPolicy: Auto) or report that one
+// is pending (Manual, the default).
 //
 // Every decision here is a pure function over the cluster's Machine
 // and the boot's facts; reconcile() supplies the few lines of I/O.
@@ -21,6 +23,8 @@ package main
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -53,6 +57,37 @@ func storageDrift(desired, actuated machine.StorageSpec) []string {
 			if !sameSize(d.Size, a.Size) {
 				diffs = append(diffs, fmt.Sprintf("%s: size %s declared, %s actuated", name, orRemainder(d.Size), orRemainder(a.Size)))
 			}
+		}
+	}
+	return diffs
+}
+
+// modulesDrift compares the declared module list against the one the
+// boot ran with, as sets: order and repetition carry no meaning, so
+// neither may count as drift. The actuated side is the boot record's
+// copy of the ask, not the load outcomes, and that is deliberate: a
+// declared module the image lacked still counts as actuated, because
+// rebooting again with the same image would change nothing. The
+// ModulesLoaded condition is what reports that problem, and its fix
+// is a new image, not a reboot.
+func modulesDrift(desired, actuated []string) []string {
+	want := map[string]bool{}
+	for _, name := range desired {
+		want[name] = true
+	}
+	have := map[string]bool{}
+	for _, name := range actuated {
+		have[name] = true
+	}
+	var diffs []string
+	for _, name := range slices.Sorted(maps.Keys(want)) {
+		if !have[name] {
+			diffs = append(diffs, fmt.Sprintf("modules: %s declared but this boot ran without it", name))
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(have)) {
+		if !want[name] {
+			diffs = append(diffs, fmt.Sprintf("modules: %s no longer declared but this boot ran with it", name))
 		}
 	}
 	return diffs
@@ -271,7 +306,8 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 			"the machine's facts carry no boot record yet")}
 	}
 
-	drift := storageDrift(m.Spec.Storage, facts.Boot.Storage)
+	drift := append(storageDrift(m.Spec.Storage, facts.Boot.Storage),
+		modulesDrift(m.Spec.Modules, facts.Boot.Modules)...)
 	if len(drift) == 0 {
 		return convergence{
 			condition:      converged("SpecConverged", "Converged", "this boot actuated the current spec"),
@@ -292,7 +328,7 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 	}
 	if facts.Boot.ManifestHash == hash {
 		return convergence{condition: notConverged("SpecConverged", "BootMismatch",
-			fmt.Sprintf("facts claim this spec was actuated, yet it differs from the boot's storage (%s); refusing to reboot over a contradiction; this is a liken bug", diffs))}
+			fmt.Sprintf("facts claim this spec was actuated, yet it differs from the boot's record (%s); refusing to reboot over a contradiction; this is a liken bug", diffs))}
 	}
 	if facts.Storage.MachineState.Backing != machine.BackingPartition {
 		return convergence{condition: notConverged("SpecConverged", "MachineStateEphemeral",

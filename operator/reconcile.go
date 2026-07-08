@@ -169,6 +169,15 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 	status.Sysctls, err = applySysctls(m.Spec.Sysctls)
 	status.Conditions = machine.SetCondition(status.Conditions, sysctlsCondition(err), now)
 
+	// Modules judge what the boot reported, not what the spec asks
+	// now: a freshly declared module has no outcome yet, and its story
+	// is SpecConverged's until a reboot loads it. This condition is
+	// the other half of the split: SpecConverged can be True (the boot
+	// ran the manifest) while this is False, because a spec the boot
+	// honored can still name modules the booted image never carried.
+	status.Conditions = machine.SetCondition(status.Conditions,
+		modulesCondition(status.Modules), now)
+
 	// Storage compares the spec's declared roles against the facts'
 	// report of where each is actually backed. The operator can't
 	// observe the disks directly (claiming happened before this
@@ -458,6 +467,39 @@ func factsCondition(err error) machine.Condition {
 		}
 	}
 	return machine.Condition{Type: "FactsPublished", Status: machine.ConditionTrue, Reason: "FactsRead"}
+}
+
+// modulesCondition summarizes the boot's declared-module outcomes as
+// one condition. Loaded and Builtin are both healthy; anything else
+// carries init's message, which names the fix (a rebuilt image for a
+// Missing module, the hardware's error for a Failed one), because a
+// status that says what would repair it beats one that only says
+// what's wrong.
+func modulesCondition(observed []machine.ModuleStatus) machine.Condition {
+	var problems []string
+	for _, s := range observed {
+		if s.State == machine.ModuleLoaded || s.State == machine.ModuleBuiltin {
+			continue
+		}
+		problems = append(problems, fmt.Sprintf("%s: %s", s.Name, s.Message))
+	}
+	switch {
+	case len(problems) > 0:
+		return machine.Condition{
+			Type: "ModulesLoaded", Status: machine.ConditionFalse, Reason: "ModulesNotLoaded",
+			Message: strings.Join(problems, "; "),
+		}
+	case len(observed) > 0:
+		return machine.Condition{
+			Type: "ModulesLoaded", Status: machine.ConditionTrue, Reason: "AllLoaded",
+			Message: fmt.Sprintf("all %d declared modules are in the kernel", len(observed)),
+		}
+	default:
+		return machine.Condition{
+			Type: "ModulesLoaded", Status: machine.ConditionTrue, Reason: "NothingDeclared",
+			Message: "no extra modules declared",
+		}
+	}
 }
 
 func sysctlsCondition(err error) machine.Condition {

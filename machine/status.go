@@ -65,6 +65,12 @@ type MachineStatus struct {
 	// side by side in one kubectl get.
 	Sysctls map[string]string `json:"sysctls,omitempty"`
 
+	// Modules reports the outcome of every module named in
+	// spec.modules: the same verdicts init prints to the console, made
+	// queryable. Only the declared extras appear here; the fixed list
+	// the OS loads for itself is the image's business, not the spec's.
+	Modules []ModuleStatus `json:"modules,omitempty"`
+
 	// Boot is what this boot ran under: which documents, and the
 	// storage as actuated. It is re-derived on every boot, and it is
 	// the record the operator diffs the spec against. Lifetime is
@@ -342,6 +348,34 @@ func AllRolesInMemory() StorageStatus {
 	}
 }
 
+// ModuleState is one declared module's outcome, a closed vocabulary
+// like every state word in this API. Two of the four are healthy:
+// Loaded means the kernel took the module (or already had it), and
+// Builtin means the name is compiled into the kernel, so there was
+// nothing to load and nothing wrong. Missing means the booted image
+// never shipped the module, which happens when a spec is edited after
+// its image was built: the fix is a new image, not a retry. Failed
+// means the module shipped but the kernel refused it, which is
+// usually the hardware's story to tell.
+type ModuleState string
+
+const (
+	ModuleLoaded  ModuleState = "Loaded"
+	ModuleBuiltin ModuleState = "Builtin"
+	ModuleMissing ModuleState = "Missing"
+	ModuleFailed  ModuleState = "Failed"
+)
+
+// ModuleStatus is one declared module's outcome this boot. Message
+// carries the detail for the unhealthy states, phrased to name the
+// fix, because a status that says what would repair it beats one that
+// only says what's wrong.
+type ModuleStatus struct {
+	Name    string      `json:"name"`
+	State   ModuleState `json:"state"`
+	Message string      `json:"message,omitempty"`
+}
+
 // ManifestSource is which copy of a document a boot ran under, in
 // preference order: a staged manifest awaiting its proving boot, the
 // proven last-known-good, or the image's seed (first boot only; see
@@ -364,6 +398,14 @@ type BootStatus struct {
 	ManifestSource ManifestSource `json:"manifestSource,omitempty"`
 	ManifestHash   string         `json:"manifestHash,omitempty"`
 	Storage        StorageSpec    `json:"storage,omitzero"`
+
+	// Modules is the module list the winning manifest declared,
+	// recorded as actuated whatever each load's outcome was: the
+	// drift reference, like Storage above. Outcomes are a health
+	// signal and live in status.modules; a module the image lacked
+	// still counts as actuated here, because rebooting again with the
+	// same image would not change anything.
+	Modules []string `json:"modules,omitempty"`
 
 	// Slot is the system slot this boot came from, "A" or "B", read
 	// from the liken.slot= parameter the installer baked into each

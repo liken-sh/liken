@@ -142,7 +142,8 @@ $(IMAGE_DIR)/liken.cpio: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s 
 		logs/dist/liken-logs-image.tar \
 		$(wildcard logs/manifests/*.yaml) \
 		dev-cluster/cluster.yaml $(wildcard dev-cluster/machines/*.yaml) \
-		image/build.sh $(shell find image/etc -type f) image/Makefile
+		image/build.sh $(wildcard image/inventory/*.go) \
+		$(shell find image/etc -type f) image/Makefile
 	$(MAKE) -C image MANIFESTS=../dev-cluster \
 		IDENTITY=$(abspath $(IDENTITY_DIR)) DIST=$(abspath $(IMAGE_DIR))
 

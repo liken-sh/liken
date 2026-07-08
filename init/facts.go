@@ -27,11 +27,14 @@ import (
 // measurement and rewriting the file.
 func publishFacts(cluster *machine.Cluster, role machine.Role, choice *manifestChoice,
 	conns []*connection, storage machine.StorageStatus, boot machine.BootStatus,
-	firstSync *timeSync, timeSources []string) *machine.MachineStatus {
+	modules []machine.ModuleStatus, firstSync *timeSync, timeSources []string) *machine.MachineStatus {
 	now := time.Now()
 	facts := &machine.MachineStatus{
 		Role:    role,
 		Version: machine.VersionStatus{Liken: machine.Version},
+		// Each declared module's outcome, exactly as the module pass
+		// printed them: console parity, as always.
+		Modules: modules,
 		Hardware: machine.HardwareStatus{
 			CPUs: runtime.NumCPU(),
 			// The same inventory the world report prints, re-derived

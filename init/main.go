@@ -38,6 +38,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -95,13 +96,14 @@ func main() {
 	// facts file read them (efi.go).
 	mountEFIVars()
 
-	// Kernel modules load before storage settles because some roles'
-	// filesystems arrive as modules: the system slots are FAT32, and
-	// mounting vfat pulls in its default character-encoding table
-	// (nls_iso8859-1), which Ubuntu's config builds as a module.
-	// Everything else on the list is for k3s, which starts much
-	// later. Loading it all in one early pass means there is a single
-	// place where modules load, rather than two.
+	// The OS's own kernel modules load before storage settles because
+	// some roles' filesystems arrive as modules: the system slots are
+	// FAT32, and mounting vfat pulls in its default character-encoding
+	// table (nls_iso8859-1), which Ubuntu's config builds as a module.
+	// Everything else on the fixed list is for k3s, which starts much
+	// later. Modules load in exactly two passes: this one, and the
+	// declared extras below, which must wait until storage has settled
+	// which manifest this boot runs under.
 	loadModules()
 
 	// Storage settles first, and with it the question of which
@@ -167,6 +169,14 @@ func main() {
 	if err != nil {
 		failBoot(fmt.Errorf("%w: %v", errIdentity, err))
 	}
+
+	// The declared modules: the second of the two module passes,
+	// possible only now that the winning manifest is known. The boot
+	// record keeps the ask (the drift reference: rebooting with the
+	// same image would ask the same) and the statuses keep the
+	// answers, bound for status.modules through the facts file.
+	boot.Modules = slices.Sorted(slices.Values(m.Spec.Modules))
+	moduleStatuses := loadDeclaredModules(m.Spec.Modules)
 
 	if name := m.Metadata.Name; name != "" {
 		// Sethostname is one syscall: no hostnamectl, no daemon. The
@@ -241,7 +251,7 @@ func main() {
 		// Facts wait until here because they live under /run, and
 		// prepareForK3s just mounted a fresh tmpfs there; anything
 		// written earlier would be shadowed by the mount.
-		facts := publishFacts(cluster, role, choice, conns, storage, boot, firstSync, clk.sources)
+		facts := publishFacts(cluster, role, choice, conns, storage, boot, moduleStatuses, firstSync, clk.sources)
 		publishBootClusterManifest(clusterRaw)
 		// A machine with time sources keeps disciplining its clock
 		// for as long as it runs; a free-running machine has nothing

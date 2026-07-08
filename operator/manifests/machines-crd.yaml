@@ -187,7 +187,8 @@ spec:
                 The declared state of this machine. Fields differ in
                 when they take effect: network is read by init at boot,
                 sysctls are both applied at boot and reconciled live by
-                the liken operator.
+                the liken operator, and storage and modules are staged
+                and take effect at the next boot.
               properties:
                 network:
                   type: object
@@ -253,6 +254,28 @@ spec:
                     so an edit here takes effect without a reboot.
                   additionalProperties:
                     type: string
+                modules:
+                  type: array
+                  description: >-
+                    Extra kernel modules this machine loads at boot,
+                    beyond the fixed list the OS itself needs: the
+                    drivers for whatever hardware this machine's
+                    workloads use. The image build ships the union of
+                    every machine's declared modules, so a module
+                    declared here is only loadable if the booted image
+                    was built from manifests that declared it;
+                    status.modules reports each name's outcome either
+                    way. Admission checks shape only, because only the
+                    build (for baked manifests) and the boot (for
+                    later edits) can know whether a name exists.
+                  # A set: order carries no meaning, and the API
+                  # server can refuse duplicates instead of trusting.
+                  x-kubernetes-list-type: set
+                  maxItems: 64
+                  items:
+                    type: string
+                    maxLength: 64
+                    pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
                 rebootPolicy:
                   type: string
                   enum: [Auto, Manual]
@@ -724,9 +747,10 @@ spec:
                     Cluster document, because the two stage and prove
                     independently.
                     The hashes identify exact bytes, and the storage
-                    block is the spec as actuated; together they are
-                    the reference point for detecting drift between
-                    what the cluster asks and what the machine did.
+                    and modules blocks are the spec as actuated;
+                    together they are the reference point for
+                    detecting drift between what the cluster asks and
+                    what the machine did.
                     A rejection reports a staged document that failed
                     and was quarantined; it stands until a different
                     edit proves out.
@@ -804,6 +828,19 @@ spec:
                               type: string
                             size:
                               type: string
+                    modules:
+                      type: array
+                      description: >-
+                        The module list the winning manifest declared,
+                        recorded as actuated whatever each load's
+                        outcome was: rebooting again with the same
+                        image would ask the same, so this is the drift
+                        reference and status.modules carries the
+                        health.
+                      x-kubernetes-list-type: atomic
+                      items:
+                        type: string
+                        maxLength: 64
                     rejection:
                       type: object
                       properties:
@@ -850,6 +887,31 @@ spec:
                     place.
                   additionalProperties:
                     type: string
+                modules:
+                  type: array
+                  description: >-
+                    The outcome of every module named in spec.modules,
+                    as this boot resolved them. Loaded and Builtin are
+                    healthy; Missing means the booted image never
+                    shipped the module and only a rebuilt image or a
+                    newer release fixes it; Failed means the kernel
+                    refused a module the image does ship. The message
+                    carries the detail, phrased to name the fix.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [name]
+                  items:
+                    type: object
+                    required: [name, state]
+                    properties:
+                      name:
+                        type: string
+                        maxLength: 64
+                      state:
+                        type: string
+                        enum: [Loaded, Builtin, Missing, Failed]
+                      message:
+                        type: string
+                        maxLength: 1024
                 bootedAt:
                   type: string
                   format: date-time

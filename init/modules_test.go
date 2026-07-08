@@ -4,10 +4,13 @@ package main
 // behind. Actually loading modules into a kernel is QEMU territory.
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/chrisguidry/liken/machine"
 )
 
 func writeFile(t *testing.T, name, content string) string {
@@ -63,6 +66,104 @@ func TestModuleNameStripsExtensionsAndNormalizes(t *testing.T) {
 	}
 	if got := moduleName("kernel/fs/ext4.ko"); got != "ext4" {
 		t.Errorf("got %q", got)
+	}
+}
+
+func TestReadModulesBuiltinKeysLikeTheDepIndex(t *testing.T) {
+	path := writeFile(t, "modules.builtin",
+		"kernel/fs/binfmt_misc.ko\nkernel/drivers/char/hw_random/rng-core.ko\n\n")
+	builtin, err := readModulesBuiltin(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !builtin["binfmt_misc"] {
+		t.Errorf("binfmt_misc should be builtin: %v", builtin)
+	}
+	if !builtin["rng_core"] {
+		t.Errorf("dashes normalize to underscores: %v", builtin)
+	}
+}
+
+// declaredFixture is the module world a declared-modules test runs
+// against: one shippable module, one builtin, and a loader that fails
+// on demand, so every outcome in the vocabulary is reachable.
+func declaredFixture(failing string) (map[string][]string, map[string]bool, func(string) error) {
+	deps := map[string][]string{"nvidia": {"kernel/nvidia.ko.zst"}}
+	builtin := map[string]bool{"loop": true}
+	load := func(name string) error {
+		if name == failing {
+			return errors.New("finit_module: no such device")
+		}
+		return nil
+	}
+	return deps, builtin, load
+}
+
+func TestDeclaredModuleOutcomes(t *testing.T) {
+	deps, builtin, load := declaredFixture("")
+	statuses := declaredModuleOutcomes([]string{"nvidia", "loop", "nbd"}, deps, builtin, load)
+	states := []machine.ModuleState{machine.ModuleLoaded, machine.ModuleBuiltin, machine.ModuleMissing}
+	for i, want := range states {
+		if statuses[i].State != want {
+			t.Errorf("%s: got %s, want %s", statuses[i].Name, statuses[i].State, want)
+		}
+	}
+	if statuses[2].Message == "" {
+		t.Error("a missing module's message must name the fix")
+	}
+}
+
+func TestDeclaredModuleOutcomesReportsKernelRefusals(t *testing.T) {
+	deps, builtin, load := declaredFixture("nvidia")
+	statuses := declaredModuleOutcomes([]string{"nvidia"}, deps, builtin, load)
+	if statuses[0].State != machine.ModuleFailed {
+		t.Errorf("got %s", statuses[0].State)
+	}
+	if statuses[0].Message != "finit_module: no such device" {
+		t.Errorf("message: got %q", statuses[0].Message)
+	}
+}
+
+func TestDeclaredModuleOutcomesNormalizesDashes(t *testing.T) {
+	_, builtin, load := declaredFixture("")
+	deps := map[string][]string{"rng_core": {"kernel/rng-core.ko.zst"}}
+	statuses := declaredModuleOutcomes([]string{"rng-core"}, deps, builtin, load)
+	if statuses[0].State != machine.ModuleLoaded {
+		t.Errorf("got %s", statuses[0].State)
+	}
+}
+
+func TestLoadDeclaredModulesFromAFabricatedTree(t *testing.T) {
+	base := t.TempDir()
+	deps := "kernel/drivers/gpu/nvidia.ko.zst:\n"
+	if err := os.WriteFile(filepath.Join(base, "modules.dep"), []byte(deps), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	builtin := "kernel/block/loop.ko\n"
+	if err := os.WriteFile(filepath.Join(base, "modules.builtin"), []byte(builtin), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// nvidia is indexed but its file doesn't exist here, so the load
+	// itself fails: the Failed path without a kernel in the loop.
+	statuses := loadDeclaredModulesFrom(base, []string{"nvidia", "loop", "nbd"})
+	states := []machine.ModuleState{machine.ModuleFailed, machine.ModuleBuiltin, machine.ModuleMissing}
+	for i, want := range states {
+		if statuses[i].State != want {
+			t.Errorf("%s: got %s, want %s", statuses[i].Name, statuses[i].State, want)
+		}
+	}
+}
+
+func TestLoadDeclaredModulesWithNothingDeclared(t *testing.T) {
+	if statuses := loadDeclaredModules(nil); statuses != nil {
+		t.Errorf("nothing declared means nothing to report: %v", statuses)
+	}
+}
+
+func TestLoadDeclaredModulesFromAMissingTree(t *testing.T) {
+	statuses := loadDeclaredModulesFrom(filepath.Join(t.TempDir(), "absent"), []string{"nvidia"})
+	if len(statuses) != 1 || statuses[0].State != machine.ModuleMissing {
+		t.Errorf("an unreadable index reads as nothing shipped: %v", statuses)
 	}
 }
 

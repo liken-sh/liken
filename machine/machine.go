@@ -134,6 +134,20 @@ type MachineSpec struct {
 	// without a reboot.
 	Sysctls map[string]string `json:"sysctls,omitempty"`
 
+	// Modules names extra kernel modules this machine loads at boot,
+	// beyond the fixed list the OS itself needs (the image's
+	// modules.conf): the drivers for whatever hardware this machine's
+	// workloads use. Init loads them once the boot's manifest is
+	// known, so they cannot serve the boot path itself; a driver the
+	// boot depends on belongs in the fixed list. The image build ships
+	// the union of every machine's declared modules, reading the same
+	// manifests it bakes, which means a module declared here is only
+	// loadable if the booted image was built from manifests that
+	// declared it; status.modules reports each name's outcome either
+	// way. Edits are staged and take effect at the next boot, like
+	// storage.
+	Modules []string `json:"modules,omitempty"`
+
 	// Storage assigns storage roles to disks (see storage.go). Applied
 	// by init at boot, before k3s: a filesystem can't be swapped under
 	// a running cluster. Edits are staged to the machineState
