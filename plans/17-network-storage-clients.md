@@ -196,6 +196,18 @@ workload plane owns recovery. The synology-csi proof against the real
 filer belongs to the deployment that runs one; the lab proves the host
 contract.
 
+One gap the drills exposed is still owed. k3s deletes an auto-deploy
+addon's resources when its manifest file is removed while k3s runs,
+but a retraction removes the file at boot, before k3s starts, so k3s
+never sees a deletion: the retracted feature's workload object
+survives with its pods failing, and only a hand-run kubectl delete
+clears it today. The retraction still disarms the feature (init stops
+writing its boot files, so the workload cannot function), but a
+clean removal needs a janitor: most likely the cluster operator
+deleting any liken-system object whose liken.sh/feature annotation
+names a feature the document no longer declares. That lands with the
+lab proof.
+
 Three questions this design left open were settled when the milestone
 ran. The static build recipe lives in open-iscsi/fetch.sh: alpine
 pinned by digest, three sources pinned by sha256 (open-iscsi, plus

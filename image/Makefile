@@ -41,6 +41,7 @@ CLUSTER_OPERATOR_DIST ?= ../cluster-operator/dist
 LOGS_DIST ?= ../logs/dist
 OPENISCSI_VERSION := $(strip $(file <../open-iscsi/VERSION))
 OPENISCSI_DIST ?= ../open-iscsi/dist/$(OPENISCSI_VERSION)
+NFSUTILS_VERSION := $(strip $(file <../nfs-utils/VERSION))
 
 ifeq ($(strip $(DIST)),)
 $(error DIST must name the deployment's image directory, e.g. DIST=../dev-cluster/image)
@@ -68,6 +69,8 @@ $(DIST)/liken.cpio: build.sh $(shell find etc -type f) \
 		$(OPENISCSI_DIST)/iscsid-image.tar \
 		$(wildcard ../open-iscsi/manifests/*.yaml) \
 		../open-iscsi/modules.conf ../open-iscsi/iscsid.conf \
+		../nfs-utils/dist/$(NFSUTILS_VERSION)/mount.nfs \
+		../nfs-utils/modules.conf \
 		$(IDENTITY)/tls/server-ca.crt \
 		$(IDENTITY)/token \
 		$(MACHINE_OPERATOR_DIST)/liken-machine-operator-image.tar \

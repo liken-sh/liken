@@ -56,8 +56,9 @@ the specific workload that revealed it:
 17. [ ] [Opt-in features](17-network-storage-clients.md) — one
     Cluster vocabulary for optional capabilities: iSCSI and NFS host
     clients, and the k3s bundled components (absorbing 19). In
-    progress: the vocabulary and the bundled components first, the
-    vendored payloads behind them.
+    progress: the vocabulary, the bundled components, and both
+    vendored payloads are landed and drilled; the lab's CSI proof
+    against real storage remains.
 18. [x] [Requestable kernel modules](18-requestable-kernel-modules.md) —
     machines declare the drivers their hardware needs; the image
     ships them, init loads them, status reports them. Ran ahead of

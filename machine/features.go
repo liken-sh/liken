@@ -93,6 +93,7 @@ var Features = []FeatureDefinition{
 	{Slug: "servicelb", Kind: FeatureBundled},
 	{Slug: "metrics-server", Kind: FeatureBundled},
 	{Slug: "iscsi", Kind: FeatureVendored},
+	{Slug: "nfs", Kind: FeatureVendored},
 }
 
 // FeatureConfig is one feature's configuration. Every feature today

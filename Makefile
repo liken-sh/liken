@@ -27,8 +27,10 @@ E2FSPROGS_VERSION := $(strip $(file <e2fsprogs/VERSION))
 E2FSPROGS_DIST := e2fsprogs/dist/$(E2FSPROGS_VERSION)
 OPENISCSI_VERSION := $(strip $(file <open-iscsi/VERSION))
 OPENISCSI_DIST := open-iscsi/dist/$(OPENISCSI_VERSION)
+NFSUTILS_VERSION := $(strip $(file <nfs-utils/VERSION))
+NFSUTILS_DIST := nfs-utils/dist/$(NFSUTILS_VERSION)
 
-all: kernel k3s xtables trust e2fsprogs open-iscsi init machine-operator cluster-operator logs identity image
+all: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils init machine-operator cluster-operator logs identity image
 
 # Because the version is part of the artifact's name, a pin bump
 # changes the target path itself and Make rebuilds with no extra
@@ -77,6 +79,15 @@ $(OPENISCSI_DIST)/iscsid $(OPENISCSI_DIST)/iscsiadm $(OPENISCSI_DIST)/iscsid-ima
 	$(MAKE) -C open-iscsi
 
 open-iscsi: $(OPENISCSI_DIST)/iscsid-image.tar
+
+# The NFS client, the host half of the nfs feature: one static
+# mount.nfs, built from pinned source inside a pinned container (see
+# nfs-utils/fetch.sh). No daemon and no OCI image, deliberately;
+# NFSv4 needs neither.
+$(NFSUTILS_DIST)/mount.nfs: nfs-utils/VERSION nfs-utils/fetch.sh
+	$(MAKE) -C nfs-utils
+
+nfs-utils: $(NFSUTILS_DIST)/mount.nfs
 
 # This is liken itself, the Go program that boots as PID 1 (see
 # init/main.go's header comment). It shares the machine package (the
@@ -164,6 +175,7 @@ $(IMAGE_DIR)/liken.cpio: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s 
 		$(OPENISCSI_DIST)/iscsid-image.tar \
 		$(wildcard open-iscsi/manifests/*.yaml) \
 		open-iscsi/modules.conf open-iscsi/iscsid.conf \
+		$(NFSUTILS_DIST)/mount.nfs nfs-utils/modules.conf \
 		$(IDENTITY_DIR)/tls/server-ca.crt $(IDENTITY_DIR)/token \
 		machine-operator/dist/liken-machine-operator-image.tar \
 		$(wildcard machine-operator/manifests/*.yaml) \
@@ -222,7 +234,7 @@ install: $(IMAGE_DIR)/install.cpio
 # a release rebuilds init, the operators, and the image, but the
 # kernel, k3s, and the other vendored artifacts are pinned by their
 # own domains and shared by every release.
-release: kernel k3s xtables trust e2fsprogs open-iscsi identity
+release: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils identity
 	$(MAKE) -C releases release
 
 # Serve the published releases to the lab over HTTP; the guests reach
@@ -244,6 +256,7 @@ clean:
 	$(MAKE) -C trust clean
 	$(MAKE) -C e2fsprogs clean
 	$(MAKE) -C open-iscsi clean
+	$(MAKE) -C nfs-utils clean
 	$(MAKE) -C init clean
 	$(MAKE) -C machine-operator clean
 	$(MAKE) -C cluster-operator clean
@@ -251,4 +264,4 @@ clean:
 	$(MAKE) -C identity DIST=$(abspath $(IDENTITY_DIR)) clean
 	$(MAKE) -C image IDENTITY=$(abspath $(IDENTITY_DIR)) DIST=$(abspath $(IMAGE_DIR)) clean
 
-.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi init machine-operator cluster-operator logs identity kubeconfig image run run-once install release serve clean
+.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils init machine-operator cluster-operator logs identity kubeconfig image run run-once install release serve clean

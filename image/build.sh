@@ -69,6 +69,11 @@
 #                                 document declares the feature; CSI
 #                                 drivers chroot into the host to exec
 #                                 iscsiadm, so /sbin is the contract
+#   /sbin/mount.nfs (and its      the NFSv4 client, the whole host
+#     mount.nfs4 alias)           half of the nfs feature: static,
+#                                 built by nfs-utils/fetch.sh. The
+#                                 kernel's mount path execs it as the
+#                                 nfs filesystem's mount helper
 #   /etc/liken/features/          each opt-in feature's per-boot
 #                                 inputs, by slug: its kernel module
 #                                 list and, for features with a
@@ -192,6 +197,16 @@ cp "$openiscsi_dist/iscsid" "$root/sbin/iscsid"
 mkdir -p "$root/etc/iscsi"
 cp "$here/../open-iscsi/iscsid.conf" "$root/etc/iscsi/iscsid.conf"
 
+# The NFS client, the host half of the nfs feature (nfs-utils/fetch.sh
+# explains the static build), shipped in every image on the same
+# kitchen-sink reasoning as the iSCSI binaries above. The kernel's
+# mount syscall path execs /sbin/mount.<fstype> as a filesystem's
+# mount helper, so the one binary answers under both of its names:
+# mount -t nfs and mount -t nfs4 both reach it.
+nfsutils_version="$(cat "$here/../nfs-utils/VERSION")"
+cp "$here/../nfs-utils/dist/$nfsutils_version/mount.nfs" "$root/sbin/mount.nfs"
+ln -s mount.nfs "$root/sbin/mount.nfs4"
+
 # The pre-generated certificate authorities, placed exactly where k3s
 # looks before generating its own. The identity directory is an input
 # like the manifests: an identity belongs to a deployment, and the
@@ -251,6 +266,8 @@ for manifest in "$here"/../open-iscsi/manifests/*.yaml; do
 done
 cp "$openiscsi_dist/iscsid-image.tar" \
    "$root/var/lib/rancher/k3s/agent/images/liken-iscsid.tar"
+mkdir -p "$root/etc/liken/features/nfs"
+cp "$here/../nfs-utils/modules.conf" "$root/etc/liken/features/nfs/modules.conf"
 
 # The machine's trust store, vendored by the trust domain (where these
 # roots come from is explained in trust/fetch.sh). The staged name is
@@ -289,6 +306,7 @@ ship_modules <"$here/etc/liken/modules.conf"
 # feature (staged above under /etc/liken/features); whether they load
 # is the cluster document's call, made at boot, never at build.
 ship_modules <"$here/../open-iscsi/modules.conf"
+ship_modules <"$here/../nfs-utils/modules.conf"
 
 # The deployment's declared modules, read from the same manifests this
 # build bakes in. The inventory program parses them with the strict
