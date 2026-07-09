@@ -17,7 +17,7 @@
 # megabytes each, reproducible from the sources that are committed.
 #
 # A release is an ordinary build with a different version stamp: the
-# init, operator, and image domains all accept LIKEN_VERSION and DIST
+# init, operators, and image domains all accept LIKEN_VERSION and DIST
 # overrides, so this Makefile re-runs their own rules into
 # build/<version>/ and never disturbs the normal dist/ trees. After
 # cutting a release, a plain `make run` still boots exactly what it
@@ -41,10 +41,13 @@ KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 release:
 	@test -n "$(VERSION)" || { echo "usage: make release VERSION=x.y.z"; exit 1; }
 	$(MAKE) -C ../init LIKEN_VERSION=$(VERSION) LIKEN_FAULT=$(FAULT) DIST=$(abspath $(BUILD)/init)
-	$(MAKE) -C ../operator LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/operator)
+	$(MAKE) -C ../machine-operator LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/machine-operator)
+	$(MAKE) -C ../cluster-operator LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/cluster-operator)
 	$(MAKE) -C ../logs LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/logs)
 	$(MAKE) -C ../image LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/image) \
-		INIT_DIST=$(abspath $(BUILD)/init) OPERATOR_DIST=$(abspath $(BUILD)/operator) \
+		INIT_DIST=$(abspath $(BUILD)/init) \
+		MACHINE_OPERATOR_DIST=$(abspath $(BUILD)/machine-operator) \
+		CLUSTER_OPERATOR_DIST=$(abspath $(BUILD)/cluster-operator) \
 		LOGS_DIST=$(abspath $(BUILD)/logs) \
 		MANIFESTS=../dev-cluster IDENTITY=../dev-cluster/identity \
 		$(abspath $(BUILD)/image)/install.cpio

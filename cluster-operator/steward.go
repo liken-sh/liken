@@ -24,8 +24,8 @@ package main
 //
 // What's left is freshness: after a machine reboots into a new
 // release, its existing pod objects predate the new manifests, and
-// the sweep leader, right here, deletes them so each DaemonSet can
-// recreate its pod from the current template. Every stewarded
+// this steward deletes them so each DaemonSet can recreate its pod
+// from the current template. Every stewarded
 // DaemonSet carries a liken.sh/os-version annotation naming the
 // release that shipped it, stamped onto its pods through the
 // template; the steward refreshes a pod exactly when its machine
@@ -41,6 +41,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/chrisguidry/liken/kubernetes"
 	"github.com/chrisguidry/liken/machine"
 )
 
@@ -55,7 +56,7 @@ const osVersionAnnotation = "liken.sh/os-version"
 // after an upgrade. Each is expected to label its pods app: <name>,
 // the selector its manifest declares.
 var stewardedDaemonSets = []string{
-	"liken-operator",
+	"liken-machine-operator",
 	"machine-logs",
 }
 
@@ -73,7 +74,7 @@ func daemonSetPodsPath(name string) string {
 // os-version annotation on the DaemonSet itself, naming the release
 // whose manifests are actually applied; "" (no annotation, or no
 // DaemonSet) means there is no authority to refresh toward.
-func decideRefresh(dsVersion string, machines []machine.Machine, pods []podObject) []podObject {
+func decideRefresh(dsVersion string, machines []machine.Machine, pods []kubernetes.Pod) []kubernetes.Pod {
 	if dsVersion == "" {
 		return nil
 	}
@@ -81,7 +82,7 @@ func decideRefresh(dsVersion string, machines []machine.Machine, pods []podObjec
 	for i := range machines {
 		running[machines[i].Metadata.Name] = machines[i].Status.Version.Liken
 	}
-	var refresh []podObject
+	var refresh []kubernetes.Pod
 	for _, p := range pods {
 		osVersion, known := running[p.Spec.NodeName]
 		if !known || osVersion != dsVersion {
@@ -95,9 +96,9 @@ func decideRefresh(dsVersion string, machines []machine.Machine, pods []podObjec
 	return refresh
 }
 
-// stewardOSPods is the acting half, run by the sweep leader over
-// every stewarded DaemonSet in turn.
-func stewardOSPods(c *apiClient, machines []machine.Machine) {
+// stewardOSPods is the acting half, run once per sweep over every
+// stewarded DaemonSet in turn.
+func stewardOSPods(c *kubernetes.Client, machines []machine.Machine) {
 	for _, name := range stewardedDaemonSets {
 		stewardDaemonSet(c, machines, name)
 	}
@@ -105,33 +106,30 @@ func stewardOSPods(c *apiClient, machines []machine.Machine) {
 
 // stewardDaemonSet reads one DaemonSet's shipped version, lists its
 // pods, and evicts the stale ones. Eviction rather than delete,
-// deliberately: it is the verb the operator already holds for
-// drains, and the DaemonSet recreates the pod either way. The
-// eviction may take the sweep leader's own operator pod (an upgraded
-// leader's old operator is exactly a stale pod); the lease passes
-// and the recreated pod picks the sweep back up. For the relay pod
-// the eviction also discards its emptyDir resume cursors, so each OS
-// upgrade re-ships the tail of that machine's streams once, with the
-// envelopes' seq field there to deduplicate.
-func stewardDaemonSet(c *apiClient, machines []machine.Machine, name string) {
+// deliberately: it is the verb liken already holds for drains, and
+// the DaemonSet recreates the pod either way. For the relay pod the
+// eviction also discards its emptyDir resume cursors, so each OS
+// upgrade re-ships the tail of that machine's streams once, with
+// the envelopes' seq field there to deduplicate.
+func stewardDaemonSet(c *kubernetes.Client, machines []machine.Machine, name string) {
 	var ds struct {
 		Metadata struct {
 			Annotations map[string]string `json:"annotations"`
 		} `json:"metadata"`
 	}
-	if err := c.requestJSON(http.MethodGet, daemonSetPath(name), nil, &ds); err != nil {
+	if err := c.RequestJSON(http.MethodGet, daemonSetPath(name), nil, &ds); err != nil {
 		return // no DaemonSet to steward; nothing to do
 	}
 	dsVersion := ds.Metadata.Annotations[osVersionAnnotation]
 	var pods struct {
-		Items []podObject `json:"items"`
+		Items []kubernetes.Pod `json:"items"`
 	}
-	if err := c.requestJSON(http.MethodGet, daemonSetPodsPath(name), nil, &pods); err != nil {
+	if err := c.RequestJSON(http.MethodGet, daemonSetPodsPath(name), nil, &pods); err != nil {
 		fmt.Printf("listing %s pods for the steward: %v\n", name, err)
 		return
 	}
 	for _, p := range decideRefresh(dsVersion, machines, pods.Items) {
-		if err := evictPod(c, p); err != nil {
+		if err := kubernetes.EvictPod(c, p); err != nil {
 			fmt.Printf("refreshing pod %s: %v\n", p.Metadata.Name, err)
 		} else {
 			fmt.Printf("pod %s on %s predates release %s; evicted for the DaemonSet to recreate\n",

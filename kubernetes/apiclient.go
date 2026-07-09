@@ -1,4 +1,18 @@
-package main
+// Package kubernetes is how liken's controllers speak to the
+// Kubernetes API: a client built from first principles, the watch
+// machinery, access to liken's own resources, the heartbeat-lease
+// protocol, and pod eviction. Two programs share it — the machine
+// operator, a privileged DaemonSet managing the machine it stands
+// on, and the cluster operator, an unprivileged Deployment watching
+// the fleet — and everything here is written against the API with
+// nothing but net/http and encoding/json: no client-go, no
+// controller-runtime, no code generation. Production controllers use
+// those libraries for good reasons (caching informers, work queues,
+// generated typed clients), but they also hide the lesson: the
+// Kubernetes API is just HTTPS serving JSON, a watch is just a long
+// HTTP response that keeps coming, and everything kubectl does, curl
+// can do.
+package kubernetes
 
 // A Kubernetes API client from first principles.
 //
@@ -34,27 +48,34 @@ import (
 
 const serviceAccountDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 
-// machinesPath and clustersPath are where our CRDs' objects live. The
+// MachinesPath and ClustersPath are where our CRDs' objects live. The
 // URL structure is the same for every resource in Kubernetes:
 // built-ins just use the legacy /api/v1 root instead of
 // /apis/<group>. Both kinds are cluster-scoped, so there's no
 // /namespaces/<ns>/ segment.
 const (
-	machinesPath = "/apis/" + machine.APIVersion + "/machines"
-	clustersPath = "/apis/" + machine.APIVersion + "/clusters"
+	MachinesPath = "/apis/" + machine.APIVersion + "/machines"
+	ClustersPath = "/apis/" + machine.APIVersion + "/clusters"
 )
 
-type apiClient struct {
+type Client struct {
 	base string
 	http *http.Client
 
 	// credentials is the directory holding the ServiceAccount token.
-	// It is a field rather than the constant above so that tests can
-	// point the client at a directory they control.
+	// It is a parameter rather than the constant above so that tests
+	// can point the client at a directory they control.
 	credentials string
 }
 
-func inClusterClient() (*apiClient, error) {
+// NewClient builds a client from its three ingredients directly:
+// InClusterClient assembles them from the pod's environment, and
+// tests assemble them from an httptest server.
+func NewClient(base string, httpClient *http.Client, credentials string) *Client {
+	return &Client{base: base, http: httpClient, credentials: credentials}
+}
+
+func InClusterClient() (*Client, error) {
 	host, port := os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")
 	if host == "" || port == "" {
 		return nil, fmt.Errorf("not running in a cluster: KUBERNETES_SERVICE_HOST unset")
@@ -74,41 +95,37 @@ func inClusterClient() (*apiClient, error) {
 		return nil, fmt.Errorf("service account CA contains no certificates")
 	}
 
-	return &apiClient{
-		base: "https://" + host + ":" + port,
-		http: &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{RootCAs: roots},
-				// Watches are long-lived responses that deliver data a
-				// little at a time, and the server ends them on its own
-				// schedule. A whole-request client timeout would cut
-				// every watch off mid-stream, so only the response
-				// headers get a deadline.
-				ResponseHeaderTimeout: 30 * time.Second,
-				// A pooled connection that has sat idle is the one most
-				// likely to be silently dead: the server may have closed
-				// it, or the network path may have quietly reset. Go
-				// writes the next request onto it anyway and only learns
-				// the truth when no answer comes; the server sees an
-				// orphaned request from a client that already gave up
-				// and logs it as an abort. Discarding idle connections
-				// after a short sit means the next request dials fresh
-				// instead of gambling on a stale socket. The operator's
-				// steady cadence keeps its one working connection busier
-				// than this, so the timeout only ever reaps the strays
-				// opened during bursts.
-				IdleConnTimeout: 30 * time.Second,
-			},
+	return NewClient("https://"+host+":"+port, &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: roots},
+			// Watches are long-lived responses that deliver data a
+			// little at a time, and the server ends them on its own
+			// schedule. A whole-request client timeout would cut
+			// every watch off mid-stream, so only the response
+			// headers get a deadline.
+			ResponseHeaderTimeout: 30 * time.Second,
+			// A pooled connection that has sat idle is the one most
+			// likely to be silently dead: the server may have closed
+			// it, or the network path may have quietly reset. Go
+			// writes the next request onto it anyway and only learns
+			// the truth when no answer comes; the server sees an
+			// orphaned request from a client that already gave up
+			// and logs it as an abort. Discarding idle connections
+			// after a short sit means the next request dials fresh
+			// instead of gambling on a stale socket. An operator's
+			// steady cadence keeps its one working connection busier
+			// than this, so the timeout only ever reaps the strays
+			// opened during bursts.
+			IdleConnTimeout: 30 * time.Second,
 		},
-		credentials: serviceAccountDir,
-	}, nil
+	}, serviceAccountDir), nil
 }
 
-// do issues one authenticated request. The token is re-read from disk
+// Do issues one authenticated request. The token is re-read from disk
 // every time: ServiceAccount tokens are short-lived now (kubelet
 // refreshes the mounted file as they approach expiry), and a client
 // that caches one in memory eventually starts getting 401s.
-func (c *apiClient) do(method, path, contentType string, body []byte) (*http.Response, error) {
+func (c *Client) Do(method, path, contentType string, body []byte) (*http.Response, error) {
 	token, err := os.ReadFile(c.credentials + "/token")
 	if err != nil {
 		return nil, fmt.Errorf("reading service account token: %w", err)
@@ -129,7 +146,7 @@ func (c *apiClient) do(method, path, contentType string, body []byte) (*http.Res
 	return c.http.Do(req)
 }
 
-// retryPause sleeps about five seconds, randomized upward by as much
+// RetryPause sleeps about five seconds, randomized upward by as much
 // as half again. The jitter matters because a fleet reboots together:
 // every machine's operator hits the same not-served-yet CRDs and
 // dropped watches at the same moments, and identical retry delays
@@ -137,30 +154,30 @@ func (c *apiClient) do(method, path, contentType string, body []byte) (*http.Res
 // spreads that load out. It is a variable so tests can replace it
 // with a no-op, the same seam init's disk code leaves with sysBlock
 // and devRoot.
-var retryPause = func() {
+var RetryPause = func() {
 	base := 5 * time.Second
 	time.Sleep(base + rand.N(base/2))
 }
 
-// errNotFound distinguishes "this object doesn't exist" from real
+// ErrNotFound distinguishes "this object doesn't exist" from real
 // failures: an absent object is an ordinary state, and the caller
-// handles it by creating the object. errConflict does the same for
+// handles it by creating the object. ErrConflict does the same for
 // "something else wrote first", which is an ordinary state under
 // optimistic concurrency, handled by re-reading.
 var (
-	errNotFound = errors.New("not found")
-	errConflict = errors.New("conflict: something else wrote this object first")
+	ErrNotFound = errors.New("not found")
+	ErrConflict = errors.New("conflict: something else wrote this object first")
 )
 
-// patchJSON applies a JSON merge patch (RFC 7386): send only the
+// PatchJSON applies a JSON merge patch (RFC 7386): send only the
 // fields to change, and the server merges them into the object (a
 // null value deletes a key). This deliberately sidesteps optimistic
 // concurrency: a merge patch carries no resourceVersion, so it can't
 // conflict. That is the right tool when the caller owns the specific
 // fields it's touching, such as a cordon flag or an annotation, and
 // doesn't care what the rest of the object looks like.
-func (c *apiClient) patchJSON(path string, patch []byte) error {
-	resp, err := c.do(http.MethodPatch, path, "application/merge-patch+json", patch)
+func (c *Client) PatchJSON(path string, patch []byte) error {
+	resp, err := c.Do(http.MethodPatch, path, "application/merge-patch+json", patch)
 	if err != nil {
 		return err
 	}
@@ -172,26 +189,26 @@ func (c *apiClient) patchJSON(path string, patch []byte) error {
 	return nil
 }
 
-// requestJSON runs a request and decodes the JSON response into out,
+// RequestJSON runs a request and decodes the JSON response into out,
 // turning non-2xx statuses into errors that include the server's
 // response body. Kubernetes API errors are structured JSON with a
 // message field, but the raw body is readable enough for our
 // purposes.
-func (c *apiClient) requestJSON(method, path string, body []byte, out any) error {
+func (c *Client) RequestJSON(method, path string, body []byte, out any) error {
 	contentType := ""
 	if body != nil {
 		contentType = "application/json"
 	}
-	resp, err := c.do(method, path, contentType, body)
+	resp, err := c.Do(method, path, contentType, body)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return errNotFound
+		return ErrNotFound
 	}
 	if resp.StatusCode == http.StatusConflict {
-		return errConflict
+		return ErrConflict
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		message, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))

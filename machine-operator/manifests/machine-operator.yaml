@@ -1,14 +1,14 @@
-# The liken operator's deployment: everything the program in this
-# directory needs to exist in the cluster. Like the CRD, this file is
+# The machine operator's deployment: everything the program in this
+# directory needs to exist in the cluster. Like the CRDs, this file is
 # applied by k3s from its auto-deploy manifests directory at every
 # startup.
 #
-# The image reference below is the airgapped one: image/build.sh ships
-# the operator as an OCI tarball inside the initramfs, k3s imports it
-# into containerd at start, and imagePullPolicy: Never guarantees this
-# machine never contacts a registry to run its own OS components.
-# LIKEN_VERSION is substituted with the real version when the image is
-# assembled.
+# The image reference below is the airgapped one: image/build.sh
+# ships the operator as an OCI tarball inside the initramfs, k3s
+# imports it into containerd at start, and imagePullPolicy: Never
+# guarantees this machine never contacts a registry to run its own OS
+# components. LIKEN_VERSION is substituted with the real version when
+# the image is assembled.
 #
 # That arrangement makes the operator's image part of the OS, and the
 # DaemonSet below is shaped around the consequence: a node can only
@@ -16,51 +16,54 @@
 # nodes carry different versions, and any leader's k3s re-applies
 # this file at startup, so the template must never demand an image
 # some node doesn't have. See the DaemonSet's own comments and
-# operator/steward.go for how the pieces fit.
+# cluster-operator/steward.go for how the pieces fit.
 ---
-# A namespace of liken's own, so `kubectl get all -n liken-system`
-# shows everything the OS runs in the cluster.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: liken-system
----
-# The ServiceAccount is the operator's identity: kubelet mounts a token
-# for it into the pod, and every API request the operator makes carries
-# it. See operator/apiclient.go for the client half.
+# The ServiceAccount is the machine operator's identity: kubelet
+# mounts a token for it into the pod, and every API request the
+# operator makes carries it. See the kubernetes package for the
+# client half.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: liken-operator
+  name: liken-machine-operator
   namespace: liken-system
 ---
-# The operator's permissions, and deliberately nothing more: full
-# control of Machines and their status, creation of the Cluster it
-# seeds plus its status (the leaders' fleet sweep writes the
-# headcount there), and Node get/delete for demotion cleanup. RBAC
-# can grant spec and status separately precisely because both CRDs
-# declare status as a subresource. Note what's absent for clusters:
-# no update on the resource itself. The operator seeds the Cluster
-# once and may never rewrite the spec a person (or one day a git
-# repository) edits afterward. Status is the operator's to write;
-# spec never is.
+# The machine operator's permissions, and deliberately nothing more.
+# This program is powerful on the machine it stands on (the pod spec
+# below is privileged) and correspondingly narrow in the cluster: it
+# reads and writes its own Machine, seeds the Cluster, and touches
+# its own Node. Everything fleet-shaped — other machines' statuses,
+# the Cluster's status, the OS pods on other nodes — belongs to the
+# cluster operator's role, not this one, so a compromised or confused
+# machine operator cannot rewrite the fleet's story. RBAC can grant
+# spec and status separately precisely because both CRDs declare
+# status as a subresource. Note what's absent for clusters: no update
+# on the resource itself, and no update on its status either. The
+# operator seeds the Cluster once and may never rewrite the spec a
+# person (or one day a git repository) edits afterward; the status is
+# the cluster operator's to write.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: liken-operator
+  name: liken-machine-operator
 rules:
+  # Its own Machine: read it, watch it, create it on first boot. The
+  # verbs cover the whole collection because RBAC has no way to say
+  # "only the Machine named for your node" (resourceNames can't be
+  # templated per pod), but the program only ever watches its own
+  # object, by fieldSelector.
   - apiGroups: [liken.sh]
     resources: [machines]
     verbs: [get, list, watch, create]
   - apiGroups: [liken.sh]
     resources: [machines/status]
-    verbs: [get, update]
+    verbs: [update]
+  # The Cluster: seed it from the image's manifest and read it back
+  # every pass for document convergence. No list or watch: the boot
+  # manifest names the one cluster this machine belongs to.
   - apiGroups: [liken.sh]
     resources: [clusters]
-    verbs: [get, list, watch, create]
-  - apiGroups: [liken.sh]
-    resources: [clusters/status]
-    verbs: [get, update]
+    verbs: [get, create]
   # Nodes: get to see role labels and cordon state, delete for
   # demotion cleanup (demotion.go; deleting the stale Node is what
   # triggers k3s's etcd member removal), and patch for the drain's
@@ -76,77 +79,69 @@ rules:
   # each pod to leave. Eviction-by-subresource rather than pod
   # delete, deliberately: an eviction is refused while it would
   # violate the workload's PodDisruptionBudget, which is the entire
-  # difference between draining a node and killing it. The pod
-  # steward (steward.go) reuses both verbs to refresh the operator's
-  # own pods after their machines upgrade.
+  # difference between draining a node and killing it.
   - apiGroups: [""]
     resources: [pods]
     verbs: [list]
   - apiGroups: [""]
     resources: [pods/eviction]
     verbs: [create]
-  # The steward reads its own DaemonSet to learn which release's
-  # manifests are actually applied (the liken.sh/os-version
-  # annotation): the authority its pod refreshes converge toward.
-  - apiGroups: [apps]
-    resources: [daemonsets]
-    verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: liken-operator
+  name: liken-machine-operator
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: liken-operator
+  name: liken-machine-operator
 subjects:
   - kind: ServiceAccount
-    name: liken-operator
+    name: liken-machine-operator
     namespace: liken-system
 ---
-# The operator's leases (operator/lease.go), all in liken-system: the
-# fleet sweep's leader-election lease, which every leader's operator
-# contends for the way kube-controller-manager and kube-scheduler run
-# hot standbys on every control-plane node, and one heartbeat lease
-# per machine, which each machine renews and the sweeping leader
-# lists to judge the fleet's liveness (list is the one verb the
-# heartbeats add). A namespaced Role rather than another ClusterRole
-# rule, deliberately: leases exist all over a cluster (every kubelet
-# heartbeats through one in kube-node-lease), and the operator has no
-# business with any lease outside its own namespace.
+# The heartbeat lease (the kubernetes package): each machine's
+# operator creates and renews the one Lease named for its machine,
+# the way a kubelet is the only writer of its node lease. No list,
+# deliberately: renewing your own heartbeat never requires seeing
+# anyone else's, and reading the fleet's liveness is the cluster
+# operator's job. A namespaced Role rather than another ClusterRole
+# rule, also deliberately: leases exist all over a cluster (every
+# kubelet heartbeats through one in kube-node-lease), and the
+# operator has no business with any lease outside liken's own
+# namespace.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: liken-operator-leases
+  name: liken-machine-operator-leases
   namespace: liken-system
 rules:
   - apiGroups: [coordination.k8s.io]
     resources: [leases]
-    verbs: [get, list, create, update]
+    verbs: [get, create, update]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: liken-operator-leases
+  name: liken-machine-operator-leases
   namespace: liken-system
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: liken-operator-leases
+  name: liken-machine-operator-leases
 subjects:
   - kind: ServiceAccount
-    name: liken-operator
+    name: liken-machine-operator
     namespace: liken-system
 ---
-# A DaemonSet rather than a Deployment because the operator's job is
-# node-local by nature: each pod manages the machine it stands on. On
-# today's single-node cluster that's one pod; when liken grows to many
-# machines, this same manifest puts an operator on each of them.
+# A DaemonSet rather than a Deployment because the machine operator's
+# job is node-local by nature: each pod manages the machine it stands
+# on. Contrast cluster-operator/manifests/cluster-operator.yaml,
+# whose job is fleet-wide and runs as an ordinary Deployment.
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: liken-operator
+  name: liken-machine-operator
   namespace: liken-system
   # The recommended app.kubernetes.io labels, for every tool that
   # keys on them. The selector below stays the minimal app: label,
@@ -154,20 +149,20 @@ metadata:
   # should carry identity only, never anything that might want to
   # change.
   labels:
-    app.kubernetes.io/name: liken-operator
+    app.kubernetes.io/name: liken-machine-operator
     app.kubernetes.io/part-of: liken
   # The release these manifests shipped with. The pod steward
-  # (operator/steward.go) compares this against each machine's
-  # running version to know when a machine is ready for a pod from
-  # this template. This annotation is the authority, the pods below
-  # inherit it, and a pod is stale exactly when its inherited copy
-  # differs from the DaemonSet's.
+  # (cluster-operator/steward.go) compares this against each
+  # machine's running version to know when a machine is ready for a
+  # pod from this template. This annotation is the authority, the
+  # pods below inherit it, and a pod is stale exactly when its
+  # inherited copy differs from the DaemonSet's.
   annotations:
     liken.sh/os-version: "LIKEN_VERSION"
 spec:
   selector:
     matchLabels:
-      app: liken-operator
+      app: liken-machine-operator
   # OnDelete, never a rolling update: the image is baked into each
   # node's OS, so a template change must not recreate pods on nodes
   # that haven't rebooted into the release that carries it. Doing so
@@ -180,13 +175,13 @@ spec:
   template:
     metadata:
       labels:
-        app: liken-operator
-        app.kubernetes.io/name: liken-operator
+        app: liken-machine-operator
+        app.kubernetes.io/name: liken-machine-operator
         app.kubernetes.io/part-of: liken
       annotations:
         liken.sh/os-version: "LIKEN_VERSION"
     spec:
-      serviceAccountName: liken-operator
+      serviceAccountName: liken-machine-operator
       # The OS layer should outrank workloads when memory gets tight;
       # this is the same priority class kube-proxy and CNI pods use.
       priorityClassName: system-node-critical
@@ -215,13 +210,14 @@ spec:
       containers:
         - name: operator
           # The stable tag: every release tags its own operator build
-          # liken.sh/operator:installed (operator/image.sh), so this
-          # same pod spec resolves to whatever build each node's OS
-          # imported, and applying a new release's manifests never
-          # changes the image field at all. A versioned tag here
-          # would demand one specific build on every node at once,
-          # which a fleet mid-upgrade cannot satisfy.
-          image: liken.sh/operator:installed
+          # liken.sh/machine-operator:installed (the Makefile here
+          # runs image/oci.sh), so this same pod spec resolves to
+          # whatever build each node's OS imported, and applying a
+          # new release's manifests never changes the image field at
+          # all. A versioned tag here would demand one specific build
+          # on every node at once, which a fleet mid-upgrade cannot
+          # satisfy.
+          image: liken.sh/machine-operator:installed
           imagePullPolicy: Never
           securityContext:
             privileged: true

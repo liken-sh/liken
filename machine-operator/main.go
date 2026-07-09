@@ -1,5 +1,5 @@
-// liken-operator: the program that makes the Kubernetes API the
-// machine API.
+// liken-machine-operator: the program that makes the Kubernetes API
+// the machine API.
 //
 // An operator is not a special kind of software. It is an ordinary
 // program that runs in a pod, reads the state of the world, compares
@@ -9,23 +9,26 @@
 // happens to reconcile the machine underneath the cluster instead of
 // something inside it.
 //
-// This operator is written against the Kubernetes API with nothing
-// but net/http and encoding/json: no client-go, no
-// controller-runtime, no code generation. Production operators use
-// those libraries for good reasons (caching informers, work queues,
-// generated typed clients), but they also hide the lesson: the
-// Kubernetes API is just HTTPS serving JSON, a watch is just a long
-// HTTP response that keeps coming, and everything kubectl does, curl
-// can do. liken speaks DHCP directly for the same reason.
+// liken's OS is operated by two programs, split by what they stand
+// on. This one is node-local: it runs privileged on every machine (a
+// DaemonSet), reads the facts init published, actuates the spec
+// against the machine itself, and reports the result as its
+// Machine's status. Its counterpart, liken-cluster-operator, is an
+// ordinary unprivileged workload that watches the whole fleet and
+// writes the verdicts no single machine can: which machines are
+// Lost, the Cluster's headcount, whose turn it is to reboot. The
+// seam between them is the Machine status this program writes and
+// the heartbeat lease it renews.
 //
 // The division of labor with init (see the machine package): init
 // observes the boot and writes facts to /run/liken; this operator
 // reads them through a hostPath mount, folds in what it can observe
 // itself, and publishes the result as the Machine's status. In the
 // other direction it actuates the spec: today that means sysctls,
-// written straight to /proc/sys, which is the host's, because this pod
-// runs privileged in the host's namespaces (see manifests/operator.yaml
-// for what that means and why it's justified here).
+// written straight to /proc/sys, which is the host's, because this
+// pod runs privileged in the host's namespaces (see
+// manifests/machine-operator.yaml for what that means and why it's
+// justified here).
 package main
 
 import (
@@ -33,18 +36,19 @@ import (
 	"os"
 	"time"
 
+	"github.com/chrisguidry/liken/kubernetes"
 	"github.com/chrisguidry/liken/machine"
 )
 
 func main() {
-	fmt.Println("liken-operator", machine.Version)
+	fmt.Println("liken-machine-operator", machine.Version)
 
 	// Failures during setup end the process deliberately. There is no
 	// retry logic here because kubelet already provides it: a pod that
 	// exits nonzero is restarted with backoff, and the failure is
 	// visible in `kubectl get pods` instead of buried in a log. This is
 	// the "crash-only" style most Kubernetes components use.
-	client, err := inClusterClient()
+	client, err := kubernetes.InClusterClient()
 	if err != nil {
 		fatal("in-cluster config: %v", err)
 	}
@@ -84,7 +88,9 @@ func main() {
 	// manifest, so most of them lose the race and find the object
 	// already there. That still counts as success. What matters is
 	// that the cluster's topology is queryable, not which machine
-	// published it.
+	// published it. (Seeding lives here rather than in the cluster
+	// operator because this is the program with the image's manifest
+	// under its feet; the cluster operator has no mounts at all.)
 	cluster, err := machine.LoadCluster(machine.ClusterManifestPath)
 	if err != nil {
 		fatal("cluster manifest: %v", err)
@@ -110,23 +116,19 @@ func main() {
 	// reconciles from absolute current state, never from the event
 	// that woke us, so that missing one event can never matter.
 	//
-	// The watch spans every Machine, not just this one. The Cluster's
-	// status is derived from the whole fleet by the sweeping leader
-	// (fleet.go), and the sweep runs at the end of a reconcile pass,
-	// so if only a ticker noticed another machine turning Ready, the
-	// Cluster would go on reporting Degraded for up to a full tick
-	// after the fleet had recovered. The level-triggered design is
-	// what makes the wider watch safe: an extra pass observes and
-	// re-asserts the same state. It is also what keeps it quiet. A
-	// settled machine's status rewrite is byte-identical, the API
-	// server drops identical writes without bumping resourceVersion,
-	// and a write that isn't an event can't wake anyone, so operators
-	// watching each other cannot echo.
-	// Buffered so a fleet-wide burst of events queues up instead of
-	// stalling the watch stream; the loop below drains and coalesces
-	// whatever accumulated while a pass was working.
+	// The watch covers exactly one object: this machine's own. The
+	// fieldSelector asks the server to filter, so no other machine's
+	// write ever crosses the wire to this pod. The rest of the fleet
+	// is the cluster operator's concern; nothing in this program's job
+	// depends on any Machine but its own, and a five-hundred-machine
+	// fleet shouldn't cost every machine five hundred wakeups.
+	// Buffered so a burst of writes to this object (the conductor's
+	// grant, the sweeper's verdict, our own publishes echoing back)
+	// queues up instead of stalling the watch stream; the loop below
+	// drains and coalesces whatever accumulated while a pass was
+	// working.
 	events := make(chan *machine.Machine, 32)
-	go watchMachines(client, name, current.Metadata.ResourceVersion, events)
+	go kubernetes.WatchMachines(client, "metadata.name="+name, current.Metadata.ResourceVersion, events)
 
 	// The release fetcher outlives any one pass: downloads take
 	// minutes, passes take milliseconds, and the fetcher is the one
@@ -135,35 +137,29 @@ func main() {
 
 	// The ticker is the heartbeat's metronome as well as the drift
 	// backstop, so it runs at the kubelet's own lease cadence of ten
-	// seconds (fleet.go explains the numbers). The heartbeat is
-	// deliberately renewed by the reconcile pass rather than by a
-	// dedicated goroutine: a heartbeat should prove the operator is
-	// doing its job, and a goroutine would keep vouching for a
-	// reconcile loop that had wedged.
+	// seconds (the kubernetes package explains the numbers). The
+	// heartbeat is deliberately renewed by the reconcile pass rather
+	// than by a dedicated goroutine: a heartbeat should prove the
+	// operator is doing its job, and a goroutine would keep vouching
+	// for a reconcile loop that had wedged.
 	ticker := time.NewTicker(10 * time.Second)
 	for {
 		reconcile(client, current, clusterName, f)
 		select {
 		case m := <-events:
-			// Only this machine's own copy replaces the working copy;
-			// another machine's event is just a reason to look again,
-			// and the pass reads whatever fleet state it needs fresh.
-			if m.Metadata.Name == name {
-				current = m
-			}
-			// A busy fleet queues events faster than passes run, so
+			// A busy object queues events faster than passes run, so
 			// take everything that arrived while the last pass worked.
 			// One pass over the newest state answers a whole burst;
 			// that is what level-triggered means, and it is the same
 			// coalescing an informer's work queue does. Skipping
 			// intermediate copies also keeps this pass from publishing
 			// against a version it already knows is stale.
-			current = drainEvents(events, name, current)
+			current = drainEvents(events, m)
 		case <-ticker.C:
 			// Re-read the object on timer passes too: status writes bump
 			// resourceVersion, and reconciling against a stale copy
 			// would make every status update a conflict.
-			if refreshed, err := getMachine(client, name); err == nil {
+			if refreshed, err := kubernetes.GetMachine(client, name); err == nil {
 				current = refreshed
 			}
 		}
@@ -171,18 +167,18 @@ func main() {
 }
 
 // drainEvents empties whatever the watch queued while the last pass
-// ran, returning the newest copy of this machine's own object (or
-// the given one, when only other machines changed). Every drained
-// event is answered by the single pass that follows.
-func drainEvents(events <-chan *machine.Machine, name string, current *machine.Machine) *machine.Machine {
+// ran, returning the newest copy of this machine's object. Every
+// event on the channel is this machine's own (the watch's
+// fieldSelector saw to that), so draining is just keeping the last
+// word. Every drained event is answered by the single pass that
+// follows.
+func drainEvents(events <-chan *machine.Machine, newest *machine.Machine) *machine.Machine {
 	for {
 		select {
 		case m := <-events:
-			if m.Metadata.Name == name {
-				current = m
-			}
+			newest = m
 		default:
-			return current
+			return newest
 		}
 	}
 }

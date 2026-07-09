@@ -91,8 +91,8 @@ type MachineStatus struct {
 	// status field, because a heartbeat must renew forever, and every
 	// status write rewrites this whole object and wakes every
 	// watcher. That is the same reason kube-node-lease exists (see
-	// operator/lease.go). The leaders watch the leases and mark a
-	// silent machine Lost.
+	// the kubernetes package). The cluster operator reads the leases
+	// and marks a silent machine Lost.
 	BootedAt *time.Time `json:"bootedAt,omitempty"`
 
 	// Conditions follow the standard Kubernetes idiom: a set of typed,
@@ -112,15 +112,15 @@ type Phase string
 // The phases a machine can report, most severe first. Each is a
 // summary of the conditions, not a fact of its own; the operator
 // derives the phase from the conditions on every pass, and the table
-// that does so (operator/phase.go) is the authority on which
+// that does so (machine-operator/phase.go) is the authority on which
 // condition puts a machine in which phase. Lost is the exception to
 // "derived from own conditions": a machine cannot report its own
-// death, so a leader writes Lost on its behalf when its heartbeat
-// goes silent.
+// death, so the cluster operator writes Lost on its behalf when its
+// heartbeat goes silent.
 const (
 	PhaseUnknown       Phase = "Unknown"       // the facts are unreadable; the operator can't tell anything
 	PhaseBooting       Phase = "Booting"       // init hasn't finished publishing this boot's record yet
-	PhaseLost          Phase = "Lost"          // the heartbeat went silent; a leader wrote this, not the machine
+	PhaseLost          Phase = "Lost"          // the heartbeat went silent; the cluster operator wrote this, not the machine
 	PhaseBlocked       Phase = "Blocked"       // drift exists but can't be staged; it needs a different edit, not time
 	PhaseUpdating      Phase = "Updating"      // a reboot is in flight to apply a staged change
 	PhaseUpdatePending Phase = "UpdatePending" // a change is staged, waiting on a Manual reboot
@@ -461,6 +461,15 @@ type Condition struct {
 	Message            string          `json:"message,omitempty"`
 	LastTransitionTime time.Time       `json:"lastTransitionTime"`
 }
+
+// RebootApprovedCondition is the rollout conductor's grant of a
+// reboot turn, and the one condition type on a Machine's status that
+// two different programs speak: the cluster operator writes and
+// removes it, and the machine's own operator carries it along
+// verbatim and acts on it. It lives here because it is shared
+// vocabulary, exactly the way PodScheduled is a condition the
+// scheduler writes onto Pods the kubelet owns.
+const RebootApprovedCondition = "RebootApproved"
 
 // SetCondition upserts a condition by type, preserving the Kubernetes
 // rule that makes lastTransitionTime meaningful: it moves only when

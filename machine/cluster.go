@@ -74,9 +74,8 @@ const (
 )
 
 // ClusterStatus is what can be observed about the cluster as a whole,
-// written by the leaders (see operator/fleet.go): they are the only
-// machines positioned to observe the fleet, because a follower that
-// can reach the API is by definition reaching a leader. The staged
+// written by the cluster operator (see cluster-operator/fleet.go),
+// the one program whose whole job is observing the fleet. The staged
 // and proven copies of the Cluster document carry spec only. Status
 // never appears in the lifecycle bytes, because observations aren't
 // part of the document's identity.
@@ -165,7 +164,7 @@ type ClusterSpec struct {
 	Time ClusterTimeSpec `json:"time,omitzero"`
 
 	// Disruption bounds how much of the fleet may be down at once
-	// when the cluster sequences reboots (operator/rollout.go).
+	// when the cluster sequences reboots (cluster-operator/rollout.go).
 	Disruption ClusterDisruptionSpec `json:"disruption,omitzero"`
 
 	// Version is the fleet's target liken release: the one field an
@@ -189,7 +188,7 @@ type ClusterSpec struct {
 // Releases are deliberately consumed live: the operator reads them
 // from the in-cluster resource on every pass, and the canonical
 // cluster document that machines stage and reboot into excludes them
-// (operator/cluster.go's renderCluster). This split means publishing
+// (machine-operator/cluster.go's renderCluster). This split means publishing
 // a release or retargeting the fleet moves machines through downloads
 // and sequenced reboots, and never stages a fleet-wide configuration
 // change of its own.

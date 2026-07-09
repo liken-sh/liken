@@ -34,6 +34,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/chrisguidry/liken/kubernetes"
 	"github.com/chrisguidry/liken/machine"
 )
 
@@ -61,16 +62,16 @@ type nodeObject struct {
 	} `json:"status"`
 }
 
-func getNode(c *apiClient, name string) (*nodeObject, error) {
+func getNode(c *kubernetes.Client, name string) (*nodeObject, error) {
 	n := &nodeObject{}
-	if err := c.requestJSON(http.MethodGet, nodesPath+"/"+name, nil, n); err != nil {
+	if err := c.RequestJSON(http.MethodGet, nodesPath+"/"+name, nil, n); err != nil {
 		return nil, err
 	}
 	return n, nil
 }
 
-func deleteNode(c *apiClient, name string) error {
-	return c.requestJSON(http.MethodDelete, nodesPath+"/"+name, nil, nil)
+func deleteNode(c *kubernetes.Client, name string) error {
+	return c.RequestJSON(http.MethodDelete, nodesPath+"/"+name, nil, nil)
 }
 
 // The role labels k3s stamps on a Node when it runs a control plane.
@@ -135,7 +136,7 @@ func decideDemotion(role machine.Role, nodeLabels map[string]string, rebootPolic
 // carryOutDemotion performs the cleanup: reboot intent first (the
 // delete kills this pod, so the reboot must already be in flight),
 // then the Node deletion that triggers etcd member removal.
-func carryOutDemotion(c *apiClient, name string, d demotion) machine.Condition {
+func carryOutDemotion(c *kubernetes.Client, name string, d demotion) machine.Condition {
 	if !d.cleanup {
 		return d.condition
 	}

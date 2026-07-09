@@ -1,6 +1,6 @@
 package main
 
-// The leader sweep is the fleet-level half of the operator's job.
+// The fleet sweep is the heart of the cluster operator's job.
 //
 // Every machine's operator reports on itself, which leaves one gap
 // nothing else covers: a dead machine can't report that it's dead.
@@ -9,25 +9,21 @@ package main
 // problem with kubelets and solves it with heartbeats: the kubelet
 // renews a lease every few seconds, and the node controller turns a
 // silent lease into a NotReady Node. The Machine gets the same
-// treatment here: every operator renews its machine's lease
-// (lease.go), and the leaders mark machines whose leases have gone
-// silent with the Lost phase.
-//
-// Only the leaders sweep, because they are the machines positioned
-// to observe the fleet. A follower that can reach the API is by
-// definition reaching a leader, so a follower's sweep could never
-// report anything a leader's sweep couldn't. The sweep is also where
-// the cluster's headcount comes from: the same pass over the Machine
-// list yields the ready-out-of-total tally the Cluster's status
-// carries.
+// treatment here: every machine's operator renews its heartbeat
+// lease (the kubernetes package), and this sweep marks machines
+// whose leases have gone silent with the Lost phase. The sweep is
+// also where the cluster's headcount comes from: the same pass over
+// the Machine list yields the ready-out-of-total tally the Cluster's
+// status carries.
 //
 // Writing another machine's status breaks the one-writer-per-object
-// rule this operator otherwise keeps, so the sweep is careful about
-// when: it only writes a machine whose heartbeat is already stale. A
-// stale heartbeat means the machine's own operator has stopped
-// writing, so the two writers can never actually contend. The moment
-// the machine returns, its own operator's next pass overwrites the
-// Lost verdict with fresh observations, no cleanup required.
+// rule the machine operators otherwise keep, so the sweep is careful
+// about when: it only writes a machine whose heartbeat is already
+// stale. A stale heartbeat means the machine's own operator has
+// stopped writing, so the two writers can never actually contend.
+// The moment the machine returns, its own operator's next pass
+// overwrites the Lost verdict with fresh observations, no cleanup
+// required.
 
 import (
 	"encoding/json"
@@ -38,38 +34,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chrisguidry/liken/kubernetes"
 	"github.com/chrisguidry/liken/machine"
 )
-
-// heartbeatRenewAfter is how old the heartbeat must be before the
-// machine's own operator renews it: just under the ten-second
-// reconcile ticker, so every ticker pass renews but the event-driven
-// passes in between get by on a read. heartbeatStaleAfter is how
-// long a machine may then go silent before the sweep declares it
-// Lost. A single missed renewal may just mean a busy moment; several
-// missed renewals mean the machine is down.
-//
-// The numbers are kube-node-lease's: the kubelet renews its lease
-// every ten seconds, and the node controller gives a silent kubelet
-// forty before its Node goes NotReady. A dead machine silences both
-// leases at the same moment, so matching the thresholds means both
-// verdicts land together, and `kubectl get nodes` never spends a
-// minute contradicting `kubectl get machines` about a machine that
-// just died.
-const (
-	heartbeatRenewAfter = 8 * time.Second
-	heartbeatStaleAfter = 40 * time.Second
-)
-
-func listMachines(c *apiClient) ([]machine.Machine, error) {
-	var list struct {
-		Items []machine.Machine `json:"items"`
-	}
-	if err := c.requestJSON(http.MethodGet, machinesPath, nil, &list); err != nil {
-		return nil, err
-	}
-	return list.Items, nil
-}
 
 // A fleetSweep is one pass's verdict over the whole fleet: which
 // machines to declare Lost, the headcount for the Cluster's status,
@@ -92,12 +59,12 @@ type fleetSweep struct {
 // otherwise degraded). Unwell outranks mid-transition, and the
 // MachinesReady condition names the machines so nobody has to go
 // looking.
-func decideFleetSweep(machines []machine.Machine, renewals map[string]time.Time, self string, now time.Time) fleetSweep {
+func decideFleetSweep(machines []machine.Machine, renewals map[string]time.Time, now time.Time) fleetSweep {
 	s := fleetSweep{tally: machine.MachineTally{Total: len(machines)}}
 	var transitioning, unwell []string
 	for i := range machines {
 		m := &machines[i]
-		effective := effectivePhase(m, renewals, self, now)
+		effective := effectivePhase(m, renewals, now)
 		if effective == machine.PhaseLost && m.Status.Phase != machine.PhaseLost {
 			s.lost = append(s.lost, m.Metadata.Name)
 		}
@@ -139,25 +106,25 @@ func decideFleetSweep(machines []machine.Machine, renewals map[string]time.Time,
 // sweepFleet is the acting half: list the fleet and its heartbeats,
 // decide, mark the silent machines Lost, and publish the verdict on
 // the Cluster.
-func sweepFleet(c *apiClient, self string, cluster *machine.Cluster, now time.Time) {
-	machines, err := listMachines(c)
+func sweepFleet(c *kubernetes.Client, cluster *machine.Cluster, now time.Time) {
+	machines, err := kubernetes.ListMachines(c)
 	if err != nil {
 		fmt.Printf("listing machines for the fleet sweep: %v\n", err)
 		return
 	}
-	renewals, err := listMachineHeartbeats(c)
+	renewals, err := kubernetes.ListHeartbeats(c)
 	if err != nil {
 		fmt.Printf("listing heartbeats for the fleet sweep: %v\n", err)
 		return
 	}
-	s := decideFleetSweep(machines, renewals, self, now)
+	s := decideFleetSweep(machines, renewals, now)
 
 	// The rollout is decided from the same listing: which machines may
 	// take their reboot turn now, and which spent grants come back
 	// (rollout.go). Sequencing belongs here for the same reason the
-	// tally does. The sweep is the one place with the whole fleet in
-	// view, and the lease already guarantees a single conductor.
-	r := decideRollout(machines, renewals, cluster, self, now)
+	// tally does: the sweep is the one place with the whole fleet in
+	// view.
+	r := decideRollout(machines, renewals, cluster, now)
 	carryOutRollout(c, machines, r, now)
 
 	// The OS's own pods (the operator's and the log relays') are
@@ -185,7 +152,7 @@ func sweepFleet(c *apiClient, self string, cluster *machine.Cluster, now time.Ti
 		// first, which is the outcome the sweep wanted anyway, so it
 		// concedes silently; the sweeper never retries a write onto
 		// another machine's status.
-		if err := publishStatus(c, &m, &status); errors.Is(err, errConflict) {
+		if err := kubernetes.PublishStatus(c, &m, &status); errors.Is(err, kubernetes.ErrConflict) {
 			continue
 		} else if err != nil {
 			fmt.Printf("marking %s lost: %v\n", m.Metadata.Name, err)
@@ -220,8 +187,8 @@ func sweepFleet(c *apiClient, self string, cluster *machine.Cluster, now time.Ti
 			fmt.Printf("rendering cluster status: %v\n", err)
 			return
 		}
-		path := clustersPath + "/" + cluster.Metadata.Name + "/status"
-		if err := c.requestJSON(http.MethodPut, path, body, nil); err != nil {
+		path := kubernetes.ClustersPath + "/" + cluster.Metadata.Name + "/status"
+		if err := c.RequestJSON(http.MethodPut, path, body, nil); err != nil {
 			fmt.Printf("publishing cluster status: %v\n", err)
 		}
 	}

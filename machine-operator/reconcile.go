@@ -14,16 +14,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chrisguidry/liken/kubernetes"
 	"github.com/chrisguidry/liken/machine"
 )
-
-func getMachine(c *apiClient, name string) (*machine.Machine, error) {
-	m := &machine.Machine{}
-	if err := c.requestJSON(http.MethodGet, machinesPath+"/"+name, nil, m); err != nil {
-		return nil, err
-	}
-	return m, nil
-}
 
 // ensureMachine makes the manifest's Machine real in the cluster. The
 // retry-forever loop covers the operator's first minutes: k3s applies
@@ -31,13 +24,13 @@ func getMachine(c *apiClient, name string) (*machine.Machine, error) {
 // it starts this pod, and until the API server is serving that CRD,
 // our URLs 404. The loop waits instead of crashing because that 404
 // is expected during startup, not a sign of anything wrong.
-func ensureMachine(c *apiClient, seed *machine.Machine) (*machine.Machine, error) {
+func ensureMachine(c *kubernetes.Client, seed *machine.Machine) (*machine.Machine, error) {
 	for {
-		current, err := getMachine(c, seed.Metadata.Name)
+		current, err := kubernetes.GetMachine(c, seed.Metadata.Name)
 		if err == nil {
 			return current, nil
 		}
-		if !errors.Is(err, errNotFound) {
+		if !errors.Is(err, kubernetes.ErrNotFound) {
 			return nil, err
 		}
 
@@ -50,14 +43,14 @@ func ensureMachine(c *apiClient, seed *machine.Machine) (*machine.Machine, error
 		if err != nil {
 			return nil, err
 		}
-		err = c.requestJSON(http.MethodPost, machinesPath, body, nil)
+		err = c.RequestJSON(http.MethodPost, kubernetes.MachinesPath, body, nil)
 		if err == nil {
 			fmt.Printf("created machine %s from %s\n", seed.Metadata.Name, machine.BootManifestPath)
 			continue // re-GET so we return the server's copy, resourceVersion and all
 		}
-		if errors.Is(err, errNotFound) {
+		if errors.Is(err, kubernetes.ErrNotFound) {
 			fmt.Println("machine API not served yet; waiting")
-			retryPause()
+			kubernetes.RetryPause()
 			continue
 		}
 		return nil, err
@@ -70,11 +63,11 @@ func ensureMachine(c *apiClient, seed *machine.Machine) (*machine.Machine, error
 // races to create the same object at boot, so all but one of those
 // POSTs will conflict. That conflict is harmless: the loop's next GET
 // confirms the object exists, which is the only outcome that matters.
-func ensureCluster(c *apiClient, seed *machine.Cluster) error {
+func ensureCluster(c *kubernetes.Client, seed *machine.Cluster) error {
 	for {
-		if _, err := getCluster(c, seed.Metadata.Name); err == nil {
+		if _, err := kubernetes.GetCluster(c, seed.Metadata.Name); err == nil {
 			return nil
-		} else if !errors.Is(err, errNotFound) {
+		} else if !errors.Is(err, kubernetes.ErrNotFound) {
 			return err
 		}
 
@@ -87,13 +80,13 @@ func ensureCluster(c *apiClient, seed *machine.Cluster) error {
 		if err != nil {
 			return err
 		}
-		switch err := c.requestJSON(http.MethodPost, clustersPath, body, nil); {
+		switch err := c.RequestJSON(http.MethodPost, kubernetes.ClustersPath, body, nil); {
 		case err == nil:
 			fmt.Printf("created cluster %s from %s\n", seed.Metadata.Name, machine.ClusterManifestPath)
-		case errors.Is(err, errNotFound):
+		case errors.Is(err, kubernetes.ErrNotFound):
 			fmt.Println("cluster API not served yet; waiting")
-			retryPause()
-		case errors.Is(err, errConflict):
+			kubernetes.RetryPause()
+		case errors.Is(err, kubernetes.ErrConflict):
 			// Another machine's operator got there first.
 		default:
 			return err
@@ -148,7 +141,7 @@ func carryOutConvergence(conv convergence, store machine.ManifestStore, what str
 // deliberately keeps no memory between passes: every value in the
 // status it writes was observed moments ago, which is what the
 // Kubernetes convention means by status being reconstructible.
-func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher) {
+func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *fetcher) {
 	now := time.Now()
 
 	// What the object records before this pass touches anything,
@@ -205,7 +198,7 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 	t := turnStandalone
 	if clusterName != "" {
 		t = turnAwaiting
-		if g := machine.FindCondition(m.Status.Conditions, rebootApprovedCondition); g != nil && g.Status == machine.ConditionTrue {
+		if g := machine.FindCondition(m.Status.Conditions, machine.RebootApprovedCondition); g != nil && g.Status == machine.ConditionTrue {
 			t = turnGranted
 		}
 	}
@@ -255,7 +248,7 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 	if clusterName != "" {
 		var cconv convergence
 		clusterStore := machine.ClusterManifests(machine.MachineStateDir)
-		if liveCluster, err = getCluster(c, clusterName); err != nil {
+		if liveCluster, err = kubernetes.GetCluster(c, clusterName); err != nil {
 			cconv = convergence{condition: convergenceUnknown("ClusterConverged", "ClusterUnavailable",
 				fmt.Sprintf("reading cluster %s: %v", clusterName, err))}
 		} else {
@@ -317,7 +310,7 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 		// cordons the operator set itself: decideUncordon leaves a
 		// human's cordon standing.
 		if !rebooting && !draining && decideUncordon(node) {
-			if err := c.patchJSON(nodesPath+"/"+node.Metadata.Name, uncordonPatch()); err != nil {
+			if err := c.PatchJSON(nodesPath+"/"+node.Metadata.Name, uncordonPatch()); err != nil {
 				fmt.Printf("uncordoning %s: %v\n", node.Metadata.Name, err)
 			} else {
 				fmt.Printf("uncordoned %s; its reboot is complete\n", node.Metadata.Name)
@@ -332,7 +325,7 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 	// about this machine's health.
 	ready := machine.Condition{Type: "Ready", Status: machine.ConditionTrue, Reason: "Reconciled"}
 	for _, condition := range status.Conditions {
-		if condition.Type == "Ready" || condition.Type == rebootApprovedCondition {
+		if condition.Type == "Ready" || condition.Type == machine.RebootApprovedCondition {
 			continue
 		}
 		if condition.Status != machine.ConditionTrue {
@@ -352,7 +345,7 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 	// it is the conductor's verdict, and this writer must not restamp
 	// it.
 	for i := range status.Conditions {
-		if status.Conditions[i].Type == rebootApprovedCondition {
+		if status.Conditions[i].Type == machine.RebootApprovedCondition {
 			continue
 		}
 		status.Conditions[i].ObservedGeneration = m.Metadata.Generation
@@ -364,8 +357,8 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 
 	// The heartbeat: renew this machine's lease so the fleet can tell
 	// that this status is current, not the final report of a machine
-	// that has since died (lease.go explains why this is a lease and
-	// not a status field). The heartbeat is deliberately separate
+	// that has since died (the kubernetes package explains why this is
+	// a lease and not a status field). The heartbeat is deliberately separate
 	// from the status write below. Status is written when the
 	// machine's state changes; the heartbeat proves the reporter is
 	// alive; and combining them would make every heartbeat rewrite
@@ -374,26 +367,15 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 	// retry on its next pass.
 	//
 	// The heartbeat goes first because of what each write means to
-	// the sweeping leader. A machine booting into a fleet that has
+	// the cluster operator. A machine booting into a fleet that has
 	// already declared it Lost announces its liveness here, so the
 	// sweeper stops writing Lost verdicts onto the very object the
 	// status write below is about to update. Publishing first would
 	// invite that collision on every boot.
-	renewMachineHeartbeat(c, m.Metadata.Name, now)
+	kubernetes.RenewHeartbeat(c, m.Metadata.Name, now)
 
 	if err := publishOwnStatus(c, m, status, before); err != nil {
 		fmt.Printf("publishing status: %v\n", err)
-	}
-
-	// Fleet-level work belongs to the leaders: mark silent machines
-	// Lost and keep the Cluster's headcount current. Every leader is
-	// *able* to sweep, but only the one holding the lease does
-	// (lease.go). That gives the fleet exactly one sweeper at a time,
-	// with the other leaders ready to take over. This machine's own
-	// heartbeat and status have already landed, so the sweep sees
-	// itself fresh like everyone else.
-	if liveCluster != nil && status.Role == machine.RoleLeader && holdFleetLease(c, m.Metadata.Name, now) {
-		sweepFleet(c, m.Metadata.Name, liveCluster, now)
 	}
 }
 
@@ -529,31 +511,11 @@ func sysctlsCondition(err error) machine.Condition {
 	return machine.Condition{Type: "SysctlsApplied", Status: machine.ConditionTrue, Reason: "Applied"}
 }
 
-// publishStatus writes through the status subresource: a separate
-// endpoint (…/machines/<name>/status) that updates *only* the status
-// half of the object. That means a controller can never accidentally
-// rewrite the spec it is acting on, and RBAC can grant the two halves
-// separately. The write is a PUT carrying the object's resourceVersion:
-// if anything else changed the object in between, the server answers
-// 409 Conflict instead of applying our stale copy. The caller's next
-// pass re-reads and tries again. This is optimistic concurrency, and
-// it is how every Kubernetes controller handles contention.
-func publishStatus(c *apiClient, m *machine.Machine, status *machine.MachineStatus) error {
-	updated := *m
-	updated.Status = *status
-	body, err := json.Marshal(&updated)
-	if err != nil {
-		return err
-	}
-	path := machinesPath + "/" + m.Metadata.Name + "/status"
-	return c.requestJSON(http.MethodPut, path, body, nil)
-}
-
-// publishOwnStatus is publishStatus for the machine writing about
+// publishOwnStatus is kubernetes.PublishStatus for the machine writing about
 // itself, which is the one writer entitled to resolve a conflict
 // rather than concede it. A Machine's status has exactly two other
 // writers: the rollout conductor, granting and reclaiming reboot
-// turns, and the sweeping leader, marking silent machines Lost. If
+// turns, and the fleet sweep, marking silent machines Lost. If
 // one of them wrote between this pass's read and its write, this
 // machine's observations are still the freshest thing anyone has (it
 // is standing on the hardware), so the answer is to retry against a
@@ -581,109 +543,23 @@ func publishStatus(c *apiClient, m *machine.Machine, status *machine.MachineStat
 // changing faster than this pass can read it, and the write that
 // beat us is already queued on the watch, so the pass it triggers
 // will publish moments from now.
-func publishOwnStatus(c *apiClient, m *machine.Machine, status *machine.MachineStatus, before []byte) error {
+func publishOwnStatus(c *kubernetes.Client, m *machine.Machine, status *machine.MachineStatus, before []byte) error {
 	after, err := json.Marshal(status)
 	if err == nil && bytes.Equal(before, after) {
 		return nil
 	}
 
-	err = publishStatus(c, m, status)
-	if !errors.Is(err, errConflict) {
+	err = kubernetes.PublishStatus(c, m, status)
+	if !errors.Is(err, kubernetes.ErrConflict) {
 		return err
 	}
-	fresh, gerr := getMachine(c, m.Metadata.Name)
+	fresh, gerr := kubernetes.GetMachine(c, m.Metadata.Name)
 	if gerr != nil {
 		return err
 	}
-	status.Conditions = machine.RemoveCondition(slices.Clone(status.Conditions), rebootApprovedCondition)
-	if grant := machine.FindCondition(fresh.Status.Conditions, rebootApprovedCondition); grant != nil {
+	status.Conditions = machine.RemoveCondition(slices.Clone(status.Conditions), machine.RebootApprovedCondition)
+	if grant := machine.FindCondition(fresh.Status.Conditions, machine.RebootApprovedCondition); grant != nil {
 		status.Conditions = append(status.Conditions, *grant)
 	}
-	return publishStatus(c, fresh, status)
-}
-
-// watchMachines turns the API server's watch mechanism into a channel
-// of fresh Machine objects. A watch is an ordinary GET with
-// ?watch=true: the response never ends, and each line of it is a JSON
-// event like {"type": "MODIFIED", "object": {…}}, pushed the moment
-// the object changes. This is the mechanism informers, kubectl get -w,
-// and every controller's responsiveness are built on.
-//
-// The watch spans the whole Machine collection, not just this
-// machine's object. The sweeping leader derives the Cluster's status
-// from every Machine (fleet.go), so another machine's transition is
-// exactly as much a reason to look as this machine's own; main.go
-// explains why the extra wakeups are safe and quiet.
-//
-// resourceVersion tells the server where to resume so no change is
-// missed between reconnects; when history has been compacted away the
-// server says 410 Gone. Stream drops are routine too (the server ends
-// watches on its own schedule). Both recover the same way, the one
-// informers use: list the collection and watch from the *list's*
-// resourceVersion, which is the current revision of the world. A
-// single object's version would not do here: it is the revision of
-// that object's own last write, and on a quiet object that can be old
-// enough to have been compacted away, which would earn another 410
-// and strand the loop. This machine's own copy from the recovery list
-// is delivered as an event, so the caller's working copy is refreshed
-// along the way.
-//
-// allowWatchBookmarks asks the server to send an occasional BOOKMARK
-// event: no object change, just "you are current through version X."
-// A watch on a quiet fleet would otherwise sit on an ever-staler
-// resourceVersion, and the next reconnect would be more likely to
-// find that version compacted away (the 410 above). Bookmarks keep
-// the resume point fresh for free; informers request them for
-// exactly this reason.
-func watchMachines(c *apiClient, name, resourceVersion string, events chan<- *machine.Machine) {
-	for {
-		path := machinesPath +
-			"?watch=true&allowWatchBookmarks=true" +
-			"&resourceVersion=" + resourceVersion
-
-		resp, err := c.do(http.MethodGet, path, "", nil)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			decoder := json.NewDecoder(resp.Body)
-			for {
-				var event struct {
-					Type   string          `json:"type"`
-					Object machine.Machine `json:"object"`
-				}
-				if err := decoder.Decode(&event); err != nil {
-					break
-				}
-				if event.Type == "ERROR" {
-					// Usually 410 Gone wrapped in an event; fall back to
-					// a fresh GET below.
-					break
-				}
-				resourceVersion = event.Object.Metadata.ResourceVersion
-				if event.Type == "BOOKMARK" {
-					// A bookmark only refreshes the resume point; there
-					// is no change to reconcile.
-					continue
-				}
-				events <- &event.Object
-			}
-		}
-		if resp != nil {
-			resp.Body.Close()
-		}
-
-		retryPause()
-		var list struct {
-			Metadata struct {
-				ResourceVersion string `json:"resourceVersion"`
-			} `json:"metadata"`
-			Items []machine.Machine `json:"items"`
-		}
-		if err := c.requestJSON(http.MethodGet, machinesPath, nil, &list); err == nil {
-			resourceVersion = list.Metadata.ResourceVersion
-			for i := range list.Items {
-				if list.Items[i].Metadata.Name == name {
-					events <- &list.Items[i]
-				}
-			}
-		}
-	}
+	return kubernetes.PublishStatus(c, fresh, status)
 }

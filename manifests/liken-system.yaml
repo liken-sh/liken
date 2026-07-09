@@ -1,0 +1,13 @@
+# A namespace of liken's own, so `kubectl get all -n liken-system`
+# shows everything the OS runs in the cluster. It lives here at the
+# top of the repo, beside the CRDs, because it is furniture every
+# liken component assumes: the operators' pods, RBAC, and heartbeat
+# leases all land in it, and no one component owns it. Declared
+# exactly once, deliberately: k3s applies each manifest file as its
+# own addon, and a namespace declared in two files would belong to
+# both, with either one's pruning able to take it (and everything in
+# it) away.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: liken-system

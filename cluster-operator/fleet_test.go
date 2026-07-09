@@ -44,7 +44,7 @@ func TestSweepCountsFreshReadyMachines(t *testing.T) {
 		fleetEntry{"node-2", machine.PhaseReady, 30 * time.Second},
 		fleetEntry{"node-3", machine.PhaseUpdatePending, 10 * time.Second},
 	)
-	s := decideFleetSweep(machines, renewals, "node-1", sweepNow)
+	s := decideFleetSweep(machines, renewals, sweepNow)
 	if s.tally.Ready != 2 || s.tally.Total != 3 || s.tally.Summary != "2/3" {
 		t.Errorf("got %+v", s.tally)
 	}
@@ -67,7 +67,7 @@ func TestSweepOfAWhollyReadyFleet(t *testing.T) {
 		fleetEntry{"node-1", machine.PhaseReady, 10 * time.Second},
 		fleetEntry{"node-2", machine.PhaseReady, 30 * time.Second},
 	)
-	s := decideFleetSweep(machines, renewals, "node-1", sweepNow)
+	s := decideFleetSweep(machines, renewals, sweepNow)
 	if s.phase != machine.PhaseReady {
 		t.Errorf("everyone ready means the cluster is, got %s", s.phase)
 	}
@@ -81,7 +81,7 @@ func TestSweepDeclaresSilentMachinesLost(t *testing.T) {
 		fleetEntry{"node-1", machine.PhaseReady, 10 * time.Second},
 		fleetEntry{"node-2", machine.PhaseReady, 5 * time.Minute},
 	)
-	s := decideFleetSweep(machines, renewals, "node-1", sweepNow)
+	s := decideFleetSweep(machines, renewals, sweepNow)
 	if s.tally.Summary != "1/2" {
 		t.Errorf("a stale Ready must not count: %+v", s.tally)
 	}
@@ -102,7 +102,7 @@ func TestSweepDegradedOutweighsUpdating(t *testing.T) {
 		fleetEntry{"node-2", machine.PhaseBlocked, 10 * time.Second},
 		fleetEntry{"node-3", machine.PhaseUpdatePending, 10 * time.Second},
 	)
-	s := decideFleetSweep(machines, renewals, "node-1", sweepNow)
+	s := decideFleetSweep(machines, renewals, sweepNow)
 	if s.phase != machine.PhaseDegraded {
 		t.Errorf("a blocked machine outweighs a rolling update, got %s", s.phase)
 	}
@@ -113,7 +113,7 @@ func TestSweepLeavesAlreadyLostMachinesAlone(t *testing.T) {
 		fleetEntry{"node-1", machine.PhaseReady, 10 * time.Second},
 		fleetEntry{"node-2", machine.PhaseLost, 5 * time.Minute},
 	)
-	s := decideFleetSweep(machines, renewals, "node-1", sweepNow)
+	s := decideFleetSweep(machines, renewals, sweepNow)
 	if len(s.lost) != 0 {
 		t.Errorf("re-marking a Lost machine is churn: %v", s.lost)
 	}
@@ -125,22 +125,6 @@ func TestSweepLeavesAlreadyLostMachinesAlone(t *testing.T) {
 	}
 }
 
-func TestSweepNeverDeclaresItselfLost(t *testing.T) {
-	// The sweeper's own heartbeat may look stale in the list it just
-	// read (its renewal could still be landing), but it is running
-	// this very code: its liveness is not in question.
-	machines, renewals := fleetInputs(
-		fleetEntry{"node-1", machine.PhaseReady, 5 * time.Minute},
-	)
-	s := decideFleetSweep(machines, renewals, "node-1", sweepNow)
-	if len(s.lost) != 0 {
-		t.Errorf("the sweeper is self-evidently alive: %v", s.lost)
-	}
-	if s.tally.Summary != "1/1" {
-		t.Errorf("got %+v", s.tally)
-	}
-}
-
 func TestSweepTreatsAMissingHeartbeatAsSilence(t *testing.T) {
 	// A Machine with no lease at all has never had an operator
 	// heartbeat: it may have been declared, but it has never
@@ -149,7 +133,7 @@ func TestSweepTreatsAMissingHeartbeatAsSilence(t *testing.T) {
 		fleetEntry{"node-1", machine.PhaseReady, 10 * time.Second},
 		fleetEntry{"node-2", "", -1},
 	)
-	s := decideFleetSweep(machines, renewals, "node-1", sweepNow)
+	s := decideFleetSweep(machines, renewals, sweepNow)
 	if len(s.lost) != 1 || s.lost[0] != "node-2" {
 		t.Errorf("got %v", s.lost)
 	}
@@ -170,7 +154,7 @@ func TestSweepReadsGrantedSilenceAsTheRebootInProgress(t *testing.T) {
 	machines[1].Status.Conditions = machine.SetCondition(nil, machine.Condition{
 		Type: "RebootApproved", Status: "True", Reason: "DisruptionBudgetAllows",
 	}, sweepNow.Add(-3*time.Minute))
-	s := decideFleetSweep(machines, renewals, "node-1", sweepNow)
+	s := decideFleetSweep(machines, renewals, sweepNow)
 	if len(s.lost) != 0 {
 		t.Errorf("this silence was requested: %v", s.lost)
 	}
@@ -187,7 +171,7 @@ func TestSweepDeclaresAGrantedMachineLostAfterTheStallWindow(t *testing.T) {
 	machines[1].Status.Conditions = machine.SetCondition(nil, machine.Condition{
 		Type: "RebootApproved", Status: "True", Reason: "DisruptionBudgetAllows",
 	}, sweepNow.Add(-12*time.Minute))
-	s := decideFleetSweep(machines, renewals, "node-1", sweepNow)
+	s := decideFleetSweep(machines, renewals, sweepNow)
 	if len(s.lost) != 1 || s.lost[0] != "node-2" {
 		t.Errorf("past the stall window the honest word is Lost: %v", s.lost)
 	}

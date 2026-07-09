@@ -27,7 +27,7 @@ $(error IDENTITY must name the deployment's identity directory, e.g. IDENTITY=..
 endif
 
 # The version baked into the image, where the archive lands, and where
-# the liken binary and the operator image come from. DIST has no
+# the liken binary and the operator images come from. DIST has no
 # default for the same reason MANIFESTS and IDENTITY don't: the
 # assembled image bakes a deployment's manifests and identity, so the
 # archive is the deployment's artifact, and it lands in the
@@ -36,7 +36,8 @@ endif
 LIKEN_VERSION ?= $(strip $(file <../VERSION))
 DIST ?=
 INIT_DIST ?= ../init/dist
-OPERATOR_DIST ?= ../operator/dist
+MACHINE_OPERATOR_DIST ?= ../machine-operator/dist
+CLUSTER_OPERATOR_DIST ?= ../cluster-operator/dist
 LOGS_DIST ?= ../logs/dist
 
 ifeq ($(strip $(DIST)),)
@@ -63,13 +64,18 @@ $(DIST)/liken.cpio: build.sh $(shell find etc -type f) \
 		../trust/dist/$(TRUST_VERSION)/cacert.pem \
 		$(IDENTITY)/tls/server-ca.crt \
 		$(IDENTITY)/token \
-		$(OPERATOR_DIST)/liken-operator-image.tar \
-		$(wildcard ../operator/manifests/*.yaml) \
+		$(MACHINE_OPERATOR_DIST)/liken-machine-operator-image.tar \
+		$(wildcard ../machine-operator/manifests/*.yaml) \
+		$(CLUSTER_OPERATOR_DIST)/liken-cluster-operator-image.tar \
+		$(wildcard ../cluster-operator/manifests/*.yaml) \
+		$(wildcard ../manifests/*.yaml) \
 		$(LOGS_DIST)/liken-logs-image.tar \
 		$(wildcard ../logs/manifests/*.yaml) \
 		../VERSION
 	LIKEN_VERSION=$(LIKEN_VERSION) DIST=$(abspath $(DIST)) \
-		INIT_DIST=$(abspath $(INIT_DIST)) OPERATOR_DIST=$(abspath $(OPERATOR_DIST)) \
+		INIT_DIST=$(abspath $(INIT_DIST)) \
+		MACHINE_OPERATOR_DIST=$(abspath $(MACHINE_OPERATOR_DIST)) \
+		CLUSTER_OPERATOR_DIST=$(abspath $(CLUSTER_OPERATOR_DIST)) \
 		LOGS_DIST=$(abspath $(LOGS_DIST)) IDENTITY=$(abspath $(IDENTITY)) \
 		./build.sh $(MANIFESTS)
 

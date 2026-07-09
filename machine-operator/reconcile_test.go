@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chrisguidry/liken/kubernetes"
 	"github.com/chrisguidry/liken/machine"
 )
 
@@ -147,7 +148,7 @@ func TestPublishStatusWritesTheStatusSubresource(t *testing.T) {
 	api := &nodeAPI{}
 	client := testClient(t, api.handler())
 	m := &machine.Machine{Metadata: machine.ObjectMeta{Name: "node-1"}}
-	if err := publishStatus(client, m, &machine.MachineStatus{Phase: machine.PhaseReady}); err != nil {
+	if err := kubernetes.PublishStatus(client, m, &machine.MachineStatus{Phase: machine.PhaseReady}); err != nil {
 		t.Fatal(err)
 	}
 	if want := "/apis/liken.sh/v1alpha1/machines/node-1/status"; api.publishedPath != want {
@@ -184,7 +185,7 @@ func (api *conflictAPI) handler() http.Handler {
 
 func grantCondition(transition time.Time) machine.Condition {
 	return machine.Condition{
-		Type: rebootApprovedCondition, Status: machine.ConditionTrue,
+		Type: machine.RebootApprovedCondition, Status: machine.ConditionTrue,
 		Reason: "TurnGranted", LastTransitionTime: transition,
 	}
 }
@@ -226,7 +227,7 @@ func TestPublishOwnStatusResolvesAConflictWithAFreshRead(t *testing.T) {
 	// copy and adopt the conductor's grant exactly as written,
 	// including its transition time, which the rollout's stall clock
 	// measures from.
-	granted := grantCondition(sweepNow)
+	granted := grantCondition(testNow)
 	api := &conflictAPI{conflicts: 1, fresh: freshMachine(granted)}
 	client := testClient(t, api.handler())
 
@@ -240,8 +241,8 @@ func TestPublishOwnStatusResolvesAConflictWithAFreshRead(t *testing.T) {
 	if api.published.Metadata.ResourceVersion != "9" {
 		t.Errorf("the retry carries the fresh copy's version: %s", api.published.Metadata.ResourceVersion)
 	}
-	if c := machine.FindCondition(api.published.Status.Conditions, rebootApprovedCondition); c == nil ||
-		!c.LastTransitionTime.Equal(sweepNow) {
+	if c := machine.FindCondition(api.published.Status.Conditions, machine.RebootApprovedCondition); c == nil ||
+		!c.LastTransitionTime.Equal(testNow) {
 		t.Errorf("the conductor's grant rides in from the fresh copy untouched: %+v", c)
 	}
 	if c := machine.FindCondition(api.published.Status.Conditions, "Ready"); c == nil || c.Status != machine.ConditionTrue {
@@ -256,11 +257,11 @@ func TestPublishOwnStatusHonorsAReclaimedGrant(t *testing.T) {
 	client := testClient(t, api.handler())
 
 	m := &machine.Machine{Metadata: machine.ObjectMeta{Name: "node-1", ResourceVersion: "7"}}
-	status := &machine.MachineStatus{Conditions: []machine.Condition{grantCondition(sweepNow)}}
+	status := &machine.MachineStatus{Conditions: []machine.Condition{grantCondition(testNow)}}
 	if err := publishOwnStatus(client, m, status, nil); err != nil {
 		t.Fatal(err)
 	}
-	if c := machine.FindCondition(api.published.Status.Conditions, rebootApprovedCondition); c != nil {
+	if c := machine.FindCondition(api.published.Status.Conditions, machine.RebootApprovedCondition); c != nil {
 		t.Errorf("a reclaimed grant must stay reclaimed: %+v", c)
 	}
 }
@@ -274,7 +275,7 @@ func TestPublishOwnStatusRetriesOnlyOnce(t *testing.T) {
 
 	m := &machine.Machine{Metadata: machine.ObjectMeta{Name: "node-1", ResourceVersion: "7"}}
 	err := publishOwnStatus(client, m, &machine.MachineStatus{}, nil)
-	if !errors.Is(err, errConflict) {
+	if !errors.Is(err, kubernetes.ErrConflict) {
 		t.Errorf("the second conflict comes back to the caller: %v", err)
 	}
 	if api.puts != 2 {

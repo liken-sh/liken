@@ -27,13 +27,23 @@ override:
   # are regexes over module-relative package paths.)
   - path: ^machine$
     threshold: 87
-  # The operator: its decisions (drift, staging validation, the
-  # convergence truth table, the fleet sweep, the lease election) are
-  # pure and tested, and everything that makes HTTP calls (the API
-  # client, the seeding loops, the watch stream, the leases) is
-  # exercised against a real HTTP test server.
-  - path: ^operator$
-    threshold: 64
+  # The Kubernetes client: every verb is exercised against a real
+  # HTTP test server; what goes untested is the in-cluster
+  # bootstrapping that only a pod's mounted credentials can satisfy.
+  - path: ^kubernetes$
+    threshold: 81
+  # The machine operator: its decisions (drift, staging validation,
+  # the convergence truth table, the drain) are pure and tested; the
+  # reconcile pass that strings them together against the real facts
+  # files and the live API is exercised by the QEMU harness, not unit
+  # tests.
+  - path: ^machine-operator$
+    threshold: 61
+  # The cluster operator: the sweep and rollout decisions are pure
+  # and tested, and the acting halves run against a miniature API
+  # server; what goes untested is main's loop.
+  - path: ^cluster-operator$
+    threshold: 82
   # Init: the boot machinery itself (mounting, DHCP, the reboot
   # syscall) is exercised by the QEMU harness, not unit tests; the
   # parsers, planners, derivations, and file-shaped actuators around

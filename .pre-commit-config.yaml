@@ -11,7 +11,7 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
         # Kubernetes manifests are conventionally multi-document
-        # streams (operator/manifests/operator.yaml carries a
+        # streams (machine-operator/manifests/machine-operator.yaml carries a
         # namespace, RBAC, and a DaemonSet in one file).
         args: [--allow-multiple-documents]
       - id: check-merge-conflict

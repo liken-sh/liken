@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/chrisguidry/liken/kubernetes"
 	"github.com/chrisguidry/liken/machine"
 )
 
@@ -57,53 +58,15 @@ const (
 
 const podsPath = "/api/v1/pods"
 
-type ownerReference struct {
-	Kind string `json:"kind"`
-}
-
-// podObject is the sliver of a Pod the drain needs: identity, who owns
-// it, and whether it is still running.
-type podObject struct {
-	Metadata struct {
-		Name            string            `json:"name"`
-		Namespace       string            `json:"namespace"`
-		Annotations     map[string]string `json:"annotations"`
-		OwnerReferences []ownerReference  `json:"ownerReferences"`
-	} `json:"metadata"`
-	Spec struct {
-		NodeName string `json:"nodeName"`
-	} `json:"spec"`
-	Status struct {
-		Phase string `json:"phase"`
-	} `json:"status"`
-}
-
-func listPodsOnNode(c *apiClient, node string) ([]podObject, error) {
+func listPodsOnNode(c *kubernetes.Client, node string) ([]kubernetes.Pod, error) {
 	var list struct {
-		Items []podObject `json:"items"`
+		Items []kubernetes.Pod `json:"items"`
 	}
 	path := podsPath + "?fieldSelector=spec.nodeName%3D" + node
-	if err := c.requestJSON(http.MethodGet, path, nil, &list); err != nil {
+	if err := c.RequestJSON(http.MethodGet, path, nil, &list); err != nil {
 		return nil, err
 	}
 	return list.Items, nil
-}
-
-// evictPod asks a pod to leave through the eviction subresource. The
-// Eviction API is what separates a drain from plain deletion: the
-// request is refused while removing the pod would violate its
-// PodDisruptionBudget, and the caller simply asks again later.
-func evictPod(c *apiClient, p podObject) error {
-	body, err := json.Marshal(map[string]any{
-		"apiVersion": "policy/v1",
-		"kind":       "Eviction",
-		"metadata":   map[string]string{"name": p.Metadata.Name, "namespace": p.Metadata.Namespace},
-	})
-	if err != nil {
-		return err
-	}
-	path := "/api/v1/namespaces/" + p.Metadata.Namespace + "/pods/" + p.Metadata.Name + "/eviction"
-	return c.requestJSON(http.MethodPost, path, body, nil)
 }
 
 // evictablePods is the set a drain actually has to move: not
@@ -111,8 +74,8 @@ func evictPod(c *apiClient, p podObject) error {
 // would just recreate them; this operator is itself one), not mirror
 // pods (the kubelet recreates those from disk), and not pods that
 // already ran to completion.
-func evictablePods(pods []podObject) []podObject {
-	var evictable []podObject
+func evictablePods(pods []kubernetes.Pod) []kubernetes.Pod {
+	var evictable []kubernetes.Pod
 	for _, p := range pods {
 		if p.Status.Phase == "Succeeded" || p.Status.Phase == "Failed" {
 			continue
@@ -120,13 +83,7 @@ func evictablePods(pods []podObject) []podObject {
 		if _, ok := p.Metadata.Annotations[mirrorPodAnnotation]; ok {
 			continue
 		}
-		daemon := false
-		for _, owner := range p.Metadata.OwnerReferences {
-			if owner.Kind == "DaemonSet" {
-				daemon = true
-			}
-		}
-		if daemon {
+		if p.IsDaemon() {
 			continue
 		}
 		evictable = append(evictable, p)
@@ -140,7 +97,7 @@ func evictablePods(pods []podObject) []podObject {
 // nothing is left holding the reboot.
 type drainStep struct {
 	patch []byte
-	evict []podObject
+	evict []kubernetes.Pod
 	clear bool
 }
 
@@ -148,7 +105,7 @@ type drainStep struct {
 // runs from the draining-since annotation; a node without one gets it
 // stamped now, along with the cordon if the node isn't already
 // unschedulable.
-func decideDrainStep(node *nodeObject, pods []podObject, now time.Time) drainStep {
+func decideDrainStep(node *nodeObject, pods []kubernetes.Pod, now time.Time) drainStep {
 	var step drainStep
 
 	since, err := time.Parse(time.RFC3339, node.Metadata.Annotations[drainingSinceAnnotation])
@@ -177,7 +134,7 @@ func decideDrainStep(node *nodeObject, pods []podObject, now time.Time) drainSte
 // releases it only once this machine's node is clear: cordon, evict,
 // and until nothing evictable remains (or the deadline passes), hold
 // the reboot and report the drain's progress on the same condition.
-func gateThroughDrain(c *apiClient, node *nodeObject, conv convergence, now time.Time) convergence {
+func gateThroughDrain(c *kubernetes.Client, node *nodeObject, conv convergence, now time.Time) convergence {
 	pods, err := listPodsOnNode(c, node.Metadata.Name)
 	if err != nil {
 		fmt.Printf("listing pods for the drain: %v\n", err)
@@ -185,14 +142,14 @@ func gateThroughDrain(c *apiClient, node *nodeObject, conv convergence, now time
 	}
 	step := decideDrainStep(node, pods, now)
 	if step.patch != nil {
-		if err := c.patchJSON(nodesPath+"/"+node.Metadata.Name, step.patch); err != nil {
+		if err := c.PatchJSON(nodesPath+"/"+node.Metadata.Name, step.patch); err != nil {
 			fmt.Printf("cordoning %s: %v\n", node.Metadata.Name, err)
 			return holdForDrain(conv, "cordoning this node failed; retrying")
 		}
 		fmt.Printf("cordoned %s ahead of its reboot\n", node.Metadata.Name)
 	}
 	for _, p := range step.evict {
-		if err := evictPod(c, p); err != nil {
+		if err := kubernetes.EvictPod(c, p); err != nil {
 			// A refusal here is usually a PodDisruptionBudget doing
 			// its job; the next pass asks again.
 			fmt.Printf("evicting %s/%s: %v\n", p.Metadata.Namespace, p.Metadata.Name, err)

@@ -3,8 +3,8 @@
 # the natural way to drive the build. The inputs come two ways. Most
 # of the system is vendored: the kernel, k3s, the xtables binaries,
 # and the trust store are each fetched at a pinned version and
-# verified. The parts that are liken itself, the init, the operator,
-# and the log relays, are the Go programs compiled here.
+# verified. The parts that are liken itself, the init, the two
+# operators, and the log relays, are the Go programs compiled here.
 #
 # The structure follows the repo's rule of organizing by domain: each
 # domain directory (kernel/, k3s/, init/, image/, ...) has its own
@@ -26,7 +26,7 @@ TRUST_DIST := trust/dist/$(TRUST_VERSION)
 E2FSPROGS_VERSION := $(strip $(file <e2fsprogs/VERSION))
 E2FSPROGS_DIST := e2fsprogs/dist/$(E2FSPROGS_VERSION)
 
-all: kernel k3s xtables trust e2fsprogs init operator logs identity image
+all: kernel k3s xtables trust e2fsprogs init machine-operator cluster-operator logs identity image
 
 # Because the version is part of the artifact's name, a pin bump
 # changes the target path itself and Make rebuilds with no extra
@@ -75,15 +75,26 @@ init/dist/liken: $(wildcard init/*.go) go.mod go.sum \
 
 init: init/dist/liken
 
-# The liken operator is the in-cluster half of the Machine API. It is
-# packaged as a hand-assembled OCI image (see operator/main.go and
-# image/oci.sh, the recipe both in-cluster binaries share).
-operator/dist/liken-operator-image.tar: $(wildcard operator/*.go) \
+# The machine operator is the node-local half of operating the OS
+# through the cluster's API, and the cluster operator is the
+# fleet-level half: one pod per machine versus one pod per fleet (each
+# main.go's header comment draws the line). Both are packaged as
+# hand-assembled OCI images (image/oci.sh, the recipe every
+# in-cluster binary shares) and both share the kubernetes package,
+# the raw API client, so both rebuild when it changes.
+machine-operator/dist/liken-machine-operator-image.tar: $(wildcard machine-operator/*.go) \
 		go.mod go.sum image/oci.sh \
-		$(wildcard machine/*.go) VERSION
-	$(MAKE) -C operator
+		$(wildcard machine/*.go) $(wildcard kubernetes/*.go) VERSION
+	$(MAKE) -C machine-operator
 
-operator: operator/dist/liken-operator-image.tar
+machine-operator: machine-operator/dist/liken-machine-operator-image.tar
+
+cluster-operator/dist/liken-cluster-operator-image.tar: $(wildcard cluster-operator/*.go) \
+		go.mod go.sum image/oci.sh \
+		$(wildcard machine/*.go) $(wildcard kubernetes/*.go) VERSION
+	$(MAKE) -C cluster-operator
+
+cluster-operator: cluster-operator/dist/liken-cluster-operator-image.tar
 
 # The log relays carry the machine's host-level log streams (the
 # kernel's, init's, k3s's, containerd's) into the cluster as pod
@@ -137,8 +148,11 @@ $(IMAGE_DIR)/liken.cpio: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s 
 		$(TRUST_DIST)/cacert.pem \
 		$(E2FSPROGS_DIST)/mke2fs \
 		$(IDENTITY_DIR)/tls/server-ca.crt $(IDENTITY_DIR)/token \
-		operator/dist/liken-operator-image.tar \
-		$(wildcard operator/manifests/*.yaml) \
+		machine-operator/dist/liken-machine-operator-image.tar \
+		$(wildcard machine-operator/manifests/*.yaml) \
+		cluster-operator/dist/liken-cluster-operator-image.tar \
+		$(wildcard cluster-operator/manifests/*.yaml) \
+		$(wildcard manifests/*.yaml) \
 		logs/dist/liken-logs-image.tar \
 		$(wildcard logs/manifests/*.yaml) \
 		dev-cluster/cluster.yaml $(wildcard dev-cluster/machines/*.yaml) \
@@ -188,7 +202,7 @@ install: $(IMAGE_DIR)/install.cpio
 # version stamp, published to releases/dist/<version>/ the way a
 # release webserver lays it out (see the releases/ Makefile for the
 # full explanation). The root's contribution is the vendored inputs:
-# a release rebuilds init, the operator, and the image, but the
+# a release rebuilds init, the operators, and the image, but the
 # kernel, k3s, and the other vendored artifacts are pinned by their
 # own domains and shared by every release.
 release: kernel k3s xtables trust e2fsprogs identity
@@ -213,9 +227,10 @@ clean:
 	$(MAKE) -C trust clean
 	$(MAKE) -C e2fsprogs clean
 	$(MAKE) -C init clean
-	$(MAKE) -C operator clean
+	$(MAKE) -C machine-operator clean
+	$(MAKE) -C cluster-operator clean
 	$(MAKE) -C logs clean
 	$(MAKE) -C identity DIST=$(abspath $(IDENTITY_DIR)) clean
 	$(MAKE) -C image IDENTITY=$(abspath $(IDENTITY_DIR)) DIST=$(abspath $(IMAGE_DIR)) clean
 
-.PHONY: all kernel k3s xtables trust e2fsprogs init operator logs identity kubeconfig image run run-once install release serve clean
+.PHONY: all kernel k3s xtables trust e2fsprogs init machine-operator cluster-operator logs identity kubeconfig image run run-once install release serve clean

@@ -26,7 +26,7 @@
 # relays, and their recipes are identical, so the recipe lives here in
 # the image domain and each program's Makefile invokes it:
 #
-#   oci.sh <binary> <image>     e.g. oci.sh liken-operator liken.sh/operator
+#   oci.sh <binary> <image>     e.g. oci.sh liken-machine-operator liken.sh/machine-operator
 #
 # with DIST naming the directory that holds <binary> and receives
 # <binary>-image.tar, and LIKEN_VERSION the version to stamp into the
@@ -122,8 +122,8 @@ manifest_digest="$(add_blob "$dist/manifest.json")"
 #
 # The same manifest is named twice: two references to one image. The
 # versioned tag says what this build is; the stable "installed" tag
-# is the one the OS DaemonSets pin (operator/manifests/operator.yaml,
-# logs/manifests/logs.yaml): every release tags its own build
+# is the one the OS workloads pin (each operator's and the log
+# relays' manifests): every release tags its own build
 # "installed", so one unchanging pod spec resolves, on every node, to
 # the build that node's own OS imported. Content addressing makes the
 # aliasing free: both names point at the same digest.

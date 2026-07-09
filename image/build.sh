@@ -79,14 +79,14 @@
 #                                 means the image contains private keys:
 #                                 anyone who holds this file controls
 #                                 the cluster it boots
-#   /var/lib/rancher/k3s/         the Machine CRD and the liken operator's
-#     server/manifests/           deployment: k3s applies everything in
+#   /var/lib/rancher/k3s/         the liken CRDs and the operators'
+#     server/manifests/           deployments: k3s applies everything in
 #                                 this directory to the cluster at
 #                                 startup, so the OS's own resources
 #                                 arrive with no kubectl step
-#   /var/lib/rancher/k3s/         the liken operator's container image as
-#     agent/images/               an OCI tarball (built by hand in
-#                                 operator/image.sh); k3s imports every
+#   /var/lib/rancher/k3s/         the liken operators' container images
+#     agent/images/               as OCI tarballs (built by hand in
+#                                 image/oci.sh); k3s imports every
 #                                 archive here into containerd at start,
 #                                 so the machine never pulls its own OS
 #                                 components from a registry
@@ -112,14 +112,15 @@ kdist="$here/../kernel/dist/$kernel_version"
 release="$(cat "$kdist/release")"
 
 # The version this image claims to be, where the archive lands, and
-# where the liken binary and operator image come from. All of these can
+# where the liken binary and operator images come from. All of these can
 # be overridden from the environment, because the releases domain
 # assembles release-stamped images through this same script, from its
 # own copies of the inputs, into its own tree (see the Makefile).
 liken_version="${LIKEN_VERSION:-$(cat "$here/../VERSION")}"
 dist="${DIST:-$here/dist}"
 init_dist="${INIT_DIST:-$here/../init/dist}"
-operator_dist="${OPERATOR_DIST:-$here/../operator/dist}"
+machine_operator_dist="${MACHINE_OPERATOR_DIST:-$here/../machine-operator/dist}"
+cluster_operator_dist="${CLUSTER_OPERATOR_DIST:-$here/../cluster-operator/dist}"
 logs_dist="${LOGS_DIST:-$here/../logs/dist}"
 
 root="$dist/root"
@@ -173,20 +174,29 @@ cp -r "$identity/tls" "$root/var/lib/rancher/k3s/server/tls"
 cp "$identity/token" "$root/etc/liken/token"
 chmod 600 "$root/etc/liken/token"
 
-# The Machine API, its operator, and the log relays, all delivered
+# The liken API and the programs that operate it, all delivered
 # through k3s's own mechanisms: the manifests go where k3s
 # auto-applies them, and the OCI images go where k3s auto-imports
-# them. The LIKEN_VERSION substitution stamps each manifest with the
-# release it shipped in, which is what the pod steward compares
-# against a machine's running version.
+# them. The manifests come from four places, by domain: the top-level
+# manifests/ carries the cluster-level furniture (the CRDs and the
+# liken-system namespace), and each operator and the log relays carry
+# their own deployment beside their code. The LIKEN_VERSION
+# substitution stamps each manifest with the release it shipped in,
+# which is what the pod steward compares against a machine's running
+# version.
 mkdir -p "$root/var/lib/rancher/k3s/server/manifests"
-for manifest in "$here"/../operator/manifests/*.yaml "$here"/../logs/manifests/*.yaml; do
+for manifest in "$here"/../manifests/*.yaml \
+        "$here"/../machine-operator/manifests/*.yaml \
+        "$here"/../cluster-operator/manifests/*.yaml \
+        "$here"/../logs/manifests/*.yaml; do
     sed "s/LIKEN_VERSION/$liken_version/g" "$manifest" \
         >"$root/var/lib/rancher/k3s/server/manifests/$(basename "$manifest")"
 done
 mkdir -p "$root/var/lib/rancher/k3s/agent/images"
-cp "$operator_dist/liken-operator-image.tar" \
-   "$root/var/lib/rancher/k3s/agent/images/liken-operator.tar"
+cp "$machine_operator_dist/liken-machine-operator-image.tar" \
+   "$root/var/lib/rancher/k3s/agent/images/liken-machine-operator.tar"
+cp "$cluster_operator_dist/liken-cluster-operator-image.tar" \
+   "$root/var/lib/rancher/k3s/agent/images/liken-cluster-operator.tar"
 cp "$logs_dist/liken-logs-image.tar" \
    "$root/var/lib/rancher/k3s/agent/images/liken-logs.tar"
 

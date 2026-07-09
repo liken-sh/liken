@@ -31,7 +31,7 @@ package main
 // orchestration. A Cluster edit is drift on every machine at once,
 // and this path only stages the change and asks for a reboot. On a
 // cluster member with rebootPolicy Auto, asking means awaiting a
-// turn from the sweep leader's rollout (rollout.go), which grants
+// turn from the cluster operator's rollout conductor, which grants
 // reboots one machine at a time, so a fleet-wide edit rolls through
 // the fleet instead of rebooting every machine together. Manual (the
 // default) leaves each machine's pending reboot visible and waiting
@@ -39,21 +39,12 @@ package main
 
 import (
 	"fmt"
-	"net/http"
 	"os"
 
 	"sigs.k8s.io/yaml"
 
 	"github.com/chrisguidry/liken/machine"
 )
-
-func getCluster(c *apiClient, name string) (*machine.Cluster, error) {
-	cluster := &machine.Cluster{}
-	if err := c.requestJSON(http.MethodGet, clustersPath+"/"+name, nil, cluster); err != nil {
-		return nil, err
-	}
-	return cluster, nil
-}
 
 // renderCluster produces the canonical bytes to stage: a Cluster
 // document with no status, deterministic for the same reason

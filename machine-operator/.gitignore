@@ -1,0 +1,3 @@
+# The built binary and the OCI image assembled from it; `make`
+# recreates both from the sources here.
+dist/

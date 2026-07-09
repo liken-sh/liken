@@ -1,7 +1,7 @@
-package main
+package kubernetes
 
-// The watch loop against a real streaming server: events arrive for
-// every machine in the fleet, bookmarks advance the resume point
+// The watch loop against a real streaming server: events arrive as
+// the server sends them, bookmarks advance the resume point
 // silently, and a dropped stream recovers through a fresh list.
 
 import (
@@ -18,9 +18,9 @@ import (
 // watchAPI serves one watch stream (each entry is one event line),
 // hangs up on later reconnects, and answers the recovery list that
 // follows a drop: a MachineList whose own resourceVersion is the
-// resume point, carrying node-1 among its items. Every watch
-// request's URL lands on the paths channel, which is how a test
-// observes the resume points without racing the handler.
+// resume point. Every watch request's URL lands on the paths
+// channel, which is how a test observes the resume points without
+// racing the handler.
 type watchAPI struct {
 	stream  []string
 	watches atomic.Int32
@@ -75,7 +75,7 @@ func TestWatchDeliversEventsAndRecoversFromADrop(t *testing.T) {
 	client := testClient(t, api.handler())
 
 	events := make(chan *machine.Machine, 4)
-	go watchMachines(client, "node-1", "1", events)
+	go WatchMachines(client, "", "1", events)
 
 	// The MODIFIED event arrives; the BOOKMARK does not (it only
 	// advances the resume point).
@@ -85,19 +85,22 @@ func TestWatchDeliversEventsAndRecoversFromADrop(t *testing.T) {
 	}
 
 	// The stream then ends, an ordinary drop, and the loop recovers
-	// with a fresh list; this machine's own copy from that list lands
-	// as an event so the caller's copy is refreshed.
+	// with a fresh list; the list's items land as events so the
+	// caller's working copies are refreshed.
 	second := <-events
 	if second.Metadata.Name != "node-1" || second.Metadata.ResourceVersion != "50" {
-		t.Errorf("the recovery list's copy of this machine should arrive: %s@%s",
+		t.Errorf("the recovery list's items should arrive: %s@%s",
 			second.Metadata.Name, second.Metadata.ResourceVersion)
+	}
+	third := <-events
+	if third.Metadata.Name != "node-2" {
+		t.Errorf("every item recovers, not just one machine's: %s", third.Metadata.Name)
 	}
 }
 
-func TestWatchSpansTheWholeFleet(t *testing.T) {
-	// The sweeping leader derives the Cluster's status from every
-	// Machine, so the loop must wake when any machine changes, not
-	// just its own: the watch carries no fieldSelector, and another
+func TestWatchWithoutASelectorSpansTheCollection(t *testing.T) {
+	// The cluster operator derives the Cluster's status from every
+	// Machine, so its watch carries no fieldSelector and another
 	// machine's event is delivered like any other.
 	api := &watchAPI{stream: []string{
 		watchEvent(t, "MODIFIED", "node-2", "7"),
@@ -105,15 +108,33 @@ func TestWatchSpansTheWholeFleet(t *testing.T) {
 	client := testClient(t, api.handler())
 
 	events := make(chan *machine.Machine, 4)
-	go watchMachines(client, "node-1", "1", events)
+	go WatchMachines(client, "", "1", events)
 
 	if path := <-api.paths; strings.Contains(path, "fieldSelector") {
-		t.Errorf("the watch should span the collection: %s", path)
+		t.Errorf("no selector was asked for: %s", path)
 	}
 	first := <-events
 	if first.Metadata.Name != "node-2" {
 		t.Errorf("another machine's event should be delivered: %s", first.Metadata.Name)
 	}
+}
+
+func TestWatchCarriesTheFieldSelector(t *testing.T) {
+	// The machine operator narrows its watch to its own object; the
+	// server does the filtering, so all the client sends is the
+	// selector, escaped into the query string.
+	api := &watchAPI{stream: []string{
+		watchEvent(t, "MODIFIED", "node-1", "7"),
+	}}
+	client := testClient(t, api.handler())
+
+	events := make(chan *machine.Machine, 4)
+	go WatchMachines(client, "metadata.name=node-1", "1", events)
+
+	if path := <-api.paths; !strings.Contains(path, "fieldSelector=metadata.name%3Dnode-1") {
+		t.Errorf("the watch should carry the selector: %s", path)
+	}
+	<-events
 }
 
 func TestWatchResumesFromTheListsVersion(t *testing.T) {
@@ -123,7 +144,7 @@ func TestWatchResumesFromTheListsVersion(t *testing.T) {
 	client := testClient(t, api.handler())
 
 	events := make(chan *machine.Machine, 4)
-	go watchMachines(client, "node-1", "1", events)
+	go WatchMachines(client, "", "1", events)
 
 	if first := <-api.paths; !strings.Contains(first, "resourceVersion=1") {
 		t.Errorf("the first watch starts where the caller said: %s", first)
@@ -140,42 +161,12 @@ func TestWatchResumesFromTheListsVersion(t *testing.T) {
 	}
 }
 
-func TestDrainEventsCoalescesABurstAndKeepsTheNewestOwnCopy(t *testing.T) {
-	// A burst of fleet events queued during a pass collapses into the
-	// single pass that follows, and only this machine's own newest
-	// copy replaces the working copy.
-	events := make(chan *machine.Machine, 4)
-	events <- &machine.Machine{Metadata: machine.ObjectMeta{Name: "node-2", ResourceVersion: "5"}}
-	events <- &machine.Machine{Metadata: machine.ObjectMeta{Name: "node-1", ResourceVersion: "6"}}
-	events <- &machine.Machine{Metadata: machine.ObjectMeta{Name: "node-3", ResourceVersion: "7"}}
-
-	current := &machine.Machine{Metadata: machine.ObjectMeta{Name: "node-1", ResourceVersion: "2"}}
-	current = drainEvents(events, "node-1", current)
-	if current.Metadata.ResourceVersion != "6" {
-		t.Errorf("the newest own copy wins: %s", current.Metadata.ResourceVersion)
-	}
-	if len(events) != 0 {
-		t.Errorf("the burst is fully drained: %d left", len(events))
-	}
-}
-
-func TestDrainEventsLeavesTheWorkingCopyWhenOnlyOthersChanged(t *testing.T) {
-	events := make(chan *machine.Machine, 4)
-	events <- &machine.Machine{Metadata: machine.ObjectMeta{Name: "node-2", ResourceVersion: "5"}}
-
-	current := &machine.Machine{Metadata: machine.ObjectMeta{Name: "node-1", ResourceVersion: "2"}}
-	current = drainEvents(events, "node-1", current)
-	if current.Metadata.ResourceVersion != "2" {
-		t.Errorf("another machine's event must not replace the working copy: %s", current.Metadata.ResourceVersion)
-	}
-}
-
-// TestMain silences retryPause for the whole test binary, exactly
-// once: watchMachines loops forever by design (a crash-only daemon
+// TestMain silences RetryPause for the whole test binary, exactly
+// once: WatchMachines loops forever by design (a crash-only daemon
 // has no shutdown path), so the goroutines these tests start outlive
 // them, and any later write to the seam would race a live loop
 // reading it. No test wants the real five-second pause anyway.
 func TestMain(m *testing.M) {
-	retryPause = func() {}
+	RetryPause = func() {}
 	os.Exit(m.Run())
 }

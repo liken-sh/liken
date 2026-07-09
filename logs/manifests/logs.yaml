@@ -27,11 +27,11 @@
 # its own.
 #
 # Delivery follows the operator wholesale, and the reasoning lives in
-# operator/manifests/operator.yaml: the "installed" tag resolving
+# machine-operator/manifests/machine-operator.yaml: the "installed" tag resolving
 # per-node to that node's baked build, imagePullPolicy Never,
 # updateStrategy OnDelete so applying manifests never kills a pod on
 # a node that hasn't upgraded yet, and the liken.sh/os-version
-# annotation the pod steward (operator/steward.go) uses to refresh
+# annotation the pod steward (cluster-operator/steward.go) uses to refresh
 # each machine's pod after its upgrade lands.
 #
 # Unlike the operator, the relays hold no cluster credentials at all:

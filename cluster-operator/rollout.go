@@ -9,7 +9,7 @@ package main
 // and leaving quorum to survive by luck. Kubernetes workloads get
 // protection from this through PodDisruptionBudgets and kubectl
 // drain; machines deserve the same, so the Cluster carries a
-// machine-level maxUnavailable (spec.disruption) and the sweep leader
+// machine-level maxUnavailable (spec.disruption) and this conductor
 // hands out reboot turns one budget-slot at a time.
 //
 // The coordination happens through conditions. A machine that wants
@@ -39,6 +39,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chrisguidry/liken/kubernetes"
 	"github.com/chrisguidry/liken/machine"
 )
 
@@ -51,10 +52,6 @@ import (
 // keeps granting turns across a fleet whose machines are not coming
 // back.
 const rolloutStallAfter = 10 * time.Minute
-
-// rebootApprovedCondition is the grant's condition type, owned by the
-// conductor: the machine's own operator never sets or clears it.
-const rebootApprovedCondition = "RebootApproved"
 
 // A rollout is one sweep's sequencing verdict: which machines to
 // grant a reboot turn, which spent grants to take back, and the
@@ -97,7 +94,7 @@ func available(phase machine.Phase) bool {
 // mistake with a worker costs little, while every leader carries a
 // share of quorum. Name order makes the decision deterministic, so
 // two sweeps of the same fleet agree.
-func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cluster *machine.Cluster, self string, now time.Time) rollout {
+func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cluster *machine.Cluster, now time.Time) rollout {
 	var r rollout
 	inFlight := 0 // budget slots occupied: unavailable machines and unspent grants
 	leaderBusy := false
@@ -107,8 +104,8 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 		m := &machines[i]
 		name := m.Metadata.Name
 		leader := slices.Contains(cluster.Spec.Leaders, name)
-		phase := effectivePhase(m, renewals, self, now)
-		grant := machine.FindCondition(m.Status.Conditions, rebootApprovedCondition)
+		phase := effectivePhase(m, renewals, now)
+		grant := machine.FindCondition(m.Status.Conditions, machine.RebootApprovedCondition)
 
 		switch {
 		case grant != nil && available(phase) && !wantsTurn(m):
@@ -193,7 +190,7 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 // other machines' statuses, safe for the same reason the Lost write
 // is: each touches only the one condition type this writer owns, and
 // a 409 from a crossing write just waits for the next sweep.
-func carryOutRollout(c *apiClient, machines []machine.Machine, r rollout, now time.Time) {
+func carryOutRollout(c *kubernetes.Client, machines []machine.Machine, r rollout, now time.Time) {
 	for i := range machines {
 		m := &machines[i]
 		name := m.Metadata.Name
@@ -201,18 +198,18 @@ func carryOutRollout(c *apiClient, machines []machine.Machine, r rollout, now ti
 		switch {
 		case slices.Contains(r.grant, name):
 			status.Conditions = machine.SetCondition(slices.Clone(m.Status.Conditions), machine.Condition{
-				Type: rebootApprovedCondition, Status: machine.ConditionTrue, Reason: "DisruptionBudgetAllows",
+				Type: machine.RebootApprovedCondition, Status: machine.ConditionTrue, Reason: "DisruptionBudgetAllows",
 				ObservedGeneration: m.Metadata.Generation,
 				Message:            "the cluster's disruption budget allows this machine to take its reboot turn now",
 			}, now)
-			if err := publishStatus(c, m, &status); err != nil {
+			if err := kubernetes.PublishStatus(c, m, &status); err != nil {
 				fmt.Printf("granting %s its reboot turn: %v\n", name, err)
 			} else {
 				fmt.Printf("granted %s its reboot turn\n", name)
 			}
 		case slices.Contains(r.revoke, name):
-			status.Conditions = machine.RemoveCondition(slices.Clone(m.Status.Conditions), rebootApprovedCondition)
-			if err := publishStatus(c, m, &status); err != nil {
+			status.Conditions = machine.RemoveCondition(slices.Clone(m.Status.Conditions), machine.RebootApprovedCondition)
+			if err := kubernetes.PublishStatus(c, m, &status); err != nil {
 				fmt.Printf("reclaiming %s's reboot turn: %v\n", name, err)
 			}
 		}

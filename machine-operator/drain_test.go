@@ -9,12 +9,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/chrisguidry/liken/kubernetes"
 )
 
 var drainNow = time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
 
-func pod(name, ns string, opts ...func(*podObject)) podObject {
-	var p podObject
+func pod(name, ns string, opts ...func(*kubernetes.Pod)) kubernetes.Pod {
+	var p kubernetes.Pod
 	p.Metadata.Name = name
 	p.Metadata.Namespace = ns
 	p.Status.Phase = "Running"
@@ -24,20 +26,20 @@ func pod(name, ns string, opts ...func(*podObject)) podObject {
 	return p
 }
 
-func ownedByDaemonSet(p *podObject) {
-	p.Metadata.OwnerReferences = []ownerReference{{Kind: "DaemonSet"}}
+func ownedByDaemonSet(p *kubernetes.Pod) {
+	p.Metadata.OwnerReferences = []kubernetes.OwnerReference{{Kind: "DaemonSet"}}
 }
 
-func mirror(p *podObject) {
+func mirror(p *kubernetes.Pod) {
 	p.Metadata.Annotations = map[string]string{mirrorPodAnnotation: "true"}
 }
 
-func completed(p *podObject) {
+func completed(p *kubernetes.Pod) {
 	p.Status.Phase = "Succeeded"
 }
 
 func TestEvictablePodsSkipsWhatCannotMove(t *testing.T) {
-	pods := []podObject{
+	pods := []kubernetes.Pod{
 		pod("web", "default"),
 		pod("liken-operator", "liken-system", ownedByDaemonSet),
 		pod("etcd-shim", "kube-system", mirror),
@@ -66,7 +68,7 @@ func drainNode(unschedulable bool, cordonedByUs bool, since string) *nodeObject 
 }
 
 func TestDrainBeginsByCordoning(t *testing.T) {
-	step := decideDrainStep(drainNode(false, false, ""), []podObject{pod("web", "default")}, drainNow)
+	step := decideDrainStep(drainNode(false, false, ""), []kubernetes.Pod{pod("web", "default")}, drainNow)
 	if step.patch == nil {
 		t.Fatal("an uncordoned node needs the cordon patch")
 	}
@@ -98,7 +100,7 @@ func TestDrainRespectsAHumanCordon(t *testing.T) {
 func TestDrainIsClearWhenNothingEvictableRemains(t *testing.T) {
 	since := drainNow.Add(-time.Minute).Format(time.RFC3339)
 	step := decideDrainStep(drainNode(true, true, since),
-		[]podObject{pod("liken-operator", "liken-system", ownedByDaemonSet)}, drainNow)
+		[]kubernetes.Pod{pod("liken-operator", "liken-system", ownedByDaemonSet)}, drainNow)
 	if step.patch != nil {
 		t.Errorf("already cordoned and anchored: %s", step.patch)
 	}
@@ -109,7 +111,7 @@ func TestDrainIsClearWhenNothingEvictableRemains(t *testing.T) {
 
 func TestDrainForcesThroughAfterTheDeadline(t *testing.T) {
 	since := drainNow.Add(-10 * time.Minute).Format(time.RFC3339)
-	step := decideDrainStep(drainNode(true, true, since), []podObject{pod("stubborn", "default")}, drainNow)
+	step := decideDrainStep(drainNode(true, true, since), []kubernetes.Pod{pod("stubborn", "default")}, drainNow)
 	if !step.clear {
 		t.Error("past the deadline the reboot proceeds; the pod dies with the machine")
 	}
@@ -120,7 +122,7 @@ func TestDrainForcesThroughAfterTheDeadline(t *testing.T) {
 
 func TestDrainKeepsEvictingBeforeTheDeadline(t *testing.T) {
 	since := drainNow.Add(-time.Minute).Format(time.RFC3339)
-	step := decideDrainStep(drainNode(true, true, since), []podObject{pod("web", "default")}, drainNow)
+	step := decideDrainStep(drainNode(true, true, since), []kubernetes.Pod{pod("web", "default")}, drainNow)
 	if step.clear {
 		t.Error("a movable pod holds the reboot")
 	}
@@ -144,7 +146,7 @@ func TestUncordonOnlyTakesBackOurOwnCordon(t *testing.T) {
 // drainAPI is a miniature API server recording pod listings, eviction
 // posts, and node patches.
 type drainAPI struct {
-	pods      []podObject
+	pods      []kubernetes.Pod
 	evictions []string
 	patched   string
 }
@@ -165,7 +167,7 @@ func (api *drainAPI) handler() http.Handler {
 }
 
 func TestListPodsOnNodeFiltersByNodeName(t *testing.T) {
-	api := &drainAPI{pods: []podObject{pod("web", "default")}}
+	api := &drainAPI{pods: []kubernetes.Pod{pod("web", "default")}}
 	client := testClient(t, api.handler())
 	pods, err := listPodsOnNode(client, "node-4")
 	if err != nil || len(pods) != 1 {
@@ -176,7 +178,7 @@ func TestListPodsOnNodeFiltersByNodeName(t *testing.T) {
 func TestEvictPodPostsTheEvictionSubresource(t *testing.T) {
 	api := &drainAPI{}
 	client := testClient(t, api.handler())
-	if err := evictPod(client, pod("web", "default")); err != nil {
+	if err := kubernetes.EvictPod(client, pod("web", "default")); err != nil {
 		t.Fatal(err)
 	}
 	want := "/api/v1/namespaces/default/pods/web/eviction"
