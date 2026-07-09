@@ -207,6 +207,19 @@ nfsutils_version="$(cat "$here/../nfs-utils/VERSION")"
 cp "$here/../nfs-utils/dist/$nfsutils_version/mount.nfs" "$root/sbin/mount.nfs"
 ln -s mount.nfs "$root/sbin/mount.nfs4"
 
+# /etc/mtab, the file where mount tools recorded mounts back when the
+# kernel didn't expose them; it has been a compatibility symlink to
+# the kernel's own table on every mainstream distribution since about
+# 2011. It matters here because mount helpers still honor the old
+# contract: after a successful mount syscall, mount.nfs goes to
+# record the mount in mtab, and only the file being a symlink tells
+# it the kernel already keeps the table. On an /etc with no mtab at
+# all, that bookkeeping spins forever retrying, wedging every NFS
+# mount behind a helper that never exits — the lab found this the
+# hard way, with the mount itself succeeding in milliseconds and the
+# machine looking hung.
+ln -s /proc/self/mounts "$root/etc/mtab"
+
 # The pre-generated certificate authorities, placed exactly where k3s
 # looks before generating its own. The identity directory is an input
 # like the manifests: an identity belongs to a deployment, and the

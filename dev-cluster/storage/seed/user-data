@@ -1,0 +1,93 @@
+#cloud-config
+# The storage server's entire configuration. cloud-init reads this
+# file from the seed ISO on first boot and turns a stock Debian image
+# into the lab's filer: an NFSv4 export and an iSCSI target, the two
+# protocols liken's storage-client features speak. Nothing is
+# configured by hand; wipe the root disk (make clean) and the next
+# boot rebuilds the server from this file alone. (Almost alone: the
+# Makefile appends ssh_authorized_keys with this checkout's minted
+# lab key, so the committed seed carries no identity.)
+
+hostname: storage
+
+# A serial-console login for poking at the server. This guest lives
+# on a host-local network segment and holds nothing but lab fixtures,
+# so a trivial root password costs nothing and saves fishing for SSH
+# keys during a drill.
+chpasswd:
+  expire: false
+  users:
+    - name: root
+      password: storage
+      type: text
+
+package_update: true
+packages:
+  # The kernel NFS server: nfsd itself is in the kernel, and this
+  # package is the userspace that starts it and feeds it the exports
+  # table. The reference implementation liken's mount.nfs is drilled
+  # against.
+  - nfs-kernel-server
+  # The iSCSI target. Linux has two: LIO, the in-kernel target
+  # configured through configfs by targetcli, and tgt, a userspace
+  # daemon configured by a text file. LIO is what production filers
+  # embed; tgt is one process reading one config file, which is
+  # exactly the amount of machinery a fixture serving one LUN needs.
+  # Performance is beside the point here — the drill is the client's
+  # login, not the server's throughput.
+  - tgt
+
+# The exports disk arrives blank, like every disk in this lab; the
+# server formats it on first boot. The by-id path is the disk's QEMU
+# serial number (see the Makefile), so this never depends on probe
+# order. fs_setup skips a disk that already carries a filesystem, so
+# a reboot never reformats the exports.
+fs_setup:
+  - device: /dev/disk/by-id/virtio-storage-exports
+    filesystem: ext4
+    label: exports
+    partition: none
+
+mounts:
+  - [
+      /dev/disk/by-id/virtio-storage-exports,
+      /srv/nfs,
+      ext4,
+      "defaults,nofail",
+    ]
+
+# Both services read drop-in directories, which is what makes writing
+# their configuration before their packages install safe: dpkg owns
+# /etc/exports and /etc/tgt/targets.conf as conffiles and would
+# quarrel over pre-existing copies, but a .d file is nobody's
+# conffile.
+write_files:
+  # The NFS export: the whole exports filesystem, to the cluster
+  # segment only. NFSv4 needs no fsid=0 pseudo-root gymnastics on a
+  # modern kernel; clients mount the real path (storage:/srv/nfs).
+  # no_root_squash because the clients are CSI provisioners creating
+  # per-volume directories as root; squashing root is a courtesy for
+  # multi-tenant filers, and this one has exactly one tenant.
+  - path: /etc/exports.d/liken.exports
+    content: |
+      /srv/nfs 10.10.0.0/24(rw,sync,no_subtree_check,no_root_squash)
+  # The iSCSI target: one target, one LUN, backed by the whole luns
+  # disk. tgt with no initiator restrictions accepts any initiator
+  # that logs in — an open door that would be negligent on a real
+  # filer and is exactly right for a fixture every lab machine must
+  # reach. The IQN's naming authority is the lab itself; the machines'
+  # initiator IQNs (iqn.2026-07.sh.liken:<name>) name liken.
+  - path: /etc/tgt/conf.d/liken.conf
+    content: |
+      <target iqn.2026-07.sh.liken.lab:storage>
+          backing-store /dev/disk/by-id/virtio-storage-luns
+      </target>
+
+# Package install starts both daemons before this stage runs, and tgt
+# reads conf.d only at startup, so restart it once its config is
+# certainly in place. exportfs -ra does the same for nfsd without a
+# restart: the exports table is pushed into the kernel, not read at
+# start.
+runcmd:
+  - [systemctl, restart, tgt]
+  - [exportfs, -ra]

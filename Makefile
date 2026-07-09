@@ -206,6 +206,13 @@ image: $(IMAGE_DIR)/liken.cpio
 run: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/liken.cpio
 	$(MAKE) -C dev-cluster run
 
+# The lab's storage server (dev-cluster/storage): the guest the
+# iscsi and nfs features are drilled against. It runs stock Debian,
+# not liken, so it needs no OS artifacts built first — the delegation
+# is pure convenience for running everything from the root.
+storage:
+	$(MAKE) -C dev-cluster storage
+
 # One-shot boots are for debugging and automation. The liken.oneshot
 # flag tells init not to restart k3s: when k3s first exits, the
 # machine powers off, QEMU exits, and the console log is a complete,
@@ -264,4 +271,4 @@ clean:
 	$(MAKE) -C identity DIST=$(abspath $(IDENTITY_DIR)) clean
 	$(MAKE) -C image IDENTITY=$(abspath $(IDENTITY_DIR)) DIST=$(abspath $(IMAGE_DIR)) clean
 
-.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils init machine-operator cluster-operator logs identity kubeconfig image run run-once install release serve clean
+.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils init machine-operator cluster-operator logs identity kubeconfig image run run-once install storage release serve clean

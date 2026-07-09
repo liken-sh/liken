@@ -313,6 +313,15 @@ install: LIKEN_BOOT_ARGS = liken.install
 install: QEMU_EXIT_ON_REBOOT := -no-reboot
 install: run
 
+# The lab's storage server: a stock-Debian guest on the same cluster
+# segment, serving the iSCSI target and NFSv4 export the fleet's
+# storage-client features are drilled against. It is a fixture, not a
+# liken machine, so it lives in its own small domain (storage/) with
+# its own disks and its own clean. Run it in its own terminal like
+# any node.
+storage:
+	$(MAKE) -C storage run
+
 # Grow a node's pods disk under the machine, the lab's stand-in for a
 # bigger drive or an expanded cloud volume. Only ever run this with
 # the machine off: resizing a live qcow2 corrupts it. The next boot
@@ -321,7 +330,7 @@ install: run
 grow-pods:
 	qemu-img resize guests/$(NODE)/pods.qcow2 +4G
 
-.PHONY: run run-once install grow-pods clean
+.PHONY: run run-once install storage grow-pods clean
 
 clean:
 	rm -rf guests

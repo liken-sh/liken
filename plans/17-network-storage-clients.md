@@ -196,6 +196,27 @@ workload plane owns recovery. The synology-csi proof against the real
 filer belongs to the deployment that runs one; the lab proves the host
 contract.
 
+The server side of that proof is dev-cluster/storage: a stock Debian
+guest on the fleet's cluster segment, serving one iSCSI LUN and one
+NFSv4 export, deliberately not a liken machine because the drill is
+about liken's side of the wire (its Makefile explains the whole
+fixture). Its first drill earned its keep twice over. The iSCSI half
+worked end to end on the first try: discovery, login through the
+host's iscsid, and raw bytes written to the LUN and read back. The
+NFS half caught a real defect, and on the client: mount(2) returned
+success in milliseconds, but liken shipped no /etc/mtab, and
+mount.nfs's post-mount bookkeeping spun forever in userspace without
+one, wedging every mount behind a helper that never exited. The
+diagnosis ran the whole stack down — wire captures showing only
+successful compounds, nfs4 tracepoints showing the client finishing
+its conversation, a syscall trace showing mount(2) succeed while the
+process burned pure user time — and the fix is one line of build.sh:
+/etc/mtab as a symlink to /proc/self/mounts, the same compatibility
+link every mainstream distribution has shipped since about 2011,
+which is mount.nfs's cue that the kernel already keeps the table. A
+minimal /etc is right until the first tool that honors a contract
+older than the initramfs.
+
 One gap the drills exposed is still owed. k3s deletes an auto-deploy
 addon's resources when its manifest file is removed while k3s runs,
 but a retraction removes the file at boot, before k3s starts, so k3s
