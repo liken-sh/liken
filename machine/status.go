@@ -7,7 +7,10 @@ package machine
 // at the machine. Nothing in these types is remembered between passes;
 // everything is re-derived from current observation.
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 type MachineStatus struct {
 	// Phase summarizes the machine's state in one word, computed from
@@ -511,7 +514,7 @@ func FindCondition(conditions []Condition, conditionType string) *Condition {
 func RemoveCondition(conditions []Condition, conditionType string) []Condition {
 	for i := range conditions {
 		if conditions[i].Type == conditionType {
-			return append(conditions[:i], conditions[i+1:]...)
+			return slices.Delete(conditions, i, i+1)
 		}
 	}
 	return conditions

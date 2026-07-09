@@ -39,6 +39,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -76,9 +77,26 @@ func NewClient(base string, httpClient *http.Client, credentials string) *Client
 }
 
 func InClusterClient() (*Client, error) {
-	host, port := os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")
-	if host == "" || port == "" {
-		return nil, fmt.Errorf("not running in a cluster: KUBERNETES_SERVICE_HOST unset")
+	return InClusterClientAt("")
+}
+
+// InClusterClientAt is InClusterClient pointed at a chosen endpoint
+// instead of the injected one. The environment names the API
+// service's virtual IP, and that VIP is iptables NAT: every new
+// connection gets pinned to one API server, and a client can't
+// choose which. Ordinary pods live with that, but a hostNetwork pod
+// standing on a machine that runs an API server (or k3s's
+// health-checked local load balancer over all of them) has a better
+// address available: its own loopback, where a dead remote server
+// can never strand its connections. The credentials are the same
+// either way, and "" means the environment's endpoint.
+func InClusterClientAt(base string) (*Client, error) {
+	if base == "" {
+		host, port := os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")
+		if host == "" || port == "" {
+			return nil, fmt.Errorf("not running in a cluster: KUBERNETES_SERVICE_HOST unset")
+		}
+		base = "https://" + host + ":" + port
 	}
 
 	// The mounted CA is the cluster's server CA: the same root
@@ -95,15 +113,41 @@ func InClusterClient() (*Client, error) {
 		return nil, fmt.Errorf("service account CA contains no certificates")
 	}
 
-	return NewClient("https://"+host+":"+port, &http.Client{
+	return NewClient(base, &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{RootCAs: roots},
+			// Every timeout below exists to bound the same failure: a
+			// server that dies without saying so. A machine that
+			// vanishes sends no FIN and no RST, so a connection to it
+			// just goes silent, and without deadlines each kind of
+			// wait would be an indefinite one. The budgets are set so
+			// that even a pass unlucky enough to hit several dead
+			// connections in a row finishes well inside the
+			// forty-second heartbeat window (heartbeat.go): a client
+			// stalled on somebody else's failure must never make this
+			// machine read as dead.
+			//
+			// The dial timeout bounds connecting to an endpoint that
+			// no longer answers (SYNs to a dead address retransmit
+			// into silence for minutes by default). The keep-alive
+			// makes the kernel probe established-but-idle
+			// connections, which is what reaps a watch stream whose
+			// server died mid-watch: the response never ends by
+			// design, so a probe is the only thing that can tell a
+			// quiet server from a dead one.
+			DialContext: (&net.Dialer{
+				Timeout:   5 * time.Second,
+				KeepAlive: 10 * time.Second,
+			}).DialContext,
 			// Watches are long-lived responses that deliver data a
 			// little at a time, and the server ends them on its own
 			// schedule. A whole-request client timeout would cut
 			// every watch off mid-stream, so only the response
-			// headers get a deadline.
-			ResponseHeaderTimeout: 30 * time.Second,
+			// headers get a deadline: ten seconds, generous for a
+			// healthy server and short enough that a request written
+			// onto a silently dead connection fails while the
+			// heartbeat still has plenty of window left.
+			ResponseHeaderTimeout: 10 * time.Second,
 			// A pooled connection that has sat idle is the one most
 			// likely to be silently dead: the server may have closed
 			// it, or the network path may have quietly reset. Go

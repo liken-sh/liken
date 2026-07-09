@@ -34,6 +34,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/chrisguidry/liken/kubernetes"
@@ -42,16 +43,6 @@ import (
 
 func main() {
 	fmt.Println("liken-machine-operator", machine.Version)
-
-	// Failures during setup end the process deliberately. There is no
-	// retry logic here because kubelet already provides it: a pod that
-	// exits nonzero is restarted with backoff, and the failure is
-	// visible in `kubectl get pods` instead of buried in a log. This is
-	// the "crash-only" style most Kubernetes components use.
-	client, err := kubernetes.InClusterClient()
-	if err != nil {
-		fatal("in-cluster config: %v", err)
-	}
 
 	// The boot manifest tells the operator which Machine it manages:
 	// the exact bytes init booted under (the proven or staged copy
@@ -67,6 +58,24 @@ func main() {
 	name := m.Metadata.Name
 	if name == "" {
 		fatal("the boot manifest names no machine; nothing to operate")
+	}
+
+	// The cluster document this boot ran, read before the client is
+	// built because it decides which door to the API this machine
+	// should use (localAPIEndpoint below).
+	cluster, err := machine.LoadCluster(machine.ClusterManifestPath)
+	if err != nil {
+		fatal("cluster manifest: %v", err)
+	}
+
+	// Failures during setup end the process deliberately. There is no
+	// retry logic here because kubelet already provides it: a pod that
+	// exits nonzero is restarted with backoff, and the failure is
+	// visible in `kubectl get pods` instead of buried in a log. This is
+	// the "crash-only" style most Kubernetes components use.
+	client, err := kubernetes.InClusterClientAt(localAPIEndpoint(cluster, name))
+	if err != nil {
+		fatal("in-cluster config: %v", err)
 	}
 
 	// The file seeds the cluster: if no Machine object exists yet, the
@@ -91,10 +100,6 @@ func main() {
 	// published it. (Seeding lives here rather than in the cluster
 	// operator because this is the program with the image's manifest
 	// under its feet; the cluster operator has no mounts at all.)
-	cluster, err := machine.LoadCluster(machine.ClusterManifestPath)
-	if err != nil {
-		fatal("cluster manifest: %v", err)
-	}
 	if cluster != nil {
 		if err := ensureCluster(client, cluster); err != nil {
 			fatal("ensuring cluster %s exists: %v", cluster.Metadata.Name, err)
@@ -181,6 +186,30 @@ func drainEvents(events <-chan *machine.Machine, newest *machine.Machine) *machi
 			return newest
 		}
 	}
+}
+
+// localAPIEndpoint is the machine's own door to the API server,
+// chosen over the service VIP the pod environment offers. The VIP is
+// iptables NAT: each connection gets pinned to one API server, and
+// when that server's machine dies silently, everything pinned to it
+// stalls on timeouts — long enough, before this function existed,
+// for healthy machines' heartbeats to lapse and read as Lost. This
+// pod runs on the host's network, so localhost is the machine, and
+// the machine always has a better path: a leader runs an API server
+// of its own on 6443, and a follower runs k3s's agent load balancer
+// on 6444, which health-checks every server and fails over between
+// them. These are the same doors the machine's own kubelet uses, so
+// the operator's view of the API can never be worse than the
+// kubelet's. A machine with no cluster document falls back to the
+// environment's endpoint ("").
+func localAPIEndpoint(cluster *machine.Cluster, name string) string {
+	if cluster == nil {
+		return ""
+	}
+	if slices.Contains(cluster.Spec.Leaders, name) {
+		return "https://127.0.0.1:6443"
+	}
+	return "https://127.0.0.1:6444"
 }
 
 func fatal(format string, args ...any) {

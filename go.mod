@@ -1,6 +1,7 @@
 // One module for the whole repo. liken's Go programs, the init that
-// boots the machine (init/), the operator that manages it from inside
-// the cluster (operator/), and the log relays that carry its streams
+// boots the machine (init/), the operators that manage the machines
+// and the fleet from inside the cluster (machine-operator/ and
+// cluster-operator/), and the log relays that carry its streams
 // into the cluster (logs/), version together (one VERSION file stamps
 // every binary), release together (one initramfs), and share
 // the machine package (machine/, the Machine API as Go types). Multiple

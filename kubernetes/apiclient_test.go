@@ -103,6 +103,16 @@ func TestListClustersReadsTheCollection(t *testing.T) {
 	}
 }
 
+func TestInClusterClientNeedsTheEnvironment(t *testing.T) {
+	// Outside a pod the injected variables are absent, and that is
+	// the whole diagnosis.
+	t.Setenv("KUBERNETES_SERVICE_HOST", "")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "")
+	if _, err := InClusterClient(); err == nil {
+		t.Error("no environment means no client")
+	}
+}
+
 func TestDoNeedsAServiceAccountToken(t *testing.T) {
 	// The token is re-read from disk on every request (kubelet
 	// refreshes it as it approaches expiry); a missing token is a
