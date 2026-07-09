@@ -353,6 +353,57 @@ spec:
                         time, because the datastore keeps quorum only
                         while a majority of leaders is up, and no
                         policy setting can change that arithmetic.
+                features:
+                  type: object
+                  description: >-
+                    The cluster's opt-ins from liken's curated feature
+                    vocabulary: optional capabilities the fleet as a
+                    whole offers, beyond the minimum viable cluster.
+                    Keyed by feature slug. The key's presence is the
+                    opt-in, and a feature's zero configuration is {}.
+                    Explicit null is refused, because everywhere else
+                    in Kubernetes null means unset, and a declaration
+                    that could mean enabled or disabled depending on
+                    the reader is exactly the ambiguity a declared
+                    document exists to remove. Unknown slugs are
+                    refused twice: the API server's strict field
+                    validation refuses them at admission, and init's
+                    strict parse refuses them at boot. (No
+                    additionalProperties: false does that work here;
+                    structural schemas forbid it beside named
+                    properties, and the two strict readers get the
+                    same result.) Behind each slug is liken's
+                    business, deliberately invisible here: some
+                    features are components the k3s binary already
+                    bundles, enabled by leaving them off the disable
+                    list init renders each boot; others are payloads
+                    liken ships in every image, inert until declared.
+                    Toggling a feature converges like any other
+                    cluster edit, rolling through the fleet as staged
+                    changes and granted reboots.
+                  properties:
+                    traefik:
+                      type: object
+                      description: >-
+                        k3s's bundled Traefik ingress controller,
+                        disabled by default on principle: anything
+                        beyond the control plane should be a
+                        declared, visible workload, and declaring it
+                        here is that declaration.
+                    servicelb:
+                      type: object
+                      description: >-
+                        k3s's bundled service load balancer
+                        (klipper-lb), which realizes Services of type
+                        LoadBalancer using the nodes' own addresses,
+                        the piece a bare-metal cluster otherwise has
+                        no answer for.
+                    metrics-server:
+                      type: object
+                      description: >-
+                        k3s's bundled metrics-server, the aggregated
+                        API that makes `kubectl top` answer and that
+                        horizontal pod autoscalers read.
             status:
               type: object
               description: >-

@@ -3,6 +3,7 @@ package machine
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -94,6 +95,79 @@ spec:
 `)
 	if _, err := LoadCluster(path); err == nil {
 		t.Fatal("expected an error for the misspelled field")
+	}
+}
+
+func TestClusterFeaturesParse(t *testing.T) {
+	path := writeClusterManifest(t, `
+apiVersion: liken.sh/v1alpha1
+kind: Cluster
+metadata:
+  name: lab
+spec:
+  features:
+    metrics-server: {}
+`)
+	c, err := LoadCluster(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.EnabledFeatures(); len(got) != 1 || got[0] != "metrics-server" {
+		t.Errorf("enabled features: got %v", got)
+	}
+}
+
+func TestClusterFeaturesRejectNull(t *testing.T) {
+	path := writeClusterManifest(t, `
+apiVersion: liken.sh/v1alpha1
+kind: Cluster
+metadata:
+  name: lab
+spec:
+  features:
+    metrics-server:
+`)
+	_, err := LoadCluster(path)
+	if err == nil {
+		t.Fatal("expected an error for a null feature")
+	}
+	if !strings.Contains(err.Error(), `"metrics-server: {}"`) {
+		t.Errorf("the error should say what to write instead, got: %v", err)
+	}
+}
+
+func TestClusterFeaturesRejectUnknownSlug(t *testing.T) {
+	path := writeClusterManifest(t, `
+apiVersion: liken.sh/v1alpha1
+kind: Cluster
+metadata:
+  name: lab
+spec:
+  features:
+    flannel: {}
+`)
+	_, err := LoadCluster(path)
+	if err == nil {
+		t.Fatal("expected an error for an unknown feature")
+	}
+	if !strings.Contains(err.Error(), "traefik") {
+		t.Errorf("the error should name the vocabulary, got: %v", err)
+	}
+}
+
+func TestClusterFeaturesRejectParameters(t *testing.T) {
+	path := writeClusterManifest(t, `
+apiVersion: liken.sh/v1alpha1
+kind: Cluster
+metadata:
+  name: lab
+spec:
+  features:
+    metrics-server:
+      replicas: 2
+`)
+	if _, err := LoadCluster(path); err == nil {
+		t.Fatal("expected an error: no feature has parameters yet")
 	}
 }
 

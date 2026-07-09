@@ -1,6 +1,6 @@
 # Opt-in features: network storage clients and the bundled components
 
-Milestone 17 — Designed, not started
+Milestone 17 — In progress
 
 liken today is a minimum viable highly-available cluster, and the aim
 is to keep it one: capabilities people may not need should not
@@ -70,15 +70,44 @@ from a pinned source tarball inside a digest-pinned container, and
 records the output digests the way every other vendored artifact does.
 (Talos ships the same binaries through its iscsi-tools extension,
 which makes a useful independent comparison when auditing a build.)
-A feature's payload ships only when the deployment's cluster document
-declares the feature; an image built without it carries nothing, which
-is the point. Each shipped feature also stages its kernel half at
+Payloads ship in every image, because they are small (static
+open-iscsi is a few megabytes beside a seventy-megabyte k3s binary)
+and because shipping them unconditionally keeps opting in a purely
+runtime act: one Cluster edit, no rebuild, no release to publish, no
+version to retarget. Init is the gate. A payload is inert bytes until
+the cluster document declares its feature, the same posture the
+disable list already takes toward the components inside the k3s
+binary. Each vendored feature stages its kernel half at
 /etc/liken/features/<name>/modules.conf, riding the same module
-pipeline milestone 18 built, and init learns a feature's modules from
-that file alone: file present means payload shipped, so there is no
-feature-to-modules mapping hardcoded in init, and a missing file is
-how init knows to report that the booted image was built without a
-feature the cluster now declares.
+pipeline milestone 18 built, and init loads those modules only when
+the feature is declared. That file's presence is also how init knows
+the booted image carries the payload at all, with no feature-to-
+modules mapping hardcoded anywhere: a missing file means the image
+predates the feature, which can happen when a cluster document
+declares a feature newer than the release a machine is running, and
+the machine reports the gap instead of silently lacking the
+capability. A feature too large to ship in every image (a GPU
+toolkit, say) would be the moment to introduce build-time
+conditioning, and not before.
+
+On the liken side, the vocabulary is one table in the machine package
+(machine/features.go): a slug and a kind per feature, consulted by
+everything that must agree on it. Init validates the cluster document
+against the table and renders the disable list from it, and the
+operator judges each machine's standing against it. The CRD stays
+hand-written so its schema can teach the API, and a parity test holds
+its feature properties to exactly the table's slugs, in both
+directions. The table deliberately carries nothing else: module lists
+live in the feature files above, and each domain's shipping steps are
+spelled out in image/build.sh, where the recipes are genuinely
+different from feature to feature and read best in the open. What a
+feature may contribute is any subset of six things: k3s configuration
+rendered at boot, vendored binaries, kernel modules, workload
+manifests seeded when declared, an init boot hook, and one day
+parameters. The next feature is a table row and its pieces, never a
+redesign. A slug enters the vocabulary in the same change that
+delivers its payload, because offering a feature no image can honor
+would make the reporting below a permanent alarm.
 
 Toggling a feature converges like any other cluster change: features
 stay in the canonical rendered document (unlike spec.version and
@@ -106,13 +135,23 @@ in, and iscsiadm reaches iscsid over an abstract unix socket, which is
 namespace-scoped too. Sessions themselves are kernel state; a
 restarting iscsid re-adopts them from sysfs, so a pod restart costs a
 window without reconnect handling, not attached disks. The DaemonSet's
-image can ride the liken image as a hand-assembled OCI tarball through
-the auto-manifests directory, the way the operator and log relays
-already deploy, which also closes a deadlock: an image registry hosted
-on iSCSI-backed storage could otherwise be needed to start the very
-daemon that mounts it. The deployment this repo serves runs
-synology-csi, which execs the host's iscsiadm and expects a running
-iscsid, so the host binaries are load-bearing, not a convenience.
+image rides the liken image as a hand-assembled OCI tarball, the way
+the operator and log relays already deploy, and init seeds its
+manifest into the auto-manifests directory only when the cluster
+document declares the feature, so retracting the feature removes the
+workload on the next roll. Riding the image rather than a registry
+also closes a deadlock: an image registry hosted on iSCSI-backed
+storage could otherwise be needed to start the very daemon that
+mounts it. Building the DaemonSet image from the same vendored
+binaries as the host's means iscsid and the iscsiadm that talks to it
+over its socket are always the same build, with no version skew to
+manage. The deployment this repo serves runs synology-csi, which
+execs the host's iscsiadm and expects a running iscsid, so the host
+binaries are load-bearing, not a convenience. (A pure-Go initiator
+login exists, u-root's iscsinl, speaking the kernel's netlink
+interface directly; it could one day matter for iSCSI-backed system
+storage at boot, but it cannot satisfy this feature's contract,
+because the CSI drivers exec iscsiadm.)
 
 The nfs feature is the same shape and smaller: a static mount.nfs
 (with libtirpc built into it), the nfsv4 module, and no daemon at all,
@@ -126,8 +165,8 @@ The lab proof: a generic iSCSI target and an NFSv4 export reachable
 from the guests, the cluster document declaring both features, and a
 real CSI node plugin mounting one block volume and one file volume
 into pods, with a write surviving a node reboot. The failure drills:
-an image built without a feature booted against a cluster document
-declaring it reports FeaturesReady: False with the rebuild message
+an image predating a feature booted against a cluster document
+declaring it reports FeaturesReady: False with the upgrade message
 while ClusterConverged stays True, and killing iscsid's pod proves the
 workload plane owns recovery. The synology-csi proof against the real
 filer belongs to the deployment that runs one; the lab proves the host

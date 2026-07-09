@@ -167,6 +167,25 @@ type ClusterSpec struct {
 	// when the cluster sequences reboots (cluster-operator/rollout.go).
 	Disruption ClusterDisruptionSpec `json:"disruption,omitzero"`
 
+	// Features is the cluster's opt-ins from liken's curated feature
+	// vocabulary (features.go): optional capabilities the fleet as a
+	// whole offers. It lives on the Cluster because a feature is a
+	// fact every node must agree on: a PersistentVolume can attach
+	// to any node the scheduler picks, and even the k3s disable list
+	// is cluster-wide in effect. It is an object keyed by feature
+	// slug rather than a list of names, so a feature can grow
+	// parameters without a schema break; the key's presence is the
+	// opt-in, and a feature's zero configuration is {}. The value is
+	// a pointer so an explicit null arrives as present-but-nil and
+	// is refused loudly (validateFeatures): everywhere else in
+	// Kubernetes null means unset, so a bare `traefik:` in
+	// hand-written YAML must be an error, never a quiet enable or a
+	// quieter no. Features converge by reboot like every other
+	// cluster fact: they stay in the canonical staged document, so
+	// an edit changes the document's hash and rolls through the
+	// fleet as staged changes and granted reboots.
+	Features map[string]*FeatureConfig `json:"features,omitempty"`
+
 	// Version is the fleet's target liken release: the one field an
 	// upgrade edits. Machines carry no version in their specs.
 	// Instead, each machine's operator compares the version its boot
@@ -321,6 +340,9 @@ func ParseCluster(raw []byte) (*Cluster, error) {
 	}
 	if c.Kind != "Cluster" {
 		return nil, fmt.Errorf("expected kind Cluster, got %q", c.Kind)
+	}
+	if err := validateFeatures(c.Spec.Features); err != nil {
+		return nil, err
 	}
 	return c, nil
 }
