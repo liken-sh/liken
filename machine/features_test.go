@@ -1,9 +1,10 @@
 package machine
 
 import (
-	"maps"
+	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	"sigs.k8s.io/yaml"
@@ -37,10 +38,11 @@ func TestFeatureBySlug(t *testing.T) {
 }
 
 // The Cluster CRD is hand-written so its schema can teach the API,
-// which means nothing mechanical keeps its feature properties aligned
+// which means nothing mechanical keeps its feature validation aligned
 // with the vocabulary in features.go. This test is that alignment: a
 // slug added to either side without the other fails here, in both
-// directions.
+// directions, because the CEL rule's vocabulary list is compared
+// against the table exactly.
 func TestClusterCRDMatchesTheVocabulary(t *testing.T) {
 	raw, err := os.ReadFile("../manifests/clusters-crd.yaml")
 	if err != nil {
@@ -55,10 +57,16 @@ func TestClusterCRDMatchesTheVocabulary(t *testing.T) {
 							Spec struct {
 								Properties struct {
 									Features struct {
-										Properties map[string]struct {
-											Type     string `json:"type"`
-											Nullable bool   `json:"nullable"`
-										} `json:"properties"`
+										Validations []struct {
+											Rule    string `json:"rule"`
+											Message string `json:"message"`
+										} `json:"x-kubernetes-validations"`
+										AdditionalProperties struct {
+											Type          string `json:"type"`
+											Nullable      bool   `json:"nullable"`
+											MaxProperties *int   `json:"maxProperties"`
+											Preserve      bool   `json:"x-kubernetes-preserve-unknown-fields"`
+										} `json:"additionalProperties"`
 									} `json:"features"`
 								} `json:"properties"`
 							} `json:"spec"`
@@ -74,22 +82,43 @@ func TestClusterCRDMatchesTheVocabulary(t *testing.T) {
 	if len(crd.Spec.Versions) != 1 {
 		t.Fatalf("expected one CRD version, got %d", len(crd.Spec.Versions))
 	}
-	declared := crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties.Spec.Properties.Features.Properties
+	features := crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties.Spec.Properties.Features
 
-	want := FeatureSlugs()
-	slices.Sort(want)
-	got := slices.Sorted(maps.Keys(declared))
-	if !slices.Equal(got, want) {
-		t.Errorf("CRD feature properties %v, vocabulary %v", got, want)
+	// The vocabulary rule must name exactly the table's slugs, in
+	// table order, or an admission error would name a vocabulary the
+	// file parser disagrees with.
+	wantRule := fmt.Sprintf("self.all(slug, slug in ['%s'])",
+		strings.Join(FeatureSlugs(), "', '"))
+	var rules []string
+	for _, v := range features.Validations {
+		rules = append(rules, v.Rule)
+	}
+	if !slices.Contains(rules, wantRule) {
+		t.Errorf("the CRD's vocabulary rule must be exactly %q; its rules are %q", wantRule, rules)
 	}
 
-	// Null rejection at admission depends on every feature being a
-	// non-nullable object in the structural schema.
-	for slug, schema := range declared {
-		if schema.Type != "object" || schema.Nullable {
-			t.Errorf("feature %q must be a non-nullable object, got type=%q nullable=%v",
-				slug, schema.Type, schema.Nullable)
-		}
+	// The null refusal depends on two things standing together: a
+	// rule that names the mistake, and nullable values, without which
+	// the decoder drops a null before validation can see it.
+	if !slices.Contains(rules, "self.all(slug, self[slug] != null)") {
+		t.Errorf("the CRD must refuse null feature values by rule; its rules are %q", rules)
+	}
+	if features.AdditionalProperties.Type != "object" || !features.AdditionalProperties.Nullable {
+		t.Errorf("feature values must be nullable objects so a null survives to validation, got %+v",
+			features.AdditionalProperties)
+	}
+
+	// No feature has parameters yet, and the guard is a pair that
+	// stands together: preserving unknown fields stops the API server
+	// pruning a guessed parameter (which would quietly flip the
+	// feature on as {}), and a maximum of zero properties refuses the
+	// preserved value by name. When the first parameter arrives, this
+	// assertion is what changes.
+	if features.AdditionalProperties.MaxProperties == nil ||
+		*features.AdditionalProperties.MaxProperties != 0 ||
+		!features.AdditionalProperties.Preserve {
+		t.Errorf("feature values must preserve unknown fields and cap properties at zero, got %+v",
+			features.AdditionalProperties)
 	}
 }
 

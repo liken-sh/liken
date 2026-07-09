@@ -361,49 +361,64 @@ spec:
                     whole offers, beyond the minimum viable cluster.
                     Keyed by feature slug. The key's presence is the
                     opt-in, and a feature's zero configuration is {}.
-                    Explicit null is refused, because everywhere else
-                    in Kubernetes null means unset, and a declaration
-                    that could mean enabled or disabled depending on
-                    the reader is exactly the ambiguity a declared
-                    document exists to remove. Unknown slugs are
-                    refused twice: the API server's strict field
-                    validation refuses them at admission, and init's
-                    strict parse refuses them at boot. (No
-                    additionalProperties: false does that work here;
-                    structural schemas forbid it beside named
-                    properties, and the two strict readers get the
-                    same result.) Behind each slug is liken's
-                    business, deliberately invisible here: some
-                    features are components the k3s binary already
-                    bundles, enabled by leaving them off the disable
-                    list init renders each boot; others are payloads
-                    liken ships in every image, inert until declared.
-                    Toggling a feature converges like any other
-                    cluster edit, rolling through the fleet as staged
-                    changes and granted reboots.
-                  properties:
-                    traefik:
-                      type: object
-                      description: >-
-                        k3s's bundled Traefik ingress controller,
-                        disabled by default on principle: anything
-                        beyond the control plane should be a
-                        declared, visible workload, and declaring it
-                        here is that declaration.
-                    servicelb:
-                      type: object
-                      description: >-
-                        k3s's bundled service load balancer
-                        (klipper-lb), which realizes Services of type
-                        LoadBalancer using the nodes' own addresses,
-                        the piece a bare-metal cluster otherwise has
-                        no answer for.
-                    metrics-server:
-                      type: object
-                      description: >-
-                        k3s's bundled metrics-server, the aggregated
-                        API that makes `kubectl top` answer and that
-                        horizontal pod autoscalers read.
+                    The vocabulary today is traefik (k3s's bundled
+                    ingress controller), servicelb (klipper-lb, which
+                    realizes Services of type LoadBalancer on the
+                    nodes' own addresses), and metrics-server (the
+                    aggregated API behind `kubectl top`). All three
+                    are components the k3s binary already bundles,
+                    disabled by default on principle: anything beyond
+                    the control plane should be a declared, visible
+                    workload, and declaring it here is that
+                    declaration. Toggling a feature converges like
+                    any other cluster edit, rolling through the fleet
+                    as staged changes and granted reboots.
+                  # The schema is a map with validation rules rather
+                  # than named per-slug properties, and the choice is
+                  # load-bearing. Named properties look natural, but
+                  # the API server prunes unknown fields before
+                  # validation ever runs, so a misspelled slug in a
+                  # patch would vanish silently (a quiet no, the
+                  # exact failure a declared document exists to
+                  # prevent), and a CEL rule can never see it. Map
+                  # keys are never pruned, so the rules below run
+                  # against exactly what was sent, and refuse the two
+                  # mistakes by name. The parity test in
+                  # machine/features_test.go holds the first rule's
+                  # vocabulary to the table in machine/features.go.
+                  x-kubernetes-validations:
+                    - rule: "self.all(slug, slug in ['traefik', 'servicelb', 'metrics-server'])"
+                      message: >-
+                        unknown feature; the vocabulary is
+                        traefik, servicelb, metrics-server
+                    - rule: "self.all(slug, self[slug] != null)"
+                      message: >-
+                        a null feature is neither enabled nor
+                        disabled; presence is the opt-in, so write
+                        {} to enable a feature or remove its key
+                        entirely
+                  additionalProperties:
+                    type: object
+                    # Nullable so that an explicit null survives
+                    # decoding long enough for the rule above to
+                    # refuse it with a message. A non-nullable value
+                    # here would be dropped by the decoder as if
+                    # unset, before validation ever saw it, and a
+                    # bare `traefik:` in hand-written YAML would
+                    # quietly mean nothing.
+                    nullable: true
+                    # No feature has parameters yet, and this pair is
+                    # what says so loudly. Without it, the API server
+                    # prunes an unrecognized parameter and keeps the
+                    # emptied object, so a patch guessing at
+                    # {replicas: 2} would quietly become {} and flip
+                    # the feature on. Preserving unknown fields stops
+                    # the pruning, and a maximum of zero properties
+                    # then refuses the value with the exact field
+                    # named. When the first feature grows a
+                    # parameter, this pair is what changes.
+                    maxProperties: 0
+                    x-kubernetes-preserve-unknown-fields: true
             status:
               type: object
               description: >-

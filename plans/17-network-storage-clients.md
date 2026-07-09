@@ -37,14 +37,25 @@ null), so a vocabulary where a bare `iscsi:` in hand-written YAML
 meant *enabled* would fight every tool in the ecosystem, and one where
 it silently meant *disabled* is exactly the misspelled-manifest
 failure the strict parser exists to prevent. Both doors reject it: the
-CRD refuses null for a non-nullable object at admission, and the file
-parser refuses it with a message that says to write {}. Unknown slugs
-are refused the same two ways. One mechanical note for the reader who
-looks for additionalProperties: false in the CRD and doesn't find it:
-apiextensions forbids it beside named properties in a structural
-schema, but the named-properties-only shape gets the same result,
-because kubectl's server-side field validation refuses unknown keys at
-admission and the strict file parse refuses them at boot.
+CRD carries a validation rule that refuses a null feature with a
+message saying to write {}, and the file parser refuses it the same
+way. Unknown slugs are refused the same two ways. The CRD's schema
+shape is load-bearing here, and drilling against the live API server
+is what settled it: the natural-looking alternative, one named
+property per feature, cannot enforce either rule, because
+apiextensions prunes unknown fields and drops nulls for non-nullable
+values before validation ever runs. A misspelled slug in a patch
+would vanish with at most a client-side warning (only kubectl apply
+and create refuse it, via strict decoding), and pruning a mistyped
+parameter can even flip a feature on: {replicas: 2} pruned to {} is
+an opt-in. So spec.features is a map (additionalProperties, with
+nullable values) plus two CEL rules, which run against exactly what
+was sent, because map keys are never pruned, and refuse both mistakes
+with messages that name the fix. The parameter case takes one more
+pair: preserving unknown fields inside each value stops the pruning,
+and a maximum of zero properties then refuses a guessed parameter
+with the exact field named, until the day a feature actually grows
+one.
 
 The vocabulary is curated here, in this repo, and deployments name
 features rather than composing them. Behind the curtain there are two
