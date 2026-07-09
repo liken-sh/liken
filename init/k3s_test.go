@@ -203,6 +203,31 @@ func TestK3sBootConfigForAFollower(t *testing.T) {
 	}
 }
 
+func TestK3sBootConfigRendersNodeLabels(t *testing.T) {
+	labels := map[string]string{
+		"topology.kubernetes.io/zone": "closet",
+		"guid.foo/gpu":                "true",
+	}
+	for _, role := range []machine.Role{machine.RoleLeader, machine.RoleFollower} {
+		got := k3sBootConfig(k3sBootInputs{role: role, cluster: labCluster(), haveToken: true, nodeLabels: labels})
+		// The + suffix asks k3s to append to the static file's list
+		// instead of replacing it; without it the drop-in would erase
+		// liken.sh/machine=true. Keys render sorted, so the drop-in is
+		// deterministic for the same spec.
+		want := "node-label+:\n  - guid.foo/gpu=true\n  - topology.kubernetes.io/zone=closet\n"
+		if !strings.Contains(got, want) {
+			t.Errorf("%s config should append the spec's node labels:\n%s", role, got)
+		}
+	}
+}
+
+func TestK3sBootConfigWithoutNodeLabelsRendersNone(t *testing.T) {
+	got := k3sBootConfig(k3sBootInputs{role: machine.RoleLeader, cluster: labCluster(), haveToken: true})
+	if strings.Contains(got, "node-label") {
+		t.Errorf("no declared labels means no node-label key:\n%s", got)
+	}
+}
+
 func TestK3sBootConfigWithNoClusterIsNearlyEmpty(t *testing.T) {
 	got := k3sBootConfig(k3sBootInputs{role: machine.RoleLeader, haveToken: true})
 	if !strings.Contains(got, "token-file:") {
@@ -277,11 +302,20 @@ func fakeK3sConfigs(t *testing.T, withToken bool) (serverDropIns, agentDropIns s
 	return k3sServerConfig + ".d", k3sAgentConfig + ".d"
 }
 
+// bootMachine builds the winning manifest as writeK3sBootConfig
+// receives it: a name, and whatever spec fields the boot renders.
+func bootMachine(name string, labels map[string]string) *machine.Machine {
+	return &machine.Machine{
+		Metadata: machine.ObjectMeta{Name: name},
+		Spec:     machine.MachineSpec{NodeLabels: labels},
+	}
+}
+
 func TestWriteK3sBootConfigForALeader(t *testing.T) {
 	serverDropIns, _ := fakeK3sConfigs(t, true)
 	conns := []*connection{conn(t, "eth1", "10.10.0.1/24")}
 
-	role, err := writeK3sBootConfig(labCluster(), "node-1", conns)
+	role, err := writeK3sBootConfig(labCluster(), bootMachine("node-1", map[string]string{"guid.foo/gpu": "true"}), conns)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +327,7 @@ func TestWriteK3sBootConfigForALeader(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := string(raw)
-	for _, want := range []string{"token-file:", "cluster-cidr: 10.42.0.0/16", "node-ip: 10.10.0.1", "flannel-iface: eth1"} {
+	for _, want := range []string{"token-file:", "cluster-cidr: 10.42.0.0/16", "node-ip: 10.10.0.1", "flannel-iface: eth1", "node-label+:\n  - guid.foo/gpu=true"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("the leader drop-in should carry %q:\n%s", want, content)
 		}
@@ -305,7 +339,7 @@ func TestWriteK3sBootConfigForAFollower(t *testing.T) {
 	cluster := labCluster()
 	conns := []*connection{conn(t, "eth1", "10.10.0.2/24")}
 
-	role, err := writeK3sBootConfig(cluster, "node-2", conns)
+	role, err := writeK3sBootConfig(cluster, bootMachine("node-2", nil), conns)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,14 +359,14 @@ func TestWriteK3sBootConfigRefusesAFollowerWithoutAnEndpoint(t *testing.T) {
 	fakeK3sConfigs(t, true)
 	cluster := labCluster()
 	cluster.Spec.Endpoint = ""
-	if _, err := writeK3sBootConfig(cluster, "node-2", nil); err == nil {
+	if _, err := writeK3sBootConfig(cluster, bootMachine("node-2", nil), nil); err == nil {
 		t.Error("a follower with nowhere to join must refuse")
 	}
 }
 
 func TestWriteK3sBootConfigRefusesAFollowerWithoutAToken(t *testing.T) {
 	fakeK3sConfigs(t, false)
-	if _, err := writeK3sBootConfig(labCluster(), "node-2", nil); err == nil {
+	if _, err := writeK3sBootConfig(labCluster(), bootMachine("node-2", nil), nil); err == nil {
 		t.Error("a follower with no join token can never register")
 	}
 }

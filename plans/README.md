@@ -65,9 +65,9 @@ the specific workload that revealed it:
     folded into 17's feature vocabulary.
 20. [ ] [Private registries](20-private-registries.md) —
     containerd mirrors and credentials, and k3s's embedded registry.
-21. [ ] [Node labels on the Machine](21-node-labels.md) —
-    scheduling identity declared on the Machine spec and reconciled
-    by the operator.
+21. [x] [Node labels on the Machine](21-node-labels.md) —
+    scheduling identity declared on the Machine spec: registered at
+    boot, reconciled live, and retractions actually retract.
 
 And one that looks past any single deployment:
 

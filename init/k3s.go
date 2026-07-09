@@ -25,9 +25,11 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -144,6 +146,7 @@ type k3sBootInputs struct {
 	haveToken     bool
 	clusterInit   bool
 	joinURL       string
+	nodeLabels    map[string]string
 }
 
 // k3sBootConfig renders the drop-in: everything k3s must be told that
@@ -199,6 +202,21 @@ func k3sBootConfig(in k3sBootInputs) string {
 	if in.nodeIP != "" {
 		fmt.Fprintf(&b, "node-ip: %s\n", in.nodeIP)
 		fmt.Fprintf(&b, "flannel-iface: %s\n", in.nodeInterface)
+	}
+
+	// The spec's node labels, so the node registers already wearing
+	// its scheduling identity: a freshly reinstalled machine must not
+	// spend its first minutes as a blank node that workloads select
+	// against wrongly. The + suffix is k3s's append syntax for list
+	// values; a plain node-label key in a drop-in would replace the
+	// static file's list, erasing liken.sh/machine=true, and appending
+	// is the point of a drop-in. Sorted, so the same spec always
+	// renders the same bytes.
+	if len(in.nodeLabels) > 0 {
+		b.WriteString("node-label+:\n")
+		for _, name := range slices.Sorted(maps.Keys(in.nodeLabels)) {
+			fmt.Fprintf(&b, "  - %s=%s\n", name, in.nodeLabels[name])
+		}
 	}
 	return b.String()
 }
@@ -274,7 +292,8 @@ func persistNodePassword(storage machine.StorageStatus) {
 // configuration and writes the drop-in beside the role's static
 // config file. It returns the role so the supervisor knows which k3s
 // to start.
-func writeK3sBootConfig(cluster *machine.Cluster, name string, conns []*connection) (machine.Role, error) {
+func writeK3sBootConfig(cluster *machine.Cluster, m *machine.Machine, conns []*connection) (machine.Role, error) {
+	name := m.Metadata.Name
 	role := cluster.Role(name)
 	if cluster != nil {
 		fmt.Printf("liken: this machine is a cluster %s (cluster %s)\n", role, cluster.Metadata.Name)
@@ -321,6 +340,7 @@ func writeK3sBootConfig(cluster *machine.Cluster, name string, conns []*connecti
 		haveToken:     haveToken,
 		clusterInit:   clusterInit,
 		joinURL:       joinURL,
+		nodeLabels:    m.Spec.NodeLabels,
 	})
 	if err := os.WriteFile(filepath.Join(dropInDir, "boot.yaml"), []byte(content), 0o644); err != nil {
 		return role, err

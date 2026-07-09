@@ -90,6 +90,29 @@ spec:
 	}
 }
 
+func TestLoadParsesNodeLabels(t *testing.T) {
+	path := writeManifest(t, `
+apiVersion: liken.sh/v1alpha1
+kind: Machine
+metadata:
+  name: liken-dev
+spec:
+  nodeLabels:
+    guid.foo/gpu: "true"
+    topology.kubernetes.io/zone: closet
+`)
+	m, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Spec.NodeLabels["guid.foo/gpu"]; got != "true" {
+		t.Errorf("nodeLabels: got %q", got)
+	}
+	if got := m.Spec.NodeLabels["topology.kubernetes.io/zone"]; got != "closet" {
+		t.Errorf("nodeLabels: got %q", got)
+	}
+}
+
 func TestLoadRejectsWrongKind(t *testing.T) {
 	path := writeManifest(t, `
 apiVersion: liken.sh/v1alpha1

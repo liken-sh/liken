@@ -46,3 +46,10 @@ spec:
   # because this manifest declares it, and status.modules on this
   # Machine reports the load.
   modules: [dummy]
+  # The node-labels drill (milestone 21): a made-up scheduling label
+  # under a domain the lab owns. Init renders it into the k3s boot
+  # drop-in so the node registers wearing it, and the operator holds
+  # it in place afterward: rewrite it by hand and the next reconcile
+  # pass puts it back.
+  nodeLabels:
+    guid.foo/drill: node-labels

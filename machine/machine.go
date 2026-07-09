@@ -148,6 +148,19 @@ type MachineSpec struct {
 	// storage.
 	Modules []string `json:"modules,omitempty"`
 
+	// NodeLabels is this machine's scheduling identity: the labels its
+	// Kubernetes Node object carries, which is what workloads select
+	// on (which machine has the GPU, which one sits on battery-backed
+	// power). Applied twice, like sysctls: init renders them into the
+	// k3s boot drop-in so the node registers already wearing them, and
+	// the operator reconciles them live afterward. The operator also
+	// removes a label this spec once declared and no longer does; the
+	// kubelet applies registration labels but never removes stale
+	// ones, so without that pass a retracted label would linger until
+	// someone noticed. Labels applied outside this spec (kubectl
+	// label, other controllers) are never touched.
+	NodeLabels map[string]string `json:"nodeLabels,omitempty"`
+
 	// Storage assigns storage roles to disks (see storage.go). Applied
 	// by init at boot, before k3s: a filesystem can't be swapped under
 	// a running cluster. Edits are staged to the machineState

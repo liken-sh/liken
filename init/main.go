@@ -213,7 +213,7 @@ func main() {
 		// come from the cluster manifest (k3s.go). A failure here is
 		// an identity problem too: a follower that can't say where
 		// its cluster is must not come up pretending otherwise.
-		role, err := writeK3sBootConfig(cluster, m.Metadata.Name, conns)
+		role, err := writeK3sBootConfig(cluster, m, conns)
 		if err != nil {
 			failBoot(fmt.Errorf("%w: %v", errIdentity, err))
 		}

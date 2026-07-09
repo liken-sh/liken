@@ -35,9 +35,9 @@ import (
 // storageDrift compares the declared storage against what the boot
 // actuated, role by role, with sizes normalized (2048Mi and 2Gi
 // declare the same thing). The returned diffs are written for humans;
-// they appear verbatim in condition messages. Sysctls never count as
-// drift: the operator already reconciles those live, so a reboot
-// would apply nothing that isn't already applied.
+// they appear verbatim in condition messages. Sysctls and node labels
+// never count as drift: the operator already reconciles those live,
+// so a reboot would apply nothing that isn't already applied.
 func storageDrift(desired, actuated machine.StorageSpec) []string {
 	var diffs []string
 	desiredRoles := rolesByName(desired)

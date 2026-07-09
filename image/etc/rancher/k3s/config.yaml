@@ -46,5 +46,10 @@ kube-proxy-arg:
 # is on every node and the selector changes nothing; it matters in a
 # mixed cluster, during a migration, when liken machines and the
 # nodes they are replacing share one cluster.
+#
+# A machine's own labels (spec.nodeLabels in its manifest) join this
+# list at boot: init renders them into the drop-in under node-label+,
+# whose + suffix asks k3s to append to this list rather than replace
+# it (init/k3s.go).
 node-label:
   - liken.sh/machine=true

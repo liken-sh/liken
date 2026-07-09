@@ -186,9 +186,9 @@ spec:
               description: >-
                 The declared state of this machine. Fields differ in
                 when they take effect: network is read by init at boot,
-                sysctls are both applied at boot and reconciled live by
-                the liken operator, and storage and modules are staged
-                and take effect at the next boot.
+                sysctls and nodeLabels are both applied at boot and
+                reconciled live by the liken operator, and storage and
+                modules are staged and take effect at the next boot.
               properties:
                 network:
                   type: object
@@ -276,6 +276,63 @@ spec:
                     type: string
                     maxLength: 64
                     pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+                nodeLabels:
+                  type: object
+                  maxProperties: 64
+                  description: >-
+                    This machine's scheduling identity: the labels its
+                    Node object carries, which is what workloads select
+                    on (which machine has the GPU, which one sits on
+                    battery-backed power). Rendered into the k3s boot
+                    configuration so the node registers already wearing
+                    them, and reconciled live by the liken operator
+                    afterward, including removing a label this spec
+                    retracts, which the kubelet never does on its own.
+                    Labels applied outside this spec are never touched.
+                  # Three admission rules stand between a label edit and
+                  # a machine that won't boot. Registration labels pass
+                  # through the kubelet, and under the NodeRestriction
+                  # admission plugin (which k3s enables) a kubelet given
+                  # a kubernetes.io or k8s.io label outside its own
+                  # allowlist refuses to start at all, so admission
+                  # refuses exactly what would take the machine down and
+                  # permits exactly what the kubelet permits itself: the
+                  # well-known identity labels (hostname, arch, os, the
+                  # topology pair, instance-type) and anything in the
+                  # kubelet.kubernetes.io and node.kubernetes.io
+                  # namespaces. The liken.sh namespace is refused as
+                  # OS-owned: the static config stamps liken.sh/machine,
+                  # and a spec fighting the OS over its own vocabulary
+                  # (or over node-role, which demotion cleanup reads)
+                  # has no good outcome.
+                  x-kubernetes-validations:
+                    - rule: >-
+                        self.all(key, key.size() <= 317 && key.matches('^([a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$'))
+                      message: >-
+                        label keys are an optional DNS-style prefix, a
+                        slash, and a name of letters, digits, dashes,
+                        underscores, and dots
+                    - rule: >-
+                        self.all(key, !key.matches('^([^/]*[.])?(kubernetes[.]io|k8s[.]io)/') ||
+                        key in ['kubernetes.io/hostname', 'kubernetes.io/arch', 'kubernetes.io/os', 'topology.kubernetes.io/region', 'topology.kubernetes.io/zone'] ||
+                        key.matches('^([^/]*[.])?(kubelet[.]kubernetes[.]io|node[.]kubernetes[.]io)/'))
+                      message: >-
+                        the kubernetes.io and k8s.io namespaces belong to
+                        Kubernetes, and the kubelet would refuse to start
+                        with them; only the kubelet's own self-label
+                        vocabulary is allowed (hostname, arch, os,
+                        topology.kubernetes.io zone and region, and the
+                        kubelet.kubernetes.io and node.kubernetes.io
+                        namespaces)
+                    - rule: >-
+                        self.all(key, !key.matches('^([^/]*[.])?liken[.]sh/'))
+                      message: >-
+                        the liken.sh namespace belongs to the operating
+                        system; it stamps its own labels
+                  additionalProperties:
+                    type: string
+                    maxLength: 63
+                    pattern: ^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$
                 rebootPolicy:
                   type: string
                   enum: [Auto, Manual]

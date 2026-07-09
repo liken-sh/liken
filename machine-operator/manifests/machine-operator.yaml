@@ -67,10 +67,11 @@ rules:
   # Nodes: get to see role labels and cordon state, delete for
   # demotion cleanup (demotion.go; deleting the stale Node is what
   # triggers k3s's etcd member removal), and patch for the drain's
-  # cordon and uncordon (drain.go). Patch rather than update,
-  # deliberately: the operator touches only the fields it owns (the
-  # unschedulable flag, its own annotations) and never rewrites a
-  # whole Node.
+  # cordon and uncordon (drain.go) and for the spec's node labels
+  # (labels.go). Patch rather than update, deliberately: the operator
+  # touches only the fields it owns (the unschedulable flag, the
+  # labels the spec declares, its own annotations) and never rewrites
+  # a whole Node.
   - apiGroups: [""]
     resources: [nodes]
     verbs: [get, delete, patch]

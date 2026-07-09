@@ -295,6 +295,13 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 		// reachable.
 		status.Conditions = machine.SetCondition(status.Conditions, nodeHealthyCondition(node), now)
 
+		// Node labels reconcile live, like sysctls, but against the
+		// Node object instead of the kernel (labels.go): re-assert
+		// what the spec declares, and remove what it retracted, which
+		// the kubelet never does on its own.
+		status.Conditions = machine.SetCondition(status.Conditions,
+			carryOutNodeLabels(c, m.Metadata.Name, decideNodeLabels(m.Spec.NodeLabels, node)), now)
+
 		// Demotion cleanup (demotion.go): a follower whose Node object
 		// still claims control-plane was just demoted. That stale Node
 		// carries a registered etcd membership, so it has to be

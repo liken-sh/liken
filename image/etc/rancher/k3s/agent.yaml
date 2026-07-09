@@ -22,5 +22,7 @@ kube-proxy-arg:
 # when the node registers; the OS DaemonSets select on it. See the
 # fuller story in config.yaml — the label must be identical for both
 # roles, because the OS components run on leaders and followers alike.
+# The machine's own spec.nodeLabels join this list at boot through the
+# drop-in's node-label+ key, exactly as they do for a leader.
 node-label:
   - liken.sh/machine=true
