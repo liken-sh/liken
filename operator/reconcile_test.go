@@ -196,6 +196,30 @@ func freshMachine(conditions ...machine.Condition) machine.Machine {
 	}
 }
 
+func TestPublishOwnStatusSkipsAnUnchangedStatus(t *testing.T) {
+	// A settled machine observes the same status pass after pass, and
+	// a write that would change nothing should never leave the
+	// process: the API server would drop it as a no-op anyway, but
+	// only after this machine made every leader consider it.
+	api := &conflictAPI{}
+	client := testClient(t, api.handler())
+
+	status := &machine.MachineStatus{Phase: machine.PhaseReady, Conditions: []machine.Condition{
+		{Type: "Ready", Status: machine.ConditionTrue, Reason: "Reconciled"},
+	}}
+	before, err := json.Marshal(status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := &machine.Machine{Metadata: machine.ObjectMeta{Name: "node-1", ResourceVersion: "7"}}
+	if err := publishOwnStatus(client, m, status, before); err != nil {
+		t.Fatal(err)
+	}
+	if api.puts != 0 {
+		t.Errorf("an unchanged status stays home: %d puts", api.puts)
+	}
+}
+
 func TestPublishOwnStatusResolvesAConflictWithAFreshRead(t *testing.T) {
 	// The conductor granted a turn between this pass's read and its
 	// write. The retry must carry the resourceVersion of the fresh
@@ -210,7 +234,7 @@ func TestPublishOwnStatusResolvesAConflictWithAFreshRead(t *testing.T) {
 	status := &machine.MachineStatus{Phase: machine.PhaseReady, Conditions: []machine.Condition{
 		{Type: "Ready", Status: machine.ConditionTrue, Reason: "Reconciled"},
 	}}
-	if err := publishOwnStatus(client, m, status); err != nil {
+	if err := publishOwnStatus(client, m, status, nil); err != nil {
 		t.Fatal(err)
 	}
 	if api.published.Metadata.ResourceVersion != "9" {
@@ -233,7 +257,7 @@ func TestPublishOwnStatusHonorsAReclaimedGrant(t *testing.T) {
 
 	m := &machine.Machine{Metadata: machine.ObjectMeta{Name: "node-1", ResourceVersion: "7"}}
 	status := &machine.MachineStatus{Conditions: []machine.Condition{grantCondition(sweepNow)}}
-	if err := publishOwnStatus(client, m, status); err != nil {
+	if err := publishOwnStatus(client, m, status, nil); err != nil {
 		t.Fatal(err)
 	}
 	if c := machine.FindCondition(api.published.Status.Conditions, rebootApprovedCondition); c != nil {
@@ -249,7 +273,7 @@ func TestPublishOwnStatusRetriesOnlyOnce(t *testing.T) {
 	client := testClient(t, api.handler())
 
 	m := &machine.Machine{Metadata: machine.ObjectMeta{Name: "node-1", ResourceVersion: "7"}}
-	err := publishOwnStatus(client, m, &machine.MachineStatus{})
+	err := publishOwnStatus(client, m, &machine.MachineStatus{}, nil)
 	if !errors.Is(err, errConflict) {
 		t.Errorf("the second conflict comes back to the caller: %v", err)
 	}

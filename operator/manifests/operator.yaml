@@ -25,17 +25,6 @@ kind: Namespace
 metadata:
   name: liken-system
 ---
-# The machines' heartbeat leases live in a namespace of their own,
-# one Lease per machine. This is the arrangement of kube-node-lease,
-# adopted for the same reasons (operator/lease.go explains them). A
-# dedicated namespace keeps the heartbeats from mingling with anything
-# else and makes `kubectl get leases -n liken-machine-lease` a quick
-# view of the whole fleet's liveness.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: liken-machine-lease
----
 # The ServiceAccount is the operator's identity: kubelet mounts a token
 # for it into the pod, and every API request the operator makes carries
 # it. See operator/apiclient.go for the client half.
@@ -116,47 +105,21 @@ subjects:
     name: liken-operator
     namespace: liken-system
 ---
-# The fleet sweep's leader-election lease (operator/lease.go): every
-# leader's operator is a candidate, and one holds it at a time. This
-# is the same mechanism kube-controller-manager and kube-scheduler
-# use to run hot standbys on every control-plane node. A namespaced
-# Role rather than another ClusterRole rule, deliberately: leases
-# exist all over a cluster (every kubelet heartbeats through one in
-# kube-node-lease), and the operator has no business with any lease
-# but its own.
+# The operator's leases (operator/lease.go), all in liken-system: the
+# fleet sweep's leader-election lease, which every leader's operator
+# contends for the way kube-controller-manager and kube-scheduler run
+# hot standbys on every control-plane node, and one heartbeat lease
+# per machine, which each machine renews and the sweeping leader
+# lists to judge the fleet's liveness (list is the one verb the
+# heartbeats add). A namespaced Role rather than another ClusterRole
+# rule, deliberately: leases exist all over a cluster (every kubelet
+# heartbeats through one in kube-node-lease), and the operator has no
+# business with any lease outside its own namespace.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: liken-operator-leases
   namespace: liken-system
-rules:
-  - apiGroups: [coordination.k8s.io]
-    resources: [leases]
-    verbs: [get, create, update]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: liken-operator-leases
-  namespace: liken-system
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: liken-operator-leases
-subjects:
-  - kind: ServiceAccount
-    name: liken-operator
-    namespace: liken-system
----
-# The heartbeat leases: every operator renews its own machine's, and
-# the sweeping leader lists them all to judge the fleet's liveness.
-# That list is the one extra verb this Role has that the election's
-# doesn't.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: liken-operator-heartbeats
-  namespace: liken-machine-lease
 rules:
   - apiGroups: [coordination.k8s.io]
     resources: [leases]
@@ -165,12 +128,12 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: liken-operator-heartbeats
-  namespace: liken-machine-lease
+  name: liken-operator-leases
+  namespace: liken-system
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: liken-operator-heartbeats
+  name: liken-operator-leases
 subjects:
   - kind: ServiceAccount
     name: liken-operator

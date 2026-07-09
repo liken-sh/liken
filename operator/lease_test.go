@@ -173,6 +173,31 @@ func TestListMachineHeartbeatsReadsRenewals(t *testing.T) {
 	}
 }
 
+func TestListMachineHeartbeatsIgnoresTheElectionLease(t *testing.T) {
+	// The heartbeats share liken-system with the fleet sweep's
+	// election lease. A heartbeat lease is named for the machine that
+	// holds it; the election lease is named for its job and held by
+	// whichever machine is sweeping, so it fails that test and must
+	// not read as some machine's liveness.
+	api := &leaseListAPI{leases: []*leaseObject{
+		lease("node-1", 10*time.Second),
+		lease("node-3", 10*time.Second),
+	}}
+	api.leases[0].Metadata.Name = "node-1"
+	api.leases[1].Metadata.Name = "liken-fleet-sweep"
+	client := testClient(t, api.handler())
+	renewals, err := listMachineHeartbeats(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(renewals) != 1 {
+		t.Fatalf("only the heartbeat should read as one: %v", renewals)
+	}
+	if _, ok := renewals["node-1"]; !ok {
+		t.Errorf("node-1's heartbeat should be read: %v", renewals)
+	}
+}
+
 // leaseListAPI answers a list request with a fixed set of leases.
 type leaseListAPI struct {
 	leases []*leaseObject

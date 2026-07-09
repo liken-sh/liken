@@ -451,7 +451,7 @@ spec:
                     operator can't read the machine's facts at all.
                     Lost is the exception to self-reporting: a leader
                     writes it when this machine's heartbeat lease
-                    (in liken-machine-lease) goes silent, because a
+                    (in liken-system) goes silent, because a
                     dead machine can't report its own death.
                 role:
                   type: string

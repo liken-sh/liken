@@ -50,8 +50,8 @@ coordination.k8s.io Lease, the same leader election
 kube-controller-manager uses to run hot standbys, built here
 from a GET and two conditional writes. A later idiom-review
 pass carried this further: the heartbeat itself moved out of
-status into a per-machine Lease in liken-machine-lease,
-kube-node-lease's arrangement, escaping the same write
+status into a per-machine Lease beside the operator in
+liken-system, kube-node-lease's mechanism, escaping the same write
 amplification. The whole API was also brought up to metav1's
 conventions: typed string vocabularies, conditions validated
 like metav1.Condition with observedGeneration, list-type

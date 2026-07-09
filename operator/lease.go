@@ -50,18 +50,22 @@ import (
 // namespaces.
 const fleetLeasePath = "/apis/coordination.k8s.io/v1/namespaces/liken-system/leases/liken-fleet-sweep"
 
-// The machines' heartbeat leases live in a namespace of their own,
-// one Lease per machine, named for it. This is the arrangement of
-// kube-node-lease, adopted for the same reasons. A heartbeat must
-// renew on a schedule forever, so it should be the cheapest write
-// the API server offers, and a Lease is a few dozen bytes with no
-// watchers. A timestamp inside Machine status would instead rewrite
-// the whole object (hardware inventory, boot record, conditions) and
-// wake every watcher on every renewal of every machine. Kubernetes
-// moved the kubelet's heartbeats out of Node status and into
-// kube-node-lease to escape exactly that; liken heartbeats through a
-// lease from the start.
-const machineLeaseDir = "/apis/coordination.k8s.io/v1/namespaces/liken-machine-lease/leases"
+// The machines' heartbeat leases live beside the sweep's election
+// lease in liken-system, one Lease per machine, named for it. The
+// mechanism is kube-node-lease's, adopted for the same reasons: a
+// heartbeat must renew on a schedule forever, so it should be the
+// cheapest write the API server offers, and a Lease is a few dozen
+// bytes with no watchers. A timestamp inside Machine status would
+// instead rewrite the whole object (hardware inventory, boot record,
+// conditions) and wake every watcher on every renewal of every
+// machine. Kubernetes moved the kubelet's heartbeats out of Node
+// status and into kube-node-lease to escape exactly that; liken
+// heartbeats through a lease from the start. Sharing liken-system
+// rather than copying kube-node-lease's dedicated namespace keeps
+// everything liken coordinates through in the one namespace the OS
+// owns: `kubectl get leases -n liken-system` is the fleet's whole
+// coordination surface, heartbeats and election alike.
+const machineLeaseDir = "/apis/coordination.k8s.io/v1/namespaces/liken-system/leases"
 
 // fleetLeaseDuration is how long a holder's claim stands without a
 // renewal: the same forty seconds the machine heartbeats get
@@ -233,7 +237,12 @@ func renewMachineHeartbeat(c *apiClient, name string, now time.Time) {
 
 // listMachineHeartbeats reads every machine's last renewal for the
 // sweep: one cheap list yields the fleet's liveness, mapping each
-// machine's name to the moment of its last renewal.
+// machine's name to the moment of its last renewal. The list also
+// returns the namespace's other lease, the sweep election itself,
+// and tells them apart by a rule the heartbeats satisfy by
+// construction: a heartbeat lease is named for the machine that
+// holds it, while the election lease is named for its job and held
+// by whichever machine is sweeping.
 func listMachineHeartbeats(c *apiClient) (map[string]time.Time, error) {
 	var list struct {
 		Items []leaseObject `json:"items"`
@@ -243,6 +252,9 @@ func listMachineHeartbeats(c *apiClient) (map[string]time.Time, error) {
 	}
 	renewals := map[string]time.Time{}
 	for _, l := range list.Items {
+		if l.Metadata.Name != l.Spec.HolderIdentity {
+			continue
+		}
 		if renewed, err := time.Parse(microTime, l.Spec.RenewTime); err == nil {
 			renewals[l.Metadata.Name] = renewed
 		}

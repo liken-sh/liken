@@ -153,6 +153,47 @@ func TestTimeStatusNeverSynced(t *testing.T) {
 	}
 }
 
+func synchronizedStatus(source string, stratum int) machine.TimeStatus {
+	return machine.TimeStatus{State: machine.TimeSynchronized, Source: source, Stratum: stratum}
+}
+
+func TestWorthRepublishingOnAnyStateSourceOrStratumChange(t *testing.T) {
+	published := synchronizedStatus("10.10.0.1", 3)
+	if worthRepublishing(published, machine.TimeStatus{State: machine.TimeUnsynchronized}, 0, time.Minute) != true {
+		t.Error("losing sync is always news")
+	}
+	if worthRepublishing(published, synchronizedStatus("10.10.0.2", 3), 0, time.Minute) != true {
+		t.Error("a different source is news")
+	}
+	if worthRepublishing(published, synchronizedStatus("10.10.0.1", 4), 0, time.Minute) != true {
+		t.Error("a different stratum is news")
+	}
+}
+
+func TestWorthRepublishingIgnoresJitter(t *testing.T) {
+	published := synchronizedStatus("10.10.0.1", 3)
+	if worthRepublishing(published, published, 800*time.Microsecond, time.Minute) {
+		t.Error("sub-threshold wobble is not news; every republish is an etcd write on every machine")
+	}
+}
+
+func TestWorthRepublishingReportsRealDrift(t *testing.T) {
+	published := synchronizedStatus("10.10.0.1", 3)
+	if !worthRepublishing(published, published, 30*time.Millisecond, time.Minute) {
+		t.Error("a clock that moved past the threshold is news")
+	}
+	if !worthRepublishing(published, published, -30*time.Millisecond, time.Minute) {
+		t.Error("drift is news in either direction")
+	}
+}
+
+func TestWorthRepublishingBoundsLastSyncStaleness(t *testing.T) {
+	published := synchronizedStatus("10.10.0.1", 3)
+	if !worthRepublishing(published, published, 0, 11*time.Minute) {
+		t.Error("the freshness floor keeps lastSync from lying about a healthy sync loop")
+	}
+}
+
 func TestSlewAmountPassesSmallOffsetsThrough(t *testing.T) {
 	if got := slewAmount(3 * time.Millisecond); got != 3*time.Millisecond {
 		t.Errorf("got %v", got)

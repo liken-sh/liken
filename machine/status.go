@@ -87,7 +87,7 @@ type MachineStatus struct {
 	// (the Uptime column).
 	//
 	// There is deliberately no heartbeat here. The machine's liveness
-	// signal is a Lease in the liken-machine-lease namespace, not a
+	// signal is a Lease in the liken-system namespace, not a
 	// status field, because a heartbeat must renew forever, and every
 	// status write rewrites this whole object and wakes every
 	// watcher. That is the same reason kube-node-lease exists (see

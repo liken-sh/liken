@@ -301,6 +301,30 @@ func slewClock(offset time.Duration) error {
 // otherwise.
 const syncStaleAfter = 3 * timePollInterval
 
+// worthRepublishing decides whether a fresh measurement changes the
+// story the published time facts tell. A change of state, source, or
+// stratum is always news. The offset is only news when it has moved
+// past offsetPublishThreshold since the last publish, because SNTP
+// measurements wobble by microseconds on every poll, and every
+// republished fact ripples outward: the operator publishes a status
+// whenever the facts change, and each of those writes is a raft
+// round and an fsync on every one of the cluster's leaders. A fleet
+// whose clocks are fine should cost etcd nothing. The freshness
+// floor bounds the one lie suppression could tell: lastSync must not
+// drift so stale that the status claims a silent sync loop while
+// init is happily hearing its sources.
+const (
+	offsetPublishThreshold = 25 * time.Millisecond
+	timePublishFloor       = 10 * time.Minute
+)
+
+func worthRepublishing(published, fresh machine.TimeStatus, drift, sincePublished time.Duration) bool {
+	if published.State != fresh.State || published.Source != fresh.Source || published.Stratum != fresh.Stratum {
+		return true
+	}
+	return drift.Abs() >= offsetPublishThreshold || sincePublished >= timePublishFloor
+}
+
 // writeRTC copies the system clock into the hardware clock. Linux
 // never does this on its own: on a traditional distro it's a
 // shutdown script's job, so here it's init's. The RTC is the clock
@@ -342,13 +366,23 @@ func writeRTC() {
 // and, from the moment it starts, of the facts file, so no lock is
 // needed. It prints transitions rather than every poll: a sync
 // gained, a sync lost, and an offset only when it exceeds the step
-// threshold, which means drift is outrunning the slew.
+// threshold, which means drift is outrunning the slew. The facts get
+// the same restraint: a poll's measurement replaces facts.Time in
+// memory every time, but the file is only rewritten when the
+// measurement is news (worthRepublishing), never for microsecond
+// wobble.
 func disciplineClock(clk *clock, facts *machine.MachineStatus) func(context.Context) error {
 	return func(ctx context.Context) error {
 		lastGood := time.Time{}
 		if facts.Time.LastSync != nil {
 			lastGood = *facts.Time.LastSync
 		}
+		// What the facts file currently says, the baseline every
+		// "is this news?" judgment compares against. The boot step
+		// published facts.Time as it stands now, moments ago.
+		published := facts.Time
+		publishedOffset, _ := time.ParseDuration(facts.Time.Offset)
+		publishedAt := time.Now()
 		// The boot step (or its absence) decided whether the RTC has
 		// been written yet; a boot that came up on a wrong hardware
 		// clock gets its RTC corrected at the first sync this loop
@@ -374,6 +408,7 @@ func disciplineClock(clk *clock, facts *machine.MachineStatus) func(context.Cont
 					facts.Time.State = machine.TimeUnsynchronized
 					facts.Time.Stratum = stratumUnsynchronized
 					publishTimeFacts(facts)
+					published, publishedAt = facts.Time, time.Now()
 				}
 				continue
 			}
@@ -394,8 +429,15 @@ func disciplineClock(clk *clock, facts *machine.MachineStatus) func(context.Cont
 				writeRTC()
 				rtcWritten = true
 			}
+			// The drift judged here is against the offset last
+			// *published*, not the last poll's, so small wobbles
+			// accumulate toward the threshold instead of resetting it
+			// every 64 seconds.
 			facts.Time = timeStatus(sync, clk.sources)
-			publishTimeFacts(facts)
+			if worthRepublishing(published, facts.Time, sync.offset-publishedOffset, time.Since(publishedAt)) {
+				publishTimeFacts(facts)
+				published, publishedOffset, publishedAt = facts.Time, sync.offset, time.Now()
+			}
 		}
 	}
 }

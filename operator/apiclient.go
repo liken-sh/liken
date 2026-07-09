@@ -85,6 +85,19 @@ func inClusterClient() (*apiClient, error) {
 				// every watch off mid-stream, so only the response
 				// headers get a deadline.
 				ResponseHeaderTimeout: 30 * time.Second,
+				// A pooled connection that has sat idle is the one most
+				// likely to be silently dead: the server may have closed
+				// it, or the network path may have quietly reset. Go
+				// writes the next request onto it anyway and only learns
+				// the truth when no answer comes; the server sees an
+				// orphaned request from a client that already gave up
+				// and logs it as an abort. Discarding idle connections
+				// after a short sit means the next request dials fresh
+				// instead of gambling on a stale socket. The operator's
+				// steady cadence keeps its one working connection busier
+				// than this, so the timeout only ever reaps the strays
+				// opened during bursts.
+				IdleConnTimeout: 30 * time.Second,
 			},
 		},
 		credentials: serviceAccountDir,

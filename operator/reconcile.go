@@ -4,6 +4,7 @@ package main
 // observes the machine, acts on the spec, and reports status.
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -149,6 +150,15 @@ func carryOutConvergence(conv convergence, store machine.ManifestStore, what str
 // Kubernetes convention means by status being reconstructible.
 func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher) {
 	now := time.Now()
+
+	// What the object records before this pass touches anything,
+	// captured now because it can't be captured later: SetCondition
+	// edits the slice it is given, so the conditions this pass builds
+	// share their backing array with m.Status, and by publish time the
+	// two are the same list. This snapshot is what lets the publish
+	// below skip a write that would change nothing.
+	before, _ := json.Marshal(&m.Status)
+
 	status := &machine.MachineStatus{}
 
 	facts, err := machine.ReadFacts(machine.FactsPath)
@@ -371,7 +381,7 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 	// invite that collision on every boot.
 	renewMachineHeartbeat(c, m.Metadata.Name, now)
 
-	if err := publishOwnStatus(c, m, status); err != nil {
+	if err := publishOwnStatus(c, m, status, before); err != nil {
 		fmt.Printf("publishing status: %v\n", err)
 	}
 
@@ -555,12 +565,29 @@ func publishStatus(c *apiClient, m *machine.Machine, status *machine.MachineStat
 // needs no special handling: overwriting it is precisely how a
 // machine announces it is back.
 //
+// before is the status the object carried when the pass began,
+// rendered as the JSON a write would send. When this pass observed
+// exactly that, nothing is written at all: a settled machine's
+// report is the same every ten seconds, and sending it anyway would
+// make the API server, and every etcd leader behind it, process a
+// write that changes nothing. The kubelet applies the same restraint
+// to Node status, and the machine's liveness doesn't ride on this
+// write anyway; that is the heartbeat lease's job. Skipping against
+// a stale working copy is safe for the same reason every skipped
+// event is: whatever made the server's copy differ arrives on the
+// watch, and the pass it triggers sees the difference and writes.
+//
 // One retry is enough. A second conflict means the object is
 // changing faster than this pass can read it, and the write that
 // beat us is already queued on the watch, so the pass it triggers
 // will publish moments from now.
-func publishOwnStatus(c *apiClient, m *machine.Machine, status *machine.MachineStatus) error {
-	err := publishStatus(c, m, status)
+func publishOwnStatus(c *apiClient, m *machine.Machine, status *machine.MachineStatus, before []byte) error {
+	after, err := json.Marshal(status)
+	if err == nil && bytes.Equal(before, after) {
+		return nil
+	}
+
+	err = publishStatus(c, m, status)
 	if !errors.Is(err, errConflict) {
 		return err
 	}
