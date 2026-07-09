@@ -76,6 +76,36 @@ func TestModulesConditionNothingDeclared(t *testing.T) {
 	}
 }
 
+func TestFeaturesConditionAllActive(t *testing.T) {
+	c := featuresCondition([]machine.FeatureStatus{
+		{Name: "metrics-server", State: machine.FeatureActive},
+		{Name: "iscsi", State: machine.FeatureActive},
+	})
+	if c.Type != "FeaturesReady" || c.Status != machine.ConditionTrue || c.Reason != "AllActive" {
+		t.Errorf("got %+v", c)
+	}
+}
+
+func TestFeaturesConditionNamesTheFix(t *testing.T) {
+	c := featuresCondition([]machine.FeatureStatus{
+		{Name: "metrics-server", State: machine.FeatureActive},
+		{Name: "iscsi", State: machine.FeatureMissing, Message: "this image predates the iscsi feature; upgrade to a release whose image carries it"},
+	})
+	if c.Status != machine.ConditionFalse || c.Reason != "FeaturesNotReady" {
+		t.Errorf("got %+v", c)
+	}
+	if !strings.Contains(c.Message, "iscsi: this image predates") {
+		t.Errorf("message should carry init's fix: %q", c.Message)
+	}
+}
+
+func TestFeaturesConditionNothingEnabled(t *testing.T) {
+	c := featuresCondition(nil)
+	if c.Status != machine.ConditionTrue || c.Reason != "NothingDeclared" {
+		t.Errorf("got %+v", c)
+	}
+}
+
 func nodeWithReady(status machine.ConditionStatus) *nodeObject {
 	n := &nodeObject{}
 	n.Status.Conditions = []machine.Condition{

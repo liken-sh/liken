@@ -8,16 +8,17 @@
 # directory k3s reads alongside this file; init writes it fresh every
 # boot (see init/k3s.go).
 #
-# The static configuration is minimal: k3s bundles several conveniences
-# (Traefik for ingress, a service load balancer, a metrics server) that
-# liken disables. Anything a machine needs beyond the Kubernetes
-# control plane itself should arrive as a declared, visible workload,
-# not as a bundled default. CoreDNS stays: pods without DNS are barely
-# usable.
-disable:
-  - traefik
-  - servicelb
-  - metrics-server
+# One key a reader might expect is absent by design: disable, the
+# list of k3s's bundled conveniences (Traefik for ingress, a service
+# load balancer, a metrics server) that stay off. liken disables them
+# on principle — anything beyond the control plane itself should be a
+# declared, visible workload — but the Cluster manifest's
+# spec.features lets a deployment declare exactly that, so the list
+# is computed, not static: init renders the bundled set minus the
+# cluster's opt-ins into the boot drop-in each boot (init/k3s.go). A
+# machine with no cluster document disables everything bundled.
+# CoreDNS is not on the list and never appears in the computed one:
+# pods without DNS are barely usable.
 
 # The local-path storage provisioner stays: it is how the Machine
 # spec's podStorage role reaches pods. A PersistentVolumeClaim becomes

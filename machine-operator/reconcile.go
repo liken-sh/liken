@@ -181,6 +181,15 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	status.Conditions = machine.SetCondition(status.Conditions,
 		modulesCondition(status.Modules), now)
 
+	// Features judge what the boot reported, on the same terms as
+	// modules. The split from ClusterConverged is the point: the
+	// cluster document's hash proves this boot ran the document that
+	// enables a feature, and this condition proves the booted image
+	// could honor it. Mid-rollout the fleet runs mixed releases, so
+	// the answers legitimately differ per machine.
+	status.Conditions = machine.SetCondition(status.Conditions,
+		featuresCondition(status.Features), now)
+
 	// Storage compares the spec's declared roles against the facts'
 	// report of where each is actually backed. The operator can't
 	// observe the disks directly (claiming happened before this
@@ -504,6 +513,38 @@ func modulesCondition(observed []machine.ModuleStatus) machine.Condition {
 		return machine.Condition{
 			Type: "ModulesLoaded", Status: machine.ConditionTrue, Reason: "NothingDeclared",
 			Message: "no extra modules declared",
+		}
+	}
+}
+
+// featuresCondition summarizes the boot's feature outcomes as one
+// condition, the same shape modulesCondition takes. Anything not
+// Active carries init's message, which names the fix: for a Missing
+// feature that is a release whose image carries the payload, because
+// enabling a feature never rebuilds anything by itself.
+func featuresCondition(observed []machine.FeatureStatus) machine.Condition {
+	var problems []string
+	for _, s := range observed {
+		if s.State == machine.FeatureActive {
+			continue
+		}
+		problems = append(problems, fmt.Sprintf("%s: %s", s.Name, s.Message))
+	}
+	switch {
+	case len(problems) > 0:
+		return machine.Condition{
+			Type: "FeaturesReady", Status: machine.ConditionFalse, Reason: "FeaturesNotReady",
+			Message: strings.Join(problems, "; "),
+		}
+	case len(observed) > 0:
+		return machine.Condition{
+			Type: "FeaturesReady", Status: machine.ConditionTrue, Reason: "AllActive",
+			Message: fmt.Sprintf("all %d enabled features are active on this machine", len(observed)),
+		}
+	default:
+		return machine.Condition{
+			Type: "FeaturesReady", Status: machine.ConditionTrue, Reason: "NothingDeclared",
+			Message: "the cluster enables no features",
 		}
 	}
 }

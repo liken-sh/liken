@@ -969,6 +969,36 @@ spec:
                       message:
                         type: string
                         maxLength: 1024
+                features:
+                  type: array
+                  description: >-
+                    This machine's standing on every feature the
+                    Cluster's spec.features enables. The Cluster
+                    declares features for the whole fleet; the answer
+                    is per machine, because honoring a feature depends
+                    on what the booted image carries, and machines run
+                    different releases mid-rollout. Active means this
+                    boot could honor everything the feature asks of
+                    this machine. Missing means the booted image
+                    predates the feature and the fix is a release
+                    whose image carries it. Failed means the image
+                    carries the payload and actuating it went wrong;
+                    the message carries the detail.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [name]
+                  items:
+                    type: object
+                    required: [name, state]
+                    properties:
+                      name:
+                        type: string
+                        maxLength: 64
+                      state:
+                        type: string
+                        enum: [Active, Missing, Failed]
+                      message:
+                        type: string
+                        maxLength: 1024
                 bootedAt:
                   type: string
                   format: date-time

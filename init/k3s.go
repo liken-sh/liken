@@ -170,27 +170,48 @@ func k3sBootConfig(in k3sBootInputs) string {
 		// "server" is k3s's config key for "the control plane I take
 		// direction from": a follower points at the endpoint.
 		fmt.Fprintf(&b, "server: %s\n", cluster.Spec.Endpoint)
-	} else if cluster != nil {
-		// The datastore keys, decided by leaderJoinConfig: the
-		// founding leader of a multi-leader cluster runs (and, on the
-		// migration boot, creates) embedded etcd; the other leaders
-		// join it. A single leader renders neither and stays sqlite.
-		if in.clusterInit {
-			b.WriteString("cluster-init: true\n")
-		} else if in.joinURL != "" {
-			fmt.Fprintf(&b, "server: %s\n", in.joinURL)
+	} else {
+		// The disable list: which of k3s's bundled components (Traefik,
+		// the service load balancer, metrics-server) stay off. liken
+		// disables them on principle — anything beyond the control
+		// plane should be a declared, visible workload — and the
+		// Cluster's spec.features is that declaration, so the list is
+		// computed: the bundled set minus the cluster's opt-ins
+		// (DisabledComponents, in the machine package). It renders on
+		// leaders only, because disable is a server-side key an agent
+		// would refuse, and always as the complete list, never a
+		// fragment merged with a default somewhere else, so the value
+		// has exactly one author. A machine with no cluster document
+		// disables everything bundled: the minimum viable cluster is
+		// the default, and features are always an opt-in.
+		if disabled := cluster.DisabledComponents(); len(disabled) > 0 {
+			b.WriteString("disable:\n")
+			for _, name := range disabled {
+				fmt.Fprintf(&b, "  - %s\n", name)
+			}
 		}
-		// The cluster's address plan is leader configuration;
-		// followers learn it from the control plane they join.
-		net := cluster.Spec.Network
-		for _, entry := range []struct{ key, value string }{
-			{"cluster-cidr", net.ClusterCIDR},
-			{"service-cidr", net.ServiceCIDR},
-			{"cluster-dns", net.ClusterDNS},
-			{"cluster-domain", net.ClusterDomain},
-		} {
-			if entry.value != "" {
-				fmt.Fprintf(&b, "%s: %s\n", entry.key, entry.value)
+		if cluster != nil {
+			// The datastore keys, decided by leaderJoinConfig: the
+			// founding leader of a multi-leader cluster runs (and, on the
+			// migration boot, creates) embedded etcd; the other leaders
+			// join it. A single leader renders neither and stays sqlite.
+			if in.clusterInit {
+				b.WriteString("cluster-init: true\n")
+			} else if in.joinURL != "" {
+				fmt.Fprintf(&b, "server: %s\n", in.joinURL)
+			}
+			// The cluster's address plan is leader configuration;
+			// followers learn it from the control plane they join.
+			net := cluster.Spec.Network
+			for _, entry := range []struct{ key, value string }{
+				{"cluster-cidr", net.ClusterCIDR},
+				{"service-cidr", net.ServiceCIDR},
+				{"cluster-dns", net.ClusterDNS},
+				{"cluster-domain", net.ClusterDomain},
+			} {
+				if entry.value != "" {
+					fmt.Fprintf(&b, "%s: %s\n", entry.key, entry.value)
+				}
 			}
 		}
 	}

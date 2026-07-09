@@ -178,6 +178,14 @@ func main() {
 	boot.Modules = slices.Sorted(slices.Values(m.Spec.Modules))
 	moduleStatuses := loadDeclaredModules(m.Spec.Modules)
 
+	// The cluster's opt-in features, reported per machine the way
+	// declared modules are (features.go). The bundled components take
+	// effect in the k3s drop-in rendered below; this pass is each
+	// feature's standing in status. No boot record entry, because
+	// features drift by the cluster document's whole-document hash,
+	// not field by field.
+	featureStatuses := actuateFeatures(cluster)
+
 	if name := m.Metadata.Name; name != "" {
 		// Sethostname is one syscall: no hostnamectl, no daemon. The
 		// kernel simply keeps a string.
@@ -251,7 +259,7 @@ func main() {
 		// Facts wait until here because they live under /run, and
 		// prepareForK3s just mounted a fresh tmpfs there; anything
 		// written earlier would be shadowed by the mount.
-		facts := publishFacts(cluster, role, choice, conns, storage, boot, moduleStatuses, firstSync, clk.sources)
+		facts := publishFacts(cluster, role, choice, conns, storage, boot, moduleStatuses, featureStatuses, firstSync, clk.sources)
 		publishBootClusterManifest(clusterRaw)
 		// A machine with time sources keeps disciplining its clock
 		// for as long as it runs; a free-running machine has nothing

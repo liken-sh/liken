@@ -74,6 +74,15 @@ type MachineStatus struct {
 	// the OS loads for itself is the image's business, not the spec's.
 	Modules []ModuleStatus `json:"modules,omitempty"`
 
+	// Features reports this machine's standing on every feature the
+	// cluster document enables (the Cluster's spec.features): the
+	// same verdicts init prints at boot, made queryable. The Cluster
+	// declares features for the whole fleet; this field is the
+	// per-machine answer, because honoring a feature depends on what
+	// the booted image carries, and machines can be running
+	// different releases mid-rollout.
+	Features []FeatureStatus `json:"features,omitempty"`
+
 	// Boot is what this boot ran under: which documents, and the
 	// storage as actuated. It is re-derived on every boot, and it is
 	// the record the operator diffs the spec against. Lifetime is
@@ -377,6 +386,31 @@ type ModuleStatus struct {
 	Name    string      `json:"name"`
 	State   ModuleState `json:"state"`
 	Message string      `json:"message,omitempty"`
+}
+
+// FeatureState is one enabled feature's standing on one machine, a
+// closed vocabulary like ModuleState's. Active means this boot could
+// honor everything the feature asks of this machine. Missing means
+// the booted image predates the feature: the cluster document
+// declares it, but the image carries no payload for it, and the fix
+// is a release that does. Failed means the image carries the payload
+// and actuating it went wrong (a module the kernel refused, a boot
+// hook that errored); the message tells that story.
+type FeatureState string
+
+const (
+	FeatureActive  FeatureState = "Active"
+	FeatureMissing FeatureState = "Missing"
+	FeatureFailed  FeatureState = "Failed"
+)
+
+// FeatureStatus is one enabled feature's outcome on this machine this
+// boot. Like ModuleStatus, Message carries detail for the unhealthy
+// states, phrased to name the fix.
+type FeatureStatus struct {
+	Name    string       `json:"name"`
+	State   FeatureState `json:"state"`
+	Message string       `json:"message,omitempty"`
 }
 
 // ManifestSource is which copy of a document a boot ran under, in

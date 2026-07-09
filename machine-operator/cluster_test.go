@@ -273,3 +273,21 @@ func TestRenderClusterExcludesTheReleaseFeed(t *testing.T) {
 		t.Error("publishing a release or retargeting the fleet must not change the canonical cluster document; that would stage a fleet-wide reboot")
 	}
 }
+
+func TestRenderClusterIncludesFeatures(t *testing.T) {
+	base := machine.ClusterSpec{Leaders: []string{"node-1"}}
+	opted := base
+	opted.Features = map[string]*machine.FeatureConfig{"metrics-server": {}}
+
+	_, baseHash, err := renderCluster("lab", base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, optedHash, err := renderCluster("lab", opted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if optedHash == baseHash {
+		t.Error("features are boot-actuated: an opt-in must change the canonical document's hash so the edit stages and rolls through reboots")
+	}
+}

@@ -238,6 +238,49 @@ func TestK3sBootConfigWithNoClusterIsNearlyEmpty(t *testing.T) {
 			t.Errorf("a machine alone derives no %s:\n%s", reject, got)
 		}
 	}
+	// A machine alone still renders the complete disable list: no
+	// cluster document means no opt-ins, and the minimum viable
+	// cluster is the default.
+	if !strings.Contains(got, "disable:\n  - metrics-server\n  - servicelb\n  - traefik\n") {
+		t.Errorf("a machine alone disables everything bundled:\n%s", got)
+	}
+}
+
+func TestK3sBootConfigDisablesEverythingBundledByDefault(t *testing.T) {
+	got := k3sBootConfig(k3sBootInputs{role: machine.RoleLeader, cluster: labCluster(), haveToken: true})
+	if !strings.Contains(got, "disable:\n  - metrics-server\n  - servicelb\n  - traefik\n") {
+		t.Errorf("a cluster with no features disables everything bundled:\n%s", got)
+	}
+}
+
+func TestK3sBootConfigLeavesOptedInComponentsOffTheDisableList(t *testing.T) {
+	c := labCluster()
+	c.Spec.Features = map[string]*machine.FeatureConfig{"metrics-server": {}}
+	got := k3sBootConfig(k3sBootInputs{role: machine.RoleLeader, cluster: c, haveToken: true})
+	if !strings.Contains(got, "disable:\n  - servicelb\n  - traefik\n") {
+		t.Errorf("an opt-in leaves the disable list:\n%s", got)
+	}
+	if strings.Contains(got, "metrics-server") {
+		t.Errorf("an opted-in component should not appear at all:\n%s", got)
+	}
+}
+
+func TestK3sBootConfigWithEveryFeatureRendersNoDisableList(t *testing.T) {
+	c := labCluster()
+	c.Spec.Features = map[string]*machine.FeatureConfig{
+		"traefik": {}, "servicelb": {}, "metrics-server": {},
+	}
+	got := k3sBootConfig(k3sBootInputs{role: machine.RoleLeader, cluster: c, haveToken: true})
+	if strings.Contains(got, "disable") {
+		t.Errorf("all opt-ins means no disable key at all:\n%s", got)
+	}
+}
+
+func TestK3sBootConfigFollowersNeverRenderTheDisableList(t *testing.T) {
+	got := k3sBootConfig(k3sBootInputs{role: machine.RoleFollower, cluster: labCluster(), haveToken: true})
+	if strings.Contains(got, "disable") {
+		t.Errorf("disable is a server-side key an agent would refuse:\n%s", got)
+	}
 }
 
 func leaderDB(t *testing.T) string {
