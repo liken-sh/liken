@@ -50,9 +50,27 @@ func actuateFeatures(cluster *machine.Cluster, machineName string) []machine.Fea
 	moduleBase := filepath.Join("/lib/modules", kernelRelease())
 	statuses := make([]machine.FeatureStatus, 0, len(slugs))
 	for _, slug := range slugs {
-		status := machine.FeatureStatus{Name: slug, State: machine.FeatureActive}
-		if def := machine.FeatureBySlug(slug); def != nil && def.Kind == machine.FeatureVendored {
+		var status machine.FeatureStatus
+		def := machine.FeatureBySlug(slug)
+		switch {
+		case def == nil:
+			// A slug this binary's vocabulary doesn't include. The
+			// parser deliberately let it through (features.go in the
+			// machine package explains why a strict vocabulary would
+			// brick a downgraded machine), so the report happens
+			// here, naming both plausible causes: this image predates
+			// the feature, or a hand-written seed misspelled it.
+			status = machine.FeatureStatus{
+				Name:  slug,
+				State: machine.FeatureMissing,
+				Message: fmt.Sprintf(
+					"this image's vocabulary has no %q feature; upgrade to a release that carries it, or fix the name if it is a misspelling (this image offers: %s)",
+					slug, strings.Join(machine.FeatureSlugs(), ", ")),
+			}
+		case def.Kind == machine.FeatureVendored:
 			status = actuateVendoredFeature(moduleBase, slug, machineName)
+		default:
+			status = machine.FeatureStatus{Name: slug, State: machine.FeatureActive}
 		}
 		if status.Message != "" {
 			fmt.Printf("liken: features: %s: %s: %s\n",

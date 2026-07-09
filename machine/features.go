@@ -48,7 +48,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strings"
 )
 
 // FeatureKind is how a feature is delivered. Deployments never see
@@ -162,17 +161,28 @@ func (c *Cluster) DisabledComponents() []string {
 	return disabled
 }
 
-// validateFeatures holds spec.features to the vocabulary. ParseCluster
+// validateFeatures holds spec.features to its shape. ParseCluster
 // calls it, so every file door (init vetting a staged or proven
-// document, the operator hashing a rendered one) refuses the same
-// mistakes the CRD refuses at admission, with messages that say what
-// to write instead.
+// document, the operator hashing a rendered one) refuses a null the
+// same way the CRD refuses it at admission, with a message that says
+// what to write instead.
+//
+// An unknown slug is deliberately not an error here, though the CRD
+// refuses one at admission. The difference is what each door knows: a
+// fleet has exactly one vocabulary at its API (the newest image's
+// CRD), but each machine's parser knows only the vocabulary its own
+// image was built with, and a fleet mid-upgrade holds several of
+// those at once. A document declaring a feature this binary predates
+// must still parse, or the machine could not read its own proven
+// document after a downgrade, could not derive its role, and would
+// sit Blocked on a document the rest of the fleet is happily running.
+// The unknown slug is reported instead, through the feature pass:
+// FeaturesReady goes False naming the slug and this image's
+// vocabulary, which covers both real causes (an image that predates
+// the feature, and a misspelling in a hand-written seed) with the
+// machine degraded rather than down.
 func validateFeatures(features map[string]*FeatureConfig) error {
 	for _, slug := range slices.Sorted(maps.Keys(features)) {
-		if FeatureBySlug(slug) == nil {
-			return fmt.Errorf("spec.features: unknown feature %q (the vocabulary is %s)",
-				slug, strings.Join(FeatureSlugs(), ", "))
-		}
 		if features[slug] == nil {
 			return fmt.Errorf("spec.features: %s is null, which in Kubernetes means unset; presence is the opt-in, so write %q to enable the feature or remove the key entirely",
 				slug, slug+": {}")

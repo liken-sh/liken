@@ -28,6 +28,19 @@ func TestActuateFeaturesWithNoFeaturesReportsNothing(t *testing.T) {
 	}
 }
 
+func TestActuateFeaturesReportsSlugsFromANewerVocabulary(t *testing.T) {
+	c := labCluster()
+	c.Spec.Features = map[string]*machine.FeatureConfig{"from-the-future": {}}
+	got := actuateFeatures(c, "node-1")
+	if len(got) != 1 || got[0].State != machine.FeatureMissing {
+		t.Fatalf("a slug this binary predates reports Missing: %+v", got)
+	}
+	if !strings.Contains(got[0].Message, "upgrade to a release") ||
+		!strings.Contains(got[0].Message, "misspelling") {
+		t.Errorf("the message should name both causes: %q", got[0].Message)
+	}
+}
+
 func TestActuateFeaturesReportsBundledFeaturesActive(t *testing.T) {
 	c := labCluster()
 	c.Spec.Features = map[string]*machine.FeatureConfig{

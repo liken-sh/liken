@@ -136,7 +136,14 @@ spec:
 	}
 }
 
-func TestClusterFeaturesRejectUnknownSlug(t *testing.T) {
+func TestClusterFeaturesParseUnknownSlugs(t *testing.T) {
+	// An unknown slug is not a parse error, deliberately: each
+	// machine's parser knows only its own image's vocabulary, and a
+	// document declaring a feature this binary predates must still
+	// parse, or a downgraded machine could not read its own proven
+	// document. The gap is reported through the feature pass instead
+	// (init/features.go); the CRD still refuses unknown slugs at
+	// admission, where the fleet's one current vocabulary lives.
 	path := writeClusterManifest(t, `
 apiVersion: liken.sh/v1alpha1
 kind: Cluster
@@ -144,14 +151,14 @@ metadata:
   name: lab
 spec:
   features:
-    flannel: {}
+    from-the-future: {}
 `)
-	_, err := LoadCluster(path)
-	if err == nil {
-		t.Fatal("expected an error for an unknown feature")
+	c, err := LoadCluster(path)
+	if err != nil {
+		t.Fatalf("a feature from a newer vocabulary must parse: %v", err)
 	}
-	if !strings.Contains(err.Error(), "traefik") {
-		t.Errorf("the error should name the vocabulary, got: %v", err)
+	if got := c.EnabledFeatures(); len(got) != 1 || got[0] != "from-the-future" {
+		t.Errorf("enabled features: got %v", got)
 	}
 }
 
