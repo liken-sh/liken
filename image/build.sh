@@ -61,6 +61,21 @@
 #                                 (see e2fsprogs/fetch.sh). It carries
 #                                 its own built-in default profile, so
 #                                 no mke2fs.conf ships
+#   /sbin/iscsiadm, /sbin/iscsid  the iSCSI initiator userspace, the
+#     and /etc/iscsi/             host half of the iscsi feature:
+#                                 static, built from pinned source by
+#                                 open-iscsi/fetch.sh. Shipped in every
+#                                 image and inert until the cluster
+#                                 document declares the feature; CSI
+#                                 drivers chroot into the host to exec
+#                                 iscsiadm, so /sbin is the contract
+#   /etc/liken/features/          each opt-in feature's per-boot
+#                                 inputs, by slug: its kernel module
+#                                 list and, for features with a
+#                                 workload, its manifests. Init acts on
+#                                 a feature's directory only when the
+#                                 cluster document declares it
+#                                 (init/features.go)
 #   /etc/ssl/certs/               CA certificates (vendored by the trust
 #                                 domain), so pulling images over TLS
 #                                 can verify who it's talking to
@@ -122,6 +137,8 @@ init_dist="${INIT_DIST:-$here/../init/dist}"
 machine_operator_dist="${MACHINE_OPERATOR_DIST:-$here/../machine-operator/dist}"
 cluster_operator_dist="${CLUSTER_OPERATOR_DIST:-$here/../cluster-operator/dist}"
 logs_dist="${LOGS_DIST:-$here/../logs/dist}"
+openiscsi_version="$(cat "$here/../open-iscsi/VERSION")"
+openiscsi_dist="${OPENISCSI_DIST:-$here/../open-iscsi/dist/$openiscsi_version}"
 
 root="$dist/root"
 rm -rf "$dist"
@@ -157,6 +174,23 @@ done
 # mke2fs creates the ext4 filesystems on the disks init claims.
 e2fsprogs_version="$(cat "$here/../e2fsprogs/VERSION")"
 cp "$here/../e2fsprogs/dist/$e2fsprogs_version/mke2fs" "$root/sbin/mke2fs"
+
+# The iSCSI initiator userspace, the host half of the iscsi feature
+# (open-iscsi/fetch.sh explains the static build). It ships in every
+# image whether or not the deployment declares the feature: the
+# payload is a few megabytes of inert bytes until the cluster document
+# opts in, and shipping it unconditionally is what keeps enabling a
+# feature a runtime act instead of an image rebuild. CSI drivers
+# chroot into the host and exec iscsiadm from the host's own PATH, so
+# /sbin is the contract; iscsid ships beside it so the feature's
+# DaemonSet and the host tool are always the same build. The /etc/iscsi
+# directory is the initiator's home: iscsid refuses to start without
+# its config file, and init writes the machine's initiator name beside
+# it at boot when the feature is declared (init/features.go).
+cp "$openiscsi_dist/iscsiadm" "$root/sbin/iscsiadm"
+cp "$openiscsi_dist/iscsid" "$root/sbin/iscsid"
+mkdir -p "$root/etc/iscsi"
+cp "$here/../open-iscsi/iscsid.conf" "$root/etc/iscsi/iscsid.conf"
 
 # The pre-generated certificate authorities, placed exactly where k3s
 # looks before generating its own. The identity directory is an input
@@ -200,6 +234,24 @@ cp "$cluster_operator_dist/liken-cluster-operator-image.tar" \
 cp "$logs_dist/liken-logs-image.tar" \
    "$root/var/lib/rancher/k3s/agent/images/liken-logs.tar"
 
+# Each opt-in feature's per-boot inputs, staged under
+# /etc/liken/features by slug: the feature's kernel module list and,
+# for a feature with a workload, its manifests. These are deliberately
+# not in the auto-deploy directory above: everything there applies on
+# every boot, while a feature's workload applies only when the cluster
+# document declares it, and init is the gate (init/features.go). The
+# iscsid container image does go in agent/images with the others,
+# because an imported-but-unused image is inert, and importing is not
+# deploying.
+mkdir -p "$root/etc/liken/features/iscsi/manifests"
+cp "$here/../open-iscsi/modules.conf" "$root/etc/liken/features/iscsi/modules.conf"
+for manifest in "$here"/../open-iscsi/manifests/*.yaml; do
+    sed "s/LIKEN_VERSION/$liken_version/g" "$manifest" \
+        >"$root/etc/liken/features/iscsi/manifests/$(basename "$manifest")"
+done
+cp "$openiscsi_dist/iscsid-image.tar" \
+   "$root/var/lib/rancher/k3s/agent/images/liken-iscsid.tar"
+
 # The machine's trust store, vendored by the trust domain (where these
 # roots come from is explained in trust/fetch.sh). The staged name is
 # the conventional path Go's crypto/x509 and most TLS stacks probe.
@@ -232,6 +284,11 @@ ship_modules() {
 }
 mkdir -p "$root/lib/modules/$release"
 ship_modules <"$here/etc/liken/modules.conf"
+
+# The features' kernel halves ship unconditionally too, one list per
+# feature (staged above under /etc/liken/features); whether they load
+# is the cluster document's call, made at boot, never at build.
+ship_modules <"$here/../open-iscsi/modules.conf"
 
 # The deployment's declared modules, read from the same manifests this
 # build bakes in. The inventory program parses them with the strict

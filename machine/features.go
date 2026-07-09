@@ -85,11 +85,15 @@ type FeatureDefinition struct {
 
 // Features is the vocabulary, in the order the story is told. The
 // bundled components' slugs are exactly k3s's names for them, the
-// same words the disable list uses.
+// same words the disable list uses; a vendored feature's slug names
+// the capability (iscsi), never the project that implements it
+// (open-iscsi), because implementations can change and an API should
+// not have to.
 var Features = []FeatureDefinition{
 	{Slug: "traefik", Kind: FeatureBundled},
 	{Slug: "servicelb", Kind: FeatureBundled},
 	{Slug: "metrics-server", Kind: FeatureBundled},
+	{Slug: "iscsi", Kind: FeatureVendored},
 }
 
 // FeatureConfig is one feature's configuration. Every feature today

@@ -44,11 +44,13 @@ release:
 	$(MAKE) -C ../machine-operator LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/machine-operator)
 	$(MAKE) -C ../cluster-operator LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/cluster-operator)
 	$(MAKE) -C ../logs LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/logs)
+	$(MAKE) -C ../open-iscsi LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/open-iscsi)
 	$(MAKE) -C ../image LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/image) \
 		INIT_DIST=$(abspath $(BUILD)/init) \
 		MACHINE_OPERATOR_DIST=$(abspath $(BUILD)/machine-operator) \
 		CLUSTER_OPERATOR_DIST=$(abspath $(BUILD)/cluster-operator) \
 		LOGS_DIST=$(abspath $(BUILD)/logs) \
+		OPENISCSI_DIST=$(abspath $(BUILD)/open-iscsi) \
 		MANIFESTS=../dev-cluster IDENTITY=../dev-cluster/identity \
 		$(abspath $(BUILD)/image)/install.cpio
 	./publish.sh $(VERSION)

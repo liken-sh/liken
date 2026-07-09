@@ -183,9 +183,14 @@ workload plane owns recovery. The synology-csi proof against the real
 filer belongs to the deployment that runs one; the lab proves the host
 contract.
 
-Still open, to be settled when this milestone runs: the exact
-digest-pinned container recipe for the static builds; whether sd_mod
-is modular or built-in in the vendored kernel config (a logged-in LUN
-still needs the SCSI disk driver to become /dev/sdX); and the precise
-shape of the iscsid DaemonSet, which the lab decides against the real
-driver.
+Three questions this design left open were settled when the milestone
+ran. The static build recipe lives in open-iscsi/fetch.sh: alpine
+pinned by digest, three sources pinned by sha256 (open-iscsi, plus
+kmod and libeconf, whose static libraries alpine doesn't package),
+and two one-line patches to open-iscsi's build definition, which
+never aimed for a fully static link. sd_mod is built into the
+vendored kernel (CONFIG_BLK_DEV_SD=y), so the feature's module list
+is iscsi_tcp alone. And the iscsid DaemonSet's shape is
+open-iscsi/manifests/iscsid.yaml: privileged and hostNetwork, no API
+identity at all, sharing /etc/iscsi, /var/lib/iscsi, and the lock
+directory with the host's iscsiadm.

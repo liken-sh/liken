@@ -39,6 +39,8 @@ INIT_DIST ?= ../init/dist
 MACHINE_OPERATOR_DIST ?= ../machine-operator/dist
 CLUSTER_OPERATOR_DIST ?= ../cluster-operator/dist
 LOGS_DIST ?= ../logs/dist
+OPENISCSI_VERSION := $(strip $(file <../open-iscsi/VERSION))
+OPENISCSI_DIST ?= ../open-iscsi/dist/$(OPENISCSI_VERSION)
 
 ifeq ($(strip $(DIST)),)
 $(error DIST must name the deployment's image directory, e.g. DIST=../dev-cluster/image)
@@ -62,6 +64,10 @@ $(DIST)/liken.cpio: build.sh $(shell find etc -type f) \
 		../k3s/dist/$(K3S_VERSION)/k3s \
 		../xtables/dist/$(XTABLES_VERSION)/bin/xtables-legacy-multi \
 		../trust/dist/$(TRUST_VERSION)/cacert.pem \
+		$(OPENISCSI_DIST)/iscsid $(OPENISCSI_DIST)/iscsiadm \
+		$(OPENISCSI_DIST)/iscsid-image.tar \
+		$(wildcard ../open-iscsi/manifests/*.yaml) \
+		../open-iscsi/modules.conf ../open-iscsi/iscsid.conf \
 		$(IDENTITY)/tls/server-ca.crt \
 		$(IDENTITY)/token \
 		$(MACHINE_OPERATOR_DIST)/liken-machine-operator-image.tar \
@@ -76,7 +82,9 @@ $(DIST)/liken.cpio: build.sh $(shell find etc -type f) \
 		INIT_DIST=$(abspath $(INIT_DIST)) \
 		MACHINE_OPERATOR_DIST=$(abspath $(MACHINE_OPERATOR_DIST)) \
 		CLUSTER_OPERATOR_DIST=$(abspath $(CLUSTER_OPERATOR_DIST)) \
-		LOGS_DIST=$(abspath $(LOGS_DIST)) IDENTITY=$(abspath $(IDENTITY)) \
+		LOGS_DIST=$(abspath $(LOGS_DIST)) \
+		OPENISCSI_DIST=$(abspath $(OPENISCSI_DIST)) \
+		IDENTITY=$(abspath $(IDENTITY)) \
 		./build.sh $(MANIFESTS)
 
 .PHONY: all clean

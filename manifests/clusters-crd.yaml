@@ -364,15 +364,20 @@ spec:
                     The vocabulary today is traefik (k3s's bundled
                     ingress controller), servicelb (klipper-lb, which
                     realizes Services of type LoadBalancer on the
-                    nodes' own addresses), and metrics-server (the
-                    aggregated API behind `kubectl top`). All three
-                    are components the k3s binary already bundles,
-                    disabled by default on principle: anything beyond
-                    the control plane should be a declared, visible
-                    workload, and declaring it here is that
-                    declaration. Toggling a feature converges like
-                    any other cluster edit, rolling through the fleet
-                    as staged changes and granted reboots.
+                    nodes' own addresses), metrics-server (the
+                    aggregated API behind `kubectl top`), and iscsi
+                    (the host-side iSCSI initiator: static open-iscsi
+                    binaries, the iscsi_tcp kernel module, an
+                    initiator name derived from each machine's name,
+                    and an iscsid DaemonSet: the host contract CSI
+                    drivers like synology-csi depend on). The first
+                    three are components the k3s binary already
+                    bundles, disabled by default on principle:
+                    anything beyond the control plane should be a
+                    declared, visible workload, and declaring it here
+                    is that declaration. Toggling a feature converges
+                    like any other cluster edit, rolling through the
+                    fleet as staged changes and granted reboots.
                   # The schema is a map with validation rules rather
                   # than named per-slug properties, and the choice is
                   # load-bearing. Named properties look natural, but
@@ -387,10 +392,10 @@ spec:
                   # machine/features_test.go holds the first rule's
                   # vocabulary to the table in machine/features.go.
                   x-kubernetes-validations:
-                    - rule: "self.all(slug, slug in ['traefik', 'servicelb', 'metrics-server'])"
+                    - rule: "self.all(slug, slug in ['traefik', 'servicelb', 'metrics-server', 'iscsi'])"
                       message: >-
                         unknown feature; the vocabulary is
-                        traefik, servicelb, metrics-server
+                        traefik, servicelb, metrics-server, iscsi
                     - rule: "self.all(slug, self[slug] != null)"
                       message: >-
                         a null feature is neither enabled nor

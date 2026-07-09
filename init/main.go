@@ -178,13 +178,14 @@ func main() {
 	boot.Modules = slices.Sorted(slices.Values(m.Spec.Modules))
 	moduleStatuses := loadDeclaredModules(m.Spec.Modules)
 
-	// The cluster's opt-in features, reported per machine the way
-	// declared modules are (features.go). The bundled components take
-	// effect in the k3s drop-in rendered below; this pass is each
-	// feature's standing in status. No boot record entry, because
+	// The cluster's opt-in features, actuated and reported per
+	// machine the way declared modules are (features.go): bundled
+	// components take effect in the k3s drop-in rendered below, and
+	// vendored payloads load their modules, write their boot files,
+	// and seed their workloads here. No boot record entry, because
 	// features drift by the cluster document's whole-document hash,
 	// not field by field.
-	featureStatuses := actuateFeatures(cluster)
+	featureStatuses := actuateFeatures(cluster, m.Metadata.Name)
 
 	if name := m.Metadata.Name; name != "" {
 		// Sethostname is one syscall: no hostnamectl, no daemon. The

@@ -25,8 +25,10 @@ TRUST_VERSION := $(strip $(file <trust/VERSION))
 TRUST_DIST := trust/dist/$(TRUST_VERSION)
 E2FSPROGS_VERSION := $(strip $(file <e2fsprogs/VERSION))
 E2FSPROGS_DIST := e2fsprogs/dist/$(E2FSPROGS_VERSION)
+OPENISCSI_VERSION := $(strip $(file <open-iscsi/VERSION))
+OPENISCSI_DIST := open-iscsi/dist/$(OPENISCSI_VERSION)
 
-all: kernel k3s xtables trust e2fsprogs init machine-operator cluster-operator logs identity image
+all: kernel k3s xtables trust e2fsprogs open-iscsi init machine-operator cluster-operator logs identity image
 
 # Because the version is part of the artifact's name, a pin bump
 # changes the target path itself and Make rebuilds with no extra
@@ -64,6 +66,17 @@ $(E2FSPROGS_DIST)/mke2fs: e2fsprogs/VERSION e2fsprogs/fetch.sh
 	$(MAKE) -C e2fsprogs
 
 e2fsprogs: $(E2FSPROGS_DIST)/mke2fs
+
+# The iSCSI initiator userspace, the host half of the iscsi feature:
+# static iscsid and iscsiadm built from pinned source inside a pinned
+# container (the repo's first build-from-source vendor; see
+# open-iscsi/fetch.sh), plus the OCI image that runs iscsid as the
+# feature's DaemonSet.
+$(OPENISCSI_DIST)/iscsid $(OPENISCSI_DIST)/iscsiadm $(OPENISCSI_DIST)/iscsid-image.tar &: \
+		open-iscsi/VERSION open-iscsi/fetch.sh image/oci.sh VERSION
+	$(MAKE) -C open-iscsi
+
+open-iscsi: $(OPENISCSI_DIST)/iscsid-image.tar
 
 # This is liken itself, the Go program that boots as PID 1 (see
 # init/main.go's header comment). It shares the machine package (the
@@ -147,6 +160,10 @@ $(IMAGE_DIR)/liken.cpio: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s 
 		$(XTABLES_DIST)/bin/xtables-legacy-multi \
 		$(TRUST_DIST)/cacert.pem \
 		$(E2FSPROGS_DIST)/mke2fs \
+		$(OPENISCSI_DIST)/iscsid $(OPENISCSI_DIST)/iscsiadm \
+		$(OPENISCSI_DIST)/iscsid-image.tar \
+		$(wildcard open-iscsi/manifests/*.yaml) \
+		open-iscsi/modules.conf open-iscsi/iscsid.conf \
 		$(IDENTITY_DIR)/tls/server-ca.crt $(IDENTITY_DIR)/token \
 		machine-operator/dist/liken-machine-operator-image.tar \
 		$(wildcard machine-operator/manifests/*.yaml) \
@@ -205,7 +222,7 @@ install: $(IMAGE_DIR)/install.cpio
 # a release rebuilds init, the operators, and the image, but the
 # kernel, k3s, and the other vendored artifacts are pinned by their
 # own domains and shared by every release.
-release: kernel k3s xtables trust e2fsprogs identity
+release: kernel k3s xtables trust e2fsprogs open-iscsi identity
 	$(MAKE) -C releases release
 
 # Serve the published releases to the lab over HTTP; the guests reach
@@ -226,6 +243,7 @@ clean:
 	$(MAKE) -C xtables clean
 	$(MAKE) -C trust clean
 	$(MAKE) -C e2fsprogs clean
+	$(MAKE) -C open-iscsi clean
 	$(MAKE) -C init clean
 	$(MAKE) -C machine-operator clean
 	$(MAKE) -C cluster-operator clean
@@ -233,4 +251,4 @@ clean:
 	$(MAKE) -C identity DIST=$(abspath $(IDENTITY_DIR)) clean
 	$(MAKE) -C image IDENTITY=$(abspath $(IDENTITY_DIR)) DIST=$(abspath $(IMAGE_DIR)) clean
 
-.PHONY: all kernel k3s xtables trust e2fsprogs init machine-operator cluster-operator logs identity kubeconfig image run run-once install release serve clean
+.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi init machine-operator cluster-operator logs identity kubeconfig image run run-once install release serve clean
