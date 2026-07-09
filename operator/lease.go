@@ -28,7 +28,7 @@ package main
 // Losing the holder costs nothing but latency: its renewals stop,
 // the lease ages past its duration, and the next leader's pass takes
 // over. The sweep pauses for at most one lease duration, and a
-// machine's Lost verdict arrives a minute late. The election
+// machine's Lost verdict arrives that much late. The election
 // deliberately runs on the reconcile loop's own cadence rather than
 // a dedicated goroutine: the sweep happens at most once per pass, so
 // renewing any faster would accomplish nothing.
@@ -64,9 +64,11 @@ const fleetLeasePath = "/apis/coordination.k8s.io/v1/namespaces/liken-system/lea
 const machineLeaseDir = "/apis/coordination.k8s.io/v1/namespaces/liken-machine-lease/leases"
 
 // fleetLeaseDuration is how long a holder's claim stands without a
-// renewal: three missed renewals, the same threshold the machine
-// heartbeats use, and for the same reason.
-const fleetLeaseDuration = 90 * time.Second
+// renewal: the same forty seconds the machine heartbeats get
+// (fleet.go), and for the same reason. The holder renews once per
+// pass, so a claim this old has missed several passes, and a sweeper
+// that has missed several passes is not sweeping.
+const fleetLeaseDuration = 40 * time.Second
 
 // microTime is the layout coordination.k8s.io uses for its
 // timestamps (metav1.MicroTime): RFC 3339 with microseconds, a finer

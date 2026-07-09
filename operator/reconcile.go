@@ -352,29 +352,36 @@ func reconcile(c *apiClient, m *machine.Machine, clusterName string, f *fetcher)
 	// listing shows (phase.go).
 	status.Phase = decidePhase(status.Conditions)
 
-	if err := publishStatus(c, m, status); err != nil {
-		fmt.Printf("publishing status: %v\n", err)
-	}
-
 	// The heartbeat: renew this machine's lease so the fleet can tell
 	// that this status is current, not the final report of a machine
 	// that has since died (lease.go explains why this is a lease and
-	// not a status field). The heartbeat is deliberately separate from
-	// the status write above. Status is written when the machine's
-	// state changes; the heartbeat proves the reporter is alive; and
-	// combining them would make every heartbeat rewrite the whole
-	// object. A status write can fail while the heartbeat still
-	// lands, and that is the correct outcome: the machine is alive
-	// and will retry the status write.
+	// not a status field). The heartbeat is deliberately separate
+	// from the status write below. Status is written when the
+	// machine's state changes; the heartbeat proves the reporter is
+	// alive; and combining them would make every heartbeat rewrite
+	// the whole object. Either write can fail while the other lands,
+	// and that is the correct outcome: the machine is alive and will
+	// retry on its next pass.
+	//
+	// The heartbeat goes first because of what each write means to
+	// the sweeping leader. A machine booting into a fleet that has
+	// already declared it Lost announces its liveness here, so the
+	// sweeper stops writing Lost verdicts onto the very object the
+	// status write below is about to update. Publishing first would
+	// invite that collision on every boot.
 	renewMachineHeartbeat(c, m.Metadata.Name, now)
+
+	if err := publishOwnStatus(c, m, status); err != nil {
+		fmt.Printf("publishing status: %v\n", err)
+	}
 
 	// Fleet-level work belongs to the leaders: mark silent machines
 	// Lost and keep the Cluster's headcount current. Every leader is
 	// *able* to sweep, but only the one holding the lease does
 	// (lease.go). That gives the fleet exactly one sweeper at a time,
 	// with the other leaders ready to take over. This machine's own
-	// status write has already landed, so the sweep sees its own
-	// heartbeat fresh like everyone else's.
+	// heartbeat and status have already landed, so the sweep sees
+	// itself fresh like everyone else.
 	if liveCluster != nil && status.Role == machine.RoleLeader && holdFleetLease(c, m.Metadata.Name, now) {
 		sweepFleet(c, m.Metadata.Name, liveCluster, now)
 	}
@@ -532,31 +539,79 @@ func publishStatus(c *apiClient, m *machine.Machine, status *machine.MachineStat
 	return c.requestJSON(http.MethodPut, path, body, nil)
 }
 
-// watchMachine turns the API server's watch mechanism into a channel of
-// fresh Machine objects. A watch is an ordinary GET with ?watch=true:
-// the response never ends, and each line of it is a JSON event like
-// {"type": "MODIFIED", "object": {…}}, pushed the moment the object
-// changes. This is the mechanism informers, kubectl get -w, and every
-// controller's responsiveness are built on.
+// publishOwnStatus is publishStatus for the machine writing about
+// itself, which is the one writer entitled to resolve a conflict
+// rather than concede it. A Machine's status has exactly two other
+// writers: the rollout conductor, granting and reclaiming reboot
+// turns, and the sweeping leader, marking silent machines Lost. If
+// one of them wrote between this pass's read and its write, this
+// machine's observations are still the freshest thing anyone has (it
+// is standing on the hardware), so the answer is to retry against a
+// fresh read rather than discard the pass. The merge honors each
+// condition's owner: the conductor's grant rides in from the fresh
+// copy exactly as written, present or absent, with its transition
+// time untouched (the rollout's stall clock measures from it), and
+// every other field is this pass's own observation. A Lost verdict
+// needs no special handling: overwriting it is precisely how a
+// machine announces it is back.
+//
+// One retry is enough. A second conflict means the object is
+// changing faster than this pass can read it, and the write that
+// beat us is already queued on the watch, so the pass it triggers
+// will publish moments from now.
+func publishOwnStatus(c *apiClient, m *machine.Machine, status *machine.MachineStatus) error {
+	err := publishStatus(c, m, status)
+	if !errors.Is(err, errConflict) {
+		return err
+	}
+	fresh, gerr := getMachine(c, m.Metadata.Name)
+	if gerr != nil {
+		return err
+	}
+	status.Conditions = machine.RemoveCondition(slices.Clone(status.Conditions), rebootApprovedCondition)
+	if grant := machine.FindCondition(fresh.Status.Conditions, rebootApprovedCondition); grant != nil {
+		status.Conditions = append(status.Conditions, *grant)
+	}
+	return publishStatus(c, fresh, status)
+}
+
+// watchMachines turns the API server's watch mechanism into a channel
+// of fresh Machine objects. A watch is an ordinary GET with
+// ?watch=true: the response never ends, and each line of it is a JSON
+// event like {"type": "MODIFIED", "object": {…}}, pushed the moment
+// the object changes. This is the mechanism informers, kubectl get -w,
+// and every controller's responsiveness are built on.
+//
+// The watch spans the whole Machine collection, not just this
+// machine's object. The sweeping leader derives the Cluster's status
+// from every Machine (fleet.go), so another machine's transition is
+// exactly as much a reason to look as this machine's own; main.go
+// explains why the extra wakeups are safe and quiet.
 //
 // resourceVersion tells the server where to resume so no change is
 // missed between reconnects; when history has been compacted away the
-// server says 410 Gone, and the recovery is to re-GET the object and
-// watch from its current version. Stream drops are routine (the server
-// ends watches on its own schedule); the loop just reconnects.
+// server says 410 Gone. Stream drops are routine too (the server ends
+// watches on its own schedule). Both recover the same way, the one
+// informers use: list the collection and watch from the *list's*
+// resourceVersion, which is the current revision of the world. A
+// single object's version would not do here: it is the revision of
+// that object's own last write, and on a quiet object that can be old
+// enough to have been compacted away, which would earn another 410
+// and strand the loop. This machine's own copy from the recovery list
+// is delivered as an event, so the caller's working copy is refreshed
+// along the way.
 //
 // allowWatchBookmarks asks the server to send an occasional BOOKMARK
 // event: no object change, just "you are current through version X."
-// A watch on a quiet object would otherwise sit on an ever-staler
+// A watch on a quiet fleet would otherwise sit on an ever-staler
 // resourceVersion, and the next reconnect would be more likely to
 // find that version compacted away (the 410 above). Bookmarks keep
 // the resume point fresh for free; informers request them for
 // exactly this reason.
-func watchMachine(c *apiClient, name, resourceVersion string, events chan<- *machine.Machine) {
+func watchMachines(c *apiClient, name, resourceVersion string, events chan<- *machine.Machine) {
 	for {
 		path := machinesPath +
 			"?watch=true&allowWatchBookmarks=true" +
-			"&fieldSelector=metadata.name%3D" + name +
 			"&resourceVersion=" + resourceVersion
 
 		resp, err := c.do(http.MethodGet, path, "", nil)
@@ -589,9 +644,19 @@ func watchMachine(c *apiClient, name, resourceVersion string, events chan<- *mac
 		}
 
 		retryPause()
-		if current, err := getMachine(c, name); err == nil {
-			resourceVersion = current.Metadata.ResourceVersion
-			events <- current
+		var list struct {
+			Metadata struct {
+				ResourceVersion string `json:"resourceVersion"`
+			} `json:"metadata"`
+			Items []machine.Machine `json:"items"`
+		}
+		if err := c.requestJSON(http.MethodGet, machinesPath, nil, &list); err == nil {
+			resourceVersion = list.Metadata.ResourceVersion
+			for i := range list.Items {
+				if list.Items[i].Metadata.Name == name {
+					events <- &list.Items[i]
+				}
+			}
 		}
 	}
 }

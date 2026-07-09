@@ -109,20 +109,56 @@ func main() {
 	// object changing, and there is no event for drift. Every pass
 	// reconciles from absolute current state, never from the event
 	// that woke us, so that missing one event can never matter.
-	events := make(chan *machine.Machine, 1)
-	go watchMachine(client, name, current.Metadata.ResourceVersion, events)
+	//
+	// The watch spans every Machine, not just this one. The Cluster's
+	// status is derived from the whole fleet by the sweeping leader
+	// (fleet.go), and the sweep runs at the end of a reconcile pass,
+	// so if only a ticker noticed another machine turning Ready, the
+	// Cluster would go on reporting Degraded for up to a full tick
+	// after the fleet had recovered. The level-triggered design is
+	// what makes the wider watch safe: an extra pass observes and
+	// re-asserts the same state. It is also what keeps it quiet. A
+	// settled machine's status rewrite is byte-identical, the API
+	// server drops identical writes without bumping resourceVersion,
+	// and a write that isn't an event can't wake anyone, so operators
+	// watching each other cannot echo.
+	// Buffered so a fleet-wide burst of events queues up instead of
+	// stalling the watch stream; the loop below drains and coalesces
+	// whatever accumulated while a pass was working.
+	events := make(chan *machine.Machine, 32)
+	go watchMachines(client, name, current.Metadata.ResourceVersion, events)
 
 	// The release fetcher outlives any one pass: downloads take
 	// minutes, passes take milliseconds, and the fetcher is the one
 	// piece of state that bridges them (fetch.go).
 	f := &fetcher{}
 
-	ticker := time.NewTicker(30 * time.Second)
+	// The ticker is the heartbeat's metronome as well as the drift
+	// backstop, so it runs at the kubelet's own lease cadence of ten
+	// seconds (fleet.go explains the numbers). The heartbeat is
+	// deliberately renewed by the reconcile pass rather than by a
+	// dedicated goroutine: a heartbeat should prove the operator is
+	// doing its job, and a goroutine would keep vouching for a
+	// reconcile loop that had wedged.
+	ticker := time.NewTicker(10 * time.Second)
 	for {
 		reconcile(client, current, clusterName, f)
 		select {
 		case m := <-events:
-			current = m
+			// Only this machine's own copy replaces the working copy;
+			// another machine's event is just a reason to look again,
+			// and the pass reads whatever fleet state it needs fresh.
+			if m.Metadata.Name == name {
+				current = m
+			}
+			// A busy fleet queues events faster than passes run, so
+			// take everything that arrived while the last pass worked.
+			// One pass over the newest state answers a whole burst;
+			// that is what level-triggered means, and it is the same
+			// coalescing an informer's work queue does. Skipping
+			// intermediate copies also keeps this pass from publishing
+			// against a version it already knows is stale.
+			current = drainEvents(events, name, current)
 		case <-ticker.C:
 			// Re-read the object on timer passes too: status writes bump
 			// resourceVersion, and reconciling against a stale copy
@@ -130,6 +166,23 @@ func main() {
 			if refreshed, err := getMachine(client, name); err == nil {
 				current = refreshed
 			}
+		}
+	}
+}
+
+// drainEvents empties whatever the watch queued while the last pass
+// ran, returning the newest copy of this machine's own object (or
+// the given one, when only other machines changed). Every drained
+// event is answered by the single pass that follows.
+func drainEvents(events <-chan *machine.Machine, name string, current *machine.Machine) *machine.Machine {
+	for {
+		select {
+		case m := <-events:
+			if m.Metadata.Name == name {
+				current = m
+			}
+		default:
+			return current
 		}
 	}
 }

@@ -31,6 +31,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -41,17 +42,23 @@ import (
 )
 
 // heartbeatRenewAfter is how old the heartbeat must be before the
-// machine's own operator renews it: just under the 30-second
+// machine's own operator renews it: just under the ten-second
 // reconcile ticker, so every ticker pass renews but the event-driven
 // passes in between get by on a read. heartbeatStaleAfter is how
 // long a machine may then go silent before the sweep declares it
-// Lost: three missed renewals, the same threshold the time loop uses
-// before declaring its NTP sources gone. A single missed renewal may
-// just mean a busy moment; three missed renewals mean the machine is
-// down.
+// Lost. A single missed renewal may just mean a busy moment; several
+// missed renewals mean the machine is down.
+//
+// The numbers are kube-node-lease's: the kubelet renews its lease
+// every ten seconds, and the node controller gives a silent kubelet
+// forty before its Node goes NotReady. A dead machine silences both
+// leases at the same moment, so matching the thresholds means both
+// verdicts land together, and `kubectl get nodes` never spends a
+// minute contradicting `kubectl get machines` about a machine that
+// just died.
 const (
-	heartbeatRenewAfter = 20 * time.Second
-	heartbeatStaleAfter = 90 * time.Second
+	heartbeatRenewAfter = 8 * time.Second
+	heartbeatStaleAfter = 40 * time.Second
 )
 
 func listMachines(c *apiClient) ([]machine.Machine, error) {
@@ -174,10 +181,13 @@ func sweepFleet(c *apiClient, self string, cluster *machine.Cluster, now time.Ti
 			ObservedGeneration: m.Metadata.Generation,
 			Message:            "the machine's operator has stopped renewing its heartbeat lease; the machine is presumed down",
 		}, now)
-		if err := publishStatus(c, &m, &status); err != nil {
-			// A conflict here usually means the machine just came
-			// back and wrote first, which is the outcome we wanted
-			// anyway.
+		// A conflict here means the machine just came back and wrote
+		// first, which is the outcome the sweep wanted anyway, so it
+		// concedes silently; the sweeper never retries a write onto
+		// another machine's status.
+		if err := publishStatus(c, &m, &status); errors.Is(err, errConflict) {
+			continue
+		} else if err != nil {
 			fmt.Printf("marking %s lost: %v\n", m.Metadata.Name, err)
 		} else {
 			fmt.Printf("machine %s has gone silent; marked Lost\n", m.Metadata.Name)

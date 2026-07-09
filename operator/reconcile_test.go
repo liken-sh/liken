@@ -5,9 +5,11 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/chrisguidry/liken/machine"
 )
@@ -150,5 +152,108 @@ func TestPublishStatusWritesTheStatusSubresource(t *testing.T) {
 	}
 	if want := "/apis/liken.sh/v1alpha1/machines/node-1/status"; api.publishedPath != want {
 		t.Errorf("status goes through the subresource, got %s", api.publishedPath)
+	}
+}
+
+// conflictAPI is a miniature API server that answers the first
+// `conflicts` status PUTs with 409, serves a fresh copy of the
+// machine on GET, and records the body of the PUT that finally
+// lands.
+type conflictAPI struct {
+	conflicts int
+	fresh     machine.Machine
+	puts      int
+	published *machine.Machine
+}
+
+func (api *conflictAPI) handler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode(&api.fresh)
+			return
+		}
+		api.puts++
+		if api.puts <= api.conflicts {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		api.published = &machine.Machine{}
+		_ = json.NewDecoder(r.Body).Decode(api.published)
+	})
+}
+
+func grantCondition(transition time.Time) machine.Condition {
+	return machine.Condition{
+		Type: rebootApprovedCondition, Status: machine.ConditionTrue,
+		Reason: "TurnGranted", LastTransitionTime: transition,
+	}
+}
+
+func freshMachine(conditions ...machine.Condition) machine.Machine {
+	return machine.Machine{
+		Metadata: machine.ObjectMeta{Name: "node-1", ResourceVersion: "9"},
+		Status:   machine.MachineStatus{Conditions: conditions},
+	}
+}
+
+func TestPublishOwnStatusResolvesAConflictWithAFreshRead(t *testing.T) {
+	// The conductor granted a turn between this pass's read and its
+	// write. The retry must carry the resourceVersion of the fresh
+	// copy and adopt the conductor's grant exactly as written,
+	// including its transition time, which the rollout's stall clock
+	// measures from.
+	granted := grantCondition(sweepNow)
+	api := &conflictAPI{conflicts: 1, fresh: freshMachine(granted)}
+	client := testClient(t, api.handler())
+
+	m := &machine.Machine{Metadata: machine.ObjectMeta{Name: "node-1", ResourceVersion: "7"}}
+	status := &machine.MachineStatus{Phase: machine.PhaseReady, Conditions: []machine.Condition{
+		{Type: "Ready", Status: machine.ConditionTrue, Reason: "Reconciled"},
+	}}
+	if err := publishOwnStatus(client, m, status); err != nil {
+		t.Fatal(err)
+	}
+	if api.published.Metadata.ResourceVersion != "9" {
+		t.Errorf("the retry carries the fresh copy's version: %s", api.published.Metadata.ResourceVersion)
+	}
+	if c := machine.FindCondition(api.published.Status.Conditions, rebootApprovedCondition); c == nil ||
+		!c.LastTransitionTime.Equal(sweepNow) {
+		t.Errorf("the conductor's grant rides in from the fresh copy untouched: %+v", c)
+	}
+	if c := machine.FindCondition(api.published.Status.Conditions, "Ready"); c == nil || c.Status != machine.ConditionTrue {
+		t.Errorf("this pass's own observations still win: %+v", c)
+	}
+}
+
+func TestPublishOwnStatusHonorsAReclaimedGrant(t *testing.T) {
+	// The reverse race: this pass carried a grant read before the
+	// conductor reclaimed it. The retry must not resurrect it.
+	api := &conflictAPI{conflicts: 1, fresh: freshMachine()}
+	client := testClient(t, api.handler())
+
+	m := &machine.Machine{Metadata: machine.ObjectMeta{Name: "node-1", ResourceVersion: "7"}}
+	status := &machine.MachineStatus{Conditions: []machine.Condition{grantCondition(sweepNow)}}
+	if err := publishOwnStatus(client, m, status); err != nil {
+		t.Fatal(err)
+	}
+	if c := machine.FindCondition(api.published.Status.Conditions, rebootApprovedCondition); c != nil {
+		t.Errorf("a reclaimed grant must stay reclaimed: %+v", c)
+	}
+}
+
+func TestPublishOwnStatusRetriesOnlyOnce(t *testing.T) {
+	// A second conflict means the object is changing faster than we
+	// can read it; the watch has already queued the event that will
+	// trigger the next pass, so the write waits for that.
+	api := &conflictAPI{conflicts: 2, fresh: freshMachine()}
+	client := testClient(t, api.handler())
+
+	m := &machine.Machine{Metadata: machine.ObjectMeta{Name: "node-1", ResourceVersion: "7"}}
+	err := publishOwnStatus(client, m, &machine.MachineStatus{})
+	if !errors.Is(err, errConflict) {
+		t.Errorf("the second conflict comes back to the caller: %v", err)
+	}
+	if api.puts != 2 {
+		t.Errorf("one retry, no more: %d puts", api.puts)
 	}
 }
