@@ -76,6 +76,14 @@ And one that looks past any single deployment:
     itself, with no deployment baked in, and the utilities someone
     needs to produce a cluster of their own from one.
 
+One the milestone-17 lab work demanded:
+
+23. [ ] [Crash-safe image imports](23-crash-safe-image-imports.md) —
+    a machine killed mid-unpack must not be left permanently unable
+    to run its own operator: image imports go through the same
+    staged/proven lifecycle as documents, with a wipe-and-retry
+    fallback. Designed.
+
 Deferred until the fundamentals above are proven, the hardening
 tier: UKIs, dm-verity, secure boot, TPM-sealed secrets, and signed
 releases.

@@ -39,7 +39,20 @@ it silently meant *disabled* is exactly the misspelled-manifest
 failure the strict parser exists to prevent. Both doors reject it: the
 CRD carries a validation rule that refuses a null feature with a
 message saying to write {}, and the file parser refuses it the same
-way. Unknown slugs are refused the same two ways. The CRD's schema
+way. Unknown slugs are refused at admission only, deliberately. The
+fleet has exactly one vocabulary at its API (the newest image's CRD),
+but each machine's parser knows only the vocabulary its binary was
+built with, and a fleet mid-upgrade holds several of those at once,
+so a document declaring a feature a binary predates must still parse.
+The lab proved the alternative the hard way: a machine downgraded
+below its cluster document's vocabulary rejected the staged document,
+could not read even its proven one, and sat Blocked on a document the
+rest of the fleet was happily running. So the file parser lets an
+unknown slug through, and the feature pass reports it instead:
+FeaturesReady goes False naming the slug and the image's own
+vocabulary, which covers both real causes (an image that predates the
+feature, and a misspelling in a hand-written seed) with the machine
+degraded rather than down. The CRD's schema
 shape is load-bearing here, and drilling against the live API server
 is what settled it: the natural-looking alternative, one named
 property per feature, cannot enforce either rule, because
