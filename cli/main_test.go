@@ -35,6 +35,7 @@ func TestRunChecksArgumentCounts(t *testing.T) {
 		{"adopt without directories", []string{"adopt", "only-one"}},
 		{"kubeconfig without a directory", []string{"kubeconfig"}},
 		{"layer without its inputs", []string{"layer", "manifests", "identity"}},
+		{"media without its inputs", []string{"media", "release-dir"}},
 		{"publish without a version", []string{"publish", "image", "channel"}},
 		{"bundle without its artifacts", []string{"bundle", "vmlinuz"}},
 		{"serve with too many arguments", []string{"serve", "channel", "addr", "extra"}},
@@ -76,6 +77,40 @@ func TestRunPacksADeploymentLayer(t *testing.T) {
 	}
 	if _, err := os.Stat(out); err != nil {
 		t.Error("no layer was written")
+	}
+}
+
+func TestRunAssemblesInstallMedia(t *testing.T) {
+	// A tiny release round-trip: bundle a release, pack a layer for an
+	// empty deployment, and turn the two into install media.
+	src := t.TempDir()
+	for _, name := range []string{"vmlinuz", "liken.cpio", "liken"} {
+		if err := os.WriteFile(filepath.Join(src, name), []byte(name+" bytes"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	channel := t.TempDir()
+	err := run([]string{"bundle", filepath.Join(src, "vmlinuz"), filepath.Join(src, "liken.cpio"),
+		filepath.Join(src, "liken"), channel, "0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	identityDir := filepath.Join(t.TempDir(), "identity")
+	if err := run([]string{"mint", identityDir}); err != nil {
+		t.Fatal(err)
+	}
+	layer := filepath.Join(t.TempDir(), "deployment.cpio")
+	if err := run([]string{"layer", t.TempDir(), identityDir, "unused", layer}); err != nil {
+		t.Fatal(err)
+	}
+
+	media := filepath.Join(t.TempDir(), "install.cpio")
+	if err := run([]string{"media", filepath.Join(channel, "0.0.1"), layer, media}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(media); err != nil {
+		t.Error("no install media was written")
 	}
 }
 

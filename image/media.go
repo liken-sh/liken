@@ -1,0 +1,140 @@
+package image
+
+// Install media: a public release and a deployment layer become the
+// image a machine boots once, to install itself.
+//
+// An installer must contain the exact bytes it installs, and an
+// archive cannot contain a finished copy of itself. So the install
+// image is three cpio archives concatenated: the generic liken.cpio,
+// the deployment layer (together they are the running system: init,
+// k3s, and this deployment's identity — the installer needs all of
+// it, because partitioning a machine's disks reads that machine's
+// storage spec from the manifests), and a small wrapper carrying the
+// release payload at /usr/share/liken/release. The kernel's initramfs
+// unpacker processes concatenated archives in order into one
+// filesystem, the same mechanism the machine's boot entries use to
+// join the two halves from its disk.
+//
+// The payload is the slot layout, exactly: every artifact the release
+// document lists, the document itself byte for byte, and the layer
+// beside its sidecar. Carrying the document verbatim, rather than
+// generating one, is what lets the installed machine verify later
+// downloads against the same catalog digest the release was published
+// under — the stick and the internet vouch for the same bytes.
+//
+// Everything is verified before a single byte is packed: an artifact
+// that fails its document here would fail it again in the installer,
+// on a machine, where the only remedy is new media.
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+
+	"github.com/liken-sh/liken/machine"
+)
+
+// payloadDir is where the wrapper archive carries the release, the
+// path the installer reads (init's releasePayloadDir).
+const payloadDir = "usr/share/liken/release"
+
+// Media assembles install media from a release directory (a public
+// bundle: artifacts beside their release.yaml) and a deployment
+// layer, writing the bootable image to out.
+func Media(releaseDir, layerPath, out string, log io.Writer) error {
+	document, err := os.ReadFile(filepath.Join(releaseDir, "release.yaml"))
+	if err != nil {
+		return fmt.Errorf("reading the release document: %w", err)
+	}
+	release, err := machine.ParseRelease(document)
+	if err != nil {
+		return err
+	}
+	for _, artifact := range release.Artifacts {
+		f, err := os.Open(filepath.Join(releaseDir, artifact.Name))
+		if err != nil {
+			return fmt.Errorf("the release is missing an artifact its document lists: %w", err)
+		}
+		err = artifact.Verify(f)
+		f.Close()
+		if err != nil {
+			return fmt.Errorf("the release does not match its own document: %w", err)
+		}
+	}
+
+	layer, err := os.ReadFile(layerPath)
+	if err != nil {
+		return fmt.Errorf("reading the deployment layer: %w", err)
+	}
+	sum := sha256.Sum256(layer)
+	sidecar := machine.FormatLayerSidecar(hex.EncodeToString(sum[:]))
+
+	f, err := os.Create(out)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	// The composed system first: the generic archive, then the layer,
+	// so the layer's entries override at unpack.
+	generic, err := os.Open(filepath.Join(releaseDir, "liken.cpio"))
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(f, generic)
+	generic.Close()
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(layer); err != nil {
+		return err
+	}
+
+	// The wrapper: the payload the installer copies to a slot. The
+	// artifacts were verified above and read again here; the document
+	// and the layer travel as the bytes already in hand.
+	payload := []struct {
+		name string
+		data []byte
+	}{
+		{"release.yaml", document},
+		{machine.LayerName, layer},
+		{machine.LayerSidecarName, sidecar},
+	}
+	for _, artifact := range release.Artifacts {
+		data, err := os.ReadFile(filepath.Join(releaseDir, artifact.Name))
+		if err != nil {
+			return err
+		}
+		payload = append(payload, struct {
+			name string
+			data []byte
+		}{artifact.Name, data})
+	}
+
+	a := newArchive(f)
+	for _, d := range []string{"usr", "usr/share", "usr/share/liken", payloadDir} {
+		if err := a.dir(d, 0o755); err != nil {
+			return err
+		}
+	}
+	for _, file := range payload {
+		if err := a.file(filepath.Join(payloadDir, file.name), file.data, 0o644); err != nil {
+			return err
+		}
+	}
+	if err := a.close(); err != nil {
+		return err
+	}
+
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(log, "install media for liken %s: %d MB (%d artifacts + the deployment layer)\n",
+		release.Metadata.Name, info.Size()/(1<<20), len(release.Artifacts))
+	return nil
+}

@@ -136,7 +136,7 @@ func TestWriteSlotBootEntry(t *testing.T) {
 	if option.filePath != `\vmlinuz` {
 		t.Errorf("file path: got %q", option.filePath)
 	}
-	wantArgs := `console=ttyS0 rdinit=/liken initrd=\liken.cpio liken.machine=node-1 liken.slot=A panic=10`
+	wantArgs := `console=ttyS0 rdinit=/liken initrd=\liken.cpio initrd=\deployment.cpio liken.machine=node-1 liken.slot=A panic=10`
 	if !bytes.Equal(option.optionalData, encodeUTF16Z(wantArgs)) {
 		t.Errorf("the baked command line is assembled from scratch: % x", option.optionalData)
 	}
@@ -221,8 +221,9 @@ func fakeSlotAMount(t *testing.T) string {
 	return dir
 }
 
-// fakePayload assembles an install payload directory: the artifacts
-// and the release document that vouches for them.
+// fakePayload assembles an install payload directory: the artifacts,
+// the release document that vouches for them, and the deployment
+// layer beside its sidecar.
 func fakePayload(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -243,6 +244,19 @@ artifacts:
 	if err := os.WriteFile(filepath.Join(dir, "release.yaml"), []byte(release), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
+	layer := []byte("the deployment layer")
+	if err := os.WriteFile(filepath.Join(dir, machine.LayerName), layer, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := machine.DigestLayer(bytes.NewReader(layer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, machine.LayerSidecarName), machine.FormatLayerSidecar(digest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	old := releasePayloadDir
 	releasePayloadDir = dir
 	t.Cleanup(func() { releasePayloadDir = old })
@@ -276,7 +290,7 @@ func TestInstallToDisk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, name := range []string{"vmlinuz", "liken.cpio"} {
+	for _, name := range []string{"vmlinuz", "liken.cpio", machine.LayerName, machine.LayerSidecarName} {
 		if _, err := os.Stat(filepath.Join(slotMount, name)); err != nil {
 			t.Errorf("%s lands on the slot: %v", name, err)
 		}
@@ -347,6 +361,34 @@ func TestInstallToDiskNeedsBothSlots(t *testing.T) {
 	fakePayload(t)
 	if err := installToDisk("node-1"); err == nil {
 		t.Error("one slot is not blue-green; the install must refuse")
+	}
+}
+
+func TestInstallToDiskNeedsTheLayerSidecar(t *testing.T) {
+	installedDisk(t)
+	dir := fakePayload(t)
+	fakeSlotAMount(t)
+	fakeFirmware(t, map[string][]byte{})
+	if err := os.Remove(filepath.Join(dir, machine.LayerSidecarName)); err != nil {
+		t.Fatal(err)
+	}
+	err := installToDisk("node-1")
+	if err == nil || !strings.Contains(err.Error(), "sidecar") {
+		t.Errorf("media without the layer's sidecar is incomplete and must refuse: %v", err)
+	}
+}
+
+func TestInstallToDiskRefusesATornLayer(t *testing.T) {
+	installedDisk(t)
+	dir := fakePayload(t)
+	fakeSlotAMount(t)
+	fakeFirmware(t, map[string][]byte{})
+	// A zero-length layer with an intact sidecar: the crash-tear shape.
+	if err := os.WriteFile(filepath.Join(dir, machine.LayerName), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := installToDisk("node-1"); err == nil {
+		t.Error("a layer that fails its sidecar must refuse to install")
 	}
 }
 

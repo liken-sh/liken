@@ -35,6 +35,9 @@ usage:
   liken kubeconfig <identity-dir>          compute an admin kubeconfig
   liken layer <manifests-dir> <identity-dir> <kernel-dist> <output.cpio>
                                            pack a deployment layer
+  liken media <release-dir> <deployment.cpio> <output.cpio>
+                                           assemble install media from
+                                           a release and a layer
   liken publish <image-dir> <channel-dir> <version>
                                            publish a built image to a
                                            release channel
@@ -90,6 +93,11 @@ func run(args []string) error {
 			return fmt.Errorf("usage: liken layer <manifests-dir> <identity-dir> <kernel-dist> <output.cpio>")
 		}
 		return image.Layer(args[1], args[2], args[3], args[4], os.Stdout)
+	case "media":
+		if len(args) != 4 {
+			return fmt.Errorf("usage: liken media <release-dir> <deployment.cpio> <output.cpio>")
+		}
+		return image.Media(args[1], args[2], args[3], os.Stdout)
 	case "publish":
 		if len(args) != 4 {
 			return fmt.Errorf("usage: liken publish <image-dir> <channel-dir> <version>")

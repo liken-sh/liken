@@ -42,11 +42,12 @@ import (
 const installParam = "liken.install"
 
 // releasePayloadDir is where the install image carries the release
-// it installs: the exact artifacts, byte for byte, that the release's
-// own document describes. image/build.sh assembles this as a second
-// cpio concatenated onto the ordinary image; the kernel unpacks
-// concatenated archives in order, the same mechanism early microcode
-// updates use. A variable so tests can supply a payload of their own.
+// it installs: the artifacts the release document lists, byte for
+// byte, plus the deployment layer and its sidecar. image/media.go
+// assembles this as a wrapper cpio concatenated onto the composed
+// system; the kernel unpacks concatenated archives in order, the
+// same mechanism early microcode updates use. A variable so tests
+// can supply a payload of their own.
 var releasePayloadDir = "/usr/share/liken/release"
 
 // installToDisk performs the whole install against the slots that
@@ -104,8 +105,19 @@ func installToDisk(machineName string) error {
 		fmt.Printf("liken: install: %s verified and installed (%d bytes)\n", artifact.Name, artifact.Size)
 	}
 
-	// Register both slots with the firmware. Slot B's entry points
-	// at a file that doesn't exist yet, because its slot stays empty
+	// The deployment layer travels beside the listed artifacts, not
+	// among them: the release document is the public one, and the
+	// layer is this deployment's own, vouched for by its sidecar. The
+	// same discipline applies — verify the payload's copy, copy
+	// durably, verify what landed — and the sidecar goes last, so a
+	// slot with a sidecar is a slot whose layer was complete when it
+	// was written.
+	if err := installLayer(slotMount); err != nil {
+		return err
+	}
+
+	// Register both slots with the firmware. Slot B's entries point
+	// at files that don't exist yet, because its slot stays empty
 	// until the first upgrade fills it. That's fine: a firmware that
 	// can't load an entry's file moves on down BootOrder.
 	entryA, err := writeSlotBootEntry(efiVarsDir, "liken slot A", "A", slotA, machineName)
@@ -134,6 +146,51 @@ func installToDisk(machineName string) error {
 
 	fmt.Printf("liken: install: boot entries %s and %s written; BootOrder prefers slot A\n",
 		bootEntryID(entryA), bootEntryID(entryB))
+	return nil
+}
+
+// installLayer copies the deployment layer and its sidecar from the
+// payload to the slot. The sidecar is the layer's trust root: the
+// release document cannot name the layer (the document is public,
+// the layer is one deployment's own), so media that carries a layer
+// without its sidecar, or a layer its sidecar disowns, is incomplete
+// and the install refuses rather than installs something no later
+// boot could vouch for.
+func installLayer(slotMount string) error {
+	sidecar, err := os.ReadFile(filepath.Join(releasePayloadDir, machine.LayerSidecarName))
+	if err != nil {
+		return fmt.Errorf("install: reading the layer's sidecar: %w", err)
+	}
+	digest, err := machine.ParseLayerSidecar(sidecar)
+	if err != nil {
+		return fmt.Errorf("install: %w", err)
+	}
+
+	verify := func(path string) error {
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		return machine.VerifyLayer(digest, f)
+	}
+
+	source := filepath.Join(releasePayloadDir, machine.LayerName)
+	if err := verify(source); err != nil {
+		return fmt.Errorf("install: the layer this image carries doesn't match its sidecar: %w", err)
+	}
+	dest := filepath.Join(slotMount, machine.LayerName)
+	if err := copyDurably(source, dest); err != nil {
+		return fmt.Errorf("install: copying %s: %w", machine.LayerName, err)
+	}
+	if err := verify(dest); err != nil {
+		return fmt.Errorf("install: the layer on the slot doesn't verify: %w", err)
+	}
+	if err := copyDurably(filepath.Join(releasePayloadDir, machine.LayerSidecarName),
+		filepath.Join(slotMount, machine.LayerSidecarName)); err != nil {
+		return fmt.Errorf("install: copying %s: %w", machine.LayerSidecarName, err)
+	}
+	fmt.Printf("liken: install: %s verified and installed against its sidecar\n", machine.LayerName)
 	return nil
 }
 
@@ -212,9 +269,15 @@ func partitionNumber(p partition) (uint32, error) {
 //	console=...      copied from this boot, so the installed system
 //	                 keeps using whatever console its operator wired
 //	rdinit=/liken    run our program as PID 1
-//	initrd=          \liken.cpio, next to the kernel; the EFI stub
-//	                 loads the initramfs from the same filesystem it
-//	                 loaded the kernel from
+//	initrd=          twice: \liken.cpio (the generic OS) then
+//	                 \deployment.cpio (this deployment's layer), both
+//	                 next to the kernel. The EFI stub loads every
+//	                 initrd= file, in order, from the same filesystem
+//	                 it loaded the kernel from, and the kernel unpacks
+//	                 the concatenation as one system with the layer's
+//	                 entries overriding — composition at load time,
+//	                 which is what lets an upgrade replace the generic
+//	                 half without ever touching the layer
 //	liken.machine=   identity, the bootloader's channel; the entry
 //	                 inherits it from the installer boot
 //	liken.slot=      which slot this entry boots, so a running system
@@ -228,6 +291,7 @@ func writeSlotBootEntry(dir, description, slot string, part *slotPartition, mach
 	args = append(args,
 		"rdinit=/liken",
 		`initrd=\liken.cpio`,
+		`initrd=\`+machine.LayerName,
 		"liken.machine="+machineName,
 		"liken.slot="+slot,
 		"panic=10",

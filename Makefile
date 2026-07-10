@@ -14,7 +14,9 @@
 
 # Version pins name the vendored artifacts, so the root reads them too:
 # downstream rules (the image build, QEMU) depend on these real files,
-# not on phony targets.
+# not on phony targets. liken's own version stamps the binaries and
+# names the release the install media carries.
+LIKEN_VERSION := $(strip $(file <VERSION))
 KERNEL_VERSION := $(strip $(file <kernel/VERSION))
 KERNEL_DIST := kernel/dist/$(KERNEL_VERSION)
 K3S_VERSION := $(strip $(file <k3s/VERSION))
@@ -259,10 +261,17 @@ run-once: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/liken.cpio
 smoke: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/liken.cpio kubeconfig
 	$(MAKE) -C dev-cluster smoke
 
-# The install image is liken.cpio carrying the release payload, which
-# the installer verifies and copies onto a machine's own disk.
-$(IMAGE_DIR)/install.cpio: $(IMAGE_DIR)/liken.cpio $(KERNEL_DIST)/vmlinuz image/install.sh
-	DIST=$(abspath $(IMAGE_DIR)) image/install.sh
+# The install image: a release composed with the lab's deployment
+# layer, carrying the release payload the installer verifies and
+# copies onto a machine's own disk. A real deployment feeds `liken
+# media` a downloaded public release; the lab bundles its own tree
+# into a release-shaped directory first, so the media it boots is
+# assembled by exactly the path a deployment would use.
+$(IMAGE_DIR)/install.cpio: $(GENERIC_IMAGE) $(IMAGE_DIR)/deployment.cpio \
+		$(KERNEL_DIST)/vmlinuz cli/dist/liken VERSION
+	cli/dist/liken bundle $(KERNEL_DIST)/vmlinuz $(GENERIC_IMAGE) cli/dist/liken \
+		$(IMAGE_DIR)/channel $(LIKEN_VERSION)
+	cli/dist/liken media $(IMAGE_DIR)/channel/$(LIKEN_VERSION) $(IMAGE_DIR)/deployment.cpio $@
 
 # Install a machine: boot it once from the "USB stick" (the install
 # image via -kernel), let it put this release on its own system
