@@ -37,11 +37,13 @@ K3S="../k3s/dist/${K3S_VERSION}/k3s"
 KUBECONFIG_FILE="identity/kubeconfig"
 CONSOLE_LOG="guests/node-1/console.log"
 
-# How long the node gets to become Ready. Six minutes is generous for
-# a KVM boot (locally this takes about two); the margin covers a CI
-# runner's slower disks and shared CPUs. Override for experiments:
-# SMOKE_DEADLINE=30 makes a handy rehearsal of the failure path.
-SMOKE_DEADLINE="${SMOKE_DEADLINE:-360}"
+# How long the node gets to become Ready. A KVM boot reaches Ready in
+# under half a minute; two minutes covers a CI runner's slower disks
+# and shared CPUs. A guest that dies outright is caught immediately
+# below, so this deadline only decides how long a hung boot can hold
+# the run. Override for experiments: SMOKE_DEADLINE=10 makes a handy
+# rehearsal of the failure path.
+SMOKE_DEADLINE="${SMOKE_DEADLINE:-120}"
 
 for f in "$K3S" "$KUBECONFIG_FILE"; do
     [[ -e "$f" ]] || {
@@ -75,10 +77,27 @@ teardown() {
 }
 trap teardown EXIT
 
+# On failure, hand back the evidence: the end of the serial console
+# if the machine got far enough to have one, and QEMU's own output,
+# which is where the explanation lands when it did not (a missing
+# host tool, a bad flag, no firmware).
+evidence() {
+    if [[ -e "$CONSOLE_LOG" ]]; then
+        echo "smoke: the last of the console ($CONSOLE_LOG):" >&2
+        tail -n 40 "$CONSOLE_LOG" >&2
+    else
+        echo "smoke: no console log was written" >&2
+    fi
+    echo "smoke: the last of QEMU's own output (guests/node-1/qemu.log):" >&2
+    tail -n 20 guests/node-1/qemu.log >&2 || true
+}
+
 # Poll for the verdict. Each attempt is bounded (--request-timeout)
 # so a half-open connection can't eat the deadline, and failures are
-# expected for the first minute or so: the API server isn't listening
-# until k3s is well into its own startup.
+# expected at first: the API server isn't listening until k3s is well
+# into its own startup. A guest that has died can never become Ready,
+# so that fails the drill immediately instead of waiting out the
+# deadline.
 started="$(date +%s)"
 echo "smoke: booting node-1, waiting up to ${SMOKE_DEADLINE}s for Ready"
 while true; do
@@ -90,10 +109,15 @@ while true; do
         exit 0
     fi
 
+    if ! kill -0 "$guest" 2>/dev/null; then
+        echo "smoke: the guest exited before its node became Ready" >&2
+        evidence
+        exit 1
+    fi
+
     if (( $(date +%s) - started >= SMOKE_DEADLINE )); then
         echo "smoke: node-1 was not Ready within ${SMOKE_DEADLINE}s" >&2
-        echo "smoke: the last of the console ($CONSOLE_LOG):" >&2
-        tail -n 40 "$CONSOLE_LOG" >&2 || true
+        evidence
         exit 1
     fi
 

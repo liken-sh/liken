@@ -34,11 +34,11 @@ jobs:
       # The fetch scripts document their own host requirements; the
       # runner image has most of them (curl, tar, ar, zstd, openssl,
       # docker) already. cpio archives the image and depmod (kmod)
-      # indexes the kernel's modules. QEMU and OVMF are the smoke
-      # drill's virtual hardware — the same packages, at the same
-      # firmware path, the dev-cluster Makefile documents.
+      # indexes the kernel's modules. QEMU, qemu-img (qemu-utils), and
+      # OVMF are the smoke drill's virtual hardware: the same packages,
+      # at the same firmware path, the dev-cluster Makefile documents.
       - name: install host tools
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cpio kmod qemu-system-x86 ovmf
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cpio kmod qemu-system-x86 qemu-utils ovmf
 
       # The runners expose /dev/kvm, but root-only. This is the
       # standard rule to open it to everyone, which on a single-use
@@ -123,10 +123,11 @@ jobs:
       # The serial console is the record of the boot, and it is worth
       # keeping when the drill passes, not just when it fails: a
       # healthy boot is the baseline the next unhealthy one gets
-      # compared against.
+      # compared against. qemu.log rides along because it is where the
+      # failure lands when QEMU itself never got as far as a console.
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: node-1-console
-          path: dev-cluster/guests/node-1/console.log
+          name: node-1-logs
+          path: dev-cluster/guests/node-1/*.log
           if-no-files-found: ignore
