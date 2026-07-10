@@ -1,7 +1,8 @@
 # A real repository and CI builds
 
-Milestone 24 — In progress: the repo is public and the checks run in
-CI; the build and smoke boot remain
+Milestone 24 — In progress: the repo is public, and CI runs the
+checks, the build, and a single-node smoke boot; the three-node
+drill remains
 
 liken today is a checkout that builds itself for one person. The
 first step toward being a public project is the unglamorous one: a
@@ -29,11 +30,17 @@ pre-commit hooks — including the unit tests and the coverage ratchet —
 on every push to main and every pull request, via prek, the same way
 a developer's commit does.
 
-What remains is the build half: `make all` in CI with per-domain
-caches keyed on the VERSION pins, and the smoke boot. GitHub's Linux
-runners expose /dev/kvm, so the boot can be a real KVM boot of the
-assembled image via run-once, with the serial console as the bounded
-artifact. The open question is the success signal — QEMU exiting
-isn't success, since a crashed k3s also exits; the honest minimum is
-probably the node reaching Ready with the operators alive, read from
-the console log.
+The build workflow (.github/workflows/build.yaml) runs `make all` —
+every vendored input fetched and verified, the Go programs compiled,
+the image assembled — with one cache per vendored domain, keyed on
+the same prerequisites the domain's Makefile rule declares, so a pin
+bump rebuilds exactly that domain cold. Then it boots the result:
+`make smoke` (dev-cluster/smoke.sh) starts node-1 from blank disks
+under KVM (the runners expose /dev/kvm) and passes when the node
+reports Ready over the cluster's API, read through the leader's
+forwarded port with the offline-minted admin kubeconfig. The serial
+console uploads as an artifact on every run, pass or fail.
+
+What remains is growing the smoke drill from one machine to three:
+the founding leader plus two followers joining over the multicast
+cluster segment, with the pass condition all three nodes Ready.
