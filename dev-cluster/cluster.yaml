@@ -69,16 +69,15 @@ spec:
   # The fleet's opt-ins from liken's feature vocabulary. liken
   # disables k3s's bundled components by default; naming one here is
   # the declaration that puts it back ({} is a feature's zero
-  # configuration). The lab keeps three features standing the way
-  # node-4 keeps the dummy module: metrics-server exercises the
-  # computed disable list every boot (`kubectl top nodes` proves it
-  # landed), and the two storage clients exercise the vendored-payload
-  # path: iscsi loads its module, writes each machine's initiator
-  # name, and seeds the iscsid DaemonSet; nfs loads nfsv4.
+  # configuration). The lab keeps metrics-server standing the way
+  # node-4 keeps the dummy module: it exercises the computed disable
+  # list every boot, and `kubectl top nodes` proves it landed. The
+  # storage-client features (iscsi, nfs) are exercised by drills
+  # against the lab's storage server (dev-cluster/storage) and opted
+  # in only for those drills, so the storage guest doesn't have to
+  # stay running between them.
   features:
     metrics-server: {}
-    iscsi: {}
-    nfs: {}
 
   releases:
     # Where release artifacts come from: the lab's release server
