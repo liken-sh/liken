@@ -1,0 +1,50 @@
+# The quality checks, run by GitHub Actions on every push to main and
+# every pull request against it.
+#
+# This workflow is deliberately thin. The checks themselves live in
+# .pre-commit-config.yaml, the same config that runs at commit time on
+# a developer's machine, so CI and local development can never disagree
+# about what "clean" means. Everything the hooks need beyond the Go
+# toolchain is pinned in the repo: staticcheck and go-test-coverage are
+# tool directives in go.mod, and the Go version comes from go.mod too.
+# All this job adds is a runner, the toolchain, and prek to drive it.
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# One run per ref at a time. On a pull request, a new push supersedes
+# the old run, so there is no reason to let it finish; on main, every
+# push gets its own group (the commit SHA) and nothing is cancelled,
+# because each commit on main deserves its own verdict.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      # setup-go reads the version from go.mod, so the pin lives where
+      # Go pins live, and it caches the module and build caches keyed
+      # on go.sum, so the hooks' go builds are warm on repeat runs.
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      # prek runs the hooks. Its version is pinned here because the
+      # workflow is the only place CI learns it; the action caches the
+      # environments of the remote hooks (shellcheck and the hygiene
+      # hooks) between runs, and by default runs
+      # `prek run --all-files --show-diff-on-failure`, so a
+      # file-modifying hook like gofmt fails with the diff it wanted
+      # to make instead of a bare exit code.
+      - uses: j178/prek-action@v2
+        with:
+          prek-version: 0.4.8
