@@ -24,6 +24,8 @@ package main
 // written here. Init never rewrites a file a person wrote.
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"maps"
 	"net"
@@ -313,7 +315,39 @@ func persistNodePassword(storage machine.StorageStatus) {
 		fmt.Fprintf(os.Stderr, "liken: node identity: %v\n", err)
 		return
 	}
+	if err := mintNodePassword(dir); err != nil {
+		fmt.Fprintf(os.Stderr, "liken: node identity: %v\n", err)
+		return
+	}
 	fmt.Printf("liken: node identity: /etc/rancher/node persists on machineState\n")
+}
+
+// mintNodePassword writes the node password k3s would otherwise mint
+// for itself on first join. Letting k3s write it is a power cut away
+// from a machine locked out of its own cluster: k3s's write is a
+// plain create, and a cut between the create and the data reaching
+// disk leaves a 0-byte file, which every boot after presents as an
+// empty password and the cluster refuses ("node password not set"),
+// forever. k3s honors a password file that already exists, so init
+// mints it first, with the same atomic, fsynced write the staging
+// files get, in the same format k3s generates (32 hex characters of
+// real randomness).
+//
+// A password that is already here is kept: the cluster recorded it
+// at registration and would refuse a replacement. A 0-byte file is
+// the torn write described above, not a credential, so it counts as
+// absent; the machine this recovers is one whose cut happened before
+// registration, and one cut after was unrecoverable either way.
+func mintNodePassword(dir string) error {
+	path := filepath.Join(dir, "password")
+	if existing, err := os.ReadFile(path); err == nil && len(existing) > 0 {
+		return nil
+	}
+	secret := make([]byte, 16)
+	if _, err := rand.Read(secret); err != nil {
+		return err
+	}
+	return machine.WriteDurable(path, []byte(hex.EncodeToString(secret)+"\n"))
 }
 
 // writeK3sBootConfig derives this machine's role and k3s
@@ -414,6 +448,7 @@ func mountAndSeedClusterState(dev, target string) error {
 	if err := seedClusterState(staging); err != nil {
 		return fmt.Errorf("seeding clusterState: %w", err)
 	}
+	sweepTornK3sFiles(staging)
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", target, err)
 	}
@@ -422,6 +457,55 @@ func mountAndSeedClusterState(dev, target string) error {
 	}
 	_ = os.Remove(staging)
 	return nil
+}
+
+// sweepTornK3sFiles removes the 0-byte identity files a power cut
+// can leave under k3s's state. ext4 can commit a file's creation
+// before its data reaches disk, so a machine that loses power just
+// after k3s writes a certificate, key, or credential can reboot to a
+// file that exists with no bytes in it. k3s treats these files as
+// create-once: an empty one is read and trusted rather than
+// regenerated, and the result is a control plane that cannot start
+// (an apiserver reading a 0-byte loopback certificate reports
+// "failed to find any PEM data" and exits, every restart, forever).
+// None of them is precious: every certificate, key, and credential
+// here is re-minted on demand from the CAs and token the image
+// carries, so deleting a torn one turns an unbootable machine into
+// an ordinary boot. The sweep is deliberately scoped to k3s's
+// identity directories; 0-byte files elsewhere (lock files, disabled
+// charts) are none of init's business. The node password is the same
+// story with its own arrangement (mintNodePassword), because it
+// lives on machineState and k3s would not re-mint a registered one.
+func sweepTornK3sFiles(root string) {
+	remove := func(path string, info os.FileInfo) {
+		if info.IsDir() || info.Size() > 0 {
+			return
+		}
+		if err := os.Remove(path); err == nil {
+			fmt.Printf("liken: swept torn k3s file %s (0 bytes; it will be re-minted)\n", path)
+		}
+	}
+	// The server's tls and cred trees hold nothing but identity
+	// material, so every 0-byte file there is torn.
+	for _, dir := range []string{"k3s/server/tls", "k3s/server/cred"} {
+		_ = filepath.Walk(filepath.Join(root, dir), func(path string, info os.FileInfo, err error) error {
+			if err == nil {
+				remove(path, info)
+			}
+			return nil
+		})
+	}
+	// The agent keeps its certificates, keys, and kubeconfigs at the
+	// top of its directory, next to subtrees (containerd's store)
+	// that are not identity and not walked.
+	for _, pattern := range []string{"*.crt", "*.key", "*.kubeconfig"} {
+		matches, _ := filepath.Glob(filepath.Join(root, "k3s/agent", pattern))
+		for _, path := range matches {
+			if info, err := os.Stat(path); err == nil {
+				remove(path, info)
+			}
+		}
+	}
 }
 
 // seedClusterState copies the image's seed files into a clusterState

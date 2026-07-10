@@ -400,7 +400,7 @@ func TestLoadStagedReportsAnUnreadableFile(t *testing.T) {
 }
 
 func TestWriteDurableReportsAnUnwritableDirectory(t *testing.T) {
-	err := writeDurable(filepath.Join(readOnlyDir(t), "file.yaml"), []byte("x"))
+	err := WriteDurable(filepath.Join(readOnlyDir(t), "file.yaml"), []byte("x"))
 	if err == nil {
 		t.Error("expected an error writing into a read-only directory")
 	}

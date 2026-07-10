@@ -298,7 +298,7 @@ func TestClusterCRDRegistriesSchema(t *testing.T) {
 
 func TestCredentialsFilesAreOwnerOnly(t *testing.T) {
 	// The staged file carries passwords, and the design leans on
-	// writeDurable's CreateTemp giving 0600: this test is the tripwire
+	// WriteDurable's CreateTemp giving 0600: this test is the tripwire
 	// if anyone ever "fixes" those modes.
 	store := RegistryCredentialsStore(t.TempDir())
 	if err := store.WriteStaged([]byte("creds")); err != nil {

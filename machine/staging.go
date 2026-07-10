@@ -177,7 +177,7 @@ func (s ManifestStore) WriteStaged(raw []byte) error {
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
 		return err
 	}
-	return writeDurable(filepath.Join(s.dir, stagedManifest), raw)
+	return WriteDurable(filepath.Join(s.dir, stagedManifest), raw)
 }
 
 // WriteProven records a document as the last-known-good directly: the
@@ -188,7 +188,7 @@ func (s ManifestStore) WriteProven(raw []byte) error {
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
 		return err
 	}
-	return writeDurable(filepath.Join(s.dir, provenManifest), raw)
+	return WriteDurable(filepath.Join(s.dir, provenManifest), raw)
 }
 
 // Promote marks the staged document proven with one rename. The
@@ -220,7 +220,7 @@ func (s ManifestStore) Reject(r Rejection) error {
 	if err != nil {
 		return err
 	}
-	if err := writeDurable(filepath.Join(s.dir, rejectionNote), note); err != nil {
+	if err := WriteDurable(filepath.Join(s.dir, rejectionNote), note); err != nil {
 		return err
 	}
 	if err := os.Rename(filepath.Join(s.dir, stagedManifest), filepath.Join(s.dir, rejectedManifest)); err != nil {
@@ -250,7 +250,7 @@ func (s ManifestStore) WriteAttempted(hash string) error {
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
 		return err
 	}
-	return writeDurable(filepath.Join(s.dir, attemptedMarker), []byte(hash+"\n"))
+	return WriteDurable(filepath.Join(s.dir, attemptedMarker), []byte(hash+"\n"))
 }
 
 // LoadAttempted reads the marker; "" means no trial is underway.
@@ -306,7 +306,7 @@ func (s ManifestStore) ClearRejection() error {
 // in the same directory (rename can't cross filesystems), then
 // rename. Rename within a filesystem is atomic, so a reader polling
 // on its own schedule sees either the old contents or the new, never
-// a torn write. It is writeDurable's sibling for files on tmpfs (the
+// a torn write. It is WriteDurable's sibling for files on tmpfs (the
 // facts, the intent channel), where an fsync would have nothing to
 // flush to.
 func writeAtomic(path string, raw []byte) error {
@@ -325,11 +325,12 @@ func writeAtomic(path string, raw []byte) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-// writeDurable is the atomic, power-loss-proof write: temp file in
+// WriteDurable is the atomic, power-loss-proof write: temp file in
 // the same directory (rename can't cross filesystems), contents
 // fsynced before the rename makes them visible, directory fsynced so
-// the rename itself is on disk.
-func writeDurable(path string, raw []byte) error {
+// the rename itself is on disk. Exported because init needs the same
+// guarantee for the identity files k3s reads (the node password).
+func WriteDurable(path string, raw []byte) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".liken-*")
 	if err != nil {

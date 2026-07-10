@@ -8,6 +8,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/liken-sh/liken/machine"
@@ -147,6 +148,128 @@ func TestPersistNodePasswordSkipsAMemoryBackedMachine(t *testing.T) {
 	// Nothing about a memory-backed machine survives a reboot, so the
 	// tmpfs default is left alone and no symlink is attempted.
 	persistNodePassword(machine.AllRolesInMemory())
+}
+
+func TestMintNodePasswordWritesOne(t *testing.T) {
+	dir := t.TempDir()
+	if err := mintNodePassword(dir); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "password"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`^[0-9a-f]{32}\n$`).Match(raw) {
+		t.Errorf("password %q is not 32 hex characters", raw)
+	}
+	info, err := os.Stat(filepath.Join(dir, "password"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("password mode: got %v, want 0600", info.Mode().Perm())
+	}
+}
+
+func TestMintNodePasswordKeepsAnExistingOne(t *testing.T) {
+	// A password the machine already registered with must never be
+	// replaced: the cluster would refuse the new one.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "password"), []byte("registered\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := mintNodePassword(dir); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "password"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "registered\n" {
+		t.Errorf("an existing password was replaced: %q", raw)
+	}
+}
+
+func TestMintNodePasswordReplacesATornEmptyFile(t *testing.T) {
+	// A 0-byte password is a torn write from a power cut, not a
+	// credential; presenting it earns "node password not set" from
+	// the cluster forever, so minting a real one is strictly better.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "password"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := mintNodePassword(dir); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "password"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) == 0 {
+		t.Error("the torn password was kept")
+	}
+}
+
+// tornStateTree builds a clusterState root the way a power cut can
+// leave one: healthy identity files beside 0-byte torn ones, and a
+// legitimate 0-byte lock file that must survive the sweep.
+func tornStateTree(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	files := map[string]string{
+		"k3s/server/tls/server-ca.crt":                                   "pem bytes",
+		"k3s/server/tls/temporary-certs/apiserver-loopback-client__.crt": "",
+		"k3s/server/tls/temporary-certs/apiserver-loopback-client__.key": "",
+		"k3s/server/cred/passwd":                                         "",
+		"k3s/agent/serving-kubelet.crt":                                  "",
+		"k3s/agent/kubelet.kubeconfig":                                   "config bytes",
+		"k3s/data/.lock":                                                 "",
+	}
+	for rel, content := range files {
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+func TestSweepTornK3sFilesRemovesTornIdentityFiles(t *testing.T) {
+	root := tornStateTree(t)
+	sweepTornK3sFiles(root)
+	for _, torn := range []string{
+		"k3s/server/tls/temporary-certs/apiserver-loopback-client__.crt",
+		"k3s/server/tls/temporary-certs/apiserver-loopback-client__.key",
+		"k3s/server/cred/passwd",
+		"k3s/agent/serving-kubelet.crt",
+	} {
+		if _, err := os.Stat(filepath.Join(root, torn)); !os.IsNotExist(err) {
+			t.Errorf("%s is torn and should be swept", torn)
+		}
+	}
+}
+
+func TestSweepTornK3sFilesKeepsHealthyAndUnrelatedFiles(t *testing.T) {
+	root := tornStateTree(t)
+	sweepTornK3sFiles(root)
+	for _, keep := range []string{
+		"k3s/server/tls/server-ca.crt",
+		"k3s/agent/kubelet.kubeconfig",
+		"k3s/data/.lock",
+	} {
+		if _, err := os.Stat(filepath.Join(root, keep)); err != nil {
+			t.Errorf("%s should survive the sweep: %v", keep, err)
+		}
+	}
+}
+
+func TestSweepTornK3sFilesOnAFreshDiskDoesNothing(t *testing.T) {
+	// A first boot has no k3s state yet; the sweep finding nothing is
+	// the ordinary case, not an error.
+	sweepTornK3sFiles(t.TempDir())
 }
 
 func TestSeedClusterStateReportsAnUnreadableSeed(t *testing.T) {

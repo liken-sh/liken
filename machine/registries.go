@@ -102,7 +102,7 @@ type RegistryCredentials struct {
 // RegistryCredentialsStore is the credentials document's lifecycle
 // store under the given machineState root, beside the Machine's, the
 // Cluster's, and the system release's. The files land owner-only
-// (writeDurable's temp files are 0600, and rename preserves that),
+// (WriteDurable's temp files are 0600, and rename preserves that),
 // which matters here more than anywhere: these bytes are passwords.
 func RegistryCredentialsStore(root string) ManifestStore {
 	return ManifestStore{dir: filepath.Join(root, "registries")}
