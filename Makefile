@@ -271,21 +271,25 @@ $(IMAGE_DIR)/install.cpio: $(IMAGE_DIR)/liken.cpio $(KERNEL_DIST)/vmlinuz image/
 install: $(IMAGE_DIR)/install.cpio
 	$(MAKE) -C dev-cluster install
 
-# Produce a liken release: the same system rebuilt under a different
-# version stamp, published to releases/dist/<version>/ the way a
-# release webserver lays it out (see the releases/ Makefile for the
-# full explanation). The root's contribution is the vendored inputs:
-# a release rebuilds init, the operators, and the image, but the
-# kernel, k3s, and the other vendored artifacts are pinned by their
-# own domains and shared by every release.
+# Produce a release on the dev cluster's channel: the same system
+# rebuilt under a different version stamp, composed with the lab's
+# deployment layer, and published to dev-cluster/releases/dist/ the
+# way a release webserver lays it out (that Makefile explains the
+# deployment side; the version-stamped build itself is the releases
+# domain's `build` target). The root's contribution is the vendored
+# inputs: a release rebuilds init, the operators, and the image, but
+# the kernel, k3s, and the other vendored artifacts are pinned by
+# their own domains and shared by every release. liken's own public
+# releases are a different command: `make -C releases release`, the
+# generic OS and the toolkit with no deployment inside.
 release: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils identity
-	$(MAKE) -C releases release
+	$(MAKE) -C dev-cluster/releases release
 
-# Serve the published releases to the lab over HTTP; the guests reach
-# this at http://10.0.2.2:8017, the source URL the dev cluster's
-# Cluster document declares.
+# Serve the dev channel to the lab over HTTP; the guests reach this
+# at http://10.0.2.2:8017, the source URL the dev cluster's Cluster
+# document declares.
 serve:
-	$(MAKE) -C releases serve
+	$(MAKE) -C dev-cluster/releases serve
 
 # Cleaning includes the dev cluster's disks. If every domain's
 # artifacts were removed but the machine state stayed behind, the
@@ -293,6 +297,7 @@ serve:
 # not be a clean boot.
 clean:
 	$(MAKE) -C releases clean
+	$(MAKE) -C dev-cluster/releases clean
 	$(MAKE) -C dev-cluster clean
 	$(MAKE) -C kernel clean
 	$(MAKE) -C k3s clean

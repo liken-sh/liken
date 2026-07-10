@@ -1,54 +1,54 @@
 # Public releases
 
-Milestone 22 — Not started
+Milestone 22 — In progress: the toolkit, the generic/deployment
+split, and the two-layer release channels exist; install media and
+scaffolding remain
 
-This one is a problem statement, not a design yet.
+The goal, designed from the user's experience inward: download a
+release, run a command, produce a USB stick, boot your cluster —
+human or agent, no repo, no builds. The pieces, as they now exist:
 
-liken has a releases domain, but it publishes the wrong thing for the
-public: versioned builds of one deployment's OS. That is correct for
-what it serves today — the fleet-upgrade machinery verifies the exact
-bytes a machine boots, and those bytes bake the deployment's identity
-and manifests — but it means nothing in releases/dist is publishable.
-A liken.cpio carries the cluster's CA private keys and join token;
-handing one out hands out the cluster. publish.sh already documents
-the symptom: no digest is stable enough to commit, because every
-checkout's artifacts embed that checkout's identity.
+- **The toolkit** is one static Go binary, `liken` (cli/), shipped
+  with public releases. It mints or adopts a cluster identity,
+  computes an admin kubeconfig, packs a deployment layer, and
+  publishes, serves, and drills a release channel. The CLI is a thin
+  dispatch table; each capability lives as a Go package in the domain
+  that owns it (identity/, image/, releases/).
 
-What's missing is the layer above: releases of liken itself, with no
-deployment baked in, so that someone who isn't this repo can run it.
-Two halves to that:
+- **Composition replaces rebuilding.** The image build produces a
+  generic archive: the OS, nobody's identity, a digest that never
+  changes with the deployment. A deployment is a small second cpio
+  (`liken layer`: manifests, identity, declared kernel modules), and
+  concatenating the two is the whole assembly — the kernel unpacks
+  concatenated archives in order into one filesystem, the same
+  mechanism the install image uses to carry its payload.
 
-- **Public artifacts.** Some form of the OS pieces — the init binary,
-  the operator and logs images, the static configuration tree —
-  versioned and digest-verified, with no identity and no manifests.
-  The vendored inputs (kernel, k3s, xtables, the trust bundle) are
-  already pinned by VERSION files and fetched from their own
-  upstreams, so a public release may name those pins rather than
-  rehost the bytes. What exactly is in the set, and how it is
-  verified, is the design work.
+- **Releases come in two layers.** liken's own public releases
+  (releases/) carry vmlinuz, the generic liken.cpio, and the toolkit,
+  named by digest in a release.yaml whose digests are stable and
+  publishable. A deployment's fleet upgrades from its own channel —
+  the same OS composed with its layer, because the digest chain
+  rooted in the Cluster's catalog must cover the exact bytes its
+  machines boot. The repo's lab keeps its channel in
+  dev-cluster/releases/, built from the public build by the same
+  steps any deployment would follow.
 
-- **Utilities for producing a cluster of your own.** The pieces exist
-  but only work inside this checkout, driven by make: mint.sh and
-  adopt.sh produce an identity, kubeconfig.sh computes a credential,
-  and the image build takes IDENTITY, MANIFESTS, and DIST to assemble
-  a deployment's bootable images. A person starting from a public
-  release needs that workflow without the repo: mint or adopt an
-  identity, write a Cluster document and Machine manifests, assemble
-  images, and stand up their own release channel for their fleet.
-  Whether that is a set of scripts, a small CLI, or a documented
-  recipe is part of the design work too.
+Decisions on the record: install media is one stick per machine (the
+media bakes liken.machine=<name> into the kernel command line);
+public releases are self-contained (vmlinuz ships in the bundle, no
+fetch-on-demand); signatures stay deferred with the rest of the
+hardening tier — integrity is the digest chain, rooted in the
+Cluster's catalog for fleets and in the published release.yaml for
+first contact.
 
-The two-layer shape this implies: public releases feed image
-assembly; image assembly feeds a deployment's own release channel;
-the fleet only ever consumes the deployment's channel, because the
-digest chain must cover the deployment's actual images. Today's
-releases/ domain is that deployment channel under a public-sounding
-name, so this milestone likely also decides where the deployment
-channel should live (probably with the deployment, next to its
-identity and image) and lets releases/ come to mean what it says.
+What remains:
 
-Open questions, deliberately unanswered here: signatures (deferred
-with the rest of the hardening tier); whether public artifacts are
-downloads or a source tag plus reproducible builds; and how much of
-"produce your own cluster" belongs in this repo versus in
-documentation.
+- **Install media.** `liken media`: a bootable per-machine image
+  (kernel + composed initramfs + command line) written from a public
+  release plus a deployment directory, the piece that turns "download
+  and run a command" into a stick a machine boots.
+- **Scaffolding.** `liken new`: a deployment directory started from
+  answers (names, disks, NICs), plus the getting-started document
+  that walks the whole path.
+- **Publishing the public bundle somewhere public** — the website
+  milestones (25, 26) own where it lands.

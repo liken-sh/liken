@@ -1,5 +1,19 @@
-// The lab's release server: the dist/ tree over HTTP, every request
-// logged.
+// Package releases produces and operates release channels: the
+// layout a release server publishes (dist/<version>/ holding the
+// artifacts and the release.yaml that names them by digest), the
+// server that exposes it, and the drills that prove machines refuse
+// what the digests disown.
+//
+// Two kinds of channel share this machinery. liken's own public
+// releases carry the generic OS (vmlinuz, the generic liken.cpio,
+// the toolkit binary) with no deployment inside; a deployment's
+// channel carries that OS composed with the deployment's layer,
+// because the digest chain must cover the exact bytes its machines
+// boot. The layouts are the same shape, so the same publishing,
+// serving, and corrupting code operates both.
+package releases
+
+// The release server: a dist/ tree over HTTP, every request logged.
 //
 // A real release server is nothing more than this: static files under
 // stable URLs. The trust chain deliberately asks nothing of the
@@ -9,15 +23,13 @@
 // upgrade from. (Integrity comes from the digests; privacy would take
 // TLS, but there is nothing private about an OS image.)
 //
-// The logging is why this program exists instead of using something
-// like python3 -m http.server. Upgrade drills watch this terminal to
-// see machines fetch: which release, which artifact, how many bytes.
-// A stalled download or a re-fetch after a corruption drill is
-// visible the moment it happens.
-package main
+// The logging is why this exists instead of something like
+// python3 -m http.server. Upgrade drills watch this terminal to see
+// machines fetch: which release, which artifact, how many bytes. A
+// stalled download or a re-fetch after a corruption drill is visible
+// the moment it happens.
 
 import (
-	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -25,9 +37,16 @@ import (
 	"time"
 )
 
+// Serve exposes a channel directory the way a release server would
+// and blocks until the listener fails.
+func Serve(dir, addr string) error {
+	fmt.Println(banner(dir, addr))
+	return http.ListenAndServe(addr, handler(dir))
+}
+
 // handler serves the published releases under /releases/, mirroring
 // the source URL the Cluster's spec declares, and logs one line per
-// request. It is separate from main so the tests can run the server
+// request. It is separate from Serve so the tests can run the server
 // against a throwaway directory.
 func handler(dir string) http.Handler {
 	files := http.StripPrefix("/releases/", http.FileServer(http.Dir(dir)))
@@ -74,13 +93,4 @@ func banner(dir, addr string) string {
 		return fmt.Sprintf("serving releases from %s on %s", dir, addr)
 	}
 	return fmt.Sprintf("serving releases from %s on %s (guests reach this at http://10.0.2.2:%s/releases)", dir, addr, port)
-}
-
-func main() {
-	dir := flag.String("dir", "dist", "the published releases to serve")
-	addr := flag.String("addr", ":8017", "the address to listen on")
-	flag.Parse()
-
-	fmt.Println(banner(*dir, *addr))
-	log.Fatal(http.ListenAndServe(*addr, handler(*dir)))
 }

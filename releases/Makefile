@@ -1,24 +1,32 @@
-# The releases domain: producing liken versions.
+# The releases domain: producing versions of liken itself, for
+# anyone.
 #
 # Everything else in this repo builds *the* system; this domain builds
-# *a version of* the system, on demand, and lays the results out the
-# way a release webserver would publish them:
+# *a version of* the system. A public release carries the generic OS
+# and the toolkit, with no deployment inside (bundle.go describes the
+# set), laid out the way a release server serves it:
 #
 #   releases/dist/<version>/vmlinuz       the kernel
-#   releases/dist/<version>/liken.cpio    the system (init, k3s, all of it)
-#   releases/dist/<version>/install.cpio  the "USB stick" for fresh machines
-#   releases/dist/<version>/release.yaml  the document naming the artifacts
-#                                         by sha256 digest and size
+#   releases/dist/<version>/liken.cpio    the generic system: init,
+#                                         k3s, all of it, and nobody's
+#                                         identity or manifests
+#   releases/dist/<version>/liken         the toolkit: mint an
+#                                         identity, pack a deployment
+#                                         layer, publish a channel —
+#                                         no repo or build required
+#   releases/dist/<version>/release.yaml  the document naming each
+#                                         artifact by sha256 digest
 #
-# `make serve` (serve/main.go) exposes that tree over HTTP exactly as
-# a real release server would, so the lab's machines can download and
-# upgrade across versions without anything leaving this repo. Both
-# trees are gitignored: releases are build products, hundreds of
-# megabytes each, reproducible from the sources that are committed.
+# Because nothing in the bundle depends on a deployment, these digests
+# are stable and publishable. A deployment's own release channel is a
+# different thing: the same OS composed with that deployment's layer,
+# verified by that deployment's fleet. The repo's own lab keeps its
+# channel in dev-cluster/releases/, built from this domain's `build`
+# target, which is the same two-layer shape any deployment follows.
 #
 # A release is an ordinary build with a different version stamp: the
-# init, operators, and image domains all accept LIKEN_VERSION and DIST
-# overrides, so this Makefile re-runs their own rules into
+# init, operators, cli, and image domains all accept LIKEN_VERSION and
+# DIST overrides, so `build` re-runs their own rules into
 # build/<version>/ and never disturbs the normal dist/ trees. After
 # cutting a release, a plain `make run` still boots exactly what it
 # always did.
@@ -28,7 +36,7 @@
 # must be given.
 VERSION ?=
 
-# FAULT selects a deliberate failure: `make release VERSION=x
+# FAULT selects a deliberate failure: `make build VERSION=x
 # FAULT=panic` (or wedge-k3s) builds a release that fails, for
 # drilling the fallback machinery (init/fault.go). Only init carries
 # the fault, because the drill is about a broken boot, and init is
@@ -38,51 +46,37 @@ FAULT ?=
 BUILD = build/$(VERSION)
 KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 
-# A release is composed the same way the dev cluster's image is (see
-# the root Makefile): the generic archive rebuilt under the release's
-# version stamp, the dev deployment's layer packed by the toolkit,
-# and the two concatenated. The layer is rebuilt per release even
-# though its inputs rarely change, because it is small and cheap and
-# a stale layer would be a miserable thing to debug.
-release:
-	@test -n "$(VERSION)" || { echo "usage: make release VERSION=x.y.z"; exit 1; }
+# The version-stamped build: every liken component rebuilt under
+# VERSION into build/<version>/, generic image included. This is the
+# input to both kinds of release: `release` below bundles it publicly,
+# and dev-cluster/releases composes it with the lab's deployment
+# layer.
+build:
+	@test -n "$(VERSION)" || { echo "usage: make build VERSION=x.y.z"; exit 1; }
 	$(MAKE) -C ../init LIKEN_VERSION=$(VERSION) LIKEN_FAULT=$(FAULT) DIST=$(abspath $(BUILD)/init)
 	$(MAKE) -C ../machine-operator LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/machine-operator)
 	$(MAKE) -C ../cluster-operator LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/cluster-operator)
 	$(MAKE) -C ../logs LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/logs)
 	$(MAKE) -C ../open-iscsi LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/open-iscsi)
+	$(MAKE) -C ../cli LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/cli)
 	$(MAKE) -C ../image LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/generic) \
 		INIT_DIST=$(abspath $(BUILD)/init) \
 		MACHINE_OPERATOR_DIST=$(abspath $(BUILD)/machine-operator) \
 		CLUSTER_OPERATOR_DIST=$(abspath $(BUILD)/cluster-operator) \
 		LOGS_DIST=$(abspath $(BUILD)/logs) \
 		OPENISCSI_DIST=$(abspath $(BUILD)/open-iscsi)
-	$(MAKE) -C ../cli
-	mkdir -p $(BUILD)/image
-	../cli/dist/liken layer ../dev-cluster ../dev-cluster/identity \
-		../kernel/dist/$(KERNEL_VERSION) $(BUILD)/image/deployment.cpio
-	cat $(BUILD)/generic/liken.cpio $(BUILD)/image/deployment.cpio \
-		>$(BUILD)/image/liken.cpio
-	LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/image) ../image/install.sh
-	./publish.sh $(VERSION)
 
-# The release server: a logged file server over dist/, listening on
-# 0.0.0.0:8017. The lab's guests reach it at http://10.0.2.2:8017,
-# QEMU's built-in address for "the host" on a user-mode network. That
-# is the source URL dev-cluster/cluster.yaml seeds.
-serve:
-	go run ./serve
-
-# Deliberately damage a published release: flip one byte in the middle
-# of its liken.cpio without touching release.yaml, so the document
-# describes bytes the server no longer has. This drills the case the
-# trust chain exists for: a machine must hold at DigestMismatch with
-# nothing staged, and must never boot the damaged release.
-corrupt:
-	@test -n "$(VERSION)" || { echo "usage: make corrupt VERSION=x.y.z"; exit 1; }
-	./corrupt.sh $(VERSION)
+# The public release: the build, bundled. The toolkit in the bundle
+# is the same binary that lays out the bundle, which is the kind of
+# circularity a bootstrapping tool earns.
+release: build
+	$(BUILD)/cli/liken bundle \
+		../kernel/dist/$(KERNEL_VERSION)/vmlinuz \
+		$(BUILD)/generic/liken.cpio \
+		$(BUILD)/cli/liken \
+		dist $(VERSION)
 
 clean:
 	rm -rf build dist
 
-.PHONY: release serve corrupt clean
+.PHONY: build release clean

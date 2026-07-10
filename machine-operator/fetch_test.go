@@ -3,7 +3,7 @@ package main
 // The fetcher, exercised against a real HTTP server (httptest)
 // serving a real, tiny release: two artifacts and a release.yaml
 // whose digests are computed from their actual bytes, exactly the way
-// publish.sh computes them.
+// the releases package computes them at publish time.
 
 import (
 	"crypto/sha256"

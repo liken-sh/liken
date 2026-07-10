@@ -5,6 +5,7 @@ package main
 // in their own packages; what's under test here is only the table.
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,6 +35,10 @@ func TestRunChecksArgumentCounts(t *testing.T) {
 		{"adopt without directories", []string{"adopt", "only-one"}},
 		{"kubeconfig without a directory", []string{"kubeconfig"}},
 		{"layer without its inputs", []string{"layer", "manifests", "identity"}},
+		{"publish without a version", []string{"publish", "image", "channel"}},
+		{"bundle without its artifacts", []string{"bundle", "vmlinuz"}},
+		{"serve with too many arguments", []string{"serve", "channel", "addr", "extra"}},
+		{"corrupt without a version", []string{"corrupt", "channel"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -71,6 +76,29 @@ func TestRunPacksADeploymentLayer(t *testing.T) {
 	}
 	if _, err := os.Stat(out); err != nil {
 		t.Error("no layer was written")
+	}
+}
+
+func TestRunOperatesAReleaseChannel(t *testing.T) {
+	// One tiny release through the channel commands: bundle it,
+	// publish is exercised by its own package against a full image
+	// payload, corrupt it. The artifacts just need to exist and be
+	// big enough to corrupt.
+	src := t.TempDir()
+	for _, name := range []string{"vmlinuz", "liken.cpio", "liken"} {
+		if err := os.WriteFile(filepath.Join(src, name), bytes.Repeat([]byte("x"), 2<<20), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	channel := t.TempDir()
+
+	err := run([]string{"bundle", filepath.Join(src, "vmlinuz"), filepath.Join(src, "liken.cpio"),
+		filepath.Join(src, "liken"), channel, "0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"corrupt", channel, "0.0.1"}); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -24,6 +24,7 @@ import (
 	"github.com/liken-sh/liken/identity"
 	"github.com/liken-sh/liken/image"
 	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/releases"
 )
 
 const usage = `liken — the toolkit for deployments of liken
@@ -34,6 +35,13 @@ usage:
   liken kubeconfig <identity-dir>          compute an admin kubeconfig
   liken layer <manifests-dir> <identity-dir> <kernel-dist> <output.cpio>
                                            pack a deployment layer
+  liken publish <image-dir> <channel-dir> <version>
+                                           publish a built image to a
+                                           release channel
+  liken serve <channel-dir> [address]      serve a release channel
+                                           (default address :8017)
+  liken corrupt <channel-dir> <version>    damage a published release,
+                                           to drill the trust chain
   liken version                            print the toolkit's version
 
 An identity directory belongs to a deployment and holds its
@@ -43,6 +51,10 @@ and never belong in version control.
 A deployment layer is the small archive that turns the generic liken
 image into one deployment's image: concatenate the two cpio files and
 the kernel unpacks them as one system (image/layer.go explains).
+
+A release channel is a directory of published releases, one version
+per subdirectory, each named by digest in its release.yaml; the
+releases package explains how deployments upgrade from one.
 `
 
 func main() {
@@ -78,6 +90,34 @@ func run(args []string) error {
 			return fmt.Errorf("usage: liken layer <manifests-dir> <identity-dir> <kernel-dist> <output.cpio>")
 		}
 		return image.Layer(args[1], args[2], args[3], args[4], os.Stdout)
+	case "publish":
+		if len(args) != 4 {
+			return fmt.Errorf("usage: liken publish <image-dir> <channel-dir> <version>")
+		}
+		return releases.Publish(args[1], args[2], args[3], os.Stdout)
+	case "bundle":
+		// Bundling is how this repo cuts liken's own public releases
+		// (see releases/bundle.go); it is undocumented in the usage
+		// text above because a deployment publishes, never bundles.
+		if len(args) != 6 {
+			return fmt.Errorf("usage: liken bundle <vmlinuz> <liken.cpio> <liken-cli> <channel-dir> <version>")
+		}
+		return releases.Bundle(args[1], args[2], args[3], args[4], args[5], os.Stdout)
+	case "serve":
+		addr := ":8017"
+		switch len(args) {
+		case 2:
+		case 3:
+			addr = args[2]
+		default:
+			return fmt.Errorf("usage: liken serve <channel-dir> [address]")
+		}
+		return releases.Serve(args[1], addr)
+	case "corrupt":
+		if len(args) != 3 {
+			return fmt.Errorf("usage: liken corrupt <channel-dir> <version>")
+		}
+		return releases.Corrupt(args[1], args[2], os.Stdout)
 	case "version":
 		fmt.Println(machine.Version)
 		return nil

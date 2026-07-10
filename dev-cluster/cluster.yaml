@@ -81,7 +81,7 @@ spec:
 
   releases:
     # Where release artifacts come from: the lab's release server
-    # (releases/serve, started with `make serve`), reached at QEMU's
+    # (`liken serve`, started with `make serve`), reached at QEMU's
     # built-in address for "the host machine" on a user-mode network.
     # The catalog and a target version are deliberately not seeded
     # here. A catalog entry is the digest of a release document, and

@@ -69,7 +69,8 @@ override:
   # the clock syscalls.
   - path: ^logs$
     threshold: 77
-  # The release file server: one handler and its logging, exercised
-  # against httptest.
-  - path: ^releases/serve$
-    threshold: 68
+  # The releases package: publishing, bundling, the corruption drill,
+  # and the file server, exercised against fixture channels and
+  # httptest; untested is Serve's real listener.
+  - path: ^releases$
+    threshold: 77
