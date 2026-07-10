@@ -426,6 +426,75 @@ spec:
                     # parameter, this pair is what changes.
                     maxProperties: 0
                     x-kubernetes-preserve-unknown-fields: true
+                registries:
+                  type: object
+                  description: >-
+                    How container images arrive on the fleet's
+                    machines: mirror endpoints containerd pulls
+                    through, and k3s's embedded peer-to-peer registry
+                    (Spegel). These are cluster facts, because any
+                    node may be asked to pull any image. Credentials
+                    are deliberately not here: a spec is public, so
+                    they enter through the registry-credentials
+                    Secret in liken-system (the shape `kubectl create
+                    secret docker-registry` produces), which the
+                    machine operator reads and delivers to each
+                    machine. Like the features above, registries are
+                    read only when the k3s process starts, so an edit
+                    here converges by restarting k3s in place on each
+                    machine — sequenced through the same
+                    one-leader-at-a-time turns as a reboot, but with
+                    the machine, and its pods, staying up.
+                  properties:
+                    mirrors:
+                      type: object
+                      maxProperties: 64
+                      description: >-
+                        Registry host to the endpoint URLs containerd
+                        tries, in preference order, before falling
+                        back to the registry itself. The key is the
+                        host as an image reference names it
+                        (docker.io, registry.example:5000).
+                      # The same nullable-plus-rule defense the
+                      # features map uses, because the decoder drops
+                      # a null value for a non-nullable field before
+                      # validation ever runs: without it, a bare
+                      # `docker.io:` in hand-written YAML would
+                      # quietly declare nothing. One wrinkle the
+                      # scratch drill caught: this map's values are
+                      # arrays, which CEL types as list(string) and
+                      # refuses to compare with null at compile time
+                      # (the features map's values type as dyn, so
+                      # its rule never hit this). The dyn() cast is
+                      # what lets the null check compile.
+                      x-kubernetes-validations:
+                        - rule: "self.all(host, dyn(self[host]) != null && self[host].size() > 0)"
+                          message: >-
+                            a mirror must list at least one endpoint
+                            URL; write the endpoints, or remove the
+                            host entirely
+                      additionalProperties:
+                        type: array
+                        nullable: true
+                        # Order is preference order, whole-list
+                        # replacement on apply.
+                        x-kubernetes-list-type: atomic
+                        maxItems: 16
+                        items:
+                          type: string
+                          maxLength: 2048
+                          pattern: ^https?://.+$
+                    embedded:
+                      type: boolean
+                      description: >-
+                        Turns on k3s's embedded registry mirror
+                        (Spegel): every node serves the images it
+                        already holds to its peers, so a fleet pulls
+                        each image over the uplink once instead of
+                        once per machine. Enabling it shares every
+                        registry's images (the wildcard mirror entry
+                        in registries.yaml); the declared mirrors
+                        above keep their own entries either way.
             status:
               type: object
               description: >-

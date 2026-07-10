@@ -77,6 +77,23 @@ func TestCarryOutConvergenceReportsAFailedStaging(t *testing.T) {
 	}
 }
 
+func TestCarryOutConvergenceReportsAFailedRestartRequest(t *testing.T) {
+	// The intent channel directory is init's to create, and on a
+	// machine where it is missing the request must downgrade to
+	// StagingFailed rather than report a restart that will not
+	// happen — the same posture a failed staging takes.
+	store := machine.RegistryCredentialsStore(t.TempDir())
+	conv := convergence{
+		condition:      notConverged("CredentialsConverged", "RestartRequested", "restarting"),
+		requestRestart: true,
+		hash:           "abc123",
+	}
+	condition := carryOutConvergence(conv, store, "registry credentials", lifecycleNow)
+	if condition.Reason != "StagingFailed" {
+		t.Errorf("got %s", condition.Reason)
+	}
+}
+
 // partitionFacts is the durable-machineState precondition every
 // lifecycle path checks first.
 func partitionFacts(source machine.ManifestSource, hash string) *machine.MachineStatus {

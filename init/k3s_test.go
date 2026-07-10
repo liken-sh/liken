@@ -283,6 +283,31 @@ func TestK3sBootConfigFollowersNeverRenderTheDisableList(t *testing.T) {
 	}
 }
 
+func TestK3sBootConfigEmbeddedRegistryOnLeaders(t *testing.T) {
+	c := labCluster()
+	c.Spec.Registries.Embedded = true
+	got := k3sBootConfig(k3sBootInputs{role: machine.RoleLeader, cluster: c, haveToken: true})
+	if !strings.Contains(got, "embedded-registry: true\n") {
+		t.Errorf("an embedded opt-in renders the server key:\n%s", got)
+	}
+}
+
+func TestK3sBootConfigEmbeddedRegistryOffByDefault(t *testing.T) {
+	got := k3sBootConfig(k3sBootInputs{role: machine.RoleLeader, cluster: labCluster(), haveToken: true})
+	if strings.Contains(got, "embedded-registry") {
+		t.Errorf("the embedded registry is an opt-in:\n%s", got)
+	}
+}
+
+func TestK3sBootConfigFollowersNeverRenderEmbeddedRegistry(t *testing.T) {
+	c := labCluster()
+	c.Spec.Registries.Embedded = true
+	got := k3sBootConfig(k3sBootInputs{role: machine.RoleFollower, cluster: c, haveToken: true})
+	if strings.Contains(got, "embedded-registry") {
+		t.Errorf("embedded-registry is a server-side key an agent would refuse:\n%s", got)
+	}
+}
+
 func leaderDB(t *testing.T) string {
 	t.Helper()
 	db := filepath.Join(t.TempDir(), "db")

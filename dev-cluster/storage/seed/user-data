@@ -1,8 +1,10 @@
 #cloud-config
 # The storage server's entire configuration. cloud-init reads this
 # file from the seed ISO on first boot and turns a stock Debian image
-# into the lab's filer: an NFSv4 export and an iSCSI target, the two
-# protocols liken's storage-client features speak. Nothing is
+# into the lab's filer: an NFSv4 export and an iSCSI target (the two
+# protocols liken's storage-client features speak), and an
+# authenticated container registry (the fixture liken's registry
+# mirrors and credentials are drilled against). Nothing is
 # configured by hand; wipe the root disk (make clean) and the next
 # boot rebuilds the server from this file alone. (Almost alone: the
 # Makefile appends ssh_authorized_keys with this checkout's minted
@@ -36,6 +38,15 @@ packages:
   # Performance is beside the point here — the drill is the client's
   # login, not the server's throughput.
   - tgt
+  # The container registry: Debian's build of CNCF distribution, the
+  # reference registry everyone else's is measured against. One
+  # daemon, one YAML config. It runs here as an authenticated
+  # pull-through mirror of Docker Hub, which is both halves of what
+  # liken's registries drill needs: a mirror endpoint for
+  # spec.registries, and a login for the registry-credentials Secret.
+  - docker-registry
+  # htpasswd, to mint the registry's credential file.
+  - apache2-utils
 
 # The exports disk arrives blank, like every disk in this lab; the
 # server formats it on first boot. The by-id path is the disk's QEMU
@@ -82,12 +93,49 @@ write_files:
       <target iqn.2026-07.sh.liken.lab:storage>
           backing-store /dev/disk/by-id/virtio-storage-luns
       </target>
+  # The registry's configuration, at a path of our own rather than
+  # the package's config.yml, which is a dpkg conffile (the same
+  # reasoning as the .d files above; the systemd drop-in below points
+  # the daemon here). Plain HTTP, deliberately: the machines' trust
+  # store carries only the Mozilla roots, so a lab CA would mean
+  # rebuilding images, and containerd treats an http:// mirror
+  # endpoint as plain by its URL scheme alone. htpasswd auth over
+  # plain HTTP is the fixture's whole point — the drill is whether
+  # containerd presents credentials, not whether TLS works.
+  # proxy.remoteurl makes it a pull-through mirror: a pull for any
+  # Docker Hub image lands here, is fetched upstream once, cached on
+  # the root disk, and served to the whole fleet after.
+  - path: /etc/docker/registry/liken-config.yml
+    content: |
+      version: 0.1
+      storage:
+        filesystem:
+          rootdirectory: /var/lib/docker-registry
+      http:
+        addr: :5000
+      auth:
+        htpasswd:
+          realm: liken-lab
+          path: /etc/docker/registry/htpasswd
+      proxy:
+        remoteurl: https://registry-1.docker.io
+  - path: /etc/systemd/system/docker-registry.service.d/liken.conf
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart=/usr/bin/docker-registry serve /etc/docker/registry/liken-config.yml
 
-# Package install starts both daemons before this stage runs, and tgt
+# Package install starts the daemons before this stage runs, and tgt
 # reads conf.d only at startup, so restart it once its config is
 # certainly in place. exportfs -ra does the same for nfsd without a
 # restart: the exports table is pushed into the kernel, not read at
-# start.
+# start. The registry gets its credential first — one committed lab
+# login (liken / pull-through-lab; a fixture on a host-local segment,
+# the same posture as the root password above) — then a restart to
+# pick up the drop-in pointing at our config.
 runcmd:
   - [systemctl, restart, tgt]
   - [exportfs, -ra]
+  - [htpasswd, -Bbc, /etc/docker/registry/htpasswd, liken, pull-through-lab]
+  - [systemctl, daemon-reload]
+  - [systemctl, restart, docker-registry]

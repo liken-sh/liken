@@ -145,7 +145,7 @@ func actuateVendoredFeature(moduleBase, slug, machineName string) machine.Featur
 	// directory, an extra file on a follower is inert, and contents
 	// that varied by role would be one more thing to reason about
 	// during a promotion.
-	if err := seedFeatureManifests(dir); err != nil {
+	if err := seedFeatureManifests(slug); err != nil {
 		status.State = machine.FeatureFailed
 		status.Message = err.Error()
 		return status
@@ -179,12 +179,20 @@ func writeInitiatorName(machineName string) error {
 	return os.WriteFile(filepath.Join(iscsiDir, "initiatorname.iscsi"), []byte(name), 0o600)
 }
 
+// featureManifestPaths lists one feature's workload manifests as the
+// image ships them. This is the single place the layout
+// (featuresDir/<slug>/manifests/*.yaml) is spelled, so seeding and
+// retraction can never disagree about where a feature's workloads
+// live. A feature with no manifests directory has no workload,
+// which is fine; nfs is exactly that shape.
+func featureManifestPaths(slug string) ([]string, error) {
+	return filepath.Glob(filepath.Join(featuresDir, slug, "manifests", "*.yaml"))
+}
+
 // seedFeatureManifests copies a feature's workload manifests into
-// k3s's auto-deploy directory. A feature with no manifests directory
-// has no workload, which is fine; nfs, when it arrives, will be
-// exactly that shape.
-func seedFeatureManifests(dir string) error {
-	manifests, err := filepath.Glob(filepath.Join(dir, "manifests", "*.yaml"))
+// k3s's auto-deploy directory.
+func seedFeatureManifests(slug string) error {
+	manifests, err := featureManifestPaths(slug)
 	if err != nil {
 		return err
 	}

@@ -225,6 +225,7 @@ type convergence struct {
 	condition      machine.Condition
 	stage          bool   // write manifest to the machineState filesystem
 	requestReboot  bool   // write the reboot intent for init
+	requestRestart bool   // write the restart intent: a k3s bounce applies it
 	withdraw       bool   // remove the staged manifest; the spec no longer wants it
 	clearRejection bool   // remove the rejection record; the spec it blocks is gone
 	manifest       []byte // the bytes to stage
@@ -248,25 +249,36 @@ func convergenceUnknown(condType, reason, message string) machine.Condition {
 	return machine.Condition{Type: condType, Status: machine.ConditionUnknown, Reason: reason, Message: message}
 }
 
-// gateReboot finishes a staged document's convergence: the staged
-// bytes are already in the convergence, and what remains is whether
-// this machine may reboot to apply them right now. The decision
-// table is identical for every staged document and is the safety
-// core of the rollout design, so it lives here once: Manual policy
-// always waits for a person (RebootPending), a cluster member on
-// Auto waits for the conductor's turn (AwaitingTurn), and only a
-// standalone or granted machine actually asks init to reboot
-// (RebootRequested). The messages differ per document; the reasons
-// and their order of precedence must not.
-func gateReboot(c *convergence, condType string, policy machine.RebootPolicy, t turn, pending, awaiting, requested string) {
+// gateDisruption finishes a staged document's convergence: the
+// staged bytes are already in the convergence, and what remains is
+// whether this machine may take its disruption right now. The
+// decision table is identical for every staged document and is the
+// safety core of the rollout design, so it lives here once: Manual
+// policy always waits for a person, a cluster member on Auto waits
+// for the conductor's turn (AwaitingTurn, the same reason for both
+// disruption kinds, which is what lets the conductor sequence them
+// without knowing the difference), and only a standalone or granted
+// machine actually asks init to act. The restart flag picks the
+// disruption's kind: a k3s bounce for changes read only at k3s
+// process start, a machine reboot for everything else. A leader's
+// restart still bounces the embedded datastore, which is exactly the
+// quorum exposure a reboot has — that is why restarts take the same
+// turns. The messages differ per document; the reasons and their
+// order of precedence must not.
+func gateDisruption(c *convergence, condType string, policy machine.RebootPolicy, t turn, restart bool, pending, awaiting, requested string) {
+	pendingReason, requestedReason := "RebootPending", "RebootRequested"
+	if restart {
+		pendingReason, requestedReason = "RestartPending", "RestartRequested"
+	}
 	switch {
 	case policy != machine.RebootAuto:
-		c.condition = notConverged(condType, "RebootPending", pending)
+		c.condition = notConverged(condType, pendingReason, pending)
 	case t == turnAwaiting:
 		c.condition = notConverged(condType, "AwaitingTurn", awaiting)
 	default:
-		c.requestReboot = true
-		c.condition = notConverged(condType, "RebootRequested", requested)
+		c.requestReboot = !restart
+		c.requestRestart = restart
+		c.condition = notConverged(condType, requestedReason, requested)
 	}
 }
 
@@ -343,7 +355,7 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 		hash:     hash,
 		stage:    stagedHash != hash, // idempotence: skip the write when these exact bytes are already staged
 	}
-	gateReboot(&c, "SpecConverged", m.Spec.RebootPolicyOrDefault(), t,
+	gateDisruption(&c, "SpecConverged", m.Spec.RebootPolicyOrDefault(), t, false,
 		fmt.Sprintf("spec staged for the next boot (%.12s); rebootPolicy is Manual, so reboot the machine (or set rebootPolicy: Auto) to apply: %s", hash, diffs),
 		fmt.Sprintf("spec staged for the next boot (%.12s); waiting for the cluster to grant a reboot turn: %s", hash, diffs),
 		fmt.Sprintf("reboot requested to apply the staged spec (%.12s): %s", hash, diffs))

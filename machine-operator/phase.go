@@ -58,7 +58,8 @@ func conditionPhase(c machine.Condition) machine.Phase {
 		// working its way up.
 		return machine.PhaseBooting
 	case "RejectedLastBoot", "StagingRejected", "BootMismatch", "MachineStateEphemeral",
-		"NoSystemSlots", "NotInstalled", "NoReleaseSource", "VersionNotInCatalog", "DigestMismatch":
+		"NoSystemSlots", "NotInstalled", "NoReleaseSource", "VersionNotInCatalog", "DigestMismatch",
+		"CredentialsInvalid":
 		// Drift exists but liken refuses or is unable to stage it.
 		// Time won't fix these; a different edit will. The version
 		// target can be stuck several ways: no slots to hold a
@@ -67,19 +68,21 @@ func conditionPhase(c machine.Condition) machine.Phase {
 		// source or without the target, and a download whose bytes
 		// don't match the catalog's digest. That last one is corrupt
 		// at the source, where refetching can't change what the
-		// server publishes.
+		// server publishes. A malformed credentials Secret is the
+		// same shape: only a corrected Secret fixes it.
 		return machine.PhaseBlocked
-	case "RebootRequested", "DemotionRebooting", "Draining", "Downloading":
-		// A reboot is in flight; the machine is mid-change. Draining
-		// is the first step of that reboot: the node is cordoned and
-		// its workloads are being evicted before the machine goes
-		// down. Downloading is the version target's equivalent. The
-		// change is arriving over the network instead of waiting on a
+	case "RebootRequested", "RestartRequested", "DemotionRebooting", "Draining", "Downloading":
+		// A disruption is in flight; the machine is mid-change.
+		// Draining is the first step of a reboot: the node is
+		// cordoned and its workloads are being evicted before the
+		// machine goes down (a k3s restart skips it; pods survive).
+		// Downloading is the version target's equivalent. The change
+		// is arriving over the network instead of waiting on a
 		// reboot, but the machine is just as much mid-change.
 		return machine.PhaseUpdating
-	case "RebootPending", "DemotionPending", "AwaitingTurn":
+	case "RebootPending", "RestartPending", "DemotionPending", "AwaitingTurn":
 		// A change is staged and waiting, either on a Manual reboot
-		// or on the cluster granting this machine its reboot turn. A
+		// or on the cluster granting this machine its turn. A
 		// verified release waiting for its proving reboot reads the
 		// same way, because it is waiting on exactly the same things.
 		return machine.PhaseUpdatePending

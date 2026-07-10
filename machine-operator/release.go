@@ -166,7 +166,7 @@ func decideSystemStaging(ask fetchAsk, snap fetchSnapshot, m *machine.Machine, r
 	}
 
 	c := convergence{manifest: record, hash: hash, stage: stagedHash != hash}
-	gateReboot(&c, "VersionConverged", m.Spec.RebootPolicyOrDefault(), t,
+	gateDisruption(&c, "VersionConverged", m.Spec.RebootPolicyOrDefault(), t, false,
 		fmt.Sprintf("release %s is verified on slot %s and staged (%.12s); rebootPolicy is Manual, so reboot the machine (or set rebootPolicy: Auto) to prove it", ask.version, ask.slot, hash),
 		fmt.Sprintf("release %s is verified on slot %s and staged (%.12s); waiting for the cluster to grant a reboot turn", ask.version, ask.slot, hash),
 		fmt.Sprintf("reboot requested to prove release %s on slot %s (%.12s)", ask.version, ask.slot, hash))

@@ -822,6 +822,33 @@ spec:
                       enum: [Staged, Proven, Seed]
                     clusterManifestHash:
                       type: string
+                    credentialsSource:
+                      type: string
+                      # No Seed here, deliberately: the operator is
+                      # the credentials document's only author, so no
+                      # image ever carries one and no first boot ever
+                      # reads one.
+                      enum: [Staged, Proven]
+                      description: >-
+                        Which copy of the registry-credentials
+                        document this boot (or the latest k3s
+                        restart) rendered into registries.yaml.
+                        Absent on a machine that has never had
+                        credentials, which is an ordinary state: its
+                        pulls are anonymous.
+                    credentialsHash:
+                      type: string
+                    restarts:
+                      type: integer
+                      description: >-
+                        How many in-place k3s restarts this boot has
+                        performed to apply restart-class changes
+                        (feature toggles, registry configuration). It
+                        shares the boot record's lifetime on purpose:
+                        a change that arrived by restart increments
+                        this without moving bootedAt, and a change
+                        that arrived by reboot moves bootedAt and
+                        returns this to zero.
                     slot:
                       type: string
                       enum: [A, B]
@@ -935,6 +962,21 @@ spec:
                         rejectedAt:
                           type: string
                           format: date-time
+                    credentialsRejection:
+                      type: object
+                      description: >-
+                        The standing verdict on a staged
+                        registry-credentials document that would not
+                        parse. It holds until a different rendering
+                        (a Secret edit) supersedes it.
+                      properties:
+                        hash:
+                          type: string
+                        reason:
+                          type: string
+                        rejectedAt:
+                          type: string
+                          format: date-time
                 sysctls:
                   type: object
                   description: >-
@@ -999,6 +1041,30 @@ spec:
                       message:
                         type: string
                         maxLength: 1024
+                registries:
+                  type: object
+                  description: >-
+                    What this machine rendered into k3s's
+                    registries.yaml: which registries are mirrored,
+                    which have credentials, and whether the embedded
+                    registry is on. Hosts and counts only — the
+                    credential material itself never appears in
+                    status.
+                  properties:
+                    mirrors:
+                      type: array
+                      x-kubernetes-list-type: atomic
+                      items:
+                        type: string
+                        maxLength: 256
+                    credentialedHosts:
+                      type: array
+                      x-kubernetes-list-type: atomic
+                      items:
+                        type: string
+                        maxLength: 256
+                    embedded:
+                      type: boolean
                 bootedAt:
                   type: string
                   format: date-time

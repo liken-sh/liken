@@ -362,32 +362,39 @@ func writeRTC() {
 }
 
 // disciplineClock builds the machine plane's time component: measure,
-// slew, publish, sleep, forever. It is the only writer of facts.Time
-// and, from the moment it starts, of the facts file, so no lock is
-// needed. It prints transitions rather than every poll: a sync
-// gained, a sync lost, and an offset only when it exceeds the step
-// threshold, which means drift is outrunning the slew. The facts get
-// the same restraint: a poll's measurement replaces facts.Time in
-// memory every time, but the file is only rewritten when the
-// measurement is news (worthRepublishing), never for microsecond
-// wobble.
-func disciplineClock(clk *clock, facts *machine.MachineStatus) func(context.Context) error {
+// slew, publish, sleep, forever. It is the only writer of facts.Time,
+// but not of the facts file — the restart path also rewrites it — so
+// every touch goes through the guarded owner (facts.go). It prints
+// transitions rather than every poll: a sync gained, a sync lost,
+// and an offset only when it exceeds the step threshold, which means
+// drift is outrunning the slew. The facts get the same restraint: a
+// poll's measurement replaces facts.Time in memory every time (so
+// any other writer's rewrite carries the freshest clock), but this
+// loop only rewrites the file when the measurement is news
+// (worthRepublishing), never for microsecond wobble.
+func disciplineClock(clk *clock, facts *factsFile) func(context.Context) error {
 	return func(ctx context.Context) error {
+		// current mirrors facts.Time: this loop is its only writer,
+		// so a local copy reads consistently without holding the lock
+		// through the loop's judgments.
+		var current machine.TimeStatus
+		facts.mutate(func(s *machine.MachineStatus) { current = s.Time })
+
 		lastGood := time.Time{}
-		if facts.Time.LastSync != nil {
-			lastGood = *facts.Time.LastSync
+		if current.LastSync != nil {
+			lastGood = *current.LastSync
 		}
 		// What the facts file currently says, the baseline every
 		// "is this news?" judgment compares against. The boot step
 		// published facts.Time as it stands now, moments ago.
-		published := facts.Time
-		publishedOffset, _ := time.ParseDuration(facts.Time.Offset)
+		published := current
+		publishedOffset, _ := time.ParseDuration(current.Offset)
 		publishedAt := time.Now()
 		// The boot step (or its absence) decided whether the RTC has
 		// been written yet; a boot that came up on a wrong hardware
 		// clock gets its RTC corrected at the first sync this loop
 		// achieves instead.
-		rtcWritten := facts.Time.State == machine.TimeSynchronized
+		rtcWritten := current.State == machine.TimeSynchronized
 		for {
 			if !sleepUnlessCancelled(ctx, timePollInterval) {
 				// Clean shutdown: leave the hardware clock holding
@@ -403,12 +410,12 @@ func disciplineClock(clk *clock, facts *machine.MachineStatus) func(context.Cont
 				// changes the machine's state: past the staleness
 				// window, the machine stops claiming a synchronized
 				// clock.
-				if facts.Time.State == machine.TimeSynchronized && time.Since(lastGood) > syncStaleAfter {
+				if current.State == machine.TimeSynchronized && time.Since(lastGood) > syncStaleAfter {
 					fmt.Fprintf(os.Stderr, "liken: time: lost every source (%v); the clock is on its own\n", err)
-					facts.Time.State = machine.TimeUnsynchronized
-					facts.Time.Stratum = stratumUnsynchronized
-					publishTimeFacts(facts)
-					published, publishedAt = facts.Time, time.Now()
+					current.State = machine.TimeUnsynchronized
+					current.Stratum = stratumUnsynchronized
+					facts.publish(func(s *machine.MachineStatus) { s.Time = current })
+					published, publishedAt = current, time.Now()
 				}
 				continue
 			}
@@ -416,7 +423,7 @@ func disciplineClock(clk *clock, facts *machine.MachineStatus) func(context.Cont
 			if err := slewClock(sync.offset); err != nil {
 				fmt.Fprintf(os.Stderr, "liken: time: slewing the clock: %v\n", err)
 			}
-			if facts.Time.State != machine.TimeSynchronized {
+			if current.State != machine.TimeSynchronized {
 				fmt.Printf("liken: time: synchronized to %s (stratum %d), offset %s\n",
 					sync.source, sync.stratum, sync.offset.Round(10*time.Microsecond))
 			} else if sync.offset.Abs() >= stepThreshold {
@@ -433,20 +440,13 @@ func disciplineClock(clk *clock, facts *machine.MachineStatus) func(context.Cont
 			// *published*, not the last poll's, so small wobbles
 			// accumulate toward the threshold instead of resetting it
 			// every 64 seconds.
-			facts.Time = timeStatus(sync, clk.sources)
-			if worthRepublishing(published, facts.Time, sync.offset-publishedOffset, time.Since(publishedAt)) {
-				publishTimeFacts(facts)
-				published, publishedOffset, publishedAt = facts.Time, sync.offset, time.Now()
+			current = timeStatus(sync, clk.sources)
+			if worthRepublishing(published, current, sync.offset-publishedOffset, time.Since(publishedAt)) {
+				facts.publish(func(s *machine.MachineStatus) { s.Time = current })
+				published, publishedOffset, publishedAt = current, sync.offset, time.Now()
+			} else {
+				facts.mutate(func(s *machine.MachineStatus) { s.Time = current })
 			}
 		}
-	}
-}
-
-// publishTimeFacts rewrites the facts file with the current time
-// status. The write is the same atomic replace every facts write is,
-// so the operator sees old facts or new, never torn ones.
-func publishTimeFacts(facts *machine.MachineStatus) {
-	if err := machine.WriteFacts(machine.FactsPath, facts); err != nil {
-		fmt.Fprintf(os.Stderr, "liken: time: writing facts: %v\n", err)
 	}
 }

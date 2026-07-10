@@ -66,8 +66,11 @@ the specific workload that revealed it:
     17, which builds on it.
 19. [x] [Choosing the bundled components](19-choosing-bundled-components.md) —
     folded into 17's feature vocabulary.
-20. [ ] [Private registries](20-private-registries.md) —
-    containerd mirrors and credentials, and k3s's embedded registry.
+20. [x] [Private registries](20-private-registries.md) —
+    spec.registries (mirrors and Spegel), credentials by Secret, and
+    the k3s restart tier: changes k3s reads only at process start
+    converge by bouncing k3s in place, pods surviving, with the
+    feature toggles migrated onto it.
 21. [x] [Node labels on the Machine](21-node-labels.md) —
     scheduling identity declared on the Machine spec: registered at
     boot, reconciled live, and retractions actually retract.

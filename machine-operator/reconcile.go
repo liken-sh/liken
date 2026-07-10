@@ -132,6 +132,16 @@ func carryOutConvergence(conv convergence, store machine.ManifestStore, what str
 		}
 		fmt.Printf("requested a reboot to apply %s %.12s\n", what, conv.hash)
 	}
+	if conv.requestRestart {
+		intent := &machine.RestartIntent{
+			Reason:      "applying the staged " + what,
+			RequestedAt: now,
+		}
+		if err := machine.WriteRestartIntent(machine.OperatorRunDir, intent); err != nil {
+			return failed(err)
+		}
+		fmt.Printf("requested a k3s restart to apply %s %.12s\n", what, conv.hash)
+	}
 	return conv.condition
 }
 
@@ -234,7 +244,14 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	// cordoned and emptied before the intent is written, so workloads
 	// move to other nodes instead of being killed by the reboot.
 	draining := false
+	rebooting := false
 	gate := func(conv convergence) convergence {
+		// A reboot already requested this pass subsumes any restart:
+		// the boot path re-renders everything a restart would have,
+		// so a second intent would only be noise. (Init also prefers
+		// the reboot file when both exist, so this is belt and
+		// braces.)
+		conv.requestRestart = conv.requestRestart && !rebooting
 		if !conv.requestReboot || t != turnGranted || nodeErr != nil {
 			return conv
 		}
@@ -253,7 +270,7 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	// policy, and this condition is where the fleet's transient
 	// disagreement about the Cluster is visible.
 	var liveCluster *machine.Cluster
-	rebooting := conv.requestReboot
+	rebooting = conv.requestReboot
 	if clusterName != "" {
 		var cconv convergence
 		clusterStore := machine.ClusterManifests(machine.MachineStateDir)
@@ -262,8 +279,9 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 				fmt.Sprintf("reading cluster %s: %v", clusterName, err))}
 		} else {
 			clusterRejection, _ := clusterStore.LoadRejection()
+			bootDoc, bootHash := bootClusterDocument(machine.BootClusterManifestPath)
 			cconv = gate(decideClusterConvergence(liveCluster, m, facts, clusterRejection,
-				bootClusterHash(machine.BootClusterManifestPath), readStagedHash(clusterStore), t))
+				bootDoc, bootHash, readStagedHash(clusterStore), t))
 		}
 		condition := carryOutConvergence(cconv, clusterStore, "cluster document", now)
 		status.Conditions = machine.SetCondition(status.Conditions, condition, now)
@@ -290,6 +308,24 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 			status.Conditions = machine.SetCondition(status.Conditions, condition, now)
 			rebooting = rebooting || vconv.requestReboot
 		}
+
+		// Registry credentials converge through the same machinery,
+		// from a different source: the registry-credentials Secret
+		// rather than a CRD (registries.go). The read happens here so
+		// the decision stays pure. Only a cluster member carries
+		// credentials at all — a machine with no cluster document has
+		// no operator-authored documents of any kind.
+		credentialsStore := machine.RegistryCredentialsStore(machine.MachineStateDir)
+		credentialsRejection, _ := credentialsStore.LoadRejection()
+		in := registriesInputs{}
+		if secret, fetchErr := kubernetes.GetRegistryCredentialsSecret(c); fetchErr != nil {
+			in.fetchErr = fetchErr
+		} else {
+			in.desired, in.parseErr = desiredRegistryCredentials(secret)
+		}
+		rconv := gate(decideRegistriesConvergence(in, m, facts, credentialsRejection, readStagedHash(credentialsStore), t))
+		condition = carryOutConvergence(rconv, credentialsStore, "registry credentials", now)
+		status.Conditions = machine.SetCondition(status.Conditions, condition, now)
 	}
 
 	if nodeErr == nil {

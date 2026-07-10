@@ -186,6 +186,19 @@ type ClusterSpec struct {
 	// fleet as staged changes and granted reboots.
 	Features map[string]*FeatureConfig `json:"features,omitempty"`
 
+	// Registries is how container images arrive on the fleet's
+	// machines: mirror endpoints containerd pulls through, and k3s's
+	// embedded peer-to-peer registry. It lives on the Cluster because
+	// any node may be asked to pull any image, so how images arrive
+	// is a fact the whole fleet must agree on. Credentials are
+	// deliberately not here: a spec is public, so they enter through
+	// the registry-credentials Secret instead (registries.go tells
+	// that story). Like features, registries stay in the canonical
+	// staged document — but both are read only when the k3s process
+	// starts, so their edits converge by restarting k3s in place
+	// rather than rebooting the machine (changes.go).
+	Registries RegistriesSpec `json:"registries,omitzero"`
+
 	// Version is the fleet's target liken release: the one field an
 	// upgrade edits. Machines carry no version in their specs.
 	// Instead, each machine's operator compares the version its boot
@@ -342,6 +355,9 @@ func ParseCluster(raw []byte) (*Cluster, error) {
 		return nil, fmt.Errorf("expected kind Cluster, got %q", c.Kind)
 	}
 	if err := validateFeatures(c.Spec.Features); err != nil {
+		return nil, err
+	}
+	if err := validateRegistries(c.Spec.Registries); err != nil {
 		return nil, err
 	}
 	return c, nil

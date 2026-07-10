@@ -170,6 +170,14 @@ func main() {
 		failBoot(fmt.Errorf("%w: %v", errIdentity, err))
 	}
 
+	// The registry credentials ride their own document lifecycle
+	// (registries.go): staged by the operator from the
+	// registry-credentials Secret, chosen here, rendered into k3s's
+	// registries.yaml below. Never fatal — a machine without
+	// credentials pulls anonymously.
+	creds := chooseRegistryCredentials(machine.MachineStateDir,
+		storage.MachineState.Backing == machine.BackingPartition, &boot)
+
 	// The declared modules: the second of the two module passes,
 	// possible only now that the winning manifest is known. The boot
 	// record keeps the ask (the drift reference: rebooting with the
@@ -226,6 +234,13 @@ func main() {
 		if err != nil {
 			failBoot(fmt.Errorf("%w: %v", errIdentity, err))
 		}
+		// How this machine pulls container images: mirrors and the
+		// embedded registry from the cluster document, credentials
+		// from their own document, rendered into the registries.yaml
+		// k3s reads at start (registries.go). Writing it promotes
+		// staged credentials — the write is their whole actuation.
+		registries := writeRegistriesConfig(cluster, creds,
+			machine.RegistryCredentialsStore(machine.MachineStateDir), boot.CredentialsSource)
 		// The node password k3s mints on first join has to outlive
 		// this boot, or the machine can never rejoin its own cluster
 		// (k3s.go explains).
@@ -260,7 +275,7 @@ func main() {
 		// Facts wait until here because they live under /run, and
 		// prepareForK3s just mounted a fresh tmpfs there; anything
 		// written earlier would be shadowed by the mount.
-		facts := publishFacts(cluster, role, choice, conns, storage, boot, moduleStatuses, featureStatuses, firstSync, clk.sources)
+		facts := publishFacts(cluster, role, choice, conns, storage, boot, moduleStatuses, featureStatuses, registries, firstSync, clk.sources)
 		publishBootClusterManifest(clusterRaw)
 		// A machine with time sources keeps disciplining its clock
 		// for as long as it runs; a free-running machine has nothing
@@ -275,17 +290,23 @@ func main() {
 		if role == machine.RoleLeader {
 			plane.start("the time responder", serveTime(clk))
 		}
-		// The reboot channel: init creates the directory (owning its
+		// The intent channel: init creates the directory (owning its
 		// existence and permissions), the operator writes into it,
-		// and the watcher carries at most one request into the
-		// supervisor (reboot.go).
+		// and the watcher carries requests into the supervisor
+		// (reboot.go) — at most one reboot, and any number of k3s
+		// restarts over the boot's life.
 		if err := os.MkdirAll(machine.OperatorRunDir, 0o755); err != nil {
 			fmt.Fprintf(os.Stderr, "liken: creating %s: %v\n", machine.OperatorRunDir, err)
 		}
 		rebootRequests := make(chan machine.RebootIntent, 1)
-		plane.start("the reboot watch", func(ctx context.Context) error {
-			return watchForRebootIntent(ctx, machine.OperatorRunDir, 2*time.Second, rebootRequests)
+		restartRequests := make(chan machine.RestartIntent, 1)
+		plane.start("the intent watch", func(ctx context.Context) error {
+			return watchForOperatorIntents(ctx, machine.OperatorRunDir, 2*time.Second, rebootRequests, restartRequests)
 		})
+		// The restart path: everything a k3s bounce may re-render,
+		// gathered while it's at hand (restart.go).
+		restarter := newRestartState(machine.MachineStateDir, m, conns, facts,
+			cluster, clusterRaw, creds, boot.CredentialsSource)
 		// A proving boot watches for its own promotion: when the
 		// operator's first reconcile proves the staged release, init
 		// rewrites the firmware's BootOrder to put the newly proven
@@ -309,7 +330,7 @@ func main() {
 			fmt.Println("liken: fault injection: wedging instead of starting k3s")
 			select {}
 		}
-		superviseK3s(role, rebootRequests) // never returns
+		superviseK3s(role, rebootRequests, restartRequests, restarter.apply) // never returns
 	}
 
 	// With no k3s to supervise, a boot is complete once the report is

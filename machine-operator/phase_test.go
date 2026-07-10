@@ -83,6 +83,21 @@ func TestDecidePhase(t *testing.T) {
 			machine.PhaseUpdating,
 		},
 		{
+			"a requested k3s restart is an update in flight",
+			[]machine.Condition{condition("ClusterConverged", "False", "RestartRequested")},
+			machine.PhaseUpdating,
+		},
+		{
+			"a staged restart waits like any staged change",
+			[]machine.Condition{condition("CredentialsConverged", "False", "RestartPending")},
+			machine.PhaseUpdatePending,
+		},
+		{
+			"a malformed credentials Secret is blocked, not pending",
+			[]machine.Condition{condition("CredentialsConverged", "False", "CredentialsInvalid")},
+			machine.PhaseBlocked,
+		},
+		{
 			"a release downloading is an update in flight",
 			[]machine.Condition{condition("VersionConverged", "False", "Downloading")},
 			machine.PhaseUpdating,

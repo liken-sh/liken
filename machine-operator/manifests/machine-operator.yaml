@@ -135,6 +135,40 @@ subjects:
     name: liken-machine-operator
     namespace: liken-system
 ---
+# The one Secret the machine operator may read: the fleet's registry
+# credentials, by exact name (the kubernetes package's secrets.go).
+# A namespaced Role like the leases', because the operator has no
+# business with any other Secret anywhere — resourceNames is what
+# makes "one named Secret" enforceable, and get-only (no list, no
+# watch) means even a compromised operator could not enumerate what
+# else the namespace holds. Polling the one name each pass is the
+# right consumption for a level-triggered loop anyway; a Secret edit
+# takes effect within one reconcile tick.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: liken-machine-operator-registry-credentials
+  namespace: liken-system
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [registry-credentials]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: liken-machine-operator-registry-credentials
+  namespace: liken-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: liken-machine-operator-registry-credentials
+subjects:
+  - kind: ServiceAccount
+    name: liken-machine-operator
+    namespace: liken-system
+---
 # A DaemonSet rather than a Deployment because the machine operator's
 # job is node-local by nature: each pod manages the machine it stands
 # on. Contrast cluster-operator/manifests/cluster-operator.yaml,

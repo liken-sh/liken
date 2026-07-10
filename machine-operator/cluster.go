@@ -84,19 +84,27 @@ func renderCluster(name string, spec machine.ClusterSpec) ([]byte, string, error
 // converged, and this case also withdraws a stale staged copy and
 // clears a spent rejection. A document init rejected last boot holds
 // rather than re-staging. With nowhere durable to stage, the
-// condition says so. Otherwise the drift is staged, and the reboot
-// follows the Machine's rebootPolicy (the one knob governing both
-// kinds of staging) and its turn with the rollout conductor. A
-// cluster document edit is drift on every machine at once, which is
-// exactly the case the conductor sequences.
+// condition says so. Otherwise the drift is staged, and the
+// disruption follows the Machine's rebootPolicy (the one knob
+// governing both kinds of staging) and its turn with the rollout
+// conductor. A cluster document edit is drift on every machine at
+// once, which is exactly the case the conductor sequences.
 //
-// bootHash is the *canonical* hash of the document this boot ran
-// (bootClusterHash below), never facts.Boot.ClusterManifestHash. The
-// facts hash raw bytes, and a hand-written seed and the operator's
-// rendering of the same spec are different bytes with the same
-// meaning. Drift is a difference in meaning, and a difference in
-// formatting alone must never reboot a fleet.
-func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, facts *machine.MachineStatus, rejection *machine.Rejection, bootHash, stagedHash string, t turn) convergence {
+// The disruption's kind comes from the classifier
+// (machine/changes.go): when every differing domain is read only at
+// k3s process start (features, registries), a k3s restart applies
+// the document and the machine, and its pods, stay up; any other
+// difference takes the reboot. An unreadable boot document falls to
+// the reboot too, the tier that always works.
+//
+// bootDoc and bootHash describe the document this boot ran
+// (bootClusterDocument below); the hash is *canonical*, never
+// facts.Boot.ClusterManifestHash. The facts hash raw bytes, and a
+// hand-written seed and the operator's rendering of the same spec
+// are different bytes with the same meaning. Drift is a difference
+// in meaning, and a difference in formatting alone must never
+// disrupt a fleet.
+func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, facts *machine.MachineStatus, rejection *machine.Rejection, bootDoc *machine.Cluster, bootHash, stagedHash string, t turn) convergence {
 	if facts == nil || facts.Boot.ManifestSource == "" {
 		return convergence{condition: convergenceUnknown("ClusterConverged", "FactsIncomplete",
 			"the machine's facts carry no boot record yet")}
@@ -132,38 +140,55 @@ func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, fact
 			"machineState is backed by memory; there is no durable filesystem to stage the cluster document into; declare machineState in the machine's manifest")}
 	}
 
+	restart := bootDoc != nil && machine.RestartApplies(bootDoc.Spec, cluster.Spec)
+
 	c := convergence{
 		manifest: manifest,
 		hash:     hash,
 		stage:    stagedHash != hash,
 	}
-	gateReboot(&c, "ClusterConverged", m.Spec.RebootPolicyOrDefault(), t,
-		fmt.Sprintf("cluster document staged for the next boot (%.12s); rebootPolicy is Manual, so reboot the machine (or set rebootPolicy: Auto) to apply", hash),
-		fmt.Sprintf("cluster document staged for the next boot (%.12s); waiting for the cluster to grant a reboot turn", hash),
-		fmt.Sprintf("reboot requested to apply the staged cluster document (%.12s)", hash))
+	// On Manual, the action available to a person is a reboot either
+	// way (the boot path applies staged documents too; nobody can
+	// hand-bounce k3s on a machine with no shell), so that message
+	// only *mentions* the lighter tier. The granted messages name
+	// what init will actually do.
+	pending := fmt.Sprintf("cluster document staged (%.12s); rebootPolicy is Manual, so reboot the machine to apply (or set rebootPolicy: Auto)", hash)
+	if restart {
+		pending = fmt.Sprintf("cluster document staged (%.12s); rebootPolicy is Manual, so reboot the machine to apply (or set rebootPolicy: Auto, which would apply it with just a k3s restart)", hash)
+	}
+	apply := "a reboot"
+	if restart {
+		apply = "a k3s restart"
+	}
+	gateDisruption(&c, "ClusterConverged", m.Spec.RebootPolicyOrDefault(), t, restart,
+		pending,
+		fmt.Sprintf("cluster document staged (%.12s); waiting for the cluster to grant a turn to apply it by %s", hash, apply),
+		fmt.Sprintf("%s requested to apply the staged cluster document (%.12s)", apply, hash))
 	return c
 }
 
-// bootClusterHash canonicalizes the document this boot ran: read the
-// bytes init published, parse them, re-render them the way the
-// operator renders everything, and hash that. Both sides of the
-// drift comparison pass through the same rendering, so any remaining
-// difference is a difference in content, not formatting. "" means
-// the publication is missing or unreadable.
-func bootClusterHash(path string) string {
+// bootClusterDocument describes the document this boot ran: the
+// parsed document, for the classifier to diff against the desired
+// spec, and its canonical hash. Canonical means the bytes init
+// published are parsed and re-rendered the way the operator renders
+// everything, so both sides of the drift comparison pass through the
+// same rendering and any remaining difference is a difference in
+// content, not formatting. nil and "" mean the publication is
+// missing or unreadable.
+func bootClusterDocument(path string) (*machine.Cluster, string) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return ""
+		return nil, ""
 	}
 	c, err := machine.ParseCluster(raw)
 	if err != nil {
-		return ""
+		return nil, ""
 	}
 	_, hash, err := renderCluster(c.Metadata.Name, c.Spec)
 	if err != nil {
-		return ""
+		return nil, ""
 	}
-	return hash
+	return c, hash
 }
 
 // settleClusterLifecycle promotes whatever this boot proved. It runs

@@ -179,29 +179,44 @@ func postMortem() {
 	}
 }
 
-// superviseK3s runs k3s forever, with one interruption it honors: a
-// reboot request from the operator. It never returns otherwise:
-// whenever k3s exits, it gets restarted, with backoff, so a fast
-// crash loop doesn't flood the console.
+// superviseK3s runs k3s forever, with two interruptions it honors:
+// a reboot request from the operator, and a restart request, the
+// lighter disruption that applies staged restart-class changes
+// (machine/changes.go) by bouncing the k3s child in place. It never
+// returns otherwise: whenever k3s exits on its own, it gets
+// restarted, with backoff, so a fast crash loop doesn't flood the
+// console.
 //
-// The reboot channel is selected in *both* of the supervisor's
+// The intent channels are selected in *both* of the supervisor's
 // states: while k3s runs, and during the backoff sleep between
-// restarts. That second select is what makes the request unable to
+// restarts. That second select is what makes a request unable to
 // race the restart decision: they're alternatives of one select in
 // one goroutine, so an intent that arrives while k3s is crash-looping
 // neither waits out the sleep nor collides with a restart.
 //
-// The liken.oneshot boot parameter disables the restart: k3s runs
-// once and its exit powers the machine down. That makes a k3s failure
-// observable from outside (QEMU exits, the console is a complete
-// record), which is what debugging and automated runs need from a
-// machine with no shell. A reboot intent is honored even in oneshot:
-// under QEMU's -no-reboot the restart is a clean exit, which is
-// exactly what a bounded harness run wants.
-func superviseK3s(role machine.Role, reboot <-chan machine.RebootIntent) {
+// A deliberate bounce is not a crash. applyRestart runs while k3s
+// still serves (all the re-rendering happens before any downtime)
+// and answers whether anything was actually applied; only then is
+// k3s stopped, gracefully, and started again immediately — skipping
+// the oneshot check and the backoff entirely, whose subjects are
+// k3s failures, not liken decisions. Stopping k3s does not stop its
+// containers (the containerd shims hold them), which is the entire
+// premise of the restart tier: the machine and its pods stay up
+// while k3s reloads the configuration it only reads at start.
+//
+// The liken.oneshot boot parameter disables the crash restart: k3s
+// runs once and its exit powers the machine down. That makes a k3s
+// failure observable from outside (QEMU exits, the console is a
+// complete record), which is what debugging and automated runs need
+// from a machine with no shell. A reboot intent is honored even in
+// oneshot: under QEMU's -no-reboot the restart is a clean exit,
+// which is exactly what a bounded harness run wants.
+func superviseK3s(role machine.Role, reboot <-chan machine.RebootIntent,
+	restarts <-chan machine.RestartIntent, applyRestart func(machine.RestartIntent) bool) {
 	backoff := time.Second
 	for {
 		started := time.Now()
+		bounced := false
 		cmd, logf, err := startK3s(role)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "liken: k3s: %v\n", err)
@@ -211,21 +226,40 @@ func superviseK3s(role machine.Role, reboot <-chan machine.RebootIntent) {
 			died := make(chan unix.WaitStatus, 1)
 			go func() { died <- deaths.await(cmd.Process.Pid) }()
 
-			select {
-			case status := <-died:
-				_ = cmd.Process.Release()
-				logf.Close()
-				fmt.Printf("liken: k3s exited (%s)\n", describeExit(status))
-			case intent := <-reboot:
-				stopK3s(cmd.Process.Pid, died)
-				_ = cmd.Process.Release()
-				// This close is part of the shutdown ordering, not
-				// tidiness: the log lives on clusterState, which
-				// rebootMachine is about to unmount, and an open
-				// handle there would make that unmount fail busy.
-				logf.Close()
-				rebootMachine(intent) // never returns
+		running:
+			for {
+				select {
+				case status := <-died:
+					_ = cmd.Process.Release()
+					logf.Close()
+					fmt.Printf("liken: k3s exited (%s)\n", describeExit(status))
+					break running
+				case intent := <-reboot:
+					stopK3s(cmd.Process.Pid, died)
+					_ = cmd.Process.Release()
+					// This close is part of the shutdown ordering, not
+					// tidiness: the log lives on clusterState, which
+					// rebootMachine is about to unmount, and an open
+					// handle there would make that unmount fail busy.
+					logf.Close()
+					rebootMachine(intent) // never returns
+				case intent := <-restarts:
+					// A stale or duplicate intent applies nothing, and
+					// a running k3s is not disturbed over it.
+					if !applyRestart(intent) {
+						continue running
+					}
+					fmt.Println("liken: restarting k3s to apply the staged changes")
+					stopK3s(cmd.Process.Pid, died)
+					_ = cmd.Process.Release()
+					logf.Close()
+					bounced = true
+					break running
+				}
 			}
+		}
+		if bounced {
+			continue // straight back to startK3s: a bounce is not a crash
 		}
 		if bootParam("liken.oneshot") {
 			postMortem()
@@ -248,6 +282,11 @@ func superviseK3s(role machine.Role, reboot <-chan machine.RebootIntent) {
 		case <-time.After(delay):
 		case intent := <-reboot:
 			rebootMachine(intent) // k3s is already dead; nothing to stop
+		case intent := <-restarts:
+			// k3s is already down: apply the staged changes now and
+			// skip the rest of the delay, since the next start will
+			// read them either way.
+			_ = applyRestart(intent)
 		}
 	}
 }

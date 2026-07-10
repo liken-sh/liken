@@ -200,6 +200,13 @@ func k3sBootConfig(in k3sBootInputs) string {
 			} else if in.joinURL != "" {
 				fmt.Fprintf(&b, "server: %s\n", in.joinURL)
 			}
+			// The embedded registry mirror (Spegel) is a server-side
+			// key: the control plane runs the coordination, and every
+			// node participates through the mirror entries init renders
+			// into registries.yaml (registries.go).
+			if cluster.Spec.Registries.Embedded {
+				b.WriteString("embedded-registry: true\n")
+			}
 			// The cluster's address plan is leader configuration;
 			// followers learn it from the control plane they join.
 			net := cluster.Spec.Network

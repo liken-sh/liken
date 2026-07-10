@@ -1,14 +1,18 @@
 # The lab's storage server: the fixture the iscsi and nfs features
-# are drilled against.
+# and the registry mirror are drilled against.
 #
 # Milestone 17 made liken a client of network storage, and a client
 # needs a server. This guest is that server, and it is deliberately
 # not a liken machine: it runs stock Debian, because the point of the
 # drill is liken's side of the wire, and the server side should be
 # the boring reference implementation everyone else runs — the kernel
-# NFS server and a standard iSCSI target. It sits on the same
-# multicast segment as the fleet, at 10.10.0.100, serving one NFSv4
-# export and one iSCSI LUN.
+# NFS server, a standard iSCSI target, and CNCF distribution, the
+# reference container registry. It sits on the same multicast segment
+# as the fleet, at 10.10.0.100, serving one NFSv4 export, one iSCSI
+# LUN, and one authenticated pull-through registry: the way the NFS
+# export answers on 2049 for the nfs feature, the registry answers on
+# 5000 for spec.registries and the registry-credentials Secret
+# (milestone 20).
 #
 # There is no installer. Debian publishes cloud images: generic qcow2
 # disks that boot ready-made and configure themselves on first boot

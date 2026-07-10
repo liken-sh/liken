@@ -83,6 +83,12 @@ type MachineStatus struct {
 	// different releases mid-rollout.
 	Features []FeatureStatus `json:"features,omitempty"`
 
+	// Registries reports what this machine rendered into k3s's
+	// registries.yaml: which registries are mirrored, which have
+	// credentials, whether the embedded registry is on — the hosts,
+	// never the material. Console parity, like Features above.
+	Registries RegistriesStatus `json:"registries,omitzero"`
+
 	// Boot is what this boot ran under: which documents, and the
 	// storage as actuated. It is re-derived on every boot, and it is
 	// the record the operator diffs the spec against. Lifetime is
@@ -459,15 +465,37 @@ type BootStatus struct {
 	ClusterManifestSource ManifestSource `json:"clusterManifestSource,omitempty"`
 	ClusterManifestHash   string         `json:"clusterManifestHash,omitempty"`
 
+	// The registry-credentials document this boot (or the latest k3s
+	// restart) rendered into registries.yaml: the same lifecycle
+	// again, in its own store. The source is only ever Staged or
+	// Proven — the operator is this document's sole author, so no
+	// image carries a seed. Both fields are empty on a machine that
+	// has never had credentials, which is an ordinary state, not a
+	// gap.
+	CredentialsSource ManifestSource `json:"credentialsSource,omitempty"`
+	CredentialsHash   string         `json:"credentialsHash,omitempty"`
+
+	// Restarts counts the in-place k3s restarts this boot has
+	// performed to apply restart-class changes (machine/changes.go).
+	// It lives in the boot record because it shares the boot's
+	// lifetime: a reboot re-makes the record and the count returns to
+	// zero, which is itself the signal — a change that arrived by
+	// restart increments this without moving bootedAt, and a change
+	// that arrived by reboot does the opposite.
+	Restarts int `json:"restarts,omitempty"`
+
 	// Rejection is the standing quarantine record for the Machine
 	// manifest, republished every boot until a promotion clears it,
 	// so a rejected spec stays visible in the cluster no matter how
 	// many times the machine power-cycles. ClusterRejection is the
-	// same record for the Cluster document, and SystemRejection for
-	// a system release whose proving boot fell back.
-	Rejection        *Rejection `json:"rejection,omitempty"`
-	ClusterRejection *Rejection `json:"clusterRejection,omitempty"`
-	SystemRejection  *Rejection `json:"systemRejection,omitempty"`
+	// same record for the Cluster document, SystemRejection for a
+	// system release whose proving boot fell back, and
+	// CredentialsRejection for a credentials document that would not
+	// parse.
+	Rejection            *Rejection `json:"rejection,omitempty"`
+	ClusterRejection     *Rejection `json:"clusterRejection,omitempty"`
+	SystemRejection      *Rejection `json:"systemRejection,omitempty"`
+	CredentialsRejection *Rejection `json:"credentialsRejection,omitempty"`
 }
 
 // ConditionStatus is a condition's verdict. It is a string rather

@@ -1,0 +1,115 @@
+package machine
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+// specWith applies one mutation to a fully-populated base spec, so
+// each case exercises exactly one domain and the comparison can't
+// pass by accident of zero values.
+func specWith(mutate func(*ClusterSpec)) ClusterSpec {
+	spec := ClusterSpec{
+		Origin:   OriginFounded,
+		Leaders:  []string{"node-1", "node-2", "node-3"},
+		Endpoint: "https://10.10.0.1:6443",
+		Network:  ClusterNetworkSpec{NodeCIDR: "10.10.0.0/24"},
+		Time:     ClusterTimeSpec{Upstreams: []string{"time.example"}},
+		Disruption: ClusterDisruptionSpec{
+			MaxUnavailable: 1,
+		},
+		Features: map[string]*FeatureConfig{"iscsi": {}},
+		Registries: RegistriesSpec{
+			Mirrors:  map[string][]string{"docker.io": {"https://mirror.example:5000"}},
+			Embedded: true,
+		},
+	}
+	if mutate != nil {
+		mutate(&spec)
+	}
+	return spec
+}
+
+func TestRestartAppliesByDomain(t *testing.T) {
+	cases := map[string]struct {
+		mutate func(*ClusterSpec)
+		want   bool
+	}{
+		"a feature toggle":        {func(s *ClusterSpec) { s.Features["traefik"] = &FeatureConfig{} }, true},
+		"a feature retraction":    {func(s *ClusterSpec) { s.Features = nil }, true},
+		"a mirror edit":           {func(s *ClusterSpec) { s.Registries.Embedded = false }, true},
+		"features and registries": {func(s *ClusterSpec) { s.Features = nil; s.Registries.Embedded = false }, true},
+		"the origin":              {func(s *ClusterSpec) { s.Origin = OriginAdopted }, false},
+		"the leaders":             {func(s *ClusterSpec) { s.Leaders = []string{"node-1"} }, false},
+		"the endpoint":            {func(s *ClusterSpec) { s.Endpoint = "https://10.10.0.2:6443" }, false},
+		"the network plan":        {func(s *ClusterSpec) { s.Network.ClusterCIDR = "10.44.0.0/16" }, false},
+		"the time hierarchy":      {func(s *ClusterSpec) { s.Time.Upstreams = nil }, false},
+		"the disruption budget":   {func(s *ClusterSpec) { s.Disruption.MaxUnavailable = 2 }, false},
+		"a mixed edit":            {func(s *ClusterSpec) { s.Features = nil; s.Endpoint = "https://10.10.0.2:6443" }, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := RestartApplies(specWith(nil), specWith(tc.mutate)); got != tc.want {
+				t.Errorf("RestartApplies = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRestartAppliesIdenticalSpecsNeedNoDisruption(t *testing.T) {
+	if RestartApplies(specWith(nil), specWith(nil)) {
+		t.Error("no drift needs no disruption at all")
+	}
+}
+
+func TestRestartAppliesIgnoresVersionAndReleases(t *testing.T) {
+	// Canonical documents never carry version or releases (the
+	// operator strips them before hashing), so the classifier must
+	// never see them as drift either: alone they are no change, and
+	// alongside a feature toggle they must not drag it to a reboot.
+	releasesOnly := specWith(func(s *ClusterSpec) {
+		s.Version = "0.3.0"
+		s.Releases = ClusterReleasesSpec{Source: "https://releases.example"}
+	})
+	if RestartApplies(specWith(nil), releasesOnly) {
+		t.Error("a release-feed edit alone is no drift at all")
+	}
+	both := specWith(func(s *ClusterSpec) {
+		s.Version = "0.3.0"
+		s.Features["traefik"] = &FeatureConfig{}
+	})
+	if !RestartApplies(specWith(nil), both) {
+		t.Error("the release feed must not drag a feature toggle to a reboot")
+	}
+}
+
+func TestRestartAppliesTreatsAnUnknownFieldAsRebootClass(t *testing.T) {
+	// The safety property is structural: a field the classifier has
+	// never heard of must read as reboot-class. Simulated by
+	// round-tripping a spec through JSON with an extra field is not
+	// possible (the strict parser refuses it), so this test pins the
+	// mechanism instead: the subtraction zeroes only the two
+	// restart-class fields, and anything else that differs — here, a
+	// stand-in for a future field, the endpoint — survives the
+	// subtraction and answers reboot.
+	changed := specWith(func(s *ClusterSpec) {
+		s.Endpoint = "https://10.10.0.9:6443"
+		s.Features["traefik"] = &FeatureConfig{}
+	})
+	if RestartApplies(specWith(nil), changed) {
+		t.Error("any residual difference beyond the restart-class fields must fall to reboot")
+	}
+}
+
+func TestRestartAppliesDoesNotMutateItsArguments(t *testing.T) {
+	// RestartApplies zeroes fields on its (by-value) copies; the
+	// caller's specs must come back untouched, or the operator would
+	// corrupt the live document mid-reconcile.
+	old, new := specWith(nil), specWith(func(s *ClusterSpec) { s.Features = nil })
+	before, _ := json.Marshal(old)
+	RestartApplies(old, new)
+	after, _ := json.Marshal(old)
+	if string(before) != string(after) {
+		t.Error("the caller's spec must not be mutated")
+	}
+}

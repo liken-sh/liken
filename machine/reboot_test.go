@@ -68,6 +68,69 @@ func TestRebootPolicyDefaultsToManual(t *testing.T) {
 	}
 }
 
+func TestRestartIntentRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	want := &RestartIntent{
+		Reason:      "applying the staged cluster document",
+		RequestedAt: time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC),
+	}
+	if err := WriteRestartIntent(dir, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadRestartIntent(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.Reason != want.Reason || !got.RequestedAt.Equal(want.RequestedAt) {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestReadRestartIntentAbsentMeansNoRequest(t *testing.T) {
+	intent, err := ReadRestartIntent(t.TempDir())
+	if intent != nil || err != nil {
+		t.Errorf("no file should mean nil, nil: %v %v", intent, err)
+	}
+}
+
+func TestClearRestartIntentConsumesTheFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := WriteRestartIntent(dir, &RestartIntent{Reason: "testing"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ClearRestartIntent(dir); err != nil {
+		t.Fatal(err)
+	}
+	intent, err := ReadRestartIntent(dir)
+	if intent != nil || err != nil {
+		t.Errorf("a cleared intent must be gone: %v %v", intent, err)
+	}
+}
+
+func TestClearRestartIntentToleratesAbsence(t *testing.T) {
+	// Clearing twice (or clearing a never-written intent) is a no-op:
+	// the watcher clears before delivering, and a crash between the
+	// two must not turn the next clear into an error.
+	if err := ClearRestartIntent(t.TempDir()); err != nil {
+		t.Errorf("clearing an absent intent must not error: %v", err)
+	}
+}
+
+func TestRestartIntentIsItsOwnFile(t *testing.T) {
+	// A restart intent must be invisible to the reboot reader and vice
+	// versa: an older init that knows only reboots must see nothing at
+	// all when a restart is requested, not an unreadable reboot intent
+	// (which it would honor by rebooting).
+	dir := t.TempDir()
+	if err := WriteRestartIntent(dir, &RestartIntent{Reason: "testing"}); err != nil {
+		t.Fatal(err)
+	}
+	reboot, err := ReadRebootIntent(dir)
+	if reboot != nil || err != nil {
+		t.Errorf("a restart intent must not read as a reboot intent: %v %v", reboot, err)
+	}
+}
+
 func TestWriteRebootIntentNeedsItsChannel(t *testing.T) {
 	// The channel directory is init's to create. If the operator
 	// writes before it exists, that is a bug to surface, not a reason

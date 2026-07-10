@@ -15,6 +15,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -22,13 +23,45 @@ import (
 	"github.com/chrisguidry/liken/machine"
 )
 
-// publishFacts returns the facts it wrote: the time component takes
-// over as their sole owner afterward, folding in each new clock
-// measurement and rewriting the file.
+// factsFile is the facts' owner after boot: two writers share it,
+// the clock (folding in each new time measurement) and the restart
+// path (recording what a k3s restart just actuated). Each mutates
+// and rewrites only under the lock, because the file write
+// serializes the whole struct, so even writers of disjoint fields
+// race without one.
+type factsFile struct {
+	mu     sync.Mutex
+	status *machine.MachineStatus
+}
+
+// mutate edits the facts in memory without rewriting the file: for
+// updates that aren't news on their own, but should ride along with
+// whatever write comes next.
+func (f *factsFile) mutate(edit func(*machine.MachineStatus)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	edit(f.status)
+}
+
+// publish edits the facts and rewrites the file, atomically as every
+// facts write is: the operator sees old facts or new, never torn
+// ones.
+func (f *factsFile) publish(edit func(*machine.MachineStatus)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	edit(f.status)
+	if err := machine.WriteFacts(machine.FactsPath, f.status); err != nil {
+		fmt.Fprintf(os.Stderr, "liken: writing facts: %v\n", err)
+	}
+}
+
+// publishFacts returns the facts it wrote, wrapped in the guarded
+// owner the boot's long-lived writers share.
 func publishFacts(cluster *machine.Cluster, role machine.Role, choice *manifestChoice,
 	conns []*connection, storage machine.StorageStatus, boot machine.BootStatus,
 	modules []machine.ModuleStatus, features []machine.FeatureStatus,
-	firstSync *timeSync, timeSources []string) *machine.MachineStatus {
+	registries machine.RegistriesStatus,
+	firstSync *timeSync, timeSources []string) *factsFile {
 	now := time.Now()
 	facts := &machine.MachineStatus{
 		Role:    role,
@@ -39,6 +72,9 @@ func publishFacts(cluster *machine.Cluster, role machine.Role, choice *manifestC
 		// Each enabled feature's standing, exactly as the feature
 		// pass printed them: console parity, as always.
 		Features: features,
+		// What this boot rendered into registries.yaml, hosts only:
+		// console parity, as always.
+		Registries: registries,
 		Hardware: machine.HardwareStatus{
 			CPUs: runtime.NumCPU(),
 			// The same inventory the world report prints, re-derived
@@ -90,9 +126,13 @@ func publishFacts(cluster *machine.Cluster, role machine.Role, choice *manifestC
 	// succeeded, or an accurate unsynchronized/free-running report.
 	facts.Time = timeStatus(firstSync, timeSources)
 
+	// The founding write happens directly rather than through
+	// publish: main is still the only goroutine at this point, and
+	// the success line should only print for a write that landed.
+	owner := &factsFile{status: facts}
 	if err := machine.WriteFacts(machine.FactsPath, facts); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: writing facts: %v\n", err)
-		return facts
+		return owner
 	}
 	fmt.Printf("liken: facts published to %s\n", machine.FactsPath)
 
@@ -105,7 +145,7 @@ func publishFacts(cluster *machine.Cluster, role machine.Role, choice *manifestC
 			fmt.Fprintf(os.Stderr, "liken: writing the boot manifest: %v\n", err)
 		}
 	}
-	return facts
+	return owner
 }
 
 // publishBootClusterManifest is the cluster document's version of the

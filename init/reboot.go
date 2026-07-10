@@ -28,17 +28,28 @@ import (
 	"github.com/chrisguidry/liken/machine"
 )
 
-// watchForRebootIntent polls the operator's channel and delivers at
-// most one intent: a reboot always follows, so there is nothing left
-// to watch for afterward, and returning nil tells the machine plane
-// this component's work is complete. The file's presence is the
-// trigger; its content only improves the console message, so an
-// unreadable intent is honored rather than stranding a requested
-// reboot (atomic writes make that case a bug, not a race, but a bug
-// must not wedge the machine). The directory and interval are
-// parameters so tests can watch a tempdir quickly; the boot passes
-// the real channel.
-func watchForRebootIntent(ctx context.Context, dir string, interval time.Duration, requests chan<- machine.RebootIntent) error {
+// watchForOperatorIntents polls the operator's channel for both
+// disruption kinds. The reboot intent is checked first on every
+// tick, deliberately: a reboot re-renders everything a restart
+// would, so when both stand, the heavier one wins and the restart
+// file vanishes with the boot's tmpfs like every reboot intent
+// does. Delivering a reboot ends the watch: a reboot always
+// follows, so there is nothing left to watch for, and returning nil
+// tells the machine plane this component's work is complete. A
+// restart is different. The machine lives on, so the intent is
+// consumed and the watch continues for the boot's whole life. The
+// clear happens *before* delivery: a crash between the two loses
+// one restart, which the operator's next pass re-requests, where
+// the reverse order would bounce k3s forever.
+//
+// The files' presence is the trigger; their content only improves
+// the console message, so an unreadable intent of either kind is
+// honored rather than stranded (atomic writes make that case a bug,
+// not a race, but a bug must not wedge the machine). The directory
+// and interval are parameters so tests can watch a tempdir quickly;
+// the boot passes the real channel.
+func watchForOperatorIntents(ctx context.Context, dir string, interval time.Duration,
+	reboots chan<- machine.RebootIntent, restarts chan<- machine.RestartIntent) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -50,11 +61,23 @@ func watchForRebootIntent(ctx context.Context, dir string, interval time.Duratio
 			fmt.Fprintf(os.Stderr, "liken: reading the reboot intent: %v\n", err)
 			intent = &machine.RebootIntent{Reason: "an unreadable reboot intent"}
 		}
-		if intent == nil {
+		if intent != nil {
+			reboots <- *intent
+			return nil
+		}
+
+		restart, err := machine.ReadRestartIntent(dir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "liken: reading the restart intent: %v\n", err)
+			restart = &machine.RestartIntent{Reason: "an unreadable restart intent"}
+		}
+		if restart == nil {
 			continue
 		}
-		requests <- *intent
-		return nil
+		if err := machine.ClearRestartIntent(dir); err != nil {
+			fmt.Fprintf(os.Stderr, "liken: consuming the restart intent: %v\n", err)
+		}
+		restarts <- *restart
 	}
 }
 
