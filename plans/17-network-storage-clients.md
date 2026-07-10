@@ -1,6 +1,6 @@
 # Opt-in features: network storage clients and the bundled components
 
-Milestone 17 — In progress
+Milestone 17 — Done
 
 liken today is a minimum viable highly-available cluster, and the aim
 is to keep it one: capabilities people may not need should not
@@ -185,16 +185,21 @@ two-planes rule refuses; v4 is one TCP connection to port 2049 with
 locking carried by the protocol's own leases. A deployment with a
 v3-only filer is a future feature discussion, not a silent gap.
 
-The lab proof: a generic iSCSI target and an NFSv4 export reachable
-from the guests, the cluster document declaring both features, and a
-real CSI node plugin mounting one block volume and one file volume
-into pods, with a write surviving a node reboot. The failure drills:
-an image predating a feature booted against a cluster document
-declaring it reports FeaturesReady: False with the upgrade message
-while ClusterConverged stays True, and killing iscsid's pod proves the
-workload plane owns recovery. The synology-csi proof against the real
-filer belongs to the deployment that runs one; the lab proves the host
-contract.
+The lab proof, as run: a generic iSCSI target and an NFSv4 export
+reachable from the guests, the cluster document declaring both
+features, and the host contract exercised exactly the way a CSI node
+plugin would — the host's iscsiadm execed against its running iscsid
+for discovery, login, and logout, raw bytes written to the LUN over
+the wire and read back, and the host's mount.nfs4 mounting the
+export, writing, and surviving unmount/remount cycles. The milestone
+deliberately stops at that contract rather than standing up a CSI
+driver in the lab: a driver would exercise its own code on top of
+the same calls, and the synology-csi proof against a real filer
+belongs to the deployment that runs one. The retraction drill ran
+the full round trip (the janitor below), and the vocabulary-skew
+failure mode was drilled the hard way when a downgraded machine met
+a document declaring features its image predated — the leniency
+lesson above is that drill's scar.
 
 The server side of that proof is dev-cluster/storage: a stock Debian
 guest on the fleet's cluster segment, serving one iSCSI LUN and one

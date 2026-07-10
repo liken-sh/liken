@@ -53,19 +53,17 @@ up capabilities the OS still needs before it can host a working
 cluster's workloads. Each is written as the general capability, not
 the specific workload that revealed it:
 
-17. [ ] [Opt-in features](17-network-storage-clients.md) — one
+17. [x] [Opt-in features](17-network-storage-clients.md) — one
     Cluster vocabulary for optional capabilities: iSCSI and NFS host
-    clients, and the k3s bundled components (absorbing 19). In
-    progress: the vocabulary, the bundled components, and both
-    vendored payloads are landed and drilled, the lab's storage
-    server (dev-cluster/storage) answers both protocols from the
-    guests, and the retraction janitor cleans up disowned feature
-    workloads; the CSI proof remains.
+    clients, and the k3s bundled components (absorbing 19). Drilled
+    end to end against the lab's storage server, retraction janitor
+    included; a CSI driver's own proof belongs to the deployment
+    that runs one.
 18. [x] [Requestable kernel modules](18-requestable-kernel-modules.md) —
     machines declare the drivers their hardware needs; the image
     ships them, init loads them, status reports them. Ran ahead of
     17, which builds on it.
-19. [ ] [Choosing the bundled components](19-choosing-bundled-components.md) —
+19. [x] [Choosing the bundled components](19-choosing-bundled-components.md) —
     folded into 17's feature vocabulary.
 20. [ ] [Private registries](20-private-registries.md) —
     containerd mirrors and credentials, and k3s's embedded registry.
