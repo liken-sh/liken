@@ -10,8 +10,8 @@ package main
 import (
 	"net/http"
 
-	"github.com/chrisguidry/liken/kubernetes"
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/kubernetes"
+	"github.com/liken-sh/liken/machine"
 )
 
 // nodesPath is the core API's home for Node objects: no group, just

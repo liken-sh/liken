@@ -20,7 +20,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // factsFile is the facts' owner after boot: two writers share it,

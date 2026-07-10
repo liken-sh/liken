@@ -24,7 +24,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // hasExt4 checks a device for ext4's superblock magic: two bytes,

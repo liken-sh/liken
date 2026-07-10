@@ -19,7 +19,7 @@ all: $(DIST)/liken-logs-image.tar
 
 $(DIST)/liken-logs: ../go.mod ../go.sum $(wildcard *.go) $(wildcard ../machine/*.go) ../VERSION
 	CGO_ENABLED=0 go build -trimpath \
-		-ldflags "-X github.com/chrisguidry/liken/machine.Version=$(LIKEN_VERSION)" \
+		-ldflags "-X github.com/liken-sh/liken/machine.Version=$(LIKEN_VERSION)" \
 		-o $(DIST)/liken-logs .
 
 $(DIST)/liken-logs-image.tar: $(DIST)/liken-logs ../image/oci.sh

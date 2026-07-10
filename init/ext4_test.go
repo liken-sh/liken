@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // superblock builds 1024 bytes with the fields growth reads.

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // importsFixture points the settle pass at a throwaway tree: a seed

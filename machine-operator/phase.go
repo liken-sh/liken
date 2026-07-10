@@ -20,7 +20,7 @@ package main
 // by the machine's own operator the moment it reports again.
 
 import (
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // phasePrecedence orders the phases most-severe-first: when several

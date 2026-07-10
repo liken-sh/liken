@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/chrisguidry/liken/kubernetes"
+	"github.com/liken-sh/liken/kubernetes"
 )
 
 // testClient wires a client to a test server, with a credentials

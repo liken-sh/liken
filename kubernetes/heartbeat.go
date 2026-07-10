@@ -35,7 +35,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 const heartbeatDir = "/apis/coordination.k8s.io/v1/namespaces/liken-system/leases"

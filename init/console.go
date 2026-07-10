@@ -44,7 +44,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // console is the raw serial console: file descriptor 1 exactly as

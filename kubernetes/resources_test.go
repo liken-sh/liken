@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 func TestListMachinesReadsTheCollection(t *testing.T) {

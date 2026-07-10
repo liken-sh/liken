@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // registriesTempPath points the renderer at a tempdir for one test.

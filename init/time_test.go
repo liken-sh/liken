@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 func clusterWithTime(upstreams []string, endpoint string, leaders ...string) *machine.Cluster {

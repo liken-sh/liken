@@ -26,7 +26,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // versionAsk decides whether this machine should be downloading a

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chrisguidry/liken/kubernetes"
+	"github.com/liken-sh/liken/kubernetes"
 )
 
 var drainNow = time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)

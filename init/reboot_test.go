@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // watchIntents arms the watcher over a tempdir with fast polls and

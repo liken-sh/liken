@@ -45,7 +45,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // manifestPeekPoint is the private mountpoint for the early look at

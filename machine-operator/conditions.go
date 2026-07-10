@@ -12,7 +12,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 func factsCondition(err error) machine.Condition {

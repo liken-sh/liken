@@ -13,7 +13,7 @@ all: $(DIST)/liken-cluster-operator-image.tar
 $(DIST)/liken-cluster-operator: ../go.mod ../go.sum $(wildcard *.go) \
 		$(wildcard ../machine/*.go) $(wildcard ../kubernetes/*.go) ../VERSION
 	CGO_ENABLED=0 go build -trimpath \
-		-ldflags "-X github.com/chrisguidry/liken/machine.Version=$(LIKEN_VERSION)" \
+		-ldflags "-X github.com/liken-sh/liken/machine.Version=$(LIKEN_VERSION)" \
 		-o $(DIST)/liken-cluster-operator .
 
 $(DIST)/liken-cluster-operator-image.tar: $(DIST)/liken-cluster-operator ../image/oci.sh

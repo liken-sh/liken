@@ -61,7 +61,7 @@ import (
 	"github.com/beevik/ntp"
 	"golang.org/x/sys/unix"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // timePollInterval is how often the discipline loop measures. 64

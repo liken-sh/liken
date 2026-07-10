@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // declared builds the DeclaredRole the spec's Roles() would produce,

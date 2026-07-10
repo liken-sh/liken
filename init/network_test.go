@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 func TestJoinIPsReadsAsAList(t *testing.T) {

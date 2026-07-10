@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 func GetMachine(c *Client, name string) (*machine.Machine, error) {

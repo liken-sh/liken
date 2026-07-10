@@ -24,7 +24,7 @@ LIKEN_FAULT ?=
 # step toward reproducible builds.
 $(DIST)/liken: ../go.mod ../go.sum $(wildcard *.go) $(wildcard ../machine/*.go) ../VERSION
 	CGO_ENABLED=0 go build -trimpath \
-		-ldflags "-X github.com/chrisguidry/liken/machine.Version=$(LIKEN_VERSION) -X main.fault=$(LIKEN_FAULT)" \
+		-ldflags "-X github.com/liken-sh/liken/machine.Version=$(LIKEN_VERSION) -X main.fault=$(LIKEN_FAULT)" \
 		-o $(DIST)/liken .
 
 .PHONY: all clean

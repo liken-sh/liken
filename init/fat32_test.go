@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // formatTestPartition formats a sparse file standing in for a

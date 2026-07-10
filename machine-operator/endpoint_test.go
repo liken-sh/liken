@@ -8,7 +8,7 @@ package main
 import (
 	"testing"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 func TestLocalAPIEndpointByRole(t *testing.T) {

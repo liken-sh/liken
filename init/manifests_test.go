@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 func TestFindMachineStatePartition(t *testing.T) {

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // testClient wires a Client to a test server, with a credentials

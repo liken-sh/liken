@@ -34,7 +34,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // Package variables rather than constants so tests can point the

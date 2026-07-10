@@ -20,7 +20,7 @@ all: $(DIST)/liken-machine-operator-image.tar
 $(DIST)/liken-machine-operator: ../go.mod ../go.sum $(wildcard *.go) \
 		$(wildcard ../machine/*.go) $(wildcard ../kubernetes/*.go) ../VERSION
 	CGO_ENABLED=0 go build -trimpath \
-		-ldflags "-X github.com/chrisguidry/liken/machine.Version=$(LIKEN_VERSION)" \
+		-ldflags "-X github.com/liken-sh/liken/machine.Version=$(LIKEN_VERSION)" \
 		-o $(DIST)/liken-machine-operator .
 
 $(DIST)/liken-machine-operator-image.tar: $(DIST)/liken-machine-operator ../image/oci.sh

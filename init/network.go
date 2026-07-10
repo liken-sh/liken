@@ -33,7 +33,7 @@ import (
 	"github.com/insomniacslk/dhcp/dhcpv4/nclient4"
 	"github.com/vishvananda/netlink"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // connection holds the facts learned while bringing up one interface:

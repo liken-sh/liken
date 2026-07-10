@@ -10,7 +10,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // slotFirmware is a fake efivarfs carrying both slots' entries and a

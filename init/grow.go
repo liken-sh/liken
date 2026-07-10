@@ -33,7 +33,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // A growth is one entry's extension: which table slot, and its new

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 var factsNow = time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)

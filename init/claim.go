@@ -37,7 +37,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // isBlank reports whether a disk carries nothing recognizable: no MBR

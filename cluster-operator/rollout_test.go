@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // A rolloutEntry is one machine as the conductor sees it: its phase,

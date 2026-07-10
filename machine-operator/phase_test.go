@@ -6,7 +6,7 @@ package main
 import (
 	"testing"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 func condition(ctype string, status machine.ConditionStatus, reason string) machine.Condition {

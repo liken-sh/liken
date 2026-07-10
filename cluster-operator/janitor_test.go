@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 func featureDaemonSet(name, slug string) featureWorkload {

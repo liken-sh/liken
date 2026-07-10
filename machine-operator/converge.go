@@ -29,7 +29,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // storageDrift compares the declared storage against what the boot

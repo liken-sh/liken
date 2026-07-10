@@ -3,7 +3,7 @@ package main
 import (
 	"slices"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // localAPIEndpoint is the machine's own path to the API server,

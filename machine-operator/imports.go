@@ -32,8 +32,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/chrisguidry/liken/kubernetes"
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/kubernetes"
+	"github.com/liken-sh/liken/machine"
 )
 
 // osImagePrefix marks the container images that arrive by tarball:

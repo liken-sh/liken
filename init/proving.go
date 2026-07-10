@@ -39,7 +39,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // settleSystemRelease reads the system store at boot and renders the

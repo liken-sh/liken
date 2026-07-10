@@ -39,8 +39,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/chrisguidry/liken/kubernetes"
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/kubernetes"
+	"github.com/liken-sh/liken/machine"
 )
 
 func main() {

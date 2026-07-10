@@ -43,7 +43,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // registriesConfigPath is where k3s expects the file. A package

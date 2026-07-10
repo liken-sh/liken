@@ -33,8 +33,8 @@ package main
 import (
 	"fmt"
 
-	"github.com/chrisguidry/liken/kubernetes"
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/kubernetes"
+	"github.com/liken-sh/liken/machine"
 )
 
 // The role labels k3s stamps on a Node when it runs a control plane.

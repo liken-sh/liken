@@ -33,7 +33,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // restartState is everything the restart path needs that main

@@ -32,7 +32,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // installParam is the command-line flag that makes a boot an

@@ -12,7 +12,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // restartFixture builds a restartState over tempdir stores with

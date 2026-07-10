@@ -30,7 +30,7 @@ import (
 	"io/fs"
 	"os"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // chooseCluster returns the cluster document this boot runs under,

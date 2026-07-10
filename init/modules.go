@@ -45,7 +45,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // modulesConf is the image's fixed module list. A package variable

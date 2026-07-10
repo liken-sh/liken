@@ -19,7 +19,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/machine"
 )
 
 // These are the roots discovery reads from. They are variables rather

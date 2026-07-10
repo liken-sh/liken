@@ -28,8 +28,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/chrisguidry/liken/kubernetes"
-	"github.com/chrisguidry/liken/machine"
+	"github.com/liken-sh/liken/kubernetes"
+	"github.com/liken-sh/liken/machine"
 )
 
 // featureAnnotation names the feature a workload belongs to, the
