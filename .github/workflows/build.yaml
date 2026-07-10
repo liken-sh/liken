@@ -1,0 +1,103 @@
+# The build, run by GitHub Actions on every push to main and every
+# pull request against it: `make all`, the same command a developer
+# runs, producing the same bootable image. The checks workflow proves
+# the tree is clean; this one proves it still assembles an operating
+# system.
+#
+# Like the checks workflow, this one is deliberately thin. The build
+# logic lives in the Makefiles; all CI adds is a runner, the
+# toolchain, and caching so the vendored inputs don't make every run
+# a cold build.
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      # The fetch scripts document their own host requirements; the
+      # runner image has most of them (curl, tar, ar, zstd, openssl,
+      # docker) already. cpio archives the image and depmod (kmod)
+      # indexes the kernel's modules.
+      - name: install host tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cpio kmod
+
+      # One cache per vendored domain, keyed on the same prerequisites
+      # the root Makefile declares for that domain's artifact. A pin
+      # bump changes the key and only that domain rebuilds cold; the
+      # kernel's 187M doesn't re-download because k3s moved. The Go
+      # programs are deliberately uncached here (beyond setup-go's
+      # module and build caches): they are the code under test and
+      # rebuild every run.
+      - uses: actions/cache@v6
+        with:
+          path: kernel/dist
+          key: kernel-${{ hashFiles('kernel/VERSION', 'kernel/fetch.sh') }}
+      - uses: actions/cache@v6
+        with:
+          path: k3s/dist
+          key: k3s-${{ hashFiles('k3s/VERSION', 'k3s/fetch.sh') }}
+      - uses: actions/cache@v6
+        with:
+          path: xtables/dist
+          key: xtables-${{ hashFiles('xtables/VERSION', 'xtables/fetch.sh') }}
+      - uses: actions/cache@v6
+        with:
+          path: trust/dist
+          key: trust-${{ hashFiles('trust/VERSION', 'trust/fetch.sh') }}
+      - uses: actions/cache@v6
+        with:
+          path: e2fsprogs/dist
+          key: e2fsprogs-${{ hashFiles('e2fsprogs/VERSION', 'e2fsprogs/fetch.sh') }}
+      # The container-built domains also key on image/oci.sh and the
+      # root VERSION, mirroring their Makefile rules: the iscsid image
+      # tar bakes the liken version, so a release bump has to rebuild
+      # it.
+      - uses: actions/cache@v6
+        with:
+          path: open-iscsi/dist
+          key: open-iscsi-${{ hashFiles('open-iscsi/VERSION', 'open-iscsi/fetch.sh', 'image/oci.sh', 'VERSION') }}
+      - uses: actions/cache@v6
+        with:
+          path: nfs-utils/dist
+          key: nfs-utils-${{ hashFiles('nfs-utils/VERSION', 'nfs-utils/fetch.sh') }}
+
+      # Make decides staleness by timestamps, and the two halves of
+      # this working tree carry different ones: checkout stamps the
+      # sources with the time of the run, while the cache restores its
+      # artifacts with the older times they were archived with. Left
+      # alone, every cached artifact looks out of date and make
+      # re-fetches it all. Touching the restored artifacts is sound
+      # precisely because each cache key hashes the artifact's real
+      # prerequisites: a hit means those inputs are unchanged, so the
+      # artifact is current no matter what the clock says.
+      - name: refresh cached artifact timestamps
+        run: |
+          for dist in kernel/dist k3s/dist xtables/dist trust/dist \
+                      e2fsprogs/dist open-iscsi/dist nfs-utils/dist; do
+              [ -d "$dist" ] && find "$dist" -type f -exec touch {} +
+          done
+          true
+
+      # The whole system: every vendored input fetched and verified,
+      # the Go programs compiled, a fresh identity minted, and the
+      # bootable image assembled. Success is make exiting zero with
+      # dev-cluster/image/liken.cpio on disk; booting that image is a
+      # later milestone's job.
+      - run: make all
