@@ -59,9 +59,12 @@ repos:
         language: system
         files: \.go$|^go\.(mod|sum)$|^\.testcoverage\.yml$
         pass_filenames: false
+      # Like go-test-coverage above, staticcheck is a pinned tool
+      # dependency in go.mod, so every machine (and CI) runs the same
+      # version without installing anything beyond the Go toolchain.
       - id: staticcheck
         name: staticcheck
-        entry: bash -c 'staticcheck ./...'
+        entry: bash -c 'go tool staticcheck ./...'
         language: system
         files: \.go$|^go\.(mod|sum)$
         pass_filenames: false
