@@ -40,8 +40,9 @@ what's still ahead.
 13. [x] [Rolling reboots](13-rolling-reboots.md) — the rollout
     conductor: budgets, drains, and one leader at a time.
 14. [ ] [GitOps from first boot](14-gitops-from-first-boot.md) —
-    a reader exercise: the seed channel and the minting primitive,
-    not a vendored engine.
+    flux as an opt-in feature with parameters (repository, path,
+    branch): the vocabulary's first parameterized feature, riding
+    the machinery 17 built.
 15. [x] [Observability below Kubernetes](15-observability-below-kubernetes.md) —
     every host log stream becomes a pod's stdout.
 16. [x] [Adopting an existing cluster](16-adopting-a-cluster.md) —
