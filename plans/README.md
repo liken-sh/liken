@@ -57,9 +57,10 @@ the specific workload that revealed it:
     Cluster vocabulary for optional capabilities: iSCSI and NFS host
     clients, and the k3s bundled components (absorbing 19). In
     progress: the vocabulary, the bundled components, and both
-    vendored payloads are landed and drilled, and the lab's storage
+    vendored payloads are landed and drilled, the lab's storage
     server (dev-cluster/storage) answers both protocols from the
-    guests; the CSI proof and the retraction janitor remain.
+    guests, and the retraction janitor cleans up disowned feature
+    workloads; the CSI proof remains.
 18. [x] [Requestable kernel modules](18-requestable-kernel-modules.md) —
     machines declare the drivers their hardware needs; the image
     ships them, init loads them, status reports them. Ran ahead of

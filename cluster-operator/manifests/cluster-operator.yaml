@@ -67,10 +67,16 @@ rules:
     verbs: [create]
   # The steward reads each stewarded DaemonSet to learn which
   # release's manifests are actually applied (the liken.sh/os-version
-  # annotation): the authority its pod refreshes converge toward.
+  # annotation): the authority its pod refreshes converge toward. The
+  # feature janitor (janitor.go) lists them looking for liken.sh/
+  # feature annotations and deletes the ones whose feature the
+  # cluster document no longer declares. Delete is a broad verb for
+  # an observer to hold, so the janitor's own judgment stays narrow:
+  # it only ever deletes an object carrying the annotation, and only
+  # feature manifests carry one.
   - apiGroups: [apps]
     resources: [daemonsets]
-    verbs: [get]
+    verbs: [get, list, delete]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

@@ -27,9 +27,15 @@ metadata:
     app.kubernetes.io/part-of: liken
   # The release these manifests shipped with, for the pod steward
   # (cluster-operator/steward.go), exactly as on the operator's
-  # DaemonSet: a pod is stale when its inherited copy differs.
+  # DaemonSet: a pod is stale when its inherited copy differs. The
+  # feature annotation is the retraction janitor's contract
+  # (cluster-operator/janitor.go): init only removes this manifest
+  # from the auto-deploy directory at boot, when k3s isn't running to
+  # see the file go, so the janitor deletes this object once the
+  # cluster document stops declaring the feature named here.
   annotations:
     liken.sh/os-version: "LIKEN_VERSION"
+    liken.sh/feature: iscsi
 spec:
   selector:
     matchLabels:

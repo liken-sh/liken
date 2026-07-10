@@ -217,17 +217,20 @@ which is mount.nfs's cue that the kernel already keeps the table. A
 minimal /etc is right until the first tool that honors a contract
 older than the initramfs.
 
-One gap the drills exposed is still owed. k3s deletes an auto-deploy
-addon's resources when its manifest file is removed while k3s runs,
-but a retraction removes the file at boot, before k3s starts, so k3s
-never sees a deletion: the retracted feature's workload object
-survives with its pods failing, and only a hand-run kubectl delete
-clears it today. The retraction still disarms the feature (init stops
-writing its boot files, so the workload cannot function), but a
-clean removal needs a janitor: most likely the cluster operator
-deleting any liken-system object whose liken.sh/feature annotation
-names a feature the document no longer declares. That lands with the
-lab proof.
+One gap the drills exposed needed its own machinery. k3s deletes an
+auto-deploy addon's resources when its manifest file is removed while
+k3s runs, but a retraction removes the file at boot, before k3s
+starts, so k3s never sees a deletion: the retracted feature's
+workload object would survive with its pods failing. The retraction
+still disarms the feature (init stops writing its boot files, so the
+workload cannot function), but the clean removal belongs to the
+cluster operator's feature janitor (cluster-operator/janitor.go):
+each feature-seeded manifest carries a liken.sh/feature annotation
+naming its owner, and every sweep deletes any liken-system workload
+whose annotation names a feature the document no longer declares.
+Declared is the only question the janitor asks, so it acts on the
+document edit rather than waiting for the fleet to roll — the same
+timing k3s itself would have shown had it watched the file go.
 
 Three questions this design left open were settled when the milestone
 ran. The static build recipe lives in open-iscsi/fetch.sh: alpine

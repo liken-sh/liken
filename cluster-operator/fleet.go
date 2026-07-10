@@ -132,6 +132,11 @@ func sweepFleet(c *kubernetes.Client, cluster *machine.Cluster, now time.Time) {
 	// upgrade until the steward refreshes them (steward.go).
 	stewardOSPods(c, machines)
 
+	// Retracted features leave workloads behind, because k3s only
+	// deletes an addon it watches disappear, and retraction removes
+	// the manifest while k3s is down (janitor.go).
+	janitorFeatureWorkloads(c, cluster)
+
 	for _, m := range machines {
 		if !slices.Contains(s.lost, m.Metadata.Name) {
 			continue
