@@ -8,10 +8,14 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"io"
+	"os"
 	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestParseKmsgRecord(t *testing.T) {
@@ -205,9 +209,7 @@ func TestKmsgRelayReportsUnparseableRecords(t *testing.T) {
 
 func TestKmsgRelayCheckpointsAndResumes(t *testing.T) {
 	// Checkpoint on every record so the first run's position sticks.
-	old := checkpointInterval
-	checkpointInterval = 0
-	t.Cleanup(func() { checkpointInterval = old })
+	immediateCheckpoints(t)
 
 	relay, _ := testKmsgRelay(t, 0, scriptedDevice(
 		"6,100,1000000,-;first\n",
@@ -245,9 +247,7 @@ func TestKmsgRelayCheckpointsAndResumes(t *testing.T) {
 // a liken relay that mostly skips kernel records still resumes past
 // them.
 func TestKmsgRelayCursorAdvancesPastOtherFacilities(t *testing.T) {
-	old := checkpointInterval
-	checkpointInterval = 0
-	t.Cleanup(func() { checkpointInterval = old })
+	immediateCheckpoints(t)
 
 	relay, _ := testKmsgRelay(t, 1, scriptedDevice(
 		"14,100,1000000,-;liken: ours\n",
@@ -266,9 +266,7 @@ func TestKmsgRelayCursorAdvancesPastOtherFacilities(t *testing.T) {
 }
 
 func TestKmsgRelayNoticesRecordsExpiredWhileDown(t *testing.T) {
-	old := checkpointInterval
-	checkpointInterval = 0
-	t.Cleanup(func() { checkpointInterval = old })
+	immediateCheckpoints(t)
 
 	relay, _ := testKmsgRelay(t, 0, scriptedDevice("6,100,1000000,-;first\n"))
 	if err := relay.run(); err != io.EOF {
@@ -291,5 +289,46 @@ func TestKmsgRelayNoticesRecordsExpiredWhileDown(t *testing.T) {
 	}
 	if es[2].Seq != 500 {
 		t.Errorf("record: %+v", es[2])
+	}
+}
+
+// A relay that cannot ship must exit with the write error so the
+// kubelet restarts it, rather than reading on and dropping records.
+func TestKmsgRelayStopsWhenItsOutputFails(t *testing.T) {
+	relay, _ := testKmsgRelay(t, 0, scriptedDevice("6,100,1000000,-;doomed\n"))
+	relay.out = newEnvelopeWriter(brokenWriter{})
+	if err := relay.run(); !errors.Is(err, errStdoutGone) {
+		t.Errorf("run should surface the write error, got %v", err)
+	}
+}
+
+// Checkpointing is the relay's durability, so a cursor directory that
+// refuses writes must stop the relay the same way a failed ship does.
+func TestKmsgRelayStopsWhenItCannotCheckpoint(t *testing.T) {
+	relay, _ := testKmsgRelay(t, 0, scriptedDevice("6,100,1000000,-;x\n"))
+	if err := os.Chmod(relay.cursorDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(relay.cursorDir, 0o700) })
+	if err := relay.run(); !errors.Is(err, os.ErrPermission) {
+		t.Errorf("run should surface the checkpoint error, got %v", err)
+	}
+}
+
+// wallAnchor recovers the wall-clock moment of boot, so it must land
+// in the past, and adding the monotonic clock's elapsed time back to
+// it must land at the present.
+func TestWallAnchorRecoversTheBootMoment(t *testing.T) {
+	anchor := wallAnchor()
+	if !anchor.Before(time.Now()) {
+		t.Fatalf("the boot moment must be in the past: %v", anchor)
+	}
+	var ts unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &ts); err != nil {
+		t.Fatal(err)
+	}
+	elapsed := time.Duration(ts.Sec)*time.Second + time.Duration(ts.Nsec)
+	if drift := time.Since(anchor.Add(elapsed)); drift < -time.Second || drift > time.Second {
+		t.Errorf("anchor plus the monotonic elapsed should be now; off by %v", drift)
 	}
 }

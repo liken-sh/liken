@@ -44,19 +44,18 @@ import (
 
 // settleSystemRelease reads the system store at boot and renders the
 // verdicts only init can: is this boot a trial, or the fallback from
-// one? It returns true when this boot is proving a staged release,
-// which is what arms the proving watch. Runs after storage settles
-// (the store lives on machineState) and after the boot's slot is
-// known.
-func settleSystemRelease(stateRoot, bootSlot string, durable bool, boot *machine.BootStatus) bool {
+// one? When this boot is proving a staged release it returns that
+// release's record, which is what arms the proving watch; every other
+// verdict returns nil. Runs after storage settles (the store lives on
+// machineState) and after the boot's slot is known.
+func settleSystemRelease(stateRoot, bootSlot string, durable bool, boot *machine.BootStatus) *machine.SystemRelease {
 	if !durable {
-		return false
+		return nil
 	}
 	store := machine.SystemReleases(stateRoot)
 
-	// Republish the standing rejection: boot facts are rebuilt from
-	// scratch every boot, but a rejection must outlast the boot that
-	// recorded it.
+	// The standing rejection is republished into the boot record
+	// every boot (rejectStagedDocument explains why).
 	boot.SystemRejection, _ = store.LoadRejection()
 
 	staged, err := store.LoadStaged()
@@ -65,15 +64,15 @@ func settleSystemRelease(stateRoot, bootSlot string, durable bool, boot *machine
 	}
 	if staged == nil {
 		repairBootOrder(efiVarsDir, stateRoot)
-		return false
+		return nil
 	}
 
 	record, perr := machine.ParseSystemRelease(staged)
 	if perr != nil {
-		boot.SystemRejection = rejectStagedSystem(store,
-			fmt.Sprintf("the staged release record does not parse: %v", perr), staged)
+		boot.SystemRejection = rejectStagedDocument("system", "release", store.Reject,
+			staged, fmt.Sprintf("the staged release record does not parse: %v", perr))
 		repairBootOrder(efiVarsDir, stateRoot)
-		return false
+		return nil
 	}
 
 	// A boot that didn't come from a slot can't judge a slot trial:
@@ -81,7 +80,7 @@ func settleSystemRelease(stateRoot, bootSlot string, durable bool, boot *machine
 	if bootSlot == "" {
 		fmt.Printf("liken: system: release %s is staged for slot %s, but this boot came from external media; leaving it for a from-disk boot\n",
 			record.Version, record.Slot)
-		return false
+		return nil
 	}
 
 	if record.Slot == bootSlot {
@@ -93,8 +92,7 @@ func settleSystemRelease(stateRoot, bootSlot string, durable bool, boot *machine
 		// the machine actually serving its cluster on the new release.
 		fmt.Printf("liken: system: proving boot: release %s on slot %s; the operator's first pass is the proof\n",
 			record.Version, record.Slot)
-		provingTrial = *record
-		return true
+		return record
 	}
 
 	hash := machine.ManifestHash(staged)
@@ -104,28 +102,17 @@ func settleSystemRelease(stateRoot, bootSlot string, durable bool, boot *machine
 		// BootNext chance and never got promoted. That is the
 		// fallback verdict, recorded durably so no boot re-arms the
 		// same trial.
-		boot.SystemRejection = rejectStagedSystem(store,
-			fmt.Sprintf("the machine booted slot %s to prove release %s and fell back to slot %s; the release never proved out",
-				record.Slot, record.Version, bootSlot), staged)
+		boot.SystemRejection = rejectStagedDocument("system", "release", store.Reject,
+			staged, fmt.Sprintf("the machine booted slot %s to prove release %s and fell back to slot %s; the release never proved out",
+				record.Slot, record.Version, bootSlot))
 		repairBootOrder(efiVarsDir, stateRoot)
-		return false
+		return nil
 	}
 
 	fmt.Printf("liken: system: release %s is staged for slot %s, awaiting its proving reboot\n",
 		record.Version, record.Slot)
 	repairBootOrder(efiVarsDir, stateRoot)
-	return false
-}
-
-// rejectStagedSystem quarantines a staged release record with its
-// reason, and reports the rejection for this boot's facts.
-func rejectStagedSystem(store machine.ManifestStore, reason string, raw []byte) *machine.Rejection {
-	fmt.Fprintf(os.Stderr, "liken: system: rejecting the staged release: %s\n", reason)
-	rejection := machine.NewRejection(raw, reason, time.Now().UTC())
-	if err := store.Reject(rejection); err != nil {
-		fmt.Fprintf(os.Stderr, "liken: system: recording the rejection: %v\n", err)
-	}
-	return &rejection
+	return nil
 }
 
 // armProvingBoot runs on the reboot path: if a release is staged for
@@ -212,18 +199,16 @@ func fallbackInPlace(efiDir, stateRoot string) bool {
 // merely slow.
 const provingPatience = 10 * time.Minute
 
-// provingTrial is the record this boot is trying, set at boot when
-// settleSystemRelease recognizes the trial. The proving watch
-// compares the store's *proven* record against it, because the trial
-// is only over when this exact record has been promoted. A staged
-// file that merely disappears was withdrawn, not promoted, and
-// treating its absence as promotion would flip BootOrder for a
-// promotion that never happened.
-var provingTrial machine.SystemRelease
-
-// provingWatch runs only on proving boots, and it combines two
-// fallbacks in one loop. The first is the ordinary path: poll the
-// store until the operator promotes the staged record (its
+// provingWatch builds the machine-plane component a proving boot
+// runs, closed over the record this boot is trying. The watch
+// compares the store's *proven* record against the trial's own,
+// because the trial is only over when this exact record has been
+// promoted: a staged file that merely disappears was withdrawn, not
+// promoted, and treating its absence as promotion would flip
+// BootOrder for a promotion that never happened.
+//
+// The loop combines two fallbacks. The first is the ordinary path:
+// poll the store until the operator promotes the staged record (its
 // disappearance is the signal), then rewrite BootOrder so the newly
 // proven slot leads. The second is a watchdog: a trial that reaches
 // provingPatience unpromoted gets a deliberate reboot. The firmware's
@@ -232,43 +217,46 @@ var provingTrial machine.SystemRelease
 // (RejectedLastBoot) and prevents any reboot loop. The watchdog
 // covers the failure BootNext can't see: a kernel that boots fine
 // into a system that never serves.
-func provingWatch(ctx context.Context) error {
-	deadline := time.After(provingPatience)
-	for {
-		select {
-		case <-ctx.Done():
+func provingWatch(trial machine.SystemRelease) func(context.Context) error {
+	return func(ctx context.Context) error {
+		deadline := time.After(provingPatience)
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-deadline:
+				fmt.Fprintf(os.Stderr, "liken: system: the proving boot never settled within %s; rebooting onto the proven slot\n", provingPatience)
+				rebootMachine(machine.RebootIntent{
+					Reason: "the proving boot never settled; the firmware's consumed BootNext falls back to the proven slot",
+				}) // never returns
+			case <-time.After(5 * time.Second):
+			}
+			store := machine.SystemReleases(machine.MachineStateDir)
+			staged, err := store.LoadStaged()
+			if err != nil || staged != nil {
+				continue
+			}
+			// The staged file is gone, but gone is not the same as
+			// promoted. Only a proven record matching this boot's own
+			// trial counts as the verdict. Anything else means the
+			// record was withdrawn out from under the trial (a
+			// retargeted cluster, most likely), and the firmware's
+			// order must not change for a promotion that never
+			// happened.
+			proven, err := store.LoadProven()
+			if err != nil || proven == nil {
+				continue
+			}
+			record, err := machine.ParseSystemRelease(proven)
+			if err != nil || record.Version != trial.Version || record.Slot != trial.Slot {
+				fmt.Printf("liken: system: the trial of release %s was withdrawn without promotion; leaving BootOrder alone\n",
+					trial.Version)
+				return nil
+			}
+			fmt.Printf("liken: system: release %s was promoted; asserting BootOrder from the store\n", record.Version)
+			repairBootOrder(efiVarsDir, machine.MachineStateDir)
 			return nil
-		case <-deadline:
-			fmt.Fprintf(os.Stderr, "liken: system: the proving boot never settled within %s; rebooting onto the proven slot\n", provingPatience)
-			rebootMachine(machine.RebootIntent{
-				Reason: "the proving boot never settled; the firmware's consumed BootNext falls back to the proven slot",
-			}) // never returns
-		case <-time.After(5 * time.Second):
 		}
-		store := machine.SystemReleases(machine.MachineStateDir)
-		staged, err := store.LoadStaged()
-		if err != nil || staged != nil {
-			continue
-		}
-		// The staged file is gone, but gone is not the same as
-		// promoted. Only a proven record matching this boot's own
-		// trial counts as the verdict. Anything else means the record
-		// was withdrawn out from under the trial (a retargeted
-		// cluster, most likely), and the firmware's order must not
-		// change for a promotion that never happened.
-		proven, err := store.LoadProven()
-		if err != nil || proven == nil {
-			continue
-		}
-		record, err := machine.ParseSystemRelease(proven)
-		if err != nil || record.Version != provingTrial.Version || record.Slot != provingTrial.Slot {
-			fmt.Printf("liken: system: the trial of release %s was withdrawn without promotion; leaving BootOrder alone\n",
-				provingTrial.Version)
-			return nil
-		}
-		fmt.Printf("liken: system: release %s was promoted; asserting BootOrder from the store\n", record.Version)
-		repairBootOrder(efiVarsDir, machine.MachineStateDir)
-		return nil
 	}
 }
 

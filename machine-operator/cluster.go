@@ -43,6 +43,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
+	"github.com/chrisguidry/liken/kubernetes"
 	"github.com/chrisguidry/liken/machine"
 )
 
@@ -106,8 +107,7 @@ func renderCluster(name string, spec machine.ClusterSpec) ([]byte, string, error
 // disrupt a fleet.
 func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, facts *machine.MachineStatus, rejection *machine.Rejection, bootDoc *machine.Cluster, bootHash, stagedHash string, t turn) convergence {
 	if facts == nil || facts.Boot.ManifestSource == "" {
-		return convergence{condition: convergenceUnknown("ClusterConverged", "FactsIncomplete",
-			"the machine's facts carry no boot record yet")}
+		return factsIncomplete("ClusterConverged")
 	}
 	if facts.Boot.ClusterManifestSource != "" && bootHash == "" {
 		return convergence{condition: convergenceUnknown("ClusterConverged", "FactsIncomplete",
@@ -120,24 +120,21 @@ func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, fact
 	}
 
 	if hash == bootHash {
-		return convergence{
-			condition:      converged("ClusterConverged", "Converged", "this boot ran the current cluster document"),
-			withdraw:       stagedHash != "",
-			clearRejection: rejection != nil,
-		}
+		return convergedWithCleanup(
+			converged("ClusterConverged", "Converged", "this boot ran the current cluster document"),
+			stagedHash, rejection)
 	}
 
 	// The rejection comes from the durable record, not from facts.
 	// Facts are a snapshot taken at boot and never change while the
 	// machine runs, but a rejection cleared by a revert must unblock
 	// a retry within the same boot.
-	if r := rejection; r != nil && r.Hash == hash {
+	if rejection != nil && rejection.Hash == hash {
 		return convergence{condition: notConverged("ClusterConverged", "RejectedLastBoot",
-			fmt.Sprintf("init rejected this exact cluster document at boot: %s; edit the cluster to something different", r.Reason))}
+			fmt.Sprintf("init rejected this exact cluster document at boot: %s; edit the cluster to something different", rejection.Reason))}
 	}
 	if facts.Storage.MachineState.Backing != machine.BackingPartition {
-		return convergence{condition: notConverged("ClusterConverged", "MachineStateEphemeral",
-			"machineState is backed by memory; there is no durable filesystem to stage the cluster document into; declare machineState in the machine's manifest")}
+		return machineStateEphemeral("ClusterConverged", "the cluster document")
 	}
 
 	restart := bootDoc != nil && machine.RestartApplies(bootDoc.Spec, cluster.Spec)
@@ -165,6 +162,27 @@ func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, fact
 		fmt.Sprintf("cluster document staged (%.12s); waiting for the cluster to grant a turn to apply it by %s", hash, apply),
 		fmt.Sprintf("%s requested to apply the staged cluster document (%.12s)", apply, hash))
 	return c
+}
+
+// convergeClusterDocument is the cluster document's part of one
+// reconcile pass: read the live Cluster, load this machine's durable
+// rejection and staged copy from the store, and decide. The decision
+// is where the fleet's transient disagreement about the Cluster
+// becomes visible: each machine stages its own copy and reboots on
+// its own policy, and this condition reports where this one stands.
+// The live Cluster comes back alongside the decision because version
+// convergence (release.go) live-consumes its release feed; nil means
+// the read failed, and the verdict already says so.
+func convergeClusterDocument(c *kubernetes.Client, store machine.ManifestStore, clusterName string, m *machine.Machine, facts *machine.MachineStatus, t turn) (convergence, *machine.Cluster) {
+	liveCluster, err := kubernetes.GetCluster(c, clusterName)
+	if err != nil {
+		return convergence{condition: convergenceUnknown("ClusterConverged", "ClusterUnavailable",
+			fmt.Sprintf("reading cluster %s: %v", clusterName, err))}, nil
+	}
+	rejection, _ := store.LoadRejection()
+	bootDoc, bootHash := bootClusterDocument(machine.BootClusterManifestPath)
+	return decideClusterConvergence(liveCluster, m, facts, rejection,
+		bootDoc, bootHash, readStagedHash(store), t), liveCluster
 }
 
 // bootClusterDocument describes the document this boot ran: the

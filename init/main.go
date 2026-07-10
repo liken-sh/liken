@@ -59,7 +59,7 @@ func main() {
 	// on its proven slot with no liken code involved in the recovery
 	// (fault.go).
 	if fault == "panic" {
-		panic("liken: fault injection: this release panics at first breath")
+		panic("liken: fault injection: this release panics at startup")
 	}
 
 	// Refuse to run as an ordinary process. Everything below assumes
@@ -152,10 +152,11 @@ func main() {
 	}
 
 	// Settle where this boot sits in the system release lifecycle: it
-	// may be the trial of a staged release, the fallback from one, or
-	// an ordinary boot whose only job is to keep the firmware's
-	// BootOrder agreeing with the store (proving.go).
-	proving := settleSystemRelease(machine.MachineStateDir, boot.Slot,
+	// may be the trial of a staged release (in which case the staged
+	// record comes back, to arm the proving watch), the fallback from
+	// one, or an ordinary boot whose only job is to keep the
+	// firmware's BootOrder agreeing with the store (proving.go).
+	trial := settleSystemRelease(machine.MachineStateDir, boot.Slot,
 		storage.MachineState.Backing == machine.BackingPartition, &boot)
 
 	// The cluster document says which machines are leaders, and from
@@ -226,119 +227,8 @@ func main() {
 	// forever. A machine without k3s (the image's minimal form) just
 	// proves it can boot and powers off.
 	if _, err := os.Stat(k3sBinary); err == nil {
-		// Before k3s can touch its container store: decide whether
-		// this boot can trust it. A store whose last imports were
-		// never proven is discarded rather than believed (imports.go),
-		// and the tarballs this boot carries are staged as a trial the
-		// operator will prove.
-		settleImageImports(machine.MachineStateDir,
-			storage.MachineState.Backing == machine.BackingPartition,
-			storage.ClusterState.Backing == machine.BackingPartition, &boot)
-		// The machine's role and k3s's boot-derived configuration
-		// come from the cluster manifest (k3s.go). A failure here is
-		// an identity problem too: a follower that can't say where
-		// its cluster is must not come up pretending otherwise.
-		role, err := writeK3sBootConfig(cluster, m, conns)
-		if err != nil {
-			failBoot(fmt.Errorf("%w: %v", errIdentity, err))
-		}
-		// How this machine pulls container images: mirrors and the
-		// embedded registry from the cluster document, credentials
-		// from their own document, rendered into the registries.yaml
-		// k3s reads at start (registries.go). Writing it promotes
-		// staged credentials — the write is their whole actuation.
-		registries := writeRegistriesConfig(cluster, creds,
-			machine.RegistryCredentialsStore(machine.MachineStateDir), boot.CredentialsSource)
-		// The node password k3s mints on first join has to outlive
-		// this boot, or the machine can never rejoin its own cluster
-		// (k3s.go explains).
-		persistNodePassword(storage)
-		// A proven demotion also removes the datastore left over from
-		// when this machine was a leader: etcd won't let a removed
-		// member rejoin over its old data, so the datastore must be
-		// deleted before k3s starts (k3s.go).
-		purgeLeaderLeftovers(role, boot.ClusterManifestSource, k3sServerDB)
-		// The clock is corrected before k3s starts, because a wrong
-		// clock fails TLS: every certificate the CA minted looks
-		// like it's from the future. This is the only moment liken
-		// ever steps the clock; from here on it only slews (time.go
-		// explains both corrections).
-		clk := newClock(timeSources(cluster, role, machine.MachineManifestDir))
-		firstSync := stepClockAtBoot(clk.sources)
-		clk.record(firstSync)
-		// A successful boot measurement is worth persisting at once:
-		// a machine that later loses power without a clean shutdown
-		// still boots with roughly the right time (time.go describes
-		// the two moments the RTC is written).
-		if firstSync != nil {
-			writeRTC()
-		}
-		prepareForK3s()
-		// The previous boot's k3s and containerd logs step aside
-		// before k3s starts writing this boot's. This is a plain call
-		// rather than a component because it must finish before k3s
-		// opens the files, and boot is the only safe moment to rename
-		// them: nothing holds them open (logrotate.go).
-		rotateBootLogs()
-		// Facts wait until here because they live under /run, and
-		// prepareForK3s just mounted a fresh tmpfs there; anything
-		// written earlier would be shadowed by the mount.
-		facts := publishFacts(cluster, role, choice, conns, storage, boot, moduleStatuses, featureStatuses, registries, firstSync, clk.sources)
-		publishBootClusterManifest(clusterRaw)
-		// A machine with time sources keeps disciplining its clock
-		// for as long as it runs; a free-running machine has nothing
-		// to follow, and its status already says so.
-		if len(clk.sources) > 0 {
-			plane.start("the clock", disciplineClock(clk, facts))
-		}
-		// Only leaders serve time, because only leaders are asked:
-		// followers sync from the leaders themselves. Serving works
-		// even when free-running: a fleet with no upstreams still
-		// keeps one consistent time across its machines (responder.go).
-		if role == machine.RoleLeader {
-			plane.start("the time responder", serveTime(clk))
-		}
-		// The intent channel: init creates the directory (owning its
-		// existence and permissions), the operator writes into it,
-		// and the watcher carries requests into the supervisor
-		// (reboot.go) — at most one reboot, and any number of k3s
-		// restarts over the boot's life.
-		if err := os.MkdirAll(machine.OperatorRunDir, 0o755); err != nil {
-			fmt.Fprintf(os.Stderr, "liken: creating %s: %v\n", machine.OperatorRunDir, err)
-		}
-		rebootRequests := make(chan machine.RebootIntent, 1)
-		restartRequests := make(chan machine.RestartIntent, 1)
-		plane.start("the intent watch", func(ctx context.Context) error {
-			return watchForOperatorIntents(ctx, machine.OperatorRunDir, 2*time.Second, rebootRequests, restartRequests)
-		})
-		// The restart path: everything a k3s bounce may re-render,
-		// gathered while it's at hand (restart.go).
-		restarter := newRestartState(machine.MachineStateDir, m, conns, facts,
-			cluster, clusterRaw, creds, boot.CredentialsSource)
-		// A proving boot watches for its own promotion: when the
-		// operator's first reconcile proves the staged release, init
-		// rewrites the firmware's BootOrder to put the newly proven
-		// slot first (proving.go).
-		if proving {
-			plane.start("the proving watch", provingWatch)
-		}
-		// Only a leader can report cluster state: the admin
-		// kubeconfig is a control-plane artifact, and followers hold
-		// no credentials of their own. A follower's join shows up on
-		// the leader's console (and in its own k3s log lines).
-		if role == machine.RoleLeader {
-			plane.start("the node report", reportWhenReady)
-		}
-		// The wedge fault boots everything except k3s: the node never
-		// joins, the operator never runs, and no promotion ever
-		// lands. That is exactly the failure the proving watchdog
-		// exists to catch (fault.go). The machine plane keeps
-		// running, so the watchdog's reboot still works.
-		if fault == "wedge-k3s" {
-			fmt.Println("liken: fault injection: wedging instead of starting k3s")
-			select {}
-		}
-		superviseK3s(role, rebootRequests, restartRequests, restarter.apply) // never returns
+		clusterLife(choice, storage, boot, cluster, clusterRaw, creds,
+			conns, moduleStatuses, featureStatuses, trial) // never returns
 	}
 
 	// With no k3s to supervise, a boot is complete once the report is
@@ -346,6 +236,145 @@ func main() {
 	// shutdown, which is what lets `make run` double as a test harness.
 	fmt.Println("liken: boot complete, powering off")
 	powerOff()
+}
+
+// clusterLife is the k3s half of a boot, everything after the machine
+// itself is settled: the container store's trust decision, the role
+// and its configuration, the clock, the facts, the machine plane's
+// long-running components, and finally the supervisor, which runs for
+// as long as the machine does. It never returns; every path out of it
+// is a reboot or a power-off.
+func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot machine.BootStatus,
+	cluster *machine.Cluster, clusterRaw []byte, creds *machine.RegistryCredentials,
+	conns []*connection, moduleStatuses []machine.ModuleStatus,
+	featureStatuses []machine.FeatureStatus, trial *machine.SystemRelease) {
+	m := choice.m
+
+	// Before k3s can touch its container store: decide whether
+	// this boot can trust it. A store whose last imports were
+	// never proven is discarded rather than believed (imports.go),
+	// and the tarballs this boot carries are staged as a trial the
+	// operator will prove.
+	settleImageImports(machine.MachineStateDir,
+		storage.MachineState.Backing == machine.BackingPartition,
+		storage.ClusterState.Backing == machine.BackingPartition, &boot)
+	// The machine's role and k3s's boot-derived configuration
+	// come from the cluster manifest (k3s.go). A failure here is
+	// an identity problem too: a follower that can't say where
+	// its cluster is must not come up pretending otherwise.
+	role, err := writeK3sBootConfig(cluster, m, conns)
+	if err != nil {
+		failBoot(fmt.Errorf("%w: %v", errIdentity, err))
+	}
+	// How this machine pulls container images: mirrors and the
+	// embedded registry from the cluster document, credentials
+	// from their own document, rendered into the registries.yaml
+	// k3s reads at start (registries.go). Writing it promotes
+	// staged credentials — the write is their whole actuation.
+	registries := writeRegistriesConfig(cluster, creds,
+		machine.RegistryCredentialsStore(machine.MachineStateDir), boot.CredentialsSource)
+	// The node password k3s mints on first join has to outlive
+	// this boot, or the machine can never rejoin its own cluster
+	// (k3s.go explains).
+	persistNodePassword(storage)
+	// A proven demotion also removes the datastore left over from
+	// when this machine was a leader: etcd won't let a removed
+	// member rejoin over its old data, so the datastore must be
+	// deleted before k3s starts (k3s.go).
+	purgeLeaderLeftovers(role, boot.ClusterManifestSource, k3sServerDB)
+	// The clock is corrected before k3s starts, because a wrong
+	// clock fails TLS: every certificate the CA minted looks
+	// like it's from the future. This is the only moment liken
+	// ever steps the clock; from here on it only slews (time.go
+	// explains both corrections).
+	clk := newClock(timeSources(cluster, role, machine.MachineManifestDir))
+	firstSync := stepClockAtBoot(clk.sources)
+	clk.record(firstSync)
+	// A successful boot measurement is worth persisting at once:
+	// a machine that later loses power without a clean shutdown
+	// still boots with roughly the right time (time.go describes
+	// the two moments the RTC is written).
+	if firstSync != nil {
+		writeRTC()
+	}
+	prepareForK3s()
+	// The previous boot's k3s and containerd logs step aside
+	// before k3s starts writing this boot's. This is a plain call
+	// rather than a component because it must finish before k3s
+	// opens the files, and boot is the only safe moment to rename
+	// them: nothing holds them open (logrotate.go).
+	rotateBootLogs()
+	// Facts wait until here because they live under /run, and
+	// prepareForK3s just mounted a fresh tmpfs there; anything
+	// written earlier would be shadowed by the mount.
+	facts := publishFacts(factsInputs{
+		cluster:     cluster,
+		role:        role,
+		choice:      choice,
+		conns:       conns,
+		storage:     storage,
+		boot:        boot,
+		modules:     moduleStatuses,
+		features:    featureStatuses,
+		registries:  registries,
+		firstSync:   firstSync,
+		timeSources: clk.sources,
+	})
+	publishBootClusterManifest(clusterRaw)
+	// A machine with time sources keeps disciplining its clock
+	// for as long as it runs; a free-running machine has nothing
+	// to follow, and its status already says so.
+	if len(clk.sources) > 0 {
+		plane.start("the clock", disciplineClock(clk, facts))
+	}
+	// Only leaders serve time, because only leaders are asked:
+	// followers sync from the leaders themselves. Serving works
+	// even when free-running: a fleet with no upstreams still
+	// keeps one consistent time across its machines (responder.go).
+	if role == machine.RoleLeader {
+		plane.start("the time responder", serveTime(clk))
+	}
+	// The intent channel: init creates the directory (owning its
+	// existence and permissions), the operator writes into it,
+	// and the watcher carries requests into the supervisor
+	// (reboot.go) — at most one reboot, and any number of k3s
+	// restarts over the boot's life.
+	if err := os.MkdirAll(machine.OperatorRunDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "liken: creating %s: %v\n", machine.OperatorRunDir, err)
+	}
+	rebootRequests := make(chan machine.RebootIntent, 1)
+	restartRequests := make(chan machine.RestartIntent, 1)
+	plane.start("the intent watch", func(ctx context.Context) error {
+		return watchForOperatorIntents(ctx, machine.OperatorRunDir, 2*time.Second, rebootRequests, restartRequests)
+	})
+	// The restart path: everything a k3s bounce may re-render,
+	// gathered while it's at hand (restart.go).
+	restarter := newRestartState(machine.MachineStateDir, m, conns, facts,
+		cluster, clusterRaw, creds, boot.CredentialsSource)
+	// A proving boot watches for its own promotion: when the
+	// operator's first reconcile proves the staged release, init
+	// rewrites the firmware's BootOrder to put the newly proven
+	// slot first (proving.go).
+	if trial != nil {
+		plane.start("the proving watch", provingWatch(*trial))
+	}
+	// Only a leader can report cluster state: the admin
+	// kubeconfig is a control-plane artifact, and followers hold
+	// no credentials of their own. A follower's join shows up on
+	// the leader's console (and in its own k3s log lines).
+	if role == machine.RoleLeader {
+		plane.start("the node report", reportWhenReady)
+	}
+	// The wedge fault boots everything except k3s: the node never
+	// joins, the operator never runs, and no promotion ever
+	// lands. That is exactly the failure the proving watchdog
+	// exists to catch (fault.go). The machine plane keeps
+	// running, so the watchdog's reboot still works.
+	if fault == "wedge-k3s" {
+		fmt.Println("liken: fault injection: wedging instead of starting k3s")
+		select {}
+	}
+	superviseK3s(role, rebootRequests, restartRequests, restarter.apply) // never returns
 }
 
 // powerOff shuts the machine down cleanly: sync flushes dirty pages

@@ -67,7 +67,7 @@ func rotateBootLogs() {
 // never worth stopping a boot over.
 func rotateGenerations(path string, keep int) {
 	if err := os.Remove(fmt.Sprintf("%s.%d", path, keep)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		fmt.Printf("liken: rotating %s: %v\n", path, err)
+		fmt.Fprintf(os.Stderr, "liken: rotating %s: %v\n", path, err)
 	}
 	for n := keep - 1; n >= 1; n-- {
 		shiftLog(fmt.Sprintf("%s.%d", path, n), fmt.Sprintf("%s.%d", path, n+1))
@@ -77,7 +77,7 @@ func rotateGenerations(path string, keep int) {
 
 func shiftLog(from, to string) {
 	if err := os.Rename(from, to); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		fmt.Printf("liken: rotating %s: %v\n", from, err)
+		fmt.Fprintf(os.Stderr, "liken: rotating %s: %v\n", from, err)
 	}
 }
 
@@ -152,7 +152,7 @@ func (c *cappedLogFile) Write(p []byte) (int, error) {
 
 func (c *cappedLogFile) rotate() {
 	if err := c.f.Close(); err != nil {
-		fmt.Printf("liken: closing %s to rotate: %v\n", c.path, err)
+		fmt.Fprintf(os.Stderr, "liken: closing %s to rotate: %v\n", c.path, err)
 	}
 	rotateGenerations(c.path, logGenerations)
 	f, err := os.OpenFile(c.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
@@ -168,7 +168,7 @@ func (c *cappedLogFile) rotate() {
 // fail reports the failure once and stops file logging; the console
 // copy of k3s's output is unaffected.
 func (c *cappedLogFile) fail(reason string) {
-	fmt.Printf("liken: %s; k3s file logging stops here (console continues)\n", reason)
+	fmt.Fprintf(os.Stderr, "liken: %s; k3s file logging stops here (console continues)\n", reason)
 	c.broken = true
 	if c.f != nil {
 		c.f.Close()

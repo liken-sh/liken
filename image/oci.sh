@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Package one static liken binary as a container image, by hand.
+# Package one static binary as a container image, by hand.
 #
 # A container image is a simple artifact: a tarball of tarballs plus
 # three small JSON documents, laid out the way the OCI image spec
@@ -22,9 +22,11 @@
 # no network. The OS image therefore carries every byte the machine
 # will run.
 #
-# Two of liken's programs ship this way, the operator and the log
-# relays, and their recipes are identical, so the recipe lives here in
-# the image domain and each program's Makefile invokes it:
+# The recipe is one static binary in, one image tarball out, so it
+# lives here in the image domain and each consumer's Makefile invokes
+# it. Four images ship this way: the machine operator, the cluster
+# operator, the log relays, and the iscsi feature's iscsid (a vendored
+# binary, not a liken program, packaged all the same):
 #
 #   oci.sh <binary> <image>     e.g. oci.sh liken-machine-operator liken.sh/machine-operator
 #

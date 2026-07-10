@@ -29,14 +29,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
-
-	"sigs.k8s.io/yaml"
 )
 
 // K3sAgentDir is the tree this record vouches for: k3s's agent
@@ -68,34 +65,14 @@ func ImportedImagesStore(root string) ManifestStore {
 }
 
 // RenderImportedImages produces the record's canonical bytes and
-// their hash. yaml marshals through JSON with sorted keys, so the
-// same tarballs always render the same bytes, which is what lets a
-// hash comparison answer "did anything change".
+// their hash: the identity a boot compares against the proven record
+// to decide whether it is bringing different tarballs to import.
 func RenderImportedImages(images map[string]string) ([]byte, string, error) {
-	record := ImportedImages{
+	return renderDocument(ImportedImages{
 		APIVersion: APIVersion,
 		Kind:       "ImportedImages",
 		Images:     images,
-	}
-	raw, err := yaml.Marshal(&record)
-	if err != nil {
-		return nil, "", err
-	}
-	return raw, ManifestHash(raw), nil
-}
-
-// ParseImportedImages reads a record strictly, like every liken
-// document: bytes that don't parse cleanly are refused rather than
-// guessed at.
-func ParseImportedImages(raw []byte) (*ImportedImages, error) {
-	record := &ImportedImages{}
-	if err := yaml.UnmarshalStrict(raw, record); err != nil {
-		return nil, err
-	}
-	if record.Kind != "ImportedImages" {
-		return nil, fmt.Errorf("expected kind ImportedImages, got %q", record.Kind)
-	}
-	return record, nil
+	})
 }
 
 // HashImageTarballs digests every .tar file in a directory, keyed by

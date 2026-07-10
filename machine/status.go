@@ -355,15 +355,11 @@ func (s *StorageStatus) Role(name StorageRoleName) *StorageRoleStatus {
 // accurate starting point, upgraded role by role as reconciliation
 // places each on a partition.
 func AllRolesInMemory() StorageStatus {
-	return StorageStatus{
-		SystemA:          StorageRoleStatus{Backing: BackingMemory},
-		SystemB:          StorageRoleStatus{Backing: BackingMemory},
-		MachineState:     StorageRoleStatus{Backing: BackingMemory},
-		MachineEphemeral: StorageRoleStatus{Backing: BackingMemory},
-		ClusterState:     StorageRoleStatus{Backing: BackingMemory},
-		PodStorage:       StorageRoleStatus{Backing: BackingMemory},
-		PodEphemeral:     StorageRoleStatus{Backing: BackingMemory},
+	s := StorageStatus{}
+	for _, name := range StorageRoleNames {
+		s.Role(name).Backing = BackingMemory
 	}
+	return s
 }
 
 // ModuleState is one declared module's outcome, a closed vocabulary

@@ -17,8 +17,8 @@
 # container image pinned by digest, which fixes the toolchain the way
 # the pins fix the source. (Talos compiles these same binaries for its
 # iscsi-tools extension, a useful independent comparison when
-# auditing.) This is the repo's first build-from-source vendor, and
-# the first to need a container runtime on the build host: docker or
+# auditing.) Building from source inside a container (nfs-utils does
+# the same) needs a container runtime on the build host: docker or
 # podman, whichever is present.
 #
 # Two more pinned sources ride along, because a fully static link
@@ -59,7 +59,7 @@ done
     exit 1
 }
 
-version="${1:-$(cat "$here/VERSION")}"
+version="$(cat "$here/VERSION")"
 
 # Every input pinned by hash: the builder by image digest, each source
 # by the sha256 of its tarball. Bumping any of them is a reviewable

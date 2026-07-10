@@ -9,12 +9,11 @@
 # from the serial console alone. QEMU provides the hardware (CPU,
 # memory, NICs, disks, and OVMF's real UEFI firmware), and each
 # machine boots from its own disk, from the system slots it installed
-# itself onto (`make install NODE=x`, once). BOOT=kernel keeps the
-# older arrangement, where QEMU also acts as the bootloader and loads
-# the two files that are the entire operating system via
-# -kernel/-initrd, per the x86 Linux boot protocol. That is the
-# fallback for machines that haven't installed yet, and it is what
-# run-once and install use.
+# itself onto (`make install NODE=x`, once). BOOT=kernel is the other
+# arrangement: QEMU itself acts as the bootloader, loading the two
+# files that are the entire operating system via -kernel/-initrd, per
+# the x86 Linux boot protocol. It serves machines that haven't
+# installed yet, and it is what run-once and install use.
 #
 # The lab is parameterized by node: the same image boots every
 # machine, and NODE picks which machine a given QEMU process is. Each
@@ -240,10 +239,10 @@ QEMU_EXIT_ON_REBOOT :=
 # exactly as real hardware would. That is why a machine must be
 # installed (`make install NODE=x`, once) before its first disk boot.
 # BOOT=kernel is the direct-kernel arrangement: QEMU itself loads
-# vmlinuz and the initramfs, taking the bootloader's role. That is
-# the fallback for machines that haven't installed yet, and it is
-# what run-once still uses (its extra kernel parameter has to change
-# per run, which a boot entry baked at install time cannot do).
+# vmlinuz and the initramfs, taking the bootloader's role. It serves
+# machines that haven't installed yet, and run-once uses it because
+# its extra kernel parameter changes per run, which a boot entry
+# baked at install time cannot do.
 # The variables below use recursive assignment (=) deliberately:
 # LIKEN_BOOT_ARGS is set per target (run-once, install) and must be
 # picked up at recipe expansion.

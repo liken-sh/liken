@@ -96,8 +96,8 @@ func (s *restartState) apply(intent machine.RestartIntent) bool {
 			// A document that won't render would fail the next boot
 			// identically: quarantine it now, keep serving the
 			// current one.
-			rejectStagedCluster(machine.ClusterManifests(s.root), stagedRaw,
-				fmt.Sprintf("the staged cluster document does not render a k3s configuration: %v", err))
+			rejectStagedDocument("cluster", "document", machine.ClusterManifests(s.root).Reject,
+				stagedRaw, fmt.Sprintf("the staged cluster document does not render a k3s configuration: %v", err))
 			applyingCluster = false
 		} else {
 			if err := machine.ClusterManifests(s.root).WriteAttempted(clusterHash); err != nil {
@@ -176,7 +176,8 @@ func (s *restartState) stagedClusterDocument() (*machine.Cluster, []byte, string
 	}
 	staged, perr := machine.ParseCluster(raw)
 	if perr != nil {
-		rejectStagedCluster(store, raw, fmt.Sprintf("the staged cluster document does not parse: %v", perr))
+		rejectStagedDocument("cluster", "document", store.Reject,
+			raw, fmt.Sprintf("the staged cluster document does not parse: %v", perr))
 		return nil, nil, ""
 	}
 	if s.cluster == nil {
@@ -201,7 +202,8 @@ func (s *restartState) stagedCredentials() (*machine.RegistryCredentials, []byte
 	}
 	creds, perr := machine.ParseRegistryCredentials(raw)
 	if perr != nil {
-		rejectStagedCredentials(store, raw, fmt.Sprintf("the staged credentials document does not parse: %v", perr))
+		rejectStagedDocument("registries", "credentials", store.Reject,
+			raw, fmt.Sprintf("the staged credentials document does not parse: %v", perr))
 		return nil, nil
 	}
 	return creds, raw

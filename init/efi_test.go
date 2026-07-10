@@ -224,3 +224,20 @@ func TestListBootEntriesSkipsWhatItCannotDecode(t *testing.T) {
 		t.Errorf("only decodable Boot entries are listed: %+v", entries)
 	}
 }
+
+func TestWriteEFIVarReportsARefusedWrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "BootNext-"+efiGlobalVariable)
+	if err := os.WriteFile(path, []byte{7, 0, 0, 0, 1, 0}, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeEFIVar(dir, "BootNext", u16le(3)); err == nil {
+		t.Error("a variable that refuses its write is an error the caller must hear")
+	}
+}
+
+func TestListBootEntriesWithNoStoreListsNothing(t *testing.T) {
+	if entries := listBootEntries(filepath.Join(t.TempDir(), "no-efivars")); len(entries) != 0 {
+		t.Errorf("no store, no entries: %+v", entries)
+	}
+}

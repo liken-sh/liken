@@ -84,8 +84,9 @@ const (
 
 // Version is the liken release this binary was built from, stamped by
 // the build (-ldflags -X) from the VERSION file at the repo root. It
-// reaches the cluster as status.version.liken; eventually a version
-// field in the spec will be how upgrades are requested.
+// reaches the cluster as status.version.liken, which the operator
+// compares against the Cluster's spec.version target to decide
+// whether this machine needs an upgrade.
 var Version = "dev"
 
 // The struct tags are json, not yaml, because parsing goes through

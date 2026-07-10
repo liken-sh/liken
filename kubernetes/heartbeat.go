@@ -100,10 +100,8 @@ func RenewHeartbeat(c *Client, name string, now time.Time) {
 	l := &lease{}
 	err := c.RequestJSON(http.MethodGet, path, nil, l)
 	if errors.Is(err, ErrNotFound) {
-		body, err := json.Marshal(newLease(name, name, HeartbeatStaleAfter, now))
-		if err != nil {
-			return
-		}
+		// A lease is a struct of strings and ints; marshaling cannot fail.
+		body, _ := json.Marshal(newLease(name, name, HeartbeatStaleAfter, now))
 		if err := c.RequestJSON(http.MethodPost, heartbeatDir, body, nil); err != nil && !errors.Is(err, ErrConflict) {
 			fmt.Printf("creating the heartbeat lease: %v\n", err)
 		}
@@ -119,10 +117,8 @@ func RenewHeartbeat(c *Client, name string, now time.Time) {
 	l.Spec.HolderIdentity = name
 	l.Spec.LeaseDurationSeconds = int(HeartbeatStaleAfter.Seconds())
 	l.Spec.RenewTime = now.UTC().Format(microTime)
-	body, err := json.Marshal(l)
-	if err != nil {
-		return
-	}
+	// A lease is a struct of strings and ints; marshaling cannot fail.
+	body, _ := json.Marshal(l)
 	if err := c.RequestJSON(http.MethodPut, path, body, nil); err != nil {
 		fmt.Printf("renewing the heartbeat lease: %v\n", err)
 	}
@@ -135,14 +131,12 @@ func RenewHeartbeat(c *Client, name string, now time.Time) {
 // the sweep looks renewals up by machine name and never iterates
 // them, so a stray key can never read as a machine.
 func ListHeartbeats(c *Client) (map[string]time.Time, error) {
-	var list struct {
-		Items []lease `json:"items"`
-	}
-	if err := c.RequestJSON(http.MethodGet, heartbeatDir, nil, &list); err != nil {
+	leases, err := List[lease](c, heartbeatDir)
+	if err != nil {
 		return nil, err
 	}
 	renewals := map[string]time.Time{}
-	for _, l := range list.Items {
+	for _, l := range leases {
 		if renewed, err := time.Parse(microTime, l.Spec.RenewTime); err == nil {
 			renewals[l.Metadata.Name] = renewed
 		}

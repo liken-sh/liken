@@ -376,29 +376,15 @@ func describeExit(status unix.WaitStatus) string {
 // takes over the reporting the moment it runs; this is the bridge to
 // that moment.
 func reportWhenReady(ctx context.Context) error {
-	last := ""
-	deadline := time.Now().Add(5 * time.Minute)
-	for time.Now().Before(deadline) {
-		if !sleepUnlessCancelled(ctx, 3*time.Second) {
-			return nil
-		}
-		out, ok := run(k3sBinary, "kubectl", "get", "nodes", "--no-headers")
-		if !ok || out == "" {
-			continue
-		}
-		if out != last {
-			last = out
-			for line := range strings.SplitSeq(out, "\n") {
-				fmt.Printf("liken: node: %s\n", line)
-			}
-		}
-		if containsReady(out) {
-			fmt.Println("liken: kubernetes is up")
-			reportPods(ctx)
-			return nil
-		}
+	fetch := func() (string, bool) {
+		return run(k3sBinary, "kubectl", "get", "nodes", "--no-headers")
 	}
-	fmt.Println("liken: gave up waiting for the node to be Ready (k3s may still get there)")
+	if pollAndReport(ctx, 3*time.Second, 5*time.Minute, "node", fetch, containsReady) {
+		fmt.Println("liken: kubernetes is up")
+		reportPods(ctx)
+	} else if ctx.Err() == nil {
+		fmt.Println("liken: gave up waiting for the node to be Ready (k3s may still get there)")
+	}
 	return nil
 }
 
@@ -406,35 +392,45 @@ func reportWhenReady(ctx context.Context) error {
 // Ready, then goes quiet once everything is Running: the console
 // equivalent of watching `kubectl get pods -A` settle.
 func reportPods(ctx context.Context) {
+	fetch := func() (string, bool) {
+		return run(k3sBinary, "kubectl", "get", "pods", "-A", "--no-headers")
+	}
+	if pollAndReport(ctx, 5*time.Second, 5*time.Minute, "pod", fetch, podsSettled) {
+		fmt.Println("liken: all system pods are settled")
+	} else if ctx.Err() == nil {
+		fmt.Println("liken: system pods have not settled; see the pod status lines above")
+	}
+}
+
+// pollAndReport is the shape both reporters share: fetch a kubectl
+// table on an interval, print it under the prefix whenever it
+// changes, and answer true the moment it satisfies settled — or false
+// when patience runs out or the plane shuts down. Printing only
+// changes is what keeps the console readable: a table that sits
+// unchanged for a minute produces no lines at all.
+func pollAndReport(ctx context.Context, interval, patience time.Duration, prefix string,
+	fetch func() (string, bool), settled func(string) bool) bool {
 	last := ""
-	deadline := time.Now().Add(5 * time.Minute)
+	deadline := time.Now().Add(patience)
 	for time.Now().Before(deadline) {
-		if !sleepUnlessCancelled(ctx, 5*time.Second) {
-			return
+		if !sleepUnlessCancelled(ctx, interval) {
+			return false
 		}
-		out, ok := run(k3sBinary, "kubectl", "get", "pods", "-A", "--no-headers")
+		out, ok := fetch()
 		if !ok || out == "" {
 			continue
 		}
 		if out != last {
 			last = out
 			for line := range strings.SplitSeq(out, "\n") {
-				fmt.Printf("liken: pod: %s\n", line)
+				fmt.Printf("liken: %s: %s\n", prefix, line)
 			}
 		}
-		settled := true
-		for line := range strings.SplitSeq(out, "\n") {
-			fields := strings.Fields(line)
-			if len(fields) >= 4 && fields[3] != "Running" && fields[3] != "Completed" {
-				settled = false
-			}
-		}
-		if settled {
-			fmt.Println("liken: all system pods are settled")
-			return
+		if settled(out) {
+			return true
 		}
 	}
-	fmt.Println("liken: system pods have not settled; see the pod status lines above")
+	return false
 }
 
 // containsReady looks for the word Ready as a whole status field, so
@@ -447,6 +443,19 @@ func containsReady(out string) bool {
 		}
 	}
 	return false
+}
+
+// podsSettled reports whether every pod in the table has reached
+// Running or Completed, the status field being kubectl's fourth
+// column.
+func podsSettled(out string) bool {
+	for line := range strings.SplitSeq(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 4 && fields[3] != "Running" && fields[3] != "Completed" {
+			return false
+		}
+	}
+	return true
 }
 
 // runNarrated executes a command with its output echoed live to the

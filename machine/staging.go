@@ -109,6 +109,20 @@ func ManifestHash(raw []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// renderDocument produces a document's canonical bytes and their
+// hash, for the documents liken itself authors (the credentials, the
+// imported-images record, the system release). yaml marshals through
+// JSON with sorted keys, so the same document always renders the same
+// bytes, which is what lets a hash comparison answer "did anything
+// change".
+func renderDocument(doc any) ([]byte, string, error) {
+	raw, err := yaml.Marshal(doc)
+	if err != nil {
+		return nil, "", err
+	}
+	return raw, ManifestHash(raw), nil
+}
+
 // NewRejection builds the record for refusing a staged document:
 // exactly these bytes, for this reason, at this moment. It exists
 // apart from Reject because a rejection is reported (on the console,
@@ -286,6 +300,29 @@ func (s ManifestStore) ClearRejection() error {
 		return nil
 	}
 	return syncDir(s.dir)
+}
+
+// writeAtomic is the atomic write without the durability: temp file
+// in the same directory (rename can't cross filesystems), then
+// rename. Rename within a filesystem is atomic, so a reader polling
+// on its own schedule sees either the old contents or the new, never
+// a torn write. It is writeDurable's sibling for files on tmpfs (the
+// facts, the intent channel), where an fsync would have nothing to
+// flush to.
+func writeAtomic(path string, raw []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".liken-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(raw); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 // writeDurable is the atomic, power-loss-proof write: temp file in

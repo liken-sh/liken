@@ -20,9 +20,7 @@ package main
 // The decisions are pure functions, reconcile supplies the I/O, and
 // the fetch itself runs on its own goroutine (fetch.go). A blocking
 // 100MB GET inside a reconcile pass would starve the heartbeat lease,
-// and the fleet would read the silence as a dead machine. Milestone
-// 10 demonstrated that failure; the separate goroutine is the
-// structural fix.
+// and the fleet would read the silence as a dead machine.
 
 import (
 	"fmt"
@@ -127,12 +125,30 @@ func versionCondition(ask fetchAsk, snap fetchSnapshot) machine.Condition {
 // machine into an upgrade nobody is asking for anymore, and a
 // standing rejection no longer blocks anything.
 func versionConvergence(cond machine.Condition, stagedHash string, rejection *machine.Rejection) convergence {
-	c := convergence{condition: cond}
 	if cond.Status == machine.ConditionTrue {
-		c.withdraw = stagedHash != ""
-		c.clearRejection = rejection != nil
+		return convergedWithCleanup(cond, stagedHash, rejection)
 	}
-	return c
+	return convergence{condition: cond}
+}
+
+// convergeSystemRelease is the version target's part of one reconcile
+// pass: load this machine's durable rejection and staged record from
+// the store, ask the fetcher where the download stands, and decide.
+// The version target converges through its own machinery — a download
+// aimed at the inactive slot. The download runs on the fetcher's
+// goroutine so that no reconcile pass, and no heartbeat, ever waits
+// on a socket (versionAsk decides, fetch.go moves the bytes). Once
+// the download verifies, the rest works like the other documents: a
+// staged SystemRelease record, the reboot chain, the drain gate, and
+// the same carryOutConvergence.
+func convergeSystemRelease(store machine.ManifestStore, liveCluster *machine.Cluster, m *machine.Machine, facts *machine.MachineStatus, f *fetcher, t turn) convergence {
+	rejection, _ := store.LoadRejection()
+	stagedHash := readStagedHash(store)
+	ask, cond, ok := versionAsk(liveCluster, facts)
+	if !ok {
+		return versionConvergence(cond, stagedHash, rejection)
+	}
+	return decideSystemStaging(ask, f.Ensure(ask), m, rejection, stagedHash, t)
 }
 
 // decideSystemStaging finishes version convergence: a verified

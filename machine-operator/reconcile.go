@@ -8,91 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
-	"net/http"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/chrisguidry/liken/kubernetes"
 	"github.com/chrisguidry/liken/machine"
 )
-
-// ensureMachine makes the manifest's Machine real in the cluster. The
-// retry-forever loop covers the operator's first minutes: k3s applies
-// the Machine CRD from its manifests directory around the same time
-// it starts this pod, and until the API server is serving that CRD,
-// our URLs 404. The loop waits instead of crashing because that 404
-// is expected during startup, not a sign of anything wrong.
-func ensureMachine(c *kubernetes.Client, seed *machine.Machine) (*machine.Machine, error) {
-	for {
-		current, err := kubernetes.GetMachine(c, seed.Metadata.Name)
-		if err == nil {
-			return current, nil
-		}
-		if !errors.Is(err, kubernetes.ErrNotFound) {
-			return nil, err
-		}
-
-		body, err := json.Marshal(&machine.Machine{
-			APIVersion: machine.APIVersion,
-			Kind:       "Machine",
-			Metadata:   machine.ObjectMeta{Name: seed.Metadata.Name},
-			Spec:       seed.Spec,
-		})
-		if err != nil {
-			return nil, err
-		}
-		err = c.RequestJSON(http.MethodPost, kubernetes.MachinesPath, body, nil)
-		if err == nil {
-			fmt.Printf("created machine %s from %s\n", seed.Metadata.Name, machine.BootManifestPath)
-			continue // re-GET so we return the server's copy, resourceVersion and all
-		}
-		if errors.Is(err, kubernetes.ErrNotFound) {
-			fmt.Println("machine API not served yet; waiting")
-			kubernetes.RetryPause()
-			continue
-		}
-		return nil, err
-	}
-}
-
-// ensureCluster makes the manifest's Cluster real in the cluster. It
-// waits out an unserved CRD the same way ensureMachine does, and it
-// tolerates one extra answer: 409 Conflict. Every machine's operator
-// races to create the same object at boot, so all but one of those
-// POSTs will conflict. That conflict is harmless: the loop's next GET
-// confirms the object exists, which is the only outcome that matters.
-func ensureCluster(c *kubernetes.Client, seed *machine.Cluster) error {
-	for {
-		if _, err := kubernetes.GetCluster(c, seed.Metadata.Name); err == nil {
-			return nil
-		} else if !errors.Is(err, kubernetes.ErrNotFound) {
-			return err
-		}
-
-		body, err := json.Marshal(&machine.Cluster{
-			APIVersion: machine.APIVersion,
-			Kind:       "Cluster",
-			Metadata:   machine.ObjectMeta{Name: seed.Metadata.Name},
-			Spec:       seed.Spec,
-		})
-		if err != nil {
-			return err
-		}
-		switch err := c.RequestJSON(http.MethodPost, kubernetes.ClustersPath, body, nil); {
-		case err == nil:
-			fmt.Printf("created cluster %s from %s\n", seed.Metadata.Name, machine.ClusterManifestPath)
-		case errors.Is(err, kubernetes.ErrNotFound):
-			fmt.Println("cluster API not served yet; waiting")
-			kubernetes.RetryPause()
-		case errors.Is(err, kubernetes.ErrConflict):
-			// Another machine's operator got there first.
-		default:
-			return err
-		}
-	}
-}
 
 // carryOutConvergence performs one convergence decision's side
 // effects against one document's store, and returns the condition to
@@ -145,6 +66,40 @@ func carryOutConvergence(conv convergence, store machine.ManifestStore, what str
 	return conv.condition
 }
 
+// disruptions is one pass's running record of what has already been
+// set in motion: whether some document requested the reboot, and
+// whether a drain is holding one back. The documents gate in a fixed
+// order — the Machine's spec, the cluster document, the system
+// release, the registry credentials, and finally the demotion — and
+// the restart suppression in gate depends on that order: a reboot
+// requested by an earlier document silences a later document's
+// restart, never the reverse.
+type disruptions struct {
+	draining  bool
+	rebooting bool
+}
+
+// gate intercepts one document's convergence decision on its way to
+// its side effects. A reboot already requested this pass subsumes any
+// restart: the boot path re-renders everything a restart would have,
+// so a second intent would only be noise. (Init also prefers the
+// reboot file when both exist, so this guard is redundant but
+// harmless.) And a granted reboot goes through the drain first
+// (drain.go): the node is cordoned and emptied before the intent is
+// written, so workloads move to other nodes instead of being killed
+// by the reboot. A pass whose Node read failed skips the drain,
+// because mid-demotion there is no Node to cordon and the reboot must
+// still happen.
+func (d *disruptions) gate(c *kubernetes.Client, node *nodeObject, nodeErr error, t turn, now time.Time, conv convergence) convergence {
+	conv.requestRestart = conv.requestRestart && !d.rebooting
+	if conv.requestReboot && t == turnGranted && nodeErr == nil {
+		conv = gateThroughDrain(c, node, conv, now)
+		d.draining = d.draining || !conv.requestReboot
+	}
+	d.rebooting = d.rebooting || conv.requestReboot
+	return conv
+}
+
 // reconcile is one full pass of the operator's job, always from
 // absolute state: read the facts init left, actuate the spec's sysctls,
 // read back what actually holds, and publish all of it as status. It
@@ -184,9 +139,9 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	// this node, because the trial covers every tarball the boot
 	// imported, not just the one this pod runs from (imports.go).
 	status.Conditions = machine.SetCondition(status.Conditions,
-		settleImportsLifecycle(c, m.Metadata.Name, facts), now)
+		settleImportsLifecycle(c, machine.MachineStateDir, m.Metadata.Name, facts), now)
 
-	status.Sysctls, err = applySysctls(m.Spec.Sysctls)
+	status.Sysctls, err = applySysctls(machine.SysctlDir, m.Spec.Sysctls)
 	status.Conditions = machine.SetCondition(status.Conditions, sysctlsCondition(err), now)
 
 	// Modules judge what the boot reported, not what the spec asks
@@ -240,99 +195,56 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	// Convergence checks whether the cluster's copy of each document
 	// matches what this boot actuated, and if not, stages the
 	// difference for the next boot (converge.go for the Machine,
-	// cluster.go for the Cluster). The decisions are pure functions;
-	// carryOutConvergence performs their side effects against each
-	// document's own store. The rejection records come from the
-	// durable store, not from facts: facts are a snapshot taken at
-	// boot and never change while the machine runs, but a rejection
-	// cleared mid-boot (by an edit that reverted) must unblock a retry
-	// without waiting for a reboot to refresh the facts. A granted
-	// reboot goes through the drain first (drain.go): the node is
-	// cordoned and emptied before the intent is written, so workloads
-	// move to other nodes instead of being killed by the reboot.
-	draining := false
-	rebooting := false
-	gate := func(conv convergence) convergence {
-		// A reboot already requested this pass subsumes any restart:
-		// the boot path re-renders everything a restart would have,
-		// so a second intent would only be noise. (Init also prefers
-		// the reboot file when both exist, so this is belt and
-		// braces.)
-		conv.requestRestart = conv.requestRestart && !rebooting
-		if !conv.requestReboot || t != turnGranted || nodeErr != nil {
-			return conv
-		}
-		gated := gateThroughDrain(c, node, conv, now)
-		draining = draining || !gated.requestReboot
-		return gated
-	}
+	// cluster.go for the Cluster, release.go for the version target,
+	// registries.go for the credentials). The decisions are pure
+	// functions; carryOutConvergence performs their side effects
+	// against each document's own store. The rejection records come
+	// from the durable store, not from facts: facts are a snapshot
+	// taken at boot and never change while the machine runs, but a
+	// rejection cleared mid-boot (by an edit that reverted) must
+	// unblock a retry without waiting for a reboot to refresh the
+	// facts. Every decision passes through the disruption gate on its
+	// way to its side effects, and the gate depends on the order the
+	// documents converge in (see disruptions).
+	disr := &disruptions{}
 	machineStore := machine.MachineManifests(machine.MachineStateDir)
 	machineRejection, _ := machineStore.LoadRejection()
-	conv := gate(decideConvergence(m, facts, machineRejection, readStagedHash(machineStore), t))
-	condition := carryOutConvergence(conv, machineStore, "spec", now)
-	status.Conditions = machine.SetCondition(status.Conditions, condition, now)
+	conv := disr.gate(c, node, nodeErr, t, now,
+		decideConvergence(m, facts, machineRejection, readStagedHash(machineStore), t))
+	status.Conditions = machine.SetCondition(status.Conditions,
+		carryOutConvergence(conv, machineStore, "spec", now), now)
 
 	// The cluster document converges through the same machinery, per
 	// machine: this machine stages its own copy and reboots on its own
 	// policy, and this condition is where the fleet's transient
-	// disagreement about the Cluster is visible.
+	// disagreement about the Cluster is visible. A machine with no
+	// cluster document carries no operator-authored documents at all,
+	// so the version target and the registry credentials only converge
+	// on a cluster member too.
 	var liveCluster *machine.Cluster
-	rebooting = conv.requestReboot
 	if clusterName != "" {
-		var cconv convergence
 		clusterStore := machine.ClusterManifests(machine.MachineStateDir)
-		if liveCluster, err = kubernetes.GetCluster(c, clusterName); err != nil {
-			cconv = convergence{condition: convergenceUnknown("ClusterConverged", "ClusterUnavailable",
-				fmt.Sprintf("reading cluster %s: %v", clusterName, err))}
-		} else {
-			clusterRejection, _ := clusterStore.LoadRejection()
-			bootDoc, bootHash := bootClusterDocument(machine.BootClusterManifestPath)
-			cconv = gate(decideClusterConvergence(liveCluster, m, facts, clusterRejection,
-				bootDoc, bootHash, readStagedHash(clusterStore), t))
-		}
-		condition := carryOutConvergence(cconv, clusterStore, "cluster document", now)
-		status.Conditions = machine.SetCondition(status.Conditions, condition, now)
-		rebooting = rebooting || cconv.requestReboot
+		var cconv convergence
+		cconv, liveCluster = convergeClusterDocument(c, clusterStore, clusterName, m, facts, t)
+		cconv = disr.gate(c, node, nodeErr, t, now, cconv)
+		status.Conditions = machine.SetCondition(status.Conditions,
+			carryOutConvergence(cconv, clusterStore, "cluster document", now), now)
 
-		// The version target converges through its own machinery: a
-		// download aimed at the inactive slot. The download runs on
-		// the fetcher's goroutine so that this pass, and the heartbeat
-		// below, never wait on a socket (release.go decides, fetch.go
-		// moves the bytes). Once the download verifies, the rest works
-		// like the other two documents: a staged SystemRelease record,
-		// the reboot chain, the drain gate, and the same
-		// carryOutConvergence.
+		// The version target reads the live Cluster's release feed, so
+		// it can only converge on a pass that read the Cluster.
 		if liveCluster != nil {
 			systemStore := machine.SystemReleases(machine.MachineStateDir)
-			systemRejection, _ := systemStore.LoadRejection()
-			stagedSystemHash := readStagedHash(systemStore)
-			ask, vcond, ok := versionAsk(liveCluster, facts)
-			vconv := versionConvergence(vcond, stagedSystemHash, systemRejection)
-			if ok {
-				vconv = gate(decideSystemStaging(ask, f.Ensure(ask), m, systemRejection, stagedSystemHash, t))
-			}
-			condition := carryOutConvergence(vconv, systemStore, "system release", now)
-			status.Conditions = machine.SetCondition(status.Conditions, condition, now)
-			rebooting = rebooting || vconv.requestReboot
+			vconv := disr.gate(c, node, nodeErr, t, now,
+				convergeSystemRelease(systemStore, liveCluster, m, facts, f, t))
+			status.Conditions = machine.SetCondition(status.Conditions,
+				carryOutConvergence(vconv, systemStore, "system release", now), now)
 		}
 
-		// Registry credentials converge through the same machinery,
-		// from a different source: the registry-credentials Secret
-		// rather than a CRD (registries.go). The read happens here so
-		// the decision stays pure. Only a cluster member carries
-		// credentials at all — a machine with no cluster document has
-		// no operator-authored documents of any kind.
 		credentialsStore := machine.RegistryCredentialsStore(machine.MachineStateDir)
-		credentialsRejection, _ := credentialsStore.LoadRejection()
-		in := registriesInputs{}
-		if secret, fetchErr := kubernetes.GetRegistryCredentialsSecret(c); fetchErr != nil {
-			in.fetchErr = fetchErr
-		} else {
-			in.desired, in.parseErr = desiredRegistryCredentials(secret)
-		}
-		rconv := gate(decideRegistriesConvergence(in, m, facts, credentialsRejection, readStagedHash(credentialsStore), t))
-		condition = carryOutConvergence(rconv, credentialsStore, "registry credentials", now)
-		status.Conditions = machine.SetCondition(status.Conditions, condition, now)
+		rconv := disr.gate(c, node, nodeErr, t, now,
+			convergeRegistryCredentials(c, credentialsStore, m, facts, t))
+		status.Conditions = machine.SetCondition(status.Conditions,
+			carryOutConvergence(rconv, credentialsStore, "registry credentials", now), now)
 	}
 
 	if nodeErr == nil {
@@ -361,14 +273,14 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 		d := decideDemotion(status.Role, node.Metadata.Labels, m.Spec.RebootPolicyOrDefault(), t)
 		condition := carryOutDemotion(c, m.Metadata.Name, d)
 		status.Conditions = machine.SetCondition(status.Conditions, condition, now)
-		rebooting = rebooting || d.cleanup
+		disr.rebooting = disr.rebooting || d.cleanup
 
 		// When this operator set a cordon and no longer needs it,
 		// because the reboot happened and the machine converged, the
 		// node goes back to the scheduler. This only applies to
 		// cordons the operator set itself: decideUncordon leaves a
 		// human's cordon standing.
-		if !rebooting && !draining && decideUncordon(node) {
+		if !disr.rebooting && !disr.draining && decideUncordon(node) {
 			if err := c.PatchJSON(nodesPath+"/"+node.Metadata.Name, uncordonPatch()); err != nil {
 				fmt.Printf("uncordoning %s: %v\n", node.Metadata.Name, err)
 			} else {
@@ -438,170 +350,6 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	}
 }
 
-// nodeHealthyCondition translates the Node's Ready condition into the
-// Machine's vocabulary. A missing Ready condition on the Node reads
-// as unhealthy: a kubelet that has never reported in cannot be
-// assumed to be serving.
-func nodeHealthyCondition(node *nodeObject) machine.Condition {
-	for _, c := range node.Status.Conditions {
-		if c.Type != "Ready" {
-			continue
-		}
-		if c.Status == machine.ConditionTrue {
-			return machine.Condition{Type: "NodeHealthy", Status: machine.ConditionTrue, Reason: "KubeletReady",
-				Message: "the Node reports Ready; the kubelet is serving this machine to the cluster"}
-		}
-		return machine.Condition{Type: "NodeHealthy", Status: machine.ConditionFalse, Reason: "NodeNotReady",
-			Message: fmt.Sprintf("the Node reports Ready=%s: %s", c.Status, c.Message)}
-	}
-	return machine.Condition{Type: "NodeHealthy", Status: machine.ConditionFalse, Reason: "NodeNotReady",
-		Message: "the Node carries no Ready condition; the kubelet has never reported in"}
-}
-
-// applySysctls actuates spec.sysctls against the host's /proc/sys,
-// reachable directly because this pod runs privileged in the host's
-// namespaces, then reads every parameter back. The returned map is
-// what the kernel now reports, not what we wrote: if some other agent
-// resets a value, the next pass both re-asserts it and reports what
-// was actually observed.
-func applySysctls(desired map[string]string) (map[string]string, error) {
-	var firstErr error
-	observed := map[string]string{}
-	for _, name := range slices.Sorted(maps.Keys(desired)) {
-		if err := machine.ApplySysctl(machine.SysctlDir, name, desired[name]); err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		if value, err := machine.ReadSysctl(machine.SysctlDir, name); err == nil {
-			observed[name] = value
-		}
-	}
-	return observed, firstErr
-}
-
-// storageCondition summarizes storage as one standard Kubernetes
-// condition, comparing what the spec declared against where each role
-// is actually backed. True means every declared role sits on its
-// partition. False should be unreachable on a running machine, since
-// init powers off rather than boot with a declared role unsatisfied.
-// But a condition has to be able to express every state it names, and
-// a future, softer failure mode may need it.
-func storageCondition(spec machine.StorageSpec, status machine.StorageStatus) machine.Condition {
-	var placed, inMemory []string
-	for _, role := range spec.Roles() {
-		rs := status.Role(role.Name)
-		if rs != nil && rs.Backing == machine.BackingPartition {
-			placed = append(placed, fmt.Sprintf("%s on %s", role.Name, rs.Device))
-		} else {
-			inMemory = append(inMemory, string(role.Name))
-		}
-	}
-	switch {
-	case len(inMemory) > 0:
-		return machine.Condition{
-			Type: "StorageReady", Status: machine.ConditionFalse, Reason: "RolesInMemory",
-			Message: fmt.Sprintf("declared roles backed by memory: %s", strings.Join(inMemory, ", ")),
-		}
-	case len(placed) > 0:
-		return machine.Condition{
-			Type: "StorageReady", Status: machine.ConditionTrue, Reason: "AllRolesPlaced",
-			Message: strings.Join(placed, ", "),
-		}
-	default:
-		return machine.Condition{
-			Type: "StorageReady", Status: machine.ConditionTrue, Reason: "NothingDeclared",
-			Message: "no storage declared; all roles backed by memory",
-		}
-	}
-}
-
-func factsCondition(err error) machine.Condition {
-	if err != nil {
-		return machine.Condition{
-			Type: "FactsPublished", Status: machine.ConditionFalse,
-			Reason: "FactsUnreadable", Message: err.Error(),
-		}
-	}
-	return machine.Condition{Type: "FactsPublished", Status: machine.ConditionTrue, Reason: "FactsRead"}
-}
-
-// modulesCondition summarizes the boot's declared-module outcomes as
-// one condition. Loaded and Builtin are both healthy; anything else
-// carries init's message, which names the fix (a rebuilt image for a
-// Missing module, the hardware's error for a Failed one), because a
-// status that says what would repair it beats one that only says
-// what's wrong.
-func modulesCondition(observed []machine.ModuleStatus) machine.Condition {
-	var problems []string
-	for _, s := range observed {
-		if s.State == machine.ModuleLoaded || s.State == machine.ModuleBuiltin {
-			continue
-		}
-		problems = append(problems, fmt.Sprintf("%s: %s", s.Name, s.Message))
-	}
-	switch {
-	case len(problems) > 0:
-		return machine.Condition{
-			Type: "ModulesLoaded", Status: machine.ConditionFalse, Reason: "ModulesNotLoaded",
-			Message: strings.Join(problems, "; "),
-		}
-	case len(observed) > 0:
-		return machine.Condition{
-			Type: "ModulesLoaded", Status: machine.ConditionTrue, Reason: "AllLoaded",
-			Message: fmt.Sprintf("all %d declared modules are in the kernel", len(observed)),
-		}
-	default:
-		return machine.Condition{
-			Type: "ModulesLoaded", Status: machine.ConditionTrue, Reason: "NothingDeclared",
-			Message: "no extra modules declared",
-		}
-	}
-}
-
-// featuresCondition summarizes the boot's feature outcomes as one
-// condition, the same shape modulesCondition takes. Anything not
-// Active carries init's message, which names the fix: for a Missing
-// feature that is a release whose image carries the payload, because
-// enabling a feature never rebuilds anything by itself.
-func featuresCondition(observed []machine.FeatureStatus) machine.Condition {
-	var problems []string
-	for _, s := range observed {
-		if s.State == machine.FeatureActive {
-			continue
-		}
-		problems = append(problems, fmt.Sprintf("%s: %s", s.Name, s.Message))
-	}
-	switch {
-	case len(problems) > 0:
-		return machine.Condition{
-			Type: "FeaturesReady", Status: machine.ConditionFalse, Reason: "FeaturesNotReady",
-			Message: strings.Join(problems, "; "),
-		}
-	case len(observed) > 0:
-		return machine.Condition{
-			Type: "FeaturesReady", Status: machine.ConditionTrue, Reason: "AllActive",
-			Message: fmt.Sprintf("all %d enabled features are active on this machine", len(observed)),
-		}
-	default:
-		return machine.Condition{
-			Type: "FeaturesReady", Status: machine.ConditionTrue, Reason: "NothingDeclared",
-			Message: "the cluster enables no features",
-		}
-	}
-}
-
-func sysctlsCondition(err error) machine.Condition {
-	if err != nil {
-		return machine.Condition{
-			Type: "SysctlsApplied", Status: machine.ConditionFalse,
-			Reason: "ApplyFailed", Message: err.Error(),
-		}
-	}
-	return machine.Condition{Type: "SysctlsApplied", Status: machine.ConditionTrue, Reason: "Applied"}
-}
-
 // publishOwnStatus is kubernetes.PublishStatus for the machine writing about
 // itself, which is the one writer entitled to resolve a conflict
 // rather than concede it. A Machine's status has exactly two other
@@ -609,8 +357,8 @@ func sysctlsCondition(err error) machine.Condition {
 // turns, and the fleet sweep, marking silent machines Lost. If
 // one of them wrote between this pass's read and its write, this
 // machine's observations are still the freshest thing anyone has (it
-// is standing on the hardware), so the answer is to retry against a
-// fresh read rather than discard the pass. The merge honors each
+// observes the hardware directly), so the answer is to retry against
+// a fresh read rather than discard the pass. The merge honors each
 // condition's owner: the conductor's grant rides in from the fresh
 // copy exactly as written, present or absent, with its transition
 // time untouched (the rollout's stall clock measures from it), and

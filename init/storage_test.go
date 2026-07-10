@@ -370,3 +370,86 @@ func TestMountRoleRejectsUnknownRoleVocabulary(t *testing.T) {
 		t.Errorf("expected a vocabulary error: %v", err)
 	}
 }
+
+func TestRecognizeRolesReadsTheFakeMachine(t *testing.T) {
+	sys, dev := fakeMachine(t)
+	addDisk(t, sys, dev, "vda", 2<<30, nil)
+	addPartition(t, sys, "vda", "vda1", "liken:clusterState", 1<<30)
+
+	found, err := recognizeRoles([]machine.DeclaredRole{declared("clusterState", "/dev/vda", "")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found["clusterState"].name != "vda1" {
+		t.Errorf("recognition reads sysfs's partition names: %+v", found)
+	}
+}
+
+func TestPlanClaimLaysOutABlankDisk(t *testing.T) {
+	sys, dev := fakeMachine(t)
+	addDisk(t, sys, dev, "vdb", 2<<30, make([]byte, 2_048)) // all zeros: blank
+	device := filepath.Join(dev, "vdb")
+	roles := []machine.DeclaredRole{
+		declared("machineState", device, "512Mi"),
+		declared("clusterState", device, ""),
+	}
+
+	plan, err := planClaim(device, roles, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.device != device || plan.roleCount != 2 || len(plan.parts) != 2 {
+		t.Errorf("both roles land in one plan: %+v", plan)
+	}
+	if plan.totalSectors != (2<<30)/sectorSize {
+		t.Errorf("the plan works in the disk's sectors: %d", plan.totalSectors)
+	}
+}
+
+func TestReconcileStorageClaimFailureIsARealError(t *testing.T) {
+	// Planning succeeds against the blank fake disk, so reconciliation
+	// proceeds to apply — and the fake device, being a plain file,
+	// refuses the kernel's re-read ioctl. That is exactly the shape of
+	// a mid-apply I/O failure: reconcile reports it and the caller
+	// stops the boot.
+	sys, dev := fakeMachine(t)
+	addDisk(t, sys, dev, "vdb", 2<<30, make([]byte, 2_048))
+	device := filepath.Join(dev, "vdb")
+	spec := machine.StorageSpec{ClusterState: &machine.StorageRole{Device: device}}
+
+	status, err := reconcileStorage(spec)
+	if err == nil || !strings.Contains(err.Error(), "partitioning") {
+		t.Errorf("expected the apply failure to surface: %v", err)
+	}
+	if status != machine.AllRolesInMemory() {
+		t.Errorf("a failed reconcile reports nothing durable: %+v", status)
+	}
+}
+
+func TestReconcileStorageRefusesAnUnsatisfiableGrow(t *testing.T) {
+	// A recognized system slot declared larger than its partition is
+	// refused at planning time, before anything is written.
+	sys, dev := fakeMachine(t)
+	addDisk(t, sys, dev, "vda", 2<<30, nil)
+	addPartition(t, sys, "vda", "vda1", "liken:systemA", 1<<20)
+	device := filepath.Join(dev, "vda")
+	spec := machine.StorageSpec{SystemA: &machine.StorageRole{Device: device, Size: "512Mi"}}
+
+	_, err := reconcileStorage(spec)
+	if err == nil || !strings.Contains(err.Error(), "can't grow") {
+		t.Errorf("expected the growth refusal to surface: %v", err)
+	}
+}
+
+func TestWaitForPartitionsSucceedsWhenEverythingIsVisible(t *testing.T) {
+	sys, dev := fakeMachine(t)
+	addDisk(t, sys, dev, "vda", 1<<30, nil)
+	addPartition(t, sys, "vda", "vda1", "liken:clusterState", 1<<20)
+
+	parts := []gptPartition{
+		{name: "liken:clusterState", firstLBA: 2_048, lastLBA: 2_048 + (1<<20)/sectorSize - 1},
+	}
+	if err := waitForPartitions(parts, 50*time.Millisecond); err != nil {
+		t.Errorf("every partition is already visible at size: %v", err)
+	}
+}

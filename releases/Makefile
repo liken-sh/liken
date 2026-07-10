@@ -36,7 +36,6 @@ VERSION ?=
 FAULT ?=
 
 BUILD = build/$(VERSION)
-KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 
 release:
 	@test -n "$(VERSION)" || { echo "usage: make release VERSION=x.y.z"; exit 1; }

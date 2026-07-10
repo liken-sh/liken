@@ -259,3 +259,46 @@ func TestChooseClusterFallsThroughACorruptProvenDocument(t *testing.T) {
 		t.Errorf("the seed carries a boot whose proven copy is corrupt: %+v", boot)
 	}
 }
+
+func TestChooseClusterToleratesUnreadableStoreFiles(t *testing.T) {
+	// Both store files exist but can't be read (a dying disk): the
+	// boot reports each and falls through to the seed.
+	root := t.TempDir()
+	store := machine.ClusterManifests(root)
+	if err := store.WriteStaged([]byte("staged")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteProven([]byte("proven")); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"staged.yaml", "proven.yaml"} {
+		path := filepath.Join(root, "cluster", name)
+		if err := os.Chmod(path, 0o000); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+	}
+
+	boot := machine.BootStatus{}
+	seed := writeSeed(t, "kind: Cluster\nmetadata:\n  name: lab\nspec:\n  leaders: [node-1]\n")
+	c, _, err := chooseCluster(root, seed, true, &boot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c == nil || boot.ClusterManifestSource != machine.ManifestSourceSeed {
+		t.Errorf("unreadable stores fall through to the seed: %+v", boot)
+	}
+}
+
+func TestChooseClusterFailsOnAnUnreadableSeed(t *testing.T) {
+	seed := writeSeed(t, "kind: Cluster\n")
+	if err := os.Chmod(seed, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(seed, 0o644) })
+
+	boot := machine.BootStatus{}
+	if _, _, err := chooseCluster(t.TempDir(), seed, false, &boot); err == nil {
+		t.Error("a seed that exists but can't be read is an error, not an absence")
+	}
+}

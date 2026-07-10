@@ -38,9 +38,9 @@ package main
 // fewer privileges than PID 1, or must not take the machine down
 // when it fatals. The child is this same binary re-exec'd with an
 // argv verb (the multi-call pattern), so the OS stays one artifact.
-// The NTP responder, which reads unauthenticated UDP, is the first
-// named candidate; it starts as a goroutine and is promoted in a
-// hardening pass, not before.
+// The NTP responder, which reads unauthenticated UDP, runs as a
+// goroutine and is the first candidate for promotion to its own
+// supervised process.
 //
 // The contract with a component is small: it's a function of a
 // context, and it runs until its work is done or the context is

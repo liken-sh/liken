@@ -113,6 +113,79 @@ func TestInClusterClientNeedsTheEnvironment(t *testing.T) {
 	}
 }
 
+// testCA is a self-signed certificate standing in for the cluster's
+// server CA. The client only ever parses it into a trust pool, so
+// its subject and validity dates never matter to these tests.
+const testCA = `-----BEGIN CERTIFICATE-----
+MIIBhTCCASugAwIBAgIUOGbmxgO5IBnZ+AdPZ+KxpFp/WSowCgYIKoZIzj0EAwIw
+GDEWMBQGA1UEAwwNbGlrZW4tdGVzdC1jYTAeFw0yNjA3MTAxNDM2NTVaFw0zNjA3
+MDcxNDM2NTVaMBgxFjAUBgNVBAMMDWxpa2VuLXRlc3QtY2EwWTATBgcqhkjOPQIB
+BggqhkjOPQMBBwNCAASaQglZfYXr1EOnBa5GCmRcHF9l09EqXuGMZcXWWI6FKi31
+InZx5N3F4T8uDCyIyXP9s99z5nJpEyGkmer45bmGo1MwUTAdBgNVHQ4EFgQUnxeb
+k5I/ZsgFlDQvQgv02Wa/nwswHwYDVR0jBBgwFoAUnxebk5I/ZsgFlDQvQgv02Wa/
+nwswDwYDVR0TAQH/BAUwAwEB/zAKBggqhkjOPQQDAgNIADBFAiEA5TQTNngoyPu6
+j58aLfXyXoNxNnxkIFvzXX2zMT55O5gCIESzr4d5khIPY9y/CAS0nry2rvAP5Y5S
+FHJFfRsR8TLD
+-----END CERTIFICATE-----
+`
+
+// serviceAccount points the serviceAccountDir seam at a directory
+// holding the given files, the way kubelet would have mounted them,
+// and restores the real path when the test ends.
+func serviceAccount(t *testing.T, files map[string]string) {
+	t.Helper()
+	dir := t.TempDir()
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	previous := serviceAccountDir
+	serviceAccountDir = dir
+	t.Cleanup(func() { serviceAccountDir = previous })
+}
+
+func TestInClusterClientBuildsFromTheEnvironment(t *testing.T) {
+	t.Setenv("KUBERNETES_SERVICE_HOST", "10.43.0.1")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
+	serviceAccount(t, map[string]string{"token": "test-token", "ca.crt": testCA})
+	client, err := InClusterClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "https://10.43.0.1:443"; client.base != want {
+		t.Errorf("the environment names the endpoint: got %s", client.base)
+	}
+}
+
+func TestInClusterClientAtPrefersTheGivenEndpoint(t *testing.T) {
+	// A hostNetwork pod on a server machine reaches the API through
+	// its own loopback instead of the service VIP; the credentials
+	// are the same either way.
+	serviceAccount(t, map[string]string{"token": "test-token", "ca.crt": testCA})
+	client, err := InClusterClientAt("https://127.0.0.1:6443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "https://127.0.0.1:6443"; client.base != want {
+		t.Errorf("got %s", client.base)
+	}
+}
+
+func TestInClusterClientAtNeedsTheMountedCA(t *testing.T) {
+	serviceAccount(t, map[string]string{"token": "test-token"})
+	if _, err := InClusterClientAt("https://127.0.0.1:6443"); err == nil {
+		t.Error("a pod without its mounted CA cannot verify the server")
+	}
+}
+
+func TestInClusterClientAtRejectsAnEmptyCA(t *testing.T) {
+	serviceAccount(t, map[string]string{"token": "test-token", "ca.crt": "not a certificate"})
+	if _, err := InClusterClientAt("https://127.0.0.1:6443"); err == nil {
+		t.Error("a CA file holding no certificates can trust nothing")
+	}
+}
+
 func TestDoNeedsAServiceAccountToken(t *testing.T) {
 	// The token is re-read from disk on every request (kubelet
 	// refreshes it as it approaches expiry); a missing token is a
@@ -120,5 +193,29 @@ func TestDoNeedsAServiceAccountToken(t *testing.T) {
 	client := NewClient("http://unreachable", http.DefaultClient, t.TempDir())
 	if _, err := client.Do(http.MethodGet, "/x", "", nil); err == nil {
 		t.Error("a missing token must fail the request")
+	}
+	if err := client.PatchJSON("/x", []byte(`{}`)); err == nil {
+		t.Error("a patch cannot go out unauthenticated either")
+	}
+}
+
+func TestGetReportsAnAbsentObject(t *testing.T) {
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	if _, err := GetMachine(client, "node-9"); err != ErrNotFound {
+		t.Errorf("an absent object is ErrNotFound: %v", err)
+	}
+}
+
+func TestListCarriesTheServersRefusal(t *testing.T) {
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "clusters.liken.sh is forbidden", http.StatusForbidden)
+	}))
+	if _, err := ListClusters(client); err == nil {
+		t.Error("a refused list is an error")
+	}
+	if _, err := ListHeartbeats(client); err == nil {
+		t.Error("and so is a refused heartbeat sweep")
 	}
 }

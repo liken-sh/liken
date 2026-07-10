@@ -95,6 +95,36 @@ spec:
 	}
 }
 
+// The build invokes run, not declaredModules, so a bad manifest must
+// fail through that path too.
+func TestRunPropagatesManifestErrors(t *testing.T) {
+	dir := deployment(t, map[string]string{
+		"node-1.yaml": `
+apiVersion: liken.sh/v1alpha1
+kind: Machine
+metadata:
+  name: node-1
+spec:
+  modulez: [nvidia]
+`,
+	})
+	if err := run([]string{"modules", dir}, &bytes.Buffer{}); err == nil {
+		t.Fatal("expected the misspelled field to fail through run")
+	}
+}
+
+// A deployment path that glob can't treat as a pattern (an unclosed
+// bracket) is an error, not an empty answer.
+func TestUnglobbableDeploymentPathIsAnError(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "dep[loyment")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := declaredModules(dir); err == nil {
+		t.Fatal("expected a bad glob pattern to be an error")
+	}
+}
+
 func TestRunPrintsOneModulePerLine(t *testing.T) {
 	dir := deployment(t, map[string]string{
 		"node-1.yaml": manifestWithModules("node-1", "[zram, nvidia]"),

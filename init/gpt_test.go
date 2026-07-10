@@ -7,6 +7,7 @@ package main
 // all, because the reader exists to preserve identity through edits.
 
 import (
+	"bytes"
 	"encoding/binary"
 	"hash/crc32"
 	"os"
@@ -312,4 +313,45 @@ func TestWriteGPTTableReportsAMissingDevice(t *testing.T) {
 	if err == nil {
 		t.Error("a device that won't open is an error")
 	}
+}
+
+func TestReadGPTWithBothCopiesUnreadable(t *testing.T) {
+	// A blank device has neither table; the error names both failures
+	// and the grown-disk caveat, because that is the one case the
+	// backup can't cover.
+	blank := bytes.NewReader(make([]byte, 4_096*sectorSize))
+	_, err := readGPT(blank, 4_096)
+	if err == nil || !strings.Contains(err.Error(), "neither partition table copy is readable") {
+		t.Errorf("expected both copies to be reported: %v", err)
+	}
+}
+
+func TestWriteGPTTableRefusesAnUnserializableTable(t *testing.T) {
+	// Serialization is validated before the device is even opened, so
+	// a table that can't be laid out never touches the disk.
+	t1 := &gptTable{entries: []gptEntry{{name: strings.Repeat("x", gptNameChars+1), typeGUID: linuxFilesystemData}}}
+	err := writeGPTTable(filepath.Join(t.TempDir(), "disk"), 4_096, t1)
+	if err == nil || !strings.Contains(err.Error(), "exceeds GPT") {
+		t.Errorf("expected the serialization refusal: %v", err)
+	}
+}
+
+func TestSerializeGPTRefusesTooManyEntries(t *testing.T) {
+	t1 := &gptTable{entries: make([]gptEntry, gptEntryCount+1)}
+	_, err := serializeGPT(t1, 1<<20)
+	if err == nil || !strings.Contains(err.Error(), "won't fit") {
+		t.Errorf("expected the entry-count refusal: %v", err)
+	}
+}
+
+func TestMustGUIDPanicsOnAGarbageLiteral(t *testing.T) {
+	// mustGUID guards the package's own constants: a bad literal is a
+	// programming error that must fail at first use, not decode into
+	// a wrong type GUID that every tool then misreads.
+	defer func() {
+		if recover() == nil {
+			t.Error("a garbage literal must panic")
+		}
+	}()
+	mustGUID("not-a-guid")
 }

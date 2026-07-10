@@ -8,14 +8,14 @@
 # mount.nfs4). There is no daemon, no manifest, and no OCI image:
 # NFSv4 needs none of them, which is most of why the feature is v4
 # only.
-NFSUTILS_VERSION := $(strip $(file <VERSION))
+VERSION := $(strip $(file <VERSION))
 
-all: dist/$(NFSUTILS_VERSION)/mount.nfs
-
-dist/$(NFSUTILS_VERSION)/mount.nfs: VERSION fetch.sh
+dist/$(VERSION)/mount.nfs: VERSION fetch.sh
 	./fetch.sh
 
 .PHONY: all clean
+
+all: dist/$(VERSION)/mount.nfs
 
 clean:
 	rm -rf dist

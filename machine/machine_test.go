@@ -138,3 +138,10 @@ spec:
 		t.Fatal("expected an error for the misspelled field")
 	}
 }
+
+func TestLoadReportsAnUnreadableFile(t *testing.T) {
+	path := unreadableFile(t, filepath.Join(t.TempDir(), "machine.yaml"))
+	if _, err := Load(path); err == nil {
+		t.Error("a manifest that exists but can't be read is an error, not a default machine")
+	}
+}

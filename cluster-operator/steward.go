@@ -121,14 +121,12 @@ func stewardDaemonSet(c *kubernetes.Client, machines []machine.Machine, name str
 		return // no DaemonSet to steward; nothing to do
 	}
 	dsVersion := ds.Metadata.Annotations[osVersionAnnotation]
-	var pods struct {
-		Items []kubernetes.Pod `json:"items"`
-	}
-	if err := c.RequestJSON(http.MethodGet, daemonSetPodsPath(name), nil, &pods); err != nil {
+	pods, err := kubernetes.List[kubernetes.Pod](c, daemonSetPodsPath(name))
+	if err != nil {
 		fmt.Printf("listing %s pods for the steward: %v\n", name, err)
 		return
 	}
-	for _, p := range decideRefresh(dsVersion, machines, pods.Items) {
+	for _, p := range decideRefresh(dsVersion, machines, pods) {
 		if err := kubernetes.EvictPod(c, p); err != nil {
 			fmt.Printf("refreshing pod %s: %v\n", p.Metadata.Name, err)
 		} else {

@@ -140,3 +140,11 @@ func TestWriteRebootIntentNeedsItsChannel(t *testing.T) {
 		t.Error("a missing channel directory must be an error")
 	}
 }
+
+func TestReadRebootIntentReportsAnUnreadableFile(t *testing.T) {
+	dir := t.TempDir()
+	unreadableFile(t, filepath.Join(dir, "reboot-intent.yaml"))
+	if _, err := ReadRebootIntent(dir); err == nil {
+		t.Error("an intent that exists but can't be read is an error, not an absent intent")
+	}
+}

@@ -201,10 +201,12 @@ func splitKmsgLine(line []byte, limit int) [][]byte {
 
 // syncLogs pauses long enough for the drainers to move the last
 // lines out of the pipes and into the kernel's buffer. The shutdown
-// paths call it just before the world ends: a reboot explanation
-// that died in a pipe helps nobody. The pipes drain in microseconds;
-// the pause is a generous bound, and it costs a reboot almost
-// nothing. When the redirect never happened this is a harmless nap.
+// paths call it just before rebooting or powering off, so the final
+// lines (usually the explanation of why the machine is going down)
+// reach the kernel's buffer instead of being lost in a pipe. The
+// pipes drain in microseconds, so 50ms is a generous bound, and when
+// the redirect never happened the pause costs nothing that matters
+// next to a reboot.
 func syncLogs() {
 	time.Sleep(50 * time.Millisecond)
 }

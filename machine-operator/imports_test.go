@@ -163,3 +163,58 @@ func TestImportsPromotionPromotesWhenTheOSServes(t *testing.T) {
 		t.Fatalf("promotion converges the condition: %+v", v.condition)
 	}
 }
+
+// The observing half, settleImportsLifecycle, gathers the store and
+// pod evidence the decision judges. These tests stop short of an
+// actual promotion, because promotion's syncfs barrier needs the real
+// container store; the decision tests above already cover that
+// verdict.
+
+func TestSettleImportsLifecycleUntrackedBootNeedsNoStore(t *testing.T) {
+	client := testClient(t, (&drainAPI{}).handler())
+	c := settleImportsLifecycle(client, t.TempDir(), "node-1", importsFacts("", ""))
+	if c.Status != machine.ConditionTrue || c.Reason != "NotTracked" {
+		t.Errorf("got %+v", c)
+	}
+}
+
+func TestSettleImportsLifecycleReportsAProvingTrial(t *testing.T) {
+	root := t.TempDir()
+	raw := []byte("kind: ImportedImages\n")
+	if err := machine.ImportedImagesStore(root).WriteStaged(raw); err != nil {
+		t.Fatal(err)
+	}
+	client := testClient(t, (&drainAPI{}).handler())
+	c := settleImportsLifecycle(client, root, "node-1",
+		importsFacts(machine.ManifestSourceStaged, machine.ManifestHash(raw)))
+	if c.Status != machine.ConditionFalse || c.Reason != "Proving" {
+		t.Errorf("no OS pods listed yet means the trial is still proving: %+v", c)
+	}
+}
+
+func TestSettleImportsLifecycleSeesAnEarlierPromotion(t *testing.T) {
+	root := t.TempDir()
+	raw := []byte("kind: ImportedImages\n")
+	if err := machine.ImportedImagesStore(root).WriteProven(raw); err != nil {
+		t.Fatal(err)
+	}
+	client := testClient(t, (&drainAPI{}).handler())
+	c := settleImportsLifecycle(client, root, "node-1",
+		importsFacts(machine.ManifestSourceStaged, machine.ManifestHash(raw)))
+	if c.Status != machine.ConditionTrue || c.Reason != "Converged" {
+		t.Errorf("an already-promoted trial is converged: %+v", c)
+	}
+}
+
+func TestSettleImportsLifecycleIgnoresAStaleStagedRecord(t *testing.T) {
+	root := t.TempDir()
+	if err := machine.ImportedImagesStore(root).WriteStaged([]byte("newer trial\n")); err != nil {
+		t.Fatal(err)
+	}
+	client := testClient(t, (&drainAPI{}).handler())
+	c := settleImportsLifecycle(client, root, "node-1",
+		importsFacts(machine.ManifestSourceStaged, "hash-of-what-this-boot-ran"))
+	if c.Status != machine.ConditionUnknown || c.Reason != "FactsIncomplete" {
+		t.Errorf("a staged record the facts don't describe can't be judged: %+v", c)
+	}
+}

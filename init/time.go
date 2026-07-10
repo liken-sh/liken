@@ -5,7 +5,7 @@ package main
 // A computer's clock drifts: cheap oscillators gain or lose seconds
 // a day. Kubernetes assumes nobody's does. TLS certificates carry
 // notBefore/notAfter instants, leases carry renew deadlines, and
-// etcd (when it arrives) orders events by time. A machine whose
+// etcd, on multi-leader clusters, orders events by time. A machine whose
 // clock is wrong enough can't even *join* a cluster, because every
 // certificate the CA minted appears to be from the future. That's
 // why time is a machine-plane concern and why the first correction

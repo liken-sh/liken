@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/chrisguidry/liken/machine"
@@ -170,5 +171,76 @@ func TestLoadDeclaredModulesFromAMissingTree(t *testing.T) {
 func TestKernelReleaseAsksTheKernel(t *testing.T) {
 	if release := kernelRelease(); release == "" {
 		t.Error("uname always has a release string")
+	}
+}
+
+// fakeModulesConf points the fixed-list pass at a list of the test's
+// making, restoring the real path when the test ends.
+func fakeModulesConf(t *testing.T, path string) {
+	t.Helper()
+	old := modulesConf
+	modulesConf = path
+	t.Cleanup(func() { modulesConf = old })
+}
+
+func TestLoadModulesWithNoListLoadsNothing(t *testing.T) {
+	fakeModulesConf(t, filepath.Join(t.TempDir(), "absent.conf"))
+	loadModules()
+}
+
+func TestLoadModulesWithAnEmptyListLoadsNothing(t *testing.T) {
+	fakeModulesConf(t, writeFile(t, "modules.conf", "# nothing but commentary\n"))
+	loadModules()
+}
+
+func TestLoadModulesReportsAnUnreadableList(t *testing.T) {
+	path := writeFile(t, "modules.conf", "overlay\n")
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+	fakeModulesConf(t, path)
+	loadModules()
+}
+
+func TestLoadModuleReportsAMissingModuleFile(t *testing.T) {
+	// The index promises a file the tree doesn't hold: the open fails
+	// as an ordinary error, and nothing counts as loaded.
+	base := t.TempDir()
+	deps := map[string][]string{"overlay": {"kernel/fs/overlayfs/overlay.ko.zst"}}
+	n, err := loadModule(base, "overlay", deps, map[string]bool{})
+	if err == nil || n != 0 {
+		t.Errorf("a missing file is an error and loads nothing: %d, %v", n, err)
+	}
+}
+
+func TestLoadModuleReportsAKernelRefusal(t *testing.T) {
+	// The file exists but the kernel refuses it (here, because an
+	// ordinary process may not load modules; on a real boot, because
+	// the bytes aren't a module). Either way it is the same branch:
+	// finit_module's error, wrapped with the file's name.
+	base := t.TempDir()
+	rel := "kernel/fake.ko.zst"
+	if err := os.MkdirAll(filepath.Join(base, "kernel"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, rel), []byte("not a module"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deps := map[string][]string{"fake": {rel}}
+	n, err := loadModule(base, "fake", deps, map[string]bool{})
+	if err == nil || !strings.Contains(err.Error(), "finit_module") || n != 0 {
+		t.Errorf("expected the kernel's refusal to surface: %d, %v", n, err)
+	}
+}
+
+func TestLoadModuleSkipsFilesAlreadyLoaded(t *testing.T) {
+	// A dependency another chain already fed the kernel is skipped
+	// entirely: no open, no syscall, no count.
+	deps := map[string][]string{"overlay": {"kernel/fs/overlayfs/overlay.ko.zst"}}
+	loaded := map[string]bool{"kernel/fs/overlayfs/overlay.ko.zst": true}
+	n, err := loadModule(t.TempDir(), "overlay", deps, loaded)
+	if err != nil || n != 0 {
+		t.Errorf("an already-loaded chain is a no-op: %d, %v", n, err)
 	}
 }

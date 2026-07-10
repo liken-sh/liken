@@ -32,47 +32,10 @@ package main
 
 import (
 	"fmt"
-	"net/http"
 
 	"github.com/chrisguidry/liken/kubernetes"
 	"github.com/chrisguidry/liken/machine"
 )
-
-// nodesPath is the core API's home for Node objects: no group, just
-// a version, which is what "core" means in the URL scheme.
-const nodesPath = "/api/v1/nodes"
-
-// nodeObject is the sliver of a Kubernetes Node the operator needs:
-// the labels, where a demoted machine's old role still shows; the
-// conditions, where the kubelet's health shows (reconcile.go mirrors
-// the Node's Ready condition onto the Machine); and the cordon
-// state, meaning the unschedulable flag plus the annotations that
-// record whether liken set it (drain.go).
-type nodeObject struct {
-	Metadata struct {
-		Name        string            `json:"name"`
-		Labels      map[string]string `json:"labels"`
-		Annotations map[string]string `json:"annotations"`
-	} `json:"metadata"`
-	Spec struct {
-		Unschedulable bool `json:"unschedulable"`
-	} `json:"spec"`
-	Status struct {
-		Conditions []machine.Condition `json:"conditions"`
-	} `json:"status"`
-}
-
-func getNode(c *kubernetes.Client, name string) (*nodeObject, error) {
-	n := &nodeObject{}
-	if err := c.RequestJSON(http.MethodGet, nodesPath+"/"+name, nil, n); err != nil {
-		return nil, err
-	}
-	return n, nil
-}
-
-func deleteNode(c *kubernetes.Client, name string) error {
-	return c.RequestJSON(http.MethodDelete, nodesPath+"/"+name, nil, nil)
-}
 
 // The role labels k3s stamps on a Node when it runs a control plane.
 // Their presence on a follower's Node is what a demotion leaves

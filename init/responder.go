@@ -27,8 +27,7 @@ package main
 // a separate process (components.go): it parses unauthenticated
 // network input as PID 1. A fixed-size read in a memory-safe
 // language is about the smallest attack surface a network service
-// can have, but it is still an attack surface. The hardening pass
-// owns that promotion.
+// can have, but it is still an attack surface.
 
 import (
 	"context"
@@ -59,9 +58,8 @@ const (
 // ntpEpochOffset converts between the two epochs in play: NTP counts
 // seconds from 1900-01-01, Unix from 1970-01-01, and these are the
 // seconds between them. (NTP's 32-bit seconds field wraps in 2036,
-// the start of era 1. The protocol handles the rollover by
-// convention, and this code will be replaced long before it
-// matters.)
+// the start of era 1; the protocol handles the rollover by
+// convention.)
 const ntpEpochOffset = 2_208_988_800
 
 // ntpTimestamp encodes a moment in NTP's 64-bit format: 32 bits of

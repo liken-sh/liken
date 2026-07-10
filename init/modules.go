@@ -48,7 +48,10 @@ import (
 	"github.com/chrisguidry/liken/machine"
 )
 
-const modulesConf = "/etc/liken/modules.conf"
+// modulesConf is the image's fixed module list. A package variable
+// rather than a constant so tests can point the first pass at a list
+// of their own making.
+var modulesConf = "/etc/liken/modules.conf"
 
 func loadModules() {
 	release := kernelRelease()
@@ -72,7 +75,9 @@ func loadModules() {
 	loaded := map[string]bool{}
 	count := 0
 	for _, name := range names {
-		if err := loadModule(base, name, deps, loaded, &count); err != nil {
+		n, err := loadModule(base, name, deps, loaded)
+		count += n
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "liken: modules: %s: %v\n", name, err)
 		}
 	}
@@ -114,9 +119,9 @@ func loadDeclaredModulesFrom(base string, names []string) []machine.ModuleStatus
 	}
 
 	loaded := map[string]bool{}
-	count := 0
 	statuses := declaredModuleOutcomes(names, deps, builtin, func(name string) error {
-		return loadModule(base, name, deps, loaded, &count)
+		_, err := loadModule(base, name, deps, loaded)
+		return err
 	})
 	for _, s := range statuses {
 		if s.Message != "" {
@@ -210,8 +215,9 @@ func readModulesDep(path string) (map[string][]string, error) {
 //
 //	kernel/fs/binfmt_misc.ko
 //
-// A name found here needs no loading, ever; the kernel was born with
-// it. The set is keyed like modules.dep's, names normalized to "_".
+// A name found here needs no loading, ever; the kernel already
+// contains it. The set is keyed like modules.dep's, names normalized
+// to "_".
 func readModulesBuiltin(path string) (map[string]bool, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -237,13 +243,16 @@ func moduleName(path string) string {
 
 // loadModule feeds one module and its dependencies to the kernel,
 // dependencies first (modules.dep lists them ready to load
-// right-to-left). Already-loaded modules, whether by us or by an
-// earlier dependency chain, return EEXIST, which counts as success.
-func loadModule(base, name string, deps map[string][]string, loaded map[string]bool, count *int) error {
+// right-to-left), and returns how many files the kernel actually
+// loaded. Already-loaded modules, whether by us or by an earlier
+// dependency chain, return EEXIST, which counts as success but not
+// toward the count.
+func loadModule(base, name string, deps map[string][]string, loaded map[string]bool) (int, error) {
 	entry, ok := deps[strings.ReplaceAll(name, "-", "_")]
 	if !ok {
-		return fmt.Errorf("not in modules.dep (is it built into the kernel?)")
+		return 0, fmt.Errorf("not in modules.dep (is it built into the kernel?)")
 	}
+	count := 0
 	for i := len(entry) - 1; i >= 0; i-- {
 		file := entry[i]
 		if loaded[file] {
@@ -251,19 +260,19 @@ func loadModule(base, name string, deps map[string][]string, loaded map[string]b
 		}
 		f, err := os.Open(filepath.Join(base, file))
 		if err != nil {
-			return err
+			return count, err
 		}
 		err = unix.FinitModule(int(f.Fd()), "", unix.MODULE_INIT_COMPRESSED_FILE)
 		f.Close()
 		if err != nil && !errors.Is(err, unix.EEXIST) {
-			return fmt.Errorf("finit_module %s: %w", file, err)
+			return count, fmt.Errorf("finit_module %s: %w", file, err)
 		}
 		if err == nil {
-			*count++
+			count++
 		}
 		loaded[file] = true
 	}
-	return nil
+	return count, nil
 }
 
 func kernelRelease() string {

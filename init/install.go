@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/chrisguidry/liken/machine"
@@ -161,8 +162,12 @@ func findSlotPartition(parts []partition, role machine.StorageRoleName) (*slotPa
 		}
 		for _, entry := range table.entries {
 			if entry.name == declared.PartitionName() {
+				number, err := partitionNumber(p)
+				if err != nil {
+					return nil, err
+				}
 				return &slotPartition{
-					number:   partitionNumber(p),
+					number:   number,
 					firstLBA: entry.firstLBA,
 					lastLBA:  entry.lastLBA,
 					guid:     entry.uniqueGUID,
@@ -185,13 +190,18 @@ type slotPartition struct {
 // node name: the suffix after the disk's name (vdc1 → 1), with the
 // "p" separator NVMe-style names insert (nvme0n1p2 → 2). The kernel
 // numbers partitions by their slot in the GPT entry array, starting
-// at 1.
-func partitionNumber(p partition) uint32 {
+// at 1. A suffix that isn't a number is refused: the index goes into
+// a firmware boot entry, and 0 is not a valid GPT slot, so a
+// malformed name must stop the install rather than encode garbage
+// the firmware would trust.
+func partitionNumber(p partition) (uint32, error) {
 	suffix := strings.TrimPrefix(p.name, p.disk)
 	suffix = strings.TrimPrefix(suffix, "p")
-	var n uint32
-	fmt.Sscanf(suffix, "%d", &n)
-	return n
+	n, err := strconv.Atoi(suffix)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("install: cannot read a partition number from %q on disk %s", p.name, p.disk)
+	}
+	return uint32(n), nil
 }
 
 // writeSlotBootEntry writes one slot's firmware entry: boot \vmlinuz
@@ -247,12 +257,8 @@ func writeSlotBootEntry(dir, description, slot string, part *slotPartition, mach
 // command line: the installer was told where this machine's console
 // is, and the installed system should keep using the same one.
 func consoleArgs() []string {
-	raw, err := os.ReadFile(cmdlinePath)
-	if err != nil {
-		return nil
-	}
 	var consoles []string
-	for _, field := range strings.Fields(string(raw)) {
+	for _, field := range cmdlineFields() {
 		if strings.HasPrefix(field, "console=") {
 			consoles = append(consoles, field)
 		}

@@ -149,3 +149,18 @@ func TestDiscoverBlockDevicesReadsSCSIModels(t *testing.T) {
 	}
 	reportBlockDevices()
 }
+
+func TestDiscoverBlockDevicesWithNoSysfsReportsNothing(t *testing.T) {
+	fakeMachine(t)
+	sysBlock = filepath.Join(t.TempDir(), "no-sys-block")
+	if disks := discoverBlockDevices(); disks != nil {
+		t.Errorf("an unreadable /sys/block discovers nothing: %v", disks)
+	}
+}
+
+func TestReportBlockDevicesWithNoDisks(t *testing.T) {
+	fakeMachine(t)
+	// A machine with no storage at all still narrates that fact; the
+	// world report must never be silent about a whole section.
+	reportBlockDevices()
+}

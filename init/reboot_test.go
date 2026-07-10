@@ -146,3 +146,24 @@ func TestWatchPrefersARebootWhenBothIntentsStand(t *testing.T) {
 	default:
 	}
 }
+
+func TestWatchHonorsAnUnreadableRestartIntent(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "restart-intent.yaml"), []byte("{not yaml"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reboots := make(chan machine.RebootIntent, 1)
+	restarts := make(chan machine.RestartIntent, 1)
+	ctx, cancel := context.WithCancel(t.Context())
+
+	done := make(chan error, 1)
+	go func() { done <- watchForOperatorIntents(ctx, dir, time.Millisecond, reboots, restarts) }()
+	intent := <-restarts
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if intent.Reason != "an unreadable restart intent" {
+		t.Errorf("the fallback reason names the problem: %q", intent.Reason)
+	}
+}

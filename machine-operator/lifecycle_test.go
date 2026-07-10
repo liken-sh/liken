@@ -1,9 +1,9 @@
 package main
 
 // The acting halves that work against real files: carrying out a
-// convergence decision against a manifest store, and settling the
-// cluster document's lifecycle after a boot proved (or didn't prove)
-// it.
+// convergence decision against a manifest store, reading the staged
+// document's identity back out of one, and settling the cluster
+// document's lifecycle after a boot proved (or didn't prove) it.
 
 import (
 	"os"
@@ -91,6 +91,37 @@ func TestCarryOutConvergenceReportsAFailedRestartRequest(t *testing.T) {
 	condition := carryOutConvergence(conv, store, "registry credentials", lifecycleNow)
 	if condition.Reason != "StagingFailed" {
 		t.Errorf("got %s", condition.Reason)
+	}
+}
+
+func TestReadStagedHashOfAnEmptyStore(t *testing.T) {
+	store := machine.MachineManifests(t.TempDir())
+	if hash := readStagedHash(store); hash != "" {
+		t.Errorf("an empty store stages nothing: %q", hash)
+	}
+}
+
+func TestReadStagedHashIsTheStagedBytesIdentity(t *testing.T) {
+	store := machine.MachineManifests(t.TempDir())
+	raw := []byte("kind: Machine\nmetadata: {name: liken-dev}\n")
+	if err := store.WriteStaged(raw); err != nil {
+		t.Fatal(err)
+	}
+	if hash := readStagedHash(store); hash != machine.ManifestHash(raw) {
+		t.Errorf("got %q", hash)
+	}
+}
+
+func TestReadStagedHashHashesUnparseableBytesToo(t *testing.T) {
+	// The idempotence check compares bytes, not parsed meaning, so
+	// staged bytes that fail to parse still get an identity.
+	store := machine.MachineManifests(t.TempDir())
+	raw := []byte(":: this is not yaml ::")
+	if err := store.WriteStaged(raw); err != nil {
+		t.Fatal(err)
+	}
+	if hash := readStagedHash(store); hash != machine.ManifestHash(raw) {
+		t.Errorf("got %q", hash)
 	}
 }
 

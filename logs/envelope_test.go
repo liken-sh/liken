@@ -6,26 +6,9 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"testing"
 	"time"
 )
-
-// parseEnvelopes decodes a stream of envelope lines, failing the test
-// on anything that isn't one.
-func parseEnvelopes(t *testing.T, raw string) []envelope {
-	t.Helper()
-	var out []envelope
-	dec := json.NewDecoder(bytes.NewReader([]byte(raw)))
-	for dec.More() {
-		var e envelope
-		if err := dec.Decode(&e); err != nil {
-			t.Fatalf("output is not a stream of envelopes: %v\n%s", err, raw)
-		}
-		out = append(out, e)
-	}
-	return out
-}
 
 func TestEnvelopeGoldenBytes(t *testing.T) {
 	facility := 1

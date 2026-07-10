@@ -1,140 +1,19 @@
 package main
 
-// The Node-to-Machine health translation: how the kubelet's own
-// account of itself becomes the Machine's NodeHealthy condition.
+// The reconcile loop's writes against a miniature API server: the
+// operator's access to its own Node object, and the status publish
+// that resolves conflicts without discarding a pass's observations.
 
 import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/chrisguidry/liken/kubernetes"
 	"github.com/chrisguidry/liken/machine"
 )
-
-func TestStorageConditionAllPlaced(t *testing.T) {
-	spec := machine.StorageSpec{ClusterState: &machine.StorageRole{Device: "/dev/vda"}}
-	status := machine.AllRolesInMemory()
-	status.ClusterState = machine.StorageRoleStatus{Backing: machine.BackingPartition, Device: "vda1"}
-	c := storageCondition(spec, status)
-	if c.Type != "StorageReady" || c.Status != machine.ConditionTrue || c.Reason != "AllRolesPlaced" {
-		t.Errorf("got %+v", c)
-	}
-	if !strings.Contains(c.Message, "clusterState on vda1") {
-		t.Errorf("message should name the landing: %q", c.Message)
-	}
-}
-
-func TestStorageConditionDeclaredButInMemory(t *testing.T) {
-	spec := machine.StorageSpec{ClusterState: &machine.StorageRole{Device: "/dev/vda"}}
-	c := storageCondition(spec, machine.AllRolesInMemory())
-	if c.Status != machine.ConditionFalse || c.Reason != "RolesInMemory" {
-		t.Errorf("got %+v", c)
-	}
-	if !strings.Contains(c.Message, "clusterState") {
-		t.Errorf("message should name the role: %q", c.Message)
-	}
-}
-
-func TestStorageConditionNothingDeclared(t *testing.T) {
-	c := storageCondition(machine.StorageSpec{}, machine.AllRolesInMemory())
-	if c.Status != machine.ConditionTrue || c.Reason != "NothingDeclared" {
-		t.Errorf("got %+v", c)
-	}
-}
-
-func TestModulesConditionAllHealthy(t *testing.T) {
-	c := modulesCondition([]machine.ModuleStatus{
-		{Name: "nvidia", State: machine.ModuleLoaded},
-		{Name: "loop", State: machine.ModuleBuiltin},
-	})
-	if c.Type != "ModulesLoaded" || c.Status != machine.ConditionTrue || c.Reason != "AllLoaded" {
-		t.Errorf("got %+v", c)
-	}
-}
-
-func TestModulesConditionNamesTheFix(t *testing.T) {
-	c := modulesCondition([]machine.ModuleStatus{
-		{Name: "nvidia", State: machine.ModuleLoaded},
-		{Name: "nbd", State: machine.ModuleMissing, Message: "not in this image; rebuild the deployment's image, or upgrade to a release built from manifests that declare it"},
-	})
-	if c.Status != machine.ConditionFalse || c.Reason != "ModulesNotLoaded" {
-		t.Errorf("got %+v", c)
-	}
-	if !strings.Contains(c.Message, "nbd: not in this image; rebuild") {
-		t.Errorf("message should carry init's fix: %q", c.Message)
-	}
-}
-
-func TestModulesConditionNothingDeclared(t *testing.T) {
-	c := modulesCondition(nil)
-	if c.Status != machine.ConditionTrue || c.Reason != "NothingDeclared" {
-		t.Errorf("got %+v", c)
-	}
-}
-
-func TestFeaturesConditionAllActive(t *testing.T) {
-	c := featuresCondition([]machine.FeatureStatus{
-		{Name: "metrics-server", State: machine.FeatureActive},
-		{Name: "iscsi", State: machine.FeatureActive},
-	})
-	if c.Type != "FeaturesReady" || c.Status != machine.ConditionTrue || c.Reason != "AllActive" {
-		t.Errorf("got %+v", c)
-	}
-}
-
-func TestFeaturesConditionNamesTheFix(t *testing.T) {
-	c := featuresCondition([]machine.FeatureStatus{
-		{Name: "metrics-server", State: machine.FeatureActive},
-		{Name: "iscsi", State: machine.FeatureMissing, Message: "this image predates the iscsi feature; upgrade to a release whose image carries it"},
-	})
-	if c.Status != machine.ConditionFalse || c.Reason != "FeaturesNotReady" {
-		t.Errorf("got %+v", c)
-	}
-	if !strings.Contains(c.Message, "iscsi: this image predates") {
-		t.Errorf("message should carry init's fix: %q", c.Message)
-	}
-}
-
-func TestFeaturesConditionNothingEnabled(t *testing.T) {
-	c := featuresCondition(nil)
-	if c.Status != machine.ConditionTrue || c.Reason != "NothingDeclared" {
-		t.Errorf("got %+v", c)
-	}
-}
-
-func nodeWithReady(status machine.ConditionStatus) *nodeObject {
-	n := &nodeObject{}
-	n.Status.Conditions = []machine.Condition{
-		{Type: "MemoryPressure", Status: "False"},
-		{Type: "Ready", Status: status, Message: "kubelet says so"},
-	}
-	return n
-}
-
-func TestAReadyNodeIsHealthy(t *testing.T) {
-	c := nodeHealthyCondition(nodeWithReady("True"))
-	if c.Status != "True" || c.Reason != "KubeletReady" {
-		t.Errorf("got %s/%s", c.Status, c.Reason)
-	}
-}
-
-func TestANotReadyNodeIsUnhealthy(t *testing.T) {
-	c := nodeHealthyCondition(nodeWithReady("Unknown"))
-	if c.Status != "False" || c.Reason != "NodeNotReady" {
-		t.Errorf("a silent kubelet is not serving this machine: %s/%s", c.Status, c.Reason)
-	}
-}
-
-func TestANodeWithoutAReadyConditionIsUnhealthy(t *testing.T) {
-	c := nodeHealthyCondition(&nodeObject{})
-	if c.Status != "False" || c.Reason != "NodeNotReady" {
-		t.Errorf("a kubelet that never reported in cannot be assumed healthy: %s/%s", c.Status, c.Reason)
-	}
-}
 
 // nodeAPI is a miniature API server holding one Node, remembering
 // whether it was deleted and what status the operator publishes.

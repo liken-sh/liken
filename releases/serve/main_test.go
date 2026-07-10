@@ -57,3 +57,37 @@ func TestAnswers404ForUnpublishedReleases(t *testing.T) {
 		t.Errorf("status: %d", resp.StatusCode)
 	}
 }
+
+// The banner documents the QEMU contract: guests reach the host's
+// loopback at 10.0.2.2, so the hint must carry whatever port the
+// server actually listens on, not assume the default.
+func TestBannerDerivesTheGuestURLFromTheAddress(t *testing.T) {
+	cases := []struct {
+		name string
+		addr string
+		want string
+	}{
+		{
+			name: "the default port",
+			addr: ":8017",
+			want: "serving releases from dist on :8017 (guests reach this at http://10.0.2.2:8017/releases)",
+		},
+		{
+			name: "a custom port",
+			addr: "0.0.0.0:9000",
+			want: "serving releases from dist on 0.0.0.0:9000 (guests reach this at http://10.0.2.2:9000/releases)",
+		},
+		{
+			name: "an address without a port gets no guest hint",
+			addr: "localhost",
+			want: "serving releases from dist on localhost",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := banner("dist", c.addr); got != c.want {
+				t.Errorf("banner:\ngot  %q\nwant %q", got, c.want)
+			}
+		})
+	}
+}

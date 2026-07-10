@@ -322,6 +322,10 @@ func persistNodePassword(storage machine.StorageStatus) {
 // to start.
 func writeK3sBootConfig(cluster *machine.Cluster, m *machine.Machine, conns []*connection) (machine.Role, error) {
 	name := m.Metadata.Name
+	// Role is nil-safe by design: a machine with no cluster document
+	// is a leader of one. That invariant is what keeps the follower
+	// branches below (which dereference cluster freely) off the nil
+	// path — a follower can only be derived *from* a document.
 	role := cluster.Role(name)
 	if cluster != nil {
 		fmt.Printf("liken: this machine is a cluster %s (cluster %s)\n", role, cluster.Metadata.Name)
@@ -381,6 +385,14 @@ func writeK3sBootConfig(cluster *machine.Cluster, m *machine.Machine, conns []*c
 	return role, nil
 }
 
+// clusterStateStaging is the private mountpoint where clusterState's
+// filesystem sits while its seed files are layered in, before the
+// mount moves to its real path. It is a shared constant because two
+// files must agree on it exactly: mountAndSeedClusterState stages the
+// mount here, and teardownStorage (storage.go) unmounts this same
+// path when a failed reconcile leaves it behind.
+const clusterStateStaging = "/.liken-claim"
+
 // mountAndSeedClusterState mounts clusterState's filesystem with the
 // image's seed files layered in. The image bakes the seeds (the
 // pre-generated CAs, the operator's manifests and container image)
@@ -392,7 +404,7 @@ func writeK3sBootConfig(cluster *machine.Cluster, m *machine.Machine, conns []*c
 // knows — the seed paths, what refreshes and what persists — is k3s's
 // on-disk layout.
 func mountAndSeedClusterState(dev, target string) error {
-	staging := "/.liken-claim"
+	staging := clusterStateStaging
 	if err := os.MkdirAll(staging, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", staging, err)
 	}

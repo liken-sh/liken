@@ -236,16 +236,26 @@ func (s StorageSpec) Validate() error {
 // uses, and accepting "2G" (decimal) alongside "2Gi" (binary) would
 // invite subtle mistakes, since the two differ by about 7%.
 func ParseSize(s string) (uint64, error) {
+	// The units are an ordered list rather than a map: the search
+	// stops at the first suffix that matches, so the order of the
+	// candidates must be fixed, and a map's iteration order is not.
+	// No suffix here is a suffix of another, so any fixed order works;
+	// were one added that overlaps (say "KiB"), it would have to come
+	// before the shorter suffix it ends in.
+	units := []struct {
+		suffix string
+		factor uint64
+	}{
+		{"Ki", 1 << 10},
+		{"Mi", 1 << 20},
+		{"Gi", 1 << 30},
+		{"Ti", 1 << 40},
+	}
 	digits := s
 	var unit uint64 = 1
-	for suffix, size := range map[string]uint64{
-		"Ki": 1 << 10,
-		"Mi": 1 << 20,
-		"Gi": 1 << 30,
-		"Ti": 1 << 40,
-	} {
-		if rest, ok := strings.CutSuffix(s, suffix); ok {
-			digits, unit = rest, size
+	for _, u := range units {
+		if rest, ok := strings.CutSuffix(s, u.suffix); ok {
+			digits, unit = rest, u.factor
 			break
 		}
 	}

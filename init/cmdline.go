@@ -17,15 +17,24 @@ import (
 // can point the parsers at a file of their own making.
 var cmdlinePath = "/proc/cmdline"
 
+// cmdlineFields reads the kernel command line as its whitespace-
+// separated words, the shape every parameter lookup starts from. A
+// command line that can't be read yields no words: the file exists on
+// any booted kernel, so absence only ever means a test never faked
+// one, and the lookups all degrade to "not present".
+func cmdlineFields() []string {
+	raw, err := os.ReadFile(cmdlinePath)
+	if err != nil {
+		return nil
+	}
+	return strings.Fields(string(raw))
+}
+
 // bootParamValue returns the value of a name=value parameter on the
 // kernel command line ("" when absent), like which machine this is
 // (liken.machine=) or which system slot booted it (liken.slot=).
 func bootParamValue(name string) string {
-	raw, err := os.ReadFile(cmdlinePath)
-	if err != nil {
-		return ""
-	}
-	for _, field := range strings.Fields(string(raw)) {
+	for _, field := range cmdlineFields() {
 		if value, ok := strings.CutPrefix(field, name+"="); ok {
 			return value
 		}
@@ -38,9 +47,5 @@ func bootParamValue(name string) string {
 // configuration (that belongs in the Machine manifest). Parameters
 // are namespaced liken.* to stay clear of the kernel's own.
 func bootParam(name string) bool {
-	raw, err := os.ReadFile(cmdlinePath)
-	if err != nil {
-		return false
-	}
-	return slices.Contains(strings.Fields(string(raw)), name)
+	return slices.Contains(cmdlineFields(), name)
 }

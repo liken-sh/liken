@@ -45,7 +45,7 @@ done
     exit 1
 }
 
-version="${1:-$(cat "$here/VERSION")}"
+version="$(cat "$here/VERSION")"
 
 # Every input pinned by hash, the same discipline as every vendored
 # domain. The nfs-utils pin matches nfs-utils/VERSION; building any
@@ -59,7 +59,8 @@ cache="$here/cache/$version"
 out="$here/dist/$version"
 mkdir -p "$cache" "$out"
 
-# Download once, verify every time.
+# Download once, verify every time: a cached tarball that stops
+# matching its pin fails the build rather than feeding it.
 fetch() {
     local url="$1" sha="$2" file="$cache/$3"
     if [[ ! -f "$file" ]]; then
@@ -76,7 +77,7 @@ fetch "https://downloads.sourceforge.net/project/libtirpc/libtirpc/$libtirpc_ver
 
 # The build, inside the pinned container. nfs-utils is one source tree
 # carrying a dozen programs, and this build wants exactly one of them,
-# so configure's job here is mostly saying no: no GSS/Kerberos, no
+# so configure here mostly disables things: no GSS/Kerberos, no
 # NFSv4 server-side tooling (idmapd and friends serve nfsd, not the
 # client), no udev readahead helper, no systemd units. The libevent
 # and sqlite packages exist only to satisfy configure's unconditional

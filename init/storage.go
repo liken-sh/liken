@@ -22,6 +22,10 @@ package main
 //     state to memory loses that state at the next power cycle.
 //     (Roles *absent* from the spec carry no such obligation: those
 //     directories simply stay on the RAM root.)
+//
+// This file owns the every-boot half: recognition, orchestration, and
+// mounting. Claiming a blank disk is claim.go's story, and growing a
+// recognized partition is grow.go's.
 
 import (
 	"errors"
@@ -32,7 +36,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -76,11 +79,20 @@ var roleMounts = map[machine.StorageRoleName]roleMount{
 	machine.PodEphemeralRole:     {path: "/var/lib/kubelet"},
 }
 
+// isSystemSlot reports whether a role is one of the firmware-read
+// system slots. The slots are the two roles with FAT32 semantics:
+// typed as EFI system partitions so the firmware finds them, and
+// fixed in size from the day they're claimed, because FAT doesn't
+// grow in place.
+func isSystemSlot(name machine.StorageRoleName) bool {
+	return name == machine.SystemARole || name == machine.SystemBRole
+}
+
 // partitionTypeFor picks a role's GPT partition type: the system
 // slots are EFI system partitions (the type GUID is how firmware
 // finds them), everything else is ordinary Linux data.
 func partitionTypeFor(name machine.StorageRoleName) [16]byte {
-	if name == machine.SystemARole || name == machine.SystemBRole {
+	if isSystemSlot(name) {
 		return efiSystemPartition
 	}
 	return linuxFilesystemData
@@ -96,9 +108,10 @@ func partitionTypeFor(name machine.StorageRoleName) [16]byte {
 // else is running this early in boot, so nothing can hold these
 // mounts busy.
 func teardownStorage() {
-	// mountRole temporarily mounts clusterState's filesystem here
-	// while seeding it; a failure partway through leaves it mounted.
-	_ = unix.Unmount("/.liken-claim", 0)
+	// mountAndSeedClusterState (k3s.go) temporarily mounts
+	// clusterState's filesystem at the staging point while seeding it;
+	// a failure partway through leaves it mounted there.
+	_ = unix.Unmount(clusterStateStaging, 0)
 	unmountRoleMounts(0, true)
 }
 
@@ -171,35 +184,6 @@ func discoverPartitions() []partition {
 		}
 	}
 	return parts
-}
-
-// isBlank reports whether a disk carries nothing recognizable: no MBR
-// or GPT, no ext4 filesystem written straight to the device. Blank is
-// the only condition under which claiming is allowed; a disk
-// something else formatted fails one of these checks and is left
-// alone.
-func isBlank(devPath string) (bool, error) {
-	f, err := os.Open(devPath)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-
-	// 2048 bytes covers all three signatures: the MBR's 0x55AA at 510,
-	// GPT's "EFI PART" at 512, ext4's magic at 1080.
-	head := make([]byte, 2048)
-	if _, err := f.ReadAt(head, 0); err != nil {
-		return false, err
-	}
-	switch {
-	case head[510] == 0x55 && head[511] == 0xAA:
-		return false, nil
-	case string(head[512:520]) == "EFI PART":
-		return false, nil
-	case head[1080] == 0x53 && head[1081] == 0xEF:
-		return false, nil
-	}
-	return true, nil
 }
 
 // reconcileStorage actuates the storage spec. On success every
@@ -332,139 +316,6 @@ func matchRoles(roles []machine.DeclaredRole, parts []partition) (map[machine.St
 		}
 	}
 	return found, nil
-}
-
-// A claimPlan is one blank disk's pending partition table. It is
-// validated and laid out up front, and written only after every
-// disk's plan has succeeded.
-type claimPlan struct {
-	device       string
-	totalSectors uint64
-	parts        []gptPartition
-	roleCount    int
-}
-
-// planClaim validates that a disk may be claimed for every declared
-// role naming it, and lays out its table: sized roles first at their
-// exact sizes, in canonical order, and the remainder role taking
-// whatever is left. Nothing is written.
-func planClaim(device string, roles []machine.DeclaredRole, found map[machine.StorageRoleName]partition) (claimPlan, error) {
-	var mine []machine.DeclaredRole
-	for _, role := range roles {
-		if role.Device == device {
-			// A disk where some roles are recognized but others need
-			// claiming is a disk whose table liken wrote and then
-			// something changed. It is not blank, so it can't be
-			// claimed, and it isn't safe to repair automatically.
-			if _, ok := found[role.Name]; ok {
-				return claimPlan{}, fmt.Errorf("disk %s already carries %s but is missing other declared roles; refusing to modify it",
-					device, role.PartitionName())
-			}
-			mine = append(mine, role)
-		}
-	}
-
-	disk := diskByPath(device)
-	if disk == nil {
-		return claimPlan{}, fmt.Errorf("declared device %s is not attached", device)
-	}
-	blank, err := isBlank(device)
-	if err != nil {
-		return claimPlan{}, fmt.Errorf("examining %s: %w", device, err)
-	}
-	if !blank {
-		return claimPlan{}, fmt.Errorf("%s carries a partition table or filesystem liken doesn't recognize; refusing to touch it (wipe it yourself if it's expendable)", device)
-	}
-
-	totalSectors := disk.SizeBytes / sectorSize
-	parts, err := planPartitions(device, mine, totalSectors)
-	if err != nil {
-		return claimPlan{}, err
-	}
-	return claimPlan{device: device, totalSectors: totalSectors, parts: parts, roleCount: len(mine)}, nil
-}
-
-// applyClaim writes one planned table and waits for the kernel to
-// surface its partitions.
-func applyClaim(plan claimPlan) error {
-	fmt.Printf("liken: storage: claiming %s (%s) for %d role(s)\n",
-		plan.device, gib(plan.totalSectors*sectorSize), plan.roleCount)
-	if err := writeGPT(plan.device, plan.totalSectors, plan.parts); err != nil {
-		return fmt.Errorf("partitioning %s: %w", plan.device, err)
-	}
-	return waitForPartitions(plan.parts, 5*time.Second)
-}
-
-// planPartitions lays out a claimed disk's table: sized roles pack
-// from the front in canonical order, each start aligned to 1MiB, and
-// the (single, validated) sizeless role takes the rest of the disk.
-// The device name appears only in error messages; the layout math
-// works purely in sectors.
-func planPartitions(device string, mine []machine.DeclaredRole, totalSectors uint64) ([]gptPartition, error) {
-	lastUsable := gptLastUsableLBA(totalSectors)
-	var parts []gptPartition
-	next := uint64(partitionAlignment)
-	var remainder *machine.DeclaredRole
-	for _, role := range mine {
-		if role.Size == "" {
-			remainder = &role
-			continue
-		}
-		bytes, _ := machine.ParseSize(role.Size) // validated before any disk is touched
-		sectors := (bytes + sectorSize - 1) / sectorSize
-		p := gptPartition{name: role.PartitionName(), firstLBA: next, lastLBA: next + sectors - 1,
-			typeGUID: partitionTypeFor(role.Name)}
-		if p.lastLBA > lastUsable {
-			return nil, fmt.Errorf("disk %s is too small: %s wants %s at sector %d but the disk's usable space ends at %d",
-				device, role.Name, role.Size, p.firstLBA, lastUsable)
-		}
-		parts = append(parts, p)
-		next = alignLBA(p.lastLBA + 1)
-	}
-	if remainder != nil {
-		if next > lastUsable {
-			return nil, fmt.Errorf("disk %s is too small: nothing left for %s", device, remainder.Name)
-		}
-		parts = append(parts, gptPartition{name: remainder.PartitionName(), firstLBA: next, lastLBA: lastUsable,
-			typeGUID: partitionTypeFor(remainder.Name)})
-	}
-	return parts, nil
-}
-
-// waitForPartitions gives the kernel a moment to surface the devices
-// for a table just written: BLKRRPART is synchronous but the devtmpfs
-// nodes and sysfs entries appear slightly later. Each partition must
-// appear at its planned size, which lets the same wait serve growth
-// as well as claiming: a partition still showing its old geometry is
-// as wrong as one that hasn't appeared. If the deadline passes, the
-// error names each partition that never appeared as expected.
-func waitForPartitions(parts []gptPartition, patience time.Duration) error {
-	deadline := time.Now().Add(patience)
-	for {
-		visible := map[string]uint64{}
-		for _, p := range discoverPartitions() {
-			visible[p.partName] = p.sizeBytes
-		}
-		var missing []string
-		for _, want := range parts {
-			wantBytes := (want.lastLBA - want.firstLBA + 1) * sectorSize
-			got, ok := visible[want.name]
-			switch {
-			case !ok:
-				missing = append(missing, want.name)
-			case got != wantBytes:
-				missing = append(missing, fmt.Sprintf("%s (still %d bytes, want %d)", want.name, got, wantBytes))
-			}
-		}
-		if len(missing) == 0 {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("partitions never appeared after their table was written: %s",
-				strings.Join(missing, ", "))
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
 }
 
 func diskByPath(device string) *machine.BlockDevice {

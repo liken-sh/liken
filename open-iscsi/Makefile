@@ -24,7 +24,7 @@ all: $(DIST)/iscsid-image.tar
 dist/$(OPENISCSI_VERSION)/iscsid dist/$(OPENISCSI_VERSION)/iscsiadm &: VERSION fetch.sh
 	./fetch.sh
 
-$(DIST)/iscsid-image.tar: dist/$(OPENISCSI_VERSION)/iscsid ../image/oci.sh
+$(DIST)/iscsid-image.tar: dist/$(OPENISCSI_VERSION)/iscsid ../image/oci.sh ../VERSION
 	@mkdir -p $(DIST)
 	@if [ "$(abspath $(DIST))" != "$(abspath dist/$(OPENISCSI_VERSION))" ]; then \
 		cp dist/$(OPENISCSI_VERSION)/iscsid dist/$(OPENISCSI_VERSION)/iscsiadm $(DIST)/; \

@@ -104,3 +104,17 @@ func TestReadSysctlReportsUnknownParameters(t *testing.T) {
 		t.Error("an unknown parameter must be an error someone sees")
 	}
 }
+
+func TestApplySysctlRejectsEscapingNames(t *testing.T) {
+	dir := fakeProcSys(t, "vm/overcommit_memory", "0\n")
+	if err := ApplySysctl(dir, "../escape", "1"); err == nil {
+		t.Error("a name that escapes the sysctl tree must be an error")
+	}
+}
+
+func TestReadSysctlRejectsEscapingNames(t *testing.T) {
+	dir := fakeProcSys(t, "vm/overcommit_memory", "0\n")
+	if _, err := ReadSysctl(dir, "../escape"); err == nil {
+		t.Error("a name that escapes the sysctl tree must be an error")
+	}
+}

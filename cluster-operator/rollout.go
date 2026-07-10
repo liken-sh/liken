@@ -5,10 +5,10 @@ package main
 //
 // A staged change that needs a reboot is drift on every affected
 // machine at once. If each machine rebooted the moment it was ready,
-// they would all reboot together, taking the whole fleet down at once
-// and leaving quorum to survive by luck. Kubernetes workloads get
-// protection from this through PodDisruptionBudgets and kubectl
-// drain; machines deserve the same, so the Cluster carries a
+// they would all reboot together, taking the whole fleet down at
+// once, which risks quorum. Kubernetes workloads get protection from
+// this through PodDisruptionBudgets and kubectl drain; machines need
+// the same protection, so the Cluster carries a
 // machine-level maxUnavailable (spec.disruption) and this conductor
 // hands out reboot turns one budget-slot at a time.
 //
@@ -143,19 +143,24 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 	slices.Sort(workers)
 	slices.Sort(leaders)
 	capacity := cluster.Spec.Disruption.MaxUnavailableOrDefault() - inFlight
-	for _, name := range slices.Concat(workers, leaders) {
-		leader := slices.Contains(cluster.Spec.Leaders, name)
-		switch {
-		case len(stalled) > 0 || capacity <= 0 || (leader && leaderBusy):
+	for _, name := range workers {
+		if len(stalled) > 0 || capacity <= 0 {
 			waiting = append(waiting, name)
-		default:
-			r.grant = append(r.grant, name)
-			inProgress = append(inProgress, name)
-			capacity--
-			if leader {
-				leaderBusy = true
-			}
+			continue
 		}
+		r.grant = append(r.grant, name)
+		inProgress = append(inProgress, name)
+		capacity--
+	}
+	for _, name := range leaders {
+		if len(stalled) > 0 || capacity <= 0 || leaderBusy {
+			waiting = append(waiting, name)
+			continue
+		}
+		r.grant = append(r.grant, name)
+		inProgress = append(inProgress, name)
+		capacity--
+		leaderBusy = true
 	}
 
 	switch {

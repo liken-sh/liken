@@ -35,14 +35,33 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-// fastPolls shortens the tailer's nap and makes every checkpoint
-// immediate, so tests measure behavior instead of sleeping. Package
-// variables again: tests in this package must not run in parallel.
+// fastPolls shortens the tailer's poll interval and makes every
+// checkpoint immediate, so tests measure behavior instead of
+// sleeping. The poll interval is a package variable, which is why
+// tests in this package must not run in parallel.
 func fastPolls(t *testing.T) {
 	t.Helper()
-	oldPoll, oldCheckpoint := pollInterval, checkpointInterval
-	pollInterval, checkpointInterval = 2*time.Millisecond, 0
-	t.Cleanup(func() { pollInterval, checkpointInterval = oldPoll, oldCheckpoint })
+	immediateCheckpoints(t)
+	old := pollInterval
+	pollInterval = 2 * time.Millisecond
+	t.Cleanup(func() { pollInterval = old })
+}
+
+// appendLine grows the file the way a live writer does: open for
+// append, write, close. The line is written verbatim, terminator and
+// all, so a test can also leave a line unterminated.
+func appendLine(t *testing.T, path, line string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(line); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // followedFile runs the tailer against path in the background. The
@@ -98,14 +117,7 @@ func TestTailerFollowsAGrowingFile(t *testing.T) {
 		t.Errorf("second line's seq should be its byte offset: %+v", es[1])
 	}
 
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.WriteString("third line\n"); err != nil {
-		t.Fatal(err)
-	}
-	f.Close()
+	appendLine(t, path, "third line\n")
 	es = awaitEnvelopes(t, out, 3)
 	if es[2].Message != "third line" {
 		t.Errorf("third: %+v", es[2])
@@ -150,6 +162,23 @@ func TestTailerWaitsForTheFileToExist(t *testing.T) {
 	}
 }
 
+// awaitCheckpoint polls the cursor directory until the tailer has
+// checkpointed the given offset: a tailer only checkpoints once it
+// reaches EOF, so watching for the offset is how a test knows the
+// tailer has both shipped and recorded everything written so far.
+func awaitCheckpoint(t *testing.T, curDir string, offset int64) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var cur tailCursor
+		if loadCursor(curDir, &cur) && cur.Offset == offset {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for a checkpoint at offset %d", offset)
+}
+
 func TestTailerResumesFromItsCursor(t *testing.T) {
 	fastPolls(t)
 	dir := t.TempDir()
@@ -161,18 +190,10 @@ func TestTailerResumesFromItsCursor(t *testing.T) {
 
 	out, stop := followedFile(t, path, curDir)
 	awaitEnvelopes(t, out, 2)
-	// Let the tailer reach EOF again and checkpoint before stopping.
-	time.Sleep(10 * time.Millisecond)
+	awaitCheckpoint(t, curDir, int64(len("old one\nold two\n")))
 	stop()
 
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.WriteString("new after restart\n"); err != nil {
-		t.Fatal(err)
-	}
-	f.Close()
+	appendLine(t, path, "new after restart\n")
 
 	out2, stop2 := followedFile(t, path, curDir)
 	defer stop2()
@@ -227,7 +248,7 @@ func TestTailerReplaysWhenTheFileShrinks(t *testing.T) {
 
 	out, stop := followedFile(t, path, curDir)
 	awaitEnvelopes(t, out, 1)
-	time.Sleep(10 * time.Millisecond)
+	awaitCheckpoint(t, curDir, int64(len("a long line that moves the cursor well along\n")))
 	stop()
 
 	// Truncate in place: same inode, smaller than the cursor.
@@ -242,5 +263,84 @@ func TestTailerReplaysWhenTheFileShrinks(t *testing.T) {
 	}
 	if es[1].Message != "tiny" || es[1].Seq != 0 {
 		t.Errorf("and the file replayed from the head: %+v", es[1])
+	}
+}
+
+// Everything written between the tailer's last catch-up and the
+// rename is only reachable through the held file, so the tailer must
+// drain the renamed generation to its final EOF before moving on.
+func TestTailerDrainsARotatedGenerationToItsEnd(t *testing.T) {
+	fastPolls(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "k3s.log")
+	if err := os.WriteFile(path, []byte("first\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out, stop := followedFile(t, path, t.TempDir())
+	defer stop()
+	awaitEnvelopes(t, out, 1)
+
+	appendLine(t, path, "last full line\ncut off mid-wr")
+	if err := os.Rename(path, path+".1"); err != nil {
+		t.Fatal(err)
+	}
+	es := awaitEnvelopes(t, out, 3)
+	if es[1].Message != "last full line" {
+		t.Errorf("the drained line should ship: %+v", es[1])
+	}
+	if es[2].Message != "cut off mid-wr" {
+		t.Errorf("the trailing fragment should ship on rotation: %+v", es[2])
+	}
+
+	if err := os.WriteFile(path, []byte("fresh generation\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	es = awaitEnvelopes(t, out, 4)
+	if es[3].Message != "fresh generation" || es[3].Seq != 0 {
+		t.Errorf("the new file starts the offsets over: %+v", es[3])
+	}
+}
+
+func TestTailerStopsCleanlyWhileAwaitingAFile(t *testing.T) {
+	fastPolls(t)
+	path := filepath.Join(t.TempDir(), "never-created.log")
+	_, stop := followedFile(t, path, t.TempDir())
+	// stop verifies the tailer exits with context.Canceled even though
+	// the file it was waiting for never appeared.
+	stop()
+}
+
+// A tailer that cannot ship must exit with the write error so the
+// kubelet restarts it, rather than reading on and dropping lines.
+func TestTailerStopsWhenItsOutputFails(t *testing.T) {
+	fastPolls(t)
+	path := filepath.Join(t.TempDir(), "k3s.log")
+	if err := os.WriteFile(path, []byte("doomed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := tailFile(context.Background(), path, newEnvelopeWriter(brokenWriter{}), t.TempDir(), time.Now)
+	if !errors.Is(err, errStdoutGone) {
+		t.Errorf("tailFile should surface the write error, got %v", err)
+	}
+}
+
+// A cursor directory that refuses writes must stop the tailer the
+// same way a failed ship does: the checkpoint is its durability.
+func TestTailerStopsWhenItCannotCheckpoint(t *testing.T) {
+	fastPolls(t)
+	path := filepath.Join(t.TempDir(), "k3s.log")
+	if err := os.WriteFile(path, []byte("a line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	curDir := t.TempDir()
+	if err := os.Chmod(curDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(curDir, 0o700) })
+	out := newEnvelopeWriter(&syncBuffer{})
+	err := tailFile(context.Background(), path, out, curDir, time.Now)
+	if !errors.Is(err, os.ErrPermission) {
+		t.Errorf("tailFile should surface the checkpoint error, got %v", err)
 	}
 }

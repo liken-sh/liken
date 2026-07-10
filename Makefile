@@ -71,9 +71,9 @@ e2fsprogs: $(E2FSPROGS_DIST)/mke2fs
 
 # The iSCSI initiator userspace, the host half of the iscsi feature:
 # static iscsid and iscsiadm built from pinned source inside a pinned
-# container (the repo's first build-from-source vendor; see
-# open-iscsi/fetch.sh), plus the OCI image that runs iscsid as the
-# feature's DaemonSet.
+# container, which needs docker or podman on the build host, like
+# nfs-utils below (see open-iscsi/fetch.sh), plus the OCI image that
+# runs iscsid as the feature's DaemonSet.
 $(OPENISCSI_DIST)/iscsid $(OPENISCSI_DIST)/iscsiadm $(OPENISCSI_DIST)/iscsid-image.tar &: \
 		open-iscsi/VERSION open-iscsi/fetch.sh image/oci.sh VERSION
 	$(MAKE) -C open-iscsi
@@ -164,7 +164,10 @@ kubeconfig: $(IDENTITY_DIR)/tls/server-ca.crt
 # it is the deployment's artifact and lands in the deployment's
 # directory. This root Makefile is where the OS build meets this
 # repo's own deployment, so it points the build at the dev cluster's
-# manifests and identity and lands the archive beside them.
+# manifests and identity and lands the archive beside them. The
+# prerequisites here mirror the ones image/Makefile's own liken.cpio
+# rule declares (from its side of the directory boundary); when either
+# list changes, change the other to match.
 IMAGE_DIR := dev-cluster/image
 
 $(IMAGE_DIR)/liken.cpio: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s \
@@ -186,6 +189,7 @@ $(IMAGE_DIR)/liken.cpio: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s 
 		$(wildcard logs/manifests/*.yaml) \
 		dev-cluster/cluster.yaml $(wildcard dev-cluster/machines/*.yaml) \
 		image/build.sh $(wildcard image/inventory/*.go) \
+		$(wildcard machine/*.go) \
 		$(shell find image/etc -type f) image/Makefile
 	$(MAKE) -C image MANIFESTS=../dev-cluster \
 		IDENTITY=$(abspath $(IDENTITY_DIR)) DIST=$(abspath $(IMAGE_DIR))

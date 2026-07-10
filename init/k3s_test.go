@@ -1,8 +1,10 @@
 package main
 
 // Tests for the cluster-derived k3s configuration: role, node
-// address, and the drop-in's contents. Writing the file and starting
-// k3s are QEMU territory; the derivations are pinned here.
+// address, and the drop-in's contents. k3s's on-disk state (the
+// clusterState seeds, a demoted leader's datastore) is
+// k3s_state_test.go's side of the seam; starting k3s itself is QEMU
+// territory. The derivations are pinned here.
 
 import (
 	"net"
@@ -308,42 +310,6 @@ func TestK3sBootConfigFollowersNeverRenderEmbeddedRegistry(t *testing.T) {
 	}
 }
 
-func leaderDB(t *testing.T) string {
-	t.Helper()
-	db := filepath.Join(t.TempDir(), "db")
-	if err := os.MkdirAll(filepath.Join(db, "etcd", "member"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return db
-}
-
-func TestAProvenFollowerPurgesLeaderLeftovers(t *testing.T) {
-	db := leaderDB(t)
-	purgeLeaderLeftovers(machine.RoleFollower, machine.ManifestSourceProven, db)
-	if _, err := os.Stat(db); !os.IsNotExist(err) {
-		t.Error("a proven follower keeps no control-plane datastore")
-	}
-}
-
-func TestAStagedFollowerBootKeepsTheDatastore(t *testing.T) {
-	// The trial boot of a document that demotes this machine must not
-	// destroy anything: if the document fails to prove, the fallback
-	// boots the leader role again and needs its datastore intact.
-	db := leaderDB(t)
-	purgeLeaderLeftovers(machine.RoleFollower, machine.ManifestSourceStaged, db)
-	if _, err := os.Stat(db); err != nil {
-		t.Error("an unproven demotion must leave the datastore alone")
-	}
-}
-
-func TestALeaderKeepsItsDatastore(t *testing.T) {
-	db := leaderDB(t)
-	purgeLeaderLeftovers(machine.RoleLeader, machine.ManifestSourceProven, db)
-	if _, err := os.Stat(db); err != nil {
-		t.Error("a leader's datastore is the cluster; hands off")
-	}
-}
-
 func TestK3sBootConfigWithoutAToken(t *testing.T) {
 	got := k3sBootConfig(k3sBootInputs{role: machine.RoleLeader, cluster: labCluster(), nodeIP: "10.10.0.1", nodeInterface: "eth1"})
 	if strings.Contains(got, "token-file") {
@@ -439,89 +405,83 @@ func TestWriteK3sBootConfigRefusesAFollowerWithoutAToken(t *testing.T) {
 	}
 }
 
-// fakeSeedSource stands in for the image's /var/lib/rancher tree.
-func fakeSeedSource(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	for _, rel := range []string{"k3s/server/tls", "k3s/server/manifests", "k3s/agent/images"} {
-		if err := os.MkdirAll(filepath.Join(dir, rel), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, rel, "seeded"), []byte(rel+"\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	old := seedSourceDir
-	seedSourceDir = dir
-	t.Cleanup(func() { seedSourceDir = old })
-	return dir
-}
-
-func TestSeedClusterStateCopiesTheSeeds(t *testing.T) {
-	fakeSeedSource(t)
-	root := t.TempDir()
-	if err := seedClusterState(root); err != nil {
-		t.Fatal(err)
-	}
-	for _, rel := range []string{"k3s/server/tls", "k3s/server/manifests", "k3s/agent/images"} {
-		if _, err := os.Stat(filepath.Join(root, rel, "seeded")); err != nil {
-			t.Errorf("%s should be seeded: %v", rel, err)
-		}
+func TestNodeAddressReportsAGarbageNodeCIDR(t *testing.T) {
+	c := labCluster()
+	c.Spec.Network.NodeCIDR = "not-a-cidr"
+	conns := []*connection{conn(t, "eth1", "10.10.0.2/24")}
+	if ip, ifname := nodeAddress(c, conns); ip != "" || ifname != "" {
+		t.Errorf("a CIDR that won't parse derives nothing: %s on %s", ip, ifname)
 	}
 }
 
-func TestSeedClusterStateKeepsIdentityAndRefreshesManifests(t *testing.T) {
-	fakeSeedSource(t)
-	root := t.TempDir()
-	// The disk already carries an identity and an old manifest tree.
-	for _, rel := range []string{"k3s/server/tls", "k3s/server/manifests"} {
-		if err := os.MkdirAll(filepath.Join(root, rel), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(root, rel, "existing"), []byte("mine\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
+func TestWriteK3sBootConfigNarratesTheFoundingLeader(t *testing.T) {
+	serverDropIns, _ := fakeK3sConfigs(t, true)
+	conns := []*connection{conn(t, "eth1", "10.10.0.1/24")}
+
+	role, err := writeK3sBootConfig(haCluster(), bootMachine("node-1", nil), conns)
+	if err != nil || role != machine.RoleLeader {
+		t.Fatalf("the founding leader is a leader: %s, %v", role, err)
 	}
-	if err := seedClusterState(root); err != nil {
+	raw, err := os.ReadFile(filepath.Join(serverDropIns, "boot.yaml"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	// TLS is identity: the disk's copy wins, and the seed never lands.
-	if _, err := os.Stat(filepath.Join(root, "k3s/server/tls", "existing")); err != nil {
-		t.Error("a disk that has an identity keeps it")
-	}
-	if _, err := os.Stat(filepath.Join(root, "k3s/server/tls", "seeded")); err == nil {
-		t.Error("the seed must not overwrite existing TLS material")
-	}
-	// Manifests are the running image's: refreshed wholesale.
-	if _, err := os.Stat(filepath.Join(root, "k3s/server/manifests", "existing")); err == nil {
-		t.Error("old manifests are replaced by the image's")
-	}
-	if _, err := os.Stat(filepath.Join(root, "k3s/server/manifests", "seeded")); err != nil {
-		t.Error("the image's manifests land on every boot")
+	if !strings.Contains(string(raw), "cluster-init: true") {
+		t.Errorf("the founding leader's drop-in initializes etcd:\n%s", raw)
 	}
 }
 
-func TestSeedClusterStateWithoutSeedsIsANoOp(t *testing.T) {
-	old := seedSourceDir
-	seedSourceDir = filepath.Join(t.TempDir(), "nothing")
-	t.Cleanup(func() { seedSourceDir = old })
-	if err := seedClusterState(t.TempDir()); err != nil {
-		t.Errorf("an image without k3s has no seed files, and that's fine: %v", err)
+func TestWriteK3sBootConfigNarratesAJoiningLeader(t *testing.T) {
+	serverDropIns, _ := fakeK3sConfigs(t, true)
+	// The founder declares no resolvable address (the image carries no
+	// manifest for it here), so the join falls back to the endpoint.
+	conns := []*connection{conn(t, "eth1", "10.10.0.3/24")}
+
+	role, err := writeK3sBootConfig(haCluster(), bootMachine("node-3", nil), conns)
+	if err != nil || role != machine.RoleLeader {
+		t.Fatalf("a joining leader is a leader: %s, %v", role, err)
+	}
+	raw, err := os.ReadFile(filepath.Join(serverDropIns, "boot.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "server: https://10.10.0.1:6443") {
+		t.Errorf("a joining leader points at its control plane:\n%s", raw)
 	}
 }
 
-func TestPurgeLeaderLeftoversReportsAFailedRemoval(t *testing.T) {
-	parent := t.TempDir()
-	db := filepath.Join(parent, "db")
-	if err := os.MkdirAll(filepath.Join(db, "etcd"), 0o755); err != nil {
+func TestWriteK3sBootConfigWarnsAFollowerOutsideTheNodeCIDR(t *testing.T) {
+	_, agentDropIns := fakeK3sConfigs(t, true)
+	// The follower's one address is outside the cluster's nodeCIDR:
+	// the warning prints and k3s is left to guess.
+	conns := []*connection{conn(t, "eth0", "192.168.1.5/24")}
+
+	role, err := writeK3sBootConfig(labCluster(), bootMachine("node-2", nil), conns)
+	if err != nil || role != machine.RoleFollower {
+		t.Fatalf("still a follower: %s, %v", role, err)
+	}
+	raw, err := os.ReadFile(filepath.Join(agentDropIns, "boot.yaml"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(parent, 0o555); err != nil {
+	if strings.Contains(string(raw), "node-ip") {
+		t.Errorf("no derived address means no node-ip key:\n%s", raw)
+	}
+}
+
+func TestWriteK3sBootConfigReportsAnUnwritableDropInDir(t *testing.T) {
+	fakeK3sConfigs(t, true)
+	// The config path sits under a plain file, so the drop-in
+	// directory can't be created.
+	blocked := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocked, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
-	purgeLeaderLeftovers(machine.RoleFollower, machine.ManifestSourceProven, db)
-	if _, err := os.Stat(db); err != nil {
-		t.Error("a failed purge leaves the datastore; the error is reported, not hidden")
+	old := k3sServerConfig
+	k3sServerConfig = filepath.Join(blocked, "config.yaml")
+	t.Cleanup(func() { k3sServerConfig = old })
+
+	if _, err := writeK3sBootConfig(labCluster(), bootMachine("node-1", nil), nil); err == nil {
+		t.Error("an unwritable drop-in directory must refuse")
 	}
 }

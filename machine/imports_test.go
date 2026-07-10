@@ -30,17 +30,13 @@ func TestRenderImportedImagesIsCanonical(t *testing.T) {
 	}
 }
 
-func TestRenderImportedImagesRoundTrips(t *testing.T) {
+func TestRenderImportedImagesNamesEveryTarball(t *testing.T) {
 	raw, _, err := RenderImportedImages(map[string]string{"liken-logs.tar": "abc123"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err := ParseImportedImages(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if record.Images["liken-logs.tar"] != "abc123" {
-		t.Fatalf("round trip lost the digest: %+v", record)
+	if !strings.Contains(string(raw), "liken-logs.tar: abc123") {
+		t.Fatalf("the rendering does not name the tarball's digest:\n%s", raw)
 	}
 }
 
@@ -52,26 +48,8 @@ func TestRenderImportedImagesWithNoTarballs(t *testing.T) {
 	if hash == "" {
 		t.Fatal("an empty record still has an identity")
 	}
-	record, err := ParseImportedImages(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(record.Images) != 0 {
-		t.Fatalf("expected no images, got %+v", record.Images)
-	}
-}
-
-func TestParseImportedImagesRejectsGarbage(t *testing.T) {
-	for name, raw := range map[string]string{
-		"not yaml":      "{{{{",
-		"wrong kind":    "apiVersion: liken.sh/v1alpha1\nkind: Cluster\n",
-		"unknown field": "apiVersion: liken.sh/v1alpha1\nkind: ImportedImages\nbogus: true\n",
-	} {
-		t.Run(name, func(t *testing.T) {
-			if _, err := ParseImportedImages([]byte(raw)); err == nil {
-				t.Fatalf("expected %s to be refused", name)
-			}
-		})
+	if strings.Contains(string(raw), "images:") {
+		t.Fatalf("an empty record should omit its images map:\n%s", raw)
 	}
 }
 
@@ -139,5 +117,23 @@ func TestHashImageTarballsWithoutADirectory(t *testing.T) {
 	}
 	if digests != nil {
 		t.Fatalf("a missing directory means no tarballs, got %v", digests)
+	}
+}
+
+func TestHashImageTarballsReportsAnUnreadableTarball(t *testing.T) {
+	dir := t.TempDir()
+	unreadableFile(t, filepath.Join(dir, "liken-logs.tar"))
+	if _, err := HashImageTarballs(dir); err == nil {
+		t.Error("a tarball that exists but can't be read is an error, not an absent tarball")
+	}
+}
+
+func TestHashImageTarballsReportsAnUnlistableDirectory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(path, []byte("plain file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := HashImageTarballs(path); err == nil {
+		t.Error("a path that exists but isn't a directory is an error, not an empty one")
 	}
 }

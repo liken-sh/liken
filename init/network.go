@@ -100,7 +100,7 @@ func bringUpNetwork(spec machine.NetworkSpec) ([]*connection, error) {
 		}
 	}
 	if b.Len() > 0 {
-		if err := writeResolvConf(b.String()); err != nil {
+		if err := os.WriteFile("/etc/resolv.conf", []byte(b.String()), 0o644); err != nil {
 			return conns, err
 		}
 	}
@@ -265,10 +265,6 @@ func applyLease(link netlink.Link, lease *nclient4.Lease, ifc machine.InterfaceS
 	}
 
 	return conn, nil
-}
-
-func writeResolvConf(content string) error {
-	return os.WriteFile("/etc/resolv.conf", []byte(content), 0o644)
 }
 
 func (c *connection) report() {

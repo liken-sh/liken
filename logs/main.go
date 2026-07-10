@@ -24,7 +24,7 @@
 // The kernel and init share /dev/kmsg (init writes its lines there
 // precisely so they interleave with the kernel's in true order), and
 // the facility field is what splits them back apart, so each pod
-// carries one program's voice.
+// carries exactly one program's records.
 //
 // A relay is crash-only: any unexpected error exits nonzero, the
 // kubelet restarts the container, and the cursor in the pod's
@@ -40,9 +40,9 @@ import (
 )
 
 // The host paths each verb reads, and the emptyDir where cursors
-// live. Package variables rather than constants so tests can point
-// a relay at a temporary directory.
-var (
+// live. These are fixed facts of the DaemonSet's mounts; tests point
+// a relay at a temporary directory through its parameters instead.
+const (
 	cursorDir         = "/cursor"
 	k3sLogPath        = "/var/lib/rancher/k3s/liken/k3s.log"
 	containerdLogPath = "/var/lib/rancher/k3s/agent/containerd/containerd.log"
@@ -50,8 +50,8 @@ var (
 
 func main() {
 	// The version goes to stderr because stdout is the data channel:
-	// every stdout line is an envelope, and the contract stays clean
-	// if the relay never speaks JSON-less on it.
+	// the relay never writes anything to stdout that isn't an
+	// envelope.
 	fmt.Fprintln(os.Stderr, "liken-logs", machine.Version)
 
 	if len(os.Args) != 2 {

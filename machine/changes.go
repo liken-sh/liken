@@ -18,13 +18,10 @@ package machine
 // function before acting on a restart intent, so the two programs
 // can never disagree about what a restart may apply.
 
-import (
-	"encoding/json"
-	"reflect"
-)
+import "encoding/json"
 
 // RestartApplies reports whether a k3s restart is enough to move a
-// machine from the old spec to the new one: the specs must differ
+// machine from the current spec to the desired one: the specs must differ
 // (no drift needs no disruption at all), and the difference must be
 // confined to the restart-class fields, the ones k3s reads only at
 // process start.
@@ -44,26 +41,25 @@ import (
 // Releases are excluded from both: canonical documents never carry
 // them (the operator strips them before hashing, because their
 // actuation is a download, not a boot).
-func RestartApplies(old, new ClusterSpec) bool {
-	old.Version, new.Version = "", ""
-	old.Releases, new.Releases = ClusterReleasesSpec{}, ClusterReleasesSpec{}
-	if jsonEqual(old, new) {
+func RestartApplies(current, desired ClusterSpec) bool {
+	current.Version, desired.Version = "", ""
+	current.Releases, desired.Releases = ClusterReleasesSpec{}, ClusterReleasesSpec{}
+	if jsonEqual(current, desired) {
 		return false
 	}
-	old.Features, new.Features = nil, nil
-	old.Registries, new.Registries = RegistriesSpec{}, RegistriesSpec{}
-	return jsonEqual(old, new)
+	current.Features, desired.Features = nil, nil
+	current.Registries, desired.Registries = RegistriesSpec{}, RegistriesSpec{}
+	return jsonEqual(current, desired)
 }
 
 // jsonEqual compares two values by their JSON bytes. A marshal error
-// falls back to reflect.DeepEqual; every type compared here is a
-// plain data struct that cannot actually fail to marshal, but a
-// comparison must answer either way.
+// reads as "differs", the safe direction under this file's rule:
+// every type compared here is a plain data struct that cannot
+// actually fail to marshal, but if one somehow did, "differs" costs
+// at most an unneeded reboot, while a false "equal" could leave a
+// change unapplied.
 func jsonEqual(a, b any) bool {
 	ra, errA := json.Marshal(a)
 	rb, errB := json.Marshal(b)
-	if errA != nil || errB != nil {
-		return reflect.DeepEqual(a, b)
-	}
-	return string(ra) == string(rb)
+	return errA == nil && errB == nil && string(ra) == string(rb)
 }

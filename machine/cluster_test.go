@@ -211,3 +211,34 @@ func TestMaxUnavailableHonorsTheDeclaredBudget(t *testing.T) {
 		t.Errorf("got %d", got)
 	}
 }
+
+func TestLoadClusterReportsAnUnreadableFile(t *testing.T) {
+	path := unreadableFile(t, filepath.Join(t.TempDir(), "cluster.yaml"))
+	if _, err := LoadCluster(path); err == nil {
+		t.Error("a cluster manifest that exists but can't be read is an error, not an absent cluster")
+	}
+}
+
+func TestReleasesEntryFindsItsVersion(t *testing.T) {
+	releases := ClusterReleasesSpec{Catalog: []ReleaseCatalogEntry{
+		{Version: "0.1.0", Digest: "sha256:aaa"},
+		{Version: "0.2.0", Digest: "sha256:bbb"},
+	}}
+	entry := releases.Entry("0.2.0")
+	if entry == nil || entry.Digest != "sha256:bbb" {
+		t.Errorf("got %+v", entry)
+	}
+}
+
+func TestReleasesEntryUnknownVersionIsNil(t *testing.T) {
+	releases := ClusterReleasesSpec{Catalog: []ReleaseCatalogEntry{{Version: "0.1.0"}}}
+	if entry := releases.Entry("0.9.9"); entry != nil {
+		t.Errorf("a version the catalog doesn't list has no entry, got %+v", entry)
+	}
+}
+
+func TestReleasesEntryEmptyCatalogIsNil(t *testing.T) {
+	if entry := (ClusterReleasesSpec{}).Entry("0.1.0"); entry != nil {
+		t.Errorf("an empty catalog has no entries, got %+v", entry)
+	}
+}

@@ -19,7 +19,7 @@ package main
 // The sequence number is the buffer's own ordering, and it counts
 // every record regardless of facility. Gaps within one relay's
 // output are therefore normal (the other facility's records consumed
-// those numbers); actual loss announces itself, because a reader
+// those numbers); actual loss is detectable, because a reader
 // that has fallen behind a wrapping buffer gets EPIPE from read(2)
 // and a notice goes into the stream. The timestamp is microseconds
 // since boot on the kernel's monotonic-ish printk clock, converted
@@ -48,7 +48,7 @@ import (
 	"github.com/chrisguidry/liken/machine"
 )
 
-var kmsgPath = "/dev/kmsg"
+const kmsgPath = "/dev/kmsg"
 
 // kmsgRecord is one parsed record: the header's facts plus the
 // message line, verbatim. Continuation lines (the SUBSYSTEM=/DEVICE=
@@ -103,11 +103,6 @@ type kmsgCursor struct {
 	Seq uint64 `json:"seq"`
 }
 
-// checkpointInterval throttles cursor writes: being at most a second
-// behind re-ships a second of records after a container restart,
-// which beats a disk write per record.
-var checkpointInterval = time.Second
-
 // kmsgRelay follows one facility of the kernel buffer. The read
 // function is /dev/kmsg's in production and a scripted fixture in
 // tests; anchor reports the wall-clock moment of boot as the clocks
@@ -130,6 +125,8 @@ func (r *kmsgRelay) run() error {
 	}
 
 	var lastCheckpoint time.Time
+	// first marks the first record parsed after a resume, the only
+	// moment when a jump past the cursor reveals expired records.
 	first := true
 	buf := make([]byte, 8192)
 	for {
@@ -138,7 +135,7 @@ func (r *kmsgRelay) run() error {
 			// EPIPE is the kernel's overrun signal: the buffer
 			// wrapped past our position. The read position has
 			// already been moved to the oldest surviving record, so
-			// the only job here is honesty about the gap.
+			// the only job here is to record that a gap happened.
 			if errors.Is(err, syscall.EPIPE) {
 				_ = r.out.notice(r.now(), "warning", cur.Seq, &r.facility,
 					"records were lost to a ring buffer overrun")
@@ -167,15 +164,13 @@ func (r *kmsgRelay) run() error {
 			}
 			resuming = false
 		}
-		first = false
 
 		cur.Seq = rec.Seq
 		if rec.Facility == r.facility {
-			facility := rec.Facility
 			if err := r.out.emit(envelope{
 				Time:     r.anchor().Add(rec.Stamp).UTC().Format(time.RFC3339Nano),
 				Severity: machine.SeverityNames[rec.Severity],
-				Facility: &facility,
+				Facility: &r.facility,
 				Seq:      rec.Seq,
 				Message:  rec.Message,
 			}); err != nil {

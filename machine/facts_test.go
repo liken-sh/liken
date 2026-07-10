@@ -1,6 +1,7 @@
 package machine
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -61,5 +62,35 @@ func TestFactsRoundTrip(t *testing.T) {
 func TestReadFactsMissingFile(t *testing.T) {
 	if _, err := ReadFacts(filepath.Join(t.TempDir(), "facts.yaml")); err == nil {
 		t.Fatal("expected an error for a missing facts file")
+	}
+}
+
+func TestReadFactsRejectsGarbage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "facts.yaml")
+	if err := os.WriteFile(path, []byte("not: [valid"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadFacts(path); err == nil {
+		t.Error("expected an error for an unparseable facts file")
+	}
+}
+
+func TestWriteFactsReportsAnUnwritableDirectory(t *testing.T) {
+	path := filepath.Join(readOnlyDir(t), "facts.yaml")
+	if err := WriteFacts(path, &MachineStatus{}); err == nil {
+		t.Error("expected an error writing facts into a read-only directory")
+	}
+}
+
+func TestWriteFactsReportsAnUncreatableDirectory(t *testing.T) {
+	path := filepath.Join(readOnlyDir(t), "liken", "facts.yaml")
+	if err := WriteFacts(path, &MachineStatus{}); err == nil {
+		t.Error("expected an error when the facts directory can't be created")
+	}
+}
+
+func TestWriteFactsReportsAPathThatIsADirectory(t *testing.T) {
+	if err := WriteFacts(t.TempDir(), &MachineStatus{}); err == nil {
+		t.Error("expected an error writing facts over an existing directory")
 	}
 }

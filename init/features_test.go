@@ -158,3 +158,61 @@ func TestVendoredFeatureWithoutManifestsSeedsNothing(t *testing.T) {
 		t.Errorf("nothing should have been seeded: %v", err)
 	}
 }
+
+func TestVendoredFeatureFailsOnAnUnreadableModuleList(t *testing.T) {
+	base := featureFixture(t)
+	conf := filepath.Join(featuresDir, "iscsi", "modules.conf")
+	writeTreeFile(t, conf, "iscsi_tcp\n")
+	if err := os.Chmod(conf, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(conf, 0o644) })
+
+	got := actuateVendoredFeature(base, "iscsi", "node-1")
+	if got.State != machine.FeatureFailed {
+		t.Errorf("a payload that can't be read is a failure, not an absence: %+v", got)
+	}
+}
+
+func TestVendoredFeatureFailsWhenItsBootHookFails(t *testing.T) {
+	base := featureFixture(t)
+	writeTreeFile(t, filepath.Join(featuresDir, "iscsi", "modules.conf"), "iscsi_tcp\n")
+	// A plain file where the hook expects to create its directory.
+	writeTreeFile(t, filepath.Join(filepath.Dir(iscsiDir), "blocker"), "")
+	iscsiDir = filepath.Join(filepath.Dir(iscsiDir), "blocker", "iscsi")
+
+	got := actuateVendoredFeature(base, "iscsi", "node-1")
+	if got.State != machine.FeatureFailed || got.Message == "" {
+		t.Errorf("a hook that can't write its file fails the feature: %+v", got)
+	}
+}
+
+func TestVendoredFeatureFailsWhenItsManifestIsUnreadable(t *testing.T) {
+	base := featureFixture(t)
+	writeTreeFile(t, filepath.Join(featuresDir, "nfs", "modules.conf"), "iscsi_tcp\n")
+	manifest := filepath.Join(featuresDir, "nfs", "manifests", "nfs.yaml")
+	writeTreeFile(t, manifest, "kind: DaemonSet\n")
+	if err := os.Chmod(manifest, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(manifest, 0o644) })
+
+	got := actuateVendoredFeature(base, "nfs", "node-1")
+	if got.State != machine.FeatureFailed {
+		t.Errorf("a workload that can't be seeded fails the feature: %+v", got)
+	}
+}
+
+func TestSeedFeatureManifestsReportsAnUnwritableDeployDir(t *testing.T) {
+	featureFixture(t)
+	writeTreeFile(t, filepath.Join(featuresDir, "nfs", "manifests", "nfs.yaml"), "kind: DaemonSet\n")
+	// The auto-deploy path is blocked by a plain file, so MkdirAll
+	// can't create the directory.
+	blocked := filepath.Join(t.TempDir(), "blocker")
+	writeTreeFile(t, blocked, "")
+	k3sManifestsDir = filepath.Join(blocked, "manifests")
+
+	if err := seedFeatureManifests("nfs"); err == nil {
+		t.Error("an unwritable deploy directory is an error")
+	}
+}

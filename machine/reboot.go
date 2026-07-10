@@ -37,27 +37,16 @@ type RebootIntent struct {
 	RequestedAt  time.Time `json:"requestedAt"`
 }
 
-// writeIntent writes one intent file atomically (temp file and
-// rename, like the facts): init polling mid-write must see a whole
-// intent or none. No fsync; tmpfs has nothing to sync to.
+// writeIntent writes one intent file atomically (writeAtomic, like
+// the facts): init polling mid-write must see a whole intent or none.
+// The channel directory is init's to create, so a missing one is an
+// error to surface, never a directory to invent.
 func writeIntent(dir, name string, intent any) error {
 	raw, err := yaml.Marshal(intent)
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, ".intent-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(raw); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), filepath.Join(dir, name))
+	return writeAtomic(filepath.Join(dir, name), raw)
 }
 
 // readIntent reads one intent file into out, reporting presence:

@@ -1,9 +1,10 @@
 # The lab's storage server: the fixture the iscsi and nfs features
 # and the registry mirror are drilled against.
 #
-# Milestone 17 made liken a client of network storage, and a client
-# needs a server. This guest is that server, and it is deliberately
-# not a liken machine: it runs stock Debian, because the point of the
+# liken is a client of network storage
+# (plans/17-network-storage-clients.md), and a client needs a
+# server. This guest is that server, and it is deliberately not a
+# liken machine: it runs stock Debian, because the point of the
 # drill is liken's side of the wire, and the server side should be
 # the boring reference implementation everyone else runs — the kernel
 # NFS server, a standard iSCSI target, and CNCF distribution, the
@@ -29,7 +30,7 @@
 #
 # It participates in nothing: no cluster document, no operator, no
 # manifests. The fleet only ever sees it as an address that answers
-# on ports 2049 (NFS) and 3260 (iSCSI).
+# on ports 2049 (NFS), 3260 (iSCSI), and 5000 (the registry).
 
 VERSION := $(strip $(file <VERSION))
 BASE := cache/$(VERSION)/debian-13-genericcloud-amd64-$(VERSION).qcow2
@@ -95,7 +96,8 @@ guest/luns.qcow2:
 # firmware and the size. SeaBIOS, QEMU's default, is plenty — the
 # Debian image boots under BIOS or UEFI, and nothing here exercises
 # firmware behavior the way the machines' install path does. Two
-# vCPUs and one gigabyte, because nfsd and tgtd together are lighter
+# vCPUs and one gigabyte are enough: nfsd and tgtd are nearly free,
+# and the registry, the heaviest of the three, is still far lighter
 # than a kubelet.
 #
 # The NICs come before the disks so PCI slot order keeps the uplink

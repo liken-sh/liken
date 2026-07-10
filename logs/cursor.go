@@ -13,17 +13,24 @@ package main
 //
 // Durable stores were considered and refused. Checkpointing through
 // the cluster API would push node-local state that changes every
-// batch through etcd (milestone 10's write-amplification lesson), and
-// a cursor file on the host would give a read-only relay write access
-// it otherwise never needs.
+// batch through etcd, where each server pays a consensus round and a
+// disk write for every update; and a cursor file on the host would
+// give a read-only relay write access it otherwise never needs.
 
 import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 const cursorFile = "cursor.json"
+
+// checkpointInterval throttles cursor writes: being at most a second
+// behind re-ships a second of records after a container restart,
+// which beats a disk write per record. A package variable rather
+// than a constant so tests can checkpoint on every record.
+var checkpointInterval = time.Second
 
 // loadCursor reads the cursor into the given struct, reporting
 // whether a usable cursor existed. Missing or corrupt cursors are a

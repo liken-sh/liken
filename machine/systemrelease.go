@@ -55,22 +55,15 @@ func SystemReleases(root string) ManifestStore {
 
 // RenderSystemRelease produces the record's canonical bytes and their
 // hash. The hash is the record's identity for staging idempotence,
-// the attempted marker, and rejections. yaml marshals through JSON
-// with sorted keys, so the same decision always renders the same
-// bytes.
+// the attempted marker, and rejections.
 func RenderSystemRelease(version, slot, releaseDigest string) ([]byte, string, error) {
-	record := SystemRelease{
+	return renderDocument(SystemRelease{
 		APIVersion:    APIVersion,
 		Kind:          "SystemRelease",
 		Version:       version,
 		Slot:          slot,
 		ReleaseDigest: releaseDigest,
-	}
-	raw, err := yaml.Marshal(&record)
-	if err != nil {
-		return nil, "", err
-	}
-	return raw, ManifestHash(raw), nil
+	})
 }
 
 // ParseSystemRelease reads a record strictly and validates it up

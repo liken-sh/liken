@@ -145,6 +145,118 @@ func TestSweepFleetWritesNothingOnASettledFleet(t *testing.T) {
 	}
 }
 
+// refusing wraps a handler so requests matching one method and path
+// fragment are refused with the given status, and everything else
+// passes through: the shape of a sweep meeting one failing endpoint
+// on an otherwise healthy API server.
+func refusing(inner http.Handler, method, fragment string, status int) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == method && strings.Contains(r.URL.Path, fragment) {
+			w.WriteHeader(status)
+			return
+		}
+		inner.ServeHTTP(w, r)
+	})
+}
+
+// silentFleet is a two-machine fleet whose node-2 has stopped
+// renewing its heartbeat: the smallest fleet with both a Lost verdict
+// to write and a cluster status worth publishing.
+func silentFleet(cluster *machine.Cluster) *fleetAPI {
+	return &fleetAPI{
+		cluster: cluster,
+		machines: []machine.Machine{
+			labMachine("node-1", machine.PhaseReady),
+			labMachine("node-2", machine.PhaseReady),
+		},
+		renewals: map[string]time.Time{
+			"node-1": sweepNow.Add(-10 * time.Second),
+			"node-2": sweepNow.Add(-5 * time.Minute),
+		},
+	}
+}
+
+func TestSweepFleetStopsWhenTheMachineListFails(t *testing.T) {
+	cluster := &machine.Cluster{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}}
+	api := silentFleet(cluster)
+	client := testClient(t, refusing(api.handler(), http.MethodGet, "/machines", http.StatusInternalServerError))
+
+	sweepFleet(client, cluster, sweepNow)
+
+	if api.clusterStatus != nil {
+		t.Errorf("a sweep that cannot see the fleet must not judge it: %+v", api.clusterStatus.Status)
+	}
+	if len(api.statuses) != 0 {
+		t.Errorf("and must not write any machine verdicts: %v", api.statuses)
+	}
+}
+
+func TestSweepFleetStopsWhenTheHeartbeatListFails(t *testing.T) {
+	cluster := &machine.Cluster{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}}
+	api := silentFleet(cluster)
+	client := testClient(t, refusing(api.handler(), http.MethodGet, "/leases", http.StatusInternalServerError))
+
+	sweepFleet(client, cluster, sweepNow)
+
+	if api.clusterStatus != nil {
+		t.Errorf("without heartbeats there is no liveness verdict to publish: %+v", api.clusterStatus.Status)
+	}
+	if len(api.statuses) != 0 {
+		t.Errorf("and no machine may be judged silent: %v", api.statuses)
+	}
+}
+
+func TestSweepFleetToleratesAClusterStatusWriteFailure(t *testing.T) {
+	cluster := &machine.Cluster{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}}
+	api := silentFleet(cluster)
+	client := testClient(t, refusing(api.handler(), http.MethodPut, "/clusters", http.StatusInternalServerError))
+
+	sweepFleet(client, cluster, sweepNow)
+
+	if lost := api.statuses["node-2"]; lost == nil || lost.Status.Phase != machine.PhaseLost {
+		t.Errorf("the machine verdicts land even when the cluster write fails: %+v", lost)
+	}
+}
+
+func TestMarkLostConcedesWhenTheMachineWritesFirst(t *testing.T) {
+	// A conflict on the Lost write means the machine came back and
+	// wrote its own status first, exactly the outcome the write was
+	// for, so the sweep moves on to the next machine.
+	api := &fleetAPI{}
+	client := testClient(t, refusing(api.handler(), http.MethodPut, "/machines/node-1", http.StatusConflict))
+	machines := []machine.Machine{
+		labMachine("node-1", machine.PhaseReady),
+		labMachine("node-2", machine.PhaseReady),
+	}
+
+	markLost(client, machines, []string{"node-1", "node-2"}, sweepNow)
+
+	if _, wrote := api.statuses["node-1"]; wrote {
+		t.Error("the conflicting write must not land")
+	}
+	if api.statuses["node-2"] == nil {
+		t.Error("one machine's conflict must not stop the next verdict")
+	}
+}
+
+func TestMarkLostCarriesOnPastAFailedWrite(t *testing.T) {
+	api := &fleetAPI{}
+	client := testClient(t, refusing(api.handler(), http.MethodPut, "/machines/node-1", http.StatusInternalServerError))
+	machines := []machine.Machine{
+		labMachine("node-1", machine.PhaseReady),
+		labMachine("node-2", machine.PhaseReady),
+	}
+
+	markLost(client, machines, []string{"node-1", "node-2"}, sweepNow)
+
+	if _, wrote := api.statuses["node-1"]; wrote {
+		t.Error("the failed write must not land")
+	}
+	if api.statuses["node-2"] == nil {
+		t.Error("one machine's write failure must not stop the next verdict")
+	}
+}
+
 func TestCarryOutRolloutGrantsAndRevokes(t *testing.T) {
 	api := &fleetAPI{}
 	client := testClient(t, api.handler())
@@ -178,6 +290,45 @@ func TestSweepReadsTheClusterFreshEachPass(t *testing.T) {
 	sweep(client, "lab")
 	if api.clusterStatus == nil {
 		t.Error("a pass over a fleet with news publishes the cluster's status")
+	}
+}
+
+func TestSweepSkipsThePassWhenTheClusterReadFails(t *testing.T) {
+	// Every pass reads the Cluster fresh because its spec drives the
+	// rollout; a pass that cannot read it has no spec to act on and
+	// must do nothing at all.
+	cluster := &machine.Cluster{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}}
+	api := silentFleet(cluster)
+	client := testClient(t, refusing(api.handler(), http.MethodGet, "/clusters", http.StatusInternalServerError))
+
+	sweep(client, "lab")
+
+	if api.clusterStatus != nil {
+		t.Errorf("no cluster status without a cluster: %+v", api.clusterStatus.Status)
+	}
+	if len(api.statuses) != 0 {
+		t.Errorf("and no machine verdicts either: %v", api.statuses)
+	}
+}
+
+func TestAwaitClusterRetriesAfterAFailingList(t *testing.T) {
+	// A real failure (not the expected 404 of an unserved CRD) is
+	// printed and retried the same way: the wait only ends when a
+	// Cluster actually appears.
+	calls := 0
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": []machine.Cluster{
+			{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}},
+		}})
+	}))
+	cluster := awaitCluster(client)
+	if cluster.Metadata.Name != "lab" || calls != 2 {
+		t.Errorf("got %q after %d calls", cluster.Metadata.Name, calls)
 	}
 }
 

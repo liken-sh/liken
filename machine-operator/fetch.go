@@ -20,9 +20,8 @@ package main
 // either verifies or doesn't; the next run converges either way. FAT
 // has no journal, so every file lands the way the installer's copies
 // do (temp file, fsync, rename) and is re-read and verified after
-// writing, because milestone 12.1's power-cut drill showed that bytes
-// sitting in the page cache are not durable until they are synced and
-// re-read.
+// writing, because bytes sitting in the page cache are not durable
+// until they are synced and re-read.
 //
 // Failure comes in two kinds, and the distinction runs through
 // everything here. A *transient* failure means the server is down or
@@ -37,6 +36,7 @@ package main
 // release under a new version and point the catalog at it.
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -218,23 +218,11 @@ func fetchArtifact(base string, artifact machine.ReleaseArtifact, dest string) e
 		return fmt.Errorf("fetching %s: the server answered %s", artifact.Name, resp.Status)
 	}
 
-	tmp := dest + ".partial"
-	f, err := os.Create(tmp)
-	if err != nil {
-		return err
-	}
 	// The size cap protects the slot: an artifact that runs past its
 	// declared size is already wrong, and there is no reason to fill
 	// a 512Mi filesystem with the rest of it before finding out.
-	_, err = io.Copy(f, io.LimitReader(resp.Body, artifact.Size+1))
-	if err == nil {
-		err = f.Sync()
-	}
-	if closeErr := f.Close(); err == nil {
-		err = closeErr
-	}
+	tmp, err := spillDurably(dest, io.LimitReader(resp.Body, artifact.Size+1))
 	if err != nil {
-		os.Remove(tmp)
 		return fmt.Errorf("writing %s: %w", artifact.Name, err)
 	}
 
@@ -273,15 +261,19 @@ func fetchBytes(url string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 }
 
-// writeDurably writes bytes already in memory with the same
-// discipline copyDurably applies to files: temp file, fsync, rename.
-func writeDurably(dest string, contents []byte) error {
+// spillDurably lands a stream next to its destination with the same
+// discipline the installer applies to file copies: write to a
+// .partial temp file, fsync, close. On any failure the temp file is
+// removed and never seen again. On success the temp path comes back
+// for the caller to finish: verify first and then rename
+// (fetchArtifact), or rename immediately (writeDurably).
+func spillDurably(dest string, r io.Reader) (string, error) {
 	tmp := dest + ".partial"
 	f, err := os.Create(tmp)
 	if err != nil {
-		return err
+		return "", err
 	}
-	_, err = f.Write(contents)
+	_, err = io.Copy(f, r)
 	if err == nil {
 		err = f.Sync()
 	}
@@ -290,6 +282,16 @@ func writeDurably(dest string, contents []byte) error {
 	}
 	if err != nil {
 		os.Remove(tmp)
+		return "", err
+	}
+	return tmp, nil
+}
+
+// writeDurably writes bytes already in memory with the same
+// discipline: temp file, fsync, rename.
+func writeDurably(dest string, contents []byte) error {
+	tmp, err := spillDurably(dest, bytes.NewReader(contents))
+	if err != nil {
 		return err
 	}
 	return os.Rename(tmp, dest)

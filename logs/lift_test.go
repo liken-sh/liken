@@ -11,10 +11,6 @@ import (
 	"time"
 )
 
-// observed is the fallback clock every table below uses: what the
-// relay's own clock read when it saw the line.
-var observed = time.Date(2026, 7, 7, 15, 30, 0, 0, time.UTC)
-
 func TestLiftLogrus(t *testing.T) {
 	cases := []struct {
 		name     string

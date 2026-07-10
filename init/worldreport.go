@@ -79,7 +79,7 @@ func worldReport() {
 	// The command line is how the outside world parameterizes a boot:
 	// it's where rdinit= points at us, and the channel for any fact a
 	// machine must know before it has a filesystem.
-	if cmdline, err := os.ReadFile("/proc/cmdline"); err == nil {
+	if cmdline, err := os.ReadFile(cmdlinePath); err == nil {
 		fmt.Printf("liken: cmdline: %s\n", strings.TrimSpace(string(cmdline)))
 	}
 

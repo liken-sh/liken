@@ -170,9 +170,12 @@ func guidToDisk(canonical [16]byte) [16]byte {
 func randomGUID() [16]byte {
 	var canonical [16]byte
 	if _, err := rand.Read(canonical[:]); err != nil {
-		// getrandom failing on this kernel would have already hung
-		// the boot at DHCP, so this can't be reached; panic if it
-		// somehow is.
+		// crypto/rand failing means the kernel could not supply
+		// random bytes at all. These GUIDs are identities other tools
+		// trust to tell disks apart forever, and minting them without
+		// randomness risks collisions, so the boot stops here: a
+		// panic in PID 1 panics the kernel, and panic=10 reboots the
+		// machine for another try.
 		panic(err)
 	}
 	canonical[6] = canonical[6]&0x0F | 0x40 // version 4: random

@@ -119,16 +119,11 @@ func RenderRegistryCredentials(hosts []RegistryCredential) ([]byte, string, erro
 	slices.SortFunc(sorted, func(a, b RegistryCredential) int {
 		return cmp.Compare(a.Host, b.Host)
 	})
-	doc := RegistryCredentials{
+	return renderDocument(RegistryCredentials{
 		APIVersion: APIVersion,
 		Kind:       "RegistryCredentials",
 		Hosts:      sorted,
-	}
-	raw, err := yaml.Marshal(&doc)
-	if err != nil {
-		return nil, "", err
-	}
-	return raw, ManifestHash(raw), nil
+	})
 }
 
 // ParseRegistryCredentials reads the document strictly, like every

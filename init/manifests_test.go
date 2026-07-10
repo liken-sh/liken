@@ -303,3 +303,70 @@ func TestLoadManifestCandidatesBeforeTheFilesystemExists(t *testing.T) {
 		t.Error("no filesystem means no candidates")
 	}
 }
+
+func TestSettleManifestsPromoteFailureIsLoudButNotFatal(t *testing.T) {
+	// Nothing is staged, so promotion fails; the machine is up and the
+	// next boot repeats the step, so the boot record is left alone.
+	store := machine.MachineManifests(t.TempDir())
+	status := machine.AllRolesInMemory()
+	status.MachineState = machine.StorageRoleStatus{Backing: machine.BackingPartition}
+	boot := machine.BootStatus{ManifestSource: machine.ManifestSourceStaged}
+	choice := &manifestChoice{source: machine.ManifestSourceStaged}
+
+	settleManifests(store, choice, status, &boot)
+
+	if boot.ManifestSource != machine.ManifestSourceStaged {
+		t.Errorf("a failed promotion must not claim proven: %+v", boot)
+	}
+}
+
+func TestSettleManifestsSeedWithNoBytesRecordsNothing(t *testing.T) {
+	// The emptiest first boot: no manifest anywhere, so there are no
+	// bytes to write down as proven.
+	root := t.TempDir()
+	store := machine.MachineManifests(root)
+	status := machine.AllRolesInMemory()
+	status.MachineState = machine.StorageRoleStatus{Backing: machine.BackingPartition}
+	boot := machine.BootStatus{ManifestSource: machine.ManifestSourceSeed}
+
+	settleManifests(store, &manifestChoice{source: machine.ManifestSourceSeed}, status, &boot)
+
+	if proven, _ := store.LoadProven(); proven != nil {
+		t.Errorf("no bytes, no proven record: %q", proven)
+	}
+}
+
+func TestSettleManifestsReportsAFailedProvenWrite(t *testing.T) {
+	sealed := t.TempDir()
+	if err := os.Chmod(sealed, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(sealed, 0o755) })
+	store := machine.MachineManifests(filepath.Join(sealed, "state"))
+	status := machine.AllRolesInMemory()
+	status.MachineState = machine.StorageRoleStatus{Backing: machine.BackingPartition}
+	boot := machine.BootStatus{ManifestSource: machine.ManifestSourceSeed}
+	choice := &manifestChoice{raw: []byte("kind: Machine\n"), source: machine.ManifestSourceSeed}
+
+	settleManifests(store, choice, status, &boot)
+
+	if boot.ManifestSource != machine.ManifestSourceSeed {
+		t.Errorf("a seed that couldn't be recorded is still just the seed: %+v", boot)
+	}
+}
+
+func TestSettleStorageRefusesDuplicateMachineStatePartitions(t *testing.T) {
+	// Two partitions claiming machineState is the cloned-disk
+	// ambiguity: the peek refuses to guess and the boot stops.
+	sys, dev := fakeMachine(t)
+	addDisk(t, sys, dev, "vda", 2<<30, nil)
+	addDisk(t, sys, dev, "vdb", 2<<30, nil)
+	addPartition(t, sys, "vda", "vda1", "liken:machineState", 1<<30)
+	addPartition(t, sys, "vdb", "vdb1", "liken:machineState", 1<<30)
+	fakeCmdline(t, "console=ttyS0\n")
+
+	_, _, _, err := settleStorage()
+	if err == nil || !strings.Contains(err.Error(), "refusing to guess") {
+		t.Errorf("expected the duplicate refusal: %v", err)
+	}
+}

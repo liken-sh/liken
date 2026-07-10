@@ -41,8 +41,7 @@ const featureAnnotation = "liken.sh/feature"
 // featureWorkloadKinds are the workload kinds the janitor sweeps,
 // each a list endpoint in liken-system. Features seed DaemonSets
 // today; a feature that ships its first Deployment or Service adds
-// that kind here, in the same change, the way a new slug enters the
-// vocabulary alongside its payload.
+// that kind here, in the same change.
 var featureWorkloadKinds = []struct {
 	kind     string
 	listPath string
@@ -82,14 +81,12 @@ func decideRetractions(features map[string]*machine.FeatureConfig, workloads []f
 // background propagation, so the workload's pods go with it.
 func janitorFeatureWorkloads(c *kubernetes.Client, cluster *machine.Cluster) {
 	for _, k := range featureWorkloadKinds {
-		var list struct {
-			Items []featureWorkload `json:"items"`
-		}
-		if err := c.RequestJSON(http.MethodGet, k.listPath, nil, &list); err != nil {
+		workloads, err := kubernetes.List[featureWorkload](c, k.listPath)
+		if err != nil {
 			fmt.Printf("listing %ss for the feature janitor: %v\n", k.kind, err)
 			continue
 		}
-		for _, w := range decideRetractions(cluster.Spec.Features, list.Items) {
+		for _, w := range decideRetractions(cluster.Spec.Features, workloads) {
 			name := w.Metadata.Name
 			slug := w.Metadata.Annotations[featureAnnotation]
 			path := k.listPath + "/" + name + "?propagationPolicy=Background"

@@ -41,12 +41,6 @@ import (
 // nothing else is.
 const osImagePrefix = "liken.sh/"
 
-// containerStorePath is where the container store's filesystem is
-// reachable inside this pod: a read-only hostPath of the same tree
-// init discards (machine.K3sAgentDir names it for both halves). Its
-// only use is as a handle for syncfs.
-var containerStorePath = machine.K3sAgentDir
-
 // importsInputs is everything settleImportsLifecycle observed, so
 // the decision itself stays a pure function.
 type importsInputs struct {
@@ -148,8 +142,8 @@ func decideImportsPromotion(in importsInputs, facts *machine.MachineStatus) impo
 // and a badly-timed power cut could prove a store whose latent
 // unpacks are still dirty, which is the exact lie this lifecycle
 // exists to prevent.
-func settleImportsLifecycle(c *kubernetes.Client, nodeName string, facts *machine.MachineStatus) machine.Condition {
-	store := machine.ImportedImagesStore(machine.MachineStateDir)
+func settleImportsLifecycle(c *kubernetes.Client, root, nodeName string, facts *machine.MachineStatus) machine.Condition {
+	store := machine.ImportedImagesStore(root)
 	in := importsInputs{}
 	if facts != nil && facts.Boot.ImportsSource == machine.ManifestSourceStaged {
 		staged, err := store.LoadStaged()
@@ -158,7 +152,7 @@ func settleImportsLifecycle(c *kubernetes.Client, nodeName string, facts *machin
 		case staged != nil:
 			in.stagedHash = machine.ManifestHash(staged)
 			if in.storeErr == nil && in.stagedHash == facts.Boot.ImportsHash {
-				in.pods, in.podsErr = listPodsOnNode(c, nodeName)
+				in.pods, in.podsErr = kubernetes.ListPodsOnNode(c, nodeName)
 			}
 		case in.storeErr == nil:
 			// Nothing staged under a Staged boot usually means an
@@ -188,12 +182,15 @@ func settleImportsLifecycle(c *kubernetes.Client, nodeName string, facts *machin
 }
 
 // syncContainerStore flushes everything on the container store's
-// filesystem to disk. One syscall turns "the OS pods we can see are
-// serving" into "every byte the imports wrote is durable": after it
-// returns, no image on this store — including ones whose pods never
-// schedule here — can be torn by a crash.
+// filesystem to disk. The store is reachable inside this pod as a
+// read-only hostPath of the same tree init discards
+// (machine.K3sAgentDir names it for both halves), and its only use
+// here is as a handle for syncfs. One syscall turns "the OS pods we
+// can see are serving" into "every byte the imports wrote is
+// durable": after it returns, no image on this store — including
+// ones whose pods never schedule here — can be torn by a crash.
 func syncContainerStore() error {
-	f, err := os.Open(containerStorePath)
+	f, err := os.Open(machine.K3sAgentDir)
 	if err != nil {
 		return err
 	}

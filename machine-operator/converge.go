@@ -249,6 +249,45 @@ func convergenceUnknown(condType, reason, message string) machine.Condition {
 	return machine.Condition{Type: condType, Status: machine.ConditionUnknown, Reason: reason, Message: message}
 }
 
+// The convergence constructors for the verdicts every document's
+// decision table shares. The decision tables deliberately mirror one
+// another — the same guards in the same order, so a reader who has
+// followed one document's convergence can follow them all — and these
+// constructors are what keep that mirroring exact instead of
+// coincidental.
+
+// factsIncomplete is the guard every decision starts with: with no
+// facts, or facts without a boot record (an older init, a machine
+// mid-upgrade), the verdict is Unknown. Guessing could reboot a
+// machine over a misreading.
+func factsIncomplete(condType string) convergence {
+	return convergence{condition: convergenceUnknown(condType, "FactsIncomplete",
+		"the machine's facts carry no boot record yet")}
+}
+
+// machineStateEphemeral is the nowhere-durable-to-stage verdict: the
+// machineState role is backed by memory, so anything staged would
+// vanish with the next reboot, which is exactly when it would be
+// needed. what names the document that has nowhere to land.
+func machineStateEphemeral(condType, what string) convergence {
+	return convergence{condition: notConverged(condType, "MachineStateEphemeral",
+		fmt.Sprintf("machineState is backed by memory; there is no durable filesystem to stage %s into; declare machineState in the machine's manifest", what))}
+}
+
+// convergedWithCleanup wraps a True verdict with the cleanup every
+// document performs on convergence. A manifest still staged for a
+// spec the cluster no longer wants is withdrawn, because the next
+// boot would otherwise apply it. A standing rejection is cleared for
+// the same reason: the spec it blocks is no longer being asked for,
+// so the record no longer blocks anything.
+func convergedWithCleanup(cond machine.Condition, stagedHash string, rejection *machine.Rejection) convergence {
+	return convergence{
+		condition:      cond,
+		withdraw:       stagedHash != "",
+		clearRejection: rejection != nil,
+	}
+}
+
 // gateDisruption finishes a staged document's convergence: the
 // staged bytes are already in the convergence, and what remains is
 // whether this machine may take its disruption right now. The
@@ -314,18 +353,15 @@ func gateDisruption(c *convergence, condType string, policy machine.RebootPolicy
 //     reboot, wait for the cluster's grant, or report one pending.
 func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejection *machine.Rejection, stagedHash string, t turn) convergence {
 	if facts == nil || facts.Boot.ManifestSource == "" {
-		return convergence{condition: convergenceUnknown("SpecConverged", "FactsIncomplete",
-			"the machine's facts carry no boot record yet")}
+		return factsIncomplete("SpecConverged")
 	}
 
 	drift := append(storageDrift(m.Spec.Storage, facts.Boot.Storage),
 		modulesDrift(m.Spec.Modules, facts.Boot.Modules)...)
 	if len(drift) == 0 {
-		return convergence{
-			condition:      converged("SpecConverged", "Converged", "this boot actuated the current spec"),
-			withdraw:       stagedHash != "",
-			clearRejection: rejection != nil,
-		}
+		return convergedWithCleanup(
+			converged("SpecConverged", "Converged", "this boot actuated the current spec"),
+			stagedHash, rejection)
 	}
 	diffs := strings.Join(drift, "; ")
 
@@ -334,17 +370,16 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 		return convergence{condition: notConverged("SpecConverged", "StagingFailed", err.Error())}
 	}
 
-	if r := rejection; r != nil && r.Hash == hash {
+	if rejection != nil && rejection.Hash == hash {
 		return convergence{condition: notConverged("SpecConverged", "RejectedLastBoot",
-			fmt.Sprintf("init rejected this exact spec at boot: %s; edit the spec to something different", r.Reason))}
+			fmt.Sprintf("init rejected this exact spec at boot: %s; edit the spec to something different", rejection.Reason))}
 	}
 	if facts.Boot.ManifestHash == hash {
 		return convergence{condition: notConverged("SpecConverged", "BootMismatch",
 			fmt.Sprintf("facts claim this spec was actuated, yet it differs from the boot's record (%s); refusing to reboot over a contradiction; this is a liken bug", diffs))}
 	}
 	if facts.Storage.MachineState.Backing != machine.BackingPartition {
-		return convergence{condition: notConverged("SpecConverged", "MachineStateEphemeral",
-			"machineState is backed by memory; there is no durable filesystem to stage a manifest into; declare machineState in the machine's manifest")}
+		return machineStateEphemeral("SpecConverged", "a manifest")
 	}
 	if err := validateStaging(m.Spec.Storage, facts); err != nil {
 		return convergence{condition: notConverged("SpecConverged", "StagingRejected", err.Error())}

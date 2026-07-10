@@ -47,7 +47,11 @@ import (
 	"github.com/chrisguidry/liken/machine"
 )
 
-const serviceAccountDir = "/var/run/secrets/kubernetes.io/serviceaccount"
+// serviceAccountDir is where kubelet mounts every container's API
+// credentials. It is a variable so tests can point it at a directory
+// they control, the same seam init's disk code leaves with sysBlock
+// and devRoot.
+var serviceAccountDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 
 // MachinesPath and ClustersPath are where our CRDs' objects live. The
 // URL structure is the same for every resource in Kubernetes:
@@ -156,7 +160,7 @@ func InClusterClientAt(base string) (*Client, error) {
 			// orphaned request from a client that already gave up
 			// and logs it as an abort. Discarding idle connections
 			// after a short sit means the next request dials fresh
-			// instead of gambling on a stale socket. An operator's
+			// instead of risking a stale socket. An operator's
 			// steady cadence keeps its one working connection busier
 			// than this, so the timeout only ever reaps the strays
 			// opened during bursts.
@@ -262,4 +266,28 @@ func (c *Client) RequestJSON(method, path string, body []byte, out any) error {
 		return nil
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// List GETs a collection and unwraps the envelope every Kubernetes
+// list response shares: a <Kind>List object whose items field holds
+// the collection. Callers get the items themselves and never see the
+// wrapper.
+func List[T any](c *Client, path string) ([]T, error) {
+	var list struct {
+		Items []T `json:"items"`
+	}
+	if err := c.RequestJSON(http.MethodGet, path, nil, &list); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+// get GETs a single object. Unlike lists, single objects arrive bare,
+// so this adds nothing but the allocation and the error shape.
+func get[T any](c *Client, path string) (*T, error) {
+	out := new(T)
+	if err := c.RequestJSON(http.MethodGet, path, nil, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

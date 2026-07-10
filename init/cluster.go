@@ -29,7 +29,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"time"
 
 	"github.com/chrisguidry/liken/machine"
 )
@@ -47,8 +46,8 @@ func chooseCluster(stateRoot, seedPath string, durable bool, boot *machine.BootS
 	if durable {
 		store := machine.ClusterManifests(stateRoot)
 
-		// The standing rejection, if any, is republished every boot:
-		// facts don't survive a boot, but this record must.
+		// The standing rejection is republished into the boot record
+		// every boot (rejectStagedDocument explains why).
 		boot.ClusterRejection, _ = store.LoadRejection()
 
 		if raw, err := store.LoadStaged(); err != nil {
@@ -59,14 +58,16 @@ func chooseCluster(stateRoot, seedPath string, durable bool, boot *machine.BootS
 			c, perr := machine.ParseCluster(raw)
 			switch {
 			case perr != nil:
-				boot.ClusterRejection = rejectStagedCluster(store, raw, fmt.Sprintf("the staged cluster document does not parse: %v", perr))
+				boot.ClusterRejection = rejectStagedDocument("cluster", "document", store.Reject,
+					raw, fmt.Sprintf("the staged cluster document does not parse: %v", perr))
 			case attempted == hash:
 				// A previous boot ran this exact document and nobody
 				// promoted it: the machine never joined its cluster
 				// under it, and the operator that would have carried
 				// the proof never ran. A staged document gets exactly
 				// one trial boot.
-				boot.ClusterRejection = rejectStagedCluster(store, raw, "the last boot ran this staged cluster document and never joined the cluster under it")
+				boot.ClusterRejection = rejectStagedDocument("cluster", "document", store.Reject,
+					raw, "the last boot ran this staged cluster document and never joined the cluster under it")
 			default:
 				if err := store.WriteAttempted(hash); err != nil {
 					fmt.Fprintf(os.Stderr, "liken: cluster: marking the staged document attempted: %v\n", err)
@@ -109,15 +110,4 @@ func chooseCluster(stateRoot, seedPath string, durable bool, boot *machine.BootS
 	boot.ClusterManifestSource = machine.ManifestSourceSeed
 	boot.ClusterManifestHash = machine.ManifestHash(raw)
 	return c, raw, nil
-}
-
-// rejectStagedCluster quarantines a staged cluster document with its
-// reason, and reports the rejection for this boot's facts.
-func rejectStagedCluster(store machine.ManifestStore, raw []byte, reason string) *machine.Rejection {
-	fmt.Fprintf(os.Stderr, "liken: cluster: rejecting the staged document: %s\n", reason)
-	rejection := machine.NewRejection(raw, reason, time.Now().UTC())
-	if err := store.Reject(rejection); err != nil {
-		fmt.Fprintf(os.Stderr, "liken: cluster: recording the rejection: %v\n", err)
-	}
-	return &rejection
 }

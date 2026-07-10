@@ -129,7 +129,7 @@ func planAllGrowth(roles []machine.DeclaredRole, found map[machine.StorageRoleNa
 		// refused here at planning time, before anything is written,
 		// and the refusal follows the usual staged-spec path: the spec
 		// is rejected and the boot falls back to the proven manifest.
-		if roleMounts[role.Name].fstype == "vfat" {
+		if isSystemSlot(role.Name) {
 			if role.Size != "" {
 				if bytes, _ := machine.ParseSize(role.Size); bytes > p.sizeBytes {
 					return nil, fmt.Errorf(

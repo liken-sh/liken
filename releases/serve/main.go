@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"time"
 )
@@ -61,11 +62,25 @@ func (r *responseRecorder) Write(p []byte) (int, error) {
 	return n, err
 }
 
+// banner is the startup line: where the releases come from, where the
+// server listens, and how a guest reaches it. QEMU's user-mode
+// networking presents the host's loopback to every guest as 10.0.2.2,
+// so the hint spells out the exact URL a machine's release source
+// points at, derived from whatever port the server was given. An
+// address without a port can't produce the hint, so it is omitted.
+func banner(dir, addr string) string {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Sprintf("serving releases from %s on %s", dir, addr)
+	}
+	return fmt.Sprintf("serving releases from %s on %s (guests reach this at http://10.0.2.2:%s/releases)", dir, addr, port)
+}
+
 func main() {
 	dir := flag.String("dir", "dist", "the published releases to serve")
 	addr := flag.String("addr", ":8017", "the address to listen on")
 	flag.Parse()
 
-	fmt.Printf("serving releases from %s on %s (guests reach this at http://10.0.2.2:8017/releases)\n", *dir, *addr)
+	fmt.Println(banner(*dir, *addr))
 	log.Fatal(http.ListenAndServe(*addr, handler(*dir)))
 }

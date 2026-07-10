@@ -24,7 +24,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/chrisguidry/liken/kubernetes"
@@ -55,19 +54,6 @@ const (
 	// apply its staged change is worse than a pod restarting.
 	drainDeadline = 5 * time.Minute
 )
-
-const podsPath = "/api/v1/pods"
-
-func listPodsOnNode(c *kubernetes.Client, node string) ([]kubernetes.Pod, error) {
-	var list struct {
-		Items []kubernetes.Pod `json:"items"`
-	}
-	path := podsPath + "?fieldSelector=spec.nodeName%3D" + node
-	if err := c.RequestJSON(http.MethodGet, path, nil, &list); err != nil {
-		return nil, err
-	}
-	return list.Items, nil
-}
 
 // evictablePods is the set a drain actually has to move: not
 // DaemonSet pods (the DaemonSet controller ignores the cordon and
@@ -120,11 +106,11 @@ func decideDrainStep(node *nodeObject, pods []kubernetes.Pod, now time.Time) dra
 		since = now
 	}
 
-	evictable := evictablePods(pods)
 	if now.Sub(since) > drainDeadline {
 		step.clear = true // the reboot proceeds; whatever remains rides through it
 		return step
 	}
+	evictable := evictablePods(pods)
 	step.evict = evictable
 	step.clear = len(evictable) == 0
 	return step
@@ -135,7 +121,7 @@ func decideDrainStep(node *nodeObject, pods []kubernetes.Pod, now time.Time) dra
 // and until nothing evictable remains (or the deadline passes), hold
 // the reboot and report the drain's progress on the same condition.
 func gateThroughDrain(c *kubernetes.Client, node *nodeObject, conv convergence, now time.Time) convergence {
-	pods, err := listPodsOnNode(c, node.Metadata.Name)
+	pods, err := kubernetes.ListPodsOnNode(c, node.Metadata.Name)
 	if err != nil {
 		fmt.Printf("listing pods for the drain: %v\n", err)
 		return holdForDrain(conv, "listing this node's pods failed; retrying")

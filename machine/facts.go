@@ -19,32 +19,18 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// WriteFacts publishes the machine's facts atomically: write a
-// temporary file, then rename it into place. Rename within a filesystem
-// is atomic, so the operator (which re-reads this file on its own
-// schedule) sees either the old facts or the new, never a torn write.
+// WriteFacts publishes the machine's facts atomically (writeAtomic),
+// so the operator, which re-reads this file on its own schedule, sees
+// either the old facts or the new, never a torn write.
 func WriteFacts(path string, facts *MachineStatus) error {
 	raw, err := yaml.Marshal(facts)
 	if err != nil {
 		return fmt.Errorf("marshalling facts: %w", err)
 	}
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, ".facts-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(raw); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return writeAtomic(path, raw)
 }
 
 // ReadFacts is the operator's side of the channel. A missing file is

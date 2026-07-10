@@ -90,6 +90,9 @@ func conditionPhase(c machine.Condition) machine.Phase {
 		// same way, because it is waiting on exactly the same things.
 		return machine.PhaseUpdatePending
 	}
+	// Anything unrecognized reads as Degraded deliberately: a reason
+	// this table doesn't know fails visibly in the fleet listing
+	// instead of passing silently as Ready.
 	return machine.PhaseDegraded
 }
 

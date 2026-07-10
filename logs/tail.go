@@ -15,8 +15,8 @@ package main
 // drained to its final EOF (the writer may have gotten a few last
 // lines in before the rename) and the path is reopened from the top.
 // Rotated generations sitting on disk (.1, .2, ...) are never read;
-// they are boot forensics, and shipping previous boots is a problem
-// this milestone deliberately left open.
+// they are boot forensics, and shipping previous boots is
+// deliberately unsolved here.
 //
 // The follow mechanism is polling. inotify could push instead, but a
 // half-second poll is two wakeups a second for sub-second shipping
@@ -77,11 +77,12 @@ func awaitFile(ctx context.Context, path string) (*os.File, error) {
 
 // tailFile follows one log file forever (until the context ends),
 // emitting an envelope per line with the line's starting byte offset
-// as its sequence number.
+// as its sequence number. Each pass of the loop handles one
+// generation of the file: open it, decide where to start reading,
+// and follow it until a rotation replaces it.
 func tailFile(ctx context.Context, path string, out *envelopeWriter, curDir string, now func() time.Time) error {
 	var cur tailCursor
 	resuming := loadCursor(curDir, &cur)
-	var lastCheckpoint time.Time
 
 	for {
 		f, err := awaitFile(ctx, path)
@@ -90,6 +91,7 @@ func tailFile(ctx context.Context, path string, out *envelopeWriter, curDir stri
 		}
 		info, err := f.Stat()
 		if err != nil {
+			f.Close()
 			return err
 		}
 		dev, ino := fileIdentity(info)
@@ -111,125 +113,131 @@ func tailFile(ctx context.Context, path string, out *envelopeWriter, curDir stri
 			}
 		}
 		resuming = false
-		if offset > 0 {
-			if _, err := f.Seek(offset, io.SeekStart); err != nil {
-				return err
-			}
-		}
 
-		// The line assembler: partial carries an incomplete line
-		// across reads, lineStart is the file offset of its first
-		// byte (and the seq of the next line emitted), pos is the
-		// offset of the next unread byte.
-		var partial []byte
-		lineStart, pos := offset, offset
-		buf := make([]byte, 32*1024)
-		consume := func(data []byte) error {
-			for len(data) > 0 {
-				nl := bytes.IndexByte(data, '\n')
-				if nl < 0 {
-					partial = append(partial, data...)
-					pos += int64(len(data))
-					return nil
-				}
-				line := string(append(partial, data[:nl]...))
-				partial = partial[:0]
-				pos += int64(nl + 1)
-				when, severity := lift(line, now())
-				if err := out.emit(envelope{
-					Time:     when.UTC().Format(time.RFC3339Nano),
-					Severity: severity,
-					Seq:      uint64(lineStart),
-					Message:  line,
-				}); err != nil {
-					return err
-				}
-				lineStart = pos
-				data = data[nl+1:]
-			}
-			return nil
+		if err := followGeneration(ctx, f, path, offset, dev, ino, out, curDir, now); err != nil {
+			return err
 		}
-
-		rotated := false
-		for !rotated {
-			n, err := f.Read(buf)
-			if n > 0 {
-				if err := consume(buf[:n]); err != nil {
-					f.Close()
-					return err
-				}
-			}
-			if err == nil {
-				continue
-			}
-			if !errors.Is(err, io.EOF) {
-				f.Close()
-				return err
-			}
-
-			// Caught up. Checkpoint (throttled), nap, then ask
-			// whether the path still names the file we hold.
-			if t := now(); t.Sub(lastCheckpoint) >= checkpointInterval {
-				lastCheckpoint = t
-				if err := saveCursor(curDir, tailCursor{Dev: dev, Ino: ino, Offset: lineStart}); err != nil {
-					f.Close()
-					return err
-				}
-			}
-			select {
-			case <-ctx.Done():
-				f.Close()
-				return ctx.Err()
-			case <-time.After(pollInterval):
-			}
-			st, err := os.Stat(path)
-			if err != nil {
-				if !errors.Is(err, fs.ErrNotExist) {
-					f.Close()
-					return err
-				}
-				rotated = true
-			} else if d, i := fileIdentity(st); d != dev || i != ino {
-				rotated = true
-			}
-		}
-
-		// The held file is the renamed previous generation. Drain
-		// whatever the writer appended before the rename, ship a
-		// trailing unterminated line as-is (a crash mid-write is the
-		// only way one exists, and it will never be finished), and
-		// move on to the new file at the path.
-		for {
-			n, err := f.Read(buf)
-			if n > 0 {
-				if err := consume(buf[:n]); err != nil {
-					f.Close()
-					return err
-				}
-			}
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			if err != nil {
-				f.Close()
-				return err
-			}
-		}
-		if len(partial) > 0 {
-			line := string(partial)
-			when, severity := lift(line, now())
-			if err := out.emit(envelope{
-				Time:     when.UTC().Format(time.RFC3339Nano),
-				Severity: severity,
-				Seq:      uint64(lineStart),
-				Message:  line,
-			}); err != nil {
-				f.Close()
-				return err
-			}
-		}
-		f.Close()
 	}
+}
+
+// followGeneration reads one generation of the file: seek to the
+// starting offset, follow the file as it grows, and when a rotation
+// replaces it at the path, drain the renamed generation to its final
+// EOF. It owns the open file, closing it on every return; a nil
+// return means the generation rotated and the caller should reopen
+// the path.
+func followGeneration(ctx context.Context, f *os.File, path string, offset int64, dev, ino uint64, out *envelopeWriter, curDir string, now func() time.Time) error {
+	defer f.Close()
+
+	if offset > 0 {
+		if _, err := f.Seek(offset, io.SeekStart); err != nil {
+			return err
+		}
+	}
+
+	// The line assembler: partial carries an incomplete line
+	// across reads, lineStart is the file offset of its first
+	// byte (and the seq of the next line emitted), pos is the
+	// offset of the next unread byte.
+	var partial []byte
+	lineStart, pos := offset, offset
+
+	// ship emits one complete line as an envelope, with the line's
+	// starting byte offset as its sequence number.
+	ship := func(line string) error {
+		when, severity := lift(line, now())
+		return out.emit(envelope{
+			Time:     when.UTC().Format(time.RFC3339Nano),
+			Severity: severity,
+			Seq:      uint64(lineStart),
+			Message:  line,
+		})
+	}
+
+	buf := make([]byte, 32*1024)
+	consume := func(data []byte) error {
+		for len(data) > 0 {
+			nl := bytes.IndexByte(data, '\n')
+			if nl < 0 {
+				partial = append(partial, data...)
+				pos += int64(len(data))
+				return nil
+			}
+			line := string(append(partial, data[:nl]...))
+			partial = partial[:0]
+			pos += int64(nl + 1)
+			if err := ship(line); err != nil {
+				return err
+			}
+			lineStart = pos
+			data = data[nl+1:]
+		}
+		return nil
+	}
+
+	var lastCheckpoint time.Time
+	rotated := false
+	for !rotated {
+		n, err := f.Read(buf)
+		if n > 0 {
+			if err := consume(buf[:n]); err != nil {
+				return err
+			}
+		}
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, io.EOF) {
+			return err
+		}
+
+		// Caught up. Checkpoint (throttled), sleep one poll interval,
+		// then check whether the path still names the file we hold.
+		if t := now(); t.Sub(lastCheckpoint) >= checkpointInterval {
+			lastCheckpoint = t
+			if err := saveCursor(curDir, tailCursor{Dev: dev, Ino: ino, Offset: lineStart}); err != nil {
+				return err
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(pollInterval):
+		}
+		st, err := os.Stat(path)
+		if err != nil {
+			if !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
+			rotated = true
+		} else if d, i := fileIdentity(st); d != dev || i != ino {
+			rotated = true
+		}
+	}
+
+	// The held file is the renamed previous generation. Drain
+	// whatever the writer appended before the rename, ship a
+	// trailing unterminated line as-is (a crash mid-write is the
+	// only way one exists, and it will never be finished), and
+	// move on to the new file at the path.
+	for {
+		n, err := f.Read(buf)
+		if n > 0 {
+			if err := consume(buf[:n]); err != nil {
+				return err
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+	}
+	if len(partial) > 0 {
+		return ship(string(partial))
+	}
+	return nil
 }
 
 // relayFile is the k3s and containerd verbs.

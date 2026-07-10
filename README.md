@@ -13,27 +13,35 @@ state declared in git.
 
 The OS image acts as a bootloader for a git repo.
 
-The immutable image contains only a kernel, a tiny init stub, and
-[k3s](https://k3s.io). Everything else (system services, user apps, node
-configuration) is a [Flux](https://fluxcd.io) Kustomization reconciled from
-a git repository. A machine's identity is nothing more than the repo and
-path it reconciles from.
+The immutable image carries the whole operating system: a kernel, liken's
+own init (the Go program the kernel runs as PID 1), [k3s](https://k3s.io),
+and the handful of host programs a Kubernetes node can't get from a
+container — the operators and log relays that run liken itself, mke2fs
+for claiming blank disks, the iSCSI and NFS client binaries, and a CA
+trust store. There is no shell, no package manager, and no libc;
+everything else runs as a container.
 
 Some things fall out of that naturally:
 
 * **Backups get simpler.** If all configuration lives in git, there is
   nothing to back up except data volumes. There is no need to snapshot
   `/etc`.
-* **Updates are commits.** Flux's image automation keeps apps current; OS and
-  kernel upgrades go through
-  [system-upgrade-controller](https://github.com/rancher/system-upgrade-controller),
-  so even a kernel bump is a git commit.
+* **Upgrades are declarative.** The Cluster resource carries a catalog of
+  releases and one target version. Machines download the target, verify
+  every byte against pinned digests, and write it into the spare slot of
+  an A/B pair; a rollout conductor then grants reboots one machine at a
+  time, so the fleet never risks its quorum. Upgrading the OS, kernel
+  and all, is one field edit.
 * **Nodes share container images.** k3s's embedded
   [Spegel](https://spegel.dev) registry mirror lets nodes share images
   peer-to-peer, so re-pulls come from the LAN and keep working even when
   the internet is down.
-* **System and user apps are just directories.** The same repo layout that
-  works for a homelab cluster works for the machine itself.
+
+The layer that completes the idea — system services, user apps, and node
+configuration as a [Flux](https://fluxcd.io) Kustomization reconciled
+from a git repository, so a machine's identity is nothing more than the
+repo and path it reconciles from — is not built yet. That is the plan in
+[plans/14-gitops-from-first-boot.md](plans/14-gitops-from-first-boot.md).
 
 ## Prior art
 

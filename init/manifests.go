@@ -166,17 +166,42 @@ func loadManifestCandidates() (manifestCandidates, error) {
 	return c, nil
 }
 
-// rejectStaged quarantines the staged manifest with its reason, and
-// reports the rejection for this boot's facts.
-func rejectStaged(part *partition, raw []byte, reason string) *machine.Rejection {
-	fmt.Fprintf(os.Stderr, "liken: storage: rejecting the staged manifest: %s\n", reason)
+// rejectStagedDocument renders the verdict every staged lifecycle
+// shares: announce the reason, quarantine the document durably (the
+// store moves the bytes aside, so the same document is never tried
+// twice), and return the rejection for this boot's facts. The
+// document lifecycles differ in what they stage — the cluster
+// document, registry credentials, a system release, the Machine
+// manifest itself — but they all reject identically, so the domain
+// and noun exist only to keep each console line in its owner's
+// voice. The record step is a parameter because most stores can
+// write immediately (their filesystem is already mounted) while the
+// Machine manifest's rejection must mount machineState around the
+// write (rejectStaged below).
+//
+// The rejection outlasts the boot that rendered it: each store keeps
+// it standing, and because the facts are rebuilt from scratch every
+// boot, each chooser republishes the standing rejection into the
+// boot record before consulting anything staged.
+func rejectStagedDocument(domain, what string, record func(machine.Rejection) error,
+	raw []byte, reason string) *machine.Rejection {
+	fmt.Fprintf(os.Stderr, "liken: %s: rejecting the staged %s: %s\n", domain, what, reason)
 	rejection := machine.NewRejection(raw, reason, time.Now().UTC())
-	if err := touchMachineState(*part, func(root string) error {
-		return machine.MachineManifests(root).Reject(rejection)
-	}); err != nil {
-		fmt.Fprintf(os.Stderr, "liken: storage: recording the rejection: %v\n", err)
+	if err := record(rejection); err != nil {
+		fmt.Fprintf(os.Stderr, "liken: %s: recording the rejection: %v\n", domain, err)
 	}
 	return &rejection
+}
+
+// rejectStaged quarantines the staged Machine manifest with its
+// reason. It runs during the peek, before the machineState role is
+// properly mounted, so the record step mounts the partition itself.
+func rejectStaged(part *partition, raw []byte, reason string) *machine.Rejection {
+	return rejectStagedDocument("storage", "manifest", func(rejection machine.Rejection) error {
+		return touchMachineState(*part, func(root string) error {
+			return machine.MachineManifests(root).Reject(rejection)
+		})
+	}, raw, reason)
 }
 
 // touchMachineState mounts the machineState partition read-write at

@@ -75,17 +75,6 @@ func ParseRelease(raw []byte) (*Release, error) {
 	return r, nil
 }
 
-// Artifact addresses one artifact by name; nil when the release
-// doesn't carry it.
-func (r *Release) Artifact(name string) *ReleaseArtifact {
-	for i := range r.Artifacts {
-		if r.Artifacts[i].Name == name {
-			return &r.Artifacts[i]
-		}
-	}
-	return nil
-}
-
 // Verify streams a reader through sha256 and compares the result
 // against this artifact's declared digest and size. Streaming means a
 // 100MB artifact never needs to be held in memory. Callers verify by

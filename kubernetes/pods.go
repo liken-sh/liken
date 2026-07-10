@@ -68,6 +68,16 @@ func (p *Pod) IsDaemon() bool {
 	return false
 }
 
+// ListPodsOnNode reads every pod running on one node, across all
+// namespaces: /api/v1/pods is the whole cluster's pod collection, and
+// the fieldSelector asks the server to filter it by spec.nodeName, so
+// only that node's pods ever cross the wire. This is the view a drain
+// starts from: everything that might still have to move off a machine
+// before it may reboot.
+func ListPodsOnNode(c *Client, nodeName string) ([]Pod, error) {
+	return List[Pod](c, "/api/v1/pods?fieldSelector=spec.nodeName%3D"+nodeName)
+}
+
 // EvictPod asks a pod to leave through the eviction subresource. The
 // Eviction API is what separates asking from plain deletion: the
 // request is refused while removing the pod would violate its

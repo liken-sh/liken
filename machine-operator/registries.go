@@ -122,11 +122,31 @@ func registryHost(key string) string {
 }
 
 // registriesInputs is one pass's view of the credentials Secret,
-// gathered by reconcile() so the decision below stays pure.
+// gathered by convergeRegistryCredentials so the decision below
+// stays pure.
 type registriesInputs struct {
 	fetchErr error                        // the API read failed (not absence: absence is desired == nil)
 	parseErr error                        // the Secret exists but is malformed
 	desired  []machine.RegistryCredential // nil when absent or empty
+}
+
+// convergeRegistryCredentials is the credentials document's part of
+// one reconcile pass: read the registry-credentials Secret, load this
+// machine's durable rejection and staged copy from the store, and
+// decide. Credentials converge through the same machinery as the
+// other documents, from a different source: the Secret rather than a
+// CRD. Only a cluster member carries credentials at all — a machine
+// with no cluster document has no operator-authored documents of any
+// kind.
+func convergeRegistryCredentials(c *kubernetes.Client, store machine.ManifestStore, m *machine.Machine, facts *machine.MachineStatus, t turn) convergence {
+	rejection, _ := store.LoadRejection()
+	in := registriesInputs{}
+	if secret, fetchErr := kubernetes.GetRegistryCredentialsSecret(c); fetchErr != nil {
+		in.fetchErr = fetchErr
+	} else {
+		in.desired, in.parseErr = desiredRegistryCredentials(secret)
+	}
+	return decideRegistriesConvergence(in, m, facts, rejection, readStagedHash(store), t)
 }
 
 // decideRegistriesConvergence is the credentials document's
@@ -153,8 +173,7 @@ type registriesInputs struct {
 //     reboot: credentials only touch registries.yaml.
 func decideRegistriesConvergence(in registriesInputs, m *machine.Machine, facts *machine.MachineStatus, rejection *machine.Rejection, stagedHash string, t turn) convergence {
 	if facts == nil || facts.Boot.ManifestSource == "" {
-		return convergence{condition: convergenceUnknown("CredentialsConverged", "FactsIncomplete",
-			"the machine's facts carry no boot record yet")}
+		return factsIncomplete("CredentialsConverged")
 	}
 	if in.fetchErr != nil {
 		return convergence{condition: convergenceUnknown("CredentialsConverged", "SecretUnavailable",
@@ -166,11 +185,9 @@ func decideRegistriesConvergence(in registriesInputs, m *machine.Machine, facts 
 	}
 
 	if in.desired == nil && facts.Boot.CredentialsHash == "" {
-		return convergence{
-			condition:      converged("CredentialsConverged", "NothingDeclared", "no registry credentials are declared"),
-			withdraw:       stagedHash != "",
-			clearRejection: rejection != nil,
-		}
+		return convergedWithCleanup(
+			converged("CredentialsConverged", "NothingDeclared", "no registry credentials are declared"),
+			stagedHash, rejection)
 	}
 
 	manifest, hash, err := machine.RenderRegistryCredentials(in.desired)
@@ -179,20 +196,17 @@ func decideRegistriesConvergence(in registriesInputs, m *machine.Machine, facts 
 	}
 
 	if hash == facts.Boot.CredentialsHash {
-		return convergence{
-			condition:      converged("CredentialsConverged", "Converged", fmt.Sprintf("this machine runs the current registry credentials (%d hosts)", len(in.desired))),
-			withdraw:       stagedHash != "",
-			clearRejection: rejection != nil,
-		}
+		return convergedWithCleanup(
+			converged("CredentialsConverged", "Converged", fmt.Sprintf("this machine runs the current registry credentials (%d hosts)", len(in.desired))),
+			stagedHash, rejection)
 	}
 
-	if r := rejection; r != nil && r.Hash == hash {
+	if rejection != nil && rejection.Hash == hash {
 		return convergence{condition: notConverged("CredentialsConverged", "RejectedLastBoot",
-			fmt.Sprintf("init rejected this exact credentials document: %s; edit the Secret to something different", r.Reason))}
+			fmt.Sprintf("init rejected this exact credentials document: %s; edit the Secret to something different", rejection.Reason))}
 	}
 	if facts.Storage.MachineState.Backing != machine.BackingPartition {
-		return convergence{condition: notConverged("CredentialsConverged", "MachineStateEphemeral",
-			"machineState is backed by memory; there is no durable filesystem to stage credentials into; declare machineState in the machine's manifest")}
+		return machineStateEphemeral("CredentialsConverged", "credentials")
 	}
 
 	c := convergence{

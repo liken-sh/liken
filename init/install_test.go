@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/chrisguidry/liken/machine"
@@ -28,8 +29,29 @@ func TestPartitionNumber(t *testing.T) {
 		{partition{name: "nvme0n1p3", disk: "nvme0n1"}, 3},
 	}
 	for _, c := range cases {
-		if got := partitionNumber(c.part); got != c.want {
+		got, err := partitionNumber(c.part)
+		if err != nil {
+			t.Errorf("%s: %v", c.part.name, err)
+		}
+		if got != c.want {
 			t.Errorf("%s: got %d, want %d", c.part.name, got, c.want)
+		}
+	}
+}
+
+func TestPartitionNumberRefusesMalformedNames(t *testing.T) {
+	// An index the kernel's node name can't supply must stop the
+	// install: 0 is not a valid GPT slot, and a boot entry carrying it
+	// would be garbage the firmware trusts.
+	cases := []partition{
+		{name: "vda", disk: "vda"},         // no suffix at all
+		{name: "vdap", disk: "vda"},        // separator with no number
+		{name: "vdaXY", disk: "vda"},       // non-numeric suffix
+		{name: "mmcblk0", disk: "mmcblk1"}, // name doesn't extend the disk's
+	}
+	for _, c := range cases {
+		if _, err := partitionNumber(c); err == nil {
+			t.Errorf("%s on %s: expected an error", c.name, c.disk)
 		}
 	}
 }
@@ -325,5 +347,44 @@ func TestInstallToDiskNeedsBothSlots(t *testing.T) {
 	fakePayload(t)
 	if err := installToDisk("node-1"); err == nil {
 		t.Error("one slot is not blue-green; the install must refuse")
+	}
+}
+
+func TestInstallToDiskNeedsItsReleaseDocument(t *testing.T) {
+	installedDisk(t)
+	old := releasePayloadDir
+	releasePayloadDir = filepath.Join(t.TempDir(), "no-payload")
+	t.Cleanup(func() { releasePayloadDir = old })
+
+	err := installToDisk("node-1")
+	if err == nil || !strings.Contains(err.Error(), "release document") {
+		t.Errorf("a payload without its document must refuse: %v", err)
+	}
+}
+
+func TestInstallToDiskRefusesAGarbageReleaseDocument(t *testing.T) {
+	installedDisk(t)
+	dir := fakePayload(t)
+	if err := os.WriteFile(filepath.Join(dir, "release.yaml"), []byte("{not yaml"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := installToDisk("node-1"); err == nil {
+		t.Error("a release document that won't parse must refuse the install")
+	}
+}
+
+func TestCopyDurablyReportsAMissingSource(t *testing.T) {
+	dir := t.TempDir()
+	err := copyDurably(filepath.Join(dir, "absent"), filepath.Join(dir, "dest"))
+	if err == nil {
+		t.Error("a source that doesn't exist can't be copied")
+	}
+}
+
+func TestConsoleArgsWithNoCommandLine(t *testing.T) {
+	fakeCmdline(t, "")
+	if got := consoleArgs(); got != nil {
+		t.Errorf("no console= arguments, no copies: %v", got)
 	}
 }

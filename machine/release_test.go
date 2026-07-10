@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -34,11 +36,8 @@ artifacts:
 	if r.Metadata.Name != "0.2.0" {
 		t.Errorf("version: got %q", r.Metadata.Name)
 	}
-	if a := r.Artifact("vmlinuz"); a == nil || a.Size != 17_000_000 {
-		t.Errorf("vmlinuz artifact: %+v", a)
-	}
-	if r.Artifact("nonexistent") != nil {
-		t.Error("unknown artifacts should be nil")
+	if len(r.Artifacts) != 2 || r.Artifacts[0].Name != "vmlinuz" || r.Artifacts[0].Size != 17_000_000 {
+		t.Errorf("artifacts: %+v", r.Artifacts)
 	}
 }
 
@@ -74,9 +73,23 @@ func TestArtifactVerify(t *testing.T) {
 		t.Error("truncated bytes must not verify")
 	}
 
-	tampered := append([]byte(nil), content...)
+	tampered := slices.Clone(content)
 	tampered[0] ^= 1
 	if err := good.Verify(bytes.NewReader(tampered)); err == nil || !strings.Contains(err.Error(), "digest mismatch") {
 		t.Errorf("tampered bytes must fail on the digest: %v", err)
+	}
+}
+
+func TestArtifactVerifyReportsReadErrors(t *testing.T) {
+	// A directory opened as a file is a real reader whose Read fails,
+	// the shape of a download torn mid-stream.
+	f, err := os.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	a := ReleaseArtifact{Name: "x", SHA256: strings.Repeat("ab", 32), Size: 1}
+	if err := a.Verify(f); err == nil || !strings.Contains(err.Error(), "reading") {
+		t.Errorf("a failing reader must fail the verification: %v", err)
 	}
 }

@@ -329,3 +329,85 @@ func TestWithdrawClearsTheAttemptedMarker(t *testing.T) {
 		t.Error("a withdrawn trial's marker must go with it, or the next staging of the identical record would falsely reject")
 	}
 }
+
+func TestNewRejectionPinsTheBytesAndTheMoment(t *testing.T) {
+	at := time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
+	r := NewRejection([]byte(sampleManifest), "did not fit", at)
+	if r.Hash != ManifestHash([]byte(sampleManifest)) {
+		t.Errorf("the rejection must hash exactly the refused bytes: %q", r.Hash)
+	}
+	if r.Reason != "did not fit" || !r.RejectedAt.Equal(at) {
+		t.Errorf("the rejection lost its story: %+v", r)
+	}
+}
+
+func TestWriteStagedReportsAnUncreatableStore(t *testing.T) {
+	s := MachineManifests(readOnlyDir(t))
+	if err := s.WriteStaged([]byte(sampleManifest)); err == nil {
+		t.Error("expected an error when the store's directory can't be created")
+	}
+}
+
+func TestWriteProvenReportsAnUncreatableStore(t *testing.T) {
+	s := MachineManifests(readOnlyDir(t))
+	if err := s.WriteProven([]byte(sampleManifest)); err == nil {
+		t.Error("expected an error when the store's directory can't be created")
+	}
+}
+
+func TestWriteAttemptedReportsAnUncreatableStore(t *testing.T) {
+	s := MachineManifests(readOnlyDir(t))
+	if err := s.WriteAttempted("abc123"); err == nil {
+		t.Error("expected an error when the store's directory can't be created")
+	}
+}
+
+func TestWriteStagedReportsASealedStore(t *testing.T) {
+	s := sealedStore(t, nil)
+	if err := s.WriteStaged([]byte(sampleManifest)); err == nil {
+		t.Error("expected an error writing into a read-only store")
+	}
+}
+
+func TestRejectReportsASealedStore(t *testing.T) {
+	s := sealedStore(t, map[string]string{"staged.yaml": sampleManifest})
+	err := s.Reject(Rejection{Hash: "h", Reason: "testing", RejectedAt: time.Now()})
+	if err == nil {
+		t.Error("expected an error recording a rejection in a read-only store")
+	}
+}
+
+func TestWithdrawStagedReportsASealedStore(t *testing.T) {
+	s := sealedStore(t, map[string]string{"staged.yaml": sampleManifest})
+	if err := s.WithdrawStaged(); err == nil {
+		t.Error("expected an error withdrawing from a read-only store")
+	}
+}
+
+func TestClearRejectionReportsASealedStore(t *testing.T) {
+	s := sealedStore(t, map[string]string{"rejected.yaml": sampleManifest})
+	if err := s.ClearRejection(); err == nil {
+		t.Error("expected an error clearing a rejection in a read-only store")
+	}
+}
+
+func TestLoadStagedReportsAnUnreadableFile(t *testing.T) {
+	root := t.TempDir()
+	unreadableFile(t, filepath.Join(root, "manifests", "staged.yaml"))
+	if _, err := MachineManifests(root).LoadStaged(); err == nil {
+		t.Error("a staged file that exists but can't be read is an error, not an empty store")
+	}
+}
+
+func TestWriteDurableReportsAnUnwritableDirectory(t *testing.T) {
+	err := writeDurable(filepath.Join(readOnlyDir(t), "file.yaml"), []byte("x"))
+	if err == nil {
+		t.Error("expected an error writing into a read-only directory")
+	}
+}
+
+func TestSyncDirReportsAMissingDirectory(t *testing.T) {
+	if err := syncDir(filepath.Join(t.TempDir(), "absent")); err == nil {
+		t.Error("expected an error syncing a directory that doesn't exist")
+	}
+}

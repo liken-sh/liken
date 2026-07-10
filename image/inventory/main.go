@@ -1,7 +1,7 @@
 // inventory answers the image build's questions about a deployment's
-// manifests: today, which extra kernel modules the deployment's
-// machines declare (spec.modules), so build.sh can ship exactly those
-// beside the OS's own fixed list.
+// manifests. Its one question so far: which extra kernel modules the
+// deployment's machines declare (spec.modules), so build.sh can ship
+// exactly those beside the OS's own fixed list.
 //
 // This is a Go program rather than shell parsing for one reason: it
 // reads the manifests with the same strict parser init uses at boot

@@ -26,10 +26,8 @@ package main
 // required.
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"slices"
 	"strings"
 	"time"
@@ -137,8 +135,15 @@ func sweepFleet(c *kubernetes.Client, cluster *machine.Cluster, now time.Time) {
 	// the manifest while k3s is down (janitor.go).
 	janitorFeatureWorkloads(c, cluster)
 
+	markLost(c, machines, s.lost, now)
+	publishClusterStatus(c, cluster, s, r, now)
+}
+
+// markLost writes the Lost verdict onto each machine the sweep found
+// silent.
+func markLost(c *kubernetes.Client, machines []machine.Machine, lost []string, now time.Time) {
 	for _, m := range machines {
-		if !slices.Contains(s.lost, m.Metadata.Name) {
+		if !slices.Contains(lost, m.Metadata.Name) {
 			continue
 		}
 		// Everything else in the status stays as the machine last
@@ -148,15 +153,18 @@ func sweepFleet(c *kubernetes.Client, cluster *machine.Cluster, now time.Time) {
 		// and the machine has stopped making them.
 		status := m.Status
 		status.Phase = machine.PhaseLost
-		status.Conditions = machine.SetCondition(status.Conditions, machine.Condition{
+		// The clone matters: status.Conditions still shares its backing
+		// array with the machines slice, and SetCondition rewrites an
+		// existing entry in place.
+		status.Conditions = machine.SetCondition(slices.Clone(m.Status.Conditions), machine.Condition{
 			Type: "Ready", Status: machine.ConditionUnknown, Reason: "HeartbeatStale",
 			ObservedGeneration: m.Metadata.Generation,
 			Message:            "the machine's operator has stopped renewing its heartbeat lease; the machine is presumed down",
 		}, now)
 		// A conflict here means the machine just came back and wrote
-		// first, which is the outcome the sweep wanted anyway, so it
-		// concedes silently; the sweeper never retries a write onto
-		// another machine's status.
+		// first, which is the outcome this write was for, so the sweep
+		// skips it; the sweeper never retries a write onto another
+		// machine's status.
 		if err := kubernetes.PublishStatus(c, &m, &status); errors.Is(err, kubernetes.ErrConflict) {
 			continue
 		} else if err != nil {
@@ -165,15 +173,17 @@ func sweepFleet(c *kubernetes.Client, cluster *machine.Cluster, now time.Time) {
 			fmt.Printf("machine %s has gone silent; marked Lost\n", m.Metadata.Name)
 		}
 	}
+}
 
-	// Publish the cluster's status. The MachinesReady condition
-	// carries the observation (stamped with the generation of the
-	// spec it judged), Progressing reports the rollout, the phase
-	// summarizes both, and the tally is the headcount the printer
-	// shows. The catalog's newest version is derived here too: the
-	// sweep is the one writer the Cluster's status has, so every
-	// derived field is its job. The write happens only when something
-	// actually changed, so a settled fleet writes nothing.
+// publishClusterStatus publishes the sweep's verdict on the Cluster.
+// The MachinesReady condition carries the observation (stamped with
+// the generation of the spec it judged), Progressing reports the
+// rollout, the phase summarizes both, and the tally is the headcount
+// the printer shows. The catalog's newest version is derived here
+// too: the sweep is the one writer the Cluster's status has, so every
+// derived field is its job. The write happens only when something
+// actually changed, so a settled fleet writes nothing.
+func publishClusterStatus(c *kubernetes.Client, cluster *machine.Cluster, s fleetSweep, r rollout, now time.Time) {
 	newest := machine.NewestVersion(cluster.Spec.Releases.Catalog)
 	s.condition.ObservedGeneration = cluster.Metadata.Generation
 	r.progressing.ObservedGeneration = cluster.Metadata.Generation
@@ -187,13 +197,7 @@ func sweepFleet(c *kubernetes.Client, cluster *machine.Cluster, now time.Time) {
 		updated.Status.Phase = s.phase
 		updated.Status.Releases.Newest = newest
 		updated.Status.Conditions = conditions
-		body, err := json.Marshal(&updated)
-		if err != nil {
-			fmt.Printf("rendering cluster status: %v\n", err)
-			return
-		}
-		path := kubernetes.ClustersPath + "/" + cluster.Metadata.Name + "/status"
-		if err := c.RequestJSON(http.MethodPut, path, body, nil); err != nil {
+		if err := kubernetes.PublishClusterStatus(c, &updated); err != nil {
 			fmt.Printf("publishing cluster status: %v\n", err)
 		}
 	}

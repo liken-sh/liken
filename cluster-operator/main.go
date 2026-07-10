@@ -3,8 +3,9 @@
 // Every machine's operator reports on itself, which leaves the
 // verdicts no single machine can write: a dead machine can't report
 // that it's dead, no machine can total a headcount it's part of
-// without stepping on four other writers, and reboot turns have to
-// be handed out by someone who can see everyone asking. This program
+// without stepping on the other machines' operators, and reboot
+// turns have to be handed out by someone who can see everyone
+// asking. This program
 // writes exactly those verdicts: the Lost phase on silent machines,
 // the Cluster's status, and the rollout conductor's grants. It also
 // stewards the OS's own DaemonSet pods after upgrades (steward.go).

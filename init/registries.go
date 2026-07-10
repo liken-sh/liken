@@ -40,7 +40,6 @@ import (
 	"os"
 	"slices"
 	"strings"
-	"time"
 
 	"sigs.k8s.io/yaml"
 
@@ -89,8 +88,8 @@ func chooseRegistryCredentials(stateRoot string, durable bool, boot *machine.Boo
 	}
 	store := machine.RegistryCredentialsStore(stateRoot)
 
-	// The standing rejection, if any, is republished every boot:
-	// facts don't survive a boot, but this record must.
+	// The standing rejection is republished into the boot record
+	// every boot (rejectStagedDocument explains why).
 	boot.CredentialsRejection, _ = store.LoadRejection()
 
 	if raw, err := store.LoadStaged(); err != nil {
@@ -98,8 +97,8 @@ func chooseRegistryCredentials(stateRoot string, durable bool, boot *machine.Boo
 	} else if raw != nil {
 		c, perr := machine.ParseRegistryCredentials(raw)
 		if perr != nil {
-			boot.CredentialsRejection = rejectStagedCredentials(store, raw,
-				fmt.Sprintf("the staged credentials document does not parse: %v", perr))
+			boot.CredentialsRejection = rejectStagedDocument("registries", "credentials", store.Reject,
+				raw, fmt.Sprintf("the staged credentials document does not parse: %v", perr))
 		} else {
 			boot.CredentialsSource = machine.ManifestSourceStaged
 			boot.CredentialsHash = machine.ManifestHash(raw)
@@ -123,17 +122,6 @@ func chooseRegistryCredentials(stateRoot string, durable bool, boot *machine.Boo
 		}
 	}
 	return nil
-}
-
-// rejectStagedCredentials quarantines a staged credentials document
-// with its reason, and reports the rejection for this boot's facts.
-func rejectStagedCredentials(store machine.ManifestStore, raw []byte, reason string) *machine.Rejection {
-	fmt.Fprintf(os.Stderr, "liken: registries: rejecting the staged credentials: %s\n", reason)
-	rejection := machine.NewRejection(raw, reason, time.Now().UTC())
-	if err := store.Reject(rejection); err != nil {
-		fmt.Fprintf(os.Stderr, "liken: registries: recording the rejection: %v\n", err)
-	}
-	return &rejection
 }
 
 // writeRegistriesConfig renders registries.yaml from the cluster

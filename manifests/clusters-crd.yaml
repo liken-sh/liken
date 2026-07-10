@@ -415,7 +415,7 @@ spec:
                     # quietly mean nothing.
                     nullable: true
                     # No feature has parameters yet, and this pair is
-                    # what says so loudly. Without it, the API server
+                    # what enforces it. Without it, the API server
                     # prunes an unrecognized parameter and keeps the
                     # emptied object, so a patch guessing at
                     # {replicas: 2} would quietly become {} and flip
@@ -460,13 +460,12 @@ spec:
                       # a null value for a non-nullable field before
                       # validation ever runs: without it, a bare
                       # `docker.io:` in hand-written YAML would
-                      # quietly declare nothing. One wrinkle the
-                      # scratch drill caught: this map's values are
-                      # arrays, which CEL types as list(string) and
-                      # refuses to compare with null at compile time
-                      # (the features map's values type as dyn, so
-                      # its rule never hit this). The dyn() cast is
-                      # what lets the null check compile.
+                      # quietly declare nothing. This map's values
+                      # are arrays, which CEL types as list(string)
+                      # and refuses to compare with null at compile
+                      # time (the features map's values type as dyn,
+                      # so its rule compiles without help); the dyn()
+                      # cast is what lets the null check compile.
                       x-kubernetes-validations:
                         - rule: "self.all(host, dyn(self[host]) != null && self[host].size() > 0)"
                           message: >-

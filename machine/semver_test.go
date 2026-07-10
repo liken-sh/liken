@@ -20,8 +20,13 @@ func TestCompareVersions(t *testing.T) {
 		{"1.0.0.1", "1.0.0", 1},
 		// A pre-release sorts before the release it precedes.
 		{"1.0.0-rc1", "1.0.0", -1},
+		{"1.0.0", "1.0.0-rc1", 1},
 		{"1.0.0-rc1", "1.0.0-rc2", -1},
 		{"1.0.0-rc1", "1.0.0-rc1", 0},
+		// A segment that isn't a number at all falls back to string
+		// order: a stable, documented answer instead of a panic.
+		{"1.x.0", "1.y.0", -1},
+		{"1.y.0", "1.x.0", 1},
 	}
 	for _, c := range cases {
 		if got := compareVersions(c.a, c.b); got != c.want {

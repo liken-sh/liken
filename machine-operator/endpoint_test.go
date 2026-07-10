@@ -1,6 +1,6 @@
 package main
 
-// The machine's door to the API: leaders through their own API
+// The machine's endpoint to the API: leaders through their own API
 // server, followers through k3s's health-checked local load
 // balancer, and a standalone machine through whatever the pod
 // environment offers.

@@ -153,3 +153,10 @@ func TestInactiveSlot(t *testing.T) {
 		}
 	}
 }
+
+func TestSpecRoleUnknownNameIsNil(t *testing.T) {
+	spec := StorageSpec{ClusterState: &StorageRole{Device: "/dev/vda"}}
+	if role := spec.Role("bogus"); role != nil {
+		t.Errorf("a name outside the vocabulary has no role, got %+v", role)
+	}
+}

@@ -64,6 +64,20 @@ func TestPublishStatusWritesTheStatusSubresource(t *testing.T) {
 	}
 }
 
+func TestPublishClusterStatusWritesTheStatusSubresource(t *testing.T) {
+	var path string
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+	}))
+	cluster := &machine.Cluster{Metadata: machine.ObjectMeta{Name: "lab"}}
+	if err := PublishClusterStatus(client, cluster); err != nil {
+		t.Fatal(err)
+	}
+	if want := ClustersPath + "/lab/status"; path != want {
+		t.Errorf("status goes through the subresource, got %s", path)
+	}
+}
+
 func TestPatchJSONSendsAMergePatch(t *testing.T) {
 	var contentType, body string
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

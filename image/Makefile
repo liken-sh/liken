@@ -55,7 +55,10 @@ TRUST_VERSION := $(strip $(file <../trust/VERSION))
 # The deployment's manifests are prerequisites, not just an argument:
 # the build bakes them in and reads spec.modules out of them, so an
 # edited manifest must rebuild the archive. With no MANIFESTS the
-# wildcards expand to nothing.
+# wildcards expand to nothing. The prerequisites here mirror the ones
+# the root Makefile's liken.cpio rule declares (from its side of the
+# directory boundary); when either list changes, change the other to
+# match.
 $(DIST)/liken.cpio: build.sh $(shell find etc -type f) \
 		$(wildcard inventory/*.go) $(wildcard ../machine/*.go) \
 		$(wildcard $(MANIFESTS)/cluster.yaml) \

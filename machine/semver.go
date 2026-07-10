@@ -4,8 +4,8 @@ package machine
 //
 // The catalog on the Cluster names releases by version, and two
 // questions need an ordering over them: which catalog entry is the
-// newest (the NEWEST printer column), and later, whether a machine is
-// behind its target. Semantic versioning answers both. The subset
+// newest (the NEWEST printer column), and whether a machine is behind
+// its target. Semantic versioning answers both. The subset
 // liken needs (dotted numeric segments, with an optional pre-release
 // suffix that sorts before its release) is small enough to write down
 // rather than take a dependency for. What matters is that the
@@ -32,7 +32,7 @@ func compareVersions(a, b string) int {
 
 	aParts := strings.Split(aCore, ".")
 	bParts := strings.Split(bCore, ".")
-	for i := 0; i < max(len(aParts), len(bParts)); i++ {
+	for i := range max(len(aParts), len(bParts)) {
 		if c := compareSegments(segment(aParts, i), segment(bParts, i)); c != 0 {
 			return c
 		}

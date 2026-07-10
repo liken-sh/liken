@@ -182,12 +182,16 @@ func TestImportsStandingTrialWithNewDigestsStagesTheNewOnes(t *testing.T) {
 		t.Fatal("the v1 trial never proved; the store is not to be trusted")
 	}
 	staged, _ := f.store().LoadStaged()
-	record, err := machine.ParseImportedImages(staged)
+	digests, err := machine.HashImageTarballs(f.imagesDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.Images["liken-machine-operator.tar"] == "digest of v1" {
-		t.Fatal("the staged record still names the digests of the dead trial")
+	expected, _, err := machine.RenderImportedImages(digests)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(staged) != string(expected) {
+		t.Fatalf("the staged record must name this boot's tarballs, not the dead trial's:\n%s", staged)
 	}
 }
 
@@ -234,5 +238,51 @@ func TestImportsUnreadableStagedRecordStillDiscards(t *testing.T) {
 	}
 	if _, err := os.Stat(torn); !os.IsNotExist(err) {
 		t.Fatal("the store survived")
+	}
+}
+
+func TestImportsReportsUnhashableTarballs(t *testing.T) {
+	// The tarballs can't even be hashed (an unreadable file): the
+	// lifecycle makes no decision at all, because a record rendered
+	// from partial hashes would be a lie in both directions.
+	f := newImportsFixture(t)
+	f.writeTarball(t, "k3s-airgap.tar", "layers")
+	sealed := filepath.Join(f.imagesDir, "k3s-airgap.tar")
+	if err := os.Chmod(sealed, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(sealed, 0o644) })
+
+	boot := machine.BootStatus{}
+	settleImageImports(f.root, true, true, &boot)
+
+	if boot.ImportsSource != "" || boot.ImportsDiscarded {
+		t.Errorf("no hash, no verdict: %+v", boot)
+	}
+	if staged, _ := f.store().LoadStaged(); staged != nil {
+		t.Error("nothing may be staged over hashes that never computed")
+	}
+}
+
+func TestDiscardContainerStoreToleratesAMissingAgentDir(t *testing.T) {
+	f := newImportsFixture(t)
+	k3sAgentDir = filepath.Join(f.agentDir, "never-created")
+	discardContainerStore()
+}
+
+func TestDiscardContainerStoreReportsWhatItCannotRemove(t *testing.T) {
+	// One entry refuses removal (its parent is read-only): the others
+	// still go, and the failure is reported rather than hidden.
+	f := newImportsFixture(t)
+	f.writeAgentState(t, "containerd/io.containerd.snapshotter.v1.overlayfs/torn", "")
+	if err := os.Chmod(f.agentDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(f.agentDir, 0o755) })
+
+	discardContainerStore()
+
+	if _, err := os.Stat(filepath.Join(f.agentDir, "containerd")); err != nil {
+		t.Error("a failed removal leaves the entry for the next boot to retry")
 	}
 }

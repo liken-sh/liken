@@ -50,45 +50,66 @@ func (f *factsFile) publish(edit func(*machine.MachineStatus)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	edit(f.status)
-	if err := machine.WriteFacts(machine.FactsPath, f.status); err != nil {
+	if err := machine.WriteFacts(factsPath, f.status); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: writing facts: %v\n", err)
 	}
 }
 
+// Where the facts and the boot manifest land. Package variables
+// rather than constants so tests can publish into a tempdir; a real
+// boot never points them anywhere but /run.
+var (
+	factsPath        = machine.FactsPath
+	bootManifestPath = machine.BootManifestPath
+
+	// xtablesProbe is the command that reports the netfilter
+	// userspace's version, a variable so tests can aim it at nothing.
+	xtablesProbe = "iptables"
+)
+
+// factsInputs gathers everything the boot decided that the facts
+// report: publishFacts assembles it into the Machine status. A struct
+// rather than a parameter list for the same reason as k3sBootInputs:
+// nearly a dozen positional arguments invite transposition, and named
+// fields read correctly at the call site.
+type factsInputs struct {
+	cluster     *machine.Cluster
+	role        machine.Role
+	choice      *manifestChoice
+	conns       []*connection
+	storage     machine.StorageStatus
+	boot        machine.BootStatus
+	modules     []machine.ModuleStatus
+	features    []machine.FeatureStatus
+	registries  machine.RegistriesStatus
+	firstSync   *timeSync
+	timeSources []string
+}
+
 // publishFacts returns the facts it wrote, wrapped in the guarded
 // owner the boot's long-lived writers share.
-func publishFacts(cluster *machine.Cluster, role machine.Role, choice *manifestChoice,
-	conns []*connection, storage machine.StorageStatus, boot machine.BootStatus,
-	modules []machine.ModuleStatus, features []machine.FeatureStatus,
-	registries machine.RegistriesStatus,
-	firstSync *timeSync, timeSources []string) *factsFile {
+func publishFacts(in factsInputs) *factsFile {
 	now := time.Now()
+	// Every block here carries the same facts the boot printed to the
+	// console — the console-parity principle: anything reported only
+	// to the serial port is invisible to anyone operating the machine
+	// remotely, so what the console narrates, the status must repeat.
+	// The hardware and firmware blocks are re-derived rather than
+	// remembered; storage and boot arrive as arguments because they
+	// were only observable while storage was settling.
 	facts := &machine.MachineStatus{
-		Role:    role,
-		Version: machine.VersionStatus{Liken: machine.Version},
-		// Each declared module's outcome, exactly as the module pass
-		// printed them: console parity, as always.
-		Modules: modules,
-		// Each enabled feature's standing, exactly as the feature
-		// pass printed them: console parity, as always.
-		Features: features,
-		// What this boot rendered into registries.yaml, hosts only:
-		// console parity, as always.
-		Registries: registries,
+		Role:       in.role,
+		Version:    machine.VersionStatus{Liken: machine.Version},
+		Modules:    in.modules,
+		Features:   in.features,
+		Registries: in.registries,
 		Hardware: machine.HardwareStatus{
-			CPUs: runtime.NumCPU(),
-			// The same inventory the world report prints, re-derived
-			// rather than remembered, like everything else in status.
+			CPUs:         runtime.NumCPU(),
 			BlockDevices: discoverBlockDevices(),
 		},
-		// The firmware's boot facts, the same ones reportFirmware
-		// printed at boot: console parity, as always.
 		Firmware: firmwareFacts(efiVarsDir),
-		// Where every storage role landed, and under which manifest.
-		// These blocks can't be re-derived here, because they were
-		// only observable while storage was settling.
-		Storage: storage,
-		Boot:    boot,
+		Storage:  in.storage,
+		Boot:     in.boot,
 	}
 
 	var u unix.Utsname
@@ -100,7 +121,7 @@ func publishFacts(cluster *machine.Cluster, role machine.Role, choice *manifestC
 	// (legacy)"; the version and variant are the interesting part. Like
 	// the kernel release, this is asked of the running machine, not
 	// copied from a build pin.
-	if out, ok := run("iptables", "-V"); ok {
+	if out, ok := run(xtablesProbe, "-V"); ok {
 		facts.Version.Xtables = strings.TrimPrefix(out, "iptables ")
 	}
 
@@ -120,28 +141,28 @@ func publishFacts(cluster *machine.Cluster, role machine.Role, choice *manifestC
 	// summary describes the primary interface: the cluster-facing one
 	// when the Cluster's nodeCIDR identifies it, otherwise the first
 	// that came up.
-	facts.Network = networkFacts(cluster, conns, now)
+	facts.Network = networkFacts(in.cluster, in.conns, now)
 
 	// The clock's state so far: the boot-time measurement if one
 	// succeeded, or an accurate unsynchronized/free-running report.
-	facts.Time = timeStatus(firstSync, timeSources)
+	facts.Time = timeStatus(in.firstSync, in.timeSources)
 
 	// The founding write happens directly rather than through
 	// publish: main is still the only goroutine at this point, and
 	// the success line should only print for a write that landed.
 	owner := &factsFile{status: facts}
-	if err := machine.WriteFacts(machine.FactsPath, facts); err != nil {
+	if err := machine.WriteFacts(factsPath, facts); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: writing facts: %v\n", err)
 		return owner
 	}
-	fmt.Printf("liken: facts published to %s\n", machine.FactsPath)
+	fmt.Printf("liken: facts published to %s\n", factsPath)
 
 	// The manifest this boot ran under, byte for byte: the operator's
 	// way to know which Machine it manages (and, on a first boot, the
 	// spec to seed the in-cluster Machine from). Published beside the
 	// facts because it shares their lifetime: it describes this boot.
-	if len(choice.raw) > 0 {
-		if err := os.WriteFile(machine.BootManifestPath, choice.raw, 0o644); err != nil {
+	if len(in.choice.raw) > 0 {
+		if err := os.WriteFile(bootManifestPath, in.choice.raw, 0o644); err != nil {
 			fmt.Fprintf(os.Stderr, "liken: writing the boot manifest: %v\n", err)
 		}
 	}

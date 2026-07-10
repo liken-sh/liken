@@ -74,6 +74,9 @@
 #                                 built by nfs-utils/fetch.sh. The
 #                                 kernel's mount path execs it as the
 #                                 nfs filesystem's mount helper
+#   /etc/mtab                     the compatibility symlink mount
+#                                 helpers require, pointing at the
+#                                 kernel's own mount table
 #   /etc/liken/features/          each opt-in feature's per-boot
 #                                 inputs, by slug: its kernel module
 #                                 list and, for features with a
@@ -198,11 +201,13 @@ mkdir -p "$root/etc/iscsi"
 cp "$here/../open-iscsi/iscsid.conf" "$root/etc/iscsi/iscsid.conf"
 
 # The NFS client, the host half of the nfs feature (nfs-utils/fetch.sh
-# explains the static build), shipped in every image on the same
-# kitchen-sink reasoning as the iSCSI binaries above. The kernel's
-# mount syscall path execs /sbin/mount.<fstype> as a filesystem's
-# mount helper, so the one binary answers under both of its names:
-# mount -t nfs and mount -t nfs4 both reach it.
+# explains the static build), shipped in every image whether or not
+# the deployment declares the feature: inert bytes are cheap, and
+# shipping them unconditionally keeps enabling a feature a runtime
+# act instead of an image rebuild. The kernel's mount syscall path
+# execs /sbin/mount.<fstype> as a filesystem's mount helper, so the
+# one binary answers under both of its names: mount -t nfs and
+# mount -t nfs4 both reach it.
 nfsutils_version="$(cat "$here/../nfs-utils/VERSION")"
 cp "$here/../nfs-utils/dist/$nfsutils_version/mount.nfs" "$root/sbin/mount.nfs"
 ln -s mount.nfs "$root/sbin/mount.nfs4"
@@ -214,10 +219,9 @@ ln -s mount.nfs "$root/sbin/mount.nfs4"
 # contract: after a successful mount syscall, mount.nfs goes to
 # record the mount in mtab, and only the file being a symlink tells
 # it the kernel already keeps the table. On an /etc with no mtab at
-# all, that bookkeeping spins forever retrying, wedging every NFS
-# mount behind a helper that never exits — the lab found this the
-# hard way, with the mount itself succeeding in milliseconds and the
-# machine looking hung.
+# all, that bookkeeping retries forever: the mount itself succeeds in
+# milliseconds while the helper never exits, so the machine looks
+# hung.
 ln -s /proc/self/mounts "$root/etc/mtab"
 
 # The pre-generated certificate authorities, placed exactly where k3s

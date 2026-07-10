@@ -274,3 +274,45 @@ func TestChooseRegistryCredentialsRepublishesAStandingRejection(t *testing.T) {
 		t.Errorf("the standing rejection must republish every boot: %+v", boot.CredentialsRejection)
 	}
 }
+
+func TestChooseRegistryCredentialsToleratesUnreadableStoreFiles(t *testing.T) {
+	root := t.TempDir()
+	store := machine.RegistryCredentialsStore(root)
+	if err := store.WriteStaged([]byte("staged")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteProven([]byte("proven")); err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := filepath.Glob(filepath.Join(root, "*", "*.yaml"))
+	if err != nil || len(sealed) == 0 {
+		t.Fatalf("expected store files to seal: %v, %v", sealed, err)
+	}
+	for _, path := range sealed {
+		if err := os.Chmod(path, 0o000); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+	}
+
+	boot := machine.BootStatus{}
+	if creds := chooseRegistryCredentials(root, true, &boot); creds != nil {
+		t.Errorf("unreadable stores mean anonymous pulls: %+v", creds)
+	}
+}
+
+func TestChooseRegistryCredentialsFallsThroughACorruptProvenDocument(t *testing.T) {
+	root := t.TempDir()
+	store := machine.RegistryCredentialsStore(root)
+	if err := store.WriteProven([]byte("not a credentials document")); err != nil {
+		t.Fatal(err)
+	}
+
+	boot := machine.BootStatus{}
+	if creds := chooseRegistryCredentials(root, true, &boot); creds != nil {
+		t.Errorf("a corrupt proven document means anonymous pulls, not a crash: %+v", creds)
+	}
+	if boot.CredentialsSource != "" {
+		t.Errorf("nothing was chosen: %+v", boot)
+	}
+}
