@@ -1,0 +1,2 @@
+# The built binary; `make` recreates it from the sources here.
+dist/

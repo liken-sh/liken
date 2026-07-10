@@ -26,7 +26,7 @@
 #                                 build at a directory carrying them
 #                                 (the repo's own lab is dev-cluster/)
 #   /etc/liken/token              the cluster's join token, minted
-#                                 offline by identity/mint.sh: it
+#                                 offline by `liken mint`: it
 #                                 embeds a hash of the server CA below,
 #                                 so a joining machine can verify the
 #                                 cluster before presenting the secret
@@ -98,7 +98,7 @@
 #                                 certs from them instead of inventing
 #                                 its own roots, which is what makes an
 #                                 operator's kubeconfig computable
-#                                 offline (identity/mint.sh). It also
+#                                 offline (`liken mint`). It also
 #                                 means the image contains private keys:
 #                                 anyone who holds this file controls
 #                                 the cluster it boots
@@ -232,7 +232,7 @@ identity="${IDENTITY:?IDENTITY must name the deployment identity directory}"
 mkdir -p "$root/var/lib/rancher/k3s/server"
 cp -r "$identity/tls" "$root/var/lib/rancher/k3s/server/tls"
 
-# The join token, minted alongside the CAs (identity/mint.sh explains
+# The join token, minted alongside the CAs (identity/mint.go explains
 # the format). It lives under /etc/liken rather than k3s's data
 # directory because the clusterState filesystem mounts over the
 # latter: a boot input has to sit where no disk will shadow it. Init

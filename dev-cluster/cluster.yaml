@@ -9,7 +9,7 @@
 #
 # The join token is deliberately not here. The spec carries topology;
 # secrets travel in the identity bundle (/etc/liken/token, minted
-# offline by identity/mint.sh alongside the CAs it hashes).
+# offline by `liken mint` alongside the CAs it hashes).
 apiVersion: liken.sh/v1alpha1
 kind: Cluster
 metadata:

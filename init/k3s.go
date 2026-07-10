@@ -45,7 +45,7 @@ var (
 	k3sAgentConfig  = "/etc/rancher/k3s/agent.yaml"
 
 	// tokenPath is where the image carries the cluster's join token,
-	// minted offline by identity/mint.sh like the CAs it hashes.
+	// minted offline like the CAs it hashes (see the identity package).
 	// Handed to k3s as a token-file so the secret itself never
 	// appears in a config file or on a command line.
 	tokenPath = "/etc/liken/token"

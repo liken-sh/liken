@@ -30,7 +30,7 @@ OPENISCSI_DIST := open-iscsi/dist/$(OPENISCSI_VERSION)
 NFSUTILS_VERSION := $(strip $(file <nfs-utils/VERSION))
 NFSUTILS_DIST := nfs-utils/dist/$(NFSUTILS_VERSION)
 
-all: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils init machine-operator cluster-operator logs identity image
+all: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils init machine-operator cluster-operator logs cli identity image
 
 # Because the version is part of the artifact's name, a pin bump
 # changes the target path itself and Make rebuilds with no extra
@@ -131,30 +131,43 @@ logs/dist/liken-logs-image.tar: $(wildcard logs/*.go) \
 
 logs: logs/dist/liken-logs-image.tar
 
+# The liken CLI: the toolkit that produces and operates deployments
+# (see cli/main.go). It runs on the operator's workstation, not
+# inside a machine, and it ships with public releases; in this repo
+# it is also how the build itself mints the dev cluster's identity
+# below.
+cli/dist/liken: $(wildcard cli/*.go) go.mod go.sum \
+		$(wildcard identity/*.go) $(wildcard machine/*.go) VERSION
+	$(MAKE) -C cli
+
+cli: cli/dist/liken
+
 # The cluster's identity is a set of certificate authorities and the
-# join token, minted before any machine boots (see identity/mint.sh).
+# join token, minted before any machine boots (see identity/mint.go).
 # The token can exist this early because the CA it hashes already
 # exists. An identity belongs to a deployment, not to the OS, so the
-# identity domain takes the output directory as an input, and this
-# root Makefile points it at the repo's own deployment, the same way
-# the image build gets the dev cluster's manifests. The keys are
+# toolkit takes the output directory as an argument, and this root
+# Makefile points it at the repo's own deployment, the same way the
+# image build gets the dev cluster's manifests. The keys are
 # gitignored and the artifacts carry no version; losing or remaking
-# them just gives the next boot a new identity.
+# them just gives the next boot a new identity. Minting keeps every
+# artifact that already exists, so an adopted identity (`liken
+# adopt`) survives this rule untouched.
 IDENTITY_DIR := dev-cluster/identity
 
-$(IDENTITY_DIR)/tls/server-ca.crt $(IDENTITY_DIR)/token &: identity/mint.sh
-	$(MAKE) -C identity DIST=$(abspath $(IDENTITY_DIR))
+$(IDENTITY_DIR)/tls/server-ca.crt $(IDENTITY_DIR)/token &: cli/dist/liken
+	cli/dist/liken mint $(IDENTITY_DIR)
 
 identity: $(IDENTITY_DIR)/tls/server-ca.crt $(IDENTITY_DIR)/token
 
 # This is an operator's admin credential, computed offline from the
 # client CA; the machine never has to provide it (see
-# identity/kubeconfig.sh). Use it explicitly, so no kubeconfig you
+# identity/kubeconfig.go). Use it explicitly, so no kubeconfig you
 # already have is ever touched:
 #
 #   kubectl --kubeconfig dev-cluster/identity/kubeconfig get nodes
-kubeconfig: $(IDENTITY_DIR)/tls/server-ca.crt
-	$(MAKE) -C identity DIST=$(abspath $(IDENTITY_DIR)) kubeconfig
+kubeconfig: $(IDENTITY_DIR)/tls/server-ca.crt cli/dist/liken
+	cli/dist/liken kubeconfig $(IDENTITY_DIR)
 
 # This is the bootable initramfs: the image domain packs liken and
 # everything k3s needs into the cpio archive the kernel unpacks at
@@ -280,7 +293,8 @@ clean:
 	$(MAKE) -C machine-operator clean
 	$(MAKE) -C cluster-operator clean
 	$(MAKE) -C logs clean
-	$(MAKE) -C identity DIST=$(abspath $(IDENTITY_DIR)) clean
+	$(MAKE) -C cli clean
+	rm -rf $(IDENTITY_DIR)
 	$(MAKE) -C image IDENTITY=$(abspath $(IDENTITY_DIR)) DIST=$(abspath $(IMAGE_DIR)) clean
 
-.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils init machine-operator cluster-operator logs identity kubeconfig image run run-once smoke install storage release serve clean
+.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils init machine-operator cluster-operator logs cli identity kubeconfig image run run-once smoke install storage release serve clean

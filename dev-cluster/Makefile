@@ -115,7 +115,7 @@ guests/$(NODE)/OVMF_VARS.fd:
 
 # Only the leader node forwards the API port to the host: kubectl on
 # the host reaches the cluster through the control plane, and there is
-# exactly one (see ../identity/kubeconfig.sh). Forwarding the same
+# exactly one (see ../identity/kubeconfig.go). Forwarding the same
 # host port from every node would collide anyway. The forward reaches
 # the cluster as a whole, not any particular machine.
 ifeq ($(NODE),node-1)

@@ -18,7 +18,7 @@
 # packs as the machine's whole Kubernetes also runs fine on the build
 # host, and `k3s kubectl` is a complete kubectl. The credential is the
 # admin kubeconfig minted offline from the deployment's identity
-# (../identity/kubeconfig.sh); the machine is never asked for one.
+# (../identity/kubeconfig.go); the machine is never asked for one.
 #
 # The drill starts from nothing: node-1's disks are deleted first,
 # because the claim under test includes claiming and formatting blank

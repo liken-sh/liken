@@ -11,9 +11,9 @@ restored at any point.
 Most of the mechanism falls out of the identity design. The image
 already carries the cluster's CAs and join token, so adopting a
 cluster means importing its identity instead of minting one:
-identity/adopt.sh takes the token and CA tree harvested from any of
+`liken adopt` takes the token and CA tree harvested from any of
 the existing cluster's servers and lays them into the same dist/
-layout mint.sh produces. From there the build doesn't care where the
+layout minting produces. From there the build doesn't care where the
 identity came from, and an image built this way joins the existing
 cluster directly; followers need no code changes at all.
 

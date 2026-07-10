@@ -27,6 +27,15 @@ override:
   # are regexes over module-relative package paths.)
   - path: ^machine$
     threshold: 87
+  # The identity package: minting, adoption, and the kubeconfig are
+  # pure crypto and file layout, tested end to end; what goes
+  # untested is a scattering of I/O error returns.
+  - path: ^identity$
+    threshold: 76
+  # The CLI: a dispatch table over the domain packages, which carry
+  # their own tests; untested here is main itself.
+  - path: ^cli$
+    threshold: 79
   # The Kubernetes client: every verb is exercised against a real
   # HTTP test server; what goes untested is the in-cluster
   # bootstrapping that only a pod's mounted credentials can satisfy.
