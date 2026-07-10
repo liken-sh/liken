@@ -73,12 +73,6 @@ the specific workload that revealed it:
     scheduling identity declared on the Machine spec: registered at
     boot, reconciled live, and retractions actually retract.
 
-And one that looks past any single deployment:
-
-22. [ ] [Public releases](22-public-releases.md) — releases of liken
-    itself, with no deployment baked in, and the utilities someone
-    needs to produce a cluster of their own from one.
-
 One the milestone-17 lab work demanded:
 
 23. [ ] [Crash-safe image imports](23-crash-safe-image-imports.md) —
@@ -86,6 +80,27 @@ One the milestone-17 lab work demanded:
     to run its own operator: image imports go through the same
     staged/proven lifecycle as documents, with a wipe-and-retry
     fallback. Designed.
+
+And the arc that looks past any single deployment, where liken stops
+being this checkout and becomes a public project. Milestone 22 was
+numbered before the arc existed; it belongs second in this order:
+
+24. [ ] [A real repository and CI builds](24-repo-and-ci.md) — a
+    public home for the code, and CI that fetches every pin, builds
+    every domain, runs the tests, assembles an image, and boots it.
+22. [ ] [Public releases](22-public-releases.md) — releases of liken
+    itself, with no deployment baked in, and the utilities someone
+    needs to produce a cluster of their own from one.
+25. [ ] [A website on liken.sh](25-liken-sh-website.md) — the
+    project's domain answers for people the way it already does for
+    CRDs: what liken is, and where to start reading.
+26. [ ] [Releases on the website](26-releases-on-the-website.md) —
+    the public release channel gets its public home: a catalog,
+    digest-verified downloads, published by CI.
+27. [ ] [Documentation on the website](27-documentation-on-the-website.md) —
+    the repo stays the documentation; the site extracts and arranges
+    it, plus the reading order and getting-started path a repo can't
+    impose.
 
 Deferred until the fundamentals above are proven, the hardening
 tier: UKIs, dm-verity, secure boot, TPM-sealed secrets, and signed
