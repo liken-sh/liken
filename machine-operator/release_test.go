@@ -49,6 +49,9 @@ func TestVersionAskForAMachineBehindTheTarget(t *testing.T) {
 	if ask.slot != "B" || ask.slotDir != "/var/lib/liken/system/b" {
 		t.Errorf("a machine running slot A downloads to slot B: %+v", ask)
 	}
+	if ask.activeSlotDir != "/var/lib/liken/system/a" {
+		t.Errorf("the running slot lends the download its layer: %+v", ask)
+	}
 	if ask.source != "http://10.0.2.2:8017/releases" {
 		t.Errorf("source: %q", ask.source)
 	}

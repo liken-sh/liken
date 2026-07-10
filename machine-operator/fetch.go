@@ -12,6 +12,12 @@ package main
 // minutes apart, and every pass in between kept the heartbeat fresh.
 // The lease must never wait on a socket.
 //
+// A complete fetch leaves a bootable slot, which takes more than the
+// release: the public artifacts are downloaded and verified against
+// the document, and then the machine's own deployment layer is
+// carried over from the slot it is running on (carryLayer), because
+// the layer never travels the network and no release can supply it.
+//
 // Downloads are resumable by re-verification rather than by byte
 // ranges: each run first verifies whatever the slot already holds
 // against the release document and fetches only what fails. A torn
@@ -57,11 +63,12 @@ import (
 // different ask, and a different ask is what clears a corruption
 // hold.
 type fetchAsk struct {
-	version string
-	digest  string // the catalog's "sha256:<hex>" over release.yaml
-	source  string // the base URL releases are served under
-	slot    string // "A" or "B", for the humans reading conditions
-	slotDir string // the slot's mounted filesystem
+	version       string
+	digest        string // the catalog's "sha256:<hex>" over release.yaml
+	source        string // the base URL releases are served under
+	slot          string // "A" or "B", for the humans reading conditions
+	slotDir       string // the slot's mounted filesystem
+	activeSlotDir string // the running slot's, which lends its layer
 }
 
 type fetchState string
@@ -195,6 +202,15 @@ func fetchRelease(ask fetchAsk) (int, error) {
 		fetched++
 	}
 
+	// The deployment layer is the one file the release cannot supply:
+	// it is this cluster's own, so the machine carries it forward from
+	// the slot it is running on. It rides between the artifacts and
+	// the document deliberately — a slot with release.yaml is bootable,
+	// and a slot without its layer is not.
+	if err := carryLayer(ask); err != nil {
+		return fetched, err
+	}
+
 	// The document lands after the artifacts it describes, durably,
 	// which makes the slot self-describing: it records which release
 	// it holds, byte for byte, without asking the network.
@@ -202,6 +218,71 @@ func fetchRelease(ask fetchAsk) (int, error) {
 		return fetched, fmt.Errorf("writing the release document to the slot: %w", err)
 	}
 	return fetched, nil
+}
+
+// carryLayer copies the running slot's deployment layer and sidecar
+// to the inactive slot. The active slot is the source of truth: its
+// sidecar was written from verified bytes at install (or by the carry
+// that filled it), so a layer that fails the active sidecar means the
+// running slot itself is damaged — a condition no retry and no
+// download can repair, which is why it holds like corruption does.
+// The remedy is a person's: repair or reinstall the machine.
+func carryLayer(ask fetchAsk) error {
+	sidecar, err := os.ReadFile(filepath.Join(ask.activeSlotDir, machine.LayerSidecarName))
+	if err != nil {
+		return fmt.Errorf("the running slot's deployment layer cannot be vouched for (%v); repair or reinstall this machine: %w", err, errCorrupt)
+	}
+	digest, err := machine.ParseLayerSidecar(sidecar)
+	if err != nil {
+		return fmt.Errorf("the running slot's layer sidecar is damaged (%v); repair or reinstall this machine: %w", err, errCorrupt)
+	}
+	verify := func(path string) error {
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		return machine.VerifyLayer(digest, f)
+	}
+	source := filepath.Join(ask.activeSlotDir, machine.LayerName)
+	if err := verify(source); err != nil {
+		return fmt.Errorf("the running slot's deployment layer does not verify (%v); repair or reinstall this machine: %w", err, errCorrupt)
+	}
+
+	// Resumable the way the artifacts are: a layer already carried
+	// (and a sidecar matching the active one) needs nothing. A layer
+	// from some older install fails this check and is replaced, and a
+	// carry that died between the layer and its sidecar resumes by
+	// rewriting just the sidecar.
+	dest := filepath.Join(ask.slotDir, machine.LayerName)
+	destSidecar := filepath.Join(ask.slotDir, machine.LayerSidecarName)
+	if verify(dest) != nil {
+		f, err := os.Open(source)
+		if err != nil {
+			return fmt.Errorf("reading the running slot's layer: %w", err)
+		}
+		tmp, err := spillDurably(dest, f)
+		f.Close()
+		if err != nil {
+			return fmt.Errorf("carrying %s: %w", machine.LayerName, err)
+		}
+		if err := verify(tmp); err != nil {
+			os.Remove(tmp)
+			return fmt.Errorf("the carried layer does not verify: %v: %w", err, errCorrupt)
+		}
+		if err := os.Rename(tmp, dest); err != nil {
+			return err
+		}
+	}
+
+	// The sidecar lands last, durably: a slot whose sidecar matches
+	// its layer is a slot whose carry completed.
+	if existing, err := os.ReadFile(destSidecar); err != nil || !bytes.Equal(existing, sidecar) {
+		if err := writeDurably(destSidecar, sidecar); err != nil {
+			return fmt.Errorf("carrying %s: %w", machine.LayerSidecarName, err)
+		}
+	}
+	return nil
 }
 
 // fetchArtifact streams one artifact onto the slot: temp file, fsync,

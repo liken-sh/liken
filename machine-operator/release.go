@@ -92,6 +92,9 @@ func versionAsk(cluster *machine.Cluster, facts *machine.MachineStatus) (fetchAs
 		source:  cluster.Spec.Releases.Source,
 		slot:    slot,
 		slotDir: machine.SystemSlotDir(slot),
+		// The running slot lends its deployment layer to the download:
+		// the release supplies the OS, the machine supplies itself.
+		activeSlotDir: machine.SystemSlotDir(facts.Boot.Slot),
 	}, machine.Condition{}, true
 }
 
