@@ -224,6 +224,14 @@ storage:
 run-once: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/liken.cpio
 	$(MAKE) -C dev-cluster run-once
 
+# The smoke drill: boot node-1 unattended from blank disks and pass
+# when its node reports Ready over the cluster's API (see
+# dev-cluster/smoke.sh). CI runs this after building everything; it
+# needs the same artifacts as `run` plus the admin kubeconfig the
+# readiness poll authenticates with.
+smoke: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/liken.cpio kubeconfig
+	$(MAKE) -C dev-cluster smoke
+
 # The install image is liken.cpio carrying the release payload, which
 # the installer verifies and copies onto a machine's own disk.
 $(IMAGE_DIR)/install.cpio: $(IMAGE_DIR)/liken.cpio $(KERNEL_DIST)/vmlinuz image/install.sh
@@ -275,4 +283,4 @@ clean:
 	$(MAKE) -C identity DIST=$(abspath $(IDENTITY_DIR)) clean
 	$(MAKE) -C image IDENTITY=$(abspath $(IDENTITY_DIR)) DIST=$(abspath $(IMAGE_DIR)) clean
 
-.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils init machine-operator cluster-operator logs identity kubeconfig image run run-once install storage release serve clean
+.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils init machine-operator cluster-operator logs identity kubeconfig image run run-once smoke install storage release serve clean

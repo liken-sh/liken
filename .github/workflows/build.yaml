@@ -1,8 +1,8 @@
 # The build, run by GitHub Actions on every push to main and every
-# pull request against it: `make all`, the same command a developer
-# runs, producing the same bootable image. The checks workflow proves
-# the tree is clean; this one proves it still assembles an operating
-# system.
+# pull request against it: `make all` and then `make smoke`, the same
+# commands a developer runs. The checks workflow proves the tree is
+# clean; this one proves it still assembles an operating system, and
+# that the operating system still boots to a Ready Kubernetes node.
 #
 # Like the checks workflow, this one is deliberately thin. The build
 # logic lives in the Makefiles; all CI adds is a runner, the
@@ -34,9 +34,23 @@ jobs:
       # The fetch scripts document their own host requirements; the
       # runner image has most of them (curl, tar, ar, zstd, openssl,
       # docker) already. cpio archives the image and depmod (kmod)
-      # indexes the kernel's modules.
+      # indexes the kernel's modules. QEMU and OVMF are the smoke
+      # drill's virtual hardware — the same packages, at the same
+      # firmware path, the dev-cluster Makefile documents.
       - name: install host tools
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cpio kmod
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cpio kmod qemu-system-x86 ovmf
+
+      # The runners expose /dev/kvm, but root-only. This is the
+      # standard rule to open it to everyone, which on a single-use
+      # throwaway VM is fine. If this ever breaks, the drill gets
+      # slower rather than failing: the QEMU flags fall back from KVM
+      # to pure emulation (-accel kvm -accel tcg, in that order).
+      - name: open /dev/kvm to the runner user
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
 
       # One cache per vendored domain, keyed on the same prerequisites
       # the root Makefile declares for that domain's artifact. A pin
@@ -97,7 +111,22 @@ jobs:
 
       # The whole system: every vendored input fetched and verified,
       # the Go programs compiled, a fresh identity minted, and the
-      # bootable image assembled. Success is make exiting zero with
-      # dev-cluster/image/liken.cpio on disk; booting that image is a
-      # later milestone's job.
+      # bootable image assembled.
       - run: make all
+
+      # Then boot it. The smoke drill (dev-cluster/smoke.sh) starts
+      # node-1 from blank disks and passes when its node reports Ready
+      # over the cluster's API — the assembled image actually running
+      # Kubernetes, not just existing.
+      - run: make smoke
+
+      # The serial console is the record of the boot, and it is worth
+      # keeping when the drill passes, not just when it fails: a
+      # healthy boot is the baseline the next unhealthy one gets
+      # compared against.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: node-1-console
+          path: dev-cluster/guests/node-1/console.log
+          if-no-files-found: ignore

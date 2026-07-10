@@ -50,6 +50,7 @@
 NODE ?= node-1
 MEM ?= 4096
 SMP ?= 4
+CONSOLE ?= stdio
 KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 VMLINUZ := ../kernel/dist/$(KERNEL_VERSION)/vmlinuz
 INITRD := image/liken.cpio
@@ -161,7 +162,12 @@ endif
 #                            variable)
 #   -display none            there is no screen; liken uses only the
 #                            serial console
-#   -serial stdio            ...and that serial port is this terminal
+#   -serial $(CONSOLE)       ...and where that serial port goes. The
+#                            default, stdio, is this terminal: a human
+#                            watches the machine boot. Automation has
+#                            no terminal to give, so the smoke drill
+#                            passes CONSOLE=file:... and reads the
+#                            boot from the file afterward
 #   -monitor none            don't multiplex QEMU's own control console
 #                            onto the same stream; tests need to read
 #                            liken's output and nothing else
@@ -275,7 +281,7 @@ run: guests/$(NODE)/state.qcow2 guests/$(NODE)/pods.qcow2 guests/$(NODE)/boot.qc
 		-drive if=pflash,format=raw,file=guests/$(NODE)/OVMF_VARS.fd \
 		$(QEMU_BOOT) \
 		-display none \
-		-serial stdio \
+		-serial $(CONSOLE) \
 		-monitor none \
 		$(RTC_BASE) \
 		$(QEMU_EXIT_ON_REBOOT) \
@@ -329,7 +335,15 @@ storage:
 grow-pods:
 	qemu-img resize guests/$(NODE)/pods.qcow2 +4G
 
-.PHONY: run run-once install storage grow-pods clean
+# The unattended boot: node-1 from blank disks to a Ready node, with
+# the verdict read from the cluster's API rather than a human reading
+# the console. This is what CI runs; smoke.sh explains the whole
+# arrangement. Run it from the repo root (`make smoke`), which builds
+# the artifacts and mints the kubeconfig it needs first.
+smoke:
+	./smoke.sh
+
+.PHONY: run run-once install storage grow-pods smoke clean
 
 clean:
 	rm -rf guests
