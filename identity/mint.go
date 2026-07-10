@@ -37,11 +37,15 @@ import (
 	"time"
 )
 
-// The identity, as paths relative to its directory. Everything mint
-// produces and adopt copies, no more. The token lives beside the tls
-// tree, not in it, matching where k3s keeps its own
-// (/var/lib/rancher/k3s/server/token).
-var bundle = []string{
+// Bundle is the identity, as paths relative to its directory:
+// everything mint produces and adopt copies, no more. The token lives
+// beside the tls tree, not in it, matching where k3s keeps its own
+// (/var/lib/rancher/k3s/server/token). The image package reads this
+// list to lay an identity into a deployment layer, so a new artifact
+// added here reaches the machines with no other change. The
+// kubeconfig is deliberately not part of the bundle: it is the
+// operator's credential, and it must never ride into an image.
+var Bundle = []string{
 	"token",
 	"tls/server-ca.crt", "tls/server-ca.key",
 	"tls/client-ca.crt", "tls/client-ca.key",

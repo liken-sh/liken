@@ -54,7 +54,7 @@ func Adopt(harvest, dir string, out io.Writer) error {
 	// missing one CA would produce an image that boots and then fails
 	// in some distant, confusing way (a control plane that can't sign
 	// one kind of certificate, pods whose tokens don't verify).
-	for _, f := range bundle {
+	for _, f := range Bundle {
 		if _, err := os.Stat(filepath.Join(harvest, f)); err != nil {
 			return fmt.Errorf("harvest is missing %s; re-run the tar on the existing server", f)
 		}
@@ -89,13 +89,13 @@ func Adopt(harvest, dir string, out io.Writer) error {
 	// image built from a mix of two identities could not join either
 	// cluster. If the identity directory holds any of the bundle,
 	// stop and make the operator choose.
-	for _, f := range bundle {
+	for _, f := range Bundle {
 		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
 			return fmt.Errorf("%s already exists; this deployment already holds an identity — delete the identity directory first if replacing it is really the intent", filepath.Join(dir, f))
 		}
 	}
 
-	for _, f := range bundle {
+	for _, f := range Bundle {
 		if err := copyPrivately(filepath.Join(harvest, f), filepath.Join(dir, f)); err != nil {
 			return err
 		}

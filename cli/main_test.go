@@ -33,6 +33,7 @@ func TestRunChecksArgumentCounts(t *testing.T) {
 		{"mint without a directory", []string{"mint"}},
 		{"adopt without directories", []string{"adopt", "only-one"}},
 		{"kubeconfig without a directory", []string{"kubeconfig"}},
+		{"layer without its inputs", []string{"layer", "manifests", "identity"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -54,6 +55,22 @@ func TestRunMintsAndComputesAKubeconfig(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "kubeconfig")); err != nil {
 		t.Error("no kubeconfig was written")
+	}
+}
+
+func TestRunPacksADeploymentLayer(t *testing.T) {
+	identityDir := filepath.Join(t.TempDir(), "identity")
+	if err := run([]string{"mint", identityDir}); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "deployment.cpio")
+	// A deployment with no manifests declares no modules, so the
+	// kernel dist is never consulted and the layer is identity only.
+	if err := run([]string{"layer", t.TempDir(), identityDir, "unused", out}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(out); err != nil {
+		t.Error("no layer was written")
 	}
 }
 

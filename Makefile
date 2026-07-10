@@ -169,21 +169,19 @@ identity: $(IDENTITY_DIR)/tls/server-ca.crt $(IDENTITY_DIR)/token
 kubeconfig: $(IDENTITY_DIR)/tls/server-ca.crt cli/dist/liken
 	cli/dist/liken kubeconfig $(IDENTITY_DIR)
 
-# This is the bootable initramfs: the image domain packs liken and
-# everything k3s needs into the cpio archive the kernel unpacks at
-# boot. The image domain is production code and carries no manifests
-# or identity of its own, and produces nothing of its own either: the
-# assembled archive bakes a deployment's manifests and identity, so
-# it is the deployment's artifact and lands in the deployment's
-# directory. This root Makefile is where the OS build meets this
-# repo's own deployment, so it points the build at the dev cluster's
-# manifests and identity and lands the archive beside them. The
-# prerequisites here mirror the ones image/Makefile's own liken.cpio
-# rule declares (from its side of the directory boundary); when either
-# list changes, change the other to match.
+# Where the OS build meets this repo's own deployment: the dev
+# cluster's composed artifacts land beside its manifests and identity.
+GENERIC_IMAGE := image/dist/liken.cpio
 IMAGE_DIR := dev-cluster/image
 
-$(IMAGE_DIR)/liken.cpio: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s \
+# This is the generic bootable initramfs: the image domain packs
+# liken and everything k3s needs into the cpio archive the kernel
+# unpacks at boot, with nothing about any one deployment inside. It
+# is the OS's own artifact, so it lands in the image domain's dist/.
+# The prerequisites here mirror the ones image/Makefile's own
+# liken.cpio rule declares (from its side of the directory boundary);
+# when either list changes, change the other to match.
+$(GENERIC_IMAGE): init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s \
 		$(XTABLES_DIST)/bin/xtables-legacy-multi \
 		$(TRUST_DIST)/cacert.pem \
 		$(E2FSPROGS_DIST)/mke2fs \
@@ -192,7 +190,6 @@ $(IMAGE_DIR)/liken.cpio: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s 
 		$(wildcard open-iscsi/manifests/*.yaml) \
 		open-iscsi/modules.conf open-iscsi/iscsid.conf \
 		$(NFSUTILS_DIST)/mount.nfs nfs-utils/modules.conf \
-		$(IDENTITY_DIR)/tls/server-ca.crt $(IDENTITY_DIR)/token \
 		machine-operator/dist/liken-machine-operator-image.tar \
 		$(wildcard machine-operator/manifests/*.yaml) \
 		cluster-operator/dist/liken-cluster-operator-image.tar \
@@ -200,14 +197,31 @@ $(IMAGE_DIR)/liken.cpio: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s 
 		$(wildcard manifests/*.yaml) \
 		logs/dist/liken-logs-image.tar \
 		$(wildcard logs/manifests/*.yaml) \
-		dev-cluster/cluster.yaml $(wildcard dev-cluster/machines/*.yaml) \
-		image/build.sh $(wildcard image/inventory/*.go) \
-		$(wildcard machine/*.go) \
+		image/build.sh \
 		$(shell find image/etc -type f) image/Makefile
-	$(MAKE) -C image MANIFESTS=../dev-cluster \
-		IDENTITY=$(abspath $(IDENTITY_DIR)) DIST=$(abspath $(IMAGE_DIR))
+	$(MAKE) -C image
 
-image: $(IMAGE_DIR)/liken.cpio
+image: $(GENERIC_IMAGE)
+
+# The deployment layer: the small archive that makes the generic
+# image the dev cluster's image — its manifests, its identity, and
+# its machines' declared kernel modules (image/layer.go explains the
+# contents; the kernel dist is where the module files and depmod
+# index come from).
+$(IMAGE_DIR)/deployment.cpio: cli/dist/liken \
+		dev-cluster/cluster.yaml $(wildcard dev-cluster/machines/*.yaml) \
+		$(IDENTITY_DIR)/tls/server-ca.crt $(IDENTITY_DIR)/token \
+		$(KERNEL_DIST)/vmlinuz
+	@mkdir -p $(IMAGE_DIR)
+	cli/dist/liken layer dev-cluster $(IDENTITY_DIR) $(KERNEL_DIST) $@
+
+# The dev cluster's bootable image: the generic OS with the
+# deployment layer concatenated on. The kernel's initramfs unpacker
+# processes concatenated cpio archives in order into one filesystem,
+# so composition replaces rebuilding: neither input is opened, only
+# joined.
+$(IMAGE_DIR)/liken.cpio: $(GENERIC_IMAGE) $(IMAGE_DIR)/deployment.cpio
+	cat $^ > $@
 
 # Boot the dev cluster's machines, the QEMU guests that stand in for
 # the physical and cloud machines liken really targets (the virtual
@@ -248,9 +262,7 @@ smoke: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/liken.cpio kubeconfig
 # The install image is liken.cpio carrying the release payload, which
 # the installer verifies and copies onto a machine's own disk.
 $(IMAGE_DIR)/install.cpio: $(IMAGE_DIR)/liken.cpio $(KERNEL_DIST)/vmlinuz image/install.sh
-	$(MAKE) -C image MANIFESTS=../dev-cluster \
-		IDENTITY=$(abspath $(IDENTITY_DIR)) DIST=$(abspath $(IMAGE_DIR)) \
-		$(abspath $(IMAGE_DIR))/install.cpio
+	DIST=$(abspath $(IMAGE_DIR)) image/install.sh
 
 # Install a machine: boot it once from the "USB stick" (the install
 # image via -kernel), let it put this release on its own system
@@ -295,6 +307,7 @@ clean:
 	$(MAKE) -C logs clean
 	$(MAKE) -C cli clean
 	rm -rf $(IDENTITY_DIR)
-	$(MAKE) -C image IDENTITY=$(abspath $(IDENTITY_DIR)) DIST=$(abspath $(IMAGE_DIR)) clean
+	$(MAKE) -C image clean
+	rm -rf $(IMAGE_DIR)
 
 .PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils init machine-operator cluster-operator logs cli identity kubeconfig image run run-once smoke install storage release serve clean

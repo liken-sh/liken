@@ -1,0 +1,2 @@
+# The built archive; `make` recreates it from the sources here.
+dist/

@@ -54,7 +54,7 @@ func parseCertificate(t *testing.T, dir, path string) *x509.Certificate {
 
 func TestMintProducesTheWholeBundle(t *testing.T) {
 	dir := mintedIdentity(t)
-	for _, f := range bundle {
+	for _, f := range Bundle {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
 			t.Errorf("missing %s", f)
 		}

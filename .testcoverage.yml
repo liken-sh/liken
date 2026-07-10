@@ -59,10 +59,11 @@ override:
   # it are tested here against fakes.
   - path: ^init$
     threshold: 61
-  # The image inventory: reading the deployment's manifests for the
-  # build; what goes untested is main's argument plumbing.
-  - path: ^image/inventory$
-    threshold: 82
+  # The image package: the cpio writer and the deployment layer,
+  # exercised end to end against fixture trees; what goes untested is
+  # a scattering of I/O error returns.
+  - path: ^image$
+    threshold: 83
   # The log relays: parsing and tailing are pure or run against real
   # temp files; what goes untested is the real /dev/kmsg device and
   # the clock syscalls.

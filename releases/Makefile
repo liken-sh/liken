@@ -36,7 +36,14 @@ VERSION ?=
 FAULT ?=
 
 BUILD = build/$(VERSION)
+KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 
+# A release is composed the same way the dev cluster's image is (see
+# the root Makefile): the generic archive rebuilt under the release's
+# version stamp, the dev deployment's layer packed by the toolkit,
+# and the two concatenated. The layer is rebuilt per release even
+# though its inputs rarely change, because it is small and cheap and
+# a stale layer would be a miserable thing to debug.
 release:
 	@test -n "$(VERSION)" || { echo "usage: make release VERSION=x.y.z"; exit 1; }
 	$(MAKE) -C ../init LIKEN_VERSION=$(VERSION) LIKEN_FAULT=$(FAULT) DIST=$(abspath $(BUILD)/init)
@@ -44,14 +51,19 @@ release:
 	$(MAKE) -C ../cluster-operator LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/cluster-operator)
 	$(MAKE) -C ../logs LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/logs)
 	$(MAKE) -C ../open-iscsi LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/open-iscsi)
-	$(MAKE) -C ../image LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/image) \
+	$(MAKE) -C ../image LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/generic) \
 		INIT_DIST=$(abspath $(BUILD)/init) \
 		MACHINE_OPERATOR_DIST=$(abspath $(BUILD)/machine-operator) \
 		CLUSTER_OPERATOR_DIST=$(abspath $(BUILD)/cluster-operator) \
 		LOGS_DIST=$(abspath $(BUILD)/logs) \
-		OPENISCSI_DIST=$(abspath $(BUILD)/open-iscsi) \
-		MANIFESTS=../dev-cluster IDENTITY=../dev-cluster/identity \
-		$(abspath $(BUILD)/image)/install.cpio
+		OPENISCSI_DIST=$(abspath $(BUILD)/open-iscsi)
+	$(MAKE) -C ../cli
+	mkdir -p $(BUILD)/image
+	../cli/dist/liken layer ../dev-cluster ../dev-cluster/identity \
+		../kernel/dist/$(KERNEL_VERSION) $(BUILD)/image/deployment.cpio
+	cat $(BUILD)/generic/liken.cpio $(BUILD)/image/deployment.cpio \
+		>$(BUILD)/image/liken.cpio
+	LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/image) ../image/install.sh
 	./publish.sh $(VERSION)
 
 # The release server: a logged file server over dist/, listening on

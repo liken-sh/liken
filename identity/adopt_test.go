@@ -23,7 +23,7 @@ func TestAdoptRoundTripsAnIdentity(t *testing.T) {
 	if err := Adopt(harvest, dir, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range bundle {
+	for _, f := range Bundle {
 		want, err := os.ReadFile(filepath.Join(harvest, f))
 		if err != nil {
 			t.Fatal(err)
