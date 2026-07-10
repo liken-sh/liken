@@ -1,8 +1,8 @@
 # Public releases
 
 Milestone 22 — In progress: the toolkit, the generic/deployment
-split, and the two-layer release channels exist; install media and
-scaffolding remain
+split, the release channel, and install-media assembly exist;
+per-machine media and scaffolding remain
 
 The goal, designed from the user's experience inward: download a
 release, run a command, produce a USB stick, boot your cluster —
@@ -10,10 +10,10 @@ human or agent, no repo, no builds. The pieces, as they now exist:
 
 - **The toolkit** is one static Go binary, `liken` (cli/), shipped
   with public releases. It mints or adopts a cluster identity,
-  computes an admin kubeconfig, packs a deployment layer, and
-  publishes, serves, and drills a release channel. The CLI is a thin
-  dispatch table; each capability lives as a Go package in the domain
-  that owns it (identity/, image/, releases/).
+  computes an admin kubeconfig, packs a deployment layer, assembles
+  install media, and bundles, serves, and drills the release channel.
+  The CLI is a thin dispatch table; each capability lives as a Go
+  package in the domain that owns it (identity/, image/, releases/).
 
 - **Composition replaces rebuilding.** The image build produces a
   generic archive: the OS, nobody's identity, a digest that never
@@ -23,15 +23,15 @@ human or agent, no repo, no builds. The pieces, as they now exist:
   concatenated archives in order into one filesystem, the same
   mechanism the install image uses to carry its payload.
 
-- **Releases come in two layers.** liken's own public releases
-  (releases/) carry vmlinuz, the generic liken.cpio, and the toolkit,
-  named by digest in a release.yaml whose digests are stable and
-  publishable. A deployment's fleet upgrades from its own channel —
-  the same OS composed with its layer, because the digest chain
-  rooted in the Cluster's catalog must cover the exact bytes its
-  machines boot. The repo's lab keeps its channel in
-  dev-cluster/releases/, built from the public build by the same
-  steps any deployment would follow.
+- **One channel, and it is public.** A release (releases/) carries
+  vmlinuz, the generic liken.cpio, and the toolkit, named by digest
+  in a release.yaml whose digests are stable and publishable. Every
+  fleet upgrades from that channel directly: a deployment pins the
+  document's digest in its Cluster's catalog, and each machine
+  supplies the one thing a release can't — its own deployment layer,
+  carried between its boot slots. Nothing is composed or hosted per
+  deployment (milestone 28 owns that design); the lab serves
+  releases/dist as its stand-in for the website's channel.
 
 Decisions on the record: install media is one stick per machine (the
 media bakes liken.machine=<name> into the kernel command line);
@@ -43,10 +43,11 @@ first contact.
 
 What remains:
 
-- **Install media.** `liken media`: a bootable per-machine image
-  (kernel + composed initramfs + command line) written from a public
-  release plus a deployment directory, the piece that turns "download
-  and run a command" into a stick a machine boots.
+- **Per-machine media.** `liken media` assembles an install image
+  from a release and a layer; what it doesn't yet do is bake one
+  machine's `liken.machine=<name>` command line into a stick, the
+  piece that makes the image bootable hardware media rather than the
+  lab's -kernel payload.
 - **Scaffolding.** `liken new`: a deployment directory started from
   answers (names, disks, NICs), plus the getting-started document
   that walks the whole path.

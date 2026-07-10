@@ -1,10 +1,9 @@
 package releases
 
-// Tests for the channel operations: publishing a deployment's built
-// image, bundling a public release, and the corruption drill. The
-// fixtures are small stand-ins with the same shapes: a built image
-// directory carrying an install payload, and artifact files big
-// enough to corrupt.
+// Tests for the channel operations: bundling a release and the
+// corruption drill. The fixtures are small stand-ins with the same
+// shapes: artifact files big enough to corrupt, and documents
+// generated from their real bytes.
 
 import (
 	"bytes"
@@ -17,93 +16,10 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// builtImage stands in for a deployment's build/<v>/image directory:
-// the install payload install.sh would have packed, plus the install
-// image beside it.
-func builtImage(t *testing.T) string {
+// bundledRelease lays out a tiny release through Bundle itself and
+// returns the channel directory and Bundle's report.
+func bundledRelease(t *testing.T, version string) (string, string) {
 	t.Helper()
-	dir := t.TempDir()
-	payload := filepath.Join(dir, "install-root", "usr", "share", "liken", "release")
-	if err := os.MkdirAll(payload, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	files := map[string]string{
-		filepath.Join(payload, "vmlinuz"):      "kernel bytes",
-		filepath.Join(payload, "liken.cpio"):   "composed image bytes",
-		filepath.Join(payload, "release.yaml"): "kind: Release\nmetadata: {name: 1.2.3}\n",
-		filepath.Join(dir, "install.cpio"):     "install image bytes",
-	}
-	for path, content := range files {
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return dir
-}
-
-func TestPublishLaysOutTheChannel(t *testing.T) {
-	channel := t.TempDir()
-	var out bytes.Buffer
-	if err := Publish(builtImage(t), channel, "1.2.3", &out); err != nil {
-		t.Fatal(err)
-	}
-
-	for name, want := range map[string]string{
-		"vmlinuz":      "kernel bytes",
-		"liken.cpio":   "composed image bytes",
-		"release.yaml": "kind: Release\nmetadata: {name: 1.2.3}\n",
-		"install.cpio": "install image bytes",
-	} {
-		got, err := os.ReadFile(filepath.Join(channel, "1.2.3", name))
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		if string(got) != want {
-			t.Errorf("%s: published bytes differ from the build's", name)
-		}
-	}
-}
-
-func TestPublishReportsTheCatalogEntry(t *testing.T) {
-	channel := t.TempDir()
-	var out bytes.Buffer
-	if err := Publish(builtImage(t), channel, "1.2.3", &out); err != nil {
-		t.Fatal(err)
-	}
-
-	// The catalog names the release document by its own digest: the
-	// root of the trust chain, computed from the published copy.
-	digest, err := fileSHA256(filepath.Join(channel, "1.2.3", "release.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out.String(), "digest: sha256:"+digest) {
-		t.Errorf("report does not carry the document digest:\n%s", out.String())
-	}
-	if !strings.Contains(out.String(), "version: 1.2.3") {
-		t.Errorf("report does not carry the version:\n%s", out.String())
-	}
-}
-
-func TestPublishReplacesAPreviousAttempt(t *testing.T) {
-	channel := t.TempDir()
-	stale := filepath.Join(channel, "1.2.3", "leftover")
-	if err := os.MkdirAll(filepath.Dir(stale), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(stale, []byte("old"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := Publish(builtImage(t), channel, "1.2.3", io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(stale); !os.IsNotExist(err) {
-		t.Error("a republish must not leave stale files in the version directory")
-	}
-}
-
-func TestBundleProducesAVerifiableRelease(t *testing.T) {
 	src := t.TempDir()
 	for name, content := range map[string]string{
 		"vmlinuz":    "kernel bytes",
@@ -115,12 +31,17 @@ func TestBundleProducesAVerifiableRelease(t *testing.T) {
 		}
 	}
 	channel := t.TempDir()
-
+	var out bytes.Buffer
 	err := Bundle(filepath.Join(src, "vmlinuz"), filepath.Join(src, "liken.cpio"),
-		filepath.Join(src, "liken"), channel, "0.2.0", io.Discard)
+		filepath.Join(src, "liken"), channel, version, &out)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return channel, out.String()
+}
+
+func TestBundleProducesAVerifiableRelease(t *testing.T) {
+	channel, _ := bundledRelease(t, "0.2.0")
 
 	// The document must parse as the same Release kind machines
 	// verify, and every artifact must verify against it: the same
@@ -148,6 +69,57 @@ func TestBundleProducesAVerifiableRelease(t *testing.T) {
 			t.Errorf("%s does not verify: %v", a.Name, err)
 		}
 		f.Close()
+	}
+}
+
+func TestBundleReportsTheCatalogEntry(t *testing.T) {
+	channel, report := bundledRelease(t, "1.2.3")
+
+	// The catalog entry is what a deployment commits to its Cluster:
+	// the release document named by its own digest, computed from the
+	// published copy, the root of the trust chain.
+	digest, err := fileSHA256(filepath.Join(channel, "1.2.3", "release.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(report, "digest: sha256:"+digest) {
+		t.Errorf("report does not carry the document digest:\n%s", report)
+	}
+	if !strings.Contains(report, "version: 1.2.3") {
+		t.Errorf("report does not carry the version:\n%s", report)
+	}
+}
+
+func TestBundleReplacesAPreviousAttempt(t *testing.T) {
+	channel := t.TempDir()
+	stale := filepath.Join(channel, "0.2.0", "leftover")
+	if err := os.MkdirAll(filepath.Dir(stale), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stale, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	src := t.TempDir()
+	for _, name := range []string{"vmlinuz", "liken.cpio", "liken"} {
+		if err := os.WriteFile(filepath.Join(src, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := Bundle(filepath.Join(src, "vmlinuz"), filepath.Join(src, "liken.cpio"),
+		filepath.Join(src, "liken"), channel, "0.2.0", io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Error("a rebundle must not leave stale files in the version directory")
+	}
+}
+
+func TestBundleRefusesAMissingArtifact(t *testing.T) {
+	if err := Bundle("no-such-vmlinuz", "no-such-cpio", "no-such-cli",
+		t.TempDir(), "0.0.1", io.Discard); err == nil {
+		t.Error("bundling artifacts that don't exist must fail")
 	}
 }
 
@@ -194,21 +166,5 @@ func TestCorruptBreaksTheDigestAndOnlyTheDigest(t *testing.T) {
 func TestCorruptRefusesAnUnpublishedRelease(t *testing.T) {
 	if err := Corrupt(t.TempDir(), "9.9.9", io.Discard); err == nil {
 		t.Error("corrupting a release that isn't there must fail loudly")
-	}
-}
-
-func TestPublishRefusesAnImageWithoutAPayload(t *testing.T) {
-	// A directory that never went through install.sh has no payload;
-	// publishing it must fail before the channel is touched.
-	channel := t.TempDir()
-	if err := Publish(t.TempDir(), channel, "1.2.3", io.Discard); err == nil {
-		t.Error("publishing an unbuilt image must fail")
-	}
-}
-
-func TestBundleRefusesAMissingArtifact(t *testing.T) {
-	if err := Bundle("no-such-vmlinuz", "no-such-cpio", "no-such-cli",
-		t.TempDir(), "0.0.1", io.Discard); err == nil {
-		t.Error("bundling artifacts that don't exist must fail")
 	}
 }

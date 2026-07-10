@@ -2,9 +2,9 @@
 # anyone.
 #
 # Everything else in this repo builds *the* system; this domain builds
-# *a version of* the system. A public release carries the generic OS
-# and the toolkit, with no deployment inside (bundle.go describes the
-# set), laid out the way a release server serves it:
+# *a version of* the system. A release carries the generic OS and the
+# toolkit, with no deployment inside (bundle.go describes the set),
+# laid out the way a release server serves it:
 #
 #   releases/dist/<version>/vmlinuz       the kernel
 #   releases/dist/<version>/liken.cpio    the generic system: init,
@@ -12,17 +12,19 @@
 #                                         identity or manifests
 #   releases/dist/<version>/liken         the toolkit: mint an
 #                                         identity, pack a deployment
-#                                         layer, publish a channel —
-#                                         no repo or build required
+#                                         layer, assemble install
+#                                         media — no repo or build
+#                                         required
 #   releases/dist/<version>/release.yaml  the document naming each
 #                                         artifact by sha256 digest
 #
 # Because nothing in the bundle depends on a deployment, these digests
-# are stable and publishable. A deployment's own release channel is a
-# different thing: the same OS composed with that deployment's layer,
-# verified by that deployment's fleet. The repo's own lab keeps its
-# channel in dev-cluster/releases/, built from this domain's `build`
-# target, which is the same two-layer shape any deployment follows.
+# are stable and publishable, and this channel is the only one there
+# is: every fleet upgrades from it directly, each machine carrying its
+# own deployment layer between its slots. The `serve` target below is
+# the lab's stand-in for the releases on the liken.sh website — the
+# dev cluster's guests fetch from it at http://10.0.2.2:8017 — and
+# `corrupt` is the drill that proves machines refuse damaged bytes.
 #
 # A release is an ordinary build with a different version stamp: the
 # init, operators, cli, and image domains all accept LIKEN_VERSION and
@@ -48,9 +50,7 @@ KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 
 # The version-stamped build: every liken component rebuilt under
 # VERSION into build/<version>/, generic image included. This is the
-# input to both kinds of release: `release` below bundles it publicly,
-# and dev-cluster/releases composes it with the lab's deployment
-# layer.
+# release's input, and nothing else's: deployments never build.
 build:
 	@test -n "$(VERSION)" || { echo "usage: make build VERSION=x.y.z"; exit 1; }
 	$(MAKE) -C ../init LIKEN_VERSION=$(VERSION) LIKEN_FAULT=$(FAULT) DIST=$(abspath $(BUILD)/init)
@@ -66,9 +66,11 @@ build:
 		LOGS_DIST=$(abspath $(BUILD)/logs) \
 		OPENISCSI_DIST=$(abspath $(BUILD)/open-iscsi)
 
-# The public release: the build, bundled. The toolkit in the bundle
-# is the same binary that lays out the bundle, which is the kind of
-# circularity a bootstrapping tool earns.
+# The release: the build, bundled. The toolkit in the bundle is the
+# same binary that lays out the bundle, which is the kind of
+# circularity a bootstrapping tool earns. The report ends with the
+# catalog entry a deployment commits to its Cluster to adopt this
+# release.
 release: build
 	$(BUILD)/cli/liken bundle \
 		../kernel/dist/$(KERNEL_VERSION)/vmlinuz \
@@ -76,7 +78,24 @@ release: build
 		$(BUILD)/cli/liken \
 		dist $(VERSION)
 
+# Serve the channel over HTTP: the lab's release server, standing in
+# for the website. The dev cluster's guests reach it at
+# http://10.0.2.2:8017, the source URL their Cluster document
+# declares.
+serve:
+	$(MAKE) -C ../cli
+	../cli/dist/liken serve dist
+
+# Damage a published release in place, to drill the trust chain: a
+# machine that fetches it must hold at DigestMismatch and stage
+# nothing. Recovery is publishing a corrected release under a new
+# version, never patching this one.
+corrupt:
+	@test -n "$(VERSION)" || { echo "usage: make corrupt VERSION=x.y.z"; exit 1; }
+	$(MAKE) -C ../cli
+	../cli/dist/liken corrupt dist $(VERSION)
+
 clean:
 	rm -rf build dist
 
-.PHONY: build release clean
+.PHONY: build release serve corrupt clean

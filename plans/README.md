@@ -93,7 +93,7 @@ numbered before the arc existed; it belongs second in this order:
 22. [ ] [Public releases](22-public-releases.md) — releases of liken
     itself, with no deployment baked in, and the utilities someone
     needs to produce a cluster of their own from one.
-28. [ ] [Internet updates](28-internet-updates.md) — the deployment
+28. [x] [Internet updates](28-internet-updates.md) — the deployment
     layer becomes a separate file on the boot slot, machines carry it
     forward themselves, and every update after the first boot comes
     straight from liken's public releases: nothing composed, nothing

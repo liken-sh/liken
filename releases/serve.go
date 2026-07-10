@@ -1,16 +1,17 @@
-// Package releases produces and operates release channels: the
+// Package releases produces and operates the release channel: the
 // layout a release server publishes (dist/<version>/ holding the
 // artifacts and the release.yaml that names them by digest), the
 // server that exposes it, and the drills that prove machines refuse
 // what the digests disown.
 //
-// Two kinds of channel share this machinery. liken's own public
-// releases carry the generic OS (vmlinuz, the generic liken.cpio,
-// the toolkit binary) with no deployment inside; a deployment's
-// channel carries that OS composed with the deployment's layer,
-// because the digest chain must cover the exact bytes its machines
-// boot. The layouts are the same shape, so the same publishing,
-// serving, and corrupting code operates both.
+// There is one kind of channel, and it is public: the generic OS
+// (vmlinuz, the generic liken.cpio, the toolkit binary) with no
+// deployment inside. Every fleet upgrades from it directly — each
+// machine carries its own deployment layer between its slots, so
+// nothing deployment-specific is ever composed for, or hosted on, a
+// channel. The server here is a stand-in for the releases on the
+// liken.sh website; a deployment's choices live on its machines and
+// in its cluster's API, not on a server.
 package releases
 
 // The release server: a dist/ tree over HTTP, every request logged.

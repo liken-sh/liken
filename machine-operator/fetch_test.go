@@ -194,6 +194,9 @@ func TestAMissingActiveLayerIsRejectedAndHeld(t *testing.T) {
 	if !strings.Contains(snap.detail, "layer") {
 		t.Errorf("the hold must name the layer as the problem: %s", snap.detail)
 	}
+	if strings.Contains(snap.detail, "publish a corrected release") {
+		t.Errorf("the remedy is local, not a republish: %s", snap.detail)
+	}
 	if _, err := os.Stat(filepath.Join(slot, "release.yaml")); !os.IsNotExist(err) {
 		t.Error("a slot without its layer is not bootable and must not carry the release document")
 	}

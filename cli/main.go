@@ -3,12 +3,12 @@
 //
 // Everything an operator does to a deployment that isn't running a
 // machine lives here: minting or adopting a cluster identity,
-// computing credentials from it, and (as this tool grows) assembling
-// install media from a public release. The other Go programs in this
-// repo run *inside* the machine — init as PID 1, the operators as
-// pods; this one runs on the operator's workstation, and it ships
-// with public releases so that producing a cluster never requires
-// this repo or a build.
+// computing credentials from it, packing a deployment layer, and
+// assembling install media from a public release. The other Go
+// programs in this repo run *inside* the machine — init as PID 1,
+// the operators as pods; this one runs on the operator's
+// workstation, and it ships with public releases so that producing a
+// cluster never requires this repo or a build.
 //
 // The command is a thin dispatcher. The logic lives with the domain
 // that owns it (the identity package, and later the image and
@@ -38,9 +38,9 @@ usage:
   liken media <release-dir> <deployment.cpio> <output.cpio>
                                            assemble install media from
                                            a release and a layer
-  liken publish <image-dir> <channel-dir> <version>
-                                           publish a built image to a
-                                           release channel
+  liken bundle <vmlinuz> <liken.cpio> <liken-cli> <channel-dir> <version>
+                                           lay out a release in a
+                                           channel
   liken serve <channel-dir> [address]      serve a release channel
                                            (default address :8017)
   liken corrupt <channel-dir> <version>    damage a published release,
@@ -98,15 +98,7 @@ func run(args []string) error {
 			return fmt.Errorf("usage: liken media <release-dir> <deployment.cpio> <output.cpio>")
 		}
 		return image.Media(args[1], args[2], args[3], os.Stdout)
-	case "publish":
-		if len(args) != 4 {
-			return fmt.Errorf("usage: liken publish <image-dir> <channel-dir> <version>")
-		}
-		return releases.Publish(args[1], args[2], args[3], os.Stdout)
 	case "bundle":
-		// Bundling is how this repo cuts liken's own public releases
-		// (see releases/bundle.go); it is undocumented in the usage
-		// text above because a deployment publishes, never bundles.
 		if len(args) != 6 {
 			return fmt.Errorf("usage: liken bundle <vmlinuz> <liken.cpio> <liken-cli> <channel-dir> <version>")
 		}

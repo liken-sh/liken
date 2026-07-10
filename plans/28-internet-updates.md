@@ -1,6 +1,6 @@
 # Internet updates
 
-Milestone 28 — In progress
+Milestone 28 — Done
 
 Milestone 22 split the OS into two archives: a generic liken.cpio that
 is the same for everyone, and a small deployment layer carrying one
@@ -92,22 +92,63 @@ both files, in order, from the slot's filesystem. The fallback this
 milestone kept in reserve (composing the two archives into a
 slot-local file after verification, one initrd=) is not needed.
 
-## The slices
+## How it landed
 
-1. **This document and the drill** — done; the verdict above.
-2. **`liken media` and the two-initrd installer.** The install-image
-   assembly moves from image/install.sh into the CLI: verify a public
-   release directory, compose it with a layer, and write install
-   media whose payload carries the release document verbatim and the
-   layer beside its sidecar. The installer copies the layer to slot A
-   and writes both slots' two-initrd boot entries.
-3. **The fetcher carries the layer.** The carry step described above,
-   between the artifact downloads and the release document.
-4. **One channel format.** The deployment channel dies: `liken
-   publish` is removed, the public bundle's document digest becomes
-   the catalog entry, and the dev cluster's channel becomes a local
-   stand-in for the website's releases.
-5. **Documentation** across plans/12, plans/22, and this file.
+1. **The drill** — the verdict above gated everything else.
+2. **`liken media` and the two-initrd installer.** Install-image
+   assembly moved from image/install.sh into the CLI (image/media.go
+   behind `liken media`): verify a release directory against its
+   document, compose it with a layer, and write install media whose
+   payload carries the document verbatim and the layer beside its
+   sidecar (the vocabulary lives in machine/layer.go). The installer
+   copies the layer to slot A with the artifacts' own
+   verify-copy-reverify discipline, sidecar last, and writes both
+   slots' two-initrd boot entries. Proven: fresh install to Ready
+   from disk; an install hard-killed mid-kernel and again mid-copy
+   converged on the next run.
+3. **The fetcher carries the layer** (machine-operator/fetch.go's
+   carryLayer), between the artifact downloads and the document. An
+   active slot whose layer or sidecar doesn't verify holds the fetch
+   the way corruption does — no retry can repair the slot the
+   machine is standing on — but under its own message, because the
+   remedy (repair or reinstall this machine) is local, not a
+   republish. Proven with a release round before the channel
+   reshape: the composed image plus the carried layer boots (the
+   layer just unpacks twice), so the two slices could land apart.
+4. **One channel format.** `liken publish` and image/install.sh are
+   gone, dev-cluster/releases/ with them; releases/dist is the
+   channel, `make release` bundles into it, `make serve` serves it,
+   and the bundle's report ends with the catalog entry a deployment
+   commits to adopt the release.
+
+## What the lab showed
+
+The milestone's proof was a three-leader fleet round on the one
+channel. Three machines wiped, installed from `liken media` output,
+and Ready; `make release VERSION=0.3.0`, one Cluster edit
+(spec.version plus the printed catalog entry), and the fleet rolled
+one leader at a time onto bytes fetched straight from the
+public-format channel — the serve log shows each machine pulling
+release.yaml, vmlinuz, the generic liken.cpio, and the CLI, and
+nothing was composed or published for the deployment at any point.
+
+The corruption drill held: a release damaged after publish
+(`make corrupt`) left every machine at DigestMismatch with nothing
+staged, and retargeting a good version cleared the hold. The layer's
+own failure mode was drilled as one sequence on one machine: a hard
+kill mid-fetch, then its active slot's sidecar truncated on disk
+while it was down (qemu-nbd). The next boot resumed the download —
+artifacts verified in place, nothing refetched — and then refused
+the carry with the local remedy: "the running slot's layer sidecar
+is damaged (the layer sidecar is 0 bytes, want 82); repair or
+reinstall this machine". A reinstall from fresh media converged it
+back to the fleet's version, its layer restored. The reinstall
+surfaced one manual step this milestone leaves on the table: a wiped
+leader rejoining under its old name is refused by etcd ("duplicate
+node name found") until the stale node object is deleted, which k3s
+turns into the old member's removal. Automating that cleanup when a
+machine is deliberately replaced is machine-lifecycle work for a
+later milestone.
 
 ## Decisions on record
 

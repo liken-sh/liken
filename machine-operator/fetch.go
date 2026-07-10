@@ -101,6 +101,13 @@ type fetcher struct {
 // Rejected.
 var errCorrupt = errors.New("the bytes do not match the release's digests")
 
+// errLayer marks a failure in the machine's own deployment layer.
+// It holds the way corruption does — no retry can repair the slot
+// the machine is standing on — but the remedy is local (repair or
+// reinstall this machine), so the condition must not send the
+// operator off to republish a release that was never the problem.
+var errLayer = errors.New("this machine's deployment layer is unusable")
+
 // Ensure records the ask, starts a download when one is needed and
 // none is running, and returns the current state. It never blocks:
 // the heaviest thing here is starting a goroutine.
@@ -152,6 +159,9 @@ func (f *fetcher) run(ask fetchAsk) {
 	case err == nil:
 		f.snap.state = fetchVerified
 		f.snap.detail = fmt.Sprintf("%d artifacts fetched, the rest already verified in place", fetched)
+	case errors.Is(err, errLayer):
+		f.snap.state = fetchRejected
+		f.snap.detail = err.Error()
 	case errors.Is(err, errCorrupt):
 		f.snap.state = fetchRejected
 		f.snap.detail = fmt.Sprintf("release %s at %s is corrupt (%v); publish a corrected release under a new version", ask.version, ask.source, err)
@@ -230,11 +240,11 @@ func fetchRelease(ask fetchAsk) (int, error) {
 func carryLayer(ask fetchAsk) error {
 	sidecar, err := os.ReadFile(filepath.Join(ask.activeSlotDir, machine.LayerSidecarName))
 	if err != nil {
-		return fmt.Errorf("the running slot's deployment layer cannot be vouched for (%v); repair or reinstall this machine: %w", err, errCorrupt)
+		return fmt.Errorf("the running slot's deployment layer cannot be vouched for (%v); repair or reinstall this machine: %w", err, errLayer)
 	}
 	digest, err := machine.ParseLayerSidecar(sidecar)
 	if err != nil {
-		return fmt.Errorf("the running slot's layer sidecar is damaged (%v); repair or reinstall this machine: %w", err, errCorrupt)
+		return fmt.Errorf("the running slot's layer sidecar is damaged (%v); repair or reinstall this machine: %w", err, errLayer)
 	}
 	verify := func(path string) error {
 		f, err := os.Open(path)
@@ -246,7 +256,7 @@ func carryLayer(ask fetchAsk) error {
 	}
 	source := filepath.Join(ask.activeSlotDir, machine.LayerName)
 	if err := verify(source); err != nil {
-		return fmt.Errorf("the running slot's deployment layer does not verify (%v); repair or reinstall this machine: %w", err, errCorrupt)
+		return fmt.Errorf("the running slot's deployment layer does not verify (%v); repair or reinstall this machine: %w", err, errLayer)
 	}
 
 	// Resumable the way the artifacts are: a layer already carried
@@ -268,7 +278,7 @@ func carryLayer(ask fetchAsk) error {
 		}
 		if err := verify(tmp); err != nil {
 			os.Remove(tmp)
-			return fmt.Errorf("the carried layer does not verify: %v: %w", err, errCorrupt)
+			return fmt.Errorf("the carried layer does not verify: %v: %w", err, errLayer)
 		}
 		if err := os.Rename(tmp, dest); err != nil {
 			return err

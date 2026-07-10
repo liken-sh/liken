@@ -1,4 +1,0 @@
-# Release builds and the published channel; `make release` recreates
-# them from the sources that are committed.
-build/
-dist/

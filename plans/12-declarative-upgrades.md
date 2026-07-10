@@ -2,6 +2,14 @@
 
 Milestone 12 — Done
 
+(Milestone 28 later revised two details recorded here: boot slots
+now hold the generic OS and the deployment layer as separate files,
+boot entries carry two initrd= parameters, and machines fetch
+releases from liken's public channel rather than a per-deployment
+one. The machinery this milestone built — spec.version, the catalog,
+the fetcher, proving boots, BootOrder repair — is unchanged.
+plans/28-internet-updates.md has the design.)
+
 Declarative upgrades: one field on the Cluster moves the whole
 fleet to a new liken version. `spec.version` names the target.
 It lives on the Cluster, not the Machines, because a fleet

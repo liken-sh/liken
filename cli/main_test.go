@@ -36,7 +36,6 @@ func TestRunChecksArgumentCounts(t *testing.T) {
 		{"kubeconfig without a directory", []string{"kubeconfig"}},
 		{"layer without its inputs", []string{"layer", "manifests", "identity"}},
 		{"media without its inputs", []string{"media", "release-dir"}},
-		{"publish without a version", []string{"publish", "image", "channel"}},
 		{"bundle without its artifacts", []string{"bundle", "vmlinuz"}},
 		{"serve with too many arguments", []string{"serve", "channel", "addr", "extra"}},
 		{"corrupt without a version", []string{"corrupt", "channel"}},
@@ -115,10 +114,9 @@ func TestRunAssemblesInstallMedia(t *testing.T) {
 }
 
 func TestRunOperatesAReleaseChannel(t *testing.T) {
-	// One tiny release through the channel commands: bundle it,
-	// publish is exercised by its own package against a full image
-	// payload, corrupt it. The artifacts just need to exist and be
-	// big enough to corrupt.
+	// One tiny release through the channel commands: bundle it, then
+	// corrupt it. The artifacts just need to exist and be big enough
+	// to corrupt.
 	src := t.TempDir()
 	for _, name := range []string{"vmlinuz", "liken.cpio", "liken"} {
 		if err := os.WriteFile(filepath.Join(src, name), bytes.Repeat([]byte("x"), 2<<20), 0o644); err != nil {
