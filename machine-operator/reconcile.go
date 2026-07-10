@@ -179,6 +179,13 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	settleClusterLifecycle(machine.MachineStateDir, machine.ClusterManifestPath, facts)
 	settleSystemReleaseLifecycle(machine.MachineStateDir, facts)
 
+	// The imports lifecycle settles on its own evidence: not this
+	// operator's existence but the Ready of every OS container on
+	// this node, because the trial covers every tarball the boot
+	// imported, not just the one this pod runs from (imports.go).
+	status.Conditions = machine.SetCondition(status.Conditions,
+		settleImportsLifecycle(c, m.Metadata.Name, facts), now)
+
 	status.Sysctls, err = applySysctls(m.Spec.Sysctls)
 	status.Conditions = machine.SetCondition(status.Conditions, sysctlsCondition(err), now)
 

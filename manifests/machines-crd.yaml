@@ -838,6 +838,31 @@ spec:
                         pulls are anonymous.
                     credentialsHash:
                       type: string
+                    importsSource:
+                      type: string
+                      # No Seed: the record describes this disk's own
+                      # container store, so nothing baked into an
+                      # image could ever stand in for it.
+                      enum: [Staged, Proven]
+                      description: >-
+                        Which imported-images record this boot ran
+                        under. Staged means the tarballs are on trial
+                        and the operator has not yet proven the
+                        container store serves them; Proven is the
+                        ordinary boot whose tarballs all match the
+                        record. Absent when the lifecycle isn't
+                        running (ephemeral machineState or an
+                        ephemeral container store).
+                    importsHash:
+                      type: string
+                    importsDiscarded:
+                      type: boolean
+                      description: >-
+                        True when this boot found an imports trial
+                        still standing from a boot that died unproven,
+                        and discarded the container store rather than
+                        trust it. OS images re-unpacked from this
+                        boot's tarballs; workload images re-pull.
                     restarts:
                       type: integer
                       description: >-

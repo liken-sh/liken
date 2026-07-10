@@ -290,6 +290,15 @@ spec:
             # machine-state is writable.
             - name: system-slots
               mountPath: /var/lib/liken/system
+            # The container store's filesystem, held only as a syncfs
+            # handle: promoting an imports trial flushes every byte
+            # the imports wrote before the record says "proven"
+            # (imports.go). Read-only because the operator never edits
+            # the store; init alone discards it, and containerd alone
+            # writes it.
+            - name: container-store
+              mountPath: /var/lib/rancher/k3s/agent
+              readOnly: true
       # Staging and rebooting need no RBAC at all: they are
       # host-filesystem acts, bounded by these mounts rather than by
       # cluster permissions.
@@ -316,4 +325,8 @@ spec:
         - name: system-slots
           hostPath:
             path: /var/lib/liken/system
+            type: DirectoryOrCreate
+        - name: container-store
+          hostPath:
+            path: /var/lib/rancher/k3s/agent
             type: DirectoryOrCreate

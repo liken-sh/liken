@@ -77,7 +77,7 @@ func listPodsOnNode(c *kubernetes.Client, node string) ([]kubernetes.Pod, error)
 func evictablePods(pods []kubernetes.Pod) []kubernetes.Pod {
 	var evictable []kubernetes.Pod
 	for _, p := range pods {
-		if p.Status.Phase == "Succeeded" || p.Status.Phase == "Failed" {
+		if p.Completed() {
 			continue
 		}
 		if _, ok := p.Metadata.Annotations[mirrorPodAnnotation]; ok {

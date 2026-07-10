@@ -226,6 +226,14 @@ func main() {
 	// forever. A machine without k3s (the image's minimal form) just
 	// proves it can boot and powers off.
 	if _, err := os.Stat(k3sBinary); err == nil {
+		// Before k3s can touch its container store: decide whether
+		// this boot can trust it. A store whose last imports were
+		// never proven is discarded rather than believed (imports.go),
+		// and the tarballs this boot carries are staged as a trial the
+		// operator will prove.
+		settleImageImports(machine.MachineStateDir,
+			storage.MachineState.Backing == machine.BackingPartition,
+			storage.ClusterState.Backing == machine.BackingPartition, &boot)
 		// The machine's role and k3s's boot-derived configuration
 		// come from the cluster manifest (k3s.go). A failure here is
 		// an identity problem too: a follower that can't say where

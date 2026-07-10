@@ -77,11 +77,11 @@ the specific workload that revealed it:
 
 One the milestone-17 lab work demanded:
 
-23. [ ] [Crash-safe image imports](23-crash-safe-image-imports.md) —
-    a machine killed mid-unpack must not be left permanently unable
-    to run its own operator: image imports go through the same
-    staged/proven lifecycle as documents, with a wipe-and-retry
-    fallback. Designed.
+23. [x] [Crash-safe image imports](23-crash-safe-image-imports.md) —
+    a machine killed mid-unpack is no longer left permanently unable
+    to run its own operator: image imports ride the staged/proven
+    lifecycle, an unproven trial discards the container store, and
+    the operator proves the unpacks before anything trusts them.
 
 And the arc that looks past any single deployment, where liken stops
 being this checkout and becomes a public project. Milestone 22 was

@@ -475,6 +475,19 @@ type BootStatus struct {
 	CredentialsSource ManifestSource `json:"credentialsSource,omitempty"`
 	CredentialsHash   string         `json:"credentialsHash,omitempty"`
 
+	// The imported-images record this boot ran under (imports.go):
+	// Staged while the container store is serving unpacks no operator
+	// has yet proven, Proven on the ordinary boot whose tarballs all
+	// match the record. Empty when the lifecycle isn't running (no
+	// durable machineState to remember a trial, or an ephemeral
+	// container store that a reboot resets anyway). ImportsDiscarded
+	// records that this boot found a trial still standing from a boot
+	// that died unproven, and threw the container store away rather
+	// than trust it.
+	ImportsSource    ManifestSource `json:"importsSource,omitempty"`
+	ImportsHash      string         `json:"importsHash,omitempty"`
+	ImportsDiscarded bool           `json:"importsDiscarded,omitempty"`
+
 	// Restarts counts the in-place k3s restarts this boot has
 	// performed to apply restart-class changes (machine/changes.go).
 	// It lives in the boot record because it shares the boot's

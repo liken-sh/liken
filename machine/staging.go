@@ -3,11 +3,11 @@ package machine
 // The manifest lifecycle is how a document edit survives a reboot.
 //
 // A machine with a machineState storage role keeps its manifests on
-// that filesystem, one directory per document. Three documents go
-// through this lifecycle today — the Machine manifest (manifests/),
-// the Cluster manifest (cluster/), and the system-release record
-// (system/, see systemrelease.go) — and each directory holds the same
-// three files with the same meanings:
+// that filesystem, one directory per document. Several documents ride
+// this lifecycle — each has a constructor below or in its own file
+// (systemrelease.go, registries.go, imports.go) naming its directory —
+// and every directory holds the same three files with the same
+// meanings:
 //
 //	staged.yaml    a document awaiting its first successful boot,
 //	               written by the operator when the cluster's copy
@@ -69,9 +69,8 @@ const (
 
 // A ManifestStore is one document's lifecycle storage: a directory on
 // machineState holding that document's staged, proven, and rejected
-// files. The two constructors below are the only places the
-// directories are named, so the Machine's and the Cluster's
-// lifecycles can never collide.
+// files. Each document's constructor is the only place its directory
+// is named, so no two lifecycles can ever collide.
 type ManifestStore struct {
 	dir string
 }

@@ -25,8 +25,20 @@ type PodSpec struct {
 	NodeName string `json:"nodeName"`
 }
 
+// ContainerStatus is the sliver of a container's status liken needs:
+// which image it runs and whether it is currently serving. Ready is
+// the kubelet's own verdict, and it covers every way a container can
+// fail to serve, from a crash loop to an image whose binary won't
+// even exec.
+type ContainerStatus struct {
+	Name  string `json:"name"`
+	Image string `json:"image"`
+	Ready bool   `json:"ready"`
+}
+
 type PodStatus struct {
-	Phase string `json:"phase"`
+	Phase             string            `json:"phase"`
+	ContainerStatuses []ContainerStatus `json:"containerStatuses"`
 }
 
 // Pod is the sliver of a Kubernetes Pod liken needs: identity, where
@@ -35,6 +47,13 @@ type Pod struct {
 	Metadata PodMetadata `json:"metadata"`
 	Spec     PodSpec     `json:"spec"`
 	Status   PodStatus   `json:"status"`
+}
+
+// Completed reports whether the pod has run to its end. A completed
+// pod's containers are legitimately not ready and never will be, so
+// drains don't evict them and health judgments don't count them.
+func (p *Pod) Completed() bool {
+	return p.Status.Phase == "Succeeded" || p.Status.Phase == "Failed"
 }
 
 // IsDaemon reports whether a DaemonSet owns the pod. Drains skip

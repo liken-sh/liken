@@ -71,14 +71,17 @@ func conditionPhase(c machine.Condition) machine.Phase {
 		// server publishes. A malformed credentials Secret is the
 		// same shape: only a corrected Secret fixes it.
 		return machine.PhaseBlocked
-	case "RebootRequested", "RestartRequested", "DemotionRebooting", "Draining", "Downloading":
+	case "RebootRequested", "RestartRequested", "DemotionRebooting", "Draining", "Downloading",
+		"Proving":
 		// A disruption is in flight; the machine is mid-change.
 		// Draining is the first step of a reboot: the node is
 		// cordoned and its workloads are being evicted before the
 		// machine goes down (a k3s restart skips it; pods survive).
 		// Downloading is the version target's equivalent. The change
 		// is arriving over the network instead of waiting on a
-		// reboot, but the machine is just as much mid-change.
+		// reboot, but the machine is just as much mid-change. So is
+		// Proving: a boot's imports are on trial until the OS pods
+		// demonstrate them, which ordinarily takes seconds.
 		return machine.PhaseUpdating
 	case "RebootPending", "RestartPending", "DemotionPending", "AwaitingTurn":
 		// A change is staged and waiting, either on a Manual reboot
