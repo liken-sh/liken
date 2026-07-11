@@ -17,7 +17,7 @@ DIST ?= dist
 $(DIST)/liken: ../go.mod ../go.sum $(wildcard *.go) \
 		$(wildcard ../identity/*.go) $(wildcard ../machine/*.go) \
 		$(wildcard ../image/*.go) $(wildcard ../releases/*.go) \
-		$(wildcard ../disks/*.go) ../VERSION
+		$(wildcard ../disks/*.go) $(wildcard ../scaffold/*.go) $(wildcard ../scaffold/*.tmpl) ../VERSION
 	CGO_ENABLED=0 go build -trimpath \
 		-ldflags "-X github.com/liken-sh/liken/machine.Version=$(LIKEN_VERSION)" \
 		-o $(DIST)/liken .

@@ -30,6 +30,7 @@ func TestRunChecksArgumentCounts(t *testing.T) {
 		name string
 		args []string
 	}{
+		{"new without a directory", []string{"new"}},
 		{"mint without a directory", []string{"mint"}},
 		{"adopt without directories", []string{"adopt", "only-one"}},
 		{"kubeconfig without a directory", []string{"kubeconfig"}},

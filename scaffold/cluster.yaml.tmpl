@@ -1,0 +1,88 @@
+# The Cluster manifest: the document that describes what your
+# machines form together. Everything here is a fact the whole fleet
+# must agree on, which is why it lives in one document instead of
+# being repeated across the machine manifests. The same file travels
+# in every machine's image, and once the cluster is up it becomes a
+# real resource there: `kubectl get clusters` answers "what is this
+# fleet?", and editing that resource is how the fleet changes from
+# then on.
+#
+# The join token is deliberately not here. This spec carries
+# topology; secrets travel in the identity directory that
+# `liken mint` creates beside this file.
+apiVersion: liken.sh/v1alpha1
+kind: Cluster
+metadata:
+  name: {{ .ClusterName }}
+spec:
+  # The machines that run control planes, by machine name. A machine
+  # derives its role by looking for its own name here: listed means
+  # leader, absent means follower. One name means the cluster's state
+  # lives in sqlite on that machine; more than one means embedded
+  # etcd, whose majority quorum needs an odd member count. The first
+  # name is the founding leader: it initializes the cluster, and
+  # every other leader joins through it.
+  leaders: [{{ range $i, $l := .Leaders }}{{ if $i }}, {{ end }}{{ $l }}{{ end }}]
+
+  # Where followers make first contact: the founding leader's fixed
+  # address. This endpoint only matters for first contact — after
+  # joining, every machine learns every leader — so a deployment that
+  # wants it to survive its first leader can point a DNS name or
+  # virtual IP here instead.
+  endpoint: {{ .Endpoint }}
+
+  network:
+    # The subnet the machines speak Kubernetes over. A machine may
+    # have several interfaces; the one whose address falls inside
+    # this subnet carries cluster traffic.
+    nodeCIDR: {{ .NodeCIDR }}
+
+    # The cluster's internal address plan. These are the defaults,
+    # written out rather than assumed, because every machine must
+    # agree on them and they cannot be changed once the cluster
+    # exists. Pod addresses come from clusterCIDR, service addresses
+    # from serviceCIDR, and clusterDNS (inside serviceCIDR) is the
+    # address every pod's resolv.conf points at.
+    clusterCIDR: 10.42.0.0/16
+    serviceCIDR: 10.43.0.0/16
+    clusterDNS: 10.43.0.10
+    clusterDomain: cluster.local
+
+  time:
+    # Where the leaders get their time; followers sync from the
+    # leaders themselves. Declaring an upstream is your choice, never
+    # the OS's default.
+    upstreams: [{{ range $i, $u := .Upstreams }}{{ if $i }}, {{ end }}{{ $u }}{{ end }}]
+{{ if .Features }}
+  # Your opt-ins from liken's feature vocabulary. liken disables the
+  # bundled components by default; naming one here is the declaration
+  # that puts it back ({} is a feature's zero configuration).
+  features:
+{{- range .Features }}
+    {{ . }}: {}
+{{- end }}
+{{- else }}
+  # liken disables Kubernetes' bundled components by default; opting
+  # in is a declaration here. The vocabulary: traefik, servicelb,
+  # metrics-server, iscsi, nfs — each with {} for its configuration.
+  #
+  # features:
+  #   metrics-server: {}
+{{- end }}
+{{ if .Source }}
+  releases:
+    # Where release artifacts come from for over-the-network updates.
+    # To move the fleet to a new version, add the release's catalog
+    # entry (printed when it is published) and set spec.version —
+    # live edits to the Cluster resource, never an image rebuild.
+    source: {{ .Source }}
+{{- else }}
+  # Over-the-network updates need a release channel to fetch from.
+  # When you have one, declare it and move the fleet by adding a
+  # release's catalog entry (printed when it is published) and
+  # setting spec.version — live edits to the Cluster resource, never
+  # an image rebuild.
+  #
+  # releases:
+  #   source: https://example.com/releases
+{{- end }}

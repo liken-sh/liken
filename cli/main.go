@@ -26,6 +26,7 @@ import (
 	"github.com/liken-sh/liken/image"
 	"github.com/liken-sh/liken/machine"
 	"github.com/liken-sh/liken/releases"
+	"github.com/liken-sh/liken/scaffold"
 )
 
 // A consoleList collects repeated -console flags in order.
@@ -41,6 +42,12 @@ func (c *consoleList) Set(v string) error {
 const usage = `liken — the toolkit for setting up and running a liken cluster
 
 usage:
+
+  liken new <directory>
+      Start a deployment: answer a few questions and get a directory
+      of manifests — cluster.yaml and one file per machine — with
+      comments that teach every field. The other commands build on
+      this directory.
 
   liken mint <identity-dir>
       Create a new cluster identity: the certificates and join token
@@ -112,6 +119,11 @@ func run(args []string) error {
 		return fmt.Errorf("a command is required")
 	}
 	switch args[0] {
+	case "new":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: liken new <directory>")
+		}
+		return scaffold.New(args[1], os.Stdin, os.Stdout)
 	case "mint":
 		if len(args) != 2 {
 			return fmt.Errorf("usage: liken mint <identity-dir>")

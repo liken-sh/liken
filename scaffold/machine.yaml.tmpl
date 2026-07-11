@@ -1,0 +1,108 @@
+# {{ .Machine.Name }}: one machine of the {{ .ClusterName }} cluster.
+#
+# Every machine's image is identical; this manifest is what makes
+# {{ .Machine.Name }} itself. It is a seed, consulted exactly once:
+# the first boot runs under it, and that boot's success writes it to
+# the machine's own disk as the first proven configuration. Every
+# boot after reads from that disk, and editing the Machine resource
+# in the cluster is how configuration changes from then on.
+apiVersion: liken.sh/v1alpha1
+kind: Machine
+metadata:
+  # The machine's name: its hostname, its Kubernetes node name, and
+  # the name the cluster.yaml leaders list refers to. The install
+  # menu offers it, and the file must be named <name>.yaml.
+  name: {{ .Machine.Name }}
+spec:
+  # Manual stages changes and waits for a person to grant each
+  # reboot; Auto lets the fleet's rollout conductor reboot this
+  # machine on a granted turn.
+  rebootPolicy: {{ .RebootPolicy }}
+  network:
+{{- if .UplinkNIC }}
+    # Two interfaces, two jobs. {{ .UplinkNIC }} is the uplink: DHCP
+    # on whatever network it is plugged into, carrying traffic to the
+    # outside world. {{ .ClusterNIC }} is the cluster segment; its
+    # address is fixed because the cluster's endpoint depends on
+    # machines finding each other before anything could negotiate.
+    interfaces:
+      - name: {{ .UplinkNIC }}
+      - name: {{ .ClusterNIC }}
+        address: {{ .Machine.Address }}
+{{- else }}
+    # One interface, doing both jobs, with a fixed address: the
+    # cluster's endpoint depends on machines finding each other
+    # before anything could negotiate. With no DHCP lease to learn a
+    # route or resolvers from, both are spelled out.
+    interfaces:
+      - name: {{ .ClusterNIC }}
+        address: {{ .Machine.Address }}
+        gateway: {{ .Gateway }}
+        nameservers: [{{ range $i, $n := .Nameservers }}{{ if $i }}, {{ end }}{{ $n }}{{ end }}]
+{{- end }}
+  # Storage is declared by purpose, not by mount path. Each role
+  # names the device it lives on and, when sharing a disk, how much
+  # to take; one role per disk may omit its size and take the
+  # remainder. The device path only matters on the boot that claims
+  # the disk: claiming writes each role's name onto its partition,
+  # and every boot after finds it by that name wherever the disk
+  # enumerates. Only a blank disk is ever claimed.
+  storage:
+{{- if eq (len .Disks) 1 }}
+{{- $disk := index .Disks 0 }}
+    # Everything on one disk. The system slots hold the OS itself
+    # (one running copy, one for upgrades); they are FAT32, the one
+    # filesystem firmware reads, so they are sized exactly and fixed
+    # at claim. machineState is the machine's own durable memory,
+    # clusterState is Kubernetes' (its database and container
+    # images), podStorage backs PersistentVolumeClaims, and
+    # podEphemeral (the remainder) is the pods' scratch space.
+    systemA:
+      device: {{ $disk }}
+      size: 512Mi
+    systemB:
+      device: {{ $disk }}
+      size: 512Mi
+    machineState:
+      device: {{ $disk }}
+      size: 64Mi
+    machineEphemeral:
+      device: {{ $disk }}
+      size: 512Mi
+    clusterState:
+      device: {{ $disk }}
+      size: 8Gi
+    podStorage:
+      device: {{ $disk }}
+      size: 8Gi
+    podEphemeral:
+      device: {{ $disk }}
+{{- else }}
+{{- $state := index .Disks 0 }}{{ $pods := index .Disks 1 }}{{ $boot := index .Disks 2 }}
+    # Three disks: state, pods, and boot. The system slots hold the
+    # OS itself (one running copy, one for upgrades); they are FAT32,
+    # the one filesystem firmware reads, so they are sized exactly
+    # and fixed at claim. machineState is the machine's own durable
+    # memory and clusterState is Kubernetes' (its database and
+    # container images); podStorage backs PersistentVolumeClaims and
+    # podEphemeral is the pods' scratch space.
+    systemA:
+      device: {{ $boot }}
+      size: 512Mi
+    systemB:
+      device: {{ $boot }}
+      size: 512Mi
+    machineState:
+      device: {{ $state }}
+      size: 64Mi
+    clusterState:
+      device: {{ $state }}
+    machineEphemeral:
+      device: {{ $pods }}
+      size: 512Mi
+    podStorage:
+      device: {{ $pods }}
+      size: 8Gi
+    podEphemeral:
+      device: {{ $pods }}
+{{- end }}

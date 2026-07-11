@@ -79,3 +79,7 @@ override:
   # httptest; untested is Serve's real listener.
   - path: ^releases$
     threshold: 77
+  # The scaffold: the interview and the templates, exercised with
+  # scripted answers; untested is a scattering of I/O error returns.
+  - path: ^scaffold$
+    threshold: 79

@@ -150,7 +150,8 @@ logs: logs/dist/liken-logs-image.tar
 cli/dist/liken: $(wildcard cli/*.go) go.mod go.sum \
 		$(wildcard identity/*.go) $(wildcard machine/*.go) \
 		$(wildcard image/*.go) $(wildcard releases/*.go) \
-		$(wildcard disks/*.go) VERSION
+		$(wildcard disks/*.go) $(wildcard scaffold/*.go) \
+		$(wildcard scaffold/*.tmpl) VERSION
 	$(MAKE) -C cli
 
 cli: cli/dist/liken
