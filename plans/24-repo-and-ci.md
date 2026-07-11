@@ -1,8 +1,6 @@
 # A real repository and CI builds
 
-Milestone 24 — In progress: the repo is public, and CI runs the
-checks, the build, and a single-node smoke boot; the three-node
-drill remains
+Milestone 24 — Done
 
 liken today is a checkout that builds itself for one person. The
 first step toward being a public project is the unglamorous one: a
@@ -41,6 +39,12 @@ reports Ready over the cluster's API, read through the leader's
 forwarded port with the offline-minted admin kubeconfig. The serial
 console uploads as an artifact on every run, pass or fail.
 
-What remains is growing the smoke drill from one machine to three:
-the founding leader plus two followers joining over the multicast
-cluster segment, with the pass condition all three nodes Ready.
+The plan originally called for growing the smoke drill from one
+machine to three, a founding leader plus two followers joining over
+the multicast cluster segment. That requirement is dropped: the
+single-node boot already proves what CI is here to prove — the
+assembled image boots and forms a working cluster on a machine
+nobody set up by hand — and multi-node behavior is exercised
+constantly by the lab's own drills. If a regression ever slips
+through that only three nodes would have caught, that will be the
+evidence this decision needs revisiting.

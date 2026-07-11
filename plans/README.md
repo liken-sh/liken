@@ -87,7 +87,7 @@ And the arc that looks past any single deployment, where liken stops
 being this checkout and becomes a public project. Milestone 22 was
 numbered before the arc existed; it belongs second in this order:
 
-24. [ ] [A real repository and CI builds](24-repo-and-ci.md) — a
+24. [x] [A real repository and CI builds](24-repo-and-ci.md) — a
     public home for the code, and CI that fetches every pin, builds
     every domain, runs the tests, assembles an image, and boots it.
 22. [ ] [Public releases](22-public-releases.md) — releases of liken
