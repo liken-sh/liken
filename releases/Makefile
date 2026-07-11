@@ -46,6 +46,7 @@ FAULT ?=
 
 BUILD = build/$(VERSION)
 KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
+SYSTEMDBOOT_VERSION := $(strip $(file <../systemd-boot/VERSION))
 
 # The version-stamped build: every liken component rebuilt under
 # VERSION into build/<version>/, generic image included. This is the
@@ -71,10 +72,12 @@ build:
 # catalog entry a deployment commits to its Cluster to adopt this
 # release.
 release: build
+	$(MAKE) -C ../systemd-boot
 	$(BUILD)/cli/liken bundle \
 		../kernel/dist/$(KERNEL_VERSION)/vmlinuz \
 		$(BUILD)/generic/liken.cpio \
 		$(BUILD)/cli/liken \
+		../systemd-boot/dist/$(SYSTEMDBOOT_VERSION)/systemd-bootx64.efi \
 		dist $(VERSION)
 
 # Serve the channel over HTTP: the lab's release server, standing in

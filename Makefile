@@ -31,8 +31,10 @@ OPENISCSI_VERSION := $(strip $(file <open-iscsi/VERSION))
 OPENISCSI_DIST := open-iscsi/dist/$(OPENISCSI_VERSION)
 NFSUTILS_VERSION := $(strip $(file <nfs-utils/VERSION))
 NFSUTILS_DIST := nfs-utils/dist/$(NFSUTILS_VERSION)
+SYSTEMDBOOT_VERSION := $(strip $(file <systemd-boot/VERSION))
+SYSTEMDBOOT_DIST := systemd-boot/dist/$(SYSTEMDBOOT_VERSION)
 
-all: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils init machine-operator cluster-operator logs cli identity image
+all: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot init machine-operator cluster-operator logs cli identity image
 
 # Because the version is part of the artifact's name, a pin bump
 # changes the target path itself and Make rebuilds with no extra
@@ -91,12 +93,19 @@ $(NFSUTILS_DIST)/mount.nfs: nfs-utils/VERSION nfs-utils/fetch.sh
 
 nfs-utils: $(NFSUTILS_DIST)/mount.nfs
 
+# systemd-boot: the boot menu on install media (its fetch.sh explains
+# why the stick needs a boot program when installed machines don't).
+$(SYSTEMDBOOT_DIST)/systemd-bootx64.efi: systemd-boot/VERSION systemd-boot/fetch.sh
+	$(MAKE) -C systemd-boot
+
+systemd-boot: $(SYSTEMDBOOT_DIST)/systemd-bootx64.efi
+
 # This is liken itself, the Go program that boots as PID 1 (see
 # init/main.go's header comment). It shares the machine package (the
 # Machine API as Go types) with the operator, so both rebuild when
 # that package changes.
 init/dist/liken: $(wildcard init/*.go) go.mod go.sum \
-		$(wildcard machine/*.go) VERSION
+		$(wildcard machine/*.go) $(wildcard disks/*.go) VERSION
 	$(MAKE) -C init
 
 init: init/dist/liken
@@ -139,7 +148,9 @@ logs: logs/dist/liken-logs-image.tar
 # it is also how the build itself mints the dev cluster's identity
 # below.
 cli/dist/liken: $(wildcard cli/*.go) go.mod go.sum \
-		$(wildcard identity/*.go) $(wildcard machine/*.go) VERSION
+		$(wildcard identity/*.go) $(wildcard machine/*.go) \
+		$(wildcard image/*.go) $(wildcard releases/*.go) \
+		$(wildcard disks/*.go) VERSION
 	$(MAKE) -C cli
 
 cli: cli/dist/liken
@@ -268,8 +279,10 @@ smoke: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/liken.cpio kubeconfig
 # into a release-shaped directory first, so the media it boots is
 # assembled by exactly the path a deployment would use.
 $(IMAGE_DIR)/install.cpio: $(GENERIC_IMAGE) $(IMAGE_DIR)/deployment.cpio \
-		$(KERNEL_DIST)/vmlinuz cli/dist/liken VERSION
+		$(KERNEL_DIST)/vmlinuz cli/dist/liken VERSION \
+		$(SYSTEMDBOOT_DIST)/systemd-bootx64.efi
 	cli/dist/liken bundle $(KERNEL_DIST)/vmlinuz $(GENERIC_IMAGE) cli/dist/liken \
+		$(SYSTEMDBOOT_DIST)/systemd-bootx64.efi \
 		$(IMAGE_DIR)/channel $(LIKEN_VERSION)
 	cli/dist/liken media $(IMAGE_DIR)/channel/$(LIKEN_VERSION) $(IMAGE_DIR)/deployment.cpio $@
 
@@ -313,6 +326,7 @@ clean:
 	$(MAKE) -C e2fsprogs clean
 	$(MAKE) -C open-iscsi clean
 	$(MAKE) -C nfs-utils clean
+	$(MAKE) -C systemd-boot clean
 	$(MAKE) -C init clean
 	$(MAKE) -C machine-operator clean
 	$(MAKE) -C cluster-operator clean
@@ -322,4 +336,4 @@ clean:
 	$(MAKE) -C image clean
 	rm -rf $(IMAGE_DIR)
 
-.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils init machine-operator cluster-operator logs cli identity kubeconfig image run run-once smoke install storage release serve clean
+.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot init machine-operator cluster-operator logs cli identity kubeconfig image run run-once smoke install storage release serve clean

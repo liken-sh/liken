@@ -91,6 +91,10 @@ jobs:
         with:
           path: nfs-utils/dist
           key: nfs-utils-${{ hashFiles('nfs-utils/VERSION', 'nfs-utils/fetch.sh') }}
+      - uses: actions/cache@v6
+        with:
+          path: systemd-boot/dist
+          key: systemd-boot-${{ hashFiles('systemd-boot/VERSION', 'systemd-boot/fetch.sh') }}
 
       # Make decides staleness by timestamps, and the two halves of
       # this working tree carry different ones: checkout stamps the
@@ -104,7 +108,8 @@ jobs:
       - name: refresh cached artifact timestamps
         run: |
           for dist in kernel/dist k3s/dist xtables/dist trust/dist \
-                      e2fsprogs/dist open-iscsi/dist nfs-utils/dist; do
+                      e2fsprogs/dist open-iscsi/dist nfs-utils/dist \
+                      systemd-boot/dist; do
               [ -d "$dist" ] && find "$dist" -type f -exec touch {} +
           done
           true

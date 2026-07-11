@@ -54,8 +54,8 @@ usage:
       Build a bootable install image from a downloaded release and
       your deployment layer. Machines install themselves from it.
 
-  liken bundle <vmlinuz> <liken.cpio> <liken-cli> <channel-dir> <version>
-      Lay out a release: copy the three files into the channel and
+  liken bundle <vmlinuz> <liken.cpio> <liken-cli> <systemd-boot.efi> <channel-dir> <version>
+      Lay out a release: copy the four files into the channel and
       write the release.yaml that names each one by its digest.
 
   liken serve <channel-dir> [address]
@@ -119,10 +119,10 @@ func run(args []string) error {
 		}
 		return image.Media(args[1], args[2], args[3], os.Stdout)
 	case "bundle":
-		if len(args) != 6 {
-			return fmt.Errorf("usage: liken bundle <vmlinuz> <liken.cpio> <liken-cli> <channel-dir> <version>")
+		if len(args) != 7 {
+			return fmt.Errorf("usage: liken bundle <vmlinuz> <liken.cpio> <liken-cli> <systemd-boot.efi> <channel-dir> <version>")
 		}
-		return releases.Bundle(args[1], args[2], args[3], args[4], args[5], os.Stdout)
+		return releases.Bundle(args[1], args[2], args[3], args[4], args[5], args[6], os.Stdout)
 	case "serve":
 		addr := ":8017"
 		switch len(args) {

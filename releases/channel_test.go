@@ -21,9 +21,10 @@ func bundledRelease(t *testing.T, version string) (string, string) {
 	t.Helper()
 	src := t.TempDir()
 	for name, content := range map[string]string{
-		"vmlinuz":    "kernel bytes",
-		"liken.cpio": "generic image bytes",
-		"liken":      "toolkit bytes",
+		"vmlinuz":             "kernel bytes",
+		"liken.cpio":          "generic image bytes",
+		"liken":               "toolkit bytes",
+		"systemd-bootx64.efi": "boot menu bytes",
 	} {
 		if err := os.WriteFile(filepath.Join(src, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
@@ -32,7 +33,7 @@ func bundledRelease(t *testing.T, version string) (string, string) {
 	channel := t.TempDir()
 	var out bytes.Buffer
 	err := Bundle(filepath.Join(src, "vmlinuz"), filepath.Join(src, "liken.cpio"),
-		filepath.Join(src, "liken"), channel, version, &out)
+		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"), channel, version, &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +57,7 @@ func TestBundleProducesAVerifiableRelease(t *testing.T) {
 	if release.Metadata.Name != "0.2.0" {
 		t.Errorf("release name: %q", release.Metadata.Name)
 	}
-	if len(release.Artifacts) != 3 {
+	if len(release.Artifacts) != 4 {
 		t.Fatalf("artifacts: %d", len(release.Artifacts))
 	}
 	for _, a := range release.Artifacts {
@@ -100,13 +101,13 @@ func TestBundleReplacesAPreviousAttempt(t *testing.T) {
 	}
 
 	src := t.TempDir()
-	for _, name := range []string{"vmlinuz", "liken.cpio", "liken"} {
+	for _, name := range []string{"vmlinuz", "liken.cpio", "liken", "systemd-bootx64.efi"} {
 		if err := os.WriteFile(filepath.Join(src, name), []byte(name), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 	err := Bundle(filepath.Join(src, "vmlinuz"), filepath.Join(src, "liken.cpio"),
-		filepath.Join(src, "liken"), channel, "0.2.0", io.Discard)
+		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"), channel, "0.2.0", io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +117,7 @@ func TestBundleReplacesAPreviousAttempt(t *testing.T) {
 }
 
 func TestBundleRefusesAMissingArtifact(t *testing.T) {
-	if err := Bundle("no-such-vmlinuz", "no-such-cpio", "no-such-cli",
+	if err := Bundle("no-such-vmlinuz", "no-such-cpio", "no-such-cli", "no-such-menu",
 		t.TempDir(), "0.0.1", io.Discard); err == nil {
 		t.Error("bundling artifacts that don't exist must fail")
 	}

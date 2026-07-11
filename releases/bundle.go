@@ -3,12 +3,15 @@ package releases
 // Bundling a release of liken: the artifacts and the document that
 // every fleet, everywhere, upgrades from.
 //
-// The bundle is three artifacts. vmlinuz and the generic liken.cpio
+// The bundle is four artifacts. vmlinuz and the generic liken.cpio
 // are the operating system, with no deployment inside; the liken
 // binary is the toolkit that turns them into a deployment's bootable
-// media without this repo or a build. Because nothing here embeds a
-// deployment, every digest is stable for a given source tree:
-// publishable on a release page, and the same for everyone.
+// media without this repo or a build; systemd-bootx64.efi is the
+// menu program that media boots (the systemd-boot domain explains
+// why a stick needs one when installed machines don't). Because
+// nothing here embeds a deployment, every digest is stable for a
+// given source tree: publishable on a release page, and the same for
+// everyone.
 //
 // That stability is what lets machines upgrade straight from the
 // public channel. A deployment pins the release document's digest in
@@ -30,7 +33,7 @@ import (
 // Bundle lays out a release: the named artifacts copied into
 // <channel>/<version>/ beside a release.yaml naming each by sha256
 // digest and size.
-func Bundle(vmlinuz, image, cli, channelDir, version string, out io.Writer) error {
+func Bundle(vmlinuz, image, cli, bootMenu, channelDir, version string, out io.Writer) error {
 	dest := filepath.Join(channelDir, version)
 	if err := os.RemoveAll(dest); err != nil {
 		return err
@@ -48,6 +51,7 @@ func Bundle(vmlinuz, image, cli, channelDir, version string, out io.Writer) erro
 		{vmlinuz, "vmlinuz"},
 		{image, "liken.cpio"},
 		{cli, "liken"},
+		{bootMenu, "systemd-bootx64.efi"},
 	}
 	document := fmt.Sprintf("apiVersion: liken.sh/v1alpha1\nkind: Release\nmetadata:\n  name: %s\nartifacts:\n", version)
 	for _, s := range sources {
