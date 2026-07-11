@@ -1,0 +1,73 @@
+# node-1: the founding leader of the liken.sh cluster, and (so far)
+# its only machine — the Linode instance terraform.tf provisions as
+# liken-node-1. Like every Machine manifest, this file is a seed,
+# consulted exactly once: the install bakes it into the deployment
+# layer, the first boot proves it, and from then on the machine reads
+# its manifests from its own machineState disk and is edited through
+# the cluster's API.
+apiVersion: liken.sh/v1alpha1
+kind: Machine
+metadata:
+  name: node-1
+spec:
+  # Nobody sits at this machine's console (there isn't one — a serial
+  # line reachable over lish is the closest thing), so staged changes
+  # that need a reboot get one automatically.
+  rebootPolicy: Auto
+  network:
+    # Two interfaces, two jobs, exactly as the boot config in
+    # terraform.tf attaches them. eth0 is Linode's public network,
+    # which serves addresses over DHCP; the lease carries the
+    # machine's static public IPv4, the gateway, and resolvers.
+    # eth1 is the private VLAN — the cluster segment — where the
+    # founding leader's address must exist before any negotiation
+    # could assign it, because cluster.yaml's endpoint names it.
+    interfaces:
+      - name: eth0
+      - name: eth1
+        address: 10.10.0.1/24
+  # One disk carries everything: a Linode's disk allotment comes as a
+  # single block device unless it is deliberately split, and there is
+  # nothing a second spindle would buy a VM whose "disks" are slices
+  # of the same host storage anyway. The device path matters only on
+  # the boot that claims the disk (the local install under QEMU,
+  # which attaches the image as a virtio-scsi disk to match Linode's
+  # /dev/sda); after that every partition is recognized by the role
+  # name written into the GPT.
+  storage:
+    # The OS's two boot slots, FAT32, each holding one complete liken
+    # release with headroom.
+    systemA:
+      device: /dev/sda
+      size: 512Mi
+    systemB:
+      device: /dev/sda
+      size: 512Mi
+    # The machine's own durable data: staged and proven manifests.
+    machineState:
+      device: /dev/sda
+      size: 64Mi
+    # The OS's scratch space: /tmp.
+    machineEphemeral:
+      device: /dev/sda
+      size: 1Gi
+    # k3s's database, TLS material, and containerd's images — the
+    # role that makes reboots cheap and upgrades incremental.
+    clusterState:
+      device: /dev/sda
+      size: 6Gi
+    # Durable storage pods claim by name (the local-path provisioner
+    # pool). The website's content ships in images, so this pool
+    # starts modest.
+    podStorage:
+      device: /dev/sda
+      size: 8Gi
+    # kubelet's working space: emptyDirs and per-pod scratch. The one
+    # unsized role on the disk, so it takes the remainder.
+    podEphemeral:
+      device: /dev/sda
+  # The kernel's default of 128 inotify instances per user runs out
+  # quickly on a node where every log-follower and config-watcher
+  # holds one.
+  sysctls:
+    fs.inotify.max_user_instances: "8192"

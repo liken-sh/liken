@@ -1,0 +1,52 @@
+# The liken.sh cluster: the deployment that serves the project's own
+# website and release channel, running on Linode (terraform.tf
+# provisions the machines this document describes the fleet for).
+#
+# This is a real, public deployment of liken, and deliberately the
+# project's first: the cluster that hosts liken's releases upgrades
+# itself from those same releases, so every rough edge in the story
+# is felt here first.
+apiVersion: liken.sh/v1alpha1
+kind: Cluster
+metadata:
+  name: liken-sh
+spec:
+  # One leader is a complete cluster: k3s keeps its state in sqlite
+  # until this list grows to three, and growing it is an ordinary
+  # edit. The name refers to machines/node-1.yaml.
+  leaders: [node-1]
+
+  # Where new machines make first contact: the founding leader's
+  # static address on the cluster segment. The segment is a private
+  # VLAN between our Linodes (terraform.tf attaches it as eth1), so
+  # a machine added later joins by carrying the same VLAN and
+  # dialing this address.
+  endpoint: https://10.10.0.1:6443
+
+  network:
+    # The VLAN's subnet. Each machine's eth1 address lives here, and
+    # the address inside this range becomes the machine's node IP —
+    # cluster traffic stays on the private segment, never the public
+    # interface.
+    nodeCIDR: 10.10.0.0/24
+
+    # The cluster's internal address plan: k3s's defaults, written
+    # out because every node must agree on them.
+    clusterCIDR: 10.42.0.0/16
+    serviceCIDR: 10.43.0.0/16
+    clusterDNS: 10.43.0.10
+    clusterDomain: cluster.local
+
+  time:
+    # The leaders' time sources. Cloudflare and NIST both run public
+    # NTP services intended for exactly this kind of anonymous use.
+    upstreams: [time.cloudflare.com, time.nist.gov]
+
+  releases:
+    # liken's public release channel — which this very cluster will
+    # serve, once the webserver is deployed here. Pointing the
+    # machines at it is the point of the whole exercise: the fleet
+    # that hosts the releases updates from them. The catalog and a
+    # target version arrive as live Cluster edits when a release is
+    # adopted; nothing is fetched until then.
+    source: https://liken.sh/releases

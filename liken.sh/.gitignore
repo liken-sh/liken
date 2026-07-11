@@ -1,0 +1,14 @@
+# This domain's build products and secrets, none of it source:
+#
+#   .terraform/  Terraform's working directory: downloaded providers
+#                and backend bookkeeping. The lock file
+#                (.terraform.lock.hcl) is deliberately not ignored —
+#                provider versions are pins like any other VERSION
+#                file here.
+#   identity/    the cluster's private keys and join token, minted by
+#                the identity domain; never in history
+#   image/       the assembled artifacts: the deployment layer, the
+#                install image, and the disk image shipped to Linode
+.terraform/
+identity/
+image/
