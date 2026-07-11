@@ -1,6 +1,6 @@
 # Root on disk
 
-Milestone 29 — In progress
+Milestone 29 — Done
 
 The first attempt to put liken on a real cloud machine found the
 limit of a design choice this repo had lived with comfortably: the
@@ -67,6 +67,28 @@ names, the installer's verify-copy-reverify discipline, the fetcher's
 carry of the layer. Artifact names change inside the release
 document, and this project is pre-release: machines are reinstalled,
 not migrated.
+
+## What the drills showed
+
+The lab proved the design at 1 GB three ways: the from-blank smoke
+boot reached Ready in ~16 seconds, an installed machine booted from
+its slot and converged fully (coredns, metrics-server, both
+operators, the log relays) with about a third of the machine free,
+and the same disk image booted under SeaBIOS — plain BIOS firmware,
+the path a Linode takes — to the same Ready node. Then the real
+thing: the liken.sh nanode booted the shipped image and was Ready in
+21 seconds, answering kubectl on its public address.
+
+Three small truths surfaced on the way. The kernel treats any boot
+parameter with a dot in its name as a module parameter and passes it
+to init neither as an argument nor in the environment, which is why
+liken.slot= can only be read from /proc/cmdline — so /proc now
+mounts before anything else. The boot archive's modules have to load
+on install boots too, because the installer mounts FAT slots and the
+encoding table is a module. And mke2fs rides in the boot archive,
+because a single-disk machine (the cloud case) claims and formats
+its data roles during the install, when the system image's copy
+isn't mounted yet.
 
 ## Decisions on record
 

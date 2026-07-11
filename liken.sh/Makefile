@@ -103,10 +103,15 @@ image/OVMF_VARS.fd:
 # QEMU's exit. The console log lands next to the image for reading
 # afterward.
 #
-# Then the one Linode-specific touch: GRUB's config, planted on the
-# freshly installed slot A so the host's bootloader can find it.
-# Loop-mounting a partition needs root, hence sudo; everything else
-# here runs unprivileged.
+# Then the BIOS bridge. Linode's hosts boot BIOS-style only, and a
+# liken machine normally has no bootloader at all (UEFI boot entries
+# do that job), so this disk carries its own GRUB: a BIOS boot
+# partition tucked into the alignment gap before the first real
+# partition (sectors 34-2047, touching nothing the installer laid
+# out), GRUB's first stage in the MBR's boot code, and grub.cfg on
+# slot A — the boot entry in GRUB's language. Loop-mounting a
+# partition needs root, hence sudo; everything else here runs
+# unprivileged.
 image/disk.img: image/install.cpio $(VMLINUZ) image/OVMF_VARS.fd grub.cfg
 	rm -f $@
 	truncate -s $(DISK_BYTES) $@
@@ -131,10 +136,13 @@ image/disk.img: image/install.cpio $(VMLINUZ) image/OVMF_VARS.fd grub.cfg
 		-drive file=$@,format=raw,if=none,id=system \
 		-device scsi-hd,drive=system,serial=liken-node-1-system
 	grep -q 'install failed' image/install.log && { tail -5 image/install.log; rm -f $@; exit 1; } || true
+	sgdisk --new=8:34:2047 --typecode=8:ef02 --change-name=8:"BIOS boot" $@
 	LOOP=$$(sudo losetup --find --show -P $@) && \
 		mkdir -p image/slot-a && \
 		sudo mount $${LOOP}p1 image/slot-a && \
-		sudo mkdir -p image/slot-a/boot/grub && \
+		sudo grub-install --target=i386-pc \
+			--boot-directory=image/slot-a/boot \
+			--modules="part_gpt fat" $$LOOP && \
 		sudo cp grub.cfg image/slot-a/boot/grub/grub.cfg && \
 		sudo umount image/slot-a && \
 		sudo losetup -d $$LOOP

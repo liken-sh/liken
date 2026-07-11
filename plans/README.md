@@ -108,7 +108,7 @@ numbered before the arc existed; it belongs second in this order:
     the repo stays the documentation; the site extracts and arranges
     it, plus the reading order and getting-started path a repo can't
     impose.
-29. [ ] [Root on disk](29-root-on-disk.md) — the OS stops living in
+29. [x] [Root on disk](29-root-on-disk.md) — the OS stops living in
     RAM: the system artifact becomes a read-only filesystem image
     mounted from the boot slot, and a 1 GB machine becomes the lab's
     standing proof that liken stays light.

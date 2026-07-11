@@ -170,17 +170,20 @@ resource "linode_instance_config" "boot" {
 
   # Linode's hosts boot guests BIOS-style only — no UEFI — while a
   # liken machine normally boots through the kernel's EFI stub, from
-  # boot entries the installer writes into firmware variables. The
-  # bridge is Linode's GRUB 2 boot setting: the host runs GRUB, GRUB
-  # reads /boot/grub/grub.cfg from the disk, and we place that file
-  # on the system slot with an entry mirroring what the EFI boot
-  # entry would have said (the kernel, the two initrd archives, the
-  # same command line). The machine boots and runs normally under
-  # BIOS; what it loses is the firmware half of blue-green upgrades
-  # (BootNext/BootOrder), so release upgrades on this machine wait on
-  # a BIOS-boot milestone. Powered off (booted = false) until the
-  # disk carries an installed system.
-  kernel      = "linode/grub2"
+  # boot entries the installer writes into firmware variables. So
+  # this machine's disk carries its own bootloader: the Makefile
+  # installs GRUB into the image's MBR and a small BIOS boot
+  # partition, with a grub.cfg on the system slot mirroring what the
+  # EFI boot entry would have said. Direct disk boot means the host
+  # simply executes what the MBR carries. (Linode's GRUB 2 setting
+  # was the road not taken: the host's GRUB expects the whole disk
+  # to be one filesystem, as Linode's own images are, and never finds
+  # a config inside a partitioned disk.) The machine boots and runs
+  # normally under BIOS; what it loses is the firmware half of
+  # blue-green upgrades (BootNext/BootOrder), so release upgrades on
+  # this machine wait on a BIOS-boot milestone. Powered off
+  # (booted = false) until the disk carries an installed system.
+  kernel      = "linode/direct-disk"
   root_device = "/dev/sda"
   booted      = false
 

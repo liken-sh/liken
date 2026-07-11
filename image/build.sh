@@ -320,15 +320,24 @@ mksquashfs "$root" "$dist/liken.sqfs" \
 
 # The boot archive: the one cpio the boot loader still stages in RAM,
 # so it carries the minimum that must exist before the system image
-# is mounted — init itself and the early boot's few modules
-# (boot-modules.conf), nothing else. The modules live under
+# is mounted — init itself, the early boot's few modules
+# (boot-modules.conf), and mke2fs. The modules live under
 # lib/modules/boot with their own depmod index: a name deliberately
 # not the kernel's release string, so when init later carries the
 # boot-time files onto the real root, nothing here can shadow the
 # system image's complete index at lib/modules/<release>.
+#
+# mke2fs rides along for the install boot, which runs from this
+# archive alone: a machine whose data roles share the boot disk (a
+# cloud machine with one disk is the common case) claims and formats
+# them during the install, and formatting ext4 is mke2fs's job.
+# Ordinary boots never reach this copy — the system image carries its
+# own at the same path, and the boot archive's files stay off the
+# real root.
 boot_root="$dist/boot-root"
-mkdir -p "$boot_root/lib/modules/$release"
+mkdir -p "$boot_root/lib/modules/$release" "$boot_root/sbin"
 cp "$init_dist/liken" "$boot_root/liken"
+cp "$here/../e2fsprogs/dist/$e2fsprogs_version/mke2fs" "$boot_root/sbin/mke2fs"
 ship_modules "$boot_root" <"$here/boot-modules.conf"
 cp "$kdist/lib/modules/$release/modules.builtin" \
    "$kdist/lib/modules/$release/modules.builtin.modinfo" \
