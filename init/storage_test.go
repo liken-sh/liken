@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/disks"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -85,10 +86,10 @@ func TestPlanPartitionsPacksSizedRolesAligned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []gptPartition{
-		{name: "liken:machineEphemeral", firstLBA: 2_048, lastLBA: 2_049, typeGUID: linuxFilesystemData},
-		{name: "liken:podStorage", firstLBA: 4_096, lastLBA: 1_052_671, typeGUID: linuxFilesystemData},
-		{name: "liken:podEphemeral", firstLBA: 1_052_672, lastLBA: 4_194_269, typeGUID: linuxFilesystemData},
+	want := []disks.Partition{
+		{Name: "liken:machineEphemeral", FirstLBA: 2_048, LastLBA: 2_049, TypeGUID: disks.LinuxFilesystemData},
+		{Name: "liken:podStorage", FirstLBA: 4_096, LastLBA: 1_052_671, TypeGUID: disks.LinuxFilesystemData},
+		{Name: "liken:podEphemeral", FirstLBA: 1_052_672, LastLBA: 4_194_269, TypeGUID: disks.LinuxFilesystemData},
 	}
 	if len(parts) != len(want) {
 		t.Fatalf("planned %d partitions, want %d: %v", len(parts), len(want), parts)
@@ -112,9 +113,9 @@ func TestPlanPartitionsTypesSystemSlotsAsESP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []gptPartition{
-		{name: "liken:systemA", firstLBA: 2_048, lastLBA: 1_050_623, typeGUID: efiSystemPartition},
-		{name: "liken:systemB", firstLBA: 1_050_624, lastLBA: 2_099_199, typeGUID: efiSystemPartition},
+	want := []disks.Partition{
+		{Name: "liken:systemA", FirstLBA: 2_048, LastLBA: 1_050_623, TypeGUID: disks.EFISystemPartition},
+		{Name: "liken:systemB", FirstLBA: 1_050_624, LastLBA: 2_099_199, TypeGUID: disks.EFISystemPartition},
 	}
 	if len(parts) != len(want) {
 		t.Fatalf("planned %d partitions, want %d: %v", len(parts), len(want), parts)
@@ -325,10 +326,10 @@ func TestWaitForPartitionsReportsMissingPartitions(t *testing.T) {
 	addDisk(t, sys, dev, "vda", 1<<30, nil)
 	addPartition(t, sys, "vda", "vda1", "liken:clusterState", 1<<20)
 
-	parts := []gptPartition{
+	parts := []disks.Partition{
 		// clusterState's extent matches the 1 MiB the fixture reports.
-		{name: "liken:clusterState", firstLBA: 2_048, lastLBA: 2_048 + (1<<20)/sectorSize - 1},
-		{name: "liken:podStorage", firstLBA: 4_096, lastLBA: 8_191},
+		{Name: "liken:clusterState", FirstLBA: 2_048, LastLBA: 2_048 + (1<<20)/disks.SectorSize - 1},
+		{Name: "liken:podStorage", FirstLBA: 4_096, LastLBA: 8_191},
 	}
 	err := waitForPartitions(parts, 50*time.Millisecond)
 	if err == nil {
@@ -349,8 +350,8 @@ func TestWaitForPartitionsReportsStaleSizes(t *testing.T) {
 	addDisk(t, sys, dev, "vda", 1<<30, nil)
 	addPartition(t, sys, "vda", "vda1", "liken:clusterState", 1<<20)
 
-	parts := []gptPartition{
-		{name: "liken:clusterState", firstLBA: 2_048, lastLBA: 2_048 + (2<<20)/sectorSize - 1},
+	parts := []disks.Partition{
+		{Name: "liken:clusterState", FirstLBA: 2_048, LastLBA: 2_048 + (2<<20)/disks.SectorSize - 1},
 	}
 	err := waitForPartitions(parts, 50*time.Millisecond)
 	if err == nil {
@@ -401,7 +402,7 @@ func TestPlanClaimLaysOutABlankDisk(t *testing.T) {
 	if plan.device != device || plan.roleCount != 2 || len(plan.parts) != 2 {
 		t.Errorf("both roles land in one plan: %+v", plan)
 	}
-	if plan.totalSectors != (2<<30)/sectorSize {
+	if plan.totalSectors != (2<<30)/disks.SectorSize {
 		t.Errorf("the plan works in the disk's sectors: %d", plan.totalSectors)
 	}
 }
@@ -446,8 +447,8 @@ func TestWaitForPartitionsSucceedsWhenEverythingIsVisible(t *testing.T) {
 	addDisk(t, sys, dev, "vda", 1<<30, nil)
 	addPartition(t, sys, "vda", "vda1", "liken:clusterState", 1<<20)
 
-	parts := []gptPartition{
-		{name: "liken:clusterState", firstLBA: 2_048, lastLBA: 2_048 + (1<<20)/sectorSize - 1},
+	parts := []disks.Partition{
+		{Name: "liken:clusterState", FirstLBA: 2_048, LastLBA: 2_048 + (1<<20)/disks.SectorSize - 1},
 	}
 	if err := waitForPartitions(parts, 50*time.Millisecond); err != nil {
 		t.Errorf("every partition is already visible at size: %v", err)

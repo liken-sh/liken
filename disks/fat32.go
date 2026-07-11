@@ -1,4 +1,4 @@
-package main
+package disks
 
 // A FAT32 formatter, from the specification.
 //
@@ -37,17 +37,15 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"time"
-
-	"github.com/liken-sh/liken/machine"
 )
 
 const (
 	// fat32SectorsPerCluster fixes the allocation unit at 4 KiB.
 	// Cluster size is a real tradeoff on big volumes (slack space
-	// against table size), but slots are half a gigabyte and hold a
-	// handful of large files; 4 KiB keeps the math simple and the
-	// cluster count comfortably in FAT32 territory.
+	// against table size), but liken's volumes are around half a
+	// gigabyte and hold a handful of large files; 4 KiB keeps the
+	// math simple and the cluster count comfortably in FAT32
+	// territory.
 	fat32SectorsPerCluster = 8
 
 	// fat32ReservedSectors is how many sectors precede the first FAT:
@@ -66,18 +64,27 @@ const (
 	fat32MinClusters = 65_525
 )
 
-// formatFAT32 writes a fresh, empty FAT32 filesystem across the given
-// device or file. The volume ID is FAT's only identity field (there
-// are no UUIDs here). The label is cosmetic, up to 11 bytes, and
-// shows up in directory listings on other machines, so it is worth
-// setting to something that says whose partition this is.
+// A Device is the surface a format is written onto: positioned
+// writes plus a durability barrier. An *os.File is one (a partition
+// device or a plain image file); a Section is another (a partition's
+// window inside an image file).
+type Device interface {
+	io.WriterAt
+	Sync() error
+}
+
+// FormatFAT32 writes a fresh, empty FAT32 filesystem across the given
+// device. The volume ID is FAT's only identity field (there are no
+// UUIDs here). The label is cosmetic, up to 11 bytes, and shows up in
+// directory listings on other machines, so it is worth setting to
+// something that says whose partition this is.
 //
 // Ordering doesn't matter for crash safety: this only ever runs
-// against a partition being claimed, where a torn write leaves the
-// partition unformatted and the next boot simply formats it again
-// (recognition is by GPT name, which went on first).
-func formatFAT32(f *os.File, totalBytes uint64, label string, volumeID uint32) error {
-	totalSectors := totalBytes / sectorSize
+// against a partition being claimed or an image being built, where a
+// torn write leaves the volume unformatted and the job simply runs
+// again.
+func FormatFAT32(f Device, totalBytes uint64, label string, volumeID uint32) error {
+	totalSectors := totalBytes / SectorSize
 
 	// Microsoft's own FAT-size formula, verbatim from the
 	// specification. The table's size depends on the cluster count,
@@ -115,8 +122,8 @@ func formatFAT32(f *os.File, totalBytes uint64, label string, volumeID uint32) e
 	// writing anything meaningful: a claimed partition inherits
 	// whatever bytes the disk held before, and stale data where a
 	// reader expects free entries is filesystem corruption.
-	zeroStart := uint64(fat32ReservedSectors) * sectorSize
-	zeroLen := (fat32NumFATs*fatSectors + fat32SectorsPerCluster) * sectorSize
+	zeroStart := uint64(fat32ReservedSectors) * SectorSize
+	zeroLen := (fat32NumFATs*fatSectors + fat32SectorsPerCluster) * SectorSize
 	if err := zeroRange(f, int64(zeroStart), int64(zeroLen)); err != nil {
 		return fmt.Errorf("zeroing the allocation tables: %w", err)
 	}
@@ -156,7 +163,7 @@ func formatFAT32(f *os.File, totalBytes uint64, label string, volumeID uint32) e
 		{dataStart, labelEntry},
 	}
 	for _, w := range writes {
-		if _, err := f.WriteAt(w.data, int64(w.lba*sectorSize)); err != nil {
+		if _, err := f.WriteAt(w.data, int64(w.lba*SectorSize)); err != nil {
 			return fmt.Errorf("writing sector %d: %w", w.lba, err)
 		}
 	}
@@ -166,10 +173,10 @@ func formatFAT32(f *os.File, totalBytes uint64, label string, volumeID uint32) e
 // buildFAT32BootSector lays out the 90 bytes of geometry every FAT
 // reader parses, padded to a full sector ending in the 0x55AA mark
 // that distinguishes a structured sector from a blank one. Those are
-// the same two bytes an MBR ends with, which is why isBlank needs no
-// special case for FAT.
+// the same two bytes an MBR ends with, which is why init's blank-disk
+// check needs no special case for FAT.
 func buildFAT32BootSector(totalSectors, fatSectors uint64, label string, volumeID uint32) []byte {
-	bs := make([]byte, sectorSize)
+	bs := make([]byte, SectorSize)
 
 	// A jump instruction over the parameter block, from the era when
 	// the boot sector's code was executed by the BIOS. Nothing
@@ -177,7 +184,7 @@ func buildFAT32BootSector(totalSectors, fatSectors uint64, label string, volumeI
 	bs[0], bs[1], bs[2] = 0xEB, 0x58, 0x90
 	copy(bs[3:11], "liken   ")
 
-	binary.LittleEndian.PutUint16(bs[11:13], sectorSize)
+	binary.LittleEndian.PutUint16(bs[11:13], SectorSize)
 	bs[13] = fat32SectorsPerCluster
 	binary.LittleEndian.PutUint16(bs[14:16], fat32ReservedSectors)
 	bs[16] = fat32NumFATs
@@ -228,7 +235,7 @@ func buildFAT32BootSector(totalSectors, fatSectors uint64, label string, volumeI
 // signature words with the free-cluster count and the next-free hint
 // between them.
 func buildFAT32FSInfo(freeClusters, nextFree uint32) []byte {
-	info := make([]byte, sectorSize)
+	info := make([]byte, SectorSize)
 	binary.LittleEndian.PutUint32(info[0:4], 0x41615252)
 	binary.LittleEndian.PutUint32(info[484:488], 0x61417272)
 	binary.LittleEndian.PutUint32(info[488:492], freeClusters)
@@ -240,7 +247,7 @@ func buildFAT32FSInfo(freeClusters, nextFree uint32) []byte {
 // zeroRange writes zeroes across a byte range in bounded chunks, so
 // zeroing a megabyte of allocation table doesn't ask for a megabyte
 // of memory.
-func zeroRange(f *os.File, offset, length int64) error {
+func zeroRange(f io.WriterAt, offset, length int64) error {
 	zeros := make([]byte, 256<<10)
 	for length > 0 {
 		n := min(length, int64(len(zeros)))
@@ -253,37 +260,20 @@ func zeroRange(f *os.File, offset, length int64) error {
 	return nil
 }
 
-// formatSlot formats a system slot's partition, labeled for the role
-// it serves so the slot identifies itself in any directory listing.
-// The volume ID (FAT's only identity field; there are no UUIDs) is
-// derived from a timestamp, the traditional choice.
-func formatSlot(devPath string, sizeBytes uint64, role machine.StorageRoleName) error {
-	f, err := os.OpenFile(devPath, os.O_RDWR, 0)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	label := "LIKEN-SYS-A"
-	if role == machine.SystemBRole {
-		label = "LIKEN-SYS-B"
-	}
-	return formatFAT32(f, sizeBytes, label, uint32(time.Now().Unix()))
-}
-
-// hasFAT32 checks a device for a FAT32 filesystem liken wrote: the
+// HasFAT32 checks a device for a FAT32 filesystem liken wrote: the
 // boot signature plus the type string. Microsoft's specification
 // warns that the type string is not how the FAT *type* is determined
 // (cluster count is), but the question here is narrower: has liken
-// already formatted this slot? liken writes both marks itself, so
+// already formatted this volume? liken writes both marks itself, so
 // checking for them is enough.
-func hasFAT32(devPath string) bool {
+func HasFAT32(devPath string) bool {
 	f, err := os.Open(devPath)
 	if err != nil {
 		return false
 	}
 	defer f.Close()
-	head := make([]byte, sectorSize)
-	if _, err := io.ReadFull(io.NewSectionReader(f, 0, sectorSize), head); err != nil {
+	head := make([]byte, SectorSize)
+	if _, err := io.ReadFull(io.NewSectionReader(f, 0, SectorSize), head); err != nil {
 		return false
 	}
 	return head[510] == 0x55 && head[511] == 0xAA && string(head[82:90]) == "FAT32   "

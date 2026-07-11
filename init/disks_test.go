@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/liken-sh/liken/disks"
 )
 
 // fakeMachine points discovery at an empty fake /sys/block and /dev,
@@ -36,7 +38,7 @@ func addDisk(t *testing.T, sys, dev, name string, sizeBytes uint64, contents []b
 	if err := os.MkdirAll(filepath.Join(dir, "device"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeSysfs(t, dir, "size", fmt.Sprintf("%d\n", sizeBytes/sectorSize))
+	writeSysfs(t, dir, "size", fmt.Sprintf("%d\n", sizeBytes/disks.SectorSize))
 	if contents != nil {
 		if err := os.WriteFile(filepath.Join(dev, name), contents, 0o600); err != nil {
 			t.Fatal(err)
@@ -52,7 +54,7 @@ func addPartition(t *testing.T, sys, disk, name, partName string, sizeBytes uint
 		t.Fatal(err)
 	}
 	writeSysfs(t, dir, "partition", "1\n")
-	writeSysfs(t, dir, "size", fmt.Sprintf("%d\n", sizeBytes/sectorSize))
+	writeSysfs(t, dir, "size", fmt.Sprintf("%d\n", sizeBytes/disks.SectorSize))
 	uevent := "MAJOR=253\nMINOR=1\nDEVNAME=" + name + "\nDEVTYPE=disk\n"
 	if partName != "" {
 		uevent += "PARTNAME=" + partName + "\n"

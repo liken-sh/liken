@@ -11,37 +11,66 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liken-sh/liken/disks"
 	"github.com/liken-sh/liken/machine"
 )
 
 // grownTable is a claimed 1 GiB disk's table: a 64 MiB machineState
 // and a clusterState remainder that ran to the last usable sector at
 // claim time.
-func grownTable(claimedSectors uint64) *gptTable {
-	return &gptTable{
-		diskGUID: mustGUID("11111111-2222-3333-4455-66778899AABB"),
-		entries: []gptEntry{
+func grownTable(claimedSectors uint64) *disks.Table {
+	return &disks.Table{
+		DiskGUID: disks.MustGUID("11111111-2222-3333-4455-66778899AABB"),
+		Entries: []disks.Entry{
 			{
-				typeGUID:   linuxFilesystemData,
-				uniqueGUID: mustGUID("AAAAAAAA-BBBB-CCCC-DDEE-FF0011223344"),
-				firstLBA:   2_048,
-				lastLBA:    2_048 + (64<<20)/sectorSize - 1, // 64Mi: sectors 2048..133119
-				name:       "liken:machineState",
+				TypeGUID:   disks.LinuxFilesystemData,
+				UniqueGUID: disks.MustGUID("AAAAAAAA-BBBB-CCCC-DDEE-FF0011223344"),
+				FirstLBA:   2_048,
+				LastLBA:    2_048 + (64<<20)/disks.SectorSize - 1, // 64Mi: sectors 2048..133119
+				Name:       "liken:machineState",
 			},
 			{
-				typeGUID:   linuxFilesystemData,
-				uniqueGUID: mustGUID("99999999-8888-7777-6655-443322110000"),
-				firstLBA:   133_120,
-				lastLBA:    gptLastUsableLBA(claimedSectors),
-				name:       "liken:clusterState",
+				TypeGUID:   disks.LinuxFilesystemData,
+				UniqueGUID: disks.MustGUID("99999999-8888-7777-6655-443322110000"),
+				FirstLBA:   133_120,
+				LastLBA:    disks.LastUsableLBA(claimedSectors),
+				Name:       "liken:clusterState",
 			},
 		},
-		lastUsableLBA: gptLastUsableLBA(claimedSectors),
-		alternateLBA:  claimedSectors - 1,
+		LastUsableLBA: disks.LastUsableLBA(claimedSectors),
+		AlternateLBA:  claimedSectors - 1,
 	}
 }
 
 const claimedSectors = 2_097_152 // the 1 GiB the disk had at claim time
+
+const testDiskSectors = 262_144 // 128 MiB
+
+// diskFile writes a table's chunks into a sparse file of the given
+// sector count: the closest thing to a block device a test can have.
+// (The disks package's tests carry the original; this copy exists
+// because test helpers don't cross package boundaries.)
+func diskFile(t *testing.T, table *disks.Table, totalSectors uint64) *os.File {
+	t.Helper()
+	chunks, err := disks.SerializeGPT(table, totalSectors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Create(filepath.Join(t.TempDir(), "disk"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.Close() })
+	if err := f.Truncate(int64(totalSectors) * disks.SectorSize); err != nil {
+		t.Fatal(err)
+	}
+	for _, chunk := range chunks {
+		if _, err := f.WriteAt(chunk.Data, int64(chunk.LBA)*disks.SectorSize); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return f
+}
 
 func TestPlanGrowthLeavesASatisfiedDiskAlone(t *testing.T) {
 	roles := []machine.DeclaredRole{
@@ -73,7 +102,7 @@ func TestPlanGrowthGrowsTheRemainderWhenTheDiskGrows(t *testing.T) {
 	if !rewrite || len(edits) != 1 {
 		t.Fatalf("expected exactly the remainder to grow: edits=%v rewrite=%v", edits, rewrite)
 	}
-	if edits[0].entryIndex != 1 || edits[0].newLastLBA != gptLastUsableLBA(grownSectors) {
+	if edits[0].entryIndex != 1 || edits[0].newLastLBA != disks.LastUsableLBA(grownSectors) {
 		t.Errorf("remainder should reach the new last usable sector: %+v", edits[0])
 	}
 }
@@ -83,7 +112,7 @@ func TestPlanGrowthRelocatesTheBackupEvenWithNothingToGrow(t *testing.T) {
 	// change, yet the table must be rewritten so the backup copy
 	// moves to the new end of the disk.
 	table := grownTable(claimedSectors)
-	table.entries = table.entries[:1] // only the sized machineState
+	table.Entries = table.Entries[:1] // only the sized machineState
 	roles := []machine.DeclaredRole{declared("machineState", "/dev/vda", "64Mi")}
 
 	edits, rewrite, err := planGrowth("/dev/vda", roles, table, 2*claimedSectors)
@@ -102,7 +131,7 @@ func TestPlanGrowthGrowsASizedRoleIntoFreeSpace(t *testing.T) {
 	// machineState is the only partition, declared larger than it is:
 	// it grows in place to its declared size.
 	table := grownTable(claimedSectors)
-	table.entries = table.entries[:1]
+	table.Entries = table.Entries[:1]
 	roles := []machine.DeclaredRole{declared("machineState", "/dev/vda", "128Mi")}
 
 	edits, _, err := planGrowth("/dev/vda", roles, table, claimedSectors)
@@ -112,7 +141,7 @@ func TestPlanGrowthGrowsASizedRoleIntoFreeSpace(t *testing.T) {
 	if len(edits) != 1 {
 		t.Fatalf("expected one edit: %v", edits)
 	}
-	want := uint64(2_048 + (128<<20)/sectorSize - 1)
+	want := uint64(2_048 + (128<<20)/disks.SectorSize - 1)
 	if edits[0].entryIndex != 0 || edits[0].newLastLBA != want {
 		t.Errorf("got %+v, want lastLBA %d", edits[0], want)
 	}
@@ -138,7 +167,7 @@ func TestPlanGrowthRefusesToGrowThroughANeighbor(t *testing.T) {
 
 func TestPlanGrowthRefusesToGrowPastTheDisk(t *testing.T) {
 	table := grownTable(claimedSectors)
-	table.entries = table.entries[:1]
+	table.Entries = table.Entries[:1]
 	roles := []machine.DeclaredRole{declared("machineState", "/dev/vda", "2Gi")}
 
 	_, _, err := planGrowth("/dev/vda", roles, table, claimedSectors)
@@ -155,7 +184,7 @@ func TestPlanGrowthToleratesAShrinkRequest(t *testing.T) {
 	// actual size is satisfied as-is, never acted on. (The operator
 	// refuses to stage shrinks; init just must not misbehave.)
 	table := grownTable(claimedSectors)
-	table.entries = table.entries[:1]
+	table.Entries = table.Entries[:1]
 	roles := []machine.DeclaredRole{declared("machineState", "/dev/vda", "1Mi")}
 
 	edits, rewrite, err := planGrowth("/dev/vda", roles, table, claimedSectors)
@@ -270,7 +299,7 @@ func TestPlanAllGrowthReadsASatisfiedDiskAndPlansNothing(t *testing.T) {
 	// nothing to do because the disk never grew.
 	sys, dev := fakeMachine(t)
 	table := grownTable(testDiskSectors)
-	addDisk(t, sys, dev, "vda", testDiskSectors*sectorSize, nil)
+	addDisk(t, sys, dev, "vda", testDiskSectors*disks.SectorSize, nil)
 	f := diskFile(t, table, testDiskSectors)
 	if err := os.Rename(f.Name(), filepath.Join(dev, "vda")); err != nil {
 		t.Fatal(err)

@@ -32,6 +32,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/liken-sh/liken/disks"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -212,22 +213,22 @@ func findSlotPartition(parts []partition, role machine.StorageRoleName) (*slotPa
 		if err != nil {
 			return nil, err
 		}
-		table, err := readGPT(f, disk.SizeBytes/sectorSize)
+		table, err := disks.ReadGPT(f, disk.SizeBytes/disks.SectorSize)
 		f.Close()
 		if err != nil {
 			return nil, fmt.Errorf("install: reading %s's partition table: %w", device, err)
 		}
-		for _, entry := range table.entries {
-			if entry.name == declared.PartitionName() {
+		for _, entry := range table.Entries {
+			if entry.Name == declared.PartitionName() {
 				number, err := partitionNumber(p)
 				if err != nil {
 					return nil, err
 				}
 				return &slotPartition{
 					number:   number,
-					firstLBA: entry.firstLBA,
-					lastLBA:  entry.lastLBA,
-					guid:     entry.uniqueGUID,
+					firstLBA: entry.FirstLBA,
+					lastLBA:  entry.LastLBA,
+					guid:     entry.UniqueGUID,
 				}, nil
 			}
 		}

@@ -1,4 +1,4 @@
-package main
+package disks
 
 import (
 	"encoding/binary"
@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/liken-sh/liken/machine"
 )
 
 // formatTestPartition formats a sparse file standing in for a
@@ -23,7 +21,7 @@ func formatTestPartition(t *testing.T, sizeBytes uint64) *os.File {
 	if err := f.Truncate(int64(sizeBytes)); err != nil {
 		t.Fatal(err)
 	}
-	if err := formatFAT32(f, sizeBytes, "LIKEN-SYS-A", 0x1234_5678); err != nil {
+	if err := FormatFAT32(f, sizeBytes, "LIKEN-SYS-A", 0x1234_5678); err != nil {
 		t.Fatal(err)
 	}
 	return f
@@ -31,8 +29,8 @@ func formatTestPartition(t *testing.T, sizeBytes uint64) *os.File {
 
 func readSector(t *testing.T, f *os.File, lba uint64) []byte {
 	t.Helper()
-	sector := make([]byte, sectorSize)
-	if _, err := f.ReadAt(sector, int64(lba*sectorSize)); err != nil {
+	sector := make([]byte, SectorSize)
+	if _, err := f.ReadAt(sector, int64(lba*SectorSize)); err != nil {
 		t.Fatal(err)
 	}
 	return sector
@@ -77,8 +75,8 @@ func TestFAT32BootSector(t *testing.T) {
 	if got := bs[21]; got != 0xF8 {
 		t.Errorf("media byte: got %#x, want 0xF8 (fixed disk)", got)
 	}
-	if got := binary.LittleEndian.Uint32(bs[32:36]); got != testSlotBytes/sectorSize {
-		t.Errorf("32-bit total sectors: got %d, want %d", got, testSlotBytes/sectorSize)
+	if got := binary.LittleEndian.Uint32(bs[32:36]); got != testSlotBytes/SectorSize {
+		t.Errorf("32-bit total sectors: got %d, want %d", got, testSlotBytes/SectorSize)
 	}
 	// Microsoft's sizing formula for a 512 MiB volume at 8 sectors
 	// per cluster: ceil((1048576-32) / ((256*8+2)/2)) = 1023.
@@ -162,7 +160,7 @@ func TestFAT32AllocationTables(t *testing.T) {
 		if got := binary.LittleEndian.Uint32(fat[8:12]); got != 0x0FFFFFFF {
 			t.Errorf("%s entry 2: got %#08x, want 0x0FFFFFFF (root directory's chain ends)", name, got)
 		}
-		for i := 12; i < sectorSize; i += 4 {
+		for i := 12; i < SectorSize; i += 4 {
 			if got := binary.LittleEndian.Uint32(fat[i : i+4]); got != 0 {
 				t.Fatalf("%s entry %d: got %#08x, want free", name, i/4, got)
 			}
@@ -200,7 +198,7 @@ func TestFAT32RefusesTinyPartitions(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	err = formatFAT32(f, 100<<20, "TOO-SMALL", 1)
+	err = FormatFAT32(f, 100<<20, "TOO-SMALL", 1)
 	if err == nil {
 		t.Fatal("expected an error for a partition too small for FAT32")
 	}
@@ -213,8 +211,8 @@ func TestFAT32RefusesTinyPartitions(t *testing.T) {
 
 func TestHasFAT32(t *testing.T) {
 	f := formatTestPartition(t, testSlotBytes)
-	if !hasFAT32(f.Name()) {
-		t.Error("hasFAT32 should recognize a freshly formatted slot")
+	if !HasFAT32(f.Name()) {
+		t.Error("HasFAT32 should recognize a freshly formatted slot")
 	}
 
 	blank, err := os.Create(filepath.Join(t.TempDir(), "blank"))
@@ -225,35 +223,13 @@ func TestHasFAT32(t *testing.T) {
 	if err := blank.Truncate(1 << 20); err != nil {
 		t.Fatal(err)
 	}
-	if hasFAT32(blank.Name()) {
-		t.Error("hasFAT32 should not recognize a blank device")
-	}
-}
-
-func TestFormatSlotLeavesARecognizableFilesystem(t *testing.T) {
-	// formatSlot against a file standing in for the partition: the
-	// same open-and-write path the claim takes, minus the disk.
-	path := filepath.Join(t.TempDir(), "slot")
-	f, err := os.Create(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Sparse: FAT32 needs at least ~260Mi of clusters, but the format
-	// only writes the reserved region and the tables.
-	if err := f.Truncate(512 << 20); err != nil {
-		t.Fatal(err)
-	}
-	f.Close()
-	if err := formatSlot(path, 512<<20, machine.SystemBRole); err != nil {
-		t.Fatal(err)
-	}
-	if !hasFAT32(path) {
-		t.Error("a formatted slot must recognize itself")
+	if HasFAT32(blank.Name()) {
+		t.Error("HasFAT32 should not recognize a blank device")
 	}
 }
 
 func TestHasFAT32ReportsAMissingDevice(t *testing.T) {
-	if hasFAT32(filepath.Join(t.TempDir(), "absent")) {
+	if HasFAT32(filepath.Join(t.TempDir(), "absent")) {
 		t.Error("no device, no filesystem")
 	}
 }

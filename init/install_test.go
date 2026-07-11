@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liken-sh/liken/disks"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -150,22 +151,22 @@ func TestWriteSlotBootEntry(t *testing.T) {
 // one boot disk whose GPT carries both system slots, mirrored into
 // the fake sysfs the way the kernel would surface it. The table's
 // chunks are written into the fake device file directly, because
-// writeGPT's kernel re-read ioctl only works on real block devices.
+// disks.Write's kernel re-read ioctl only works on real block devices.
 func installedDisk(t *testing.T) (sys, dev string) {
 	t.Helper()
 	sys, dev = fakeMachine(t)
 	const totalSectors = 1 << 16 // a 32MiB disk is plenty for a table
-	addDisk(t, sys, dev, "vdc", totalSectors*sectorSize, make([]byte, totalSectors*sectorSize))
-	table := &gptTable{
-		diskGUID: mustGUID("11111111-2222-3333-4455-66778899AABB"),
-		entries: []gptEntry{
-			{typeGUID: efiSystemPartition, uniqueGUID: mustGUID("AAAAAAAA-BBBB-CCCC-DDEE-FF0011223344"),
-				firstLBA: 2048, lastLBA: 18431, name: "liken:systemA"},
-			{typeGUID: efiSystemPartition, uniqueGUID: mustGUID("99999999-8888-7777-6655-443322110000"),
-				firstLBA: 18432, lastLBA: 34815, name: "liken:systemB"},
+	addDisk(t, sys, dev, "vdc", totalSectors*disks.SectorSize, make([]byte, totalSectors*disks.SectorSize))
+	table := &disks.Table{
+		DiskGUID: disks.MustGUID("11111111-2222-3333-4455-66778899AABB"),
+		Entries: []disks.Entry{
+			{TypeGUID: disks.EFISystemPartition, UniqueGUID: disks.MustGUID("AAAAAAAA-BBBB-CCCC-DDEE-FF0011223344"),
+				FirstLBA: 2048, LastLBA: 18431, Name: "liken:systemA"},
+			{TypeGUID: disks.EFISystemPartition, UniqueGUID: disks.MustGUID("99999999-8888-7777-6655-443322110000"),
+				FirstLBA: 18432, LastLBA: 34815, Name: "liken:systemB"},
 		},
 	}
-	chunks, err := serializeGPT(table, totalSectors)
+	chunks, err := disks.SerializeGPT(table, totalSectors)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,12 +176,12 @@ func installedDisk(t *testing.T) (sys, dev string) {
 	}
 	defer f.Close()
 	for _, chunk := range chunks {
-		if _, err := f.WriteAt(chunk.data, int64(chunk.lba)*sectorSize); err != nil {
+		if _, err := f.WriteAt(chunk.Data, int64(chunk.LBA)*disks.SectorSize); err != nil {
 			t.Fatal(err)
 		}
 	}
-	addPartition(t, sys, "vdc", "vdc1", "liken:systemA", 16384*sectorSize)
-	addPartition(t, sys, "vdc", "vdc2", "liken:systemB", 16384*sectorSize)
+	addPartition(t, sys, "vdc", "vdc1", "liken:systemA", 16384*disks.SectorSize)
+	addPartition(t, sys, "vdc", "vdc2", "liken:systemB", 16384*disks.SectorSize)
 	return sys, dev
 }
 
@@ -307,7 +308,7 @@ func TestInstallToDisk(t *testing.T) {
 		}
 	}
 	if found != 2 {
-		t.Fatalf("both slots get entries: %+v", entries)
+		t.Fatalf("both slots get Entries: %+v", entries)
 	}
 	order := readBootOrder(firmware)
 	if len(order) != 3 || order[0] != a || order[1] != b || order[2] != 0x0000 {
@@ -356,8 +357,8 @@ func TestInstallToDiskNeedsBothSlots(t *testing.T) {
 	// slot being registered from the start, so the install refuses.
 	sys, dev := fakeMachine(t)
 	const totalSectors = 1 << 16
-	addDisk(t, sys, dev, "vdc", totalSectors*sectorSize, make([]byte, totalSectors*sectorSize))
-	addPartition(t, sys, "vdc", "vdc1", "liken:systemA", 16384*sectorSize)
+	addDisk(t, sys, dev, "vdc", totalSectors*disks.SectorSize, make([]byte, totalSectors*disks.SectorSize))
+	addPartition(t, sys, "vdc", "vdc1", "liken:systemA", 16384*disks.SectorSize)
 	fakePayload(t)
 	if err := installToDisk("node-1"); err == nil {
 		t.Error("one slot is not blue-green; the install must refuse")

@@ -58,7 +58,12 @@ override:
   # parsers, planners, derivations, and file-shaped actuators around
   # it are tested here against fakes.
   - path: ^init$
-    threshold: 61
+    threshold: 66
+  # The disks package: GPT and FAT32 are pure byte layout, tested by
+  # round-tripping against the package's own readers; untested is the
+  # ioctl that only a real block device answers.
+  - path: ^disks$
+    threshold: 85
   # The image package: the cpio writer and the deployment layer,
   # exercised end to end against fixture trees; what goes untested is
   # a scattering of I/O error returns.

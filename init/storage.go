@@ -39,6 +39,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/liken-sh/liken/disks"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -93,9 +94,9 @@ func isSystemSlot(name machine.StorageRoleName) bool {
 // finds them), everything else is ordinary Linux data.
 func partitionTypeFor(name machine.StorageRoleName) [16]byte {
 	if isSystemSlot(name) {
-		return efiSystemPartition
+		return disks.EFISystemPartition
 	}
-	return linuxFilesystemData
+	return disks.LinuxFilesystemData
 }
 
 // teardownStorage unmounts whatever reconciliation may have mounted,
@@ -168,7 +169,7 @@ func discoverPartitions() []partition {
 			p := partition{name: entry.Name(), disk: disk.Name}
 			if raw, err := os.ReadFile(filepath.Join(dir, entry.Name(), "size")); err == nil {
 				if sectors, err := strconv.ParseUint(strings.TrimSpace(string(raw)), 10, 64); err == nil {
-					p.sizeBytes = sectors * sectorSize
+					p.sizeBytes = sectors * disks.SectorSize
 				}
 			}
 			// The uevent file is KEY=value lines; PARTNAME appears
@@ -350,7 +351,7 @@ func mountRole(role machine.DeclaredRole, p partition) error {
 	// covers a boot that died between partitioning and mkfs.
 	dev := devRoot + "/" + p.name
 	if rm.fstype == "vfat" {
-		if !hasFAT32(dev) {
+		if !disks.HasFAT32(dev) {
 			fmt.Printf("liken: storage: making a FAT32 filesystem on %s for %s\n", dev, role.Name)
 			if err := formatSlot(dev, p.sizeBytes, role.Name); err != nil {
 				return fmt.Errorf("formatting %s for %s: %w", dev, role.Name, err)

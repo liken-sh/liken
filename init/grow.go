@@ -33,6 +33,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/liken-sh/liken/disks"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -48,12 +49,12 @@ type growth struct {
 // device name appears only in error messages. rewrite reports whether
 // the table needs rewriting even with no extents changing, which is
 // how a grown disk gets its backup table relocated to the new end.
-func planGrowth(device string, roles []machine.DeclaredRole, t *gptTable, totalSectors uint64) (edits []growth, rewrite bool, err error) {
-	lastUsable := gptLastUsableLBA(totalSectors)
+func planGrowth(device string, roles []machine.DeclaredRole, t *disks.Table, totalSectors uint64) (edits []growth, rewrite bool, err error) {
+	lastUsable := disks.LastUsableLBA(totalSectors)
 	for _, role := range roles {
 		idx := -1
-		for i, e := range t.entries {
-			if e.name == role.PartitionName() {
+		for i, e := range t.Entries {
+			if e.Name == role.PartitionName() {
 				idx = i
 				break
 			}
@@ -61,26 +62,26 @@ func planGrowth(device string, roles []machine.DeclaredRole, t *gptTable, totalS
 		if idx < 0 {
 			continue // this role's partition lives on another disk
 		}
-		e := t.entries[idx]
+		e := t.Entries[idx]
 
 		var target uint64
 		if role.Size == "" {
 			// A remainder role's size is "the rest of the disk";
 			// growth means the disk itself grew.
 			target = lastUsable
-			if target <= e.lastLBA {
+			if target <= e.LastLBA {
 				continue
 			}
 		} else {
 			bytes, _ := machine.ParseSize(role.Size) // validated before any disk is touched
-			declared := (bytes + sectorSize - 1) / sectorSize
-			if declared <= e.lastLBA-e.firstLBA+1 {
+			declared := (bytes + disks.SectorSize - 1) / disks.SectorSize
+			if declared <= e.LastLBA-e.FirstLBA+1 {
 				// At or above the declared size already: satisfied.
 				// (A shrink the operator failed to refuse lands here
 				// too, tolerated and never acted on.)
 				continue
 			}
-			target = e.firstLBA + declared - 1
+			target = e.FirstLBA + declared - 1
 			if target > lastUsable {
 				return nil, false, fmt.Errorf("disk %s is too small to grow %s to %s: needs sector %d but the disk's usable space ends at %d",
 					device, role.Name, role.Size, target, lastUsable)
@@ -89,18 +90,18 @@ func planGrowth(device string, roles []machine.DeclaredRole, t *gptTable, totalS
 
 		// Growing never moves data, so anything that starts in the
 		// space this partition wants makes the spec unsatisfiable.
-		for j, other := range t.entries {
+		for j, other := range t.Entries {
 			if j == idx {
 				continue
 			}
-			if other.firstLBA > e.lastLBA && other.firstLBA <= target {
+			if other.FirstLBA > e.LastLBA && other.FirstLBA <= target {
 				return nil, false, fmt.Errorf("cannot grow %s on %s to sector %d: partition %q begins at sector %d, in the way (growing never moves data)",
-					role.Name, device, target, other.name, other.firstLBA)
+					role.Name, device, target, other.Name, other.FirstLBA)
 			}
 		}
 		edits = append(edits, growth{entryIndex: idx, newLastLBA: target})
 	}
-	return edits, len(edits) > 0 || t.alternateLBA != totalSectors-1, nil
+	return edits, len(edits) > 0 || t.AlternateLBA != totalSectors-1, nil
 }
 
 // A growPlan is one disk's pending rewrite: computed up front (the
@@ -109,7 +110,7 @@ func planGrowth(device string, roles []machine.DeclaredRole, t *gptTable, totalS
 type growPlan struct {
 	device       string
 	totalSectors uint64
-	table        *gptTable
+	table        *disks.Table
 	edits        []growth
 }
 
@@ -152,13 +153,13 @@ func planAllGrowth(roles []machine.DeclaredRole, found map[machine.StorageRoleNa
 		if disk == nil {
 			return nil, fmt.Errorf("recognized partitions on %s but the disk is not in the inventory", device)
 		}
-		totalSectors := disk.SizeBytes / sectorSize
+		totalSectors := disk.SizeBytes / disks.SectorSize
 
 		f, err := os.Open(device)
 		if err != nil {
 			return nil, fmt.Errorf("examining %s: %w", device, err)
 		}
-		t, err := readGPT(f, totalSectors)
+		t, err := disks.ReadGPT(f, totalSectors)
 		f.Close()
 		if err != nil {
 			return nil, fmt.Errorf("reading the partition table on %s: %w", device, err)
@@ -180,23 +181,23 @@ func planAllGrowth(roles []machine.DeclaredRole, found map[machine.StorageRoleNa
 // and waits for the kernel to surface the new geometry.
 func applyGrowth(plan growPlan) error {
 	for _, g := range plan.edits {
-		e := &plan.table.entries[g.entryIndex]
+		e := &plan.table.Entries[g.entryIndex]
 		fmt.Printf("liken: storage: growing %s on %s from %s to %s\n",
-			e.name, plan.device,
-			gib((e.lastLBA-e.firstLBA+1)*sectorSize),
-			gib((g.newLastLBA-e.firstLBA+1)*sectorSize))
-		e.lastLBA = g.newLastLBA
+			e.Name, plan.device,
+			gib((e.LastLBA-e.FirstLBA+1)*disks.SectorSize),
+			gib((g.newLastLBA-e.FirstLBA+1)*disks.SectorSize))
+		e.LastLBA = g.newLastLBA
 	}
 	if len(plan.edits) == 0 {
 		fmt.Printf("liken: storage: %s grew; relocating its backup partition table to the new end\n", plan.device)
 	}
-	if err := writeGPTTable(plan.device, plan.totalSectors, plan.table); err != nil {
+	if err := disks.WriteTable(plan.device, plan.totalSectors, plan.table); err != nil {
 		return fmt.Errorf("rewriting the partition table on %s: %w", plan.device, err)
 	}
 
-	var expect []gptPartition
-	for _, e := range plan.table.entries {
-		expect = append(expect, gptPartition{name: e.name, firstLBA: e.firstLBA, lastLBA: e.lastLBA})
+	var expect []disks.Partition
+	for _, e := range plan.table.Entries {
+		expect = append(expect, disks.Partition{Name: e.Name, FirstLBA: e.FirstLBA, LastLBA: e.LastLBA})
 	}
 	return waitForPartitions(expect, 5*time.Second)
 }

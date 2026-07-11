@@ -37,6 +37,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liken-sh/liken/disks"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -75,7 +76,7 @@ func isBlank(devPath string) (bool, error) {
 type claimPlan struct {
 	device       string
 	totalSectors uint64
-	parts        []gptPartition
+	parts        []disks.Partition
 	roleCount    int
 }
 
@@ -111,7 +112,7 @@ func planClaim(device string, roles []machine.DeclaredRole, found map[machine.St
 		return claimPlan{}, fmt.Errorf("%s carries a partition table or filesystem liken doesn't recognize; refusing to touch it (wipe it yourself if it's expendable)", device)
 	}
 
-	totalSectors := disk.SizeBytes / sectorSize
+	totalSectors := disk.SizeBytes / disks.SectorSize
 	parts, err := planPartitions(device, mine, totalSectors)
 	if err != nil {
 		return claimPlan{}, err
@@ -123,8 +124,8 @@ func planClaim(device string, roles []machine.DeclaredRole, found map[machine.St
 // surface its partitions.
 func applyClaim(plan claimPlan) error {
 	fmt.Printf("liken: storage: claiming %s (%s) for %d role(s)\n",
-		plan.device, gib(plan.totalSectors*sectorSize), plan.roleCount)
-	if err := writeGPT(plan.device, plan.totalSectors, plan.parts); err != nil {
+		plan.device, gib(plan.totalSectors*disks.SectorSize), plan.roleCount)
+	if err := disks.Write(plan.device, plan.totalSectors, plan.parts); err != nil {
 		return fmt.Errorf("partitioning %s: %w", plan.device, err)
 	}
 	return waitForPartitions(plan.parts, 5*time.Second)
@@ -135,10 +136,10 @@ func applyClaim(plan claimPlan) error {
 // the (single, validated) sizeless role takes the rest of the disk.
 // The device name appears only in error messages; the layout math
 // works purely in sectors.
-func planPartitions(device string, mine []machine.DeclaredRole, totalSectors uint64) ([]gptPartition, error) {
-	lastUsable := gptLastUsableLBA(totalSectors)
-	var parts []gptPartition
-	next := uint64(partitionAlignment)
+func planPartitions(device string, mine []machine.DeclaredRole, totalSectors uint64) ([]disks.Partition, error) {
+	lastUsable := disks.LastUsableLBA(totalSectors)
+	var parts []disks.Partition
+	next := uint64(disks.PartitionAlignment)
 	var remainder *machine.DeclaredRole
 	for _, role := range mine {
 		if role.Size == "" {
@@ -146,22 +147,22 @@ func planPartitions(device string, mine []machine.DeclaredRole, totalSectors uin
 			continue
 		}
 		bytes, _ := machine.ParseSize(role.Size) // validated before any disk is touched
-		sectors := (bytes + sectorSize - 1) / sectorSize
-		p := gptPartition{name: role.PartitionName(), firstLBA: next, lastLBA: next + sectors - 1,
-			typeGUID: partitionTypeFor(role.Name)}
-		if p.lastLBA > lastUsable {
+		sectors := (bytes + disks.SectorSize - 1) / disks.SectorSize
+		p := disks.Partition{Name: role.PartitionName(), FirstLBA: next, LastLBA: next + sectors - 1,
+			TypeGUID: partitionTypeFor(role.Name)}
+		if p.LastLBA > lastUsable {
 			return nil, fmt.Errorf("disk %s is too small: %s wants %s at sector %d but the disk's usable space ends at %d",
-				device, role.Name, role.Size, p.firstLBA, lastUsable)
+				device, role.Name, role.Size, p.FirstLBA, lastUsable)
 		}
 		parts = append(parts, p)
-		next = alignLBA(p.lastLBA + 1)
+		next = disks.AlignLBA(p.LastLBA + 1)
 	}
 	if remainder != nil {
 		if next > lastUsable {
 			return nil, fmt.Errorf("disk %s is too small: nothing left for %s", device, remainder.Name)
 		}
-		parts = append(parts, gptPartition{name: remainder.PartitionName(), firstLBA: next, lastLBA: lastUsable,
-			typeGUID: partitionTypeFor(remainder.Name)})
+		parts = append(parts, disks.Partition{Name: remainder.PartitionName(), FirstLBA: next, LastLBA: lastUsable,
+			TypeGUID: partitionTypeFor(remainder.Name)})
 	}
 	return parts, nil
 }
@@ -173,7 +174,7 @@ func planPartitions(device string, mine []machine.DeclaredRole, totalSectors uin
 // as well as claiming: a partition still showing its old geometry is
 // as wrong as one that hasn't appeared. If the deadline passes, the
 // error names each partition that never appeared as expected.
-func waitForPartitions(parts []gptPartition, patience time.Duration) error {
+func waitForPartitions(parts []disks.Partition, patience time.Duration) error {
 	deadline := time.Now().Add(patience)
 	for {
 		visible := map[string]uint64{}
@@ -182,13 +183,13 @@ func waitForPartitions(parts []gptPartition, patience time.Duration) error {
 		}
 		var missing []string
 		for _, want := range parts {
-			wantBytes := (want.lastLBA - want.firstLBA + 1) * sectorSize
-			got, ok := visible[want.name]
+			wantBytes := (want.LastLBA - want.FirstLBA + 1) * disks.SectorSize
+			got, ok := visible[want.Name]
 			switch {
 			case !ok:
-				missing = append(missing, want.name)
+				missing = append(missing, want.Name)
 			case got != wantBytes:
-				missing = append(missing, fmt.Sprintf("%s (still %d bytes, want %d)", want.name, got, wantBytes))
+				missing = append(missing, fmt.Sprintf("%s (still %d bytes, want %d)", want.Name, got, wantBytes))
 			}
 		}
 		if len(missing) == 0 {

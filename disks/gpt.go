@@ -1,4 +1,18 @@
-package main
+// Package disks writes and reads the on-disk formats liken deals in
+// directly: GUID Partition Tables and FAT32 filesystems.
+//
+// These are the two formats firmware itself understands, which is why
+// liken handles them by hand instead of shelling out to tools: a
+// machine's first boot has no tools, and an install image is built on
+// a workstation that shouldn't need any either. Both formats are a
+// few hundred bytes at well-known offsets, simple enough that writing
+// them directly shows exactly what they are.
+//
+// Two consumers share this package: init, which claims and grows a
+// machine's real disks from PID 1, and the image package, which lays
+// the same structures into a plain file when it builds bootable
+// install media.
+package disks
 
 // Reading and writing GUID Partition Tables, from scratch.
 //
@@ -47,100 +61,100 @@ import (
 )
 
 const (
-	sectorSize = 512
+	SectorSize = 512
 
 	// The entry array's size is part of the format: 128 entries of 128
 	// bytes = 32 sectors. With the MBR and header ahead of it, the
 	// first sector a partition may use is 34; mirrored at the tail, the
 	// last usable sector is 34 from the end.
-	gptEntryCount   = 128
-	gptEntrySize    = 128
-	gptEntrySectors = gptEntryCount * gptEntrySize / sectorSize
-	gptReservedLBAs = 2 + gptEntrySectors
+	entryCount   = 128
+	entrySize    = 128
+	entrySectors = entryCount * entrySize / SectorSize
+	ReservedLBAs = 2 + entrySectors
 
 	// Partitions start on 1MiB boundaries (2048 sectors), the
 	// alignment every modern partitioner uses, chosen so partitions
 	// align with any plausible physical block or RAID stripe beneath.
-	partitionAlignment = 2048
+	PartitionAlignment = 2048
 
 	// GPT names are UTF-16LE (UEFI predates the industry settling on
 	// UTF-8) in a fixed 72-byte field: 36 code units.
-	gptNameChars = 36
+	NameChars = 36
 )
 
-// gptLastUsableLBA is the last sector a partition may occupy: the
+// LastUsableLBA is the last sector a partition may occupy: the
 // backup entry array and header claim the tail of the disk.
-func gptLastUsableLBA(totalSectors uint64) uint64 {
-	return totalSectors - gptReservedLBAs - 1
+func LastUsableLBA(totalSectors uint64) uint64 {
+	return totalSectors - ReservedLBAs - 1
 }
 
-// alignLBA rounds a sector number up to the next 1MiB boundary.
-func alignLBA(lba uint64) uint64 {
-	return (lba + partitionAlignment - 1) / partitionAlignment * partitionAlignment
+// AlignLBA rounds a sector number up to the next 1MiB boundary.
+func AlignLBA(lba uint64) uint64 {
+	return (lba + PartitionAlignment - 1) / PartitionAlignment * PartitionAlignment
 }
 
-// A gptPartition is one entry as liken declares it when claiming; a
+// A Partition is one entry as liken declares it when claiming; a
 // fresh unique GUID is filled in at write time. The type GUID is part
 // of the plan: most roles are ordinary Linux data, but the system
 // slots must be typed as EFI system partitions or the firmware will
 // never look at them.
-type gptPartition struct {
-	name     string
-	firstLBA uint64
-	lastLBA  uint64
-	typeGUID [16]byte
+type Partition struct {
+	Name     string
+	FirstLBA uint64
+	LastLBA  uint64
+	TypeGUID [16]byte
 }
 
-// A gptEntry is one occupied slot of the entry array, everything the
+// An Entry is one occupied slot of the entry array, everything the
 // disk records about a partition. An edit preserves each field
 // byte-for-byte except the extent it means to change.
-type gptEntry struct {
-	typeGUID   [16]byte
-	uniqueGUID [16]byte
-	firstLBA   uint64
-	lastLBA    uint64
-	attributes uint64
-	name       string
+type Entry struct {
+	TypeGUID   [16]byte
+	UniqueGUID [16]byte
+	FirstLBA   uint64
+	LastLBA    uint64
+	Attributes uint64
+	Name       string
 }
 
-// A gptTable is a whole partition table in memory: what readGPT
-// returns and serializeGPT lays out. The two header fields are kept
-// because they are how a grown disk is detected: a table whose
-// alternate (backup) header is no longer at the disk's final sector
-// was written when the disk was smaller.
-type gptTable struct {
-	diskGUID      [16]byte
-	entries       []gptEntry
-	lastUsableLBA uint64
-	alternateLBA  uint64
+// A Table is a whole partition table in memory: what ReadGPT returns
+// and SerializeGPT lays out. The two header fields are kept because
+// they are how a grown disk is detected: a table whose alternate
+// (backup) header is no longer at the disk's final sector was written
+// when the disk was smaller.
+type Table struct {
+	DiskGUID      [16]byte
+	Entries       []Entry
+	LastUsableLBA uint64
+	AlternateLBA  uint64
 }
 
-// A gptChunk is one run of bytes at one location: the unit
-// serialization produces and writing consumes.
-type gptChunk struct {
-	lba  uint64
-	data []byte
+// A Chunk is one run of bytes at one location: the unit serialization
+// produces and writing consumes.
+type Chunk struct {
+	LBA  uint64
+	Data []byte
 }
 
-// linuxFilesystemData is the partition type GUID meaning "an ordinary
+// LinuxFilesystemData is the partition type GUID meaning "an ordinary
 // Linux filesystem". Types are well-known constants, not invented:
 // this exact GUID is what lsblk, blkid, and installers everywhere
 // recognize as a Linux data partition.
-var linuxFilesystemData = mustGUID("0FC63DAF-8483-4772-8E79-3D69D8477DE4")
+var LinuxFilesystemData = MustGUID("0FC63DAF-8483-4772-8E79-3D69D8477DE4")
 
-// efiSystemPartition is the type GUID that makes a partition an ESP:
+// EFISystemPartition is the type GUID that makes a partition an ESP:
 // the one partition type UEFI firmware itself reads. The type GUID is
 // the entire signal: firmware doesn't inspect contents to find boot
 // candidates, it looks for this GUID and expects FAT inside. That is
 // why the type is planned per role rather than assumed.
-var efiSystemPartition = mustGUID("C12A7328-F81F-11D2-BA4B-00A0C93EC93B")
+var EFISystemPartition = MustGUID("C12A7328-F81F-11D2-BA4B-00A0C93EC93B")
 
-// mustGUID turns a GUID's canonical text into its 16 on-disk bytes.
+// MustGUID turns a GUID's canonical text into its 16 on-disk bytes.
 // The encoding is a historical quirk: the first three fields are
 // little-endian (GUIDs come from Microsoft, via UEFI) while the rest
 // is byte-for-byte, so the text and the bytes read differently.
 // Getting this wrong makes every tool misread the type.
-func mustGUID(s string) [16]byte {
+func MustGUID(s string) [16]byte {
 	var canonical [16]byte
 	n, err := fmt.Sscanf(s,
 		"%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X",
@@ -164,18 +178,18 @@ func guidToDisk(canonical [16]byte) [16]byte {
 	}
 }
 
-// randomGUID generates a version-4 (random) GUID in on-disk encoding,
+// RandomGUID generates a version-4 (random) GUID in on-disk encoding,
 // for the disk itself and each partition, so every one is globally
 // distinguishable from every other disk and partition in the world.
-func randomGUID() [16]byte {
+func RandomGUID() [16]byte {
 	var canonical [16]byte
 	if _, err := rand.Read(canonical[:]); err != nil {
 		// crypto/rand failing means the kernel could not supply
 		// random bytes at all. These GUIDs are identities other tools
 		// trust to tell disks apart forever, and minting them without
-		// randomness risks collisions, so the boot stops here: a
-		// panic in PID 1 panics the kernel, and panic=10 reboots the
-		// machine for another try.
+		// randomness risks collisions, so there is no proceeding: in
+		// init this panic panics the kernel and panic=10 reboots the
+		// machine for another try; in the toolkit it ends the build.
 		panic(err)
 	}
 	canonical[6] = canonical[6]&0x0F | 0x40 // version 4: random
@@ -183,30 +197,30 @@ func randomGUID() [16]byte {
 	return guidToDisk(canonical)
 }
 
-// serializeGPT is the pure half of writing: a table in, the five
+// SerializeGPT is the pure half of writing: a table in, the five
 // on-disk chunks out (protective MBR, primary header, entries, backup
 // entries, backup header), with both CRCs computed. totalSectors
 // decides where the backup lands and what lastUsable becomes, which
 // is exactly how serializing a table read from a smaller disk
 // relocates its backup to the new end.
-func serializeGPT(t *gptTable, totalSectors uint64) ([]gptChunk, error) {
-	if len(t.entries) > gptEntryCount {
-		return nil, fmt.Errorf("%d partitions won't fit a %d-entry GPT", len(t.entries), gptEntryCount)
+func SerializeGPT(t *Table, totalSectors uint64) ([]Chunk, error) {
+	if len(t.Entries) > entryCount {
+		return nil, fmt.Errorf("%d partitions won't fit a %d-entry GPT", len(t.Entries), entryCount)
 	}
 
 	// The entry array first, because both headers embed its checksum.
-	entries := make([]byte, gptEntryCount*gptEntrySize)
-	for i, p := range t.entries {
-		e := entries[i*gptEntrySize:]
-		copy(e[0:16], p.typeGUID[:])
-		copy(e[16:32], p.uniqueGUID[:])
-		binary.LittleEndian.PutUint64(e[32:40], p.firstLBA)
-		binary.LittleEndian.PutUint64(e[40:48], p.lastLBA)
-		binary.LittleEndian.PutUint64(e[48:56], p.attributes)
+	entries := make([]byte, entryCount*entrySize)
+	for i, p := range t.Entries {
+		e := entries[i*entrySize:]
+		copy(e[0:16], p.TypeGUID[:])
+		copy(e[16:32], p.UniqueGUID[:])
+		binary.LittleEndian.PutUint64(e[32:40], p.FirstLBA)
+		binary.LittleEndian.PutUint64(e[40:48], p.LastLBA)
+		binary.LittleEndian.PutUint64(e[48:56], p.Attributes)
 
-		name := utf16.Encode([]rune(p.name))
-		if len(name) > gptNameChars {
-			return nil, fmt.Errorf("partition name %q exceeds GPT's %d characters", p.name, gptNameChars)
+		name := utf16.Encode([]rune(p.Name))
+		if len(name) > NameChars {
+			return nil, fmt.Errorf("partition name %q exceeds GPT's %d characters", p.Name, NameChars)
 		}
 		for j, r := range name {
 			binary.LittleEndian.PutUint16(e[56+2*j:], r)
@@ -215,13 +229,13 @@ func serializeGPT(t *gptTable, totalSectors uint64) ([]gptChunk, error) {
 	entriesCRC := crc32.ChecksumIEEE(entries)
 
 	backupHeaderLBA := totalSectors - 1
-	backupEntriesLBA := totalSectors - 1 - gptEntrySectors
+	backupEntriesLBA := totalSectors - 1 - entrySectors
 
 	// Each header records its own location and the other copy's. The
 	// backup is not a byte-for-byte copy of the primary; it holds the
 	// same facts written from the other end of the disk.
 	header := func(currentLBA, otherLBA, entriesLBA uint64) []byte {
-		h := make([]byte, sectorSize)
+		h := make([]byte, SectorSize)
 		copy(h[0:8], "EFI PART")
 		binary.LittleEndian.PutUint32(h[8:12], 0x0001_0000) // revision 1.0
 		binary.LittleEndian.PutUint32(h[12:16], 92)         // header size
@@ -229,12 +243,12 @@ func serializeGPT(t *gptTable, totalSectors uint64) ([]gptChunk, error) {
 		// with this field zeroed, then patched in.
 		binary.LittleEndian.PutUint64(h[24:32], currentLBA)
 		binary.LittleEndian.PutUint64(h[32:40], otherLBA)
-		binary.LittleEndian.PutUint64(h[40:48], gptReservedLBAs)
-		binary.LittleEndian.PutUint64(h[48:56], gptLastUsableLBA(totalSectors))
-		copy(h[56:72], t.diskGUID[:])
+		binary.LittleEndian.PutUint64(h[40:48], ReservedLBAs)
+		binary.LittleEndian.PutUint64(h[48:56], LastUsableLBA(totalSectors))
+		copy(h[56:72], t.DiskGUID[:])
 		binary.LittleEndian.PutUint64(h[72:80], entriesLBA)
-		binary.LittleEndian.PutUint32(h[80:84], gptEntryCount)
-		binary.LittleEndian.PutUint32(h[84:88], gptEntrySize)
+		binary.LittleEndian.PutUint32(h[80:84], entryCount)
+		binary.LittleEndian.PutUint32(h[84:88], entrySize)
 		binary.LittleEndian.PutUint32(h[88:92], entriesCRC)
 		binary.LittleEndian.PutUint32(h[16:20], crc32.ChecksumIEEE(h[0:92]))
 		return h
@@ -243,7 +257,7 @@ func serializeGPT(t *gptTable, totalSectors uint64) ([]gptChunk, error) {
 	// The protective MBR: one legacy partition of type 0xEE spanning
 	// the disk (capped at the 32-bit sector count MBR can express), so
 	// GPT-unaware tools refuse to touch it rather than see empty space.
-	mbr := make([]byte, sectorSize)
+	mbr := make([]byte, SectorSize)
 	span := min(totalSectors-1, 0xFFFF_FFFF)
 	entry := mbr[446:]
 	entry[1], entry[2], entry[3] = 0x00, 0x02, 0x00 // CHS start: legacy filler
@@ -253,7 +267,7 @@ func serializeGPT(t *gptTable, totalSectors uint64) ([]gptChunk, error) {
 	binary.LittleEndian.PutUint32(entry[12:16], uint32(span))
 	mbr[510], mbr[511] = 0x55, 0xAA
 
-	return []gptChunk{
+	return []Chunk{
 		{0, mbr},
 		{1, header(1, backupHeaderLBA, 2)},
 		{2, entries},
@@ -264,9 +278,9 @@ func serializeGPT(t *gptTable, totalSectors uint64) ([]gptChunk, error) {
 
 // readGPTCopy parses one copy of the table from its header sector,
 // verifying both checksums, or explains what disqualified it.
-func readGPTCopy(r io.ReaderAt, headerLBA uint64) (*gptTable, error) {
-	h := make([]byte, sectorSize)
-	if _, err := r.ReadAt(h, int64(headerLBA)*sectorSize); err != nil {
+func readGPTCopy(r io.ReaderAt, headerLBA uint64) (*Table, error) {
+	h := make([]byte, SectorSize)
+	if _, err := r.ReadAt(h, int64(headerLBA)*SectorSize); err != nil {
 		return nil, fmt.Errorf("reading the header at sector %d: %w", headerLBA, err)
 	}
 	if string(h[0:8]) != "EFI PART" {
@@ -278,7 +292,7 @@ func readGPTCopy(r io.ReaderAt, headerLBA uint64) (*gptTable, error) {
 	// the format allows more) so the checksum covers what the writer
 	// covered.
 	headerSize := binary.LittleEndian.Uint32(h[12:16])
-	if headerSize < 92 || headerSize > sectorSize {
+	if headerSize < 92 || headerSize > SectorSize {
 		return nil, fmt.Errorf("implausible header size %d at sector %d", headerSize, headerLBA)
 	}
 	scratch := slices.Clone(h[:headerSize])
@@ -290,66 +304,66 @@ func readGPTCopy(r io.ReaderAt, headerLBA uint64) (*gptTable, error) {
 	// liken only ever writes the standard 128×128 array. A table with
 	// any other geometry is not one liken wrote, and foreign disks
 	// are refused at claim time, so refuse this one too.
-	entryCount := binary.LittleEndian.Uint32(h[80:84])
-	entrySize := binary.LittleEndian.Uint32(h[84:88])
-	if entryCount != gptEntryCount || entrySize != gptEntrySize {
-		return nil, fmt.Errorf("unexpected entry geometry %d×%d at sector %d", entryCount, entrySize, headerLBA)
+	gotCount := binary.LittleEndian.Uint32(h[80:84])
+	gotSize := binary.LittleEndian.Uint32(h[84:88])
+	if gotCount != entryCount || gotSize != entrySize {
+		return nil, fmt.Errorf("unexpected entry geometry %d×%d at sector %d", gotCount, gotSize, headerLBA)
 	}
 
 	entriesLBA := binary.LittleEndian.Uint64(h[72:80])
-	entries := make([]byte, entryCount*entrySize)
-	if _, err := r.ReadAt(entries, int64(entriesLBA)*sectorSize); err != nil {
+	entries := make([]byte, gotCount*gotSize)
+	if _, err := r.ReadAt(entries, int64(entriesLBA)*SectorSize); err != nil {
 		return nil, fmt.Errorf("reading the entry array at sector %d: %w", entriesLBA, err)
 	}
 	if crc32.ChecksumIEEE(entries) != binary.LittleEndian.Uint32(h[88:92]) {
 		return nil, fmt.Errorf("entry array checksum mismatch (header at sector %d)", headerLBA)
 	}
 
-	t := &gptTable{
-		lastUsableLBA: binary.LittleEndian.Uint64(h[48:56]),
-		alternateLBA:  binary.LittleEndian.Uint64(h[32:40]),
+	t := &Table{
+		LastUsableLBA: binary.LittleEndian.Uint64(h[48:56]),
+		AlternateLBA:  binary.LittleEndian.Uint64(h[32:40]),
 	}
-	copy(t.diskGUID[:], h[56:72])
+	copy(t.DiskGUID[:], h[56:72])
 
-	for i := range int(entryCount) {
-		e := entries[i*int(entrySize):]
+	for i := range int(gotCount) {
+		e := entries[i*int(gotSize):]
 		var typeGUID [16]byte
 		copy(typeGUID[:], e[0:16])
 		if typeGUID == ([16]byte{}) {
 			continue // an all-zero type GUID marks an unused slot
 		}
-		p := gptEntry{
-			typeGUID:   typeGUID,
-			firstLBA:   binary.LittleEndian.Uint64(e[32:40]),
-			lastLBA:    binary.LittleEndian.Uint64(e[40:48]),
-			attributes: binary.LittleEndian.Uint64(e[48:56]),
+		p := Entry{
+			TypeGUID:   typeGUID,
+			FirstLBA:   binary.LittleEndian.Uint64(e[32:40]),
+			LastLBA:    binary.LittleEndian.Uint64(e[40:48]),
+			Attributes: binary.LittleEndian.Uint64(e[48:56]),
 		}
-		copy(p.uniqueGUID[:], e[16:32])
+		copy(p.UniqueGUID[:], e[16:32])
 		var units []uint16
-		for j := range gptNameChars {
+		for j := range NameChars {
 			u := binary.LittleEndian.Uint16(e[56+2*j:])
 			if u == 0 {
 				break
 			}
 			units = append(units, u)
 		}
-		p.name = string(utf16.Decode(units))
-		t.entries = append(t.entries, p)
+		p.Name = string(utf16.Decode(units))
+		t.Entries = append(t.Entries, p)
 	}
 	return t, nil
 }
 
-// readGPT parses a device's partition table, trying the primary copy
+// ReadGPT parses a device's partition table, trying the primary copy
 // first and falling back to the backup. Disagreements resolve in the
 // primary's favor: the kernel read the primary too, so recognition
 // already trusted it, and the next rewrite reconciles the pair.
-func readGPT(r io.ReaderAt, totalSectors uint64) (*gptTable, error) {
+func ReadGPT(r io.ReaderAt, totalSectors uint64) (*Table, error) {
 	primary, perr := readGPTCopy(r, 1)
 	backup, berr := readGPTCopy(r, totalSectors-1)
 
 	switch {
 	case perr == nil && berr == nil:
-		if primary.diskGUID != backup.diskGUID || !slices.Equal(primary.entries, backup.entries) {
+		if primary.DiskGUID != backup.DiskGUID || !slices.Equal(primary.Entries, backup.Entries) {
 			fmt.Println("liken: storage: the primary and backup partition tables disagree; trusting the primary (so did the kernel)")
 		}
 		return primary, nil
@@ -368,12 +382,12 @@ func readGPT(r io.ReaderAt, totalSectors uint64) (*gptTable, error) {
 	}
 }
 
-// writeGPTTable is the I/O half of writing: serialize the table for
-// this disk size, put the chunks where they go, then ask the kernel
-// to re-read the result. It is deliberately thin; everything
-// interesting happens in serializeGPT.
-func writeGPTTable(devPath string, totalSectors uint64, t *gptTable) error {
-	chunks, err := serializeGPT(t, totalSectors)
+// WriteTable is the I/O half of writing: serialize the table for this
+// disk size, put the chunks where they go, then ask the kernel to
+// re-read the result. It is deliberately thin; everything interesting
+// happens in SerializeGPT.
+func WriteTable(devPath string, totalSectors uint64, t *Table) error {
+	chunks, err := SerializeGPT(t, totalSectors)
 	if err != nil {
 		return err
 	}
@@ -385,8 +399,8 @@ func writeGPTTable(devPath string, totalSectors uint64, t *gptTable) error {
 	defer f.Close()
 
 	for _, chunk := range chunks {
-		if _, err := f.WriteAt(chunk.data, int64(chunk.lba)*sectorSize); err != nil {
-			return fmt.Errorf("writing at LBA %d: %w", chunk.lba, err)
+		if _, err := f.WriteAt(chunk.Data, int64(chunk.LBA)*SectorSize); err != nil {
+			return fmt.Errorf("writing at LBA %d: %w", chunk.LBA, err)
 		}
 	}
 	if err := f.Sync(); err != nil {
@@ -402,19 +416,19 @@ func writeGPTTable(devPath string, totalSectors uint64, t *gptTable) error {
 	return nil
 }
 
-// writeGPT lays a brand-new partition table onto a blank disk being
+// Write lays a brand-new partition table onto a blank disk being
 // claimed: fresh GUIDs for the disk and every partition, because
 // claiming is when these identities are created.
-func writeGPT(devPath string, totalSectors uint64, parts []gptPartition) error {
-	t := &gptTable{diskGUID: randomGUID()}
+func Write(devPath string, totalSectors uint64, parts []Partition) error {
+	t := &Table{DiskGUID: RandomGUID()}
 	for _, p := range parts {
-		t.entries = append(t.entries, gptEntry{
-			typeGUID:   p.typeGUID,
-			uniqueGUID: randomGUID(),
-			firstLBA:   p.firstLBA,
-			lastLBA:    p.lastLBA,
-			name:       p.name,
+		t.Entries = append(t.Entries, Entry{
+			TypeGUID:   p.TypeGUID,
+			UniqueGUID: RandomGUID(),
+			FirstLBA:   p.FirstLBA,
+			LastLBA:    p.LastLBA,
+			Name:       p.Name,
 		})
 	}
-	return writeGPTTable(devPath, totalSectors, t)
+	return WriteTable(devPath, totalSectors, t)
 }
