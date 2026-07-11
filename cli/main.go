@@ -66,7 +66,9 @@ usage:
   liken layer <manifests-dir> <identity-dir> <kernel-dist> <output.cpio>
       Pack your cluster's half of the operating system into one small
       archive: your cluster and machine manifests, your identity, and
-      any kernel modules your machines ask for.
+      any kernel modules your machines ask for. The kernel directory
+      is only consulted when a machine declares modules; pass - when
+      none do.
 
   liken media <release-dir> <deployment.cpio> <output.cpio>
       Build a bootable install image from a downloaded release and

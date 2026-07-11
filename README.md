@@ -68,10 +68,11 @@ defines the OS itself.
 liken boots machines, so far virtual ones: the milestones in
 [plans/](plans/) walk from a bare PID 1 to a five-node HA cluster
 with declarative upgrades, automated rolling reboots, and adoption of
-existing k3s clusters, each proven in the QEMU lab. It is not yet a
-public distribution: there are no public releases, and it has never
-run on bare metal. Getting there is the current direction; see
-[plans/22-public-releases.md](plans/22-public-releases.md). The
+existing k3s clusters, each proven in the QEMU lab. The toolkit for
+running your own cluster from a release exists —
+[GETTING-STARTED.md](GETTING-STARTED.md) walks the whole path — but
+there is nowhere public to download a release from yet, and liken
+has never run on bare metal. Both are the current direction; the
 design overview and the milestone-by-milestone story live in
 [plans/](plans/).
 
