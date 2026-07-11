@@ -233,7 +233,10 @@ timeout menu-force
 // Boot Loader Specification form. The three initrd lines concatenate
 // in order — the same composition an installed machine gets from the
 // two initrd= parameters in its boot entries, plus the installer's
-// payload.
+// payload. The sort-key matters more than it looks: without one,
+// systemd-boot orders entries the way it orders kernels, newest
+// first, which put node-5 at the top of the menu; sort-keys sort
+// ascending, so the machines read in their natural order.
 func entryText(name string, consoles []string) []byte {
 	options := []string{"rdinit=/liken", "liken.machine=" + name, "liken.install"}
 	for _, c := range consoles {
@@ -242,10 +245,11 @@ func entryText(name string, consoles []string) []byte {
 	return fmt.Appendf(nil, `# Boot this deployment's OS with the identity %q and install it
 # onto this machine's own disks.
 title install as %s
+sort-key %s
 linux /vmlinuz
 initrd /liken.cpio
 initrd /%s
 initrd /payload.cpio
 options %s
-`, name, name, machine.LayerName, strings.Join(options, " "))
+`, name, name, name, machine.LayerName, strings.Join(options, " "))
 }

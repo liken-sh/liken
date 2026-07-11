@@ -272,19 +272,32 @@ run-once: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/liken.cpio
 smoke: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/liken.cpio kubeconfig
 	$(MAKE) -C dev-cluster smoke
 
-# The install image: a release composed with the lab's deployment
-# layer, carrying the release payload the installer verifies and
-# copies onto a machine's own disk. A real deployment feeds `liken
-# media` a downloaded public release; the lab bundles its own tree
-# into a release-shaped directory first, so the media it boots is
-# assembled by exactly the path a deployment would use.
-$(IMAGE_DIR)/install.cpio: $(GENERIC_IMAGE) $(IMAGE_DIR)/deployment.cpio \
+# The lab's release-shaped channel: the current tree bundled the way
+# a published release is laid out. A real deployment downloads this
+# directory from the release channel; the lab produces its own, so
+# the media targets below assemble by exactly the path a deployment
+# would use.
+$(IMAGE_DIR)/channel/$(LIKEN_VERSION)/release.yaml: $(GENERIC_IMAGE) \
 		$(KERNEL_DIST)/vmlinuz cli/dist/liken VERSION \
 		$(SYSTEMDBOOT_DIST)/systemd-bootx64.efi
 	cli/dist/liken bundle $(KERNEL_DIST)/vmlinuz $(GENERIC_IMAGE) cli/dist/liken \
 		$(SYSTEMDBOOT_DIST)/systemd-bootx64.efi \
 		$(IMAGE_DIR)/channel $(LIKEN_VERSION)
+
+# The install image for the lab's fast -kernel boots: the release
+# composed with the lab's deployment layer, carrying the payload the
+# installer verifies and copies onto a machine's own disk.
+$(IMAGE_DIR)/install.cpio: $(IMAGE_DIR)/channel/$(LIKEN_VERSION)/release.yaml \
+		$(IMAGE_DIR)/deployment.cpio cli/dist/liken
 	cli/dist/liken media $(IMAGE_DIR)/channel/$(LIKEN_VERSION) $(IMAGE_DIR)/deployment.cpio $@
+
+# The install stick: the same release and layer as a bootable disk
+# image with the machine menu, the medium real hardware uses. The lab
+# bakes console=ttyS0 so the menu and every installed machine stay on
+# the serial console QEMU shows us.
+$(IMAGE_DIR)/stick.img: $(IMAGE_DIR)/channel/$(LIKEN_VERSION)/release.yaml \
+		$(IMAGE_DIR)/deployment.cpio cli/dist/liken
+	cli/dist/liken stick -console ttyS0 $(IMAGE_DIR)/channel/$(LIKEN_VERSION) $(IMAGE_DIR)/deployment.cpio $@
 
 # Install a machine: boot it once from the "USB stick" (the install
 # image via -kernel), let it put this release on its own system
@@ -292,6 +305,13 @@ $(IMAGE_DIR)/install.cpio: $(GENERIC_IMAGE) $(IMAGE_DIR)/deployment.cpio \
 # that disk.
 install: $(IMAGE_DIR)/install.cpio
 	$(MAKE) -C dev-cluster install
+
+# Install a machine through the real stick under real firmware:
+# OVMF's removable-media path boots systemd-boot's menu on the serial
+# console, and a person picks the machine. This is the drill for what
+# hardware does; daily lab installs keep the unattended target above.
+install-stick: $(IMAGE_DIR)/stick.img
+	$(MAKE) -C dev-cluster install-stick
 
 # Produce a release: the same system rebuilt under a different
 # version stamp and bundled into releases/dist/ the way a release
@@ -336,4 +356,4 @@ clean:
 	$(MAKE) -C image clean
 	rm -rf $(IMAGE_DIR)
 
-.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot init machine-operator cluster-operator logs cli identity kubeconfig image run run-once smoke install storage release serve clean
+.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot init machine-operator cluster-operator logs cli identity kubeconfig image run run-once smoke install install-stick storage release serve clean

@@ -22,7 +22,7 @@ LIKEN_FAULT ?=
 # a dynamically linked PID 1 would have nothing to load. -trimpath
 # keeps this machine's filesystem layout out of the binary, a small
 # step toward reproducible builds.
-$(DIST)/liken: ../go.mod ../go.sum $(wildcard *.go) $(wildcard ../machine/*.go) ../VERSION
+$(DIST)/liken: ../go.mod ../go.sum $(wildcard *.go) $(wildcard ../machine/*.go) $(wildcard ../disks/*.go) ../VERSION
 	CGO_ENABLED=0 go build -trimpath \
 		-ldflags "-X github.com/liken-sh/liken/machine.Version=$(LIKEN_VERSION) -X main.fault=$(LIKEN_FAULT)" \
 		-o $(DIST)/liken .

@@ -15,7 +15,9 @@ DIST ?= dist
 # the operator has, with no libc expectations. -trimpath keeps this
 # machine's filesystem layout out of the binary.
 $(DIST)/liken: ../go.mod ../go.sum $(wildcard *.go) \
-		$(wildcard ../identity/*.go) $(wildcard ../machine/*.go) ../VERSION
+		$(wildcard ../identity/*.go) $(wildcard ../machine/*.go) \
+		$(wildcard ../image/*.go) $(wildcard ../releases/*.go) \
+		$(wildcard ../disks/*.go) ../VERSION
 	CGO_ENABLED=0 go build -trimpath \
 		-ldflags "-X github.com/liken-sh/liken/machine.Version=$(LIKEN_VERSION)" \
 		-o $(DIST)/liken .

@@ -96,6 +96,7 @@ func TestStickListsEveryMachine(t *testing.T) {
 		text := string(entry)
 		for _, want := range []string{
 			"title install as " + name,
+			"sort-key " + name,
 			"linux /vmlinuz",
 			"initrd /liken.cpio",
 			"initrd /deployment.cpio",

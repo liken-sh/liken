@@ -271,6 +271,10 @@ QEMU_BOOT = $(QEMU_BOOT_$(BOOT))
 RTC ?= utc
 RTC_BASE := -rtc base=$(RTC)
 
+# QEMU_EXTRA is the hook for one-off hardware: install-stick attaches
+# the USB stick through it. Empty for every ordinary boot.
+QEMU_EXTRA ?=
+
 run: guests/$(NODE)/state.qcow2 guests/$(NODE)/pods.qcow2 guests/$(NODE)/boot.qcow2 guests/$(NODE)/OVMF_VARS.fd
 	qemu-system-x86_64 \
 		-accel kvm -accel tcg \
@@ -280,6 +284,7 @@ run: guests/$(NODE)/state.qcow2 guests/$(NODE)/pods.qcow2 guests/$(NODE)/boot.qc
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
 		-drive if=pflash,format=raw,file=guests/$(NODE)/OVMF_VARS.fd \
 		$(QEMU_BOOT) \
+		$(QEMU_EXTRA) \
 		-display none \
 		-serial $(CONSOLE) \
 		-monitor none \
@@ -318,6 +323,24 @@ install: LIKEN_BOOT_ARGS = liken.install
 install: QEMU_EXIT_ON_REBOOT := -no-reboot
 install: run
 
+# The install boot the way real hardware takes it: no -kernel at all.
+# The varstore is refreshed to a blank copy first, because that is
+# what a new machine's firmware looks like — no boot entries — and a
+# firmware with no entries falls through to the removable-media path,
+# \EFI\BOOT\BOOTX64.EFI on the stick, which is systemd-boot's menu.
+# Pick the machine at the console; the installer writes this
+# machine's slot entries into this same varstore, and `make run`
+# boots from them afterward. Refreshing an installed node's varstore
+# is harmless for the same reason: the install re-creates its
+# entries. The stick rides USB mass storage because that is the
+# hardware shape; the installer never reads it after boot (everything
+# it needs came along in the initramfs).
+install-stick: guests/$(NODE)/state.qcow2 guests/$(NODE)/pods.qcow2 guests/$(NODE)/boot.qcow2
+	cp /usr/share/OVMF/OVMF_VARS_4M.fd guests/$(NODE)/OVMF_VARS.fd
+	$(MAKE) run NODE=$(NODE) QEMU_EXIT_ON_REBOOT=-no-reboot QEMU_EXTRA="-device qemu-xhci \
+		-drive file=image/stick.img,format=raw,if=none,id=stick \
+		-device usb-storage,drive=stick"
+
 # The lab's storage server: a stock-Debian guest on the same cluster
 # segment, serving the iSCSI target and NFSv4 export the fleet's
 # storage-client features are drilled against. It is a fixture, not a
@@ -343,7 +366,7 @@ grow-pods:
 smoke:
 	./smoke.sh
 
-.PHONY: run run-once install storage grow-pods smoke clean
+.PHONY: run run-once install install-stick storage grow-pods smoke clean
 
 clean:
 	rm -rf guests
