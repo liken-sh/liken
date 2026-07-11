@@ -48,9 +48,9 @@ func (a *archive) header(name string, mode, nlink, filesize int) error {
 	// mtime is zero deliberately: the archive's bytes then depend
 	// only on its contents, not on when it was built, which keeps a
 	// deployment layer reproducible and its digest stable.
-	if err := a.write([]byte(fmt.Sprintf(
+	if err := a.write(fmt.Appendf(nil,
 		"070701%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X",
-		a.ino, mode, 0, 0, nlink, 0, filesize, 0, 0, 0, 0, len(name)+1, 0))); err != nil {
+		a.ino, mode, 0, 0, nlink, 0, filesize, 0, 0, 0, 0, len(name)+1, 0)); err != nil {
 		return err
 	}
 	if err := a.write(append([]byte(name), 0)); err != nil {
