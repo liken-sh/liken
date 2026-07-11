@@ -27,35 +27,56 @@ import (
 	"github.com/liken-sh/liken/releases"
 )
 
-const usage = `liken — the toolkit for deployments of liken
+const usage = `liken — the toolkit for setting up and running a liken cluster
 
 usage:
-  liken mint <identity-dir>                mint a new cluster identity
-  liken adopt <harvest-dir> <identity-dir> adopt an existing cluster's identity
-  liken kubeconfig <identity-dir>          compute an admin kubeconfig
+
+  liken mint <identity-dir>
+      Create a new cluster identity: the certificates and join token
+      that every machine in one cluster shares.
+
+  liken adopt <harvest-dir> <identity-dir>
+      Take identity files copied off an existing cluster's disk and
+      arrange them as an identity directory, so new media can be made
+      for a cluster that is already running.
+
+  liken kubeconfig <identity-dir>
+      Write an admin kubeconfig: the credential kubectl uses to
+      administer the cluster.
+
   liken layer <manifests-dir> <identity-dir> <kernel-dist> <output.cpio>
-                                           pack a deployment layer
+      Pack your cluster's half of the operating system into one small
+      archive: your cluster and machine manifests, your identity, and
+      any kernel modules your machines ask for.
+
   liken media <release-dir> <deployment.cpio> <output.cpio>
-                                           assemble install media from
-                                           a release and a layer
+      Build a bootable install image from a downloaded release and
+      your deployment layer. Machines install themselves from it.
+
   liken bundle <vmlinuz> <liken.cpio> <liken-cli> <channel-dir> <version>
-                                           lay out a release in a
-                                           channel
-  liken serve <channel-dir> [address]      serve a release channel
-                                           (default address :8017)
-  liken version                            print the toolkit's version
+      Lay out a release: copy the three files into the channel and
+      write the release.yaml that names each one by its digest.
 
-An identity directory belongs to a deployment and holds its
-certificate authorities and join token; the files are private keys
-and never belong in version control.
+  liken serve <channel-dir> [address]
+      Share a release channel over plain HTTP so machines can
+      download from it. The address defaults to :8017.
 
-A deployment layer is the small archive that turns the generic liken
-image into one deployment's image: concatenate the two cpio files and
-the kernel unpacks them as one system (image/layer.go explains).
+  liken version
+      Print this toolkit's version.
 
-A release channel is a directory of published releases, one version
-per subdirectory, each named by digest in its release.yaml; the
-releases package explains how deployments upgrade from one.
+An identity directory holds the certificates and join token that
+make a cluster one cluster. Some of the files are private keys, so
+keep the directory out of version control.
+
+A deployment layer is a small archive holding everything about the
+operating system that is yours and not liken's. A machine boots the
+generic liken image and your layer together, and the kernel joins
+them into one system.
+
+A release channel is a directory any web server can share: one
+subdirectory per version, each holding the release's files and a
+release.yaml that names every file by its sha256 digest, so a
+machine can check that what it downloaded is what was published.
 `
 
 func main() {
