@@ -45,32 +45,15 @@ const payloadDir = "usr/share/liken/release"
 // bundle: artifacts beside their release.yaml) and a deployment
 // layer, writing the bootable image to out.
 func Media(releaseDir, layerPath, out string, log io.Writer) error {
-	document, err := os.ReadFile(filepath.Join(releaseDir, "release.yaml"))
-	if err != nil {
-		return fmt.Errorf("reading the release document: %w", err)
-	}
-	release, err := machine.ParseRelease(document)
+	document, release, err := verifiedRelease(releaseDir)
 	if err != nil {
 		return err
-	}
-	for _, artifact := range release.Artifacts {
-		f, err := os.Open(filepath.Join(releaseDir, artifact.Name))
-		if err != nil {
-			return fmt.Errorf("the release is missing an artifact its document lists: %w", err)
-		}
-		err = artifact.Verify(f)
-		f.Close()
-		if err != nil {
-			return fmt.Errorf("the release does not match its own document: %w", err)
-		}
 	}
 
 	layer, err := os.ReadFile(layerPath)
 	if err != nil {
 		return fmt.Errorf("reading the deployment layer: %w", err)
 	}
-	sum := sha256.Sum256(layer)
-	sidecar := machine.FormatLayerSidecar(hex.EncodeToString(sum[:]))
 
 	f, err := os.Create(out)
 	if err != nil {
@@ -93,9 +76,57 @@ func Media(releaseDir, layerPath, out string, log io.Writer) error {
 		return err
 	}
 
-	// The wrapper: the payload the installer copies to a slot. The
-	// artifacts were verified above and read again here; the document
-	// and the layer travel as the bytes already in hand.
+	if err := writePayload(f, releaseDir, release, document, layer); err != nil {
+		return err
+	}
+
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(log, "install media for liken %s: %d MB (%d artifacts + the deployment layer)\n",
+		release.Metadata.Name, info.Size()/(1<<20), len(release.Artifacts))
+	return nil
+}
+
+// verifiedRelease reads a release directory's document and proves
+// every listed artifact against it: the same check the fetch path
+// performs, done before a single byte is packed, because an artifact
+// that fails its document here would fail it again on a machine,
+// where the only remedy is new media.
+func verifiedRelease(releaseDir string) ([]byte, *machine.Release, error) {
+	document, err := os.ReadFile(filepath.Join(releaseDir, "release.yaml"))
+	if err != nil {
+		return nil, nil, fmt.Errorf("reading the release document: %w", err)
+	}
+	release, err := machine.ParseRelease(document)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, artifact := range release.Artifacts {
+		f, err := os.Open(filepath.Join(releaseDir, artifact.Name))
+		if err != nil {
+			return nil, nil, fmt.Errorf("the release is missing an artifact its document lists: %w", err)
+		}
+		err = artifact.Verify(f)
+		f.Close()
+		if err != nil {
+			return nil, nil, fmt.Errorf("the release does not match its own document: %w", err)
+		}
+	}
+	return document, release, nil
+}
+
+// writePayload packs the installer's payload as a wrapper archive:
+// the slot layout, exactly — every artifact the document lists, the
+// document itself byte for byte, and the layer beside the sidecar
+// computed from it. The artifacts were verified before this is
+// called and are read again here; the document and the layer travel
+// as the bytes already in hand.
+func writePayload(w io.Writer, releaseDir string, release *machine.Release, document, layer []byte) error {
+	sum := sha256.Sum256(layer)
+	sidecar := machine.FormatLayerSidecar(hex.EncodeToString(sum[:]))
+
 	payload := []struct {
 		name string
 		data []byte
@@ -115,7 +146,7 @@ func Media(releaseDir, layerPath, out string, log io.Writer) error {
 		}{artifact.Name, data})
 	}
 
-	a := newArchive(f)
+	a := newArchive(w)
 	for _, d := range []string{"usr", "usr/share", "usr/share/liken", payloadDir} {
 		if err := a.dir(d, 0o755); err != nil {
 			return err
@@ -126,15 +157,5 @@ func Media(releaseDir, layerPath, out string, log io.Writer) error {
 			return err
 		}
 	}
-	if err := a.close(); err != nil {
-		return err
-	}
-
-	info, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(log, "install media for liken %s: %d MB (%d artifacts + the deployment layer)\n",
-		release.Metadata.Name, info.Size()/(1<<20), len(release.Artifacts))
-	return nil
+	return a.close()
 }

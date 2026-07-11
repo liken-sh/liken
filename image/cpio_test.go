@@ -9,53 +9,23 @@ package image
 import (
 	"bytes"
 	"fmt"
-	"strconv"
 	"testing"
 )
 
-// A parsed newc entry, just enough to verify what the writer emits.
-type entry struct {
-	name string
-	mode uint32
-	uid  uint32
-	gid  uint32
-	data []byte
-}
-
-// readArchive parses a newc archive the way the kernel's unpacker
-// does: fixed 110-byte ASCII headers, names and data each padded to
-// four bytes, ending at the TRAILER!!! record.
-func readArchive(t *testing.T, raw []byte) []entry {
+// readArchive parses one archive with the production reader
+// (cpio_read.go) and asserts it stands alone: exactly one archive,
+// nothing after the trailer. Tests that expect concatenation call
+// readCPIO themselves.
+func readArchive(t *testing.T, raw []byte) []cpioEntry {
 	t.Helper()
-	var entries []entry
-	off := 0
-	field := func(i int) uint32 {
-		start := off + 6 + i*8
-		v, err := strconv.ParseUint(string(raw[start:start+8]), 16, 32)
-		if err != nil {
-			t.Fatalf("header field %d at %d: %v", i, off, err)
-		}
-		return uint32(v)
+	entries, rest, err := readCPIO(raw)
+	if err != nil {
+		t.Fatal(err)
 	}
-	pad4 := func(n int) int { return (n + 3) &^ 3 }
-	for {
-		if string(raw[off:off+6]) != "070701" {
-			t.Fatalf("bad magic at %d: %q", off, raw[off:off+6])
-		}
-		mode, uid, gid := field(1), field(2), field(3)
-		filesize, namesize := int(field(6)), int(field(11))
-		name := string(raw[off+110 : off+110+namesize-1])
-		dataStart := pad4(off + 110 + namesize)
-		data := raw[dataStart : dataStart+filesize]
-		off = pad4(dataStart + filesize)
-		if name == "TRAILER!!!" {
-			if off != len(raw) {
-				t.Errorf("%d bytes after the trailer", len(raw)-off)
-			}
-			return entries
-		}
-		entries = append(entries, entry{name, mode, uid, gid, data})
+	if len(rest) != 0 {
+		t.Errorf("%d bytes after the trailer", len(rest))
 	}
+	return entries
 }
 
 func TestArchiveRoundTrips(t *testing.T) {

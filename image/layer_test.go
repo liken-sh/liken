@@ -89,7 +89,7 @@ func fixtureKernel(t *testing.T) string {
 }
 
 // builtLayer runs Layer over the fixtures and parses the archive.
-func builtLayer(t *testing.T, manifests string) map[string]entry {
+func builtLayer(t *testing.T, manifests string) map[string]cpioEntry {
 	t.Helper()
 	identityDir := t.TempDir()
 	if err := identity.Mint(identityDir, io.Discard); err != nil {
@@ -103,7 +103,7 @@ func builtLayer(t *testing.T, manifests string) map[string]entry {
 	if err != nil {
 		t.Fatal(err)
 	}
-	byName := map[string]entry{}
+	byName := map[string]cpioEntry{}
 	for _, e := range readArchive(t, raw) {
 		byName[e.name] = e
 	}
