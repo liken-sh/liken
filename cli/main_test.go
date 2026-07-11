@@ -5,7 +5,6 @@ package main
 // in their own packages; what's under test here is only the table.
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,7 +37,6 @@ func TestRunChecksArgumentCounts(t *testing.T) {
 		{"media without its inputs", []string{"media", "release-dir"}},
 		{"bundle without its artifacts", []string{"bundle", "vmlinuz"}},
 		{"serve with too many arguments", []string{"serve", "channel", "addr", "extra"}},
-		{"corrupt without a version", []string{"corrupt", "channel"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -113,13 +111,12 @@ func TestRunAssemblesInstallMedia(t *testing.T) {
 	}
 }
 
-func TestRunOperatesAReleaseChannel(t *testing.T) {
-	// One tiny release through the channel commands: bundle it, then
-	// corrupt it. The artifacts just need to exist and be big enough
-	// to corrupt.
+func TestRunBundlesARelease(t *testing.T) {
+	// One tiny release through the bundle command; the artifacts just
+	// need to exist.
 	src := t.TempDir()
 	for _, name := range []string{"vmlinuz", "liken.cpio", "liken"} {
-		if err := os.WriteFile(filepath.Join(src, name), bytes.Repeat([]byte("x"), 2<<20), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(src, name), []byte(name+" bytes"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -130,8 +127,8 @@ func TestRunOperatesAReleaseChannel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := run([]string{"corrupt", channel, "0.0.1"}); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(filepath.Join(channel, "0.0.1", "release.yaml")); err != nil {
+		t.Error("no release document was written")
 	}
 }
 

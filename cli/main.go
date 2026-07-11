@@ -43,8 +43,6 @@ usage:
                                            channel
   liken serve <channel-dir> [address]      serve a release channel
                                            (default address :8017)
-  liken corrupt <channel-dir> <version>    damage a published release,
-                                           to drill the trust chain
   liken version                            print the toolkit's version
 
 An identity directory belongs to a deployment and holds its
@@ -113,11 +111,6 @@ func run(args []string) error {
 			return fmt.Errorf("usage: liken serve <channel-dir> [address]")
 		}
 		return releases.Serve(args[1], addr)
-	case "corrupt":
-		if len(args) != 3 {
-			return fmt.Errorf("usage: liken corrupt <channel-dir> <version>")
-		}
-		return releases.Corrupt(args[1], args[2], os.Stdout)
 	case "version":
 		fmt.Println(machine.Version)
 		return nil

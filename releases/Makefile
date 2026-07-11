@@ -22,9 +22,8 @@
 # are stable and publishable, and this channel is the only one there
 # is: every fleet upgrades from it directly, each machine carrying its
 # own deployment layer between its slots. The `serve` target below is
-# the lab's stand-in for the releases on the liken.sh website — the
-# dev cluster's guests fetch from it at http://10.0.2.2:8017 — and
-# `corrupt` is the drill that proves machines refuse damaged bytes.
+# the lab's stand-in for the releases on the liken.sh website; the
+# dev cluster's guests fetch from it at http://10.0.2.2:8017.
 #
 # A release is an ordinary build with a different version stamp: the
 # init, operators, cli, and image domains all accept LIKEN_VERSION and
@@ -86,16 +85,7 @@ serve:
 	$(MAKE) -C ../cli
 	../cli/dist/liken serve dist
 
-# Damage a published release in place, to drill the trust chain: a
-# machine that fetches it must hold at DigestMismatch and stage
-# nothing. Recovery is publishing a corrected release under a new
-# version, never patching this one.
-corrupt:
-	@test -n "$(VERSION)" || { echo "usage: make corrupt VERSION=x.y.z"; exit 1; }
-	$(MAKE) -C ../cli
-	../cli/dist/liken corrupt dist $(VERSION)
-
 clean:
 	rm -rf build dist
 
-.PHONY: build release serve corrupt clean
+.PHONY: build release serve clean

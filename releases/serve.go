@@ -1,8 +1,7 @@
 // Package releases produces and operates the release channel: the
 // layout a release server publishes (dist/<version>/ holding the
-// artifacts and the release.yaml that names them by digest), the
-// server that exposes it, and the drills that prove machines refuse
-// what the digests disown.
+// artifacts and the release.yaml that names them by digest) and the
+// server that exposes it.
 //
 // There is one kind of channel, and it is public: the generic OS
 // (vmlinuz, the generic liken.cpio, the toolkit binary) with no
@@ -27,8 +26,7 @@ package releases
 // The logging is why this exists instead of something like
 // python3 -m http.server. Upgrade drills watch this terminal to see
 // machines fetch: which release, which artifact, how many bytes. A
-// stalled download or a re-fetch after a corruption drill is visible
-// the moment it happens.
+// stalled or repeated download is visible the moment it happens.
 
 import (
 	"fmt"

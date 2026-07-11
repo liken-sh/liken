@@ -1,9 +1,8 @@
 package releases
 
-// Tests for the channel operations: bundling a release and the
-// corruption drill. The fixtures are small stand-ins with the same
-// shapes: artifact files big enough to corrupt, and documents
-// generated from their real bytes.
+// Tests for bundling a release. The fixtures are small stand-ins
+// with the same shape as the real thing: artifact files and a
+// document generated from their real bytes.
 
 import (
 	"bytes"
@@ -120,51 +119,5 @@ func TestBundleRefusesAMissingArtifact(t *testing.T) {
 	if err := Bundle("no-such-vmlinuz", "no-such-cpio", "no-such-cli",
 		t.TempDir(), "0.0.1", io.Discard); err == nil {
 		t.Error("bundling artifacts that don't exist must fail")
-	}
-}
-
-func TestCorruptBreaksTheDigestAndOnlyTheDigest(t *testing.T) {
-	channel := t.TempDir()
-	version := filepath.Join(channel, "1.2.3")
-	if err := os.MkdirAll(version, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	original := bytes.Repeat([]byte("liken"), 512*1024)
-	if err := os.WriteFile(filepath.Join(version, "liken.cpio"), original, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	var out bytes.Buffer
-	if err := Corrupt(channel, "1.2.3", &out); err != nil {
-		t.Fatal(err)
-	}
-
-	damaged, err := os.ReadFile(filepath.Join(version, "liken.cpio"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(damaged) != len(original) {
-		t.Fatalf("corruption changed the size: %d -> %d", len(original), len(damaged))
-	}
-	diffs := 0
-	for i := range original {
-		if original[i] != damaged[i] {
-			diffs++
-			if i != corruptionOffset {
-				t.Errorf("byte %d changed; only %d should", i, corruptionOffset)
-			}
-		}
-	}
-	if diffs != 1 {
-		t.Errorf("%d bytes changed, want exactly 1", diffs)
-	}
-	if !strings.Contains(out.String(), "refuse") {
-		t.Errorf("report does not say what the drill proves:\n%s", out.String())
-	}
-}
-
-func TestCorruptRefusesAnUnpublishedRelease(t *testing.T) {
-	if err := Corrupt(t.TempDir(), "9.9.9", io.Discard); err == nil {
-		t.Error("corrupting a release that isn't there must fail loudly")
 	}
 }
