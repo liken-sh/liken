@@ -18,17 +18,13 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// releaseFixture lays out a public release directory: the three
+// releaseFixtureWith lays out a release directory: the given
 // artifacts and a release.yaml naming them by digest and size.
-func releaseFixture(t *testing.T) string {
+func releaseFixtureWith(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
 	document := "apiVersion: liken.sh/v1alpha1\nkind: Release\nmetadata:\n  name: 0.9.9\nartifacts:\n"
-	for name, content := range map[string]string{
-		"vmlinuz":    "kernel bytes",
-		"liken.cpio": "generic image bytes",
-		"liken":      "toolkit bytes",
-	} {
+	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -39,6 +35,16 @@ func releaseFixture(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return dir
+}
+
+// releaseFixture is the media tests' three-artifact release.
+func releaseFixture(t *testing.T) string {
+	t.Helper()
+	return releaseFixtureWith(t, map[string]string{
+		"vmlinuz":    "kernel bytes",
+		"liken.cpio": "generic image bytes",
+		"liken":      "toolkit bytes",
+	})
 }
 
 // layerFixture writes a stand-in deployment layer beside the test.

@@ -18,6 +18,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 
@@ -26,6 +27,16 @@ import (
 	"github.com/liken-sh/liken/machine"
 	"github.com/liken-sh/liken/releases"
 )
+
+// A consoleList collects repeated -console flags in order.
+type consoleList []string
+
+func (c *consoleList) String() string { return fmt.Sprint([]string(*c)) }
+
+func (c *consoleList) Set(v string) error {
+	*c = append(*c, v)
+	return nil
+}
 
 const usage = `liken — the toolkit for setting up and running a liken cluster
 
@@ -53,6 +64,14 @@ usage:
   liken media <release-dir> <deployment.cpio> <output.cpio>
       Build a bootable install image from a downloaded release and
       your deployment layer. Machines install themselves from it.
+
+  liken stick [-console ttyS0] <release-dir> <deployment.cpio> <output.img>
+      Build the USB install stick's disk image from a downloaded
+      release and your deployment layer: one stick for the whole
+      deployment, with a boot menu listing every machine by name.
+      Boot it, pick the machine you're standing at, and it installs
+      itself and powers off. -console (repeatable) adds a console=
+      argument to every entry; the machines keep it permanently.
 
   liken bundle <vmlinuz> <liken.cpio> <liken-cli> <systemd-boot.efi> <channel-dir> <version>
       Lay out a release: copy the four files into the channel and
@@ -118,6 +137,19 @@ func run(args []string) error {
 			return fmt.Errorf("usage: liken media <release-dir> <deployment.cpio> <output.cpio>")
 		}
 		return image.Media(args[1], args[2], args[3], os.Stdout)
+	case "stick":
+		// The CLI's first flags; stdlib flag over a subcommand's own
+		// FlagSet, so the positional arguments stay positional.
+		fs := flag.NewFlagSet("stick", flag.ContinueOnError)
+		var consoles consoleList
+		fs.Var(&consoles, "console", "add console=<value> to every menu entry (repeatable)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 3 {
+			return fmt.Errorf("usage: liken stick [-console ttyS0] <release-dir> <deployment.cpio> <output.img>")
+		}
+		return image.Stick(fs.Arg(0), fs.Arg(1), fs.Arg(2), consoles, os.Stdout)
 	case "bundle":
 		if len(args) != 7 {
 			return fmt.Errorf("usage: liken bundle <vmlinuz> <liken.cpio> <liken-cli> <systemd-boot.efi> <channel-dir> <version>")
