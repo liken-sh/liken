@@ -6,7 +6,8 @@ package identity
 // token, which is why machines built from the same image belong to
 // the same cluster. Minting creates that identity before any machine
 // exists, which works for a cluster liken founds. For a cluster liken
-// did not create, the identity already exists on that cluster's
+// did not create — any existing k3s cluster, however it was set up —
+// the identity already exists on that cluster's
 // servers and has to be copied off one of them instead. Adoption
 // takes that copy and lays it into the deployment's identity
 // directory exactly as minting would have, so everything downstream

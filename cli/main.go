@@ -37,8 +37,9 @@ usage:
 
   liken adopt <harvest-dir> <identity-dir>
       Take identity files copied off an existing cluster's disk and
-      arrange them as an identity directory, so new media can be made
-      for a cluster that is already running.
+      arrange them as an identity directory. The cluster does not
+      have to be a liken cluster: any k3s cluster's identity can be
+      adopted, so liken machines can join a cluster you already run.
 
   liken kubeconfig <identity-dir>
       Write an admin kubeconfig: the credential kubectl uses to
