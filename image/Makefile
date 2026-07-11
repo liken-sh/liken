@@ -1,20 +1,20 @@
 # The image domain, where the pieces are assembled into a bootable
 # system.
 #
-# The system is an initramfs: a cpio archive the kernel unpacks into an
-# in-memory root filesystem at boot. There is no disk, no bootloader,
-# and no installer: the entire OS is two files, the kernel and this
-# archive, and QEMU boots them directly. build.sh documents everything
-# that goes in and why.
+# The system is two artifacts (build.sh documents everything that
+# goes into each and why): liken.sqfs, the whole OS as a read-only
+# squashfs image that init mounts as the root filesystem, and
+# boot.cpio, the small initramfs the boot loader stages in RAM —
+# init and the early boot's modules, nothing more.
 #
-# The archive built here is generic: it carries no identity and no
-# manifests, so it is the OS's own artifact and lands in this domain's
-# dist/ by default. What makes it a deployment's image is the
-# deployment layer (layer.go), concatenated on by whoever owns the
+# Both are generic: they carry no identity and no manifests, so they
+# are the OS's own artifacts and land in this domain's dist/ by
+# default. What makes the system a deployment's is the deployment
+# layer (layer.go), loaded as a further initrd by whoever owns the
 # deployment (the root Makefile for the dev cluster, the releases
 # domain for a release build). version.mk supplies the version stamp;
 # it and the input locations are overridable because the releases
-# domain rebuilds this same archive under a different version into
+# domain rebuilds these same artifacts under a different version into
 # its own tree.
 include ../version.mk
 DIST ?= dist
@@ -34,7 +34,8 @@ TRUST_VERSION := $(strip $(file <../trust/VERSION))
 # The prerequisites here mirror the ones the root Makefile's rule
 # declares (from its side of the directory boundary); when either
 # list changes, change the other to match.
-$(DIST)/liken.cpio: build.sh $(shell find etc -type f) \
+$(DIST)/liken.sqfs $(DIST)/boot.cpio &: build.sh boot-modules.conf \
+		$(shell find etc -type f) \
 		$(INIT_DIST)/liken \
 		../kernel/dist/$(KERNEL_VERSION)/vmlinuz \
 		../k3s/dist/$(K3S_VERSION)/k3s \
@@ -64,11 +65,7 @@ $(DIST)/liken.cpio: build.sh $(shell find etc -type f) \
 
 .PHONY: all clean
 
-all: $(DIST)/liken.cpio
-
-# The install image (install.sh) is a deployment artifact — it wraps
-# the deployment's composed liken.cpio — so deployments invoke
-# install.sh against their own trees; there is no rule for it here.
+all: $(DIST)/liken.sqfs $(DIST)/boot.cpio
 
 clean:
 	rm -rf dist

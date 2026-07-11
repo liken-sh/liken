@@ -3,15 +3,17 @@ package releases
 // Bundling a release of liken: the artifacts and the document that
 // every fleet, everywhere, upgrades from.
 //
-// The bundle is four artifacts. vmlinuz and the generic liken.cpio
-// are the operating system, with no deployment inside; the liken
-// binary is the toolkit that turns them into a deployment's bootable
-// media without this repo or a build; systemd-bootx64.efi is the
-// menu program that media boots (the systemd-boot domain explains
-// why a stick needs one when installed machines don't). Because
-// nothing here embeds a deployment, every digest is stable for a
-// given source tree: publishable on a release page, and the same for
-// everyone.
+// The bundle is five artifacts. vmlinuz, the system image
+// (liken.sqfs, the OS as a read-only filesystem a machine mounts as
+// its root), and the boot archive (boot.cpio, the small initramfs
+// the boot loader stages) are the operating system, with no
+// deployment inside; the liken binary is the toolkit that turns them
+// into a deployment's bootable media without this repo or a build;
+// systemd-bootx64.efi is the menu program that media boots (the
+// systemd-boot domain explains why a stick needs one when installed
+// machines don't). Because nothing here embeds a deployment, every
+// digest is stable for a given source tree: publishable on a release
+// page, and the same for everyone.
 //
 // That stability is what lets machines upgrade straight from the
 // public channel. A deployment pins the release document's digest in
@@ -38,7 +40,7 @@ import (
 // The version must fit liken's calendar grammar (the machine package
 // defines it); enforcing that here, where versions are authored,
 // means a malformed one never reaches a channel at all.
-func Bundle(vmlinuz, image, cli, bootMenu, channelDir, version string, components []machine.ReleaseComponent, out io.Writer) error {
+func Bundle(vmlinuz, systemImage, bootArchive, cli, bootMenu, channelDir, version string, components []machine.ReleaseComponent, out io.Writer) error {
 	if err := machine.ValidVersion(version); err != nil {
 		return err
 	}
@@ -57,7 +59,8 @@ func Bundle(vmlinuz, image, cli, bootMenu, channelDir, version string, component
 		src, name string
 	}{
 		{vmlinuz, "vmlinuz"},
-		{image, "liken.cpio"},
+		{systemImage, "liken.sqfs"},
+		{bootArchive, "boot.cpio"},
 		{cli, "liken"},
 		{bootMenu, "systemd-bootx64.efi"},
 	}

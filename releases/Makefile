@@ -7,9 +7,15 @@
 # laid out the way a release server serves it:
 #
 #   releases/dist/<version>/vmlinuz       the kernel
-#   releases/dist/<version>/liken.cpio    the generic system: init,
-#                                         k3s, all of it, and nobody's
+#   releases/dist/<version>/liken.sqfs    the system image: init, k3s,
+#                                         all of it as a read-only
+#                                         filesystem a machine mounts
+#                                         as its root, and nobody's
 #                                         identity or manifests
+#   releases/dist/<version>/boot.cpio     the boot archive: the small
+#                                         initramfs the boot loader
+#                                         stages, init and the early
+#                                         boot's modules
 #   releases/dist/<version>/liken         the toolkit: mint an
 #                                         identity, pack a deployment
 #                                         layer, assemble install
@@ -94,7 +100,8 @@ release: build
 	$(MAKE) -C ../systemd-boot
 	$(BUILD)/cli/liken bundle \
 		../kernel/dist/$(KERNEL_VERSION)/vmlinuz \
-		$(BUILD)/generic/liken.cpio \
+		$(BUILD)/generic/liken.sqfs \
+		$(BUILD)/generic/boot.cpio \
 		$(BUILD)/cli/liken \
 		../systemd-boot/dist/$(SYSTEMDBOOT_VERSION)/systemd-bootx64.efi \
 		dist $(VERSION) \

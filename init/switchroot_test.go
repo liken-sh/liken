@@ -1,8 +1,9 @@
 package main
 
-// Tests for the tree copy that carries the initramfs onto the new
-// root, against real temporary directories. The switch_root procedure
-// itself (mounts, chroot, exec) is QEMU territory.
+// Tests for the tree carry that brings the boot loader's extra cargo
+// (the deployment layer) onto the overlay root, against real
+// temporary directories. The switch_root procedure itself (loop
+// devices, mounts, chroot, exec) is QEMU territory.
 
 import (
 	"os"
@@ -12,19 +13,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func TestFsTypeNameKnowsTheBootFilesystems(t *testing.T) {
-	if got := fsTypeName(unix.TMPFS_MAGIC); got != "tmpfs" {
-		t.Errorf("got %q", got)
-	}
-	if got := fsTypeName(unix.RAMFS_MAGIC); got != "ramfs" {
-		t.Errorf("got %q", got)
-	}
-	if got := fsTypeName(0x1234); got != "magic 0x1234" {
-		t.Errorf("an unknown magic is reported raw: %q", got)
-	}
-}
-
-func TestCopyTreeReplicatesDirsFilesAndSymlinks(t *testing.T) {
+func TestCarryTreeReplicatesDirsFilesAndSymlinks(t *testing.T) {
 	src, dst := t.TempDir(), t.TempDir()
 	if err := os.MkdirAll(filepath.Join(src, "sbin"), 0o755); err != nil {
 		t.Fatal(err)
@@ -35,7 +24,7 @@ func TestCopyTreeReplicatesDirsFilesAndSymlinks(t *testing.T) {
 	if err := os.Symlink("tool", filepath.Join(src, "sbin", "alias")); err != nil {
 		t.Fatal(err)
 	}
-	if err := copyTree(src, dst); err != nil {
+	if err := carryTree(src, dst, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -51,47 +40,124 @@ func TestCopyTreeReplicatesDirsFilesAndSymlinks(t *testing.T) {
 	}
 }
 
-func TestCopyTreeLeavesDevBehind(t *testing.T) {
-	// /dev holds device nodes the kernel owns, not files the image
-	// delivered; the copy takes the empty directory and nothing in it.
+func TestCarryTreeSkipsTheBootArchivesOwnSubtrees(t *testing.T) {
+	// The boot archive's module tree (and /dev, and the staging
+	// mounts) must never land on the real root; the skip list names
+	// them by path.
 	src, dst := t.TempDir(), t.TempDir()
-	if err := os.MkdirAll(filepath.Join(src, "dev"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(src, "lib", "modules", "boot"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(src, "dev", "stray"), nil, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(src, "lib", "modules", "boot", "overlay.ko"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := copyTree(src, dst); err != nil {
+	if err := os.WriteFile(filepath.Join(src, "liken"), []byte("init"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dst, "dev")); err != nil {
-		t.Error("the empty /dev directory itself comes along")
+	if err := os.MkdirAll(filepath.Join(src, "etc", "liken"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dst, "dev", "stray")); !os.IsNotExist(err) {
-		t.Error("nothing inside /dev should be copied")
+	if err := os.WriteFile(filepath.Join(src, "etc", "liken", "cluster.yaml"), []byte("kind: Cluster"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	skip := []string{
+		filepath.Join(src, "lib", "modules", "boot"),
+		filepath.Join(src, "liken"),
+	}
+	if err := carryTree(src, dst, skip); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "etc", "liken", "cluster.yaml")); err != nil {
+		t.Error("the layer's files come along")
+	}
+	if _, err := os.Stat(filepath.Join(dst, "liken")); !os.IsNotExist(err) {
+		t.Error("a skipped file must stay behind")
+	}
+	if _, err := os.Stat(filepath.Join(dst, "lib", "modules", "boot")); !os.IsNotExist(err) {
+		t.Error("a skipped subtree must stay behind entirely")
+	}
+	if _, err := os.Stat(filepath.Join(dst, "lib", "modules")); err != nil {
+		t.Error("a skipped subtree's parents still come along")
 	}
 }
 
-func TestCopyTreeRefusesUnexpectedFileTypes(t *testing.T) {
+func TestCarryTreeOverwritesWhatTheDestinationAlreadyHas(t *testing.T) {
+	// The destination is the overlay, whose lower layer already
+	// carries the system's copy of anything the layer overrides — the
+	// depmod index, most importantly. Later archives win: that is the
+	// initramfs contract the carry preserves.
+	src, dst := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(src, "lib", "modules", "r1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "lib", "modules", "r1", "modules.dep"), []byte("complete"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dst, "lib", "modules", "r1"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dst, "lib", "modules", "r1", "modules.dep"), []byte("partial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := carryTree(src, dst, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(dst, "lib", "modules", "r1", "modules.dep"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "complete" {
+		t.Errorf("the carried file must win, got %q", got)
+	}
+	info, err := os.Stat(filepath.Join(dst, "lib", "modules", "r1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		t.Errorf("an existing directory keeps its permissions, got %v", info.Mode().Perm())
+	}
+}
+
+func TestCarryTreeRefusesUnexpectedFileTypes(t *testing.T) {
 	src, dst := t.TempDir(), t.TempDir()
 	if err := unix.Mkfifo(filepath.Join(src, "pipe"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := copyTree(src, dst); err == nil {
-		t.Error("a fifo is not part of any initramfs we built; the copy must refuse it")
+	if err := carryTree(src, dst, nil); err == nil {
+		t.Error("a fifo is not part of any initramfs we built; the carry must refuse it")
 	}
 }
 
-func TestCopyFileRefusesToOverwrite(t *testing.T) {
+func TestCarryTreeToleratesAnExistingSymlink(t *testing.T) {
+	// The overlay's lower layer ships symlinks of its own (mtab, the
+	// iptables aliases); carrying the same link again is a no-op, not
+	// a failure.
+	src, dst := t.TempDir(), t.TempDir()
+	if err := os.Symlink("target", filepath.Join(src, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("target", filepath.Join(dst, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	if err := carryTree(src, dst, nil); err != nil {
+		t.Errorf("an existing symlink must not fail the carry: %v", err)
+	}
+}
+
+func TestCopyFileReportsAMissingSource(t *testing.T) {
+	if err := copyFile(filepath.Join(t.TempDir(), "absent"), filepath.Join(t.TempDir(), "out"), 0o644); err == nil {
+		t.Error("a missing source must be reported")
+	}
+}
+
+func TestCopyFileReportsAnUnwritableDestination(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "src")
-	dst := filepath.Join(t.TempDir(), "dst")
-	if err := os.WriteFile(src, []byte("new"), 0o644); err != nil {
+	if err := os.WriteFile(src, []byte("bytes"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(dst, []byte("old"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := copyFile(src, dst, 0o644); err == nil {
-		t.Error("the new root starts empty; an existing file is a bug to surface")
+	if err := copyFile(src, filepath.Join(t.TempDir(), "no-such-dir", "out"), 0o644); err == nil {
+		t.Error("an unwritable destination must be reported")
 	}
 }

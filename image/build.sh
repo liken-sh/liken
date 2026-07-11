@@ -1,20 +1,30 @@
 #!/usr/bin/env bash
 #
-# Assemble the generic liken image: an initramfs the kernel unpacks
-# into RAM, carrying the operating system and nothing about any one
-# deployment.
+# Assemble the generic liken system: the operating system with
+# nothing about any one deployment inside, produced as two artifacts.
 #
-# What makes an image a *deployment's* image — the cluster identity,
-# the manifests, the machines' declared kernel modules — arrives as a
-# second cpio archive, the deployment layer (image/layer.go),
-# concatenated onto this one: the kernel's initramfs unpacker
-# processes concatenated archives in order into one filesystem. The
-# split is what makes liken releasable: this archive's digest never
-# changes with the deployment, so a public release can publish it,
-# and producing a bootable image from a release is composition, not
+# liken.sqfs is the system image: the whole OS tree as a read-only,
+# zstd-compressed squashfs. A machine never unpacks it — init
+# loop-mounts it (from the boot slot, or from RAM when the boot
+# loader delivered it) and makes it the root filesystem, with a small
+# bounded tmpfs overlaid for the runtime's writes. The OS therefore
+# costs page cache, not a permanent copy of itself in memory.
+#
+# boot.cpio is the initramfs, and it is deliberately tiny: init and
+# the few modules the early boot needs (boot-modules.conf). It is all
+# the boot loader stages in RAM, which is what lets liken boot a
+# 1 GB machine with room to spare.
+#
+# What makes the system a *deployment's* — the cluster identity, the
+# manifests, the machines' declared kernel modules — arrives as a
+# second cpio archive, the deployment layer (image/layer.go), loaded
+# after boot.cpio: the kernel unpacks both into rootfs, and init
+# carries the layer's files onto the mounted root. The split is what
+# makes liken releasable: the system image's digest never changes
+# with the deployment, so a public release can publish it, and
+# producing a bootable image from a release is composition, not
 # compilation. An image with no layer is still a valid machine:
-# everything defaults, with DHCP and a RAM root, and no cluster to
-# form or join.
+# everything defaults, with DHCP, and no cluster to form or join.
 #
 # This directory is organized as a mirror of the filesystem it
 # produces: image/etc/rancher/k3s/config.yaml is the file the machine
@@ -257,6 +267,7 @@ cp "$here/../trust/dist/$trust_version/cacert.pem" \
 # fails the build right here, which is the point: a deployment learns
 # about a typo'd module at build time, not on a booted fleet.
 ship_modules() {
+    local dest="$1"
     while IFS= read -r name; do
         [[ -z "$name" || "$name" == \#* ]] && continue
         modprobe -d "$kdist" -S "$release" --show-depends "$name"
@@ -265,18 +276,18 @@ ship_modules() {
         sort -u |
         while IFS= read -r file; do
             rel="${file#"$kdist"/lib/modules/"$release"/}"
-            mkdir -p "$root/lib/modules/$release/$(dirname "$rel")"
-            cp "$file" "$root/lib/modules/$release/$rel"
+            mkdir -p "$dest/lib/modules/$release/$(dirname "$rel")"
+            cp "$file" "$dest/lib/modules/$release/$rel"
         done
 }
 mkdir -p "$root/lib/modules/$release"
-ship_modules <"$here/etc/liken/modules.conf"
+ship_modules "$root" <"$here/etc/liken/modules.conf"
 
 # The features' kernel halves ship unconditionally too, one list per
 # feature (staged above under /etc/liken/features); whether they load
 # is the cluster document's call, made at boot, never at build.
-ship_modules <"$here/../open-iscsi/modules.conf"
-ship_modules <"$here/../nfs-utils/modules.conf"
+ship_modules "$root" <"$here/../open-iscsi/modules.conf"
+ship_modules "$root" <"$here/../nfs-utils/modules.conf"
 
 # The deployment's declared modules (spec.modules) are not here: the
 # deployment layer ships them, closure and all, resolved against the
@@ -295,11 +306,43 @@ cp "$kdist/lib/modules/$release/modules.builtin" \
    "$root/lib/modules/$release/"
 depmod --basedir "$root" "$release"
 
-# cpio, flag by flag: -o creates an archive from filenames on stdin
-# (the archive's contents are an explicit, reviewable stream); -H newc
-# is the one format the kernel's unpacker accepts; -R +0:+0 makes root
-# own everything, whoever ran the build.
-(cd "$root" && find . | cpio --quiet -o -H newc -R +0:+0) >"$dist/liken.cpio"
+# The system image: the staged tree as a read-only, mountable
+# filesystem. squashfs because this kernel mounts it with no modules
+# at all (CONFIG_SQUASHFS=y, the zstd decompressor and the loop
+# device built in), so the boot path needs nothing loaded to reach
+# its root. At boot the running root *is* this artifact, loop-mounted
+# from the slot and never unpacked: the RAM cost of the OS is the
+# page cache, which the kernel reclaims under pressure, instead of a
+# permanent tmpfs copy. -all-root makes root own everything, whoever
+# ran the build; -noappend replaces rather than appends on rebuild.
+mksquashfs "$root" "$dist/liken.sqfs" \
+    -comp zstd -all-root -noappend -no-progress -quiet
+
+# The boot archive: the one cpio the boot loader still stages in RAM,
+# so it carries the minimum that must exist before the system image
+# is mounted — init itself and the early boot's few modules
+# (boot-modules.conf), nothing else. The modules live under
+# lib/modules/boot with their own depmod index: a name deliberately
+# not the kernel's release string, so when init later carries the
+# boot-time files onto the real root, nothing here can shadow the
+# system image's complete index at lib/modules/<release>.
+boot_root="$dist/boot-root"
+mkdir -p "$boot_root/lib/modules/$release"
+cp "$init_dist/liken" "$boot_root/liken"
+ship_modules "$boot_root" <"$here/boot-modules.conf"
+cp "$kdist/lib/modules/$release/modules.builtin" \
+   "$kdist/lib/modules/$release/modules.builtin.modinfo" \
+   "$kdist/lib/modules/$release/modules.order" \
+   "$boot_root/lib/modules/$release/"
+depmod --basedir "$boot_root" "$release"
+mv "$boot_root/lib/modules/$release" "$boot_root/lib/modules/boot"
+
+# The list itself rides along, so init loads exactly what the build
+# shipped — one file feeds both decisions.
+cp "$here/boot-modules.conf" "$boot_root/lib/modules/boot/boot-modules.conf"
+
+(cd "$boot_root" && find . | cpio --quiet -o -H newc -R +0:+0) >"$dist/boot.cpio"
+rm -rf "$boot_root"
 
 echo "image for kernel $release, k3s $k3s_version:"
-du -sh "$dist/liken.cpio"
+du -sh "$dist/liken.sqfs" "$dist/boot.cpio"

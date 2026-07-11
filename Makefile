@@ -200,17 +200,19 @@ kubeconfig: $(IDENTITY_DIR)/tls/server-ca.crt cli/dist/liken
 
 # Where the OS build meets this repo's own deployment: the dev
 # cluster's composed artifacts land beside its manifests and identity.
-GENERIC_IMAGE := image/dist/liken.cpio
+SYSTEM_IMAGE := image/dist/liken.sqfs
+BOOT_ARCHIVE := image/dist/boot.cpio
 IMAGE_DIR := dev-cluster/image
 
-# This is the generic bootable initramfs: the image domain packs
-# liken and everything k3s needs into the cpio archive the kernel
-# unpacks at boot, with nothing about any one deployment inside. It
-# is the OS's own artifact, so it lands in the image domain's dist/.
-# The prerequisites here mirror the ones image/Makefile's own
-# liken.cpio rule declares (from its side of the directory boundary);
-# when either list changes, change the other to match.
-$(GENERIC_IMAGE): init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s \
+# The generic system, two artifacts from one build: liken.sqfs, the
+# whole OS as a read-only filesystem image init mounts as the root,
+# and boot.cpio, the small initramfs the boot loader stages — with
+# nothing about any one deployment inside either. They are the OS's
+# own artifacts, so they land in the image domain's dist/.
+# The prerequisites here mirror the ones image/Makefile's own rule
+# declares (from its side of the directory boundary); when either
+# list changes, change the other to match.
+$(SYSTEM_IMAGE) $(BOOT_ARCHIVE) &: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s \
 		$(XTABLES_DIST)/bin/xtables-legacy-multi \
 		$(TRUST_DIST)/cacert.pem \
 		$(E2FSPROGS_DIST)/mke2fs \
@@ -226,11 +228,11 @@ $(GENERIC_IMAGE): init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s \
 		$(wildcard manifests/*.yaml) \
 		logs/dist/liken-logs-image.tar \
 		$(wildcard logs/manifests/*.yaml) \
-		image/build.sh \
+		image/build.sh image/boot-modules.conf \
 		$(shell find image/etc -type f) image/Makefile
 	$(MAKE) -C image
 
-image: $(GENERIC_IMAGE)
+image: $(SYSTEM_IMAGE) $(BOOT_ARCHIVE)
 
 # The deployment layer: the small archive that makes the generic
 # image the dev cluster's image — its manifests, its identity, and
@@ -244,13 +246,19 @@ $(IMAGE_DIR)/deployment.cpio: cli/dist/liken \
 	@mkdir -p $(IMAGE_DIR)
 	cli/dist/liken layer dev-cluster $(IDENTITY_DIR) $(KERNEL_DIST) $@
 
-# The dev cluster's bootable image: the generic OS with the
-# deployment layer concatenated on. The kernel's initramfs unpacker
-# processes concatenated cpio archives in order into one filesystem,
-# so composition replaces rebuilding: neither input is opened, only
-# joined.
-$(IMAGE_DIR)/liken.cpio: $(GENERIC_IMAGE) $(IMAGE_DIR)/deployment.cpio
-	cat $^ > $@
+# The dev cluster's -kernel boot initrd: the boot archive, the system
+# image wrapped in a bare cpio so the kernel unpacks it into rootfs as
+# a file (init loop-mounts it from there — the from-RAM path
+# rootimage.go describes), and the deployment layer, concatenated.
+# The kernel's initramfs unpacker processes concatenated cpio archives
+# in order into one filesystem, so composition replaces rebuilding:
+# the system image is never opened, only wrapped and joined. Installed
+# boots (BOOT=disk) don't use this file; their slots carry the same
+# artifacts unwrapped.
+$(IMAGE_DIR)/initrd.cpio: $(BOOT_ARCHIVE) $(SYSTEM_IMAGE) $(IMAGE_DIR)/deployment.cpio
+	cat $(BOOT_ARCHIVE) > $@
+	(cd image/dist && echo liken.sqfs | cpio --quiet -o -H newc -R +0:+0) >> $@
+	cat $(IMAGE_DIR)/deployment.cpio >> $@
 
 # Boot the dev cluster's machines, the QEMU guests that stand in for
 # the physical and cloud machines liken really targets (the virtual
@@ -263,7 +271,7 @@ $(IMAGE_DIR)/liken.cpio: $(GENERIC_IMAGE) $(IMAGE_DIR)/deployment.cpio
 # end, with the shutdown and the next boot in one stream. As with
 # every target here, the root Makefile only makes sure the artifacts
 # exist, in order, before handing off.
-run: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/liken.cpio
+run: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/initrd.cpio
 	$(MAKE) -C dev-cluster run
 
 # The lab's storage server (dev-cluster/storage): the guest the
@@ -277,7 +285,7 @@ storage:
 # flag tells init not to restart k3s: when k3s first exits, the
 # machine powers off, QEMU exits, and the console log is a complete,
 # bounded record of the boot.
-run-once: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/liken.cpio
+run-once: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/initrd.cpio
 	$(MAKE) -C dev-cluster run-once
 
 # The smoke drill: boot node-1 unattended from blank disks and pass
@@ -285,7 +293,7 @@ run-once: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/liken.cpio
 # dev-cluster/smoke.sh). CI runs this after building everything; it
 # needs the same artifacts as `run` plus the admin kubeconfig the
 # readiness poll authenticates with.
-smoke: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/liken.cpio kubeconfig
+smoke: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/initrd.cpio kubeconfig
 	$(MAKE) -C dev-cluster smoke
 
 # The lab's release-shaped channel: the current tree bundled the way
@@ -300,12 +308,12 @@ smoke: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/liken.cpio kubeconfig
 # holds one.
 LAB_VERSION := $(shell date +%Y.%m.%d)-000
 
-$(IMAGE_DIR)/channel/$(LAB_VERSION)/release.yaml: $(GENERIC_IMAGE) \
+$(IMAGE_DIR)/channel/$(LAB_VERSION)/release.yaml: $(SYSTEM_IMAGE) $(BOOT_ARCHIVE) \
 		$(KERNEL_DIST)/vmlinuz cli/dist/liken $(LIKEN_VERSION_STAMP) \
 		$(SYSTEMDBOOT_DIST)/systemd-bootx64.efi
 	rm -rf $(IMAGE_DIR)/channel
-	cli/dist/liken bundle $(KERNEL_DIST)/vmlinuz $(GENERIC_IMAGE) cli/dist/liken \
-		$(SYSTEMDBOOT_DIST)/systemd-bootx64.efi \
+	cli/dist/liken bundle $(KERNEL_DIST)/vmlinuz $(SYSTEM_IMAGE) $(BOOT_ARCHIVE) \
+		cli/dist/liken $(SYSTEMDBOOT_DIST)/systemd-bootx64.efi \
 		$(IMAGE_DIR)/channel $(LAB_VERSION)
 
 # The install image for the lab's fast -kernel boots: the release

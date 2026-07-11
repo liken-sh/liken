@@ -8,10 +8,14 @@ toolkit these steps run.
 
 ## 1. Download a release and check it
 
-A release is four files and a document that names them:
+A release is five files and a document that names them:
 
     vmlinuz               the Linux kernel
-    liken.cpio            the operating system, nobody's in particular
+    liken.sqfs            the operating system, nobody's in particular:
+                          a read-only filesystem image a machine mounts
+                          as its root
+    boot.cpio             the small initramfs the boot loader stages —
+                          init and the early boot's modules
     liken                 the toolkit
     systemd-bootx64.efi   the install stick's boot menu
     release.yaml          each of the above, by sha256 digest, and
@@ -26,7 +30,7 @@ holds a `sha256:` line for each file, and the release's page
 publishes the digest of `release.yaml` itself, so the chain starts
 with something you can read on the site:
 
-    sha256sum vmlinuz liken.cpio liken systemd-bootx64.efi
+    sha256sum vmlinuz liken.sqfs boot.cpio liken systemd-bootx64.efi
 
 Then make the toolkit runnable:
 

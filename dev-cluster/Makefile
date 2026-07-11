@@ -10,10 +10,10 @@
 # memory, NICs, disks, and OVMF's real UEFI firmware), and each
 # machine boots from its own disk, from the system slots it installed
 # itself onto (`make install NODE=x`, once). BOOT=kernel is the other
-# arrangement: QEMU itself acts as the bootloader, loading the two
-# files that are the entire operating system via -kernel/-initrd, per
-# the x86 Linux boot protocol. It serves machines that haven't
-# installed yet, and it is what run-once and install use.
+# arrangement: QEMU itself acts as the bootloader, loading the kernel
+# and one composed initrd via -kernel/-initrd, per the x86 Linux boot
+# protocol. It serves machines that haven't installed yet, and it is
+# what run-once and install use.
 #
 # The lab is parameterized by node: the same image boots every
 # machine, and NODE picks which machine a given QEMU process is. Each
@@ -25,11 +25,13 @@
 #   make run                    the founding leader, node-1
 #   make run NODE=node-4        a follower, in a second terminal
 #
-# The full lab is five machines (node-1 through node-3 the leaders,
-# node-4 and node-5 the followers), which at the default size is more
-# RAM than most laptops can spare for QEMU. MEM sizes each guest, and
-# followers are fine at 2048: nothing heavy is pinned to them, so
-# their memory mostly covers the kubelet's own overhead.
+# MEM sizes each guest, and the default is deliberately the smallest
+# cloud machine liken targets: 1 GB, the Linode nanode's allotment.
+# The OS runs from a read-only system image on disk, so the guest's
+# memory goes to Kubernetes, not to holding a copy of the OS — and
+# every drill run at this size is proof that stays true. A machine
+# that stops converging at 1 GB is a regression in liken, not a
+# reason to raise this default.
 #
 # SMP sizes each guest's CPU count, and it matters more than it looks:
 # QEMU's default is a single vCPU, and a Kubernetes server cannot live
@@ -48,12 +50,12 @@
 # at them. The root Makefile is the orchestrator that makes sure they
 # exist before booting; run `make run` from the repo root.
 NODE ?= node-1
-MEM ?= 4096
+MEM ?= 1024
 SMP ?= 4
 CONSOLE ?= stdio
 KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 VMLINUZ := ../kernel/dist/$(KERNEL_VERSION)/vmlinuz
-INITRD := image/liken.cpio
+INITRD := image/initrd.cpio
 
 # Each node's MACs are derived from its number so they never collide:
 # QEMU's default would give every guest the same address
@@ -140,9 +142,10 @@ endif
 #                            deadlines cannot share a single vCPU with
 #                            the rest of the control plane (see SMP
 #                            above)
-#   -m $(MEM)                enough memory for Kubernetes: the root
-#                            filesystem, container images, and every
-#                            workload all live in RAM here
+#   -m $(MEM)                enough memory for Kubernetes; the OS
+#                            itself runs from its system image on
+#                            disk, so this is the workloads' budget,
+#                            not liken's
 #   -drive if=pflash (x2)    the machine's firmware: OVMF's code and
 #                            this node's private variable store, in
 #                            that order (the firmware expects unit 0
@@ -311,7 +314,7 @@ run-once: run
 
 # The install boot, the lab's equivalent of booting a physical
 # machine from a USB installer. It boots the install image
-# (liken.cpio carrying the release payload) with liken.install on the
+# (boot.cpio, the layer, and the release payload) with liken.install on the
 # command line; init claims the boot disk if it's blank, verifies and
 # copies the release into slot A, writes the firmware's boot entries,
 # and powers off, which ends QEMU. From then on, `make run BOOT=disk`

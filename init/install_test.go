@@ -137,7 +137,7 @@ func TestWriteSlotBootEntry(t *testing.T) {
 	if option.filePath != `\vmlinuz` {
 		t.Errorf("file path: got %q", option.filePath)
 	}
-	wantArgs := `console=ttyS0 rdinit=/liken initrd=\liken.cpio initrd=\deployment.cpio liken.machine=node-1 liken.slot=A panic=10`
+	wantArgs := `console=ttyS0 rdinit=/liken initrd=\boot.cpio initrd=\deployment.cpio liken.machine=node-1 liken.slot=A panic=10`
 	if !bytes.Equal(option.optionalData, encodeUTF16Z(wantArgs)) {
 		t.Errorf("the baked command line is assembled from scratch: % x", option.optionalData)
 	}
@@ -229,7 +229,7 @@ func fakePayload(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	kernel := artifactFor(t, dir, "vmlinuz", []byte("the kernel"))
-	cpio := artifactFor(t, dir, "liken.cpio", []byte("the rest of the OS"))
+	cpio := artifactFor(t, dir, "liken.sqfs", []byte("the rest of the OS"))
 	release := fmt.Sprintf(`apiVersion: liken.sh/v1alpha1
 kind: Release
 metadata:
@@ -291,7 +291,7 @@ func TestInstallToDisk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, name := range []string{"vmlinuz", "liken.cpio", machine.LayerName, machine.LayerSidecarName} {
+	for _, name := range []string{"vmlinuz", "liken.sqfs", machine.LayerName, machine.LayerSidecarName} {
 		if _, err := os.Stat(filepath.Join(slotMount, name)); err != nil {
 			t.Errorf("%s lands on the slot: %v", name, err)
 		}

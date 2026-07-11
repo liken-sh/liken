@@ -27,7 +27,8 @@ func bundledRelease(t *testing.T, version string) (string, string) {
 	src := t.TempDir()
 	for name, content := range map[string]string{
 		"vmlinuz":             "kernel bytes",
-		"liken.cpio":          "generic image bytes",
+		"liken.sqfs":          "system image bytes",
+		"boot.cpio":           "boot archive bytes",
 		"liken":               "toolkit bytes",
 		"systemd-bootx64.efi": "boot menu bytes",
 	} {
@@ -37,7 +38,8 @@ func bundledRelease(t *testing.T, version string) (string, string) {
 	}
 	channel := t.TempDir()
 	var out bytes.Buffer
-	err := Bundle(filepath.Join(src, "vmlinuz"), filepath.Join(src, "liken.cpio"),
+	err := Bundle(filepath.Join(src, "vmlinuz"), filepath.Join(src, "liken.sqfs"),
+		filepath.Join(src, "boot.cpio"),
 		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"),
 		channel, version, testComponents, &out)
 	if err != nil {
@@ -63,7 +65,7 @@ func TestBundleProducesAVerifiableRelease(t *testing.T) {
 	if release.Metadata.Name != "2026.07.11-001" {
 		t.Errorf("release name: %q", release.Metadata.Name)
 	}
-	if len(release.Artifacts) != 4 {
+	if len(release.Artifacts) != 5 {
 		t.Fatalf("artifacts: %d", len(release.Artifacts))
 	}
 	for _, a := range release.Artifacts {
@@ -132,12 +134,13 @@ func TestBundleReplacesAPreviousAttempt(t *testing.T) {
 	}
 
 	src := t.TempDir()
-	for _, name := range []string{"vmlinuz", "liken.cpio", "liken", "systemd-bootx64.efi"} {
+	for _, name := range []string{"vmlinuz", "liken.sqfs", "boot.cpio", "liken", "systemd-bootx64.efi"} {
 		if err := os.WriteFile(filepath.Join(src, name), []byte(name), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	err := Bundle(filepath.Join(src, "vmlinuz"), filepath.Join(src, "liken.cpio"),
+	err := Bundle(filepath.Join(src, "vmlinuz"), filepath.Join(src, "liken.sqfs"),
+		filepath.Join(src, "boot.cpio"),
 		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"),
 		channel, "2026.07.11-001", testComponents, io.Discard)
 	if err != nil {
@@ -149,7 +152,7 @@ func TestBundleReplacesAPreviousAttempt(t *testing.T) {
 }
 
 func TestBundleRefusesAMissingArtifact(t *testing.T) {
-	if err := Bundle("no-such-vmlinuz", "no-such-cpio", "no-such-cli", "no-such-menu",
+	if err := Bundle("no-such-vmlinuz", "no-such-sqfs", "no-such-cpio", "no-such-cli", "no-such-menu",
 		t.TempDir(), "2026.07.11-001", testComponents, io.Discard); err == nil {
 		t.Error("bundling artifacts that don't exist must fail")
 	}
@@ -160,7 +163,7 @@ func TestBundleRefusesAMalformedVersion(t *testing.T) {
 	// is refused here rather than discovered when a machine fails to
 	// fetch. Nothing may land in the channel under the bad name.
 	channel := t.TempDir()
-	err := Bundle("vmlinuz", "liken.cpio", "liken", "menu.efi",
+	err := Bundle("vmlinuz", "liken.sqfs", "boot.cpio", "liken", "menu.efi",
 		channel, "1.2.3", testComponents, io.Discard)
 	if err == nil {
 		t.Fatal("a version outside the grammar must be refused")

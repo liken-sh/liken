@@ -182,7 +182,7 @@ func Stick(releaseDir, layerPath, out string, consoles []string, log io.Writer) 
 	if err := copyIn("vmlinuz", filepath.Join(releaseDir, "vmlinuz")); err != nil {
 		return err
 	}
-	if err := copyIn("liken.cpio", filepath.Join(releaseDir, "liken.cpio")); err != nil {
+	if err := copyIn("boot.cpio", filepath.Join(releaseDir, "boot.cpio")); err != nil {
 		return err
 	}
 	if err := w.WriteFile(machine.LayerName, strings.NewReader(string(layer)), int64(len(layer))); err != nil {
@@ -247,7 +247,7 @@ func entryText(name string, consoles []string) []byte {
 title install as %s
 sort-key %s
 linux /vmlinuz
-initrd /liken.cpio
+initrd /boot.cpio
 initrd /%s
 initrd /payload.cpio
 options %s

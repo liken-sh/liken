@@ -37,12 +37,13 @@ func releaseFixtureWith(t *testing.T, files map[string]string) string {
 	return dir
 }
 
-// releaseFixture is the media tests' three-artifact release.
+// releaseFixture is the media tests' four-artifact release.
 func releaseFixture(t *testing.T) string {
 	t.Helper()
 	return releaseFixtureWith(t, map[string]string{
 		"vmlinuz":    "kernel bytes",
-		"liken.cpio": "generic image bytes",
+		"liken.sqfs": "system image bytes",
+		"boot.cpio":  "boot archive bytes",
 		"liken":      "toolkit bytes",
 	})
 }
@@ -77,11 +78,12 @@ func TestMediaLeadsWithTheComposedSystem(t *testing.T) {
 	layerPath := layerFixture(t)
 	raw := buildMedia(t, releaseDir, layerPath)
 
-	// The install boot runs the composed OS: the generic archive and
-	// the layer, in override order, ahead of the payload wrapper.
-	composed := append([]byte("generic image bytes"), []byte("deployment layer bytes")...)
+	// The install boot runs from the boot archive and the layer, in
+	// override order, ahead of the payload wrapper; the system image
+	// travels only inside the payload.
+	composed := append([]byte("boot archive bytes"), []byte("deployment layer bytes")...)
 	if !bytes.HasPrefix(raw, composed) {
-		t.Error("the image must begin with the generic archive followed by the layer")
+		t.Error("the image must begin with the boot archive followed by the layer")
 	}
 }
 
@@ -90,7 +92,7 @@ func TestMediaCarriesTheReleasePayload(t *testing.T) {
 	layerPath := layerFixture(t)
 	raw := buildMedia(t, releaseDir, layerPath)
 
-	wrapper := raw[len("generic image bytes")+len("deployment layer bytes"):]
+	wrapper := raw[len("boot archive bytes")+len("deployment layer bytes"):]
 	files := map[string][]byte{}
 	for _, e := range readArchive(t, wrapper) {
 		if e.mode&0o170000 == 0o100000 {
@@ -105,7 +107,8 @@ func TestMediaCarriesTheReleasePayload(t *testing.T) {
 	payload := "usr/share/liken/release/"
 	for name, want := range map[string]string{
 		"vmlinuz":                "kernel bytes",
-		"liken.cpio":             "generic image bytes",
+		"liken.sqfs":             "system image bytes",
+		"boot.cpio":              "boot archive bytes",
 		"liken":                  "toolkit bytes",
 		"release.yaml":           string(document),
 		machine.LayerName:        "deployment layer bytes",
@@ -127,7 +130,7 @@ func TestMediaSidecarVouchesForTheLayer(t *testing.T) {
 	layerPath := layerFixture(t)
 	raw := buildMedia(t, releaseDir, layerPath)
 
-	wrapper := raw[len("generic image bytes")+len("deployment layer bytes"):]
+	wrapper := raw[len("boot archive bytes")+len("deployment layer bytes"):]
 	var sidecar []byte
 	for _, e := range readArchive(t, wrapper) {
 		if strings.HasSuffix(e.name, machine.LayerSidecarName) {

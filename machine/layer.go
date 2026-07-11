@@ -3,9 +3,9 @@ package machine
 // The deployment layer and its sidecar: the half of the OS that is
 // yours, and the record that lets a machine vouch for it.
 //
-// A boot slot carries two initramfs archives. The generic liken.cpio
-// is public and appears in the release document, so its integrity
-// rides the catalog's digest chain. The deployment layer
+// A boot slot carries the release's public artifacts — named in the
+// release document, their integrity riding the catalog's digest
+// chain — and one file that is nobody's but this cluster's. The deployment layer
 // (deployment.cpio) is private to one cluster and never travels over
 // the network, so the document cannot name it — a machine carries its
 // own layer forward from slot to slot at every upgrade. The sidecar

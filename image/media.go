@@ -3,17 +3,17 @@ package image
 // Install media: a public release and a deployment layer become the
 // image a machine boots once, to install itself.
 //
-// An installer must contain the exact bytes it installs, and an
-// archive cannot contain a finished copy of itself. So the install
-// image is three cpio archives concatenated: the generic liken.cpio,
-// the deployment layer (together they are the running system: init,
-// k3s, and this deployment's identity — the installer needs all of
-// it, because partitioning a machine's disks reads that machine's
-// storage spec from the manifests), and a small wrapper carrying the
-// release payload at /usr/share/liken/release. The kernel's initramfs
-// unpacker processes concatenated archives in order into one
-// filesystem, the same mechanism the machine's boot entries use to
-// join the two halves from its disk.
+// An install boot is a small one: the installer is init itself, and
+// it never needs the running system — just the manifests that say
+// how to partition, and the payload to copy. So the install image is
+// three cpio archives concatenated: the release's boot archive
+// (boot.cpio: init and the early boot's modules), the deployment
+// layer (the manifests whose storage specs drive the partitioning),
+// and a wrapper carrying the release payload at
+// /usr/share/liken/release. The kernel's initramfs unpacker
+// processes concatenated archives in order into one filesystem, the
+// same mechanism the machine's boot entries use to join their two
+// halves from the slot.
 //
 // The payload is the slot layout, exactly: every artifact the release
 // document lists, the document itself byte for byte, and the layer
@@ -61,9 +61,9 @@ func Media(releaseDir, layerPath, out string, log io.Writer) error {
 	}
 	defer f.Close()
 
-	// The composed system first: the generic archive, then the layer,
-	// so the layer's entries override at unpack.
-	generic, err := os.Open(filepath.Join(releaseDir, "liken.cpio"))
+	// The boot archive first, then the layer, so the layer's entries
+	// override at unpack.
+	generic, err := os.Open(filepath.Join(releaseDir, "boot.cpio"))
 	if err != nil {
 		return err
 	}

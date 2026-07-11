@@ -23,7 +23,8 @@ func stickFixture(t *testing.T, consoles []string) (string, *disks.FATVolume) {
 	t.Helper()
 	releaseDir := releaseFixtureWith(t, map[string]string{
 		"vmlinuz":             "kernel bytes",
-		"liken.cpio":          "generic image bytes",
+		"liken.sqfs":          "system image bytes",
+		"boot.cpio":           "boot archive bytes",
 		"liken":               "toolkit bytes",
 		"systemd-bootx64.efi": "boot menu program bytes",
 	})
@@ -98,7 +99,7 @@ func TestStickListsEveryMachine(t *testing.T) {
 			"title install as " + name,
 			"sort-key " + name,
 			"linux /vmlinuz",
-			"initrd /liken.cpio",
+			"initrd /boot.cpio",
 			"initrd /deployment.cpio",
 			"initrd /payload.cpio",
 			"options rdinit=/liken liken.machine=" + name + " liken.install",
@@ -130,8 +131,8 @@ func TestStickCarriesTheBootFilesAndPayload(t *testing.T) {
 	if got, err := v.ReadFile("vmlinuz"); err != nil || string(got) != "kernel bytes" {
 		t.Errorf("vmlinuz: %v", err)
 	}
-	if got, err := v.ReadFile("liken.cpio"); err != nil || string(got) != "generic image bytes" {
-		t.Errorf("liken.cpio: %v", err)
+	if got, err := v.ReadFile("boot.cpio"); err != nil || string(got) != "boot archive bytes" {
+		t.Errorf("boot.cpio: %v", err)
 	}
 
 	layer, err := v.ReadFile(machine.LayerName)
@@ -159,7 +160,8 @@ func TestStickCarriesTheBootFilesAndPayload(t *testing.T) {
 	for _, want := range []string{
 		"usr/share/liken/release/release.yaml",
 		"usr/share/liken/release/vmlinuz",
-		"usr/share/liken/release/liken.cpio",
+		"usr/share/liken/release/liken.sqfs",
+		"usr/share/liken/release/boot.cpio",
 		"usr/share/liken/release/liken",
 		"usr/share/liken/release/systemd-bootx64.efi",
 		"usr/share/liken/release/" + machine.LayerName,
@@ -174,7 +176,7 @@ func TestStickCarriesTheBootFilesAndPayload(t *testing.T) {
 func TestStickRefusesAReleaseWithoutTheMenu(t *testing.T) {
 	releaseDir := releaseFixtureWith(t, map[string]string{
 		"vmlinuz":    "kernel bytes",
-		"liken.cpio": "generic image bytes",
+		"liken.sqfs": "system image bytes",
 		"liken":      "toolkit bytes",
 	})
 	layer := filepath.Join(t.TempDir(), machine.LayerName)
@@ -190,7 +192,8 @@ func TestStickRefusesAReleaseWithoutTheMenu(t *testing.T) {
 func TestStickRefusesATamperedRelease(t *testing.T) {
 	releaseDir := releaseFixtureWith(t, map[string]string{
 		"vmlinuz":             "kernel bytes",
-		"liken.cpio":          "generic image bytes",
+		"liken.sqfs":          "system image bytes",
+		"boot.cpio":           "boot archive bytes",
 		"liken":               "toolkit bytes",
 		"systemd-bootx64.efi": "boot menu program bytes",
 	})
@@ -209,7 +212,8 @@ func TestStickRefusesATamperedRelease(t *testing.T) {
 func TestStickRefusesBadInputs(t *testing.T) {
 	releaseDir := releaseFixtureWith(t, map[string]string{
 		"vmlinuz":             "kernel bytes",
-		"liken.cpio":          "generic image bytes",
+		"liken.sqfs":          "system image bytes",
+		"boot.cpio":           "boot archive bytes",
 		"liken":               "toolkit bytes",
 		"systemd-bootx64.efi": "boot menu program bytes",
 	})
