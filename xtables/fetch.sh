@@ -73,6 +73,12 @@ rm -rf "$out"
 mkdir -p "$out"
 tar -xf "$cache/$tarball" -C "$out"
 
+# tar restores the archive's own timestamps, which predate this
+# script, so Make would judge the extracted binaries stale against
+# their prerequisites forever and re-run this fetch on every build.
+# Extraction time is the honest timestamp for a vendored artifact.
+find "$out" -exec touch {} +
+
 echo
 echo "xtables (k3s-root) $version:"
 du -sh "$out/bin/xtables-legacy-multi"

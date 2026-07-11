@@ -36,11 +36,9 @@
 
 set -euo pipefail
 
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 binary="${1:?usage: oci.sh <binary> <image>}"
 image="${2:?usage: oci.sh <binary> <image>}"
-version="${LIKEN_VERSION:-$(cat "$here/../VERSION")}"
+version="${LIKEN_VERSION:?LIKEN_VERSION must be set; the Makefiles pass it via version.mk}"
 dist="${DIST:?DIST must name the directory holding $binary}"
 
 layout="$dist/oci"

@@ -28,12 +28,20 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/liken-sh/liken/machine"
 )
 
 // Bundle lays out a release: the named artifacts copied into
 // <channel>/<version>/ beside a release.yaml naming each by sha256
-// digest and size.
-func Bundle(vmlinuz, image, cli, bootMenu, channelDir, version string, out io.Writer) error {
+// digest and size, and recording which upstream components shipped.
+// The version must fit liken's calendar grammar (the machine package
+// defines it); enforcing that here, where versions are authored,
+// means a malformed one never reaches a channel at all.
+func Bundle(vmlinuz, image, cli, bootMenu, channelDir, version string, components []machine.ReleaseComponent, out io.Writer) error {
+	if err := machine.ValidVersion(version); err != nil {
+		return err
+	}
 	dest := filepath.Join(channelDir, version)
 	if err := os.RemoveAll(dest); err != nil {
 		return err
@@ -68,6 +76,17 @@ func Bundle(vmlinuz, image, cli, bootMenu, channelDir, version string, out io.Wr
 			return err
 		}
 		document += fmt.Sprintf("  - name: %s\n    sha256: %s\n    size: %d\n", s.name, digest, info.Size())
+	}
+
+	// The components record what shipped inside those artifacts. The
+	// version above is a calendar date and deliberately says nothing
+	// about contents, so the document is where a reader learns which
+	// kernel or k3s this release carries.
+	if len(components) > 0 {
+		document += "components:\n"
+		for _, c := range components {
+			document += fmt.Sprintf("  - name: %s\n    version: %s\n", c.Name, c.Version)
+		}
 	}
 
 	// The document is generated from the copies in the channel, the

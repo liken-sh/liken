@@ -12,10 +12,11 @@
 # dist/ by default. What makes it a deployment's image is the
 # deployment layer (layer.go), concatenated on by whoever owns the
 # deployment (the root Makefile for the dev cluster, the releases
-# domain for a release build). The version stamp and the input
-# locations are overridable because the releases domain rebuilds this
-# same archive under a different version into its own tree.
-LIKEN_VERSION ?= $(strip $(file <../VERSION))
+# domain for a release build). version.mk supplies the version stamp;
+# it and the input locations are overridable because the releases
+# domain rebuilds this same archive under a different version into
+# its own tree.
+include ../version.mk
 DIST ?= dist
 INIT_DIST ?= ../init/dist
 MACHINE_OPERATOR_DIST ?= ../machine-operator/dist
@@ -52,7 +53,7 @@ $(DIST)/liken.cpio: build.sh $(shell find etc -type f) \
 		$(wildcard ../manifests/*.yaml) \
 		$(LOGS_DIST)/liken-logs-image.tar \
 		$(wildcard ../logs/manifests/*.yaml) \
-		../VERSION
+		$(LIKEN_VERSION_STAMP)
 	LIKEN_VERSION=$(LIKEN_VERSION) DIST=$(abspath $(DIST)) \
 		INIT_DIST=$(abspath $(INIT_DIST)) \
 		MACHINE_OPERATOR_DIST=$(abspath $(MACHINE_OPERATOR_DIST)) \

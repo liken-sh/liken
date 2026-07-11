@@ -8,16 +8,15 @@
 # manifests/ runs this one image in four containers, differing only
 # in the verb they pass and the host paths they mount.
 #
-# The version and output directory are overridable for the same
-# reason the operator's are: the releases domain rebuilds these
-# relays under a different version stamp into its own tree, through
-# these same rules.
-LIKEN_VERSION ?= $(strip $(file <../VERSION))
+# version.mk supplies the version stamp; the releases domain
+# overrides it and the output directory to rebuild these relays under
+# a release's name into its own tree, through these same rules.
+include ../version.mk
 DIST ?= dist
 
 all: $(DIST)/liken-logs-image.tar
 
-$(DIST)/liken-logs: ../go.mod ../go.sum $(wildcard *.go) $(wildcard ../machine/*.go) ../VERSION
+$(DIST)/liken-logs: ../go.mod ../go.sum $(wildcard *.go) $(wildcard ../machine/*.go) $(LIKEN_VERSION_STAMP)
 	CGO_ENABLED=0 go build -trimpath \
 		-ldflags "-X github.com/liken-sh/liken/machine.Version=$(LIKEN_VERSION)" \
 		-o $(DIST)/liken-logs .

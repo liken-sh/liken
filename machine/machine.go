@@ -82,11 +82,13 @@ const (
 	SysctlDir = "/proc/sys"
 )
 
-// Version is the liken release this binary was built from, stamped by
-// the build (-ldflags -X) from the VERSION file at the repo root. It
-// reaches the cluster as status.version.liken, which the operator
-// compares against the Cluster's spec.version target to decide
-// whether this machine needs an upgrade.
+// Version is the liken version this binary was built as, stamped by
+// the build (-ldflags -X): a release name when the releases domain is
+// building, the git-described commit for a development build
+// (version.mk at the repo root explains the mechanism). It reaches
+// the cluster as status.version.liken, which the operator compares
+// against the Cluster's spec.version target to decide whether this
+// machine needs an upgrade.
 var Version = "dev"
 
 // The struct tags are json, not yaml, because parsing goes through

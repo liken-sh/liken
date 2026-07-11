@@ -12,11 +12,15 @@
 # `make -C <domain>`. This root Makefile names the artifacts the domains
 # exchange and delegates the work of producing them.
 
+# liken's own version stamps the binaries: a release name when the
+# releases domain is building, the git-described commit for every
+# development build (version.mk explains the mechanism and the stamp
+# file that lets Make track it).
+include version.mk
+
 # Version pins name the vendored artifacts, so the root reads them too:
 # downstream rules (the image build, QEMU) depend on these real files,
-# not on phony targets. liken's own version stamps the binaries and
-# names the release the install media carries.
-LIKEN_VERSION := $(strip $(file <VERSION))
+# not on phony targets.
 KERNEL_VERSION := $(strip $(file <kernel/VERSION))
 KERNEL_DIST := kernel/dist/$(KERNEL_VERSION)
 K3S_VERSION := $(strip $(file <k3s/VERSION))
@@ -77,9 +81,16 @@ e2fsprogs: $(E2FSPROGS_DIST)/mke2fs
 # static iscsid and iscsiadm built from pinned source inside a pinned
 # container, which needs docker or podman on the build host, like
 # nfs-utils below (see open-iscsi/fetch.sh), plus the OCI image that
-# runs iscsid as the feature's DaemonSet.
-$(OPENISCSI_DIST)/iscsid $(OPENISCSI_DIST)/iscsiadm $(OPENISCSI_DIST)/iscsid-image.tar &: \
-		open-iscsi/VERSION open-iscsi/fetch.sh image/oci.sh VERSION
+# runs iscsid as the feature's DaemonSet. Two rules, mirroring the
+# domain's own: the binaries are a function of the pin alone, while
+# the image tar also bakes the liken version, so only the tar goes
+# stale when the version moves.
+$(OPENISCSI_DIST)/iscsid $(OPENISCSI_DIST)/iscsiadm &: \
+		open-iscsi/VERSION open-iscsi/fetch.sh
+	$(MAKE) -C open-iscsi
+
+$(OPENISCSI_DIST)/iscsid-image.tar: $(OPENISCSI_DIST)/iscsid \
+		image/oci.sh $(LIKEN_VERSION_STAMP)
 	$(MAKE) -C open-iscsi
 
 open-iscsi: $(OPENISCSI_DIST)/iscsid-image.tar
@@ -105,7 +116,7 @@ systemd-boot: $(SYSTEMDBOOT_DIST)/systemd-bootx64.efi
 # Machine API as Go types) with the operator, so both rebuild when
 # that package changes.
 init/dist/liken: $(wildcard init/*.go) go.mod go.sum \
-		$(wildcard machine/*.go) $(wildcard disks/*.go) VERSION
+		$(wildcard machine/*.go) $(wildcard disks/*.go) $(LIKEN_VERSION_STAMP)
 	$(MAKE) -C init
 
 init: init/dist/liken
@@ -119,14 +130,14 @@ init: init/dist/liken
 # the raw API client, so both rebuild when it changes.
 machine-operator/dist/liken-machine-operator-image.tar: $(wildcard machine-operator/*.go) \
 		go.mod go.sum image/oci.sh \
-		$(wildcard machine/*.go) $(wildcard kubernetes/*.go) VERSION
+		$(wildcard machine/*.go) $(wildcard kubernetes/*.go) $(LIKEN_VERSION_STAMP)
 	$(MAKE) -C machine-operator
 
 machine-operator: machine-operator/dist/liken-machine-operator-image.tar
 
 cluster-operator/dist/liken-cluster-operator-image.tar: $(wildcard cluster-operator/*.go) \
 		go.mod go.sum image/oci.sh \
-		$(wildcard machine/*.go) $(wildcard kubernetes/*.go) VERSION
+		$(wildcard machine/*.go) $(wildcard kubernetes/*.go) $(LIKEN_VERSION_STAMP)
 	$(MAKE) -C cluster-operator
 
 cluster-operator: cluster-operator/dist/liken-cluster-operator-image.tar
@@ -137,7 +148,7 @@ cluster-operator: cluster-operator/dist/liken-cluster-operator-image.tar
 # hand-assembled OCI image (see logs/main.go and image/oci.sh).
 logs/dist/liken-logs-image.tar: $(wildcard logs/*.go) \
 		go.mod go.sum image/oci.sh \
-		$(wildcard machine/*.go) VERSION
+		$(wildcard machine/*.go) $(LIKEN_VERSION_STAMP)
 	$(MAKE) -C logs
 
 logs: logs/dist/liken-logs-image.tar
@@ -151,7 +162,7 @@ cli/dist/liken: $(wildcard cli/*.go) go.mod go.sum \
 		$(wildcard identity/*.go) $(wildcard machine/*.go) \
 		$(wildcard image/*.go) $(wildcard releases/*.go) \
 		$(wildcard disks/*.go) $(wildcard scaffold/*.go) \
-		$(wildcard scaffold/*.tmpl) VERSION
+		$(wildcard scaffold/*.tmpl) $(LIKEN_VERSION_STAMP)
 	$(MAKE) -C cli
 
 cli: cli/dist/liken
@@ -169,7 +180,11 @@ cli: cli/dist/liken
 # adopt`) survives this rule untouched.
 IDENTITY_DIR := dev-cluster/identity
 
-$(IDENTITY_DIR)/tls/server-ca.crt $(IDENTITY_DIR)/token &: cli/dist/liken
+# The toolkit is an order-only prerequisite (after the |): minting
+# needs the CLI to exist, but the identity is deliberately not a
+# function of the CLI's bytes — a rebuilt toolkit must never make
+# Make think the cluster's identity is stale.
+$(IDENTITY_DIR)/tls/server-ca.crt $(IDENTITY_DIR)/token &: | cli/dist/liken
 	cli/dist/liken mint $(IDENTITY_DIR)
 
 identity: $(IDENTITY_DIR)/tls/server-ca.crt $(IDENTITY_DIR)/token
@@ -277,28 +292,36 @@ smoke: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/liken.cpio kubeconfig
 # a published release is laid out. A real deployment downloads this
 # directory from the release channel; the lab produces its own, so
 # the media targets below assemble by exactly the path a deployment
-# would use.
-$(IMAGE_DIR)/channel/$(LIKEN_VERSION)/release.yaml: $(GENERIC_IMAGE) \
-		$(KERNEL_DIST)/vmlinuz cli/dist/liken VERSION \
+# would use. The bundle needs a name in the release grammar, so the
+# lab uses today's date with serial 000 — a serial no published
+# release ever carries (they start at 001), which both marks this as
+# the lab's stand-in and sorts it below any real release cut the same
+# day. Yesterday's stand-in is swept first so the channel only ever
+# holds one.
+LAB_VERSION := $(shell date +%Y.%m.%d)-000
+
+$(IMAGE_DIR)/channel/$(LAB_VERSION)/release.yaml: $(GENERIC_IMAGE) \
+		$(KERNEL_DIST)/vmlinuz cli/dist/liken $(LIKEN_VERSION_STAMP) \
 		$(SYSTEMDBOOT_DIST)/systemd-bootx64.efi
+	rm -rf $(IMAGE_DIR)/channel
 	cli/dist/liken bundle $(KERNEL_DIST)/vmlinuz $(GENERIC_IMAGE) cli/dist/liken \
 		$(SYSTEMDBOOT_DIST)/systemd-bootx64.efi \
-		$(IMAGE_DIR)/channel $(LIKEN_VERSION)
+		$(IMAGE_DIR)/channel $(LAB_VERSION)
 
 # The install image for the lab's fast -kernel boots: the release
 # composed with the lab's deployment layer, carrying the payload the
 # installer verifies and copies onto a machine's own disk.
-$(IMAGE_DIR)/install.cpio: $(IMAGE_DIR)/channel/$(LIKEN_VERSION)/release.yaml \
+$(IMAGE_DIR)/install.cpio: $(IMAGE_DIR)/channel/$(LAB_VERSION)/release.yaml \
 		$(IMAGE_DIR)/deployment.cpio cli/dist/liken
-	cli/dist/liken media $(IMAGE_DIR)/channel/$(LIKEN_VERSION) $(IMAGE_DIR)/deployment.cpio $@
+	cli/dist/liken media $(IMAGE_DIR)/channel/$(LAB_VERSION) $(IMAGE_DIR)/deployment.cpio $@
 
 # The install stick: the same release and layer as a bootable disk
 # image with the machine menu, the medium real hardware uses. The lab
 # bakes console=ttyS0 so the menu and every installed machine stay on
 # the serial console QEMU shows us.
-$(IMAGE_DIR)/stick.img: $(IMAGE_DIR)/channel/$(LIKEN_VERSION)/release.yaml \
+$(IMAGE_DIR)/stick.img: $(IMAGE_DIR)/channel/$(LAB_VERSION)/release.yaml \
 		$(IMAGE_DIR)/deployment.cpio cli/dist/liken
-	cli/dist/liken stick -console ttyS0 $(IMAGE_DIR)/channel/$(LIKEN_VERSION) $(IMAGE_DIR)/deployment.cpio $@
+	cli/dist/liken stick -console ttyS0 $(IMAGE_DIR)/channel/$(LAB_VERSION) $(IMAGE_DIR)/deployment.cpio $@
 
 # Install a machine: boot it once from the "USB stick" (the install
 # image via -kernel), let it put this release on its own system

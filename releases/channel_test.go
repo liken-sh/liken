@@ -15,6 +15,11 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
+var testComponents = []machine.ReleaseComponent{
+	{Name: "kernel", Version: "7.1.2"},
+	{Name: "k3s", Version: "v1.36.2+k3s1"},
+}
+
 // bundledRelease lays out a tiny release through Bundle itself and
 // returns the channel directory and Bundle's report.
 func bundledRelease(t *testing.T, version string) (string, string) {
@@ -33,7 +38,8 @@ func bundledRelease(t *testing.T, version string) (string, string) {
 	channel := t.TempDir()
 	var out bytes.Buffer
 	err := Bundle(filepath.Join(src, "vmlinuz"), filepath.Join(src, "liken.cpio"),
-		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"), channel, version, &out)
+		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"),
+		channel, version, testComponents, &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,12 +47,12 @@ func bundledRelease(t *testing.T, version string) (string, string) {
 }
 
 func TestBundleProducesAVerifiableRelease(t *testing.T) {
-	channel, _ := bundledRelease(t, "0.2.0")
+	channel, _ := bundledRelease(t, "2026.07.11-001")
 
 	// The document must parse as the same Release kind machines
 	// verify, and every artifact must verify against it: the same
 	// check the fetch path performs.
-	raw, err := os.ReadFile(filepath.Join(channel, "0.2.0", "release.yaml"))
+	raw, err := os.ReadFile(filepath.Join(channel, "2026.07.11-001", "release.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,14 +60,14 @@ func TestBundleProducesAVerifiableRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if release.Metadata.Name != "0.2.0" {
+	if release.Metadata.Name != "2026.07.11-001" {
 		t.Errorf("release name: %q", release.Metadata.Name)
 	}
 	if len(release.Artifacts) != 4 {
 		t.Fatalf("artifacts: %d", len(release.Artifacts))
 	}
 	for _, a := range release.Artifacts {
-		f, err := os.Open(filepath.Join(channel, "0.2.0", a.Name))
+		f, err := os.Open(filepath.Join(channel, "2026.07.11-001", a.Name))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -72,27 +78,52 @@ func TestBundleProducesAVerifiableRelease(t *testing.T) {
 	}
 }
 
+func TestBundleRecordsTheComponents(t *testing.T) {
+	channel, _ := bundledRelease(t, "2026.07.11-001")
+
+	// The version is a calendar date that says nothing about what
+	// shipped; the document's components section is where the what
+	// lives, so a bundle must carry it through verbatim.
+	raw, err := os.ReadFile(filepath.Join(channel, "2026.07.11-001", "release.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := machine.ParseRelease(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(release.Components) != 2 {
+		t.Fatalf("components: %+v", release.Components)
+	}
+	if release.Components[0].Name != "kernel" || release.Components[0].Version != "7.1.2" {
+		t.Errorf("components: %+v", release.Components)
+	}
+	if release.Components[1].Name != "k3s" || release.Components[1].Version != "v1.36.2+k3s1" {
+		t.Errorf("components: %+v", release.Components)
+	}
+}
+
 func TestBundleReportsTheCatalogEntry(t *testing.T) {
-	channel, report := bundledRelease(t, "1.2.3")
+	channel, report := bundledRelease(t, "2026.07.11-002")
 
 	// The catalog entry is what a deployment commits to its Cluster:
 	// the release document named by its own digest, computed from the
 	// published copy, the root of the trust chain.
-	digest, err := fileSHA256(filepath.Join(channel, "1.2.3", "release.yaml"))
+	digest, err := fileSHA256(filepath.Join(channel, "2026.07.11-002", "release.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(report, "digest: sha256:"+digest) {
 		t.Errorf("report does not carry the document digest:\n%s", report)
 	}
-	if !strings.Contains(report, "version: 1.2.3") {
+	if !strings.Contains(report, "version: 2026.07.11-002") {
 		t.Errorf("report does not carry the version:\n%s", report)
 	}
 }
 
 func TestBundleReplacesAPreviousAttempt(t *testing.T) {
 	channel := t.TempDir()
-	stale := filepath.Join(channel, "0.2.0", "leftover")
+	stale := filepath.Join(channel, "2026.07.11-001", "leftover")
 	if err := os.MkdirAll(filepath.Dir(stale), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +138,8 @@ func TestBundleReplacesAPreviousAttempt(t *testing.T) {
 		}
 	}
 	err := Bundle(filepath.Join(src, "vmlinuz"), filepath.Join(src, "liken.cpio"),
-		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"), channel, "0.2.0", io.Discard)
+		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"),
+		channel, "2026.07.11-001", testComponents, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +150,22 @@ func TestBundleReplacesAPreviousAttempt(t *testing.T) {
 
 func TestBundleRefusesAMissingArtifact(t *testing.T) {
 	if err := Bundle("no-such-vmlinuz", "no-such-cpio", "no-such-cli", "no-such-menu",
-		t.TempDir(), "0.0.1", io.Discard); err == nil {
+		t.TempDir(), "2026.07.11-001", testComponents, io.Discard); err == nil {
 		t.Error("bundling artifacts that don't exist must fail")
+	}
+}
+
+func TestBundleRefusesAMalformedVersion(t *testing.T) {
+	// The grammar is enforced where versions are authored, so a typo
+	// is refused here rather than discovered when a machine fails to
+	// fetch. Nothing may land in the channel under the bad name.
+	channel := t.TempDir()
+	err := Bundle("vmlinuz", "liken.cpio", "liken", "menu.efi",
+		channel, "1.2.3", testComponents, io.Discard)
+	if err == nil {
+		t.Fatal("a version outside the grammar must be refused")
+	}
+	if entries, _ := os.ReadDir(channel); len(entries) != 0 {
+		t.Errorf("a refused bundle must leave the channel untouched: %v", entries)
 	}
 }

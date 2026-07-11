@@ -14,7 +14,12 @@ A release is four files and a document that names them:
     liken.cpio            the operating system, nobody's in particular
     liken                 the toolkit
     systemd-bootx64.efi   the install stick's boot menu
-    release.yaml          each of the above, by sha256 digest
+    release.yaml          each of the above, by sha256 digest, and
+                          which kernel, k3s, and friends are inside
+
+A release's version is the date it was cut plus a serial —
+2026.07.11-001 — and deliberately nothing more; `release.yaml`'s
+`components` section is where you read what shipped in it.
 
 Verify what you downloaded against the document — `release.yaml`
 holds a `sha256:` line for each file, and the release's page

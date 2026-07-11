@@ -3,3 +3,8 @@
 # else gitignored in this repo is ignored by its own domain's file.
 coverage.out
 operator/operator
+
+# The version stamp file version.mk maintains: the git-described
+# version as a file Make can track, rewritten only when the version
+# actually changes.
+.version

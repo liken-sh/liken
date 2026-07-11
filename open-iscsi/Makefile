@@ -15,8 +15,8 @@
 # its own version into its own tree. The binaries don't vary by liken
 # version, so they always come from this domain's dist/<version>/ and
 # are copied into an overridden DIST for packaging.
+include ../version.mk
 OPENISCSI_VERSION := $(strip $(file <VERSION))
-LIKEN_VERSION ?= $(strip $(file <../VERSION))
 DIST ?= dist/$(OPENISCSI_VERSION)
 
 all: $(DIST)/iscsid-image.tar
@@ -24,7 +24,7 @@ all: $(DIST)/iscsid-image.tar
 dist/$(OPENISCSI_VERSION)/iscsid dist/$(OPENISCSI_VERSION)/iscsiadm &: VERSION fetch.sh
 	./fetch.sh
 
-$(DIST)/iscsid-image.tar: dist/$(OPENISCSI_VERSION)/iscsid ../image/oci.sh ../VERSION
+$(DIST)/iscsid-image.tar: dist/$(OPENISCSI_VERSION)/iscsid ../image/oci.sh $(LIKEN_VERSION_STAMP)
 	@mkdir -p $(DIST)
 	@if [ "$(abspath $(DIST))" != "$(abspath dist/$(OPENISCSI_VERSION))" ]; then \
 		cp dist/$(OPENISCSI_VERSION)/iscsid dist/$(OPENISCSI_VERSION)/iscsiadm $(DIST)/; \

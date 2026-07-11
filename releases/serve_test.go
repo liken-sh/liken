@@ -12,11 +12,11 @@ import (
 func publishedRelease(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	release := filepath.Join(dir, "0.1.0")
+	release := filepath.Join(dir, "2026.07.11-001")
 	if err := os.Mkdir(release, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	doc := []byte("kind: Release\nmetadata: {name: 0.1.0}\n")
+	doc := []byte("kind: Release\nmetadata: {name: 2026.07.11-001}\n")
 	if err := os.WriteFile(filepath.Join(release, "release.yaml"), doc, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func TestServesPublishedArtifacts(t *testing.T) {
 	server := httptest.NewServer(handler(publishedRelease(t)))
 	defer server.Close()
 
-	resp, err := http.Get(server.URL + "/releases/0.1.0/release.yaml")
+	resp, err := http.Get(server.URL + "/releases/2026.07.11-001/release.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestServesPublishedArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(body) != "kind: Release\nmetadata: {name: 0.1.0}\n" {
+	if string(body) != "kind: Release\nmetadata: {name: 2026.07.11-001}\n" {
 		t.Errorf("body: %q", body)
 	}
 }

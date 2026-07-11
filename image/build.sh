@@ -116,7 +116,7 @@ release="$(cat "$kdist/release")"
 # be overridden from the environment, because the releases domain
 # assembles release-stamped images through this same script, from its
 # own copies of the inputs, into its own tree (see the Makefile).
-liken_version="${LIKEN_VERSION:-$(cat "$here/../VERSION")}"
+liken_version="${LIKEN_VERSION:?LIKEN_VERSION must be set; the Makefile passes it via version.mk}"
 dist="${DIST:-$here/dist}"
 init_dist="${INIT_DIST:-$here/../init/dist}"
 machine_operator_dist="${MACHINE_OPERATOR_DIST:-$here/../machine-operator/dist}"

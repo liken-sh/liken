@@ -3,10 +3,11 @@ package machine
 // The release document defines what one version of liken is, by
 // digest.
 //
-// A liken release is two files, vmlinuz and liken.cpio, and this
-// document names them with their sha256 digests and sizes. It is the
-// middle link of the trust chain: the Cluster's release catalog pins
-// a version to the digest of this document's exact bytes, and this
+// This document names the release's artifact files with their sha256
+// digests and sizes, and records which upstream components (the
+// kernel, k3s, and the rest) shipped inside them. It is the middle
+// link of the trust chain: the Cluster's release catalog pins a
+// version to the digest of this document's exact bytes, and this
 // document pins every artifact's exact bytes. A machine that verifies
 // the chain end to end has proven that what it is about to boot is
 // exactly what the catalog named. Nothing here is signed; liken
@@ -28,10 +29,11 @@ import (
 )
 
 type Release struct {
-	APIVersion string            `json:"apiVersion"`
-	Kind       string            `json:"kind"`
-	Metadata   ObjectMeta        `json:"metadata"`
-	Artifacts  []ReleaseArtifact `json:"artifacts"`
+	APIVersion string             `json:"apiVersion"`
+	Kind       string             `json:"kind"`
+	Metadata   ObjectMeta         `json:"metadata"`
+	Artifacts  []ReleaseArtifact  `json:"artifacts"`
+	Components []ReleaseComponent `json:"components,omitempty"`
 }
 
 // A ReleaseArtifact names one file of the release. The size is
@@ -41,6 +43,17 @@ type ReleaseArtifact struct {
 	Name   string `json:"name"`
 	SHA256 string `json:"sha256"`
 	Size   int64  `json:"size"`
+}
+
+// A ReleaseComponent records one vendored piece of the system and the
+// upstream version of it that shipped: the kernel, k3s, and the rest.
+// liken's own version is a calendar date that says when a release was
+// cut and nothing about what is inside it, so the document carries
+// the what. The versions are informational, in each upstream's own
+// format; the artifacts' digests remain the only identity.
+type ReleaseComponent struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
 }
 
 // ParseRelease validates a release document as it is read, the way
@@ -70,6 +83,11 @@ func ParseRelease(raw []byte) (*Release, error) {
 		}
 		if _, err := hex.DecodeString(a.SHA256); err != nil {
 			return nil, fmt.Errorf("artifact %s: sha256 is not hex: %w", a.Name, err)
+		}
+	}
+	for _, c := range r.Components {
+		if c.Name == "" || c.Version == "" {
+			return nil, fmt.Errorf("release %s has a component missing its name or version", r.Metadata.Name)
 		}
 	}
 	return r, nil

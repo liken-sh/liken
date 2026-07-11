@@ -121,6 +121,15 @@ spec:
                 version:
                   type: string
                   maxLength: 64
+                  # liken versions are a calendar date and a serial,
+                  # yyyy.mm.dd-nnn: the date says when the release was
+                  # cut and deliberately nothing else (the release
+                  # document's components record what shipped). The
+                  # pattern catches a typo at admission, the way the
+                  # digest pattern below does, instead of leaving a
+                  # machine unable to find the release it was asked to
+                  # run.
+                  pattern: ^\d{4}\.\d{2}\.\d{2}-\d{3}$
                   description: >-
                     The fleet's target liken release: the one field an
                     upgrade edits. Machines carry no version in their
@@ -174,6 +183,9 @@ spec:
                           version:
                             type: string
                             maxLength: 64
+                            # The same grammar spec.version enforces:
+                            # a calendar date and serial.
+                            pattern: ^\d{4}\.\d{2}\.\d{2}-\d{3}$
                           digest:
                             type: string
                             maxLength: 71

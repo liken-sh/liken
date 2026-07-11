@@ -8,17 +8,16 @@
 # is, why this one uses no Kubernetes libraries, and where the line
 # sits between it and the cluster operator.
 #
-# The version and output directory are overridable for the same
-# reason init's are: the releases domain rebuilds this operator under
-# a different version stamp into its own tree, through these same
-# rules.
-LIKEN_VERSION ?= $(strip $(file <../VERSION))
+# version.mk supplies the version stamp; the releases domain
+# overrides it and the output directory to rebuild this operator
+# under a release's name into its own tree, through these same rules.
+include ../version.mk
 DIST ?= dist
 
 all: $(DIST)/liken-machine-operator-image.tar
 
 $(DIST)/liken-machine-operator: ../go.mod ../go.sum $(wildcard *.go) \
-		$(wildcard ../machine/*.go) $(wildcard ../kubernetes/*.go) ../VERSION
+		$(wildcard ../machine/*.go) $(wildcard ../kubernetes/*.go) $(LIKEN_VERSION_STAMP)
 	CGO_ENABLED=0 go build -trimpath \
 		-ldflags "-X github.com/liken-sh/liken/machine.Version=$(LIKEN_VERSION)" \
 		-o $(DIST)/liken-machine-operator .

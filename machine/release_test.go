@@ -24,7 +24,7 @@ func TestParseRelease(t *testing.T) {
 apiVersion: liken.sh/v1alpha1
 kind: Release
 metadata:
-  name: 0.2.0
+  name: 2026.07.11-001
 artifacts:
   - name: vmlinuz
     sha256: `+strings.Repeat("ab", 32)+`
@@ -32,25 +32,52 @@ artifacts:
   - name: liken.cpio
     sha256: `+strings.Repeat("cd", 32)+`
     size: 99000000
+components:
+  - name: kernel
+    version: 7.1.2
+  - name: k3s
+    version: v1.36.2+k3s1
 `)
-	if r.Metadata.Name != "0.2.0" {
+	if r.Metadata.Name != "2026.07.11-001" {
 		t.Errorf("version: got %q", r.Metadata.Name)
 	}
 	if len(r.Artifacts) != 2 || r.Artifacts[0].Name != "vmlinuz" || r.Artifacts[0].Size != 17_000_000 {
 		t.Errorf("artifacts: %+v", r.Artifacts)
 	}
+	if len(r.Components) != 2 || r.Components[0].Name != "kernel" || r.Components[1].Version != "v1.36.2+k3s1" {
+		t.Errorf("components: %+v", r.Components)
+	}
+}
+
+func TestParseReleaseAllowsAbsentComponents(t *testing.T) {
+	r := releaseYAML(t, `
+apiVersion: liken.sh/v1alpha1
+kind: Release
+metadata:
+  name: 2026.07.11-001
+artifacts:
+  - name: vmlinuz
+    sha256: `+strings.Repeat("ab", 32)+`
+    size: 17000000
+`)
+	if len(r.Components) != 0 {
+		t.Errorf("components: %+v", r.Components)
+	}
 }
 
 func TestParseReleaseVetsAtTheDoor(t *testing.T) {
 	digest := strings.Repeat("ab", 32)
+	version := "2026.07.11-001"
 	cases := map[string]string{
-		"wrong kind":       `{kind: Machine, metadata: {name: 0.2.0}, artifacts: [{name: x, sha256: ` + digest + `}]}`,
-		"no version":       `{kind: Release, artifacts: [{name: x, sha256: ` + digest + `}]}`,
-		"no artifacts":     `{kind: Release, metadata: {name: 0.2.0}}`,
-		"unnamed artifact": `{kind: Release, metadata: {name: 0.2.0}, artifacts: [{sha256: ` + digest + `}]}`,
-		"short digest":     `{kind: Release, metadata: {name: 0.2.0}, artifacts: [{name: x, sha256: abcd}]}`,
-		"non-hex digest":   `{kind: Release, metadata: {name: 0.2.0}, artifacts: [{name: x, sha256: ` + strings.Repeat("zz", 32) + `}]}`,
-		"unknown field":    `{kind: Release, metadata: {name: 0.2.0}, surprise: true, artifacts: [{name: x, sha256: ` + digest + `}]}`,
+		"wrong kind":            `{kind: Machine, metadata: {name: ` + version + `}, artifacts: [{name: x, sha256: ` + digest + `}]}`,
+		"no version":            `{kind: Release, artifacts: [{name: x, sha256: ` + digest + `}]}`,
+		"no artifacts":          `{kind: Release, metadata: {name: ` + version + `}}`,
+		"unnamed artifact":      `{kind: Release, metadata: {name: ` + version + `}, artifacts: [{sha256: ` + digest + `}]}`,
+		"short digest":          `{kind: Release, metadata: {name: ` + version + `}, artifacts: [{name: x, sha256: abcd}]}`,
+		"non-hex digest":        `{kind: Release, metadata: {name: ` + version + `}, artifacts: [{name: x, sha256: ` + strings.Repeat("zz", 32) + `}]}`,
+		"unknown field":         `{kind: Release, metadata: {name: ` + version + `}, surprise: true, artifacts: [{name: x, sha256: ` + digest + `}]}`,
+		"unnamed component":     `{kind: Release, metadata: {name: ` + version + `}, artifacts: [{name: x, sha256: ` + digest + `}], components: [{version: 7.1.2}]}`,
+		"unversioned component": `{kind: Release, metadata: {name: ` + version + `}, artifacts: [{name: x, sha256: ` + digest + `}], components: [{name: kernel}]}`,
 	}
 	for name, doc := range cases {
 		t.Run(name, func(t *testing.T) {

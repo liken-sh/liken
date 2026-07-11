@@ -90,7 +90,7 @@ func TestRunAssemblesInstallMedia(t *testing.T) {
 	}
 	channel := t.TempDir()
 	err := run([]string{"bundle", filepath.Join(src, "vmlinuz"), filepath.Join(src, "liken.cpio"),
-		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"), channel, "0.0.1"})
+		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"), channel, "2026.07.11-001"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestRunAssemblesInstallMedia(t *testing.T) {
 	}
 
 	media := filepath.Join(t.TempDir(), "install.cpio")
-	if err := run([]string{"media", filepath.Join(channel, "0.0.1"), layer, media}); err != nil {
+	if err := run([]string{"media", filepath.Join(channel, "2026.07.11-001"), layer, media}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(media); err != nil {
@@ -125,12 +125,21 @@ func TestRunBundlesARelease(t *testing.T) {
 	channel := t.TempDir()
 
 	err := run([]string{"bundle", filepath.Join(src, "vmlinuz"), filepath.Join(src, "liken.cpio"),
-		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"), channel, "0.0.1"})
+		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"), channel, "2026.07.11-001",
+		"kernel=7.1.2", "k3s=v1.36.2+k3s1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(channel, "0.0.1", "release.yaml")); err != nil {
+	if _, err := os.Stat(filepath.Join(channel, "2026.07.11-001", "release.yaml")); err != nil {
 		t.Error("no release document was written")
+	}
+}
+
+func TestRunRefusesAMalformedComponent(t *testing.T) {
+	err := run([]string{"bundle", "vmlinuz", "liken.cpio", "liken", "menu.efi",
+		t.TempDir(), "2026.07.11-001", "kernel"})
+	if err == nil || !strings.Contains(err.Error(), "name=version") {
+		t.Errorf("a component without name=version must be refused: %v", err)
 	}
 }
 

@@ -4,10 +4,11 @@
 # domain packages it dispatches to).
 
 # The same version stamp every liken binary carries (see
-# init/Makefile for the full explanation of the -X mechanism); the
-# toolkit reports it via `liken version`, which matters once the
-# binary ships with releases and outlives any one checkout.
-LIKEN_VERSION ?= $(strip $(file <../VERSION))
+# init/Makefile for the full explanation of the -X mechanism, and
+# version.mk for where the version comes from); the toolkit reports
+# it via `liken version`, which matters once the binary ships with
+# releases and outlives any one checkout.
+include ../version.mk
 DIST ?= dist
 
 # Static for the same practical reason as everything else here: the
@@ -17,7 +18,7 @@ DIST ?= dist
 $(DIST)/liken: ../go.mod ../go.sum $(wildcard *.go) \
 		$(wildcard ../identity/*.go) $(wildcard ../machine/*.go) \
 		$(wildcard ../image/*.go) $(wildcard ../releases/*.go) \
-		$(wildcard ../disks/*.go) $(wildcard ../scaffold/*.go) $(wildcard ../scaffold/*.tmpl) ../VERSION
+		$(wildcard ../disks/*.go) $(wildcard ../scaffold/*.go) $(wildcard ../scaffold/*.tmpl) $(LIKEN_VERSION_STAMP)
 	CGO_ENABLED=0 go build -trimpath \
 		-ldflags "-X github.com/liken-sh/liken/machine.Version=$(LIKEN_VERSION)" \
 		-o $(DIST)/liken .

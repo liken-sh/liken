@@ -25,7 +25,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      # Full history, because the build names itself with git describe
+      # (version.mk): the most recent release tag and the distance past
+      # it. A shallow checkout would leave describe blind to the tags
+      # and every CI build would claim to be a bare commit.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-go@v6
         with:
@@ -79,14 +85,17 @@ jobs:
         with:
           path: e2fsprogs/dist
           key: e2fsprogs-${{ hashFiles('e2fsprogs/VERSION', 'e2fsprogs/fetch.sh') }}
-      # The container-built domains also key on image/oci.sh and the
-      # root VERSION, mirroring their Makefile rules: the iscsid image
-      # tar bakes the liken version, so a release bump has to rebuild
-      # it.
+      # The cache carries only what fetch.sh built; the iscsid image
+      # tar in it is always stale, because the tar bakes the liken
+      # version and that moves with every commit now. The version
+      # stamp file (version.mk) is born during the run with a fresh
+      # timestamp, so make rebuilds the tar from the cached binaries
+      # every time — cheap, next to the container build the cache
+      # exists to avoid.
       - uses: actions/cache@v6
         with:
           path: open-iscsi/dist
-          key: open-iscsi-${{ hashFiles('open-iscsi/VERSION', 'open-iscsi/fetch.sh', 'image/oci.sh', 'VERSION') }}
+          key: open-iscsi-${{ hashFiles('open-iscsi/VERSION', 'open-iscsi/fetch.sh') }}
       - uses: actions/cache@v6
         with:
           path: nfs-utils/dist

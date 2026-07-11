@@ -17,6 +17,8 @@
 #                                         required
 #   releases/dist/<version>/release.yaml  the document naming each
 #                                         artifact by sha256 digest
+#                                         and recording the versions
+#                                         of the components inside
 #
 # Because nothing in the bundle depends on a deployment, these digests
 # are stable and publishable, and this channel is the only one there
@@ -32,12 +34,16 @@
 # cutting a release, a plain `make run` still boots exactly what it
 # always did.
 
-# Which version to produce: `make release VERSION=0.2.0`. There is no
-# default, because the command exists to name a release, so the name
-# must be given.
+# Which version to produce: `make release VERSION=2026.07.11-001`.
+# There is no default, because the command exists to name a release,
+# so the name must be given. The grammar (a calendar date and a
+# serial, every field zero-padded) is defined in machine/versions.go
+# and re-checked here before any building happens, so a typo costs a
+# second rather than a full build; versioning.md explains the scheme
+# and the release process around it.
 VERSION ?=
 
-# FAULT selects a deliberate failure: `make build VERSION=x
+# FAULT selects a deliberate failure: `make build VERSION=2026.07.11-001
 # FAULT=panic` (or wedge-k3s) builds a release that fails, for
 # drilling the fallback machinery (init/fault.go). Only init carries
 # the fault, because the drill is about a broken boot, and init is
@@ -45,14 +51,27 @@ VERSION ?=
 FAULT ?=
 
 BUILD = build/$(VERSION)
+
+# The vendored components and the upstream versions of them that this
+# release will carry, read from each domain's VERSION file. The
+# release document records these because the release's own version is
+# a date that deliberately says nothing about contents.
 KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
+K3S_VERSION := $(strip $(file <../k3s/VERSION))
+XTABLES_VERSION := $(strip $(file <../xtables/VERSION))
+TRUST_VERSION := $(strip $(file <../trust/VERSION))
+E2FSPROGS_VERSION := $(strip $(file <../e2fsprogs/VERSION))
+OPENISCSI_VERSION := $(strip $(file <../open-iscsi/VERSION))
+NFSUTILS_VERSION := $(strip $(file <../nfs-utils/VERSION))
 SYSTEMDBOOT_VERSION := $(strip $(file <../systemd-boot/VERSION))
 
 # The version-stamped build: every liken component rebuilt under
 # VERSION into build/<version>/, generic image included. This is the
 # release's input, and nothing else's: deployments never build.
 build:
-	@test -n "$(VERSION)" || { echo "usage: make build VERSION=x.y.z"; exit 1; }
+	@test -n "$(VERSION)" || { echo "usage: make build VERSION=yyyy.mm.dd-nnn"; exit 1; }
+	@echo "$(VERSION)" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3}$$' \
+		|| { echo "VERSION must be yyyy.mm.dd-nnn (for example 2026.07.11-001)"; exit 1; }
 	$(MAKE) -C ../init LIKEN_VERSION=$(VERSION) LIKEN_FAULT=$(FAULT) DIST=$(abspath $(BUILD)/init)
 	$(MAKE) -C ../machine-operator LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/machine-operator)
 	$(MAKE) -C ../cluster-operator LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/cluster-operator)
@@ -78,7 +97,15 @@ release: build
 		$(BUILD)/generic/liken.cpio \
 		$(BUILD)/cli/liken \
 		../systemd-boot/dist/$(SYSTEMDBOOT_VERSION)/systemd-bootx64.efi \
-		dist $(VERSION)
+		dist $(VERSION) \
+		kernel=$(KERNEL_VERSION) \
+		k3s=$(K3S_VERSION) \
+		xtables=$(XTABLES_VERSION) \
+		trust=$(TRUST_VERSION) \
+		e2fsprogs=$(E2FSPROGS_VERSION) \
+		open-iscsi=$(OPENISCSI_VERSION) \
+		nfs-utils=$(NFSUTILS_VERSION) \
+		systemd-boot=$(SYSTEMDBOOT_VERSION)
 
 # Serve the channel over HTTP: the lab's release server, standing in
 # for the website. The dev cluster's guests reach it at
