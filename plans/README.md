@@ -117,10 +117,11 @@ numbered before the arc existed; it belongs second in this order:
     variables, BIOS machines rewrite what GRUB reads, with the same
     one-shot trial and fallback. What the liken.sh node needs before
     it can upgrade itself.
-31. [ ] [TLS for the website](31-website-tls.md) — liken.sh answers
-    over HTTPS via Let's Encrypt, sized for a 1 GB node: probably
-    Traefik's built-in ACME rather than cert-manager's three
-    always-on controllers.
+31. [x] [TLS for the website](31-website-tls.md) — liken.sh answers
+    over HTTPS via Let's Encrypt, sized for a 1 GB node: Traefik's
+    built-in ACME rather than cert-manager's three always-on
+    controllers, staged first, and a hard lesson in the node's
+    memory envelope.
 
 Deferred until the fundamentals above are proven, the hardening
 tier: UKIs, dm-verity, secure boot, TPM-sealed secrets, and signed
