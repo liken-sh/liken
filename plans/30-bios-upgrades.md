@@ -40,3 +40,13 @@ the installer should learn to lay down GRUB itself instead of leaving
 it to a deployment's Makefile; and whether liken writes the
 environment block directly (it is a 1 KiB block with a documented
 format) or ships grub-editenv to do it.
+
+One more capability belongs in this milestone's orbit: a BIOS machine
+should notice and heal its own boot sectors. The liken.sh node's boot
+code has been zeroed twice by Linode operations entirely outside the
+machine (image deploys sanitize the MBR, and a failed deploy step can
+do it again an hour later), and each time the fix was 440 bytes a
+human restored over a rescue boot. A machine that owns its bootloader
+can verify those bytes on every boot and put them back itself — the
+same self-reliance the storage roles already practice, applied to the
+one region of the disk nothing else watches.

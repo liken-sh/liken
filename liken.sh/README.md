@@ -113,5 +113,6 @@ The API server's certificate names the node's cluster-segment address
 public internet means telling kubectl which name to expect:
 
     kubectl --kubeconfig identity/kubeconfig \
-      --server=https://50.116.63.57:6443 --tls-server-name=10.10.0.1 \
+      --server=https://$(terraform output -raw node_ipv4):6443 \
+      --tls-server-name=10.10.0.1 \
       get nodes
