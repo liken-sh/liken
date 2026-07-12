@@ -307,6 +307,83 @@ resource "linode_instance_config" "boot" {
 }
 
 # ---------------------------------------------------------------------------
+# The firewall: the node's public face is the website, nothing else.
+#
+# The cluster API on 6443 authenticates every caller with client
+# certificates, so the firewall is defense in depth rather than the
+# lock on the door — but depth is cheap and exposure isn't: a port
+# the edge drops can't be scanned, fuzzed, or hit by the next
+# pre-auth vulnerability, and a 1 GB node shouldn't spend its one
+# CPU entertaining the internet's background noise. Packets the
+# firewall drops never reach the machine at all.
+#
+# The operator's address arrives as a variable so it never lands in
+# this public repository: .envrc.private exports TF_VAR_operator_cidr
+# (it lives on in the Terraform state, which is already private, like
+# every other secret here). The VLAN is untouched — Cloud Firewalls
+# filter the public interface, and cluster traffic rides the private
+# segment.
+
+variable "operator_cidr" {
+  description = "The address allowed to reach the cluster API and rescue-mode ssh, as a CIDR"
+  type        = string
+  sensitive   = true
+}
+
+resource "linode_firewall" "node" {
+  label           = "liken-node-1"
+  inbound_policy  = "DROP"
+  outbound_policy = "ACCEPT"
+  linodes         = [linode_instance.node.id]
+
+  inbound {
+    label    = "website-http"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "80"
+    ipv4     = ["0.0.0.0/0"]
+    ipv6     = ["::/0"]
+  }
+
+  inbound {
+    label    = "website-https"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "443"
+    ipv4     = ["0.0.0.0/0"]
+    ipv6     = ["::/0"]
+  }
+
+  # Ping stays answerable: it costs nothing and it is the first
+  # question anyone asks a machine that seems down.
+  inbound {
+    label    = "ping"
+    action   = "ACCEPT"
+    protocol = "ICMP"
+    ipv4     = ["0.0.0.0/0"]
+    ipv6     = ["::/0"]
+  }
+
+  inbound {
+    label    = "kubernetes-api"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "6443"
+    ipv4     = [var.operator_cidr]
+  }
+
+  # Rescue mode's sshd, for shipping: the machine itself runs no ssh
+  # server, so outside a rescue boot this rule matches nothing.
+  inbound {
+    label    = "rescue-ssh"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "22"
+    ipv4     = [var.operator_cidr]
+  }
+}
+
+# ---------------------------------------------------------------------------
 # Release storage: the bucket the published channel lives in.
 #
 # A release is a directory of digest-named artifacts and a document
