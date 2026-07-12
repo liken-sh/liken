@@ -10,11 +10,11 @@
 # disk we can write but whose console we only watch. The install
 # still happens the ordinary way — the installer boots and runs
 # exactly as it would on hardware — but it runs here, in a local
-# QEMU guest under real UEFI firmware, against a raw disk file the
-# exact size of the Linode's disk. The written disk then travels to
-# Linode whole (dd over a rescue boot), where it boots BIOS-style
-# through the grub.cfg this Makefile plants on the system slot
-# (grub.cfg explains that bridge).
+# QEMU guest under real UEFI firmware, against a raw disk file. The
+# written disk travels as a Linode custom image: terraform.tf
+# uploads it and stamps it onto the machine's system disk, where it
+# boots BIOS-style through the grub.cfg this Makefile plants on the
+# system slot (grub.cfg explains that bridge).
 #
 # The install must run under UEFI even though Linode will boot the
 # result under BIOS: the installer records its boot entries in
@@ -41,15 +41,25 @@ BOOT_ARCHIVE := ../image/dist/boot.cpio
 # install media gets built from a downloaded channel instead.
 VERSION := $(shell date +%Y.%m.%d)-000
 
-# The Linode disk's exact size in bytes, measured from the instance
-# (blockdev --getsize64 in rescue mode) — not the nominal 25600 MB
-# the plan advertises. The local disk image must match exactly: GPT
-# keeps its backup header on the last sector of the disk, so an
-# image built at any other size lands that header somewhere Linode's
-# disk doesn't end.
-DISK_BYTES := 26826768384
+# The system image's size: 3 GiB holds both boot slots, the machine's
+# state, and its scratch space, with room left over. Linode caps
+# uploaded images at 6 GB uncompressed, which is why the machine's
+# storage splits across two disks at all — the OS ships as this small
+# image while the cluster's data lives on a disk that never travels.
+# The image is deliberately smaller than the disk terraform.tf gives
+# it (Linode's advertised disk sizes don't land on exact byte counts):
+# a GPT records where its disk ends, and liken notices a disk larger
+# than its table claims on first boot and rewrites the table to the
+# real end.
+SYSTEM_DISK_BYTES := 3221225472
 
-all: image/disk.img.zst
+# A scratch stand-in for the machine's data disk, present during the
+# local install only so that storage reconciliation finds every
+# declared device. Its contents never travel: the real data disk
+# starts blank on Linode and the machine claims it on first boot.
+DATA_SCRATCH_BYTES := 23622320128
+
+all: image/disk.img.gz
 
 # The cluster's identity: certificate authorities and the join
 # token, minted before any machine boots. The CLI is an order-only
@@ -105,16 +115,20 @@ image/OVMF_VARS.fd:
 #
 # Then the BIOS bridge. Linode's hosts boot BIOS-style only, and a
 # liken machine normally has no bootloader at all (UEFI boot entries
-# do that job), so this disk carries its own GRUB: a BIOS boot
-# partition tucked into the alignment gap before the first real
-# partition (sectors 34-2047, touching nothing the installer laid
-# out), GRUB's first stage in the MBR's boot code, and grub.cfg on
-# slot A — the boot entry in GRUB's language. Loop-mounting a
-# partition needs root, hence sudo; everything else here runs
-# unprivileged.
+# do that job), so this disk carries a complete GRUB installation:
+# a BIOS boot partition tucked into the alignment gap before the
+# first real partition (sectors 34-2047, touching nothing the
+# installer laid out), GRUB's first stage in the MBR's boot code,
+# and the /boot/grub tree — config and modules — on slot A. One
+# Linode-specific wart: their image deploys preserve every partition
+# faithfully but zero the MBR's boot code, so shipping this image
+# ends by putting its first 440 bytes back (terraform.tf tells that
+# story). Loop-mounting a partition needs root, hence sudo;
+# everything else here runs unprivileged.
 image/disk.img: image/install.cpio $(VMLINUZ) image/OVMF_VARS.fd grub.cfg
-	rm -f $@
-	truncate -s $(DISK_BYTES) $@
+	rm -f $@ image/data-scratch.img
+	truncate -s $(SYSTEM_DISK_BYTES) $@
+	truncate -s $(DATA_SCRATCH_BYTES) image/data-scratch.img
 	qemu-system-x86_64 \
 		-accel kvm -accel tcg \
 		-cpu max \
@@ -134,7 +148,10 @@ image/disk.img: image/install.cpio $(VMLINUZ) image/OVMF_VARS.fd grub.cfg
 		-device virtio-net-pci,netdev=cluster \
 		-device virtio-scsi-pci \
 		-drive file=$@,format=raw,if=none,id=system \
-		-device scsi-hd,drive=system,serial=liken-node-1-system
+		-device scsi-hd,drive=system,serial=liken-node-1-system \
+		-drive file=image/data-scratch.img,format=raw,if=none,id=data \
+		-device scsi-hd,drive=data,serial=liken-node-1-data
+	rm -f image/data-scratch.img
 	grep -q 'install failed' image/install.log && { tail -5 image/install.log; rm -f $@; exit 1; } || true
 	sgdisk --new=8:34:2047 --typecode=8:ef02 --change-name=8:"BIOS boot" $@
 	LOOP=$$(sudo losetup --find --show -P $@) && \
@@ -148,10 +165,10 @@ image/disk.img: image/install.cpio $(VMLINUZ) image/OVMF_VARS.fd grub.cfg
 		sudo losetup -d $$LOOP
 
 # The disk, travel-sized: all but ~1GB of the image is zeros, which
-# zstd reduces to almost nothing, so this is what crosses the
-# network to the rescue-booted Linode.
-image/disk.img.zst: image/disk.img
-	zstd -T0 -f -o $@ $<
+# compress to almost nothing. gzip rather than anything better
+# because it is the one format Linode's image upload accepts.
+image/disk.img.gz: image/disk.img
+	gzip --keep --force $<
 
 clean:
 	rm -rf image

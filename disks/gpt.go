@@ -387,25 +387,11 @@ func ReadGPT(r io.ReaderAt, totalSectors uint64) (*Table, error) {
 // re-read the result. It is deliberately thin; everything interesting
 // happens in SerializeGPT.
 func WriteTable(devPath string, totalSectors uint64, t *Table) error {
-	chunks, err := SerializeGPT(t, totalSectors)
-	if err != nil {
-		return err
-	}
-
-	f, err := os.OpenFile(devPath, os.O_RDWR, 0)
+	f, err := writeTableBytes(devPath, totalSectors, t)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-
-	for _, chunk := range chunks {
-		if _, err := f.WriteAt(chunk.Data, int64(chunk.LBA)*SectorSize); err != nil {
-			return fmt.Errorf("writing at LBA %d: %w", chunk.LBA, err)
-		}
-	}
-	if err := f.Sync(); err != nil {
-		return err
-	}
 
 	// The bytes are on disk, but the kernel's view of the device
 	// predates them; this ioctl asks it to re-read the table, which
@@ -414,6 +400,48 @@ func WriteTable(devPath string, totalSectors uint64, t *Table) error {
 		return fmt.Errorf("re-reading partition table: %w", err)
 	}
 	return nil
+}
+
+// WriteTableInPlace writes a table's bytes without asking the kernel
+// to re-read them. That is only correct when no partition's extent
+// changed — relocating the backup copy to the end of a grown disk is
+// the case — because then the kernel's existing view of the device
+// already matches the new table. It exists because the kernel refuses
+// to re-read a disk with any partition mounted, and the disk that
+// carries the running system always has one: the boot slot the OS
+// mounted its own root image from.
+func WriteTableInPlace(devPath string, totalSectors uint64, t *Table) error {
+	f, err := writeTableBytes(devPath, totalSectors, t)
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
+
+// writeTableBytes serializes and writes a table's chunks, returning
+// the still-open device for whatever the caller wants to ask of it.
+func writeTableBytes(devPath string, totalSectors uint64, t *Table) (*os.File, error) {
+	chunks, err := SerializeGPT(t, totalSectors)
+	if err != nil {
+		return nil, err
+	}
+
+	f, err := os.OpenFile(devPath, os.O_RDWR, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, chunk := range chunks {
+		if _, err := f.WriteAt(chunk.Data, int64(chunk.LBA)*SectorSize); err != nil {
+			f.Close()
+			return nil, fmt.Errorf("writing at LBA %d: %w", chunk.LBA, err)
+		}
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return f, nil
 }
 
 // Write lays a brand-new partition table onto a blank disk being

@@ -127,6 +127,37 @@ func TestPlanGrowthRelocatesTheBackupEvenWithNothingToGrow(t *testing.T) {
 	}
 }
 
+func TestApplyGrowthRelocatesWithoutAskingTheKernel(t *testing.T) {
+	// A relocation-only rewrite (no extents changing) must not ask
+	// the kernel to re-read the table: the kernel's view is already
+	// correct, and on the disk that carries the running system the
+	// request would be refused anyway — the OS's own slot is mounted
+	// from the moment early boot finds the system image on it. A
+	// plain file stands in for the disk here exactly because it
+	// can't answer that ioctl: applyGrowth succeeding proves it
+	// never asks.
+	grownSectors := uint64(2 * claimedSectors)
+	table := grownTable(claimedSectors)
+	table.Entries = table.Entries[:1]
+	f := diskFile(t, table, claimedSectors)
+	if err := f.Truncate(int64(grownSectors) * disks.SectorSize); err != nil {
+		t.Fatal(err)
+	}
+
+	plan := growPlan{device: f.Name(), totalSectors: grownSectors, table: table}
+	if err := applyGrowth(plan); err != nil {
+		t.Fatalf("a pure relocation should succeed without the kernel: %v", err)
+	}
+
+	got, err := disks.ReadGPT(f, grownSectors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AlternateLBA != grownSectors-1 {
+		t.Errorf("the backup should land on the grown disk's last sector: %d", got.AlternateLBA)
+	}
+}
+
 func TestPlanGrowthGrowsASizedRoleIntoFreeSpace(t *testing.T) {
 	// machineState is the only partition, declared larger than it is:
 	// it grows in place to its declared size.

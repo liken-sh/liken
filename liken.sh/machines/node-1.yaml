@@ -26,14 +26,17 @@ spec:
       - name: eth0
       - name: eth1
         address: 10.10.0.1/24
-  # One disk carries everything: a Linode's disk allotment comes as a
-  # single block device unless it is deliberately split, and there is
-  # nothing a second spindle would buy a VM whose "disks" are slices
-  # of the same host storage anyway. The device path matters only on
-  # the boot that claims the disk (the local install under QEMU,
-  # which attaches the image as a virtio-scsi disk to match Linode's
-  # /dev/sda); after that every partition is recognized by the role
-  # name written into the GPT.
+  # Two disks, split by lifetime. The system disk (/dev/sda) holds the
+  # OS: boot slots and the machine's own state. It ships whole, as a
+  # disk image terraform.tf uploads and stamps onto the disk, so every
+  # ship erases it. The data disk (/dev/sdb) holds everything that
+  # must outlive a ship — the cluster's database, the container
+  # store, pod volumes. Terraform creates it raw and blank exactly
+  # once, and liken claims it on the machine's first boot; after that
+  # ships replace the system disk around it and the cluster comes back
+  # with its state. The device paths matter only on the boot that
+  # claims each disk; after that every partition is recognized by the
+  # role name written into the GPT.
   storage:
     # The OS's two boot slots, FAT32, each holding one complete liken
     # release with headroom.
@@ -54,18 +57,18 @@ spec:
     # k3s's database, TLS material, and containerd's images — the
     # role that makes reboots cheap and upgrades incremental.
     clusterState:
-      device: /dev/sda
+      device: /dev/sdb
       size: 6Gi
     # Durable storage pods claim by name (the local-path provisioner
     # pool). The website's content ships in images, so this pool
     # starts modest.
     podStorage:
-      device: /dev/sda
+      device: /dev/sdb
       size: 8Gi
     # kubelet's working space: emptyDirs and per-pod scratch. The one
-    # unsized role on the disk, so it takes the remainder.
+    # unsized role on its disk, so it takes the remainder.
     podEphemeral:
-      device: /dev/sda
+      device: /dev/sdb
   # The kernel's default of 128 inotify instances per user runs out
   # quickly on a node where every log-follower and config-watcher
   # holds one.

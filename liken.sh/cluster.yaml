@@ -42,6 +42,13 @@ spec:
     # NTP services intended for exactly this kind of anonymous use.
     upstreams: [time.cloudflare.com, time.nist.gov]
 
+  # The fleet's opt-ins from liken's feature vocabulary ({} is a
+  # feature's zero configuration). metrics-server is how `kubectl top`
+  # answers, which matters on a machine this small: memory pressure is
+  # the fact we watch here.
+  features:
+    metrics-server: {}
+
   releases:
     # liken's public release channel — which this very cluster will
     # serve, once the webserver is deployed here. Pointing the

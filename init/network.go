@@ -90,21 +90,43 @@ func bringUpNetwork(spec machine.NetworkSpec) ([]*connection, error) {
 	}
 
 	// One resolv.conf for the whole machine, gathered across every
-	// interface: DHCP leases and manifest declarations both land here,
-	// in interface order. The file is an ordinary one that resolvers
-	// (including Go's) read by convention.
-	var b strings.Builder
-	for _, conn := range conns {
-		for _, ns := range conn.nameservers {
-			fmt.Fprintf(&b, "nameserver %s\n", ns)
-		}
-	}
-	if b.Len() > 0 {
-		if err := os.WriteFile("/etc/resolv.conf", []byte(b.String()), 0o644); err != nil {
+	// interface (resolvConf below explains what makes the cut). The
+	// file is an ordinary one that resolvers (including Go's) read by
+	// convention.
+	if content := resolvConf(conns); content != "" {
+		if err := os.WriteFile("/etc/resolv.conf", []byte(content), 0o644); err != nil {
 			return conns, err
 		}
 	}
 	return conns, nil
+}
+
+// resolvConf renders the machine's resolv.conf from its connections'
+// nameservers — DHCP leases and manifest declarations both, in
+// interface order — deduplicated and capped at three. Three is the
+// resolver world's oldest hard limit: glibc has read at most MAXNS=3
+// nameservers since the 1980s, the other libc stacks follow it, and
+// Kubernetes truncates every pod's list to the same three, logging a
+// warning each sync when a node's file offers more. Some networks do
+// offer more (Linode's DHCP hands out its whole regional fleet,
+// eighteen resolvers per lease); writing them all would change
+// nothing about how names resolve and cost a warning every minute,
+// forever. Interface order is priority order, so the cap keeps the
+// resolvers the machine would have consulted anyway.
+func resolvConf(conns []*connection) string {
+	const maxNameservers = 3
+	var b strings.Builder
+	seen := map[string]bool{}
+	for _, conn := range conns {
+		for _, ns := range conn.nameservers {
+			if len(seen) == maxNameservers || seen[ns.String()] {
+				continue
+			}
+			seen[ns.String()] = true
+			fmt.Fprintf(&b, "nameserver %s\n", ns)
+		}
+	}
+	return b.String()
 }
 
 // bringUpInterface raises one link and gives it an address by

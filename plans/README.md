@@ -112,6 +112,11 @@ numbered before the arc existed; it belongs second in this order:
     RAM: the system artifact becomes a read-only filesystem image
     mounted from the boot slot, and a 1 GB machine becomes the lab's
     standing proof that liken stays light.
+30. [ ] [Upgrades under BIOS](30-bios-upgrades.md) — the upgrade
+    path's second actuator: where UEFI machines flip firmware
+    variables, BIOS machines rewrite what GRUB reads, with the same
+    one-shot trial and fallback. What the liken.sh node needs before
+    it can upgrade itself.
 
 Deferred until the fundamentals above are proven, the hardening
 tier: UKIs, dm-verity, secure boot, TPM-sealed secrets, and signed

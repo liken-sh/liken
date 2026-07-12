@@ -280,6 +280,39 @@ func TestWriteGPTWritesEverythingButNeedsARealDevice(t *testing.T) {
 	}
 }
 
+func TestWriteTableInPlaceSkipsTheKernelReread(t *testing.T) {
+	// A regular file can't answer BLKRRPART, so success here proves
+	// the in-place variant never asks: it writes the bytes and stops,
+	// which is the whole point of having it (grow.go uses it when
+	// nothing about the kernel's view of the partitions changes).
+	path := filepath.Join(t.TempDir(), "disk")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(testDiskSectors * SectorSize); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	if err := WriteTableInPlace(path, testDiskSectors, sampleTable()); err != nil {
+		t.Fatalf("in-place write should succeed on a plain file: %v", err)
+	}
+
+	r, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	table, err := ReadGPT(r, testDiskSectors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if table.AlternateLBA != testDiskSectors-1 {
+		t.Errorf("the backup should land on the last sector: %d", table.AlternateLBA)
+	}
+}
+
 func TestGPTReaderRejectsForeignGeometry(t *testing.T) {
 	f := diskFile(t, sampleTable(), testDiskSectors)
 	// Rewrite the primary header claiming a 64-entry array, with a

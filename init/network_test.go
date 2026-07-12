@@ -42,3 +42,51 @@ func TestConnectionReportNarratesEachMethod(t *testing.T) {
 	}
 	static.report()
 }
+
+func TestResolvConfCapsAtThreeNameservers(t *testing.T) {
+	// glibc has read at most three nameservers since the 1980s, every
+	// other resolver stack follows it, and kubelet logs a warning on
+	// every sync when a node offers more. Linode's DHCP hands out its
+	// whole regional fleet (eighteen); the machine keeps three.
+	conns := []*connection{{nameservers: []net.IP{
+		net.ParseIP("10.0.0.1"), net.ParseIP("10.0.0.2"),
+		net.ParseIP("10.0.0.3"), net.ParseIP("10.0.0.4"),
+		net.ParseIP("10.0.0.5"),
+	}}}
+	want := "nameserver 10.0.0.1\nnameserver 10.0.0.2\nnameserver 10.0.0.3\n"
+	if got := resolvConf(conns); got != want {
+		t.Errorf("got:\n%s", got)
+	}
+}
+
+func TestResolvConfKeepsInterfaceOrder(t *testing.T) {
+	// Interface order is priority order: the uplink's lease speaks
+	// before a later interface's manifest declarations.
+	conns := []*connection{
+		{nameservers: []net.IP{net.ParseIP("10.0.0.1"), net.ParseIP("10.0.0.2")}},
+		{nameservers: []net.IP{net.ParseIP("10.1.0.1")}},
+	}
+	want := "nameserver 10.0.0.1\nnameserver 10.0.0.2\nnameserver 10.1.0.1\n"
+	if got := resolvConf(conns); got != want {
+		t.Errorf("got:\n%s", got)
+	}
+}
+
+func TestResolvConfDropsDuplicates(t *testing.T) {
+	// A resolver listed on two interfaces buys nothing twice, and
+	// with only three slots a duplicate costs a real one.
+	conns := []*connection{
+		{nameservers: []net.IP{net.ParseIP("10.0.0.1")}},
+		{nameservers: []net.IP{net.ParseIP("10.0.0.1"), net.ParseIP("10.1.0.1")}},
+	}
+	want := "nameserver 10.0.0.1\nnameserver 10.1.0.1\n"
+	if got := resolvConf(conns); got != want {
+		t.Errorf("got:\n%s", got)
+	}
+}
+
+func TestResolvConfWithNoNameserversIsEmpty(t *testing.T) {
+	if got := resolvConf([]*connection{{}}); got != "" {
+		t.Errorf("no nameservers must render nothing, got %q", got)
+	}
+}

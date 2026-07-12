@@ -180,6 +180,23 @@ func planAllGrowth(roles []machine.DeclaredRole, found map[machine.StorageRoleNa
 // applyGrowth rewrites one disk's table with its planned extensions
 // and waits for the kernel to surface the new geometry.
 func applyGrowth(plan growPlan) error {
+	// A plan with no edits is a pure relocation: the disk grew, no
+	// partition's extent changes, and only the backup copy of the
+	// table needs to move to the new end. The kernel's view of the
+	// partitions is already correct, so it isn't asked to re-read —
+	// and it couldn't be: on the disk carrying the running system,
+	// the boot slot has been mounted since early boot found the
+	// system image on it, and the kernel refuses to re-read a disk
+	// in use. (This is the normal first boot after the liken.sh
+	// deployment stamps its disk image onto a slightly larger disk.)
+	if len(plan.edits) == 0 {
+		fmt.Printf("liken: storage: %s grew; relocating its backup partition table to the new end\n", plan.device)
+		if err := disks.WriteTableInPlace(plan.device, plan.totalSectors, plan.table); err != nil {
+			return fmt.Errorf("rewriting the partition table on %s: %w", plan.device, err)
+		}
+		return nil
+	}
+
 	for _, g := range plan.edits {
 		e := &plan.table.Entries[g.entryIndex]
 		fmt.Printf("liken: storage: growing %s on %s from %s to %s\n",
@@ -187,9 +204,6 @@ func applyGrowth(plan growPlan) error {
 			gib((e.LastLBA-e.FirstLBA+1)*disks.SectorSize),
 			gib((g.newLastLBA-e.FirstLBA+1)*disks.SectorSize))
 		e.LastLBA = g.newLastLBA
-	}
-	if len(plan.edits) == 0 {
-		fmt.Printf("liken: storage: %s grew; relocating its backup partition table to the new end\n", plan.device)
 	}
 	if err := disks.WriteTable(plan.device, plan.totalSectors, plan.table); err != nil {
 		return fmt.Errorf("rewriting the partition table on %s: %w", plan.device, err)

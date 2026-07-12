@@ -116,18 +116,16 @@ resource "linode_domain_record" "www" {
 # datastore), and it is all the website and release channel need to
 # start. Growing past one node is an ordinary Cluster edit later.
 #
-# The honest caveat: this instance does not boot liken yet. Linode's
-# KVM guests boot BIOS-style only — no UEFI — and liken today boots
-# through the kernel's EFI stub, loading the OS archive and the
-# deployment layer as two initrd= parameters from a boot entry that
-# systemd-boot or the firmware reads. Getting liken onto this machine
-# means teaching the install media a legacy path: an MBR-stage
-# bootloader on the slot disk that loads vmlinuz with both archives,
-# under Linode's "direct disk" boot setting, which simply executes
-# the disk's boot sector. That is a drill for its own milestone, so
-# the machine is provisioned powered off: the disk, the address, and
-# the DNS above are real, and the first boot happens when the OS is
-# ready for it.
+# The OS reaches this machine as a disk image. The Makefile beside
+# this file runs a real liken install in a local QEMU guest and the
+# resulting disk is declared below as a Linode custom image, hashed
+# so that Terraform notices a rebuild; shipping a new OS is
+# `make && terraform apply` with the instance powered off, and a
+# power-on to boot the result. The machine's storage splits by
+# lifetime to make that stamp safe: the system disk is erased by
+# every ship, and everything durable lives on a data disk the ship
+# never touches (machines/node-1.yaml declares which roles live
+# where).
 
 resource "linode_instance" "node" {
   label  = "liken-node-1"
@@ -152,16 +150,72 @@ resource "linode_instance" "node" {
   }
 }
 
-# The whole disk, raw and unformatted: liken's installer owns the
-# partition table (an ESP and the two system slots), so Linode is
-# given no filesystem to manage and no distro to be helpful about.
-# 25600 MB is the entire nanode allotment.
+# The OS, as a custom image. `make` in this directory produces
+# image/disk.img.gz — a complete installed system disk — and this
+# resource uploads it, so the file must exist before a plan. Linode
+# accepts raw disk images, gzipped, up to 6 GB uncompressed; the
+# Makefile explains how that cap shaped the disk layout.
+#
+# Replacing this image is how an OS ships: a new image forces the
+# system disk below to be recreated from it, which erases that disk.
+# Shipping is therefore an explicit act, never a side effect:
+# ignore_changes keeps a routine apply from noticing a rebuilt local
+# image (builds aren't byte-reproducible, so every rebuild would
+# otherwise read as a ship), and
+#
+#   terraform apply -replace=linode_image.system
+#
+# is the command that means "reinstall the node's OS from the image
+# I just built" — run with the instance powered off, then power on.
+
+resource "linode_image" "system" {
+  label       = "liken-node-1-system"
+  description = "The liken.sh node's installed system disk"
+  region      = "us-east"
+
+  file_path = "${path.module}/image/disk.img.gz"
+  file_hash = filemd5("${path.module}/image/disk.img.gz")
+
+  lifecycle {
+    ignore_changes = [file_hash]
+  }
+}
+
+# The system disk, stamped from the image above. Slightly larger than
+# the 3 GiB image because Linode's advertised sizes don't land on
+# exact byte counts; liken grows the partition table to the disk's
+# real end on first boot. Replacing a disk needs the instance
+# powered off, so a ship is: power off, apply, power on.
 
 resource "linode_instance_disk" "system" {
-  label      = "liken"
+  label     = "liken-system"
+  linode_id = linode_instance.node.id
+  size      = 3200
+  image     = linode_image.system.id
+
+  # The API insists on a login credential whenever a disk comes from
+  # an image, so that Linode can write it into the disk's filesystem.
+  # A raw image has no filesystem Linode can read, so nothing is ever
+  # written anywhere and no such login exists; this value satisfies
+  # the API's schema and does nothing else.
+  root_pass = "inert!on a raw image 0"
+}
+
+# The data disk: raw, blank, and never shipped to. liken claims it on
+# the machine's first boot, writing role names into its GPT, and
+# every ship after that replaces the OS around it — the cluster's
+# database, images, and volumes survive. 22400 MB is the rest of the
+# nanode's allotment.
+
+resource "linode_instance_disk" "data" {
+  label      = "liken-data"
   linode_id  = linode_instance.node.id
-  size       = 25600
+  size       = 22400
   filesystem = "raw"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "linode_instance_config" "boot" {
@@ -173,16 +227,23 @@ resource "linode_instance_config" "boot" {
   # boot entries the installer writes into firmware variables. So
   # this machine's disk carries its own bootloader: the Makefile
   # installs GRUB into the image's MBR and a small BIOS boot
-  # partition, with a grub.cfg on the system slot mirroring what the
+  # partition, with its config on the system slot mirroring what the
   # EFI boot entry would have said. Direct disk boot means the host
   # simply executes what the MBR carries. (Linode's GRUB 2 setting
-  # was the road not taken: the host's GRUB expects the whole disk
-  # to be one filesystem, as Linode's own images are, and never finds
-  # a config inside a partitioned disk.) The machine boots and runs
-  # normally under BIOS; what it loses is the firmware half of
-  # blue-green upgrades (BootNext/BootOrder), so release upgrades on
-  # this machine wait on a BIOS-boot milestone. Powered off
-  # (booted = false) until the disk carries an installed system.
+  # is a dead end for this disk: their loader reads its config from
+  # the disk treated as one whole-disk filesystem, as Linode's own
+  # images are laid out, and never looks inside a partition table.)
+  #
+  # One wart rides along: Linode's image deploys zero whatever boot
+  # code the MBR carries, so after the system disk is stamped from a
+  # new image, the first 440 bytes must be put back from the local
+  # disk.img over a rescue boot before the machine can boot. The
+  # machine runs normally under BIOS; what it loses is the firmware
+  # half of blue-green upgrades (BootNext/BootOrder), so release
+  # upgrades on this machine wait on a BIOS-boot milestone.
+  # booted = false keeps Terraform's hands off the power state:
+  # applies happen while the machine is deliberately off, and boots
+  # are an explicit act.
   kernel      = "linode/direct-disk"
   root_device = "/dev/sda"
   booted      = false
@@ -190,6 +251,11 @@ resource "linode_instance_config" "boot" {
   device {
     device_name = "sda"
     disk_id     = linode_instance_disk.system.id
+  }
+
+  device {
+    device_name = "sdb"
+    disk_id     = linode_instance_disk.data.id
   }
 
   # Two interfaces, and the second is the reason this cluster can
