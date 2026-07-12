@@ -206,10 +206,13 @@ func main() {
 		}
 	}
 
-	// Sysctls are applied before k3s starts so every value holds by
-	// the time it reads them. The operator re-asserts the same spec
-	// once the cluster is up, which is what makes a live kubectl edit
-	// take effect without a reboot.
+	// The OS's own kernel opinions go first, then the Machine spec's
+	// sysctls, so a deployment that disagrees with a default simply
+	// overwrites it. Both run before k3s starts, so every value holds
+	// by the time it reads them. The operator re-asserts the spec's
+	// values once the cluster is up, which is what makes a live
+	// kubectl edit take effect without a reboot.
+	applySysctls(osSysctls)
 	applySysctls(m.Spec.Sysctls)
 
 	worldReport()

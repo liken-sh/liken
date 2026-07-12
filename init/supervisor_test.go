@@ -8,11 +8,27 @@ import (
 	"bytes"
 	"context"
 	"os/exec"
+	"slices"
 	"testing"
 	"time"
 
 	"golang.org/x/sys/unix"
 )
+
+// The runtime discipline scales with the machine and with what the
+// cluster asks k3s to hold: a quarter of memory for the minimum
+// viable control plane, seven sixteenths once the helm feature
+// brings the chart renderer and its CRDs into the process.
+func TestK3sRuntimeEnv(t *testing.T) {
+	lean := k3sRuntimeEnv(1024*1024*1024, false)
+	if want := []string{"GOMEMLIMIT=256MiB", "GOGC=50"}; !slices.Equal(lean, want) {
+		t.Errorf("lean: got %v, want %v", lean, want)
+	}
+	helm := k3sRuntimeEnv(1024*1024*1024, true)
+	if want := []string{"GOMEMLIMIT=448MiB", "GOGC=50"}; !slices.Equal(helm, want) {
+		t.Errorf("helm: got %v, want %v", helm, want)
+	}
+}
 
 // Wait statuses use the kernel's packing: an exit code rides in the
 // second byte, a terminating signal in the low seven bits.

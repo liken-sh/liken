@@ -192,6 +192,43 @@ func k3sBootConfig(in k3sBootInputs) string {
 				fmt.Fprintf(&b, "  - %s\n", name)
 			}
 		}
+		// The Helm controller is not on the disable list because it is
+		// not a deployable component: it is a controller compiled into
+		// the k3s server process, watching for HelmChart resources to
+		// render, and holding informer caches whether or not any
+		// exist. On a small machine that residency is worth naming, so
+		// it follows the same rule as the bundled components: off
+		// unless the cluster declares the helm feature — or a feature
+		// that requires it, the way traefik does, since k3s deploys
+		// Traefik through a HelmChart.
+		if !cluster.FeatureEnabled("helm") {
+			b.WriteString("disable-helm-controller: true\n")
+		}
+		// The embedded cloud controller manager is in the same
+		// position: a controller inside the k3s server process,
+		// spending memory and holding a leader-election lease on
+		// every leader. On real clouds an external provider replaces
+		// it; on bare metal its only real job here is running the
+		// service load balancer (klipper-lb lives inside it since k3s
+		// moved ServiceLB there), so it runs exactly when servicelb
+		// is declared. Without it the kubelet initializes the node
+		// itself — addresses and all — which is the ordinary
+		// arrangement for a machine that is not in anyone's cloud.
+		if !cluster.FeatureEnabled("servicelb") {
+			b.WriteString("disable-cloud-controller: true\n")
+		}
+		// The network policy controller, likewise embedded: it turns
+		// NetworkPolicy resources into per-node packet filtering,
+		// which the flannel CNI cannot do alone. A cluster that
+		// wants that enforcement declares it; on one that doesn't,
+		// the controller would spend its memory watching for
+		// resources that never come. Kubernetes without it accepts
+		// NetworkPolicy documents and enforces nothing — precisely
+		// flannel's own posture, and the reason the feature's
+		// absence is a safe default rather than a broken one.
+		if !cluster.FeatureEnabled("network-policy") {
+			b.WriteString("disable-network-policy: true\n")
+		}
 		if cluster != nil {
 			// The datastore keys, decided by leaderJoinConfig: the
 			// founding leader of a multi-leader cluster runs (and, on the
@@ -415,6 +452,18 @@ func writeK3sBootConfig(cluster *machine.Cluster, m *machine.Machine, conns []*c
 		if !strings.HasPrefix(line, "#") {
 			fmt.Printf("liken: k3s config: %s\n", line)
 		}
+	}
+
+	// The Go runtime discipline rides beside the configuration: it is
+	// derived from the same cluster document (the helm feature is what
+	// swells the k3s heap), and re-deriving it here means an applied
+	// restart re-scales the ceiling on the same bounce that
+	// reconfigures k3s. Echoed like the config lines, because an
+	// invisible environment variable is where a memory mystery hides.
+	var si unix.Sysinfo_t
+	if err := unix.Sysinfo(&si); err == nil {
+		k3sMemoryDiscipline = k3sRuntimeEnv(uint64(si.Totalram)*uint64(si.Unit), cluster.FeatureEnabled("helm"))
+		fmt.Printf("liken: k3s env: %s\n", strings.Join(k3sMemoryDiscipline, " "))
 	}
 	return role, nil
 }

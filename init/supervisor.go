@@ -291,6 +291,54 @@ func superviseK3s(role machine.Role, reboot <-chan machine.RebootIntent,
 	}
 }
 
+// k3sRuntimeEnv is the Go runtime discipline init imposes on k3s,
+// derived from the machine's memory and from what the cluster asks
+// k3s to carry. Go's collector left alone lets a process's heap grow
+// to twice its live data before collecting, which is the right trade
+// on a machine with memory to spare and the wrong one on the small
+// machines liken targets, where k3s is the dominant resident and
+// every uncollected megabyte comes out of the workloads' budget.
+//
+// GOMEMLIMIT is a soft ceiling on everything the runtime manages
+// (heap, stacks, its own metadata): approaching it, the collector
+// runs harder rather than growing; past it, the runtime caps GC at
+// half the process's CPU and lets the heap grow anyway, so a genuine
+// spike degrades into slowness, never a heap-exhaustion crash. The
+// ceiling scales with the features the cluster declares, because
+// they are what the heap holds: a minimum viable control plane fits
+// comfortably under a quarter of the machine, while the helm feature
+// (and everything that requires it, like traefik) brings the chart
+// renderer and Traefik's CRDs into the process and gets seven
+// sixteenths — the budget that leaves a 1GB machine room for the
+// container runtime, the pods themselves, the kernel's own caches,
+// and free headroom for the next convergence. GOGC=50 sets the
+// everyday pace under either ceiling: collect at fifty percent heap
+// growth instead of a hundred, trading a little CPU all the time so
+// the process's resting size stays near its live data.
+//
+// containerd and the shims inherit this environment from k3s. That
+// is deliberate and cheap: they are Go programs a fraction of the
+// limit's size, so the ceiling never constrains them and the GC pace
+// keeps them lean too. Workload processes inherit nothing; their
+// environments come from their pod specs.
+func k3sRuntimeEnv(memoryBytes uint64, helm bool) []string {
+	limit := memoryBytes / 4
+	if helm {
+		limit = memoryBytes / 16 * 7
+	}
+	return []string{
+		fmt.Sprintf("GOMEMLIMIT=%dMiB", limit/(1<<20)),
+		"GOGC=50",
+	}
+}
+
+// k3sMemoryDiscipline is the runtime environment startK3s gives every
+// k3s it launches. writeK3sBootConfig derives it beside the boot
+// drop-in — at boot and again on every applied restart — so a
+// restart that changes the cluster's features re-scales the ceiling
+// on the same bounce that reconfigures k3s.
+var k3sMemoryDiscipline []string
+
 // startK3s launches k3s in the machine's role and hands back the
 // running command and its log file (which must stay open as long as
 // the process writes; the console copy flows through an in-process
@@ -321,6 +369,9 @@ func startK3s(role machine.Role) (*exec.Cmd, io.Closer, error) {
 		args = []string{"agent", "--config", k3sAgentConfig}
 	}
 	cmd := exec.Command(k3sBinary, args...)
+	if len(k3sMemoryDiscipline) > 0 {
+		cmd.Env = append(os.Environ(), k3sMemoryDiscipline...)
+	}
 	cmd.Stdout = io.MultiWriter(logf, &lineWriter{dest: console, prefix: "k3s | "})
 	cmd.Stderr = io.MultiWriter(logf, &lineWriter{dest: console, prefix: "k3s | "})
 	if err := cmd.Start(); err != nil {

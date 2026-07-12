@@ -48,11 +48,14 @@ func TestActuateFeaturesReportsBundledFeaturesActive(t *testing.T) {
 		"traefik":        {},
 	}
 	got := actuateFeatures(c, "node-1")
-	if len(got) != 2 {
-		t.Fatalf("expected two feature statuses, got %v", got)
+	// Three statuses from two declarations: traefik requires helm,
+	// and an implied feature reports its standing like a declared
+	// one, so status.features tells the whole truth about what runs.
+	if len(got) != 3 {
+		t.Fatalf("expected three feature statuses, got %v", got)
 	}
 	// Sorted by slug, like every rendering of the same spec.
-	if got[0].Name != "metrics-server" || got[1].Name != "traefik" {
+	if got[0].Name != "helm" || got[1].Name != "metrics-server" || got[2].Name != "traefik" {
 		t.Errorf("expected sorted slugs, got %v", got)
 	}
 	for _, s := range got {

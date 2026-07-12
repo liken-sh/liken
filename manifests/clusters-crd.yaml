@@ -377,7 +377,17 @@ spec:
                     ingress controller), servicelb (klipper-lb, which
                     realizes Services of type LoadBalancer on the
                     nodes' own addresses), metrics-server (the
-                    aggregated API behind `kubectl top`), iscsi (the
+                    aggregated API behind `kubectl top`), helm (the
+                    Helm controller embedded in the k3s server
+                    process, which renders HelmChart resources into
+                    workloads; declaring traefik enables it
+                    automatically, because k3s deploys Traefik
+                    through exactly such a resource), network-policy
+                    (the controller that turns NetworkPolicy
+                    resources into packet filtering; without it the
+                    API accepts those resources but nothing enforces
+                    them, which is the flannel CNI's own behavior),
+                    iscsi (the
                     host-side iSCSI initiator: static open-iscsi
                     binaries, the iscsi_tcp kernel module, an
                     initiator name derived from each machine's name,
@@ -406,10 +416,11 @@ spec:
                   # machine/features_test.go holds the first rule's
                   # vocabulary to the table in machine/features.go.
                   x-kubernetes-validations:
-                    - rule: "self.all(slug, slug in ['traefik', 'servicelb', 'metrics-server', 'iscsi', 'nfs'])"
+                    - rule: "self.all(slug, slug in ['traefik', 'servicelb', 'metrics-server', 'helm', 'network-policy', 'iscsi', 'nfs'])"
                       message: >-
                         unknown feature; the vocabulary is
-                        traefik, servicelb, metrics-server, iscsi, nfs
+                        traefik, servicelb, metrics-server, helm,
+                        network-policy, iscsi, nfs
                     - rule: "self.all(slug, self[slug] != null)"
                       message: >-
                         a null feature is neither enabled nor

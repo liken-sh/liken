@@ -20,6 +20,28 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
+// osSysctls are the kernel opinions every liken machine boots with,
+// applied before the Machine spec's own sysctls so a deployment can
+// override any of them.
+//
+// watermark_scale_factor sizes the gap between the memory watermarks
+// that wake and rest kswapd, the kernel's background reclaimer, as a
+// fraction of the machine (units of 0.01%). The default gap of 0.1%
+// means kswapd on a small machine barely runs until allocation is
+// nearly failing, and then everything learns at once: allocations
+// stall in direct reclaim at the worst moment, exactly the kind of
+// latency spike that costs k3s's datastore its IO deadlines under
+// load. One percent makes reclaim a steady background habit instead:
+// pages the boot touched once age out on a calm machine, and a
+// convergence burst finds free memory waiting rather than a reclaim
+// stall. The cost is a modestly smaller page cache and a little
+// background CPU — and the value is a balance between them: twice
+// this kept kswapd visibly busy on a well-filled machine, reclaiming
+// pages nothing was waiting for.
+var osSysctls = map[string]string{
+	"vm.watermark_scale_factor": "100",
+}
+
 // applySysctls actuates spec.sysctls at boot. Failures are reported and
 // skipped rather than fatal (a typo'd parameter shouldn't cost the
 // machine its boot), and the keys are applied in sorted order so the

@@ -64,6 +64,20 @@ const (
 	// the k3s boot drop-in.
 	FeatureBundled FeatureKind = "Bundled"
 
+	// FeatureEmbedded is a controller compiled into the k3s server
+	// process itself, rather than a component k3s deploys into the
+	// cluster: the Helm controller (which watches HelmChart
+	// resources and renders them into workloads) and the network
+	// policy controller (which turns NetworkPolicy resources into
+	// packet filtering, something the flannel CNI cannot do alone).
+	// Each costs memory in the k3s process whether or not any of its
+	// resources exist. An embedded feature can never appear on the
+	// disable list (that list names deployable components); its
+	// actuation is a dedicated disable key init renders into the
+	// leader's boot drop-in (init/k3s.go), omitted only when the
+	// feature is enabled.
+	FeatureEmbedded FeatureKind = "Embedded"
+
 	// FeatureVendored is a payload this repository vendors as a
 	// top-level domain: static binaries, kernel modules, sometimes a
 	// workload manifest. The payload rides every image, and
@@ -76,10 +90,14 @@ const (
 )
 
 // FeatureDefinition names one feature: its slug, which is the key
-// deployments write in spec.features, and its kind.
+// deployments write in spec.features, and its kind. Requires names
+// the features this one cannot work without; enabling a feature
+// enables everything it requires, so a deployment declares what it
+// wants and never has to know the dependency exists.
 type FeatureDefinition struct {
-	Slug string
-	Kind FeatureKind
+	Slug     string
+	Kind     FeatureKind
+	Requires []string
 }
 
 // Features is the vocabulary, in the order the story is told. The
@@ -89,9 +107,11 @@ type FeatureDefinition struct {
 // (open-iscsi), because implementations can change and an API should
 // not have to.
 var Features = []FeatureDefinition{
-	{Slug: "traefik", Kind: FeatureBundled},
+	{Slug: "traefik", Kind: FeatureBundled, Requires: []string{"helm"}},
 	{Slug: "servicelb", Kind: FeatureBundled},
 	{Slug: "metrics-server", Kind: FeatureBundled},
+	{Slug: "helm", Kind: FeatureEmbedded},
+	{Slug: "network-policy", Kind: FeatureEmbedded},
 	{Slug: "iscsi", Kind: FeatureVendored},
 	{Slug: "nfs", Kind: FeatureVendored},
 }
@@ -128,14 +148,43 @@ func FeatureSlugs() []string {
 	return slugs
 }
 
-// EnabledFeatures returns the slugs this cluster opts into, sorted.
-// A nil Cluster (a machine with no cluster document) enables nothing,
-// which is how the minimum viable cluster stays the default.
+// EnabledFeatures returns the slugs this cluster's declarations
+// enable, sorted: the declared opt-ins plus everything they require
+// (traefik pulls in helm, because k3s deploys Traefik through a
+// HelmChart resource only the Helm controller can render). The
+// closure runs to a fixed point, so a requirement's own requirements
+// are honored too. A nil Cluster (a machine with no cluster
+// document) enables nothing, which is how the minimum viable cluster
+// stays the default.
 func (c *Cluster) EnabledFeatures() []string {
 	if c == nil {
 		return nil
 	}
-	return slices.Sorted(maps.Keys(c.Spec.Features))
+	enabled := map[string]bool{}
+	for slug := range c.Spec.Features {
+		enabled[slug] = true
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, f := range Features {
+			if !enabled[f.Slug] {
+				continue
+			}
+			for _, req := range f.Requires {
+				if !enabled[req] {
+					enabled[req] = true
+					changed = true
+				}
+			}
+		}
+	}
+	return slices.Sorted(maps.Keys(enabled))
+}
+
+// FeatureEnabled reports whether one feature is on for this cluster,
+// declared or required by a declared one.
+func (c *Cluster) FeatureEnabled(slug string) bool {
+	return slices.Contains(c.EnabledFeatures(), slug)
 }
 
 // DisabledComponents computes the k3s disable list: every bundled

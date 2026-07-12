@@ -270,11 +270,80 @@ func TestK3sBootConfigLeavesOptedInComponentsOffTheDisableList(t *testing.T) {
 func TestK3sBootConfigWithEveryFeatureRendersNoDisableList(t *testing.T) {
 	c := labCluster()
 	c.Spec.Features = map[string]*machine.FeatureConfig{
-		"traefik": {}, "servicelb": {}, "metrics-server": {},
+		"traefik": {}, "servicelb": {}, "metrics-server": {}, "network-policy": {},
 	}
 	got := k3sBootConfig(k3sBootInputs{role: machine.RoleLeader, cluster: c, haveToken: true})
 	if strings.Contains(got, "disable") {
 		t.Errorf("all opt-ins means no disable key at all:\n%s", got)
+	}
+}
+
+func TestK3sBootConfigDisablesTheHelmControllerByDefault(t *testing.T) {
+	// Both shapes of "no opt-ins": a machine alone and a cluster
+	// document with no features. The Helm controller lives inside the
+	// k3s server process, so its key is its own, not a disable-list
+	// entry.
+	for name, in := range map[string]k3sBootInputs{
+		"no cluster":  {role: machine.RoleLeader, haveToken: true},
+		"no features": {role: machine.RoleLeader, cluster: labCluster(), haveToken: true},
+	} {
+		if got := k3sBootConfig(in); !strings.Contains(got, "disable-helm-controller: true\n") {
+			t.Errorf("%s: the helm controller is an opt-in:\n%s", name, got)
+		}
+	}
+}
+
+func TestK3sBootConfigHelmFeatureKeepsTheHelmController(t *testing.T) {
+	c := labCluster()
+	c.Spec.Features = map[string]*machine.FeatureConfig{"helm": {}}
+	got := k3sBootConfig(k3sBootInputs{role: machine.RoleLeader, cluster: c, haveToken: true})
+	if strings.Contains(got, "disable-helm-controller") {
+		t.Errorf("declaring helm keeps the controller:\n%s", got)
+	}
+}
+
+func TestK3sBootConfigTraefikImpliesTheHelmController(t *testing.T) {
+	c := labCluster()
+	c.Spec.Features = map[string]*machine.FeatureConfig{"traefik": {}}
+	got := k3sBootConfig(k3sBootInputs{role: machine.RoleLeader, cluster: c, haveToken: true})
+	if strings.Contains(got, "disable-helm-controller") {
+		t.Errorf("traefik requires helm, so the controller stays:\n%s", got)
+	}
+}
+
+func TestK3sBootConfigDisablesTheCloudControllerByDefault(t *testing.T) {
+	for name, in := range map[string]k3sBootInputs{
+		"no cluster":  {role: machine.RoleLeader, haveToken: true},
+		"no features": {role: machine.RoleLeader, cluster: labCluster(), haveToken: true},
+	} {
+		if got := k3sBootConfig(in); !strings.Contains(got, "disable-cloud-controller: true\n") {
+			t.Errorf("%s: the embedded cloud controller runs only for servicelb:\n%s", name, got)
+		}
+	}
+}
+
+func TestK3sBootConfigDisablesNetworkPolicyByDefault(t *testing.T) {
+	got := k3sBootConfig(k3sBootInputs{role: machine.RoleLeader, cluster: labCluster(), haveToken: true})
+	if !strings.Contains(got, "disable-network-policy: true\n") {
+		t.Errorf("network policy enforcement is an opt-in:\n%s", got)
+	}
+}
+
+func TestK3sBootConfigNetworkPolicyFeatureKeepsTheController(t *testing.T) {
+	c := labCluster()
+	c.Spec.Features = map[string]*machine.FeatureConfig{"network-policy": {}}
+	got := k3sBootConfig(k3sBootInputs{role: machine.RoleLeader, cluster: c, haveToken: true})
+	if strings.Contains(got, "disable-network-policy") {
+		t.Errorf("declaring network-policy keeps the controller:\n%s", got)
+	}
+}
+
+func TestK3sBootConfigServiceLBKeepsTheCloudController(t *testing.T) {
+	c := labCluster()
+	c.Spec.Features = map[string]*machine.FeatureConfig{"servicelb": {}}
+	got := k3sBootConfig(k3sBootInputs{role: machine.RoleLeader, cluster: c, haveToken: true})
+	if strings.Contains(got, "disable-cloud-controller") {
+		t.Errorf("servicelb runs inside the cloud controller, so it must stay:\n%s", got)
 	}
 }
 

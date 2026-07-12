@@ -22,8 +22,21 @@ func TestFeatureSlugsAreUnique(t *testing.T) {
 
 func TestFeatureKindsAreValid(t *testing.T) {
 	for _, f := range Features {
-		if f.Kind != FeatureBundled && f.Kind != FeatureVendored {
+		if f.Kind != FeatureBundled && f.Kind != FeatureEmbedded && f.Kind != FeatureVendored {
 			t.Errorf("feature %q has kind %q", f.Slug, f.Kind)
+		}
+	}
+}
+
+// A feature's requirements must name slugs the vocabulary itself
+// carries, or the closure in EnabledFeatures would enable a feature
+// no table entry defines.
+func TestFeatureRequirementsAreInTheVocabulary(t *testing.T) {
+	for _, f := range Features {
+		for _, req := range f.Requires {
+			if FeatureBySlug(req) == nil {
+				t.Errorf("feature %q requires %q, which is not in the vocabulary", f.Slug, req)
+			}
 		}
 	}
 }
@@ -131,8 +144,29 @@ func TestEnabledFeatures(t *testing.T) {
 		"traefik":        {},
 		"metrics-server": {},
 	}}}
-	if got := c.EnabledFeatures(); !slices.Equal(got, []string{"metrics-server", "traefik"}) {
+	// traefik requires helm, so helm joins the enabled set without
+	// being declared.
+	if got := c.EnabledFeatures(); !slices.Equal(got, []string{"helm", "metrics-server", "traefik"}) {
 		t.Errorf("got %v", got)
+	}
+}
+
+func TestFeatureEnabled(t *testing.T) {
+	var none *Cluster
+	if none.FeatureEnabled("helm") {
+		t.Error("a nil cluster enables nothing")
+	}
+	lean := &Cluster{}
+	if lean.FeatureEnabled("helm") {
+		t.Error("no features means no helm")
+	}
+	explicit := &Cluster{Spec: ClusterSpec{Features: map[string]*FeatureConfig{"helm": {}}}}
+	if !explicit.FeatureEnabled("helm") {
+		t.Error("helm can be enabled on its own")
+	}
+	implied := &Cluster{Spec: ClusterSpec{Features: map[string]*FeatureConfig{"traefik": {}}}}
+	if !implied.FeatureEnabled("helm") {
+		t.Error("traefik requires helm, so declaring traefik enables it")
 	}
 }
 
