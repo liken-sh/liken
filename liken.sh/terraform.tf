@@ -32,6 +32,10 @@ terraform {
       source  = "integrations/github"
       version = "~> 6.0"
     }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.0"
+    }
   }
 
   # Terraform's state maps these declarations onto real resource IDs,
@@ -65,6 +69,19 @@ provider "linode" {}
 
 provider "github" {
   owner = "liken-sh"
+}
+
+# The cluster itself is a provider too: the website below is ordinary
+# Kubernetes resources, and Terraform applies them with the operator
+# credential `make kubeconfig` mints. The API server's certificate
+# names the node's cluster-segment address, so reaching it over the
+# public internet means naming the server we expect — the same
+# --server/--tls-server-name pair every kubectl in this deployment
+# uses.
+provider "kubernetes" {
+  config_path     = "identity/kubeconfig"
+  host            = "https://${tolist(linode_instance.node.ipv4)[0]}:6443"
+  tls_server_name = "10.10.0.1"
 }
 
 # ---------------------------------------------------------------------------
@@ -240,13 +257,13 @@ resource "linode_instance_config" "boot" {
   # disk.img over a rescue boot before the machine can boot. The
   # machine runs normally under BIOS; what it loses is the firmware
   # half of blue-green upgrades (BootNext/BootOrder), so release
-  # upgrades on this machine wait on a BIOS-boot milestone.
-  # booted = false keeps Terraform's hands off the power state:
-  # applies happen while the machine is deliberately off, and boots
-  # are an explicit act.
+  # upgrades on this machine wait on a BIOS-boot milestone. The
+  # config deliberately says nothing about power: `booted` here is
+  # not a description but an instruction (false shuts a running
+  # machine down to match), so power stays an explicit act through
+  # the API, never a side effect of an apply.
   kernel      = "linode/direct-disk"
   root_device = "/dev/sda"
-  booted      = false
 
   device {
     device_name = "sda"
@@ -346,6 +363,122 @@ resource "github_actions_secret" "releases_secret_key" {
 }
 
 # ---------------------------------------------------------------------------
+# The website: one static page, served by the cluster it describes.
+#
+# The page rides in a ConfigMap and nginx serves it — the smallest
+# arrangement that is still ordinary Kubernetes, so replacing it with
+# a real site later is editing these resources, not inventing new
+# machinery. Traffic arrives through Traefik, the cluster's declared
+# ingress (cluster.yaml opts into it), which the service load
+# balancer binds to the node's own addresses: the ports liken.sh
+# resolves to are the ports Traefik answers.
+
+resource "kubernetes_config_map_v1" "website" {
+  metadata {
+    name = "website"
+  }
+  data = {
+    "index.html" = file("${path.module}/website/index.html")
+  }
+}
+
+resource "kubernetes_deployment_v1" "website" {
+  metadata {
+    name = "website"
+  }
+  spec {
+    replicas = 1
+    selector {
+      match_labels = { app = "website" }
+    }
+    template {
+      metadata {
+        labels = { app = "website" }
+        annotations = {
+          # Roll the deployment when the page changes: the pod spec
+          # itself is what Kubernetes watches, so the content's hash
+          # rides in it.
+          "liken.sh/content" = sha1(file("${path.module}/website/index.html"))
+        }
+      }
+      spec {
+        container {
+          name  = "nginx"
+          image = "nginx:1.29-alpine"
+          port {
+            container_port = 80
+          }
+          volume_mount {
+            name       = "page"
+            mount_path = "/usr/share/nginx/html"
+          }
+        }
+        volume {
+          name = "page"
+          config_map {
+            name = kubernetes_config_map_v1.website.metadata[0].name
+          }
+        }
+      }
+    }
+  }
+}
+
+resource "kubernetes_service_v1" "website" {
+  metadata {
+    name = "website"
+  }
+  spec {
+    selector = { app = "website" }
+    port {
+      port        = 80
+      target_port = 80
+    }
+  }
+}
+
+resource "kubernetes_ingress_v1" "website" {
+  metadata {
+    name = "website"
+  }
+  spec {
+    ingress_class_name = "traefik"
+    dynamic "rule" {
+      for_each = ["liken.sh", "www.liken.sh"]
+      content {
+        host = rule.value
+        http {
+          path {
+            path = "/"
+            backend {
+              service {
+                name = kubernetes_service_v1.website.metadata[0].name
+                port {
+                  number = 80
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+# ---------------------------------------------------------------------------
+
+# The identifiers the shipping commands need (README.md), so they
+# never have to be written down anywhere else.
+
+output "node_id" {
+  description = "The Linode instance ID, for linode-cli power commands"
+  value       = linode_instance.node.id
+}
+
+output "boot_config_id" {
+  description = "The boot configuration ID, for linode-cli boot commands"
+  value       = linode_instance_config.boot.id
+}
 
 output "node_ipv4" {
   description = "The liken.sh node's public IPv4 address"

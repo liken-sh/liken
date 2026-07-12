@@ -45,9 +45,14 @@ spec:
   # The fleet's opt-ins from liken's feature vocabulary ({} is a
   # feature's zero configuration). metrics-server is how `kubectl top`
   # answers, which matters on a machine this small: memory pressure is
-  # the fact we watch here.
+  # the fact we watch here. traefik is the ingress that serves the
+  # website, and servicelb is what hands traefik the node's own
+  # address — on a one-node cluster there is no other load balancer
+  # to do it.
   features:
     metrics-server: {}
+    traefik: {}
+    servicelb: {}
 
   releases:
     # liken's public release channel — which this very cluster will

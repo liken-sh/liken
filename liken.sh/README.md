@@ -66,17 +66,29 @@ Shipping is an explicit act, never a side effect of a routine apply
 treat a rebuilt file as intent):
 
     make
-    # power the instance off, then:
+    linode-cli linodes shutdown $(terraform output -raw node_id)
     terraform apply -replace=linode_image.system
-    # restore the MBR boot code (below), then power it back on
+    # restore the MBR boot code (below), then:
+    linode-cli linodes boot $(terraform output -raw node_id) \
+      --config_id $(terraform output -raw boot_config_id)
 
 The extra step is Linode's one distortion of the image: deploys
 preserve every partition faithfully but zero the MBR's boot code, so
 GRUB's first stage has to be put back before the disk can boot. From
-a rescue boot with ssh enabled:
+a rescue boot with ssh enabled (mind the device letter — Finnix
+enumerates its own devices first, so check lsblk for the 3 GiB disk):
 
     dd if=image/disk.img bs=1 count=440 | \
-      ssh root@50.116.63.57 'dd of=/dev/sda bs=1 count=440 conv=notrunc,fsync'
+      ssh root@liken.sh 'dd of=/dev/sdX bs=1 count=440 conv=notrunc,fsync'
+
+One more Linode behavior to wait out: creating the disk from the
+image leaves a failed disk_resize event behind ("couldn't set
+credentials" — the API requires a login credential to inject, and a
+raw image has no filesystem to inject it into). That failure can
+grind on in the background for up to an hour and appears to zero the
+boot code again when it dies, undoing a restore done too early.
+Watch `linode-cli events list` until the disk_resize settles before
+restoring the MBR.
 
 A ship erases the system disk entirely, and the machine's storage is
 split by lifetime to make that safe. The system disk (3 GiB: boot
