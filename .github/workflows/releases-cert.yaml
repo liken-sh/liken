@@ -1,0 +1,106 @@
+# The channel's certificate. Linode terminates TLS for the
+# releases.liken.sh bucket with a certificate its owner uploads —
+# there is no ACME on their side — so this workflow is the ACME
+# client, run monthly: prove control of the name with a DNS-01
+# challenge against the liken.sh zone, then hand the fresh
+# certificate to the bucket. Let's Encrypt certificates live 90 days;
+# a monthly cadence means the one being replaced always has plenty of
+# life left, so a failed run is a warning, not an outage.
+#
+# Everything here rides one credential: RELEASES_CERT_TOKEN, a Linode
+# token scoped to Domains and Object Storage read/write, delivered to
+# this repository by Terraform (liken.sh/terraform.tf). Nothing
+# persists between runs — each run mints a fresh ACME account and a
+# fresh certificate, which Let's Encrypt's rate limits accommodate at
+# this volume many times over.
+#
+# workflow_dispatch is not just for rehearsal: dispatching this
+# workflow is also how the certificate exists in the first place, and
+# the remedy any time the handshake check below reports trouble.
+name: releases-cert
+
+on:
+  schedule:
+    - cron: "17 6 3 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: releases-cert
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # lego is a single static binary and the runner needs nothing
+      # else, so there is no checkout here. Pinned by version, like
+      # every vendored input in this repository.
+      - name: fetch lego
+        run: |
+          curl --fail --silent --show-error --location \
+            -o lego.tar.gz \
+            https://github.com/go-acme/lego/releases/download/v5.2.2/lego_v5.2.2_linux_amd64.tar.gz
+          tar -xzf lego.tar.gz lego
+
+      # DNS-01: lego plants a TXT record in the liken.sh zone through
+      # Linode's API, waits for Let's Encrypt to see it, and cleans it
+      # up. The generous propagation window is for Linode's
+      # nameservers, which pick up zone edits on a refresh cycle
+      # rather than instantly.
+      - name: obtain a certificate
+        env:
+          LINODE_TOKEN: ${{ secrets.RELEASES_CERT_TOKEN }}
+          LINODE_PROPAGATION_TIMEOUT: "900"
+          LINODE_POLLING_INTERVAL: "15"
+        run: |
+          ./lego --accept-tos --email c@guid.foo \
+            --dns linode --domains releases.liken.sh run
+
+      # The bucket holds at most one certificate, so renewal is
+      # delete-then-upload. The delete is allowed to fail: a bucket
+      # that has never held a certificate answers it with an error
+      # that means nothing here.
+      - name: install the certificate on the bucket
+        env:
+          LINODE_TOKEN: ${{ secrets.RELEASES_CERT_TOKEN }}
+        run: |
+          curl --silent --show-error -X DELETE \
+            -H "Authorization: Bearer $LINODE_TOKEN" \
+            https://api.linode.com/v4/object-storage/buckets/us-east/releases.liken.sh/ssl \
+            || true
+          jq --null-input \
+            --rawfile cert .lego/certificates/releases.liken.sh.crt \
+            --rawfile key .lego/certificates/releases.liken.sh.key \
+            '{certificate: $cert, private_key: $key}' \
+          | curl --fail --silent --show-error -X POST \
+              -H "Authorization: Bearer $LINODE_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data @- \
+              https://api.linode.com/v4/object-storage/buckets/us-east/releases.liken.sh/ssl
+
+      # Prove it the way a downloader meets it: a real handshake with
+      # the public name, presenting a certificate that both names the
+      # channel and has at least 60 days to live — which a freshly
+      # minted 90-day certificate always does, so anything less means
+      # an old certificate is still answering. The retry loop gives
+      # Linode's edge a bounded few minutes to start serving the new
+      # certificate.
+      - name: prove the handshake
+        run: |
+          for attempt in $(seq 20); do
+            served=$(echo | openssl s_client -connect releases.liken.sh:443 \
+              -servername releases.liken.sh 2>/dev/null | openssl x509 2>/dev/null) || served=""
+            if [ -n "$served" ] \
+              && echo "$served" | openssl x509 -noout -checkend 5184000 >/dev/null \
+              && echo "$served" | openssl x509 -noout -ext subjectAltName | grep -q releases.liken.sh; then
+              echo "releases.liken.sh presents a fresh certificate:"
+              echo "$served" | openssl x509 -noout -subject -issuer -enddate
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "releases.liken.sh is not serving the new certificate" >&2
+          exit 1

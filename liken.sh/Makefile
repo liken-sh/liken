@@ -1,6 +1,5 @@
-# Building the liken.sh deployment: the artifacts that turn the
-# Linode instance terraform.tf provisions into this cluster's
-# founding leader.
+# Building the liken.sh deployment: the artifacts that turn a Linode
+# instance into this cluster's founding leader.
 #
 # The shape mirrors the dev cluster's: mint an identity, pack the
 # deployment layer, compose install media from a release channel.
@@ -11,10 +10,10 @@
 # still happens the ordinary way — the installer boots and runs
 # exactly as it would on hardware — but it runs here, in a local
 # QEMU guest under real UEFI firmware, against a raw disk file. The
-# written disk travels as a Linode custom image: terraform.tf
-# uploads it and stamps it onto the machine's system disk, where it
-# boots BIOS-style through the grub.cfg this Makefile plants on the
-# system slot (grub.cfg explains that bridge).
+# written disk is then copied byte-for-byte onto the machine's
+# system disk, where it boots BIOS-style through the grub.cfg this
+# Makefile plants on the system slot (grub.cfg explains that
+# bridge).
 #
 # The install must run under UEFI even though Linode will boot the
 # result under BIOS: the installer records its boot entries in
@@ -42,15 +41,14 @@ BOOT_ARCHIVE := ../image/dist/boot.cpio
 VERSION := $(shell date +%Y.%m.%d)-000
 
 # The system image's size: 3 GiB holds both boot slots, the machine's
-# state, and its scratch space, with room left over. Linode caps
-# uploaded images at 6 GB uncompressed, which is why the machine's
-# storage splits across two disks at all — the OS ships as this small
-# image while the cluster's data lives on a disk that never travels.
-# The image is deliberately smaller than the disk terraform.tf gives
-# it (Linode's advertised disk sizes don't land on exact byte counts):
-# a GPT records where its disk ends, and liken notices a disk larger
-# than its table claims on first boot and rewrites the table to the
-# real end.
+# state, and its scratch space, with room left over. Keeping it small
+# keeps the system disk disposable — everything durable lives on the
+# machine's data disk, which is claimed once and never reinstalled.
+# The image may land on a disk slightly larger than itself (cloud
+# providers' advertised sizes don't land on exact byte counts): a GPT
+# records where its disk ends, and liken notices a disk larger than
+# its table claims on first boot and rewrites the table to the real
+# end.
 SYSTEM_DISK_BYTES := 3221225472
 
 # A scratch stand-in for the machine's data disk, present during the
@@ -59,7 +57,7 @@ SYSTEM_DISK_BYTES := 3221225472
 # starts blank on Linode and the machine claims it on first boot.
 DATA_SCRATCH_BYTES := 23622320128
 
-all: image/disk.img.gz
+all: image/disk.img
 
 # The cluster's identity: certificate authorities and the join
 # token, minted before any machine boots. The CLI is an order-only
@@ -163,12 +161,6 @@ image/disk.img: image/install.cpio $(VMLINUZ) image/OVMF_VARS.fd grub.cfg
 		sudo cp grub.cfg image/slot-a/boot/grub/grub.cfg && \
 		sudo umount image/slot-a && \
 		sudo losetup -d $$LOOP
-
-# The disk, travel-sized: all but ~1GB of the image is zeros, which
-# compress to almost nothing. gzip rather than anything better
-# because it is the one format Linode's image upload accepts.
-image/disk.img.gz: image/disk.img
-	gzip --keep --force $<
 
 clean:
 	rm -rf image

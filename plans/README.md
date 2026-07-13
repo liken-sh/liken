@@ -101,9 +101,10 @@ numbered before the arc existed; it belongs second in this order:
 25. [ ] [A website on liken.sh](25-liken-sh-website.md) — the
     project's domain answers for people the way it already does for
     CRDs: what liken is, and where to start reading.
-26. [ ] [Releases on the website](26-releases-on-the-website.md) —
-    the public release channel gets its public home: a catalog,
-    digest-verified downloads, published by CI.
+26. [x] [The public release channel](26-releases-on-the-website.md) —
+    the release channel gets its public home at releases.liken.sh:
+    digest-verified downloads from object storage, published by CI on
+    every version tag; release pages wait for the website.
 27. [ ] [Documentation on the website](27-documentation-on-the-website.md) —
     the repo stays the documentation; the site extracts and arranges
     it, plus the reading order and getting-started path a repo can't

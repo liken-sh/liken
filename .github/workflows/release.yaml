@@ -1,0 +1,141 @@
+# The release, run when a version tag lands: build the bundle under
+# the tagged version, prove the same tree still boots, and publish it
+# to the channel at https://releases.liken.sh. The tag is the act of
+# release (releases/versioning.md); this workflow is just the tag's
+# consequences, so cutting a release from a workstation is only
+#
+#   git tag v2026.07.11-001 && git push origin v2026.07.11-001
+#
+# The channel is object storage, and the workflow talks straight to
+# it with the scoped key Terraform delivered as repository secrets
+# (liken.sh/terraform.tf). Nothing here is reachable by a machine
+# until its Cluster document names the version and pins the digest
+# this run prints — publishing makes bytes available, never adopts
+# them anywhere.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      # Full history and tags: version.mk names dev artifacts with
+      # git describe even during a release build, and describe needs
+      # to see the tags to do it.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The version is the tag without its conventional v prefix, and
+      # it must be a real release version: the CalVer grammar the
+      # whole system agrees on, and not serial 000, which versioning.md
+      # reserves for lab stand-ins that must never be published. The
+      # releases Makefile checks the grammar again; failing here just
+      # names the problem before spending a build on it.
+      - name: derive the version from the tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3}$ ]]; then
+            echo "tag $GITHUB_REF_NAME is not a release version (vyyyy.mm.dd-nnn)" >&2
+            exit 1
+          fi
+          if [[ "$VERSION" == *-000 ]]; then
+            echo "serial 000 is the lab stand-in and is never published" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/build-setup
+
+      # Build every liken binary under the release version and lay
+      # out releases/dist/<version>/ exactly as the channel serves it.
+      - run: make release VERSION=${{ steps.version.outputs.version }}
+
+      # Then boot the same tree before a byte leaves the runner: the
+      # smoke drill starts node-1 from blank disks and passes when its
+      # node reports Ready over the cluster's API. Releases are
+      # immutable, so a bundle that can't boot must be caught here —
+      # after publication the only remedy is the next serial.
+      - run: make smoke
+
+      # s3cmd is the uploader because it speaks plain S3 to non-AWS
+      # endpoints without protest; recent aws-cli versions attach
+      # AWS-only integrity checksums that Linode's S3 implementation
+      # rejects. The config names the endpoint; the key arrives from
+      # the repository secrets Terraform keeps delivered.
+      - name: configure the uploader
+        env:
+          RELEASES_ACCESS_KEY: ${{ secrets.RELEASES_ACCESS_KEY }}
+          RELEASES_SECRET_KEY: ${{ secrets.RELEASES_SECRET_KEY }}
+        run: |
+          sudo apt-get install -y --no-install-recommends s3cmd
+          cat > ~/.s3cfg <<EOF
+          [default]
+          access_key = $RELEASES_ACCESS_KEY
+          secret_key = $RELEASES_SECRET_KEY
+          host_base = us-east-1.linodeobjects.com
+          host_bucket = %(bucket)s.us-east-1.linodeobjects.com
+          use_https = True
+          EOF
+
+      # Releases are immutable: a published version is never rewritten,
+      # only superseded by the next serial. A tag that names an already
+      # published version fails here, before any byte moves.
+      - name: refuse to republish
+        run: |
+          if s3cmd info "s3://releases.liken.sh/${{ steps.version.outputs.version }}/release.yaml" >/dev/null 2>&1; then
+            echo "release ${{ steps.version.outputs.version }} is already published; releases are immutable" >&2
+            exit 1
+          fi
+
+      # Artifacts first, the document last: release.yaml is how anyone
+      # discovers the artifacts, so until it lands the half-uploaded
+      # release simply doesn't exist yet. Every object is public-read —
+      # the channel is public by design — while the bucket itself
+      # refuses to list, so only named paths answer.
+      - name: publish
+        working-directory: releases/dist/${{ steps.version.outputs.version }}
+        run: |
+          for artifact in *; do
+            [ "$artifact" = release.yaml ] && continue
+            s3cmd put --acl-public --no-progress "$artifact" \
+              "s3://releases.liken.sh/${{ steps.version.outputs.version }}/$artifact"
+          done
+          s3cmd put --acl-public --no-progress release.yaml \
+            "s3://releases.liken.sh/${{ steps.version.outputs.version }}/release.yaml"
+
+      # Prove the release the way a consumer meets it: fetch the
+      # document over the public URL, byte-compare it against what was
+      # built, and print the catalog entry a Cluster commits to adopt
+      # this release — the digest is the root of the trust chain, so
+      # it's worth surfacing where a person will copy it from.
+      - name: verify from the public channel
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          curl --fail --silent --show-error --retry 5 --retry-delay 5 \
+            "https://releases.liken.sh/$VERSION/release.yaml" -o fetched.yaml
+          cmp fetched.yaml "releases/dist/$VERSION/release.yaml"
+          DIGEST=$(sha256sum "releases/dist/$VERSION/release.yaml" | cut -d' ' -f1)
+          {
+            echo "## liken $VERSION"
+            echo
+            echo "Published to https://releases.liken.sh/$VERSION/"
+            echo
+            echo "Catalog entry for a Cluster's spec.releases.catalog:"
+            echo
+            echo '```yaml'
+            echo "  - version: $VERSION"
+            echo "    digest: sha256:$DIGEST"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -57,19 +57,22 @@ The git tag is the act of release; everything else follows from it.
 
        git tag -l "v$(date +%Y.%m.%d)-*"
 
-2. Build and bundle it:
-
-       make -C releases release VERSION=2026.07.11-001
-
-   This rebuilds every liken binary under the version stamp and lays
-   out releases/dist/2026.07.11-001/ exactly as a web server serves
-   it. The report ends with the catalog entry a deployment commits to
-   adopt the release.
-
-3. Tag the commit the release was built from and push the tag:
+2. Tag the commit and push the tag:
 
        git tag v2026.07.11-001
        git push origin v2026.07.11-001
+
+Pushing the tag hands the rest to CI (.github/workflows/release.yaml):
+the workflow rebuilds every liken binary under the version stamp,
+bundles the release, boots the same tree to a Ready node, and only
+then publishes to https://releases.liken.sh/2026.07.11-001/ — a
+release someone's laptop assembled is exactly what the digest
+discipline exists to rule out. The run's summary ends with the
+catalog entry a deployment commits to adopt the release. The same
+bundle can be built and inspected locally, without publishing
+anything:
+
+       make -C releases release VERSION=2026.07.11-001
 
 The tag carries a v prefix, as git release tags conventionally do;
 the version itself never does. Between releases, development builds
@@ -77,7 +80,3 @@ name themselves from the same tags: `git describe` yields
 v2026.07.11-001-5-gabc123 (five commits past the release, at that
 commit), which is what a dev machine reports as status.version.liken
 (version.mk at the repo root explains the mechanism).
-
-Publishing the bundle to the public website, and building it in CI
-when the tag is pushed rather than on a workstation, belong to the
-website milestones (plans/26-releases-on-the-website.md).

@@ -1,24 +1,59 @@
 # The liken.sh deployment
 
-This directory is a complete, real deployment of liken: the cluster
-that serves the project's own website and release channel. It is
-deliberately the project's first production deployment — the cluster
-that hosts liken's releases upgrades itself from those same releases,
-so every rough edge in that story is felt here before anyone else
-feels it.
+This directory is the project's public presence, and a complete, real
+deployment of liken. Two different things live under the one name,
+with deliberately different lifetimes:
+
+* **The release channel, which is live**: `https://releases.liken.sh`,
+  where CI publishes every release of liken (the releases domain
+  explains what a release is; `.github/workflows/release.yaml` is the
+  publisher).
+* **The cluster, which is declared but not currently provisioned**:
+  the machine that runs liken and serves the project's website. Its
+  declarations (`cluster.yaml`, `machines/`) stay ready; the section
+  below explains what it waits on.
 
 Everything the deployment needs lives here, organized the way any
 liken deployment would be:
 
-* `terraform.tf` — the infrastructure: DNS, the machine, its disks,
-  release storage, and the CI upload credential.
+* `terraform.tf` — the live infrastructure: the DNS zone, the release
+  channel's bucket, and the credentials CI uses to publish releases
+  and renew the channel's certificate.
 * `cluster.yaml` and `machines/` — the fleet, in liken's own
   vocabulary.
-* `Makefile` — how the OS gets built for this machine.
+* `Makefile` — how the OS gets built for this deployment's machine.
 * `grub.cfg` — the boot entry, in GRUB's language (below explains
   why GRUB is here at all).
 * `identity/` — the cluster's minted certificate authorities and
   join token, created by `make identity` and never committed.
+
+## The release channel
+
+The channel is a Linode Object Storage bucket, served over HTTPS at
+its own name, and deliberately *not* the cluster: machines upgrade
+themselves from the channel, so the channel has to outlive any
+machine it feeds — a cluster serving its own updates could never be
+rescued by one.
+
+The layout is exactly what liken's fetcher and any curious person
+expect:
+
+    https://releases.liken.sh/<version>/release.yaml
+    https://releases.liken.sh/<version>/<artifact>
+
+Nothing lists the bucket, by design. A Cluster document names the
+version it wants and pins the release document's digest, so discovery
+and trust both travel through the Cluster, never the channel. The
+digest for each release is printed by the publishing workflow's run
+summary.
+
+Two Linode particulars, so nobody has to rediscover them: the bucket
+is *named* `releases.liken.sh` because that is how Linode's
+custom-domain TLS finds a bucket (the name CNAMEs to the bucket's own
+hostname), and Linode has no ACME of its own, so a scheduled workflow
+(`.github/workflows/releases-cert.yaml`) mints a fresh Let's Encrypt
+certificate monthly, by DNS-01 against the zone declared here, and
+uploads it to the bucket.
 
 ## The machine, and why it boots the way it does
 
@@ -50,69 +85,33 @@ itself where UEFI firmware exists is narrower than liken means to be,
 and this deployment forces the missing capability honestly: teaching
 liken to actuate upgrades by rewriting GRUB's configuration instead of
 firmware variables is [its own milestone](../plans/30-bios-upgrades.md).
-Until that lands, updating this machine means shipping a fresh system
-disk, which the next section makes cheap and safe.
 
-## How the OS ships
-
-The OS reaches this machine as a disk image. `make` here runs a real
-liken install in a local QEMU guest — the installer boots and runs
-exactly as it would on hardware — against a 3 GiB raw disk file, then
-plants GRUB on the result. Terraform uploads that file as a Linode
-custom image and stamps it onto the machine's system disk.
-
-Shipping is an explicit act, never a side effect of a routine apply
-(image builds aren't byte-reproducible, so Terraform is told not to
-treat a rebuilt file as intent):
-
-    make
-    linode-cli linodes shutdown $(terraform output -raw node_id)
-    terraform apply -replace=linode_image.system
-    # restore the MBR boot code (below), then:
-    linode-cli linodes boot $(terraform output -raw node_id) \
-      --config_id $(terraform output -raw boot_config_id)
-
-The extra step is Linode's one distortion of the image: deploys
-preserve every partition faithfully but zero the MBR's boot code, so
-GRUB's first stage has to be put back before the disk can boot. From
-a rescue boot with ssh enabled (mind the device letter — Finnix
-enumerates its own devices first, so check lsblk for the 3 GiB disk):
-
-    dd if=image/disk.img bs=1 count=440 | \
-      ssh root@liken.sh 'dd of=/dev/sdX bs=1 count=440 conv=notrunc,fsync'
-
-One more Linode behavior to wait out: creating the disk from the
-image leaves a failed disk_resize event behind ("couldn't set
-credentials" — the API requires a login credential to inject, and a
-raw image has no filesystem to inject it into). That failure can
-grind on in the background for up to an hour and appears to zero the
-boot code again when it dies, undoing a restore done too early.
-Watch `linode-cli events list` until the disk_resize settles before
-restoring the MBR.
-
-A ship erases the system disk entirely, and the machine's storage is
-split by lifetime to make that safe. The system disk (3 GiB: boot
-slots, machine state, scratch) is disposable and rewritten by every
-ship; the data disk (the rest of the nanode's storage: the cluster's
-database, the container store, pod volumes) is created blank exactly
-once, claimed by liken on the machine's first boot, and never shipped
-to again. Reinstalling the OS costs a reboot, not the cluster.
-
-The 3 GiB figure is Linode's constraint: uploaded images are capped at
-6 GB uncompressed, which is what pushed everything durable onto a
-second disk in the first place. The image is also built slightly
-smaller than the disk Terraform gives it, because Linode's advertised
-disk sizes don't land on exact byte counts — liken notices a disk
-larger than its partition table claims and grows the table to the real
-end on first boot.
+That milestone is what the cluster waits on. Without it, every OS
+update means re-shipping the whole system disk from a workstation,
+and Linode's machinery fights that at each step: image deploys zero
+the MBR's boot code (a rescue boot and a 440-byte repair every time),
+a failed background event can zero it again up to an hour later, and
+writing a raw disk needs their serial console to open a door first.
+Operating a machine that can only be updated that way teaches the
+wrong lesson, so the machine stays down until it can update itself:
+install once from the release channel, then upgrade by Cluster edits,
+with the disk-writing path demoted to disaster recovery. `make` here
+still builds the machine's install media — a real liken install run
+in a local QEMU guest against a raw disk file, GRUB planted on the
+result — and the storage design it installs splits the machine's
+disks by lifetime: a small disposable system disk (boot slots,
+machine state, scratch) and a data disk that is claimed once, holds
+everything durable, and is never reinstalled. Reinstalling the OS
+costs a reboot, not the cluster.
 
 ## Reaching the cluster
 
 The API server's certificate names the node's cluster-segment address
-(the VLAN, where peers and future nodes live), so reaching it over the
-public internet means telling kubectl which name to expect:
+(the VLAN, where peers and future nodes live), so reaching it over
+the public internet means telling kubectl which name to expect —
+every kubectl in this deployment carries the same pair:
 
     kubectl --kubeconfig identity/kubeconfig \
-      --server=https://$(terraform output -raw node_ipv4):6443 \
+      --server=https://<node public address>:6443 \
       --tls-server-name=10.10.0.1 \
       get nodes

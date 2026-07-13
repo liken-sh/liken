@@ -1,0 +1,103 @@
+# The build environment, shared by every workflow that assembles the
+# operating system. The build and release workflows run the same
+# Makefiles and need the same runner preparation — toolchain, virtual
+# hardware, and caches — so that preparation lives here once, and the
+# two workflows cannot drift apart.
+name: build setup
+description: Toolchain, KVM access, and vendored-input caches for building liken
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v6
+      with:
+        go-version-file: go.mod
+
+    # The fetch scripts document their own host requirements; the
+    # runner image has most of them (curl, tar, ar, zstd, openssl,
+    # docker) already. cpio archives the image and depmod (kmod)
+    # indexes the kernel's modules. QEMU, qemu-img (qemu-utils), and
+    # OVMF are the smoke drill's virtual hardware: the same packages,
+    # at the same firmware path, the dev-cluster Makefile documents.
+    - name: install host tools
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cpio kmod qemu-system-x86 qemu-utils ovmf
+
+    # The runners expose /dev/kvm, but root-only. This is the
+    # standard rule to open it to everyone, which on a single-use
+    # throwaway VM is fine. If this ever breaks, the smoke drill gets
+    # slower rather than failing: the QEMU flags fall back from KVM
+    # to pure emulation (-accel kvm -accel tcg, in that order).
+    - name: open /dev/kvm to the runner user
+      shell: bash
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+          | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
+
+    # One cache per vendored domain, keyed on the same prerequisites
+    # the root Makefile declares for that domain's artifact. A pin
+    # bump changes the key and only that domain rebuilds cold; the
+    # kernel's 187M doesn't re-download because k3s moved. The Go
+    # programs are deliberately uncached here (beyond setup-go's
+    # module and build caches): they are the code under test and
+    # rebuild every run.
+    - uses: actions/cache@v6
+      with:
+        path: kernel/dist
+        key: kernel-${{ hashFiles('kernel/VERSION', 'kernel/fetch.sh') }}
+    - uses: actions/cache@v6
+      with:
+        path: k3s/dist
+        key: k3s-${{ hashFiles('k3s/VERSION', 'k3s/fetch.sh') }}
+    - uses: actions/cache@v6
+      with:
+        path: xtables/dist
+        key: xtables-${{ hashFiles('xtables/VERSION', 'xtables/fetch.sh') }}
+    - uses: actions/cache@v6
+      with:
+        path: trust/dist
+        key: trust-${{ hashFiles('trust/VERSION', 'trust/fetch.sh') }}
+    - uses: actions/cache@v6
+      with:
+        path: e2fsprogs/dist
+        key: e2fsprogs-${{ hashFiles('e2fsprogs/VERSION', 'e2fsprogs/fetch.sh') }}
+    # The cache carries only what fetch.sh built; the iscsid image
+    # tar in it is always stale, because the tar bakes the liken
+    # version and that moves with every commit now. The version
+    # stamp file (version.mk) is born during the run with a fresh
+    # timestamp, so make rebuilds the tar from the cached binaries
+    # every time — cheap, next to the container build the cache
+    # exists to avoid.
+    - uses: actions/cache@v6
+      with:
+        path: open-iscsi/dist
+        key: open-iscsi-${{ hashFiles('open-iscsi/VERSION', 'open-iscsi/fetch.sh') }}
+    - uses: actions/cache@v6
+      with:
+        path: nfs-utils/dist
+        key: nfs-utils-${{ hashFiles('nfs-utils/VERSION', 'nfs-utils/fetch.sh') }}
+    - uses: actions/cache@v6
+      with:
+        path: systemd-boot/dist
+        key: systemd-boot-${{ hashFiles('systemd-boot/VERSION', 'systemd-boot/fetch.sh') }}
+
+    # Make decides staleness by timestamps, and the two halves of
+    # this working tree carry different ones: checkout stamps the
+    # sources with the time of the run, while the cache restores its
+    # artifacts with the older times they were archived with. Left
+    # alone, every cached artifact looks out of date and make
+    # re-fetches it all. Touching the restored artifacts is sound
+    # precisely because each cache key hashes the artifact's real
+    # prerequisites: a hit means those inputs are unchanged, so the
+    # artifact is current no matter what the clock says.
+    - name: refresh cached artifact timestamps
+      shell: bash
+      run: |
+        for dist in kernel/dist k3s/dist xtables/dist trust/dist \
+                    e2fsprogs/dist open-iscsi/dist nfs-utils/dist \
+                    systemd-boot/dist; do
+            [ -d "$dist" ] && find "$dist" -type f -exec touch {} +
+        done
+        true

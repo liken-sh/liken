@@ -1,11 +1,11 @@
 # The liken.sh cluster: the deployment that serves the project's own
-# website and release channel, running on Linode (terraform.tf
-# provisions the machines this document describes the fleet for).
+# website, running on Linode (terraform.tf provisions the
+# infrastructure this document describes the fleet for).
 #
 # This is a real, public deployment of liken, and deliberately the
-# project's first: the cluster that hosts liken's releases upgrades
-# itself from those same releases, so every rough edge in the story
-# is felt here first.
+# project's first: it installs from and upgrades along liken's public
+# release channel like any other deployment would, so every rough
+# edge in the story is felt here first.
 apiVersion: liken.sh/v1alpha1
 kind: Cluster
 metadata:
@@ -55,10 +55,11 @@ spec:
     servicelb: {}
 
   releases:
-    # liken's public release channel — which this very cluster will
-    # serve, once the webserver is deployed here. Pointing the
-    # machines at it is the point of the whole exercise: the fleet
-    # that hosts the releases updates from them. The catalog and a
+    # liken's public release channel. It lives in object storage
+    # (terraform.tf), deliberately not on this cluster: machines
+    # upgrade themselves from the channel, so the channel must
+    # outlive any machine it feeds — a cluster serving its own
+    # updates could never be rescued by one. The catalog and a
     # target version arrive as live Cluster edits when a release is
     # adopted; nothing is fetched until then.
-    source: https://liken.sh/releases
+    source: https://releases.liken.sh
