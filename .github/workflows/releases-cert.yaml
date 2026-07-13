@@ -56,8 +56,8 @@ jobs:
           LINODE_PROPAGATION_TIMEOUT: "900"
           LINODE_POLLING_INTERVAL: "15"
         run: |
-          ./lego --accept-tos --email c@guid.foo \
-            --dns linode --domains releases.liken.sh run
+          ./lego run --accept-tos --email c@guid.foo \
+            --dns linode --domains releases.liken.sh
 
       # The bucket holds at most one certificate, so renewal is
       # delete-then-upload. The delete is allowed to fail: a bucket
