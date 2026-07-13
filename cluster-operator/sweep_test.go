@@ -92,7 +92,7 @@ func TestSweepFleetMarksTheSilentMachineAndPublishesTheCluster(t *testing.T) {
 	}
 	client := testClient(t, api.handler())
 
-	sweepFleet(client, cluster, sweepNow)
+	sweepFleet(client, cluster, "", sweepNow)
 
 	lost := api.statuses["node-2"]
 	if lost == nil || lost.Status.Phase != machine.PhaseLost {
@@ -109,6 +109,26 @@ func TestSweepFleetMarksTheSilentMachineAndPublishesTheCluster(t *testing.T) {
 	}
 	if api.clusterStatus.Status.Machines.Summary != "1/2" || api.clusterStatus.Status.Phase != machine.PhaseDegraded {
 		t.Errorf("got %+v", api.clusterStatus.Status)
+	}
+}
+
+func TestSweepPublishesTheChannelsAvailableVersion(t *testing.T) {
+	// The poller's answer rides the same status write as everything
+	// else the sweep derives: a fresh answer alone is a change worth
+	// writing, and it lands at status.releases.available.
+	cluster := &machine.Cluster{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}}
+	cluster.Spec.Leaders = []string{"node-1"}
+	api := &fleetAPI{
+		cluster:  cluster,
+		machines: []machine.Machine{labMachine("node-1", machine.PhaseReady)},
+		renewals: map[string]time.Time{"node-1": sweepNow.Add(-10 * time.Second)},
+	}
+	client := testClient(t, api.handler())
+
+	sweepFleet(client, cluster, "2026.07.13-002", sweepNow)
+
+	if api.clusterStatus == nil || api.clusterStatus.Status.Releases.Available != "2026.07.13-002" {
+		t.Fatalf("the channel's answer should reach the status: %+v", api.clusterStatus)
 	}
 }
 
@@ -135,7 +155,7 @@ func TestSweepFleetWritesNothingOnASettledFleet(t *testing.T) {
 	}
 	client := testClient(t, api.handler())
 
-	sweepFleet(client, cluster, sweepNow)
+	sweepFleet(client, cluster, "", sweepNow)
 
 	if api.clusterStatus != nil {
 		t.Errorf("nothing changed, so nothing should be written: %+v", api.clusterStatus.Status)
@@ -181,7 +201,7 @@ func TestSweepFleetStopsWhenTheMachineListFails(t *testing.T) {
 	api := silentFleet(cluster)
 	client := testClient(t, refusing(api.handler(), http.MethodGet, "/machines", http.StatusInternalServerError))
 
-	sweepFleet(client, cluster, sweepNow)
+	sweepFleet(client, cluster, "", sweepNow)
 
 	if api.clusterStatus != nil {
 		t.Errorf("a sweep that cannot see the fleet must not judge it: %+v", api.clusterStatus.Status)
@@ -196,7 +216,7 @@ func TestSweepFleetStopsWhenTheHeartbeatListFails(t *testing.T) {
 	api := silentFleet(cluster)
 	client := testClient(t, refusing(api.handler(), http.MethodGet, "/leases", http.StatusInternalServerError))
 
-	sweepFleet(client, cluster, sweepNow)
+	sweepFleet(client, cluster, "", sweepNow)
 
 	if api.clusterStatus != nil {
 		t.Errorf("without heartbeats there is no liveness verdict to publish: %+v", api.clusterStatus.Status)
@@ -211,7 +231,7 @@ func TestSweepFleetToleratesAClusterStatusWriteFailure(t *testing.T) {
 	api := silentFleet(cluster)
 	client := testClient(t, refusing(api.handler(), http.MethodPut, "/clusters", http.StatusInternalServerError))
 
-	sweepFleet(client, cluster, sweepNow)
+	sweepFleet(client, cluster, "", sweepNow)
 
 	if lost := api.statuses["node-2"]; lost == nil || lost.Status.Phase != machine.PhaseLost {
 		t.Errorf("the machine verdicts land even when the cluster write fails: %+v", lost)
@@ -287,7 +307,7 @@ func TestSweepReadsTheClusterFreshEachPass(t *testing.T) {
 		renewals: map[string]time.Time{"node-1": sweepNow.Add(-10 * time.Second)},
 	}
 	client := testClient(t, api.handler())
-	sweep(client, "lab")
+	sweep(client, "lab", newChannelPoller())
 	if api.clusterStatus == nil {
 		t.Error("a pass over a fleet with news publishes the cluster's status")
 	}
@@ -301,7 +321,7 @@ func TestSweepSkipsThePassWhenTheClusterReadFails(t *testing.T) {
 	api := silentFleet(cluster)
 	client := testClient(t, refusing(api.handler(), http.MethodGet, "/clusters", http.StatusInternalServerError))
 
-	sweep(client, "lab")
+	sweep(client, "lab", newChannelPoller())
 
 	if api.clusterStatus != nil {
 		t.Errorf("no cluster status without a cluster: %+v", api.clusterStatus.Status)

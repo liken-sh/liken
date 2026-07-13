@@ -75,6 +75,13 @@ func main() {
 	events := make(chan *machine.Machine, 32)
 	go kubernetes.WatchMachines(client, "", "", events)
 
+	// The channel poller is the one piece of state that outlives a
+	// pass, exactly like the machine operator's release fetcher: the
+	// sweep stays level-triggered and stateless, and the poller
+	// remembers only what laziness requires (when it last asked, and
+	// the channel's last answer).
+	poller := newChannelPoller()
+
 	// The ticker is the backstop for the changes no Machine event
 	// announces: heartbeats aging past staleness (a Lease renewal is
 	// not a Machine write) and Cluster spec edits like a new version
@@ -82,7 +89,7 @@ func main() {
 	// the machine operators work on.
 	ticker := time.NewTicker(10 * time.Second)
 	for {
-		sweep(client, name)
+		sweep(client, name, poller)
 		select {
 		case <-events:
 			drainEvents(events)
@@ -93,14 +100,16 @@ func main() {
 
 // sweep is one pass of the cluster operator's whole job, always from
 // absolute state: read the Cluster fresh (its spec drives the
-// rollout), then let the fleet sweep list, judge, and write.
-func sweep(c *kubernetes.Client, name string) {
+// rollout), give the channel poller its look at the spec, then let
+// the fleet sweep list, judge, and write.
+func sweep(c *kubernetes.Client, name string, poller *channelPoller) {
 	cluster, err := kubernetes.GetCluster(c, name)
 	if err != nil {
 		fmt.Printf("reading cluster %s: %v\n", name, err)
 		return
 	}
-	sweepFleet(c, cluster, time.Now())
+	poller.Observe(cluster.Spec.Releases, time.Now())
+	sweepFleet(c, cluster, poller.Available(), time.Now())
 }
 
 // awaitCluster lists until a Cluster exists. A 404 just means the

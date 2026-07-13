@@ -103,8 +103,10 @@ func decideFleetSweep(machines []machine.Machine, renewals map[string]time.Time,
 
 // sweepFleet is the acting half: list the fleet and its heartbeats,
 // decide, mark the silent machines Lost, and publish the verdict on
-// the Cluster.
-func sweepFleet(c *kubernetes.Client, cluster *machine.Cluster, now time.Time) {
+// the Cluster. available is the channel poller's last answer, passed
+// in as a plain value so the sweep itself stays a function of its
+// arguments.
+func sweepFleet(c *kubernetes.Client, cluster *machine.Cluster, available string, now time.Time) {
 	machines, err := kubernetes.ListMachines(c)
 	if err != nil {
 		fmt.Printf("listing machines for the fleet sweep: %v\n", err)
@@ -136,7 +138,7 @@ func sweepFleet(c *kubernetes.Client, cluster *machine.Cluster, now time.Time) {
 	janitorFeatureWorkloads(c, cluster)
 
 	markLost(c, machines, s.lost, now)
-	publishClusterStatus(c, cluster, s, r, now)
+	publishClusterStatus(c, cluster, s, r, available, now)
 }
 
 // markLost writes the Lost verdict onto each machine the sweep found
@@ -179,11 +181,12 @@ func markLost(c *kubernetes.Client, machines []machine.Machine, lost []string, n
 // The MachinesReady condition carries the observation (stamped with
 // the generation of the spec it judged), Progressing reports the
 // rollout, the phase summarizes both, and the tally is the headcount
-// the printer shows. The catalog's newest version is derived here
-// too: the sweep is the one writer the Cluster's status has, so every
+// the printer shows. The release fields are derived here too — the
+// catalog's newest version, and the channel's polled latest — because
+// the sweep is the one writer the Cluster's status has, so every
 // derived field is its job. The write happens only when something
 // actually changed, so a settled fleet writes nothing.
-func publishClusterStatus(c *kubernetes.Client, cluster *machine.Cluster, s fleetSweep, r rollout, now time.Time) {
+func publishClusterStatus(c *kubernetes.Client, cluster *machine.Cluster, s fleetSweep, r rollout, available string, now time.Time) {
 	newest := machine.NewestVersion(cluster.Spec.Releases.Catalog)
 	s.condition.ObservedGeneration = cluster.Metadata.Generation
 	r.progressing.ObservedGeneration = cluster.Metadata.Generation
@@ -191,11 +194,13 @@ func publishClusterStatus(c *kubernetes.Client, cluster *machine.Cluster, s flee
 	conditions = machine.SetCondition(conditions, r.progressing, now)
 	if cluster.Status.Machines != s.tally || cluster.Status.Phase != s.phase ||
 		cluster.Status.Releases.Newest != newest ||
+		cluster.Status.Releases.Available != available ||
 		!slices.Equal(conditions, cluster.Status.Conditions) {
 		updated := *cluster
 		updated.Status.Machines = s.tally
 		updated.Status.Phase = s.phase
 		updated.Status.Releases.Newest = newest
+		updated.Status.Releases.Available = available
 		updated.Status.Conditions = conditions
 		if err := kubernetes.PublishClusterStatus(c, &updated); err != nil {
 			fmt.Printf("publishing cluster status: %v\n", err)

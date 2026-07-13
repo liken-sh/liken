@@ -30,10 +30,16 @@ So the channel is object storage, under its own name:
   story whether a fleet or a person is doing the downloading: the
   release document's digest, printed by the publishing run, is what a
   Cluster's catalog commits to.
-* The channel does not enumerate itself: objects are public-read but
-  the bucket refuses anonymous listing. Discovery is the Cluster
-  document's catalog — an index is a website concern, not a channel
-  concern.
+* The channel is linear, and it announces itself with exactly one
+  mutable object: `channel.yaml` at the root, naming the newest
+  published version (`liken bundle` maintains it; the release
+  workflow uploads it last). It is advisory by design — a cluster
+  polls it to learn that something newer exists, but *adopting* a
+  release still requires the digest-pinned catalog entry, so a
+  tampered pointer can misstate what exists and never change what a
+  machine installs. Beyond that one pointer the channel does not
+  enumerate itself: objects are public-read but the bucket refuses
+  anonymous listing.
 
 What remains for the website, when it returns: a release page — the
 place a person learns what changed, with changelogs written or

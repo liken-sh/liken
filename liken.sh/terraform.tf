@@ -103,9 +103,12 @@ resource "linode_domain_record" "releases" {
 # natural home for exactly that: immutable blobs, addressed by path,
 # no server of ours required to hold them. Machines fetch
 # https://releases.liken.sh/<version>/release.yaml and the artifacts
-# beside it. Nothing ever lists the bucket: a Cluster names the exact
-# version it wants and pins the release document's digest, so
-# discovery happens in the Cluster document, not the channel.
+# beside it, and the channel's root carries one mutable object,
+# channel.yaml, naming the newest published version — the advisory
+# pointer clusters poll. Nothing ever lists the bucket: adopting a
+# release still means a Cluster naming the exact version and pinning
+# the release document's digest, so trust travels in the Cluster
+# document, never the channel.
 #
 # Three Linode particulars shape this resource. The label is the
 # fully-qualified domain name, because that is how their custom-domain

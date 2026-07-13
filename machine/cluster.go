@@ -96,13 +96,19 @@ type ClusterStatus struct {
 	Conditions []Condition           `json:"conditions,omitempty"`
 }
 
-// ClusterReleasesStatus is what the sweep observes about the release
-// catalog. Newest is the catalog's highest version. Like every status
-// field it is derived, and it exists so a printer column can show
-// "the catalog offers 0.3.0" next to "the target is 0.2.0" without
-// anyone comparing versions at the terminal.
+// ClusterReleasesStatus is what the sweep observes about releases.
+// Newest is the catalog's highest version — spec-local, no network.
+// Available is the version the channel's own document announces as
+// its latest, learned by polling <source>/channel.yaml; it may name
+// a version the catalog doesn't hold yet, which is exactly the
+// signal it exists to surface. Available is advisory by design —
+// adopting a release still means committing a digest-pinned catalog
+// entry — and like every status field both are derived, existing so
+// printer columns can show the whole story next to spec.version
+// without anyone comparing versions at the terminal.
 type ClusterReleasesStatus struct {
-	Newest string `json:"newest,omitempty"`
+	Newest    string `json:"newest,omitempty"`
+	Available string `json:"available,omitempty"`
 }
 
 // MachineTally counts the cluster's Machines: how many are fully
@@ -236,6 +242,14 @@ type ClusterReleasesSpec struct {
 	// document, the document names the artifacts, and every byte
 	// downloaded is checked against one or the other.
 	Catalog []ReleaseCatalogEntry `json:"catalog,omitempty"`
+
+	// Check is a nudge to poll the channel now. The fleet observer
+	// polls the channel's root document on a lazy interval; any
+	// change to this value (a timestamp, a counter — the content
+	// itself means nothing) makes the very next sweep poll
+	// immediately. The edit is the request, the same declarative
+	// shape as a Deployment's restartedAt annotation.
+	Check string `json:"check,omitempty"`
 }
 
 // ReleaseCatalogEntry names one release: its version and the digest

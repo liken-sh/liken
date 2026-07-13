@@ -25,6 +25,11 @@
 #                                         artifact by sha256 digest
 #                                         and recording the versions
 #                                         of the components inside
+#   releases/dist/channel.yaml            the channel's one mutable
+#                                         document: the newest
+#                                         version published, for
+#                                         clusters polling "is there
+#                                         anything newer?"
 #
 # Because nothing in the bundle depends on a deployment, these digests
 # are stable and publishable, and this channel is the only one there

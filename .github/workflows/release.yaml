@@ -103,7 +103,11 @@ jobs:
       # discovers the artifacts, so until it lands the half-uploaded
       # release simply doesn't exist yet. Every object is public-read —
       # the channel is public by design — while the bucket itself
-      # refuses to list, so only named paths answer.
+      # refuses to list, so only named paths answer. channel.yaml goes
+      # last of all and is the channel's one mutable object: the
+      # advisory pointer clusters poll to learn the latest version
+      # (the immutability guard above keeps a re-run of an old tag
+      # from ever moving it backwards).
       - name: publish
         working-directory: releases/dist/${{ steps.version.outputs.version }}
         run: |
@@ -114,6 +118,8 @@ jobs:
           done
           s3cmd put --acl-public --no-progress release.yaml \
             "s3://releases.liken.sh/${{ steps.version.outputs.version }}/release.yaml"
+          s3cmd put --acl-public --no-progress ../channel.yaml \
+            "s3://releases.liken.sh/channel.yaml"
 
       # Prove the release the way a consumer meets it: fetch the
       # document over the public URL, byte-compare it against what was
@@ -126,6 +132,12 @@ jobs:
           curl --fail --silent --show-error --retry 5 --retry-delay 5 \
             "https://releases.liken.sh/$VERSION/release.yaml" -o fetched.yaml
           cmp fetched.yaml "releases/dist/$VERSION/release.yaml"
+          LATEST=$(curl --fail --silent --show-error \
+            "https://releases.liken.sh/channel.yaml" | awk '/^latest:/ {print $2}')
+          if [[ "$LATEST" < "$VERSION" ]]; then
+            echo "channel.yaml names $LATEST as latest but $VERSION just published" >&2
+            exit 1
+          fi
           DIGEST=$(sha256sum "releases/dist/$VERSION/release.yaml" | cut -d' ' -f1)
           {
             echo "## liken $VERSION"

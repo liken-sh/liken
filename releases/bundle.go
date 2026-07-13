@@ -99,9 +99,19 @@ func Bundle(vmlinuz, systemImage, bootArchive, cli, bootMenu, channelDir, versio
 		return err
 	}
 
+	// The channel document at the root announces the newest release
+	// present, so a cluster can discover that something newer exists
+	// without listing the channel (the machine package explains why
+	// the document is advisory, never trusted).
+	latest, err := writeChannelDocument(channelDir)
+	if err != nil {
+		return err
+	}
+
 	if err := report(dest, version, out); err != nil {
 		return err
 	}
+	fmt.Fprintf(out, "\nchannel.yaml names the latest release: %s\n", latest)
 
 	// The document's own digest is the root of the trust chain: a
 	// person verifies a download against it, and a deployment commits
@@ -114,6 +124,30 @@ func Bundle(vmlinuz, systemImage, bootArchive, cli, bootMenu, channelDir, versio
 	fmt.Fprintf(out, "  - version: %s\n", version)
 	fmt.Fprintf(out, "    digest: sha256:%s\n", digest)
 	return nil
+}
+
+// writeChannelDocument rewrites the channel's root document to name
+// the newest release present. The newest is computed from what is
+// actually in the channel, not from the version just bundled, so
+// re-bundling an old release never moves the channel backwards. The
+// zero-padded calendar grammar makes plain string order the version
+// order (releases/versioning.md), so the max is the latest.
+func writeChannelDocument(channelDir string) (string, error) {
+	entries, err := os.ReadDir(channelDir)
+	if err != nil {
+		return "", err
+	}
+	latest := ""
+	for _, e := range entries {
+		if !e.IsDir() || machine.ValidVersion(e.Name()) != nil {
+			continue
+		}
+		if e.Name() > latest {
+			latest = e.Name()
+		}
+	}
+	document := fmt.Sprintf("apiVersion: liken.sh/v1alpha1\nkind: Channel\nmetadata:\n  name: liken\nlatest: %s\n", latest)
+	return latest, os.WriteFile(filepath.Join(channelDir, "channel.yaml"), []byte(document), 0o644)
 }
 
 // report prints what landed in the channel.

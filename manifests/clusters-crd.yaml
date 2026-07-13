@@ -52,18 +52,24 @@ spec:
         - name: Machines
           type: string
           jsonPath: .status.machines.summary
-        # The upgrade at a glance, in two columns: the version the
-        # fleet is being moved toward (declared, one edit) and the
-        # newest the catalog offers (observed by the sweep). When they
-        # differ, someone published a release nobody has asked for
-        # yet; the Machine listing's LIKEN column shows the rollout
-        # moving machines onto the target.
+        # The upgrade at a glance, in three columns: the version the
+        # fleet is being moved toward (declared, one edit), the
+        # newest the catalog offers (observed by the sweep), and the
+        # latest the channel itself announces (polled from its
+        # channel.yaml). VERSION behind NEWEST means a cataloged
+        # release nobody has asked for yet; NEWEST behind AVAILABLE
+        # means the channel holds something this cluster hasn't even
+        # cataloged. The Machine listing's LIKEN column shows the
+        # rollout moving machines onto the target.
         - name: Version
           type: string
           jsonPath: .spec.version
         - name: Newest
           type: string
           jsonPath: .status.releases.newest
+        - name: Available
+          type: string
+          jsonPath: .status.releases.available
         - name: Leaders
           type: string
           jsonPath: .spec.leaders
@@ -190,6 +196,18 @@ spec:
                             type: string
                             maxLength: 71
                             pattern: ^sha256:[0-9a-f]{64}$
+                    check:
+                      type: string
+                      maxLength: 64
+                      description: >-
+                        A nudge to poll the channel now. The fleet
+                        observer polls the channel's root document
+                        (channel.yaml, which names the latest
+                        published version) on a lazy interval;
+                        changing this value to anything new (a
+                        timestamp, a counter — the content itself
+                        means nothing) makes the very next sweep poll
+                        immediately. The edit is the request.
                 origin:
                   type: string
                   enum: [founded, adopted]
@@ -602,7 +620,8 @@ spec:
                 releases:
                   type: object
                   description: >-
-                    What the sweep observes about the release catalog.
+                    What the sweep observes about releases: the
+                    catalog it was given, and the channel it polls.
                   properties:
                     newest:
                       type: string
@@ -612,3 +631,15 @@ spec:
                         sweep so the NEWEST printer column can sit
                         next to VERSION without anyone doing version
                         arithmetic at the terminal.
+                    available:
+                      type: string
+                      maxLength: 64
+                      description: >-
+                        The latest version the release channel itself
+                        announces: the channel.yaml document at
+                        spec.releases.source, polled lazily by the
+                        fleet observer (spec.releases.check forces
+                        the next poll). Advisory only — it may name a
+                        version the catalog doesn't hold yet, and
+                        adopting it still means committing a
+                        digest-pinned catalog entry.

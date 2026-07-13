@@ -123,6 +123,92 @@ func TestBundleReportsTheCatalogEntry(t *testing.T) {
 	}
 }
 
+func TestBundleWritesTheChannelDocument(t *testing.T) {
+	channel, report := bundledRelease(t, "2026.07.11-001")
+
+	// One bundle in a fresh channel makes that bundle the latest; the
+	// document at the channel's root must say so, in the same Channel
+	// kind a polling cluster will read.
+	raw, err := os.ReadFile(filepath.Join(channel, "channel.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := machine.ParseChannel(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Latest != "2026.07.11-001" {
+		t.Errorf("latest: %q", doc.Latest)
+	}
+	if !strings.Contains(report, "latest release: 2026.07.11-001") {
+		t.Errorf("report does not announce the channel's latest:\n%s", report)
+	}
+}
+
+func TestChannelDocumentNamesTheNewestRelease(t *testing.T) {
+	// Bundling an older release after a newer one must not move the
+	// channel backwards: the latest is the newest version present, not
+	// the most recently bundled. The zero-padded calendar grammar makes
+	// plain string order the version order.
+	channel, _ := bundledRelease(t, "2026.07.11-002")
+	rebundleInto(t, channel, "2026.07.11-001")
+
+	raw, err := os.ReadFile(filepath.Join(channel, "channel.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := machine.ParseChannel(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Latest != "2026.07.11-002" {
+		t.Errorf("latest went backwards: %q", doc.Latest)
+	}
+}
+
+func TestChannelDocumentIgnoresForeignDirectories(t *testing.T) {
+	// A channel directory may hold things that aren't releases (notes,
+	// scratch space); only version-shaped directories are candidates
+	// for latest.
+	channel, _ := bundledRelease(t, "2026.07.11-001")
+	if err := os.MkdirAll(filepath.Join(channel, "not-a-version"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rebundleInto(t, channel, "2026.07.11-002")
+
+	raw, err := os.ReadFile(filepath.Join(channel, "channel.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := machine.ParseChannel(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Latest != "2026.07.11-002" {
+		t.Errorf("latest: %q", doc.Latest)
+	}
+}
+
+// rebundleInto runs Bundle again against an existing channel
+// directory, the way successive releases land in the same channel.
+func rebundleInto(t *testing.T, channel, version string) {
+	t.Helper()
+	src := t.TempDir()
+	for _, name := range []string{"vmlinuz", "liken.sqfs", "boot.cpio", "liken", "systemd-bootx64.efi"} {
+		if err := os.WriteFile(filepath.Join(src, name), []byte(name+" bytes"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var out bytes.Buffer
+	err := Bundle(filepath.Join(src, "vmlinuz"), filepath.Join(src, "liken.sqfs"),
+		filepath.Join(src, "boot.cpio"),
+		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"),
+		channel, version, testComponents, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestBundleReplacesAPreviousAttempt(t *testing.T) {
 	channel := t.TempDir()
 	stale := filepath.Join(channel, "2026.07.11-001", "leftover")

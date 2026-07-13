@@ -38,14 +38,18 @@ rescued by one.
 The layout is exactly what liken's fetcher and any curious person
 expect:
 
+    https://releases.liken.sh/channel.yaml
     https://releases.liken.sh/<version>/release.yaml
     https://releases.liken.sh/<version>/<artifact>
 
-Nothing lists the bucket, by design. A Cluster document names the
-version it wants and pins the release document's digest, so discovery
-and trust both travel through the Cluster, never the channel. The
-digest for each release is printed by the publishing workflow's run
-summary.
+`channel.yaml` is the channel's one mutable object: liken's releases
+are linear, so the root document just names the newest version, and
+clusters poll it to learn that something newer exists. It is advisory
+only — *adopting* a release still means a Cluster edit naming the
+version and pinning the release document's digest, so trust travels
+through the Cluster, never the channel. Beyond that pointer nothing
+lists the bucket. The digest for each release is printed by the
+publishing workflow's run summary.
 
 Two Linode particulars, so nobody has to rediscover them: the bucket
 is *named* `releases.liken.sh` because that is how Linode's
