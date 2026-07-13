@@ -64,6 +64,18 @@ rootfs="$dist/rootfs"
 rm -rf "$rootfs"
 mkdir -p "$rootfs"
 cp "$dist/$binary" "$rootfs/$binary"
+
+# TLS trust, for the programs that dial out of the cluster. There is
+# no base image here, so there is no root certificate store unless we
+# put one in — without it, Go's crypto/x509 rejects every certificate
+# as unknown. Consumers whose binaries fetch over HTTPS (the
+# operators, polling and downloading from release channels) pass
+# CA_BUNDLE, and the machine's own vendored bundle lands at the path
+# Go checks first on Linux.
+if [ -n "${CA_BUNDLE:-}" ]; then
+    mkdir -p "$rootfs/etc/ssl/certs"
+    cp "$CA_BUNDLE" "$rootfs/etc/ssl/certs/ca-certificates.crt"
+fi
 tar --create --file "$dist/layer.tar" \
     --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
     -C "$rootfs" .

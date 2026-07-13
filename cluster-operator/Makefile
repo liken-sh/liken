@@ -16,8 +16,14 @@ $(DIST)/liken-cluster-operator: ../go.mod ../go.sum $(wildcard *.go) \
 		-ldflags "-X github.com/liken-sh/liken/machine.Version=$(LIKEN_VERSION)" \
 		-o $(DIST)/liken-cluster-operator .
 
-$(DIST)/liken-cluster-operator-image.tar: $(DIST)/liken-cluster-operator ../image/oci.sh
-	DIST=$(abspath $(DIST)) LIKEN_VERSION=$(LIKEN_VERSION) ../image/oci.sh liken-cluster-operator liken.sh/cluster-operator
+# The operator polls release channels over HTTPS, and its image has
+# no base layer to supply root certificates, so the machine's own
+# vendored trust bundle rides in the image (oci.sh explains where it
+# lands).
+CA_BUNDLE := ../trust/dist/$(strip $(file <../trust/VERSION))/cacert.pem
+
+$(DIST)/liken-cluster-operator-image.tar: $(DIST)/liken-cluster-operator ../image/oci.sh $(CA_BUNDLE)
+	DIST=$(abspath $(DIST)) LIKEN_VERSION=$(LIKEN_VERSION) CA_BUNDLE=$(CA_BUNDLE) ../image/oci.sh liken-cluster-operator liken.sh/cluster-operator
 
 .PHONY: all clean
 

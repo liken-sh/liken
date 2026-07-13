@@ -22,8 +22,14 @@ $(DIST)/liken-machine-operator: ../go.mod ../go.sum $(wildcard *.go) \
 		-ldflags "-X github.com/liken-sh/liken/machine.Version=$(LIKEN_VERSION)" \
 		-o $(DIST)/liken-machine-operator .
 
-$(DIST)/liken-machine-operator-image.tar: $(DIST)/liken-machine-operator ../image/oci.sh
-	DIST=$(abspath $(DIST)) LIKEN_VERSION=$(LIKEN_VERSION) ../image/oci.sh liken-machine-operator liken.sh/machine-operator
+# The operator downloads releases over HTTPS, and its image has no
+# base layer to supply root certificates, so the machine's own
+# vendored trust bundle rides in the image (oci.sh explains where it
+# lands).
+CA_BUNDLE := ../trust/dist/$(strip $(file <../trust/VERSION))/cacert.pem
+
+$(DIST)/liken-machine-operator-image.tar: $(DIST)/liken-machine-operator ../image/oci.sh $(CA_BUNDLE)
+	DIST=$(abspath $(DIST)) LIKEN_VERSION=$(LIKEN_VERSION) CA_BUNDLE=$(CA_BUNDLE) ../image/oci.sh liken-machine-operator liken.sh/machine-operator
 
 .PHONY: all clean
 
