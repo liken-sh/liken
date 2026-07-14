@@ -7,7 +7,8 @@
 # and cloud machines are the real targets; these QEMU guests are where
 # everything gets tried first: headless, disposable, and observable
 # from the serial console alone. QEMU provides the hardware (CPU,
-# memory, NICs, disks, and OVMF's real UEFI firmware), and each
+# memory, NICs, disks, and firmware — OVMF's real UEFI by default,
+# SeaBIOS under FIRMWARE=bios), and each
 # machine boots from its own disk, from the system slots it installed
 # itself onto (`make install NODE=x`, once). BOOT=kernel is the other
 # arrangement: QEMU itself acts as the bootloader, loading the kernel
@@ -99,21 +100,62 @@ guests/$(NODE)/boot.qcow2:
 	mkdir -p guests/$(NODE)
 	qemu-img create -f qcow2 $@ 2G
 
-# Real UEFI firmware for the guests: OVMF is TianoCore edk2 (the same
-# codebase physical motherboards ship) built for virtual machines
-# (Ubuntu's ovmf package). It comes as two pflash images, and the
-# split mirrors how a physical board is organized. OVMF_CODE is the
-# firmware program itself, read-only and shared by every guest.
-# OVMF_VARS is the firmware's writable variable store, the equivalent
-# of the battery-backed CMOS where boot entries live. Each node gets
-# its own private copy, which survives guest reboots the way a real
-# board's NVRAM survives power cuts; deleting it with `make clean`
-# has the same effect as pulling the CMOS battery.
+# The guest's firmware. Both regimes liken supports are real machines
+# somewhere: UEFI is every modern motherboard, and BIOS is every
+# Linode guest, so the lab drills both.
+#
+# FIRMWARE=uefi (the default) gives the guest real UEFI: OVMF is
+# TianoCore edk2 (the same codebase physical motherboards ship) built
+# for virtual machines (Ubuntu's ovmf package). It comes as two
+# pflash images, and the split mirrors how a physical board is
+# organized. OVMF_CODE is the firmware program itself, read-only and
+# shared by every guest. OVMF_VARS is the firmware's writable
+# variable store, the equivalent of the battery-backed CMOS where
+# boot entries live. Each node gets its own private copy, which
+# survives guest reboots the way a real board's NVRAM survives power
+# cuts; deleting it with `make clean` has the same effect as pulling
+# the CMOS battery.
+#
+# FIRMWARE=bios asks for nothing at all, which is how QEMU gives you
+# BIOS: SeaBIOS is its built-in default firmware, used whenever no
+# pflash firmware displaces it. A BIOS machine has no variable store,
+# so there is no per-node file to manage either — everything the boot
+# needs lives on the disk itself (the MBR's boot code, GRUB's core
+# image, and the environment block GRUB reads in place of variables).
 OVMF_CODE := /usr/share/OVMF/OVMF_CODE_4M.fd
 
 guests/$(NODE)/OVMF_VARS.fd:
 	mkdir -p guests/$(NODE)
 	cp /usr/share/OVMF/OVMF_VARS_4M.fd $@
+
+# Selected by name at recipe expansion, the same idiom as QEMU_BOOT
+# below. The prerequisite list is separate because make expands
+# prerequisites at parse time: only a UEFI guest needs its private
+# variable store created first.
+FIRMWARE ?= uefi
+QEMU_FIRMWARE_uefi = -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=guests/$(NODE)/OVMF_VARS.fd
+QEMU_FIRMWARE_bios =
+QEMU_FIRMWARE = $(QEMU_FIRMWARE_$(FIRMWARE))
+FIRMWARE_DEPS_uefi := guests/$(NODE)/OVMF_VARS.fd
+FIRMWARE_DEPS_bios :=
+FIRMWARE_DEPS := $(FIRMWARE_DEPS_$(FIRMWARE))
+
+# Which disk the firmware boots. The boot disk is deliberately
+# attached third so the data disks keep the /dev/vda and /dev/vdb
+# handles their claims were declared with — but BIOS firmware tries
+# disks in device order, and the data disks come first. Their claimed
+# GPTs carry the protective MBR's 0x55AA signature with no boot code
+# behind it, so SeaBIOS would pick one, jump into zeroes, and hang.
+# bootindex names the boot disk as the one to try, the lab's stand-in
+# for a cloud console's boot-device setting. It is 1 rather than 0
+# because a -kernel boot claims index 0 for the kernel itself; the
+# disk holds the next place in line either way, first when there is
+# no -kernel. Under UEFI it is deliberately absent: the machine's own
+# NVRAM entries choose the boot path there, and liken's upgrade
+# mechanics depend on them staying authoritative.
+QEMU_BOOTINDEX_uefi =
+QEMU_BOOTINDEX_bios = ,bootindex=1
+QEMU_BOOTINDEX = $(QEMU_BOOTINDEX_$(FIRMWARE))
 
 # Only the leader node forwards the API port to the host: kubectl on
 # the host reaches the cluster through the control plane, and there is
@@ -146,15 +188,18 @@ endif
 #                            itself runs from its system image on
 #                            disk, so this is the workloads' budget,
 #                            not liken's
-#   -drive if=pflash (x2)    the machine's firmware: OVMF's code and
-#                            this node's private variable store, in
-#                            that order (the firmware expects unit 0
-#                            to be code and unit 1 to be NVRAM). With
-#                            -kernel also present, OVMF boots the
-#                            fw_cfg kernel directly: the "USB stick"
-#                            arrangement that stands in for an
-#                            installer until machines boot from their
-#                            own disks
+#   $(QEMU_FIRMWARE)         the machine's firmware. Under UEFI, two
+#                            pflash drives: OVMF's code and this
+#                            node's private variable store, in that
+#                            order (the firmware expects unit 0 to be
+#                            code and unit 1 to be NVRAM). Under
+#                            BIOS, nothing: SeaBIOS is what QEMU runs
+#                            when no pflash displaces it. Either
+#                            firmware boots the fw_cfg kernel
+#                            directly when -kernel is also present:
+#                            the "USB stick" arrangement that stands
+#                            in for an installer until machines boot
+#                            from their own disks
 #   -append                  the kernel command line: put the kernel's
 #                            console on the first serial port, run our
 #                            program, by name, as PID 1, and tell it
@@ -244,9 +289,11 @@ QEMU_EXIT_ON_REBOOT :=
 
 # Where the boot comes from. BOOT=disk (the default) leaves booting
 # entirely to the firmware: no -kernel, no -append; OVMF consults its
-# boot entries and loads the OS from the machine's own system slots,
-# exactly as real hardware would. That is why a machine must be
-# installed (`make install NODE=x`, once) before its first disk boot.
+# boot entries (or SeaBIOS runs the disk's boot code, under
+# FIRMWARE=bios) and the OS loads from the machine's own system
+# slots, exactly as real hardware would. That is why a machine must
+# be installed (`make install NODE=x`, once) before its first disk
+# boot.
 # BOOT=kernel is the direct-kernel arrangement: QEMU itself loads
 # vmlinuz and the initramfs, taking the bootloader's role. It serves
 # machines that haven't installed yet, and run-once uses it because
@@ -278,14 +325,13 @@ RTC_BASE := -rtc base=$(RTC)
 # the USB stick through it. Empty for every ordinary boot.
 QEMU_EXTRA ?=
 
-run: guests/$(NODE)/state.qcow2 guests/$(NODE)/pods.qcow2 guests/$(NODE)/boot.qcow2 guests/$(NODE)/OVMF_VARS.fd
+run: guests/$(NODE)/state.qcow2 guests/$(NODE)/pods.qcow2 guests/$(NODE)/boot.qcow2 $(FIRMWARE_DEPS)
 	qemu-system-x86_64 \
 		-accel kvm -accel tcg \
 		-cpu max \
 		-smp $(SMP) \
 		-m $(MEM) \
-		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
-		-drive if=pflash,format=raw,file=guests/$(NODE)/OVMF_VARS.fd \
+		$(QEMU_FIRMWARE) \
 		$(QEMU_BOOT) \
 		$(QEMU_EXTRA) \
 		-display none \
@@ -302,7 +348,7 @@ run: guests/$(NODE)/state.qcow2 guests/$(NODE)/pods.qcow2 guests/$(NODE)/boot.qc
 		-drive file=guests/$(NODE)/pods.qcow2,format=qcow2,if=none,id=pods \
 		-device virtio-blk-pci,drive=pods,serial=liken-$(NODE)-pods \
 		-drive file=guests/$(NODE)/boot.qcow2,format=qcow2,if=none,id=boot \
-		-device virtio-blk-pci,drive=boot,serial=liken-$(NODE)-boot
+		-device virtio-blk-pci,drive=boot,serial=liken-$(NODE)-boot$(QEMU_BOOTINDEX)
 
 # One-shot boots for debugging and automation: liken.oneshot tells init
 # not to restart k3s: its first exit powers the machine off, QEMU
@@ -363,13 +409,21 @@ grow-pods:
 
 # The unattended boot: node-1 from blank disks to a Ready node, with
 # the verdict read from the cluster's API rather than a human reading
-# the console. This is what CI runs; smoke.sh explains the whole
-# arrangement. Run it from the repo root (`make smoke`), which builds
-# the artifacts and mints the kubeconfig it needs first.
-smoke:
-	./smoke.sh
+# the console. This is what CI runs; smoke-uefi.sh explains the whole
+# arrangement. Run it from the repo root (`make smoke-uefi`), which
+# builds the artifacts and mints the kubeconfig it needs first.
+smoke-uefi:
+	./smoke-uefi.sh
 
-.PHONY: run run-once install install-stick storage grow-pods smoke clean
+# The same drill under BIOS, and from further back: install first,
+# then boot the installed disk under SeaBIOS. The UEFI smoke boots
+# via -kernel, so this is the drill that exercises the install path
+# and the disk boot path end to end; smoke-bios.sh explains the
+# arrangement.
+smoke-bios:
+	./smoke-bios.sh
+
+.PHONY: run run-once install install-stick storage grow-pods smoke-uefi smoke-bios clean
 
 clean:
 	rm -rf guests

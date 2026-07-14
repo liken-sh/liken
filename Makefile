@@ -299,13 +299,21 @@ storage:
 run-once: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/initrd.cpio
 	$(MAKE) -C dev-cluster run-once
 
-# The smoke drill: boot node-1 unattended from blank disks and pass
-# when its node reports Ready over the cluster's API (see
-# dev-cluster/smoke.sh). CI runs this after building everything; it
-# needs the same artifacts as `run` plus the admin kubeconfig the
+# The UEFI smoke drill: boot node-1 unattended from blank disks and
+# pass when its node reports Ready over the cluster's API (see
+# dev-cluster/smoke-uefi.sh). CI runs this after building everything;
+# it needs the same artifacts as `run` plus the admin kubeconfig the
 # readiness poll authenticates with.
-smoke: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/initrd.cpio kubeconfig
-	$(MAKE) -C dev-cluster smoke
+smoke-uefi: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/initrd.cpio kubeconfig
+	$(MAKE) -C dev-cluster smoke-uefi
+
+# The BIOS smoke drill: install node-1 onto a blank disk, then boot
+# that disk under SeaBIOS and pass on the same Ready verdict (see
+# dev-cluster/smoke-bios.sh). This is the drill that covers the
+# install path and the disk boot path, which the -kernel smoke above
+# never touches, so it needs the install image too.
+smoke-bios: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/install.cpio kubeconfig
+	$(MAKE) -C dev-cluster smoke-bios
 
 # The lab's release-shaped channel: the current tree bundled the way
 # a published release is laid out. A real deployment downloads this
@@ -402,4 +410,4 @@ clean:
 	$(MAKE) -C image clean
 	rm -rf $(IMAGE_DIR)
 
-.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub init machine-operator cluster-operator logs cli identity kubeconfig image run run-once smoke install install-stick storage release serve clean
+.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub init machine-operator cluster-operator logs cli identity kubeconfig image run run-once smoke-uefi smoke-bios install install-stick storage release serve clean

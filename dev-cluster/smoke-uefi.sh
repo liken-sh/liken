@@ -3,7 +3,7 @@
 # The smoke drill: prove that a machine and blank disks become a Ready
 # cluster node, with no human watching.
 #
-# This is the boot CI runs (`make smoke` from the repo root), and it
+# This is the boot CI runs (`make smoke-uefi` from the repo root), and it
 # is deliberately the same boot a developer runs by hand: the run
 # target below is the ordinary one, with two differences an automated
 # caller needs. The serial console goes to a file instead of a
@@ -47,7 +47,7 @@ SMOKE_DEADLINE="${SMOKE_DEADLINE:-120}"
 
 for f in "$K3S" "$KUBECONFIG_FILE"; do
     [[ -e "$f" ]] || {
-        echo "smoke.sh: missing $f — run \`make smoke\` from the repo root," >&2
+        echo "smoke-uefi.sh: missing $f — run \`make smoke-uefi\` from the repo root," >&2
         echo "which builds the artifacts and mints the kubeconfig first" >&2
         exit 1
     }
@@ -83,12 +83,12 @@ trap teardown EXIT
 # host tool, a bad flag, no firmware).
 evidence() {
     if [[ -e "$CONSOLE_LOG" ]]; then
-        echo "smoke: the last of the console ($CONSOLE_LOG):" >&2
+        echo "smoke-uefi: the last of the console ($CONSOLE_LOG):" >&2
         tail -n 40 "$CONSOLE_LOG" >&2
     else
-        echo "smoke: no console log was written" >&2
+        echo "smoke-uefi: no console log was written" >&2
     fi
-    echo "smoke: the last of QEMU's own output (guests/node-1/qemu.log):" >&2
+    echo "smoke-uefi: the last of QEMU's own output (guests/node-1/qemu.log):" >&2
     tail -n 20 guests/node-1/qemu.log >&2 || true
 }
 
@@ -99,24 +99,24 @@ evidence() {
 # so that fails the drill immediately instead of waiting out the
 # deadline.
 started="$(date +%s)"
-echo "smoke: booting node-1, waiting up to ${SMOKE_DEADLINE}s for Ready"
+echo "smoke-uefi: booting node-1, waiting up to ${SMOKE_DEADLINE}s for Ready"
 while true; do
     if "$K3S" kubectl --kubeconfig "$KUBECONFIG_FILE" \
             --request-timeout=5s get nodes --no-headers 2>/dev/null \
             | awk '$2 == "Ready" { found = 1 } END { exit !found }'; then
         elapsed=$(( $(date +%s) - started ))
-        echo "smoke: node-1 is Ready after ${elapsed}s"
+        echo "smoke-uefi: node-1 is Ready after ${elapsed}s"
         exit 0
     fi
 
     if ! kill -0 "$guest" 2>/dev/null; then
-        echo "smoke: the guest exited before its node became Ready" >&2
+        echo "smoke-uefi: the guest exited before its node became Ready" >&2
         evidence
         exit 1
     fi
 
     if (( $(date +%s) - started >= SMOKE_DEADLINE )); then
-        echo "smoke: node-1 was not Ready within ${SMOKE_DEADLINE}s" >&2
+        echo "smoke-uefi: node-1 was not Ready within ${SMOKE_DEADLINE}s" >&2
         evidence
         exit 1
     fi

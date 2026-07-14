@@ -27,6 +27,13 @@ spec:
   # is what saves a follower from re-importing every container image
   # on every boot.
   storage:
+    # node-1.yaml explains the GRUB boot path these two roles declare.
+    biosBoot:
+      device: /dev/vdc
+      size: 1Mi
+    bootHome:
+      device: /dev/vdc
+      size: 64Mi
     systemA:
       device: /dev/vdc
       size: 512Mi

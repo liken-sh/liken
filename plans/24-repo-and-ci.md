@@ -33,7 +33,7 @@ every vendored input fetched and verified, the Go programs compiled,
 the image assembled — with one cache per vendored domain, keyed on
 the same prerequisites the domain's Makefile rule declares, so a pin
 bump rebuilds exactly that domain cold. Then it boots the result:
-`make smoke` (dev-cluster/smoke.sh) starts node-1 from blank disks
+`make smoke-uefi` (dev-cluster/smoke-uefi.sh) starts node-1 from blank disks
 under KVM (the runners expose /dev/kvm) and passes when the node
 reports Ready over the cluster's API, read through the leader's
 forwarded port with the offline-minted admin kubeconfig. The serial

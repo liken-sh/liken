@@ -67,7 +67,7 @@ jobs:
       # node reports Ready over the cluster's API. Releases are
       # immutable, so a bundle that can't boot must be caught here —
       # after publication the only remedy is the next serial.
-      - run: make smoke
+      - run: make smoke-uefi
 
       # s3cmd is the uploader because it speaks plain S3 to non-AWS
       # endpoints without protest; recent aws-cli versions attach

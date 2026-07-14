@@ -1,8 +1,9 @@
 # The build, run by GitHub Actions on every push to main and every
-# pull request against it: `make all` and then `make smoke`, the same
-# commands a developer runs. The checks workflow proves the tree is
-# clean; this one proves it still assembles an operating system, and
-# that the operating system still boots to a Ready Kubernetes node.
+# pull request against it: `make all` and then the smoke drills, the
+# same commands a developer runs. The checks workflow proves the tree
+# is clean; this one proves it still assembles an operating system,
+# and that the operating system still boots to a Ready Kubernetes
+# node — under both firmware regimes liken supports.
 #
 # Like the checks workflow, this one is deliberately thin. The build
 # logic lives in the Makefiles, and the runner preparation (toolchain,
@@ -41,11 +42,19 @@ jobs:
       # bootable image assembled.
       - run: make all
 
-      # Then boot it. The smoke drill (dev-cluster/smoke.sh) starts
-      # node-1 from blank disks and passes when its node reports Ready
-      # over the cluster's API — the assembled image actually running
-      # Kubernetes, not just existing.
-      - run: make smoke
+      # Then boot it. The UEFI smoke drill (dev-cluster/smoke-uefi.sh)
+      # starts node-1 from blank disks and passes when its node reports
+      # Ready over the cluster's API — the assembled image actually
+      # running Kubernetes, not just existing.
+      - run: make smoke-uefi
+
+      # Then install it and boot the installed disk under BIOS
+      # firmware (dev-cluster/smoke-bios.sh). The drill above boots
+      # via -kernel, so this is the run that proves the install path
+      # and the whole disk boot chain: MBR boot code, GRUB's core
+      # image, its config on the boot home, and the chosen slot's
+      # kernel.
+      - run: make smoke-bios
 
       # The serial console is the record of the boot, and it is worth
       # keeping when the drill passes, not just when it fails: a

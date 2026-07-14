@@ -48,6 +48,25 @@ spec:
   # boot: a machine declared to have persistent state must not come up
   # ephemeral.
   storage:
+    # The GRUB boot path. Declaring these two roles is how a machine
+    # says it boots through GRUB — there is no firmware field in the
+    # spec; the roles are the declaration. biosBoot is a raw
+    # partition, never formatted or mounted, holding GRUB's core
+    # image where the MBR's 440 bytes of boot code can find it.
+    # bootHome is a small FAT32 filesystem holding GRUB's config and
+    # its environment block, the file that stands in for the boot
+    # variables a BIOS machine's firmware doesn't have. The lab's
+    # machines declare them so both firmware regimes can be drilled
+    # on the same manifests; under UEFI they're just two small
+    # partitions the boot never consults. Storage declarations bind
+    # at claim time, so an already-claimed guest keeps its old layout
+    # until `make clean` factory-resets it.
+    biosBoot:
+      device: /dev/vdc
+      size: 1Mi
+    bootHome:
+      device: /dev/vdc
+      size: 64Mi
     # The operating system's own boot slots: two EFI system partitions
     # on the boot disk, each big enough to hold one complete liken
     # version (the kernel plus the initramfs, with headroom). The
