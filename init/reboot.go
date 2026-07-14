@@ -90,10 +90,21 @@ func watchForOperatorIntents(ctx context.Context, dir string, interval time.Dura
 func rebootMachine(intent machine.RebootIntent) {
 	fmt.Printf("liken: rebooting: %s\n", intent.Reason)
 	// The firmware conversation happens first, while machineState and
-	// efivarfs are still mounted: if a release is staged for the other
-	// slot, this reboot is its proving boot, and the one-shot trial
-	// must be armed before the machine goes down (proving.go).
-	armProvingBoot(chooseBootActuator(), machine.MachineStateDir, bootParamValue("liken.slot"))
+	// the boot path's filesystems are still mounted. The proven slot
+	// is asserted before anything else — on a BIOS machine that
+	// assertion also heals the boot chain on disk, and it must happen
+	// on the way down because a boot path damaged while the machine
+	// ran (cloud hosts rewrite MBRs under running guests) would turn
+	// this reboot into the one that never comes back. Arming comes
+	// after asserting, never before: assertProven clears a stale
+	// one-shot, and the trial this reboot may be arming must not read
+	// as stale.
+	actuator := chooseBootActuator()
+	assertProvenSlot(actuator, machine.MachineStateDir)
+	// If a release is staged for the other slot, this reboot is its
+	// proving boot, and the one-shot trial must be armed before the
+	// machine goes down (proving.go).
+	armProvingBoot(actuator, machine.MachineStateDir, bootParamValue("liken.slot"))
 	killEverything()
 	// The machine plane stops only after every process is dead: the
 	// reaper is one of its components, and exited processes need

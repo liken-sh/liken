@@ -193,12 +193,9 @@ func installGRUB(parts []partition, machineName, slotMount string) error {
 	if err != nil {
 		return err
 	}
-	name := machine.DeclaredRole{Name: machine.BIOSBootRole}.PartitionName()
-	var diskDev string
-	for _, p := range parts {
-		if p.partName == name {
-			diskDev = devRoot + "/" + p.disk
-		}
+	diskDev, err := diskDevice(parts, machine.BIOSBootRole)
+	if err != nil {
+		return err
 	}
 
 	bootImg, err := os.ReadFile(filepath.Join(slotMount, "grub-boot.img"))
@@ -247,6 +244,19 @@ func installGRUB(parts []partition, machineName, slotMount string) error {
 
 	fmt.Printf("liken: install: GRUB installed on %s; grub.cfg and grubenv on the boot home prefer slot A\n", diskDev)
 	return nil
+}
+
+// diskDevice names the whole-disk device a role's partition lives
+// on: boot-sector writes address the disk, not the partition, since
+// the MBR belongs to no partition at all.
+func diskDevice(parts []partition, role machine.StorageRoleName) (string, error) {
+	name := machine.DeclaredRole{Name: role}.PartitionName()
+	for _, p := range parts {
+		if p.partName == name {
+			return devRoot + "/" + p.disk, nil
+		}
+	}
+	return "", fmt.Errorf("no partition carries the name %q, so its disk cannot be found", name)
 }
 
 // hasPartition reports whether a role's partition exists on this

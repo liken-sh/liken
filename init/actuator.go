@@ -15,9 +15,20 @@ package main
 // A UEFI machine's firmware holds boot preferences itself, as
 // variables in NVRAM, and the dialect is written into the UEFI
 // specification: BootNext is the one-shot trial, BootOrder is the
-// standing preference (efiactuator.go).
+// standing preference (efiactuator.go). A BIOS machine's firmware
+// holds nothing, so its preferences live where GRUB can read them —
+// the environment block on the boot home (grubactuator.go).
+// Declaring the biosBoot and bootHome storage roles is how a machine
+// chooses that life; the installed grubenv is the sign the dialect
+// is actually in place.
 
-import "errors"
+import (
+	"errors"
+	"os"
+	"path/filepath"
+
+	"github.com/liken-sh/liken/machine"
+)
 
 // bootActuator is what the proving lifecycle asks of the firmware;
 // each method is one of the three acts described above.
@@ -56,10 +67,18 @@ type bootActuator interface {
 
 // chooseBootActuator picks the dialect this machine's firmware
 // speaks. The regime test is the same one the installer uses:
-// /sys/firmware/efi exists exactly when UEFI booted this kernel.
+// /sys/firmware/efi exists exactly when UEFI booted this kernel. A
+// BIOS machine speaks GRUB when the boot home carries an installed
+// environment block; without one (external media, a direct-kernel
+// lab boot, a machine installed without the GRUB roles) there is no
+// dialect to speak.
 func chooseBootActuator() bootActuator {
 	if firmwareIsUEFI() {
 		return efiActuator{dir: efiVarsDir}
+	}
+	grubDir := filepath.Join(roleMounts[machine.BootHomeRole].path, "grub")
+	if _, err := os.Stat(filepath.Join(grubDir, "grubenv")); err == nil {
+		return grubActuator{grubDir: grubDir, machineName: bootParamValue("liken.machine")}
 	}
 	return noActuator{}
 }

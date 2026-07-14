@@ -210,21 +210,20 @@ func writeBootOrder(dir string, order []uint16) error {
 	return writeEFIVar(dir, "BootOrder", payload)
 }
 
-// firmwareFacts reads the machine's boot facts from its firmware:
-// which mode it booted in, which entry the firmware used, and the
-// standing preference order. Each entry is decoded to its name, so a
-// fleet listing reads "liken slot A", not a hex dump. Console parity
-// holds here as everywhere: reportFirmware prints these same facts
-// at boot.
+// firmwareFacts reads the machine's boot facts from wherever this
+// machine keeps them: which mode it booted in, which entry the boot
+// used, and the standing preference. Each fact is decoded to a name,
+// so a fleet listing reads "liken slot A", not a hex dump. Console
+// parity holds here as everywhere: reportFirmware prints these same
+// facts at boot.
 //
 // The mode is decided by the variable store's presence: efivarfs
-// exists exactly when UEFI booted this kernel. "BIOS" is shorthand
-// for everything else, whether a legacy server or QEMU's
-// direct-kernel boot: any machine with no firmware variables to
-// consult.
+// exists exactly when UEFI booted this kernel. Everything else is
+// "BIOS", and a BIOS machine's boot facts live on disk instead, in
+// GRUB's environment block (biosFirmwareFacts).
 func firmwareFacts(dir string) machine.FirmwareStatus {
 	if _, err := os.Stat(dir); err != nil {
-		return machine.FirmwareStatus{Mode: machine.FirmwareBIOS}
+		return biosFirmwareFacts()
 	}
 	fw := machine.FirmwareStatus{Mode: machine.FirmwareUEFI}
 
@@ -263,21 +262,25 @@ func describeBootEntry(dir string, n uint16) string {
 
 // reportFirmware prints the firmware's facts on the console: the
 // same facts firmwareFacts publishes, formatted for the world
-// report.
+// report. Both modes print the same shape of report, so reading a
+// BIOS machine's console teaches the same things a UEFI machine's
+// does; only the mode line and the mechanisms behind the facts
+// differ.
 func reportFirmware() {
 	fw := firmwareFacts(efiVarsDir)
-	if fw.Mode != machine.FirmwareUEFI {
-		fmt.Println("liken: firmware: BIOS (no /sys/firmware/efi; no boot variables to consult)")
-		return
+	if fw.Mode == machine.FirmwareUEFI {
+		fmt.Println("liken: firmware: UEFI")
+		if fw.BootCurrent == "" {
+			fmt.Println("liken: firmware: BootCurrent not set (a direct-kernel boot never picks an entry)")
+		}
+	} else {
+		fmt.Println("liken: firmware: BIOS (no /sys/firmware/efi; boot preferences live with GRUB, when installed)")
 	}
-	fmt.Println("liken: firmware: UEFI")
 	if fw.BootCurrent != "" {
 		fmt.Printf("liken: firmware: booted via %s\n", fw.BootCurrent)
-	} else {
-		fmt.Println("liken: firmware: BootCurrent not set (a direct-kernel boot never picks an entry)")
 	}
 	if fw.BootNext != "" {
-		fmt.Printf("liken: firmware: BootNext is armed: %s\n", fw.BootNext)
+		fmt.Printf("liken: firmware: a one-shot trial is armed: %s\n", fw.BootNext)
 	}
 	for _, entry := range fw.BootOrder {
 		fmt.Printf("liken: firmware: boot order: %s\n", entry)
