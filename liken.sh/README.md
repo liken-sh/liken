@@ -8,12 +8,10 @@ with deliberately different lifetimes:
   where CI publishes every release of liken (the releases domain
   explains what a release is; `.github/workflows/release.yaml` is the
   publisher).
-* **The cluster, which is declared but not currently provisioned**:
-  the machine that runs liken and serves the project's website. Its
-  declarations (`cluster.yaml`, `machines/`) are ready, and the
-  capability it was waiting on — a machine that updates itself under
-  BIOS firmware — has landed; what remains is provisioning the
-  Linode again and founding the cluster from this directory's media.
+* **The cluster, which is live**: one Linode machine, installed once
+  from a published release and upgrading itself from the channel by
+  Cluster edits ever since. Its declarations are `cluster.yaml` and
+  `machines/`; the website it will serve again is follow-on work.
 
 Everything the deployment needs lives here, organized the way any
 liken deployment would be:
@@ -94,19 +92,28 @@ and this deployment forced the missing capability honestly:
 [milestone 30](../plans/30-bios-upgrades.md) taught liken to actuate
 upgrades by rewriting what GRUB reads instead of firmware variables.
 
-Linode's machinery adds one hazard worth naming: image deploys
-preserve every partition faithfully but zero the MBR's 440 bytes of
-boot code, and a failed background event can zero them again up to an
-hour later — under a machine that is already running. So the machine
-defends its own boot path: on every boot and before every reboot, it
-re-derives the MBR's boot code, GRUB's core image, and the config
-from the proven slot's artifacts and rewrites whatever disagrees. A
-boot path damaged while the machine runs is healed before the reboot
-that would otherwise never come back.
+Linode's machinery adds two particulars worth naming. First, the
+boot code: their image deploys once zeroed the MBR's 440 bytes (and
+a failed background event could zero them again under a running
+machine), which is part of why the machine defends its own boot
+path — on every boot and before every reboot, it re-derives the
+MBR's boot code, GRUB's core image, and the config from the proven
+slot's artifacts and rewrites whatever disagrees. Today's deploys
+measure byte-faithful end to end, so the healing is a backstop
+rather than a routine repair; it stays because the hazard was real
+once and costs nothing to guard against. Second, reboots: Linode
+turns a guest-initiated reboot into a power-off, so every reboot the
+machine performs on itself — trying a new release, rolling back from
+one — ends with the instance off. The shutdown watchdog (Lassie,
+enabled in terraform) notices within a couple of minutes and boots
+it again; without the watchdog, the machine's first self-reboot
+would be its last.
 
-`make` here builds the machine's install media the ordinary way — a
-real liken install run in a local QEMU guest under SeaBIOS, against
-a raw disk file, no root privileges anywhere — and the storage design
+`make RELEASE=<version>` here builds the machine's install media
+from a published release — downloaded from the channel and
+digest-verified, then really installed in a local QEMU guest under
+SeaBIOS, against a raw disk file, no root privileges anywhere — and
+the storage design
 it installs splits the machine's disks by lifetime: a small
 disposable system disk (boot slots, machine state, scratch) and a
 data disk that is claimed once, holds everything durable, and is
@@ -126,3 +133,7 @@ every kubectl in this deployment carries the same pair:
       --server=https://<node public address>:6443 \
       --tls-server-name=10.10.0.1 \
       get nodes
+
+The `kubectl` and `stern` wrappers in this directory carry that pair
+for you: `./liken.sh/kubectl get machines` from the repo root is the
+short way to ask the cluster anything.

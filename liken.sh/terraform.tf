@@ -110,11 +110,18 @@ resource "linode_instance" "node" {
   # Backups snapshot disks, and a liken machine's disks are the wrong
   # thing to snapshot: the slots are reproducible from published
   # releases, and everything that matters lives in the cluster's own
-  # state. The watchdog restarts a machine that powers off
-  # unexpectedly; while this instance is deliberately offline, that
-  # would fight us.
-  backups_enabled  = false
-  watchdog_enabled = false
+  # state.
+  backups_enabled = false
+
+  # The watchdog (Lassie) boots the instance whenever it finds it
+  # powered off unexpectedly, and on this host that is load-bearing:
+  # Linode treats a guest-initiated reboot as a power-off, so every
+  # reboot a liken machine performs on itself — proving a new
+  # release, rolling back from one, applying a spec that needs a
+  # fresh boot — ends with the instance off and the watchdog is what
+  # turns it back on. Without it, the machine's first self-reboot is
+  # its last.
+  watchdog_enabled = true
 
   lifecycle {
     prevent_destroy = true

@@ -140,13 +140,12 @@ image/install.cpio: channel/$(RELEASE)/release.yaml image/deployment.cpio $(CLI)
 # powers off; -no-reboot turns that power-off into QEMU's exit. The
 # console log lands next to the image for reading afterward.
 #
-# One Linode-specific wart survives all of this: their image deploys
-# preserve every partition faithfully but zero the MBR's boot code,
-# so shipping this image ends by putting its first 440 bytes back
-# (terraform.tf tells that story). That restoration covers the
-# deploy; once the machine is running, it heals those same bytes
-# itself from its proven slot's artifacts, on every boot and before
-# every reboot.
+# Shipping this image is a plain Linode image deploy: their deploys
+# measure byte-faithful end to end, boot code included (they once
+# zeroed the MBR's first 440 bytes, a hazard the README records).
+# The machine guards those bytes itself regardless, healing them
+# from its proven slot's artifacts on every boot and before every
+# reboot.
 image/disk.img: image/install.cpio channel/$(RELEASE)/release.yaml
 	rm -f $@ image/data-scratch.img
 	truncate -s $(SYSTEM_DISK_BYTES) $@
