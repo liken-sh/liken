@@ -1,0 +1,11 @@
+#!/bin/sh
+# kubectl, aimed at the dev cluster.
+#
+# The admin kubeconfig (make kubeconfig) already points where the lab
+# listens: QEMU forwards host 127.0.0.1:16443 to the leader guest's
+# API server, and the server's certificate carries 127.0.0.1 among
+# its names, so no overrides are needed — this wrapper only saves
+# typing the --kubeconfig flag.
+exec kubectl \
+  --kubeconfig "$(dirname "$0")/identity/kubeconfig" \
+  "$@"

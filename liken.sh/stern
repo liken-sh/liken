@@ -1,0 +1,20 @@
+#!/bin/sh
+# stern, aimed at the liken.sh cluster.
+#
+# stern reads a kubeconfig but has no flags to override the server or
+# the TLS name the way kubectl does, so this wrapper derives one: a
+# copy of the admin kubeconfig with the node's public address and the
+# certificate's segment name written into the cluster entry (the
+# kubectl wrapper beside this one explains that pair). The derived
+# file lives in identity/, which never enters version control, and is
+# rewritten on every run so it can never go stale against the
+# original.
+here="$(dirname "$0")"
+derived="$here/identity/kubeconfig.public"
+
+cp "$here/identity/kubeconfig" "$derived"
+kubectl --kubeconfig "$derived" config set-cluster liken \
+  --server https://162.216.16.163:6443 \
+  --tls-server-name 10.10.0.1 >/dev/null
+
+exec stern --kubeconfig "$derived" "$@"

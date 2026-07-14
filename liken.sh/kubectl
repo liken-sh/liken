@@ -1,0 +1,16 @@
+#!/bin/sh
+# kubectl, aimed at the liken.sh cluster.
+#
+# The admin kubeconfig (make kubeconfig) is computed offline from the
+# cluster's identity, and the endpoint written inside it points at the
+# cluster segment — the VLAN address the API server's certificate
+# names. Reaching the cluster over the public internet means telling
+# kubectl two things: where the node really is (--server, the
+# instance's public address from terraform), and which name to expect
+# on the certificate it meets there (--tls-server-name). That pair is
+# what lets one certificate serve both the VLAN and the world.
+exec kubectl \
+  --kubeconfig "$(dirname "$0")/identity/kubeconfig" \
+  --server https://162.216.16.163:6443 \
+  --tls-server-name 10.10.0.1 \
+  "$@"
