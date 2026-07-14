@@ -72,7 +72,7 @@ SYSTEM_DISK_BYTES := 3221225472
 # starts blank on Linode and the machine claims it on first boot.
 DATA_SCRATCH_BYTES := 23622320128
 
-all: image/disk.img
+all: image/disk.img.gz
 
 # The downloaded release, cached under a version-keyed path the way
 # the vendored domains cache their dist trees. A published release is
@@ -174,6 +174,12 @@ image/disk.img: image/install.cpio channel/$(RELEASE)/release.yaml
 	rm -f image/data-scratch.img
 	grep -q 'install failed' image/install.log && { tail -5 image/install.log; rm -f $@; exit 1; } || true
 	grep -q 'install complete' image/install.log || { tail -5 image/install.log; rm -f $@; exit 1; }
+
+# The disk, travel-sized: all but ~1GB of the image is zeros, which
+# compress to almost nothing. gzip rather than anything better
+# because it is the one format Linode's image upload accepts.
+image/disk.img.gz: image/disk.img
+	gzip --keep --force $<
 
 # clean sweeps the assembled artifacts but leaves channel/ alone:
 # those are verified downloads, gigabytes that redownload identically,

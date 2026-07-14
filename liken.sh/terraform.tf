@@ -96,6 +96,252 @@ resource "linode_domain_record" "releases" {
 }
 
 # ---------------------------------------------------------------------------
+# The machine: one nanode, carrying the cluster.
+
+resource "linode_instance" "node" {
+  label  = "liken-node-1"
+  region = "us-east"
+
+  # The smallest Linode: 1 GB of memory. liken runs from a read-only
+  # system image on disk, so the OS itself needs little RAM and a
+  # single small machine can carry the cluster and its website.
+  type = "g6-nanode-1"
+
+  # Backups snapshot disks, and a liken machine's disks are the wrong
+  # thing to snapshot: the slots are reproducible from published
+  # releases, and everything that matters lives in the cluster's own
+  # state. The watchdog restarts a machine that powers off
+  # unexpectedly; while this instance is deliberately offline, that
+  # would fight us.
+  backups_enabled  = false
+  watchdog_enabled = false
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# The OS, as a custom image. `make RELEASE=<version>` in this
+# directory downloads that published release from the channel,
+# verifies it, and really installs it onto image/disk.img.gz — a
+# complete installed system disk — and this resource uploads the
+# result, so the file must exist before a plan. Linode accepts raw
+# disk images, gzipped, up to 6 GB uncompressed; the Makefile
+# explains how that cap shaped the disk layout.
+#
+# Replacing this image is how an OS ships from the outside — which
+# founding a machine needs exactly once. After that the machine
+# upgrades itself from the channel, and shipping a disk again is the
+# recovery path, not the routine. A new image forces the system disk
+# below to be recreated from it, which erases that disk. Shipping is
+# therefore an explicit act, never a side effect: ignore_changes
+# keeps a routine apply from noticing a rebuilt local image (builds
+# aren't byte-reproducible, so every rebuild would otherwise read as
+# a ship), and
+#
+#   terraform apply -replace=linode_image.system
+#
+# is the command that means "reinstall the node's OS from the image
+# I just built" — run with the instance powered off, then power on.
+
+resource "linode_image" "system" {
+  label       = "liken-node-1-system"
+  description = "The liken.sh node's installed system disk"
+  region      = "us-east"
+
+  file_path = "${path.module}/image/disk.img.gz"
+  file_hash = filemd5("${path.module}/image/disk.img.gz")
+
+  lifecycle {
+    ignore_changes = [file_hash]
+  }
+}
+
+# The system disk, stamped from the image above. Slightly larger than
+# the 3 GiB image because Linode's advertised sizes don't land on
+# exact byte counts; liken grows the partition table to the disk's
+# real end on first boot. Replacing a disk needs the instance
+# powered off, so a ship is: power off, apply, power on.
+
+resource "linode_instance_disk" "system" {
+  label     = "liken-system"
+  linode_id = linode_instance.node.id
+  size      = 3200
+  image     = linode_image.system.id
+
+  # The API insists on a login credential whenever a disk comes from
+  # an image, so that Linode can write it into the disk's filesystem.
+  # A raw image has no filesystem Linode can read, so nothing is ever
+  # written anywhere and no such login exists; this value satisfies
+  # the API's schema and does nothing else.
+  root_pass = "inert!on a raw image 0"
+}
+
+# The data disk: raw, blank, and never shipped to. liken claims it on
+# the machine's first boot, writing role names into its GPT, and
+# every ship after that replaces the OS around it — the cluster's
+# database, images, and volumes survive. 22400 MB is the rest of the
+# nanode's allotment.
+
+resource "linode_instance_disk" "data" {
+  label      = "liken-data"
+  linode_id  = linode_instance.node.id
+  size       = 22400
+  filesystem = "raw"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "linode_instance_config" "boot" {
+  label     = "liken"
+  linode_id = linode_instance.node.id
+
+  # Linode's hosts boot guests BIOS-style only — no UEFI — so this
+  # machine's disk carries its own bootloader, laid down by the
+  # installer: GRUB's first stage in the MBR, its core image in a
+  # BIOS boot partition, and its config and environment block on the
+  # boot home. Direct disk boot means the host simply executes what
+  # the MBR carries, and upgrades actuate through GRUB's environment
+  # block the way UEFI machines actuate through firmware variables.
+  # (Linode's GRUB 2 setting is a dead end for this disk: their
+  # loader reads its config from the disk treated as one whole-disk
+  # filesystem, as Linode's own images are laid out, and never looks
+  # inside a partition table.)
+  #
+  # The MBR's 440 boot-code bytes deserve a sentence of history:
+  # Linode's image deploys used to zero them, which once meant a
+  # rescue-boot restoration after every ship. Today's deploys are
+  # byte-faithful — verified by hashing a deployed disk end to end —
+  # and the machine guards those bytes itself anyway, re-deriving
+  # them from its proven slot's artifacts on every boot and before
+  # every reboot. The config deliberately says nothing about power:
+  # `booted` here is not a description but an instruction (false
+  # shuts a running machine down to match), so power stays an
+  # explicit act through the API, never a side effect of an apply.
+  kernel      = "linode/direct-disk"
+  root_device = "/dev/sda"
+
+  device {
+    device_name = "sda"
+    disk_id     = linode_instance_disk.system.id
+  }
+
+  device {
+    device_name = "sdb"
+    disk_id     = linode_instance_disk.data.id
+  }
+
+  # Two interfaces, and the second is the reason this cluster can
+  # grow: eth0 is the public internet, and eth1 joins a private VLAN
+  # named "liken" — Linode's free layer-2 segment within a region.
+  # The VLAN is the cluster segment (the Cluster document's nodeCIDR
+  # lives here), so adding a node later is another instance with the
+  # same VLAN label and the next address, exactly how the lab's
+  # machines share their cluster network. The ipam_address is
+  # Linode-side bookkeeping only; the machine configures its own
+  # addresses from its Machine manifest.
+  interface {
+    purpose = "public"
+  }
+
+  interface {
+    purpose      = "vlan"
+    label        = "liken"
+    ipam_address = "10.10.0.1/24"
+  }
+
+  # Every helper here assumes Linode installed the distro and may
+  # reach into its filesystem at boot to adjust it. liken is not that
+  # distro, and nothing on the outside gets to edit a slot.
+  helpers {
+    devtmpfs_automount = false
+    distro             = false
+    modules_dep        = false
+    network            = false
+    updatedb_disabled  = true
+  }
+}
+
+# ---------------------------------------------------------------------------
+# The firewall: the node's public face is the website, nothing else.
+#
+# The cluster API on 6443 authenticates every caller with client
+# certificates, so the firewall is defense in depth rather than the
+# lock on the door — but depth is cheap and exposure isn't: a port
+# the edge drops can't be scanned, fuzzed, or hit by the next
+# pre-auth vulnerability, and a 1 GB node shouldn't spend its one
+# CPU entertaining the internet's background noise. Packets the
+# firewall drops never reach the machine at all.
+#
+# The operator's address arrives as a variable so it never lands in
+# this public repository: .envrc.private exports TF_VAR_operator_cidr
+# (it lives on in the Terraform state, which is already private, like
+# every other secret here). The VLAN is untouched — Cloud Firewalls
+# filter the public interface, and cluster traffic rides the private
+# segment.
+
+variable "operator_cidr" {
+  description = "The address allowed to reach the cluster API and rescue-mode ssh, as a CIDR"
+  type        = string
+  sensitive   = true
+}
+
+resource "linode_firewall" "node" {
+  label           = "liken-node-1"
+  inbound_policy  = "DROP"
+  outbound_policy = "ACCEPT"
+  linodes         = [linode_instance.node.id]
+
+  inbound {
+    label    = "website-http"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "80"
+    ipv4     = ["0.0.0.0/0"]
+    ipv6     = ["::/0"]
+  }
+
+  inbound {
+    label    = "website-https"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "443"
+    ipv4     = ["0.0.0.0/0"]
+    ipv6     = ["::/0"]
+  }
+
+  # Ping stays answerable: it costs nothing and it is the first
+  # question anyone asks a machine that seems down.
+  inbound {
+    label    = "ping"
+    action   = "ACCEPT"
+    protocol = "ICMP"
+    ipv4     = ["0.0.0.0/0"]
+    ipv6     = ["::/0"]
+  }
+
+  inbound {
+    label    = "kubernetes-api"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "6443"
+    ipv4     = [var.operator_cidr]
+  }
+
+  # Rescue mode's sshd, the break-glass path: the machine itself runs
+  # no ssh server, so outside a rescue boot this rule matches nothing.
+  inbound {
+    label    = "rescue-ssh"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "22"
+    ipv4     = [var.operator_cidr]
+  }
+}
+
+# ---------------------------------------------------------------------------
 # Release storage: the bucket the published channel lives in.
 #
 # A release is a directory of digest-named artifacts and a document
