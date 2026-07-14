@@ -37,6 +37,8 @@ const PartitionPrefix = "liken:"
 type StorageRoleName string
 
 const (
+	BIOSBootRole         StorageRoleName = "biosBoot"
+	BootHomeRole         StorageRoleName = "bootHome"
 	SystemARole          StorageRoleName = "systemA"
 	SystemBRole          StorageRoleName = "systemB"
 	MachineStateRole     StorageRoleName = "machineState"
@@ -48,15 +50,19 @@ const (
 
 // StorageRoleNames is the canonical order: the order partitions are
 // laid down when roles share a disk (fixed here rather than by YAML
-// map order, which Kubernetes doesn't preserve). The system slots
-// come first, because the firmware is the earliest reader of any
-// partition liken owns and an EFI system partition conventionally
-// leads its disk. machineState comes next, ahead of all the data
-// roles, because it holds the partition a future boot must find
-// before it has read any spec. Recognition is by partition name,
-// never by position; the order is a layout convention, not a
-// discovery mechanism.
+// map order, which Kubernetes doesn't preserve). The boot roles lead,
+// earliest reader first: BIOS firmware executes the MBR before
+// anything else exists, so the partition its boot code jumps into
+// comes first, then GRUB's own config home, then the system slots
+// (an EFI system partition conventionally leads its disk, and here it
+// leads everything the firmware doesn't read). machineState comes
+// next, ahead of all the data roles, because it holds the partition a
+// future boot must find before it has read any spec. Recognition is
+// by partition name, never by position; the order is a layout
+// convention, not a discovery mechanism.
 var StorageRoleNames = []StorageRoleName{
+	BIOSBootRole,
+	BootHomeRole,
 	SystemARole,
 	SystemBRole,
 	MachineStateRole,
@@ -67,6 +73,20 @@ var StorageRoleNames = []StorageRoleName{
 }
 
 type StorageSpec struct {
+	// BIOSBoot and BootHome are how a machine declares that it boots
+	// through GRUB rather than UEFI firmware — there is no separate
+	// firmware field; declaring the partitions GRUB needs *is* the
+	// declaration. A BIOS machine has no boot variables to hold the
+	// blue-green bookkeeping, so liken supplies the pieces the
+	// firmware would have provided: BIOSBoot is a tiny raw partition
+	// (about 1Mi, no filesystem) holding GRUB's core image, the code
+	// the MBR's 440 boot bytes jump into; BootHome is a small FAT32
+	// partition (about 64Mi) holding GRUB's config and its
+	// environment block — the file that stands in for BootNext and
+	// BootOrder. Machines that boot UEFI leave both out.
+	BIOSBoot *StorageRole `json:"biosBoot,omitempty"`
+	BootHome *StorageRole `json:"bootHome,omitempty"`
+
 	// SystemA and SystemB are the operating system's own boot slots:
 	// each holds one complete liken version (the kernel and the
 	// initramfs that is the rest of the OS), and the machine runs
@@ -176,6 +196,10 @@ func InactiveSlot(running string) string {
 // outside the vocabulary and for roles the spec leaves out.
 func (s *StorageSpec) Role(name StorageRoleName) *StorageRole {
 	switch name {
+	case BIOSBootRole:
+		return s.BIOSBoot
+	case BootHomeRole:
+		return s.BootHome
 	case SystemARole:
 		return s.SystemA
 	case SystemBRole:

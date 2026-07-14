@@ -46,6 +46,15 @@ import (
 // Where each role lands in the filesystem. This translation is
 // liken's own, and it is deliberately kept out of the Machine API.
 //
+//	biosBoot         no mount at all: a raw partition holding GRUB's
+//	                 core image, read by the MBR's boot code before
+//	                 any filesystem exists; liken writes it through
+//	                 the partition's device node, never through a
+//	                 mount
+//	bootHome         /var/lib/liken/boot: GRUB's config and its
+//	                 environment block, the BIOS machine's stand-in
+//	                 for boot variables; FAT32 because GRUB reads it
+//	                 with the same driver that reads the slots
 //	systemA/systemB  /var/lib/liken/system/{a,b}: the OS's own boot
 //	                 slots, FAT32 because the firmware reads them;
 //	                 no suid, no devices, no executables, because
@@ -70,7 +79,13 @@ type roleMount struct {
 
 const slotMountFlags = unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC
 
+// bootHomeDir is where the bootHome role mounts: GRUB's config and
+// environment block, which init writes when it arms or settles a
+// slot trial on a BIOS machine.
+const bootHomeDir = "/var/lib/liken/boot"
+
 var roleMounts = map[machine.StorageRoleName]roleMount{
+	machine.BootHomeRole:         {path: bootHomeDir, flags: slotMountFlags, fstype: "vfat"},
 	machine.SystemARole:          {path: machine.SystemSlotDir("A"), flags: slotMountFlags, fstype: "vfat"},
 	machine.SystemBRole:          {path: machine.SystemSlotDir("B"), flags: slotMountFlags, fstype: "vfat"},
 	machine.MachineStateRole:     {path: machine.MachineStateDir},
@@ -89,12 +104,35 @@ func isSystemSlot(name machine.StorageRoleName) bool {
 	return name == machine.SystemARole || name == machine.SystemBRole
 }
 
+// isRawRole reports whether a role is a bare partition: recognized,
+// claimed, and reported like any other, but never formatted and never
+// mounted. biosBoot is the only one — GRUB's core image is read by
+// the MBR's boot code long before any filesystem driver exists, so a
+// filesystem there would only be in the way. liken writes it through
+// the partition's device node.
+func isRawRole(name machine.StorageRoleName) bool {
+	return name == machine.BIOSBootRole
+}
+
+// isFixedSizeRole reports whether a role's size is settled the day
+// it's claimed. The FAT32 roles are (FAT doesn't grow in place), and
+// so is biosBoot: GRUB's boot code holds the core image's location as
+// literal sector numbers, and a layout that never changes is the
+// foundation the boot-sector healing rewrite stands on.
+func isFixedSizeRole(name machine.StorageRoleName) bool {
+	return isSystemSlot(name) || name == machine.BootHomeRole || name == machine.BIOSBootRole
+}
+
 // partitionTypeFor picks a role's GPT partition type: the system
 // slots are EFI system partitions (the type GUID is how firmware
-// finds them), everything else is ordinary Linux data.
+// finds them), biosBoot is GRUB's own well-known type, and everything
+// else is ordinary Linux data.
 func partitionTypeFor(name machine.StorageRoleName) [16]byte {
-	if isSystemSlot(name) {
+	switch {
+	case isSystemSlot(name):
 		return disks.EFISystemPartition
+	case name == machine.BIOSBootRole:
+		return disks.BIOSBootPartition
 	}
 	return disks.LinuxFilesystemData
 }
@@ -130,6 +168,9 @@ func teardownStorage() {
 func unmountRoleMounts(flags int, reportErrors bool) {
 	for _, name := range slices.Backward(machine.StorageRoleNames) {
 		target := roleMounts[name].path
+		if target == "" {
+			continue // raw roles are never mounted
+		}
 		err := unix.Unmount(target, flags)
 		switch {
 		case err == nil:
@@ -278,7 +319,15 @@ func reconcileStorage(spec machine.StorageSpec) (machine.StorageStatus, error) {
 
 	for _, role := range roles {
 		p := found[role.Name]
-		if err := mountRole(role, p); err != nil {
+		// Raw roles are done once recognized: there is no filesystem
+		// to make and no mountpoint to serve. The status still says
+		// where the partition landed, because "which device holds the
+		// boot code" is exactly the kind of fact that must not live
+		// only on a serial console.
+		if isRawRole(role.Name) {
+			fmt.Printf("liken: storage: %s is %s/%s (%s), raw\n",
+				role.Name, devRoot, p.name, p.partName)
+		} else if err := mountRole(role, p); err != nil {
 			return status, err
 		}
 		*status.Role(role.Name) = machine.StorageRoleStatus{

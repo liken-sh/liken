@@ -127,6 +127,36 @@ func TestPlanPartitionsTypesSystemSlotsAsESP(t *testing.T) {
 	}
 }
 
+func TestPlanPartitionsTypesTheBIOSBootRoles(t *testing.T) {
+	// A BIOS machine's boot roles lead the disk in canonical order:
+	// the raw core-image partition carries GRUB's own well-known type
+	// GUID (nothing else will claim it), and the boot home is an
+	// ordinary Linux data partition — GRUB finds it by filesystem
+	// label, not by type.
+	mine := []machine.DeclaredRole{
+		declared("biosBoot", "/dev/vdc", "1Mi"),
+		declared("bootHome", "/dev/vdc", "64Mi"),
+		declared("systemA", "/dev/vdc", "512Mi"),
+	}
+	parts, err := planPartitions("/dev/vdc", mine, 4_194_304)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []disks.Partition{
+		{Name: "liken:biosBoot", FirstLBA: 2_048, LastLBA: 4_095, TypeGUID: disks.BIOSBootPartition},
+		{Name: "liken:bootHome", FirstLBA: 4_096, LastLBA: 135_167, TypeGUID: disks.LinuxFilesystemData},
+		{Name: "liken:systemA", FirstLBA: 135_168, LastLBA: 1_183_743, TypeGUID: disks.EFISystemPartition},
+	}
+	if len(parts) != len(want) {
+		t.Fatalf("planned %d partitions, want %d: %v", len(parts), len(want), parts)
+	}
+	for i, w := range want {
+		if parts[i] != w {
+			t.Errorf("partition %d: got %+v, want %+v", i, parts[i], w)
+		}
+	}
+}
+
 func TestPlanPartitionsRejectsDiskTooSmall(t *testing.T) {
 	// 4,096 sectors is 2 MiB of disk, but the table's reservations
 	// leave less than that usable; a 2 MiB role can't fit.

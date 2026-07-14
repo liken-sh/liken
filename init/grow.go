@@ -124,17 +124,19 @@ func planAllGrowth(roles []machine.DeclaredRole, found map[machine.StorageRoleNa
 		if !ok {
 			continue
 		}
-		// The system slots never grow: ext4 grows in place by ioctl,
-		// but FAT's geometry is fixed at format time, so a slot's size
-		// is settled the day it's claimed. A spec asking for more is
-		// refused here at planning time, before anything is written,
-		// and the refusal follows the usual staged-spec path: the spec
-		// is rejected and the boot falls back to the proven manifest.
-		if isSystemSlot(role.Name) {
+		// The boot roles never grow: ext4 grows in place by ioctl, but
+		// FAT's geometry is fixed at format time (the slots, bootHome),
+		// and biosBoot's whole point is a layout the MBR's literal
+		// sector numbers can rely on. Their sizes are settled the day
+		// they're claimed. A spec asking for more is refused here at
+		// planning time, before anything is written, and the refusal
+		// follows the usual staged-spec path: the spec is rejected and
+		// the boot falls back to the proven manifest.
+		if isFixedSizeRole(role.Name) {
 			if role.Size != "" {
 				if bytes, _ := machine.ParseSize(role.Size); bytes > p.sizeBytes {
 					return nil, fmt.Errorf(
-						"%s is %s and can't grow to %s: system slots are fixed when claimed (FAT32 doesn't grow in place)",
+						"%s is %s and can't grow to %s: boot roles are fixed when claimed",
 						role.Name, gib(p.sizeBytes), role.Size)
 				}
 			}

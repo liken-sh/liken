@@ -133,6 +133,20 @@ spec:
           x-kubernetes-validations:
             - rule: >-
                 !has(self.spec) || !has(self.spec.storage) ||
+                !has(self.spec.storage.biosBoot) || !has(self.spec.storage.biosBoot.size) ||
+                !has(self.status) || !has(self.status.boot) || !has(self.status.boot.storage) ||
+                !has(self.status.boot.storage.biosBoot) || !has(self.status.boot.storage.biosBoot.size) ||
+                !quantity(self.spec.storage.biosBoot.size).isLessThan(quantity(self.status.boot.storage.biosBoot.size))
+              message: biosBoot may not shrink below the size this machine booted with; partitions are grow-only
+            - rule: >-
+                !has(self.spec) || !has(self.spec.storage) ||
+                !has(self.spec.storage.bootHome) || !has(self.spec.storage.bootHome.size) ||
+                !has(self.status) || !has(self.status.boot) || !has(self.status.boot.storage) ||
+                !has(self.status.boot.storage.bootHome) || !has(self.status.boot.storage.bootHome.size) ||
+                !quantity(self.spec.storage.bootHome.size).isLessThan(quantity(self.status.boot.storage.bootHome.size))
+              message: bootHome may not shrink below the size this machine booted with; partitions are grow-only
+            - rule: >-
+                !has(self.spec) || !has(self.spec.storage) ||
                 !has(self.spec.storage.systemA) || !has(self.spec.storage.systemA.size) ||
                 !has(self.status) || !has(self.status.boot) || !has(self.status.boot.storage) ||
                 !has(self.status.boot.storage.systemA) || !has(self.status.boot.storage.systemA.size) ||
@@ -364,6 +378,48 @@ spec:
                     boot. Roles absent from the spec are backed by the
                     machine's RAM root.
                   properties:
+                    biosBoot:
+                      type: object
+                      description: >-
+                        Declaring this role (with bootHome) is how a
+                        machine says it boots BIOS-style, through
+                        liken's own GRUB, rather than through UEFI
+                        firmware. A tiny raw partition — about 1Mi,
+                        no filesystem — holding GRUB's core image,
+                        the code the MBR's 440 boot bytes jump into.
+                        Fixed in size once claimed; the MBR refers to
+                        it by literal sector numbers.
+                      required: [device]
+                      properties:
+                        device:
+                          type: string
+                          maxLength: 128
+                          pattern: ^/dev/[a-zA-Z0-9/_-]+$
+                        size:
+                          type: string
+                          maxLength: 32
+                          pattern: ^[0-9]+(Ki|Mi|Gi|Ti)?$
+                    bootHome:
+                      type: object
+                      description: >-
+                        The other half of the BIOS boot declaration: a
+                        small FAT32 partition (about 64Mi) holding
+                        GRUB's configuration and its environment
+                        block, the file that stands in for the boot
+                        variables UEFI firmware would have provided.
+                        It lives on neither system slot so that both
+                        slots can be written freely while the boot
+                        machinery keeps its own ground.
+                      required: [device]
+                      properties:
+                        device:
+                          type: string
+                          maxLength: 128
+                          pattern: ^/dev/[a-zA-Z0-9/_-]+$
+                        size:
+                          type: string
+                          maxLength: 32
+                          pattern: ^[0-9]+(Ki|Mi|Gi|Ti)?$
                     systemA:
                       type: object
                       description: >-
@@ -712,6 +768,28 @@ spec:
                     the one RAM root, and per-role figures would count
                     it multiple times.
                   properties:
+                    biosBoot:
+                      type: object
+                      properties:
+                        backing:
+                          type: string
+                        device:
+                          type: string
+                        partition:
+                          type: string
+                        capacityBytes:
+                          type: integer
+                    bootHome:
+                      type: object
+                      properties:
+                        backing:
+                          type: string
+                        device:
+                          type: string
+                        partition:
+                          type: string
+                        capacityBytes:
+                          type: integer
                     systemA:
                       type: object
                       properties:
@@ -888,6 +966,20 @@ spec:
                     storage:
                       type: object
                       properties:
+                        biosBoot:
+                          type: object
+                          properties:
+                            device:
+                              type: string
+                            size:
+                              type: string
+                        bootHome:
+                          type: object
+                          properties:
+                            device:
+                              type: string
+                            size:
+                              type: string
                         systemA:
                           type: object
                           properties:

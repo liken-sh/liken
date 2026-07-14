@@ -142,6 +142,16 @@ type Chunk struct {
 // 446 belongs to the bootloader, not the partition table.
 const mbrBootCodeSize = 446
 
+// BIOSBootPartition is the type GUID for GRUB's BIOS boot partition:
+// a small raw partition, no filesystem, holding the core image that
+// the MBR's 440 bytes of boot code jump into. The MBR has no room
+// for a real program, and GPT (unlike the old MBR layout) leaves no
+// dependable gap after sector 0, so GRUB's own convention is a typed
+// partition it can trust nothing else will claim. The GUID spells
+// "Hah!IdontNeedEFI" in ASCII — GRUB's little joke, and a genuinely
+// well-known constant every partitioning tool recognizes.
+var BIOSBootPartition = MustGUID("21686148-6449-6E6F-744E-656564454649")
+
 // LinuxFilesystemData is the partition type GUID meaning "an ordinary
 // Linux filesystem". Types are well-known constants, not invented:
 // this exact GUID is what lsblk, blkid, and installers everywhere

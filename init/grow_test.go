@@ -306,8 +306,24 @@ func TestPlanAllGrowthRefusesToGrowASystemSlot(t *testing.T) {
 		machine.SystemARole: {name: "vdc1", disk: "vdc", sizeBytes: 512 << 20},
 	}
 	_, err := planAllGrowth(roles, found)
-	if err == nil || !strings.Contains(err.Error(), "FAT32 doesn't grow in place") {
+	if err == nil || !strings.Contains(err.Error(), "fixed when claimed") {
 		t.Errorf("slots are fixed when claimed: %v", err)
+	}
+}
+
+func TestPlanAllGrowthRefusesToGrowTheBootRoles(t *testing.T) {
+	// bootHome is FAT32 like the slots, and biosBoot's location is
+	// baked into the MBR's boot code as literal sectors; neither may
+	// grow after the day it's claimed.
+	for _, role := range []machine.StorageRoleName{machine.BIOSBootRole, machine.BootHomeRole} {
+		roles := []machine.DeclaredRole{declared(role, "/dev/vdc", "1Gi")}
+		found := map[machine.StorageRoleName]partition{
+			role: {name: "vdc1", disk: "vdc", sizeBytes: 64 << 20},
+		}
+		_, err := planAllGrowth(roles, found)
+		if err == nil || !strings.Contains(err.Error(), "fixed when claimed") {
+			t.Errorf("%s should be fixed when claimed: %v", role, err)
+		}
 	}
 }
 

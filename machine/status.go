@@ -309,6 +309,8 @@ type FirmwareStatus struct {
 // fields mirror the spec's keys exactly, so spec and status line up
 // name for name.
 type StorageStatus struct {
+	BIOSBoot         StorageRoleStatus `json:"biosBoot"`
+	BootHome         StorageRoleStatus `json:"bootHome"`
 	SystemA          StorageRoleStatus `json:"systemA"`
 	SystemB          StorageRoleStatus `json:"systemB"`
 	MachineState     StorageRoleStatus `json:"machineState"`
@@ -333,6 +335,10 @@ type StorageRoleStatus struct {
 // outside the vocabulary.
 func (s *StorageStatus) Role(name StorageRoleName) *StorageRoleStatus {
 	switch name {
+	case BIOSBootRole:
+		return &s.BIOSBoot
+	case BootHomeRole:
+		return &s.BootHome
 	case SystemARole:
 		return &s.SystemA
 	case SystemBRole:

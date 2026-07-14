@@ -13,10 +13,12 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// formatSlot formats a system slot's partition, labeled for the role
-// it serves so the slot identifies itself in any directory listing.
-// The volume ID (FAT's only identity field; there are no UUIDs) is
-// derived from a timestamp, the traditional choice.
+// formatSlot formats one of the FAT32 roles' partitions, labeled for
+// the role it serves so the volume identifies itself in any directory
+// listing — and, for these roles, so GRUB can find it: the labels are
+// what its search command keys on. The volume ID (FAT's only identity
+// field; there are no UUIDs) is derived from a timestamp, the
+// traditional choice.
 func formatSlot(devPath string, sizeBytes uint64, role machine.StorageRoleName) error {
 	f, err := os.OpenFile(devPath, os.O_RDWR, 0)
 	if err != nil {
@@ -24,8 +26,11 @@ func formatSlot(devPath string, sizeBytes uint64, role machine.StorageRoleName) 
 	}
 	defer f.Close()
 	label := "LIKEN-SYS-A"
-	if role == machine.SystemBRole {
+	switch role {
+	case machine.SystemBRole:
 		label = "LIKEN-SYS-B"
+	case machine.BootHomeRole:
+		label = "LIKEN-BOOT"
 	}
 	return disks.FormatFAT32(f, sizeBytes, label, uint32(time.Now().Unix()))
 }
