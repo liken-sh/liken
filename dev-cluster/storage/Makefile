@@ -32,7 +32,12 @@
 # manifests. The fleet only ever sees it as an address that answers
 # on ports 2049 (NFS), 3260 (iSCSI), and 5000 (the registry).
 
-VERSION := $(strip $(file <VERSION))
+# override keeps this pin authoritative even under a release build:
+# `make release VERSION=<stamp>` passes VERSION on the command line,
+# and command-line variables silently replace plain assignments in
+# every sub-make they reach. This domain's version comes from the
+# VERSION file beside this Makefile, never from a caller.
+override VERSION := $(strip $(file <VERSION))
 BASE := cache/$(VERSION)/debian-13-genericcloud-amd64-$(VERSION).qcow2
 
 # MACs continue the lab's scheme (52:54:00 is QEMU's prefix, 4c:4b/4c

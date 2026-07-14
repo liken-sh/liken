@@ -42,7 +42,7 @@ INSTALL_LOG="guests/node-1/install-console.log"
 # generous bound below; this one covers only the disk boot.
 SMOKE_DEADLINE="${SMOKE_DEADLINE:-120}"
 
-for f in "$K3S" "$KUBECONFIG_FILE"; do
+for f in "$K3S" "$KUBECONFIG_FILE" image/install.cpio; do
     [[ -e "$f" ]] || {
         echo "smoke-bios.sh: missing $f — run \`make smoke-bios\` from the repo root," >&2
         echo "which builds the artifacts and mints the kubeconfig first" >&2

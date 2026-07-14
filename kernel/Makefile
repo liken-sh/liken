@@ -7,7 +7,12 @@
 # The pin is a file, not a variable, so a kernel upgrade is a one-line,
 # obviously-reviewable diff. $(file <...) reads it at parse time; strip
 # drops the trailing newline.
-VERSION := $(strip $(file <VERSION))
+# override keeps this pin authoritative even under a release build:
+# `make release VERSION=<stamp>` passes VERSION on the command line,
+# and command-line variables silently replace plain assignments in
+# every sub-make they reach. This domain's version comes from the
+# VERSION file beside this Makefile, never from a caller.
+override VERSION := $(strip $(file <VERSION))
 
 # vmlinuz represents the whole extraction: modules, config, and the
 # release string all arrive in the same fetch.sh run. Make only runs

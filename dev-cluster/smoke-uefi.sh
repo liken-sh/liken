@@ -45,7 +45,7 @@ CONSOLE_LOG="guests/node-1/console.log"
 # rehearsal of the failure path.
 SMOKE_DEADLINE="${SMOKE_DEADLINE:-120}"
 
-for f in "$K3S" "$KUBECONFIG_FILE"; do
+for f in "$K3S" "$KUBECONFIG_FILE" image/initrd.cpio; do
     [[ -e "$f" ]] || {
         echo "smoke-uefi.sh: missing $f — run \`make smoke-uefi\` from the repo root," >&2
         echo "which builds the artifacts and mints the kubeconfig first" >&2
