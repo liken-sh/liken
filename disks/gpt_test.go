@@ -313,6 +313,52 @@ func TestWriteTableInPlaceSkipsTheKernelReread(t *testing.T) {
 	}
 }
 
+func TestTableWritesPreserveTheBootCode(t *testing.T) {
+	// The first 446 bytes of sector 0 are the BIOS boot code (plus
+	// the MBR disk signature) — GRUB's first stage on a BIOS
+	// machine. The table writer owns only what follows: the
+	// protective 0xEE entry and the boot signature. A rewrite (a
+	// claim over an old table, growth relocating the backup) must
+	// carry the boot code through untouched, or liken's own storage
+	// reconciliation would un-boot the machine it runs on.
+	path := filepath.Join(t.TempDir(), "disk")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(testDiskSectors * SectorSize); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := bytes.Repeat([]byte{0xC3}, 446)
+	if _, err := f.WriteAt(sentinel, 0); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	if err := WriteTableInPlace(path, testDiskSectors, sampleTable()); err != nil {
+		t.Fatal(err)
+	}
+
+	sector := make([]byte, SectorSize)
+	r, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := r.ReadAt(sector, 0); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(sector[:446], sentinel) {
+		t.Error("the boot code did not survive the table write")
+	}
+	if sector[446+4] != 0xEE {
+		t.Error("the protective entry should still be written")
+	}
+	if sector[510] != 0x55 || sector[511] != 0xAA {
+		t.Error("the boot signature should still be written")
+	}
+}
+
 func TestGPTReaderRejectsForeignGeometry(t *testing.T) {
 	f := diskFile(t, sampleTable(), testDiskSectors)
 	// Rewrite the primary header claiming a 64-entry array, with a

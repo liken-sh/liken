@@ -136,6 +136,12 @@ type Chunk struct {
 	Data []byte
 }
 
+// mbrBootCodeSize is how much of sector 0 precedes the MBR's own
+// fields: 440 bytes of x86 boot code, then the 4-byte disk signature
+// and 2 reserved bytes. Everything before the partition entries at
+// 446 belongs to the bootloader, not the partition table.
+const mbrBootCodeSize = 446
+
 // LinuxFilesystemData is the partition type GUID meaning "an ordinary
 // Linux filesystem". Types are well-known constants, not invented:
 // this exact GUID is what lsblk, blkid, and installers everywhere
@@ -257,6 +263,15 @@ func SerializeGPT(t *Table, totalSectors uint64) ([]Chunk, error) {
 	// The protective MBR: one legacy partition of type 0xEE spanning
 	// the disk (capped at the 32-bit sector count MBR can express), so
 	// GPT-unaware tools refuse to touch it rather than see empty space.
+	//
+	// The table owns only the tail of sector 0: the partition entries
+	// at byte 446 and the boot signature at 510. The 446 bytes ahead
+	// of them are BIOS boot code, which belongs to whoever owns
+	// booting — on a BIOS machine that is GRUB's first stage, planted
+	// at install time and healed by init. This serialization emits
+	// zeros there (a freshly claimed disk boots nothing yet), and
+	// writeTableBytes preserves whatever the disk already carries, so
+	// rewriting the partition table never un-boots a machine.
 	mbr := make([]byte, SectorSize)
 	span := min(totalSectors-1, 0xFFFF_FFFF)
 	entry := mbr[446:]
@@ -429,6 +444,23 @@ func writeTableBytes(devPath string, totalSectors uint64, t *Table) (*os.File, e
 	f, err := os.OpenFile(devPath, os.O_RDWR, 0)
 	if err != nil {
 		return nil, err
+	}
+
+	// Sector 0 is shared ground: SerializeGPT owns the protective
+	// entry and the boot signature, but the boot code ahead of them
+	// (446 bytes: code plus the MBR disk signature) is not the
+	// table's to write. Carry the disk's existing bytes through, so a
+	// GPT rewrite — growth relocating the backup, most commonly —
+	// never zeroes the machine's own bootloader out from under it.
+	bootCode := make([]byte, mbrBootCodeSize)
+	if _, err := f.ReadAt(bootCode, 0); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("reading the existing boot code: %w", err)
+	}
+	for _, chunk := range chunks {
+		if chunk.LBA == 0 {
+			copy(chunk.Data[:mbrBootCodeSize], bootCode)
+		}
 	}
 
 	for _, chunk := range chunks {
