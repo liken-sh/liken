@@ -41,7 +41,7 @@ func TestABootOnTheStagedSlotIsTheTrial(t *testing.T) {
 	stagedRelease(t, root, "0.2.0", "B")
 
 	boot := machine.BootStatus{}
-	trial := settleSystemRelease(root, "B", true, &boot)
+	trial := settleSystemRelease(noActuator{}, root, "B", true, &boot)
 	if trial == nil {
 		t.Fatal("booting the staged slot is the proving boot")
 	}
@@ -62,7 +62,7 @@ func TestABootBackOnTheProvenSlotAfterATrialRejects(t *testing.T) {
 	}
 
 	boot := machine.BootStatus{}
-	if settleSystemRelease(root, "A", true, &boot) != nil {
+	if settleSystemRelease(noActuator{}, root, "A", true, &boot) != nil {
 		t.Error("the fallback boot is not a proving boot")
 	}
 	if boot.SystemRejection == nil {
@@ -81,7 +81,7 @@ func TestAStagedReleaseAwaitingItsRebootIsLeftStanding(t *testing.T) {
 	stagedRelease(t, root, "0.2.0", "B")
 
 	boot := machine.BootStatus{}
-	if settleSystemRelease(root, "A", true, &boot) != nil {
+	if settleSystemRelease(noActuator{}, root, "A", true, &boot) != nil {
 		t.Error("no attempted marker means the trial hasn't run")
 	}
 	if boot.SystemRejection != nil {
@@ -111,7 +111,7 @@ func TestArmProvingBootWritesTheMarkerThenBootNext(t *testing.T) {
 	raw, _ := stagedRelease(t, root, "0.2.0", "B")
 	dir := slotFirmware(t, 0x0002, 0x0003)
 
-	armProvingBoot(dir, root, "A")
+	armProvingBoot(efiActuator{dir: dir}, root, "A")
 
 	attempted, _ := machine.SystemReleases(root).LoadAttempted()
 	if attempted != machine.ManifestHash(raw) {
@@ -131,7 +131,7 @@ func TestArmProvingBootRefusesWithoutAVerifiedFallback(t *testing.T) {
 	stagedRelease(t, root, "0.2.0", "B")
 	dir := slotFirmware(t, 0x0002, 0x0003)
 
-	armProvingBoot(dir, root, "A")
+	armProvingBoot(efiActuator{dir: dir}, root, "A")
 
 	if attempted, _ := machine.SystemReleases(root).LoadAttempted(); attempted != "" {
 		t.Error("no fallback, no trial")
@@ -149,7 +149,7 @@ func TestArmProvingBootAssertsTheFallbackFirst(t *testing.T) {
 	// trial of slot A must first flip the fallback to proven slot B.
 	dir := slotFirmware(t, 0x0002, 0x0003)
 
-	armProvingBoot(dir, root, "B")
+	armProvingBoot(efiActuator{dir: dir}, root, "B")
 
 	if got := readBootOrder(dir); !slices.Equal(got, []uint16{0x0003, 0x0002}) {
 		t.Errorf("the fallback must lead with the proven slot before the trial arms: % x", got)
@@ -165,7 +165,7 @@ func TestArmProvingBootRefusesWithoutAnEntry(t *testing.T) {
 	stagedRelease(t, root, "0.2.0", "B")
 	dir := fakeEFIVars(t, map[string][]byte{}) // no entries at all
 
-	armProvingBoot(dir, root, "A")
+	armProvingBoot(efiActuator{dir: dir}, root, "A")
 
 	if attempted, _ := machine.SystemReleases(root).LoadAttempted(); attempted != "" {
 		t.Error("no entry, no trial: the marker must not claim one happened")
@@ -182,7 +182,7 @@ func underlying(err error) error {
 	return err
 }
 
-func TestRepairBootOrderAssertsTheProvenSlot(t *testing.T) {
+func TestAssertProvenSlotPutsTheProvenSlotFirst(t *testing.T) {
 	root := t.TempDir()
 	raw, _, err := machine.RenderSystemRelease("0.2.0", "B", "")
 	if err != nil {
@@ -194,22 +194,22 @@ func TestRepairBootOrderAssertsTheProvenSlot(t *testing.T) {
 	// The firmware still remembers the install's order: A first.
 	dir := slotFirmware(t, 0x0002, 0x0003, 0x0000)
 
-	repairBootOrder(dir, root)
+	assertProvenSlot(efiActuator{dir: dir}, root)
 
 	if got := readBootOrder(dir); !slices.Equal(got, []uint16{0x0003, 0x0002, 0x0000}) {
 		t.Errorf("slot B should lead, everything else in order: % x", got)
 	}
 
-	// Idempotent: a second repair writes nothing new and keeps the order.
-	repairBootOrder(dir, root)
+	// Idempotent: a second assertion writes nothing new and keeps the order.
+	assertProvenSlot(efiActuator{dir: dir}, root)
 	if got := readBootOrder(dir); !slices.Equal(got, []uint16{0x0003, 0x0002, 0x0000}) {
-		t.Errorf("repair must be idempotent: % x", got)
+		t.Errorf("the assertion must be idempotent: % x", got)
 	}
 }
 
-func TestRepairBootOrderDoesNothingWithoutAProvenRecord(t *testing.T) {
+func TestAssertProvenSlotDoesNothingWithoutAProvenRecord(t *testing.T) {
 	dir := slotFirmware(t, 0x0002, 0x0003)
-	repairBootOrder(dir, t.TempDir())
+	assertProvenSlot(efiActuator{dir: dir}, t.TempDir())
 	if got := readBootOrder(dir); !slices.Equal(got, []uint16{0x0002, 0x0003}) {
 		t.Errorf("no record, no opinion: % x", got)
 	}
@@ -220,7 +220,7 @@ func TestSettleSystemReleaseIgnoresExternalMediaBoots(t *testing.T) {
 	stagedRelease(t, root, "0.2.0", "B")
 
 	boot := machine.BootStatus{}
-	if settleSystemRelease(root, "", true, &boot) != nil {
+	if settleSystemRelease(noActuator{}, root, "", true, &boot) != nil {
 		t.Error("external media can't prove a slot")
 	}
 	if staged, _ := machine.SystemReleases(root).LoadStaged(); staged == nil {
@@ -250,7 +250,7 @@ func TestAStagedReleaseWaitsForAFromDiskBoot(t *testing.T) {
 	root := t.TempDir()
 	stagedRelease(t, root, "0.2.0", "B")
 	boot := machine.BootStatus{}
-	if settleSystemRelease(root, "", true, &boot) != nil {
+	if settleSystemRelease(noActuator{}, root, "", true, &boot) != nil {
 		t.Error("an external-media boot is never the trial")
 	}
 	if staged, _ := machine.SystemReleases(root).LoadStaged(); staged == nil {
@@ -264,7 +264,7 @@ func TestArmProvingBootIgnoresARecordForTheRunningSlot(t *testing.T) {
 	root := t.TempDir()
 	stagedRelease(t, root, "0.2.0", "B")
 	dir := slotFirmware(t, 0x0002, 0x0003)
-	armProvingBoot(dir, root, "B")
+	armProvingBoot(efiActuator{dir: dir}, root, "B")
 	if _, err := readEFIVar(dir, "BootNext"); err == nil {
 		t.Error("no trial, no BootNext")
 	}
@@ -278,7 +278,7 @@ func TestSettleSystemReleaseRejectsAGarbageStagedRecord(t *testing.T) {
 	}
 
 	boot := machine.BootStatus{}
-	if settleSystemRelease(root, "A", true, &boot) != nil {
+	if settleSystemRelease(noActuator{}, root, "A", true, &boot) != nil {
 		t.Error("garbage can never be a trial")
 	}
 	if boot.SystemRejection == nil {
@@ -295,7 +295,7 @@ func TestSettleSystemReleaseToleratesAnUnreadableStagedRecord(t *testing.T) {
 	sealFile(t, filepath.Join(root, "system", "staged.yaml"))
 
 	boot := machine.BootStatus{}
-	if settleSystemRelease(root, "A", true, &boot) != nil {
+	if settleSystemRelease(noActuator{}, root, "A", true, &boot) != nil {
 		t.Error("a record that can't be read can't be a trial")
 	}
 }
@@ -310,34 +310,34 @@ func sealFile(t *testing.T, path string) {
 	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
 }
 
-func TestRepairBootOrderToleratesAnUnreadableProvenRecord(t *testing.T) {
+func TestAssertProvenSlotToleratesAnUnreadableProvenRecord(t *testing.T) {
 	root := t.TempDir()
 	provenRelease(t, root, "0.2.0", "B")
 	sealFile(t, filepath.Join(root, "system", "proven.yaml"))
 	dir := slotFirmware(t, 0x0002, 0x0003)
 
-	repairBootOrder(dir, root)
+	assertProvenSlot(efiActuator{dir: dir}, root)
 
 	if got := readBootOrder(dir); !slices.Equal(got, []uint16{0x0002, 0x0003}) {
 		t.Errorf("an unreadable record earns no opinion: % x", got)
 	}
 }
 
-func TestRepairBootOrderToleratesAGarbageProvenRecord(t *testing.T) {
+func TestAssertProvenSlotToleratesAGarbageProvenRecord(t *testing.T) {
 	root := t.TempDir()
 	if err := machine.SystemReleases(root).WriteProven([]byte("not a release record")); err != nil {
 		t.Fatal(err)
 	}
 	dir := slotFirmware(t, 0x0002, 0x0003)
 
-	repairBootOrder(dir, root)
+	assertProvenSlot(efiActuator{dir: dir}, root)
 
 	if got := readBootOrder(dir); !slices.Equal(got, []uint16{0x0002, 0x0003}) {
 		t.Errorf("a record that won't parse earns no opinion: % x", got)
 	}
 }
 
-func TestRepairBootOrderLeavesTheOrderWhenTheSlotHasNoEntry(t *testing.T) {
+func TestAssertProvenSlotLeavesTheOrderWhenTheSlotHasNoEntry(t *testing.T) {
 	// The store says slot B is proven but the firmware has no entry
 	// answering to it (a machine whose NVRAM was reset): rewriting the
 	// order around a missing entry would prefer nothing.
@@ -348,14 +348,14 @@ func TestRepairBootOrderLeavesTheOrderWhenTheSlotHasNoEntry(t *testing.T) {
 		"BootOrder": u16le(0x0002),
 	})
 
-	repairBootOrder(dir, root)
+	assertProvenSlot(efiActuator{dir: dir}, root)
 
 	if got := readBootOrder(dir); !slices.Equal(got, []uint16{0x0002}) {
 		t.Errorf("no entry, no rewrite: % x", got)
 	}
 }
 
-func TestRepairBootOrderReportsAFailedWrite(t *testing.T) {
+func TestAssertProvenSlotReportsAFailedWrite(t *testing.T) {
 	root := t.TempDir()
 	provenRelease(t, root, "0.2.0", "B")
 	dir := slotFirmware(t, 0x0002, 0x0003)
@@ -364,7 +364,7 @@ func TestRepairBootOrderReportsAFailedWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	repairBootOrder(dir, root)
+	assertProvenSlot(efiActuator{dir: dir}, root)
 
 	if got := readBootOrder(dir); !slices.Equal(got, []uint16{0x0002, 0x0003}) {
 		t.Errorf("a failed write leaves the firmware as it was: % x", got)
@@ -380,7 +380,7 @@ func TestArmProvingBootIgnoresAGarbageStagedRecord(t *testing.T) {
 	}
 	dir := slotFirmware(t, 0x0002, 0x0003)
 
-	armProvingBoot(dir, root, "A")
+	armProvingBoot(efiActuator{dir: dir}, root, "A")
 
 	if _, err := readEFIVar(dir, "BootNext"); err == nil {
 		t.Error("garbage must not arm a trial")

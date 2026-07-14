@@ -4,15 +4,19 @@ package main
 //
 // The operator stages a SystemRelease record (machine/systemrelease.go)
 // when a verified release is waiting on the inactive slot. From
-// there, this file carries the upgrade across the reboot:
+// there, this file carries the upgrade across the reboot. Everything
+// here is firmware-neutral: the three acts that touch the machine's
+// actual boot mechanism go through a bootActuator (actuator.go),
+// which carries the firmware's dialect.
 //
 //   - On the way down (armProvingBoot, called from init's reboot
-//     path), init writes the attempted marker and arms the firmware's
-//     BootNext at the staged slot's boot entry. BootNext is the
-//     mechanism that makes blue-green safe: the firmware consumes it
-//     as it boots, so the trial gets exactly one chance, and any
+//     path), init writes the attempted marker and arms the
+//     actuator's one-shot trial at the staged slot. The one-shot is
+//     what makes blue-green safe: the arming is consumed by the boot
+//     it triggers, so the trial gets exactly one chance, and any
 //     reset after that (a kernel panic, a watchdog, a power cut)
-//     falls back to BootOrder, which still prefers the proven slot.
+//     falls back to the standing preference, which still prefers the
+//     proven slot.
 //
 //   - On the way up (settleSystemRelease), init reads the files and
 //     decides what happened. If this boot came from the staged slot,
@@ -24,14 +28,14 @@ package main
 //     the operator will not stage that exact record again.
 //
 //   - After promotion (provingWatch, a machine-plane component that
-//     runs only on proving boots), init rewrites BootOrder so the
-//     newly proven slot leads. Init owns this write for the same
-//     reason it owns every efivars write: talking to the firmware is
-//     the machine plane's job, and the store on disk is the
-//     authority. repairBootOrder re-asserts the proven record's slot
-//     on every boot, so a power cut between promotion and the
-//     BootOrder rewrite costs one extra boot of the old version,
-//     never a wrong BootOrder that sticks.
+//     runs only on proving boots), init asserts the standing
+//     preference so the newly proven slot leads. Init owns this
+//     write for the same reason it owns every firmware write:
+//     talking to the firmware is the machine plane's job, and the
+//     store on disk is the authority. assertProvenSlot re-asserts
+//     the proven record's slot on every boot, so a power cut between
+//     promotion and the assertion costs one extra boot of the old
+//     version, never a wrong preference that sticks.
 
 import (
 	"context"
@@ -48,7 +52,7 @@ import (
 // release's record, which is what arms the proving watch; every other
 // verdict returns nil. Runs after storage settles (the store lives on
 // machineState) and after the boot's slot is known.
-func settleSystemRelease(stateRoot, bootSlot string, durable bool, boot *machine.BootStatus) *machine.SystemRelease {
+func settleSystemRelease(act bootActuator, stateRoot, bootSlot string, durable bool, boot *machine.BootStatus) *machine.SystemRelease {
 	if !durable {
 		return nil
 	}
@@ -63,7 +67,7 @@ func settleSystemRelease(stateRoot, bootSlot string, durable bool, boot *machine
 		fmt.Fprintf(os.Stderr, "liken: system: the staged release record is unreadable: %v\n", err)
 	}
 	if staged == nil {
-		repairBootOrder(efiVarsDir, stateRoot)
+		assertProvenSlot(act, stateRoot)
 		return nil
 	}
 
@@ -71,7 +75,7 @@ func settleSystemRelease(stateRoot, bootSlot string, durable bool, boot *machine
 	if perr != nil {
 		boot.SystemRejection = rejectStagedDocument("system", "release", store.Reject,
 			staged, fmt.Sprintf("the staged release record does not parse: %v", perr))
-		repairBootOrder(efiVarsDir, stateRoot)
+		assertProvenSlot(act, stateRoot)
 		return nil
 	}
 
@@ -99,32 +103,35 @@ func settleSystemRelease(stateRoot, bootSlot string, durable bool, boot *machine
 	if attempted, _ := store.LoadAttempted(); attempted == hash {
 		// The trial ran and the firmware brought the machine back
 		// here, to the proven slot: the release booted its one
-		// BootNext chance and never got promoted. That is the
-		// fallback verdict, recorded durably so no boot re-arms the
-		// same trial.
+		// chance and never got promoted. That is the fallback
+		// verdict, recorded durably so no boot re-arms the same
+		// trial.
 		boot.SystemRejection = rejectStagedDocument("system", "release", store.Reject,
 			staged, fmt.Sprintf("the machine booted slot %s to prove release %s and fell back to slot %s; the release never proved out",
 				record.Slot, record.Version, bootSlot))
-		repairBootOrder(efiVarsDir, stateRoot)
+		assertProvenSlot(act, stateRoot)
 		return nil
 	}
 
 	fmt.Printf("liken: system: release %s is staged for slot %s, awaiting its proving reboot\n",
 		record.Version, record.Slot)
-	repairBootOrder(efiVarsDir, stateRoot)
+	assertProvenSlot(act, stateRoot)
 	return nil
 }
 
 // armProvingBoot runs on the reboot path: if a release is staged for
-// the other slot, mark it attempted and arm BootNext so the next
-// boot, and only the next, tries it. The attempted marker is written
-// first, deliberately. A crash between the two writes then reads as
-// "tried and fell back", which wrongly rejects a release that never
-// ran; but the opposite order could arm a trial with no marker, and
-// a failing release would then re-arm and reboot forever. A false
-// rejection can be fixed by editing the store; a reboot loop can't
-// be fixed by anything, so the ordering favors the false rejection.
-func armProvingBoot(efiDir, stateRoot, runningSlot string) {
+// the other slot, mark it attempted and arm the actuator's one-shot
+// trial so the next boot, and only the next, tries it. The attempted
+// marker is written first, deliberately. A crash between the two
+// writes then reads as "tried and fell back", which wrongly rejects
+// a release that never ran; but the opposite order could arm a trial
+// with no marker, and a failing release would then re-arm and reboot
+// forever. A false rejection can be fixed by editing the store; a
+// reboot loop can't be fixed by anything, so the ordering favors the
+// false rejection. canArmTrial runs before either write for the same
+// reason: anything knowably wrong must be found while refusing is
+// still free.
+func armProvingBoot(act bootActuator, stateRoot, runningSlot string) {
 	store := machine.SystemReleases(stateRoot)
 	staged, err := store.LoadStaged()
 	if staged == nil || err != nil {
@@ -138,22 +145,22 @@ func armProvingBoot(efiDir, stateRoot, runningSlot string) {
 		return
 	}
 
-	entry, ok := findSlotEntry(efiDir, record.Slot)
-	if !ok {
-		fmt.Fprintf(os.Stderr, "liken: system: no boot entry answers to \"liken slot %s\"; rebooting without arming the trial\n", record.Slot)
+	if err := act.canArmTrial(record.Slot); err != nil {
+		fmt.Fprintf(os.Stderr, "liken: system: %v; rebooting without arming the trial\n", err)
 		return
 	}
 
 	// The fallback is asserted, and *verified*, before the trial is
 	// armed. A trial is only safe when every reset after its one
-	// BootNext chance lands on a proven slot, and BootOrder is what
-	// guarantees that. If the firmware won't hold the order (or the
-	// repair quietly failed), the fallback doesn't exist, and arming
-	// a trial anyway could brick the machine with its own upgrade.
-	// So the trial is refused, visibly, and the machine stays on the
-	// version that works, where an operator can still reach it.
-	if !fallbackInPlace(efiDir, stateRoot) {
-		fmt.Fprintln(os.Stderr, "liken: system: the fallback BootOrder could not be verified; refusing to arm the trial")
+	// chance lands on a proven slot, and the standing preference is
+	// what guarantees that. If the firmware won't hold it (or the
+	// assertion quietly failed), the fallback doesn't exist, and
+	// arming a trial anyway could brick the machine with its own
+	// upgrade. So the trial is refused, visibly, and the machine
+	// stays on the version that works, where an operator can still
+	// reach it.
+	if !fallbackInPlace(act, stateRoot) {
+		fmt.Fprintln(os.Stderr, "liken: system: the proven fallback could not be verified; refusing to arm the trial")
 		return
 	}
 
@@ -161,35 +168,26 @@ func armProvingBoot(efiDir, stateRoot, runningSlot string) {
 		fmt.Fprintf(os.Stderr, "liken: system: marking the trial attempted: %v; rebooting without arming it\n", err)
 		return
 	}
-	if err := writeEFIVar(efiDir, "BootNext", []byte{byte(entry), byte(entry >> 8)}); err != nil {
-		fmt.Fprintf(os.Stderr, "liken: system: arming BootNext: %v\n", err)
+	armed, err := act.armTrial(record.Slot)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "liken: system: %v\n", err)
 		return
 	}
-	fmt.Printf("liken: system: BootNext armed at %s; the next boot tries release %s on slot %s, once\n",
-		bootEntryID(entry), record.Version, record.Slot)
+	fmt.Printf("liken: system: %s; the next boot tries release %s on slot %s, once\n",
+		armed, record.Version, record.Slot)
 }
 
-// fallbackInPlace makes BootOrder lead with the proven slot, then
-// trusts only what it can read back: a write that appeared to
-// succeed is not the same thing as the firmware actually holding the
-// order.
-func fallbackInPlace(efiDir, stateRoot string) bool {
-	repairBootOrder(efiDir, stateRoot)
-
-	proven, err := machine.SystemReleases(stateRoot).LoadProven()
-	if proven == nil || err != nil {
+// fallbackInPlace asserts the standing preference at the proven slot,
+// then trusts only what the actuator can read back: a write that
+// appeared to succeed is not the same thing as the firmware actually
+// holding it.
+func fallbackInPlace(act bootActuator, stateRoot string) bool {
+	record := provenRecord(stateRoot)
+	if record == nil {
 		return false
 	}
-	record, err := machine.ParseSystemRelease(proven)
-	if err != nil {
-		return false
-	}
-	leader, ok := findSlotEntry(efiDir, record.Slot)
-	if !ok {
-		return false
-	}
-	current := readBootOrder(efiDir)
-	return len(current) > 0 && current[0] == leader
+	act.assertProven(record.Slot)
+	return act.fallbackLeads(record.Slot)
 }
 
 // provingPatience is how long a proving boot may run unpromoted
@@ -209,15 +207,15 @@ const provingPatience = 10 * time.Minute
 //
 // The loop combines two fallbacks. The first is the ordinary path:
 // poll the store until the operator promotes the staged record (its
-// disappearance is the signal), then rewrite BootOrder so the newly
-// proven slot leads. The second is a watchdog: a trial that reaches
-// provingPatience unpromoted gets a deliberate reboot. The firmware's
-// one-shot BootNext is already consumed, so the machine lands on the
-// proven slot, where the attempted marker renders the verdict
+// disappearance is the signal), then assert the standing preference
+// so the newly proven slot leads. The second is a watchdog: a trial
+// that reaches provingPatience unpromoted gets a deliberate reboot.
+// The one-shot arming is already consumed, so the machine lands on
+// the proven slot, where the attempted marker renders the verdict
 // (RejectedLastBoot) and prevents any reboot loop. The watchdog
-// covers the failure BootNext can't see: a kernel that boots fine
-// into a system that never serves.
-func provingWatch(trial machine.SystemRelease) func(context.Context) error {
+// covers the failure the one-shot can't see: a kernel that boots
+// fine into a system that never serves.
+func provingWatch(act bootActuator, trial machine.SystemRelease) func(context.Context) error {
 	return func(ctx context.Context) error {
 		deadline := time.After(provingPatience)
 		for {
@@ -227,7 +225,7 @@ func provingWatch(trial machine.SystemRelease) func(context.Context) error {
 			case <-deadline:
 				fmt.Fprintf(os.Stderr, "liken: system: the proving boot never settled within %s; rebooting onto the proven slot\n", provingPatience)
 				rebootMachine(machine.RebootIntent{
-					Reason: "the proving boot never settled; the firmware's consumed BootNext falls back to the proven slot",
+					Reason: "the proving boot never settled; the consumed one-shot falls back to the proven slot",
 				}) // never returns
 			case <-time.After(5 * time.Second):
 			}
@@ -253,72 +251,46 @@ func provingWatch(trial machine.SystemRelease) func(context.Context) error {
 					trial.Version)
 				return nil
 			}
-			fmt.Printf("liken: system: release %s was promoted; asserting BootOrder from the store\n", record.Version)
-			repairBootOrder(efiVarsDir, machine.MachineStateDir)
+			fmt.Printf("liken: system: release %s was promoted; asserting the proven slot from the store\n", record.Version)
+			assertProvenSlot(act, machine.MachineStateDir)
 			return nil
 		}
 	}
 }
 
-// repairBootOrder makes the firmware agree with the store: the proven
-// record's slot leads BootOrder, and everything else keeps its
-// relative order. It runs on every boot and after every promotion,
-// so the store stays the authority and the firmware only ever holds
-// a copy. A lost or mangled BootOrder (a dead NVRAM battery, someone
-// editing the setup menu) is corrected on the next boot.
-func repairBootOrder(efiDir, stateRoot string) {
+// assertProvenSlot makes the firmware agree with the store: the
+// proven record's slot leads the standing boot preference. It runs on
+// every boot and after every promotion, so the store stays the
+// authority and the firmware only ever holds a copy; whatever
+// drifted (a dead NVRAM battery, someone editing the setup menu) is
+// corrected on the next boot. Reading the record is neutral work done
+// here; making the firmware agree is the actuator's.
+func assertProvenSlot(act bootActuator, stateRoot string) {
+	record := provenRecord(stateRoot)
+	if record == nil {
+		return // no record yet; leave the firmware's preference as it is
+	}
+	act.assertProven(record.Slot)
+}
+
+// provenRecord loads and parses the store's proven release record,
+// reporting the ways a record can fail to exist: unreadable and
+// unparseable earn a console line, because a machine whose proven
+// record is damaged has lost its fallback; absent is ordinary (a
+// machine that has never upgraded).
+func provenRecord(stateRoot string) *machine.SystemRelease {
 	proven, err := machine.SystemReleases(stateRoot).LoadProven()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "liken: system: the proven release record is unreadable: %v\n", err)
-		return
+		return nil
 	}
 	if proven == nil {
-		return // no record yet; leave the firmware's order as it is
+		return nil
 	}
 	record, err := machine.ParseSystemRelease(proven)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "liken: system: the proven release record does not parse: %v\n", err)
-		return
+		return nil
 	}
-	leader, ok := findSlotEntry(efiDir, record.Slot)
-	if !ok {
-		fmt.Fprintf(os.Stderr, "liken: system: the store says slot %s is proven, but no boot entry answers to it; leaving BootOrder alone\n", record.Slot)
-		return
-	}
-
-	order := readBootOrder(efiDir)
-	if len(order) > 0 && order[0] == leader {
-		return // the firmware already agrees
-	}
-
-	repaired := []uint16{leader}
-	for _, n := range order {
-		if n != leader {
-			repaired = append(repaired, n)
-		}
-	}
-	if err := writeBootOrder(efiDir, repaired); err != nil {
-		fmt.Fprintf(os.Stderr, "liken: system: repairing BootOrder: %v\n", err)
-		return
-	}
-	// Trust the readback, not the write: some firmware accepts a
-	// write and then fails to hold it, and every later report would
-	// be wrong if the write were taken at face value.
-	if readback := readBootOrder(efiDir); len(readback) == 0 || readback[0] != leader {
-		fmt.Fprintf(os.Stderr, "liken: system: BootOrder was written but reads back unchanged; the firmware is not holding it\n")
-		return
-	}
-	fmt.Printf("liken: system: BootOrder now leads with %s (slot %s is proven)\n",
-		bootEntryID(leader), record.Slot)
-}
-
-// findSlotEntry locates a slot's firmware entry the way everything in
-// liken finds things: by the name written on it at install time.
-func findSlotEntry(efiDir, slot string) (uint16, bool) {
-	for number, option := range listBootEntries(efiDir) {
-		if option.description == "liken slot "+slot {
-			return number, true
-		}
-	}
-	return 0, false
+	return record
 }

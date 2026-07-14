@@ -155,8 +155,12 @@ func main() {
 	// may be the trial of a staged release (in which case the staged
 	// record comes back, to arm the proving watch), the fallback from
 	// one, or an ordinary boot whose only job is to keep the
-	// firmware's BootOrder agreeing with the store (proving.go).
-	trial := settleSystemRelease(machine.MachineStateDir, boot.Slot,
+	// firmware's boot preference agreeing with the store
+	// (proving.go). The actuator is the firmware dialect those
+	// conversations happen in, chosen once here for the whole boot
+	// (actuator.go).
+	actuator := chooseBootActuator()
+	trial := settleSystemRelease(actuator, machine.MachineStateDir, boot.Slot,
 		storage.MachineState.Backing == machine.BackingPartition, &boot)
 
 	// The cluster document says which machines are leaders, and from
@@ -231,7 +235,7 @@ func main() {
 	// proves it can boot and powers off.
 	if _, err := os.Stat(k3sBinary); err == nil {
 		clusterLife(choice, storage, boot, cluster, clusterRaw, creds,
-			conns, moduleStatuses, featureStatuses, trial) // never returns
+			conns, moduleStatuses, featureStatuses, actuator, trial) // never returns
 	}
 
 	// With no k3s to supervise, a boot is complete once the report is
@@ -250,7 +254,7 @@ func main() {
 func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot machine.BootStatus,
 	cluster *machine.Cluster, clusterRaw []byte, creds *machine.RegistryCredentials,
 	conns []*connection, moduleStatuses []machine.ModuleStatus,
-	featureStatuses []machine.FeatureStatus, trial *machine.SystemRelease) {
+	featureStatuses []machine.FeatureStatus, actuator bootActuator, trial *machine.SystemRelease) {
 	m := choice.m
 
 	// Before k3s can touch its container store: decide whether
@@ -356,10 +360,10 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 		cluster, clusterRaw, creds, boot.CredentialsSource)
 	// A proving boot watches for its own promotion: when the
 	// operator's first reconcile proves the staged release, init
-	// rewrites the firmware's BootOrder to put the newly proven
-	// slot first (proving.go).
+	// asserts the firmware's boot preference so the newly proven
+	// slot leads (proving.go).
 	if trial != nil {
-		plane.start("the proving watch", provingWatch(*trial))
+		plane.start("the proving watch", provingWatch(actuator, *trial))
 	}
 	// Only a leader can report cluster state: the admin
 	// kubeconfig is a control-plane artifact, and followers hold
