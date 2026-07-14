@@ -7,8 +7,10 @@ package main
 // stick or PXE on real hardware — and its job this boot is not to
 // serve a cluster but to make external media unnecessary: verify the
 // release payload it carries, copy it into system slot A, register
-// both slots in the firmware's boot menu, and power off. Every boot
-// after comes from the disk.
+// both slots with whatever governs booting (firmware boot entries on
+// a UEFI machine, liken's own GRUB on a machine that declares the
+// biosBoot and bootHome roles), and power off. Every boot after
+// comes from the disk.
 //
 // The installer is liken itself, not a separate program: the same
 // init, the same storage reconciliation (which is what claimed and
@@ -117,10 +119,38 @@ func installToDisk(machineName string) error {
 		return err
 	}
 
-	// Register both slots with the firmware. Slot B's entries point
-	// at files that don't exist yet, because its slot stays empty
-	// until the first upgrade fills it. That's fine: a firmware that
-	// can't load an entry's file moves on down BootOrder.
+	// The actuator half: register the slots with whatever will hold
+	// this machine's boot choices. A UEFI machine gets firmware boot
+	// entries; a machine whose spec declares the GRUB roles gets its
+	// own bootloader laid down. Both at once is legitimate — a disk
+	// prepared under UEFI can carry its GRUB for a BIOS life, and the
+	// lab's dual-firmware disks do — but neither is an install no
+	// firmware could ever boot, refused before the power-off makes it
+	// permanent.
+	actuators := 0
+	if firmwareIsUEFI() {
+		if err := installBootEntries(slotA, slotB, machineName); err != nil {
+			return err
+		}
+		actuators++
+	}
+	if hasPartition(parts, machine.BIOSBootRole) {
+		if err := installGRUB(parts, machineName, slotMount); err != nil {
+			return err
+		}
+		actuators++
+	}
+	if actuators == 0 {
+		return fmt.Errorf("install: this machine's firmware holds no boot variables (BIOS) and its spec declares no biosBoot/bootHome roles for GRUB; there is nothing that could boot the installed disk")
+	}
+	return nil
+}
+
+// installBootEntries registers both slots with UEFI firmware. Slot
+// B's entry points at files that don't exist yet, because its slot
+// stays empty until the first upgrade fills it. That's fine: a
+// firmware that can't load an entry's file moves on down BootOrder.
+func installBootEntries(slotA, slotB *slotPartition, machineName string) error {
 	entryA, err := writeSlotBootEntry(efiVarsDir, "liken slot A", "A", slotA, machineName)
 	if err != nil {
 		return err
@@ -148,6 +178,89 @@ func installToDisk(machineName string) error {
 	fmt.Printf("liken: install: boot entries %s and %s written; BootOrder prefers slot A\n",
 		bootEntryID(entryA), bootEntryID(entryB))
 	return nil
+}
+
+// installGRUB lays the bootloader down for a machine that boots
+// BIOS-style: the patched boot chain into the MBR and the biosBoot
+// partition (grubinstall.go owns the arithmetic), and the config and
+// environment block onto the boot home. The GRUB artifacts come from
+// the slot the release was just verified onto — they arrived through
+// the same verify-copy-verify pipeline as everything else. Like the
+// rest of the installer this converges on re-run: every write puts
+// down the same bytes.
+func installGRUB(parts []partition, machineName, slotMount string) error {
+	biosBoot, err := findSlotPartition(parts, machine.BIOSBootRole)
+	if err != nil {
+		return err
+	}
+	name := machine.DeclaredRole{Name: machine.BIOSBootRole}.PartitionName()
+	var diskDev string
+	for _, p := range parts {
+		if p.partName == name {
+			diskDev = devRoot + "/" + p.disk
+		}
+	}
+
+	bootImg, err := os.ReadFile(filepath.Join(slotMount, "grub-boot.img"))
+	if err != nil {
+		return fmt.Errorf("install: this release carries no grub-boot.img, so it cannot boot a BIOS machine: %w", err)
+	}
+	coreImg, err := os.ReadFile(filepath.Join(slotMount, "grub-core.img"))
+	if err != nil {
+		return fmt.Errorf("install: this release carries no grub-core.img, so it cannot boot a BIOS machine: %w", err)
+	}
+	plan, err := planGRUBBootSectors(bootImg, coreImg, biosBoot)
+	if err != nil {
+		return fmt.Errorf("install: %w", err)
+	}
+	disk, err := os.OpenFile(diskDev, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	writeErr := plan.write(disk)
+	if err := disk.Close(); writeErr == nil {
+		writeErr = err
+	}
+	if writeErr != nil {
+		return fmt.Errorf("install: writing the boot sectors on %s: %w", diskDev, writeErr)
+	}
+
+	// The boot home: the rendered config and a fresh environment
+	// block naming slot A — where this install just put the release —
+	// as the default.
+	home := roleMounts[machine.BootHomeRole].path
+	grubDir := filepath.Join(home, "grub")
+	if err := os.MkdirAll(grubDir, 0o755); err != nil {
+		return fmt.Errorf("install: %w", err)
+	}
+	cfg := renderGRUBConfig(machineName, consoleArgs())
+	if err := writeFileDurably(filepath.Join(grubDir, "grub.cfg"), []byte(cfg)); err != nil {
+		return fmt.Errorf("install: writing grub.cfg: %w", err)
+	}
+	env, err := renderGRUBEnv(map[string]string{"default_slot": "A", "try_slot": ""})
+	if err != nil {
+		return err
+	}
+	if err := writeFileDurably(filepath.Join(grubDir, "grubenv"), env); err != nil {
+		return fmt.Errorf("install: writing grubenv: %w", err)
+	}
+
+	fmt.Printf("liken: install: GRUB installed on %s; grub.cfg and grubenv on the boot home prefer slot A\n", diskDev)
+	return nil
+}
+
+// hasPartition reports whether a role's partition exists on this
+// machine: for the installer, the sign that the machine's spec
+// declared the role, since storage reconciliation claimed the
+// partitions moments before the install began.
+func hasPartition(parts []partition, role machine.StorageRoleName) bool {
+	name := machine.DeclaredRole{Name: role}.PartitionName()
+	for _, p := range parts {
+		if p.partName == name {
+			return true
+		}
+	}
+	return false
 }
 
 // installLayer copies the deployment layer and its sidecar from the

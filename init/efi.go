@@ -29,15 +29,17 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-const (
-	efiSysDir = "/sys/firmware/efi"
+// Every variable's filename carries its owner's GUID, because
+// variable names are only unique per vendor. The boot manager's
+// variables all belong to the specification's own GUID, fixed
+// forever as EFI_GLOBAL_VARIABLE.
+const efiGlobalVariable = "8be4df61-93ca-11d2-aa0d-00e098032b8c"
 
-	// Every variable's filename carries its owner's GUID, because
-	// variable names are only unique per vendor. The boot manager's
-	// variables all belong to the specification's own GUID, fixed
-	// forever as EFI_GLOBAL_VARIABLE.
-	efiGlobalVariable = "8be4df61-93ca-11d2-aa0d-00e098032b8c"
-)
+// efiSysDir is where the kernel exposes UEFI runtime services; its
+// existence is the whole firmware-regime test. A variable rather
+// than a constant so tests can decide which regime they run under
+// regardless of the machine running them.
+var efiSysDir = "/sys/firmware/efi"
 
 // efiVarsDir is a variable rather than a constant so tests can stand
 // up a directory of fake variables and exercise everything above the

@@ -9,6 +9,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -185,6 +186,47 @@ func installedDisk(t *testing.T) (sys, dev string) {
 	return sys, dev
 }
 
+// installedBIOSDisk is installedDisk with the two GRUB roles ahead of
+// the slots: the disk of a machine whose spec declared them.
+func installedBIOSDisk(t *testing.T) (sys, dev string) {
+	t.Helper()
+	sys, dev = fakeMachine(t)
+	const totalSectors = 1 << 16
+	addDisk(t, sys, dev, "vdc", totalSectors*disks.SectorSize, make([]byte, totalSectors*disks.SectorSize))
+	table := &disks.Table{
+		DiskGUID: disks.MustGUID("11111111-2222-3333-4455-66778899AABB"),
+		Entries: []disks.Entry{
+			{TypeGUID: disks.BIOSBootPartition, UniqueGUID: disks.MustGUID("0B105B00-0000-4000-8000-000000000001"),
+				FirstLBA: 2048, LastLBA: 4095, Name: "liken:biosBoot"},
+			{TypeGUID: disks.LinuxFilesystemData, UniqueGUID: disks.MustGUID("0B105B00-0000-4000-8000-000000000002"),
+				FirstLBA: 4096, LastLBA: 20479, Name: "liken:bootHome"},
+			{TypeGUID: disks.EFISystemPartition, UniqueGUID: disks.MustGUID("AAAAAAAA-BBBB-CCCC-DDEE-FF0011223344"),
+				FirstLBA: 20480, LastLBA: 36863, Name: "liken:systemA"},
+			{TypeGUID: disks.EFISystemPartition, UniqueGUID: disks.MustGUID("99999999-8888-7777-6655-443322110000"),
+				FirstLBA: 36864, LastLBA: 53247, Name: "liken:systemB"},
+		},
+	}
+	chunks, err := disks.SerializeGPT(table, totalSectors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(filepath.Join(dev, "vdc"), os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	for _, chunk := range chunks {
+		if _, err := f.WriteAt(chunk.Data, int64(chunk.LBA)*disks.SectorSize); err != nil {
+			t.Fatal(err)
+		}
+	}
+	addPartition(t, sys, "vdc", "vdc1", "liken:biosBoot", 2048*disks.SectorSize)
+	addPartition(t, sys, "vdc", "vdc2", "liken:bootHome", 16384*disks.SectorSize)
+	addPartition(t, sys, "vdc", "vdc3", "liken:systemA", 16384*disks.SectorSize)
+	addPartition(t, sys, "vdc", "vdc4", "liken:systemB", 16384*disks.SectorSize)
+	return sys, dev
+}
+
 func TestFindSlotPartition(t *testing.T) {
 	installedDisk(t)
 	parts := discoverPartitions()
@@ -230,6 +272,14 @@ func fakePayload(t *testing.T) string {
 	dir := t.TempDir()
 	kernel := artifactFor(t, dir, "vmlinuz", []byte("the kernel"))
 	cpio := artifactFor(t, dir, "liken.sqfs", []byte("the rest of the OS"))
+	// The GRUB pair every release carries: a full boot.img sector and
+	// a small core image with the load segment where diskboot keeps
+	// it, enough for the patcher to accept them.
+	bootImgBytes := bytes.Repeat([]byte{0xB0}, disks.SectorSize)
+	coreImgBytes := bytes.Repeat([]byte{0xC0}, 3*disks.SectorSize)
+	binary.LittleEndian.PutUint16(coreImgBytes[grubBlocklistSegment:], grubLoadSegment)
+	bootImg := artifactFor(t, dir, "grub-boot.img", bootImgBytes)
+	coreImg := artifactFor(t, dir, "grub-core.img", coreImgBytes)
 	release := fmt.Sprintf(`apiVersion: liken.sh/v1alpha1
 kind: Release
 metadata:
@@ -241,7 +291,14 @@ artifacts:
 - name: %s
   sha256: %s
   size: %d
-`, kernel.Name, kernel.SHA256, kernel.Size, cpio.Name, cpio.SHA256, cpio.Size)
+- name: %s
+  sha256: %s
+  size: %d
+- name: %s
+  sha256: %s
+  size: %d
+`, kernel.Name, kernel.SHA256, kernel.Size, cpio.Name, cpio.SHA256, cpio.Size,
+		bootImg.Name, bootImg.SHA256, bootImg.Size, coreImg.Name, coreImg.SHA256, coreImg.Size)
 	if err := os.WriteFile(filepath.Join(dir, "release.yaml"), []byte(release), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -265,13 +322,39 @@ artifacts:
 }
 
 // fakeFirmware points the efivars path at a fake store so the
-// install's boot-entry writes land somewhere observable.
+// install's boot-entry writes land somewhere observable, and pins
+// the regime to UEFI (the store's directory existing is the same
+// test the kernel's /sys/firmware/efi satisfies) so the test means
+// the same thing on any machine that runs it.
 func fakeFirmware(t *testing.T, vars map[string][]byte) string {
 	t.Helper()
 	dir := fakeEFIVars(t, vars)
-	old := efiVarsDir
-	efiVarsDir = dir
-	t.Cleanup(func() { efiVarsDir = old })
+	old, oldSys := efiVarsDir, efiSysDir
+	efiVarsDir, efiSysDir = dir, dir
+	t.Cleanup(func() { efiVarsDir, efiSysDir = old, oldSys })
+	return dir
+}
+
+// fakeBIOSRegime pins the regime to BIOS: no firmware directory, no
+// boot variables, exactly what a machine booted by legacy firmware
+// looks like to the kernel.
+func fakeBIOSRegime(t *testing.T) {
+	t.Helper()
+	oldSys := efiSysDir
+	efiSysDir = filepath.Join(t.TempDir(), "no-efi-here")
+	t.Cleanup(func() { efiSysDir = oldSys })
+}
+
+// fakeBootHomeMount points the bootHome role's mountpoint at a
+// tempdir, the same stand-in fakeSlotAMount provides for slot A.
+func fakeBootHomeMount(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	old := roleMounts[machine.BootHomeRole]
+	rm := old
+	rm.path = dir
+	roleMounts[machine.BootHomeRole] = rm
+	t.Cleanup(func() { roleMounts[machine.BootHomeRole] = old })
 	return dir
 }
 
@@ -319,6 +402,83 @@ func TestInstallToDisk(t *testing.T) {
 func TestInstallToDiskNeedsAName(t *testing.T) {
 	if err := installToDisk(""); err == nil {
 		t.Error("an anonymous install would be wrong on every later boot")
+	}
+}
+
+func TestInstallToDiskLaysDownGRUB(t *testing.T) {
+	_, dev := installedBIOSDisk(t)
+	fakePayload(t)
+	fakeSlotAMount(t)
+	home := fakeBootHomeMount(t)
+	fakeCmdline(t, "console=ttyS0 rdinit=/liken liken.install\n")
+	fakeBIOSRegime(t)
+
+	if err := installToDisk("node-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	disk, err := os.Open(filepath.Join(dev, "vdc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer disk.Close()
+	sector := make([]byte, disks.SectorSize)
+	if _, err := disk.ReadAt(sector, 0); err != nil {
+		t.Fatal(err)
+	}
+	// The MBR carries the patched boot code: the core image's LBA at
+	// its fixed offset, and the payload's own bytes elsewhere.
+	if got := binary.LittleEndian.Uint64(sector[grubKernelSectorOffset:]); got != 2048 {
+		t.Errorf("the boot code should point at the biosBoot partition: sector %d", got)
+	}
+	if sector[0] != 0xB0 {
+		t.Error("the boot code's unpatched bytes should be the release's grub-boot.img")
+	}
+	// Sector 0's tail still belongs to the GPT: protective entry and
+	// signature intact.
+	if sector[446+4] != 0xEE || sector[510] != 0x55 || sector[511] != 0xAA {
+		t.Error("the install must not disturb the protective MBR")
+	}
+	core := make([]byte, disks.SectorSize)
+	if _, err := disk.ReadAt(core, 2048*disks.SectorSize); err != nil {
+		t.Fatal(err)
+	}
+	if core[0] != 0xC0 {
+		t.Error("the core image should land at the biosBoot partition's start")
+	}
+	if got := binary.LittleEndian.Uint64(core[grubBlocklistStart:]); got != 2049 {
+		t.Errorf("the core image's blocklist should be patched: start %d", got)
+	}
+
+	cfg, err := os.ReadFile(filepath.Join(home, "grub", "grub.cfg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(cfg), "liken.machine=node-1") {
+		t.Error("grub.cfg should carry the machine's identity")
+	}
+	vars, err := readGRUBEnv(filepath.Join(home, "grub", "grubenv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vars["default_slot"] != "A" {
+		t.Errorf("a fresh install prefers slot A: %v", vars)
+	}
+}
+
+func TestInstallToDiskRefusesWithoutAnyActuator(t *testing.T) {
+	// A BIOS machine whose spec declares no GRUB roles: nothing could
+	// ever boot the installed disk, so the install must say so
+	// instead of powering off a machine that will never come back.
+	installedDisk(t)
+	fakePayload(t)
+	fakeSlotAMount(t)
+	fakeCmdline(t, "console=ttyS0 rdinit=/liken liken.install\n")
+	fakeBIOSRegime(t)
+
+	err := installToDisk("node-1")
+	if err == nil || !strings.Contains(err.Error(), "biosBoot") {
+		t.Errorf("an install with no actuator must be refused with the reason: %v", err)
 	}
 }
 
