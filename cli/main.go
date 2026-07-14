@@ -83,8 +83,8 @@ usage:
       itself and powers off. -console (repeatable) adds a console=
       argument to every entry; the machines keep it permanently.
 
-  liken bundle <vmlinuz> <liken.sqfs> <boot.cpio> <liken-cli> <systemd-boot.efi> <channel-dir> <version> [component=version ...]
-      Lay out a release: copy the five files into the channel and
+  liken bundle <vmlinuz> <liken.sqfs> <boot.cpio> <liken-cli> <systemd-boot.efi> <grub-boot.img> <grub-core.img> <channel-dir> <version> [component=version ...]
+      Lay out a release: copy the seven files into the channel and
       write the release.yaml that names each one by its digest. The
       version is a calendar date and serial (2026.07.11-001); the
       component=version pairs record which upstreams shipped inside,
@@ -169,18 +169,18 @@ func run(args []string) error {
 		}
 		return image.Stick(fs.Arg(0), fs.Arg(1), fs.Arg(2), consoles, os.Stdout)
 	case "bundle":
-		if len(args) < 8 {
-			return fmt.Errorf("usage: liken bundle <vmlinuz> <liken.sqfs> <boot.cpio> <liken-cli> <systemd-boot.efi> <channel-dir> <version> [component=version ...]")
+		if len(args) < 10 {
+			return fmt.Errorf("usage: liken bundle <vmlinuz> <liken.sqfs> <boot.cpio> <liken-cli> <systemd-boot.efi> <grub-boot.img> <grub-core.img> <channel-dir> <version> [component=version ...]")
 		}
 		var components []machine.ReleaseComponent
-		for _, arg := range args[8:] {
+		for _, arg := range args[10:] {
 			name, version, ok := strings.Cut(arg, "=")
 			if !ok || name == "" || version == "" {
 				return fmt.Errorf("component %q must be name=version", arg)
 			}
 			components = append(components, machine.ReleaseComponent{Name: name, Version: version})
 		}
-		return releases.Bundle(args[1], args[2], args[3], args[4], args[5], args[6], args[7], components, os.Stdout)
+		return releases.Bundle(args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], components, os.Stdout)
 	case "serve":
 		addr := ":8017"
 		switch len(args) {

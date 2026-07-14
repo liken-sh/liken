@@ -321,10 +321,12 @@ LAB_VERSION := $(shell date +%Y.%m.%d)-000
 
 $(IMAGE_DIR)/channel/$(LAB_VERSION)/release.yaml: $(SYSTEM_IMAGE) $(BOOT_ARCHIVE) \
 		$(KERNEL_DIST)/vmlinuz cli/dist/liken $(LIKEN_VERSION_STAMP) \
-		$(SYSTEMDBOOT_DIST)/systemd-bootx64.efi
+		$(SYSTEMDBOOT_DIST)/systemd-bootx64.efi \
+		$(GRUB_DIST)/grub-boot.img $(GRUB_DIST)/grub-core.img
 	rm -rf $(IMAGE_DIR)/channel
 	cli/dist/liken bundle $(KERNEL_DIST)/vmlinuz $(SYSTEM_IMAGE) $(BOOT_ARCHIVE) \
 		cli/dist/liken $(SYSTEMDBOOT_DIST)/systemd-bootx64.efi \
+		$(GRUB_DIST)/grub-boot.img $(GRUB_DIST)/grub-core.img \
 		$(IMAGE_DIR)/channel $(LAB_VERSION)
 
 # The install image for the lab's fast -kernel boots: the release

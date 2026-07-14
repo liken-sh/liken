@@ -19,14 +19,19 @@
 #   grub-pc-bin   the BIOS ("i386-pc") build: boot.img (the MBR
 #                 stage) and the module tree grub-mkimage links core
 #                 images from
-#   grub2-common  grub-mkimage itself, the tool that does the linking
+#   grub-common   grub-mkimage itself, the tool that does the linking
+#                 (the 2.14 packaging moved it to grub2-common; a
+#                 re-pin past 2.12 must move this fetch with it)
 #
 # The tool rides along rather than coming from the build host so the
 # pair can never skew: a grub-mkimage from one GRUB version linking
 # modules from another is exactly the kind of quiet mismatch pinning
-# exists to prevent. (The binary is dynamically linked, but only
-# against libraries every Ubuntu host has; the Makefile's build of
-# core.img proves it runs.)
+# exists to prevent. The binary is dynamically linked, which cuts the
+# other way — the pinned series must be old enough that its library
+# demands are met everywhere builds run. The 2.14 series taught that
+# lesson (its grub-mkimage wants a libdevmapper newer than CI has),
+# which is why the pin sits on 2.12, the current LTS series, and
+# should follow the oldest platform liken builds on.
 #
 # When Ubuntu supersedes this version the URLs 404, and the fix is
 # the ordinary one-line re-pin: new version in grub/VERSION, new
@@ -57,10 +62,10 @@ version="${1:-$(cat "$here/VERSION")}"
 # Release indexes, not beside the files, so the pins live here where
 # a version bump has to update them deliberately.
 declare -A pc_bin_sha256=(
-    ["2.14-2ubuntu3"]="187f86d4c802a250d417f9f0d2a4095c2e3995ea5194f55a6d9ec27fd16f5055"
+    ["2.12-1ubuntu7.3"]="698d80bc51c0c593fbc829758365a0e4bce96819e2c8c754ae77dfe39b0388df"
 )
 declare -A common_sha256=(
-    ["2.14-2ubuntu3"]="5d45c86963028b5d027d65c9126580742f8924195f71265144dc7ea6422acdbd"
+    ["2.12-1ubuntu7.3"]="464e7c3a9f261b2120a6755fbf753384669c666a5cc7cd571cf836d6da88373f"
 )
 
 pool="http://archive.ubuntu.com/ubuntu/pool/main/g/grub2"
@@ -84,7 +89,7 @@ fetch() {
 }
 
 pc_bin="grub-pc-bin_${version}_amd64.deb"
-common="grub2-common_${version}_amd64.deb"
+common="grub-common_${version}_amd64.deb"
 fetch "$pc_bin" "${pc_bin_sha256[$version]:-}"
 fetch "$common" "${common_sha256[$version]:-}"
 

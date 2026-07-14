@@ -75,6 +75,7 @@ E2FSPROGS_VERSION := $(strip $(file <../e2fsprogs/VERSION))
 OPENISCSI_VERSION := $(strip $(file <../open-iscsi/VERSION))
 NFSUTILS_VERSION := $(strip $(file <../nfs-utils/VERSION))
 SYSTEMDBOOT_VERSION := $(strip $(file <../systemd-boot/VERSION))
+GRUB_VERSION := $(strip $(file <../grub/VERSION))
 
 # The version-stamped build: every liken component rebuilt under
 # VERSION into build/<version>/, generic image included. This is the
@@ -103,12 +104,15 @@ build:
 # release.
 release: build
 	$(MAKE) -C ../systemd-boot
+	$(MAKE) -C ../grub
 	$(BUILD)/cli/liken bundle \
 		../kernel/dist/$(KERNEL_VERSION)/vmlinuz \
 		$(BUILD)/generic/liken.sqfs \
 		$(BUILD)/generic/boot.cpio \
 		$(BUILD)/cli/liken \
 		../systemd-boot/dist/$(SYSTEMDBOOT_VERSION)/systemd-bootx64.efi \
+		../grub/dist/$(GRUB_VERSION)/grub-boot.img \
+		../grub/dist/$(GRUB_VERSION)/grub-core.img \
 		dist $(VERSION) \
 		kernel=$(KERNEL_VERSION) \
 		k3s=$(K3S_VERSION) \
@@ -117,7 +121,8 @@ release: build
 		e2fsprogs=$(E2FSPROGS_VERSION) \
 		open-iscsi=$(OPENISCSI_VERSION) \
 		nfs-utils=$(NFSUTILS_VERSION) \
-		systemd-boot=$(SYSTEMDBOOT_VERSION)
+		systemd-boot=$(SYSTEMDBOOT_VERSION) \
+		grub=$(GRUB_VERSION)
 
 # Serve the channel over HTTP: the lab's release server, standing in
 # for the website. The dev cluster's guests reach it at

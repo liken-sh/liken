@@ -83,7 +83,7 @@ func TestRunAssemblesInstallMedia(t *testing.T) {
 	// A tiny release round-trip: bundle a release, pack a layer for an
 	// empty deployment, and turn the two into install media.
 	src := t.TempDir()
-	for _, name := range []string{"vmlinuz", "liken.sqfs", "boot.cpio", "liken", "systemd-bootx64.efi"} {
+	for _, name := range []string{"vmlinuz", "liken.sqfs", "boot.cpio", "liken", "systemd-bootx64.efi", "grub-boot.img", "grub-core.img"} {
 		if err := os.WriteFile(filepath.Join(src, name), []byte(name+" bytes"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -91,7 +91,8 @@ func TestRunAssemblesInstallMedia(t *testing.T) {
 	channel := t.TempDir()
 	err := run([]string{"bundle", filepath.Join(src, "vmlinuz"), filepath.Join(src, "liken.sqfs"),
 		filepath.Join(src, "boot.cpio"),
-		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"), channel, "2026.07.11-001"})
+		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"),
+		filepath.Join(src, "grub-boot.img"), filepath.Join(src, "grub-core.img"), channel, "2026.07.11-001"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +119,7 @@ func TestRunBundlesARelease(t *testing.T) {
 	// One tiny release through the bundle command; the artifacts just
 	// need to exist.
 	src := t.TempDir()
-	for _, name := range []string{"vmlinuz", "liken.sqfs", "boot.cpio", "liken", "systemd-bootx64.efi"} {
+	for _, name := range []string{"vmlinuz", "liken.sqfs", "boot.cpio", "liken", "systemd-bootx64.efi", "grub-boot.img", "grub-core.img"} {
 		if err := os.WriteFile(filepath.Join(src, name), []byte(name+" bytes"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -127,7 +128,8 @@ func TestRunBundlesARelease(t *testing.T) {
 
 	err := run([]string{"bundle", filepath.Join(src, "vmlinuz"), filepath.Join(src, "liken.sqfs"),
 		filepath.Join(src, "boot.cpio"),
-		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"), channel, "2026.07.11-001",
+		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"),
+		filepath.Join(src, "grub-boot.img"), filepath.Join(src, "grub-core.img"), channel, "2026.07.11-001",
 		"kernel=7.1.2", "k3s=v1.36.2+k3s1"})
 	if err != nil {
 		t.Fatal(err)
@@ -139,6 +141,7 @@ func TestRunBundlesARelease(t *testing.T) {
 
 func TestRunRefusesAMalformedComponent(t *testing.T) {
 	err := run([]string{"bundle", "vmlinuz", "liken.sqfs", "boot.cpio", "liken", "menu.efi",
+		"grub-boot.img", "grub-core.img",
 		t.TempDir(), "2026.07.11-001", "kernel"})
 	if err == nil || !strings.Contains(err.Error(), "name=version") {
 		t.Errorf("a component without name=version must be refused: %v", err)

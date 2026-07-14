@@ -30,6 +30,9 @@ KERNEL_DIST := ../kernel/dist/$(KERNEL_VERSION)
 VMLINUZ := $(KERNEL_DIST)/vmlinuz
 SYSTEMDBOOT_VERSION := $(strip $(file <../systemd-boot/VERSION))
 SDBOOT := ../systemd-boot/dist/$(SYSTEMDBOOT_VERSION)/systemd-bootx64.efi
+GRUB_VERSION := $(strip $(file <../grub/VERSION))
+GRUB_BOOT := ../grub/dist/$(GRUB_VERSION)/grub-boot.img
+GRUB_CORE := ../grub/dist/$(GRUB_VERSION)/grub-core.img
 CLI := ../cli/dist/liken
 SYSTEM_IMAGE := ../image/dist/liken.sqfs
 BOOT_ARCHIVE := ../image/dist/boot.cpio
@@ -85,9 +88,9 @@ image/deployment.cpio: $(CLI) cluster.yaml $(wildcard machines/*.yaml) \
 
 # The release-shaped channel this install draws from: the current
 # tree bundled the way a published release is laid out.
-image/channel/$(VERSION)/release.yaml: $(SYSTEM_IMAGE) $(BOOT_ARCHIVE) $(VMLINUZ) $(CLI) $(SDBOOT)
+image/channel/$(VERSION)/release.yaml: $(SYSTEM_IMAGE) $(BOOT_ARCHIVE) $(VMLINUZ) $(CLI) $(SDBOOT) $(GRUB_BOOT) $(GRUB_CORE)
 	rm -rf image/channel
-	$(CLI) bundle $(VMLINUZ) $(SYSTEM_IMAGE) $(BOOT_ARCHIVE) $(CLI) $(SDBOOT) image/channel $(VERSION)
+	$(CLI) bundle $(VMLINUZ) $(SYSTEM_IMAGE) $(BOOT_ARCHIVE) $(CLI) $(SDBOOT) $(GRUB_BOOT) $(GRUB_CORE) image/channel $(VERSION)
 
 # The install image: the release composed with this deployment's
 # layer, carrying the payload the installer verifies and copies onto
