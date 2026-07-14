@@ -40,14 +40,6 @@ import (
 )
 
 const (
-	// fat32SectorsPerCluster fixes the allocation unit at 4 KiB.
-	// Cluster size is a real tradeoff on big volumes (slack space
-	// against table size), but liken's volumes are around half a
-	// gigabyte and hold a handful of large files; 4 KiB keeps the
-	// math simple and the cluster count comfortably in FAT32
-	// territory.
-	fat32SectorsPerCluster = 8
-
 	// fat32ReservedSectors is how many sectors precede the first FAT:
 	// the boot sector, FSInfo, their backups at sectors 6 and 7, and
 	// padding. 32 is the value everything else writes, and matching
@@ -63,6 +55,29 @@ const (
 	// would be misparsed as FAT16 by any spec-faithful reader.
 	fat32MinClusters = 65_525
 )
+
+// fat32SectorsPerCluster picks the allocation unit from the volume's
+// size, following the table in Microsoft's specification. The
+// interesting line is the first: at one sector per cluster, a volume
+// barely past the 65,525-cluster minimum fits in about 33 MiB, which
+// is what lets small partitions (the GRUB boot home) be FAT32 at all.
+// Above 260 MB the spec steps the cluster up to keep the allocation
+// table from growing without bound; liken's half-gigabyte slots land
+// on 8 sectors (4 KiB), the same tradeoff every other formatter makes.
+func fat32SectorsPerCluster(totalSectors uint64) uint64 {
+	switch {
+	case totalSectors <= 532_480: // ≤ 260 MB
+		return 1
+	case totalSectors <= 16_777_216: // ≤ 8 GB
+		return 8
+	case totalSectors <= 33_554_432: // ≤ 16 GB
+		return 16
+	case totalSectors <= 67_108_864: // ≤ 32 GB
+		return 32
+	default:
+		return 64
+	}
+}
 
 // A Device is the surface a format is written onto: positioned
 // writes plus a durability barrier. An *os.File is one (a partition
@@ -85,6 +100,7 @@ type Device interface {
 // again.
 func FormatFAT32(f Device, totalBytes uint64, label string, volumeID uint32) error {
 	totalSectors := totalBytes / SectorSize
+	sectorsPerCluster := fat32SectorsPerCluster(totalSectors)
 
 	// Microsoft's own FAT-size formula, verbatim from the
 	// specification. The table's size depends on the cluster count,
@@ -92,17 +108,17 @@ func FormatFAT32(f Device, totalBytes uint64, label string, volumeID uint32) err
 	// resolves that circularity by slightly overestimating, wasting
 	// at most a sector or two of table that nothing will ever index.
 	tmp1 := totalSectors - fat32ReservedSectors
-	tmp2 := uint64(256*fat32SectorsPerCluster+fat32NumFATs) / 2
+	tmp2 := (256*sectorsPerCluster + fat32NumFATs) / 2
 	fatSectors := (tmp1 + tmp2 - 1) / tmp2
 
 	dataStart := uint64(fat32ReservedSectors) + fat32NumFATs*fatSectors
 	if totalSectors < dataStart {
 		return fmt.Errorf("partition is too small for FAT32: %d bytes leaves no room past the tables", totalBytes)
 	}
-	clusters := (totalSectors - dataStart) / fat32SectorsPerCluster
+	clusters := (totalSectors - dataStart) / sectorsPerCluster
 	if clusters < fat32MinClusters {
 		return fmt.Errorf(
-			"partition is too small for FAT32: %d bytes yields %d clusters and FAT32 requires %d (about 260Mi); the FAT type is determined by cluster count, so a smaller volume would misparse as FAT16",
+			"partition is too small for FAT32: %d bytes yields %d clusters and FAT32 requires %d (about 33Mi at one sector per cluster); the FAT type is determined by cluster count, so a smaller volume would misparse as FAT16",
 			totalBytes, clusters, fat32MinClusters)
 	}
 	// The far limit: cluster numbers at and above 0x0FFFFFF5 are
@@ -111,7 +127,7 @@ func FormatFAT32(f Device, totalBytes uint64, label string, volumeID uint32) err
 		return fmt.Errorf("partition is too large for FAT32: %d clusters", clusters)
 	}
 
-	boot := buildFAT32BootSector(totalSectors, fatSectors, label, volumeID)
+	boot := buildFAT32BootSector(totalSectors, fatSectors, sectorsPerCluster, label, volumeID)
 	// The FSInfo sector is a hint cache: how many clusters are free
 	// and where to start looking. Readers are allowed to distrust it,
 	// but a fresh count is exact: every cluster except the root
@@ -123,7 +139,7 @@ func FormatFAT32(f Device, totalBytes uint64, label string, volumeID uint32) err
 	// whatever bytes the disk held before, and stale data where a
 	// reader expects free entries is filesystem corruption.
 	zeroStart := uint64(fat32ReservedSectors) * SectorSize
-	zeroLen := (fat32NumFATs*fatSectors + fat32SectorsPerCluster) * SectorSize
+	zeroLen := (fat32NumFATs*fatSectors + sectorsPerCluster) * SectorSize
 	if err := zeroRange(f, int64(zeroStart), int64(zeroLen)); err != nil {
 		return fmt.Errorf("zeroing the allocation tables: %w", err)
 	}
@@ -175,7 +191,7 @@ func FormatFAT32(f Device, totalBytes uint64, label string, volumeID uint32) err
 // that distinguishes a structured sector from a blank one. Those are
 // the same two bytes an MBR ends with, which is why init's blank-disk
 // check needs no special case for FAT.
-func buildFAT32BootSector(totalSectors, fatSectors uint64, label string, volumeID uint32) []byte {
+func buildFAT32BootSector(totalSectors, fatSectors, sectorsPerCluster uint64, label string, volumeID uint32) []byte {
 	bs := make([]byte, SectorSize)
 
 	// A jump instruction over the parameter block, from the era when
@@ -185,7 +201,7 @@ func buildFAT32BootSector(totalSectors, fatSectors uint64, label string, volumeI
 	copy(bs[3:11], "liken   ")
 
 	binary.LittleEndian.PutUint16(bs[11:13], SectorSize)
-	bs[13] = fat32SectorsPerCluster
+	bs[13] = byte(sectorsPerCluster)
 	binary.LittleEndian.PutUint16(bs[14:16], fat32ReservedSectors)
 	bs[16] = fat32NumFATs
 	// Offsets 17-23 are the FAT12/16 fields (root entry count,

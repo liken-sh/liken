@@ -191,14 +191,14 @@ func TestFAT32RootDirectoryCarriesTheLabel(t *testing.T) {
 func TestFAT32RefusesTinyPartitions(t *testing.T) {
 	// Below 65,525 clusters the volume would legally be FAT16 — the
 	// FAT type is determined by cluster count, nothing else — and a
-	// mislabeled FAT16 volume misparses everywhere. 100 MiB at 4 KiB
-	// clusters is well under the line.
+	// mislabeled FAT16 volume misparses everywhere. Even at one
+	// sector per cluster, 16 MiB is well under the line.
 	f, err := os.Create(filepath.Join(t.TempDir(), "tiny"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	err = FormatFAT32(f, 100<<20, "TOO-SMALL", 1)
+	err = FormatFAT32(f, 16<<20, "TOO-SMALL", 1)
 	if err == nil {
 		t.Fatal("expected an error for a partition too small for FAT32")
 	}
@@ -206,6 +206,62 @@ func TestFAT32RefusesTinyPartitions(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %q: %v", want, err)
 		}
+	}
+}
+
+func TestFAT32SectorsPerClusterFollowsTheSpecTable(t *testing.T) {
+	// Microsoft's size table, spot-checked at each step and just
+	// across each boundary. The 512 MiB slots stay at 8 sectors, so
+	// nothing already formatted changes shape.
+	cases := []struct {
+		bytes uint64
+		want  uint64
+	}{
+		{64 << 20, 1},  // the GRUB boot home's neighborhood
+		{260 << 20, 1}, // still at or under the 260 MB line
+		{512 << 20, 8}, // the system slots
+		{8 << 30, 8},   // the 8 GB line itself
+		{(8 << 30) + 512, 16},
+		{16 << 30, 16},
+		{(16 << 30) + 512, 32},
+		{32 << 30, 32},
+		{(32 << 30) + 512, 64},
+	}
+	for _, c := range cases {
+		if got := fat32SectorsPerCluster(c.bytes / SectorSize); got != c.want {
+			t.Errorf("fat32SectorsPerCluster(%d bytes) = %d, want %d", c.bytes, got, c.want)
+		}
+	}
+}
+
+func TestFAT32FormatsASmallVolume(t *testing.T) {
+	// 64 MiB — the GRUB boot home's size class, far below the old
+	// 4 KiB-cluster floor of ~260 MiB. At one sector per cluster the
+	// cluster count clears FAT32's minimum with room to spare.
+	f := formatTestPartition(t, 64<<20)
+	bs := readSector(t, f, 0)
+
+	if got := bs[13]; got != 1 {
+		t.Errorf("sectors per cluster: got %d, want 1", got)
+	}
+	// The sizing formula at one sector per cluster:
+	// ceil((131072-32) / ((256*1+2)/2)) = 1016 sectors of FAT.
+	const fatSize = 1016
+	if got := binary.LittleEndian.Uint32(bs[36:40]); got != fatSize {
+		t.Errorf("32-bit FAT size: got %d, want %d", got, fatSize)
+	}
+	clusters := (64<<20/SectorSize - 32 - 2*fatSize) / 1
+	if clusters < 65_525 {
+		t.Fatalf("test arithmetic is off: %d clusters would misparse as FAT16", clusters)
+	}
+	// The layout holds together: the root directory's label entry
+	// sits where the geometry says cluster 2 begins.
+	root := readSector(t, f, 32+2*fatSize)
+	if got := string(root[0:11]); got != "LIKEN-SYS-A" {
+		t.Errorf("volume label entry: got %q", got)
+	}
+	if !HasFAT32(f.Name()) {
+		t.Error("HasFAT32 should recognize the small volume")
 	}
 }
 
