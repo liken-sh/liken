@@ -71,6 +71,13 @@ usage:
       is only consulted when a machine declares modules; pass - when
       none do.
 
+  liken fetch [-digest sha256:<hex>] <source-url> <version|latest> <channel-dir>
+      Download a published release from a channel into a local
+      channel directory, verifying every artifact against the
+      release's document. Pass "latest" to take whatever the channel
+      currently names newest. -digest pins the document itself to a
+      catalog entry's digest, closing the trust chain end to end.
+
   liken media <release-dir> <deployment.cpio> <output.cpio>
       Build a bootable install image from a downloaded release and
       your deployment layer. Machines install themselves from it.
@@ -150,6 +157,16 @@ func run(args []string) error {
 			return fmt.Errorf("usage: liken layer <manifests-dir> <identity-dir> <kernel-dist> <output.cpio>")
 		}
 		return image.Layer(args[1], args[2], args[3], args[4], os.Stdout)
+	case "fetch":
+		fs := flag.NewFlagSet("fetch", flag.ContinueOnError)
+		digest := fs.String("digest", "", "pin the release document to a catalog entry's sha256:<hex> digest")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 3 {
+			return fmt.Errorf("usage: liken fetch [-digest sha256:<hex>] <source-url> <version|latest> <channel-dir>")
+		}
+		return releases.Fetch(fs.Arg(0), fs.Arg(1), *digest, fs.Arg(2), os.Stdout)
 	case "media":
 		if len(args) != 4 {
 			return fmt.Errorf("usage: liken media <release-dir> <deployment.cpio> <output.cpio>")

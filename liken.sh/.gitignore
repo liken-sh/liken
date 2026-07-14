@@ -9,6 +9,9 @@
 #                the identity domain; never in history
 #   image/       the assembled artifacts: the deployment layer, the
 #                install image, and the disk image shipped to Linode
+#   channel/     verified downloads from the release channel, cached
+#                by version; redownloadable, so never source
 .terraform/
 identity/
 image/
+channel/

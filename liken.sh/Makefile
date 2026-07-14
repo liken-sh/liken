@@ -1,15 +1,34 @@
 # Building the liken.sh deployment: the artifacts that turn a Linode
 # instance into this cluster's founding leader.
 #
-# The shape mirrors the dev cluster's: mint an identity, pack the
-# deployment layer, compose install media from a release channel.
-# What's different is the destination. The dev cluster boots QEMU
-# guests directly; this deployment produces a complete installed
-# *disk image*, because the machine it targets is a Linode whose
-# disk we can write but whose console we only watch. The install
-# still happens the ordinary way — the installer boots and runs
-# exactly as it would on hardware — but it runs here, in a local
-# QEMU guest, against a raw disk file. The written disk is then
+# The operating system here comes from the public release channel,
+# never from this repo's build tree. This deployment exists to
+# consume the channel the way any fleet anywhere does — install once
+# from a published release, upgrade from published releases forever
+# after — so composing its media starts with a verified download:
+#
+#     make RELEASE=2026.07.14-001
+#     make RELEASE=2026.07.14-001 DIGEST=sha256:<hex>
+#     make latest
+#
+# RELEASE names a published version (a pasted tag's leading v is
+# tolerated). DIGEST, printed in the release workflow's run summary,
+# pins the release document itself — the same digest a Cluster
+# commits to its catalog — closing the trust chain end to end; left
+# empty, the artifacts are still verified against the document, just
+# not the document against a pin. `make latest` composes whatever
+# the channel currently names newest. The one piece of the local
+# build still assumed is the toolkit (`make -C ../cli`), which does
+# the fetching and composing; every byte that reaches the disk comes
+# from the verified download.
+#
+# What's different from the dev cluster is the destination. The dev
+# cluster boots QEMU guests directly; this deployment produces a
+# complete installed *disk image*, because the machine it targets is
+# a Linode whose disk we can write but whose console we only watch.
+# The install still happens the ordinary way — the installer boots
+# and runs exactly as it would on hardware — but it runs here, in a
+# local QEMU guest, against a raw disk file. The written disk is then
 # copied byte-for-byte onto the machine's system disk.
 #
 # The install runs under the same firmware Linode boots with: BIOS
@@ -20,28 +39,21 @@
 # config and environment block on the boot home. The disk that comes
 # out boots anywhere BIOS firmware runs it, with nothing planted by
 # hand and no root privileges anywhere in the build.
-#
-# This Makefile assumes the repo's root build is current
-# (`make -C ..`): it composes the generic image, the CLI, and the
-# vendored kernel; it never rebuilds them.
 
-KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
-KERNEL_DIST := ../kernel/dist/$(KERNEL_VERSION)
-VMLINUZ := $(KERNEL_DIST)/vmlinuz
-SYSTEMDBOOT_VERSION := $(strip $(file <../systemd-boot/VERSION))
-SDBOOT := ../systemd-boot/dist/$(SYSTEMDBOOT_VERSION)/systemd-bootx64.efi
-GRUB_VERSION := $(strip $(file <../grub/VERSION))
-GRUB_BOOT := ../grub/dist/$(GRUB_VERSION)/grub-boot.img
-GRUB_CORE := ../grub/dist/$(GRUB_VERSION)/grub-core.img
 CLI := ../cli/dist/liken
-SYSTEM_IMAGE := ../image/dist/liken.sqfs
-BOOT_ARCHIVE := ../image/dist/boot.cpio
 
-# The stand-in version for locally assembled media, exactly the root
-# Makefile's convention: today's date with serial 000, which no
-# published release ever carries. When CI publishes real releases,
-# install media gets built from a downloaded channel instead.
-VERSION := $(shell date +%Y.%m.%d)-000
+# Where releases come from. The public channel is the default; a
+# locally served one (`liken serve`, at http://localhost:8017/releases)
+# stands in for it during development, exercising the same download
+# path end to end rather than keeping a second build graph around.
+CHANNEL ?= https://releases.liken.sh
+DIGEST ?=
+
+# The leading v is stripped so a pasted tag names its release.
+# `override` because command-line definitions (make RELEASE=...)
+# silently ignore plain assignments, and the command line is exactly
+# where RELEASE arrives from.
+override RELEASE := $(patsubst v%,%,$(strip $(RELEASE)))
 
 # The system image's size: 3 GiB holds both boot slots, the machine's
 # state, and its scratch space, with room left over. Keeping it small
@@ -62,6 +74,26 @@ DATA_SCRATCH_BYTES := 23622320128
 
 all: image/disk.img
 
+# The downloaded release, cached under a version-keyed path the way
+# the vendored domains cache their dist trees. A published release is
+# immutable, and fetch writes release.yaml only after every artifact
+# verified, so an existing release.yaml means the whole directory is
+# good and the network is never asked twice for the same version. An
+# interrupted download never looks finished to Make; rerunning
+# verifies what landed and fetches only what's missing. The toolkit
+# is order-only for the usual reason: a rebuilt CLI must never make
+# Make think a verified download is stale.
+channel/$(RELEASE)/release.yaml: | $(CLI)
+	@test -n "$(RELEASE)" || { echo "name a release: make RELEASE=<version>, or make latest"; exit 1; }
+	$(CLI) fetch $(if $(DIGEST),-digest $(DIGEST)) $(CHANNEL) $(RELEASE) channel
+
+# Composing whatever the channel currently names newest: resolve the
+# advisory channel document to a concrete version, then re-enter make
+# under that name, so the cache stays version-keyed and "latest"
+# never becomes a path.
+latest:
+	$(MAKE) RELEASE=$$(curl -fsSL $(CHANNEL)/channel.yaml | awk '/^latest:/ {print $$2}')
+
 # The cluster's identity: certificate authorities and the join
 # token, minted before any machine boots. The CLI is an order-only
 # prerequisite for the same reason as at the root: a rebuilt toolkit
@@ -80,32 +112,33 @@ kubeconfig: identity/tls/server-ca.crt $(CLI)
 
 # The deployment layer: this cluster's manifests, identity, and its
 # machines' declared kernel modules, packed as the second cpio
-# archive every boot loads over the generic OS.
+# archive every boot loads over the generic OS. The kernel directory
+# is `-` because node-1 declares no modules — and a release publishes
+# vmlinuz but not the module tree, so a machine that one day declares
+# modules will need the repo's kernel vendored at the version the
+# release's components record.
 image/deployment.cpio: $(CLI) cluster.yaml $(wildcard machines/*.yaml) \
-		identity/tls/server-ca.crt identity/token $(VMLINUZ)
+		identity/tls/server-ca.crt identity/token
 	@mkdir -p image
-	$(CLI) layer . identity $(KERNEL_DIST) $@
+	$(CLI) layer . identity - $@
 
-# The release-shaped channel this install draws from: the current
-# tree bundled the way a published release is laid out.
-image/channel/$(VERSION)/release.yaml: $(SYSTEM_IMAGE) $(BOOT_ARCHIVE) $(VMLINUZ) $(CLI) $(SDBOOT) $(GRUB_BOOT) $(GRUB_CORE)
-	rm -rf image/channel
-	$(CLI) bundle $(VMLINUZ) $(SYSTEM_IMAGE) $(BOOT_ARCHIVE) $(CLI) $(SDBOOT) $(GRUB_BOOT) $(GRUB_CORE) image/channel $(VERSION)
-
-# The install image: the release composed with this deployment's
-# layer, carrying the payload the installer verifies and copies onto
-# the machine's disk.
-image/install.cpio: image/channel/$(VERSION)/release.yaml image/deployment.cpio $(CLI)
-	$(CLI) media image/channel/$(VERSION) image/deployment.cpio $@
+# The install image: the downloaded release composed with this
+# deployment's layer, carrying the payload the installer verifies and
+# copies onto the machine's disk. media re-verifies every artifact
+# against the release document before packing, so nothing unverified
+# can reach a disk even if the cache were tampered with.
+image/install.cpio: channel/$(RELEASE)/release.yaml image/deployment.cpio $(CLI)
+	$(CLI) media channel/$(RELEASE) image/deployment.cpio $@
 
 # The installed disk, produced by really installing. QEMU boots the
 # installer under SeaBIOS with the raw image attached as a
 # virtio-scsi disk — Linode's controller, so the disk claims itself
-# at the /dev/sda the Machine manifest names. The installer
-# partitions, copies the release into slot A, lays down the GRUB
-# boot path the declared roles ask for, and powers off; -no-reboot
-# turns that power-off into QEMU's exit. The console log lands next
-# to the image for reading afterward.
+# at the /dev/sda the Machine manifest names. The kernel that runs
+# the install is the release's own vmlinuz, exactly what the machine
+# will boot. The installer partitions, copies the release into slot
+# A, lays down the GRUB boot path the declared roles ask for, and
+# powers off; -no-reboot turns that power-off into QEMU's exit. The
+# console log lands next to the image for reading afterward.
 #
 # One Linode-specific wart survives all of this: their image deploys
 # preserve every partition faithfully but zero the MBR's boot code,
@@ -114,7 +147,7 @@ image/install.cpio: image/channel/$(VERSION)/release.yaml image/deployment.cpio 
 # deploy; once the machine is running, it heals those same bytes
 # itself from its proven slot's artifacts, on every boot and before
 # every reboot.
-image/disk.img: image/install.cpio $(VMLINUZ)
+image/disk.img: image/install.cpio channel/$(RELEASE)/release.yaml
 	rm -f $@ image/data-scratch.img
 	truncate -s $(SYSTEM_DISK_BYTES) $@
 	truncate -s $(DATA_SCRATCH_BYTES) image/data-scratch.img
@@ -123,7 +156,7 @@ image/disk.img: image/install.cpio $(VMLINUZ)
 		-cpu max \
 		-smp 2 \
 		-m 2048 \
-		-kernel $(VMLINUZ) -initrd image/install.cpio \
+		-kernel channel/$(RELEASE)/vmlinuz -initrd image/install.cpio \
 		-append "console=ttyS0 rdinit=/liken liken.machine=node-1 liken.install" \
 		-display none \
 		-serial file:image/install.log \
@@ -142,7 +175,10 @@ image/disk.img: image/install.cpio $(VMLINUZ)
 	grep -q 'install failed' image/install.log && { tail -5 image/install.log; rm -f $@; exit 1; } || true
 	grep -q 'install complete' image/install.log || { tail -5 image/install.log; rm -f $@; exit 1; }
 
+# clean sweeps the assembled artifacts but leaves channel/ alone:
+# those are verified downloads, gigabytes that redownload identically,
+# and cleaning scratch shouldn't cost the network anything.
 clean:
 	rm -rf image
 
-.PHONY: all identity kubeconfig clean
+.PHONY: all latest identity kubeconfig clean

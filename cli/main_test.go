@@ -35,6 +35,7 @@ func TestRunChecksArgumentCounts(t *testing.T) {
 		{"adopt without directories", []string{"adopt", "only-one"}},
 		{"kubeconfig without a directory", []string{"kubeconfig"}},
 		{"layer without its inputs", []string{"layer", "manifests", "identity"}},
+		{"fetch without its inputs", []string{"fetch", "https://example.com"}},
 		{"media without its inputs", []string{"media", "release-dir"}},
 		{"stick without its inputs", []string{"stick", "-console", "ttyS0", "release-dir"}},
 		{"bundle without its artifacts", []string{"bundle", "vmlinuz"}},
