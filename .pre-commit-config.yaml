@@ -7,8 +7,13 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      # Golden test fixtures are byte-exact by definition (a GRUB
+      # environment block is exactly 1024 bytes, '#'-padded, no final
+      # newline), so the whitespace fixers must leave them alone.
       - id: trailing-whitespace
+        exclude: /testdata/
       - id: end-of-file-fixer
+        exclude: /testdata/
       - id: check-yaml
         # Kubernetes manifests are conventionally multi-document
         # streams (machine-operator/manifests/machine-operator.yaml carries a
