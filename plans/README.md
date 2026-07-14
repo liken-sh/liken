@@ -113,11 +113,12 @@ numbered before the arc existed; it belongs second in this order:
     RAM: the system artifact becomes a read-only filesystem image
     mounted from the boot slot, and a 1 GB machine becomes the lab's
     standing proof that liken stays light.
-30. [ ] [Upgrades under BIOS](30-bios-upgrades.md) — the upgrade
+30. [x] [Upgrades under BIOS](30-bios-upgrades.md) — the upgrade
     path's second actuator: where UEFI machines flip firmware
     variables, BIOS machines rewrite what GRUB reads, with the same
-    one-shot trial and fallback. What the liken.sh node needs before
-    it can upgrade itself.
+    one-shot trial and fallback, plus boot sectors that heal
+    themselves. What the liken.sh node needed before it could
+    upgrade itself.
 31. [x] [TLS for the website](31-website-tls.md) — liken.sh answers
     over HTTPS via Let's Encrypt, sized for a 1 GB node: Traefik's
     built-in ACME rather than cert-manager's three always-on

@@ -38,6 +38,23 @@ spec:
   # claims each disk; after that every partition is recognized by the
   # role name written into the GPT.
   storage:
+    # The GRUB boot path: Linode's hosts boot BIOS-style only, and
+    # declaring these two roles is the machine's whole declaration
+    # that it boots through GRUB. biosBoot is a raw partition holding
+    # GRUB's core image where the MBR's boot code can find it;
+    # bootHome is a small FAT32 filesystem holding GRUB's config and
+    # the environment block that stands in for the boot variables
+    # this firmware doesn't have. The installer lays all of it down,
+    # and the machine heals it from its proven slot's artifacts on
+    # every boot and every reboot — Linode is known to zero MBR boot
+    # code under running machines, and healing is what makes that
+    # survivable.
+    biosBoot:
+      device: /dev/sda
+      size: 1Mi
+    bootHome:
+      device: /dev/sda
+      size: 64Mi
     # The OS's two boot slots, FAT32, each holding one complete liken
     # release with headroom.
     systemA:

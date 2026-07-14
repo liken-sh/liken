@@ -10,8 +10,10 @@ with deliberately different lifetimes:
   publisher).
 * **The cluster, which is declared but not currently provisioned**:
   the machine that runs liken and serves the project's website. Its
-  declarations (`cluster.yaml`, `machines/`) stay ready; the section
-  below explains what it waits on.
+  declarations (`cluster.yaml`, `machines/`) are ready, and the
+  capability it was waiting on — a machine that updates itself under
+  BIOS firmware — has landed; what remains is provisioning the
+  Linode again and founding the cluster from this directory's media.
 
 Everything the deployment needs lives here, organized the way any
 liken deployment would be:
@@ -22,8 +24,6 @@ liken deployment would be:
 * `cluster.yaml` and `machines/` — the fleet, in liken's own
   vocabulary.
 * `Makefile` — how the OS gets built for this deployment's machine.
-* `grub.cfg` — the boot entry, in GRUB's language (below explains
-  why GRUB is here at all).
 * `identity/` — the cluster's minted certificate authorities and
   join token, created by `make identity` and never committed.
 
@@ -67,46 +67,53 @@ liken claims to be a lightweight OS, and the claim is only honest if
 the project's own production cluster runs comfortably inside 1 GB.
 
 Linode shaped this deployment in a second way: **Akamai's hosts boot
-guests BIOS-style only — there is no UEFI option at all.** liken
-normally boots with no bootloader of its own: the firmware's boot
-entries load the kernel's EFI stub directly, and upgrades actuate by
-flipping firmware variables (BootNext to try a new slot once,
-BootOrder to keep it). None of that machinery exists under BIOS. So
-this machine's disk carries its own GRUB — first stage in the MBR,
-the rest in a BIOS boot partition tucked into the GPT's alignment
-gap, and its config and modules under `/boot/grub` on the active
-slot — and Linode's "direct disk" boot setting simply executes what
-the MBR carries. (Linode's own GRUB 2 loader is a dead end here: it
-reads its config from the disk treated as one whole-disk filesystem,
-the way Linode's own images are laid out, and never looks inside a
-partition table.)
+guests BIOS-style only — there is no UEFI option at all.** On a UEFI
+machine liken boots with no bootloader of its own: the firmware's
+boot entries load the kernel's EFI stub directly, and upgrades
+actuate by flipping firmware variables (BootNext to try a new slot
+once, BootOrder to keep it). None of that machinery exists under
+BIOS, so this machine's manifest declares the two storage roles that
+ask for liken's other boot path: `biosBoot`, a raw partition holding
+GRUB's core image, and `bootHome`, a small filesystem holding GRUB's
+config and its environment block. The installer lays all of it down
+— the MBR's boot code included — and upgrades actuate through the
+environment block exactly the way they do through firmware variables:
+`try_slot` is the one-shot trial, `default_slot` the standing
+preference, both written by the machine itself. Linode's "direct
+disk" boot setting simply executes what the MBR carries. (Linode's
+own GRUB 2 loader is a dead end here: it reads its config from the
+disk treated as one whole-disk filesystem, the way Linode's own
+images are laid out, and never looks inside a partition table.)
 
 We considered moving to a cloud with UEFI guests and decided to stay.
 BIOS-only machines are not a Linode quirk; they are a standing fact of
 the hardware liken will meet — old servers, cheap virtual machines,
 other clouds' legacy tiers. An OS that only knows how to upgrade
 itself where UEFI firmware exists is narrower than liken means to be,
-and this deployment forces the missing capability honestly: teaching
-liken to actuate upgrades by rewriting GRUB's configuration instead of
-firmware variables is [its own milestone](../plans/30-bios-upgrades.md).
+and this deployment forced the missing capability honestly:
+[milestone 30](../plans/30-bios-upgrades.md) taught liken to actuate
+upgrades by rewriting what GRUB reads instead of firmware variables.
 
-That milestone is what the cluster waits on. Without it, every OS
-update means re-shipping the whole system disk from a workstation,
-and Linode's machinery fights that at each step: image deploys zero
-the MBR's boot code (a rescue boot and a 440-byte repair every time),
-a failed background event can zero it again up to an hour later, and
-writing a raw disk needs their serial console to open a door first.
-Operating a machine that can only be updated that way teaches the
-wrong lesson, so the machine stays down until it can update itself:
-install once from the release channel, then upgrade by Cluster edits,
-with the disk-writing path demoted to disaster recovery. `make` here
-still builds the machine's install media — a real liken install run
-in a local QEMU guest against a raw disk file, GRUB planted on the
-result — and the storage design it installs splits the machine's
-disks by lifetime: a small disposable system disk (boot slots,
-machine state, scratch) and a data disk that is claimed once, holds
-everything durable, and is never reinstalled. Reinstalling the OS
-costs a reboot, not the cluster.
+Linode's machinery adds one hazard worth naming: image deploys
+preserve every partition faithfully but zero the MBR's 440 bytes of
+boot code, and a failed background event can zero them again up to an
+hour later — under a machine that is already running. So the machine
+defends its own boot path: on every boot and before every reboot, it
+re-derives the MBR's boot code, GRUB's core image, and the config
+from the proven slot's artifacts and rewrites whatever disagrees. A
+boot path damaged while the machine runs is healed before the reboot
+that would otherwise never come back.
+
+`make` here builds the machine's install media the ordinary way — a
+real liken install run in a local QEMU guest under SeaBIOS, against
+a raw disk file, no root privileges anywhere — and the storage design
+it installs splits the machine's disks by lifetime: a small
+disposable system disk (boot slots, machine state, scratch) and a
+data disk that is claimed once, holds everything durable, and is
+never reinstalled. The disk image ships once to found the machine;
+from then on it updates itself from the release channel by Cluster
+edits, with the disk-writing path demoted to disaster recovery.
+Reinstalling the OS costs a reboot, not the cluster.
 
 ## Reaching the cluster
 

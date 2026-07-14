@@ -1,6 +1,6 @@
 # Upgrades under BIOS
 
-Milestone 30 — Not started
+Milestone 30 — Landed
 
 liken's declarative upgrades (milestone 12) actuate through UEFI
 firmware: the operator writes the new release into the inactive slot,
@@ -12,41 +12,58 @@ automatic fallback — and it assumes the firmware exists.
 The liken.sh deployment broke that assumption in the most useful way
 possible: Linode boots guests BIOS-style only, no UEFI available at
 any price, and we chose to stay (liken.sh/README.md tells that story).
-The machine boots today through its own GRUB — first stage in the MBR,
-a BIOS boot partition, and a grub.cfg on the active slot — but nothing
-can flip which slot boots next, so release upgrades on that machine
-currently mean reinstalling the system disk. BIOS machines are not a
-Linode quirk; they are old servers, cheap VMs, and other clouds'
-legacy tiers, and an OS that can only upgrade itself where UEFI
-exists is narrower than liken means to be.
+BIOS machines are not a Linode quirk; they are old servers, cheap VMs,
+and other clouds' legacy tiers, and an OS that can only upgrade itself
+where UEFI exists is narrower than liken means to be.
 
-The milestone: teach the upgrade path a second actuator. Where UEFI
-writes firmware variables, BIOS rewrites what GRUB reads. GRUB's
-environment block — a fixed-size file GRUB can read and write from
-its own config, designed for exactly this kind of boot bookkeeping —
-can carry the BootNext analogue: boot the new slot once, and unless
-the new system marks itself proven, the next boot falls back to the
-old one. Promotion is then an ordinary edit to the default entry.
-The mechanics liken already owns (slots, digests, the staged/proven
-lifecycle) don't change at all; only the last step, "make the
-firmware prefer the new slot," grows a second dialect.
+The milestone taught the upgrade path a second actuator. Where UEFI
+writes firmware variables, BIOS rewrites what GRUB reads. The three
+acts the proving lifecycle needs from a firmware — try a slot once,
+keep preferring the proven slot, verify that preference holds — now
+live behind a small seam (init/actuator.go), with the UEFI dialect
+speaking BootNext and BootOrder and the GRUB dialect speaking the
+environment block: `try_slot` is the one-shot (grub.cfg consumes it
+before loading a single kernel byte, exactly as firmware consumes
+BootNext), `default_slot` the standing preference, and a `fallback=1`
+menu so a slot that won't even load falls through instead of hanging
+at a prompt. The mechanics liken already owned (slots, digests, the
+staged/proven lifecycle) didn't change at all.
 
-Open questions, deliberately unanswered here: how a machine knows
-which regime it is in (the presence of efivarfs is probably the whole
-test); where grub.cfg and the environment block should live so that
-both slots can reach them (today grub.cfg sits on slot A, planted by
-the liken.sh Makefile — a shared home may be more honest); whether
-the installer should learn to lay down GRUB itself instead of leaving
-it to a deployment's Makefile; and whether liken writes the
-environment block directly (it is a 1 KiB block with a documented
-format) or ships grub-editenv to do it.
+The open questions resolved as follows. The regime test is the
+presence of /sys/firmware/efi, the same test the installer and the
+facts report use. GRUB's config and environment block live on their
+own small filesystem — the `bootHome` storage role, FAT32, labeled
+LIKEN-BOOT — beside `biosBoot`, the raw partition holding GRUB's core
+image; declaring those two roles in a Machine's spec *is* the
+declaration that it boots through GRUB, with no separate firmware
+field. The installer lays the whole chain down itself (the liken.sh
+Makefile's hand-planted GRUB is gone), from `grub-boot.img` and
+`grub-core.img` vendored from Ubuntu's archive by the grub/ domain
+and carried in every release bundle. And liken writes the
+environment block directly — it is a 1 KiB block with a documented
+format, and the codec's fixtures are checked against grub-editenv's
+own output.
 
-One more capability belongs in this milestone's orbit: a BIOS machine
-should notice and heal its own boot sectors. The liken.sh node's boot
-code has been zeroed twice by Linode operations entirely outside the
-machine (image deploys sanitize the MBR, and a failed deploy step can
-do it again an hour later), and each time the fix was 440 bytes a
-human restored over a rescue boot. A machine that owns its bootloader
-can verify those bytes on every boot and put them back itself — the
-same self-reliance the storage roles already practice, applied to the
-one region of the disk nothing else watches.
+The healing capability landed too, made sharper by a fact learned the
+hard way: Linode zeroes MBR boot code *under running machines*, so
+healing only at boot is not enough — a machine that goes down with a
+zeroed MBR never comes back to heal it. Asserting the proven slot now
+re-derives the MBR's boot code, GRUB's core image, and grub.cfg from
+the proven slot's own artifacts and rewrites whatever disagrees, on
+every boot and on the way down before every reboot.
+
+The lab drills both firmware regimes (`FIRMWARE=uefi` is the default;
+`FIRMWARE=bios` asks QEMU for nothing, which is how you get SeaBIOS),
+and CI runs two smoke drills on every push: `smoke-uefi` boots the
+image via -kernel, and `smoke-bios` installs node-1 onto a blank disk
+and boots the installed disk through the whole GRUB chain. The
+milestone's closing drills all passed on the dev cluster: a forward
+roll onto the inactive slot, a deliberately broken release that
+panicked, fell back, and was durably rejected, and a boot-sector heal
+under a running machine that would otherwise have been its last
+reboot.
+
+Re-provisioning the liken.sh Linode with all of this is its own
+follow-on work: the deployment's media now installs under SeaBIOS
+with no root privileges and no hand-planted bootloader, ready to
+found the cluster again.
