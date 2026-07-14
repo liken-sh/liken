@@ -82,6 +82,14 @@ runs:
       with:
         path: systemd-boot/dist
         key: systemd-boot-${{ hashFiles('systemd-boot/VERSION', 'systemd-boot/fetch.sh') }}
+    # grub's dist carries the fetched module tree and tool plus the
+    # core image linked from them, so the key also covers the inputs
+    # of the link: the embedded config and the module list in the
+    # Makefile.
+    - uses: actions/cache@v6
+      with:
+        path: grub/dist
+        key: grub-${{ hashFiles('grub/VERSION', 'grub/fetch.sh', 'grub/early.cfg', 'grub/Makefile') }}
 
     # Make decides staleness by timestamps, and the two halves of
     # this working tree carry different ones: checkout stamps the
@@ -97,7 +105,7 @@ runs:
       run: |
         for dist in kernel/dist k3s/dist xtables/dist trust/dist \
                     e2fsprogs/dist open-iscsi/dist nfs-utils/dist \
-                    systemd-boot/dist; do
+                    systemd-boot/dist grub/dist; do
             [ -d "$dist" ] && find "$dist" -type f -exec touch {} +
         done
         true

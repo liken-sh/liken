@@ -37,8 +37,10 @@ NFSUTILS_VERSION := $(strip $(file <nfs-utils/VERSION))
 NFSUTILS_DIST := nfs-utils/dist/$(NFSUTILS_VERSION)
 SYSTEMDBOOT_VERSION := $(strip $(file <systemd-boot/VERSION))
 SYSTEMDBOOT_DIST := systemd-boot/dist/$(SYSTEMDBOOT_VERSION)
+GRUB_VERSION := $(strip $(file <grub/VERSION))
+GRUB_DIST := grub/dist/$(GRUB_VERSION)
 
-all: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot init machine-operator cluster-operator logs cli identity image
+all: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub init machine-operator cluster-operator logs cli identity image
 
 # Because the version is part of the artifact's name, a pin bump
 # changes the target path itself and Make rebuilds with no extra
@@ -110,6 +112,15 @@ $(SYSTEMDBOOT_DIST)/systemd-bootx64.efi: systemd-boot/VERSION systemd-boot/fetch
 	$(MAKE) -C systemd-boot
 
 systemd-boot: $(SYSTEMDBOOT_DIST)/systemd-bootx64.efi
+
+# grub: the bootloader on BIOS machines (its fetch.sh explains why
+# BIOS machines need one when UEFI machines don't). Both boot-sector
+# artifacts come from one make: the fetch delivers grub-boot.img and
+# the core image is linked beside it.
+$(GRUB_DIST)/grub-core.img $(GRUB_DIST)/grub-boot.img &: grub/VERSION grub/fetch.sh grub/early.cfg grub/Makefile
+	$(MAKE) -C grub
+
+grub: $(GRUB_DIST)/grub-core.img
 
 # This is liken itself, the Go program that boots as PID 1 (see
 # init/main.go's header comment). It shares the machine package (the
@@ -379,6 +390,7 @@ clean:
 	$(MAKE) -C open-iscsi clean
 	$(MAKE) -C nfs-utils clean
 	$(MAKE) -C systemd-boot clean
+	$(MAKE) -C grub clean
 	$(MAKE) -C init clean
 	$(MAKE) -C machine-operator clean
 	$(MAKE) -C cluster-operator clean
@@ -388,4 +400,4 @@ clean:
 	$(MAKE) -C image clean
 	rm -rf $(IMAGE_DIR)
 
-.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot init machine-operator cluster-operator logs cli identity kubeconfig image run run-once smoke install install-stick storage release serve clean
+.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub init machine-operator cluster-operator logs cli identity kubeconfig image run run-once smoke install install-stick storage release serve clean

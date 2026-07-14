@@ -1,0 +1,4 @@
+# Vendored artifacts and the core image linked from them; `make`
+# re-fetches, re-verifies, and re-links.
+cache/
+dist/
