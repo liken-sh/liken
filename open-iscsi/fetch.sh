@@ -31,7 +31,15 @@
 #             libblkid); alpine ships only the shared library.
 #
 # Usage:
-#   open-iscsi/fetch.sh    build the version pinned in open-iscsi/VERSION
+#   open-iscsi/fetch.sh                   build the version pinned in
+#                                         open-iscsi/VERSION
+#   open-iscsi/fetch.sh --sources-only    fetch and verify the source
+#                                         tarballs, skipping the build
+#
+# --sources-only exists for the licensing domain: the release channel
+# mirrors these same tarballs as the binaries' corresponding source,
+# and mirroring needs the verified bytes, not the build (and no
+# container runtime).
 #
 # Results land in open-iscsi/dist/<version>/, with the source
 # tarballs cached in open-iscsi/cache/.
@@ -39,6 +47,9 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+sources_only=""
+[[ "${1:-}" != "--sources-only" ]] || sources_only=1
 
 for tool in curl sha256sum; do
     command -v "$tool" >/dev/null || {
@@ -54,7 +65,7 @@ for candidate in docker podman; do
         break
     fi
 done
-[[ -n "$runtime" ]] || {
+[[ -n "$runtime" || -n "$sources_only" ]] || {
     echo "fetch.sh: needs docker or podman to run the pinned build container" >&2
     exit 1
 }
@@ -93,6 +104,8 @@ fetch "https://www.kernel.org/pub/linux/utils/kernel/kmod/kmod-$kmod_version.tar
     "$kmod_sha256" "kmod-$kmod_version.tar.xz"
 fetch "https://github.com/openSUSE/libeconf/archive/refs/tags/v$libeconf_version.tar.gz" \
     "$libeconf_sha256" "libeconf-$libeconf_version.tar.gz"
+
+[[ -z "$sources_only" ]] || exit 0
 
 # The build itself, inside the pinned container: sources mounted
 # read-only at /in, the dist directory writable at /out, and the

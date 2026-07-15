@@ -1,0 +1,4 @@
+# The assembled notices and the mirrored source tarballs are build
+# products; the pins that produce them are what's committed.
+dist
+cache

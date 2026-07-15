@@ -17,7 +17,15 @@
 # speaks the mount protocol through, built in statically.
 #
 # Usage:
-#   nfs-utils/fetch.sh    build the version pinned in nfs-utils/VERSION
+#   nfs-utils/fetch.sh                   build the version pinned in
+#                                        nfs-utils/VERSION
+#   nfs-utils/fetch.sh --sources-only    fetch and verify the source
+#                                        tarballs, skipping the build
+#
+# --sources-only exists for the licensing domain: the release channel
+# mirrors these same tarballs as the binary's corresponding source,
+# and mirroring needs the verified bytes, not the build (and no
+# container runtime).
 #
 # Results land in nfs-utils/dist/<version>/, with the source tarballs
 # cached in nfs-utils/cache/.
@@ -25,6 +33,9 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+sources_only=""
+[[ "${1:-}" != "--sources-only" ]] || sources_only=1
 
 for tool in curl sha256sum; do
     command -v "$tool" >/dev/null || {
@@ -40,7 +51,7 @@ for candidate in docker podman; do
         break
     fi
 done
-[[ -n "$runtime" ]] || {
+[[ -n "$runtime" || -n "$sources_only" ]] || {
     echo "fetch.sh: needs docker or podman to run the pinned build container" >&2
     exit 1
 }
@@ -74,6 +85,8 @@ fetch "https://www.kernel.org/pub/linux/utils/nfs-utils/$version/nfs-utils-$vers
     "$nfsutils_sha256" "nfs-utils-$version.tar.xz"
 fetch "https://downloads.sourceforge.net/project/libtirpc/libtirpc/$libtirpc_version/libtirpc-$libtirpc_version.tar.bz2" \
     "$libtirpc_sha256" "libtirpc-$libtirpc_version.tar.bz2"
+
+[[ -z "$sources_only" ]] || exit 0
 
 # The build, inside the pinned container. nfs-utils is one source tree
 # carrying a dozen programs, and this build wants exactly one of them,

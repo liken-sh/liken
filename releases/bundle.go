@@ -3,7 +3,7 @@ package releases
 // Bundling a release of liken: the artifacts and the document that
 // every fleet, everywhere, upgrades from.
 //
-// The bundle is seven artifacts. vmlinuz, the system image
+// The bundle is eight artifacts. vmlinuz, the system image
 // (liken.sqfs, the OS as a read-only filesystem a machine mounts as
 // its root), and the boot archive (boot.cpio, the small initramfs
 // the boot loader stages) are the operating system, with no
@@ -15,9 +15,14 @@ package releases
 // halves of the bootloader BIOS machines carry (the grub domain
 // explains why they need one when UEFI machines don't) — inert
 // passengers on a UEFI machine, and the bytes init writes into the
-// MBR and the biosBoot partition on a BIOS one. Because nothing here
-// embeds a deployment, every digest is stable for a given source
-// tree: publishable on a release page, and the same for everyone.
+// MBR and the biosBoot partition on a BIOS one. LICENSES.md is the
+// third-party notices the licensing domain assembles: several of the
+// artifacts carry other projects' GPL- and LGPL-licensed binaries,
+// whose terms require the notices to travel with the bytes, so the
+// notices are an artifact like any other and ride the same channel,
+// sticks, and slots the binaries do. Because nothing here embeds a
+// deployment, every digest is stable for a given source tree:
+// publishable on a release page, and the same for everyone.
 //
 // That stability is what lets machines upgrade straight from the
 // public channel. A deployment pins the release document's digest in
@@ -44,7 +49,7 @@ import (
 // The version must fit liken's calendar grammar (the machine package
 // defines it); enforcing that here, where versions are authored,
 // means a malformed one never reaches a channel at all.
-func Bundle(vmlinuz, systemImage, bootArchive, cli, bootMenu, grubBoot, grubCore, channelDir, version string, components []machine.ReleaseComponent, out io.Writer) error {
+func Bundle(vmlinuz, systemImage, bootArchive, cli, bootMenu, grubBoot, grubCore, licenses, channelDir, version string, components []machine.ReleaseComponent, out io.Writer) error {
 	if err := machine.ValidVersion(version); err != nil {
 		return err
 	}
@@ -69,6 +74,7 @@ func Bundle(vmlinuz, systemImage, bootArchive, cli, bootMenu, grubBoot, grubCore
 		{bootMenu, "systemd-bootx64.efi"},
 		{grubBoot, "grub-boot.img"},
 		{grubCore, "grub-core.img"},
+		{licenses, "LICENSES.md"},
 	}
 	document := fmt.Sprintf("apiVersion: liken.sh/v1alpha1\nkind: Release\nmetadata:\n  name: %s\nartifacts:\n", version)
 	for _, s := range sources {

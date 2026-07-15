@@ -40,7 +40,7 @@ SYSTEMDBOOT_DIST := systemd-boot/dist/$(SYSTEMDBOOT_VERSION)
 GRUB_VERSION := $(strip $(file <grub/VERSION))
 GRUB_DIST := grub/dist/$(GRUB_VERSION)
 
-all: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub init machine-operator cluster-operator logs cli identity image
+all: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub licensing init machine-operator cluster-operator logs cli identity image
 
 # Because the version is part of the artifact's name, a pin bump
 # changes the target path itself and Make rebuilds with no extra
@@ -121,6 +121,16 @@ $(GRUB_DIST)/grub-core.img $(GRUB_DIST)/grub-boot.img &: grub/VERSION grub/fetch
 	$(MAKE) -C grub
 
 grub: $(GRUB_DIST)/grub-core.img
+
+# The third-party notices every release bundles beside its binaries:
+# several artifacts carry GPL- and LGPL-licensed components, and
+# their terms require the notices to travel with the bytes (see
+# licensing/Makefile, which also owns the corresponding-source mirror
+# the release workflow publishes).
+licensing/dist/LICENSES.md: licensing/NOTICES.md licensing/Makefile LICENSE $(wildcard licensing/texts/*.txt)
+	$(MAKE) -C licensing
+
+licensing: licensing/dist/LICENSES.md
 
 # This is liken itself, the Go program that boots as PID 1 (see
 # init/main.go's header comment). It shares the machine package (the
@@ -401,6 +411,7 @@ clean:
 	$(MAKE) -C nfs-utils clean
 	$(MAKE) -C systemd-boot clean
 	$(MAKE) -C grub clean
+	$(MAKE) -C licensing clean
 	$(MAKE) -C init clean
 	$(MAKE) -C machine-operator clean
 	$(MAKE) -C cluster-operator clean
@@ -410,4 +421,4 @@ clean:
 	$(MAKE) -C image clean
 	rm -rf $(IMAGE_DIR)
 
-.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub init machine-operator cluster-operator logs cli identity kubeconfig image run run-once smoke-uefi smoke-bios install install-stick storage release serve clean
+.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub licensing init machine-operator cluster-operator logs cli identity kubeconfig image run run-once smoke-uefi smoke-bios install install-stick storage release serve clean

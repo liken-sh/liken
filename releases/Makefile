@@ -21,6 +21,16 @@
 #                                         layer, assemble install
 #                                         media — no repo or build
 #                                         required
+#   releases/dist/<version>/LICENSES.md   the third-party notices:
+#                                         several artifacts carry GPL-
+#                                         and LGPL-licensed components
+#                                         whose terms require notices
+#                                         to travel with the binaries
+#                                         (the licensing domain also
+#                                         mirrors their corresponding
+#                                         source, which the release
+#                                         workflow publishes to the
+#                                         channel under sources/)
 #   releases/dist/<version>/release.yaml  the document naming each
 #                                         artifact by sha256 digest
 #                                         and recording the versions
@@ -105,6 +115,7 @@ build:
 release: build
 	$(MAKE) -C ../systemd-boot
 	$(MAKE) -C ../grub
+	$(MAKE) -C ../licensing
 	$(BUILD)/cli/liken bundle \
 		../kernel/dist/$(KERNEL_VERSION)/vmlinuz \
 		$(BUILD)/generic/liken.sqfs \
@@ -113,6 +124,7 @@ release: build
 		../systemd-boot/dist/$(SYSTEMDBOOT_VERSION)/systemd-bootx64.efi \
 		../grub/dist/$(GRUB_VERSION)/grub-boot.img \
 		../grub/dist/$(GRUB_VERSION)/grub-core.img \
+		../licensing/dist/LICENSES.md \
 		dist $(VERSION) \
 		kernel=$(KERNEL_VERSION) \
 		k3s=$(K3S_VERSION) \

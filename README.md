@@ -78,4 +78,14 @@ design overview and the milestone-by-milestone story live in
 
 ## License
 
-MIT
+MIT, for everything in this repository — and everything in this
+repository is liken's own; the kernel, k3s, and the other vendored
+components are fetched at build time, never committed. A built
+release redistributes those components under their own licenses
+(GPL-2.0 for the kernel, Apache-2.0 for k3s, GPL-3.0 for GRUB, and so
+on). Every release bundles a `LICENSES.md` naming each component,
+its license, and its copyright, and the release channel serves each
+component's source beside the binaries, under
+[sources/](https://releases.liken.sh/) — the
+[`./licensing/` directory](./licensing/) explains how those
+obligations are met.

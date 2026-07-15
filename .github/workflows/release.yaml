@@ -99,6 +99,27 @@ jobs:
             exit 1
           fi
 
+      # The corresponding sources go up before the release does. The
+      # GPL- and LGPL-licensed components in the artifacts oblige the
+      # channel to offer their source from the same place it offers
+      # the binaries (licensing/sources.sh explains), so no release
+      # may be discoverable before its sources are. The mirror is
+      # keyed by component version, not release version — releases
+      # built from the same pins share sources — so most uploads skip:
+      # only a pin bump moves new bytes.
+      - name: mirror the corresponding sources
+        run: make -C licensing sources
+
+      - name: publish the sources
+        working-directory: licensing/dist/sources
+        run: |
+          find . -type f | sort | while read -r file; do
+            key="sources/${file#./}"
+            if ! s3cmd info "s3://releases.liken.sh/$key" >/dev/null 2>&1; then
+              s3cmd put --acl-public --no-progress "$file" "s3://releases.liken.sh/$key"
+            fi
+          done
+
       # Artifacts first, the document last: release.yaml is how anyone
       # discovers the artifacts, so until it lands the half-uploaded
       # release simply doesn't exist yet. Every object is public-read —

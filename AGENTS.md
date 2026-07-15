@@ -38,3 +38,18 @@ Organize by domain, not by kind. Directories should be named for what
 part of the system they are (the kernel, the init, the image), and each
 should contain everything that domain needs: scripts, config, and docs
 together. No `scripts/` junk drawer.
+
+## Licensing
+
+liken's own code is MIT, but releases redistribute other projects'
+binaries, several under GPL or LGPL. That never touches liken's
+license (they are aggregated, never linked), but it does oblige the
+release channel to ship third-party notices with the binaries and to
+offer each component's source from the same channel. The licensing
+domain owns both: every release bundles its `LICENSES.md` as an
+artifact, and the release workflow publishes its source mirror to
+`sources/<component>/<version>/`.
+
+When a vendored pin changes, licensing/ must move with it: the source
+pins in `licensing/sources.sh` and the notices in
+`licensing/NOTICES.md`. Those files explain the reasoning.
