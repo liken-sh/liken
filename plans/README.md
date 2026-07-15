@@ -98,9 +98,10 @@ numbered before the arc existed; it belongs second in this order:
     forward themselves, and every update after the first boot comes
     straight from liken's public releases: nothing composed, nothing
     hosted, per deployment.
-25. [ ] [A website on liken.sh](25-liken-sh-website.md) — the
+25. [x] [A website on liken.sh](25-liken-sh-website.md) — the
     project's domain answers for people the way it already does for
-    CRDs: what liken is, and where to start reading.
+    CRDs: one page served by the project's own cluster, published by
+    push, never by rebuild or reboot.
 26. [x] [The public release channel](26-releases-on-the-website.md) —
     the release channel gets its public home at releases.liken.sh:
     digest-verified downloads from object storage, published by CI on

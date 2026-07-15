@@ -1,17 +1,22 @@
 # The liken.sh domain: the project's public presence, as
-# infrastructure. This one file declares everything the name answers
-# for: the DNS zone, and the release channel — the object storage
-# bucket that holds published releases, the credential that lets this
-# repo's CI upload them, and the token that keeps the channel's TLS
-# certificate fresh.
+# infrastructure. This one file declares what Linode has to know for
+# the name to answer: the DNS zone, the machine that runs the cluster
+# and serves the website, the firewall in front of it, and the
+# release channel — the object storage bucket that holds published
+# releases, the credential that lets this repo's CI upload them, and
+# the token that keeps the channel's TLS certificate fresh.
 #
 # The channel lives in object storage rather than on a liken machine
 # for a reason worth stating plainly: machines upgrade themselves
 # *from* the channel, so the channel has to outlive any machine it
 # feeds. A cluster that served its own update channel could never be
-# rescued by an update. When a liken cluster serves the project's
-# website again, its resources will join this file — and that cluster
-# will install and upgrade from the channel declared here.
+# rescued by an update. The website has no such constraint, so the
+# cluster serves it — but the site's Kubernetes resources deliberately
+# do not live in this file. Terraform's kubernetes provider fetches
+# the API server's entire OpenAPI document on every plan, which is
+# real memory pressure on a 1 GB node (plans/31 tells that story), so
+# Terraform stops at Linode's edge and the website deploys with
+# kubectl instead (website/README.md).
 #
 # Terraform fits here for the same reason the Machine and Cluster
 # documents fit the OS: the desired state is declared in files, and a
@@ -30,6 +35,10 @@ terraform {
     github = {
       source  = "integrations/github"
       version = "~> 6.0"
+    }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
     }
   }
 
@@ -93,6 +102,34 @@ resource "linode_domain_record" "releases" {
   name        = "releases"
   record_type = "CNAME"
   target      = "releases.liken.sh.us-east-1.linodeobjects.com"
+}
+
+# The website's names: the apex points at the node, and www rides
+# along as a CNAME. Traefik on the cluster answers for both
+# (website/), and it proves control of them to Let's Encrypt by
+# answering a challenge dialed back to the name — so these records
+# have to resolve before the site's first deploy can earn its
+# certificate.
+
+resource "linode_domain_record" "apex_a" {
+  domain_id   = linode_domain.liken_sh.id
+  name        = ""
+  record_type = "A"
+  target      = tolist(linode_instance.node.ipv4)[0]
+}
+
+resource "linode_domain_record" "apex_aaaa" {
+  domain_id   = linode_domain.liken_sh.id
+  name        = ""
+  record_type = "AAAA"
+  target      = split("/", linode_instance.node.ipv6)[0]
+}
+
+resource "linode_domain_record" "www" {
+  domain_id   = linode_domain.liken_sh.id
+  name        = "www"
+  record_type = "CNAME"
+  target      = "liken.sh"
 }
 
 # ---------------------------------------------------------------------------
@@ -272,15 +309,21 @@ resource "linode_instance_config" "boot" {
 }
 
 # ---------------------------------------------------------------------------
-# The firewall: the node's public face is the website, nothing else.
+# The firewall: the node answers the world on the website's ports and
+# the cluster API, and drops everything else at the edge.
 #
-# The cluster API on 6443 authenticates every caller with client
-# certificates, so the firewall is defense in depth rather than the
-# lock on the door — but depth is cheap and exposure isn't: a port
-# the edge drops can't be scanned, fuzzed, or hit by the next
-# pre-auth vulnerability, and a 1 GB node shouldn't spend its one
-# CPU entertaining the internet's background noise. Packets the
-# firewall drops never reach the machine at all.
+# The API on 6443 answers publicly because CI deploys the website
+# from GitHub-hosted runners, whose addresses can't usefully be
+# pinned. That is a real trade: an open port can be scanned, fuzzed,
+# and hit by the next pre-auth vulnerability, and a 1 GB node would
+# rather not spend its one CPU entertaining the internet's background
+# noise. What bounds the exposure is what a caller can actually do:
+# the API authenticates everyone with client certificates or tokens,
+# unauthenticated requests stop at TLS, and the one credential that
+# leaves the operator's hands — the certificate CI deploys with — is
+# scoped to the website's namespace alone
+# (website/manifests/deployer.yaml), so the worst a leak spends is
+# the page itself.
 #
 # The operator's address arrives as a variable so it never lands in
 # this public repository: .envrc.private exports TF_VAR_operator_cidr
@@ -290,7 +333,7 @@ resource "linode_instance_config" "boot" {
 # segment.
 
 variable "operator_cidr" {
-  description = "The address allowed to reach the cluster API and rescue-mode ssh, as a CIDR"
+  description = "The address allowed to reach rescue-mode ssh, as a CIDR"
   type        = string
   sensitive   = true
 }
@@ -334,7 +377,8 @@ resource "linode_firewall" "node" {
     action   = "ACCEPT"
     protocol = "TCP"
     ports    = "6443"
-    ipv4     = [var.operator_cidr]
+    ipv4     = ["0.0.0.0/0"]
+    ipv6     = ["::/0"]
   }
 
   # Rescue mode's sshd, the break-glass path: the machine itself runs
@@ -446,6 +490,101 @@ resource "github_actions_secret" "releases_cert_token" {
   repository  = "liken"
   secret_name = "RELEASES_CERT_TOKEN"
   value       = var.releases_cert_token
+}
+
+# ---------------------------------------------------------------------------
+# The website deploy credential: how CI updates the page.
+#
+# CI authenticates to the cluster the same way the operator does — a
+# client certificate signed by the cluster's client CA — just as a
+# lesser user. The cluster's identity is minted offline (`make
+# identity`) and its CA material lives in identity/, so Terraform can
+# mint this credential offline too: a key and a certificate naming
+# the user website-deployer, whose entire authority is the RBAC in
+# website/manifests/deployer.yaml — content updates in the website's
+# namespace, nothing else. Kubernetes reads the certificate's common
+# name as the username, so the signature is the authentication and
+# the RoleBinding is the authorization. Nothing here talks to the
+# cluster: what a plan needs is the identity files on disk, the same
+# bootstrap the system image above asks for, and the credential can
+# be minted and delivered while the machine is down, mid-refound, or
+# not yet founded at all.
+#
+# The certificate lives a year, and any plan inside the last month of
+# that proposes a fresh one, so renewal is whichever `terraform
+# apply` comes next. Rotation on demand is
+#
+#   terraform apply -replace=tls_private_key.website_deployer
+#
+# and revocation doesn't involve the certificate at all (issued
+# certificates can't be recalled): delete the RoleBinding on the
+# cluster and the name the certificate proves stops meaning anything.
+
+resource "tls_private_key" "website_deployer" {
+  algorithm   = "ECDSA"
+  ecdsa_curve = "P256"
+}
+
+resource "tls_cert_request" "website_deployer" {
+  private_key_pem = tls_private_key.website_deployer.private_key_pem
+
+  subject {
+    common_name = "website-deployer"
+  }
+}
+
+resource "tls_locally_signed_cert" "website_deployer" {
+  cert_request_pem   = tls_cert_request.website_deployer.cert_request_pem
+  ca_private_key_pem = file("${path.module}/identity/tls/client-ca.key")
+  ca_cert_pem        = file("${path.module}/identity/tls/client-ca.crt")
+
+  allowed_uses = ["client_auth", "digital_signature"]
+
+  validity_period_hours = 24 * 365
+  early_renewal_hours   = 24 * 30
+}
+
+# The kubeconfig CI receives, assembled from parts Terraform already
+# holds: the certificate above, the server CA that lets the client
+# trust what it dials, and the same public-address/tls-server-name
+# pair the ./kubectl wrapper uses (the API server's certificate names
+# the VLAN address; the tls-server-name is what lets one certificate
+# serve both the VLAN and the world).
+
+locals {
+  website_deployer_kubeconfig = yamlencode({
+    apiVersion = "v1"
+    kind       = "Config"
+    clusters = [{
+      name = "liken-sh"
+      cluster = {
+        server                       = "https://${tolist(linode_instance.node.ipv4)[0]}:6443"
+        "tls-server-name"            = "10.10.0.1"
+        "certificate-authority-data" = base64encode(file("${path.module}/identity/tls/server-ca.crt"))
+      }
+    }]
+    users = [{
+      name = "website-deployer"
+      user = {
+        "client-certificate-data" = base64encode(tls_locally_signed_cert.website_deployer.cert_pem)
+        "client-key-data"         = base64encode(tls_private_key.website_deployer.private_key_pem)
+      }
+    }]
+    contexts = [{
+      name = "website"
+      context = {
+        cluster = "liken-sh"
+        user    = "website-deployer"
+      }
+    }]
+    "current-context" = "website"
+  })
+}
+
+resource "github_actions_secret" "website_kubeconfig" {
+  repository  = "liken"
+  secret_name = "WEBSITE_KUBECONFIG"
+  value       = local.website_deployer_kubeconfig
 }
 
 # ---------------------------------------------------------------------------

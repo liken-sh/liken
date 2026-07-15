@@ -11,7 +11,11 @@ with deliberately different lifetimes:
 * **The cluster, which is live**: one Linode machine, installed once
   from a published release and upgrading itself from the channel by
   Cluster edits ever since. Its declarations are `cluster.yaml` and
-  `machines/`; the website it will serve again is follow-on work.
+  `machines/`.
+* **The website, which is live**: `https://liken.sh`, one static page
+  served by the cluster itself. `website/` holds the page, its
+  manifests, and the deploy story — publishing a change is a push,
+  never an image rebuild or a reboot.
 
 Everything the deployment needs lives here, organized the way any
 liken deployment would be:
@@ -21,7 +25,10 @@ liken deployment would be:
   and renew the channel's certificate.
 * `cluster.yaml` and `machines/` — the fleet, in liken's own
   vocabulary.
-* `Makefile` — how the OS gets built for this deployment's machine.
+* `Makefile` — how the OS gets built for this deployment's machine,
+  and how the website deploys to its cluster.
+* `website/` — the site the cluster serves: the page, its Kubernetes
+  manifests, and the deploy story.
 * `identity/` — the cluster's minted certificate authorities and
   join token, created by `make identity` and never committed.
 

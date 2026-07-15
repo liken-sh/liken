@@ -1,0 +1,101 @@
+# The website: one static page, served by the cluster it describes.
+#
+# The page rides in a ConfigMap and nginx serves it — the smallest
+# arrangement that is still ordinary Kubernetes, so replacing it with
+# a real site later is editing these resources, not inventing new
+# machinery. The ConfigMap itself is not declared here: the Makefile
+# generates it from website/index.html on every deploy, so the page's
+# source of truth stays a plain HTML file.
+#
+# Traffic arrives through Traefik, the cluster's declared ingress
+# (cluster.yaml opts into it), which the service load balancer binds
+# to the node's own addresses: the ports liken.sh resolves to are the
+# ports Traefik answers.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: website
+  namespace: website
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: website
+  template:
+    metadata:
+      labels:
+        app: website
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.29-alpine
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            # The ConfigMap mounts as a whole directory, never by
+            # subPath: kubelet refreshes whole-directory mounts in
+            # place when the ConfigMap changes (an atomic symlink
+            # swap, within about a minute), while subPath mounts are
+            # frozen at pod start. That refresh is what makes a
+            # content deploy free of restarts.
+            - name: page
+              mountPath: /usr/share/nginx/html
+      volumes:
+        - name: page
+          configMap:
+            name: website
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: website
+  namespace: website
+spec:
+  selector:
+    app: website
+  ports:
+    - port: 80
+      targetPort: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: website
+  namespace: website
+  annotations:
+    # Traefik terminates TLS for this site with a certificate it
+    # maintains itself — the resolver named here is defined in
+    # traefik-tls.yaml. Pointing this annotation at "staging" instead
+    # swaps in Let's Encrypt's staging environment: same dance,
+    # untrusted roots, generous rate limits — the way to rehearse a
+    # certificate change without spending real issuance attempts.
+    traefik.ingress.kubernetes.io/router.tls.certresolver: letsencrypt
+spec:
+  ingressClassName: traefik
+  tls:
+    # The hosts named here are the names the certificate is issued
+    # for; the annotation only picks which resolver does the issuing.
+    - hosts:
+        - liken.sh
+        - www.liken.sh
+  rules:
+    - host: liken.sh
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: website
+                port:
+                  number: 80
+    - host: www.liken.sh
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: website
+                port:
+                  number: 80
