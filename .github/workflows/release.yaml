@@ -151,6 +151,10 @@ jobs:
           s3cmd put --acl-public --no-progress --mime-type=image/x-icon \
             ../../../brand/favicon.ico \
             "s3://releases.liken.sh/favicon.ico"
+          s3cmd put --acl-public --no-progress \
+            --mime-type="text/html; charset=utf-8" \
+            ../../index.html \
+            "s3://releases.liken.sh/index.html"
 
       # Prove the release the way a consumer meets it: fetch the
       # document over the public URL, byte-compare it against what was

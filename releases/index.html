@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>liken releases</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<style>
+  body { max-width: 40rem; margin: 4rem auto; padding: 0 1rem;
+         font-family: system-ui, sans-serif; line-height: 1.6; }
+</style>
+<body>
+  <h1><code>liken</code> releases</h1>
+  <p>This is the release channel for
+  <a href="https://liken.sh"><code>liken</code></a>, a small operating
+  system that boots a machine straight into Kubernetes. The channel is
+  plain object storage: every published file is public, and a release
+  never changes after it is published.</p>
+  <p>The layout:</p>
+  <ul>
+    <li><a href="/channel.yaml"><code>channel.yaml</code></a> names the
+    newest published version.</li>
+    <li><code>/&lt;version&gt;/release.yaml</code> names a release's
+    artifacts by sha256 digest, and the artifacts sit beside it.</li>
+    <li><code>/&lt;version&gt;/LICENSES.md</code> carries the
+    third-party notices for everything a release redistributes.</li>
+    <li><code>/sources/&lt;component&gt;/&lt;version&gt;/</code> serves
+    the corresponding source for the GPL- and LGPL-licensed components,
+    beside the binaries built from it.</li>
+  </ul>
+  <p>There is no directory listing. A deployment adopts a release by
+  naming its exact version and pinning its document's digest, so trust
+  travels in the deployment's own configuration, never in this
+  channel. <a href="https://github.com/liken-sh/liken">The
+  repository</a> explains how it all works, and
+  <a href="https://github.com/liken-sh/liken/blob/main/GETTING-STARTED.md">GETTING-STARTED.md</a>
+  walks the path from a release to a running cluster.</p>
+</body>
+</html>
