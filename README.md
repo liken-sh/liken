@@ -1,8 +1,17 @@
 # `liken`
 
+<img src="brand/liken.svg" alt="The liken mark: a patch of lichen drawn as hexagonal tiles" width="130" align="right">
+
 **liken** *(v.)* — to represent one thing as similar to another; to compare.
 
-Homophone of *lichen*: a symbiont of two organisms living as one, on bare rock.
+Homophone of *[lichen](https://en.wikipedia.org/wiki/Lichen)*: a symbiont
+of two organisms living as one, and one of the first things to colonize
+bare rock.
+
+The icon is a patch of that lichen, drawn as the polygonal plates
+(*[areoles](https://en.wikipedia.org/wiki/Crustose_lichen)*) that a
+crustose lichen cracks into as it grows. [`brand/`](brand/) explains
+the design and the biology behind it.
 
 `liken` is a small operating system that boots a machine straight into
 Kubernetes and uses it as the service manager. **Li**nux +

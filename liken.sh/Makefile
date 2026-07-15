@@ -202,9 +202,18 @@ website:
 # wait. kubelet would refresh the mounted page within a minute on its
 # own; the restart gives the deploy a definite end, so a deployer can
 # check the site serves what it just shipped.
+#
+# The page's icon rides along from the brand domain, renamed into the
+# names the page links to: the vector at /icon.svg, which modern
+# browsers prefer, and the /favicon.ico raster as the fallback. The
+# .ico is binary, so kubectl files it under the ConfigMap's binaryData
+# on its own.
 website-content:
 	./kubectl create configmap website --namespace website \
-		--from-file website/index.html --dry-run=client -o yaml \
+		--from-file website/index.html \
+		--from-file=icon.svg=../brand/liken.svg \
+		--from-file=favicon.ico=../brand/favicon.ico \
+		--dry-run=client -o yaml \
 		| ./kubectl apply -f -
 	./kubectl rollout restart --namespace website deployment/website
 	./kubectl rollout status --namespace website deployment/website
