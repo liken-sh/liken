@@ -141,6 +141,9 @@ jobs:
             "s3://releases.liken.sh/${{ steps.version.outputs.version }}/release.yaml"
           s3cmd put --acl-public --no-progress ../channel.yaml \
             "s3://releases.liken.sh/channel.yaml"
+          s3cmd put --acl-public --no-progress --mime-type=image/x-icon \
+            ../../../brand/favicon.ico \
+            "s3://releases.liken.sh/favicon.ico"
 
       # Prove the release the way a consumer meets it: fetch the
       # document over the public URL, byte-compare it against what was

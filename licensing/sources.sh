@@ -70,13 +70,16 @@ out="$here/dist/sources"
 # mirror <component>/<version> <filename> <sha256> <url>: download
 # once into the cache, verify against the pin every time, and place
 # the file in the tree the channel serves. Hardlinks keep the big
-# tarballs from existing twice on disk.
+# tarballs from existing twice on disk. The retries matter here more
+# than in most fetch scripts: this one pulls from several upstreams
+# in a row (kernel.org, GitHub, GNU, Launchpad), and a single
+# transient 502 from any of them would otherwise fail a release.
 mirror() {
     local dir="$1" file="$2" sha="$3" url="$4"
     mkdir -p "$cache/$dir" "$out/$dir"
     if [[ ! -f "$cache/$dir/$file" ]]; then
         echo "mirroring $dir/$file"
-        curl -fsSL "$url" -o "$cache/$dir/$file.partial"
+        curl -fsSL --retry 5 --retry-delay 5 "$url" -o "$cache/$dir/$file.partial"
         mv "$cache/$dir/$file.partial" "$cache/$dir/$file"
     fi
     echo "$sha  $cache/$dir/$file" | sha256sum --check --quiet || {
