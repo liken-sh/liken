@@ -67,6 +67,22 @@ grub_version="$(cat "$here/../grub/VERSION")"
 cache="$here/cache"
 out="$here/dist/sources"
 
+# The channel this mirror ultimately serves. Sources are keyed by
+# component version and published exactly once, verified against
+# their pins on the way in, so a file the channel already serves
+# needs no work at all: no download, no upload. That check is what
+# keeps this script cheap on the release path — the pins change far
+# less often than anything else in a release, so most runs skip
+# every file here. The check needs no credentials because every
+# published object is public-read, and it fails safe: if the check
+# itself can't reach the channel, the file is fetched and uploaded
+# redundantly rather than ever left missing.
+channel="https://releases.liken.sh"
+
+published() {
+    curl -fsI --retry 3 "$channel/sources/$1/$2" >/dev/null 2>&1
+}
+
 # mirror <component>/<version> <filename> <sha256> <url>: download
 # once into the cache, verify against the pin every time, and place
 # the file in the tree the channel serves. Hardlinks keep the big
@@ -76,6 +92,10 @@ out="$here/dist/sources"
 # transient 502 from any of them would otherwise fail a release.
 mirror() {
     local dir="$1" file="$2" sha="$3" url="$4"
+    if published "$dir" "$file"; then
+        echo "$dir/$file is already on the channel"
+        return
+    fi
     mkdir -p "$cache/$dir" "$out/$dir"
     if [[ ! -f "$cache/$dir/$file" ]]; then
         echo "mirroring $dir/$file"
@@ -93,9 +113,14 @@ mirror() {
 
 # place <component>/<version> <filename> <path>: a file another
 # domain already fetched and verified against its own pin; it only
-# needs to be laid out in the sources tree.
+# needs to be laid out in the sources tree, and not even that when
+# the channel already serves it.
 place() {
     local dir="$1" file="$2" src="$3"
+    if published "$dir" "$file"; then
+        echo "$dir/$file is already on the channel"
+        return
+    fi
     [[ -f "$src" ]] || {
         echo "sources.sh: $src is missing; build its domain first" >&2
         exit 1
@@ -206,5 +231,9 @@ place "trust/$trust_version" "cacert-$trust_version.pem" \
     "$here/../trust/dist/$trust_version/cacert.pem"
 
 echo
-echo "sources mirrored:"
-(cd "$out" && find . -type f | sort | sed 's|^\./|  |')
+if [[ -d "$out" ]]; then
+    echo "sources to publish:"
+    (cd "$out" && find . -type f | sort | sed 's|^\./|  |')
+else
+    echo "every source is already on the channel"
+fi

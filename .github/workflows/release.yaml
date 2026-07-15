@@ -104,15 +104,22 @@ jobs:
       # channel to offer their source from the same place it offers
       # the binaries (licensing/sources.sh explains), so no release
       # may be discoverable before its sources are. The mirror is
-      # keyed by component version, not release version — releases
-      # built from the same pins share sources — so most uploads skip:
-      # only a pin bump moves new bytes.
+      # keyed by component version, not release version, and the
+      # script skips everything the channel already serves, so a
+      # release whose pins haven't moved downloads and uploads
+      # nothing here; only a pin bump moves new bytes. When every
+      # file is already published, the sources tree isn't produced
+      # at all and the publish loop below has nothing to do.
       - name: mirror the corresponding sources
         run: make -C licensing sources
 
       - name: publish the sources
-        working-directory: licensing/dist/sources
         run: |
+          if [ ! -d licensing/dist/sources ]; then
+            echo "every source is already on the channel"
+            exit 0
+          fi
+          cd licensing/dist/sources
           find . -type f | sort | while read -r file; do
             key="sources/${file#./}"
             if ! s3cmd info "s3://releases.liken.sh/$key" >/dev/null 2>&1; then
