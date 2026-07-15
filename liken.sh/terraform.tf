@@ -40,6 +40,16 @@ terraform {
       source  = "hashicorp/tls"
       version = "~> 4.0"
     }
+    # The aws provider is here for exactly one resource: the release
+    # bucket's website configuration. That setting exists only in the
+    # S3 protocol (PutBucketWebsite) — Linode's own API doesn't carry
+    # it and their provider doesn't model it — and the aws provider is
+    # the maintained Terraform client for that protocol, pointed at
+    # Linode's endpoint below.
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
   }
 
   # Terraform's state maps these declarations onto real resource IDs,
@@ -75,6 +85,32 @@ provider "github" {
   owner = "liken-sh"
 }
 
+# The aws provider, aimed at Linode's S3 endpoint rather than AWS.
+# It authenticates with the same scoped upload key CI publishes with,
+# read straight from that key's resource, so no new credential
+# exists. The skip_* lines tell it not to expect the parts of AWS
+# that Linode's S3 compatibility doesn't imitate, and path-style
+# addressing matters because the bucket's dotted name (the FQDN, for
+# custom-domain TLS) breaks the wildcard certificate under
+# virtual-host addressing.
+provider "aws" {
+  alias  = "linode_object_storage"
+  region = "us-east-1"
+
+  access_key = linode_object_storage_key.github_releases.access_key
+  secret_key = linode_object_storage_key.github_releases.secret_key
+
+  skip_credentials_validation = true
+  skip_region_validation      = true
+  skip_requesting_account_id  = true
+  skip_metadata_api_check     = true
+  s3_use_path_style           = true
+
+  endpoints {
+    s3 = "https://us-east-1.linodeobjects.com"
+  }
+}
+
 # ---------------------------------------------------------------------------
 # DNS: the liken.sh zone.
 #
@@ -93,15 +129,25 @@ resource "linode_domain" "liken_sh" {
 
 # The release channel's name. Linode serves a bucket over HTTPS on a
 # custom domain only when the bucket is *named* that domain (see the
-# bucket below) and the name CNAMEs to the bucket's own hostname: the
-# TLS SNI and Host header of a request are how their edge finds both
-# the bucket and the certificate to answer with.
+# bucket below) and the name CNAMEs to one of the bucket's own
+# hostnames: the TLS SNI and Host header of a request are how their
+# edge finds both the bucket and the certificate to answer with.
+#
+# A bucket answers under two hostname classes, and the CNAME's target
+# picks which one a custom domain gets. The plain S3 class treats
+# GET / as a listing request, which this bucket's ACL refuses; the
+# website class serves the bucket's index document there instead (the
+# website configuration below names it). Everything else is the same
+# either way — objects, digests, and the uploaded certificate, which
+# Linode presents on both classes — so the channel points at the
+# website class and https://releases.liken.sh/ answers with a page
+# instead of a 403.
 
 resource "linode_domain_record" "releases" {
   domain_id   = linode_domain.liken_sh.id
   name        = "releases"
   record_type = "CNAME"
-  target      = "releases.liken.sh.us-east-1.linodeobjects.com"
+  target      = "releases.liken.sh.website-us-east-1.linodeobjects.com"
 }
 
 # The website's names: the apex points at the node, and www rides
@@ -426,6 +472,26 @@ resource "linode_object_storage_bucket" "releases" {
   # first editing this stanza with intent.
   lifecycle {
     prevent_destroy = true
+  }
+}
+
+# The channel's front page. With a website configuration on the
+# bucket, the website hostname class (which the CNAME above targets)
+# serves index.html when a request asks for / — the one thing the
+# plain S3 class cannot do — and the same page answers for any path
+# that doesn't exist. The page itself is releases/index.html in this
+# repository; the release workflow keeps the object fresh.
+
+resource "aws_s3_bucket_website_configuration" "releases" {
+  provider = aws.linode_object_storage
+  bucket   = linode_object_storage_bucket.releases.label
+
+  index_document {
+    suffix = "index.html"
+  }
+
+  error_document {
+    key = "index.html"
   }
 }
 
