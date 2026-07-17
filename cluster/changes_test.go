@@ -1,4 +1,4 @@
-package machine
+package cluster
 
 import (
 	"encoding/json"

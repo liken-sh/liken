@@ -1,16 +1,12 @@
 package machine
 
-// Private registries: how container images arrive on the fleet.
+// Private registries, the machine's half: the credentials document
+// and the status this boot reports. The cluster's half — the mirror
+// and embedded-registry declarations in spec.registries — lives in
+// the cluster package (cluster/registries.go).
 //
-// Two declarations live here. The first is spec.registries on the
-// Cluster (RegistriesSpec): mirror endpoints containerd pulls
-// through, and k3s's embedded peer-to-peer registry. Those are
-// cluster facts — any node may be asked to pull any image — and they
-// converge inside the canonical cluster document like every other
-// fleet-wide fact.
-//
-// The second is the credentials document (RegistryCredentials), and
-// it is deliberately not part of the Cluster spec. A spec is public:
+// The credentials document (RegistryCredentials) is deliberately not
+// part of the Cluster spec. A spec is public:
 // anyone who can get the Cluster can read every field, and a
 // password in a spec would also make every credential rotation a
 // document edit for people to hand-author. Credentials instead enter
@@ -26,57 +22,11 @@ package machine
 import (
 	"cmp"
 	"fmt"
-	"maps"
-	"net/url"
 	"path/filepath"
 	"slices"
 
 	"sigs.k8s.io/yaml"
 )
-
-// RegistriesSpec is the Cluster's declaration of how images arrive.
-// The zero value means nothing declared: no mirrors, no embedded
-// registry, no registries.yaml written at all.
-type RegistriesSpec struct {
-	// Mirrors maps a registry host, as an image reference names it
-	// (docker.io, registry.example:5000), to the endpoint URLs
-	// containerd should try, in preference order, before falling
-	// back to the registry itself.
-	Mirrors map[string][]string `json:"mirrors,omitempty"`
-
-	// Embedded turns on k3s's embedded registry mirror (Spegel):
-	// every node serves the images it already holds to its peers,
-	// which is what keeps a fleet on a slow uplink from pulling the
-	// same bytes once per machine.
-	Embedded bool `json:"embedded,omitempty"`
-}
-
-// validateRegistries holds spec.registries to its shape. The spec
-// itself may be null or absent — both decode to the zero struct and
-// genuinely mean "no registries configuration", a contrast with
-// spec.features, where a null could be mistaken for an opt-in. But a
-// mirror host with a null or empty endpoint list is refused loudly:
-// a mirror with nowhere to point is neither a mirror nor nothing,
-// and `docker.io:` in hand-written YAML is a mistake to name, not to
-// guess about.
-func validateRegistries(r RegistriesSpec) error {
-	for _, host := range slices.Sorted(maps.Keys(r.Mirrors)) {
-		if host == "" {
-			return fmt.Errorf("spec.registries.mirrors: a mirror's key must be the registry host it stands in for (docker.io, registry.example:5000)")
-		}
-		endpoints := r.Mirrors[host]
-		if len(endpoints) == 0 {
-			return fmt.Errorf("spec.registries.mirrors: %s lists no endpoints; list at least one endpoint URL, or remove the host entirely", host)
-		}
-		for _, endpoint := range endpoints {
-			u, err := url.Parse(endpoint)
-			if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-				return fmt.Errorf("spec.registries.mirrors: %s endpoint %q must be an http:// or https:// URL", host, endpoint)
-			}
-		}
-	}
-	return nil
-}
 
 // RegistryCredential is one registry's login: the auth containerd
 // presents when it pulls from this host (or from a mirror endpoint

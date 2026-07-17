@@ -432,7 +432,7 @@ spec:
                   # against exactly what was sent, and refuse the two
                   # mistakes by name. The parity test in
                   # machine/features_test.go holds the first rule's
-                  # vocabulary to the table in machine/features.go.
+                  # vocabulary to the table in cluster/features.go.
                   x-kubernetes-validations:
                     - rule: "self.all(slug, slug in ['traefik', 'servicelb', 'metrics-server', 'helm', 'network-policy', 'iscsi', 'nfs'])"
                       message: >-

@@ -1,4 +1,4 @@
-package machine
+package cluster
 
 // The feature vocabulary: the curated set of optional capabilities a
 // cluster may opt into through spec.features (see ClusterSpec).
@@ -12,7 +12,7 @@ package machine
 // vocabulary agrees by consulting this table: init validates the
 // cluster document against it and renders the k3s disable list from
 // it, the operator judges each machine's standing against it, and a
-// parity test holds the hand-written CRD (manifests/clusters-crd.yaml)
+// parity test holds the hand-written CRD (cluster/manifests/clusters-crd.yaml)
 // to exactly these slugs.
 //
 // A feature is a slug plus any subset of these contributions:

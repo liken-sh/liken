@@ -1,10 +1,12 @@
-package machine
+package cluster
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/liken-sh/liken/machine"
 )
 
 func writeClusterManifest(t *testing.T, content string) string {
@@ -184,11 +186,11 @@ func TestRoleDerivation(t *testing.T) {
 		name    string
 		cluster *Cluster
 		machine string
-		want    Role
+		want    machine.Role
 	}{
-		{"named leader", cluster, "node-1", RoleLeader},
-		{"unnamed machine is a follower", cluster, "node-2", RoleFollower},
-		{"no cluster manifest means a machine alone", nil, "node-1", RoleLeader},
+		{"named leader", cluster, "node-1", machine.RoleLeader},
+		{"unnamed machine is a follower", cluster, "node-2", machine.RoleFollower},
+		{"no cluster manifest means a machine alone", nil, "node-1", machine.RoleLeader},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.cluster.Role(tc.machine); got != tc.want {
@@ -240,5 +242,19 @@ func TestReleasesEntryUnknownVersionIsNil(t *testing.T) {
 func TestReleasesEntryEmptyCatalogIsNil(t *testing.T) {
 	if entry := (ClusterReleasesSpec{}).Entry("0.1.0"); entry != nil {
 		t.Errorf("an empty catalog has no entries, got %+v", entry)
+	}
+}
+
+func TestNewestVersion(t *testing.T) {
+	catalog := []ReleaseCatalogEntry{
+		{Version: "2026.07.09-002"},
+		{Version: "2026.07.11-001"},
+		{Version: "2026.07.10-001"},
+	}
+	if got := NewestVersion(catalog); got != "2026.07.11-001" {
+		t.Errorf("got %q", got)
+	}
+	if got := NewestVersion(nil); got != "" {
+		t.Errorf("an empty catalog has no newest; got %q", got)
 	}
 }

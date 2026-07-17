@@ -43,6 +43,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -169,7 +170,7 @@ func main() {
 	// (cluster.go), and reading it can stop the boot: a machine whose
 	// only cluster document won't parse cannot know its role, and a
 	// machine that can't tell its role must not guess.
-	cluster, clusterRaw, err := chooseCluster(machine.MachineStateDir, machine.ClusterManifestPath,
+	clusterDoc, clusterRaw, err := chooseCluster(machine.MachineStateDir, cluster.ClusterManifestPath,
 		storage.MachineState.Backing == machine.BackingPartition, &boot)
 	if err != nil {
 		failBoot(fmt.Errorf("%w: %v", errIdentity, err))
@@ -198,7 +199,7 @@ func main() {
 	// and seed their workloads here. No boot record entry, because
 	// features drift by the cluster document's whole-document hash,
 	// not field by field.
-	featureStatuses := actuateFeatures(cluster, m.Metadata.Name)
+	featureStatuses := actuateFeatures(clusterDoc, m.Metadata.Name)
 
 	if name := m.Metadata.Name; name != "" {
 		// Sethostname is one syscall: no hostnamectl, no daemon. The
@@ -234,7 +235,7 @@ func main() {
 	// forever. A machine without k3s (the image's minimal form) just
 	// proves it can boot and powers off.
 	if _, err := os.Stat(k3sBinary); err == nil {
-		clusterLife(choice, storage, boot, cluster, clusterRaw, creds,
+		clusterLife(choice, storage, boot, clusterDoc, clusterRaw, creds,
 			conns, moduleStatuses, featureStatuses, actuator, trial) // never returns
 	}
 
@@ -252,7 +253,7 @@ func main() {
 // as long as the machine does. It never returns; every path out of it
 // is a reboot or a power-off.
 func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot machine.BootStatus,
-	cluster *machine.Cluster, clusterRaw []byte, creds *machine.RegistryCredentials,
+	clusterDoc *cluster.Cluster, clusterRaw []byte, creds *machine.RegistryCredentials,
 	conns []*connection, moduleStatuses []machine.ModuleStatus,
 	featureStatuses []machine.FeatureStatus, actuator bootActuator, trial *machine.SystemRelease) {
 	m := choice.m
@@ -269,7 +270,7 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	// come from the cluster manifest (k3s.go). A failure here is
 	// an identity problem too: a follower that can't say where
 	// its cluster is must not come up pretending otherwise.
-	role, err := writeK3sBootConfig(cluster, m, conns)
+	role, err := writeK3sBootConfig(clusterDoc, m, conns)
 	if err != nil {
 		failBoot(fmt.Errorf("%w: %v", errIdentity, err))
 	}
@@ -278,7 +279,7 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	// from their own document, rendered into the registries.yaml
 	// k3s reads at start (registries.go). Writing it promotes
 	// staged credentials — the write is their whole actuation.
-	registries := writeRegistriesConfig(cluster, creds,
+	registries := writeRegistriesConfig(clusterDoc, creds,
 		machine.RegistryCredentialsStore(machine.MachineStateDir), boot.CredentialsSource)
 	// The node password k3s mints on first join has to outlive
 	// this boot, or the machine can never rejoin its own cluster
@@ -294,7 +295,7 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	// like it's from the future. This is the only moment liken
 	// ever steps the clock; from here on it only slews (time.go
 	// explains both corrections).
-	clk := newClock(timeSources(cluster, role, machine.MachineManifestDir))
+	clk := newClock(timeSources(clusterDoc, role, machine.MachineManifestDir))
 	firstSync := stepClockAtBoot(clk.sources)
 	clk.record(firstSync)
 	// A successful boot measurement is worth persisting at once:
@@ -315,7 +316,7 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	// prepareForK3s just mounted a fresh tmpfs there; anything
 	// written earlier would be shadowed by the mount.
 	facts := publishFacts(factsInputs{
-		cluster:     cluster,
+		clusterDoc:  clusterDoc,
 		role:        role,
 		choice:      choice,
 		conns:       conns,
@@ -357,7 +358,7 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	// The restart path: everything a k3s bounce may re-render,
 	// gathered while it's at hand (restart.go).
 	restarter := newRestartState(machine.MachineStateDir, m, conns, facts,
-		cluster, clusterRaw, creds, boot.CredentialsSource)
+		clusterDoc, clusterRaw, creds, boot.CredentialsSource)
 	// A proving boot watches for its own promotion: when the
 	// operator's first reconcile proves the staged release, init
 	// asserts the firmware's boot preference so the newly proven

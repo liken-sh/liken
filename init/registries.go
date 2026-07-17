@@ -7,7 +7,7 @@ package main
 // arrangements: mirror endpoints to pull through, and the
 // credentials to present. k3s reads it once, at process start, when
 // it renders containerd's actual configuration — which is exactly
-// why registry changes converge by restarting k3s (machine/changes.go)
+// why registry changes converge by restarting k3s (cluster/changes.go)
 // and never need a reboot.
 //
 // Init is the file's sole author, from two inputs. The mirrors and
@@ -43,6 +43,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -145,7 +146,7 @@ func chooseRegistryCredentials(stateRoot string, durable bool, boot *machine.Boo
 // whole actuation (the file comment argues why no downstream proof
 // exists to wait for). A write failure leaves staged in place for
 // the next boot to retry.
-func writeRegistriesConfig(cluster *machine.Cluster, creds *machine.RegistryCredentials,
+func writeRegistriesConfig(clusterDoc *cluster.Cluster, creds *machine.RegistryCredentials,
 	store machine.ManifestStore, source machine.ManifestSource) machine.RegistriesStatus {
 	status := machine.RegistriesStatus{}
 
@@ -155,11 +156,11 @@ func writeRegistriesConfig(cluster *machine.Cluster, creds *machine.RegistryCred
 		Mirrors: map[string]registryMirror{},
 		Configs: map[string]registryConfig{},
 	}
-	if cluster != nil {
-		for host, endpoints := range cluster.Spec.Registries.Mirrors {
+	if clusterDoc != nil {
+		for host, endpoints := range clusterDoc.Spec.Registries.Mirrors {
 			file.Mirrors[host] = registryMirror{Endpoint: endpoints}
 		}
-		if cluster.Spec.Registries.Embedded {
+		if clusterDoc.Spec.Registries.Embedded {
 			status.Embedded = true
 			if _, declared := file.Mirrors["*"]; !declared {
 				file.Mirrors["*"] = registryMirror{}

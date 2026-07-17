@@ -1,4 +1,4 @@
-package machine
+package cluster
 
 import (
 	"fmt"
@@ -57,7 +57,7 @@ func TestFeatureBySlug(t *testing.T) {
 // directions, because the CEL rule's vocabulary list is compared
 // against the table exactly.
 func TestClusterCRDMatchesTheVocabulary(t *testing.T) {
-	raw, err := os.ReadFile("../manifests/clusters-crd.yaml")
+	raw, err := os.ReadFile("manifests/clusters-crd.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}

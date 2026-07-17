@@ -39,6 +39,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/kubernetes"
 	"github.com/liken-sh/liken/machine"
 )
@@ -59,8 +60,8 @@ func main() {
 	// and the machine operators seed it from the image. Until the CRD
 	// is served and some machine's seed lands (the first minutes of a
 	// brand-new cluster), there is nothing to operate, so wait.
-	cluster := awaitCluster(client)
-	name := cluster.Metadata.Name
+	clusterDoc := awaitCluster(client)
+	name := clusterDoc.Metadata.Name
 	fmt.Printf("operating cluster %s\n", name)
 
 	// The same level-triggered loop as the machine operator, pointed
@@ -103,19 +104,19 @@ func main() {
 // rollout), give the channel poller its look at the spec, then let
 // the fleet sweep list, judge, and write.
 func sweep(c *kubernetes.Client, name string, poller *channelPoller) {
-	cluster, err := kubernetes.GetCluster(c, name)
+	clusterDoc, err := kubernetes.GetCluster(c, name)
 	if err != nil {
 		fmt.Printf("reading cluster %s: %v\n", name, err)
 		return
 	}
-	poller.Observe(cluster.Spec.Releases, time.Now())
-	sweepFleet(c, cluster, poller.Available(), time.Now())
+	poller.Observe(clusterDoc.Spec.Releases, time.Now())
+	sweepFleet(c, clusterDoc, poller.Available(), time.Now())
 }
 
 // awaitCluster lists until a Cluster exists. A 404 just means the
 // CRD isn't served yet; an empty list means no machine has seeded
 // the object; both resolve themselves as the fleet boots.
-func awaitCluster(c *kubernetes.Client) *machine.Cluster {
+func awaitCluster(c *kubernetes.Client) *cluster.Cluster {
 	for {
 		clusters, err := kubernetes.ListClusters(c)
 		if err != nil && !errors.Is(err, kubernetes.ErrNotFound) {

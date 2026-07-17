@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -129,7 +130,7 @@ func (api *clusterAPI) handler() http.Handler {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
-			_ = json.NewEncoder(w).Encode(&machine.Cluster{
+			_ = json.NewEncoder(w).Encode(&cluster.Cluster{
 				Kind:     "Cluster",
 				Metadata: machine.ObjectMeta{Name: "lab"},
 			})
@@ -157,11 +158,11 @@ func (api *clusterAPI) handler() http.Handler {
 	})
 }
 
-func seedCluster() *machine.Cluster {
-	return &machine.Cluster{
+func seedCluster() *cluster.Cluster {
+	return &cluster.Cluster{
 		Kind:     "Cluster",
 		Metadata: machine.ObjectMeta{Name: "lab"},
-		Spec:     machine.ClusterSpec{Leaders: []string{"node-1"}},
+		Spec:     cluster.ClusterSpec{Leaders: []string{"node-1"}},
 	}
 }
 

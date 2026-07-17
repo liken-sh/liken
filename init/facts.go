@@ -20,6 +20,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -73,7 +74,7 @@ var (
 // nearly a dozen positional arguments invite transposition, and named
 // fields read correctly at the call site.
 type factsInputs struct {
-	cluster     *machine.Cluster
+	clusterDoc  *cluster.Cluster
 	role        machine.Role
 	choice      *manifestChoice
 	conns       []*connection
@@ -141,7 +142,7 @@ func publishFacts(in factsInputs) *factsFile {
 	// summary describes the primary interface: the cluster-facing one
 	// when the Cluster's nodeCIDR identifies it, otherwise the first
 	// that came up.
-	facts.Network = networkFacts(in.cluster, in.conns, now)
+	facts.Network = networkFacts(in.clusterDoc, in.conns, now)
 
 	// The clock's state so far: the boot-time measurement if one
 	// succeeded, or an accurate unsynchronized/free-running report.
@@ -177,13 +178,13 @@ func publishBootClusterManifest(raw []byte) {
 	if len(raw) == 0 {
 		return
 	}
-	if err := os.WriteFile(machine.BootClusterManifestPath, raw, 0o644); err != nil {
+	if err := os.WriteFile(cluster.BootClusterManifestPath, raw, 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: writing the boot cluster manifest: %v\n", err)
 	}
 }
 
 // networkFacts folds every connection into a NetworkStatus.
-func networkFacts(cluster *machine.Cluster, conns []*connection, now time.Time) machine.NetworkStatus {
+func networkFacts(clusterDoc *cluster.Cluster, conns []*connection, now time.Time) machine.NetworkStatus {
 	status := machine.NetworkStatus{}
 	if len(conns) == 0 {
 		return status
@@ -194,7 +195,7 @@ func networkFacts(cluster *machine.Cluster, conns []*connection, now time.Time) 
 	}
 
 	primary := conns[0]
-	if _, ifname := nodeAddress(cluster, conns); ifname != "" {
+	if _, ifname := nodeAddress(clusterDoc, conns); ifname != "" {
 		for _, conn := range conns {
 			if conn.ifname == ifname {
 				primary = conn

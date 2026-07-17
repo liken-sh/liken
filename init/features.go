@@ -3,7 +3,7 @@ package main
 // Actuating the cluster's opt-in features on this machine.
 //
 // The Cluster document's spec.features is the fleet's opt-ins from
-// liken's curated vocabulary (the machine package's features.go).
+// liken's curated vocabulary (the cluster package's features.go).
 // This pass is init's half of honoring them: one verdict per enabled
 // feature, bound for status.features through the facts file, with a
 // console line for each so the console and the API tell the same
@@ -31,6 +31,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -42,8 +43,8 @@ var (
 	iscsiDir        = "/etc/iscsi"
 )
 
-func actuateFeatures(cluster *machine.Cluster, machineName string) []machine.FeatureStatus {
-	slugs := cluster.EnabledFeatures()
+func actuateFeatures(clusterDoc *cluster.Cluster, machineName string) []machine.FeatureStatus {
+	slugs := clusterDoc.EnabledFeatures()
 	if len(slugs) == 0 {
 		return nil
 	}
@@ -51,12 +52,12 @@ func actuateFeatures(cluster *machine.Cluster, machineName string) []machine.Fea
 	statuses := make([]machine.FeatureStatus, 0, len(slugs))
 	for _, slug := range slugs {
 		var status machine.FeatureStatus
-		def := machine.FeatureBySlug(slug)
+		def := cluster.FeatureBySlug(slug)
 		switch {
 		case def == nil:
 			// A slug this binary's vocabulary doesn't include. The
 			// parser deliberately let it through (features.go in the
-			// machine package explains why a strict vocabulary would
+			// cluster package explains why a strict vocabulary would
 			// brick a downgraded machine), so the report happens
 			// here, naming both plausible causes: this image predates
 			// the feature, or a hand-written seed misspelled it.
@@ -65,9 +66,9 @@ func actuateFeatures(cluster *machine.Cluster, machineName string) []machine.Fea
 				State: machine.FeatureMissing,
 				Message: fmt.Sprintf(
 					"this image's vocabulary has no %q feature; upgrade to a release that carries it, or fix the name if it is a misspelling (this image offers: %s)",
-					slug, strings.Join(machine.FeatureSlugs(), ", ")),
+					slug, strings.Join(cluster.FeatureSlugs(), ", ")),
 			}
-		case def.Kind == machine.FeatureVendored:
+		case def.Kind == cluster.FeatureVendored:
 			status = actuateVendoredFeature(moduleBase, slug, machineName)
 		default:
 			status = machine.FeatureStatus{Name: slug, State: machine.FeatureActive}

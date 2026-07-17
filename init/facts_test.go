@@ -113,7 +113,7 @@ func TestPublishFactsPublishesTheBootStory(t *testing.T) {
 	raw := []byte("kind: Machine\nmetadata:\n  name: node-1\n")
 
 	owner := publishFacts(factsInputs{
-		cluster:    labCluster(),
+		clusterDoc: labCluster(),
 		role:       machine.RoleLeader,
 		choice:     &manifestChoice{raw: raw},
 		conns:      []*connection{fullConn(t, "eth1", "10.10.0.2/24", machine.MethodStatic)},

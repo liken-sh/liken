@@ -32,6 +32,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/kubernetes"
 	"github.com/liken-sh/liken/machine"
 )
@@ -44,7 +45,7 @@ import (
 // the fleet. decideFleetSweep is pure; sweepFleet acts.
 type fleetSweep struct {
 	lost      []string
-	tally     machine.MachineTally
+	tally     cluster.MachineTally
 	condition machine.Condition
 	phase     machine.Phase
 }
@@ -58,7 +59,7 @@ type fleetSweep struct {
 // MachinesReady condition names the machines so nobody has to go
 // looking.
 func decideFleetSweep(machines []machine.Machine, renewals map[string]time.Time, now time.Time) fleetSweep {
-	s := fleetSweep{tally: machine.MachineTally{Total: len(machines)}}
+	s := fleetSweep{tally: cluster.MachineTally{Total: len(machines)}}
 	var transitioning, unwell []string
 	for i := range machines {
 		m := &machines[i]
@@ -106,7 +107,7 @@ func decideFleetSweep(machines []machine.Machine, renewals map[string]time.Time,
 // the Cluster. available is the channel poller's last answer, passed
 // in as a plain value so the sweep itself stays a function of its
 // arguments.
-func sweepFleet(c *kubernetes.Client, cluster *machine.Cluster, available string, now time.Time) {
+func sweepFleet(c *kubernetes.Client, clusterDoc *cluster.Cluster, available string, now time.Time) {
 	machines, err := kubernetes.ListMachines(c)
 	if err != nil {
 		fmt.Printf("listing machines for the fleet sweep: %v\n", err)
@@ -124,7 +125,7 @@ func sweepFleet(c *kubernetes.Client, cluster *machine.Cluster, available string
 	// (rollout.go). Sequencing belongs here for the same reason the
 	// tally does: the sweep is the one place with the whole fleet in
 	// view.
-	r := decideRollout(machines, renewals, cluster, now)
+	r := decideRollout(machines, renewals, clusterDoc, now)
 	carryOutRollout(c, machines, r, now)
 
 	// The OS's own pods (the operator's and the log relays') are
@@ -135,10 +136,10 @@ func sweepFleet(c *kubernetes.Client, cluster *machine.Cluster, available string
 	// Retracted features leave workloads behind, because k3s only
 	// deletes an addon it watches disappear, and retraction removes
 	// the manifest while k3s is down (janitor.go).
-	janitorFeatureWorkloads(c, cluster)
+	janitorFeatureWorkloads(c, clusterDoc)
 
 	markLost(c, machines, s.lost, now)
-	publishClusterStatus(c, cluster, s, r, available, now)
+	publishClusterStatus(c, clusterDoc, s, r, available, now)
 }
 
 // markLost writes the Lost verdict onto each machine the sweep found
@@ -186,17 +187,17 @@ func markLost(c *kubernetes.Client, machines []machine.Machine, lost []string, n
 // the sweep is the one writer the Cluster's status has, so every
 // derived field is its job. The write happens only when something
 // actually changed, so a settled fleet writes nothing.
-func publishClusterStatus(c *kubernetes.Client, cluster *machine.Cluster, s fleetSweep, r rollout, available string, now time.Time) {
-	newest := machine.NewestVersion(cluster.Spec.Releases.Catalog)
-	s.condition.ObservedGeneration = cluster.Metadata.Generation
-	r.progressing.ObservedGeneration = cluster.Metadata.Generation
-	conditions := machine.SetCondition(slices.Clone(cluster.Status.Conditions), s.condition, now)
+func publishClusterStatus(c *kubernetes.Client, clusterDoc *cluster.Cluster, s fleetSweep, r rollout, available string, now time.Time) {
+	newest := cluster.NewestVersion(clusterDoc.Spec.Releases.Catalog)
+	s.condition.ObservedGeneration = clusterDoc.Metadata.Generation
+	r.progressing.ObservedGeneration = clusterDoc.Metadata.Generation
+	conditions := machine.SetCondition(slices.Clone(clusterDoc.Status.Conditions), s.condition, now)
 	conditions = machine.SetCondition(conditions, r.progressing, now)
-	if cluster.Status.Machines != s.tally || cluster.Status.Phase != s.phase ||
-		cluster.Status.Releases.Newest != newest ||
-		cluster.Status.Releases.Available != available ||
-		!slices.Equal(conditions, cluster.Status.Conditions) {
-		updated := *cluster
+	if clusterDoc.Status.Machines != s.tally || clusterDoc.Status.Phase != s.phase ||
+		clusterDoc.Status.Releases.Newest != newest ||
+		clusterDoc.Status.Releases.Available != available ||
+		!slices.Equal(conditions, clusterDoc.Status.Conditions) {
+		updated := *clusterDoc
 		updated.Status.Machines = s.tally
 		updated.Status.Phase = s.phase
 		updated.Status.Releases.Newest = newest

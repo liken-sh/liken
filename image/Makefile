@@ -51,7 +51,9 @@ $(DIST)/liken.sqfs $(DIST)/boot.cpio &: build.sh boot-modules.conf \
 		$(wildcard ../machine-operator/manifests/*.yaml) \
 		$(CLUSTER_OPERATOR_DIST)/liken-cluster-operator-image.tar \
 		$(wildcard ../cluster-operator/manifests/*.yaml) \
-		$(wildcard ../manifests/*.yaml) \
+		$(wildcard ../machine/manifests/*.yaml) \
+		$(wildcard ../cluster/manifests/*.yaml) \
+		$(wildcard ../kubernetes/manifests/*.yaml) \
 		$(LOGS_DIST)/liken-logs-image.tar \
 		$(wildcard ../logs/manifests/*.yaml) \
 		$(LIKEN_VERSION_STAMP)

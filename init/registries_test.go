@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -19,12 +20,12 @@ func registriesTempPath(t *testing.T) string {
 	return registriesConfigPath
 }
 
-func mirroredCluster(embedded bool) *machine.Cluster {
-	return &machine.Cluster{
+func mirroredCluster(embedded bool) *cluster.Cluster {
+	return &cluster.Cluster{
 		Kind:     "Cluster",
 		Metadata: machine.ObjectMeta{Name: "lab"},
-		Spec: machine.ClusterSpec{
-			Registries: machine.RegistriesSpec{
+		Spec: cluster.ClusterSpec{
+			Registries: cluster.RegistriesSpec{
 				Mirrors:  map[string][]string{"docker.io": {"http://10.10.0.100:5000"}},
 				Embedded: embedded,
 			},
@@ -89,9 +90,9 @@ func TestWriteRegistriesConfigEmbeddedAddsTheWildcard(t *testing.T) {
 
 func TestWriteRegistriesConfigEmbeddedKeepsADeclaredWildcard(t *testing.T) {
 	path := registriesTempPath(t)
-	cluster := mirroredCluster(true)
-	cluster.Spec.Registries.Mirrors["*"] = []string{"http://10.10.0.100:5000"}
-	writeRegistriesConfig(cluster, nil, machine.RegistryCredentialsStore(t.TempDir()), "")
+	clusterDoc := mirroredCluster(true)
+	clusterDoc.Spec.Registries.Mirrors["*"] = []string{"http://10.10.0.100:5000"}
+	writeRegistriesConfig(clusterDoc, nil, machine.RegistryCredentialsStore(t.TempDir()), "")
 	raw, _ := os.ReadFile(path)
 	if strings.Count(string(raw), "*") != 1 {
 		t.Errorf("a declared wildcard must not be duplicated or overwritten:\n%s", raw)
@@ -137,13 +138,13 @@ func TestWriteRegistriesConfigNothingDeclaredRemovesTheFile(t *testing.T) {
 
 func TestWriteRegistriesConfigDeterministicBytes(t *testing.T) {
 	path := registriesTempPath(t)
-	cluster := mirroredCluster(true)
-	cluster.Spec.Registries.Mirrors["quay.io"] = []string{"http://10.10.0.100:5000"}
+	clusterDoc := mirroredCluster(true)
+	clusterDoc.Spec.Registries.Mirrors["quay.io"] = []string{"http://10.10.0.100:5000"}
 	store := machine.RegistryCredentialsStore(t.TempDir())
 
-	writeRegistriesConfig(cluster, labCredentials(), store, machine.ManifestSourceProven)
+	writeRegistriesConfig(clusterDoc, labCredentials(), store, machine.ManifestSourceProven)
 	first, _ := os.ReadFile(path)
-	writeRegistriesConfig(cluster, labCredentials(), store, machine.ManifestSourceProven)
+	writeRegistriesConfig(clusterDoc, labCredentials(), store, machine.ManifestSourceProven)
 	second, _ := os.ReadFile(path)
 	if string(first) != string(second) {
 		t.Errorf("the same inputs must render the same bytes:\n%s\n%s", first, second)

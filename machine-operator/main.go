@@ -36,6 +36,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/kubernetes"
 	"github.com/liken-sh/liken/machine"
 )
@@ -62,7 +63,7 @@ func main() {
 	// The cluster document this boot ran, read before the client is
 	// built because it decides which API endpoint this machine should
 	// use (localAPIEndpoint, endpoint.go).
-	cluster, err := machine.LoadCluster(machine.ClusterManifestPath)
+	clusterDoc, err := cluster.LoadCluster(cluster.ClusterManifestPath)
 	if err != nil {
 		fatal("cluster manifest: %v", err)
 	}
@@ -72,7 +73,7 @@ func main() {
 	// exits nonzero is restarted with backoff, and the failure is
 	// visible in `kubectl get pods` instead of buried in a log. This is
 	// the "crash-only" style most Kubernetes components use.
-	client, err := kubernetes.InClusterClientAt(localAPIEndpoint(cluster, name))
+	client, err := kubernetes.InClusterClientAt(localAPIEndpoint(clusterDoc, name))
 	if err != nil {
 		fatal("in-cluster config: %v", err)
 	}
@@ -99,9 +100,9 @@ func main() {
 	// published it. (Seeding lives here rather than in the cluster
 	// operator because this is the program with the image's manifest
 	// under its feet; the cluster operator has no mounts at all.)
-	if cluster != nil {
-		if err := ensureCluster(client, cluster); err != nil {
-			fatal("ensuring cluster %s exists: %v", cluster.Metadata.Name, err)
+	if clusterDoc != nil {
+		if err := ensureCluster(client, clusterDoc); err != nil {
+			fatal("ensuring cluster %s exists: %v", clusterDoc.Metadata.Name, err)
 		}
 	}
 
@@ -109,8 +110,8 @@ func main() {
 	// Cluster resource each pass (cluster convergence); a machine with
 	// no cluster manifest has no document to converge.
 	clusterName := ""
-	if cluster != nil {
-		clusterName = cluster.Metadata.Name
+	if clusterDoc != nil {
+		clusterName = clusterDoc.Metadata.Name
 	}
 
 	// The core of every operator is a level-triggered loop. Watch

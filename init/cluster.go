@@ -30,6 +30,7 @@ import (
 	"io/fs"
 	"os"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -42,7 +43,7 @@ import (
 // answer, because a machine alone is its own cluster. A seed that
 // exists and won't parse is an error the caller treats as fatal,
 // because a machine that can't tell its role must not guess.
-func chooseCluster(stateRoot, seedPath string, durable bool, boot *machine.BootStatus) (*machine.Cluster, []byte, error) {
+func chooseCluster(stateRoot, seedPath string, durable bool, boot *machine.BootStatus) (*cluster.Cluster, []byte, error) {
 	if durable {
 		store := machine.ClusterManifests(stateRoot)
 
@@ -55,7 +56,7 @@ func chooseCluster(stateRoot, seedPath string, durable bool, boot *machine.BootS
 		} else if raw != nil {
 			hash := machine.ManifestHash(raw)
 			attempted, _ := store.LoadAttempted()
-			c, perr := machine.ParseCluster(raw)
+			c, perr := cluster.ParseCluster(raw)
 			switch {
 			case perr != nil:
 				boot.ClusterRejection = rejectStagedDocument("cluster", "document", store.Reject,
@@ -82,7 +83,7 @@ func chooseCluster(stateRoot, seedPath string, durable bool, boot *machine.BootS
 		if raw, err := store.LoadProven(); err != nil {
 			fmt.Fprintf(os.Stderr, "liken: cluster: the proven document is unreadable: %v\n", err)
 		} else if raw != nil {
-			c, perr := machine.ParseCluster(raw)
+			c, perr := cluster.ParseCluster(raw)
 			if perr != nil {
 				// A proven document that won't parse is a corrupted
 				// last-known-good: report it and fall through to the
@@ -103,7 +104,7 @@ func chooseCluster(stateRoot, seedPath string, durable bool, boot *machine.BootS
 	if err != nil {
 		return nil, nil, err
 	}
-	c, err := machine.ParseCluster(raw)
+	c, err := cluster.ParseCluster(raw)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", seedPath, err)
 	}

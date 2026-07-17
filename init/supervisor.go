@@ -182,7 +182,7 @@ func postMortem() {
 // superviseK3s runs k3s forever, with two interruptions it honors:
 // a reboot request from the operator, and a restart request, the
 // lighter disruption that applies staged restart-class changes
-// (machine/changes.go) by bouncing the k3s child in place. It never
+// (cluster/changes.go) by bouncing the k3s child in place. It never
 // returns otherwise: whenever k3s exits on its own, it gets
 // restarted, with backoff, so a fast crash loop doesn't flood the
 // console.
@@ -358,7 +358,7 @@ func startK3s(role machine.Role) (*exec.Cmd, io.Closer, error) {
 
 	// This is the one place liken's role vocabulary meets k3s's: a
 	// leader runs `k3s server`, a follower runs `k3s agent`
-	// (machine/cluster.go). Configuration lives in files, not flags:
+	// (cluster/cluster.go). Configuration lives in files, not flags:
 	// a leader's k3s reads /etc/rancher/k3s/config.yaml on its own,
 	// and a follower's is pointed at its own file (whose leader-only
 	// sibling would otherwise be misread as unknown flags). Both were

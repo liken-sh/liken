@@ -30,6 +30,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -61,7 +62,7 @@ func newChannelPoller() *channelPoller {
 // stanza. It decides whether a poll is due — the source or check
 // changed, or the last answer has aged out — and starts one in the
 // background if so. It never blocks.
-func (p *channelPoller) Observe(releases machine.ClusterReleasesSpec, now time.Time) {
+func (p *channelPoller) Observe(releases cluster.ClusterReleasesSpec, now time.Time) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 

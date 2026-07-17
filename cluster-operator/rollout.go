@@ -39,6 +39,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/kubernetes"
 	"github.com/liken-sh/liken/machine"
 )
@@ -94,7 +95,7 @@ func available(phase machine.Phase) bool {
 // mistake with a worker costs little, while every leader carries a
 // share of quorum. Name order makes the decision deterministic, so
 // two sweeps of the same fleet agree.
-func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cluster *machine.Cluster, now time.Time) rollout {
+func decideRollout(machines []machine.Machine, renewals map[string]time.Time, clusterDoc *cluster.Cluster, now time.Time) rollout {
 	var r rollout
 	inFlight := 0 // budget slots occupied: unavailable machines and unspent grants
 	leaderBusy := false
@@ -103,7 +104,7 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 	for i := range machines {
 		m := &machines[i]
 		name := m.Metadata.Name
-		leader := slices.Contains(cluster.Spec.Leaders, name)
+		leader := slices.Contains(clusterDoc.Spec.Leaders, name)
 		phase := effectivePhase(m, renewals, now)
 		grant := machine.FindCondition(m.Status.Conditions, machine.RebootApprovedCondition)
 
@@ -142,7 +143,7 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 
 	slices.Sort(workers)
 	slices.Sort(leaders)
-	capacity := cluster.Spec.Disruption.MaxUnavailableOrDefault() - inFlight
+	capacity := clusterDoc.Spec.Disruption.MaxUnavailableOrDefault() - inFlight
 	for _, name := range workers {
 		if len(stalled) > 0 || capacity <= 0 {
 			waiting = append(waiting, name)

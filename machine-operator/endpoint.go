@@ -3,7 +3,7 @@ package main
 import (
 	"slices"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/cluster"
 )
 
 // localAPIEndpoint is the machine's own path to the API server,
@@ -20,11 +20,11 @@ import (
 // operator's view of the API can never be worse than the kubelet's.
 // A machine with no cluster document falls back to the environment's
 // endpoint ("").
-func localAPIEndpoint(cluster *machine.Cluster, name string) string {
-	if cluster == nil {
+func localAPIEndpoint(clusterDoc *cluster.Cluster, name string) string {
+	if clusterDoc == nil {
 		return ""
 	}
-	if slices.Contains(cluster.Spec.Leaders, name) {
+	if slices.Contains(clusterDoc.Spec.Leaders, name) {
 		return "https://127.0.0.1:6443"
 	}
 	return "https://127.0.0.1:6444"

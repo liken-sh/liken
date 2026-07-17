@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -62,7 +63,7 @@ func awaitCalls(t *testing.T, calls *atomic.Int64, n int64) {
 	t.Fatalf("fetches: %d, want %d", calls.Load(), n)
 }
 
-var channelSpec = machine.ClusterReleasesSpec{Source: "https://releases.example/"}
+var channelSpec = cluster.ClusterReleasesSpec{Source: "https://releases.example/"}
 
 func TestPollerLearnsTheChannelsLatest(t *testing.T) {
 	var calls atomic.Int64
@@ -140,7 +141,7 @@ func TestANewSourceDropsTheOldAnswer(t *testing.T) {
 	p.Observe(channelSpec, now)
 	awaitAvailable(t, p, "2026.07.13-002")
 
-	moved := machine.ClusterReleasesSpec{Source: "https://elsewhere.example"}
+	moved := cluster.ClusterReleasesSpec{Source: "https://elsewhere.example"}
 	p.Observe(moved, now.Add(10*time.Second))
 	awaitAvailable(t, p, "")
 }
@@ -174,7 +175,7 @@ func TestNoSourceMeansNothingAvailable(t *testing.T) {
 
 	// The channel leaves the spec entirely: the stale answer goes
 	// with it, and nothing is fetched.
-	p.Observe(machine.ClusterReleasesSpec{}, now.Add(10*time.Second))
+	p.Observe(cluster.ClusterReleasesSpec{}, now.Add(10*time.Second))
 	awaitAvailable(t, p, "")
 	if calls.Load() != 1 {
 		t.Errorf("fetches: %d, want 1", calls.Load())

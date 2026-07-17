@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -31,13 +32,13 @@ func scaffolded(t *testing.T, answers ...string) string {
 
 // parsedCluster reads the generated cluster.yaml back through the
 // machine package's strict parser.
-func parsedCluster(t *testing.T, dir string) *machine.Cluster {
+func parsedCluster(t *testing.T, dir string) *cluster.Cluster {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(dir, "cluster.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := machine.ParseCluster(raw)
+	c, err := cluster.ParseCluster(raw)
 	if err != nil {
 		t.Fatal(err)
 	}

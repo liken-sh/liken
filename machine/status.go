@@ -491,7 +491,7 @@ type BootStatus struct {
 	ImportsDiscarded bool           `json:"importsDiscarded,omitempty"`
 
 	// Restarts counts the in-place k3s restarts this boot has
-	// performed to apply restart-class changes (machine/changes.go).
+	// performed to apply restart-class changes (cluster/changes.go).
 	// It lives in the boot record because it shares the boot's
 	// lifetime: a reboot re-makes the record and the count returns to
 	// zero, which is itself the signal — a change that arrived by

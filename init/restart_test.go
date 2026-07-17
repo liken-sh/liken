@@ -12,6 +12,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -21,8 +22,8 @@ import (
 type restartFixture struct {
 	state           *restartState
 	root            string
-	bootConfigs     []*machine.Cluster
-	actuations      []*machine.Cluster
+	bootConfigs     []*cluster.Cluster
+	actuations      []*cluster.Cluster
 	renderedCreds   []*machine.RegistryCredentials
 	renderedSources []machine.ManifestSource
 }
@@ -30,27 +31,27 @@ type restartFixture struct {
 func newRestartFixture(t *testing.T) *restartFixture {
 	t.Helper()
 	root := t.TempDir()
-	current := &machine.Cluster{
+	current := &cluster.Cluster{
 		APIVersion: machine.APIVersion,
 		Kind:       "Cluster",
 		Metadata:   machine.ObjectMeta{Name: "lab"},
-		Spec:       machine.ClusterSpec{Leaders: []string{"node-1"}},
+		Spec:       cluster.ClusterSpec{Leaders: []string{"node-1"}},
 	}
 	f := &restartFixture{root: root}
 	f.state = &restartState{
-		root:    root,
-		m:       &machine.Machine{Metadata: machine.ObjectMeta{Name: "node-1"}},
-		facts:   &factsFile{status: &machine.MachineStatus{}},
-		cluster: current,
-		writeBootConfig: func(c *machine.Cluster, _ *machine.Machine, _ []*connection) (machine.Role, error) {
+		root:       root,
+		m:          &machine.Machine{Metadata: machine.ObjectMeta{Name: "node-1"}},
+		facts:      &factsFile{status: &machine.MachineStatus{}},
+		clusterDoc: current,
+		writeBootConfig: func(c *cluster.Cluster, _ *machine.Machine, _ []*connection) (machine.Role, error) {
 			f.bootConfigs = append(f.bootConfigs, c)
 			return machine.RoleLeader, nil
 		},
-		actuateFeatures: func(c *machine.Cluster, _ string) []machine.FeatureStatus {
+		actuateFeatures: func(c *cluster.Cluster, _ string) []machine.FeatureStatus {
 			f.actuations = append(f.actuations, c)
 			return []machine.FeatureStatus{{Name: "traefik", State: machine.FeatureActive}}
 		},
-		renderRegistries: func(_ *machine.Cluster, creds *machine.RegistryCredentials,
+		renderRegistries: func(_ *cluster.Cluster, creds *machine.RegistryCredentials,
 			_ machine.ManifestStore, source machine.ManifestSource) machine.RegistriesStatus {
 			f.renderedCreds = append(f.renderedCreds, creds)
 			f.renderedSources = append(f.renderedSources, source)
@@ -61,9 +62,9 @@ func newRestartFixture(t *testing.T) *restartFixture {
 }
 
 // stageCluster stages a mutation of the fixture's current document.
-func (f *restartFixture) stageCluster(t *testing.T, mutate func(*machine.ClusterSpec)) string {
+func (f *restartFixture) stageCluster(t *testing.T, mutate func(*cluster.ClusterSpec)) string {
 	t.Helper()
-	doc := *f.state.cluster
+	doc := *f.state.clusterDoc
 	mutate(&doc.Spec)
 	raw, err := yaml.Marshal(&doc)
 	if err != nil {
@@ -91,8 +92,8 @@ func (f *restartFixture) stageCredentials(t *testing.T) string {
 
 func TestRestartAppliesAStagedFeatureToggle(t *testing.T) {
 	f := newRestartFixture(t)
-	hash := f.stageCluster(t, func(s *machine.ClusterSpec) {
-		s.Features = map[string]*machine.FeatureConfig{"traefik": {}}
+	hash := f.stageCluster(t, func(s *cluster.ClusterSpec) {
+		s.Features = map[string]*cluster.FeatureConfig{"traefik": {}}
 	})
 
 	if !f.state.apply(machine.RestartIntent{Reason: "test"}) {
@@ -115,7 +116,7 @@ func TestRestartAppliesAStagedFeatureToggle(t *testing.T) {
 	if status.Boot.Restarts != 1 {
 		t.Errorf("the restart counter is the observable: %+v", status.Boot.Restarts)
 	}
-	if f.state.cluster.Spec.Features["traefik"] == nil {
+	if f.state.clusterDoc.Spec.Features["traefik"] == nil {
 		t.Error("the applied document becomes current")
 	}
 }
@@ -158,8 +159,8 @@ func TestRestartRefusesAnAlreadyAttemptedDocument(t *testing.T) {
 	// document this restart (or a previous boot) already tried waits
 	// for the operator's promotion or the next boot's verdict.
 	f := newRestartFixture(t)
-	hash := f.stageCluster(t, func(s *machine.ClusterSpec) {
-		s.Features = map[string]*machine.FeatureConfig{"traefik": {}}
+	hash := f.stageCluster(t, func(s *cluster.ClusterSpec) {
+		s.Features = map[string]*cluster.FeatureConfig{"traefik": {}}
 	})
 	if err := machine.ClusterManifests(f.root).WriteAttempted(hash); err != nil {
 		t.Fatal(err)
@@ -171,7 +172,7 @@ func TestRestartRefusesAnAlreadyAttemptedDocument(t *testing.T) {
 
 func TestRestartLeavesARebootClassDocumentStanding(t *testing.T) {
 	f := newRestartFixture(t)
-	f.stageCluster(t, func(s *machine.ClusterSpec) {
+	f.stageCluster(t, func(s *cluster.ClusterSpec) {
 		s.Endpoint = "https://10.10.0.9:6443"
 	})
 
@@ -227,8 +228,8 @@ func TestRestartRetractsADroppedFeaturesManifests(t *testing.T) {
 	}
 
 	// This boot ran with iscsi declared; the staged document drops it.
-	f.state.cluster.Spec.Features = map[string]*machine.FeatureConfig{"iscsi": {}}
-	f.stageCluster(t, func(s *machine.ClusterSpec) {
+	f.state.clusterDoc.Spec.Features = map[string]*cluster.FeatureConfig{"iscsi": {}}
+	f.stageCluster(t, func(s *cluster.ClusterSpec) {
 		s.Features = nil
 	})
 

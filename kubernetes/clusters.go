@@ -9,15 +9,15 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/cluster"
 )
 
-func GetCluster(c *Client, name string) (*machine.Cluster, error) {
-	return get[machine.Cluster](c, ClustersPath+"/"+name)
+func GetCluster(c *Client, name string) (*cluster.Cluster, error) {
+	return get[cluster.Cluster](c, ClustersPath+"/"+name)
 }
 
-func ListClusters(c *Client) ([]machine.Cluster, error) {
-	return List[machine.Cluster](c, ClustersPath)
+func ListClusters(c *Client) ([]cluster.Cluster, error) {
+	return List[cluster.Cluster](c, ClustersPath)
 }
 
 // PublishClusterStatus writes through the Cluster's status
@@ -30,11 +30,11 @@ func ListClusters(c *Client) ([]machine.Cluster, error) {
 // instead of applying our stale copy, and the caller's next pass
 // re-reads and tries again. This is optimistic concurrency, the same
 // contract PublishStatus describes for Machines.
-func PublishClusterStatus(c *Client, cluster *machine.Cluster) error {
-	body, err := json.Marshal(cluster)
+func PublishClusterStatus(c *Client, clusterDoc *cluster.Cluster) error {
+	body, err := json.Marshal(clusterDoc)
 	if err != nil {
 		return err
 	}
-	path := ClustersPath + "/" + cluster.Metadata.Name + "/status"
+	path := ClustersPath + "/" + clusterDoc.Metadata.Name + "/status"
 	return c.RequestJSON(http.MethodPut, path, body, nil)
 }

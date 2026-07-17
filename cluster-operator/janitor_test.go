@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/cluster"
 )
 
 func featureDaemonSet(name, slug string) featureWorkload {
@@ -27,7 +27,7 @@ func retractionNames(workloads []featureWorkload) []string {
 }
 
 func TestJanitorLeavesDeclaredFeatureWorkloads(t *testing.T) {
-	features := map[string]*machine.FeatureConfig{"iscsi": {}}
+	features := map[string]*cluster.FeatureConfig{"iscsi": {}}
 	workloads := []featureWorkload{featureDaemonSet("liken-iscsid", "iscsi")}
 	if got := decideRetractions(features, workloads); len(got) != 0 {
 		t.Fatalf("expected no retractions, got %v", retractionNames(got))
@@ -43,7 +43,7 @@ func TestJanitorDeletesRetractedFeatureWorkloads(t *testing.T) {
 }
 
 func TestJanitorJudgesEachWorkloadByItsOwnFeature(t *testing.T) {
-	features := map[string]*machine.FeatureConfig{"nfs": {}}
+	features := map[string]*cluster.FeatureConfig{"nfs": {}}
 	workloads := []featureWorkload{
 		featureDaemonSet("liken-iscsid", "iscsi"),
 		featureDaemonSet("liken-nfs-helper", "nfs"),
@@ -83,8 +83,8 @@ func TestJanitorDeletesRetractedWorkloadsThroughTheAPI(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	})
-	cluster := &machine.Cluster{}
-	janitorFeatureWorkloads(testClient(t, handler), cluster)
+	clusterDoc := &cluster.Cluster{}
+	janitorFeatureWorkloads(testClient(t, handler), clusterDoc)
 	want := "/apis/apps/v1/namespaces/liken-system/daemonsets/liken-iscsid"
 	if len(deletes) != 1 || deletes[0] != want {
 		t.Fatalf("expected exactly [%s] deleted, got %v", want, deletes)

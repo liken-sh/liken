@@ -24,6 +24,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -71,11 +72,11 @@ func New(dir string, in io.Reader, out io.Writer) error {
 		return err
 	}
 
-	cluster, err := render("cluster.yaml.tmpl", a)
+	clusterYAML, err := render("cluster.yaml.tmpl", a)
 	if err != nil {
 		return err
 	}
-	if _, err := machine.ParseCluster(cluster); err != nil {
+	if _, err := cluster.ParseCluster(clusterYAML); err != nil {
 		return fmt.Errorf("this is a scaffold bug: the generated cluster.yaml does not parse: %w", err)
 	}
 
@@ -102,7 +103,7 @@ func New(dir string, in io.Reader, out io.Writer) error {
 	if err := os.MkdirAll(filepath.Join(dir, "machines"), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(dir, "cluster.yaml"), cluster, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "cluster.yaml"), clusterYAML, 0o644); err != nil {
 		return err
 	}
 	for name, doc := range machines {

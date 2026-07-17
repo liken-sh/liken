@@ -49,26 +49,12 @@ func ValidVersion(v string) error {
 	return nil
 }
 
-// compareVersions orders two version strings: negative when a is
+// CompareVersions orders two version strings: negative when a is
 // older, zero when they are the same version, positive when a is
 // newer. Because every field of the grammar is zero-padded to a fixed
 // width, plain string comparison is the correct ordering — the
 // padding exists exactly so that no field ever needs numeric parsing
 // to sort (as bare numbers, "010" and "9" would sort backwards).
-func compareVersions(a, b string) int {
+func CompareVersions(a, b string) int {
 	return strings.Compare(a, b)
-}
-
-// NewestVersion is the catalog's highest version, "" when the catalog
-// is empty. The fleet sweep publishes this as status.releases.newest,
-// which exists so a printer column can answer "is there something
-// newer than the target?" at a glance.
-func NewestVersion(catalog []ReleaseCatalogEntry) string {
-	newest := ""
-	for _, entry := range catalog {
-		if newest == "" || compareVersions(entry.Version, newest) > 0 {
-			newest = entry.Version
-		}
-	}
-	return newest
 }

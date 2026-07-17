@@ -28,8 +28,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/kubernetes"
-	"github.com/liken-sh/liken/machine"
 )
 
 // featureAnnotation names the feature a workload belongs to, the
@@ -62,7 +62,7 @@ type featureWorkload struct {
 // features the document no longer declares. Presence in spec.features
 // is the same opt-in test init actuates by, so the two gates always
 // agree.
-func decideRetractions(features map[string]*machine.FeatureConfig, workloads []featureWorkload) []featureWorkload {
+func decideRetractions(features map[string]*cluster.FeatureConfig, workloads []featureWorkload) []featureWorkload {
 	var retracted []featureWorkload
 	for _, w := range workloads {
 		slug := w.Metadata.Annotations[featureAnnotation]
@@ -79,14 +79,14 @@ func decideRetractions(features map[string]*machine.FeatureConfig, workloads []f
 // janitorFeatureWorkloads is the acting half, run once per sweep:
 // list each swept kind, decide, delete. Deletion is by name with
 // background propagation, so the workload's pods go with it.
-func janitorFeatureWorkloads(c *kubernetes.Client, cluster *machine.Cluster) {
+func janitorFeatureWorkloads(c *kubernetes.Client, clusterDoc *cluster.Cluster) {
 	for _, k := range featureWorkloadKinds {
 		workloads, err := kubernetes.List[featureWorkload](c, k.listPath)
 		if err != nil {
 			fmt.Printf("listing %ss for the feature janitor: %v\n", k.kind, err)
 			continue
 		}
-		for _, w := range decideRetractions(cluster.Spec.Features, workloads) {
+		for _, w := range decideRetractions(clusterDoc.Spec.Features, workloads) {
 			name := w.Metadata.Name
 			slug := w.Metadata.Annotations[featureAnnotation]
 			path := k.listPath + "/" + name + "?propagationPolicy=Background"

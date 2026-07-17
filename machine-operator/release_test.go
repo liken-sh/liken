@@ -8,17 +8,18 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
-func clusterWithTarget(version string) *machine.Cluster {
-	return &machine.Cluster{
+func clusterWithTarget(version string) *cluster.Cluster {
+	return &cluster.Cluster{
 		Metadata: machine.ObjectMeta{Name: "lab"},
-		Spec: machine.ClusterSpec{
+		Spec: cluster.ClusterSpec{
 			Version: version,
-			Releases: machine.ClusterReleasesSpec{
+			Releases: cluster.ClusterReleasesSpec{
 				Source: "http://10.0.2.2:8017/releases",
-				Catalog: []machine.ReleaseCatalogEntry{
+				Catalog: []cluster.ReleaseCatalogEntry{
 					{Version: "0.1.0", Digest: "sha256:" + strings.Repeat("aa", 32)},
 					{Version: "0.2.0", Digest: "sha256:" + strings.Repeat("bb", 32)},
 				},
@@ -70,7 +71,7 @@ func TestVersionAskShortCircuits(t *testing.T) {
 
 	cases := []struct {
 		name       string
-		cluster    *machine.Cluster
+		clusterDoc *cluster.Cluster
 		facts      *machine.MachineStatus
 		wantStatus machine.ConditionStatus
 		wantReason string
@@ -84,7 +85,7 @@ func TestVersionAskShortCircuits(t *testing.T) {
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			_, cond, ok := versionAsk(tt.cluster, tt.facts)
+			_, cond, ok := versionAsk(tt.clusterDoc, tt.facts)
 			if ok {
 				t.Fatal("no ask expected")
 			}
@@ -96,9 +97,9 @@ func TestVersionAskShortCircuits(t *testing.T) {
 }
 
 func TestVersionAskWithoutASource(t *testing.T) {
-	cluster := clusterWithTarget("0.2.0")
-	cluster.Spec.Releases.Source = ""
-	_, cond, ok := versionAsk(cluster, slotBackedFacts("0.1.0", "A"))
+	clusterDoc := clusterWithTarget("0.2.0")
+	clusterDoc.Spec.Releases.Source = ""
+	_, cond, ok := versionAsk(clusterDoc, slotBackedFacts("0.1.0", "A"))
 	if ok || cond.Reason != "NoReleaseSource" {
 		t.Errorf("a catalog without a source can't be fetched from: %+v", cond)
 	}

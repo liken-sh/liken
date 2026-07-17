@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -120,12 +121,12 @@ func TestDoesNotRecordASeedTheBootDidNotRun(t *testing.T) {
 
 // decisionCluster builds the in-cluster Cluster document the operator
 // would be comparing against.
-func decisionCluster() *machine.Cluster {
-	return &machine.Cluster{
+func decisionCluster() *cluster.Cluster {
+	return &cluster.Cluster{
 		APIVersion: machine.APIVersion,
 		Kind:       "Cluster",
 		Metadata:   machine.ObjectMeta{Name: "lab"},
-		Spec: machine.ClusterSpec{
+		Spec: cluster.ClusterSpec{
 			Leaders:  []string{"node-1"},
 			Endpoint: "https://10.10.0.1:6443",
 		},
@@ -140,14 +141,14 @@ func machineWithPolicy(policy machine.RebootPolicy) *machine.Machine {
 }
 
 func TestClusterConvergedWhenTheBootRunsTheCurrentDocument(t *testing.T) {
-	cluster := decisionCluster()
-	_, hash, err := renderCluster(cluster.Metadata.Name, cluster.Spec)
+	clusterDoc := decisionCluster()
+	_, hash, err := renderCluster(clusterDoc.Metadata.Name, clusterDoc.Spec)
 	if err != nil {
 		t.Fatal(err)
 	}
 	facts := partitionBackedFacts(machine.ManifestSourceProven, hash)
 
-	conv := decideClusterConvergence(cluster, machineWithPolicy(""), facts, nil, nil, hash, "", turnGranted)
+	conv := decideClusterConvergence(clusterDoc, machineWithPolicy(""), facts, nil, nil, hash, "", turnGranted)
 	if conv.condition.Status != "True" || conv.condition.Reason != "Converged" {
 		t.Errorf("got %+v", conv.condition)
 	}
@@ -157,12 +158,12 @@ func TestClusterConvergedWhenTheBootRunsTheCurrentDocument(t *testing.T) {
 }
 
 func TestClusterConvergedWithdrawsAStaleStagedDocument(t *testing.T) {
-	cluster := decisionCluster()
-	_, hash, _ := renderCluster(cluster.Metadata.Name, cluster.Spec)
+	clusterDoc := decisionCluster()
+	_, hash, _ := renderCluster(clusterDoc.Metadata.Name, clusterDoc.Spec)
 	facts := partitionBackedFacts(machine.ManifestSourceProven, hash)
 	rejection := &machine.Rejection{Hash: "old", Reason: "history"}
 
-	conv := decideClusterConvergence(cluster, machineWithPolicy(""), facts, rejection, nil, hash, "some-other-hash", turnGranted)
+	conv := decideClusterConvergence(clusterDoc, machineWithPolicy(""), facts, rejection, nil, hash, "some-other-hash", turnGranted)
 	if !conv.withdraw || !conv.clearRejection {
 		t.Errorf("an edit taken back should withdraw and clear: %+v", conv)
 	}
@@ -190,23 +191,23 @@ func TestClusterDriftRequestsARebootUnderAutoPolicy(t *testing.T) {
 }
 
 func TestClusterDriftDoesNotRestageTheSameBytes(t *testing.T) {
-	cluster := decisionCluster()
-	_, hash, _ := renderCluster(cluster.Metadata.Name, cluster.Spec)
+	clusterDoc := decisionCluster()
+	_, hash, _ := renderCluster(clusterDoc.Metadata.Name, clusterDoc.Spec)
 	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-hash")
 
-	conv := decideClusterConvergence(cluster, machineWithPolicy(""), facts, nil, nil, "some-old-hash", hash, turnGranted)
+	conv := decideClusterConvergence(clusterDoc, machineWithPolicy(""), facts, nil, nil, "some-old-hash", hash, turnGranted)
 	if conv.stage {
 		t.Error("the exact bytes already wait; staging again is disk churn")
 	}
 }
 
 func TestClusterRejectedLastBootHolds(t *testing.T) {
-	cluster := decisionCluster()
-	_, hash, _ := renderCluster(cluster.Metadata.Name, cluster.Spec)
+	clusterDoc := decisionCluster()
+	_, hash, _ := renderCluster(clusterDoc.Metadata.Name, clusterDoc.Spec)
 	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-hash")
 	rejection := &machine.Rejection{Hash: hash, Reason: "never joined"}
 
-	conv := decideClusterConvergence(cluster, machineWithPolicy(machine.RebootAuto), facts, rejection, nil, "some-old-hash", "", turnGranted)
+	conv := decideClusterConvergence(clusterDoc, machineWithPolicy(machine.RebootAuto), facts, rejection, nil, "some-old-hash", "", turnGranted)
 	if conv.condition.Reason != "RejectedLastBoot" || conv.stage || conv.requestReboot {
 		t.Errorf("a rejected document must not be re-staged: %+v", conv)
 	}
@@ -257,7 +258,7 @@ func TestClusterFeatureDriftConvergesByRestart(t *testing.T) {
 	// spec.features, which k3s reads at process start: a restart
 	// applies it, so the machine and its pods stay up.
 	desired := decisionCluster()
-	desired.Spec.Features = map[string]*machine.FeatureConfig{"traefik": {}}
+	desired.Spec.Features = map[string]*cluster.FeatureConfig{"traefik": {}}
 	bootDoc := decisionCluster()
 	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-hash")
 
@@ -269,7 +270,7 @@ func TestClusterFeatureDriftConvergesByRestart(t *testing.T) {
 
 func TestClusterRegistriesDriftConvergesByRestart(t *testing.T) {
 	desired := decisionCluster()
-	desired.Spec.Registries = machine.RegistriesSpec{
+	desired.Spec.Registries = cluster.RegistriesSpec{
 		Mirrors: map[string][]string{"docker.io": {"https://mirror.example:5000"}},
 	}
 	bootDoc := decisionCluster()
@@ -299,7 +300,7 @@ func TestClusterMixedDriftFallsToReboot(t *testing.T) {
 	// One edit touching a restart-class domain and a reboot-class one
 	// takes the heavier tier: a reboot is a restart plus more.
 	desired := decisionCluster()
-	desired.Spec.Features = map[string]*machine.FeatureConfig{"traefik": {}}
+	desired.Spec.Features = map[string]*cluster.FeatureConfig{"traefik": {}}
 	desired.Spec.Endpoint = "https://10.10.0.2:6443"
 	bootDoc := decisionCluster()
 	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-hash")
@@ -327,7 +328,7 @@ func TestClusterRestartDriftAwaitsItsTurn(t *testing.T) {
 	// conductor turns exactly like reboots — same reason, so the
 	// conductor needs no new vocabulary.
 	desired := decisionCluster()
-	desired.Spec.Features = map[string]*machine.FeatureConfig{"traefik": {}}
+	desired.Spec.Features = map[string]*cluster.FeatureConfig{"traefik": {}}
 	bootDoc := decisionCluster()
 	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-hash")
 
@@ -339,7 +340,7 @@ func TestClusterRestartDriftAwaitsItsTurn(t *testing.T) {
 
 func TestClusterRestartDriftUnderManualPolicyReportsRestartPending(t *testing.T) {
 	desired := decisionCluster()
-	desired.Spec.Features = map[string]*machine.FeatureConfig{"traefik": {}}
+	desired.Spec.Features = map[string]*cluster.FeatureConfig{"traefik": {}}
 	bootDoc := decisionCluster()
 	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-hash")
 
@@ -369,12 +370,12 @@ func TestBootClusterDocumentAbsentIsNil(t *testing.T) {
 }
 
 func TestRenderClusterExcludesTheReleaseFeed(t *testing.T) {
-	base := machine.ClusterSpec{Leaders: []string{"node-1"}}
+	base := cluster.ClusterSpec{Leaders: []string{"node-1"}}
 	upgraded := base
 	upgraded.Version = "0.2.0"
-	upgraded.Releases = machine.ClusterReleasesSpec{
+	upgraded.Releases = cluster.ClusterReleasesSpec{
 		Source:  "http://10.0.2.2:8017/releases",
-		Catalog: []machine.ReleaseCatalogEntry{{Version: "0.2.0", Digest: "sha256:abcd"}},
+		Catalog: []cluster.ReleaseCatalogEntry{{Version: "0.2.0", Digest: "sha256:abcd"}},
 	}
 
 	baseBytes, baseHash, err := renderCluster("lab", base)
@@ -391,9 +392,9 @@ func TestRenderClusterExcludesTheReleaseFeed(t *testing.T) {
 }
 
 func TestRenderClusterIncludesFeatures(t *testing.T) {
-	base := machine.ClusterSpec{Leaders: []string{"node-1"}}
+	base := cluster.ClusterSpec{Leaders: []string{"node-1"}}
 	opted := base
-	opted.Features = map[string]*machine.FeatureConfig{"metrics-server": {}}
+	opted.Features = map[string]*cluster.FeatureConfig{"metrics-server": {}}
 
 	_, baseHash, err := renderCluster("lab", base)
 	if err != nil {

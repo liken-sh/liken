@@ -61,6 +61,7 @@ import (
 	"github.com/beevik/ntp"
 	"golang.org/x/sys/unix"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -128,15 +129,15 @@ func (c *clock) record(measured *timeSync) {
 // therefore comes from inputs the machine already needed to find its
 // cluster; no new information is required. nil means free-running: a
 // leader with no upstreams declared.
-func timeSources(cluster *machine.Cluster, role machine.Role, manifestDir string) []string {
-	if cluster == nil {
+func timeSources(clusterDoc *cluster.Cluster, role machine.Role, manifestDir string) []string {
+	if clusterDoc == nil {
 		return nil
 	}
 	if role == machine.RoleLeader {
-		return cluster.Spec.Time.Upstreams
+		return clusterDoc.Spec.Time.Upstreams
 	}
-	sources := leaderAddresses(cluster, manifestDir)
-	endpoint, err := url.Parse(cluster.Spec.Endpoint)
+	sources := leaderAddresses(clusterDoc, manifestDir)
+	endpoint, err := url.Parse(clusterDoc.Spec.Endpoint)
 	if err == nil && endpoint.Hostname() != "" && !slices.Contains(sources, endpoint.Hostname()) {
 		sources = append(sources, endpoint.Hostname())
 	}
@@ -149,10 +150,10 @@ func timeSources(cluster *machine.Cluster, role machine.Role, manifestDir string
 // address inside nodeCIDR) is simply skipped: the endpoint fallback
 // covers it, and the source list is a preference order in which
 // missing entries are acceptable.
-func leaderAddresses(cluster *machine.Cluster, manifestDir string) []string {
+func leaderAddresses(clusterDoc *cluster.Cluster, manifestDir string) []string {
 	var addresses []string
-	for _, name := range cluster.Spec.Leaders {
-		if addr := declaredNodeAddress(cluster, manifestDir, name); addr != "" {
+	for _, name := range clusterDoc.Spec.Leaders {
+		if addr := declaredNodeAddress(clusterDoc, manifestDir, name); addr != "" {
 			addresses = append(addresses, addr)
 		}
 	}
@@ -164,8 +165,8 @@ func leaderAddresses(cluster *machine.Cluster, manifestDir string) []string {
 // declares none (a DHCP machine has no address to find). This is how
 // machines find each other before any of them is up: the fleet's
 // declared inputs, not discovery.
-func declaredNodeAddress(cluster *machine.Cluster, manifestDir, name string) string {
-	_, subnet, err := net.ParseCIDR(cluster.Spec.Network.NodeCIDR)
+func declaredNodeAddress(clusterDoc *cluster.Cluster, manifestDir, name string) string {
+	_, subnet, err := net.ParseCIDR(clusterDoc.Spec.Network.NodeCIDR)
 	if err != nil {
 		return ""
 	}

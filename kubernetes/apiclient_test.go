@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -89,7 +90,7 @@ func TestListClustersReadsTheCollection(t *testing.T) {
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"kind": "ClusterList",
-			"items": []machine.Cluster{
+			"items": []cluster.Cluster{
 				{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}},
 			},
 		})

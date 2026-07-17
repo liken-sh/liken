@@ -60,15 +60,6 @@ const (
 	// it lives under /run because it describes the current boot only.
 	BootManifestPath = "/run/liken/machine.yaml"
 
-	// BootClusterManifestPath is the same publication for the cluster
-	// document: the exact bytes this boot derived its role from. The
-	// operator needs the bytes, not just their hash, because drift
-	// detection compares documents by meaning. A hand-written seed
-	// and the operator's canonical rendering of the same spec are
-	// different bytes that say the same thing, and a formatting
-	// difference should never reboot the fleet.
-	BootClusterManifestPath = "/run/liken/cluster.yaml"
-
 	// FactsPath is where init publishes what it learned about the
 	// machine, shaped exactly like MachineStatus. /run is a fresh
 	// tmpfs every boot, which suits the facts exactly: they describe
@@ -80,6 +71,22 @@ const (
 	// so tests can point them at a miniature copy; real callers pass
 	// this.
 	SysctlDir = "/proc/sys"
+)
+
+// Role is what a machine is in its cluster. There are exactly two:
+// leaders run a control plane (an API server, a scheduler, the
+// datastore), followers run workloads and take direction from the
+// leaders. k3s calls these "server" and "agent". liken translates in
+// exactly one place, the moment it execs k3s (init/supervisor.go), and
+// uses leader/follower everywhere else. The vocabulary lives here
+// because it names a fact about a machine (status.role); deriving a
+// machine's role from the group's document is the cluster package's
+// job (cluster.Role).
+type Role string
+
+const (
+	RoleLeader   Role = "leader"
+	RoleFollower Role = "follower"
 )
 
 // Version is the liken version this binary was built as, stamped by

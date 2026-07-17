@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/kubernetes"
 	"github.com/liken-sh/liken/machine"
 )
@@ -21,14 +22,14 @@ import (
 // their heartbeat leases, and the cluster, answering the sweep's
 // lists and remembering every status it publishes.
 type fleetAPI struct {
-	cluster  *machine.Cluster
-	machines []machine.Machine
-	renewals map[string]time.Time
+	clusterDoc *cluster.Cluster
+	machines   []machine.Machine
+	renewals   map[string]time.Time
 
 	// statuses records each machine-status PUT by machine name;
 	// clusterStatus records the cluster's, nil until written.
 	statuses      map[string]*machine.Machine
-	clusterStatus *machine.Cluster
+	clusterStatus *cluster.Cluster
 }
 
 func (api *fleetAPI) handler() http.Handler {
@@ -48,17 +49,17 @@ func (api *fleetAPI) handler() http.Handler {
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/machines"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": api.machines})
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/clusters"):
-			if api.cluster == nil {
-				_ = json.NewEncoder(w).Encode(map[string]any{"items": []machine.Cluster{}})
+			if api.clusterDoc == nil {
+				_ = json.NewEncoder(w).Encode(map[string]any{"items": []cluster.Cluster{}})
 				return
 			}
 			if strings.HasSuffix(r.URL.Path, "/clusters") {
-				_ = json.NewEncoder(w).Encode(map[string]any{"items": []machine.Cluster{*api.cluster}})
+				_ = json.NewEncoder(w).Encode(map[string]any{"items": []cluster.Cluster{*api.clusterDoc}})
 				return
 			}
-			_ = json.NewEncoder(w).Encode(api.cluster)
+			_ = json.NewEncoder(w).Encode(api.clusterDoc)
 		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/clusters/"):
-			api.clusterStatus = &machine.Cluster{}
+			api.clusterStatus = &cluster.Cluster{}
 			_ = json.NewDecoder(r.Body).Decode(api.clusterStatus)
 		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/machines/"):
 			m := &machine.Machine{}
@@ -77,10 +78,10 @@ func labMachine(name string, phase machine.Phase) machine.Machine {
 }
 
 func TestSweepFleetMarksTheSilentMachineAndPublishesTheCluster(t *testing.T) {
-	cluster := &machine.Cluster{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}}
-	cluster.Spec.Leaders = []string{"node-1"}
+	clusterDoc := &cluster.Cluster{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}}
+	clusterDoc.Spec.Leaders = []string{"node-1"}
 	api := &fleetAPI{
-		cluster: cluster,
+		clusterDoc: clusterDoc,
 		machines: []machine.Machine{
 			labMachine("node-1", machine.PhaseReady),
 			labMachine("node-2", machine.PhaseReady),
@@ -92,7 +93,7 @@ func TestSweepFleetMarksTheSilentMachineAndPublishesTheCluster(t *testing.T) {
 	}
 	client := testClient(t, api.handler())
 
-	sweepFleet(client, cluster, "", sweepNow)
+	sweepFleet(client, clusterDoc, "", sweepNow)
 
 	lost := api.statuses["node-2"]
 	if lost == nil || lost.Status.Phase != machine.PhaseLost {
@@ -116,16 +117,16 @@ func TestSweepPublishesTheChannelsAvailableVersion(t *testing.T) {
 	// The poller's answer rides the same status write as everything
 	// else the sweep derives: a fresh answer alone is a change worth
 	// writing, and it lands at status.releases.available.
-	cluster := &machine.Cluster{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}}
-	cluster.Spec.Leaders = []string{"node-1"}
+	clusterDoc := &cluster.Cluster{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}}
+	clusterDoc.Spec.Leaders = []string{"node-1"}
 	api := &fleetAPI{
-		cluster:  cluster,
-		machines: []machine.Machine{labMachine("node-1", machine.PhaseReady)},
-		renewals: map[string]time.Time{"node-1": sweepNow.Add(-10 * time.Second)},
+		clusterDoc: clusterDoc,
+		machines:   []machine.Machine{labMachine("node-1", machine.PhaseReady)},
+		renewals:   map[string]time.Time{"node-1": sweepNow.Add(-10 * time.Second)},
 	}
 	client := testClient(t, api.handler())
 
-	sweepFleet(client, cluster, "2026.07.13-002", sweepNow)
+	sweepFleet(client, clusterDoc, "2026.07.13-002", sweepNow)
 
 	if api.clusterStatus == nil || api.clusterStatus.Status.Releases.Available != "2026.07.13-002" {
 		t.Fatalf("the channel's answer should reach the status: %+v", api.clusterStatus)
@@ -136,26 +137,26 @@ func TestSweepFleetWritesNothingOnASettledFleet(t *testing.T) {
 	// The cluster's status already says what this sweep observes, so
 	// the pass must not write it again: a settled fleet writes
 	// nothing.
-	cluster := &machine.Cluster{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}}
-	cluster.Spec.Leaders = []string{"node-1"}
-	cluster.Status.Phase = machine.PhaseReady
-	cluster.Status.Machines = machine.MachineTally{Ready: 1, Total: 1, Summary: "1/1"}
-	cluster.Status.Conditions = machine.SetCondition(nil, machine.Condition{
+	clusterDoc := &cluster.Cluster{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}}
+	clusterDoc.Spec.Leaders = []string{"node-1"}
+	clusterDoc.Status.Phase = machine.PhaseReady
+	clusterDoc.Status.Machines = cluster.MachineTally{Ready: 1, Total: 1, Summary: "1/1"}
+	clusterDoc.Status.Conditions = machine.SetCondition(nil, machine.Condition{
 		Type: "MachinesReady", Status: machine.ConditionTrue, Reason: "AllMachinesReady",
 		Message: "all 1 machines are ready",
 	}, sweepNow.Add(-time.Hour))
-	cluster.Status.Conditions = machine.SetCondition(cluster.Status.Conditions, machine.Condition{
+	clusterDoc.Status.Conditions = machine.SetCondition(clusterDoc.Status.Conditions, machine.Condition{
 		Type: "Progressing", Status: machine.ConditionTrue, Reason: "RolloutComplete",
 		Message: "no machines are waiting for a reboot turn",
 	}, sweepNow.Add(-time.Hour))
 	api := &fleetAPI{
-		cluster:  cluster,
-		machines: []machine.Machine{labMachine("node-1", machine.PhaseReady)},
-		renewals: map[string]time.Time{"node-1": sweepNow.Add(-10 * time.Second)},
+		clusterDoc: clusterDoc,
+		machines:   []machine.Machine{labMachine("node-1", machine.PhaseReady)},
+		renewals:   map[string]time.Time{"node-1": sweepNow.Add(-10 * time.Second)},
 	}
 	client := testClient(t, api.handler())
 
-	sweepFleet(client, cluster, "", sweepNow)
+	sweepFleet(client, clusterDoc, "", sweepNow)
 
 	if api.clusterStatus != nil {
 		t.Errorf("nothing changed, so nothing should be written: %+v", api.clusterStatus.Status)
@@ -182,9 +183,9 @@ func refusing(inner http.Handler, method, fragment string, status int) http.Hand
 // silentFleet is a two-machine fleet whose node-2 has stopped
 // renewing its heartbeat: the smallest fleet with both a Lost verdict
 // to write and a cluster status worth publishing.
-func silentFleet(cluster *machine.Cluster) *fleetAPI {
+func silentFleet(clusterDoc *cluster.Cluster) *fleetAPI {
 	return &fleetAPI{
-		cluster: cluster,
+		clusterDoc: clusterDoc,
 		machines: []machine.Machine{
 			labMachine("node-1", machine.PhaseReady),
 			labMachine("node-2", machine.PhaseReady),
@@ -197,11 +198,11 @@ func silentFleet(cluster *machine.Cluster) *fleetAPI {
 }
 
 func TestSweepFleetStopsWhenTheMachineListFails(t *testing.T) {
-	cluster := &machine.Cluster{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}}
-	api := silentFleet(cluster)
+	clusterDoc := &cluster.Cluster{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}}
+	api := silentFleet(clusterDoc)
 	client := testClient(t, refusing(api.handler(), http.MethodGet, "/machines", http.StatusInternalServerError))
 
-	sweepFleet(client, cluster, "", sweepNow)
+	sweepFleet(client, clusterDoc, "", sweepNow)
 
 	if api.clusterStatus != nil {
 		t.Errorf("a sweep that cannot see the fleet must not judge it: %+v", api.clusterStatus.Status)
@@ -212,11 +213,11 @@ func TestSweepFleetStopsWhenTheMachineListFails(t *testing.T) {
 }
 
 func TestSweepFleetStopsWhenTheHeartbeatListFails(t *testing.T) {
-	cluster := &machine.Cluster{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}}
-	api := silentFleet(cluster)
+	clusterDoc := &cluster.Cluster{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}}
+	api := silentFleet(clusterDoc)
 	client := testClient(t, refusing(api.handler(), http.MethodGet, "/leases", http.StatusInternalServerError))
 
-	sweepFleet(client, cluster, "", sweepNow)
+	sweepFleet(client, clusterDoc, "", sweepNow)
 
 	if api.clusterStatus != nil {
 		t.Errorf("without heartbeats there is no liveness verdict to publish: %+v", api.clusterStatus.Status)
@@ -227,11 +228,11 @@ func TestSweepFleetStopsWhenTheHeartbeatListFails(t *testing.T) {
 }
 
 func TestSweepFleetToleratesAClusterStatusWriteFailure(t *testing.T) {
-	cluster := &machine.Cluster{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}}
-	api := silentFleet(cluster)
+	clusterDoc := &cluster.Cluster{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}}
+	api := silentFleet(clusterDoc)
 	client := testClient(t, refusing(api.handler(), http.MethodPut, "/clusters", http.StatusInternalServerError))
 
-	sweepFleet(client, cluster, "", sweepNow)
+	sweepFleet(client, clusterDoc, "", sweepNow)
 
 	if lost := api.statuses["node-2"]; lost == nil || lost.Status.Phase != machine.PhaseLost {
 		t.Errorf("the machine verdicts land even when the cluster write fails: %+v", lost)
@@ -300,11 +301,11 @@ func TestCarryOutRolloutGrantsAndRevokes(t *testing.T) {
 }
 
 func TestSweepReadsTheClusterFreshEachPass(t *testing.T) {
-	cluster := &machine.Cluster{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}}
+	clusterDoc := &cluster.Cluster{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}}
 	api := &fleetAPI{
-		cluster:  cluster,
-		machines: []machine.Machine{labMachine("node-1", machine.PhaseReady)},
-		renewals: map[string]time.Time{"node-1": sweepNow.Add(-10 * time.Second)},
+		clusterDoc: clusterDoc,
+		machines:   []machine.Machine{labMachine("node-1", machine.PhaseReady)},
+		renewals:   map[string]time.Time{"node-1": sweepNow.Add(-10 * time.Second)},
 	}
 	client := testClient(t, api.handler())
 	sweep(client, "lab", newChannelPoller())
@@ -317,8 +318,8 @@ func TestSweepSkipsThePassWhenTheClusterReadFails(t *testing.T) {
 	// Every pass reads the Cluster fresh because its spec drives the
 	// rollout; a pass that cannot read it has no spec to act on and
 	// must do nothing at all.
-	cluster := &machine.Cluster{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}}
-	api := silentFleet(cluster)
+	clusterDoc := &cluster.Cluster{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}}
+	api := silentFleet(clusterDoc)
 	client := testClient(t, refusing(api.handler(), http.MethodGet, "/clusters", http.StatusInternalServerError))
 
 	sweep(client, "lab", newChannelPoller())
@@ -342,13 +343,13 @@ func TestAwaitClusterRetriesAfterAFailingList(t *testing.T) {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"items": []machine.Cluster{
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": []cluster.Cluster{
 			{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}},
 		}})
 	}))
-	cluster := awaitCluster(client)
-	if cluster.Metadata.Name != "lab" || calls != 2 {
-		t.Errorf("got %q after %d calls", cluster.Metadata.Name, calls)
+	clusterDoc := awaitCluster(client)
+	if clusterDoc.Metadata.Name != "lab" || calls != 2 {
+		t.Errorf("got %q after %d calls", clusterDoc.Metadata.Name, calls)
 	}
 }
 
@@ -362,13 +363,13 @@ func TestAwaitClusterWaitsForTheFirstCluster(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"items": []machine.Cluster{
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": []cluster.Cluster{
 			{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}},
 		}})
 	}))
-	cluster := awaitCluster(client)
-	if cluster.Metadata.Name != "lab" || calls != 2 {
-		t.Errorf("got %q after %d calls", cluster.Metadata.Name, calls)
+	clusterDoc := awaitCluster(client)
+	if clusterDoc.Metadata.Name != "lab" || calls != 2 {
+		t.Errorf("got %q after %d calls", clusterDoc.Metadata.Name, calls)
 	}
 }
 

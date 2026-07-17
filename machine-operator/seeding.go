@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/kubernetes"
 	"github.com/liken-sh/liken/machine"
 )
@@ -61,7 +62,7 @@ func ensureMachine(c *kubernetes.Client, seed *machine.Machine) (*machine.Machin
 // races to create the same object at boot, so all but one of those
 // POSTs will conflict. That conflict is harmless: the loop's next GET
 // confirms the object exists, which is the only outcome that matters.
-func ensureCluster(c *kubernetes.Client, seed *machine.Cluster) error {
+func ensureCluster(c *kubernetes.Client, seed *cluster.Cluster) error {
 	for {
 		if _, err := kubernetes.GetCluster(c, seed.Metadata.Name); err == nil {
 			return nil
@@ -69,7 +70,7 @@ func ensureCluster(c *kubernetes.Client, seed *machine.Cluster) error {
 			return err
 		}
 
-		body, err := json.Marshal(&machine.Cluster{
+		body, err := json.Marshal(&cluster.Cluster{
 			APIVersion: machine.APIVersion,
 			Kind:       "Cluster",
 			Metadata:   machine.ObjectMeta{Name: seed.Metadata.Name},
@@ -80,7 +81,7 @@ func ensureCluster(c *kubernetes.Client, seed *machine.Cluster) error {
 		}
 		switch err := c.RequestJSON(http.MethodPost, kubernetes.ClustersPath, body, nil); {
 		case err == nil:
-			fmt.Printf("created cluster %s from %s\n", seed.Metadata.Name, machine.ClusterManifestPath)
+			fmt.Printf("created cluster %s from %s\n", seed.Metadata.Name, cluster.ClusterManifestPath)
 		case errors.Is(err, kubernetes.ErrNotFound):
 			fmt.Println("cluster API not served yet; waiting")
 			kubernetes.RetryPause()

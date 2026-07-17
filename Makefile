@@ -246,7 +246,9 @@ $(SYSTEM_IMAGE) $(BOOT_ARCHIVE) &: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_
 		$(wildcard machine-operator/manifests/*.yaml) \
 		cluster-operator/dist/liken-cluster-operator-image.tar \
 		$(wildcard cluster-operator/manifests/*.yaml) \
-		$(wildcard manifests/*.yaml) \
+		$(wildcard machine/manifests/*.yaml) \
+		$(wildcard cluster/manifests/*.yaml) \
+		$(wildcard kubernetes/manifests/*.yaml) \
 		logs/dist/liken-logs-image.tar \
 		$(wildcard logs/manifests/*.yaml) \
 		image/build.sh image/boot-modules.conf \

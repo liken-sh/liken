@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -36,17 +37,17 @@ func TestGetClusterReadsOneCluster(t *testing.T) {
 		if want := ClustersPath + "/lab"; r.URL.Path != want {
 			t.Errorf("got %s, want %s", r.URL.Path, want)
 		}
-		_ = json.NewEncoder(w).Encode(&machine.Cluster{
+		_ = json.NewEncoder(w).Encode(&cluster.Cluster{
 			Kind:     "Cluster",
 			Metadata: machine.ObjectMeta{Name: "lab"},
 		})
 	}))
-	cluster, err := GetCluster(client, "lab")
+	clusterDoc, err := GetCluster(client, "lab")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cluster.Metadata.Name != "lab" {
-		t.Errorf("got %q", cluster.Metadata.Name)
+	if clusterDoc.Metadata.Name != "lab" {
+		t.Errorf("got %q", clusterDoc.Metadata.Name)
 	}
 }
 
@@ -69,8 +70,8 @@ func TestPublishClusterStatusWritesTheStatusSubresource(t *testing.T) {
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path = r.URL.Path
 	}))
-	cluster := &machine.Cluster{Metadata: machine.ObjectMeta{Name: "lab"}}
-	if err := PublishClusterStatus(client, cluster); err != nil {
+	clusterDoc := &cluster.Cluster{Metadata: machine.ObjectMeta{Name: "lab"}}
+	if err := PublishClusterStatus(client, clusterDoc); err != nil {
 		t.Fatal(err)
 	}
 	if want := ClustersPath + "/lab/status"; path != want {

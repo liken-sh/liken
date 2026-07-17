@@ -36,6 +36,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -86,29 +87,29 @@ var (
 // lone leader. Each joining leader becomes an etcd member and raft
 // replicates the existing keyspace to it, so the cluster's state
 // carries over without ever being exported or copied.
-func leaderJoinConfig(cluster *machine.Cluster, name, manifestDir string) (clusterInit bool, joinURL string) {
-	if cluster == nil {
+func leaderJoinConfig(clusterDoc *cluster.Cluster, name, manifestDir string) (clusterInit bool, joinURL string) {
+	if clusterDoc == nil {
 		return false, ""
 	}
-	if cluster.Spec.Origin == machine.OriginAdopted {
-		if leaders := cluster.Spec.Leaders; len(leaders) > 0 && name != leaders[0] {
-			if addr := declaredNodeAddress(cluster, manifestDir, leaders[0]); addr != "" {
+	if clusterDoc.Spec.Origin == cluster.OriginAdopted {
+		if leaders := clusterDoc.Spec.Leaders; len(leaders) > 0 && name != leaders[0] {
+			if addr := declaredNodeAddress(clusterDoc, manifestDir, leaders[0]); addr != "" {
 				return false, fmt.Sprintf("https://%s:6443", addr)
 			}
 		}
-		return false, cluster.Spec.Endpoint
+		return false, clusterDoc.Spec.Endpoint
 	}
-	if len(cluster.Spec.Leaders) < 2 {
+	if len(clusterDoc.Spec.Leaders) < 2 {
 		return false, ""
 	}
-	founder := cluster.Spec.Leaders[0]
+	founder := clusterDoc.Spec.Leaders[0]
 	if name == founder {
 		return true, ""
 	}
-	if addr := declaredNodeAddress(cluster, manifestDir, founder); addr != "" {
+	if addr := declaredNodeAddress(clusterDoc, manifestDir, founder); addr != "" {
 		return false, fmt.Sprintf("https://%s:6443", addr)
 	}
-	return false, cluster.Spec.Endpoint
+	return false, clusterDoc.Spec.Endpoint
 }
 
 // nodeAddress picks which of the machine's addresses is its node IP:
@@ -118,13 +119,13 @@ func leaderJoinConfig(cluster *machine.Cluster, name, manifestDir string) (clust
 // with several interfaces needs this to be explicit; k3s left to
 // itself picks the interface holding the default route, which on a
 // machine with an internet uplink is exactly the wrong one.
-func nodeAddress(cluster *machine.Cluster, conns []*connection) (ip, ifname string) {
-	if cluster == nil || cluster.Spec.Network.NodeCIDR == "" {
+func nodeAddress(clusterDoc *cluster.Cluster, conns []*connection) (ip, ifname string) {
+	if clusterDoc == nil || clusterDoc.Spec.Network.NodeCIDR == "" {
 		return "", ""
 	}
-	_, subnet, err := net.ParseCIDR(cluster.Spec.Network.NodeCIDR)
+	_, subnet, err := net.ParseCIDR(clusterDoc.Spec.Network.NodeCIDR)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "liken: cluster nodeCIDR %q: %v\n", cluster.Spec.Network.NodeCIDR, err)
+		fmt.Fprintf(os.Stderr, "liken: cluster nodeCIDR %q: %v\n", clusterDoc.Spec.Network.NodeCIDR, err)
 		return "", ""
 	}
 	for _, conn := range conns {
@@ -142,7 +143,7 @@ func nodeAddress(cluster *machine.Cluster, conns []*connection) (ip, ifname stri
 // transposition; named fields read correctly at the call site.
 type k3sBootInputs struct {
 	role          machine.Role
-	cluster       *machine.Cluster
+	clusterDoc    *cluster.Cluster
 	nodeIP        string
 	nodeInterface string
 	haveToken     bool
@@ -155,7 +156,7 @@ type k3sBootInputs struct {
 // only this boot could decide. Plain key: value lines, because every
 // value here is a string k3s maps onto one of its flags.
 func k3sBootConfig(in k3sBootInputs) string {
-	role, cluster := in.role, in.cluster
+	role, clusterDoc := in.role, in.clusterDoc
 	var b strings.Builder
 	b.WriteString("# Written by liken at boot: the configuration only the boot can\n")
 	b.WriteString("# derive, joined with the static file this directory sits beside.\n")
@@ -171,7 +172,7 @@ func k3sBootConfig(in k3sBootInputs) string {
 	if role == machine.RoleFollower {
 		// "server" is k3s's config key for "the control plane I take
 		// direction from": a follower points at the endpoint.
-		fmt.Fprintf(&b, "server: %s\n", cluster.Spec.Endpoint)
+		fmt.Fprintf(&b, "server: %s\n", clusterDoc.Spec.Endpoint)
 	} else {
 		// The disable list: which of k3s's bundled components (Traefik,
 		// the service load balancer, metrics-server) stay off. liken
@@ -179,14 +180,14 @@ func k3sBootConfig(in k3sBootInputs) string {
 		// plane should be a declared, visible workload — and the
 		// Cluster's spec.features is that declaration, so the list is
 		// computed: the bundled set minus the cluster's opt-ins
-		// (DisabledComponents, in the machine package). It renders on
+		// (DisabledComponents, in the cluster package). It renders on
 		// leaders only, because disable is a server-side key an agent
 		// would refuse, and always as the complete list, never a
 		// fragment merged with a default somewhere else, so the value
 		// has exactly one author. A machine with no cluster document
 		// disables everything bundled: the minimum viable cluster is
 		// the default, and features are always an opt-in.
-		if disabled := cluster.DisabledComponents(); len(disabled) > 0 {
+		if disabled := clusterDoc.DisabledComponents(); len(disabled) > 0 {
 			b.WriteString("disable:\n")
 			for _, name := range disabled {
 				fmt.Fprintf(&b, "  - %s\n", name)
@@ -201,7 +202,7 @@ func k3sBootConfig(in k3sBootInputs) string {
 		// unless the cluster declares the helm feature — or a feature
 		// that requires it, the way traefik does, since k3s deploys
 		// Traefik through a HelmChart.
-		if !cluster.FeatureEnabled("helm") {
+		if !clusterDoc.FeatureEnabled("helm") {
 			b.WriteString("disable-helm-controller: true\n")
 		}
 		// The embedded cloud controller manager is in the same
@@ -214,7 +215,7 @@ func k3sBootConfig(in k3sBootInputs) string {
 		// is declared. Without it the kubelet initializes the node
 		// itself — addresses and all — which is the ordinary
 		// arrangement for a machine that is not in anyone's cloud.
-		if !cluster.FeatureEnabled("servicelb") {
+		if !clusterDoc.FeatureEnabled("servicelb") {
 			b.WriteString("disable-cloud-controller: true\n")
 		}
 		// The network policy controller, likewise embedded: it turns
@@ -226,10 +227,10 @@ func k3sBootConfig(in k3sBootInputs) string {
 		// NetworkPolicy documents and enforces nothing — precisely
 		// flannel's own posture, and the reason the feature's
 		// absence is a safe default rather than a broken one.
-		if !cluster.FeatureEnabled("network-policy") {
+		if !clusterDoc.FeatureEnabled("network-policy") {
 			b.WriteString("disable-network-policy: true\n")
 		}
-		if cluster != nil {
+		if clusterDoc != nil {
 			// The datastore keys, decided by leaderJoinConfig: the
 			// founding leader of a multi-leader cluster runs (and, on the
 			// migration boot, creates) embedded etcd; the other leaders
@@ -243,12 +244,12 @@ func k3sBootConfig(in k3sBootInputs) string {
 			// key: the control plane runs the coordination, and every
 			// node participates through the mirror entries init renders
 			// into registries.yaml (registries.go).
-			if cluster.Spec.Registries.Embedded {
+			if clusterDoc.Spec.Registries.Embedded {
 				b.WriteString("embedded-registry: true\n")
 			}
 			// The cluster's address plan is leader configuration;
 			// followers learn it from the control plane they join.
-			net := cluster.Spec.Network
+			net := clusterDoc.Spec.Network
 			for _, entry := range []struct{ key, value string }{
 				{"cluster-cidr", net.ClusterCIDR},
 				{"service-cidr", net.ServiceCIDR},
@@ -391,17 +392,17 @@ func mintNodePassword(dir string) error {
 // configuration and writes the drop-in beside the role's static
 // config file. It returns the role so the supervisor knows which k3s
 // to start.
-func writeK3sBootConfig(cluster *machine.Cluster, m *machine.Machine, conns []*connection) (machine.Role, error) {
+func writeK3sBootConfig(clusterDoc *cluster.Cluster, m *machine.Machine, conns []*connection) (machine.Role, error) {
 	name := m.Metadata.Name
 	// Role is nil-safe by design: a machine with no cluster document
 	// is a leader of one. That invariant is what keeps the follower
 	// branches below (which dereference cluster freely) off the nil
 	// path — a follower can only be derived *from* a document.
-	role := cluster.Role(name)
-	if cluster != nil {
-		fmt.Printf("liken: this machine is a cluster %s (cluster %s)\n", role, cluster.Metadata.Name)
+	role := clusterDoc.Role(name)
+	if clusterDoc != nil {
+		fmt.Printf("liken: this machine is a cluster %s (cluster %s)\n", role, clusterDoc.Metadata.Name)
 	}
-	if role == machine.RoleFollower && cluster.Spec.Endpoint == "" {
+	if role == machine.RoleFollower && clusterDoc.Spec.Endpoint == "" {
 		return role, fmt.Errorf("this machine is a follower, but the cluster manifest declares no endpoint to join")
 	}
 
@@ -413,14 +414,14 @@ func writeK3sBootConfig(cluster *machine.Cluster, m *machine.Machine, conns []*c
 		}
 	}
 
-	nodeIP, nodeInterface := nodeAddress(cluster, conns)
+	nodeIP, nodeInterface := nodeAddress(clusterDoc, conns)
 	if nodeIP != "" {
 		fmt.Printf("liken: node IP is %s on %s\n", nodeIP, nodeInterface)
 	} else if role == machine.RoleFollower {
 		fmt.Fprintf(os.Stderr, "liken: no address falls inside the cluster's nodeCIDR; k3s will guess a node IP\n")
 	}
 
-	clusterInit, joinURL := leaderJoinConfig(cluster, name, machine.MachineManifestDir)
+	clusterInit, joinURL := leaderJoinConfig(clusterDoc, name, machine.MachineManifestDir)
 	if clusterInit {
 		fmt.Println("liken: this machine is the founding leader; embedded etcd runs here")
 	} else if joinURL != "" {
@@ -437,7 +438,7 @@ func writeK3sBootConfig(cluster *machine.Cluster, m *machine.Machine, conns []*c
 	}
 	content := k3sBootConfig(k3sBootInputs{
 		role:          role,
-		cluster:       cluster,
+		clusterDoc:    clusterDoc,
 		nodeIP:        nodeIP,
 		nodeInterface: nodeInterface,
 		haveToken:     haveToken,
@@ -462,7 +463,7 @@ func writeK3sBootConfig(cluster *machine.Cluster, m *machine.Machine, conns []*c
 	// invisible environment variable is where a memory mystery hides.
 	var si unix.Sysinfo_t
 	if err := unix.Sysinfo(&si); err == nil {
-		k3sMemoryDiscipline = k3sRuntimeEnv(uint64(si.Totalram)*uint64(si.Unit), cluster.FeatureEnabled("helm"))
+		k3sMemoryDiscipline = k3sRuntimeEnv(uint64(si.Totalram)*uint64(si.Unit), clusterDoc.FeatureEnabled("helm"))
 		fmt.Printf("liken: k3s env: %s\n", strings.Join(k3sMemoryDiscipline, " "))
 	}
 	return role, nil

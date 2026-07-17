@@ -13,19 +13,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
-func clusterWithTime(upstreams []string, endpoint string, leaders ...string) *machine.Cluster {
+func clusterWithTime(upstreams []string, endpoint string, leaders ...string) *cluster.Cluster {
 	if leaders == nil {
 		leaders = []string{"node-1"}
 	}
-	return &machine.Cluster{
-		Spec: machine.ClusterSpec{
+	return &cluster.Cluster{
+		Spec: cluster.ClusterSpec{
 			Leaders:  leaders,
 			Endpoint: endpoint,
-			Network:  machine.ClusterNetworkSpec{NodeCIDR: "10.10.0.0/24"},
-			Time:     machine.ClusterTimeSpec{Upstreams: upstreams},
+			Network:  cluster.ClusterNetworkSpec{NodeCIDR: "10.10.0.0/24"},
+			Time:     cluster.ClusterTimeSpec{Upstreams: upstreams},
 		},
 	}
 }

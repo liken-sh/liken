@@ -50,22 +50,8 @@ func TestCompareVersions(t *testing.T) {
 		{"2026.12.31-001", "2027.01.01-001", -1},
 	}
 	for _, c := range cases {
-		if got := compareVersions(c.a, c.b); got != c.want {
-			t.Errorf("compareVersions(%q, %q): got %d, want %d", c.a, c.b, got, c.want)
+		if got := CompareVersions(c.a, c.b); got != c.want {
+			t.Errorf("CompareVersions(%q, %q): got %d, want %d", c.a, c.b, got, c.want)
 		}
-	}
-}
-
-func TestNewestVersion(t *testing.T) {
-	catalog := []ReleaseCatalogEntry{
-		{Version: "2026.07.09-002"},
-		{Version: "2026.07.11-001"},
-		{Version: "2026.07.10-001"},
-	}
-	if got := NewestVersion(catalog); got != "2026.07.11-001" {
-		t.Errorf("got %q", got)
-	}
-	if got := NewestVersion(nil); got != "" {
-		t.Errorf("an empty catalog has no newest; got %q", got)
 	}
 }

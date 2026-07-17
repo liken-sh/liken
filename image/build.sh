@@ -206,15 +206,17 @@ ln -s /proc/self/mounts "$root/etc/mtab"
 # The liken API and the programs that operate it, all delivered
 # through k3s's own mechanisms: the manifests go where k3s
 # auto-applies them, and the OCI images go where k3s auto-imports
-# them. The manifests come from four places, by domain: the top-level
-# manifests/ carries the cluster-level furniture (the CRDs and the
-# liken-system namespace), and each operator and the log relays carry
+# them. The manifests come from each domain: the machine and cluster
+# domains carry their CRDs, the kubernetes domain carries the
+# liken-system namespace, and each operator and the log relays carry
 # their own deployment beside their code. The LIKEN_VERSION
 # substitution stamps each manifest with the release it shipped in,
 # which is what the pod steward compares against a machine's running
 # version.
 mkdir -p "$root/var/lib/rancher/k3s/server/manifests"
-for manifest in "$here"/../manifests/*.yaml \
+for manifest in "$here"/../machine/manifests/*.yaml \
+        "$here"/../cluster/manifests/*.yaml \
+        "$here"/../kubernetes/manifests/*.yaml \
         "$here"/../machine-operator/manifests/*.yaml \
         "$here"/../cluster-operator/manifests/*.yaml \
         "$here"/../logs/manifests/*.yaml; do

@@ -43,6 +43,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/kubernetes"
 	"github.com/liken-sh/liken/machine"
 )
@@ -63,10 +64,10 @@ import (
 // can carry sysctls in its staged manifest because its drift check,
 // storageDrift, is field-selective rather than a hash of the whole
 // document.)
-func renderCluster(name string, spec machine.ClusterSpec) ([]byte, string, error) {
+func renderCluster(name string, spec cluster.ClusterSpec) ([]byte, string, error) {
 	spec.Version = ""
-	spec.Releases = machine.ClusterReleasesSpec{}
-	doc := machine.Cluster{
+	spec.Releases = cluster.ClusterReleasesSpec{}
+	doc := cluster.Cluster{
 		APIVersion: machine.APIVersion,
 		Kind:       "Cluster",
 		Metadata:   machine.ObjectMeta{Name: name},
@@ -92,7 +93,7 @@ func renderCluster(name string, spec machine.ClusterSpec) ([]byte, string, error
 // once, which is exactly the case the conductor sequences.
 //
 // The disruption's kind comes from the classifier
-// (machine/changes.go): when every differing domain is read only at
+// (cluster/changes.go): when every differing domain is read only at
 // k3s process start (features, registries), a k3s restart applies
 // the document and the machine, and its pods, stay up; any other
 // difference takes the reboot. An unreadable boot document falls to
@@ -105,7 +106,7 @@ func renderCluster(name string, spec machine.ClusterSpec) ([]byte, string, error
 // are different bytes with the same meaning. Drift is a difference
 // in meaning, and a difference in formatting alone must never
 // disrupt a fleet.
-func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, facts *machine.MachineStatus, rejection *machine.Rejection, bootDoc *machine.Cluster, bootHash, stagedHash string, t turn) convergence {
+func decideClusterConvergence(clusterDoc *cluster.Cluster, m *machine.Machine, facts *machine.MachineStatus, rejection *machine.Rejection, bootDoc *cluster.Cluster, bootHash, stagedHash string, t turn) convergence {
 	if facts == nil || facts.Boot.ManifestSource == "" {
 		return factsIncomplete("ClusterConverged")
 	}
@@ -114,7 +115,7 @@ func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, fact
 			"the boot ran a cluster document but its publication is unreadable")}
 	}
 
-	manifest, hash, err := renderCluster(cluster.Metadata.Name, cluster.Spec)
+	manifest, hash, err := renderCluster(clusterDoc.Metadata.Name, clusterDoc.Spec)
 	if err != nil {
 		return convergence{condition: notConverged("ClusterConverged", "StagingFailed", err.Error())}
 	}
@@ -137,7 +138,7 @@ func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, fact
 		return machineStateEphemeral("ClusterConverged", "the cluster document")
 	}
 
-	restart := bootDoc != nil && machine.RestartApplies(bootDoc.Spec, cluster.Spec)
+	restart := bootDoc != nil && cluster.RestartApplies(bootDoc.Spec, clusterDoc.Spec)
 
 	c := convergence{
 		manifest: manifest,
@@ -173,14 +174,14 @@ func decideClusterConvergence(cluster *machine.Cluster, m *machine.Machine, fact
 // The live Cluster comes back alongside the decision because version
 // convergence (release.go) live-consumes its release feed; nil means
 // the read failed, and the verdict already says so.
-func convergeClusterDocument(c *kubernetes.Client, store machine.ManifestStore, clusterName string, m *machine.Machine, facts *machine.MachineStatus, t turn) (convergence, *machine.Cluster) {
+func convergeClusterDocument(c *kubernetes.Client, store machine.ManifestStore, clusterName string, m *machine.Machine, facts *machine.MachineStatus, t turn) (convergence, *cluster.Cluster) {
 	liveCluster, err := kubernetes.GetCluster(c, clusterName)
 	if err != nil {
 		return convergence{condition: convergenceUnknown("ClusterConverged", "ClusterUnavailable",
 			fmt.Sprintf("reading cluster %s: %v", clusterName, err))}, nil
 	}
 	rejection, _ := store.LoadRejection()
-	bootDoc, bootHash := bootClusterDocument(machine.BootClusterManifestPath)
+	bootDoc, bootHash := bootClusterDocument(cluster.BootClusterManifestPath)
 	return decideClusterConvergence(liveCluster, m, facts, rejection,
 		bootDoc, bootHash, readStagedHash(store), t), liveCluster
 }
@@ -193,12 +194,12 @@ func convergeClusterDocument(c *kubernetes.Client, store machine.ManifestStore, 
 // same rendering and any remaining difference is a difference in
 // content, not formatting. nil and "" mean the publication is
 // missing or unreadable.
-func bootClusterDocument(path string) (*machine.Cluster, string) {
+func bootClusterDocument(path string) (*cluster.Cluster, string) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, ""
 	}
-	c, err := machine.ParseCluster(raw)
+	c, err := cluster.ParseCluster(raw)
 	if err != nil {
 		return nil, ""
 	}

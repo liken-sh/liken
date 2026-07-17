@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -50,8 +51,8 @@ func rolloutInputs(entries ...rolloutEntry) ([]machine.Machine, map[string]time.
 
 // labCluster declares node-1 and node-2 the leaders, so every other
 // name in these tests is a worker.
-func labCluster(maxUnavailable int) *machine.Cluster {
-	c := &machine.Cluster{}
+func labCluster(maxUnavailable int) *cluster.Cluster {
+	c := &cluster.Cluster{}
 	c.Spec.Leaders = []string{"node-1", "node-2"}
 	c.Spec.Disruption.MaxUnavailable = maxUnavailable
 	return c

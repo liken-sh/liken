@@ -11,6 +11,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/kubernetes"
 	"github.com/liken-sh/liken/machine"
 )
@@ -131,7 +132,7 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	// The same evidence, together with the version this boot reported
 	// in the facts, is what promotes a system release's proving boot
 	// (release.go).
-	settleClusterLifecycle(machine.MachineStateDir, machine.ClusterManifestPath, facts)
+	settleClusterLifecycle(machine.MachineStateDir, cluster.ClusterManifestPath, facts)
 	settleSystemReleaseLifecycle(machine.MachineStateDir, facts)
 
 	// The imports lifecycle settles on its own evidence: not this
@@ -221,7 +222,7 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	// cluster document carries no operator-authored documents at all,
 	// so the version target and the registry credentials only converge
 	// on a cluster member too.
-	var liveCluster *machine.Cluster
+	var liveCluster *cluster.Cluster
 	if clusterName != "" {
 		clusterStore := machine.ClusterManifests(machine.MachineStateDir)
 		var cconv convergence

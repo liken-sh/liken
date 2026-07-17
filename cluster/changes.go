@@ -1,4 +1,4 @@
-package machine
+package cluster
 
 // Classifying a cluster-document edit by how it must be applied.
 //

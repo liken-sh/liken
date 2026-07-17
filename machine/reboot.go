@@ -85,7 +85,7 @@ func ReadRebootIntent(dir string) (*RebootIntent, error) {
 const restartIntentFile = "restart-intent.yaml"
 
 // A RestartIntent asks init to bounce the k3s child in place, for
-// changes k3s reads only at process start (machine/changes.go names
+// changes k3s reads only at process start (cluster/changes.go names
 // them). It is a sibling file to the reboot intent, deliberately not
 // a field on it: init honors an *unreadable* reboot intent by
 // rebooting anyway, so a new field in that file would read as a

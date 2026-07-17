@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -39,14 +40,14 @@ import (
 // permanently blocked cases are checked before the in-progress ones,
 // so a machine that can never comply reports that instead of
 // reporting an attempt that could not succeed.
-func versionAsk(cluster *machine.Cluster, facts *machine.MachineStatus) (fetchAsk, machine.Condition, bool) {
+func versionAsk(clusterDoc *cluster.Cluster, facts *machine.MachineStatus) (fetchAsk, machine.Condition, bool) {
 	none := fetchAsk{}
 	if facts == nil {
 		return none, convergenceUnknown("VersionConverged", "FactsIncomplete",
 			"the machine's facts haven't been read yet"), false
 	}
 
-	target := cluster.Spec.Version
+	target := clusterDoc.Spec.Version
 	if target == "" {
 		return none, converged("VersionConverged", "NoTarget",
 			"the cluster declares no target version"), false
@@ -60,12 +61,12 @@ func versionAsk(cluster *machine.Cluster, facts *machine.MachineStatus) (fetchAs
 	// API, but the operator checks anyway: the lookup can fail, so
 	// the failure has to be handled, whatever the API server
 	// promised.
-	entry := cluster.Spec.Releases.Entry(target)
+	entry := clusterDoc.Spec.Releases.Entry(target)
 	if entry == nil {
 		return none, notConverged("VersionConverged", "VersionNotInCatalog",
 			fmt.Sprintf("the target version %s is not in the release catalog", target)), false
 	}
-	if cluster.Spec.Releases.Source == "" {
+	if clusterDoc.Spec.Releases.Source == "" {
 		return none, notConverged("VersionConverged", "NoReleaseSource",
 			"the catalog names releases but spec.releases.source gives nowhere to fetch them from"), false
 	}
@@ -89,7 +90,7 @@ func versionAsk(cluster *machine.Cluster, facts *machine.MachineStatus) (fetchAs
 	return fetchAsk{
 		version: target,
 		digest:  entry.Digest,
-		source:  cluster.Spec.Releases.Source,
+		source:  clusterDoc.Spec.Releases.Source,
 		slot:    slot,
 		slotDir: machine.SystemSlotDir(slot),
 		// The running slot lends its deployment layer to the download:
@@ -144,7 +145,7 @@ func versionConvergence(cond machine.Condition, stagedHash string, rejection *ma
 // the download verifies, the rest works like the other documents: a
 // staged SystemRelease record, the reboot chain, the drain gate, and
 // the same carryOutConvergence.
-func convergeSystemRelease(store machine.ManifestStore, liveCluster *machine.Cluster, m *machine.Machine, facts *machine.MachineStatus, f *fetcher, t turn) convergence {
+func convergeSystemRelease(store machine.ManifestStore, liveCluster *cluster.Cluster, m *machine.Machine, facts *machine.MachineStatus, f *fetcher, t turn) convergence {
 	rejection, _ := store.LoadRejection()
 	stagedHash := readStagedHash(store)
 	ask, cond, ok := versionAsk(liveCluster, facts)

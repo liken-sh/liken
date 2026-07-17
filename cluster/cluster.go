@@ -1,7 +1,5 @@
-package machine
-
-// The Cluster API is the document that describes what the machines
-// form together.
+// Package cluster is the Cluster API: the document that describes
+// what the machines form together, as Go types.
 //
 // A Machine describes one computer; a Cluster describes the group.
 // What goes where is decided by who has to agree on it. Everything in
@@ -10,7 +8,10 @@ package machine
 // services live in) or a fact about the group that no single machine
 // owns (the endpoint followers join through). Everything specific to
 // one machine (its interfaces, its addresses, its disks) stays on the
-// Machine.
+// Machine, and this package leans on the machine package for the
+// vocabulary the two documents share (ObjectMeta, Phase, Condition,
+// Role) — the dependency runs this way only, because a machine must
+// be able to describe itself with no cluster document at all.
 //
 // Like the Machine manifest, the Cluster manifest is delivered as a
 // file in the image and seeded into the cluster as a custom resource
@@ -19,6 +20,12 @@ package machine
 // image. The document is cluster-scoped, so there is exactly one, and
 // liken already equates "same image" with "same cluster": the image
 // carries the cluster's CA and join token.
+//
+// The type names stutter (cluster.ClusterSpec) for the same reason
+// the machine package's do: they mirror the CRD kind and Kubernetes'
+// XxxSpec/XxxStatus convention, and matching what `kubectl explain
+// cluster.spec` shows is worth more than avoiding the echo.
+package cluster
 
 import (
 	"errors"
@@ -28,6 +35,8 @@ import (
 	"slices"
 
 	"sigs.k8s.io/yaml"
+
+	"github.com/liken-sh/liken/machine"
 )
 
 // ClusterManifestPath is where the image carries the cluster's
@@ -36,25 +45,22 @@ import (
 // Cluster resource.
 const ClusterManifestPath = "/etc/liken/cluster.yaml"
 
-// Role is what a machine is in its cluster. There are exactly two:
-// leaders run a control plane (an API server, a scheduler, the
-// datastore), followers run workloads and take direction from the
-// leaders. k3s calls these "server" and "agent". liken translates in
-// exactly one place, the moment it execs k3s (supervisor.go), and
-// uses leader/follower everywhere else.
-type Role string
-
-const (
-	RoleLeader   Role = "leader"
-	RoleFollower Role = "follower"
-)
+// BootClusterManifestPath is where init publishes the cluster
+// document this boot actually derived its role from (the staged or
+// proven copy from machineState, or the image's seed on a first
+// boot). The operator needs the bytes, not just their hash, because
+// drift detection compares documents by meaning. A hand-written seed
+// and the operator's canonical rendering of the same spec are
+// different bytes that say the same thing, and a formatting
+// difference should never reboot the fleet.
+const BootClusterManifestPath = "/run/liken/cluster.yaml"
 
 type Cluster struct {
-	APIVersion string        `json:"apiVersion"`
-	Kind       string        `json:"kind"`
-	Metadata   ObjectMeta    `json:"metadata"`
-	Spec       ClusterSpec   `json:"spec,omitzero"`
-	Status     ClusterStatus `json:"status,omitzero"`
+	APIVersion string             `json:"apiVersion"`
+	Kind       string             `json:"kind"`
+	Metadata   machine.ObjectMeta `json:"metadata"`
+	Spec       ClusterSpec        `json:"spec,omitzero"`
+	Status     ClusterStatus      `json:"status,omitzero"`
 }
 
 // ClusterOrigin records how the cluster's datastore came to exist.
@@ -90,10 +96,10 @@ const (
 // it, so there is nobody left to write the status; when quorum is
 // lost, the symptom is a status that stops updating.
 type ClusterStatus struct {
-	Phase      Phase                 `json:"phase,omitempty"`
+	Phase      machine.Phase         `json:"phase,omitempty"`
 	Machines   MachineTally          `json:"machines,omitzero"`
 	Releases   ClusterReleasesStatus `json:"releases,omitzero"`
-	Conditions []Condition           `json:"conditions,omitempty"`
+	Conditions []machine.Condition   `json:"conditions,omitempty"`
 }
 
 // ClusterReleasesStatus is what the sweep observes about releases.
@@ -198,7 +204,7 @@ type ClusterSpec struct {
 	// any node may be asked to pull any image, so how images arrive
 	// is a fact the whole fleet must agree on. Credentials are
 	// deliberately not here: a spec is public, so they enter through
-	// the registry-credentials Secret instead (registries.go tells
+	// the registry-credentials Secret instead (machine/registries.go tells
 	// that story). Like features, registries stay in the canonical
 	// staged document — but both are read only when the k3s process
 	// starts, so their edits converge by restarting k3s in place
@@ -271,6 +277,21 @@ func (s ClusterReleasesSpec) Entry(version string) *ReleaseCatalogEntry {
 		}
 	}
 	return nil
+}
+
+// NewestVersion is the catalog's highest version, "" when the catalog
+// is empty. The fleet sweep publishes this as status.releases.newest,
+// which exists so a printer column can answer "is there something
+// newer than the target?" at a glance. The ordering itself belongs to
+// the version grammar (machine.CompareVersions).
+func NewestVersion(catalog []ReleaseCatalogEntry) string {
+	newest := ""
+	for _, entry := range catalog {
+		if newest == "" || machine.CompareVersions(entry.Version, newest) > 0 {
+			newest = entry.Version
+		}
+	}
+	return newest
 }
 
 // ClusterDisruptionSpec is the machine-level analogue of a workload's
@@ -349,11 +370,11 @@ type ClusterNetworkSpec struct {
 // answers leader: a machine with no cluster manifest is on its own,
 // and a machine on its own runs as its own single-node cluster, which
 // is liken's default arrangement.
-func (c *Cluster) Role(machineName string) Role {
+func (c *Cluster) Role(machineName string) machine.Role {
 	if c == nil || slices.Contains(c.Spec.Leaders, machineName) {
-		return RoleLeader
+		return machine.RoleLeader
 	}
-	return RoleFollower
+	return machine.RoleFollower
 }
 
 // ParseCluster reads a Cluster manifest from its bytes, strictly, for

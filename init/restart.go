@@ -15,7 +15,7 @@ package main
 // file only announces that there is work. Duplicate intents are
 // therefore harmless: a pass that finds nothing new to apply answers
 // false and k3s is not disturbed. And both programs consult the same
-// classifier (machine/changes.go): a staged document whose changes
+// classifier (cluster/changes.go): a staged document whose changes
 // need a reboot is left standing for the reboot path, never
 // half-applied here.
 //
@@ -33,6 +33,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -49,24 +50,24 @@ type restartState struct {
 
 	// What k3s currently runs: the boot's choices, advanced by each
 	// applied restart.
-	cluster     *machine.Cluster
+	clusterDoc  *cluster.Cluster
 	clusterRaw  []byte
 	creds       *machine.RegistryCredentials
 	credsSource machine.ManifestSource
 
-	writeBootConfig  func(*machine.Cluster, *machine.Machine, []*connection) (machine.Role, error)
-	actuateFeatures  func(*machine.Cluster, string) []machine.FeatureStatus
-	renderRegistries func(*machine.Cluster, *machine.RegistryCredentials, machine.ManifestStore, machine.ManifestSource) machine.RegistriesStatus
+	writeBootConfig  func(*cluster.Cluster, *machine.Machine, []*connection) (machine.Role, error)
+	actuateFeatures  func(*cluster.Cluster, string) []machine.FeatureStatus
+	renderRegistries func(*cluster.Cluster, *machine.RegistryCredentials, machine.ManifestStore, machine.ManifestSource) machine.RegistriesStatus
 }
 
 // newRestartState wires the real implementations; tests build the
 // struct directly with seams of their own.
 func newRestartState(root string, m *machine.Machine, conns []*connection, facts *factsFile,
-	cluster *machine.Cluster, clusterRaw []byte, creds *machine.RegistryCredentials,
+	clusterDoc *cluster.Cluster, clusterRaw []byte, creds *machine.RegistryCredentials,
 	credsSource machine.ManifestSource) *restartState {
 	return &restartState{
 		root: root, m: m, conns: conns, facts: facts,
-		cluster: cluster, clusterRaw: clusterRaw, creds: creds, credsSource: credsSource,
+		clusterDoc: clusterDoc, clusterRaw: clusterRaw, creds: creds, credsSource: credsSource,
 		writeBootConfig:  writeK3sBootConfig,
 		actuateFeatures:  actuateFeatures,
 		renderRegistries: writeRegistriesConfig,
@@ -89,7 +90,7 @@ func (s *restartState) apply(intent machine.RestartIntent) bool {
 
 	// The cluster document half: re-render the boot drop-in and
 	// re-run feature actuation under the staged document.
-	cluster, clusterRaw := s.cluster, s.clusterRaw
+	clusterDoc, clusterRaw := s.clusterDoc, s.clusterRaw
 	applyingCluster := stagedCluster != nil
 	if applyingCluster {
 		if _, err := s.writeBootConfig(stagedCluster, s.m, s.conns); err != nil {
@@ -103,7 +104,7 @@ func (s *restartState) apply(intent machine.RestartIntent) bool {
 			if err := machine.ClusterManifests(s.root).WriteAttempted(clusterHash); err != nil {
 				fmt.Fprintf(os.Stderr, "liken: restart: marking the staged document attempted: %v\n", err)
 			}
-			cluster, clusterRaw = stagedCluster, stagedRaw
+			clusterDoc, clusterRaw = stagedCluster, stagedRaw
 		}
 	}
 
@@ -118,11 +119,11 @@ func (s *restartState) apply(intent machine.RestartIntent) bool {
 		return false
 	}
 
-	featureStatuses := s.actuateFeatures(cluster, s.m.Metadata.Name)
+	featureStatuses := s.actuateFeatures(clusterDoc, s.m.Metadata.Name)
 	if applyingCluster {
-		s.retractFeatureManifests(s.cluster, cluster)
+		s.retractFeatureManifests(s.clusterDoc, clusterDoc)
 	}
-	registries := s.renderRegistries(cluster, creds, machine.RegistryCredentialsStore(s.root), credsSource)
+	registries := s.renderRegistries(clusterDoc, creds, machine.RegistryCredentialsStore(s.root), credsSource)
 
 	// The facts update before the bounce: they name the staged
 	// documents (the cluster document's entry is the operator's
@@ -150,7 +151,7 @@ func (s *restartState) apply(intent machine.RestartIntent) bool {
 	// finds nothing staged (credentials were promoted) or an
 	// attempted marker matching staged (the cluster document, until
 	// the operator promotes it) and applies nothing.
-	s.cluster, s.clusterRaw = cluster, clusterRaw
+	s.clusterDoc, s.clusterRaw = clusterDoc, clusterRaw
 	s.creds, s.credsSource = creds, credsSource
 	return true
 }
@@ -164,7 +165,7 @@ func (s *restartState) apply(intent machine.RestartIntent) bool {
 // standing for the reboot path — the operator asked for a reboot in
 // that case, and this guard is what keeps a racing restart intent
 // from half-applying it).
-func (s *restartState) stagedClusterDocument() (*machine.Cluster, []byte, string) {
+func (s *restartState) stagedClusterDocument() (*cluster.Cluster, []byte, string) {
 	store := machine.ClusterManifests(s.root)
 	raw, err := store.LoadStaged()
 	if err != nil || raw == nil {
@@ -174,16 +175,16 @@ func (s *restartState) stagedClusterDocument() (*machine.Cluster, []byte, string
 	if attempted, _ := store.LoadAttempted(); attempted == hash {
 		return nil, nil, ""
 	}
-	staged, perr := machine.ParseCluster(raw)
+	staged, perr := cluster.ParseCluster(raw)
 	if perr != nil {
 		rejectStagedDocument("cluster", "document", store.Reject,
 			raw, fmt.Sprintf("the staged cluster document does not parse: %v", perr))
 		return nil, nil, ""
 	}
-	if s.cluster == nil {
+	if s.clusterDoc == nil {
 		return nil, nil, ""
 	}
-	if !machine.RestartApplies(s.cluster.Spec, staged.Spec) {
+	if !cluster.RestartApplies(s.clusterDoc.Spec, staged.Spec) {
 		fmt.Println("liken: restart: the staged cluster document needs a reboot; leaving it for one")
 		return nil, nil, ""
 	}
@@ -216,7 +217,7 @@ func (s *restartState) stagedCredentials() (*machine.RegistryCredentials, []byte
 // the file vanishes while k3s is down and the cluster operator's
 // janitor must clean up after it. The janitor stays for exactly
 // that boot path.
-func (s *restartState) retractFeatureManifests(old, new *machine.Cluster) {
+func (s *restartState) retractFeatureManifests(old, new *cluster.Cluster) {
 	declared := map[string]bool{}
 	for _, slug := range new.EnabledFeatures() {
 		declared[slug] = true
