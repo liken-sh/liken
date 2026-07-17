@@ -120,6 +120,20 @@ absence is the healthy state. The full device inventory is not
 status material: anyone who needs it can read `/sys` from a
 workload, which is how the drills themselves observed the machine.
 
+The report should name hardware the way an operator knows it, not in
+hex, and the three pieces of that cost differently. USB devices
+carry their manufacturer and product strings in the hardware itself
+— the kernel reads them at enumeration, so those names are free. PCI
+devices carry only numeric IDs; the names lspci prints come from the
+pci.ids database (the hwdata project, ~1.2 MB of plain text), which
+liken vendors as a pinned flat file in the first phase, the same
+shape as shipping the full modules.alias: a small image cost so the
+status can say "Red Hat Virtio GPU" instead of "1af4:1050". PCI
+class codes are a small spec-defined enum that lives as a Go table,
+no database needed. The pci.ids dependency stays soft — the reporter
+falls back to numeric IDs when the file is missing — and hwdata's
+notices join the licensing domain like every other vendored pin.
+
 Open, deliberately: the Kubernetes half (device plugins versus DRA,
 and what liken owes each — probably just well-known paths and the
 kubelet's plugin socket directory); whether module loading can ride
