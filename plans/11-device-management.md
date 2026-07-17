@@ -105,6 +105,28 @@ storage claiming (probe reality, refuse to act on ambiguity) and the
 feature vocabulary (an unknown slug degrades loudly instead of
 acting quietly).
 
+For declaring a driver to be a pure edit, the module has to already
+be on the machine, so the image ships the kernel build's entire
+module tree — batteries included, inert until declared. Today the
+image prunes to the boot set plus whatever the baked manifests
+declare, which works only for images built beside their manifests; a
+machine installed from the public channel would find that no edit
+can load a module its release never carried, and "wait for a
+release" is not an answer to "I plugged in a serial adapter". The
+principle is the feature vocabulary's, applied to drivers: enabling
+is a runtime act, never an image rebuild. Payloads ship because
+shipping is cheap where it counts — the tree is ~170 MB of
+already-compressed modules against 512 Mi system slots, resident on
+disk and read on demand, costing download and slot space but no
+memory at all. It also deletes machinery rather than adding it: the
+build's union-of-declared pruning goes away, and the full
+modules.alias table (which the unclaimed report needs anyway) comes
+along for free. The one obligation the choice creates: slot headroom
+becomes a number to watch, so the release build should check its
+artifact sizes against the declared slot size and fail loudly,
+turning "the image outgrew the slots" from an install-time surprise
+into a red build.
+
 What gets built is the reporting: a netlink uevent listener in init
 and a sysfs walk at boot (the same coldplug replay udev does, but for
 observation), feeding console lines and the Machine's status with
