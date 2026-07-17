@@ -126,11 +126,12 @@ numbered before the arc existed; it belongs second in this order:
     built-in ACME rather than cert-manager's three always-on
     controllers, staged first, and a hard lesson in the node's
     memory envelope.
-32. [ ] [Booting real silicon](32-real-silicon.md) — what bare metal
-    adds is firmware: microcode as an early initrd, driver blobs
-    derived from the module tree (nvidia excepted, for now), and the
-    slot budget that carries them. Designed during 11's drills;
-    waits for a physical machine.
+32. [ ] [Batteries included](32-batteries-included.md) — one
+    milestone for everything the image carries so real hardware just
+    works: the whole module tree, driver firmware derived from it
+    (nvidia excepted, for now), and microcode as an early initrd,
+    with the slot budget that carries them. The published image
+    becomes the one that boots bare metal.
 
 Deferred until the fundamentals above are proven, the hardening
 tier: UKIs, dm-verity, secure boot, TPM-sealed secrets, and signed
