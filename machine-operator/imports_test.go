@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/kubernetes"
 	"github.com/liken-sh/liken/machine"
 )
@@ -28,21 +29,21 @@ func importsFacts(source machine.ManifestSource, hash string) *machine.MachineSt
 
 func TestImportsPromotionNeedsFacts(t *testing.T) {
 	v := decideImportsPromotion(importsInputs{}, nil)
-	if v.promote || v.condition.Status != machine.ConditionUnknown || v.condition.Reason != "FactsIncomplete" {
+	if v.promote || v.condition.Status != api.ConditionUnknown || v.condition.Reason != "FactsIncomplete" {
 		t.Fatalf("no facts, no verdict: %+v", v.condition)
 	}
 }
 
 func TestImportsPromotionWithNothingTracked(t *testing.T) {
 	v := decideImportsPromotion(importsInputs{}, importsFacts("", ""))
-	if v.promote || v.condition.Status != machine.ConditionTrue || v.condition.Reason != "NotTracked" {
+	if v.promote || v.condition.Status != api.ConditionTrue || v.condition.Reason != "NotTracked" {
 		t.Fatalf("an untracked boot has nothing to prove: %+v", v.condition)
 	}
 }
 
 func TestImportsPromotionProvenBootIsConverged(t *testing.T) {
 	v := decideImportsPromotion(importsInputs{}, importsFacts(machine.ManifestSourceProven, "abc"))
-	if v.promote || v.condition.Status != machine.ConditionTrue || v.condition.Reason != "Converged" {
+	if v.promote || v.condition.Status != api.ConditionTrue || v.condition.Reason != "Converged" {
 		t.Fatalf("a proven boot is already converged: %+v", v.condition)
 	}
 }
@@ -52,7 +53,7 @@ func TestImportsPromotionAlreadyPromotedThisBoot(t *testing.T) {
 	// promoted: the store's proven record now matches the boot.
 	in := importsInputs{provenHash: "abc"}
 	v := decideImportsPromotion(in, importsFacts(machine.ManifestSourceStaged, "abc"))
-	if v.promote || v.condition.Status != machine.ConditionTrue || v.condition.Reason != "Converged" {
+	if v.promote || v.condition.Status != api.ConditionTrue || v.condition.Reason != "Converged" {
 		t.Fatalf("an already-promoted trial is converged: %+v", v.condition)
 	}
 }
@@ -62,7 +63,7 @@ func TestImportsPromotionMissingTrialIsUnknown(t *testing.T) {
 	// the store no longer holds the trial the facts describe.
 	in := importsInputs{provenHash: "something else"}
 	v := decideImportsPromotion(in, importsFacts(machine.ManifestSourceStaged, "abc"))
-	if v.promote || v.condition.Status != machine.ConditionUnknown || v.condition.Reason != "MachineStateUnavailable" {
+	if v.promote || v.condition.Status != api.ConditionUnknown || v.condition.Reason != "MachineStateUnavailable" {
 		t.Fatalf("a vanished trial can't be judged: %+v", v.condition)
 	}
 }
@@ -70,7 +71,7 @@ func TestImportsPromotionMissingTrialIsUnknown(t *testing.T) {
 func TestImportsPromotionStoreErrorIsUnknown(t *testing.T) {
 	in := importsInputs{storeErr: errors.New("machineState is on fire")}
 	v := decideImportsPromotion(in, importsFacts(machine.ManifestSourceStaged, "abc"))
-	if v.promote || v.condition.Status != machine.ConditionUnknown || v.condition.Reason != "MachineStateUnavailable" {
+	if v.promote || v.condition.Status != api.ConditionUnknown || v.condition.Reason != "MachineStateUnavailable" {
 		t.Fatalf("an unreadable store can't be judged: %+v", v.condition)
 	}
 }
@@ -78,7 +79,7 @@ func TestImportsPromotionStoreErrorIsUnknown(t *testing.T) {
 func TestImportsPromotionStaleFactsAreUnknown(t *testing.T) {
 	in := importsInputs{stagedHash: "def"}
 	v := decideImportsPromotion(in, importsFacts(machine.ManifestSourceStaged, "abc"))
-	if v.promote || v.condition.Status != machine.ConditionUnknown || v.condition.Reason != "FactsIncomplete" {
+	if v.promote || v.condition.Status != api.ConditionUnknown || v.condition.Reason != "FactsIncomplete" {
 		t.Fatalf("a staged record the facts don't describe can't be promoted: %+v", v.condition)
 	}
 }
@@ -86,7 +87,7 @@ func TestImportsPromotionStaleFactsAreUnknown(t *testing.T) {
 func TestImportsPromotionPodsErrorIsUnknown(t *testing.T) {
 	in := importsInputs{stagedHash: "abc", podsErr: errors.New("apiserver away")}
 	v := decideImportsPromotion(in, importsFacts(machine.ManifestSourceStaged, "abc"))
-	if v.promote || v.condition.Status != machine.ConditionUnknown || v.condition.Reason != "ClusterUnavailable" {
+	if v.promote || v.condition.Status != api.ConditionUnknown || v.condition.Reason != "ClusterUnavailable" {
 		t.Fatalf("no pods listing, no proof: %+v", v.condition)
 	}
 }
@@ -94,7 +95,7 @@ func TestImportsPromotionPodsErrorIsUnknown(t *testing.T) {
 func TestImportsPromotionWaitsForOSPods(t *testing.T) {
 	in := importsInputs{stagedHash: "abc"}
 	v := decideImportsPromotion(in, importsFacts(machine.ManifestSourceStaged, "abc"))
-	if v.promote || v.condition.Status != machine.ConditionFalse || v.condition.Reason != "Proving" {
+	if v.promote || v.condition.Status != api.ConditionFalse || v.condition.Reason != "Proving" {
 		t.Fatalf("no OS pods on the node yet means the trial is still proving: %+v", v.condition)
 	}
 }
@@ -108,7 +109,7 @@ func TestImportsPromotionWaitsForEveryOSContainer(t *testing.T) {
 		},
 	}
 	v := decideImportsPromotion(in, importsFacts(machine.ManifestSourceStaged, "abc"))
-	if v.promote || v.condition.Status != machine.ConditionFalse || v.condition.Reason != "Proving" {
+	if v.promote || v.condition.Status != api.ConditionFalse || v.condition.Reason != "Proving" {
 		t.Fatalf("one torn OS image must hold the whole promotion: %+v", v.condition)
 	}
 	if !strings.Contains(v.condition.Message, "liken-iscsid-y") {
@@ -159,7 +160,7 @@ func TestImportsPromotionPromotesWhenTheOSServes(t *testing.T) {
 	if !v.promote {
 		t.Fatalf("every OS container serves; the trial is proven: %+v", v.condition)
 	}
-	if v.condition.Status != machine.ConditionTrue || v.condition.Reason != "Converged" {
+	if v.condition.Status != api.ConditionTrue || v.condition.Reason != "Converged" {
 		t.Fatalf("promotion converges the condition: %+v", v.condition)
 	}
 }
@@ -173,7 +174,7 @@ func TestImportsPromotionPromotesWhenTheOSServes(t *testing.T) {
 func TestSettleImportsLifecycleUntrackedBootNeedsNoStore(t *testing.T) {
 	client := testClient(t, (&drainAPI{}).handler())
 	c := settleImportsLifecycle(client, t.TempDir(), "node-1", importsFacts("", ""))
-	if c.Status != machine.ConditionTrue || c.Reason != "NotTracked" {
+	if c.Status != api.ConditionTrue || c.Reason != "NotTracked" {
 		t.Errorf("got %+v", c)
 	}
 }
@@ -187,7 +188,7 @@ func TestSettleImportsLifecycleReportsAProvingTrial(t *testing.T) {
 	client := testClient(t, (&drainAPI{}).handler())
 	c := settleImportsLifecycle(client, root, "node-1",
 		importsFacts(machine.ManifestSourceStaged, machine.ManifestHash(raw)))
-	if c.Status != machine.ConditionFalse || c.Reason != "Proving" {
+	if c.Status != api.ConditionFalse || c.Reason != "Proving" {
 		t.Errorf("no OS pods listed yet means the trial is still proving: %+v", c)
 	}
 }
@@ -201,7 +202,7 @@ func TestSettleImportsLifecycleSeesAnEarlierPromotion(t *testing.T) {
 	client := testClient(t, (&drainAPI{}).handler())
 	c := settleImportsLifecycle(client, root, "node-1",
 		importsFacts(machine.ManifestSourceStaged, machine.ManifestHash(raw)))
-	if c.Status != machine.ConditionTrue || c.Reason != "Converged" {
+	if c.Status != api.ConditionTrue || c.Reason != "Converged" {
 		t.Errorf("an already-promoted trial is converged: %+v", c)
 	}
 }
@@ -214,7 +215,7 @@ func TestSettleImportsLifecycleIgnoresAStaleStagedRecord(t *testing.T) {
 	client := testClient(t, (&drainAPI{}).handler())
 	c := settleImportsLifecycle(client, root, "node-1",
 		importsFacts(machine.ManifestSourceStaged, "hash-of-what-this-boot-ran"))
-	if c.Status != machine.ConditionUnknown || c.Reason != "FactsIncomplete" {
+	if c.Status != api.ConditionUnknown || c.Reason != "FactsIncomplete" {
 		t.Errorf("a staged record the facts don't describe can't be judged: %+v", c)
 	}
 }

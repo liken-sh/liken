@@ -44,7 +44,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/api"
 )
 
 // serviceAccountDir is where kubelet mounts every container's API
@@ -59,8 +59,8 @@ var serviceAccountDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 // /apis/<group>. Both kinds are cluster-scoped, so there's no
 // /namespaces/<ns>/ segment.
 const (
-	MachinesPath = "/apis/" + machine.APIVersion + "/machines"
-	ClustersPath = "/apis/" + machine.APIVersion + "/clusters"
+	MachinesPath = "/apis/" + api.APIVersion + "/machines"
+	ClustersPath = "/apis/" + api.APIVersion + "/clusters"
 )
 
 type Client struct {

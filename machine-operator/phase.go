@@ -1,5 +1,7 @@
 package main
 
+import "github.com/liken-sh/liken/api"
+
 // The machine's phase: the whole set of conditions summarized in one
 // word.
 //
@@ -19,22 +21,18 @@ package main
 // the cluster operator on a silent machine's behalf, and overwritten
 // by the machine's own operator the moment it reports again.
 
-import (
-	"github.com/liken-sh/liken/machine"
-)
-
 // phasePrecedence orders the phases most-severe-first: when several
 // conditions point at different phases, the machine reports the
 // gravest one. A machine that is both waiting on a Manual reboot and
 // failing a sysctl is UpdatePending *and* Degraded; the listing
 // should show the one that needs a human soonest.
-var phasePrecedence = []machine.Phase{
-	machine.PhaseUnknown,
-	machine.PhaseBooting,
-	machine.PhaseBlocked,
-	machine.PhaseUpdating,
-	machine.PhaseUpdatePending,
-	machine.PhaseDegraded,
+var phasePrecedence = []api.Phase{
+	api.PhaseUnknown,
+	api.PhaseBooting,
+	api.PhaseBlocked,
+	api.PhaseUpdating,
+	api.PhaseUpdatePending,
+	api.PhaseDegraded,
 }
 
 // conditionPhase maps one condition to the phase it argues for, ""
@@ -44,19 +42,19 @@ var phasePrecedence = []machine.Phase{
 // the boolean status can't: RebootPending and RejectedLastBoot are
 // both "not converged", but one resolves with a reboot and the other
 // never will without a different edit.
-func conditionPhase(c machine.Condition) machine.Phase {
-	if c.Type == "Ready" || c.Status == machine.ConditionTrue {
+func conditionPhase(c api.Condition) api.Phase {
+	if c.Type == "Ready" || c.Status == api.ConditionTrue {
 		return ""
 	}
 	switch c.Reason {
 	case "FactsUnreadable":
 		// The operator is running but cannot read the facts, so it
 		// knows nothing about the machine it stands on.
-		return machine.PhaseUnknown
+		return api.PhaseUnknown
 	case "FactsIncomplete":
 		// Facts exist but carry no boot record yet: init is still
 		// working its way up.
-		return machine.PhaseBooting
+		return api.PhaseBooting
 	case "RejectedLastBoot", "StagingRejected", "BootMismatch", "MachineStateEphemeral",
 		"NoSystemSlots", "NotInstalled", "NoReleaseSource", "VersionNotInCatalog", "DigestMismatch",
 		"CredentialsInvalid":
@@ -70,7 +68,7 @@ func conditionPhase(c machine.Condition) machine.Phase {
 		// at the source, where refetching can't change what the
 		// server publishes. A malformed credentials Secret is the
 		// same shape: only a corrected Secret fixes it.
-		return machine.PhaseBlocked
+		return api.PhaseBlocked
 	case "RebootRequested", "RestartRequested", "DemotionRebooting", "Draining", "Downloading",
 		"Proving":
 		// A disruption is in flight; the machine is mid-change.
@@ -82,24 +80,24 @@ func conditionPhase(c machine.Condition) machine.Phase {
 		// reboot, but the machine is just as much mid-change. So is
 		// Proving: a boot's imports are on trial until the OS pods
 		// demonstrate them, which ordinarily takes seconds.
-		return machine.PhaseUpdating
+		return api.PhaseUpdating
 	case "RebootPending", "RestartPending", "DemotionPending", "AwaitingTurn":
 		// A change is staged and waiting, either on a Manual reboot
 		// or on the cluster granting this machine its turn. A
 		// verified release waiting for its proving reboot reads the
 		// same way, because it is waiting on exactly the same things.
-		return machine.PhaseUpdatePending
+		return api.PhaseUpdatePending
 	}
 	// Anything unrecognized reads as Degraded deliberately: a reason
 	// this table doesn't know fails visibly in the fleet listing
 	// instead of passing silently as Ready.
-	return machine.PhaseDegraded
+	return api.PhaseDegraded
 }
 
 // decidePhase reduces the conditions to the single gravest phase,
 // Ready when nothing argues otherwise.
-func decidePhase(conditions []machine.Condition) machine.Phase {
-	argued := map[machine.Phase]bool{}
+func decidePhase(conditions []api.Condition) api.Phase {
+	argued := map[api.Phase]bool{}
 	for _, c := range conditions {
 		if phase := conditionPhase(c); phase != "" {
 			argued[phase] = true
@@ -110,5 +108,5 @@ func decidePhase(conditions []machine.Condition) machine.Phase {
 			return phase
 		}
 	}
-	return machine.PhaseReady
+	return api.PhaseReady
 }

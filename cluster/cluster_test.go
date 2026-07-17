@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/api"
 )
 
 func writeClusterManifest(t *testing.T, content string) string {
@@ -186,11 +186,11 @@ func TestRoleDerivation(t *testing.T) {
 		name    string
 		cluster *Cluster
 		machine string
-		want    machine.Role
+		want    api.Role
 	}{
-		{"named leader", cluster, "node-1", machine.RoleLeader},
-		{"unnamed machine is a follower", cluster, "node-2", machine.RoleFollower},
-		{"no cluster manifest means a machine alone", nil, "node-1", machine.RoleLeader},
+		{"named leader", cluster, "node-1", api.RoleLeader},
+		{"unnamed machine is a follower", cluster, "node-2", api.RoleFollower},
+		{"no cluster manifest means a machine alone", nil, "node-1", api.RoleLeader},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.cluster.Role(tc.machine); got != tc.want {

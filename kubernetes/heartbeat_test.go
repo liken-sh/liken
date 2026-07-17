@@ -32,54 +32,54 @@ type leaseAPI struct {
 	fail  map[string]int
 }
 
-func (api *leaseAPI) handler() http.Handler {
+func (fake *leaseAPI) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if status, refused := api.fail[r.Method]; refused {
+		if status, refused := fake.fail[r.Method]; refused {
 			w.WriteHeader(status)
 			return
 		}
 		switch r.Method {
 		case http.MethodGet:
-			if api.lease == nil {
+			if fake.lease == nil {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
-			_ = json.NewEncoder(w).Encode(api.lease)
+			_ = json.NewEncoder(w).Encode(fake.lease)
 		case http.MethodPost, http.MethodPut:
 			l := &lease{}
 			_ = json.NewDecoder(r.Body).Decode(l)
-			api.lease = l
+			fake.lease = l
 		}
 	})
 }
 
 func TestHeartbeatCreatesTheFirstLease(t *testing.T) {
-	api := &leaseAPI{}
-	client := testClient(t, api.handler())
+	fake := &leaseAPI{}
+	client := testClient(t, fake.handler())
 	RenewHeartbeat(client, "node-1", heartbeatNow)
-	if api.lease == nil || api.lease.Spec.HolderIdentity != "node-1" {
-		t.Fatalf("the first pass creates the machine's lease: %+v", api.lease)
+	if fake.lease == nil || fake.lease.Spec.HolderIdentity != "node-1" {
+		t.Fatalf("the first pass creates the machine's lease: %+v", fake.lease)
 	}
 }
 
 func TestHeartbeatRenewsAnAgedLease(t *testing.T) {
-	api := &leaseAPI{lease: testLease("node-1", 30*time.Second)}
-	client := testClient(t, api.handler())
+	fake := &leaseAPI{lease: testLease("node-1", 30*time.Second)}
+	client := testClient(t, fake.handler())
 	RenewHeartbeat(client, "node-1", heartbeatNow)
-	if api.lease.Spec.RenewTime != heartbeatNow.UTC().Format(microTime) {
-		t.Errorf("an aged lease should renew: %s", api.lease.Spec.RenewTime)
+	if fake.lease.Spec.RenewTime != heartbeatNow.UTC().Format(microTime) {
+		t.Errorf("an aged lease should renew: %s", fake.lease.Spec.RenewTime)
 	}
 }
 
 func TestHeartbeatLeavesAFreshLeaseAlone(t *testing.T) {
 	// Most reconcile passes are event-driven and land seconds apart;
 	// the heartbeat costs them a read, never a write.
-	api := &leaseAPI{lease: testLease("node-1", 5*time.Second)}
-	client := testClient(t, api.handler())
-	before := api.lease.Spec.RenewTime
+	fake := &leaseAPI{lease: testLease("node-1", 5*time.Second)}
+	client := testClient(t, fake.handler())
+	before := fake.lease.Spec.RenewTime
 	RenewHeartbeat(client, "node-1", heartbeatNow)
-	if api.lease.Spec.RenewTime != before {
-		t.Errorf("a fresh lease should not be rewritten: %s", api.lease.Spec.RenewTime)
+	if fake.lease.Spec.RenewTime != before {
+		t.Errorf("a fresh lease should not be rewritten: %s", fake.lease.Spec.RenewTime)
 	}
 }
 
@@ -90,33 +90,33 @@ func TestHeartbeatLeavesAFreshLeaseAlone(t *testing.T) {
 // lease to come through untouched.
 
 func TestHeartbeatSurvivesARefusedRead(t *testing.T) {
-	api := &leaseAPI{fail: map[string]int{http.MethodGet: http.StatusInternalServerError}}
-	client := testClient(t, api.handler())
+	fake := &leaseAPI{fail: map[string]int{http.MethodGet: http.StatusInternalServerError}}
+	client := testClient(t, fake.handler())
 	RenewHeartbeat(client, "node-1", heartbeatNow)
-	if api.lease != nil {
-		t.Errorf("an unreadable lease must not be rewritten: %+v", api.lease)
+	if fake.lease != nil {
+		t.Errorf("an unreadable lease must not be rewritten: %+v", fake.lease)
 	}
 }
 
 func TestHeartbeatSurvivesARefusedCreate(t *testing.T) {
-	api := &leaseAPI{fail: map[string]int{http.MethodPost: http.StatusInternalServerError}}
-	client := testClient(t, api.handler())
+	fake := &leaseAPI{fail: map[string]int{http.MethodPost: http.StatusInternalServerError}}
+	client := testClient(t, fake.handler())
 	RenewHeartbeat(client, "node-1", heartbeatNow)
-	if api.lease != nil {
-		t.Errorf("a refused create leaves no lease behind: %+v", api.lease)
+	if fake.lease != nil {
+		t.Errorf("a refused create leaves no lease behind: %+v", fake.lease)
 	}
 }
 
 func TestHeartbeatSurvivesARefusedRenewal(t *testing.T) {
-	api := &leaseAPI{
+	fake := &leaseAPI{
 		lease: testLease("node-1", 30*time.Second),
 		fail:  map[string]int{http.MethodPut: http.StatusInternalServerError},
 	}
-	client := testClient(t, api.handler())
-	before := api.lease.Spec.RenewTime
+	client := testClient(t, fake.handler())
+	before := fake.lease.Spec.RenewTime
 	RenewHeartbeat(client, "node-1", heartbeatNow)
-	if api.lease.Spec.RenewTime != before {
-		t.Errorf("a refused renewal changes nothing: %s", api.lease.Spec.RenewTime)
+	if fake.lease.Spec.RenewTime != before {
+		t.Errorf("a refused renewal changes nothing: %s", fake.lease.Spec.RenewTime)
 	}
 }
 
@@ -125,22 +125,22 @@ type leaseListAPI struct {
 	leases []*lease
 }
 
-func (api *leaseListAPI) handler() http.Handler {
+func (fake *leaseListAPI) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var list struct {
 			Items []*lease `json:"items"`
 		}
-		list.Items = api.leases
+		list.Items = fake.leases
 		_ = json.NewEncoder(w).Encode(&list)
 	})
 }
 
 func TestListHeartbeatsReadsRenewals(t *testing.T) {
-	api := &leaseListAPI{leases: []*lease{
+	fake := &leaseListAPI{leases: []*lease{
 		testLease("node-1", 10*time.Second),
 		testLease("node-2", 5*time.Minute),
 	}}
-	client := testClient(t, api.handler())
+	client := testClient(t, fake.handler())
 	renewals, err := ListHeartbeats(client)
 	if err != nil {
 		t.Fatal(err)
@@ -159,11 +159,11 @@ func TestListHeartbeatsSkipsAnUnreadableRenewal(t *testing.T) {
 	// machine as never heard from.
 	broken := testLease("node-2", -1)
 	broken.Spec.RenewTime = "not a timestamp"
-	api := &leaseListAPI{leases: []*lease{
+	fake := &leaseListAPI{leases: []*lease{
 		testLease("node-1", 10*time.Second),
 		broken,
 	}}
-	client := testClient(t, api.handler())
+	client := testClient(t, fake.handler())
 	renewals, err := ListHeartbeats(client)
 	if err != nil {
 		t.Fatal(err)

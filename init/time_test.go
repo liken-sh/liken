@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
@@ -58,7 +59,7 @@ spec:
 
 func TestTimeSourcesLeaderAsksTheUpstreams(t *testing.T) {
 	c := clusterWithTime([]string{"time.cloudflare.com", "192.168.1.1"}, "https://10.10.0.1:6443")
-	sources := timeSources(c, machine.RoleLeader, t.TempDir())
+	sources := timeSources(c, api.RoleLeader, t.TempDir())
 	if len(sources) != 2 || sources[0] != "time.cloudflare.com" || sources[1] != "192.168.1.1" {
 		t.Errorf("got %v", sources)
 	}
@@ -66,13 +67,13 @@ func TestTimeSourcesLeaderAsksTheUpstreams(t *testing.T) {
 
 func TestTimeSourcesLeaderWithoutUpstreamsFreeRuns(t *testing.T) {
 	c := clusterWithTime(nil, "https://10.10.0.1:6443")
-	if sources := timeSources(c, machine.RoleLeader, t.TempDir()); sources != nil {
+	if sources := timeSources(c, api.RoleLeader, t.TempDir()); sources != nil {
 		t.Errorf("expected free-running, got %v", sources)
 	}
 }
 
 func TestTimeSourcesNilClusterFreeRuns(t *testing.T) {
-	if sources := timeSources(nil, machine.RoleLeader, t.TempDir()); sources != nil {
+	if sources := timeSources(nil, api.RoleLeader, t.TempDir()); sources != nil {
 		t.Errorf("expected free-running, got %v", sources)
 	}
 }
@@ -84,7 +85,7 @@ func TestTimeSourcesFollowerAsksEveryLeader(t *testing.T) {
 		"node-2": "10.10.0.2/24", // a follower: present in the image, not a source
 		"node-3": "10.10.0.3/24",
 	})
-	sources := timeSources(c, machine.RoleFollower, dir)
+	sources := timeSources(c, api.RoleFollower, dir)
 	want := []string{"10.10.0.1", "10.10.0.3", "cluster.example.com"}
 	if !slices.Equal(sources, want) {
 		t.Errorf("got %v, want %v", sources, want)
@@ -94,7 +95,7 @@ func TestTimeSourcesFollowerAsksEveryLeader(t *testing.T) {
 func TestTimeSourcesFollowerDoesNotAskTheEndpointTwice(t *testing.T) {
 	c := clusterWithTime(nil, "https://10.10.0.1:6443")
 	dir := manifestsDir(t, map[string]string{"node-1": "10.10.0.1/24"})
-	sources := timeSources(c, machine.RoleFollower, dir)
+	sources := timeSources(c, api.RoleFollower, dir)
 	if !slices.Equal(sources, []string{"10.10.0.1"}) {
 		t.Errorf("got %v", sources)
 	}
@@ -102,7 +103,7 @@ func TestTimeSourcesFollowerDoesNotAskTheEndpointTwice(t *testing.T) {
 
 func TestTimeSourcesFollowerFallsBackToTheEndpoint(t *testing.T) {
 	c := clusterWithTime(nil, "https://10.10.0.1:6443")
-	sources := timeSources(c, machine.RoleFollower, t.TempDir())
+	sources := timeSources(c, api.RoleFollower, t.TempDir())
 	if !slices.Equal(sources, []string{"10.10.0.1"}) {
 		t.Errorf("got %v", sources)
 	}

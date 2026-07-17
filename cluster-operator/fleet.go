@@ -32,6 +32,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/kubernetes"
 	"github.com/liken-sh/liken/machine"
@@ -46,8 +47,8 @@ import (
 type fleetSweep struct {
 	lost      []string
 	tally     cluster.MachineTally
-	condition machine.Condition
-	phase     machine.Phase
+	condition api.Condition
+	phase     api.Phase
 }
 
 // decideFleetSweep judges every machine by its effective phase: a
@@ -64,14 +65,14 @@ func decideFleetSweep(machines []machine.Machine, renewals map[string]time.Time,
 	for i := range machines {
 		m := &machines[i]
 		effective := effectivePhase(m, renewals, now)
-		if effective == machine.PhaseLost && m.Status.Phase != machine.PhaseLost {
+		if effective == api.PhaseLost && m.Status.Phase != api.PhaseLost {
 			s.lost = append(s.lost, m.Metadata.Name)
 		}
 
 		switch effective {
-		case machine.PhaseReady:
+		case api.PhaseReady:
 			s.tally.Ready++
-		case machine.PhaseUpdating, machine.PhaseUpdatePending, machine.PhaseBooting:
+		case api.PhaseUpdating, api.PhaseUpdatePending, api.PhaseBooting:
 			transitioning = append(transitioning, m.Metadata.Name)
 		default:
 			unwell = append(unwell, m.Metadata.Name)
@@ -81,21 +82,21 @@ func decideFleetSweep(machines []machine.Machine, renewals map[string]time.Time,
 
 	switch {
 	case len(unwell) > 0:
-		s.phase = machine.PhaseDegraded
-		s.condition = machine.Condition{
-			Type: "MachinesReady", Status: machine.ConditionFalse, Reason: "MachinesDegraded",
+		s.phase = api.PhaseDegraded
+		s.condition = api.Condition{
+			Type: "MachinesReady", Status: api.ConditionFalse, Reason: "MachinesDegraded",
 			Message: fmt.Sprintf("%s machines ready; unwell: %s", s.tally.Summary, strings.Join(unwell, ", ")),
 		}
 	case len(transitioning) > 0:
-		s.phase = machine.PhaseUpdating
-		s.condition = machine.Condition{
-			Type: "MachinesReady", Status: machine.ConditionFalse, Reason: "MachinesUpdating",
+		s.phase = api.PhaseUpdating
+		s.condition = api.Condition{
+			Type: "MachinesReady", Status: api.ConditionFalse, Reason: "MachinesUpdating",
 			Message: fmt.Sprintf("%s machines ready; mid-transition: %s", s.tally.Summary, strings.Join(transitioning, ", ")),
 		}
 	default:
-		s.phase = machine.PhaseReady
-		s.condition = machine.Condition{
-			Type: "MachinesReady", Status: machine.ConditionTrue, Reason: "AllMachinesReady",
+		s.phase = api.PhaseReady
+		s.condition = api.Condition{
+			Type: "MachinesReady", Status: api.ConditionTrue, Reason: "AllMachinesReady",
 			Message: fmt.Sprintf("all %d machines are ready", s.tally.Total),
 		}
 	}
@@ -155,12 +156,12 @@ func markLost(c *kubernetes.Client, machines []machine.Machine, lost []string, n
 		// condition flip because they are claims about the present,
 		// and the machine has stopped making them.
 		status := m.Status
-		status.Phase = machine.PhaseLost
+		status.Phase = api.PhaseLost
 		// The clone matters: status.Conditions still shares its backing
 		// array with the machines slice, and SetCondition rewrites an
 		// existing entry in place.
-		status.Conditions = machine.SetCondition(slices.Clone(m.Status.Conditions), machine.Condition{
-			Type: "Ready", Status: machine.ConditionUnknown, Reason: "HeartbeatStale",
+		status.Conditions = api.SetCondition(slices.Clone(m.Status.Conditions), api.Condition{
+			Type: "Ready", Status: api.ConditionUnknown, Reason: "HeartbeatStale",
 			ObservedGeneration: m.Metadata.Generation,
 			Message:            "the machine's operator has stopped renewing its heartbeat lease; the machine is presumed down",
 		}, now)
@@ -191,8 +192,8 @@ func publishClusterStatus(c *kubernetes.Client, clusterDoc *cluster.Cluster, s f
 	newest := cluster.NewestVersion(clusterDoc.Spec.Releases.Catalog)
 	s.condition.ObservedGeneration = clusterDoc.Metadata.Generation
 	r.progressing.ObservedGeneration = clusterDoc.Metadata.Generation
-	conditions := machine.SetCondition(slices.Clone(clusterDoc.Status.Conditions), s.condition, now)
-	conditions = machine.SetCondition(conditions, r.progressing, now)
+	conditions := api.SetCondition(slices.Clone(clusterDoc.Status.Conditions), s.condition, now)
+	conditions = api.SetCondition(conditions, r.progressing, now)
 	if clusterDoc.Status.Machines != s.tally || clusterDoc.Status.Phase != s.phase ||
 		clusterDoc.Status.Releases.Newest != newest ||
 		clusterDoc.Status.Releases.Available != available ||

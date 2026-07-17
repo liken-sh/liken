@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/api"
 )
 
 func nodeWearing(labels, annotations map[string]string) *nodeObject {
@@ -43,7 +43,7 @@ func TestNodeLabelsNothingDeclaredIsQuiet(t *testing.T) {
 	if step.patch != nil {
 		t.Errorf("nothing declared and nothing owned should patch nothing: %s", step.patch)
 	}
-	if step.condition.Status != machine.ConditionTrue || step.condition.Reason != "NothingDeclared" {
+	if step.condition.Status != api.ConditionTrue || step.condition.Reason != "NothingDeclared" {
 		t.Errorf("condition: %+v", step.condition)
 	}
 }
@@ -58,7 +58,7 @@ func TestNodeLabelsFirstApplication(t *testing.T) {
 	if annotations[ownedLabelsAnnotation] != "guid.foo/gpu,topology.kubernetes.io/zone" {
 		t.Errorf("ownership annotation should record the managed keys sorted: %v", annotations)
 	}
-	if step.condition.Status != machine.ConditionTrue || step.condition.Reason != "Applied" {
+	if step.condition.Status != api.ConditionTrue || step.condition.Reason != "Applied" {
 		t.Errorf("condition: %+v", step.condition)
 	}
 }
@@ -72,7 +72,7 @@ func TestNodeLabelsSettledNodeNeedsNoPatch(t *testing.T) {
 	if step.patch != nil {
 		t.Errorf("a settled node should not be patched: %s", step.patch)
 	}
-	if step.condition.Status != machine.ConditionTrue || step.condition.Reason != "Applied" {
+	if step.condition.Status != api.ConditionTrue || step.condition.Reason != "Applied" {
 		t.Errorf("condition: %+v", step.condition)
 	}
 }
@@ -151,7 +151,7 @@ func TestCarryOutNodeLabelsAppliesThePatch(t *testing.T) {
 	}))
 	step := decideNodeLabels(map[string]string{"guid.foo/gpu": "true"}, nodeWearing(nil, nil))
 	condition := carryOutNodeLabels(c, "node-1", step)
-	if condition.Status != machine.ConditionTrue || condition.Reason != "Applied" {
+	if condition.Status != api.ConditionTrue || condition.Reason != "Applied" {
 		t.Errorf("condition: %+v", condition)
 	}
 	if len(patched) == 0 {
@@ -165,7 +165,7 @@ func TestCarryOutNodeLabelsReportsAFailedPatch(t *testing.T) {
 	}))
 	step := decideNodeLabels(map[string]string{"guid.foo/gpu": "true"}, nodeWearing(nil, nil))
 	condition := carryOutNodeLabels(c, "node-1", step)
-	if condition.Status != machine.ConditionFalse || condition.Reason != "ApplyFailed" {
+	if condition.Status != api.ConditionFalse || condition.Reason != "ApplyFailed" {
 		t.Errorf("a failed patch should report ApplyFailed: %+v", condition)
 	}
 }

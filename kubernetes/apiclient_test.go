@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
@@ -38,7 +39,7 @@ func TestRequestJSONDecodesAndAuthenticates(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(&machine.Machine{
 			Kind:     "Machine",
-			Metadata: machine.ObjectMeta{Name: "node-1"},
+			Metadata: api.ObjectMeta{Name: "node-1"},
 		})
 	}))
 	m, err := GetMachine(client, "node-1")
@@ -91,7 +92,7 @@ func TestListClustersReadsTheCollection(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"kind": "ClusterList",
 			"items": []cluster.Cluster{
-				{Kind: "Cluster", Metadata: machine.ObjectMeta{Name: "lab"}},
+				{Kind: "Cluster", Metadata: api.ObjectMeta{Name: "lab"}},
 			},
 		})
 	}))

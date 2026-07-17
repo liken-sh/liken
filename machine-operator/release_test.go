@@ -8,13 +8,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
 func clusterWithTarget(version string) *cluster.Cluster {
 	return &cluster.Cluster{
-		Metadata: machine.ObjectMeta{Name: "lab"},
+		Metadata: api.ObjectMeta{Name: "lab"},
 		Spec: cluster.ClusterSpec{
 			Version: version,
 			Releases: cluster.ClusterReleasesSpec{
@@ -73,7 +74,7 @@ func TestVersionAskShortCircuits(t *testing.T) {
 		name       string
 		clusterDoc *cluster.Cluster
 		facts      *machine.MachineStatus
-		wantStatus machine.ConditionStatus
+		wantStatus api.ConditionStatus
 		wantReason string
 	}{
 		{"no facts yet", clusterWithTarget("0.2.0"), nil, "Unknown", "FactsIncomplete"},
@@ -109,7 +110,7 @@ func TestVersionConditionFollowsTheFetch(t *testing.T) {
 	ask := fetchAsk{version: "0.2.0", slot: "B"}
 	cases := []struct {
 		state      fetchState
-		wantStatus machine.ConditionStatus
+		wantStatus api.ConditionStatus
 		wantReason string
 	}{
 		{fetchIdle, "False", "Downloading"},

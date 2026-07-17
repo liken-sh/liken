@@ -35,7 +35,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/api"
 )
 
 const heartbeatDir = "/apis/coordination.k8s.io/v1/namespaces/liken-system/leases"
@@ -67,9 +67,9 @@ const (
 const microTime = "2006-01-02T15:04:05.000000Z07:00"
 
 type lease struct {
-	APIVersion string             `json:"apiVersion"`
-	Kind       string             `json:"kind"`
-	Metadata   machine.ObjectMeta `json:"metadata"`
+	APIVersion string         `json:"apiVersion"`
+	Kind       string         `json:"kind"`
+	Metadata   api.ObjectMeta `json:"metadata"`
 	Spec       struct {
 		HolderIdentity       string `json:"holderIdentity,omitempty"`
 		LeaseDurationSeconds int    `json:"leaseDurationSeconds,omitempty"`

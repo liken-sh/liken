@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -27,15 +28,15 @@ type watchAPI struct {
 	paths   chan string
 }
 
-func (api *watchAPI) handler() http.Handler {
-	api.paths = make(chan string, 8)
+func (fake *watchAPI) handler() http.Handler {
+	fake.paths = make(chan string, 8)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("watch") == "true" {
-			api.paths <- r.URL.String()
-			if api.watches.Add(1) > 1 {
+			fake.paths <- r.URL.String()
+			if fake.watches.Add(1) > 1 {
 				return
 			}
-			for _, event := range api.stream {
+			for _, event := range fake.stream {
 				_, _ = w.Write([]byte(event + "\n"))
 			}
 			return
@@ -44,8 +45,8 @@ func (api *watchAPI) handler() http.Handler {
 			"kind":     "MachineList",
 			"metadata": map[string]any{"resourceVersion": "99"},
 			"items": []machine.Machine{
-				{Kind: "Machine", Metadata: machine.ObjectMeta{Name: "node-1", ResourceVersion: "50"}},
-				{Kind: "Machine", Metadata: machine.ObjectMeta{Name: "node-2", ResourceVersion: "51"}},
+				{Kind: "Machine", Metadata: api.ObjectMeta{Name: "node-1", ResourceVersion: "50"}},
+				{Kind: "Machine", Metadata: api.ObjectMeta{Name: "node-2", ResourceVersion: "51"}},
 			},
 		})
 	})
@@ -57,7 +58,7 @@ func watchEvent(t *testing.T, eventType, name, resourceVersion string) string {
 		"type": eventType,
 		"object": &machine.Machine{
 			Kind:     "Machine",
-			Metadata: machine.ObjectMeta{Name: name, ResourceVersion: resourceVersion},
+			Metadata: api.ObjectMeta{Name: name, ResourceVersion: resourceVersion},
 		},
 	}
 	raw, err := json.Marshal(event)
@@ -68,11 +69,11 @@ func watchEvent(t *testing.T, eventType, name, resourceVersion string) string {
 }
 
 func TestWatchDeliversEventsAndRecoversFromADrop(t *testing.T) {
-	api := &watchAPI{stream: []string{
+	fake := &watchAPI{stream: []string{
 		watchEvent(t, "MODIFIED", "node-1", "7"),
 		watchEvent(t, "BOOKMARK", "node-1", "8"),
 	}}
-	client := testClient(t, api.handler())
+	client := testClient(t, fake.handler())
 
 	events := make(chan *machine.Machine, 4)
 	go WatchMachines(client, "", "1", events)
@@ -102,15 +103,15 @@ func TestWatchWithoutASelectorSpansTheCollection(t *testing.T) {
 	// The cluster operator derives the Cluster's status from every
 	// Machine, so its watch carries no fieldSelector and another
 	// machine's event is delivered like any other.
-	api := &watchAPI{stream: []string{
+	fake := &watchAPI{stream: []string{
 		watchEvent(t, "MODIFIED", "node-2", "7"),
 	}}
-	client := testClient(t, api.handler())
+	client := testClient(t, fake.handler())
 
 	events := make(chan *machine.Machine, 4)
 	go WatchMachines(client, "", "1", events)
 
-	if path := <-api.paths; strings.Contains(path, "fieldSelector") {
+	if path := <-fake.paths; strings.Contains(path, "fieldSelector") {
 		t.Errorf("no selector was asked for: %s", path)
 	}
 	first := <-events
@@ -123,30 +124,30 @@ func TestWatchCarriesTheFieldSelector(t *testing.T) {
 	// The machine operator narrows its watch to its own object; the
 	// server does the filtering, so all the client sends is the
 	// selector, escaped into the query string.
-	api := &watchAPI{stream: []string{
+	fake := &watchAPI{stream: []string{
 		watchEvent(t, "MODIFIED", "node-1", "7"),
 	}}
-	client := testClient(t, api.handler())
+	client := testClient(t, fake.handler())
 
 	events := make(chan *machine.Machine, 4)
 	go WatchMachines(client, "metadata.name=node-1", "1", events)
 
-	if path := <-api.paths; !strings.Contains(path, "fieldSelector=metadata.name%3Dnode-1") {
+	if path := <-fake.paths; !strings.Contains(path, "fieldSelector=metadata.name%3Dnode-1") {
 		t.Errorf("the watch should carry the selector: %s", path)
 	}
 	<-events
 }
 
 func TestWatchResumesFromTheListsVersion(t *testing.T) {
-	api := &watchAPI{stream: []string{
+	fake := &watchAPI{stream: []string{
 		watchEvent(t, "BOOKMARK", "node-1", "42"),
 	}}
-	client := testClient(t, api.handler())
+	client := testClient(t, fake.handler())
 
 	events := make(chan *machine.Machine, 4)
 	go WatchMachines(client, "", "1", events)
 
-	if first := <-api.paths; !strings.Contains(first, "resourceVersion=1") {
+	if first := <-fake.paths; !strings.Contains(first, "resourceVersion=1") {
 		t.Errorf("the first watch starts where the caller said: %s", first)
 	}
 	// The bookmark advanced the resume point, the stream dropped, and
@@ -156,7 +157,7 @@ func TestWatchResumesFromTheListsVersion(t *testing.T) {
 	// which on a quiet object can be old enough to have been
 	// compacted away, and a watch from a compacted version is refused
 	// with 410 Gone.
-	if second := <-api.paths; !strings.Contains(second, "resourceVersion=99") {
+	if second := <-fake.paths; !strings.Contains(second, "resourceVersion=99") {
 		t.Errorf("the reconnect should resume from the list's version: %s", second)
 	}
 }

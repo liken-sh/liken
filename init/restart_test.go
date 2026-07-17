@@ -12,6 +12,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
@@ -32,20 +33,20 @@ func newRestartFixture(t *testing.T) *restartFixture {
 	t.Helper()
 	root := t.TempDir()
 	current := &cluster.Cluster{
-		APIVersion: machine.APIVersion,
+		APIVersion: api.APIVersion,
 		Kind:       "Cluster",
-		Metadata:   machine.ObjectMeta{Name: "lab"},
+		Metadata:   api.ObjectMeta{Name: "lab"},
 		Spec:       cluster.ClusterSpec{Leaders: []string{"node-1"}},
 	}
 	f := &restartFixture{root: root}
 	f.state = &restartState{
 		root:       root,
-		m:          &machine.Machine{Metadata: machine.ObjectMeta{Name: "node-1"}},
+		m:          &machine.Machine{Metadata: api.ObjectMeta{Name: "node-1"}},
 		facts:      &factsFile{status: &machine.MachineStatus{}},
 		clusterDoc: current,
-		writeBootConfig: func(c *cluster.Cluster, _ *machine.Machine, _ []*connection) (machine.Role, error) {
+		writeBootConfig: func(c *cluster.Cluster, _ *machine.Machine, _ []*connection) (api.Role, error) {
 			f.bootConfigs = append(f.bootConfigs, c)
-			return machine.RoleLeader, nil
+			return api.RoleLeader, nil
 		},
 		actuateFeatures: func(c *cluster.Cluster, _ string) []machine.FeatureStatus {
 			f.actuations = append(f.actuations, c)

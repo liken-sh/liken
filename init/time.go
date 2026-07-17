@@ -61,6 +61,7 @@ import (
 	"github.com/beevik/ntp"
 	"golang.org/x/sys/unix"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
@@ -129,11 +130,11 @@ func (c *clock) record(measured *timeSync) {
 // therefore comes from inputs the machine already needed to find its
 // cluster; no new information is required. nil means free-running: a
 // leader with no upstreams declared.
-func timeSources(clusterDoc *cluster.Cluster, role machine.Role, manifestDir string) []string {
+func timeSources(clusterDoc *cluster.Cluster, role api.Role, manifestDir string) []string {
 	if clusterDoc == nil {
 		return nil
 	}
-	if role == machine.RoleLeader {
+	if role == api.RoleLeader {
 		return clusterDoc.Spec.Time.Upstreams
 	}
 	sources := leaderAddresses(clusterDoc, manifestDir)

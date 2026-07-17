@@ -43,6 +43,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
@@ -339,7 +340,7 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	// followers sync from the leaders themselves. Serving works
 	// even when free-running: a fleet with no upstreams still
 	// keeps one consistent time across its machines (responder.go).
-	if role == machine.RoleLeader {
+	if role == api.RoleLeader {
 		plane.start("the time responder", serveTime(clk))
 	}
 	// The intent channel: init creates the directory (owning its
@@ -370,7 +371,7 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	// kubeconfig is a control-plane artifact, and followers hold
 	// no credentials of their own. A follower's join shows up on
 	// the leader's console (and in its own k3s log lines).
-	if role == machine.RoleLeader {
+	if role == api.RoleLeader {
 		plane.start("the node report", reportWhenReady)
 	}
 	// The wedge fault boots everything except k3s: the node never

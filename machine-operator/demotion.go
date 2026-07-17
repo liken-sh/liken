@@ -33,6 +33,7 @@ package main
 import (
 	"fmt"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/kubernetes"
 	"github.com/liken-sh/liken/machine"
 )
@@ -49,7 +50,7 @@ var leaderNodeLabels = []string{
 // NodeCurrent condition to publish either way.
 type demotion struct {
 	cleanup   bool
-	condition machine.Condition
+	condition api.Condition
 }
 
 // decideDemotion compares what this machine is (the derived role)
@@ -63,12 +64,12 @@ type demotion struct {
 // always the aftermath of a Cluster edit, which means other machines
 // are converging on the same edit at the same time, and this is
 // exactly the traffic the rollout conductor sequences.
-func decideDemotion(role machine.Role, nodeLabels map[string]string, rebootPolicy machine.RebootPolicy, t turn) demotion {
-	nodeCurrent := func(status machine.ConditionStatus, reason, message string) machine.Condition {
-		return machine.Condition{Type: "NodeCurrent", Status: status, Reason: reason, Message: message}
+func decideDemotion(role api.Role, nodeLabels map[string]string, rebootPolicy machine.RebootPolicy, t turn) demotion {
+	nodeCurrent := func(status api.ConditionStatus, reason, message string) api.Condition {
+		return api.Condition{Type: "NodeCurrent", Status: status, Reason: reason, Message: message}
 	}
 
-	if role != machine.RoleFollower {
+	if role != api.RoleFollower {
 		return demotion{condition: nodeCurrent("True", "NodeMatchesRole", "the Node object matches this machine's role")}
 	}
 	stale := false
@@ -99,13 +100,13 @@ func decideDemotion(role machine.Role, nodeLabels map[string]string, rebootPolic
 // carryOutDemotion performs the cleanup: reboot intent first (the
 // delete kills this pod, so the reboot must already be in flight),
 // then the Node deletion that triggers etcd member removal.
-func carryOutDemotion(c *kubernetes.Client, name string, d demotion) machine.Condition {
+func carryOutDemotion(c *kubernetes.Client, name string, d demotion) api.Condition {
 	if !d.cleanup {
 		return d.condition
 	}
 	intent := &machine.RebootIntent{Reason: "completing the demotion to follower"}
 	if err := machine.WriteRebootIntent(machine.OperatorRunDir, intent); err != nil {
-		return machine.Condition{Type: "NodeCurrent", Status: machine.ConditionFalse, Reason: "DemotionFailed",
+		return api.Condition{Type: "NodeCurrent", Status: api.ConditionFalse, Reason: "DemotionFailed",
 			Message: fmt.Sprintf("writing the reboot intent: %v", err)}
 	}
 	if err := deleteNode(c, name); err != nil {

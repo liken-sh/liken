@@ -40,17 +40,18 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/machine"
 )
 
 // Bundle lays out a release: the named artifacts copied into
 // <channel>/<version>/ beside a release.yaml naming each by sha256
 // digest and size, and recording which upstream components shipped.
-// The version must fit liken's calendar grammar (the machine package
+// The version must fit liken's calendar grammar (the api package
 // defines it); enforcing that here, where versions are authored,
 // means a malformed one never reaches a channel at all.
 func Bundle(vmlinuz, systemImage, bootArchive, cli, bootMenu, grubBoot, grubCore, licenses, channelDir, version string, components []machine.ReleaseComponent, out io.Writer) error {
-	if err := machine.ValidVersion(version); err != nil {
+	if err := api.ValidVersion(version); err != nil {
 		return err
 	}
 	dest := filepath.Join(channelDir, version)
@@ -151,7 +152,7 @@ func writeChannelDocument(channelDir string) (string, error) {
 	}
 	latest := ""
 	for _, e := range entries {
-		if !e.IsDir() || machine.ValidVersion(e.Name()) != nil {
+		if !e.IsDir() || api.ValidVersion(e.Name()) != nil {
 			continue
 		}
 		if e.Name() > latest {

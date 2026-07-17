@@ -8,8 +8,9 @@ package machine
 // everything is re-derived from current observation.
 
 import (
-	"slices"
 	"time"
+
+	"github.com/liken-sh/liken/api"
 )
 
 type MachineStatus struct {
@@ -17,8 +18,8 @@ type MachineStatus struct {
 	// the conditions below on every pass. It is never remembered, so
 	// it can never go stale relative to them. Conditions are for programs
 	// (kubectl wait, controllers); the phase is for the human scanning
-	// a fleet listing. See the Phase constants for the vocabulary.
-	Phase Phase `json:"phase,omitempty"`
+	// a fleet listing. See the api package's Phase constants for the vocabulary.
+	Phase api.Phase `json:"phase,omitempty"`
 
 	// Version reports what this machine is running. The k3s and kubelet
 	// versions aren't here because Kubernetes already reports them on
@@ -29,7 +30,7 @@ type MachineStatus struct {
 	// a control plane) or a follower (it runs workloads). Derived at
 	// boot from the Cluster manifest's leaders list, never declared
 	// here.
-	Role Role `json:"role,omitempty"`
+	Role api.Role `json:"role,omitempty"`
 
 	// Network is the boot's networking outcome, DHCP leases and static
 	// assignments alike: the same facts init prints to the console,
@@ -116,35 +117,8 @@ type MachineStatus struct {
 	// Conditions follow the standard Kubernetes idiom: a set of typed,
 	// timestamped observations ("Ready", "SysctlsApplied") that
 	// controllers maintain and humans and tooling read.
-	Conditions []Condition `json:"conditions,omitempty"`
+	Conditions []api.Condition `json:"conditions,omitempty"`
 }
-
-// Phase summarizes a machine's state in one word. Named string types
-// are how Go models a closed vocabulary: the constants below are the
-// only values, the compiler catches a Phase handed where a Role
-// belongs, and the wire format is unchanged (a named string marshals
-// exactly like a bare one). Kubernetes' own API types use the same
-// idiom (v1.PodPhase, metav1.ConditionStatus).
-type Phase string
-
-// The phases a machine can report, most severe first. Each is a
-// summary of the conditions, not a fact of its own; the operator
-// derives the phase from the conditions on every pass, and the table
-// that does so (machine-operator/phase.go) is the authority on which
-// condition puts a machine in which phase. Lost is the exception to
-// "derived from own conditions": a machine cannot report its own
-// death, so the cluster operator writes Lost on its behalf when its
-// heartbeat goes silent.
-const (
-	PhaseUnknown       Phase = "Unknown"       // the facts are unreadable; the operator can't tell anything
-	PhaseBooting       Phase = "Booting"       // init hasn't finished publishing this boot's record yet
-	PhaseLost          Phase = "Lost"          // the heartbeat went silent; the cluster operator wrote this, not the machine
-	PhaseBlocked       Phase = "Blocked"       // drift exists but can't be staged; it needs a different edit, not time
-	PhaseUpdating      Phase = "Updating"      // a reboot is in flight to apply a staged change
-	PhaseUpdatePending Phase = "UpdatePending" // a change is staged, waiting on a Manual reboot
-	PhaseDegraded      Phase = "Degraded"      // something is wrong that isn't one of the specific states above
-	PhaseReady         Phase = "Ready"         // every condition is True
-)
 
 type VersionStatus struct {
 	Liken  string `json:"liken,omitempty"`
@@ -513,35 +487,6 @@ type BootStatus struct {
 	CredentialsRejection *Rejection `json:"credentialsRejection,omitempty"`
 }
 
-// ConditionStatus is a condition's verdict. It is a string rather
-// than a bool because there is a third state: a controller that can't
-// currently tell must be able to say so.
-type ConditionStatus string
-
-const (
-	ConditionTrue    ConditionStatus = "True"
-	ConditionFalse   ConditionStatus = "False"
-	ConditionUnknown ConditionStatus = "Unknown"
-)
-
-// Condition mirrors metav1.Condition, the shape Kubernetes uses
-// everywhere (Pods, Nodes, Deployments all carry these).
-// ObservedGeneration records which metadata.generation the condition
-// judged: generation counts spec edits, so a consumer can tell
-// "Ready, for the spec as it stands" from "Ready, but for a spec two
-// edits ago". That distinction matters in liken, where edits wait
-// for a reboot to take effect. (The convergence conditions make the
-// stronger, content-hashed version of this claim; the generation is
-// for tooling that speaks the convention.)
-type Condition struct {
-	Type               string          `json:"type"`
-	Status             ConditionStatus `json:"status"`
-	ObservedGeneration int64           `json:"observedGeneration,omitempty"`
-	Reason             string          `json:"reason,omitempty"`
-	Message            string          `json:"message,omitempty"`
-	LastTransitionTime time.Time       `json:"lastTransitionTime"`
-}
-
 // RebootApprovedCondition is the rollout conductor's grant of a
 // reboot turn, and the one condition type on a Machine's status that
 // two different programs speak: the cluster operator writes and
@@ -550,49 +495,3 @@ type Condition struct {
 // vocabulary, exactly the way PodScheduled is a condition the
 // scheduler writes onto Pods the kubelet owns.
 const RebootApprovedCondition = "RebootApproved"
-
-// SetCondition upserts a condition by type, preserving the Kubernetes
-// rule that makes lastTransitionTime meaningful: it moves only when
-// Status flips, not on every write. That's what lets `kubectl get`
-// answer "how long has this machine been Ready?" instead of "when did
-// the operator last say so?".
-func SetCondition(conditions []Condition, c Condition, now time.Time) []Condition {
-	c.LastTransitionTime = now
-	for i, existing := range conditions {
-		if existing.Type != c.Type {
-			continue
-		}
-		if existing.Status == c.Status {
-			c.LastTransitionTime = existing.LastTransitionTime
-		}
-		conditions[i] = c
-		return conditions
-	}
-	return append(conditions, c)
-}
-
-// FindCondition reports the condition of the named type, nil when the
-// list carries none.
-func FindCondition(conditions []Condition, conditionType string) *Condition {
-	for i := range conditions {
-		if conditions[i].Type == conditionType {
-			return &conditions[i]
-		}
-	}
-	return nil
-}
-
-// RemoveCondition drops the condition of the named type. Most
-// conditions are observations: they stay in the list forever and flip
-// between True and False. Removal exists for the conditions that are
-// grants, which are present while extended and gone when revoked.
-// Their absence carries the meaning, so there is no False state for
-// other machinery to misread as trouble.
-func RemoveCondition(conditions []Condition, conditionType string) []Condition {
-	for i := range conditions {
-		if conditions[i].Type == conditionType {
-			return slices.Delete(conditions, i, i+1)
-		}
-	}
-	return conditions
-}

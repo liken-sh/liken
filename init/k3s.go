@@ -36,6 +36,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
@@ -142,7 +143,7 @@ func nodeAddress(clusterDoc *cluster.Cluster, conns []*connection) (ip, ifname s
 // positional arguments with adjacent strings and bools invite
 // transposition; named fields read correctly at the call site.
 type k3sBootInputs struct {
-	role          machine.Role
+	role          api.Role
 	clusterDoc    *cluster.Cluster
 	nodeIP        string
 	nodeInterface string
@@ -169,7 +170,7 @@ func k3sBootConfig(in k3sBootInputs) string {
 		fmt.Fprintf(&b, "token-file: %s\n", tokenPath)
 	}
 
-	if role == machine.RoleFollower {
+	if role == api.RoleFollower {
 		// "server" is k3s's config key for "the control plane I take
 		// direction from": a follower points at the endpoint.
 		fmt.Fprintf(&b, "server: %s\n", clusterDoc.Spec.Endpoint)
@@ -309,8 +310,8 @@ const k3sServerDB = "/var/lib/rancher/k3s/server/db"
 // a demotion has already proved out, meaning the machine joined its
 // cluster as a follower and the operator promoted the document; it
 // runs on the boot after that.
-func purgeLeaderLeftovers(role machine.Role, clusterManifestSource machine.ManifestSource, dbDir string) {
-	if role != machine.RoleFollower || clusterManifestSource != machine.ManifestSourceProven {
+func purgeLeaderLeftovers(role api.Role, clusterManifestSource machine.ManifestSource, dbDir string) {
+	if role != api.RoleFollower || clusterManifestSource != machine.ManifestSourceProven {
 		return
 	}
 	if _, err := os.Stat(dbDir); err != nil {
@@ -392,7 +393,7 @@ func mintNodePassword(dir string) error {
 // configuration and writes the drop-in beside the role's static
 // config file. It returns the role so the supervisor knows which k3s
 // to start.
-func writeK3sBootConfig(clusterDoc *cluster.Cluster, m *machine.Machine, conns []*connection) (machine.Role, error) {
+func writeK3sBootConfig(clusterDoc *cluster.Cluster, m *machine.Machine, conns []*connection) (api.Role, error) {
 	name := m.Metadata.Name
 	// Role is nil-safe by design: a machine with no cluster document
 	// is a leader of one. That invariant is what keeps the follower
@@ -402,14 +403,14 @@ func writeK3sBootConfig(clusterDoc *cluster.Cluster, m *machine.Machine, conns [
 	if clusterDoc != nil {
 		fmt.Printf("liken: this machine is a cluster %s (cluster %s)\n", role, clusterDoc.Metadata.Name)
 	}
-	if role == machine.RoleFollower && clusterDoc.Spec.Endpoint == "" {
+	if role == api.RoleFollower && clusterDoc.Spec.Endpoint == "" {
 		return role, fmt.Errorf("this machine is a follower, but the cluster manifest declares no endpoint to join")
 	}
 
 	haveToken := true
 	if _, err := os.Stat(tokenPath); err != nil {
 		haveToken = false
-		if role == machine.RoleFollower {
+		if role == api.RoleFollower {
 			return role, fmt.Errorf("this machine is a follower, but the image carries no join token at %s", tokenPath)
 		}
 	}
@@ -417,7 +418,7 @@ func writeK3sBootConfig(clusterDoc *cluster.Cluster, m *machine.Machine, conns [
 	nodeIP, nodeInterface := nodeAddress(clusterDoc, conns)
 	if nodeIP != "" {
 		fmt.Printf("liken: node IP is %s on %s\n", nodeIP, nodeInterface)
-	} else if role == machine.RoleFollower {
+	} else if role == api.RoleFollower {
 		fmt.Fprintf(os.Stderr, "liken: no address falls inside the cluster's nodeCIDR; k3s will guess a node IP\n")
 	}
 
@@ -429,7 +430,7 @@ func writeK3sBootConfig(clusterDoc *cluster.Cluster, m *machine.Machine, conns [
 	}
 
 	base := k3sServerConfig
-	if role == machine.RoleFollower {
+	if role == api.RoleFollower {
 		base = k3sAgentConfig
 	}
 	dropInDir := base + ".d"

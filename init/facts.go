@@ -20,6 +20,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
@@ -75,7 +76,7 @@ var (
 // fields read correctly at the call site.
 type factsInputs struct {
 	clusterDoc  *cluster.Cluster
-	role        machine.Role
+	role        api.Role
 	choice      *manifestChoice
 	conns       []*connection
 	storage     machine.StorageStatus

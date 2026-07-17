@@ -10,12 +10,13 @@ package main
 import (
 	"testing"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/machine"
 )
 
 func TestDemotionCleanupFiresForADemotedFollower(t *testing.T) {
 	labels := map[string]string{"node-role.kubernetes.io/control-plane": "true"}
-	d := decideDemotion(machine.RoleFollower, labels, machine.RebootAuto, turnGranted)
+	d := decideDemotion(api.RoleFollower, labels, machine.RebootAuto, turnGranted)
 	if !d.cleanup {
 		t.Error("a follower with a control-plane Node needs cleanup")
 	}
@@ -26,7 +27,7 @@ func TestDemotionCleanupFiresForADemotedFollower(t *testing.T) {
 
 func TestDemotionCleanupWaitsUnderManualPolicy(t *testing.T) {
 	labels := map[string]string{"node-role.kubernetes.io/etcd": "true"}
-	d := decideDemotion(machine.RoleFollower, labels, machine.RebootManual, turnGranted)
+	d := decideDemotion(api.RoleFollower, labels, machine.RebootManual, turnGranted)
 	if d.cleanup {
 		t.Error("cleanup deletes the Node and reboots; Manual policy must gate it")
 	}
@@ -36,7 +37,7 @@ func TestDemotionCleanupWaitsUnderManualPolicy(t *testing.T) {
 }
 
 func TestACleanFollowerNeedsNothing(t *testing.T) {
-	d := decideDemotion(machine.RoleFollower, map[string]string{"kubernetes.io/hostname": "node-4"}, machine.RebootAuto, turnGranted)
+	d := decideDemotion(api.RoleFollower, map[string]string{"kubernetes.io/hostname": "node-4"}, machine.RebootAuto, turnGranted)
 	if d.cleanup || d.condition.Status != "True" {
 		t.Errorf("got %+v", d)
 	}
@@ -47,7 +48,7 @@ func TestALeaderIsAlwaysCurrent(t *testing.T) {
 	// still coming up (labels not yet set) is k3s's business, not the
 	// operator's.
 	labels := map[string]string{"node-role.kubernetes.io/control-plane": "true"}
-	d := decideDemotion(machine.RoleLeader, labels, machine.RebootAuto, turnGranted)
+	d := decideDemotion(api.RoleLeader, labels, machine.RebootAuto, turnGranted)
 	if d.cleanup || d.condition.Status != "True" {
 		t.Errorf("got %+v", d)
 	}
@@ -55,7 +56,7 @@ func TestALeaderIsAlwaysCurrent(t *testing.T) {
 
 func TestDemotionWaitsForItsRebootTurn(t *testing.T) {
 	labels := map[string]string{"node-role.kubernetes.io/control-plane": "true"}
-	d := decideDemotion(machine.RoleFollower, labels, machine.RebootAuto, turnAwaiting)
+	d := decideDemotion(api.RoleFollower, labels, machine.RebootAuto, turnAwaiting)
 	if d.cleanup {
 		t.Error("no turn granted means no Node deletion and no reboot")
 	}

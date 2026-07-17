@@ -24,6 +24,7 @@ package machine
 import (
 	"fmt"
 
+	"github.com/liken-sh/liken/api"
 	"sigs.k8s.io/yaml"
 )
 
@@ -58,7 +59,7 @@ func SystemReleases(root string) ManifestStore {
 // the attempted marker, and rejections.
 func RenderSystemRelease(version, slot, releaseDigest string) ([]byte, string, error) {
 	return renderDocument(SystemRelease{
-		APIVersion:    APIVersion,
+		APIVersion:    api.APIVersion,
 		Kind:          "SystemRelease",
 		Version:       version,
 		Slot:          slot,

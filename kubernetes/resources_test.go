@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
@@ -18,8 +19,8 @@ func TestListMachinesReadsTheCollection(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"kind": "MachineList",
 			"items": []machine.Machine{
-				{Kind: "Machine", Metadata: machine.ObjectMeta{Name: "node-1"}},
-				{Kind: "Machine", Metadata: machine.ObjectMeta{Name: "node-2"}},
+				{Kind: "Machine", Metadata: api.ObjectMeta{Name: "node-1"}},
+				{Kind: "Machine", Metadata: api.ObjectMeta{Name: "node-2"}},
 			},
 		})
 	}))
@@ -39,7 +40,7 @@ func TestGetClusterReadsOneCluster(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(&cluster.Cluster{
 			Kind:     "Cluster",
-			Metadata: machine.ObjectMeta{Name: "lab"},
+			Metadata: api.ObjectMeta{Name: "lab"},
 		})
 	}))
 	clusterDoc, err := GetCluster(client, "lab")
@@ -56,8 +57,8 @@ func TestPublishStatusWritesTheStatusSubresource(t *testing.T) {
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path = r.URL.Path
 	}))
-	m := &machine.Machine{Metadata: machine.ObjectMeta{Name: "node-1"}}
-	if err := PublishStatus(client, m, &machine.MachineStatus{Phase: machine.PhaseReady}); err != nil {
+	m := &machine.Machine{Metadata: api.ObjectMeta{Name: "node-1"}}
+	if err := PublishStatus(client, m, &machine.MachineStatus{Phase: api.PhaseReady}); err != nil {
 		t.Fatal(err)
 	}
 	if want := MachinesPath + "/node-1/status"; path != want {
@@ -70,7 +71,7 @@ func TestPublishClusterStatusWritesTheStatusSubresource(t *testing.T) {
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path = r.URL.Path
 	}))
-	clusterDoc := &cluster.Cluster{Metadata: machine.ObjectMeta{Name: "lab"}}
+	clusterDoc := &cluster.Cluster{Metadata: api.ObjectMeta{Name: "lab"}}
 	if err := PublishClusterStatus(client, clusterDoc); err != nil {
 		t.Fatal(err)
 	}

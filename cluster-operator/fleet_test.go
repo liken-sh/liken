@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -18,7 +19,7 @@ var sweepNow = time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
 // the machine has no lease at all).
 type fleetEntry struct {
 	name  string
-	phase machine.Phase
+	phase api.Phase
 	age   time.Duration
 }
 
@@ -28,7 +29,7 @@ func fleetInputs(entries ...fleetEntry) ([]machine.Machine, map[string]time.Time
 	var machines []machine.Machine
 	renewals := map[string]time.Time{}
 	for _, e := range entries {
-		m := machine.Machine{Metadata: machine.ObjectMeta{Name: e.name}}
+		m := machine.Machine{Metadata: api.ObjectMeta{Name: e.name}}
 		m.Status.Phase = e.phase
 		machines = append(machines, m)
 		if e.age >= 0 {
@@ -40,9 +41,9 @@ func fleetInputs(entries ...fleetEntry) ([]machine.Machine, map[string]time.Time
 
 func TestSweepCountsFreshReadyMachines(t *testing.T) {
 	machines, renewals := fleetInputs(
-		fleetEntry{"node-1", machine.PhaseReady, 10 * time.Second},
-		fleetEntry{"node-2", machine.PhaseReady, 30 * time.Second},
-		fleetEntry{"node-3", machine.PhaseUpdatePending, 10 * time.Second},
+		fleetEntry{"node-1", api.PhaseReady, 10 * time.Second},
+		fleetEntry{"node-2", api.PhaseReady, 30 * time.Second},
+		fleetEntry{"node-3", api.PhaseUpdatePending, 10 * time.Second},
 	)
 	s := decideFleetSweep(machines, renewals, sweepNow)
 	if s.tally.Ready != 2 || s.tally.Total != 3 || s.tally.Summary != "2/3" {
@@ -51,7 +52,7 @@ func TestSweepCountsFreshReadyMachines(t *testing.T) {
 	if len(s.lost) != 0 {
 		t.Errorf("nobody here is silent: %v", s.lost)
 	}
-	if s.phase != machine.PhaseUpdating {
+	if s.phase != api.PhaseUpdating {
 		t.Errorf("a fleet whose only exception is mid-update is Updating, got %s", s.phase)
 	}
 	if s.condition.Status != "False" || s.condition.Reason != "MachinesUpdating" {
@@ -64,11 +65,11 @@ func TestSweepCountsFreshReadyMachines(t *testing.T) {
 
 func TestSweepOfAWhollyReadyFleet(t *testing.T) {
 	machines, renewals := fleetInputs(
-		fleetEntry{"node-1", machine.PhaseReady, 10 * time.Second},
-		fleetEntry{"node-2", machine.PhaseReady, 30 * time.Second},
+		fleetEntry{"node-1", api.PhaseReady, 10 * time.Second},
+		fleetEntry{"node-2", api.PhaseReady, 30 * time.Second},
 	)
 	s := decideFleetSweep(machines, renewals, sweepNow)
-	if s.phase != machine.PhaseReady {
+	if s.phase != api.PhaseReady {
 		t.Errorf("everyone ready means the cluster is, got %s", s.phase)
 	}
 	if s.condition.Status != "True" || s.condition.Reason != "AllMachinesReady" {
@@ -78,8 +79,8 @@ func TestSweepOfAWhollyReadyFleet(t *testing.T) {
 
 func TestSweepDeclaresSilentMachinesLost(t *testing.T) {
 	machines, renewals := fleetInputs(
-		fleetEntry{"node-1", machine.PhaseReady, 10 * time.Second},
-		fleetEntry{"node-2", machine.PhaseReady, 5 * time.Minute},
+		fleetEntry{"node-1", api.PhaseReady, 10 * time.Second},
+		fleetEntry{"node-2", api.PhaseReady, 5 * time.Minute},
 	)
 	s := decideFleetSweep(machines, renewals, sweepNow)
 	if s.tally.Summary != "1/2" {
@@ -88,7 +89,7 @@ func TestSweepDeclaresSilentMachinesLost(t *testing.T) {
 	if len(s.lost) != 1 || s.lost[0] != "node-2" {
 		t.Errorf("got %v", s.lost)
 	}
-	if s.phase != machine.PhaseDegraded {
+	if s.phase != api.PhaseDegraded {
 		t.Errorf("a lost machine degrades the cluster, got %s", s.phase)
 	}
 	if s.condition.Reason != "MachinesDegraded" || !strings.Contains(s.condition.Message, "node-2") {
@@ -98,20 +99,20 @@ func TestSweepDeclaresSilentMachinesLost(t *testing.T) {
 
 func TestSweepDegradedOutweighsUpdating(t *testing.T) {
 	machines, renewals := fleetInputs(
-		fleetEntry{"node-1", machine.PhaseReady, 10 * time.Second},
-		fleetEntry{"node-2", machine.PhaseBlocked, 10 * time.Second},
-		fleetEntry{"node-3", machine.PhaseUpdatePending, 10 * time.Second},
+		fleetEntry{"node-1", api.PhaseReady, 10 * time.Second},
+		fleetEntry{"node-2", api.PhaseBlocked, 10 * time.Second},
+		fleetEntry{"node-3", api.PhaseUpdatePending, 10 * time.Second},
 	)
 	s := decideFleetSweep(machines, renewals, sweepNow)
-	if s.phase != machine.PhaseDegraded {
+	if s.phase != api.PhaseDegraded {
 		t.Errorf("a blocked machine outweighs a rolling update, got %s", s.phase)
 	}
 }
 
 func TestSweepLeavesAlreadyLostMachinesAlone(t *testing.T) {
 	machines, renewals := fleetInputs(
-		fleetEntry{"node-1", machine.PhaseReady, 10 * time.Second},
-		fleetEntry{"node-2", machine.PhaseLost, 5 * time.Minute},
+		fleetEntry{"node-1", api.PhaseReady, 10 * time.Second},
+		fleetEntry{"node-2", api.PhaseLost, 5 * time.Minute},
 	)
 	s := decideFleetSweep(machines, renewals, sweepNow)
 	if len(s.lost) != 0 {
@@ -120,7 +121,7 @@ func TestSweepLeavesAlreadyLostMachinesAlone(t *testing.T) {
 	if s.tally.Summary != "1/2" {
 		t.Errorf("got %+v", s.tally)
 	}
-	if s.phase != machine.PhaseDegraded {
+	if s.phase != api.PhaseDegraded {
 		t.Errorf("a lost machine keeps the cluster degraded, got %s", s.phase)
 	}
 }
@@ -130,7 +131,7 @@ func TestSweepTreatsAMissingHeartbeatAsSilence(t *testing.T) {
 	// heartbeat: it may have been declared, but it has never
 	// reported in.
 	machines, renewals := fleetInputs(
-		fleetEntry{"node-1", machine.PhaseReady, 10 * time.Second},
+		fleetEntry{"node-1", api.PhaseReady, 10 * time.Second},
 		fleetEntry{"node-2", "", -1},
 	)
 	s := decideFleetSweep(machines, renewals, sweepNow)
@@ -148,27 +149,27 @@ func TestSweepReadsGrantedSilenceAsTheRebootInProgress(t *testing.T) {
 	// does not declare it Lost until the grant is old enough to be a
 	// stall.
 	machines, renewals := fleetInputs(
-		fleetEntry{"node-1", machine.PhaseReady, 10 * time.Second},
-		fleetEntry{"node-2", machine.PhaseUpdating, 3 * time.Minute},
+		fleetEntry{"node-1", api.PhaseReady, 10 * time.Second},
+		fleetEntry{"node-2", api.PhaseUpdating, 3 * time.Minute},
 	)
-	machines[1].Status.Conditions = machine.SetCondition(nil, machine.Condition{
+	machines[1].Status.Conditions = api.SetCondition(nil, api.Condition{
 		Type: "RebootApproved", Status: "True", Reason: "DisruptionBudgetAllows",
 	}, sweepNow.Add(-3*time.Minute))
 	s := decideFleetSweep(machines, renewals, sweepNow)
 	if len(s.lost) != 0 {
 		t.Errorf("this silence was requested: %v", s.lost)
 	}
-	if s.phase != machine.PhaseUpdating {
+	if s.phase != api.PhaseUpdating {
 		t.Errorf("a granted reboot is a transition, not an illness: %s", s.phase)
 	}
 }
 
 func TestSweepDeclaresAGrantedMachineLostAfterTheStallWindow(t *testing.T) {
 	machines, renewals := fleetInputs(
-		fleetEntry{"node-1", machine.PhaseReady, 10 * time.Second},
-		fleetEntry{"node-2", machine.PhaseUpdating, 12 * time.Minute},
+		fleetEntry{"node-1", api.PhaseReady, 10 * time.Second},
+		fleetEntry{"node-2", api.PhaseUpdating, 12 * time.Minute},
 	)
-	machines[1].Status.Conditions = machine.SetCondition(nil, machine.Condition{
+	machines[1].Status.Conditions = api.SetCondition(nil, api.Condition{
 		Type: "RebootApproved", Status: "True", Reason: "DisruptionBudgetAllows",
 	}, sweepNow.Add(-12*time.Minute))
 	s := decideFleetSweep(machines, renewals, sweepNow)

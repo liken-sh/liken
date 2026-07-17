@@ -10,8 +10,8 @@ package main
 import (
 	"net/http"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/kubernetes"
-	"github.com/liken-sh/liken/machine"
 )
 
 // nodesPath is the core API's home for Node objects: no group, just
@@ -34,7 +34,7 @@ type nodeObject struct {
 		Unschedulable bool `json:"unschedulable"`
 	} `json:"spec"`
 	Status struct {
-		Conditions []machine.Condition `json:"conditions"`
+		Conditions []api.Condition `json:"conditions"`
 	} `json:"status"`
 }
 

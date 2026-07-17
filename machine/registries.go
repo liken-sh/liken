@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"slices"
 
+	"github.com/liken-sh/liken/api"
 	"sigs.k8s.io/yaml"
 )
 
@@ -70,7 +71,7 @@ func RenderRegistryCredentials(hosts []RegistryCredential) ([]byte, string, erro
 		return cmp.Compare(a.Host, b.Host)
 	})
 	return renderDocument(RegistryCredentials{
-		APIVersion: APIVersion,
+		APIVersion: api.APIVersion,
 		Kind:       "RegistryCredentials",
 		Hosts:      sorted,
 	})

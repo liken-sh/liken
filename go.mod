@@ -4,7 +4,8 @@
 // cluster-operator/), and the log relays that carry its streams
 // into the cluster (logs/), version together (one VERSION file stamps
 // every binary), release together (one initramfs), and share
-// the machine package (machine/, the Machine API as Go types). Multiple
+// the API packages (api/ for the grammar every document speaks,
+// machine/ and cluster/ for the documents themselves). Multiple
 // modules are for code that versions and releases independently, and
 // nothing here does, so a single module fits. It also means a shared
 // package is just an import, with no publishing or replace directives

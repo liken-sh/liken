@@ -11,19 +11,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/machine"
 )
 
 func TestFactsConditionReadsTrue(t *testing.T) {
 	c := factsCondition(nil)
-	if c.Type != "FactsPublished" || c.Status != machine.ConditionTrue || c.Reason != "FactsRead" {
+	if c.Type != "FactsPublished" || c.Status != api.ConditionTrue || c.Reason != "FactsRead" {
 		t.Errorf("got %+v", c)
 	}
 }
 
 func TestFactsConditionCarriesTheReadError(t *testing.T) {
 	c := factsCondition(errors.New("facts are unreadable this boot"))
-	if c.Status != machine.ConditionFalse || c.Reason != "FactsUnreadable" {
+	if c.Status != api.ConditionFalse || c.Reason != "FactsUnreadable" {
 		t.Errorf("got %+v", c)
 	}
 	if !strings.Contains(c.Message, "unreadable this boot") {
@@ -33,14 +34,14 @@ func TestFactsConditionCarriesTheReadError(t *testing.T) {
 
 func TestSysctlsConditionApplied(t *testing.T) {
 	c := sysctlsCondition(nil)
-	if c.Type != "SysctlsApplied" || c.Status != machine.ConditionTrue || c.Reason != "Applied" {
+	if c.Type != "SysctlsApplied" || c.Status != api.ConditionTrue || c.Reason != "Applied" {
 		t.Errorf("got %+v", c)
 	}
 }
 
 func TestSysctlsConditionCarriesTheApplyError(t *testing.T) {
 	c := sysctlsCondition(errors.New("sysctl vm.nope: not there"))
-	if c.Status != machine.ConditionFalse || c.Reason != "ApplyFailed" {
+	if c.Status != api.ConditionFalse || c.Reason != "ApplyFailed" {
 		t.Errorf("got %+v", c)
 	}
 	if !strings.Contains(c.Message, "vm.nope") {
@@ -108,7 +109,7 @@ func TestStorageConditionAllPlaced(t *testing.T) {
 	status := machine.AllRolesInMemory()
 	status.ClusterState = machine.StorageRoleStatus{Backing: machine.BackingPartition, Device: "vda1"}
 	c := storageCondition(spec, status)
-	if c.Type != "StorageReady" || c.Status != machine.ConditionTrue || c.Reason != "AllRolesPlaced" {
+	if c.Type != "StorageReady" || c.Status != api.ConditionTrue || c.Reason != "AllRolesPlaced" {
 		t.Errorf("got %+v", c)
 	}
 	if !strings.Contains(c.Message, "clusterState on vda1") {
@@ -119,7 +120,7 @@ func TestStorageConditionAllPlaced(t *testing.T) {
 func TestStorageConditionDeclaredButInMemory(t *testing.T) {
 	spec := machine.StorageSpec{ClusterState: &machine.StorageRole{Device: "/dev/vda"}}
 	c := storageCondition(spec, machine.AllRolesInMemory())
-	if c.Status != machine.ConditionFalse || c.Reason != "RolesInMemory" {
+	if c.Status != api.ConditionFalse || c.Reason != "RolesInMemory" {
 		t.Errorf("got %+v", c)
 	}
 	if !strings.Contains(c.Message, "clusterState") {
@@ -129,7 +130,7 @@ func TestStorageConditionDeclaredButInMemory(t *testing.T) {
 
 func TestStorageConditionNothingDeclared(t *testing.T) {
 	c := storageCondition(machine.StorageSpec{}, machine.AllRolesInMemory())
-	if c.Status != machine.ConditionTrue || c.Reason != "NothingDeclared" {
+	if c.Status != api.ConditionTrue || c.Reason != "NothingDeclared" {
 		t.Errorf("got %+v", c)
 	}
 }
@@ -139,7 +140,7 @@ func TestModulesConditionAllHealthy(t *testing.T) {
 		{Name: "nvidia", State: machine.ModuleLoaded},
 		{Name: "loop", State: machine.ModuleBuiltin},
 	})
-	if c.Type != "ModulesLoaded" || c.Status != machine.ConditionTrue || c.Reason != "AllLoaded" {
+	if c.Type != "ModulesLoaded" || c.Status != api.ConditionTrue || c.Reason != "AllLoaded" {
 		t.Errorf("got %+v", c)
 	}
 }
@@ -149,7 +150,7 @@ func TestModulesConditionNamesTheFix(t *testing.T) {
 		{Name: "nvidia", State: machine.ModuleLoaded},
 		{Name: "nbd", State: machine.ModuleMissing, Message: "not in this image; rebuild the deployment's image, or upgrade to a release built from manifests that declare it"},
 	})
-	if c.Status != machine.ConditionFalse || c.Reason != "ModulesNotLoaded" {
+	if c.Status != api.ConditionFalse || c.Reason != "ModulesNotLoaded" {
 		t.Errorf("got %+v", c)
 	}
 	if !strings.Contains(c.Message, "nbd: not in this image; rebuild") {
@@ -159,7 +160,7 @@ func TestModulesConditionNamesTheFix(t *testing.T) {
 
 func TestModulesConditionNothingDeclared(t *testing.T) {
 	c := modulesCondition(nil)
-	if c.Status != machine.ConditionTrue || c.Reason != "NothingDeclared" {
+	if c.Status != api.ConditionTrue || c.Reason != "NothingDeclared" {
 		t.Errorf("got %+v", c)
 	}
 }
@@ -169,7 +170,7 @@ func TestFeaturesConditionAllActive(t *testing.T) {
 		{Name: "metrics-server", State: machine.FeatureActive},
 		{Name: "iscsi", State: machine.FeatureActive},
 	})
-	if c.Type != "FeaturesReady" || c.Status != machine.ConditionTrue || c.Reason != "AllActive" {
+	if c.Type != "FeaturesReady" || c.Status != api.ConditionTrue || c.Reason != "AllActive" {
 		t.Errorf("got %+v", c)
 	}
 }
@@ -179,7 +180,7 @@ func TestFeaturesConditionNamesTheFix(t *testing.T) {
 		{Name: "metrics-server", State: machine.FeatureActive},
 		{Name: "iscsi", State: machine.FeatureMissing, Message: "this image predates the iscsi feature; upgrade to a release whose image carries it"},
 	})
-	if c.Status != machine.ConditionFalse || c.Reason != "FeaturesNotReady" {
+	if c.Status != api.ConditionFalse || c.Reason != "FeaturesNotReady" {
 		t.Errorf("got %+v", c)
 	}
 	if !strings.Contains(c.Message, "iscsi: this image predates") {
@@ -189,14 +190,14 @@ func TestFeaturesConditionNamesTheFix(t *testing.T) {
 
 func TestFeaturesConditionNothingEnabled(t *testing.T) {
 	c := featuresCondition(nil)
-	if c.Status != machine.ConditionTrue || c.Reason != "NothingDeclared" {
+	if c.Status != api.ConditionTrue || c.Reason != "NothingDeclared" {
 		t.Errorf("got %+v", c)
 	}
 }
 
-func nodeWithReady(status machine.ConditionStatus) *nodeObject {
+func nodeWithReady(status api.ConditionStatus) *nodeObject {
 	n := &nodeObject{}
-	n.Status.Conditions = []machine.Condition{
+	n.Status.Conditions = []api.Condition{
 		{Type: "MemoryPressure", Status: "False"},
 		{Type: "Ready", Status: status, Message: "kubelet says so"},
 	}

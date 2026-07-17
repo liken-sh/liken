@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/kubernetes"
 	"github.com/liken-sh/liken/machine"
@@ -34,9 +35,9 @@ func ensureMachine(c *kubernetes.Client, seed *machine.Machine) (*machine.Machin
 		}
 
 		body, err := json.Marshal(&machine.Machine{
-			APIVersion: machine.APIVersion,
+			APIVersion: api.APIVersion,
 			Kind:       "Machine",
-			Metadata:   machine.ObjectMeta{Name: seed.Metadata.Name},
+			Metadata:   api.ObjectMeta{Name: seed.Metadata.Name},
 			Spec:       seed.Spec,
 		})
 		if err != nil {
@@ -71,9 +72,9 @@ func ensureCluster(c *kubernetes.Client, seed *cluster.Cluster) error {
 		}
 
 		body, err := json.Marshal(&cluster.Cluster{
-			APIVersion: machine.APIVersion,
+			APIVersion: api.APIVersion,
 			Kind:       "Cluster",
-			Metadata:   machine.ObjectMeta{Name: seed.Metadata.Name},
+			Metadata:   api.ObjectMeta{Name: seed.Metadata.Name},
 			Spec:       seed.Spec,
 		})
 		if err != nil {

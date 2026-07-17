@@ -26,8 +26,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/kubernetes"
-	"github.com/liken-sh/liken/machine"
 )
 
 // ownedLabelsAnnotation records, on the Node itself, which label keys
@@ -42,7 +42,7 @@ const ownedLabelsAnnotation = "liken.sh/node-labels"
 // the condition to publish once it lands.
 type labelStep struct {
 	patch     []byte
-	condition machine.Condition
+	condition api.Condition
 }
 
 // decideNodeLabels compares the spec's labels against the Node and
@@ -80,10 +80,10 @@ func decideNodeLabels(desired map[string]string, node *nodeObject) labelStep {
 		}
 	}
 
-	condition := machine.Condition{Type: "NodeLabelsApplied", Status: machine.ConditionTrue, Reason: "Applied",
+	condition := api.Condition{Type: "NodeLabelsApplied", Status: api.ConditionTrue, Reason: "Applied",
 		Message: fmt.Sprintf("the Node carries all %d declared labels", len(desired))}
 	if len(desired) == 0 {
-		condition = machine.Condition{Type: "NodeLabelsApplied", Status: machine.ConditionTrue, Reason: "NothingDeclared",
+		condition = api.Condition{Type: "NodeLabelsApplied", Status: api.ConditionTrue, Reason: "NothingDeclared",
 			Message: "no node labels declared"}
 	}
 
@@ -104,12 +104,12 @@ func decideNodeLabels(desired map[string]string, node *nodeObject) labelStep {
 // carryOutNodeLabels applies the step's patch, downgrading the
 // condition when the API server refuses it; the next pass re-decides
 // from a fresh read and tries again.
-func carryOutNodeLabels(c *kubernetes.Client, name string, step labelStep) machine.Condition {
+func carryOutNodeLabels(c *kubernetes.Client, name string, step labelStep) api.Condition {
 	if step.patch == nil {
 		return step.condition
 	}
 	if err := c.PatchJSON(nodesPath+"/"+name, step.patch); err != nil {
-		return machine.Condition{Type: "NodeLabelsApplied", Status: machine.ConditionFalse, Reason: "ApplyFailed",
+		return api.Condition{Type: "NodeLabelsApplied", Status: api.ConditionFalse, Reason: "ApplyFailed",
 			Message: fmt.Sprintf("patching the Node's labels: %v", err)}
 	}
 	return step.condition

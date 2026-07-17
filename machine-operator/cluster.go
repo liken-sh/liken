@@ -43,6 +43,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/kubernetes"
 	"github.com/liken-sh/liken/machine"
@@ -68,9 +69,9 @@ func renderCluster(name string, spec cluster.ClusterSpec) ([]byte, string, error
 	spec.Version = ""
 	spec.Releases = cluster.ClusterReleasesSpec{}
 	doc := cluster.Cluster{
-		APIVersion: machine.APIVersion,
+		APIVersion: api.APIVersion,
 		Kind:       "Cluster",
-		Metadata:   machine.ObjectMeta{Name: name},
+		Metadata:   api.ObjectMeta{Name: name},
 		Spec:       spec,
 	}
 	body, err := yaml.Marshal(&doc)

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
@@ -25,30 +26,30 @@ type machineAPI struct {
 	creates   int
 }
 
-func (api *machineAPI) handler() http.Handler {
+func (fake *machineAPI) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			if !api.exists {
+			if !fake.exists {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
 			_ = json.NewEncoder(w).Encode(&machine.Machine{
 				Kind:     "Machine",
-				Metadata: machine.ObjectMeta{Name: "node-1", ResourceVersion: "5"},
+				Metadata: api.ObjectMeta{Name: "node-1", ResourceVersion: "5"},
 			})
 		case http.MethodPost:
-			api.creates++
-			if api.fail {
+			fake.creates++
+			if fake.fail {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
-			if api.notServed > 0 {
-				api.notServed--
+			if fake.notServed > 0 {
+				fake.notServed--
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
-			api.exists = true
+			fake.exists = true
 			w.WriteHeader(http.StatusCreated)
 		}
 	})
@@ -57,20 +58,20 @@ func (api *machineAPI) handler() http.Handler {
 func seedMachine() *machine.Machine {
 	return &machine.Machine{
 		Kind:     "Machine",
-		Metadata: machine.ObjectMeta{Name: "node-1"},
+		Metadata: api.ObjectMeta{Name: "node-1"},
 		Spec:     machine.MachineSpec{Sysctls: map[string]string{"vm.swappiness": "10"}},
 	}
 }
 
 func TestEnsureMachineCreatesWhenAbsent(t *testing.T) {
-	api := &machineAPI{}
-	client := testClient(t, api.handler())
+	fake := &machineAPI{}
+	client := testClient(t, fake.handler())
 	current, err := ensureMachine(client, seedMachine())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if api.creates != 1 {
-		t.Errorf("expected one create, got %d", api.creates)
+	if fake.creates != 1 {
+		t.Errorf("expected one create, got %d", fake.creates)
 	}
 	if current.Metadata.ResourceVersion != "5" {
 		t.Errorf("the server's copy comes back, resourceVersion and all: %+v", current.Metadata)
@@ -78,32 +79,32 @@ func TestEnsureMachineCreatesWhenAbsent(t *testing.T) {
 }
 
 func TestEnsureMachineReturnsAnExistingMachine(t *testing.T) {
-	api := &machineAPI{exists: true}
-	client := testClient(t, api.handler())
+	fake := &machineAPI{exists: true}
+	client := testClient(t, fake.handler())
 	if _, err := ensureMachine(client, seedMachine()); err != nil {
 		t.Fatal(err)
 	}
-	if api.creates != 0 {
-		t.Errorf("an existing machine should never be re-created; got %d creates", api.creates)
+	if fake.creates != 0 {
+		t.Errorf("an existing machine should never be re-created; got %d creates", fake.creates)
 	}
 }
 
 func TestEnsureMachineWaitsOutAnUnservedCRD(t *testing.T) {
 	// k3s applies the Machine CRD around the same time it starts this
 	// pod, so the first creates can land before the API serves it.
-	api := &machineAPI{notServed: 2}
-	client := testClient(t, api.handler())
+	fake := &machineAPI{notServed: 2}
+	client := testClient(t, fake.handler())
 	if _, err := ensureMachine(client, seedMachine()); err != nil {
 		t.Fatal(err)
 	}
-	if api.creates != 3 {
-		t.Errorf("the loop retries until the CRD is served: %d creates", api.creates)
+	if fake.creates != 3 {
+		t.Errorf("the loop retries until the CRD is served: %d creates", fake.creates)
 	}
 }
 
 func TestEnsureMachineReturnsAHardCreateFailure(t *testing.T) {
-	api := &machineAPI{fail: true}
-	client := testClient(t, api.handler())
+	fake := &machineAPI{fail: true}
+	client := testClient(t, fake.handler())
 	if _, err := ensureMachine(client, seedMachine()); err == nil {
 		t.Fatal("a 500 is not a startup condition to wait out; it comes back to the caller")
 	}
@@ -122,37 +123,37 @@ type clusterAPI struct {
 	creates   int
 }
 
-func (api *clusterAPI) handler() http.Handler {
+func (fake *clusterAPI) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet:
-			if !api.exists {
+			if !fake.exists {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
 			_ = json.NewEncoder(w).Encode(&cluster.Cluster{
 				Kind:     "Cluster",
-				Metadata: machine.ObjectMeta{Name: "lab"},
+				Metadata: api.ObjectMeta{Name: "lab"},
 			})
 		case r.Method == http.MethodPost:
-			api.creates++
-			if api.fail {
+			fake.creates++
+			if fake.fail {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
-			if api.notServed > 0 {
-				api.notServed--
+			if fake.notServed > 0 {
+				fake.notServed--
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
-			if api.conflict {
+			if fake.conflict {
 				// Someone else's create landed first; the object
 				// exists now no matter who made it.
-				api.exists = true
+				fake.exists = true
 				w.WriteHeader(http.StatusConflict)
 				return
 			}
-			api.exists = true
+			fake.exists = true
 			w.WriteHeader(http.StatusCreated)
 		}
 	})
@@ -161,55 +162,55 @@ func (api *clusterAPI) handler() http.Handler {
 func seedCluster() *cluster.Cluster {
 	return &cluster.Cluster{
 		Kind:     "Cluster",
-		Metadata: machine.ObjectMeta{Name: "lab"},
+		Metadata: api.ObjectMeta{Name: "lab"},
 		Spec:     cluster.ClusterSpec{Leaders: []string{"node-1"}},
 	}
 }
 
 func TestEnsureClusterCreatesWhenAbsent(t *testing.T) {
-	api := &clusterAPI{}
-	client := testClient(t, api.handler())
+	fake := &clusterAPI{}
+	client := testClient(t, fake.handler())
 	if err := ensureCluster(client, seedCluster()); err != nil {
 		t.Fatal(err)
 	}
-	if api.creates != 1 {
-		t.Errorf("expected one create, got %d", api.creates)
+	if fake.creates != 1 {
+		t.Errorf("expected one create, got %d", fake.creates)
 	}
 }
 
 func TestEnsureClusterLeavesAnExistingClusterAlone(t *testing.T) {
-	api := &clusterAPI{exists: true}
-	client := testClient(t, api.handler())
+	fake := &clusterAPI{exists: true}
+	client := testClient(t, fake.handler())
 	if err := ensureCluster(client, seedCluster()); err != nil {
 		t.Fatal(err)
 	}
-	if api.creates != 0 {
-		t.Errorf("an existing cluster should never be re-created; got %d creates", api.creates)
+	if fake.creates != 0 {
+		t.Errorf("an existing cluster should never be re-created; got %d creates", fake.creates)
 	}
 }
 
 func TestEnsureClusterTreatsLosingTheRaceAsSuccess(t *testing.T) {
-	api := &clusterAPI{conflict: true}
-	client := testClient(t, api.handler())
+	fake := &clusterAPI{conflict: true}
+	client := testClient(t, fake.handler())
 	if err := ensureCluster(client, seedCluster()); err != nil {
 		t.Fatalf("a lost race is a seeded cluster: %v", err)
 	}
 }
 
 func TestEnsureClusterWaitsOutAnUnservedCRD(t *testing.T) {
-	api := &clusterAPI{notServed: 2}
-	client := testClient(t, api.handler())
+	fake := &clusterAPI{notServed: 2}
+	client := testClient(t, fake.handler())
 	if err := ensureCluster(client, seedCluster()); err != nil {
 		t.Fatal(err)
 	}
-	if api.creates != 3 {
-		t.Errorf("the loop retries until the CRD is served: %d creates", api.creates)
+	if fake.creates != 3 {
+		t.Errorf("the loop retries until the CRD is served: %d creates", fake.creates)
 	}
 }
 
 func TestEnsureClusterReturnsAHardCreateFailure(t *testing.T) {
-	api := &clusterAPI{fail: true}
-	client := testClient(t, api.handler())
+	fake := &clusterAPI{fail: true}
+	client := testClient(t, fake.handler())
 	if err := ensureCluster(client, seedCluster()); err == nil {
 		t.Fatal("a 500 is not a startup condition to wait out; it comes back to the caller")
 	}

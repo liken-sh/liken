@@ -8,10 +8,9 @@
 // services live in) or a fact about the group that no single machine
 // owns (the endpoint followers join through). Everything specific to
 // one machine (its interfaces, its addresses, its disks) stays on the
-// Machine, and this package leans on the machine package for the
-// vocabulary the two documents share (ObjectMeta, Phase, Condition,
-// Role) — the dependency runs this way only, because a machine must
-// be able to describe itself with no cluster document at all.
+// Machine. The two document packages never import each other; the
+// grammar they share (ObjectMeta, Phase, Condition, Role) lives in
+// the api package underneath both.
 //
 // Like the Machine manifest, the Cluster manifest is delivered as a
 // file in the image and seeded into the cluster as a custom resource
@@ -34,9 +33,8 @@ import (
 	"os"
 	"slices"
 
+	"github.com/liken-sh/liken/api"
 	"sigs.k8s.io/yaml"
-
-	"github.com/liken-sh/liken/machine"
 )
 
 // ClusterManifestPath is where the image carries the cluster's
@@ -56,11 +54,11 @@ const ClusterManifestPath = "/etc/liken/cluster.yaml"
 const BootClusterManifestPath = "/run/liken/cluster.yaml"
 
 type Cluster struct {
-	APIVersion string             `json:"apiVersion"`
-	Kind       string             `json:"kind"`
-	Metadata   machine.ObjectMeta `json:"metadata"`
-	Spec       ClusterSpec        `json:"spec,omitzero"`
-	Status     ClusterStatus      `json:"status,omitzero"`
+	APIVersion string         `json:"apiVersion"`
+	Kind       string         `json:"kind"`
+	Metadata   api.ObjectMeta `json:"metadata"`
+	Spec       ClusterSpec    `json:"spec,omitzero"`
+	Status     ClusterStatus  `json:"status,omitzero"`
 }
 
 // ClusterOrigin records how the cluster's datastore came to exist.
@@ -96,10 +94,10 @@ const (
 // it, so there is nobody left to write the status; when quorum is
 // lost, the symptom is a status that stops updating.
 type ClusterStatus struct {
-	Phase      machine.Phase         `json:"phase,omitempty"`
+	Phase      api.Phase             `json:"phase,omitempty"`
 	Machines   MachineTally          `json:"machines,omitzero"`
 	Releases   ClusterReleasesStatus `json:"releases,omitzero"`
-	Conditions []machine.Condition   `json:"conditions,omitempty"`
+	Conditions []api.Condition       `json:"conditions,omitempty"`
 }
 
 // ClusterReleasesStatus is what the sweep observes about releases.
@@ -283,11 +281,11 @@ func (s ClusterReleasesSpec) Entry(version string) *ReleaseCatalogEntry {
 // is empty. The fleet sweep publishes this as status.releases.newest,
 // which exists so a printer column can answer "is there something
 // newer than the target?" at a glance. The ordering itself belongs to
-// the version grammar (machine.CompareVersions).
+// the version grammar (api.CompareVersions).
 func NewestVersion(catalog []ReleaseCatalogEntry) string {
 	newest := ""
 	for _, entry := range catalog {
-		if newest == "" || machine.CompareVersions(entry.Version, newest) > 0 {
+		if newest == "" || api.CompareVersions(entry.Version, newest) > 0 {
 			newest = entry.Version
 		}
 	}
@@ -370,11 +368,11 @@ type ClusterNetworkSpec struct {
 // answers leader: a machine with no cluster manifest is on its own,
 // and a machine on its own runs as its own single-node cluster, which
 // is liken's default arrangement.
-func (c *Cluster) Role(machineName string) machine.Role {
+func (c *Cluster) Role(machineName string) api.Role {
 	if c == nil || slices.Contains(c.Spec.Leaders, machineName) {
-		return machine.RoleLeader
+		return api.RoleLeader
 	}
-	return machine.RoleFollower
+	return api.RoleFollower
 }
 
 // ParseCluster reads a Cluster manifest from its bytes, strictly, for

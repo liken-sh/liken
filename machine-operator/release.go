@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
@@ -40,7 +41,7 @@ import (
 // permanently blocked cases are checked before the in-progress ones,
 // so a machine that can never comply reports that instead of
 // reporting an attempt that could not succeed.
-func versionAsk(clusterDoc *cluster.Cluster, facts *machine.MachineStatus) (fetchAsk, machine.Condition, bool) {
+func versionAsk(clusterDoc *cluster.Cluster, facts *machine.MachineStatus) (fetchAsk, api.Condition, bool) {
 	none := fetchAsk{}
 	if facts == nil {
 		return none, convergenceUnknown("VersionConverged", "FactsIncomplete",
@@ -96,7 +97,7 @@ func versionAsk(clusterDoc *cluster.Cluster, facts *machine.MachineStatus) (fetc
 		// The running slot lends its deployment layer to the download:
 		// the release supplies the OS, the machine supplies itself.
 		activeSlotDir: machine.SystemSlotDir(facts.Boot.Slot),
-	}, machine.Condition{}, true
+	}, api.Condition{}, true
 }
 
 // versionCondition turns the fetcher's answer about an ask into the
@@ -111,7 +112,7 @@ func versionAsk(clusterDoc *cluster.Cluster, facts *machine.MachineStatus) (fetc
 // publishes, so the machine holds at DigestMismatch (phase Blocked)
 // until the catalog names different bytes, and nothing is ever
 // staged.
-func versionCondition(ask fetchAsk, snap fetchSnapshot) machine.Condition {
+func versionCondition(ask fetchAsk, snap fetchSnapshot) api.Condition {
 	switch snap.state {
 	case fetchRejected:
 		return notConverged("VersionConverged", "DigestMismatch", snap.detail)
@@ -128,8 +129,8 @@ func versionCondition(ask fetchAsk, snap fetchSnapshot) machine.Condition {
 // also cleans up: a staged record left behind would reboot the
 // machine into an upgrade nobody is asking for anymore, and a
 // standing rejection no longer blocks anything.
-func versionConvergence(cond machine.Condition, stagedHash string, rejection *machine.Rejection) convergence {
-	if cond.Status == machine.ConditionTrue {
+func versionConvergence(cond api.Condition, stagedHash string, rejection *machine.Rejection) convergence {
+	if cond.Status == api.ConditionTrue {
 		return convergedWithCleanup(cond, stagedHash, rejection)
 	}
 	return convergence{condition: cond}

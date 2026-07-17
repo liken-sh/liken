@@ -34,6 +34,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/liken-sh/liken/api"
 )
 
 // K3sAgentDir is the tree this record vouches for: k3s's agent
@@ -69,7 +71,7 @@ func ImportedImagesStore(root string) ManifestStore {
 // to decide whether it is bringing different tarballs to import.
 func RenderImportedImages(images map[string]string) ([]byte, string, error) {
 	return renderDocument(ImportedImages{
-		APIVersion: APIVersion,
+		APIVersion: api.APIVersion,
 		Kind:       "ImportedImages",
 		Images:     images,
 	})

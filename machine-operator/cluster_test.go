@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
@@ -123,9 +124,9 @@ func TestDoesNotRecordASeedTheBootDidNotRun(t *testing.T) {
 // would be comparing against.
 func decisionCluster() *cluster.Cluster {
 	return &cluster.Cluster{
-		APIVersion: machine.APIVersion,
+		APIVersion: api.APIVersion,
 		Kind:       "Cluster",
-		Metadata:   machine.ObjectMeta{Name: "lab"},
+		Metadata:   api.ObjectMeta{Name: "lab"},
 		Spec: cluster.ClusterSpec{
 			Leaders:  []string{"node-1"},
 			Endpoint: "https://10.10.0.1:6443",
@@ -135,7 +136,7 @@ func decisionCluster() *cluster.Cluster {
 
 func machineWithPolicy(policy machine.RebootPolicy) *machine.Machine {
 	return &machine.Machine{
-		Metadata: machine.ObjectMeta{Name: "node-1"},
+		Metadata: api.ObjectMeta{Name: "node-1"},
 		Spec:     machine.MachineSpec{RebootPolicy: policy},
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -25,7 +26,7 @@ func leaderDB(t *testing.T) string {
 
 func TestAProvenFollowerPurgesLeaderLeftovers(t *testing.T) {
 	db := leaderDB(t)
-	purgeLeaderLeftovers(machine.RoleFollower, machine.ManifestSourceProven, db)
+	purgeLeaderLeftovers(api.RoleFollower, machine.ManifestSourceProven, db)
 	if _, err := os.Stat(db); !os.IsNotExist(err) {
 		t.Error("a proven follower keeps no control-plane datastore")
 	}
@@ -36,7 +37,7 @@ func TestAStagedFollowerBootKeepsTheDatastore(t *testing.T) {
 	// destroy anything: if the document fails to prove, the fallback
 	// boots the leader role again and needs its datastore intact.
 	db := leaderDB(t)
-	purgeLeaderLeftovers(machine.RoleFollower, machine.ManifestSourceStaged, db)
+	purgeLeaderLeftovers(api.RoleFollower, machine.ManifestSourceStaged, db)
 	if _, err := os.Stat(db); err != nil {
 		t.Error("an unproven demotion must leave the datastore alone")
 	}
@@ -44,7 +45,7 @@ func TestAStagedFollowerBootKeepsTheDatastore(t *testing.T) {
 
 func TestALeaderKeepsItsDatastore(t *testing.T) {
 	db := leaderDB(t)
-	purgeLeaderLeftovers(machine.RoleLeader, machine.ManifestSourceProven, db)
+	purgeLeaderLeftovers(api.RoleLeader, machine.ManifestSourceProven, db)
 	if _, err := os.Stat(db); err != nil {
 		t.Error("a leader's datastore is the cluster; hands off")
 	}
@@ -131,7 +132,7 @@ func TestPurgeLeaderLeftoversReportsAFailedRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
-	purgeLeaderLeftovers(machine.RoleFollower, machine.ManifestSourceProven, db)
+	purgeLeaderLeftovers(api.RoleFollower, machine.ManifestSourceProven, db)
 	if _, err := os.Stat(db); err != nil {
 		t.Error("a failed purge leaves the datastore; the error is reported, not hidden")
 	}
@@ -140,7 +141,7 @@ func TestPurgeLeaderLeftoversReportsAFailedRemoval(t *testing.T) {
 func TestPurgeLeaderLeftoversWithNoDatastoreDoesNothing(t *testing.T) {
 	// A follower that was never a leader has nothing to purge; the
 	// missing directory is the ordinary case, not an error.
-	purgeLeaderLeftovers(machine.RoleFollower, machine.ManifestSourceProven,
+	purgeLeaderLeftovers(api.RoleFollower, machine.ManifestSourceProven,
 		filepath.Join(t.TempDir(), "absent"))
 }
 

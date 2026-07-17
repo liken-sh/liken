@@ -19,8 +19,9 @@
 // state, and the file at /run/liken/facts.yaml is the one-way channel
 // between them.
 //
-// The API group is liken.sh: CRD groups are DNS names, and we own
-// that one.
+// The document's shape — the group/version it declares, its
+// metadata, the condition and phase vocabulary its status speaks —
+// is the api package's, shared with every other liken document.
 //
 // A note on naming: machine.MachineSpec and machine.MachineStatus
 // stutter against Go's naming advice, deliberately. The types mirror
@@ -35,15 +36,11 @@ import (
 	"io/fs"
 	"os"
 
+	"github.com/liken-sh/liken/api"
 	"sigs.k8s.io/yaml"
 )
 
 const (
-	// APIVersion is the full group/version string a Machine document
-	// declares, and the URL segment the operator speaks to the API
-	// server: /apis/liken.sh/v1alpha1/machines.
-	APIVersion = "liken.sh/v1alpha1"
-
 	// MachineManifestDir is where the image carries Machine manifests,
 	// one file per machine (<name>.yaml). One image boots a whole
 	// fleet, so the image carries every machine's manifest and each
@@ -73,22 +70,6 @@ const (
 	SysctlDir = "/proc/sys"
 )
 
-// Role is what a machine is in its cluster. There are exactly two:
-// leaders run a control plane (an API server, a scheduler, the
-// datastore), followers run workloads and take direction from the
-// leaders. k3s calls these "server" and "agent". liken translates in
-// exactly one place, the moment it execs k3s (init/supervisor.go), and
-// uses leader/follower everywhere else. The vocabulary lives here
-// because it names a fact about a machine (status.role); deriving a
-// machine's role from the group's document is the cluster package's
-// job (cluster.Role).
-type Role string
-
-const (
-	RoleLeader   Role = "leader"
-	RoleFollower Role = "follower"
-)
-
 // Version is the liken version this binary was built as, stamped by
 // the build (-ldflags -X): a release name when the releases domain is
 // building, the git-described commit for a development build
@@ -105,25 +86,11 @@ var Version = "dev"
 // structs serialize identically whether they're read from a file or
 // from the API server.
 type Machine struct {
-	APIVersion string        `json:"apiVersion"`
-	Kind       string        `json:"kind"`
-	Metadata   ObjectMeta    `json:"metadata"`
-	Spec       MachineSpec   `json:"spec,omitzero"`
-	Status     MachineStatus `json:"status,omitzero"`
-}
-
-// ObjectMeta carries the small slice of Kubernetes object metadata
-// liken actually uses. Name is the machine's hostname and its node
-// name. ResourceVersion only matters on the API-server transport: it's
-// the cluster's optimistic-concurrency counter, and the operator hands
-// it back when watching so the server knows where to resume.
-// Generation counts spec changes (the API server bumps it on spec
-// writes and leaves it alone on status writes), which is what lets a
-// condition say which version of the spec it judged.
-type ObjectMeta struct {
-	Name            string `json:"name"`
-	ResourceVersion string `json:"resourceVersion,omitempty"`
-	Generation      int64  `json:"generation,omitempty"`
+	APIVersion string         `json:"apiVersion"`
+	Kind       string         `json:"kind"`
+	Metadata   api.ObjectMeta `json:"metadata"`
+	Spec       MachineSpec    `json:"spec,omitzero"`
+	Status     MachineStatus  `json:"status,omitzero"`
 }
 
 // MachineSpec is the declared half: what a person (or a git

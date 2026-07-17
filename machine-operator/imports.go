@@ -32,6 +32,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/kubernetes"
 	"github.com/liken-sh/liken/machine"
 )
@@ -55,7 +56,7 @@ type importsInputs struct {
 // ImportsConverged condition to publish either way.
 type importsVerdict struct {
 	promote   bool
-	condition machine.Condition
+	condition api.Condition
 }
 
 // decideImportsPromotion judges one pass of the imports lifecycle
@@ -142,7 +143,7 @@ func decideImportsPromotion(in importsInputs, facts *machine.MachineStatus) impo
 // and a badly-timed power cut could prove a store whose latent
 // unpacks are still dirty, which is the exact lie this lifecycle
 // exists to prevent.
-func settleImportsLifecycle(c *kubernetes.Client, root, nodeName string, facts *machine.MachineStatus) machine.Condition {
+func settleImportsLifecycle(c *kubernetes.Client, root, nodeName string, facts *machine.MachineStatus) api.Condition {
 	store := machine.ImportedImagesStore(root)
 	in := importsInputs{}
 	if facts != nil && facts.Boot.ImportsSource == machine.ManifestSourceStaged {

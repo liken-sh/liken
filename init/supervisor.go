@@ -37,6 +37,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -211,7 +212,7 @@ func postMortem() {
 // from a machine with no shell. A reboot intent is honored even in
 // oneshot: under QEMU's -no-reboot the restart is a clean exit,
 // which is exactly what a bounded harness run wants.
-func superviseK3s(role machine.Role, reboot <-chan machine.RebootIntent,
+func superviseK3s(role api.Role, reboot <-chan machine.RebootIntent,
 	restarts <-chan machine.RestartIntent, applyRestart func(machine.RestartIntent) bool) {
 	backoff := time.Second
 	for {
@@ -343,7 +344,7 @@ var k3sMemoryDiscipline []string
 // running command and its log file (which must stay open as long as
 // the process writes; the console copy flows through an in-process
 // pipe).
-func startK3s(role machine.Role) (*exec.Cmd, io.Closer, error) {
+func startK3s(role api.Role) (*exec.Cmd, io.Closer, error) {
 	// k3s's output goes two places: a file, and the console, where it
 	// arrives live, line-buffered, and prefixed so it's
 	// distinguishable from liken's own messages. On a machine with no
@@ -365,7 +366,7 @@ func startK3s(role machine.Role) (*exec.Cmd, io.Closer, error) {
 	// joined with this boot's derived drop-in by k3s.go before we got
 	// here.
 	args := []string{"server"}
-	if role == machine.RoleFollower {
+	if role == api.RoleFollower {
 		args = []string{"agent", "--config", k3sAgentConfig}
 	}
 	cmd := exec.Command(k3sBinary, args...)

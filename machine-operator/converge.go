@@ -29,6 +29,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -192,9 +193,9 @@ func deviceNames(disks []machine.BlockDevice) string {
 // facts).
 func renderManifest(name string, spec machine.MachineSpec) ([]byte, string, error) {
 	doc := machine.Machine{
-		APIVersion: machine.APIVersion,
+		APIVersion: api.APIVersion,
 		Kind:       "Machine",
-		Metadata:   machine.ObjectMeta{Name: name},
+		Metadata:   api.ObjectMeta{Name: name},
 		Spec:       spec,
 	}
 	body, err := yaml.Marshal(&doc)
@@ -222,7 +223,7 @@ const (
 // publish, and which side effects to perform. decideConvergence is
 // pure; reconcile() acts.
 type convergence struct {
-	condition      machine.Condition
+	condition      api.Condition
 	stage          bool   // write manifest to the machineState filesystem
 	requestReboot  bool   // write the reboot intent for init
 	requestRestart bool   // write the restart intent: a k3s bounce applies it
@@ -237,16 +238,16 @@ type convergence struct {
 // condition type (SpecConverged, ClusterConverged, VersionConverged),
 // and all three share one reason vocabulary, so the constructors take
 // the type rather than hard-coding it.
-func converged(condType, reason, message string) machine.Condition {
-	return machine.Condition{Type: condType, Status: machine.ConditionTrue, Reason: reason, Message: message}
+func converged(condType, reason, message string) api.Condition {
+	return api.Condition{Type: condType, Status: api.ConditionTrue, Reason: reason, Message: message}
 }
 
-func notConverged(condType, reason, message string) machine.Condition {
-	return machine.Condition{Type: condType, Status: machine.ConditionFalse, Reason: reason, Message: message}
+func notConverged(condType, reason, message string) api.Condition {
+	return api.Condition{Type: condType, Status: api.ConditionFalse, Reason: reason, Message: message}
 }
 
-func convergenceUnknown(condType, reason, message string) machine.Condition {
-	return machine.Condition{Type: condType, Status: machine.ConditionUnknown, Reason: reason, Message: message}
+func convergenceUnknown(condType, reason, message string) api.Condition {
+	return api.Condition{Type: condType, Status: api.ConditionUnknown, Reason: reason, Message: message}
 }
 
 // The convergence constructors for the verdicts every document's
@@ -280,7 +281,7 @@ func machineStateEphemeral(condType, what string) convergence {
 // boot would otherwise apply it. A standing rejection is cleared for
 // the same reason: the spec it blocks is no longer being asked for,
 // so the record no longer blocks anything.
-func convergedWithCleanup(cond machine.Condition, stagedHash string, rejection *machine.Rejection) convergence {
+func convergedWithCleanup(cond api.Condition, stagedHash string, rejection *machine.Rejection) convergence {
 	return convergence{
 		condition:      cond,
 		withdraw:       stagedHash != "",

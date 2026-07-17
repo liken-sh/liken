@@ -39,6 +39,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/kubernetes"
 	"github.com/liken-sh/liken/machine"
@@ -62,7 +63,7 @@ const rolloutStallAfter = 10 * time.Minute
 type rollout struct {
 	grant       []string
 	revoke      []string
-	progressing machine.Condition
+	progressing api.Condition
 }
 
 // wantsTurn reports whether any of the machine's conditions carry the
@@ -81,9 +82,9 @@ func wantsTurn(m *machine.Machine) bool {
 // now. Blocked and UpdatePending machines are up; their trouble is
 // administrative, not operational. Everything else that isn't Ready
 // is either absent or unwell.
-func available(phase machine.Phase) bool {
+func available(phase api.Phase) bool {
 	switch phase {
-	case machine.PhaseReady, machine.PhaseUpdatePending, machine.PhaseBlocked:
+	case api.PhaseReady, api.PhaseUpdatePending, api.PhaseBlocked:
 		return true
 	}
 	return false
@@ -106,7 +107,7 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 		name := m.Metadata.Name
 		leader := slices.Contains(clusterDoc.Spec.Leaders, name)
 		phase := effectivePhase(m, renewals, now)
-		grant := machine.FindCondition(m.Status.Conditions, machine.RebootApprovedCondition)
+		grant := api.FindCondition(m.Status.Conditions, machine.RebootApprovedCondition)
 
 		switch {
 		case grant != nil && available(phase) && !wantsTurn(m):
@@ -166,8 +167,8 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 
 	switch {
 	case len(stalled) > 0:
-		r.progressing = machine.Condition{
-			Type: "Progressing", Status: machine.ConditionFalse, Reason: "RolloutStalled",
+		r.progressing = api.Condition{
+			Type: "Progressing", Status: api.ConditionFalse, Reason: "RolloutStalled",
 			Message: fmt.Sprintf("granted a reboot turn more than %s ago and not back: %s; no further turns until it returns",
 				rolloutStallAfter, strings.Join(stalled, ", ")),
 		}
@@ -179,12 +180,12 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 		if len(waiting) > 0 {
 			message += "; waiting: " + strings.Join(waiting, ", ")
 		}
-		r.progressing = machine.Condition{
-			Type: "Progressing", Status: machine.ConditionTrue, Reason: "RollingOut", Message: message,
+		r.progressing = api.Condition{
+			Type: "Progressing", Status: api.ConditionTrue, Reason: "RollingOut", Message: message,
 		}
 	default:
-		r.progressing = machine.Condition{
-			Type: "Progressing", Status: machine.ConditionTrue, Reason: "RolloutComplete",
+		r.progressing = api.Condition{
+			Type: "Progressing", Status: api.ConditionTrue, Reason: "RolloutComplete",
 			Message: "no machines are waiting for a reboot turn",
 		}
 	}
@@ -203,8 +204,8 @@ func carryOutRollout(c *kubernetes.Client, machines []machine.Machine, r rollout
 		status := m.Status
 		switch {
 		case slices.Contains(r.grant, name):
-			status.Conditions = machine.SetCondition(slices.Clone(m.Status.Conditions), machine.Condition{
-				Type: machine.RebootApprovedCondition, Status: machine.ConditionTrue, Reason: "DisruptionBudgetAllows",
+			status.Conditions = api.SetCondition(slices.Clone(m.Status.Conditions), api.Condition{
+				Type: machine.RebootApprovedCondition, Status: api.ConditionTrue, Reason: "DisruptionBudgetAllows",
 				ObservedGeneration: m.Metadata.Generation,
 				Message:            "the cluster's disruption budget allows this machine to take its reboot turn now",
 			}, now)
@@ -214,7 +215,7 @@ func carryOutRollout(c *kubernetes.Client, machines []machine.Machine, r rollout
 				fmt.Printf("granted %s its reboot turn\n", name)
 			}
 		case slices.Contains(r.revoke, name):
-			status.Conditions = machine.RemoveCondition(slices.Clone(m.Status.Conditions), machine.RebootApprovedCondition)
+			status.Conditions = api.RemoveCondition(slices.Clone(m.Status.Conditions), machine.RebootApprovedCondition)
 			if err := kubernetes.PublishStatus(c, m, &status); err != nil {
 				fmt.Printf("reclaiming %s's reboot turn: %v\n", name, err)
 			}

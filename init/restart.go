@@ -33,6 +33,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
@@ -55,7 +56,7 @@ type restartState struct {
 	creds       *machine.RegistryCredentials
 	credsSource machine.ManifestSource
 
-	writeBootConfig  func(*cluster.Cluster, *machine.Machine, []*connection) (machine.Role, error)
+	writeBootConfig  func(*cluster.Cluster, *machine.Machine, []*connection) (api.Role, error)
 	actuateFeatures  func(*cluster.Cluster, string) []machine.FeatureStatus
 	renderRegistries func(*cluster.Cluster, *machine.RegistryCredentials, machine.ManifestStore, machine.ManifestSource) machine.RegistriesStatus
 }

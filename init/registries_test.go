@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
@@ -23,7 +24,7 @@ func registriesTempPath(t *testing.T) string {
 func mirroredCluster(embedded bool) *cluster.Cluster {
 	return &cluster.Cluster{
 		Kind:     "Cluster",
-		Metadata: machine.ObjectMeta{Name: "lab"},
+		Metadata: api.ObjectMeta{Name: "lab"},
 		Spec: cluster.ClusterSpec{
 			Registries: cluster.RegistriesSpec{
 				Mirrors:  map[string][]string{"docker.io": {"http://10.10.0.100:5000"}},
@@ -35,7 +36,7 @@ func mirroredCluster(embedded bool) *cluster.Cluster {
 
 func labCredentials() *machine.RegistryCredentials {
 	return &machine.RegistryCredentials{
-		APIVersion: machine.APIVersion,
+		APIVersion: api.APIVersion,
 		Kind:       "RegistryCredentials",
 		Hosts: []machine.RegistryCredential{
 			{Host: "10.10.0.100:5000", Username: "liken", Password: "hunter2"},

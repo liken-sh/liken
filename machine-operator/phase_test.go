@@ -6,15 +6,15 @@ package main
 import (
 	"testing"
 
-	"github.com/liken-sh/liken/machine"
+	"github.com/liken-sh/liken/api"
 )
 
-func condition(ctype string, status machine.ConditionStatus, reason string) machine.Condition {
-	return machine.Condition{Type: ctype, Status: status, Reason: reason}
+func condition(ctype string, status api.ConditionStatus, reason string) api.Condition {
+	return api.Condition{Type: ctype, Status: status, Reason: reason}
 }
 
 func TestDecidePhase(t *testing.T) {
-	allTrue := []machine.Condition{
+	allTrue := []api.Condition{
 		condition("FactsPublished", "True", "FactsRead"),
 		condition("SysctlsApplied", "True", "Applied"),
 		condition("SpecConverged", "True", "Converged"),
@@ -24,127 +24,127 @@ func TestDecidePhase(t *testing.T) {
 	}
 	tests := []struct {
 		name       string
-		conditions []machine.Condition
-		want       machine.Phase
+		conditions []api.Condition
+		want       api.Phase
 	}{
-		{"everything true is ready", allTrue, machine.PhaseReady},
-		{"no conditions at all is ready", nil, machine.PhaseReady},
+		{"everything true is ready", allTrue, api.PhaseReady},
+		{"no conditions at all is ready", nil, api.PhaseReady},
 		{
 			"unreadable facts leave the operator blind",
-			[]machine.Condition{condition("FactsPublished", "False", "FactsUnreadable")},
-			machine.PhaseUnknown,
+			[]api.Condition{condition("FactsPublished", "False", "FactsUnreadable")},
+			api.PhaseUnknown,
 		},
 		{
 			"no boot record yet means init is still working",
-			[]machine.Condition{
+			[]api.Condition{
 				condition("SpecConverged", "Unknown", "FactsIncomplete"),
 				condition("ClusterConverged", "Unknown", "FactsIncomplete"),
 			},
-			machine.PhaseBooting,
+			api.PhaseBooting,
 		},
 		{
 			"a rejected spec is blocked, not pending",
-			[]machine.Condition{condition("SpecConverged", "False", "RejectedLastBoot")},
-			machine.PhaseBlocked,
+			[]api.Condition{condition("SpecConverged", "False", "RejectedLastBoot")},
+			api.PhaseBlocked,
 		},
 		{
 			"a spec the machine can't satisfy is blocked",
-			[]machine.Condition{condition("SpecConverged", "False", "StagingRejected")},
-			machine.PhaseBlocked,
+			[]api.Condition{condition("SpecConverged", "False", "StagingRejected")},
+			api.PhaseBlocked,
 		},
 		{
 			"nowhere durable to stage is blocked",
-			[]machine.Condition{condition("ClusterConverged", "False", "MachineStateEphemeral")},
-			machine.PhaseBlocked,
+			[]api.Condition{condition("ClusterConverged", "False", "MachineStateEphemeral")},
+			api.PhaseBlocked,
 		},
 		{
 			"a machine with no system slots can never take a release",
-			[]machine.Condition{condition("VersionConverged", "False", "NoSystemSlots")},
-			machine.PhaseBlocked,
+			[]api.Condition{condition("VersionConverged", "False", "NoSystemSlots")},
+			api.PhaseBlocked,
 		},
 		{
 			"a corrupt release blocks until the catalog changes",
-			[]machine.Condition{condition("VersionConverged", "False", "DigestMismatch")},
-			machine.PhaseBlocked,
+			[]api.Condition{condition("VersionConverged", "False", "DigestMismatch")},
+			api.PhaseBlocked,
 		},
 		{
 			"a machine not booted from a slot can't take releases",
-			[]machine.Condition{condition("VersionConverged", "False", "NotInstalled")},
-			machine.PhaseBlocked,
+			[]api.Condition{condition("VersionConverged", "False", "NotInstalled")},
+			api.PhaseBlocked,
 		},
 		{
 			"a staged release waits like any staged change",
-			[]machine.Condition{condition("VersionConverged", "False", "RebootPending")},
-			machine.PhaseUpdatePending,
+			[]api.Condition{condition("VersionConverged", "False", "RebootPending")},
+			api.PhaseUpdatePending,
 		},
 		{
 			"a requested reboot is an update in flight",
-			[]machine.Condition{condition("SpecConverged", "False", "RebootRequested")},
-			machine.PhaseUpdating,
+			[]api.Condition{condition("SpecConverged", "False", "RebootRequested")},
+			api.PhaseUpdating,
 		},
 		{
 			"a requested k3s restart is an update in flight",
-			[]machine.Condition{condition("ClusterConverged", "False", "RestartRequested")},
-			machine.PhaseUpdating,
+			[]api.Condition{condition("ClusterConverged", "False", "RestartRequested")},
+			api.PhaseUpdating,
 		},
 		{
 			"a staged restart waits like any staged change",
-			[]machine.Condition{condition("CredentialsConverged", "False", "RestartPending")},
-			machine.PhaseUpdatePending,
+			[]api.Condition{condition("CredentialsConverged", "False", "RestartPending")},
+			api.PhaseUpdatePending,
 		},
 		{
 			"a malformed credentials Secret is blocked, not pending",
-			[]machine.Condition{condition("CredentialsConverged", "False", "CredentialsInvalid")},
-			machine.PhaseBlocked,
+			[]api.Condition{condition("CredentialsConverged", "False", "CredentialsInvalid")},
+			api.PhaseBlocked,
 		},
 		{
 			"a release downloading is an update in flight",
-			[]machine.Condition{condition("VersionConverged", "False", "Downloading")},
-			machine.PhaseUpdating,
+			[]api.Condition{condition("VersionConverged", "False", "Downloading")},
+			api.PhaseUpdating,
 		},
 		{
 			"a demotion mid-reboot is an update in flight",
-			[]machine.Condition{condition("NodeCurrent", "False", "DemotionRebooting")},
-			machine.PhaseUpdating,
+			[]api.Condition{condition("NodeCurrent", "False", "DemotionRebooting")},
+			api.PhaseUpdating,
 		},
 		{
 			"staged and waiting on a manual reboot",
-			[]machine.Condition{condition("ClusterConverged", "False", "RebootPending")},
-			machine.PhaseUpdatePending,
+			[]api.Condition{condition("ClusterConverged", "False", "RebootPending")},
+			api.PhaseUpdatePending,
 		},
 		{
 			"a pending demotion waits the same way",
-			[]machine.Condition{condition("NodeCurrent", "False", "DemotionPending")},
-			machine.PhaseUpdatePending,
+			[]api.Condition{condition("NodeCurrent", "False", "DemotionPending")},
+			api.PhaseUpdatePending,
 		},
 		{
 			"a failing sysctl is plain degradation",
-			[]machine.Condition{condition("SysctlsApplied", "False", "ApplyFailed")},
-			machine.PhaseDegraded,
+			[]api.Condition{condition("SysctlsApplied", "False", "ApplyFailed")},
+			api.PhaseDegraded,
 		},
 		{
 			"an unreachable cluster is plain degradation",
-			[]machine.Condition{condition("ClusterConverged", "Unknown", "ClusterUnavailable")},
-			machine.PhaseDegraded,
+			[]api.Condition{condition("ClusterConverged", "Unknown", "ClusterUnavailable")},
+			api.PhaseDegraded,
 		},
 		{
 			"a dead kubelet is plain degradation",
-			[]machine.Condition{condition("NodeHealthy", "False", "NodeNotReady")},
-			machine.PhaseDegraded,
+			[]api.Condition{condition("NodeHealthy", "False", "NodeNotReady")},
+			api.PhaseDegraded,
 		},
 		{
 			"the gravest condition wins",
-			[]machine.Condition{
+			[]api.Condition{
 				condition("SysctlsApplied", "False", "ApplyFailed"),
 				condition("SpecConverged", "False", "RebootPending"),
 				condition("ClusterConverged", "False", "RejectedLastBoot"),
 			},
-			machine.PhaseBlocked,
+			api.PhaseBlocked,
 		},
 		{
 			"the ready roll-up never argues on its own",
-			[]machine.Condition{condition("Ready", "False", "Degraded")},
-			machine.PhaseReady,
+			[]api.Condition{condition("Ready", "False", "Degraded")},
+			api.PhaseReady,
 		},
 	}
 	for _, tt := range tests {
@@ -157,19 +157,19 @@ func TestDecidePhase(t *testing.T) {
 }
 
 func TestAwaitingTurnIsUpdatePending(t *testing.T) {
-	phase := decidePhase([]machine.Condition{
+	phase := decidePhase([]api.Condition{
 		{Type: "ClusterConverged", Status: "False", Reason: "AwaitingTurn"},
 	})
-	if phase != machine.PhaseUpdatePending {
+	if phase != api.PhaseUpdatePending {
 		t.Errorf("waiting on the cluster's grant is a pending update: %s", phase)
 	}
 }
 
 func TestDrainingIsUpdating(t *testing.T) {
-	phase := decidePhase([]machine.Condition{
+	phase := decidePhase([]api.Condition{
 		{Type: "SpecConverged", Status: "False", Reason: "Draining"},
 	})
-	if phase != machine.PhaseUpdating {
+	if phase != api.PhaseUpdating {
 		t.Errorf("draining is the reboot's opening move: %s", phase)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/kubernetes"
 	"github.com/liken-sh/liken/machine"
@@ -21,9 +22,9 @@ import (
 // publish (an I/O failure downgrades it to StagingFailed on the same
 // condition type, so the report stays attached to the right
 // document).
-func carryOutConvergence(conv convergence, store machine.ManifestStore, what string, now time.Time) machine.Condition {
-	failed := func(err error) machine.Condition {
-		return machine.Condition{Type: conv.condition.Type, Status: machine.ConditionFalse, Reason: "StagingFailed", Message: err.Error()}
+func carryOutConvergence(conv convergence, store machine.ManifestStore, what string, now time.Time) api.Condition {
+	failed := func(err error) api.Condition {
+		return api.Condition{Type: conv.condition.Type, Status: api.ConditionFalse, Reason: "StagingFailed", Message: err.Error()}
 	}
 	if conv.withdraw {
 		if err := store.WithdrawStaged(); err != nil {
@@ -124,7 +125,7 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	if err == nil {
 		*status = *facts
 	}
-	status.Conditions = machine.SetCondition(m.Status.Conditions, factsCondition(err), now)
+	status.Conditions = api.SetCondition(m.Status.Conditions, factsCondition(err), now)
 
 	// The operator's own existence is the evidence that promotes a
 	// staged cluster document: if this line runs, the machine joined
@@ -139,11 +140,11 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	// operator's existence but the Ready of every OS container on
 	// this node, because the trial covers every tarball the boot
 	// imported, not just the one this pod runs from (imports.go).
-	status.Conditions = machine.SetCondition(status.Conditions,
+	status.Conditions = api.SetCondition(status.Conditions,
 		settleImportsLifecycle(c, machine.MachineStateDir, m.Metadata.Name, facts), now)
 
 	status.Sysctls, err = applySysctls(machine.SysctlDir, m.Spec.Sysctls)
-	status.Conditions = machine.SetCondition(status.Conditions, sysctlsCondition(err), now)
+	status.Conditions = api.SetCondition(status.Conditions, sysctlsCondition(err), now)
 
 	// Modules judge what the boot reported, not what the spec asks
 	// now: a freshly declared module has no outcome yet, and its story
@@ -151,7 +152,7 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	// the other half of the split: SpecConverged can be True (the boot
 	// ran the manifest) while this is False, because a spec the boot
 	// honored can still name modules the booted image never carried.
-	status.Conditions = machine.SetCondition(status.Conditions,
+	status.Conditions = api.SetCondition(status.Conditions,
 		modulesCondition(status.Modules), now)
 
 	// Features judge what the boot reported, on the same terms as
@@ -160,7 +161,7 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	// enables a feature, and this condition proves the booted image
 	// could honor it. Mid-rollout the fleet runs mixed releases, so
 	// the answers legitimately differ per machine.
-	status.Conditions = machine.SetCondition(status.Conditions,
+	status.Conditions = api.SetCondition(status.Conditions,
 		featuresCondition(status.Features), now)
 
 	// Storage compares the spec's declared roles against the facts'
@@ -168,7 +169,7 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	// observe the disks directly (claiming happened before this
 	// cluster existed), so init's facts are the only source, and this
 	// condition checks them against the spec.
-	status.Conditions = machine.SetCondition(status.Conditions,
+	status.Conditions = api.SetCondition(status.Conditions,
 		storageCondition(m.Spec.Storage, status.Storage), now)
 
 	// t is this machine's standing with the rollout conductor. A
@@ -180,7 +181,7 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	t := turnStandalone
 	if clusterName != "" {
 		t = turnAwaiting
-		if g := machine.FindCondition(m.Status.Conditions, machine.RebootApprovedCondition); g != nil && g.Status == machine.ConditionTrue {
+		if g := api.FindCondition(m.Status.Conditions, machine.RebootApprovedCondition); g != nil && g.Status == api.ConditionTrue {
 			t = turnGranted
 		}
 	}
@@ -212,7 +213,7 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	machineRejection, _ := machineStore.LoadRejection()
 	conv := disr.gate(c, node, nodeErr, t, now,
 		decideConvergence(m, facts, machineRejection, readStagedHash(machineStore), t))
-	status.Conditions = machine.SetCondition(status.Conditions,
+	status.Conditions = api.SetCondition(status.Conditions,
 		carryOutConvergence(conv, machineStore, "spec", now), now)
 
 	// The cluster document converges through the same machinery, per
@@ -228,7 +229,7 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 		var cconv convergence
 		cconv, liveCluster = convergeClusterDocument(c, clusterStore, clusterName, m, facts, t)
 		cconv = disr.gate(c, node, nodeErr, t, now, cconv)
-		status.Conditions = machine.SetCondition(status.Conditions,
+		status.Conditions = api.SetCondition(status.Conditions,
 			carryOutConvergence(cconv, clusterStore, "cluster document", now), now)
 
 		// The version target reads the live Cluster's release feed, so
@@ -237,14 +238,14 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 			systemStore := machine.SystemReleases(machine.MachineStateDir)
 			vconv := disr.gate(c, node, nodeErr, t, now,
 				convergeSystemRelease(systemStore, liveCluster, m, facts, f, t))
-			status.Conditions = machine.SetCondition(status.Conditions,
+			status.Conditions = api.SetCondition(status.Conditions,
 				carryOutConvergence(vconv, systemStore, "system release", now), now)
 		}
 
 		credentialsStore := machine.RegistryCredentialsStore(machine.MachineStateDir)
 		rconv := disr.gate(c, node, nodeErr, t, now,
 			convergeRegistryCredentials(c, credentialsStore, m, facts, t))
-		status.Conditions = machine.SetCondition(status.Conditions,
+		status.Conditions = api.SetCondition(status.Conditions,
 			carryOutConvergence(rconv, credentialsStore, "registry credentials", now), now)
 	}
 
@@ -258,13 +259,13 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 		// turns into the Node's Ready condition) is the evidence that
 		// the machine is actually serving the cluster, not just
 		// reachable.
-		status.Conditions = machine.SetCondition(status.Conditions, nodeHealthyCondition(node), now)
+		status.Conditions = api.SetCondition(status.Conditions, nodeHealthyCondition(node), now)
 
 		// Node labels reconcile live, like sysctls, but against the
 		// Node object instead of the kernel (labels.go): re-assert
 		// what the spec declares, and remove what it retracted, which
 		// the kubelet never does on its own.
-		status.Conditions = machine.SetCondition(status.Conditions,
+		status.Conditions = api.SetCondition(status.Conditions,
 			carryOutNodeLabels(c, m.Metadata.Name, decideNodeLabels(m.Spec.NodeLabels, node)), now)
 
 		// Demotion cleanup (demotion.go): a follower whose Node object
@@ -273,7 +274,7 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 		// deleted.
 		d := decideDemotion(status.Role, node.Metadata.Labels, m.Spec.RebootPolicyOrDefault(), t)
 		condition := carryOutDemotion(c, m.Metadata.Name, d)
-		status.Conditions = machine.SetCondition(status.Conditions, condition, now)
+		status.Conditions = api.SetCondition(status.Conditions, condition, now)
 		disr.rebooting = disr.rebooting || d.cleanup
 
 		// When this operator set a cordon and no longer needs it,
@@ -295,19 +296,19 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	// can't affect this one. It also skips the conductor's grant,
 	// because the grant is a permission token, not an observation
 	// about this machine's health.
-	ready := machine.Condition{Type: "Ready", Status: machine.ConditionTrue, Reason: "Reconciled"}
+	ready := api.Condition{Type: "Ready", Status: api.ConditionTrue, Reason: "Reconciled"}
 	for _, condition := range status.Conditions {
 		if condition.Type == "Ready" || condition.Type == machine.RebootApprovedCondition {
 			continue
 		}
-		if condition.Status != machine.ConditionTrue {
-			ready = machine.Condition{
-				Type: "Ready", Status: machine.ConditionFalse,
+		if condition.Status != api.ConditionTrue {
+			ready = api.Condition{
+				Type: "Ready", Status: api.ConditionFalse,
 				Reason: "Degraded", Message: condition.Type + " is " + string(condition.Status),
 			}
 		}
 	}
-	status.Conditions = machine.SetCondition(status.Conditions, ready, now)
+	status.Conditions = api.SetCondition(status.Conditions, ready, now)
 
 	// Every condition this pass publishes judged the spec at this
 	// generation. The API server bumps metadata.generation on spec
@@ -397,8 +398,8 @@ func publishOwnStatus(c *kubernetes.Client, m *machine.Machine, status *machine.
 	if gerr != nil {
 		return err
 	}
-	status.Conditions = machine.RemoveCondition(slices.Clone(status.Conditions), machine.RebootApprovedCondition)
-	if grant := machine.FindCondition(fresh.Status.Conditions, machine.RebootApprovedCondition); grant != nil {
+	status.Conditions = api.RemoveCondition(slices.Clone(status.Conditions), machine.RebootApprovedCondition)
+	if grant := api.FindCondition(fresh.Status.Conditions, machine.RebootApprovedCondition); grant != nil {
 		status.Conditions = append(status.Conditions, *grant)
 	}
 	return kubernetes.PublishStatus(c, fresh, status)

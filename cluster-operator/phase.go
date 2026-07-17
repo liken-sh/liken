@@ -13,6 +13,7 @@ package main
 import (
 	"time"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/kubernetes"
 	"github.com/liken-sh/liken/machine"
 )
@@ -29,14 +30,14 @@ import (
 // (rollout.go) was told to go down, so until the grant is old enough
 // to count as a stall, the sweep treats its silence as the reboot in
 // progress.
-func effectivePhase(m *machine.Machine, renewals map[string]time.Time, now time.Time) machine.Phase {
+func effectivePhase(m *machine.Machine, renewals map[string]time.Time, now time.Time) api.Phase {
 	renewed, heard := renewals[m.Metadata.Name]
 	if heard && now.Sub(renewed) <= kubernetes.HeartbeatStaleAfter {
 		return m.Status.Phase
 	}
-	if grant := machine.FindCondition(m.Status.Conditions, machine.RebootApprovedCondition); grant != nil &&
+	if grant := api.FindCondition(m.Status.Conditions, machine.RebootApprovedCondition); grant != nil &&
 		now.Sub(grant.LastTransitionTime) <= rolloutStallAfter {
-		return machine.PhaseUpdating
+		return api.PhaseUpdating
 	}
-	return machine.PhaseLost
+	return api.PhaseLost
 }

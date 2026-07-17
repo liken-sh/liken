@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -114,7 +115,7 @@ func TestPublishFactsPublishesTheBootStory(t *testing.T) {
 
 	owner := publishFacts(factsInputs{
 		clusterDoc: labCluster(),
-		role:       machine.RoleLeader,
+		role:       api.RoleLeader,
 		choice:     &manifestChoice{raw: raw},
 		conns:      []*connection{fullConn(t, "eth1", "10.10.0.2/24", machine.MethodStatic)},
 		storage:    machine.AllRolesInMemory(),
@@ -127,7 +128,7 @@ func TestPublishFactsPublishesTheBootStory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if facts.Role != machine.RoleLeader || facts.Boot.Slot != "A" {
+	if facts.Role != api.RoleLeader || facts.Boot.Slot != "A" {
 		t.Errorf("the file carries the boot's identity: %+v", facts)
 	}
 	if facts.Network.Interface != "eth1" {
@@ -143,7 +144,7 @@ func TestPublishFactsPublishesTheBootStory(t *testing.T) {
 	if err != nil || string(published) != string(raw) {
 		t.Errorf("the boot manifest is the choice's exact bytes: %q, %v", published, err)
 	}
-	if owner.status.Role != machine.RoleLeader {
+	if owner.status.Role != api.RoleLeader {
 		t.Errorf("the returned owner wraps the same facts: %+v", owner.status)
 	}
 }
@@ -160,11 +161,11 @@ func TestPublishFactsSurvivesAnUnwritableDestination(t *testing.T) {
 	// The facts still exist in memory for the boot's later writers,
 	// even when the founding write never landed.
 	owner := publishFacts(factsInputs{
-		role:    machine.RoleFollower,
+		role:    api.RoleFollower,
 		choice:  &manifestChoice{},
 		storage: machine.AllRolesInMemory(),
 	})
-	if owner == nil || owner.status.Role != machine.RoleFollower {
+	if owner == nil || owner.status.Role != api.RoleFollower {
 		t.Errorf("a failed write still returns the guarded owner: %+v", owner)
 	}
 }
@@ -174,7 +175,7 @@ func TestFactsFileMutateRidesTheNextPublish(t *testing.T) {
 	owner := &factsFile{status: &machine.MachineStatus{}}
 
 	// mutate edits only the memory: nothing lands on disk yet.
-	owner.mutate(func(s *machine.MachineStatus) { s.Role = machine.RoleFollower })
+	owner.mutate(func(s *machine.MachineStatus) { s.Role = api.RoleFollower })
 	if _, err := os.Stat(factsDest); !os.IsNotExist(err) {
 		t.Errorf("mutate must not write the file: %v", err)
 	}
@@ -185,7 +186,7 @@ func TestFactsFileMutateRidesTheNextPublish(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if facts.Role != machine.RoleFollower || facts.Boot.Restarts != 1 {
+	if facts.Role != api.RoleFollower || facts.Boot.Restarts != 1 {
 		t.Errorf("both edits publish together: %+v", facts)
 	}
 }

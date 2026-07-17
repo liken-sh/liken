@@ -26,8 +26,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/kubernetes"
-	"github.com/liken-sh/liken/machine"
 )
 
 const (
@@ -151,8 +151,8 @@ func gateThroughDrain(c *kubernetes.Client, node *nodeObject, conv convergence, 
 // while the drain works: same type, reboot withheld, reason Draining.
 func holdForDrain(conv convergence, message string) convergence {
 	conv.requestReboot = false
-	conv.condition = machine.Condition{
-		Type: conv.condition.Type, Status: machine.ConditionFalse, Reason: "Draining", Message: message,
+	conv.condition = api.Condition{
+		Type: conv.condition.Type, Status: api.ConditionFalse, Reason: "Draining", Message: message,
 	}
 	return conv
 }

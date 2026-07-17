@@ -154,25 +154,25 @@ type drainAPI struct {
 	patched   string
 }
 
-func (api *drainAPI) handler() http.Handler {
+func (fake *drainAPI) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet:
-			if api.listFail {
+			if fake.listFail {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"items": api.pods})
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": fake.pods})
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/eviction"):
-			api.evictions = append(api.evictions, r.URL.Path)
+			fake.evictions = append(fake.evictions, r.URL.Path)
 		case r.Method == http.MethodPatch:
-			if api.patchFail {
+			if fake.patchFail {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
 			body := make([]byte, 4096)
 			n, _ := r.Body.Read(body)
-			api.patched = string(body[:n])
+			fake.patched = string(body[:n])
 		}
 	})
 }
@@ -187,8 +187,8 @@ func rebootingConvergence() convergence {
 }
 
 func TestGateThroughDrainHoldsWhenPodsCannotBeListed(t *testing.T) {
-	api := &drainAPI{listFail: true}
-	client := testClient(t, api.handler())
+	fake := &drainAPI{listFail: true}
+	client := testClient(t, fake.handler())
 	since := drainNow.Add(-time.Minute).Format(time.RFC3339)
 	conv := gateThroughDrain(client, drainNode(true, true, since), rebootingConvergence(), drainNow)
 	if conv.requestReboot {
@@ -200,8 +200,8 @@ func TestGateThroughDrainHoldsWhenPodsCannotBeListed(t *testing.T) {
 }
 
 func TestGateThroughDrainHoldsWhenTheCordonFails(t *testing.T) {
-	api := &drainAPI{patchFail: true}
-	client := testClient(t, api.handler())
+	fake := &drainAPI{patchFail: true}
+	client := testClient(t, fake.handler())
 	conv := gateThroughDrain(client, drainNode(false, false, ""), rebootingConvergence(), drainNow)
 	if conv.requestReboot {
 		t.Error("an uncordoned node must not reboot; new pods could still land on it")
@@ -212,16 +212,16 @@ func TestGateThroughDrainHoldsWhenTheCordonFails(t *testing.T) {
 }
 
 func TestGateThroughDrainEvictsAndHolds(t *testing.T) {
-	api := &drainAPI{pods: []kubernetes.Pod{pod("web", "default")}}
-	client := testClient(t, api.handler())
+	fake := &drainAPI{pods: []kubernetes.Pod{pod("web", "default")}}
+	client := testClient(t, fake.handler())
 	since := drainNow.Add(-time.Minute).Format(time.RFC3339)
 	conv := gateThroughDrain(client, drainNode(true, true, since), rebootingConvergence(), drainNow)
 	if conv.requestReboot {
 		t.Error("a movable pod holds the reboot")
 	}
 	want := "/api/v1/namespaces/default/pods/web/eviction"
-	if len(api.evictions) != 1 || api.evictions[0] != want {
-		t.Errorf("the same pass asks the pod to leave: %v", api.evictions)
+	if len(fake.evictions) != 1 || fake.evictions[0] != want {
+		t.Errorf("the same pass asks the pod to leave: %v", fake.evictions)
 	}
 	if conv.condition.Reason != "Draining" || !strings.Contains(conv.condition.Message, "1 pods") {
 		t.Errorf("the condition reports the drain's progress: %+v", conv.condition)
@@ -229,11 +229,11 @@ func TestGateThroughDrainEvictsAndHolds(t *testing.T) {
 }
 
 func TestGateThroughDrainCordonsAnEmptyNodeAndReleases(t *testing.T) {
-	api := &drainAPI{}
-	client := testClient(t, api.handler())
+	fake := &drainAPI{}
+	client := testClient(t, fake.handler())
 	conv := gateThroughDrain(client, drainNode(false, false, ""), rebootingConvergence(), drainNow)
-	if !strings.Contains(api.patched, `"unschedulable":true`) {
-		t.Errorf("the first pass cordons: %s", api.patched)
+	if !strings.Contains(fake.patched, `"unschedulable":true`) {
+		t.Errorf("the first pass cordons: %s", fake.patched)
 	}
 	if !conv.requestReboot {
 		t.Error("an empty node is clear the moment it is cordoned")
@@ -241,8 +241,8 @@ func TestGateThroughDrainCordonsAnEmptyNodeAndReleases(t *testing.T) {
 }
 
 func TestGateThroughDrainReleasesAClearNode(t *testing.T) {
-	api := &drainAPI{pods: []kubernetes.Pod{pod("liken-operator", "liken-system", ownedByDaemonSet)}}
-	client := testClient(t, api.handler())
+	fake := &drainAPI{pods: []kubernetes.Pod{pod("liken-operator", "liken-system", ownedByDaemonSet)}}
+	client := testClient(t, fake.handler())
 	since := drainNow.Add(-time.Minute).Format(time.RFC3339)
 	conv := gateThroughDrain(client, drainNode(true, true, since), rebootingConvergence(), drainNow)
 	if !conv.requestReboot {
@@ -254,8 +254,8 @@ func TestGateThroughDrainReleasesAClearNode(t *testing.T) {
 }
 
 func TestListPodsOnNodeFiltersByNodeName(t *testing.T) {
-	api := &drainAPI{pods: []kubernetes.Pod{pod("web", "default")}}
-	client := testClient(t, api.handler())
+	fake := &drainAPI{pods: []kubernetes.Pod{pod("web", "default")}}
+	client := testClient(t, fake.handler())
 	pods, err := kubernetes.ListPodsOnNode(client, "node-4")
 	if err != nil || len(pods) != 1 {
 		t.Fatalf("got %v, %v", pods, err)
@@ -263,13 +263,13 @@ func TestListPodsOnNodeFiltersByNodeName(t *testing.T) {
 }
 
 func TestEvictPodPostsTheEvictionSubresource(t *testing.T) {
-	api := &drainAPI{}
-	client := testClient(t, api.handler())
+	fake := &drainAPI{}
+	client := testClient(t, fake.handler())
 	if err := kubernetes.EvictPod(client, pod("web", "default")); err != nil {
 		t.Fatal(err)
 	}
 	want := "/api/v1/namespaces/default/pods/web/eviction"
-	if len(api.evictions) != 1 || api.evictions[0] != want {
-		t.Errorf("got %v", api.evictions)
+	if len(fake.evictions) != 1 || fake.evictions[0] != want {
+		t.Errorf("got %v", fake.evictions)
 	}
 }

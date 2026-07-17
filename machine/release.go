@@ -25,13 +25,14 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/liken-sh/liken/api"
 	"sigs.k8s.io/yaml"
 )
 
 type Release struct {
 	APIVersion string             `json:"apiVersion"`
 	Kind       string             `json:"kind"`
-	Metadata   ObjectMeta         `json:"metadata"`
+	Metadata   api.ObjectMeta     `json:"metadata"`
 	Artifacts  []ReleaseArtifact  `json:"artifacts"`
 	Components []ReleaseComponent `json:"components,omitempty"`
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -55,9 +56,9 @@ func labFacts() *machine.MachineStatus {
 
 func labMachine() *machine.Machine {
 	return &machine.Machine{
-		APIVersion: machine.APIVersion,
+		APIVersion: api.APIVersion,
 		Kind:       "Machine",
-		Metadata:   machine.ObjectMeta{Name: "liken-dev"},
+		Metadata:   api.ObjectMeta{Name: "liken-dev"},
 		Spec:       specWith(labStorage()),
 	}
 }

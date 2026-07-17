@@ -18,14 +18,15 @@ package machine
 import (
 	"fmt"
 
+	"github.com/liken-sh/liken/api"
 	"sigs.k8s.io/yaml"
 )
 
 type Channel struct {
-	APIVersion string     `json:"apiVersion"`
-	Kind       string     `json:"kind"`
-	Metadata   ObjectMeta `json:"metadata"`
-	Latest     string     `json:"latest"`
+	APIVersion string         `json:"apiVersion"`
+	Kind       string         `json:"kind"`
+	Metadata   api.ObjectMeta `json:"metadata"`
+	Latest     string         `json:"latest"`
 }
 
 // ParseChannel validates a channel document as it is read, the way
@@ -43,7 +44,7 @@ func ParseChannel(raw []byte) (*Channel, error) {
 	if c.Metadata.Name == "" {
 		return nil, fmt.Errorf("a channel must have a name")
 	}
-	if err := ValidVersion(c.Latest); err != nil {
+	if err := api.ValidVersion(c.Latest); err != nil {
 		return nil, fmt.Errorf("channel %s: latest: %w", c.Metadata.Name, err)
 	}
 	return c, nil
