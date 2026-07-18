@@ -401,7 +401,7 @@ install-stick: $(IMAGE_DIR)/stick.img
 # by every release. There is no deployment in a release and no
 # per-deployment channel: the lab's machines upgrade from this bundle
 # directly, carrying their own deployment layer between slots.
-release: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils
+release: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils hwdata
 	$(MAKE) -C releases release
 
 # Serve the release channel to the lab over HTTP; the guests reach
