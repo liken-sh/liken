@@ -204,9 +204,23 @@ vocabulary; a reconciler closes the loop.
 Open for the design pass: the driver's exact hosting (inside the
 machine operator versus beside it) and whether it is a feature slug
 or standing equipment; how much attribute vocabulary liken
-standardizes versus documents; whether liken ships any DeviceClasses
-or only teaches them; and re-plug semantics — what a standing
-allocation means when its device re-enumerates. The proving
+standardizes versus documents; and whether liken ships any
+DeviceClasses or only teaches them.
+
+Re-plug semantics — what a standing allocation means when its
+device disappears — has an upstream answer arriving rather than a
+liken design to invent: DRA's device-health and device-taints
+features (alpha and maturing in the Kubernetes liken runs) let a
+driver report a published device unhealthy and taint it, steering
+new claims away and surfacing the failure in the claiming pod's own
+status. The full lifecycle then has three stages, each reported by
+the right API to the right audience: unclaimed in Machine status
+(the kernel can't drive it; an operator can fix it), published in a
+ResourceSlice (claimable), and tainted (was claimable, currently
+sick; the workload's problem to tolerate or leave). The driver's
+uevent watcher already sees the remove events this needs — the same
+listener, feeding a third output — so the driver interface should
+carry health from day one, enabled as the feature matures. The proving
 workloads are already picked: a transcode claim against a render
 node (the lab can fake this today with virtio-gpu), and an
 identity-pinned claim against a real USB device when one is on the
