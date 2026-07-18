@@ -86,6 +86,7 @@ OPENISCSI_VERSION := $(strip $(file <../open-iscsi/VERSION))
 NFSUTILS_VERSION := $(strip $(file <../nfs-utils/VERSION))
 SYSTEMDBOOT_VERSION := $(strip $(file <../systemd-boot/VERSION))
 GRUB_VERSION := $(strip $(file <../grub/VERSION))
+HWDATA_VERSION := $(strip $(file <../hwdata/VERSION))
 
 # The version-stamped build: every liken component rebuilt under
 # VERSION into build/<version>/, generic image included. This is the
@@ -134,7 +135,8 @@ release: build
 		open-iscsi=$(OPENISCSI_VERSION) \
 		nfs-utils=$(NFSUTILS_VERSION) \
 		systemd-boot=$(SYSTEMDBOOT_VERSION) \
-		grub=$(GRUB_VERSION)
+		grub=$(GRUB_VERSION) \
+		hwdata=$(HWDATA_VERSION)
 
 # Serve the channel over HTTP: the lab's release server, standing in
 # for the website. The dev cluster's guests reach it at

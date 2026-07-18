@@ -268,6 +268,23 @@ mkdir -p "$root/usr/share/hwdata"
 cp "$here/../hwdata/dist/$hwdata_version/pci.ids" \
    "$root/usr/share/hwdata/pci.ids"
 
+# The components record: which upstream version of every outside
+# component this image carries, read from the same VERSION pins the
+# release document publishes (releases/Makefile), so the two can
+# never disagree. It rides in the image because a running machine
+# reports its own composition in Machine status (init/versions.go)
+# and shouldn't have to phone the channel to know what it is made
+# of. Under /usr/share, deliberately outside /etc/liken: this is a
+# fact about the image, not about any deployment of it.
+mkdir -p "$root/usr/share/liken"
+{
+    echo "components:"
+    for component in kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata; do
+        echo "  - name: $component"
+        echo "    version: $(cat "$here/../$component/VERSION")"
+    done
+} > "$root/usr/share/liken/components.yaml"
+
 # The image carries only the modules the machines will load, plus
 # everything those depend on. Two lists feed this: the OS's own fixed
 # needs (etc/liken/modules.conf) and whatever extra modules the

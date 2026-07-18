@@ -129,6 +129,11 @@ func publishFacts(in factsInputs) *factsFile {
 		facts.Version.Xtables = strings.TrimPrefix(out, "iptables ")
 	}
 
+	// Everything that can't answer for itself — boot artifacts,
+	// bundled images, data files — reports from the record the image
+	// build staged beside the bytes (versions.go).
+	applyComponentFacts(&facts.Version)
+
 	// Sysinfo is one syscall answering two questions: how much memory
 	// the machine has, and how long it's been up, which, subtracted
 	// from the clock, is the moment it booted. (The wall clock itself

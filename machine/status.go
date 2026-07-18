@@ -120,14 +120,37 @@ type MachineStatus struct {
 	Conditions []api.Condition `json:"conditions,omitempty"`
 }
 
+// VersionStatus is the complete inventory of what this machine
+// runs: liken's own version and every outside component the OS
+// carries. Two kinds of fact live here, sourced differently. The
+// kernel and the netfilter userspace can answer for themselves on
+// the running machine (uname and `iptables -V`), so those are
+// observed, in the running software's own vocabulary. The rest —
+// boot artifacts, bundled images, data files — cannot be asked
+// anything, so they are reported from the components record the
+// image build wrote alongside the bytes it staged
+// (/usr/share/liken/components.yaml), the same pins the release
+// document publishes, so the two can never disagree. k3s is listed
+// even though the Node object reports a kubelet version, because
+// this block answers a different question: not "what is running the
+// pods" but "what did this OS image carry".
 type VersionStatus struct {
 	Liken  string `json:"liken,omitempty"`
 	Kernel string `json:"kernel,omitempty"`
 
 	// Xtables is the netfilter userspace as it reports itself
 	// (`iptables -V`, e.g. "v1.8.11 (legacy)"): observed, not echoed
-	// from a build pin, like every other fact here.
+	// from a build pin.
 	Xtables string `json:"xtables,omitempty"`
+
+	K3s         string `json:"k3s,omitempty"`
+	Trust       string `json:"trust,omitempty"`
+	E2fsprogs   string `json:"e2fsprogs,omitempty"`
+	OpenISCSI   string `json:"openIscsi,omitempty"`
+	NFSUtils    string `json:"nfsUtils,omitempty"`
+	SystemdBoot string `json:"systemdBoot,omitempty"`
+	Grub        string `json:"grub,omitempty"`
+	Hwdata      string `json:"hwdata,omitempty"`
 }
 
 // NetworkStatus reports how the boot attached this machine to the

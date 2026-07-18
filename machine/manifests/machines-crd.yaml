@@ -576,9 +576,16 @@ spec:
                 version:
                   type: object
                   description: >-
-                    The software this machine runs. The k3s and kubelet
-                    versions are reported on the built-in Node object;
-                    this covers the layer beneath it.
+                    The complete inventory of what this machine runs:
+                    liken's own version and every outside component
+                    the OS carries. The kernel and xtables are
+                    observed on the running machine; the rest report
+                    from the components record the image build staged
+                    beside the bytes — the same pins the release
+                    document publishes. k3s appears here as well as
+                    on the Node object because the two answer
+                    different questions: the Node reports the running
+                    kubelet, this reports what the OS image carried.
                   properties:
                     liken:
                       type: string
@@ -589,6 +596,28 @@ spec:
                       description: >-
                         The netfilter userspace as iptables -V reports
                         it: version and variant (legacy vs nft).
+                    k3s:
+                      type: string
+                    trust:
+                      type: string
+                      description: >-
+                        The CA bundle's snapshot date: which day's
+                        Mozilla roots this machine trusts.
+                    e2fsprogs:
+                      type: string
+                    openIscsi:
+                      type: string
+                    nfsUtils:
+                      type: string
+                    systemdBoot:
+                      type: string
+                    grub:
+                      type: string
+                    hwdata:
+                      type: string
+                      description: >-
+                        The PCI naming database that turns vendor and
+                        device IDs into words.
                 network:
                   type: object
                   description: >-
