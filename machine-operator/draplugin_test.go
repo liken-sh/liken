@@ -15,7 +15,10 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
+	healthv1alpha1 "k8s.io/kubelet/pkg/apis/dra-health/v1alpha1"
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
 	regv1 "k8s.io/kubelet/pkg/apis/pluginregistration/v1"
 
@@ -265,6 +268,21 @@ func TestServeAnswersOnBothSockets(t *testing.T) {
 	}
 	if answer := resp.Claims["claim-1"]; answer == nil || answer.Error != "" {
 		t.Errorf("answer = %+v", answer)
+	}
+
+	// The health stream must open and stay open, not answer
+	// Unimplemented: the kubelet retries a missing service every few
+	// seconds, forever, and that noise is exactly what registering
+	// the silent stream prevents.
+	streamCtx, streamCancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer streamCancel()
+	watch, err := healthv1alpha1.NewDRAResourceHealthClient(draConn).NodeWatchResources(streamCtx, &healthv1alpha1.NodeWatchResourcesRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = watch.Recv()
+	if status.Code(err) == codes.Unimplemented {
+		t.Error("the health service must accept the stream, not answer Unimplemented")
 	}
 }
 

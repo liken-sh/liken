@@ -38,6 +38,7 @@ import (
 	"path/filepath"
 
 	"google.golang.org/grpc"
+	healthv1alpha1 "k8s.io/kubelet/pkg/apis/dra-health/v1alpha1"
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
 	regv1 "k8s.io/kubelet/pkg/apis/pluginregistration/v1"
 
@@ -107,6 +108,7 @@ func serveDRAPlugin(ctx context.Context, client *kubernetes.Client) error {
 	}
 	pluginServer := grpc.NewServer()
 	drav1.RegisterDRAPluginServer(pluginServer, &draPlugin{client: client})
+	healthv1alpha1.RegisterDRAResourceHealthServer(pluginServer, &draHealth{})
 
 	registrationSocket := filepath.Join(draRegistryDir, kubernetes.DriverName+"-reg.sock")
 	_ = os.Remove(registrationSocket)
@@ -209,6 +211,23 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 		}
 	}
 	return &drav1.NodePrepareResourceResponse{Devices: devices}
+}
+
+// draHealth is the device-health stream, held open and silent. The
+// service is optional, but the kubelet doesn't treat it that way in
+// practice: an unregistered service earns an Unimplemented error and
+// a retry every few seconds, forever, in the k3s log. Accepting the
+// stream and reporting nothing is the honest posture — liken makes
+// no health claims about devices yet — and it is the same stream
+// real health reports will ride when the uevent watcher starts
+// feeding it (the plan doc's device-health note).
+type draHealth struct {
+	healthv1alpha1.UnimplementedDRAResourceHealthServer
+}
+
+func (h *draHealth) NodeWatchResources(req *healthv1alpha1.NodeWatchResourcesRequest, stream grpc.ServerStreamingServer[healthv1alpha1.NodeWatchResourcesResponse]) error {
+	<-stream.Context().Done()
+	return nil
 }
 
 // NodeUnprepareResources retires each claim's CDI spec. Like
