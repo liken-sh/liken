@@ -18,8 +18,12 @@ on:
   push:
     tags: ["v*"]
 
+# contents: write is what lets the last step create the GitHub
+# release; everything before it only reads the tree. The publishing
+# credentials proper (the channel's key) arrive as secrets, not
+# through this token.
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -186,3 +190,48 @@ jobs:
             echo "    digest: sha256:$DIGEST"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # The GitHub release is the announcement, not the distribution:
+      # a page people can watch and an RSS feed clusters' operators
+      # can follow, carrying the catalog entry so adopting the
+      # release is copy-paste from the release page. The artifacts
+      # deliberately stay off it — the channel is the one place
+      # binaries live, because the GPL notice obligations travel with
+      # the binaries and the channel is where LICENSES.md and the
+      # source mirror already satisfy them. Notes are the commit
+      # subjects since the last release: commit messages here are
+      # written as prose, so the log *is* the changelog.
+      - name: publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "the GitHub release already exists"
+            exit 0
+          fi
+          DIGEST=$(sha256sum "releases/dist/$VERSION/release.yaml" | cut -d' ' -f1)
+          PREVIOUS=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)
+          {
+            echo "Published to https://releases.liken.sh/$VERSION/ —"
+            echo "the artifacts, their licenses, and the corresponding"
+            echo "sources all live on the channel."
+            echo
+            echo "To adopt it, add the catalog entry to your Cluster's"
+            echo "spec.releases.catalog and set spec.version:"
+            echo
+            echo '```yaml'
+            echo "  - version: $VERSION"
+            echo "    digest: sha256:$DIGEST"
+            echo '```'
+            echo
+            if [ -n "$PREVIOUS" ]; then
+              echo "Changes since $PREVIOUS:"
+            else
+              echo "Changes:"
+            fi
+            echo
+            git log --format='- %s' ${PREVIOUS:+$PREVIOUS..}"$GITHUB_REF_NAME"
+          } > notes.md
+          gh release create "$GITHUB_REF_NAME" --verify-tag \
+            --title "liken $VERSION" --notes-file notes.md
