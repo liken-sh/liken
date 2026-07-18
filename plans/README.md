@@ -32,9 +32,11 @@ what's still ahead.
     heartbeat leases, the sweep, and a status vocabulary that says
     what would fix it.
 11. [ ] [Device management](11-device-management.md) — hotplug,
-    GPUs, and how workloads reach hardware. The lab has answered the
-    OS half (declared drivers serve hotplug in-kernel; what's missing
-    is only the reporting); the Kubernetes half stays open.
+    GPUs, and how workloads reach hardware. The lab answered the OS
+    half (declared drivers serve hotplug in-kernel; what's missing
+    is only the reporting), and the Kubernetes half is DRA-first:
+    ResourceSlices as the inventory, DeviceClasses as the purpose
+    vocabulary, one liken driver publishing both.
 12. [x] [Declarative upgrades](12-declarative-upgrades.md) —
     A/B slots, the digest chain, firmware fallback, and one field
     that moves the fleet.

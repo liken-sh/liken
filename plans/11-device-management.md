@@ -142,53 +142,75 @@ no database needed. The pci.ids dependency stays soft — the reporter
 falls back to numeric IDs when the file is missing — and hwdata's
 notices join the licensing domain like every other vendored pin.
 
-## Devices by purpose: the Kubernetes half
+## The Kubernetes half: DRA
 
-Direction, not yet design. Kubernetes has two generations of
-machinery for handing hardware to workloads: device plugins (a
-DaemonSet advertises a named, counted resource; the kubelet injects
-the device node when a pod requests one) and dynamic resource
-allocation (devices published with structured attributes, claims
-selecting on them, GA in the Kubernetes liken currently runs). A
-bare counted resource is not expressive enough for what real
-deployments do with leaf hardware — a UPS on USB for NUT, a Zigbee
-coordinator for zigbee2mqtt. Those workloads want *that specific
-device*, stably, not "any serial port"; and raw attribute selectors
-in workload manifests would leak hardware fingerprints (hex vendor
-IDs) into every deployment's YAML.
+Workloads reach hardware through dynamic resource allocation
+(resource.k8s.io, GA in the Kubernetes liken runs), and DRA's object
+model absorbs most of what this milestone would otherwise have had
+to invent:
 
-The liken-shaped answer is the storage-claiming move a third time:
-naming on the Machine spec, by purpose.
+* **ResourceSlice is the inventory.** A per-node driver publishes
+  each usable device with typed attributes — vendor, product,
+  serial, class, decorated with hwdata's names. This is where bulk
+  hardware belongs, purpose-built for churn and garbage-collected
+  with the node; it is why Machine.status never carries a census.
+  The split is natural: slices carry what works, status.unclaimed
+  carries what doesn't and what would fix it. A device whose driver
+  isn't loaded never reaches a slice — spec.modules stays the gate.
+* **DeviceClass is the purpose vocabulary.** A cluster-scoped name
+  (`zigbee`, `ups`, `transcode`) with CEL selectors over device
+  attributes. The hex vendor IDs live in exactly one object, owned
+  by the deployment, and every workload manifest speaks only the
+  name. Pinning to one physical unit is a serial-number selector; a
+  capability class ("any VAAPI-capable render node") is an attribute
+  expression. Both of the shapes real deployments need — fungible by
+  capability (Jellyfin wants any transcode device) and pinned by
+  identity (NUT wants the UPS on this wall) — are the same
+  mechanism.
+* **Claims do the delivery.** A pod references a claim, the
+  scheduler matches it against the slices (so "run this where the
+  hardware is" is ordinary scheduling — no node labels, no
+  nodeSelector to keep in agreement with physical reality), and at
+  container creation the driver answers with CDI specs naming
+  whatever the node is called this boot. No privileged pods, no
+  hostPath /dev mounts, no enumeration-order names in anyone's
+  YAML.
 
-    spec:
-      devices:
-        zigbee:
-          usb: { vendor: "10c4", product: "ea60" }
-        ups:
-          usb: { vendor: "0463" }
+What liken owns shrinks to the driver: a small program that watches
+sysfs and uevents, publishes ResourceSlices, and answers the
+kubelet's prepare calls with CDI specs. That is the same watcher the
+reporting half builds — one listener, two outputs — and its likely
+home is the machine operator, which already runs on every node with
+API access; the memory envelope argues against a second daemon.
 
-The machine matches each named role against the probed bus — exactly
-one match or a loud refusal — status reports what each role
-resolved to, and the role's *name* becomes the schedulable
-vocabulary: the zigbee2mqtt pod claims `zigbee`, with no hex
-anywhere in a workload manifest. Because the naming happens on the
-spec, the plugin-versus-DRA choice demotes to an implementation
-detail, and "run this wherever the Zigbee stick is" is scheduling,
-not host configuration.
+An earlier version of this design put the naming on the Machine spec
+(a spec.devices map binding role names to matchers, storage-claiming
+style). DRA supersedes it: DeviceClass already is naming-by-purpose,
+at the scope the names actually live (a purpose is deployment
+vocabulary, not a fact about one machine), and the scheduler's
+matching replaces the spec's claim-and-refuse pass. The refusal
+semantics that make storage claiming strict aren't load-bearing for
+devices — allocating one of two matching dongles destroys nothing —
+so the extra Machine API surface wasn't earning its place.
 
-Seen whole, this is udev's policy layer rebuilt as Kubernetes API,
-clause for clause: the match rules become spec matchers, SYMLINK
-becomes the role name (resolved to this boot's node path at
-container-injection time), OWNER/GROUP/MODE dissolve into which pod
-holds the claim, RUN hooks become reconcilers, and the event bus is
-the uevent listener the reporting half already builds. The OS
-declined the host-policy daemon; the API grows the vocabulary; a
-reconciler closes the loop — the same relocation storage claiming
-performed on fstab. The open questions for its design pass: whether
-role names are cluster vocabulary with per-machine bindings (the
-features/registries split, again), what a claim conveys for a
-device exposing several nodes, and re-resolution when hardware is
-re-plugged mid-flight.
+The udev translation still holds, with one clause sharpened: match
+rules become DeviceClass selectors (upstream built the rule engine,
+liken doesn't), SYMLINK's stable name becomes the class name
+resolved to a node path at injection time, OWNER/GROUP/MODE dissolve
+into which pod holds the claim, and the event bus is the uevent
+listener. The OS declines the host-policy daemon; the API grows the
+vocabulary; a reconciler closes the loop.
+
+Open for the design pass: the driver's exact hosting (inside the
+machine operator versus beside it) and whether it is a feature slug
+or standing equipment; how much attribute vocabulary liken
+standardizes versus documents; whether liken ships any DeviceClasses
+or only teaches them; and re-plug semantics — what a standing
+allocation means when its device re-enumerates. The proving
+workloads are already picked: a transcode claim against a render
+node (the lab can fake this today with virtio-gpu), and an
+identity-pinned claim against a real USB device when one is on the
+desk.
 
 Also open: whether module loading can ride the k3s-restart
 convergence tier instead of a reboot (loading is live-capable — the
