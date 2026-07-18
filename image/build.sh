@@ -258,6 +258,16 @@ trust_version="$(cat "$here/../trust/VERSION")"
 cp "$here/../trust/dist/$trust_version/cacert.pem" \
    "$root/etc/ssl/certs/ca-certificates.crt"
 
+# The PCI naming database (see hwdata/fetch.sh): what lets the
+# unclaimed-hardware report say "Red Hat, Inc. Virtio 1.0 GPU"
+# instead of "1af4:1050". Staged at hwdata's conventional path; the
+# dependency is soft, so a reader missing this file degrades to
+# numeric IDs rather than failing.
+hwdata_version="$(cat "$here/../hwdata/VERSION")"
+mkdir -p "$root/usr/share/hwdata"
+cp "$here/../hwdata/dist/$hwdata_version/pci.ids" \
+   "$root/usr/share/hwdata/pci.ids"
+
 # The image carries only the modules the machines will load, plus
 # everything those depend on. Two lists feed this: the OS's own fixed
 # needs (etc/liken/modules.conf) and whatever extra modules the
@@ -307,6 +317,19 @@ cp "$kdist/lib/modules/$release/modules.builtin" \
    "$kdist/lib/modules/$release/modules.order" \
    "$root/lib/modules/$release/"
 depmod --basedir "$root" "$release"
+
+# One index is deliberately *not* depmod's pruned output: the alias
+# table ships complete, from the kernel build, covering every module
+# the kernel could load — not just the ones aboard. It is the
+# unclaimed-hardware report's naming database: when a device shows
+# up that nothing drives, the report matches its modalias here to
+# say "declare usb_storage" (or "this image doesn't carry it"),
+# which a table describing only the shipped modules could never say
+# about the very driver that's missing. Nothing loads modules from
+# this file — init resolves loads through modules.dep, which still
+# describes exactly what shipped.
+cp "$kdist/lib/modules/$release/modules.alias" \
+   "$root/lib/modules/$release/modules.alias"
 
 # The system image: the staged tree as a read-only, mountable
 # filesystem. squashfs because this kernel mounts it with no modules

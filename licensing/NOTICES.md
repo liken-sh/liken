@@ -119,6 +119,17 @@ The Mozilla CA program's root certificates, as extracted and
 published by the curl project. The PEM bundle is its own source form
 and is mirrored under `sources/trust/`.
 
+## The PCI naming database (`/usr/share/hwdata/pci.ids`)
+
+License: BSD-3-Clause (dual-licensed with GPL-2.0-or-later; liken
+redistributes it under the BSD option). Copyright Martin Mares and
+Albert Pool.
+
+The pci.ids compilation, as snapshotted by the hwdata project: the
+database that names PCI vendors and devices in the Machine's
+unclaimed-hardware report. The file is its own source form and is
+mirrored under `sources/hwdata/`.
+
 ## liken's programs and their Go dependencies
 
 liken's binaries (`/liken`, the operators, the log relays, and the

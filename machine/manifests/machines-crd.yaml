@@ -726,6 +726,39 @@ spec:
                             type: string
                           serial:
                             type: string
+                    unclaimed:
+                      type: array
+                      description: >-
+                        Devices the kernel enumerated but nothing
+                        drives: hardware waiting on a module that
+                        spec.modules doesn't declare. This is the
+                        gap, never the census — a machine whose
+                        hardware is fully driven reports nothing
+                        here. Each entry names the device in words,
+                        the candidate modules whose alias patterns
+                        match its fingerprint, and the fix: declare
+                        a candidate the image carries, or upgrade
+                        to a release that carries one.
+                      x-kubernetes-list-type: map
+                      x-kubernetes-list-map-keys: [modalias]
+                      items:
+                        type: object
+                        required: [modalias, bus]
+                        properties:
+                          modalias:
+                            type: string
+                          bus:
+                            type: string
+                          name:
+                            type: string
+                          class:
+                            type: string
+                          candidates:
+                            type: array
+                            items:
+                              type: string
+                          message:
+                            type: string
                 firmware:
                   type: object
                   description: >-

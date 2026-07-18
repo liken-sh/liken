@@ -86,6 +86,7 @@ type factsInputs struct {
 	registries  machine.RegistriesStatus
 	firstSync   *timeSync
 	timeSources []string
+	unclaimed   []machine.UnclaimedDevice
 }
 
 // publishFacts returns the facts it wrote, wrapped in the guarded
@@ -108,6 +109,7 @@ func publishFacts(in factsInputs) *factsFile {
 		Hardware: machine.HardwareStatus{
 			CPUs:         runtime.NumCPU(),
 			BlockDevices: discoverBlockDevices(),
+			Unclaimed:    in.unclaimed,
 		},
 		Firmware: firmwareFacts(efiVarsDir),
 		Storage:  in.storage,

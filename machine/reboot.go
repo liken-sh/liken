@@ -130,3 +130,52 @@ func ClearRestartIntent(dir string) error {
 	}
 	return err
 }
+
+const modulesIntentFile = "modules-intent.yaml"
+
+// A ModulesIntent asks init to load the staged spec's added kernel
+// modules into the running kernel, for the one machine-spec change
+// that needs no disruption at all: module loading is live-capable
+// (a resident driver claims already-plugged hardware on its own),
+// so an additive spec.modules edit shouldn't cost a drain and a
+// reboot. It is a third sibling file, for the same reasons the
+// restart intent is a sibling rather than a field: invisible to any
+// init that predates it, and consumed like the restart intent — the
+// machine lives on, so leaving the file would load forever. The
+// file's presence is the trigger and the staged store is the truth
+// about what to load; init re-derives the staged manifest's
+// live-applicability for itself and refuses anything that would
+// need a boot, so a stale or duplicate intent is harmless.
+type ModulesIntent struct {
+	Reason       string    `json:"reason"`
+	ManifestHash string    `json:"manifestHash,omitempty"`
+	RequestedAt  time.Time `json:"requestedAt"`
+}
+
+// WriteModulesIntent asks for a live module load.
+func WriteModulesIntent(dir string, intent *ModulesIntent) error {
+	return writeIntent(dir, modulesIntentFile, intent)
+}
+
+// ReadModulesIntent reports the pending intent, or nil when no load
+// has been requested.
+func ReadModulesIntent(dir string) (*ModulesIntent, error) {
+	intent := &ModulesIntent{}
+	present, err := readIntent(dir, modulesIntentFile, intent)
+	if !present || err != nil {
+		return nil, err
+	}
+	return intent, nil
+}
+
+// ClearModulesIntent consumes the intent, in the same clear-before-
+// acting order the restart intent uses and for the same reason: a
+// crash between the two loses one request, and the operator's next
+// pass re-requests it.
+func ClearModulesIntent(dir string) error {
+	err := os.Remove(filepath.Join(dir, modulesIntentFile))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
+}

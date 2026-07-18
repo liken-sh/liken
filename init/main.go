@@ -38,6 +38,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -313,6 +314,11 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	// opens the files, and boot is the only safe moment to rename
 	// them: nothing holds them open (logrotate.go).
 	rotateBootLogs()
+	// The hardware walk waits until here too: every declared module
+	// has loaded and bound whatever it drives, so what is still
+	// undriven now is a real gap, not a race with the boot.
+	catalog := loadHardwareCatalog()
+	unclaimed := discoverUnclaimed(catalog)
 	// Facts wait until here because they live under /run, and
 	// prepareForK3s just mounted a fresh tmpfs there; anything
 	// written earlier would be shadowed by the mount.
@@ -328,8 +334,19 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 		registries:  registries,
 		firstSync:   firstSync,
 		timeSources: clk.sources,
+		unclaimed:   unclaimed,
 	})
 	publishBootClusterManifest(clusterRaw)
+	// The hardware watch keeps that walk true for the machine's
+	// whole life: hot-plugged devices arrive as uevents, and the
+	// report follows them (hardware.go). An image without the
+	// catalog can't judge devices, so it doesn't watch either.
+	if catalog != nil {
+		for _, line := range hardwareTransitions(nil, unclaimed, nil) {
+			fmt.Println(line)
+		}
+		plane.start("the hardware watch", watchHardware(catalog, facts, unclaimed))
+	}
 	// A machine with time sources keeps disciplining its clock
 	// for as long as it runs; a free-running machine has nothing
 	// to follow, and its status already says so.
@@ -353,8 +370,26 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	}
 	rebootRequests := make(chan machine.RebootIntent, 1)
 	restartRequests := make(chan machine.RestartIntent, 1)
+	loadRequests := make(chan machine.ModulesIntent, 1)
 	plane.start("the intent watch", func(ctx context.Context) error {
-		return watchForOperatorIntents(ctx, machine.OperatorRunDir, 2*time.Second, rebootRequests, restartRequests)
+		return watchForOperatorIntents(ctx, machine.OperatorRunDir, 2*time.Second, rebootRequests, restartRequests, loadRequests)
+	})
+	// The module loader consumes the lightest intent: an additive
+	// spec.modules edit applied to the running kernel, no reboot and
+	// no k3s bounce involved (liveload.go). It runs beside the
+	// supervisor rather than inside it because, unlike the other two
+	// intents, k3s is not a party to this one.
+	plane.start("the module loader", func(ctx context.Context) error {
+		store := machine.MachineManifests(machine.MachineStateDir)
+		moduleBase := filepath.Join("/lib/modules", kernelRelease())
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case intent := <-loadRequests:
+				applyModulesIntent(intent, store, moduleBase, facts)
+			}
+		}
 	})
 	// The restart path: everything a k3s bounce may re-render,
 	// gathered while it's at hand (restart.go).

@@ -63,115 +63,64 @@ func labMachine() *machine.Machine {
 	}
 }
 
-func TestStorageDriftSeesNoDriftInTheSameSpec(t *testing.T) {
-	if diffs := storageDrift(labStorage(), labStorage()); len(diffs) != 0 {
-		t.Errorf("identical specs should not drift: %v", diffs)
-	}
-}
-
-func TestStorageDriftNormalizesSizes(t *testing.T) {
-	desired := labStorage()
-	desired.PodStorage.Size = "2048Mi" // the same ask as 2Gi, spelled differently
-	if diffs := storageDrift(desired, labStorage()); len(diffs) != 0 {
-		t.Errorf("2048Mi and 2Gi are the same size: %v", diffs)
-	}
-}
-
-func TestStorageDriftSeesAGrow(t *testing.T) {
-	desired := labStorage()
-	desired.PodStorage.Size = "3Gi"
-	diffs := storageDrift(desired, labStorage())
-	if len(diffs) != 1 || !strings.Contains(diffs[0], "podStorage") {
-		t.Errorf("expected one podStorage diff: %v", diffs)
-	}
-}
-
-func TestStorageDriftSeesAnAddedRole(t *testing.T) {
-	actuated := labStorage()
-	actuated.PodStorage = nil
-	diffs := storageDrift(labStorage(), actuated)
-	if len(diffs) != 1 || !strings.Contains(diffs[0], "declared but not actuated") {
-		t.Errorf("expected an added-role diff: %v", diffs)
-	}
-}
-
-func TestStorageDriftSeesARemovedRole(t *testing.T) {
-	desired := labStorage()
-	desired.PodEphemeral = nil
-	diffs := storageDrift(desired, labStorage())
-	if len(diffs) != 1 || !strings.Contains(diffs[0], "no longer declared") {
-		t.Errorf("expected a removed-role diff: %v", diffs)
-	}
-}
-
-func TestStorageDriftSeesADeviceChange(t *testing.T) {
-	desired := labStorage()
-	desired.ClusterState.Device = "/dev/vdc"
-	diffs := storageDrift(desired, labStorage())
-	if len(diffs) != 1 || !strings.Contains(diffs[0], "device") {
-		t.Errorf("expected a device diff: %v", diffs)
-	}
-}
-
-func TestStorageDriftFallsBackToStringsForUnparseableSizes(t *testing.T) {
-	// Validation will refuse these anyway; drift detection just has to
-	// not panic on them, and string equality is the only comparison
-	// left.
-	desired := labStorage()
-	desired.PodStorage.Size = "a-whole-bunch"
-	actuated := labStorage()
-	actuated.PodStorage.Size = "a-whole-bunch"
-	if diffs := storageDrift(desired, actuated); len(diffs) != 0 {
-		t.Errorf("identical spellings should not drift, parseable or not: %v", diffs)
-	}
-	actuated.PodStorage.Size = "even-more"
-	if diffs := storageDrift(desired, actuated); len(diffs) != 1 {
-		t.Errorf("different spellings should drift: %v", diffs)
-	}
-}
-
-func TestStorageDriftNamesTheRemainder(t *testing.T) {
-	// A remainder role's size is spelled "" in the spec; the diff
-	// message should say "(remainder)" rather than showing nothing.
-	desired := labStorage()
-	desired.ClusterState.Size = "3Gi" // was the remainder
-	diffs := storageDrift(desired, labStorage())
-	if len(diffs) != 1 || !strings.Contains(diffs[0], "(remainder)") {
-		t.Errorf("expected the diff to name the remainder: %v", diffs)
-	}
-}
-
-func TestModulesDriftIgnoresOrderAndRepetition(t *testing.T) {
-	diffs := modulesDrift([]string{"nvidia", "zram", "nvidia"}, []string{"zram", "nvidia"})
-	if len(diffs) != 0 {
-		t.Errorf("the lists are the same set: %v", diffs)
-	}
-}
-
-func TestModulesDriftTreatsNilAndEmptyAlike(t *testing.T) {
-	if diffs := modulesDrift(nil, []string{}); len(diffs) != 0 {
-		t.Errorf("nothing declared, nothing actuated: %v", diffs)
-	}
-}
-
-func TestModulesDriftSeesAnAddedModule(t *testing.T) {
-	diffs := modulesDrift([]string{"nvidia"}, nil)
-	if len(diffs) != 1 || !strings.Contains(diffs[0], "nvidia declared but this boot ran without it") {
-		t.Errorf("got %v", diffs)
-	}
-}
-
-func TestModulesDriftSeesARemovedModule(t *testing.T) {
-	diffs := modulesDrift(nil, []string{"zram"})
-	if len(diffs) != 1 || !strings.Contains(diffs[0], "zram no longer declared") {
-		t.Errorf("got %v", diffs)
-	}
-}
-
-func TestDecideConvergenceStagesOnModulesOnlyDrift(t *testing.T) {
+func TestDecideConvergenceLoadsAddedModulesLive(t *testing.T) {
+	// An additive modules edit is the one machine-spec change that
+	// needs no disruption: the manifest stages (for durability), and
+	// instead of a reboot the operator asks init to load the added
+	// modules into the running kernel.
 	m := labMachine()
 	m.Spec.Modules = []string{"nvidia"}
 	conv := decideConvergence(m, labFacts(), nil, "", turnStandalone)
+	if conv.condition.Reason != "LoadRequested" {
+		t.Fatalf("got %+v", conv.condition)
+	}
+	if !conv.stage || !conv.requestLoad || conv.requestReboot || conv.requestRestart {
+		t.Errorf("an additive modules edit stages and loads, nothing more: %+v", conv)
+	}
+}
+
+func TestLiveLoadNeedsNoPolicyOrTurn(t *testing.T) {
+	// Loading a module is not a disruption: nothing drains, nothing
+	// restarts. So it takes no reboot turn and waits for no Manual
+	// approval, exactly like the sysctls the operator reconciles live.
+	m := labMachine()
+	m.Spec.Modules = []string{"nvidia"}
+	m.Spec.RebootPolicy = machine.RebootManual
+	conv := decideConvergence(m, labFacts(), nil, "", turnAwaiting)
+	if conv.condition.Reason != "LoadRequested" || !conv.requestLoad {
+		t.Errorf("a live load should not wait on policy or turns: %+v", conv.condition)
+	}
+}
+
+func TestModuleRetractionStillConvergesByReboot(t *testing.T) {
+	// Loading is one-way: the kernel offers no safe way to pull a
+	// driver out from under whatever started using it, so retracting
+	// a module keeps the reboot tier.
+	m := labMachine()
+	facts := labFacts()
+	facts.Boot.Modules = []string{"nvidia"}
+	conv := decideConvergence(m, facts, nil, "", turnStandalone)
+	if conv.condition.Reason != "RebootPending" || conv.requestLoad {
+		t.Errorf("a retraction needs the reboot: %+v", conv.condition)
+	}
+}
+
+func TestMixedModuleAndStorageDriftConvergesByReboot(t *testing.T) {
+	m := labMachine()
+	m.Spec.Modules = []string{"nvidia"}
+	m.Spec.Storage.PodStorage.Size = "3Gi"
+	conv := decideConvergence(m, labFacts(), nil, "", turnStandalone)
+	if conv.condition.Reason != "RebootPending" || conv.requestLoad {
+		t.Errorf("storage drift forces the reboot tier: %+v", conv.condition)
+	}
+}
+
+func TestDecideConvergenceStagesOnModulesDrift(t *testing.T) {
+	m := labMachine()
+	facts := labFacts()
+	facts.Boot.Modules = []string{"zram"}
+	m.Spec.Modules = []string{"nvidia"}
+	conv := decideConvergence(m, facts, nil, "", turnStandalone)
 	if conv.condition.Reason != "RebootPending" {
 		t.Fatalf("got %+v", conv.condition)
 	}

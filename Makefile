@@ -39,8 +39,10 @@ SYSTEMDBOOT_VERSION := $(strip $(file <systemd-boot/VERSION))
 SYSTEMDBOOT_DIST := systemd-boot/dist/$(SYSTEMDBOOT_VERSION)
 GRUB_VERSION := $(strip $(file <grub/VERSION))
 GRUB_DIST := grub/dist/$(GRUB_VERSION)
+HWDATA_VERSION := $(strip $(file <hwdata/VERSION))
+HWDATA_DIST := hwdata/dist/$(HWDATA_VERSION)
 
-all: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub licensing init machine-operator cluster-operator logs cli identity image
+all: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata licensing init machine-operator cluster-operator logs cli identity image
 
 # Because the version is part of the artifact's name, a pin bump
 # changes the target path itself and Make rebuilds with no extra
@@ -71,6 +73,13 @@ $(TRUST_DIST)/cacert.pem: trust/VERSION trust/fetch.sh
 	$(MAKE) -C trust
 
 trust: $(TRUST_DIST)/cacert.pem
+
+# The PCI naming database, the file that lets the unclaimed-hardware
+# report name devices in words (see hwdata/fetch.sh).
+$(HWDATA_DIST)/pci.ids: hwdata/VERSION hwdata/fetch.sh
+	$(MAKE) -C hwdata
+
+hwdata: $(HWDATA_DIST)/pci.ids
 
 # mke2fs is the program init execs to make a filesystem on a claimed
 # disk. It is a static binary, vendored (see e2fsprogs/fetch.sh).
@@ -137,7 +146,8 @@ licensing: licensing/dist/LICENSES.md
 # Machine API as Go types) with the operator, so both rebuild when
 # that package changes.
 init/dist/liken: $(wildcard init/*.go) go.mod go.sum \
-		$(wildcard machine/*.go) $(wildcard disks/*.go) $(LIKEN_VERSION_STAMP)
+		$(wildcard machine/*.go) $(wildcard disks/*.go) \
+		$(wildcard hardware/*.go) $(LIKEN_VERSION_STAMP)
 	$(MAKE) -C init
 
 init: init/dist/liken
@@ -252,6 +262,7 @@ $(SYSTEM_IMAGE) $(BOOT_ARCHIVE) &: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_
 		logs/dist/liken-logs-image.tar \
 		$(wildcard logs/manifests/*.yaml) \
 		image/build.sh image/boot-modules.conf \
+		$(HWDATA_DIST)/pci.ids \
 		$(shell find image/etc -type f) image/Makefile
 	$(MAKE) -C image
 
@@ -425,4 +436,4 @@ clean:
 	$(MAKE) -C image clean
 	rm -rf $(IMAGE_DIR)
 
-.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub licensing init machine-operator cluster-operator logs cli identity kubeconfig image run run-once smoke-uefi smoke-bios install install-stick storage release serve clean
+.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata licensing init machine-operator cluster-operator logs cli identity kubeconfig image run run-once smoke-uefi smoke-bios install install-stick storage release serve clean

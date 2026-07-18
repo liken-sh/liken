@@ -34,9 +34,12 @@ modules, inert until declared, making milestone 11's user story
 reboot applies it) a pure edit on any machine.
 
 Shipping everything deletes machinery rather than adding it: the
-build's union-of-declared pruning goes away, and the full
-modules.alias table — which milestone 11's unclaimed-hardware
-report needs to name candidate drivers — comes along for free.
+build's union-of-declared pruning goes away, and the image's one
+deliberate inconsistency heals — milestone 11 already ships the
+kernel's complete modules.alias beside a pruned module tree (its
+report has to name drivers the image doesn't carry), and with the
+whole tree aboard, the alias table and the modules it names finally
+describe the same system.
 
 ## Driver firmware: derived, not curated
 

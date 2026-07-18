@@ -63,6 +63,7 @@ openiscsi_version="$(cat "$here/../open-iscsi/VERSION")"
 nfsutils_version="$(cat "$here/../nfs-utils/VERSION")"
 systemdboot_version="$(cat "$here/../systemd-boot/VERSION")"
 grub_version="$(cat "$here/../grub/VERSION")"
+hwdata_version="$(cat "$here/../hwdata/VERSION")"
 
 cache="$here/cache"
 out="$here/dist/sources"
@@ -229,6 +230,14 @@ mirror "grub/$grub_version" "grub2_$grub_version.dsc" \
 # source form available, and the PEM is that form.
 place "trust/$trust_version" "cacert-$trust_version.pem" \
     "$here/../trust/dist/$trust_version/cacert.pem"
+
+# The PCI naming database: dual-licensed, redistributed under its
+# 3-clause BSD option, which asks only for notices — but the file is
+# its own source form (like the CA bundle), so mirroring it costs
+# one small file and keeps the channel's rule simple: everything a
+# release carries, the channel can hand you the source for.
+place "hwdata/$hwdata_version" "pci.ids" \
+    "$here/../hwdata/dist/$hwdata_version/pci.ids"
 
 echo
 if [[ -d "$out" ]]; then

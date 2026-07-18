@@ -49,7 +49,8 @@ import (
 // and interval are parameters so tests can watch a tempdir quickly;
 // the boot passes the real channel.
 func watchForOperatorIntents(ctx context.Context, dir string, interval time.Duration,
-	reboots chan<- machine.RebootIntent, restarts chan<- machine.RestartIntent) error {
+	reboots chan<- machine.RebootIntent, restarts chan<- machine.RestartIntent,
+	loads chan<- machine.ModulesIntent) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -71,13 +72,31 @@ func watchForOperatorIntents(ctx context.Context, dir string, interval time.Dura
 			fmt.Fprintf(os.Stderr, "liken: reading the restart intent: %v\n", err)
 			restart = &machine.RestartIntent{Reason: "an unreadable restart intent"}
 		}
-		if restart == nil {
+		if restart != nil {
+			if err := machine.ClearRestartIntent(dir); err != nil {
+				fmt.Fprintf(os.Stderr, "liken: consuming the restart intent: %v\n", err)
+			}
+			restarts <- *restart
+		}
+
+		// The modules intent lives and dies like the restart intent
+		// (consumed before delivery, machine lives on), and takes the
+		// lightest disruption of all: none. An unreadable one is still
+		// honored, because the staged store — not the intent — is the
+		// truth about what to load, and the apply re-derives
+		// everything from it.
+		load, err := machine.ReadModulesIntent(dir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "liken: reading the modules intent: %v\n", err)
+			load = &machine.ModulesIntent{Reason: "an unreadable modules intent"}
+		}
+		if load == nil {
 			continue
 		}
-		if err := machine.ClearRestartIntent(dir); err != nil {
-			fmt.Fprintf(os.Stderr, "liken: consuming the restart intent: %v\n", err)
+		if err := machine.ClearModulesIntent(dir); err != nil {
+			fmt.Fprintf(os.Stderr, "liken: consuming the modules intent: %v\n", err)
 		}
-		restarts <- *restart
+		loads <- *load
 	}
 }
 

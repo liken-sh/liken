@@ -1,6 +1,7 @@
 # Device management
 
-Milestone 11 — Explored in the lab; design settling, nothing built
+Milestone 11 — The OS half is built and drilled end to end; the
+Kubernetes half (the DRA driver) awaits its design pass
 
 The question this milestone opened with: how does a shell-less,
 udev-less OS expose `/dev` beyond the basics — USB devices arriving
@@ -110,17 +111,30 @@ be on the machine. Making that true — the image shipping the kernel
 build's entire module tree, the firmware blobs those modules can
 request, and CPU microcode, all inert until something asks — is
 milestone 32 (batteries included), which also carries the slot
-budget and the full modules.alias table this report needs to name
-its candidates.
+budget. The one piece 11 takes for itself is the naming data: the
+image ships the kernel build's *complete* modules.alias (1.8 MB,
+while modules.dep keeps describing only what shipped), because the
+report's whole job is naming drivers the image may not carry, and a
+pruned table cannot name the very module that's missing.
 
-What gets built is the reporting: a netlink uevent listener in init
-and a sysfs walk at boot (the same coldplug replay udev does, but for
-observation), feeding console lines and the Machine's status with
-the same facts. For each device no driver has claimed, the status
-names the candidate modules from the full `modules.alias` table, so
-the message reads "declare ftdi_sio" or "this image doesn't carry
-it" — the status vocabulary's rule that an observation should say
-what would fix it.
+The reporting is built (the hardware package, plus init's
+hardware.go): a sysfs walk over the pci and usb buses at boot — the
+same coldplug replay udev does, but for observation — and a netlink
+uevent listener on the machine plane that re-walks when the
+hardware changes, treating each uevent as a doorbell rather than a
+fact (a re-walk cannot drift; a mirror of event payloads can). Both
+feed the console and the facts file with the same lines, and the
+operator lifts the facts into status on every pass, which is what
+makes a hot-plugged device surface in `kubectl get machine` within
+seconds, no reboot involved. For each device no driver has claimed,
+the status names the candidate modules from the full alias table —
+every match, because one fingerprint matching several drivers (uas
+and usb_storage for one stick) is normal — and a message phrased as
+the fix: "declare usb_storage or uas in spec.modules" when the
+image carries them, "upgrade to a release that does" when it
+doesn't. The judgment excludes devices only builtin drivers could
+claim and devices no loadable module matches at all (host bridges,
+platform stubs): a report an operator cannot act on is noise.
 
 Status stays small by reporting the gap, never the census. A machine
 whose hardware is fully driven reports nothing — like conditions,
@@ -128,19 +142,59 @@ absence is the healthy state. The full device inventory is not
 status material: anyone who needs it can read `/sys` from a
 workload, which is how the drills themselves observed the machine.
 
-The report should name hardware the way an operator knows it, not in
-hex, and the three pieces of that cost differently. USB devices
-carry their manufacturer and product strings in the hardware itself
-— the kernel reads them at enumeration, so those names are free. PCI
-devices carry only numeric IDs; the names lspci prints come from the
-pci.ids database (the hwdata project, ~1.2 MB of plain text), which
-liken vendors as a pinned flat file in the first phase, the same
-shape as shipping the full modules.alias: a small image cost so the
-status can say "Red Hat Virtio GPU" instead of "1af4:1050". PCI
-class codes are a small spec-defined enum that lives as a Go table,
-no database needed. The pci.ids dependency stays soft — the reporter
-falls back to numeric IDs when the file is missing — and hwdata's
-notices join the licensing domain like every other vendored pin.
+One deliberate absence, learned in the lab rather than designed in
+advance: there is no HardwareClaimed condition, though the report
+looks like modules and features at first glance. Conditions judge
+asks — a declared module that didn't load is a promise unkept — but
+unclaimed devices are hardware nobody has asked anything about, and
+undriven is a normal permanent state: every QEMU guest carries a
+VGA adapter (wanting `bochs`) no server image drives, and a
+headless machine with a GPU leaves it undriven by design. A
+condition would read every one of those machines Degraded forever.
+So the report follows the undeclared-disk precedent — inventory in
+status, loud on the console, judged by nobody — until a person
+declares the driver, at which point status.modules judges the ask.
+
+The report names hardware the way an operator knows it, not in hex,
+and the three pieces of that cost differently. USB devices carry
+their manufacturer and product strings in the hardware itself — the
+kernel reads them at enumeration, so those names are free (an
+undriven interface borrows its parent device's strings, since leaf
+drivers bind interfaces and the strings live on the device). PCI
+devices carry only numeric IDs; the names lspci prints come from
+the pci.ids database, which liken vendors as a pinned flat file
+(the hwdata domain), the same shape as shipping the full
+modules.alias: a small image cost so the status can say "Red Hat,
+Inc. Virtio 1.0 GPU" instead of "1af4:1050". PCI class codes are a
+small spec-defined enum that lives as a Go table, no database
+needed. The pci.ids dependency stays soft — the reporter falls back
+to numeric IDs when the file is missing — and hwdata's notice and
+source mirror joined the licensing domain like every other vendored
+pin.
+
+The second drill (2026-07-18) ran the whole user story on the dev
+cluster, one machine, no udev anywhere: a stick hot-plugged over
+QMP surfaced in status.hardware.unclaimed within seconds, named
+from its own strings, candidates uas and usb_storage from the full
+alias table, message naming the spec.modules edit; the edit staged,
+the conductor granted the reboot, and the next boot loaded the
+driver and bound the stick before Kubernetes came up — after which
+the walk reports nothing, which is the point. Two findings came
+home. The condition question above was settled by QEMU's own VGA
+adapter, unclaimed on every guest. And status.hardware.blockDevices
+was a boot-time snapshot: the rebooted walk ran before the stick's
+SCSI probe finished, so /dev/sda served pods while the inventory
+didn't list it. The uevent watcher now refreshes the disk inventory
+in the same republish it does for unclaimed devices — the probe's
+own uevents are the doorbell — so blockDevices is as live as the
+report, and a hot-plugged disk whose driver is already declared
+appears there within seconds of the plug. Proving that surfaced its
+own lesson: coalescing uevent bursts by waiting for quiet is a trap
+on a Kubernetes node, whose container churn emits uevents more or
+less continuously (one crash-looping pod held the watcher captive
+for minutes), so the settle has a hard ceiling and simply walks
+during the noise — walks are cheap and idempotent, and honesty
+beats coalescing.
 
 ## The Kubernetes half: DRA
 
@@ -232,9 +286,28 @@ node (the lab can fake this today with virtio-gpu), and an
 identity-pinned claim against a real USB device when one is on the
 desk.
 
-Also open: whether module loading can ride the k3s-restart
-convergence tier instead of a reboot (loading is live-capable — the
-drills proved device-first binding — so it could plausibly converge
-even lighter); and real GPU compute stacks, which no emulation can
-stand in for. Firmware and everything else the image must carry is
-milestone 32's.
+One open question closed itself harder than expected: module
+loading doesn't ride the k3s-restart tier, it converges with no
+disruption at all. An *additive* spec.modules edit — storage
+untouched, nothing retracted — stages the manifest for durability
+and then asks init, over a third intent file beside the reboot and
+restart intents, to load the additions into the running kernel.
+Init re-derives the staged manifest's live-applicability for itself
+(the same shared drift functions the operator used, so the two can
+never disagree) and refuses anything that would need a boot;
+promotion comes after the loads, so a module that panics the kernel
+leaves its manifest staged for the rejection machinery rather than
+enshrined as proven. There is no policy gate and no reboot turn,
+the same terms as the sysctls the operator reconciles live: the
+gates exist for disruptions, and this isn't one. Retraction keeps
+the reboot tier, because loading is one-way. The drill: plug a
+stick, watch it report unclaimed, declare usb-storage, and the
+device is claimed five seconds later — same boot, nothing drained,
+the console narrating "spec applied in place: usb-storage loaded
+without a reboot" and then "now driven by usb-storage" as the
+resident driver binds the already-plugged hardware, exactly the
+device-first order the first drills proved.
+
+Also open: real GPU compute stacks, which no emulation can stand in
+for. Firmware and everything else the image must carry is milestone
+32's.

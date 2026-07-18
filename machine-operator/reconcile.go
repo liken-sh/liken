@@ -65,6 +65,17 @@ func carryOutConvergence(conv convergence, store machine.ManifestStore, what str
 		}
 		fmt.Printf("requested a k3s restart to apply %s %.12s\n", what, conv.hash)
 	}
+	if conv.requestLoad {
+		intent := &machine.ModulesIntent{
+			Reason:       "loading the staged " + what + "'s added modules",
+			ManifestHash: conv.hash,
+			RequestedAt:  now,
+		}
+		if err := machine.WriteModulesIntent(machine.OperatorRunDir, intent); err != nil {
+			return failed(err)
+		}
+		fmt.Printf("requested a live module load to apply %s %.12s\n", what, conv.hash)
+	}
 	return conv.condition
 }
 
@@ -154,6 +165,21 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	// honored can still name modules the booted image never carried.
 	status.Conditions = api.SetCondition(status.Conditions,
 		modulesCondition(status.Modules), now)
+
+	// The unclaimed-hardware report deliberately has no condition,
+	// though it looks like modules and features at first glance. The
+	// difference is that those judge *asks* — a declared module that
+	// didn't load is a promise unkept — while unclaimed devices are
+	// hardware nobody has asked anything about, and undriven is a
+	// normal permanent state: every QEMU guest carries a VGA adapter
+	// no server image drives, and a headless machine with a GPU
+	// leaves it undriven by design. A condition would read every one
+	// of those machines Degraded forever. So the report follows the
+	// undeclared-disk precedent instead: inventory in the status
+	// (hardware.unclaimed rides in from the facts, live, because
+	// init's uevent watcher republishes on every hot-plug), loud on
+	// the console, and judged by nobody until a person declares the
+	// driver — at which point status.modules judges the ask.
 
 	// Features judge what the boot reported, on the same terms as
 	// modules. The split from ClusterConverged is the point: the

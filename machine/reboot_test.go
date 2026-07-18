@@ -131,6 +131,60 @@ func TestRestartIntentIsItsOwnFile(t *testing.T) {
 	}
 }
 
+func TestModulesIntentRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	want := &ModulesIntent{
+		Reason:       "loading the staged spec's added modules",
+		ManifestHash: "d29abd212304",
+		RequestedAt:  time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC),
+	}
+	if err := WriteModulesIntent(dir, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadModulesIntent(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.Reason != want.Reason || got.ManifestHash != want.ManifestHash {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestReadModulesIntentAbsentMeansNoRequest(t *testing.T) {
+	intent, err := ReadModulesIntent(t.TempDir())
+	if intent != nil || err != nil {
+		t.Errorf("no file should mean nil, nil: %v %v", intent, err)
+	}
+}
+
+func TestClearModulesIntentConsumesTheFileAndToleratesAbsence(t *testing.T) {
+	dir := t.TempDir()
+	if err := WriteModulesIntent(dir, &ModulesIntent{Reason: "testing"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ClearModulesIntent(dir); err != nil {
+		t.Fatal(err)
+	}
+	if intent, err := ReadModulesIntent(dir); intent != nil || err != nil {
+		t.Errorf("a cleared intent must be gone: %v %v", intent, err)
+	}
+	if err := ClearModulesIntent(dir); err != nil {
+		t.Errorf("clearing an absent intent must not error: %v", err)
+	}
+}
+
+func TestModulesIntentIsItsOwnFile(t *testing.T) {
+	// Like the restart intent: invisible to the reboot reader, so an
+	// older init that knows only reboots sees nothing at all.
+	dir := t.TempDir()
+	if err := WriteModulesIntent(dir, &ModulesIntent{Reason: "testing"}); err != nil {
+		t.Fatal(err)
+	}
+	if reboot, err := ReadRebootIntent(dir); reboot != nil || err != nil {
+		t.Errorf("a modules intent must not read as a reboot intent: %v %v", reboot, err)
+	}
+}
+
 func TestWriteRebootIntentNeedsItsChannel(t *testing.T) {
 	// The channel directory is init's to create. If the operator
 	// writes before it exists, that is a bug to surface, not a reason

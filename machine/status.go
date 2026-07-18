@@ -222,6 +222,55 @@ type HardwareStatus struct {
 	// it. An attached-but-undeclared disk shows up here, which is how
 	// you notice one.
 	BlockDevices []BlockDevice `json:"blockDevices,omitempty"`
+
+	// Unclaimed is every device the kernel enumerated but nothing
+	// drives: hardware waiting on a module that spec.modules doesn't
+	// declare. It is the gap, never the census — a machine whose
+	// hardware is fully driven reports nothing here, the way healthy
+	// conditions read True and a healthy fleet listing is boring. The
+	// full inventory of working devices is deliberately not status
+	// material; workloads reach it through /sys, and claimable
+	// devices belong to ResourceSlices.
+	Unclaimed []UnclaimedDevice `json:"unclaimed,omitempty"`
+}
+
+// UnclaimedDevice is one enumerated-but-undriven device, reported
+// with everything an operator needs to fix it: the device named in
+// words, and the candidate modules whose alias patterns match its
+// fingerprint. Only devices some loadable module could drive appear
+// at all — a device the kernel build has no module for (a host
+// bridge, a platform stub) is not actionable, and reporting it would
+// bury the fixable gaps in noise.
+type UnclaimedDevice struct {
+	// Modalias is the kernel's fingerprint for this device, the same
+	// string it announces in uevents and matches driver patterns
+	// against. It identifies the device precisely when the words
+	// above it don't.
+	Modalias string `json:"modalias"`
+
+	// Bus is where the device lives: pci or usb.
+	Bus string `json:"bus"`
+
+	// Name is the device in words — a USB device's own manufacturer
+	// and product strings, a PCI device's names from the pci.ids
+	// database — falling back to numeric vendor:device IDs when no
+	// better name exists.
+	Name string `json:"name,omitempty"`
+
+	// Class is the device's coarse kind (mass-storage, display,
+	// network), decoded from the bus's class code.
+	Class string `json:"class,omitempty"`
+
+	// Candidates are the loadable modules whose alias patterns match
+	// this device, in the kernel build's preference order. More than
+	// one is normal (USB storage matches uas and usb_storage); the
+	// choice belongs to whoever edits spec.modules.
+	Candidates []string `json:"candidates,omitempty"`
+
+	// Message says what would fix it, like every message in this
+	// status: declare a candidate when the image carries one, or get
+	// an image that carries it when none is aboard.
+	Message string `json:"message,omitempty"`
 }
 
 // BlockDevice is one disk as the machine observed it, straight from

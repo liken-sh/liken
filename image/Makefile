@@ -30,6 +30,7 @@ KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 K3S_VERSION := $(strip $(file <../k3s/VERSION))
 XTABLES_VERSION := $(strip $(file <../xtables/VERSION))
 TRUST_VERSION := $(strip $(file <../trust/VERSION))
+HWDATA_VERSION := $(strip $(file <../hwdata/VERSION))
 
 # The prerequisites here mirror the ones the root Makefile's rule
 # declares (from its side of the directory boundary); when either
@@ -41,6 +42,7 @@ $(DIST)/liken.sqfs $(DIST)/boot.cpio &: build.sh boot-modules.conf \
 		../k3s/dist/$(K3S_VERSION)/k3s \
 		../xtables/dist/$(XTABLES_VERSION)/bin/xtables-legacy-multi \
 		../trust/dist/$(TRUST_VERSION)/cacert.pem \
+		../hwdata/dist/$(HWDATA_VERSION)/pci.ids \
 		$(OPENISCSI_DIST)/iscsid $(OPENISCSI_DIST)/iscsiadm \
 		$(OPENISCSI_DIST)/iscsid-image.tar \
 		$(wildcard ../open-iscsi/manifests/*.yaml) \

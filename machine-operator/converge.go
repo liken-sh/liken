@@ -23,8 +23,6 @@ package main
 
 import (
 	"fmt"
-	"maps"
-	"slices"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -32,98 +30,6 @@ import (
 	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/machine"
 )
-
-// storageDrift compares the declared storage against what the boot
-// actuated, role by role, with sizes normalized (2048Mi and 2Gi
-// declare the same thing). The returned diffs are written for humans;
-// they appear verbatim in condition messages. Sysctls and node labels
-// never count as drift: the operator already reconciles those live,
-// so a reboot would apply nothing that isn't already applied.
-func storageDrift(desired, actuated machine.StorageSpec) []string {
-	var diffs []string
-	desiredRoles := rolesByName(desired)
-	actuatedRoles := rolesByName(actuated)
-	for _, name := range machine.StorageRoleNames {
-		d, dok := desiredRoles[name]
-		a, aok := actuatedRoles[name]
-		switch {
-		case dok && !aok:
-			diffs = append(diffs, fmt.Sprintf("%s: declared but not actuated", name))
-		case !dok && aok:
-			diffs = append(diffs, fmt.Sprintf("%s: actuated but no longer declared", name))
-		case dok && aok:
-			if d.Device != a.Device {
-				diffs = append(diffs, fmt.Sprintf("%s: device %s declared, %s actuated", name, d.Device, a.Device))
-			}
-			if !sameSize(d.Size, a.Size) {
-				diffs = append(diffs, fmt.Sprintf("%s: size %s declared, %s actuated", name, orRemainder(d.Size), orRemainder(a.Size)))
-			}
-		}
-	}
-	return diffs
-}
-
-// modulesDrift compares the declared module list against the one the
-// boot ran with, as sets: order and repetition carry no meaning, so
-// neither may count as drift. The actuated side is the boot record's
-// copy of the ask, not the load outcomes, and that is deliberate: a
-// declared module the image lacked still counts as actuated, because
-// rebooting again with the same image would change nothing. The
-// ModulesLoaded condition is what reports that problem, and its fix
-// is a new image, not a reboot.
-func modulesDrift(desired, actuated []string) []string {
-	want := map[string]bool{}
-	for _, name := range desired {
-		want[name] = true
-	}
-	have := map[string]bool{}
-	for _, name := range actuated {
-		have[name] = true
-	}
-	var diffs []string
-	for _, name := range slices.Sorted(maps.Keys(want)) {
-		if !have[name] {
-			diffs = append(diffs, fmt.Sprintf("modules: %s declared but this boot ran without it", name))
-		}
-	}
-	for _, name := range slices.Sorted(maps.Keys(have)) {
-		if !want[name] {
-			diffs = append(diffs, fmt.Sprintf("modules: %s no longer declared but this boot ran with it", name))
-		}
-	}
-	return diffs
-}
-
-func rolesByName(spec machine.StorageSpec) map[machine.StorageRoleName]machine.DeclaredRole {
-	byName := map[machine.StorageRoleName]machine.DeclaredRole{}
-	for _, role := range spec.Roles() {
-		byName[role.Name] = role
-	}
-	return byName
-}
-
-// sameSize compares two size declarations by the number of bytes they
-// describe rather than by their spelling. An unparseable size (which
-// validation will refuse anyway) falls back to string comparison
-// rather than panicking here.
-func sameSize(a, b string) bool {
-	if a == "" || b == "" {
-		return a == b
-	}
-	aBytes, aErr := machine.ParseSize(a)
-	bBytes, bErr := machine.ParseSize(b)
-	if aErr != nil || bErr != nil {
-		return a == b
-	}
-	return aBytes == bBytes
-}
-
-func orRemainder(size string) string {
-	if size == "" {
-		return "(remainder)"
-	}
-	return size
-}
 
 // validateStaging checks everything admission can't, because these
 // checks need the actual machine: CEL rules in the CRD compare the
@@ -227,6 +133,7 @@ type convergence struct {
 	stage          bool   // write manifest to the machineState filesystem
 	requestReboot  bool   // write the reboot intent for init
 	requestRestart bool   // write the restart intent: a k3s bounce applies it
+	requestLoad    bool   // write the modules intent: init loads the staged additions live
 	withdraw       bool   // remove the staged manifest; the spec no longer wants it
 	clearRejection bool   // remove the rejection record; the spec it blocks is gone
 	manifest       []byte // the bytes to stage
@@ -357,8 +264,8 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 		return factsIncomplete("SpecConverged")
 	}
 
-	drift := append(storageDrift(m.Spec.Storage, facts.Boot.Storage),
-		modulesDrift(m.Spec.Modules, facts.Boot.Modules)...)
+	storageDiffs := machine.StorageDrift(m.Spec.Storage, facts.Boot.Storage)
+	drift := append(storageDiffs, machine.ModulesDrift(m.Spec.Modules, facts.Boot.Modules)...)
 	if len(drift) == 0 {
 		return convergedWithCleanup(
 			converged("SpecConverged", "Converged", "this boot actuated the current spec"),
@@ -391,6 +298,26 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 		hash:     hash,
 		stage:    stagedHash != hash, // idempotence: skip the write when these exact bytes are already staged
 	}
+
+	// The one machine-spec change that needs no disruption: adding
+	// modules. Loading is live-capable — the kernel binds a resident
+	// driver to already-plugged hardware on its own — so when the
+	// storage is untouched and no module is being retracted, the
+	// manifest stages for durability and init loads the additions
+	// into the running kernel. No policy gate and no reboot turn,
+	// exactly like the sysctls the operator reconciles live: the
+	// gates exist for disruptions, and this isn't one. (Retraction
+	// stays a reboot: loading is one-way, because the kernel offers
+	// no safe way to pull a driver out from under whatever started
+	// using it.)
+	_, retracted := machine.ModuleSetDiff(m.Spec.Modules, facts.Boot.Modules)
+	if len(storageDiffs) == 0 && len(retracted) == 0 {
+		c.requestLoad = true
+		c.condition = notConverged("SpecConverged", "LoadRequested",
+			fmt.Sprintf("module load requested to apply the staged spec (%.12s) in place: %s", hash, diffs))
+		return c
+	}
+
 	gateDisruption(&c, "SpecConverged", m.Spec.RebootPolicyOrDefault(), t, false,
 		fmt.Sprintf("spec staged for the next boot (%.12s); rebootPolicy is Manual, so reboot the machine (or set rebootPolicy: Auto) to apply: %s", hash, diffs),
 		fmt.Sprintf("spec staged for the next boot (%.12s); waiting for the cluster to grant a reboot turn: %s", hash, diffs),

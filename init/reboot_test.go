@@ -16,18 +16,19 @@ import (
 )
 
 // watchIntents arms the watcher over a tempdir with fast polls and
-// hands back both channels.
-func watchIntents(t *testing.T) (string, chan machine.RebootIntent, chan machine.RestartIntent) {
+// hands back all three channels.
+func watchIntents(t *testing.T) (string, chan machine.RebootIntent, chan machine.RestartIntent, chan machine.ModulesIntent) {
 	t.Helper()
 	dir := t.TempDir()
 	reboots := make(chan machine.RebootIntent, 1)
 	restarts := make(chan machine.RestartIntent, 1)
-	go watchForOperatorIntents(t.Context(), dir, time.Millisecond, reboots, restarts)
-	return dir, reboots, restarts
+	loads := make(chan machine.ModulesIntent, 1)
+	go watchForOperatorIntents(t.Context(), dir, time.Millisecond, reboots, restarts, loads)
+	return dir, reboots, restarts, loads
 }
 
 func TestWatchDeliversARebootIntent(t *testing.T) {
-	dir, reboots, _ := watchIntents(t)
+	dir, reboots, _, _ := watchIntents(t)
 
 	// A few empty polls happen first: no file, no delivery.
 	select {
@@ -62,7 +63,7 @@ func TestWatchHonorsAnUnreadableRebootIntent(t *testing.T) {
 	restarts := make(chan machine.RestartIntent, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := watchForOperatorIntents(ctx, dir, time.Millisecond, reboots, restarts); err != nil {
+	if err := watchForOperatorIntents(ctx, dir, time.Millisecond, reboots, restarts, make(chan machine.ModulesIntent, 1)); err != nil {
 		t.Fatal(err)
 	}
 	intent := <-reboots
@@ -72,7 +73,7 @@ func TestWatchHonorsAnUnreadableRebootIntent(t *testing.T) {
 }
 
 func TestWatchConsumesARestartIntentAndKeepsWatching(t *testing.T) {
-	dir, _, restarts := watchIntents(t)
+	dir, _, restarts, _ := watchIntents(t)
 
 	want := machine.RestartIntent{Reason: "applying the staged cluster document"}
 	if err := machine.WriteRestartIntent(dir, &want); err != nil {
@@ -114,6 +115,49 @@ func TestWatchConsumesARestartIntentAndKeepsWatching(t *testing.T) {
 	}
 }
 
+func TestWatchConsumesAModulesIntentAndKeepsWatching(t *testing.T) {
+	dir, _, _, loads := watchIntents(t)
+
+	want := machine.ModulesIntent{Reason: "loading the staged spec's added modules", ManifestHash: "abc"}
+	if err := machine.WriteModulesIntent(dir, &want); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-loads:
+		if got.Reason != want.Reason || got.ManifestHash != want.ManifestHash {
+			t.Errorf("got %+v, want %+v", got, want)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the watcher never delivered the modules intent")
+	}
+
+	// Consumed, like the restart intent: the machine lives on, so the
+	// file must not fire twice.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if intent, _ := machine.ReadModulesIntent(dir); intent == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the delivered intent should be consumed")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// And the watch is still alive for the next one.
+	if err := machine.WriteModulesIntent(dir, &machine.ModulesIntent{Reason: "another edit"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-loads:
+		if got.Reason != "another edit" {
+			t.Errorf("got %+v", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the watch must outlive a delivered load")
+	}
+}
+
 func TestWatchPrefersARebootWhenBothIntentsStand(t *testing.T) {
 	// A reboot re-renders everything a restart would, so when both
 	// files exist the heavier one wins and the restart file simply
@@ -129,7 +173,7 @@ func TestWatchPrefersARebootWhenBothIntentsStand(t *testing.T) {
 	restarts := make(chan machine.RestartIntent, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := watchForOperatorIntents(ctx, dir, time.Millisecond, reboots, restarts); err != nil {
+	if err := watchForOperatorIntents(ctx, dir, time.Millisecond, reboots, restarts, make(chan machine.ModulesIntent, 1)); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -157,7 +201,9 @@ func TestWatchHonorsAnUnreadableRestartIntent(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 
 	done := make(chan error, 1)
-	go func() { done <- watchForOperatorIntents(ctx, dir, time.Millisecond, reboots, restarts) }()
+	go func() {
+		done <- watchForOperatorIntents(ctx, dir, time.Millisecond, reboots, restarts, make(chan machine.ModulesIntent, 1))
+	}()
 	intent := <-restarts
 	cancel()
 	if err := <-done; err != nil {
