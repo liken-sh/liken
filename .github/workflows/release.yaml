@@ -213,9 +213,7 @@ jobs:
           DIGEST=$(sha256sum "releases/dist/$VERSION/release.yaml" | cut -d' ' -f1)
           PREVIOUS=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)
           {
-            echo "Published to https://releases.liken.sh/$VERSION/release.yaml —"
-            echo "the artifacts, their licenses, and the corresponding"
-            echo "sources all live on the channel."
+            echo "Published to https://releases.liken.sh/$VERSION/release.yaml."
             echo
             echo "To adopt it, add the catalog entry to your Cluster's"
             echo "spec.releases.catalog and set spec.version:"
