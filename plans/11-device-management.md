@@ -201,11 +201,17 @@ into which pod holds the claim, and the event bus is the uevent
 listener. The OS declines the host-policy daemon; the API grows the
 vocabulary; a reconciler closes the loop.
 
-Open for the design pass: the driver's exact hosting (inside the
-machine operator versus beside it) and whether it is a feature slug
-or standing equipment; how much attribute vocabulary liken
-standardizes versus documents; and whether liken ships any
-DeviceClasses or only teaches them.
+Three hosting questions are settled. The driver lives inside the
+machine operator — one more goroutine in a process already on every
+node, and the memory envelope has no room for a second daemon. It is
+standing equipment, not a feature slug: slugs exist to keep optional
+heft out of the default footprint, and there is no heft here to opt
+out of — a machine that cannot report its own hardware gaps is
+failing at its basic job. And liken ships no DeviceClasses: a class
+encodes a deployment's purposes, so liken shipping one would be
+guessing at someone else's vocabulary. The documentation teaches the
+shape; deployments write their own. Still open for the design pass:
+how much attribute vocabulary liken standardizes versus documents.
 
 Re-plug semantics — what a standing allocation means when its
 device disappears — has an upstream answer arriving rather than a
