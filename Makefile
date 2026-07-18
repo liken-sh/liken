@@ -161,7 +161,8 @@ init: init/dist/liken
 # the raw API client, so both rebuild when it changes.
 machine-operator/dist/liken-machine-operator-image.tar: $(wildcard machine-operator/*.go) \
 		go.mod go.sum image/oci.sh \
-		$(wildcard machine/*.go) $(wildcard kubernetes/*.go) $(LIKEN_VERSION_STAMP)
+		$(wildcard machine/*.go) $(wildcard kubernetes/*.go) $(wildcard hardware/*.go) \
+		$(HWDATA_DIST)/pci.ids $(LIKEN_VERSION_STAMP)
 	$(MAKE) -C machine-operator
 
 machine-operator: machine-operator/dist/liken-machine-operator-image.tar

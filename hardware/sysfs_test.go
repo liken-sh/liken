@@ -138,6 +138,111 @@ func TestDiscoverNamesPCIDevicesNumericallyWithoutADatabase(t *testing.T) {
 	}
 }
 
+func TestDiscoverRecordsEachDeviceAddress(t *testing.T) {
+	sysfs := newFakeSysfs(t)
+	sysfs.device("pci", "0000:00:02.0", "", map[string]string{
+		"modalias": "pci:v00001AF4d00001050sv00001AF4sd00001100bc03sc80i00",
+		"vendor":   "0x1af4",
+		"device":   "0x1050",
+		"class":    "0x038000",
+	})
+	sysfs.device("usb", "2-1:1.0", "uas", map[string]string{
+		"modalias":        "usb:v46F4p0001d0100dc00dsc00dp00ic08isc06ip50in00",
+		"bInterfaceClass": "08",
+	})
+
+	devices := DiscoverDevices(sysfs.root, nil)
+
+	if len(devices) != 2 {
+		t.Fatalf("devices = %+v, want 2", devices)
+	}
+	if devices[0].Address != "0000:00:02.0" {
+		t.Errorf("Address = %q, want the sysfs directory name", devices[0].Address)
+	}
+	if devices[1].Address != "2-1:1.0" {
+		t.Errorf("Address = %q, want the sysfs directory name", devices[1].Address)
+	}
+}
+
+func TestDiscoverBorrowsTheParentSerialForUSBInterfaces(t *testing.T) {
+	sysfs := newFakeSysfs(t)
+	sysfs.device("usb", "2-1", "usb", map[string]string{
+		"modalias":     "usb:v46F4p0001d0100dc00dsc00dp00ic00isc00ip00in00",
+		"manufacturer": "QEMU",
+		"product":      "QEMU USB HARDDRIVE",
+		"serial":       "1-0000:00:04.0-1",
+	})
+	sysfs.device("usb", "2-1:1.0", "uas", map[string]string{
+		"modalias":        "usb:v46F4p0001d0100dc00dsc00dp00ic08isc06ip50in00",
+		"bInterfaceClass": "08",
+	})
+
+	devices := DiscoverDevices(sysfs.root, nil)
+
+	var iface *Device
+	for i := range devices {
+		if devices[i].Address == "2-1:1.0" {
+			iface = &devices[i]
+		}
+	}
+	if iface == nil {
+		t.Fatal("the interface was not discovered")
+	}
+	if iface.Serial != "1-0000:00:04.0-1" {
+		t.Errorf("Serial = %q, want the parent device's serial", iface.Serial)
+	}
+}
+
+func TestDiscoverRecordsVendorAndProductIDs(t *testing.T) {
+	sysfs := newFakeSysfs(t)
+	sysfs.device("pci", "0000:00:02.0", "bochs", map[string]string{
+		"modalias": "pci:v00001234d00001111sv00001AF4sd00001100bc03sc00i00",
+		"vendor":   "0x1234",
+		"device":   "0x1111",
+		"class":    "0x030000",
+	})
+	sysfs.device("usb", "2-1", "usb", map[string]string{
+		"modalias":  "usb:v46F4p0001d0100dc00dsc00dp00ic00isc00ip00in00",
+		"idVendor":  "46f4",
+		"idProduct": "0001",
+	})
+	sysfs.device("usb", "2-1:1.0", "uas", map[string]string{
+		"modalias":        "usb:v46F4p0001d0100dc00dsc00dp00ic08isc06ip50in00",
+		"bInterfaceClass": "08",
+	})
+
+	devices := DiscoverDevices(sysfs.root, nil)
+
+	byAddress := map[string]Device{}
+	for _, d := range devices {
+		byAddress[d.Address] = d
+	}
+	pci := byAddress["0000:00:02.0"]
+	if pci.Vendor != "1234" || pci.Product != "1111" {
+		t.Errorf("pci ids = %q:%q, want 1234:1111", pci.Vendor, pci.Product)
+	}
+	iface := byAddress["2-1:1.0"]
+	if iface.Vendor != "46f4" || iface.Product != "0001" {
+		t.Errorf("interface ids = %q:%q, want the parent's 46f4:0001", iface.Vendor, iface.Product)
+	}
+}
+
+func TestDiscoverLeavesSerialEmptyWhenTheHardwareCarriesNone(t *testing.T) {
+	sysfs := newFakeSysfs(t)
+	sysfs.device("pci", "0000:00:02.0", "bochs", map[string]string{
+		"modalias": "pci:v00001234d00001111sv00001AF4sd00001100bc03sc00i00",
+		"vendor":   "0x1234",
+		"device":   "0x1111",
+		"class":    "0x030000",
+	})
+
+	devices := DiscoverDevices(sysfs.root, nil)
+
+	if len(devices) != 1 || devices[0].Serial != "" {
+		t.Errorf("devices = %+v, want one with no serial", devices)
+	}
+}
+
 func TestDiscoverSkipsDevicesWithoutAModalias(t *testing.T) {
 	sysfs := newFakeSysfs(t)
 	sysfs.device("usb", "usb2", "usb", map[string]string{

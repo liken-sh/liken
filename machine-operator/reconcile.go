@@ -220,6 +220,18 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	// pass settles them.
 	node, nodeErr := getNode(c, m.Metadata.Name)
 
+	// The device inventory converges on the same cadence as
+	// everything else: one sysfs walk per pass, published as this
+	// node's ResourceSlice (dra.go). It waits on the Node read
+	// because the slice is owned by the Node's UID; a pass without a
+	// Node (mid-demotion) has no owner to anchor inventory to, and
+	// skipping is correct — the old slice is being garbage-collected
+	// with the old Node. The facts supply the storage roles, which
+	// is what keeps the machine's own disks out of the offer.
+	if nodeErr == nil {
+		publishDeviceInventory(c, node, facts)
+	}
+
 	// Convergence checks whether the cluster's copy of each document
 	// matches what this boot actuated, and if not, stages the
 	// difference for the next boot (converge.go for the Machine,

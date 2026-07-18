@@ -31,14 +31,16 @@ what's still ahead.
 10. [x] [Fleet visibility](10-fleet-visibility.md) — phases,
     heartbeat leases, the sweep, and a status vocabulary that says
     what would fix it.
-11. [ ] [Device management](11-device-management.md) — hotplug,
-    GPUs, and how workloads reach hardware. The OS half is built
-    and drilled: declared drivers serve hotplug in-kernel, and the
-    unclaimed-hardware report (a sysfs walk plus a uevent watcher
-    in init) names the missing module in status and on the console.
-    The Kubernetes half is DRA-first — ResourceSlices as the
-    inventory, DeviceClasses as the purpose vocabulary, one liken
-    driver publishing both — and still ahead.
+11. [x] [Device management](11-device-management.md) — hotplug,
+    GPUs, and how workloads reach hardware. The OS half: declared
+    drivers serve hotplug in-kernel, and the unclaimed-hardware
+    report (a sysfs walk plus a uevent watcher in init) names the
+    missing module in status and on the console. The Kubernetes
+    half: the machine operator is the DRA driver, publishing each
+    node's deliverable, non-platform devices as a ResourceSlice and
+    answering the kubelet's prepare calls with CDI device nodes —
+    an unprivileged pod claims a disk by DeviceClass and finds
+    /dev/sda inside. Real GPU stacks await milestone 32's images.
 12. [x] [Declarative upgrades](12-declarative-upgrades.md) —
     A/B slots, the digest chain, firmware fallback, and one field
     that moves the fleet.

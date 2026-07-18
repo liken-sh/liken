@@ -76,6 +76,19 @@ if [ -n "${CA_BUNDLE:-}" ]; then
     mkdir -p "$rootfs/etc/ssl/certs"
     cp "$CA_BUNDLE" "$rootfs/etc/ssl/certs/ca-certificates.crt"
 fi
+
+# The PCI naming database, for the machine operator's device
+# inventory (machine-operator/dra.go). It rides in the operator's own
+# image rather than as a hostPath mount of the OS's copy,
+# deliberately: a DaemonSet template is applied fleet-wide while a
+# fleet mid-upgrade runs mixed OS versions, so the template must
+# never mount a path some node's OS lacks — and a naming database
+# that versions with the binary reading it can never disagree with
+# it either.
+if [ -n "${PCI_IDS:-}" ]; then
+    mkdir -p "$rootfs/usr/share/hwdata"
+    cp "$PCI_IDS" "$rootfs/usr/share/hwdata/pci.ids"
+fi
 tar --create --file "$dist/layer.tar" \
     --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
     -C "$rootfs" .

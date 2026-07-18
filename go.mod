@@ -19,6 +19,8 @@ require (
 	github.com/insomniacslk/dhcp v0.0.0-20260603135910-a415979eb11e
 	github.com/vishvananda/netlink v1.3.1
 	golang.org/x/sys v0.46.0
+	google.golang.org/grpc v1.82.1
+	k8s.io/kubelet v0.36.2
 	sigs.k8s.io/yaml v1.6.0
 )
 
@@ -43,13 +45,16 @@ require (
 	github.com/u-root/uio v0.0.0-20230220225925-ffce2a382923 // indirect
 	github.com/vishvananda/netns v0.0.5 // indirect
 	github.com/vladopajic/go-test-coverage/v2 v2.18.8 // indirect
-	go.yaml.in/yaml/v2 v2.4.2 // indirect
+	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	golang.org/x/exp/typeparams v0.0.0-20231108232855-2478ac86f678 // indirect
 	golang.org/x/image v0.38.0 // indirect
-	golang.org/x/mod v0.31.0 // indirect
-	golang.org/x/net v0.48.0 // indirect
-	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/tools v0.40.1-0.20260108161641-ca281cf95054 // indirect
+	golang.org/x/mod v0.34.0 // indirect
+	golang.org/x/net v0.53.0 // indirect
+	golang.org/x/sync v0.20.0 // indirect
+	golang.org/x/text v0.36.0 // indirect
+	golang.org/x/tools v0.43.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
+	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	honnef.co/go/tools v0.7.0 // indirect
 )

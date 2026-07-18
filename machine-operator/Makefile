@@ -17,7 +17,8 @@ DIST ?= dist
 all: $(DIST)/liken-machine-operator-image.tar
 
 $(DIST)/liken-machine-operator: ../go.mod ../go.sum $(wildcard *.go) \
-		$(wildcard ../machine/*.go) $(wildcard ../kubernetes/*.go) $(LIKEN_VERSION_STAMP)
+		$(wildcard ../machine/*.go) $(wildcard ../kubernetes/*.go) \
+		$(wildcard ../hardware/*.go) $(LIKEN_VERSION_STAMP)
 	CGO_ENABLED=0 go build -trimpath \
 		-ldflags "-X github.com/liken-sh/liken/machine.Version=$(LIKEN_VERSION)" \
 		-o $(DIST)/liken-machine-operator .
@@ -28,8 +29,13 @@ $(DIST)/liken-machine-operator: ../go.mod ../go.sum $(wildcard *.go) \
 # lands).
 CA_BUNDLE := ../trust/dist/$(strip $(file <../trust/VERSION))/cacert.pem
 
-$(DIST)/liken-machine-operator-image.tar: $(DIST)/liken-machine-operator ../image/oci.sh $(CA_BUNDLE)
-	DIST=$(abspath $(DIST)) LIKEN_VERSION=$(LIKEN_VERSION) CA_BUNDLE=$(CA_BUNDLE) ../image/oci.sh liken-machine-operator liken.sh/machine-operator
+# The PCI naming database, for the device inventory's human-readable
+# names (dra.go); oci.sh explains why it rides in this image rather
+# than as a mount of the OS's own copy.
+PCI_IDS := ../hwdata/dist/$(strip $(file <../hwdata/VERSION))/pci.ids
+
+$(DIST)/liken-machine-operator-image.tar: $(DIST)/liken-machine-operator ../image/oci.sh $(CA_BUNDLE) $(PCI_IDS)
+	DIST=$(abspath $(DIST)) LIKEN_VERSION=$(LIKEN_VERSION) CA_BUNDLE=$(CA_BUNDLE) PCI_IDS=$(PCI_IDS) ../image/oci.sh liken-machine-operator liken.sh/machine-operator
 
 .PHONY: all clean
 

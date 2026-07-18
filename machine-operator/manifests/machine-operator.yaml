@@ -75,6 +75,26 @@ rules:
   - apiGroups: [""]
     resources: [nodes]
     verbs: [get, delete, patch]
+  # The device inventory (dra.go): this node's ResourceSlice, the
+  # DRA census of driven devices that workloads can claim. Like the
+  # machines rule, the verbs cover the collection because RBAC
+  # cannot say "only the slice named for your node"; the program
+  # only ever writes its own. No list or watch: the slice's name is
+  # deterministic, and reading anyone else's inventory is the
+  # scheduler's job, not this operator's.
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceslices]
+    verbs: [get, create, update, delete]
+  # The DRA plugin (draplugin.go): when the kubelet asks this driver
+  # to prepare a claim, the request names the claim and nothing
+  # more; the allocation lives on the claim's status, so the driver
+  # reads it back. Read-only, any namespace — claims belong to
+  # workloads, and the driver serves whichever namespace claims its
+  # hardware — but no list or watch: prepare calls arrive with exact
+  # names.
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceclaims]
+    verbs: [get]
   # The drain (drain.go): list to see what still runs on this
   # machine's node, and create on the eviction subresource to ask
   # each pod to leave. Eviction-by-subresource rather than pod
@@ -299,6 +319,18 @@ spec:
             - name: container-store
               mountPath: /var/lib/rancher/k3s/agent
               readOnly: true
+            # The DRA plugin's two conversations (draplugin.go, cdi.go):
+            # the kubelet's plugin directories, where the driver's
+            # sockets live, and the CDI directory, where prepared
+            # claims become device-node grants for containerd to
+            # resolve. All three writable, because serving a socket
+            # and publishing a spec are the actuation.
+            - name: kubelet-plugins
+              mountPath: /var/lib/kubelet/plugins
+            - name: kubelet-plugins-registry
+              mountPath: /var/lib/kubelet/plugins_registry
+            - name: cdi
+              mountPath: /var/run/cdi
       # Staging and rebooting need no RBAC at all: they are
       # host-filesystem acts, bounded by these mounts rather than by
       # cluster permissions.
@@ -329,4 +361,16 @@ spec:
         - name: container-store
           hostPath:
             path: /var/lib/rancher/k3s/agent
+            type: DirectoryOrCreate
+        - name: kubelet-plugins
+          hostPath:
+            path: /var/lib/kubelet/plugins
+            type: DirectoryOrCreate
+        - name: kubelet-plugins-registry
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry
+            type: DirectoryOrCreate
+        - name: cdi
+          hostPath:
+            path: /var/run/cdi
             type: DirectoryOrCreate

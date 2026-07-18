@@ -1,7 +1,8 @@
 # Device management
 
-Milestone 11 — The OS half is built and drilled end to end; the
-Kubernetes half (the DRA driver) awaits its design pass
+Milestone 11 — Built and drilled end to end, both halves: the OS
+half (unclaimed reporting, live module loads) and the DRA driver
+(inventory, kubelet plugin, CDI delivery to an unprivileged pod)
 
 The question this milestone opened with: how does a shell-less,
 udev-less OS expose `/dev` beyond the basics — USB devices arriving
@@ -266,6 +267,104 @@ encodes a deployment's purposes, so liken shipping one would be
 guessing at someone else's vocabulary. The documentation teaches the
 shape; deployments write their own. Still open for the design pass:
 how much attribute vocabulary liken standardizes versus documents.
+
+The inventory half is built and drilled (2026-07-18). The operator
+publishes one ResourceSlice per node — driven PCI and USB devices,
+minus the bus plumbing (usbcore's device nodes, hubs, PCIe ports) —
+through the same hand-rolled honest-subset style as every other API
+type: importing k8s.io/api for the slice structs was measured and
+declined, at 11 MB of linked apimachinery for what sixty lines
+write. Each device carries string attributes under the driver's own
+domain (bus, driver, class, name, modalias, vendor, product, serial
+when the hardware has one), named by its bus-prefixed sysfs address:
+the address names the slot, not the unit, so replacing a dongle in
+the same port keeps the device name and identity-pinning is the
+serial attribute's job. The slice is owned by the Node's UID, so
+inventory dies with the node registration instead of outliving it.
+The naming database rides in the operator's own OCI image rather
+than as a hostPath of the OS's copy — a DaemonSet template applied
+fleet-wide mid-upgrade must never mount a path an older node's OS
+lacks. The drill: the release path shipped it (forward roll onto
+slot B), the slice appeared with eight devices on the first pass,
+unplugging the stick converged to seven at pool generation 2 in ten
+seconds, re-plugging converged back at generation 3 — where QEMU
+re-enumerated the stick on a different port and the device name
+moved with the slot, exactly the semantics chosen above.
+
+The census question resolved against generosity, because the claim
+scenario that worried us is real: prepare hands a pod device nodes
+read-write with no privilege anywhere, so a claim on the system
+disk would be one `dd` from ruin. A ResourceSlice is the offer, not
+a census, and publication is the one airtight enforcement point —
+the scheduler can only allocate what a slice lists, by the API's
+own machinery. So the publish rule is three tests: driven and not
+bus plumbing; *deliverable* (the device's sysfs subtree carries
+/dev nodes, pruned at nested bus devices so a controller doesn't
+inherit its peripherals' nodes); and *not the platform's own*
+(nothing in the subtree backs a storage role — which makes the two
+claiming systems mutually exclusive: a disk is either the
+machine's, by role, or the workloads', by DRA, never both). On the
+lab guest that leaves exactly the honest offers: the stick, and the
+IDE controller whose CD-ROM drive is real deliverable hardware.
+NICs (nothing to inject), the XHCI controller (its nodes belong to
+the USB devices' own decisions), and every role-backed virtio disk
+all fall out.
+
+One refinement waits for real hardware: for SATA/IDE/SAS, the
+inventory unit is currently the controller, but the claimable thing
+is the media on its SCSI sub-bus — the controller's attributes say
+"Intel AHCI" while the delivery is whatever disks hang off it, and
+a six-disk controller would publish as one coarse entry. NVMe and
+USB mass storage don't have this problem (the bus device *is* the
+media, and its attributes describe it). The fix, when a machine can
+exercise it, is to publish each SCSI disk or optical drive as its
+own slice device — named by its board-stable port path, never by
+enumeration-order sda, attributed by the media's own model, serial,
+and class, individually withholdable when a role stands on it —
+and never the controller itself. The lab's single IDE CD-ROM is
+close enough to 1:1 that the current shape stays honest until then.
+
+If a workload ever wants a whole controller rather than one of its
+drives, DRA already has the mechanism waiting: partitionable
+devices (sharedCounters and consumesCounters, in the v1 API behind
+the DRAPartitionableDevices gate) let a slice list overlapping
+devices drawing from one counter pool, with the scheduler enforcing
+that a whole-controller claim and a single-drive claim exclude each
+other. That is purely additive to the media-leaf shape — the
+controller would re-enter the slice as a full device over the same
+counters — so nothing is built for it until the want is real. The
+same mechanism could model GPT partitions of one disk, but carving
+storage for workloads is volumes' well-tooled territory
+(volumeMode: Block, local provisioners); DRA claims deliver drives,
+not filesystems.
+
+The kubelet half is built and drilled (2026-07-18). The operator
+serves the two gRPC services the kubelet dials — registration in
+the plugin-watcher directory, the v1 DRA plugin API on its own
+socket — which is what finally brought grpc-go and the k8s.io/kubelet
+stubs into go.mod (~3 MB compressed on the operator image; the
+helper library and its forty-dependency tree stayed out). Prepare
+treats the intent as a doorbell, liken-style: the request names
+only the claim, the driver reads the allocation back from the API
+server, refuses a claim whose UID changed, re-walks sysfs with the
+same code that published the inventory, and writes one CDI spec per
+claim UID under /var/run/cdi for containerd to resolve — tmpfs,
+because the kubelet re-prepares every claim after a boot anyway.
+Failures stay per-claim and in-band, so the kubelet retries and the
+pod waits visibly in ContainerCreating. The drill: a DeviceClass
+selecting mass-storage on this driver, a claim, and an unprivileged
+pod — six seconds from apply to Running with /dev/sda injected,
+CLAIMED-OK from a container holding no privilege and no hostPath.
+
+One upgrade lesson from the drill: right after the reboot, the new
+operator binary woke inside the pod the *previous* template
+created (OnDelete keeps the pod; the stable image tag resolves to
+the new build), which lacked the kubelet-socket mounts — and a
+fatal there killed status publishing, the very thing the pod
+steward waits on before refreshing the pod. The DRA plugin's
+startup failure is now loud but non-fatal: the machine operates
+without device claims for the one template-lag window, and the
+refreshed pod brings the plugin up.
 
 Re-plug semantics — what a standing allocation means when its
 device disappears — has an upstream answer arriving rather than a

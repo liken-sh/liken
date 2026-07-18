@@ -30,14 +30,30 @@ import (
 // Device is one bus device as sysfs presents it: its fingerprint,
 // who drives it (empty when nothing does), and its identity in
 // words, gathered here so every consumer — the unclaimed report, a
-// console line, someday a ResourceSlice — describes hardware the
-// same way.
+// console line, a ResourceSlice — describes hardware the same way.
+//
+// Address is the device's sysfs directory name — a PCI
+// domain:bus:device.function or a USB port path — which is stable
+// for as long as the hardware stays where it is: PCI addresses are
+// fixed by the board, and a USB path names the physical port chain,
+// not the plug order. That stability is what makes the address a
+// usable device name in a ResourceSlice. Serial is the identity the
+// hardware itself carries, when it carries one (USB devices often
+// do, PCI functions rarely), and is what lets a claim pin one
+// physical unit rather than any unit of the same model. Vendor and
+// Product are the numeric identity underneath Name — bare lowercase
+// hex, no 0x — kept because selectors match on numbers while people
+// read words.
 type Device struct {
 	Bus      string
+	Address  string
 	Modalias string
 	Driver   string
 	Name     string
 	Class    string
+	Serial   string
+	Vendor   string
+	Product  string
 }
 
 // DiscoverDevices walks the interesting buses under one sysfs root.
@@ -60,14 +76,19 @@ func DiscoverDevices(sysRoot string, naming *PCIIDs) []Device {
 			if modalias == "" {
 				continue
 			}
-			d := Device{Bus: bus, Modalias: modalias, Driver: boundDriver(path)}
+			d := Device{Bus: bus, Address: entry.Name(), Modalias: modalias, Driver: boundDriver(path)}
 			switch bus {
 			case "pci":
-				d.Name = pciName(path, naming)
+				d.Vendor = strings.TrimPrefix(readAttr(path, "vendor"), "0x")
+				d.Product = strings.TrimPrefix(readAttr(path, "device"), "0x")
+				d.Name = pciName(d.Vendor, d.Product, naming)
 				d.Class = pciClassWord(readAttr(path, "class"))
 			case "usb":
+				d.Vendor = parentAttr(dir, entry.Name(), "idVendor")
+				d.Product = parentAttr(dir, entry.Name(), "idProduct")
 				d.Name = usbName(dir, entry.Name())
 				d.Class = usbClassWord(readAttr(path, "bInterfaceClass"))
+				d.Serial = parentAttr(dir, entry.Name(), "serial")
 			}
 			devices = append(devices, d)
 		}
@@ -102,9 +123,7 @@ func readAttr(devicePath, attr string) string {
 // pciName names a PCI device from the pci.ids database when one is
 // loaded, and falls back to the bare vendor:device hex otherwise —
 // numeric, but still enough to search by.
-func pciName(devicePath string, naming *PCIIDs) string {
-	vendor := strings.TrimPrefix(readAttr(devicePath, "vendor"), "0x")
-	device := strings.TrimPrefix(readAttr(devicePath, "device"), "0x")
+func pciName(vendor, device string, naming *PCIIDs) string {
 	if vendor == "" {
 		return ""
 	}
@@ -132,4 +151,17 @@ func usbName(busDir, name string) string {
 	words := strings.TrimSpace(
 		readAttr(dir, "manufacturer") + " " + readAttr(dir, "product"))
 	return words
+}
+
+// parentAttr reads a USB attribute from the parent device when the
+// entry is an interface, for the same reason usbName borrows the
+// parent's strings: identity (serial, idVendor, idProduct) lives on
+// the device, while the driver binds the interface.
+func parentAttr(busDir, name, attr string) string {
+	parent, _, isInterface := strings.Cut(name, ":")
+	dir := filepath.Join(busDir, name)
+	if isInterface {
+		dir = filepath.Join(busDir, parent)
+	}
+	return readAttr(dir, attr)
 }

@@ -21,12 +21,15 @@ const nodesPath = "/api/v1/nodes"
 // nodeObject is the sliver of a Kubernetes Node the operator needs:
 // the labels, where a demoted machine's old role still shows; the
 // conditions, where the kubelet's health shows (reconcile.go mirrors
-// the Node's Ready condition onto the Machine); and the cordon
-// state, meaning the unschedulable flag plus the annotations that
-// record whether liken set it (drain.go).
+// the Node's Ready condition onto the Machine); the cordon state,
+// meaning the unschedulable flag plus the annotations that record
+// whether liken set it (drain.go); and the UID, which anchors the
+// device inventory's owner reference to this incarnation of the
+// node (dra.go).
 type nodeObject struct {
 	Metadata struct {
 		Name        string            `json:"name"`
+		UID         string            `json:"uid"`
 		Labels      map[string]string `json:"labels"`
 		Annotations map[string]string `json:"annotations"`
 	} `json:"metadata"`

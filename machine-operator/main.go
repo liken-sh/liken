@@ -32,6 +32,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -77,6 +78,22 @@ func main() {
 	if err != nil {
 		fatal("in-cluster config: %v", err)
 	}
+
+	// The DRA plugin serves the kubelet for the life of the process
+	// (draplugin.go). Its failure is loud but not fatal, deliberately:
+	// right after an upgrade this binary can find itself in a pod
+	// created from the *previous* release's template — OnDelete keeps
+	// the old pod, the stable image tag resolves to the new build —
+	// and if that template lacks a mount this plugin needs, dying
+	// here would kill the whole operator, including the status
+	// publishing the pod steward is waiting on to refresh this very
+	// pod. The machine must keep operating without device claims;
+	// the refreshed pod brings the plugin up.
+	go func() {
+		if err := serveDRAPlugin(context.Background(), client); err != nil {
+			fmt.Fprintf(os.Stderr, "the DRA plugin is not serving: %v\n", err)
+		}
+	}()
 
 	// The file seeds the cluster: if no Machine object exists yet, the
 	// manifest's spec becomes the first version of it. From then on the

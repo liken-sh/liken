@@ -10,10 +10,6 @@ import (
 	"net/http"
 )
 
-type OwnerReference struct {
-	Kind string `json:"kind"`
-}
-
 type PodMetadata struct {
 	Name            string            `json:"name"`
 	Namespace       string            `json:"namespace"`
