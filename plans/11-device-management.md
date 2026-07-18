@@ -142,10 +142,57 @@ no database needed. The pci.ids dependency stays soft — the reporter
 falls back to numeric IDs when the file is missing — and hwdata's
 notices join the licensing domain like every other vendored pin.
 
-Open, deliberately: the Kubernetes half (device plugins versus DRA,
-and what liken owes each — probably just well-known paths and the
-kubelet's plugin socket directory); whether module loading can ride
-the k3s-restart convergence tier instead of a reboot; firmware blobs
-(`request_firmware` barely fires under emulation, so the
-linux-firmware question waits for real hardware); and real GPU
-compute stacks, which no emulation can stand in for.
+## Devices by purpose: the Kubernetes half
+
+Direction, not yet design. Kubernetes has two generations of
+machinery for handing hardware to workloads: device plugins (a
+DaemonSet advertises a named, counted resource; the kubelet injects
+the device node when a pod requests one) and dynamic resource
+allocation (devices published with structured attributes, claims
+selecting on them, GA in the Kubernetes liken currently runs). A
+bare counted resource is not expressive enough for what real
+deployments do with leaf hardware — a UPS on USB for NUT, a Zigbee
+coordinator for zigbee2mqtt. Those workloads want *that specific
+device*, stably, not "any serial port"; and raw attribute selectors
+in workload manifests would leak hardware fingerprints (hex vendor
+IDs) into every deployment's YAML.
+
+The liken-shaped answer is the storage-claiming move a third time:
+naming on the Machine spec, by purpose.
+
+    spec:
+      devices:
+        zigbee:
+          usb: { vendor: "10c4", product: "ea60" }
+        ups:
+          usb: { vendor: "0463" }
+
+The machine matches each named role against the probed bus — exactly
+one match or a loud refusal — status reports what each role
+resolved to, and the role's *name* becomes the schedulable
+vocabulary: the zigbee2mqtt pod claims `zigbee`, with no hex
+anywhere in a workload manifest. Because the naming happens on the
+spec, the plugin-versus-DRA choice demotes to an implementation
+detail, and "run this wherever the Zigbee stick is" is scheduling,
+not host configuration.
+
+Seen whole, this is udev's policy layer rebuilt as Kubernetes API,
+clause for clause: the match rules become spec matchers, SYMLINK
+becomes the role name (resolved to this boot's node path at
+container-injection time), OWNER/GROUP/MODE dissolve into which pod
+holds the claim, RUN hooks become reconcilers, and the event bus is
+the uevent listener the reporting half already builds. The OS
+declined the host-policy daemon; the API grows the vocabulary; a
+reconciler closes the loop — the same relocation storage claiming
+performed on fstab. The open questions for its design pass: whether
+role names are cluster vocabulary with per-machine bindings (the
+features/registries split, again), what a claim conveys for a
+device exposing several nodes, and re-resolution when hardware is
+re-plugged mid-flight.
+
+Also open: whether module loading can ride the k3s-restart
+convergence tier instead of a reboot (loading is live-capable — the
+drills proved device-first binding — so it could plausibly converge
+even lighter); and real GPU compute stacks, which no emulation can
+stand in for. Firmware and everything else the image must carry is
+milestone 32's.

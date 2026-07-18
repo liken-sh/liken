@@ -132,6 +132,11 @@ numbered before the arc existed; it belongs second in this order:
     (nvidia excepted, for now), and microcode as an early initrd,
     with the slot budget that carries them. The published image
     becomes the one that boots bare metal.
+33. [ ] [Updating the machine's own firmware](33-firmware-updates.md) —
+    fwupd as an eventual feature slug: firmware updates riding the
+    rolling-reboot orchestration liken already has. Not a battery —
+    an agent — so it waits for bare-metal experience rather than
+    riding 32.
 
 Deferred until the fundamentals above are proven, the hardening
 tier: UKIs, dm-verity, secure boot, TPM-sealed secrets, and signed

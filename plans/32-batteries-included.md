@@ -110,10 +110,10 @@ a red build, never an install-time surprise.
 ## Out of scope, deliberately
 
 Updating the machine's own firmware — UEFI capsules, NIC NVRAM, SSD
-firmware (fwupd/LVFS) — is a different job: liken already owns the
-reboot orchestration such updates want, which makes fwupd a
-plausible future feature slug, and that is exactly why it should
-wait for the feature vocabulary rather than ride this milestone.
+firmware (fwupd/LVFS) — is a different job entirely: batteries are
+inert bytes, and fwupd is an agent whose work reaches into the boot
+chain liken owns. It gets its own milestone
+(33-firmware-updates.md), after bare metal exists to learn from.
 The TPM needs no blobs (hardening tier); IPMI/BMC sensors are just
 kernel modules the tree above already carries; ACPI quirks are the
 kernel's problem.
