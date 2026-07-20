@@ -1,31 +1,34 @@
 package main
 
-// The proving boot: how a downloaded release becomes the running one.
+// The proving boot: how a downloaded release becomes the running
+// release.
 //
 // The operator stages a SystemRelease record (machine/systemrelease.go)
-// when a verified release is waiting on the inactive slot. From
-// there, this file carries the upgrade across the reboot. Everything
-// here is firmware-neutral: the three acts that touch the machine's
-// actual boot mechanism go through a bootActuator (actuator.go),
-// which carries the firmware's dialect.
+// when a verified release is waiting on the inactive slot. From that
+// point, this file carries the upgrade across the reboot. Everything
+// in this file is firmware-neutral. The three actions that touch the
+// machine's actual boot mechanism go through a bootActuator
+// (actuator.go), which carries the firmware's own dialect.
 //
-//   - On the way down (armProvingBoot, called from init's reboot
+//   - Before the reboot (armProvingBoot, called from init's reboot
 //     path), init writes the attempted marker and arms the
-//     actuator's one-shot trial at the staged slot. The one-shot is
-//     what makes blue-green safe: the arming is consumed by the boot
-//     it triggers, so the trial gets exactly one chance, and any
-//     reset after that (a kernel panic, a watchdog, a power cut)
-//     falls back to the standing preference, which still prefers the
-//     proven slot.
+//     actuator's one-shot trial at the staged slot. The one-shot
+//     mechanism is what makes blue-green upgrades safe. The boot
+//     that the arming triggers consumes the arming, so the trial
+//     gets exactly one chance. Any reset after that chance, such as
+//     a kernel panic, a watchdog reset, or a power cut, falls back
+//     to the standing preference, which still prefers the proven
+//     slot.
 //
-//   - On the way up (settleSystemRelease), init reads the files and
-//     decides what happened. If this boot came from the staged slot,
-//     this is the trial: the operator's first reconcile demonstrates
-//     that the new kernel, init, k3s, and the join all work, and
-//     that is what promotes the release. If this boot came from the
-//     proven slot with the attempted marker set, the trial ran and
-//     the firmware fell back, so the record is rejected durably, and
-//     the operator will not stage that exact record again.
+//   - After the reboot (settleSystemRelease), init reads the files
+//     and decides what happened. If this boot came from the staged
+//     slot, this boot is the trial. The operator's first reconcile
+//     shows that the new kernel, init, k3s, and the cluster join all
+//     work, and this is what promotes the release. If this boot came
+//     from the proven slot with the attempted marker set, the trial
+//     ran and the firmware fell back. In this case the record is
+//     rejected durably, and the operator will not stage that exact
+//     record again.
 //
 //   - After promotion (provingWatch, a machine-plane component that
 //     runs only on proving boots), init asserts the standing
@@ -33,9 +36,10 @@ package main
 //     write for the same reason it owns every firmware write:
 //     talking to the firmware is the machine plane's job, and the
 //     store on disk is the authority. assertProvenSlot re-asserts
-//     the proven record's slot on every boot, so a power cut between
-//     promotion and the assertion costs one extra boot of the old
-//     version, never a wrong preference that sticks.
+//     the proven record's slot on every boot. So, if a power cut
+//     happens between promotion and the assertion, the machine costs
+//     one extra boot of the old version, and never keeps a wrong
+//     preference.
 
 import (
 	"context"
@@ -46,20 +50,21 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// settleSystemRelease reads the system store at boot and renders the
-// verdicts only init can: is this boot a trial, or the fallback from
-// one? When this boot is proving a staged release it returns that
-// release's record, which is what arms the proving watch; every other
-// verdict returns nil. Runs after storage settles (the store lives on
-// machineState) and after the boot's slot is known.
+// settleSystemRelease reads the system store at boot and decides the
+// verdict that only init can decide: is this boot a trial, or is it
+// the fallback from a trial? When this boot proves a staged release,
+// the function returns that release's record. This record is what
+// arms the proving watch. Every other verdict returns nil. This
+// function runs after storage settles (the store lives on
+// machineState) and after the code knows the boot's slot.
 func settleSystemRelease(act bootActuator, stateRoot, bootSlot string, durable bool, boot *machine.BootStatus) *machine.SystemRelease {
 	if !durable {
 		return nil
 	}
 	store := machine.SystemReleases(stateRoot)
 
-	// The standing rejection is republished into the boot record
-	// every boot (rejectStagedDocument explains why).
+	// The code republishes the standing rejection into the boot
+	// record on every boot. rejectStagedDocument explains why.
 	boot.SystemRejection, _ = store.LoadRejection()
 
 	staged, err := store.LoadStaged()
@@ -79,8 +84,9 @@ func settleSystemRelease(act bootActuator, stateRoot, bootSlot string, durable b
 		return nil
 	}
 
-	// A boot that didn't come from a slot can't judge a slot trial:
-	// external media is running, not either half of blue-green.
+	// A boot that did not come from a slot cannot judge a slot
+	// trial. In this case, external media is running, not either
+	// half of the blue-green pair.
 	if bootSlot == "" {
 		fmt.Printf("liken: system: release %s is staged for slot %s, but this boot came from external media; leaving it for a from-disk boot\n",
 			record.Version, record.Slot)
@@ -88,12 +94,13 @@ func settleSystemRelease(act bootActuator, stateRoot, bootSlot string, durable b
 	}
 
 	if record.Slot == bootSlot {
-		// This is the trial: the previous boot armed BootNext at this
-		// slot, and this boot is running the staged release's own
-		// kernel and init. There is nothing to write, because the
-		// attempted marker already stands. The proof isn't init's to
-		// declare either: the operator's first reconcile is what shows
-		// the machine actually serving its cluster on the new release.
+		// This boot is the trial. The previous boot armed BootNext at
+		// this slot, and this boot runs the staged release's own
+		// kernel and init. The code writes nothing here, because the
+		// attempted marker already stands. init also does not decide
+		// the proof. The operator's first reconcile is what shows
+		// that the machine actually serves its cluster on the new
+		// release.
 		fmt.Printf("liken: system: proving boot: release %s on slot %s; the operator's first pass is the proof\n",
 			record.Version, record.Slot)
 		return record
@@ -101,11 +108,11 @@ func settleSystemRelease(act bootActuator, stateRoot, bootSlot string, durable b
 
 	hash := machine.ManifestHash(staged)
 	if attempted, _ := store.LoadAttempted(); attempted == hash {
-		// The trial ran and the firmware brought the machine back
-		// here, to the proven slot: the release booted its one
-		// chance and never got promoted. That is the fallback
-		// verdict, recorded durably so no boot re-arms the same
-		// trial.
+		// The trial ran, and the firmware brought the machine back
+		// to the proven slot. The release used its one chance and
+		// did not get promoted. This is the fallback verdict. The
+		// code records it durably so that no later boot re-arms the
+		// same trial.
 		boot.SystemRejection = rejectStagedDocument("system", "release", store.Reject,
 			staged, fmt.Sprintf("the machine booted slot %s to prove release %s and fell back to slot %s; the release never proved out",
 				record.Slot, record.Version, bootSlot))
@@ -119,18 +126,23 @@ func settleSystemRelease(act bootActuator, stateRoot, bootSlot string, durable b
 	return nil
 }
 
-// armProvingBoot runs on the reboot path: if a release is staged for
-// the other slot, mark it attempted and arm the actuator's one-shot
-// trial so the next boot, and only the next, tries it. The attempted
-// marker is written first, deliberately. A crash between the two
-// writes then reads as "tried and fell back", which wrongly rejects
-// a release that never ran; but the opposite order could arm a trial
-// with no marker, and a failing release would then re-arm and reboot
-// forever. A false rejection can be fixed by editing the store; a
-// reboot loop can't be fixed by anything, so the ordering favors the
-// false rejection. canArmTrial runs before either write for the same
-// reason: anything knowably wrong must be found while refusing is
-// still free.
+// armProvingBoot runs on the reboot path. If a release is staged for
+// the other slot, the function marks it attempted and arms the
+// actuator's one-shot trial. Only the next boot tries the staged
+// release.
+//
+// The code writes the attempted marker first, deliberately. If a
+// crash happens between the two writes, the boot record reads as
+// "tried and fell back". This wrongly rejects a release that never
+// ran. But the opposite write order could arm a trial with no
+// marker. A failing release would then re-arm itself and reboot
+// forever. An operator can fix a false rejection by editing the
+// store, but nothing can fix a reboot loop. So the write order
+// favors the false rejection over the reboot loop.
+//
+// canArmTrial runs before either write, for the same reason: the
+// code must find anything that is knowably wrong while refusing the
+// trial still costs nothing.
 func armProvingBoot(act bootActuator, stateRoot, runningSlot string) {
 	store := machine.SystemReleases(stateRoot)
 	staged, err := store.LoadStaged()
@@ -150,15 +162,15 @@ func armProvingBoot(act bootActuator, stateRoot, runningSlot string) {
 		return
 	}
 
-	// The fallback is asserted, and *verified*, before the trial is
-	// armed. A trial is only safe when every reset after its one
-	// chance lands on a proven slot, and the standing preference is
-	// what guarantees that. If the firmware won't hold it (or the
-	// assertion quietly failed), the fallback doesn't exist, and
-	// arming a trial anyway could brick the machine with its own
-	// upgrade. So the trial is refused, visibly, and the machine
-	// stays on the version that works, where an operator can still
-	// reach it.
+	// The code asserts the fallback, and verifies it, before it arms
+	// the trial. A trial is only safe when every reset after its one
+	// chance lands on a proven slot. The standing preference is what
+	// guarantees this. If the firmware does not hold the preference,
+	// or if the assertion quietly fails, the fallback does not
+	// exist. Arming a trial in that case could make the machine
+	// permanently unusable, through its own upgrade. So the code
+	// refuses the trial, visibly, and the machine stays on the
+	// version that works, where an operator can still reach it.
 	if !fallbackInPlace(act, stateRoot) {
 		fmt.Fprintln(os.Stderr, "liken: system: the proven fallback could not be verified; refusing to arm the trial")
 		return
@@ -177,10 +189,10 @@ func armProvingBoot(act bootActuator, stateRoot, runningSlot string) {
 		armed, record.Version, record.Slot)
 }
 
-// fallbackInPlace asserts the standing preference at the proven slot,
-// then trusts only what the actuator can read back: a write that
-// appeared to succeed is not the same thing as the firmware actually
-// holding it.
+// fallbackInPlace asserts the standing preference at the proven
+// slot. Then it checks only what the actuator can read back. A
+// write that appears to succeed is not the same as proof that the
+// firmware actually holds it.
 func fallbackInPlace(act bootActuator, stateRoot string) bool {
 	record := provenRecord(stateRoot)
 	if record == nil {
@@ -190,31 +202,32 @@ func fallbackInPlace(act bootActuator, stateRoot string) bool {
 	return act.fallbackLeads(record.Slot)
 }
 
-// provingPatience is how long a proving boot may run unpromoted
-// before the watchdog gives up on it: the same ten minutes the
-// rollout conductor waits before calling a reboot stalled. A machine
-// that hasn't joined its cluster after ten minutes is stuck, not
-// merely slow.
+// provingPatience is the length of time a proving boot may run
+// unpromoted before the watchdog reboots it. This is the same ten
+// minutes that the rollout conductor waits before it calls a reboot
+// stalled. A machine that has not joined its cluster after ten
+// minutes is stuck, not merely slow.
 const provingPatience = 10 * time.Minute
 
-// provingWatch builds the machine-plane component a proving boot
-// runs, closed over the record this boot is trying. The watch
-// compares the store's *proven* record against the trial's own,
-// because the trial is only over when this exact record has been
-// promoted: a staged file that merely disappears was withdrawn, not
-// promoted, and treating its absence as promotion would flip
-// BootOrder for a promotion that never happened.
+// provingWatch builds the machine-plane component that a proving
+// boot runs. This component closes over the record that this boot
+// is trying. The watch compares the store's proven record against
+// the trial's own record. The trial is only over when the code has
+// promoted this exact record. A staged file that merely disappears
+// was withdrawn, not promoted. Treating its absence as promotion
+// would flip BootOrder for a promotion that never happened.
 //
-// The loop combines two fallbacks. The first is the ordinary path:
-// poll the store until the operator promotes the staged record (its
-// disappearance is the signal), then assert the standing preference
-// so the newly proven slot leads. The second is a watchdog: a trial
-// that reaches provingPatience unpromoted gets a deliberate reboot.
+// The loop combines two fallback paths. The first is the ordinary
+// path: the code polls the store until the operator promotes the
+// staged record (the record's disappearance is the signal), then it
+// asserts the standing preference so the newly proven slot leads.
+// The second path is a watchdog: when a trial reaches
+// provingPatience unpromoted, the code forces a deliberate reboot.
 // The one-shot arming is already consumed, so the machine lands on
-// the proven slot, where the attempted marker renders the verdict
+// the proven slot. There, the attempted marker sets the verdict
 // (RejectedLastBoot) and prevents any reboot loop. The watchdog
-// covers the failure the one-shot can't see: a kernel that boots
-// fine into a system that never serves.
+// covers a failure that the one-shot cannot detect: a kernel that
+// boots fine into a system that never serves.
 func provingWatch(act bootActuator, trial machine.SystemRelease) func(context.Context) error {
 	return func(ctx context.Context) error {
 		deadline := time.After(provingPatience)
@@ -235,10 +248,11 @@ func provingWatch(act bootActuator, trial machine.SystemRelease) func(context.Co
 				continue
 			}
 			// The staged file is gone, but gone is not the same as
-			// promoted. Only a proven record matching this boot's own
-			// trial counts as the verdict. Anything else means the
-			// record was withdrawn out from under the trial (a
-			// retargeted cluster, most likely), and the firmware's
+			// promoted. Only a proven record that matches this
+			// boot's own trial counts as the verdict. Anything else
+			// means that someone withdrew the record while the
+			// trial was still running, most likely because of a
+			// retargeted cluster. In that case, the firmware's boot
 			// order must not change for a promotion that never
 			// happened.
 			proven, err := store.LoadProven()
@@ -258,13 +272,14 @@ func provingWatch(act bootActuator, trial machine.SystemRelease) func(context.Co
 	}
 }
 
-// assertProvenSlot makes the firmware agree with the store: the
-// proven record's slot leads the standing boot preference. It runs on
-// every boot and after every promotion, so the store stays the
-// authority and the firmware only ever holds a copy; whatever
-// drifted (a dead NVRAM battery, someone editing the setup menu) is
-// corrected on the next boot. Reading the record is neutral work done
-// here; making the firmware agree is the actuator's.
+// assertProvenSlot sets the firmware to match the store: the proven
+// record's slot leads the standing boot preference. This function
+// runs on every boot and after every promotion. So the store stays
+// the authority, and the firmware only ever holds a copy of it. The
+// code corrects anything that drifted, such as a dead NVRAM battery
+// or someone editing the setup menu, on the next boot. Reading the
+// record is plain work that this function does directly. Making the
+// firmware match the record is the actuator's job.
 func assertProvenSlot(act bootActuator, stateRoot string) {
 	record := provenRecord(stateRoot)
 	if record == nil {
@@ -273,11 +288,11 @@ func assertProvenSlot(act bootActuator, stateRoot string) {
 	act.assertProven(record.Slot)
 }
 
-// provenRecord loads and parses the store's proven release record,
-// reporting the ways a record can fail to exist: unreadable and
-// unparseable earn a console line, because a machine whose proven
-// record is damaged has lost its fallback; absent is ordinary (a
-// machine that has never upgraded).
+// provenRecord loads and parses the store's proven release record.
+// It reports the ways that a record can fail to exist. An unreadable
+// or unparseable record prints a console line, because a machine
+// with a damaged proven record has lost its fallback. An absent
+// record is ordinary; it means the machine has never upgraded.
 func provenRecord(stateRoot string) *machine.SystemRelease {
 	proven, err := machine.SystemReleases(stateRoot).LoadProven()
 	if err != nil {

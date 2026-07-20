@@ -2,9 +2,9 @@ package main
 
 // Tests for the installer's pieces: payload verification, durable
 // copies, partition addressing, and the boot entries it writes. The
-// full install (claiming a real disk, powering off) is QEMU
-// territory; everything here runs against temp files, the fake
-// sysfs, and the fake efivarfs.
+// full install (claiming a real disk, powering off) runs only under
+// QEMU. Everything here runs against temp files, the fake sysfs, and
+// the fake efivarfs.
 
 import (
 	"bytes"
@@ -42,9 +42,9 @@ func TestPartitionNumber(t *testing.T) {
 }
 
 func TestPartitionNumberRefusesMalformedNames(t *testing.T) {
-	// An index the kernel's node name can't supply must stop the
-	// install: 0 is not a valid GPT slot, and a boot entry carrying it
-	// would be garbage the firmware trusts.
+	// An index that the kernel's node name cannot supply must stop
+	// the install. 0 is not a valid GPT slot, and a boot entry that
+	// carries it would be garbage that the firmware trusts.
 	cases := []partition{
 		{name: "vda", disk: "vda"},         // no suffix at all
 		{name: "vdap", disk: "vda"},        // separator with no number
@@ -148,11 +148,12 @@ func TestWriteSlotBootEntry(t *testing.T) {
 	}
 }
 
-// installedDisk builds the fake machine an install expects to find:
-// one boot disk whose GPT carries both system slots, mirrored into
-// the fake sysfs the way the kernel would surface it. The table's
-// chunks are written into the fake device file directly, because
-// disks.Write's kernel re-read ioctl only works on real block devices.
+// installedDisk builds the fake machine that an install expects to
+// find: one boot disk whose GPT carries both system slots, mirrored
+// into the fake sysfs the way the kernel would present it. The
+// table's chunks are written into the fake device file directly,
+// because disks.Write's kernel re-read ioctl only works on real
+// block devices.
 func installedDisk(t *testing.T) (sys, dev string) {
 	t.Helper()
 	sys, dev = fakeMachine(t)
@@ -187,7 +188,8 @@ func installedDisk(t *testing.T) (sys, dev string) {
 }
 
 // installedBIOSDisk is installedDisk with the two GRUB roles ahead of
-// the slots: the disk of a machine whose spec declared them.
+// the slots. This is the disk of a machine whose spec declared those
+// roles.
 func installedBIOSDisk(t *testing.T) (sys, dev string) {
 	t.Helper()
 	sys, dev = fakeMachine(t)
@@ -250,9 +252,10 @@ func TestFindSlotPartitionRefusesAMissingSlot(t *testing.T) {
 	}
 }
 
-// fakeSlotAMount points the systemA role's mountpoint at a tempdir,
-// standing in for the filesystem storage reconciliation would have
-// mounted, and restores the real translation afterward.
+// fakeSlotAMount points the systemA role's mountpoint at a temporary
+// directory, which substitutes for the filesystem that storage
+// reconciliation would have mounted. It restores the real mapping
+// afterward.
 func fakeSlotAMount(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -272,9 +275,9 @@ func fakePayload(t *testing.T) string {
 	dir := t.TempDir()
 	kernel := artifactFor(t, dir, "vmlinuz", []byte("the kernel"))
 	cpio := artifactFor(t, dir, "liken.sqfs", []byte("the rest of the OS"))
-	// The GRUB pair every release carries: a full boot.img sector and
-	// a small core image with the load segment where diskboot keeps
-	// it, enough for the patcher to accept them.
+	// The GRUB pair that every release carries: a full boot.img sector
+	// and a small core image with the load segment where diskboot
+	// expects it. This is enough for the patcher to accept them.
 	bootImgBytes := bytes.Repeat([]byte{0xB0}, disks.SectorSize)
 	coreImgBytes := bytes.Repeat([]byte{0xC0}, 3*disks.SectorSize)
 	binary.LittleEndian.PutUint16(coreImgBytes[grubBlocklistSegment:], grubLoadSegment)
@@ -321,11 +324,11 @@ artifacts:
 	return dir
 }
 
-// fakeFirmware points the efivars path at a fake store so the
+// fakeFirmware points the efivars path at a fake store, so the
 // install's boot-entry writes land somewhere observable, and pins
-// the regime to UEFI (the store's directory existing is the same
-// test the kernel's /sys/firmware/efi satisfies) so the test means
-// the same thing on any machine that runs it.
+// the regime to UEFI. The store's directory existing satisfies the
+// same test that the kernel's /sys/firmware/efi satisfies, so the
+// test means the same thing on any machine that runs it.
 func fakeFirmware(t *testing.T, vars map[string][]byte) string {
 	t.Helper()
 	dir := fakeEFIVars(t, vars)
@@ -335,9 +338,9 @@ func fakeFirmware(t *testing.T, vars map[string][]byte) string {
 	return dir
 }
 
-// fakeBIOSRegime pins the regime to BIOS: no firmware directory, no
-// boot variables, exactly what a machine booted by legacy firmware
-// looks like to the kernel.
+// fakeBIOSRegime pins the regime to BIOS: no firmware directory and
+// no boot variables. This is exactly what a machine booted by legacy
+// firmware looks like to the kernel.
 func fakeBIOSRegime(t *testing.T) {
 	t.Helper()
 	oldSys := efiSysDir
@@ -346,7 +349,8 @@ func fakeBIOSRegime(t *testing.T) {
 }
 
 // fakeBootHomeMount points the bootHome role's mountpoint at a
-// tempdir, the same stand-in fakeSlotAMount provides for slot A.
+// temporary directory, the same substitution that fakeSlotAMount
+// provides for slot A.
 func fakeBootHomeMount(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -363,8 +367,9 @@ func TestInstallToDisk(t *testing.T) {
 	fakePayload(t)
 	slotMount := fakeSlotAMount(t)
 	fakeCmdline(t, "console=ttyS0 rdinit=/liken liken.install\n")
-	// The firmware already had an entry of its own; it must survive,
-	// after ours, in BootOrder.
+	// The firmware already had an entry of its own. This test checks
+	// that the entry survives in BootOrder, after this machine's own
+	// entries.
 	firmware := fakeFirmware(t, map[string][]byte{
 		"Boot0000":  encodeLoadOption(loadOption{attributes: loadOptionActive, description: "UEFI Shell"}),
 		"BootOrder": u16le(0x0000),
@@ -434,8 +439,8 @@ func TestInstallToDiskLaysDownGRUB(t *testing.T) {
 	if sector[0] != 0xB0 {
 		t.Error("the boot code's unpatched bytes should be the release's grub-boot.img")
 	}
-	// Sector 0's tail still belongs to the GPT: protective entry and
-	// signature intact.
+	// Sector 0's tail still belongs to the GPT: the protective entry
+	// and the signature stay intact.
 	if sector[446+4] != 0xEE || sector[510] != 0x55 || sector[511] != 0xAA {
 		t.Error("the install must not disturb the protective MBR")
 	}
@@ -468,8 +473,8 @@ func TestInstallToDiskLaysDownGRUB(t *testing.T) {
 
 func TestInstallToDiskRefusesWithoutAnyActuator(t *testing.T) {
 	// A BIOS machine whose spec declares no GRUB roles: nothing could
-	// ever boot the installed disk, so the install must say so
-	// instead of powering off a machine that will never come back.
+	// ever boot the installed disk. The install must report this
+	// instead of powering off a machine that would never come back.
 	installedDisk(t)
 	fakePayload(t)
 	fakeSlotAMount(t)
@@ -544,7 +549,8 @@ func TestInstallToDiskRefusesATornLayer(t *testing.T) {
 	dir := fakePayload(t)
 	fakeSlotAMount(t)
 	fakeFirmware(t, map[string][]byte{})
-	// A zero-length layer with an intact sidecar: the crash-tear shape.
+	// A zero-length layer with an intact sidecar: this is the shape
+	// that a crash-torn write leaves behind.
 	if err := os.WriteFile(filepath.Join(dir, machine.LayerName), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}

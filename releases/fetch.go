@@ -1,24 +1,25 @@
 package releases
 
-// Downloading a release from a channel: the workstation half of the
-// trust chain the machines already walk.
+// This file downloads a release from a channel: the workstation half
+// of the trust chain the machines already walk.
 //
-// A machine's operator downloads releases onto a boot slot; this
+// A machine's operator downloads releases onto a boot slot. This
 // fetch downloads the same releases onto an operator's workstation,
 // where they become install media. The verification discipline is
 // identical, because the threat is identical: the bytes crossed a
-// network, and nothing about the transport is trusted. The document
-// is fetched first and, when the caller pins a digest, checked
-// against it before a single artifact moves; every artifact is
-// verified against the document before it takes its final name; and
-// the document itself lands last, so a directory holding release.yaml
-// is a directory whose artifacts were complete when it was written.
-// That last property is also what makes the download resumable — and
-// safe to cache: a rerun verifies whatever already landed and fetches
-// only what fails, so an interrupted download converges instead of
-// lingering half-finished under a complete-looking name.
+// network, and nothing about the transport is trusted. Fetch
+// downloads the document first, and, when the caller pins a digest,
+// checks it against that digest before a single artifact moves.
+// Fetch verifies every artifact against the document before the
+// artifact takes its final name. The document itself lands last, so
+// a directory holding release.yaml is a directory whose artifacts
+// were complete when release.yaml was written. This last property
+// also makes the download resumable and safe to cache: a rerun
+// verifies whatever already landed and fetches only what fails, so
+// an interrupted download converges instead of staying half-finished
+// under a name that looks complete.
 //
-// The digest pin is optional here and mandatory on machines, and the
+// The digest pin is optional here and required on machines, and the
 // difference is who holds the catalog. A machine always has its
 // cluster's spec.releases.catalog to vouch for the document. A
 // workstation composing a deployment's first media has no cluster
@@ -40,10 +41,10 @@ import (
 )
 
 // Fetch downloads one release from a channel's source URL into
-// <channelDir>/<version>/, the same layout Bundle produces and the
-// media and stick builders consume. The version "latest" resolves
-// through the channel's advisory document; digest, when non-empty,
-// pins the release document's own bytes ("sha256:<hex>", the
+// <channelDir>/<version>/, the same layout that Bundle produces and
+// that the media and stick builders consume. The version "latest"
+// resolves through the channel's advisory document. digest, when not
+// empty, pins the release document's own bytes ("sha256:<hex>", the
 // catalog-entry form).
 func Fetch(source, version, digest, channelDir string, out io.Writer) error {
 	if out == nil {
@@ -66,9 +67,10 @@ func Fetch(source, version, digest, channelDir string, out io.Writer) error {
 		return fmt.Errorf("fetching the release document: %w", err)
 	}
 
-	// The trust chain's first link, when the caller holds one: the
-	// document's bytes must hash to exactly what the catalog entry
-	// promised. Until that holds, nothing the document says counts.
+	// This is the trust chain's first link, when the caller holds one:
+	// the document's bytes must hash to exactly what the catalog entry
+	// promised. Until that holds true, nothing the document says
+	// counts.
 	if digest != "" {
 		if got := fmt.Sprintf("sha256:%x", sha256.Sum256(raw)); got != digest {
 			return fmt.Errorf("the release document's digest %s does not match the pinned %s", got, digest)
@@ -99,9 +101,9 @@ func Fetch(source, version, digest, channelDir string, out io.Writer) error {
 		fetched++
 	}
 
-	// The document lands after every artifact it describes, making the
-	// directory self-describing: it records which release it holds,
-	// byte for byte, without asking the network again.
+	// The document lands after every artifact it describes. This makes
+	// the directory self-describing: it records which release it
+	// holds, byte for byte, without asking the network again.
 	if err := os.WriteFile(filepath.Join(dest, "release.yaml"), raw, 0o644); err != nil {
 		return err
 	}
@@ -110,9 +112,9 @@ func Fetch(source, version, digest, channelDir string, out io.Writer) error {
 }
 
 // resolveLatest asks the channel's root document what the newest
-// published release is. The document is advisory — outside the trust
-// chain — which is exactly right here: it only chooses which version
-// to fetch, and everything fetched is still verified against that
+// published release is. The document is advisory, outside the trust
+// chain, which is exactly right here: it only chooses which version
+// to fetch, and Fetch still verifies everything fetched against that
 // version's own document.
 func resolveLatest(source string) (string, error) {
 	raw, err := fetchDocument(source + "/channel.yaml")
@@ -126,11 +128,11 @@ func resolveLatest(source string) (string, error) {
 	return channel.Latest, nil
 }
 
-// fetchArtifact streams one artifact into the channel directory:
-// download to a .partial name, verify against the document, then
-// rename. The verify-before-rename order means a final-looking name
-// never points at unverified bytes, which is what lets reruns trust
-// whatever they find in place.
+// fetchArtifact streams one artifact into the channel directory: it
+// downloads to a .partial name, verifies against the document, then
+// renames the file. This verify-before-rename order means a
+// final-looking name never points at unverified bytes, which is what
+// lets reruns trust whatever they find already in place.
 func fetchArtifact(base string, artifact machine.ReleaseArtifact, dest string) error {
 	resp, err := http.Get(base + "/" + artifact.Name)
 	if err != nil {
@@ -146,8 +148,8 @@ func fetchArtifact(base string, artifact machine.ReleaseArtifact, dest string) e
 	if err != nil {
 		return err
 	}
-	// The size cap means an artifact that runs past its declared size
-	// is caught without downloading the rest of it.
+	// The size cap catches an artifact that runs past its declared
+	// size, without downloading the rest of it.
 	_, err = io.Copy(f, io.LimitReader(resp.Body, artifact.Size+1))
 	if closeErr := f.Close(); err == nil {
 		err = closeErr
@@ -165,8 +167,9 @@ func fetchArtifact(base string, artifact machine.ReleaseArtifact, dest string) e
 }
 
 // verifyFile checks one downloaded file against its artifact's digest
-// and size, returning an error for any reason it fails — including
-// that it doesn't exist, the common case on a first run.
+// and size. It returns an error for any reason the check fails,
+// including that the file does not exist, the common case on a first
+// run.
 func verifyFile(artifact machine.ReleaseArtifact, path string) error {
 	f, err := os.Open(path)
 	if err != nil {
@@ -177,8 +180,8 @@ func verifyFile(artifact machine.ReleaseArtifact, path string) error {
 }
 
 // fetchDocument GETs a small document whole. The 1MiB cap is far
-// larger than any reasonable release or channel document and small
-// enough to hold without concern.
+// larger than any reasonable release or channel document, and small
+// enough to hold in memory without concern.
 func fetchDocument(url string) ([]byte, error) {
 	resp, err := http.Get(url)
 	if err != nil {

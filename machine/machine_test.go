@@ -6,8 +6,9 @@ import (
 	"testing"
 )
 
-// writeManifest drops a manifest into a fresh directory and returns its
-// path, so each test can describe a machine in a few lines of YAML.
+// writeManifest writes a manifest into a fresh directory and returns
+// its path, so each test can describe a machine in a few lines of
+// YAML.
 func writeManifest(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "machine.yaml")

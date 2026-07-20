@@ -1,27 +1,29 @@
 package main
 
 // The GRUB dialect of the boot actuator (actuator.go describes the
-// interface and why it exists).
+// interface and explains why it exists).
 //
-// BIOS firmware holds no boot variables, so a BIOS machine's boot
-// preferences live where GRUB can read them: the environment block
-// on the boot home (grubenv.go describes the format). The dialect
-// maps one-to-one onto UEFI's: try_slot is the one-shot trial
-// (grub.cfg consumes it before loading a single kernel byte, exactly
-// as firmware consumes BootNext), and default_slot is the standing
-// preference (the stand-in for BootOrder's head).
+// BIOS firmware holds no boot variables, so a BIOS machine keeps its
+// boot preferences where GRUB can read them: the environment block on
+// the boot home (grubenv.go describes the format). This dialect maps
+// one to one onto the UEFI dialect. try_slot is the one-shot trial
+// (grub.cfg consumes it before it loads a single kernel byte, in the
+// same way that firmware consumes BootNext). default_slot is the
+// standing preference, and it corresponds to the first entry in
+// BootOrder.
 //
-// This dialect has one duty UEFI never needed: healing. A UEFI
-// machine's boot path lives in NVRAM, which nothing but the firmware
-// touches. A BIOS machine's boot path lives on the disk itself — the
-// MBR's boot code, GRUB's core image, the config on the boot home —
-// and cloud hosts are known to rewrite MBRs under running machines
-// (Linode's boot-mode changes do exactly that). So asserting the
-// proven slot here also re-derives every byte of the boot chain from
-// the proven slot's own artifacts and puts back whatever disagrees.
-// It runs on every boot and on the way down before every reboot,
-// because a boot path zeroed while the machine runs must be healed
-// before the reboot that would otherwise never come back.
+// This dialect has one duty that UEFI never needed: healing. A UEFI
+// machine's boot path lives in NVRAM, and nothing but the firmware
+// touches NVRAM. A BIOS machine's boot path lives on the disk itself:
+// the MBR's boot code, GRUB's core image, and the config on the boot
+// home. Cloud hosts are known to rewrite MBRs under running machines
+// (Linode's boot-mode changes do exactly that). So, when this dialect
+// asserts the proven slot, it also re-derives every byte of the boot
+// chain from the proven slot's own artifacts, and it puts back
+// whatever disagrees. This healing runs on every boot and on the way
+// down before every reboot, because a boot path that is zeroed while
+// the machine runs must be healed before the reboot. Otherwise, the
+// machine would never come back.
 
 import (
 	"bytes"
@@ -33,12 +35,12 @@ import (
 )
 
 type grubActuator struct {
-	// grubDir is the boot home's grub directory, holding grub.cfg
+	// grubDir is the boot home's grub directory. It holds grub.cfg
 	// and grubenv.
 	grubDir string
-	// machineName is rendered into grub.cfg when healing it; it
-	// comes from the kernel command line, where GRUB's own config
-	// put it.
+	// machineName is rendered into grub.cfg when this code heals
+	// grub.cfg. This value comes from the kernel command line, where
+	// GRUB's own config put it.
 	machineName string
 }
 
@@ -64,7 +66,7 @@ func (a grubActuator) fallbackLeads(slot string) bool {
 }
 
 // assertProven brings the whole GRUB boot path into agreement with
-// the store: the environment block prefers the proven slot, and the
+// the store. The environment block prefers the proven slot, and the
 // boot chain on disk matches the proven slot's own artifacts.
 func (a grubActuator) assertProven(slot string) {
 	env, err := readGRUBEnv(a.envPath())
@@ -72,14 +74,15 @@ func (a grubActuator) assertProven(slot string) {
 	case err != nil:
 		fmt.Fprintf(os.Stderr, "liken: system: reading the GRUB environment block: %v\n", err)
 	case env["default_slot"] != slot || env["try_slot"] != "":
-		// A leftover try_slot is cleared along with the preference
-		// write: a one-shot that was armed for a release since
-		// withdrawn must not fire on some later reboot.
+		// This call clears a leftover try_slot along with the
+		// preference write. A one-shot trial that was armed for a
+		// release since withdrawn must not run on a later reboot.
 		if err := updateGRUBEnv(a.envPath(), map[string]string{"default_slot": slot, "try_slot": ""}); err != nil {
 			fmt.Fprintf(os.Stderr, "liken: system: asserting default_slot in the GRUB environment block: %v\n", err)
 		} else if readback, err := readGRUBEnv(a.envPath()); err != nil || readback["default_slot"] != slot {
-			// Trust the readback, not the write, exactly as the UEFI
-			// dialect does with BootOrder.
+			// This code trusts the readback, not the write, in the
+			// same way that the UEFI dialect trusts the readback of
+			// BootOrder.
 			fmt.Fprintln(os.Stderr, "liken: system: the GRUB environment block was written but reads back unchanged")
 		} else {
 			fmt.Printf("liken: system: the GRUB environment block now prefers slot %s (proven)\n", slot)
@@ -87,15 +90,16 @@ func (a grubActuator) assertProven(slot string) {
 	}
 
 	// The environment block and the boot chain are separate
-	// assertions on purpose: a torn environment block must not stop
-	// the boot sectors from healing, or the other way around.
+	// assertions on purpose. A torn environment block must not stop
+	// the boot sectors from healing, and a problem in the boot
+	// sectors must not stop the environment block assertion.
 	a.healBootChain(slot)
 }
 
 // healBootChain re-derives the on-disk boot chain from the proven
 // slot's artifacts and rewrites whatever disagrees. The comparison
-// runs every time; the writes only when something drifted, so a
-// healthy machine's console says nothing.
+// runs every time. The write happens only when something drifted, so
+// a healthy machine's console shows no message.
 func (a grubActuator) healBootChain(slot string) {
 	slotMount := slotMountPath(slot)
 	if slotMount == "" {
@@ -104,8 +108,8 @@ func (a grubActuator) healBootChain(slot string) {
 	bootImg, err := os.ReadFile(filepath.Join(slotMount, "grub-boot.img"))
 	if err != nil {
 		// A proven release from before liken carried GRUB artifacts
-		// can't say what the boot sectors should hold; the chain that
-		// booted this machine stays as it is.
+		// cannot say what the boot sectors should hold. The chain
+		// that booted this machine stays as it is.
 		fmt.Printf("liken: system: slot %s carries no grub-boot.img; leaving the boot sectors alone\n", slot)
 		return
 	}
@@ -151,9 +155,9 @@ func (a grubActuator) healBootChain(slot string) {
 	}
 
 	// grub.cfg is rendered, not copied, so it heals the same way:
-	// re-render and compare. Without a machine name there is nothing
-	// correct to render, so the file is left alone rather than
-	// anonymized.
+	// this code re-renders it and compares the result. Without a
+	// machine name, there is nothing correct to render, so this code
+	// leaves the file alone rather than write an anonymous version.
 	if a.machineName == "" {
 		return
 	}
@@ -170,9 +174,10 @@ func (a grubActuator) healBootChain(slot string) {
 	fmt.Println("liken: system: grub.cfg disagreed with this machine's rendering; healed")
 }
 
-// slotMountPath translates a slot letter to its mountpoint via the
-// same table storage reconciliation mounts by, so tests can stand in
-// a tempdir the way they do for every role.
+// slotMountPath translates a slot letter to its mountpoint. It uses
+// the same table that storage reconciliation uses for mounts, so
+// tests can substitute a temporary directory, the same way tests do
+// for every role.
 func slotMountPath(slot string) string {
 	switch slot {
 	case "A":
@@ -185,9 +190,10 @@ func slotMountPath(slot string) string {
 
 // biosFirmwareFacts reports a BIOS machine's boot configuration from
 // where that machine actually keeps it: GRUB's environment block and
-// the kernel command line GRUB composed. The fields deliberately
-// mirror the UEFI report — a fleet listing reads the same either way,
-// with each fact naming the mechanism it came from.
+// the kernel command line that GRUB composed. The fields deliberately
+// mirror the UEFI report. A fleet listing reads the same way for
+// either firmware type, and each fact names the mechanism it came
+// from.
 func biosFirmwareFacts() machine.FirmwareStatus {
 	fw := machine.FirmwareStatus{Mode: machine.FirmwareBIOS}
 	if slot := bootParamValue("liken.slot"); slot != "" {

@@ -10,8 +10,8 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// osPod builds a pod whose one container runs a liken OS image, ready
-// or not, for exercising the promotion proof.
+// osPod builds a pod whose one container runs a liken OS image,
+// ready or not, for use in the promotion proof tests.
 func osPod(name, image string, ready bool) kubernetes.Pod {
 	p := kubernetes.Pod{}
 	p.Metadata.Name = name
@@ -50,7 +50,8 @@ func TestImportsPromotionProvenBootIsConverged(t *testing.T) {
 
 func TestImportsPromotionAlreadyPromotedThisBoot(t *testing.T) {
 	// Facts say Staged for the whole boot, but an earlier pass
-	// promoted: the store's proven record now matches the boot.
+	// already promoted. The store's proven record now matches the
+	// boot.
 	in := importsInputs{provenHash: "abc"}
 	v := decideImportsPromotion(in, importsFacts(machine.ManifestSourceStaged, "abc"))
 	if v.promote || v.condition.Status != api.ConditionTrue || v.condition.Reason != "Converged" {
@@ -59,8 +60,9 @@ func TestImportsPromotionAlreadyPromotedThisBoot(t *testing.T) {
 }
 
 func TestImportsPromotionMissingTrialIsUnknown(t *testing.T) {
-	// Nothing staged, and the proven record isn't this boot's either:
-	// the store no longer holds the trial the facts describe.
+	// Nothing is staged, and the proven record does not match this
+	// boot either. The store no longer holds the trial that the
+	// facts describe.
 	in := importsInputs{provenHash: "something else"}
 	v := decideImportsPromotion(in, importsFacts(machine.ManifestSourceStaged, "abc"))
 	if v.promote || v.condition.Status != api.ConditionUnknown || v.condition.Reason != "MachineStateUnavailable" {
@@ -165,11 +167,11 @@ func TestImportsPromotionPromotesWhenTheOSServes(t *testing.T) {
 	}
 }
 
-// The observing half, settleImportsLifecycle, gathers the store and
-// pod evidence the decision judges. These tests stop short of an
-// actual promotion, because promotion's syncfs barrier needs the real
-// container store; the decision tests above already cover that
-// verdict.
+// The observing half, settleImportsLifecycle, gathers the store
+// and pod evidence that the decision judges. These tests stop short
+// of an actual promotion, because promotion's syncfs barrier needs
+// the real container store. The decision tests above already cover
+// that verdict.
 
 func TestSettleImportsLifecycleUntrackedBootNeedsNoStore(t *testing.T) {
 	client := testClient(t, (&drainAPI{}).handler())

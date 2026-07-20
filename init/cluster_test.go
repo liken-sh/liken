@@ -2,7 +2,7 @@ package main
 
 // Tests for the cluster document's boot-time selection: staged over
 // proven over seed, vetting before the trial, and the boot record
-// accurately recording which copy won.
+// accurately recording which copy the boot used.
 
 import (
 	"os"
@@ -21,7 +21,7 @@ spec:
   endpoint: https://10.10.0.1:6443
 `
 
-// a second, distinguishable document
+// a second document that the tests can tell apart from the first
 const editedCluster = sampleCluster + `  time:
     upstreams: [time.cloudflare.com]
 `
@@ -174,7 +174,7 @@ func TestChooseClusterRepublishesAStandingRejection(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The next boot finds no staged document, but the quarantine
-	// record still stands and must be reported again.
+	// record still stands. The code must report it again.
 	nextBoot := &machine.BootStatus{}
 	if _, _, err := chooseCluster(root, writeSeed(t, sampleCluster), true, nextBoot); err != nil {
 		t.Fatal(err)
@@ -209,8 +209,9 @@ func TestChooseClusterRejectsAStagedDocumentThatWasNeverProven(t *testing.T) {
 	if err := store.WriteStaged([]byte(editedCluster)); err != nil {
 		t.Fatal(err)
 	}
-	// The previous boot tried this exact document and nobody promoted
-	// it: the machine never joined its cluster under it.
+	// The previous boot tried this exact document, and nobody
+	// promoted it. The machine never joined its cluster under the
+	// document.
 	if err := store.WriteAttempted(machine.ManifestHash([]byte(editedCluster))); err != nil {
 		t.Fatal(err)
 	}
@@ -238,9 +239,10 @@ func TestChooseClusterFailsOnAnUnparseableSeed(t *testing.T) {
 }
 
 func TestChooseClusterFallsThroughACorruptProvenDocument(t *testing.T) {
-	// A proven document that won't parse is a corrupted
-	// last-known-good: reported, then the seed carries the boot,
-	// because a recovery file must never be the thing a boot dies on.
+	// A proven document that will not parse is a corrupted
+	// last-known-good copy. The code reports it, then the seed
+	// carries the boot, because a recovery file must never be the
+	// thing a boot fails on.
 	root := t.TempDir()
 	if err := machine.ClusterManifests(root).WriteProven([]byte("{corrupt")); err != nil {
 		t.Fatal(err)
@@ -261,8 +263,9 @@ func TestChooseClusterFallsThroughACorruptProvenDocument(t *testing.T) {
 }
 
 func TestChooseClusterToleratesUnreadableStoreFiles(t *testing.T) {
-	// Both store files exist but can't be read (a dying disk): the
-	// boot reports each and falls through to the seed.
+	// Both store files exist but cannot be read, for example because
+	// of a dying disk. The boot reports each one and falls through
+	// to the seed.
 	root := t.TempDir()
 	store := machine.ClusterManifests(root)
 	if err := store.WriteStaged([]byte("staged")); err != nil {

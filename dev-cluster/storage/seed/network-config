@@ -1,24 +1,25 @@
-# The storage server's two networks, the same two jobs every lab
-# machine has (see dev-cluster/Makefile): an uplink for reaching the
-# outside world, and the cluster segment where the fleet lives.
-# Interfaces are matched by MAC address, the one identity QEMU pins
-# regardless of how the guest's kernel names its devices.
+# The storage server's two networks, with the same two jobs that
+# every lab machine has (see dev-cluster/Makefile): an uplink for
+# reaching the outside world, and the cluster segment where the
+# fleet lives. The config matches interfaces by MAC address, the one
+# identity that QEMU pins, regardless of how the guest's kernel names
+# its devices.
 version: 2
 ethernets:
   # The uplink: QEMU's user-mode network, with its built-in DHCP.
-  # The server needs it exactly once, to install its packages on
-  # first boot; user-mode NAT is private to this guest, so nothing
-  # here reaches the fleet.
+  # The server needs this network exactly once, to install its
+  # packages on first boot. User-mode NAT is private to this guest,
+  # so nothing here reaches the fleet.
   uplink:
     match:
       macaddress: "52:54:00:4c:4b:10"
     set-name: uplink
     dhcp4: true
-  # The cluster segment: the multicast wire the fleet speaks
-  # Kubernetes over. Static, like every address on it — the segment
-  # has no DHCP, deliberately. .100 sits well clear of the machines,
-  # which count up from .1; this is the address the lab's exports
-  # and targets are reached at.
+  # The cluster segment: the multicast wire that the fleet speaks
+  # Kubernetes over. This address is static, like every address on
+  # the segment, because the segment has no DHCP on purpose. .100
+  # sits well clear of the machines, which count up from .1. This is
+  # the address where the lab's exports and targets can be reached.
   cluster:
     match:
       macaddress: "52:54:00:4c:4c:10"

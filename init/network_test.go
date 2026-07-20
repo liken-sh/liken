@@ -1,7 +1,8 @@
 package main
 
-// Tests for the network derivations that are pure over their inputs.
-// Interfaces, DHCP exchanges, and routing tables are QEMU territory.
+// This file tests the network functions that produce the same
+// output for the same input. Tests for interfaces, DHCP exchanges,
+// and routing tables run under QEMU, not here.
 
 import (
 	"net"
@@ -19,8 +20,9 @@ func TestJoinIPsReadsAsAList(t *testing.T) {
 }
 
 func TestConnectionReportNarratesEachMethod(t *testing.T) {
-	// The report prints the same facts interfaceFacts publishes;
-	// exercising both methods pins that every field has a voice.
+	// The report prints the same facts that interfaceFacts publishes.
+	// Testing both methods confirms that the report prints every
+	// field.
 	_, subnet, _ := net.ParseCIDR("10.0.2.0/24")
 	dhcp := &connection{
 		ifname:      "eth0",
@@ -44,10 +46,12 @@ func TestConnectionReportNarratesEachMethod(t *testing.T) {
 }
 
 func TestResolvConfCapsAtThreeNameservers(t *testing.T) {
-	// glibc has read at most three nameservers since the 1980s, every
-	// other resolver stack follows it, and kubelet logs a warning on
-	// every sync when a node offers more. Linode's DHCP hands out its
-	// whole regional fleet (eighteen); the machine keeps three.
+	// Since the 1980s, glibc has read at most three nameservers.
+	// Every other resolver stack follows the same limit. kubelet
+	// logs a warning at each sync when a node offers more than
+	// three. Linode's DHCP service hands out its whole regional
+	// fleet of resolvers, eighteen in total, but the machine keeps
+	// only three.
 	conns := []*connection{{nameservers: []net.IP{
 		net.ParseIP("10.0.0.1"), net.ParseIP("10.0.0.2"),
 		net.ParseIP("10.0.0.3"), net.ParseIP("10.0.0.4"),
@@ -60,8 +64,9 @@ func TestResolvConfCapsAtThreeNameservers(t *testing.T) {
 }
 
 func TestResolvConfKeepsInterfaceOrder(t *testing.T) {
-	// Interface order is priority order: the uplink's lease speaks
-	// before a later interface's manifest declarations.
+	// Interface order is priority order. The uplink's lease
+	// nameservers come before a later interface's manifest
+	// declarations.
 	conns := []*connection{
 		{nameservers: []net.IP{net.ParseIP("10.0.0.1"), net.ParseIP("10.0.0.2")}},
 		{nameservers: []net.IP{net.ParseIP("10.1.0.1")}},
@@ -73,8 +78,9 @@ func TestResolvConfKeepsInterfaceOrder(t *testing.T) {
 }
 
 func TestResolvConfDropsDuplicates(t *testing.T) {
-	// A resolver listed on two interfaces buys nothing twice, and
-	// with only three slots a duplicate costs a real one.
+	// Listing the same resolver on two interfaces adds no value the
+	// second time. With only three slots available, a duplicate
+	// takes the place of a real nameserver.
 	conns := []*connection{
 		{nameservers: []net.IP{net.ParseIP("10.0.0.1")}},
 		{nameservers: []net.IP{net.ParseIP("10.0.0.1"), net.ParseIP("10.1.0.1")}},

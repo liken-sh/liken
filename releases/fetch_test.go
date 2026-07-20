@@ -1,10 +1,10 @@
 package releases
 
 // Tests for downloading a release. Each test round-trips through the
-// package's own machinery: Bundle lays out a real (tiny) release,
-// the serve handler publishes it the way any web server would, and
-// Fetch downloads it back — so the fixtures can never drift from
-// what the channel actually serves.
+// package's own machinery: Bundle lays out a real (tiny) release, the
+// serve handler publishes it the way any web server would, and Fetch
+// downloads it back. This way, the fixtures can never drift from what
+// the channel actually serves.
 
 import (
 	"bytes"
@@ -19,9 +19,9 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// servedChannel bundles a release and exposes it over HTTP, returning
-// the source URL a fetch would be pointed at and the channel directory
-// behind it.
+// servedChannel bundles a release and exposes it over HTTP. It
+// returns the source URL a fetch would be pointed at, and the channel
+// directory behind it.
 func servedChannel(t *testing.T, version string) (string, string) {
 	t.Helper()
 	channel, _ := bundledRelease(t, version)
@@ -51,7 +51,8 @@ func TestFetchDownloadsAVerifiableRelease(t *testing.T) {
 	}
 
 	// What landed must verify the same way a machine would verify it:
-	// parse the document, then check every artifact against it.
+	// parse the document, then check every artifact against the
+	// document.
 	raw, err := os.ReadFile(filepath.Join(dest, "2026.07.14-001", "release.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -91,8 +92,8 @@ func TestFetchRefusesADocumentThatMissesThePin(t *testing.T) {
 	if err == nil {
 		t.Fatal("a digest mismatch must refuse the release")
 	}
-	// Nothing may look complete: release.yaml is the marker of a
-	// finished download and must never land for a refused release.
+	// Nothing may look complete: release.yaml marks a finished
+	// download, and must never land for a refused release.
 	if _, statErr := os.Stat(filepath.Join(dest, "2026.07.14-001", "release.yaml")); !os.IsNotExist(statErr) {
 		t.Error("a refused release must not leave release.yaml behind")
 	}
@@ -102,9 +103,9 @@ func TestFetchRefusesATamperedArtifact(t *testing.T) {
 	source, channel := servedChannel(t, "2026.07.14-001")
 	dest := t.TempDir()
 
-	// Tamper with a published artifact after the document was written:
-	// the served bytes no longer match the digests the document
-	// promises.
+	// This tampers with a published artifact after the document was
+	// written, so the served bytes no longer match the digests the
+	// document promises.
 	tampered := filepath.Join(channel, "2026.07.14-001", "liken.sqfs")
 	if err := os.WriteFile(tampered, []byte("not the published bytes"), 0o644); err != nil {
 		t.Fatal(err)
@@ -129,9 +130,9 @@ func TestFetchRepairsADamagedLocalCopy(t *testing.T) {
 	if err := Fetch(source, "2026.07.14-001", "", dest, nil); err != nil {
 		t.Fatal(err)
 	}
-	// Damage one local artifact; a refetch must notice by digest and
-	// repair only what fails, the same resume-by-reverification the
-	// machines use.
+	// This damages one local artifact. A refetch must notice by
+	// digest, and repair only what fails. This is the same resume
+	// approach, checking digests again, that the machines use.
 	damaged := filepath.Join(dest, "2026.07.14-001", "vmlinuz")
 	if err := os.WriteFile(damaged, []byte("torn"), 0o644); err != nil {
 		t.Fatal(err)

@@ -2,70 +2,75 @@
 #
 # Vendor a pre-built Linux kernel from Ubuntu's mainline builds.
 #
-# liken deliberately does not compile kernels. Building Linux once is
-# worth doing, but maintaining kernel builds (configs, CVEs,
-# toolchains) is ongoing work that has exhausted many small distros,
-# and it teaches nothing about what liken is here to teach.
-# Instead we rely on Canonical's kernel team: their mainline archive
-# (https://kernel.ubuntu.com/mainline/) publishes every upstream release
-# (stable, point releases, even RCs) as pre-built Debian packages, usually
-# within a day of the tag. Crucially, these are vanilla kernels: built
-# from Linus's tree with no Ubuntu patches, using Ubuntu's "generic"
-# configuration. What we boot is what upstream shipped.
+# liken does not compile kernels. Building Linux once is worth doing.
+# But maintaining kernel builds (configs, CVEs, toolchains) is ongoing
+# work. This work has exhausted many small distros, and it teaches
+# nothing about what liken is here to teach.
 #
-# A Debian package needs no Debian tooling to open. A .deb is an `ar`
-# archive, the 1970s static-library format, wrapping a tarball
+# Instead, liken relies on Canonical's kernel team. Their mainline
+# archive (https://kernel.ubuntu.com/mainline/) publishes every
+# upstream release (stable, point releases, and even RCs) as pre-built
+# Debian packages, usually within a day of the tag. These are vanilla
+# kernels: the archive builds them from Linus's tree with no Ubuntu
+# patches, using Ubuntu's "generic" configuration. The kernel liken
+# boots is the kernel upstream shipped.
+#
+# A Debian package needs no Debian tooling to open. A .deb file is an
+# `ar` archive, the 1970s static-library format. It wraps a tarball
 # (data.tar.zst) of the package's files. So `ar`, `tar`, and `zstd` are
-# the entire extraction toolchain, and this script works the same on any
-# Linux machine.
+# the entire extraction toolchain, and this script works the same way
+# on any Linux machine.
 #
-# Each mainline build publishes several packages; we want exactly two:
+# Each mainline build publishes several packages. This script wants
+# exactly two of them:
 #
 #   linux-image-unsigned-*   the kernel itself: one self-decompressing
 #                            file, /boot/vmlinuz-*
 #   linux-modules-*          everything built as a loadable module, plus
 #                            the build's config and System.map
 #
-# ("unsigned" because the signed variant only matters when chaining trust
-# from Canonical's Secure Boot certificates. When liken gets to Secure
-# Boot, the plan is to sign with our own keys anyway.)
+# ("unsigned" because the signed variant matters only when it chains
+# trust from Canonical's Secure Boot certificates. When liken adds
+# Secure Boot support, the plan is to sign with liken's own keys.)
 #
 # Usage:
 #
 #   kernel/fetch.sh            fetch the version pinned in kernel/VERSION
 #   kernel/fetch.sh 7.1.1      fetch a specific version instead
 #
-# Upgrading the kernel is a one-line change to kernel/VERSION. Every
-# other upgrade in liken works the same way: edit a pin and commit it.
+# To upgrade the kernel, change one line in kernel/VERSION. Every other
+# upgrade in liken works the same way: edit a pin and commit it.
 #
 # Results land in kernel/dist/<version>/:
 #
 #   vmlinuz                  the bootable kernel image
-#   config                   the exact build configuration, for answering
-#                            "is that driver built in, a module, or absent?"
+#   config                   the exact build configuration; use it to
+#                            answer "is that driver built in, a module,
+#                            or absent?"
 #   release                  the kernel's release string, e.g.
-#                            "7.1.2-070102-generic"; later build steps
-#                            need it to find the module directory
-#   lib/modules/<release>/   the module tree, indexed and laid out exactly
-#                            as it will appear in the initramfs
+#                            "7.1.2-070102-generic". Later build steps
+#                            need it to find the module directory.
+#   lib/modules/<release>/   the module tree, indexed and laid out
+#                            exactly as it will appear in the initramfs
 #
-# Downloads are cached in kernel/cache/ and verified against the sha256
-# checksums the archive publishes alongside each build, so re-runs are
-# cheap and a torn download can't slip through. (The archive also signs
-# its checksum file with the Ubuntu kernel team's GPG key. We don't
-# verify that signature, and that gap is deliberate: the sha256 check
-# proves the file arrived intact, but it does not prove who published
-# it.)
+# This script caches downloads in kernel/cache/ and verifies them
+# against the sha256 checksums the archive publishes beside each
+# build. This makes re-runs cheap and stops a torn download from
+# passing as good. (The archive also signs its checksum file with the
+# Ubuntu kernel team's GPG key. This script does not verify that
+# signature. That gap is deliberate: the sha256 check proves the file
+# arrived intact, but it does not prove who published it.)
 
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Everything we need is stock on an ordinary Linux development machine:
-# curl to fetch, ar (binutils) to open the .deb wrapper, tar + zstd to
-# unpack the payload, sha256sum to verify it, and depmod (kmod) to index
-# the modules at the end. Checking for them up front means a missing
-# tool fails immediately instead of partway through a download.
+# An ordinary Linux development machine has every tool this script
+# needs: curl to fetch, ar (binutils) to open the .deb wrapper, tar and
+# zstd to unpack the payload, sha256sum to verify it, and depmod (kmod)
+# to index the modules at the end. This script checks for them first,
+# so a missing tool stops it immediately instead of partway through a
+# download.
 for tool in curl ar tar zstd sha256sum depmod; do
     command -v "$tool" >/dev/null || {
         echo "fetch.sh: missing required tool: $tool" >&2
@@ -81,27 +86,29 @@ cache="$here/cache"
 out="$here/dist/$version"
 mkdir -p "$cache"
 
-# The archive publishes a CHECKSUMS file per build: sha1 lines (40 hex
-# chars) followed by sha256 lines (64), each "<digest>  <filename>". It
-# doubles as our package index: the filenames embed a build timestamp we
-# can't otherwise guess, so we discover the exact .deb names by grepping
-# it rather than constructing URLs.
+# The archive publishes one CHECKSUMS file per build: sha1 lines (40
+# hex characters), followed by sha256 lines (64 characters), each in
+# the form "<digest>  <filename>". This file also works as a package
+# index. The filenames embed a build timestamp that has no other
+# source, so this script finds the exact .deb names by searching this
+# file instead of constructing URLs.
 if ! checksums="$(curl -fsSL "$base/CHECKSUMS")"; then
     echo "fetch.sh: no mainline build found at $base" >&2
     echo "fetch.sh: (not every release builds successfully; check https://kernel.ubuntu.com/mainline/)" >&2
     exit 1
 fi
 
-# Files extract into a scratch directory first; dist/ only gets touched
-# once everything has arrived and verified, so a failed run can't leave a
-# half-populated kernel behind.
+# Files extract into a scratch directory first. This script touches
+# dist/ only after everything arrives and verifies, so a failed run
+# cannot leave a half-populated kernel behind.
 staging="$(mktemp -d)"
 trap 'rm -rf "$staging"' EXIT
 
-# Download (with cache) and unpack one package, identified by a filename
-# pattern rather than an exact name. `ar p` streams the payload member to
-# stdout; the payload may be a plain data.tar (current mainline builds) or
-# compressed with zstd or xz (Ubuntu's own archives, older builds).
+# Download (with a cache) and unpack one package, identified by a
+# filename pattern instead of an exact name. `ar p` streams the payload
+# member to stdout. The payload may be a plain data.tar (current
+# mainline builds), or compressed with zstd or xz (Ubuntu's own
+# archives, older builds).
 fetch() {
     local pattern="$1" line digest deb payload
     line="$(grep -E "^[0-9a-f]{64}  $pattern" <<<"$checksums" | head -n1)" || {
@@ -111,9 +118,10 @@ fetch() {
     digest="${line%% *}"
     deb="${line##* }"
 
-    # A cached file that still matches its checksum is good; anything
-    # else (missing, torn, or tampered) gets re-downloaded and must
-    # verify before we touch it.
+    # A cached file that still matches its checksum is good. This
+    # script downloads anything else (missing, torn, or tampered)
+    # again, and the new download must verify before the script uses
+    # it.
     if ! sha256sum --check --status <<<"$digest  $cache/$deb" >/dev/null 2>&1; then
         echo "downloading $deb"
         curl -fL --progress-bar -o "$cache/$deb" "$base/$deb"
@@ -136,16 +144,17 @@ fetch "linux-image-unsigned-.*-generic_.*_$arch\.deb"
 fetch "linux-modules-.*-generic_.*_$arch\.deb"
 
 # The kernel's "release string" (uname -r) is embedded in every
-# artifact's filename and directory layout, and it's how the kernel
-# locates its modules at runtime (/lib/modules/$(uname -r)). Recover
-# it from the image filename rather than guessing.
+# artifact's filename and directory layout. The kernel uses this
+# string at runtime to locate its modules (/lib/modules/$(uname -r)).
+# This script reads the string from the image filename instead of
+# guessing it.
 vmlinuz=("$staging"/boot/vmlinuz-*)
 release="$(basename "${vmlinuz[0]}")"
 release="${release#vmlinuz-}"
 
-# Modules historically live in /lib/modules; distributions that have
-# completed the "usr merge" ship them in /usr/lib/modules instead. Take
-# whichever this package used.
+# Modules traditionally live in /lib/modules. Distributions that have
+# completed the "usr merge" ship them in /usr/lib/modules instead. This
+# script uses whichever path this package used.
 modules="$staging/lib/modules"
 [[ -d "$modules" ]] || modules="$staging/usr/lib/modules"
 
@@ -156,12 +165,12 @@ cp "$staging"/boot/config-* "$out/config"
 echo "$release" >"$out/release"
 mv "$modules" "$out/lib/modules"
 
-# modprobe never scans the module tree at runtime; it reads an index,
-# modules.dep(.bin), that maps each module to the modules it depends on.
-# depmod builds that index. Installing the .deb normally would have run
-# this in a post-install hook; since we unpack by hand, we run it by
-# hand, at build time, here on the host, so the booted system never
-# needs depmod at all.
+# modprobe never scans the module tree at runtime. It reads an index,
+# modules.dep(.bin), that maps each module to the modules it depends
+# on. depmod builds that index. A normal .deb install runs this step in
+# a post-install hook. This script unpacks the package by hand, so it
+# runs depmod by hand too, at build time, here on the host. As a
+# result, the booted system never needs depmod at all.
 depmod --basedir "$out" "$release"
 
 echo

@@ -1,10 +1,11 @@
 # node-2: the second leader. Its name is in cluster.yaml's leaders
-# list, so it derives the leader role: it runs a control plane and an
-# etcd member of its own, joining through the founding leader.
+# list, so it takes the leader role: it runs a control plane and its
+# own etcd member, and it joins the cluster through the founding
+# leader.
 #
-# Selected at boot by liken.machine=node-2 on the kernel command
-# line; node-1.yaml explains the seed lifecycle and the storage
-# vocabulary, which are the same for every machine.
+# The boot selects this manifest through liken.machine=node-2 on the
+# kernel command line. node-1.yaml explains the seed lifecycle and
+# the storage vocabulary, which are the same for every machine.
 apiVersion: liken.sh/v1alpha1
 kind: Machine
 metadata:
@@ -14,18 +15,19 @@ spec:
   rebootPolicy: Auto
   network:
     # The same two-interface shape as node-1: a DHCP uplink and a
-    # static address on the cluster segment. Only the address differs;
-    # every machine on the segment needs its own, and keeping them
-    # unique across manifests is (for now) the manifest author's job.
+    # static address on the cluster segment. Only the address
+    # differs. Every machine on the segment needs its own address,
+    # and keeping these addresses unique across manifests is, for
+    # now, the manifest author's job.
     interfaces:
       - name: eth0
       - name: eth1
         address: 10.10.0.2/24
   # The same storage shape as node-1: every machine owns its own
-  # disks, follower or not. clusterState matters on a follower too:
-  # it holds containerd's images and the kubelet's bookkeeping, which
-  # is what saves a follower from re-importing every container image
-  # on every boot.
+  # disks, whether it is a follower or not. clusterState matters on a
+  # follower too: it holds containerd's images and the kubelet's
+  # bookkeeping, and this is what saves a follower from re-importing
+  # every container image on every boot.
   storage:
     # node-1.yaml explains the GRUB boot path these two roles declare.
     biosBoot:

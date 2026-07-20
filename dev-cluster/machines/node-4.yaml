@@ -1,7 +1,8 @@
 # node-4: a follower. Its name is not in cluster.yaml's leaders list,
-# so it derives the follower role: it runs workloads and takes
-# direction from the control plane, which it joins through the
-# cluster's endpoint, presenting the token from the identity bundle.
+# so it takes the follower role: it runs workloads and takes
+# direction from the control plane. It joins the control plane
+# through the cluster's endpoint, and it presents the token from the
+# identity bundle.
 apiVersion: liken.sh/v1alpha1
 kind: Machine
 metadata:
@@ -44,16 +45,16 @@ spec:
   sysctls:
     fs.inotify.max_user_instances: "8192"
   # The declared-modules drill (milestone 18): dummy is the kernel's
-  # placeholder network driver, harmless everywhere, so this machine
-  # is the lab's standing proof that a deployment can ask for a
-  # module the OS itself would never load. The image build ships it
-  # because this manifest declares it, and status.modules on this
-  # Machine reports the load.
+  # placeholder network driver. It is harmless everywhere, so this
+  # machine stands as the lab's proof that a deployment can ask for a
+  # module that the OS itself would never load on its own. The image
+  # build ships this module because this manifest declares it, and
+  # status.modules on this Machine reports the load.
   modules: [dummy]
   # The node-labels drill (milestone 21): a made-up scheduling label
-  # under a domain the lab owns. Init renders it into the k3s boot
-  # drop-in so the node registers wearing it, and the operator holds
-  # it in place afterward: rewrite it by hand and the next reconcile
-  # pass puts it back.
+  # under a domain that the lab owns. Init writes it into the k3s
+  # boot drop-in, so the node registers with this label attached, and
+  # the operator keeps it in place afterward. If someone rewrites the
+  # label by hand, the next reconcile pass restores it.
   nodeLabels:
     guid.foo/drill: node-labels

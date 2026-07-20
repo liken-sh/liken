@@ -2,30 +2,32 @@ package main
 
 import "github.com/liken-sh/liken/api"
 
-// The machine's phase: the whole set of conditions summarized in one
-// word.
+// The machine's phase: the whole set of conditions summarized in
+// one word.
 //
 // Conditions are the machine's full account of itself, typed,
-// reasoned, and timestamped, and they're what programs consume
-// (kubectl wait, controllers, the Ready roll-up). But a human
-// scanning a fleet listing doesn't want five columns of True and
-// False; they want one word per machine that says whether it needs
-// attention. Pods solved this with status.phase (Pending, Running,
-// Succeeded, Failed), and the Machine borrows the idea exactly: the
-// phase is derived from the conditions on every pass and never
-// remembered, so it can never disagree with them.
+// reasoned, and timestamped, and programs consume them (kubectl
+// wait, controllers, the Ready roll-up). But a person scanning a
+// fleet listing does not want five columns of True and False. They
+// want one word per machine that says whether it needs attention.
+// Pods solved this with status.phase (Pending, Running, Succeeded,
+// Failed), and the Machine borrows this idea exactly. The operator
+// derives the phase from the conditions on every pass, and never
+// stores it, so it can never disagree with them.
 //
-// One phase is deliberately missing from this table: Lost. A machine
-// cannot derive its own death from its own conditions, because if
-// this code is running, the machine isn't lost. Lost is written by
-// the cluster operator on a silent machine's behalf, and overwritten
-// by the machine's own operator the moment it reports again.
+// One phase is deliberately missing from this table: Lost. A
+// machine cannot derive its own death from its own conditions,
+// because if this code is running, the machine is not lost. The
+// cluster operator writes Lost on a silent machine's behalf, and
+// the machine's own operator overwrites it the moment the machine
+// reports again.
 
-// phasePrecedence orders the phases most-severe-first: when several
-// conditions point at different phases, the machine reports the
-// gravest one. A machine that is both waiting on a Manual reboot and
-// failing a sysctl is UpdatePending *and* Degraded; the listing
-// should show the one that needs a human soonest.
+// phasePrecedence orders the phases from most severe to least
+// severe. When several conditions point at different phases, the
+// machine reports the most severe one. A machine that is both
+// waiting on a Manual reboot and failing a sysctl is UpdatePending
+// and Degraded at the same time. The listing should show the one
+// that needs a person soonest.
 var phasePrecedence = []api.Phase{
 	api.PhaseUnknown,
 	api.PhaseBooting,
@@ -35,13 +37,14 @@ var phasePrecedence = []api.Phase{
 	api.PhaseDegraded,
 }
 
-// conditionPhase maps one condition to the phase it argues for, ""
-// when it argues for nothing (it's True, or it's the Ready roll-up,
-// which is a summary of the others and would double-count). The
-// mapping is by reason, because the reasons already distinguish what
-// the boolean status can't: RebootPending and RejectedLastBoot are
-// both "not converged", but one resolves with a reboot and the other
-// never will without a different edit.
+// conditionPhase maps one condition to the phase it indicates. It
+// returns "" when the condition indicates nothing: when it is True,
+// or when it is the Ready roll-up, which summarizes the others and
+// would double-count. The mapping works by reason, because the
+// reasons already distinguish what the boolean status cannot.
+// RebootPending and RejectedLastBoot are both "not converged," but
+// one resolves with a reboot and the other never will without a
+// different edit.
 func conditionPhase(c api.Condition) api.Phase {
 	if c.Type == "Ready" || c.Status == api.ConditionTrue {
 		return ""
@@ -49,37 +52,38 @@ func conditionPhase(c api.Condition) api.Phase {
 	switch c.Reason {
 	case "FactsUnreadable":
 		// The operator is running but cannot read the facts, so it
-		// knows nothing about the machine it stands on.
+		// knows nothing about the machine it runs on.
 		return api.PhaseUnknown
 	case "FactsIncomplete":
-		// Facts exist but carry no boot record yet: init is still
-		// working its way up.
+		// Facts exist but carry no boot record yet. init is still
+		// starting up.
 		return api.PhaseBooting
 	case "RejectedLastBoot", "StagingRejected", "BootMismatch", "MachineStateEphemeral",
 		"NoSystemSlots", "NotInstalled", "NoReleaseSource", "VersionNotInCatalog", "DigestMismatch",
 		"CredentialsInvalid":
-		// Drift exists but liken refuses or is unable to stage it.
-		// Time won't fix these; a different edit will. The version
-		// target can be stuck several ways: no slots to hold a
-		// release, a boot that didn't come from a slot (so no boot
-		// entry could ever run the download), a catalog with no
-		// source or without the target, and a download whose bytes
-		// don't match the catalog's digest. That last one is corrupt
-		// at the source, where refetching can't change what the
-		// server publishes. A malformed credentials Secret is the
-		// same shape: only a corrected Secret fixes it.
+		// Drift exists, but liken refuses to stage it, or cannot.
+		// Time will not fix these; a different edit will. The
+		// version target can get stuck in several ways: no slots to
+		// hold a release, a boot that did not come from a slot (so
+		// no boot entry could ever run the download), a catalog with
+		// no source or without the target, or a download whose bytes
+		// do not match the catalog's digest. That last case is
+		// corrupt at the source, where refetching cannot change what
+		// the server publishes. A malformed credentials Secret has
+		// the same shape: only a corrected Secret fixes it.
 		return api.PhaseBlocked
 	case "RebootRequested", "RestartRequested", "DemotionRebooting", "Draining", "Downloading",
 		"Proving":
-		// A disruption is in flight; the machine is mid-change.
-		// Draining is the first step of a reboot: the node is
-		// cordoned and its workloads are being evicted before the
-		// machine goes down (a k3s restart skips it; pods survive).
-		// Downloading is the version target's equivalent. The change
-		// is arriving over the network instead of waiting on a
-		// reboot, but the machine is just as much mid-change. So is
-		// Proving: a boot's imports are on trial until the OS pods
-		// demonstrate them, which ordinarily takes seconds.
+		// A disruption is in progress; the machine is in the middle
+		// of a change. Draining is the first step of a reboot: the
+		// node is cordoned and its workloads are being evicted
+		// before the machine goes down (a k3s restart skips this
+		// step, and pods survive). Downloading is the version
+		// target's equivalent. The change is arriving over the
+		// network instead of waiting on a reboot, but the machine is
+		// just as much in the middle of a change. So is Proving: a
+		// boot's imports stay on trial until the OS pods prove them,
+		// which ordinarily takes seconds.
 		return api.PhaseUpdating
 	case "RebootPending", "RestartPending", "DemotionPending", "AwaitingTurn":
 		// A change is staged and waiting, either on a Manual reboot
@@ -88,14 +92,14 @@ func conditionPhase(c api.Condition) api.Phase {
 		// same way, because it is waiting on exactly the same things.
 		return api.PhaseUpdatePending
 	}
-	// Anything unrecognized reads as Degraded deliberately: a reason
-	// this table doesn't know fails visibly in the fleet listing
-	// instead of passing silently as Ready.
+	// Anything unrecognized reads as Degraded, deliberately. A
+	// reason this table does not know fails visibly in the fleet
+	// listing, instead of passing silently as Ready.
 	return api.PhaseDegraded
 }
 
-// decidePhase reduces the conditions to the single gravest phase,
-// Ready when nothing argues otherwise.
+// decidePhase reduces the conditions to the single most severe
+// phase, or Ready when nothing indicates otherwise.
 func decidePhase(conditions []api.Condition) api.Phase {
 	argued := map[api.Phase]bool{}
 	for _, c := range conditions {

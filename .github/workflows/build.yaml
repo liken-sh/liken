@@ -1,15 +1,16 @@
-# The build, run by GitHub Actions on every push to main and every
-# pull request against it: `make all` and then the smoke drills, the
-# same commands a developer runs. The checks workflow proves the tree
-# is clean; this one proves it still assembles an operating system,
-# and that the operating system still boots to a Ready Kubernetes
-# node — under both firmware regimes liken supports.
+# This is the build. GitHub Actions runs it on every push to main and
+# every pull request against main: `make all`, then the smoke drills,
+# the same commands a developer runs. The checks workflow proves the
+# tree is clean. This workflow proves the tree still assembles an
+# operating system, and that the operating system still boots to a
+# Ready Kubernetes node, under both firmware types that liken
+# supports.
 #
-# Like the checks workflow, this one is deliberately thin. The build
-# logic lives in the Makefiles, and the runner preparation (toolchain,
-# KVM, vendored-input caches) lives in the build-setup action shared
-# with the release workflow; all this file adds is which commands run
-# for which events.
+# Like the checks workflow, this workflow is deliberately small. The
+# build logic lives in the Makefiles, and the runner preparation
+# (toolchain, KVM, vendored-input caches) lives in the build-setup
+# action shared with the release workflow. All this file adds is
+# which commands run for which events.
 name: build
 
 on:
@@ -27,30 +28,32 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      # Full history, because the build names itself with git describe
-      # (version.mk): the most recent release tag and the distance past
-      # it. A shallow checkout would leave describe blind to the tags
-      # and every CI build would claim to be a bare commit.
+      # This step checks out full history, because the build names
+      # itself with git describe (version.mk): the most recent release
+      # tag and the distance past it. A shallow checkout would leave
+      # describe unable to see the tags, and every CI build would
+      # claim to be a bare commit.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - uses: ./.github/actions/build-setup
 
-      # The whole system: every vendored input fetched and verified,
-      # the Go programs compiled, a fresh identity minted, and the
-      # bootable image assembled.
+      # This step builds the whole system: every vendored input
+      # fetched and verified, the Go programs compiled, a fresh
+      # identity minted, and the bootable image assembled.
       - run: make all
 
-      # Then boot it. The UEFI smoke drill (dev-cluster/smoke-uefi.sh)
-      # starts node-1 from blank disks and passes when its node reports
-      # Ready over the cluster's API — the assembled image actually
-      # running Kubernetes, not just existing.
+      # Then this step boots it. The UEFI smoke drill
+      # (dev-cluster/smoke-uefi.sh) starts node-1 from blank disks and
+      # passes when its node reports Ready over the cluster's API.
+      # This proves that the assembled image actually runs Kubernetes,
+      # not just that the image exists.
       - run: make smoke-uefi
 
-      # Then install it and boot the installed disk under BIOS
-      # firmware (dev-cluster/smoke-bios.sh). The drill above boots
-      # via -kernel, so this is the run that proves the install path
+      # Then this step installs it and boots the installed disk under
+      # BIOS firmware (dev-cluster/smoke-bios.sh). The drill above
+      # boots through -kernel. So this run proves the install path
       # and the whole disk boot chain: MBR boot code, GRUB's core
       # image, its config on the boot home, and the chosen slot's
       # kernel.
@@ -58,9 +61,10 @@ jobs:
 
       # The serial console is the record of the boot, and it is worth
       # keeping when the drill passes, not just when it fails: a
-      # healthy boot is the baseline the next unhealthy one gets
-      # compared against. qemu.log rides along because it is where the
-      # failure lands when QEMU itself never got as far as a console.
+      # healthy boot is the baseline that the next unhealthy one gets
+      # compared against. This step also uploads qemu.log, because
+      # that is where the failure appears when QEMU itself never gets
+      # as far as a console.
       - uses: actions/upload-artifact@v7
         if: always()
         with:

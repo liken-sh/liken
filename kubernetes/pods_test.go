@@ -1,7 +1,7 @@
 package kubernetes
 
-// Eviction and pod ownership, the verbs the drain and the pod
-// steward share.
+// These tests cover eviction and pod ownership, the operations the
+// drain and the pod steward share.
 
 import (
 	"encoding/json"
@@ -62,8 +62,9 @@ func TestEvictPodPostsTheEvictionSubresource(t *testing.T) {
 }
 
 func TestEvictPodCarriesTheServersRefusal(t *testing.T) {
-	// 429 is how the Eviction API says a PodDisruptionBudget would be
-	// violated; the caller hears an error and simply asks again later.
+	// A 429 status is how the Eviction API reports that a
+	// PodDisruptionBudget would be violated. The caller gets an
+	// error, and asks again later.
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Cannot evict pod as it would violate the pod's disruption budget.",
 			http.StatusTooManyRequests)

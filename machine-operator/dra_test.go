@@ -1,10 +1,10 @@
 package main
 
-// The DRA inventory mapping: which discovered devices become slice
-// devices, what they are named, and which attributes they carry.
-// The publish rule is three tests — driven and not plumbing,
-// deliverable, and not the platform's own — and each has a test
-// refusing its counterexample.
+// The DRA inventory mapping: which discovered devices become
+// slice devices, what they are named, and which attributes they
+// carry. The publish rule has three tests: driven and not part of
+// the bus structure, deliverable, and not the platform's own disk.
+// Each test has a case that refuses its counterexample.
 
 import (
 	"testing"
@@ -13,7 +13,8 @@ import (
 )
 
 // delivering builds an inspect function that reports the same
-// delivery for every device, standing in for the sysfs walk.
+// delivery for every device. It replaces the sysfs walk in these
+// tests.
 func delivering(d hardware.Delivery) func(hardware.Device) hardware.Delivery {
 	return func(hardware.Device) hardware.Delivery { return d }
 }

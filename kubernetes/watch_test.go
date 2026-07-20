@@ -1,8 +1,9 @@
 package kubernetes
 
-// The watch loop against a real streaming server: events arrive as
-// the server sends them, bookmarks advance the resume point
-// silently, and a dropped stream recovers through a fresh list.
+// These tests run the watch loop against a real streaming server.
+// Events arrive as the server sends them. Bookmarks advance the
+// resume point without sending an event. A dropped stream recovers
+// through a fresh list.
 
 import (
 	"encoding/json"
@@ -16,12 +17,12 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// watchAPI serves one watch stream (each entry is one event line),
-// hangs up on later reconnects, and answers the recovery list that
-// follows a drop: a MachineList whose own resourceVersion is the
-// resume point. Every watch request's URL lands on the paths
-// channel, which is how a test observes the resume points without
-// racing the handler.
+// watchAPI serves one watch stream, where each entry is one event
+// line. It closes the connection on later reconnects, and it answers
+// the recovery list that follows a drop with a MachineList whose own
+// resourceVersion is the resume point. Every watch request's URL
+// arrives on the paths channel. This is how a test observes the
+// resume points without racing the handler.
 type watchAPI struct {
 	stream  []string
 	watches atomic.Int32
@@ -78,16 +79,16 @@ func TestWatchDeliversEventsAndRecoversFromADrop(t *testing.T) {
 	events := make(chan *machine.Machine, 4)
 	go WatchMachines(client, "", "1", events)
 
-	// The MODIFIED event arrives; the BOOKMARK does not (it only
-	// advances the resume point).
+	// The MODIFIED event arrives. The BOOKMARK event does not arrive,
+	// because it only advances the resume point.
 	first := <-events
 	if first.Metadata.ResourceVersion != "7" {
 		t.Errorf("got %s", first.Metadata.ResourceVersion)
 	}
 
-	// The stream then ends, an ordinary drop, and the loop recovers
-	// with a fresh list; the list's items land as events so the
-	// caller's working copies are refreshed.
+	// The stream then ends. This is an ordinary drop, and the loop
+	// recovers with a fresh list. The list's items arrive as events,
+	// so the caller's working copies are refreshed.
 	second := <-events
 	if second.Metadata.Name != "node-1" || second.Metadata.ResourceVersion != "50" {
 		t.Errorf("the recovery list's items should arrive: %s@%s",
@@ -101,8 +102,8 @@ func TestWatchDeliversEventsAndRecoversFromADrop(t *testing.T) {
 
 func TestWatchWithoutASelectorSpansTheCollection(t *testing.T) {
 	// The cluster operator derives the Cluster's status from every
-	// Machine, so its watch carries no fieldSelector and another
-	// machine's event is delivered like any other.
+	// Machine. Because of this, its watch carries no fieldSelector,
+	// and another machine's event is delivered like any other event.
 	fake := &watchAPI{stream: []string{
 		watchEvent(t, "MODIFIED", "node-2", "7"),
 	}}
@@ -121,8 +122,8 @@ func TestWatchWithoutASelectorSpansTheCollection(t *testing.T) {
 }
 
 func TestWatchCarriesTheFieldSelector(t *testing.T) {
-	// The machine operator narrows its watch to its own object; the
-	// server does the filtering, so all the client sends is the
+	// The machine operator narrows its watch to its own object. The
+	// server does the filtering, so the client only sends the
 	// selector, escaped into the query string.
 	fake := &watchAPI{stream: []string{
 		watchEvent(t, "MODIFIED", "node-1", "7"),
@@ -152,21 +153,23 @@ func TestWatchResumesFromTheListsVersion(t *testing.T) {
 	}
 	// The bookmark advanced the resume point, the stream dropped, and
 	// the recovery list answered at version 99. The reconnect must
-	// resume from the list's version, not any single object's: an
-	// object's resourceVersion is the revision of its own last write,
-	// which on a quiet object can be old enough to have been
-	// compacted away, and a watch from a compacted version is refused
-	// with 410 Gone.
+	// resume from the list's version, not from any single object's
+	// version. An object's resourceVersion is the revision of its own
+	// last write. On a quiet object, that revision can be old enough
+	// to have been compacted away, and the server refuses a watch
+	// from a compacted version with 410 Gone.
 	if second := <-fake.paths; !strings.Contains(second, "resourceVersion=99") {
 		t.Errorf("the reconnect should resume from the list's version: %s", second)
 	}
 }
 
-// TestMain silences RetryPause for the whole test binary, exactly
-// once: WatchMachines loops forever by design (a crash-only daemon
-// has no shutdown path), so the goroutines these tests start outlive
-// them, and any later write to the seam would race a live loop
-// reading it. No test wants the real five-second pause anyway.
+// TestMain replaces RetryPause with a function that does nothing,
+// once for the whole test binary. WatchMachines loops forever by
+// design, because a crash-only daemon has no shutdown path. Because
+// of this, the goroutines these tests start keep running after the
+// tests finish, and any later write to the seam would race a live
+// loop that is reading it. None of these tests need the real
+// five-second pause anyway.
 func TestMain(m *testing.M) {
 	RetryPause = func() {}
 	os.Exit(m.Run())

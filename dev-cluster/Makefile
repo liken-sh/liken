@@ -1,55 +1,61 @@
 # The dev cluster: the deployment liken is developed against.
 #
-# Every other domain in this repo produces a piece of the operating
-# system; this one is a user of it: a complete deployment, from the
-# declared side (cluster.yaml and machines/, the manifests the image
-# build bakes in) to the virtual hardware that boots them. Physical
-# and cloud machines are the real targets; these QEMU guests are where
-# everything gets tried first: headless, disposable, and observable
-# from the serial console alone. QEMU provides the hardware (CPU,
-# memory, NICs, disks, and firmware — OVMF's real UEFI by default,
-# SeaBIOS under FIRMWARE=bios), and each
-# machine boots from its own disk, from the system slots it installed
-# itself onto (`make install NODE=x`, once). BOOT=kernel is the other
-# arrangement: QEMU itself acts as the bootloader, loading the kernel
-# and one composed initrd via -kernel/-initrd, per the x86 Linux boot
-# protocol. It serves machines that haven't installed yet, and it is
-# what run-once and install use.
+# Every other domain in this repo builds one piece of the operating
+# system. This domain uses those pieces together, as a complete
+# deployment. The deployment has a declared side (cluster.yaml and
+# machines/, the manifests that the image build includes) and a
+# virtual-hardware side (the QEMU guests that boot from those
+# manifests). Physical machines and cloud machines are the real
+# targets. The QEMU guests are where the team tries new changes
+# first: the guests have no screen, the team can delete and recreate
+# them at will, and the team can observe them only through the serial
+# console. QEMU provides the hardware: CPU, memory, NICs, disks, and
+# firmware (OVMF's real UEFI by default, or SeaBIOS under
+# FIRMWARE=bios). Each machine boots from its own disk, from the
+# system slots it installed onto itself (run `make install NODE=x`
+# once). BOOT=kernel selects a different arrangement: QEMU acts as
+# the bootloader itself. It loads the kernel and one composed initrd
+# through -kernel and -initrd, following the x86 Linux boot protocol.
+# This arrangement serves machines that have not installed yet.
+# run-once and install both use it.
 #
-# The lab is parameterized by node: the same image boots every
-# machine, and NODE picks which machine a given QEMU process is. Each
-# node gets its own disks (guests/<node>/), its own MACs, and its own
-# liken.machine=<node> kernel parameter, which is how the shared image
-# knows which Machine manifest is this machine's. Boot the cluster by
-# running each node in its own terminal:
+# The lab takes a node name as a parameter. The same image boots
+# every machine; NODE picks which machine a given QEMU process is.
+# Each node gets its own disks (guests/<node>/), its own MAC
+# addresses, and its own liken.machine=<node> kernel parameter. This
+# parameter tells the shared image which Machine manifest belongs to
+# this machine. To boot the cluster, run each node in its own
+# terminal:
 #
 #   make run                    the founding leader, node-1
 #   make run NODE=node-4        a follower, in a second terminal
 #
-# MEM sizes each guest, and the default is deliberately the smallest
-# cloud machine liken targets: 1 GB, the Linode nanode's allotment.
-# The OS runs from a read-only system image on disk, so the guest's
-# memory goes to Kubernetes, not to holding a copy of the OS — and
-# every drill run at this size is proof that stays true. A machine
-# that stops converging at 1 GB is a regression in liken, not a
-# reason to raise this default.
+# MEM sets the memory size of each guest. The default is the smallest
+# cloud machine that liken targets: 1 GB, the amount a Linode nanode
+# has. The OS runs from a read-only system image on disk, so the
+# guest's memory goes to Kubernetes, not to a copy of the OS. Every
+# drill that runs at this size proves that this stays true. If a
+# machine stops converging at 1 GB, that is a regression in liken. It
+# is not a reason to raise this default.
 #
-# SMP sizes each guest's CPU count, and it matters more than it looks:
-# QEMU's default is a single vCPU, and a Kubernetes server cannot live
-# on one core. k3s runs the whole control plane in one process, and
-# etcd is in there too, with hard real-time-ish needs: the raft leader
-# must send heartbeats every 500ms and fsync its log promptly, or the
-# other members conclude it has died. On one core those deadlines
-# compete with the apiserver, the scheduler, the kubelet, and every
-# workload on the machine; any burst of work (a compaction, a garbage
-# collection, a log flood) owns the core for seconds, heartbeats go
-# out late, etcd logs "leader is overloaded", and API requests queue
-# up past the apiserver's 60-second limit. Four vCPUs is modest for a
-# server and leaves those deadlines met even when the machine is busy.
+# SMP sets each guest's CPU count. This setting matters more than it
+# looks: QEMU's default is a single vCPU, and a Kubernetes server
+# cannot run on one core. k3s runs the whole control plane in one
+# process, and etcd runs inside that process too, with near-real-time
+# needs. The raft leader must send heartbeats every 500ms and write
+# its log to disk promptly. If it does not, the other members decide
+# that it has failed. On one core, those deadlines compete with the
+# apiserver, the scheduler, the kubelet, and every workload on the
+# machine. Any burst of work (a compaction, a garbage collection, a
+# flood of log writes) can occupy the core for seconds. When this
+# happens, heartbeats go out late, etcd logs "leader is overloaded",
+# and API requests wait in a queue past the apiserver's 60-second
+# limit. Four vCPUs is a modest count for a server, and it keeps
+# these deadlines even when the machine is busy.
 #
-# The OS artifacts are other domains' work; this Makefile only points
-# at them. The root Makefile is the orchestrator that makes sure they
-# exist before booting; run `make run` from the repo root.
+# The OS artifacts come from other domains' work; this Makefile only
+# points at them. The root Makefile is the orchestrator that makes
+# sure they exist before boot. Run `make run` from the repo root.
 NODE ?= node-1
 MEM ?= 1024
 SMP ?= 4
@@ -58,30 +64,32 @@ KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 VMLINUZ := ../kernel/dist/$(KERNEL_VERSION)/vmlinuz
 INITRD := image/initrd.cpio
 
-# Each node's MACs are derived from its number so they never collide:
-# QEMU's default would give every guest the same address
-# (52:54:00:12:34:56), and two machines sharing a MAC on one segment
-# is very hard to diagnose, because the symptoms point everywhere
-# except the MAC addresses.
-# 52:54:00 is QEMU's locally-administered prefix; 4c:4b is "LK".
+# Each node's MAC addresses come from its node number, so they never
+# collide. QEMU's default gives every guest the same address
+# (52:54:00:12:34:56). Two machines that share a MAC address on one
+# segment are very hard to diagnose, because the symptoms point
+# everywhere except the MAC addresses.
+# 52:54:00 is QEMU's locally administered prefix. 4c:4b stands for
+# "LK".
 NODE_NUM := $(patsubst node-%,%,$(NODE))
 UPLINK_MAC := 52:54:00:4c:4b:0$(NODE_NUM)
 CLUSTER_MAC := 52:54:00:4c:4c:0$(NODE_NUM)
 
-# The machine's disks. These hold state, not source, and they are not
-# part of the two-file operating system. They are deliberately created
-# blank: liken's storage design starts from a machine and an empty
-# disk, with partitioning and formatting done at boot by the machine
-# itself, exactly as they would have to happen on hardware that no
-# build system ever touched. The names are for the people running the
-# lab; the machine sees two anonymous blank disks and learns their
-# purposes only from its manifest: a small one for the cluster's
-# state, and a larger one to carve up for pod storage. qcow2 is QEMU's
-# copy-on-write format, allocated sparsely, so the disks cost the host
-# almost nothing until the machine writes to them. Everything lives in
-# the gitignored guests/, one directory per node, and `make clean` acts
-# as a factory reset: the next boot finds blank disks and claims them
-# fresh.
+# The machine's disks. These disks hold state, not source code, and
+# they are not part of the two-file operating system. The disks start
+# blank on purpose. liken's storage design starts from a machine and
+# an empty disk: the machine itself partitions and formats the disk
+# at boot, the same way it would have to on hardware that no build
+# system ever touched. The file names below are for the people who
+# run the lab; the machine itself sees two disks with no names, and
+# learns their purpose only from its manifest. One disk is small and
+# holds the cluster's state. The other disk is larger, for the
+# machine to divide up for pod storage. qcow2 is QEMU's copy-on-write
+# format. QEMU allocates a qcow2 file sparsely, so a disk costs the
+# host almost nothing until the machine writes to it. All disks live
+# under the gitignored guests/ directory, one directory for each
+# node. `make clean` deletes this directory and acts as a factory
+# reset: the next boot finds blank disks and claims them again.
 guests/$(NODE)/state.qcow2:
 	mkdir -p guests/$(NODE)
 	qemu-img create -f qcow2 $@ 2G
@@ -90,38 +98,40 @@ guests/$(NODE)/pods.qcow2:
 	mkdir -p guests/$(NODE)
 	qemu-img create -f qcow2 $@ 4G
 
-# The boot disk: where the machine will keep its own operating system
+# The boot disk: where the machine keeps its own operating system
 # once it installs itself (milestone 12). It starts blank like the
-# others; the machine claims it, formats the two FAT32 system slots,
-# and eventually boots from it. It is attached third, so the data
-# disks keep the /dev/vda and /dev/vdb handles their claims were
-# declared with.
+# other disks. The machine claims it, formats the two FAT32 system
+# slots on it, and later boots from it. QEMU attaches this disk
+# third, so the data disks keep the /dev/vda and /dev/vdb device
+# names that their claims declared.
 guests/$(NODE)/boot.qcow2:
 	mkdir -p guests/$(NODE)
 	qemu-img create -f qcow2 $@ 2G
 
-# The guest's firmware. Both regimes liken supports are real machines
-# somewhere: UEFI is every modern motherboard, and BIOS is every
-# Linode guest, so the lab drills both.
+# The guest's firmware. liken supports two firmware types, and both
+# exist on real machines: UEFI is the firmware on every modern
+# motherboard, and BIOS is the firmware on every Linode guest. The lab
+# drills both types.
 #
-# FIRMWARE=uefi (the default) gives the guest real UEFI: OVMF is
-# TianoCore edk2 (the same codebase physical motherboards ship) built
-# for virtual machines (Ubuntu's ovmf package). It comes as two
-# pflash images, and the split mirrors how a physical board is
-# organized. OVMF_CODE is the firmware program itself, read-only and
-# shared by every guest. OVMF_VARS is the firmware's writable
-# variable store, the equivalent of the battery-backed CMOS where
-# boot entries live. Each node gets its own private copy, which
-# survives guest reboots the way a real board's NVRAM survives power
-# cuts; deleting it with `make clean` has the same effect as pulling
-# the CMOS battery.
+# FIRMWARE=uefi (the default) gives the guest real UEFI. OVMF is
+# TianoCore edk2, the same codebase that physical motherboards ship,
+# built for virtual machines (Ubuntu's ovmf package). OVMF comes as
+# two pflash images, and this split matches how a physical board is
+# organized. OVMF_CODE is the firmware program itself. It is
+# read-only and shared by every guest. OVMF_VARS is the firmware's
+# writable variable store, the equivalent of the battery-backed CMOS
+# where boot entries live. Each node gets its own private copy of
+# OVMF_VARS. This copy survives guest reboots the way a real board's
+# NVRAM survives power cuts. Deleting it with `make clean` has the
+# same effect as removing the CMOS battery.
 #
-# FIRMWARE=bios asks for nothing at all, which is how QEMU gives you
-# BIOS: SeaBIOS is its built-in default firmware, used whenever no
-# pflash firmware displaces it. A BIOS machine has no variable store,
-# so there is no per-node file to manage either — everything the boot
-# needs lives on the disk itself (the MBR's boot code, GRUB's core
-# image, and the environment block GRUB reads in place of variables).
+# FIRMWARE=bios asks QEMU for nothing extra, and this is how QEMU
+# gives BIOS: SeaBIOS is its built-in default firmware, and QEMU uses
+# it whenever no pflash firmware replaces it. A BIOS machine has no
+# variable store, so there is no per-node file to manage either.
+# Everything the boot needs lives on the disk itself: the MBR's boot
+# code, GRUB's core image, and the environment block that GRUB reads
+# in place of variables.
 OVMF_CODE := /usr/share/OVMF/OVMF_CODE_4M.fd
 
 guests/$(NODE)/OVMF_VARS.fd:
@@ -140,28 +150,30 @@ FIRMWARE_DEPS_uefi := guests/$(NODE)/OVMF_VARS.fd
 FIRMWARE_DEPS_bios :=
 FIRMWARE_DEPS := $(FIRMWARE_DEPS_$(FIRMWARE))
 
-# Which disk the firmware boots. The boot disk is deliberately
-# attached third so the data disks keep the /dev/vda and /dev/vdb
-# handles their claims were declared with — but BIOS firmware tries
-# disks in device order, and the data disks come first. Their claimed
-# GPTs carry the protective MBR's 0x55AA signature with no boot code
-# behind it, so SeaBIOS would pick one, jump into zeroes, and hang.
-# bootindex names the boot disk as the one to try, the lab's stand-in
-# for a cloud console's boot-device setting. It is 1 rather than 0
-# because a -kernel boot claims index 0 for the kernel itself; the
-# disk holds the next place in line either way, first when there is
-# no -kernel. Under UEFI it is deliberately absent: the machine's own
-# NVRAM entries choose the boot path there, and liken's upgrade
-# mechanics depend on them staying authoritative.
+# Which disk the firmware boots. QEMU attaches the boot disk third,
+# so the data disks keep the /dev/vda and /dev/vdb device names that
+# their claims declared. But BIOS firmware tries disks in device
+# order, and the data disks come first in that order. Their claimed
+# GPTs carry the protective MBR's 0x55AA signature, with no boot code
+# behind it. Without bootindex, SeaBIOS would pick one of these
+# disks, jump into a block of zeroes, and stop responding.
+# bootindex names the boot disk as the one to try. It stands in for a
+# cloud console's boot-device setting. The value is 1, not 0, because
+# a -kernel boot claims index 0 for the kernel itself; the disk holds
+# the next position either way, and that position is first when there
+# is no -kernel. Under UEFI, bootindex is absent on purpose: the
+# machine's own NVRAM entries choose the boot path there, and liken's
+# upgrade mechanics depend on those entries staying authoritative.
 QEMU_BOOTINDEX_uefi =
 QEMU_BOOTINDEX_bios = ,bootindex=1
 QEMU_BOOTINDEX = $(QEMU_BOOTINDEX_$(FIRMWARE))
 
-# Only the leader node forwards the API port to the host: kubectl on
-# the host reaches the cluster through the control plane, and there is
-# exactly one (see ../identity/kubeconfig.go). Forwarding the same
-# host port from every node would collide anyway. The forward reaches
-# the cluster as a whole, not any particular machine.
+# Only the leader node forwards the API port to the host. kubectl on
+# the host reaches the cluster through the control plane, and the
+# cluster has exactly one control plane (see
+# ../identity/kubeconfig.go). Forwarding the same host port from
+# every node would also collide. This forward reaches the cluster as
+# a whole, not any particular machine.
 ifeq ($(NODE),node-1)
 API_FORWARD := ,hostfwd=tcp:127.0.0.1:16443-:6443
 else
@@ -171,137 +183,144 @@ endif
 # Boot the machine. Flag by flag:
 #
 #   -accel kvm -accel tcg    hardware virtualization when available
-#                            (near-native speed), pure emulation when
-#                            not (CI), in that order of preference
-#   -cpu max                 the fullest CPU the accelerator can offer,
-#                            crucially including RDRAND. QEMU's default
-#                            model lacks it, and without any entropy
-#                            source the kernel RNG never initializes, so
-#                            the first getrandom() in userspace blocks
-#                            forever (liken's DHCP client draws one for
-#                            its transaction IDs)
-#   -smp $(SMP)              enough cores for Kubernetes: etcd's raft
+#                            (near-native speed), or full emulation
+#                            when not available (CI), tried in that
+#                            order
+#   -cpu max                 the fullest CPU that the accelerator can
+#                            offer, including RDRAND. QEMU's default
+#                            CPU model lacks RDRAND. Without any
+#                            entropy source, the kernel RNG never
+#                            initializes, so the first getrandom()
+#                            call in userspace waits forever (liken's
+#                            DHCP client calls it to generate its
+#                            transaction IDs)
+#   -smp $(SMP)              enough cores for Kubernetes. etcd's raft
 #                            deadlines cannot share a single vCPU with
 #                            the rest of the control plane (see SMP
 #                            above)
-#   -m $(MEM)                enough memory for Kubernetes; the OS
+#   -m $(MEM)                enough memory for Kubernetes. The OS
 #                            itself runs from its system image on
-#                            disk, so this is the workloads' budget,
-#                            not liken's
+#                            disk, so this memory is the workloads'
+#                            budget, not liken's
 #   $(QEMU_FIRMWARE)         the machine's firmware. Under UEFI, two
-#                            pflash drives: OVMF's code and this
+#                            pflash drives: OVMF's code, then this
 #                            node's private variable store, in that
-#                            order (the firmware expects unit 0 to be
-#                            code and unit 1 to be NVRAM). Under
-#                            BIOS, nothing: SeaBIOS is what QEMU runs
-#                            when no pflash displaces it. Either
-#                            firmware boots the fw_cfg kernel
-#                            directly when -kernel is also present:
-#                            the "USB stick" arrangement that stands
-#                            in for an installer until machines boot
-#                            from their own disks
-#   -append                  the kernel command line: put the kernel's
-#                            console on the first serial port, run our
-#                            program, by name, as PID 1, and tell it
-#                            which machine this is (liken.machine= is
-#                            the bootloader's channel for identity;
-#                            QEMU is the bootloader here, so the
-#                            identity comes from this Makefile's NODE
-#                            variable)
-#   -display none            there is no screen; liken uses only the
+#                            order (the firmware expects unit 0 to
+#                            hold code and unit 1 to hold NVRAM).
+#                            Under BIOS, nothing: SeaBIOS is what
+#                            QEMU runs when no pflash file replaces
+#                            it. Both firmware types boot the fw_cfg
+#                            kernel directly when -kernel is also
+#                            present. This is the "USB stick"
+#                            arrangement, and it takes the place of an
+#                            installer until machines can boot from
+#                            their own disks
+#   -append                  the kernel command line. It puts the
+#                            kernel's console on the first serial
+#                            port, runs liken's own program (by name)
+#                            as PID 1, and tells that program which
+#                            machine this is. liken.machine= is the
+#                            bootloader's channel for identity; QEMU
+#                            is the bootloader here, so the identity
+#                            comes from this Makefile's NODE variable
+#   -display none            there is no screen. liken uses only the
 #                            serial console
-#   -serial $(CONSOLE)       ...and where that serial port goes. The
-#                            default, stdio, is this terminal: a human
-#                            watches the machine boot. Automation has
-#                            no terminal to give, so the smoke drill
+#   -serial $(CONSOLE)       where that serial port goes. The default,
+#                            stdio, is this terminal, so a person can
+#                            watch the machine boot. Automation has no
+#                            terminal to give, so the smoke drill
 #                            passes CONSOLE=file:... and reads the
-#                            boot from the file afterward
-#   -monitor none            don't multiplex QEMU's own control console
-#                            onto the same stream; tests need to read
-#                            liken's output and nothing else
+#                            boot record from that file afterward
+#   -monitor none            keep QEMU's own control console off this
+#                            stream. Tests must read only liken's
+#                            output, and nothing else
 #
-# The network is two NICs with two jobs, which is what real fleets
-# look like (a management network and a cluster network):
+# The network is two NICs, and each NIC has one job. This matches a
+# real fleet's shape: a management network and a cluster network.
 #
 #   -netdev user             eth0, the uplink. QEMU's built-in
-#                            user-mode network provides DHCP, routing,
-#                            NAT, and DNS proxying for the guest
-#                            (the 10.0.2.0/24 network), no root or
-#                            bridges required on the host. Every guest
-#                            gets its own private copy: user-mode NAT
-#                            isolates guests from each other, which is
-#                            exactly why it can't be the cluster's
-#                            wire. On the leader, hostfwd opens one
-#                            inbound path: host 127.0.0.1:16443
-#                            forwards to the guest's API server on
-#                            6443, which is what lets kubectl on the
-#                            host reach the cluster. The host port is
-#                            non-default and bound to loopback only,
-#                            so it can't collide with any other
-#                            cluster the host talks to
+#                            user-mode network gives the guest DHCP,
+#                            routing, NAT, and DNS proxying (on the
+#                            10.0.2.0/24 network), and needs no root
+#                            access or bridges on the host. Every
+#                            guest gets its own private copy of this
+#                            network. Because user-mode NAT isolates
+#                            guests from each other, it cannot serve
+#                            as the cluster's wire. On the leader,
+#                            hostfwd opens one inbound path: host
+#                            127.0.0.1:16443 forwards to the guest's
+#                            API server on 6443, and this is what lets
+#                            kubectl on the host reach the cluster.
+#                            The host port is not the default port,
+#                            and it is bound to loopback only, so it
+#                            cannot collide with any other cluster the
+#                            host talks to
 #   -netdev socket,mcast     eth1, the cluster segment. Every QEMU
 #                            process that names the same multicast
 #                            group joins the same virtual ethernet
-#                            segment: each guest's frames are wrapped
-#                            in UDP and multicast to the others, making
-#                            a hub with no root, no bridges, and no
-#                            daemon. The segment is deliberately a
-#                            dumb wire, with no DHCP, no NAT, and no
-#                            DNS. That is precisely the environment
-#                            that forces static addressing, exactly as
-#                            the Machine manifests declare.
-#                            239.192.0.0/14 is the organization-local
-#                            multicast scope (RFC 2365): these frames
-#                            stay on this host
-#   -device virtio-net-pci   the NICs those netdevs attach to; virtio
-#                            because our vendored kernel builds that
-#                            driver in (CONFIG_VIRTIO_NET=y). Device
-#                            order determines PCI slot order, which
-#                            determines probe order, so the uplink is
-#                            always eth0 and the cluster segment
-#                            always eth1, matching the names the
-#                            manifests pin
-#   -drive                   the machine's disks (the qcow2s above).
-#                            if=none only registers a backing file
-#                            under an id; the -device lines below do
-#                            the attaching, the same declare-then-
-#                            attach split as -netdev/-device for the NICs
-#   -device virtio-blk-pci   the disk controllers, virtio again for the
-#                            same reason (CONFIG_VIRTIO_BLK=y); the
-#                            guest sees /dev/vda and /dev/vdb, in
+#                            segment: each guest wraps its frames in
+#                            UDP and sends them by multicast to the
+#                            others, which makes a hub with no root
+#                            access, no bridges, and no daemon needed.
+#                            This segment is a plain wire on purpose,
+#                            with no DHCP, no NAT, and no DNS. This is
+#                            exactly the setup that requires static
+#                            addressing, the way the Machine manifests
+#                            declare it. 239.192.0.0/14 is the
+#                            organization-local multicast scope (RFC
+#                            2365), so these frames stay on this host
+#   -device virtio-net-pci   the NICs that these netdevs attach to.
+#                            They use virtio because our vendored
+#                            kernel builds that driver in
+#                            (CONFIG_VIRTIO_NET=y). Device order sets
+#                            PCI slot order, which sets probe order,
+#                            so the uplink is always eth0 and the
+#                            cluster segment is always eth1, matching
+#                            the names the manifests pin
+#   -drive                   the machine's disks (the qcow2 files
+#                            above). if=none only registers a backing
+#                            file under an id; the -device lines below
+#                            do the attaching. This is the same
+#                            declare-then-attach split that
+#                            -netdev/-device use for the NICs
+#   -device virtio-blk-pci   the disk controllers, using virtio for
+#                            the same reason (CONFIG_VIRTIO_BLK=y).
+#                            The guest sees /dev/vda and /dev/vdb, in
 #                            -device order. serial= gives each disk a
-#                            serial number the guest can read from
-#                            sysfs, standing in for the serial a real
-#                            drive would carry, so identifying a disk
-#                            by identity rather than by kernel name
-#                            works in the lab too
-# A guest-initiated reboot resets the VM in place: QEMU reloads the
-# firmware (and -kernel/-initrd when present), the qcow2 disks and
-# NVRAM persist, and the serial console shows the shutdown and the
-# next boot as one stream. That's the behavior a lab machine needs,
-# because reboots are how liken applies staged specs and proves new
-# releases. If a reboot ended the machine's QEMU process, the machine
-# would power off mid-rollout and leave the fleet. The bounded boots
-# (run-once, install) add -no-reboot instead: they end in a deliberate
-# power off, and if anything reboots unexpectedly they should exit and
-# hand the console log back rather than loop.
+#                            serial number that the guest can read
+#                            from sysfs. This takes the place of the
+#                            serial number a real drive would carry,
+#                            so identifying a disk by its identity,
+#                            rather than by its kernel name, also
+#                            works in the lab
+# A reboot that the guest starts itself resets the VM in place: QEMU
+# reloads the firmware (and -kernel/-initrd, when present), the
+# qcow2 disks and the NVRAM persist, and the serial console shows the
+# shutdown and the next boot as one continuous stream. A lab machine
+# needs this behavior, because liken uses reboots to apply staged
+# specs and to prove new releases. If a reboot ended the machine's
+# QEMU process, the machine would power off in the middle of a
+# rollout and leave the fleet. The bounded boots (run-once, install)
+# add -no-reboot instead. These boots end in a deliberate power off.
+# If anything reboots unexpectedly during one of these boots, QEMU
+# should exit and return the console log, rather than boot again.
 QEMU_EXIT_ON_REBOOT :=
 
 # Where the boot comes from. BOOT=disk (the default) leaves booting
-# entirely to the firmware: no -kernel, no -append; OVMF consults its
-# boot entries (or SeaBIOS runs the disk's boot code, under
-# FIRMWARE=bios) and the OS loads from the machine's own system
-# slots, exactly as real hardware would. That is why a machine must
-# be installed (`make install NODE=x`, once) before its first disk
+# entirely to the firmware: no -kernel, no -append. OVMF consults its
+# boot entries (or, under FIRMWARE=bios, SeaBIOS runs the disk's boot
+# code), and the OS loads from the machine's own system slots, the
+# same way real hardware would. This is why a machine must be
+# installed (`make install NODE=x`, once) before its first disk
 # boot.
 # BOOT=kernel is the direct-kernel arrangement: QEMU itself loads
-# vmlinuz and the initramfs, taking the bootloader's role. It serves
-# machines that haven't installed yet, and run-once uses it because
-# its extra kernel parameter changes per run, which a boot entry
-# baked at install time cannot do.
-# The variables below use recursive assignment (=) deliberately:
-# LIKEN_BOOT_ARGS is set per target (run-once, install) and must be
-# picked up at recipe expansion.
+# vmlinuz and the initramfs, and takes the bootloader's role. This
+# arrangement serves machines that have not installed yet. run-once
+# uses it because its extra kernel parameter changes on each run, and
+# a boot entry that install wrote in advance cannot do that.
+# The variables below use recursive assignment (=) on purpose:
+# run-once and install each set LIKEN_BOOT_ARGS for their own target,
+# and make must read that value again when it expands the recipe.
 BOOT ?= disk
 
 # Selected by name at recipe expansion (never ifeq, which evaluates
@@ -311,18 +330,19 @@ QEMU_BOOT_kernel = -kernel $(VMLINUZ) -initrd $(INITRD) -append "console=ttyS0 r
 QEMU_BOOT_disk =
 QEMU_BOOT = $(QEMU_BOOT_$(BOOT))
 
-# A deliberately wrong hardware clock: `make run RTC=2001-01-01`
-# starts the guest with a clock reading the turn of the millennium.
-# This is the milestone-7 drill: watch init's SNTP client discover a
-# quarter-century of error, step the clock before k3s starts, and
-# write the corrected time back to the RTC. QEMU's default
-# (-rtc base=utc) gives the guest the host's clock, so an unset RTC
-# means a normal boot.
+# A hardware clock set wrong on purpose: `make run RTC=2001-01-01`
+# starts the guest with a clock that reads the turn of the
+# millennium. This is the milestone-7 drill: it lets you watch init's
+# SNTP client find a 25-year error, step the clock before k3s starts,
+# and write the corrected time back to the RTC. QEMU's default (-rtc
+# base=utc) gives the guest the host's own clock, so an unset RTC
+# produces a normal boot.
 RTC ?= utc
 RTC_BASE := -rtc base=$(RTC)
 
-# QEMU_EXTRA is the hook for one-off hardware: install-stick attaches
-# the USB stick through it. Empty for every ordinary boot.
+# QEMU_EXTRA is the hook for hardware that only some boots need:
+# install-stick attaches the USB stick through it. QEMU_EXTRA stays
+# empty for every ordinary boot.
 QEMU_EXTRA ?=
 
 run: guests/$(NODE)/state.qcow2 guests/$(NODE)/pods.qcow2 guests/$(NODE)/boot.qcow2 $(FIRMWARE_DEPS)
@@ -350,9 +370,10 @@ run: guests/$(NODE)/state.qcow2 guests/$(NODE)/pods.qcow2 guests/$(NODE)/boot.qc
 		-drive file=guests/$(NODE)/boot.qcow2,format=qcow2,if=none,id=boot \
 		-device virtio-blk-pci,drive=boot,serial=liken-$(NODE)-boot$(QEMU_BOOTINDEX)
 
-# One-shot boots for debugging and automation: liken.oneshot tells init
-# not to restart k3s: its first exit powers the machine off, QEMU
-# exits, and the console log is a complete, bounded record of the boot.
+# One-shot boots, for debugging and automation. liken.oneshot tells
+# init not to restart k3s. When k3s exits for the first time, the
+# machine powers off, QEMU exits, and the console log becomes a
+# complete, bounded record of the boot.
 run-once: BOOT = kernel
 run-once: LIKEN_BOOT_ARGS = liken.oneshot
 run-once: QEMU_EXIT_ON_REBOOT := -no-reboot
@@ -360,30 +381,32 @@ run-once: run
 
 # The install boot, the lab's equivalent of booting a physical
 # machine from a USB installer. It boots the install image
-# (boot.cpio, the layer, and the release payload) with liken.install on the
-# command line; init claims the boot disk if it's blank, verifies and
-# copies the release into slot A, writes the firmware's boot entries,
-# and powers off, which ends QEMU. From then on, `make run BOOT=disk`
-# boots the machine from its own disk. The install is idempotent: if
-# it is interrupted, running it again converges.
+# (boot.cpio, the layer, and the release payload) with liken.install
+# on the command line. init claims the boot disk if the disk is
+# blank, verifies and copies the release into slot A, writes the
+# firmware's boot entries, and powers off, which ends QEMU. After
+# this, `make run BOOT=disk` boots the machine from its own disk. The
+# install is idempotent: if something interrupts it, running it again
+# finishes the job.
 install: BOOT = kernel
 install: INITRD = image/install.cpio
 install: LIKEN_BOOT_ARGS = liken.install
 install: QEMU_EXIT_ON_REBOOT := -no-reboot
 install: run
 
-# The install boot the way real hardware takes it: no -kernel at all.
-# The varstore is refreshed to a blank copy first, because that is
-# what a new machine's firmware looks like — no boot entries — and a
-# firmware with no entries falls through to the removable-media path,
-# \EFI\BOOT\BOOTX64.EFI on the stick, which is systemd-boot's menu.
-# Pick the machine at the console; the installer writes this
-# machine's slot entries into this same varstore, and `make run`
-# boots from them afterward. Refreshing an installed node's varstore
-# is harmless for the same reason: the install re-creates its
-# entries. The stick rides USB mass storage because that is the
-# hardware shape; the installer never reads it after boot (everything
-# it needs came along in the initramfs).
+# The install boot in the same way that real hardware takes it: no
+# -kernel at all. This target refreshes the varstore to a blank copy
+# first, because that is what a new machine's firmware looks like: no
+# boot entries. A firmware with no entries falls through to the
+# removable-media path, \EFI\BOOT\BOOTX64.EFI on the stick, which is
+# systemd-boot's menu. Pick the machine at the console. The installer
+# writes this machine's slot entries into this same varstore, and
+# `make run` boots from them afterward. Refreshing an installed
+# node's varstore is harmless for the same reason: the install
+# recreates its entries. The stick uses USB mass storage because that
+# matches the hardware shape. The installer never reads the stick
+# after boot, because everything it needs already came in the
+# initramfs.
 install-stick: guests/$(NODE)/state.qcow2 guests/$(NODE)/pods.qcow2 guests/$(NODE)/boot.qcow2
 	cp /usr/share/OVMF/OVMF_VARS_4M.fd guests/$(NODE)/OVMF_VARS.fd
 	$(MAKE) run NODE=$(NODE) QEMU_EXIT_ON_REBOOT=-no-reboot QEMU_EXTRA="-device qemu-xhci \
@@ -391,35 +414,37 @@ install-stick: guests/$(NODE)/state.qcow2 guests/$(NODE)/pods.qcow2 guests/$(NOD
 		-device usb-storage,drive=stick"
 
 # The lab's storage server: a stock-Debian guest on the same cluster
-# segment, serving the iSCSI target and NFSv4 export the fleet's
-# storage-client features are drilled against. It is a fixture, not a
-# liken machine, so it lives in its own small domain (storage/) with
-# its own disks and its own clean. Run it in its own terminal like
-# any node.
+# segment. It serves the iSCSI target and the NFSv4 export that the
+# fleet's storage-client features are drilled against. It is a test
+# fixture, not a liken machine, so it lives in its own small domain
+# (storage/), with its own disks and its own clean target. Run it in
+# its own terminal, the same way you run any node.
 storage:
 	$(MAKE) -C storage run
 
-# Grow a node's pods disk under the machine, the lab's stand-in for a
-# bigger drive or an expanded cloud volume. Only ever run this with
-# the machine off: resizing a live qcow2 corrupts it. The next boot
-# notices the disk outgrew its partition table, relocates the backup
-# GPT to the new end, and grows the remainder role into the new space.
+# Grow a node's pods disk under the machine. This stands in for a
+# bigger drive or an expanded cloud volume. Run this command only
+# while the machine is off: resizing a live qcow2 file corrupts it.
+# On the next boot, the machine notices that the disk has grown
+# beyond its partition table, moves the backup GPT to the new end of
+# the disk, and grows the remainder role into the new space.
 grow-pods:
 	qemu-img resize guests/$(NODE)/pods.qcow2 +4G
 
-# The unattended boot: node-1 from blank disks to a Ready node, with
-# the verdict read from the cluster's API rather than a human reading
-# the console. This is what CI runs; smoke-uefi.sh explains the whole
-# arrangement. Run it from the repo root (`make smoke-uefi`), which
-# builds the artifacts and mints the kubeconfig it needs first.
+# The unattended boot: it takes node-1 from blank disks to a Ready
+# node, and reads the verdict from the cluster's API instead of
+# having a person read the console. This is what CI runs.
+# smoke-uefi.sh explains the whole arrangement. Run it from the repo
+# root (`make smoke-uefi`), which first builds the artifacts and
+# creates the kubeconfig that the drill needs.
 smoke-uefi:
 	./smoke-uefi.sh
 
-# The same drill under BIOS, and from further back: install first,
-# then boot the installed disk under SeaBIOS. The UEFI smoke boots
-# via -kernel, so this is the drill that exercises the install path
-# and the disk boot path end to end; smoke-bios.sh explains the
-# arrangement.
+# The same drill under BIOS, starting from further back: it installs
+# first, then boots the installed disk under SeaBIOS. The UEFI smoke
+# drill boots through -kernel, so this drill is the one that exercises
+# the install path and the disk boot path from end to end.
+# smoke-bios.sh explains the arrangement.
 smoke-bios:
 	./smoke-bios.sh
 

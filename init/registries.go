@@ -3,34 +3,37 @@ package main
 // Rendering k3s's registries.yaml: how this machine pulls container
 // images.
 //
-// registries.yaml is k3s's file for containerd's registry
-// arrangements: mirror endpoints to pull through, and the
-// credentials to present. k3s reads it once, at process start, when
-// it renders containerd's actual configuration — which is exactly
-// why registry changes converge by restarting k3s (cluster/changes.go)
-// and never need a reboot.
+// registries.yaml is k3s's file for containerd's registry settings:
+// mirror endpoints to pull through, and the credentials to present.
+// k3s reads this file once, at process start, when it renders
+// containerd's actual configuration. This is why registry changes
+// take effect only when k3s restarts (see cluster/changes.go), and
+// never need a reboot.
 //
-// Init is the file's sole author, from two inputs. The mirrors and
-// the embedded-registry choice come from the cluster document, like
-// every fleet-wide fact. The credentials come from their own
-// document (the machine package's registries.go), authored by the
-// operator from the registry-credentials Secret and riding the same
-// staged/proven lifecycle as everything else — in its own store,
-// because credentials rotate on their own schedule and must not
-// wait on, or trigger, a cluster document edit.
+// Init is the sole author of this file, and it uses two inputs. The
+// mirrors and the embedded-registry choice come from the cluster
+// document, like every fleet-wide fact. The credentials come from
+// their own document (see registries.go in the machine package).
+// The operator authors this document from the registry-credentials
+// Secret. The document follows the same staged/proven lifecycle as
+// every other document, but it has its own store, because
+// credentials rotate on their own schedule. A credentials change
+// must not wait for a cluster document edit, and must not trigger
+// one either.
 //
 // The credentials lifecycle is simpler than the cluster document's
-// in one deliberate way: init promotes staged credentials at
-// actuation, no attempted marker, no downstream proof. The cluster
-// document needs the operator's existence as its proof because its
-// failure modes are downstream of the boot (a bad endpoint means
-// the machine never joins). A credentials document has no such
-// failure mode: k3s starts fine with a wrong password, the symptom
-// (ImagePullBackOff) is visible in the cluster, and the fix is a
-// Secret edit that flows through as a new document. The file write
-// is the whole actuation, init observes it directly, and falling
-// back to older credentials on the next boot would repair nothing
-// while hiding the newest intent.
+// lifecycle in one deliberate way: init promotes staged credentials
+// at actuation, with no attempted marker and no downstream proof.
+// The cluster document needs the operator's existence as its proof,
+// because its failure modes appear only after the boot completes (a
+// bad endpoint means the machine never joins the cluster). A
+// credentials document has no such failure mode. k3s starts fine
+// even with a wrong password. The symptom (ImagePullBackOff) is
+// visible in the cluster, and the fix is a Secret edit that flows
+// through as a new document. Writing the file is the whole
+// actuation, and init observes the result directly. Falling back to
+// older credentials on the next boot would repair nothing, and it
+// would also hide the newest intent.
 
 import (
 	"errors"
@@ -47,20 +50,23 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// registriesConfigPath is where k3s expects the file. A package
-// variable so tests can render into a tempdir.
+// registriesConfigPath is the path where k3s expects the file. It is
+// a package variable, so tests can render into a temporary
+// directory.
 var registriesConfigPath = "/etc/rancher/k3s/registries.yaml"
 
-// The registries.yaml shape, reduced to the keys liken writes.
-// Rendered through sigs.k8s.io/yaml (JSON-path marshaling, sorted
-// keys) so the same inputs always produce the same bytes.
+// registriesFile is the registries.yaml shape, reduced to the keys
+// that liken writes. It renders through sigs.k8s.io/yaml, which uses
+// JSON-path marshaling and sorts keys, so the same inputs always
+// produce the same bytes.
 type registriesFile struct {
 	Mirrors map[string]registryMirror `json:"mirrors,omitempty"`
 	Configs map[string]registryConfig `json:"configs,omitempty"`
 }
 
 type registryMirror struct {
-	// Endpoint is k3s's key name; order is preference order.
+	// Endpoint is k3s's key name. The order of endpoints is the order
+	// of preference.
 	Endpoint []string `json:"endpoint,omitempty"`
 }
 
@@ -73,24 +79,25 @@ type registryAuth struct {
 	Password string `json:"password,omitempty"`
 }
 
-// chooseRegistryCredentials selects the credentials document this
-// rendering uses: staged (vetted) over proven, recorded in the boot
-// record. There is no seed and no image fallback — the operator is
-// the document's only author, so a machine that has never had
-// credentials staged simply has none, which is the ordinary
-// anonymous-pulls state, never an error. A staged document that
-// won't parse is rejected on the spot and the rendering falls back
-// to proven; unlike the cluster document there is no attempted
-// marker (the file comment explains why promotion happens at
-// actuation instead).
+// chooseRegistryCredentials selects the credentials document that
+// this rendering uses. It prefers the staged (vetted) document over
+// the proven document, and it records the choice in the boot record.
+// There is no seed document and no image fallback, because the
+// operator is the only author of this document. A machine that has
+// never had credentials staged simply has none. This is the normal
+// anonymous-pulls state, not an error. The function rejects a staged
+// document that does not parse immediately, and the rendering falls
+// back to the proven document. Unlike the cluster document, this
+// document has no attempted marker. (The file comment above explains
+// why promotion happens at actuation instead.)
 func chooseRegistryCredentials(stateRoot string, durable bool, boot *machine.BootStatus) *machine.RegistryCredentials {
 	if !durable {
 		return nil
 	}
 	store := machine.RegistryCredentialsStore(stateRoot)
 
-	// The standing rejection is republished into the boot record
-	// every boot (rejectStagedDocument explains why).
+	// The function republishes the standing rejection into the boot
+	// record on every boot. (rejectStagedDocument explains why.)
 	boot.CredentialsRejection, _ = store.LoadRejection()
 
 	if raw, err := store.LoadStaged(); err != nil {
@@ -112,9 +119,10 @@ func chooseRegistryCredentials(stateRoot string, durable bool, boot *machine.Boo
 	} else if raw != nil {
 		c, perr := machine.ParseRegistryCredentials(raw)
 		if perr != nil {
-			// A proven document that won't parse is a corrupted
-			// last-known-good: report it and pull anonymously rather
-			// than dying over credentials.
+			// A proven document that does not parse is a corrupted
+			// last-known-good copy. The function reports this and pulls
+			// images anonymously, instead of stopping because of a
+			// credentials problem.
 			fmt.Fprintf(os.Stderr, "liken: registries: the proven credentials are unreadable: %v\n", perr)
 		} else {
 			boot.CredentialsSource = machine.ManifestSourceProven
@@ -126,32 +134,34 @@ func chooseRegistryCredentials(stateRoot string, durable bool, boot *machine.Boo
 }
 
 // writeRegistriesConfig renders registries.yaml from the cluster
-// document's mirrors and the chosen credentials, and returns what it
-// rendered for the facts. With nothing declared anywhere it removes
-// the file instead (a live retraction must take the old rendering
-// with it), so k3s's default behavior — every registry reached
-// directly, anonymously — stays the default.
+// document's mirrors and the chosen credentials, and it returns what
+// it rendered for the facts. When nothing is declared anywhere, the
+// function removes the file instead. (A live retraction must remove
+// the old rendering too.) This keeps k3s's default behavior in
+// place: every registry is reached directly, and anonymously.
 //
 // When the embedded registry is on, the spec's mirrors render
-// verbatim and a bare "*" entry joins them (unless the spec already
-// declares one): with Spegel, a registry participates in
+// exactly as declared, and a bare "*" entry joins them, unless the
+// spec already declares one. With Spegel, a registry participates in
 // peer-to-peer sharing only if registries.yaml lists it as a mirror,
-// and the wildcard is k3s's own way to say "all of them". Turning
-// embedded on means "share pulled images across the fleet", and a
-// version of that which silently excluded every registry not also
-// being mirrored would surprise exactly the deployments that want
-// it most.
+// and the wildcard is k3s's way to say "all registries". Turning the
+// embedded registry on means "share pulled images across the
+// fleet". If the function silently excluded every registry that was
+// not also mirrored, it would surprise the deployments that want
+// this feature most.
 //
-// On success, staged credentials are promoted: the write was the
-// whole actuation (the file comment argues why no downstream proof
-// exists to wait for). A write failure leaves staged in place for
-// the next boot to retry.
+// On success, the function promotes the staged credentials, because
+// the write was the whole actuation. (The file comment above
+// explains why no downstream proof exists to wait for.) A write
+// failure leaves the staged credentials in place, so the next boot
+// can retry.
 func writeRegistriesConfig(clusterDoc *cluster.Cluster, creds *machine.RegistryCredentials,
 	store machine.ManifestStore, source machine.ManifestSource) machine.RegistriesStatus {
 	status := machine.RegistriesStatus{}
 
-	// Both maps are built unconditionally and marshal away when empty
-	// (omitempty); the nothing-declared gate below reads their sizes.
+	// The function always builds both maps. Each map disappears from
+	// the output when it is empty (omitempty). The gate below, for
+	// the nothing-declared case, reads the size of each map.
 	file := registriesFile{
 		Mirrors: map[string]registryMirror{},
 		Configs: map[string]registryConfig{},
@@ -188,7 +198,8 @@ func writeRegistriesConfig(clusterDoc *cluster.Cluster, creds *machine.RegistryC
 		fmt.Fprintf(os.Stderr, "liken: registries: rendering %s: %v\n", registriesConfigPath, err)
 		return status
 	}
-	// 0600, the join token's posture: this file embeds passwords.
+	// 0600, the same permission as the join token, because this file
+	// embeds passwords.
 	if err := os.WriteFile(registriesConfigPath, raw, 0o600); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: registries: writing %s: %v\n", registriesConfigPath, err)
 		return status

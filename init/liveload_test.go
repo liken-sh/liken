@@ -11,11 +11,11 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// liveLoadFixture builds everything a live load touches: a manifest
-// store with a staged Machine document, a fabricated module tree
-// where "loop" is builtin (so outcomes need no real kernel), and a
-// facts owner publishing into a tempdir. It returns the store, the
-// tree, the facts, and the staged document's hash.
+// liveLoadFixture builds everything that a live load touches: a
+// manifest store with a staged Machine document, a fabricated module
+// tree where "loop" is builtin (so outcomes need no real kernel), and
+// a facts owner that publishes into a temporary directory. It returns
+// the store, the tree, the facts, and the staged document's hash.
 func liveLoadFixture(t *testing.T, stagedModules []string, bootModules []string, stagedStorage machine.StorageSpec) (machine.ManifestStore, string, *factsFile, string) {
 	t.Helper()
 
@@ -59,8 +59,8 @@ func liveLoadFixture(t *testing.T, stagedModules []string, bootModules []string,
 	return store, base, facts, machine.ManifestHash(raw)
 }
 
-// bootStorageSpec is the storage the fixture's boot record actuated;
-// staging the same spec means no storage drift.
+// bootStorageSpec is the storage that the fixture's boot record
+// actuated. Staging the same spec means no storage drift.
 func bootStorageSpec() machine.StorageSpec {
 	return machine.StorageSpec{
 		MachineState: &machine.StorageRole{Device: "/dev/vda", Size: "64Mi"},

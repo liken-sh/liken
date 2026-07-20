@@ -44,9 +44,9 @@ func TestReadRebootIntentRejectsGarbage(t *testing.T) {
 }
 
 func TestWriteRebootIntentNeedsItsDirectory(t *testing.T) {
-	// The channel directory is init's to create; writing into a
-	// missing one is an error the operator should report rather than
-	// hide.
+	// Init creates the channel directory, not the operator. If the
+	// operator writes into a missing directory, that is an error. The
+	// operator should report this error, not hide it.
 	err := WriteRebootIntent(filepath.Join(t.TempDir(), "absent"), &RebootIntent{Reason: "test"})
 	if err == nil {
 		t.Error("expected an error for a missing channel directory")
@@ -108,19 +108,22 @@ func TestClearRestartIntentConsumesTheFile(t *testing.T) {
 }
 
 func TestClearRestartIntentToleratesAbsence(t *testing.T) {
-	// Clearing twice (or clearing a never-written intent) is a no-op:
-	// the watcher clears before delivering, and a crash between the
-	// two must not turn the next clear into an error.
+	// Clearing twice, or clearing a never-written intent, does nothing
+	// and causes no error. The watcher clears the intent file before
+	// it delivers the intent's effect. A crash between these two steps
+	// must not turn the next clear into an error.
 	if err := ClearRestartIntent(t.TempDir()); err != nil {
 		t.Errorf("clearing an absent intent must not error: %v", err)
 	}
 }
 
 func TestRestartIntentIsItsOwnFile(t *testing.T) {
-	// A restart intent must be invisible to the reboot reader and vice
-	// versa: an older init that knows only reboots must see nothing at
-	// all when a restart is requested, not an unreadable reboot intent
-	// (which it would honor by rebooting).
+	// A restart intent must be invisible to the reboot reader, and a
+	// reboot intent must be invisible to the restart reader. An older
+	// init that knows only about reboots must see nothing at all when
+	// a restart is requested. It must not see an unreadable reboot
+	// intent, because it would honor an unreadable reboot intent by
+	// rebooting the machine.
 	dir := t.TempDir()
 	if err := WriteRestartIntent(dir, &RestartIntent{Reason: "testing"}); err != nil {
 		t.Fatal(err)
@@ -174,8 +177,9 @@ func TestClearModulesIntentConsumesTheFileAndToleratesAbsence(t *testing.T) {
 }
 
 func TestModulesIntentIsItsOwnFile(t *testing.T) {
-	// Like the restart intent: invisible to the reboot reader, so an
-	// older init that knows only reboots sees nothing at all.
+	// Like the restart intent, a modules intent is invisible to the
+	// reboot reader. So an older init that knows only about reboots
+	// sees nothing at all.
 	dir := t.TempDir()
 	if err := WriteModulesIntent(dir, &ModulesIntent{Reason: "testing"}); err != nil {
 		t.Fatal(err)
@@ -186,9 +190,10 @@ func TestModulesIntentIsItsOwnFile(t *testing.T) {
 }
 
 func TestWriteRebootIntentNeedsItsChannel(t *testing.T) {
-	// The channel directory is init's to create. If the operator
-	// writes before it exists, that is a bug to surface, not a reason
-	// to create the directory.
+	// Init creates the channel directory, not the operator. If the
+	// operator writes before the directory exists, that is a bug to
+	// surface. The system must not create the directory to work around
+	// the bug.
 	intent := &RebootIntent{Reason: "testing"}
 	if err := WriteRebootIntent(filepath.Join(t.TempDir(), "absent"), intent); err == nil {
 		t.Error("a missing channel directory must be an error")

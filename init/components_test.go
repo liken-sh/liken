@@ -1,9 +1,9 @@
 package main
 
 // Tests for the machine plane's contract with its components: a
-// finished component stays finished, a failed or panicking one is
-// restarted, and shutdown is prompt for the well-behaved and bounded
-// for the stuck.
+// finished component stays finished, the code restarts a failed or
+// panicking component, and shutdown is prompt for a well-behaved
+// component and bounded for a stuck one.
 
 import (
 	"context"
@@ -13,8 +13,8 @@ import (
 )
 
 // testPlane builds a machine plane with restart delays measured in
-// milliseconds, so a test exercises several restarts without slowing
-// the suite down.
+// milliseconds, so a test can exercise several restarts without
+// slowing the suite down.
 func testPlane(t *testing.T) *machinePlane {
 	t.Helper()
 	p := newMachinePlane()
@@ -25,7 +25,7 @@ func testPlane(t *testing.T) *machinePlane {
 }
 
 // awaitRuns fails the test unless the counter channel delivers n runs
-// in time.
+// before the deadline.
 func awaitRuns(t *testing.T, ran <-chan struct{}, n int) {
 	t.Helper()
 	for i := range n {
@@ -93,7 +93,7 @@ func TestShutdownStopsAWellBehavedComponent(t *testing.T) {
 
 func TestShutdownInterruptsARestartBackoff(t *testing.T) {
 	p := newMachinePlane()
-	p.backoff = time.Hour // a restart wait shutdown must cut short
+	p.backoff = time.Hour // shutdown must cut this restart wait short
 	p.maxBackoff = time.Hour
 	ran := make(chan struct{}, 8)
 	p.start("failer", func(ctx context.Context) error {
@@ -118,7 +118,7 @@ func TestShutdownIsBoundedWhenAComponentIsStuck(t *testing.T) {
 	p := newMachinePlane()
 	forever := make(chan struct{})
 	p.start("stuck", func(ctx context.Context) error {
-		<-forever // ignores ctx: the misbehavior under test
+		<-forever // ignores ctx, the misbehavior under test
 		return nil
 	})
 

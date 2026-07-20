@@ -55,9 +55,9 @@ func TestJanitorJudgesEachWorkloadByItsOwnFeature(t *testing.T) {
 }
 
 func TestJanitorIgnoresWorkloadsWithoutTheAnnotation(t *testing.T) {
-	// The operator and log-relay DaemonSets live in liken-system too;
-	// carrying no feature annotation means no feature owns them, and
-	// the janitor must never touch them.
+	// The operator and log-relay DaemonSets live in liken-system too.
+	// They carry no feature annotation, which means no feature owns
+	// them, and the janitor must never touch them.
 	workloads := []featureWorkload{featureDaemonSet("liken-machine-operator", "")}
 	if got := decideRetractions(nil, workloads); len(got) != 0 {
 		t.Fatalf("expected no retractions, got %v", retractionNames(got))

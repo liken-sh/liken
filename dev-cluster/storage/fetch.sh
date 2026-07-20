@@ -3,23 +3,25 @@
 # Fetch the lab storage server's operating system: a stock Debian
 # cloud image.
 #
-# The storage server is the one guest in the lab that is deliberately
-# not a liken machine. The iscsi and nfs features make liken a
-# *client* of network storage, and drilling a client honestly means
-# pointing it at a server that liken had no hand in: an ordinary
-# Linux box running the reference implementations (the kernel NFS
-# server and a standard iSCSI target). A mainstream distribution is
-# the fastest honest way to have one, and Debian's cloud images are
-# built for exactly this use: a generic qcow2 that boots in any
-# hypervisor and configures itself from a cloud-init seed on first
-# boot, no installer and no interaction (see seed/ and the Makefile).
+# The storage server is the one guest in the lab that is not a liken
+# machine, on purpose. The iscsi and nfs features make liken a client
+# of network storage. To drill a client honestly, the drill must
+# point it at a server that liken had no hand in: an ordinary Linux
+# box that runs the reference implementations (the kernel NFS server
+# and a standard iSCSI target). A mainstream distribution is the
+# fastest honest way to get one, and Debian's cloud images are built
+# for exactly this use. Each image is a generic qcow2 file that boots
+# in any hypervisor and configures itself from a cloud-init seed on
+# first boot, with no installer and no interaction (see seed/ and the
+# Makefile).
 #
 # The pin is a dated build (storage/VERSION). Debian publishes each
-# cloud image build into an immutable directory named by date and
-# serial, with checksums beside it, so the fetch verifies against the
-# SHA512SUMS published in the same directory — the same posture as
-# trust/fetch.sh, where the pin is the snapshot and the checksum
-# travels with it.
+# cloud image build into an immutable directory, named by date and
+# serial, with checksums stored beside it. Because of this, the fetch
+# verifies the image against the SHA512SUMS file published in the
+# same directory. This is the same approach that trust/fetch.sh
+# takes, where the pin is the snapshot and the checksum travels with
+# it.
 #
 # Usage:
 #   fetch.sh                fetch the build pinned in storage/VERSION

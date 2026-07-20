@@ -12,7 +12,8 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// registriesTempPath points the renderer at a tempdir for one test.
+// registriesTempPath points the renderer at a temporary directory
+// for one test.
 func registriesTempPath(t *testing.T) string {
 	t.Helper()
 	original := registriesConfigPath
@@ -104,9 +105,10 @@ func TestWriteRegistriesConfigEmbeddedKeepsADeclaredWildcard(t *testing.T) {
 }
 
 func TestWriteRegistriesConfigCredentialsAloneStillRender(t *testing.T) {
-	// Credentials without mirrors is the Docker Hub rate-limit case:
-	// no mirror anywhere, but authenticated pulls straight to the
-	// registry. Valid registries.yaml, just a configs section.
+	// Credentials without mirrors covers the Docker Hub rate-limit
+	// case: no mirror anywhere, but authenticated pulls go straight
+	// to the registry. This produces a valid registries.yaml with
+	// only a configs section.
 	path := registriesTempPath(t)
 	status := writeRegistriesConfig(nil, labCredentials(), machine.RegistryCredentialsStore(t.TempDir()), machine.ManifestSourceProven)
 	raw, err := os.ReadFile(path)
@@ -123,8 +125,9 @@ func TestWriteRegistriesConfigCredentialsAloneStillRender(t *testing.T) {
 
 func TestWriteRegistriesConfigNothingDeclaredRemovesTheFile(t *testing.T) {
 	path := registriesTempPath(t)
-	// A previous rendering exists (this is the live-retraction case:
-	// the restart path re-renders with nothing declared).
+	// A previous rendering already exists. This is the
+	// live-retraction case, where the restart path re-renders the
+	// file with nothing declared.
 	if err := os.WriteFile(path, []byte("mirrors: {}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -174,8 +177,9 @@ func TestWriteRegistriesConfigPromotesStagedCredentialsOnSuccess(t *testing.T) {
 }
 
 func TestWriteRegistriesConfigFailedWriteLeavesStagedInPlace(t *testing.T) {
-	// The render target is unwritable, so the actuation never
-	// happened: staged must remain for the next boot to retry.
+	// The render target is not writable, so the actuation never
+	// happens. The staged credentials must remain, so the next boot
+	// can retry.
 	original := registriesConfigPath
 	registriesConfigPath = filepath.Join(t.TempDir(), "no-such-dir", "registries.yaml")
 	t.Cleanup(func() { registriesConfigPath = original })

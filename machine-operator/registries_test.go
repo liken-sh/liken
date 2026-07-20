@@ -52,8 +52,8 @@ func TestDesiredRegistryCredentialsDecodesTheAuthField(t *testing.T) {
 }
 
 func TestDesiredRegistryCredentialsNormalizesDockerHub(t *testing.T) {
-	// `docker login` records the Hub under its legacy URL; containerd
-	// and image references call it docker.io.
+	// `docker login` records the Hub under its legacy URL.
+	// containerd and image references call it docker.io.
 	hosts, err := desiredRegistryCredentials(dockerConfigSecret(
 		`{"auths":{"https://index.docker.io/v1/":{"username":"u","password":"p"}}}`))
 	if err != nil {
@@ -65,10 +65,10 @@ func TestDesiredRegistryCredentialsNormalizesDockerHub(t *testing.T) {
 }
 
 func TestDesiredRegistryCredentialsRenderDeterministically(t *testing.T) {
-	// The map iteration order here is whatever Go deals; determinism
-	// belongs to RenderRegistryCredentials, which sorts. This pins
-	// the pair end to end: the same Secret always renders the same
-	// document hash.
+	// The map iteration order here is whatever Go happens to give.
+	// Determinism belongs to RenderRegistryCredentials, which sorts.
+	// This test checks the whole pipeline end to end: the same
+	// Secret always renders the same document hash.
 	secret := dockerConfigSecret(
 		`{"auths":{"z.example":{"username":"z","password":"p"},"a.example":{"username":"a","password":"p"}}}`)
 	first, err := desiredRegistryCredentials(secret)
@@ -239,9 +239,9 @@ func TestCredentialsDriftUnderManualPolicyWaits(t *testing.T) {
 }
 
 func TestCredentialsRetractionStagesTheEmptyDocument(t *testing.T) {
-	// The Secret was deleted, but this boot rendered credentials: the
-	// empty document stages, and applying it strips the configs from
-	// registries.yaml.
+	// The Secret was deleted, but this boot rendered credentials.
+	// The empty document stages, and applying it removes the
+	// configs from registries.yaml.
 	_, bootHash, _ := machine.RenderRegistryCredentials(desiredCredentials())
 	conv := decideRegistriesConvergence(registriesInputs{}, machineWithPolicy(machine.RebootAuto),
 		credentialFacts(bootHash), nil, "", turnGranted)

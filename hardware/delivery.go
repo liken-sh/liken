@@ -1,23 +1,24 @@
 package hardware
 
-// What claiming a device would actually hand over.
+// This file finds what claiming a device would hand over.
 //
-// Delivering hardware to a workload means device nodes: the /dev
-// entries a container can be given without any privilege. Sysfs
-// records exactly which descendants of a device have nodes — any
-// directory holding a `dev` file is one, and its uevent publishes
-// the node's path under /dev as DEVNAME. So "what would claiming
-// this device deliver" is a subtree walk, and a device whose subtree
-// delivers nothing (a NIC, a bare controller) is not claimable
-// inventory at all, however real the hardware is.
+// Delivering hardware to a workload means giving it device nodes:
+// the /dev entries that a container can receive without any
+// privilege. Sysfs records exactly which descendants of a device
+// have nodes. Any directory that holds a `dev` file is one of these
+// descendants, and its uevent file publishes the node's path under
+// /dev as DEVNAME. So the question "what would claiming this device
+// deliver" is answered by a subtree walk. A device whose subtree
+// delivers nothing, such as a NIC or a bare controller, is not
+// claimable inventory, even though the hardware is real.
 //
-// The walk prunes at nested bus devices. Sysfs nests the physical
-// topology — a USB controller's directory contains the hubs, which
-// contain the devices, which contain the interfaces — so without
-// pruning, every device node on the bus would count toward the
+// The walk stops at nested bus devices. Sysfs nests the physical
+// topology: a USB controller's directory contains the hubs, which
+// contain the devices, which contain the interfaces. Without this
+// limit, every device node on the bus would count toward the
 // controller that hosts it. Each PCI and USB device gets its own
-// inventory decision, so a walk claims only the nodes between this
-// device and the next bus device down.
+// inventory decision. For this reason, a walk claims only the nodes
+// between this device and the next bus device below it.
 
 import (
 	"io/fs"
@@ -26,24 +27,25 @@ import (
 	"strings"
 )
 
-// Delivery is the walk's report: the device nodes a claim on this
-// device would inject, and the block-device names among them, which
-// is what the platform test checks against the storage roles'
-// partitions.
+// Delivery is the report that the walk produces. It lists the device
+// nodes that a claim on this device would inject, and the
+// block-device names among them. The platform test checks these
+// block-device names against the storage roles' partitions.
 type Delivery struct {
 	DevNodes []string
 	Blocks   []string
 }
 
-// InspectDelivery walks one device's sysfs subtree for device nodes.
-// Missing devices report an empty delivery: hardware can unplug
-// between a discovery walk and this one, and an empty answer is the
-// truthful one for hardware that isn't there anymore.
+// InspectDelivery walks one device's sysfs subtree and finds its
+// device nodes. If the device is missing, InspectDelivery reports an
+// empty delivery. Hardware can unplug between a discovery walk and
+// this one, and an empty result is correct for hardware that is no
+// longer there.
 func InspectDelivery(sysRoot string, d Device) Delivery {
 	root := filepath.Join(sysRoot, "bus", d.Bus, "devices", d.Address)
-	// The bus entry is a symlink into the devices tree; the walk
-	// needs the real directory so its children are real directories
-	// too.
+	// The bus entry is a symlink into the devices tree. The walk
+	// needs the real directory, so that its children are also real
+	// directories.
 	resolved, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return Delivery{}
@@ -73,15 +75,16 @@ func InspectDelivery(sysRoot string, d Device) Delivery {
 }
 
 // isBusDevice reports whether a sysfs directory is itself a PCI or
-// USB device — the subtree boundary where another inventory decision
-// begins.
+// USB device. This is the subtree boundary where another inventory
+// decision begins.
 func isBusDevice(path string) bool {
 	name := subsystemName(path)
 	return name == "pci" || name == "usb"
 }
 
-// subsystemName is the base of the subsystem symlink every sysfs
-// device carries: which kernel subsystem the directory belongs to.
+// subsystemName reads the subsystem symlink that every sysfs device
+// carries, and returns its base name: the kernel subsystem that the
+// directory belongs to.
 func subsystemName(path string) string {
 	target, err := os.Readlink(filepath.Join(path, "subsystem"))
 	if err != nil {
@@ -90,8 +93,9 @@ func subsystemName(path string) string {
 	return filepath.Base(target)
 }
 
-// ueventDevName extracts DEVNAME from a device's uevent file: the
-// node's path relative to /dev, which devtmpfs mirrors exactly.
+// ueventDevName extracts DEVNAME from a device's uevent file.
+// DEVNAME is the node's path relative to /dev, and devtmpfs mirrors
+// this path exactly.
 func ueventDevName(path string) string {
 	raw, err := os.ReadFile(filepath.Join(path, "uevent"))
 	if err != nil {

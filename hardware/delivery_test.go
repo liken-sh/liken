@@ -1,8 +1,8 @@
 package hardware
 
-// What claiming a device would hand over: the /dev nodes beneath it
-// in sysfs, with the walk pruned at nested bus devices that get
-// their own inventory decision.
+// This file tests what claiming a device would hand over: the /dev
+// nodes beneath it in sysfs. The walk stops at nested bus devices,
+// which get their own inventory decision.
 
 import (
 	"os"
@@ -11,10 +11,10 @@ import (
 	"testing"
 )
 
-// child adds a nested (non-bus) child directory under an existing
-// device, optionally carrying a devnode: a dev file, the uevent
-// DEVNAME the kernel publishes, and a subsystem symlink naming which
-// class of node it is.
+// child adds a nested, non-bus child directory under an existing
+// device. It can optionally carry a device node: a dev file, the
+// uevent DEVNAME that the kernel publishes, and a subsystem symlink
+// that names the node's class.
 func (f *fakeSysfs) child(bus, device, rel, subsystem, devname string) {
 	f.t.Helper()
 	dir := filepath.Join(f.root, "bus", bus, "devices", device, rel)
@@ -93,9 +93,9 @@ func TestDeliveryIsEmptyForADeviceWithNoNodes(t *testing.T) {
 
 func TestDeliveryPrunesAtNestedBusDevices(t *testing.T) {
 	// The XHCI controller's subtree contains every USB device on the
-	// bus, each with /dev nodes of its own. Those belong to the USB
-	// devices' own inventory decisions; the controller itself
-	// delivers nothing.
+	// bus, and each of those devices has its own /dev nodes. Those
+	// nodes belong to the USB devices' own inventory decisions. The
+	// controller itself delivers nothing.
 	sysfs := newFakeSysfs(t)
 	sysfs.device("pci", "0000:00:03.0", "xhci_hcd", map[string]string{
 		"modalias": "pci:v00001B36d0000000Dsv00001AF4sd00001100bc0Csc03i30",

@@ -1,16 +1,17 @@
-# The logs domain: the relays that carry the machine's host-level log
-# streams into the cluster.
+# This is the logs domain: the relays that carry the machine's
+# host-level log streams into the cluster.
 #
-# Two artifacts, on the operator's exact pattern: the liken-logs
-# binary (a static Go build; main.go explains the four relays it
-# carries) and the OCI image tarball that delivers it, packaged by
-# the shared recipe (image/oci.sh). The machine-logs DaemonSet in
-# manifests/ runs this one image in four containers, differing only
-# in the verb they pass and the host paths they mount.
+# This builds two artifacts, following the operator's exact pattern:
+# the liken-logs binary (a static Go build; main.go explains the four
+# relays it carries) and the OCI image tarball that delivers it,
+# packaged by the shared recipe (image/oci.sh). The machine-logs
+# DaemonSet in manifests/ runs this one image in four containers,
+# differing only in the verb they pass and the host paths they mount.
 #
-# version.mk supplies the version stamp; the releases domain
-# overrides it and the output directory to rebuild these relays under
-# a release's name into its own tree, through these same rules.
+# version.mk supplies the version stamp. The releases domain
+# overrides the stamp and the output directory, to rebuild these
+# relays under a release's name into its own tree, using these same
+# rules.
 include ../version.mk
 DIST ?= dist
 

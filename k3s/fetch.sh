@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 #
-# Vendor k3s, the entire Kubernetes distribution, as one static binary.
+# Vendor k3s, the whole Kubernetes distribution, as one static binary.
 #
-# k3s is the reason liken's architecture works at all. It compiles
-# containerd, kubelet, the API server, scheduler, controller manager,
-# flannel, CoreDNS, and a sqlite-backed datastore into a single
-# self-contained executable that requires nothing from the host beyond
-# a kernel. It even unpacks its own userland (mount, iptables, and
-# more) under /var/lib/rancher at runtime. One file in the image
+# k3s makes liken's architecture possible. It compiles containerd,
+# kubelet, the API server, scheduler, controller manager, flannel,
+# CoreDNS, and a sqlite-backed datastore into one self-contained
+# executable. This executable needs nothing from the host beyond a
+# kernel. At runtime it also unpacks its own userland (mount,
+# iptables, and more) under /var/lib/rancher. One file in the image
 # provides the whole service manager.
 #
-# Like the kernel, we pin a version (k3s/VERSION, e.g. v1.36.2+k3s1,
-# upstream Kubernetes plus k3s's packaging revision) and fetch the
-# published build from the project's GitHub releases, verifying it
-# against the sha256 manifest published beside it.
+# As with the kernel, this script pins a version (k3s/VERSION, for
+# example v1.36.2+k3s1: upstream Kubernetes plus k3s's packaging
+# revision). It fetches the published build from the project's GitHub
+# releases, and verifies the build against the sha256 manifest
+# published beside it.
 #
 # Usage:
 #   k3s/fetch.sh                  fetch the version pinned in k3s/VERSION
@@ -35,18 +36,18 @@ done
 arch="amd64"
 version="${1:-$(cat "$here/VERSION")}"
 
-# The "+" in k3s version tags must be percent-encoded in release URLs.
+# Release URLs must percent-encode the "+" in k3s version tags.
 base="https://github.com/k3s-io/k3s/releases/download/${version//+/%2B}"
 
 cache="$here/cache/$version"
 out="$here/dist/$version"
 mkdir -p "$cache"
 
-# The release publishes one sha256 manifest per architecture covering
-# all of its artifacts; the line ending in exactly " k3s" is the bare
-# server/agent binary (its siblings are airgap image bundles, which
-# liken doesn't vendor; a machine's first boot pulls its images over
-# the network).
+# Each release publishes one sha256 manifest per architecture, covering
+# all of its artifacts. The line ending in exactly " k3s" names the
+# bare server/agent binary. Its siblings are airgap image bundles,
+# which liken does not vendor; a machine pulls its images over the
+# network on its first boot instead.
 digest="$(curl -fsSL "$base/sha256sum-$arch.txt" | awk '$2 == "k3s" { print $1 }')"
 if [[ -z "$digest" ]]; then
     echo "fetch.sh: no k3s binary listed in $base/sha256sum-$arch.txt" >&2

@@ -1,9 +1,10 @@
 package kubernetes
 
-// Reading and reporting on Clusters. The machine operator reads the
-// one its manifest names; the cluster operator lists, because the
-// list *is* how it learns which Cluster it operates: it takes no
-// configuration at all, and a fleet has exactly one Cluster to find.
+// This file reads and reports on Clusters. The machine operator reads
+// the one Cluster that its manifest names. The cluster operator lists
+// all Clusters, because the list is how it learns which Cluster it
+// operates. The cluster operator needs no configuration at all: a
+// fleet has exactly one Cluster to find.
 
 import (
 	"encoding/json"
@@ -21,15 +22,17 @@ func ListClusters(c *Client) ([]cluster.Cluster, error) {
 }
 
 // PublishClusterStatus writes through the Cluster's status
-// subresource: a separate endpoint (…/clusters/<name>/status) that
-// updates *only* the status half of the object, so the one writer of
-// the Cluster's status can never accidentally rewrite the spec it is
-// acting on, and RBAC can grant the two halves separately. The write
-// is a PUT carrying the object's resourceVersion: if anything else
-// changed the object in between, the server answers 409 Conflict
-// instead of applying our stale copy, and the caller's next pass
-// re-reads and tries again. This is optimistic concurrency, the same
-// contract PublishStatus describes for Machines.
+// subresource. This is a separate endpoint (…/clusters/<name>/status)
+// that updates only the status half of the object. Because of this,
+// the single writer of the Cluster's status can never accidentally
+// rewrite the spec it acts on, and RBAC can grant access to the two
+// halves separately. The write is a PUT request that carries the
+// object's resourceVersion. If anything else changed the object in
+// the meantime, the server answers with 409 Conflict instead of
+// applying the stale copy. The caller then reads the object again on
+// its next pass and tries again. This pattern is optimistic
+// concurrency, the same contract that PublishStatus uses for
+// Machines.
 func PublishClusterStatus(c *Client, clusterDoc *cluster.Cluster) error {
 	body, err := json.Marshal(clusterDoc)
 	if err != nil {

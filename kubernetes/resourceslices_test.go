@@ -1,8 +1,10 @@
 package kubernetes
 
-// The ResourceSlice publisher's decisions: create when absent, leave
-// alone when current, replace with a bumped pool generation when the
-// inventory changed, delete when the last device is gone.
+// These tests cover the ResourceSlice publisher's decisions: create
+// the slice when it is absent, leave the slice alone when it is
+// current, replace the slice with an increased pool generation when
+// the inventory changed, and delete the slice when the last device
+// is gone.
 
 import (
 	"encoding/json"
@@ -10,8 +12,8 @@ import (
 	"testing"
 )
 
-// slicePublishFixture is a miniature API server holding at most one
-// ResourceSlice, remembering the requests it saw.
+// slicePublishFixture is a small API server that holds at most one
+// ResourceSlice. It remembers the requests it received.
 type slicePublishFixture struct {
 	existing *ResourceSlice
 	requests []string

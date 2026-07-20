@@ -4,22 +4,23 @@ package main
 //
 // Credentials enter the cluster as a kubernetes.io/dockerconfigjson
 // Secret at a well-known name (the kubernetes package), because that
-// is the shape the whole ecosystem's tooling already produces:
+// is the shape the whole ecosystem's tooling already produces.
 // `kubectl create secret docker-registry` writes one, `docker login`
 // writes the same JSON to disk, and imagePullSecrets consume it. The
-// operator reads that Secret each pass, renders it into liken's
+// operator reads that Secret on each pass, renders it into liken's
 // canonical credentials document, and stages the rendering onto
-// machineState whenever it differs from what the boot actuated —
-// the same drift-and-stage loop every other document rides.
+// machineState whenever it differs from what the boot actuated.
+// This is the same drift-and-stage loop every other document uses.
 //
-// The whole pipeline is restart-class: credentials land in
-// registries.yaml, which k3s reads only at process start, so the
-// staged document converges by bouncing k3s in place, never by
-// rebooting the machine. And unlike the cluster document, no
-// canonicalization pass is needed before comparing hashes: the
-// operator is this document's only author (no image carries a seed,
-// no person hand-writes one), so the facts' hash and the desired
-// rendering are always outputs of the same function.
+// This whole pipeline belongs to the restart class of changes.
+// Credentials land in registries.yaml, which k3s reads only when
+// its process starts, so the staged document converges by
+// restarting k3s in place, never by rebooting the machine. And
+// unlike the cluster document, no canonicalization pass is needed
+// before comparing hashes. The operator is this document's only
+// author (no image carries a seed, and no person hand-writes one),
+// so the facts' hash and the desired rendering are always outputs
+// of the same function.
 
 import (
 	"encoding/base64"
@@ -32,8 +33,9 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// dockerConfig is the .dockerconfigjson payload: registry host to
-// login. Docker's own format, reduced to the fields liken reads.
+// dockerConfig is the .dockerconfigjson payload: registry host
+// mapped to login. This is Docker's own format, reduced to the
+// fields liken reads.
 type dockerConfig struct {
 	Auths map[string]dockerAuth `json:"auths"`
 }
@@ -49,12 +51,12 @@ type dockerAuth struct {
 }
 
 // desiredRegistryCredentials renders the Secret into the canonical
-// credential list: one username/password per registry host, sorted
-// by RenderRegistryCredentials downstream. nil means no credentials
-// anywhere — the Secret is absent or names no hosts — which is the
-// ordinary "nothing declared" state, not an error. A malformed
-// Secret is an error, and the message names what to create, because
-// the fix is always a corrected Secret.
+// credential list: one username/password pair per registry host,
+// sorted later by RenderRegistryCredentials. A nil result means no
+// credentials exist anywhere: the Secret is absent, or it names no
+// hosts. This is the ordinary "nothing declared" state, not an
+// error. A malformed Secret is an error, and the message names what
+// to create, because the fix is always a corrected Secret.
 func desiredRegistryCredentials(secret *kubernetes.Secret) ([]machine.RegistryCredential, error) {
 	if secret == nil {
 		return nil, nil
@@ -100,14 +102,14 @@ func desiredRegistryCredentials(secret *kubernetes.Secret) ([]machine.RegistryCr
 	return hosts, nil
 }
 
-// registryHost reduces an auths key to the host containerd matches
-// against. Keys are usually bare hosts already, but `docker login`
-// records Docker Hub as the URL https://index.docker.io/v1/, so a
-// key carrying a scheme is reduced to its host, and index.docker.io
-// maps to docker.io — the name image references, and therefore
-// registries.yaml, use for the Hub. This is the one normalization
-// worth doing, because it is the shape the ecosystem's own tool
-// produces.
+// registryHost reduces an auths key to the host that containerd
+// matches against. Keys are usually bare hosts already, but `docker
+// login` records Docker Hub as the URL https://index.docker.io/v1/,
+// so the function reduces a key carrying a scheme to its host, and
+// maps index.docker.io to docker.io, the name that image
+// references, and therefore registries.yaml, use for the Hub. This
+// is the one normalization worth doing, because it matches the
+// shape the ecosystem's own tool produces.
 func registryHost(key string) string {
 	host := key
 	if strings.Contains(key, "://") {
@@ -130,14 +132,14 @@ type registriesInputs struct {
 	desired  []machine.RegistryCredential // nil when absent or empty
 }
 
-// convergeRegistryCredentials is the credentials document's part of
-// one reconcile pass: read the registry-credentials Secret, load this
-// machine's durable rejection and staged copy from the store, and
-// decide. Credentials converge through the same machinery as the
-// other documents, from a different source: the Secret rather than a
-// CRD. Only a cluster member carries credentials at all — a machine
-// with no cluster document has no operator-authored documents of any
-// kind.
+// convergeRegistryCredentials runs the credentials document's part
+// of one reconcile pass. It reads the registry-credentials Secret,
+// loads this machine's durable rejection and staged copy from the
+// store, and makes the convergence decision. Credentials converge
+// through the same machinery as the other documents, from a
+// different source: the Secret, rather than a CRD. Only a cluster
+// member carries credentials at all. A machine with no cluster
+// document has no operator-authored documents of any kind.
 func convergeRegistryCredentials(c *kubernetes.Client, store machine.ManifestStore, m *machine.Machine, facts *machine.MachineStatus, t turn) convergence {
 	rejection, _ := store.LoadRejection()
 	in := registriesInputs{}
@@ -150,27 +152,30 @@ func convergeRegistryCredentials(c *kubernetes.Client, store machine.ManifestSto
 }
 
 // decideRegistriesConvergence is the credentials document's
-// convergence decision, mirroring the other documents' short-circuit
-// order. The cases:
+// convergence decision, following the same order of checks as the
+// other documents. The cases:
 //
-//  1. No facts, or facts without a boot record: Unknown.
-//  2. The Secret is unreadable (an API failure, not absence):
+//  1. No facts, or facts with no boot record: Unknown.
+//  2. The Secret is unreadable, an API failure rather than absence:
 //     Unknown, the same posture ClusterUnavailable takes.
 //  3. The Secret is malformed: CredentialsInvalid, and nothing is
-//     staged — the last good rendering keeps running and the message
-//     names the Secret to fix. Report, don't wedge.
-//  4. Nothing declared anywhere (no Secret, and this boot rendered
-//     no credentials): converged. This case is what keeps a machine
+//     staged. The last good rendering keeps running, and the
+//     message names the Secret to fix. This reports the problem
+//     instead of getting stuck.
+//  4. Nothing declared anywhere, meaning no Secret and this boot
+//     rendered no credentials: converged. This case keeps a machine
 //     that has never had credentials from staging an empty document
 //     and restarting once for nothing. It also withdraws a stale
 //     staged copy and clears a spent rejection, like every document.
 //  5. The boot rendered exactly the desired credentials: converged.
 //  6. The desired rendering is the one init rejected: hold.
-//  7. machineState is memory-backed: nowhere durable to stage.
-//  8. Drift: stage (a deleted Secret stages the *empty* document,
-//     the retraction rendering) and gate the k3s restart through
-//     policy and the conductor's turn. Always a restart, never a
-//     reboot: credentials only touch registries.yaml.
+//  7. machineState is backed by memory: there is nowhere durable to
+//     stage.
+//  8. Drift: stage the document (a deleted Secret stages the empty
+//     document, the retraction rendering) and gate the k3s restart
+//     through policy and the conductor's turn. This is always a
+//     restart, never a reboot, because credentials only touch
+//     registries.yaml.
 func decideRegistriesConvergence(in registriesInputs, m *machine.Machine, facts *machine.MachineStatus, rejection *machine.Rejection, stagedHash string, t turn) convergence {
 	if facts == nil || facts.Boot.ManifestSource == "" {
 		return factsIncomplete("CredentialsConverged")

@@ -1,9 +1,8 @@
 package main
 
-// The machine's endpoint to the API: leaders through their own API
-// server, followers through k3s's health-checked local load
-// balancer, and a standalone machine through whatever the pod
-// environment offers.
+// The machine's endpoint to the API. Leaders use their own API
+// server. Followers use k3s's health-checked local load balancer. A
+// standalone machine uses whatever the pod environment offers.
 
 import (
 	"testing"

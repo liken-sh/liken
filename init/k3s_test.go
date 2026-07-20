@@ -3,8 +3,8 @@ package main
 // Tests for the cluster-derived k3s configuration: role, node
 // address, and the drop-in's contents. k3s's on-disk state (the
 // clusterState seeds, a demoted leader's datastore) is
-// k3s_state_test.go's side of the seam; starting k3s itself is QEMU
-// territory. The derivations are pinned here.
+// k3s_state_test.go's side of the split. Starting k3s itself runs
+// only under QEMU. The derivations are pinned here.
 
 import (
 	"net"
@@ -100,8 +100,8 @@ func TestLeaderJoinConfigForAJoiningLeader(t *testing.T) {
 }
 
 func TestLeaderJoinConfigFallsBackToTheEndpoint(t *testing.T) {
-	// The founder declares no static address (DHCP); the endpoint is
-	// the one address the deployment promised is reachable.
+	// The founder declares no static address (DHCP). The endpoint is
+	// the one address that the deployment promised is reachable.
 	clusterInit, joinURL := leaderJoinConfig(haCluster(), "node-3", t.TempDir())
 	if clusterInit || joinURL != "https://10.10.0.1:6443" {
 		t.Errorf("an unresolvable founder falls back to the endpoint: %v %q", clusterInit, joinURL)
@@ -109,8 +109,9 @@ func TestLeaderJoinConfigFallsBackToTheEndpoint(t *testing.T) {
 }
 
 // adoptedCluster is an HA cluster whose datastore liken did not
-// create: the endpoint points at the existing (foreign) control
-// plane, and origin: adopted says nobody may initialize a new one.
+// create. The endpoint points at the existing (foreign) control
+// plane, and origin: adopted says that no leader may initialize a
+// new datastore.
 func adoptedCluster() *cluster.Cluster {
 	c := haCluster()
 	c.Spec.Origin = cluster.OriginAdopted
@@ -198,8 +199,9 @@ func TestK3sBootConfigForAFollower(t *testing.T) {
 			t.Errorf("follower config should carry %q:\n%s", want, got)
 		}
 	}
-	// The address plan is the control plane's to declare; a follower
-	// telling k3s about it would be misread as unknown flags.
+	// The address plan belongs to the control plane to declare. If a
+	// follower told k3s about it, k3s would misread it as unknown
+	// flags.
 	for _, reject := range []string{"cluster-cidr", "service-cidr", "cluster-dns", "cluster-domain"} {
 		if strings.Contains(got, reject) {
 			t.Errorf("follower config should not carry %s:\n%s", reject, got)
@@ -215,7 +217,7 @@ func TestK3sBootConfigRendersNodeLabels(t *testing.T) {
 	for _, role := range []api.Role{api.RoleLeader, api.RoleFollower} {
 		got := k3sBootConfig(k3sBootInputs{role: role, clusterDoc: labCluster(), haveToken: true, nodeLabels: labels})
 		// The + suffix asks k3s to append to the static file's list
-		// instead of replacing it; without it the drop-in would erase
+		// instead of replacing it. Without it, the drop-in would erase
 		// liken.sh/machine=true. Keys render sorted, so the drop-in is
 		// deterministic for the same spec.
 		want := "node-label+:\n  - guid.foo/gpu=true\n  - topology.kubernetes.io/zone=closet\n"
@@ -388,9 +390,10 @@ func TestK3sBootConfigWithoutAToken(t *testing.T) {
 	}
 }
 
-// fakeK3sConfigs points the drop-in writers at a tempdir standing in
-// for /etc/rancher/k3s, and the token path at a tempdir file (present
-// or not), restoring the real paths when the test ends.
+// fakeK3sConfigs points the drop-in writers at a temporary directory
+// that substitutes for /etc/rancher/k3s, and the token path at a
+// temporary file (present or not). It restores the real paths when
+// the test ends.
 func fakeK3sConfigs(t *testing.T, withToken bool) (serverDropIns, agentDropIns string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -523,8 +526,8 @@ func TestWriteK3sBootConfigNarratesAJoiningLeader(t *testing.T) {
 
 func TestWriteK3sBootConfigWarnsAFollowerOutsideTheNodeCIDR(t *testing.T) {
 	_, agentDropIns := fakeK3sConfigs(t, true)
-	// The follower's one address is outside the cluster's nodeCIDR:
-	// the warning prints and k3s is left to guess.
+	// The follower's one address is outside the cluster's nodeCIDR.
+	// The warning prints, and k3s is left to guess.
 	conns := []*connection{conn(t, "eth0", "192.168.1.5/24")}
 
 	role, err := writeK3sBootConfig(labCluster(), bootMachine("node-2", nil), conns)
@@ -543,7 +546,7 @@ func TestWriteK3sBootConfigWarnsAFollowerOutsideTheNodeCIDR(t *testing.T) {
 func TestWriteK3sBootConfigReportsAnUnwritableDropInDir(t *testing.T) {
 	fakeK3sConfigs(t, true)
 	// The config path sits under a plain file, so the drop-in
-	// directory can't be created.
+	// directory cannot be created.
 	blocked := filepath.Join(t.TempDir(), "blocker")
 	if err := os.WriteFile(blocked, nil, 0o644); err != nil {
 		t.Fatal(err)

@@ -1,9 +1,9 @@
 package main
 
-// Tests for the time responder, exercised the strongest way
+// These tests exercise the time responder the strongest way
 // available: over a real UDP socket on loopback, with the same
-// vendored client the machines themselves use. If beevik/ntp is
-// satisfied, a follower will be too.
+// vendored client that the machines themselves use. If beevik/ntp
+// accepts the response, a follower will accept it too.
 
 import (
 	"net"
@@ -14,7 +14,7 @@ import (
 )
 
 // startResponder serves time from the given clock on an ephemeral
-// loopback port and returns the address to query.
+// loopback port, and it returns the address to query.
 func startResponder(t *testing.T, clk *clock) string {
 	t.Helper()
 	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
@@ -26,7 +26,7 @@ func startResponder(t *testing.T, clk *clock) string {
 	return pc.LocalAddr().String()
 }
 
-// syncedClock is a clock that measured its source moments ago.
+// syncedClock is a clock that measured its source a moment ago.
 func syncedClock() *clock {
 	clk := newClock([]string{"time.example.com"})
 	clk.record(&timeSync{
@@ -89,21 +89,21 @@ func TestRespondToIgnoresGarbage(t *testing.T) {
 		t.Error("a short packet deserves silence, not a reply")
 	}
 	server := make([]byte, 48)
-	server[0] = 4 // mode 4: another server, not a client asking
+	server[0] = 4 // mode 4: another server, not a client request
 	if respondTo(server, clk, time.Now()) != nil {
 		t.Error("only client (mode 3) requests get answers")
 	}
 }
 
 func TestNTPTimestampEncoding(t *testing.T) {
-	// The NTP epoch is 1900-01-01; Unix's is 1970-01-01. Unix time
-	// zero corresponds to NTP second 2,208,988,800, the canonical
-	// check for the conversion.
+	// The NTP epoch is 1900-01-01. The Unix epoch is 1970-01-01. Unix
+	// time zero corresponds to NTP second 2,208,988,800, which is the
+	// standard check for this conversion.
 	epoch := time.Unix(0, 0)
 	if got := ntpTimestamp(epoch); got != 2_208_988_800<<32 {
 		t.Errorf("got %d", got)
 	}
-	// Half a second is half of 2^32 in the fraction field.
+	// Half a second equals half of 2^32 in the fraction field.
 	half := time.Unix(0, 500_000_000)
 	want := uint64(2_208_988_800)<<32 | 1<<31
 	if got := ntpTimestamp(half); got != want {

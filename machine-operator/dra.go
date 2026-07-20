@@ -3,28 +3,27 @@ package main
 // The DRA driver's inventory half: publishing this machine's driven
 // devices as a ResourceSlice.
 //
-// liken's answer to "how do workloads reach hardware" is dynamic
-// resource allocation, and the driver is this operator — one more
-// job in a process already standing on every node, not a second
-// daemon (the memory envelope has no room for one). The division of
-// the milestone's two halves runs through the driver symlink: a
-// device nothing drives is init's unclaimed report in Machine
-// status, aimed at the person who can declare a module; a device
-// with a driver is working equipment, and working equipment belongs
-// in the cluster's own inventory API where DeviceClasses can select
-// it and pods can claim it. spec.modules is the gate between the
-// two — declaring a driver is what moves a device from one report
-// to the other.
+// liken's answer to the question of how workloads reach hardware is
+// dynamic resource allocation, and the driver is this operator: one
+// more job in a process that already runs on every node, not a
+// second daemon, because the memory envelope has no room for one.
+// The driver symlink divides the milestone's two halves. A device
+// with no driver is init's unclaimed report in Machine status, aimed
+// at the person who can declare a module. A device with a driver is
+// working equipment, and working equipment belongs in the cluster's
+// own inventory API, where DeviceClasses can select it and pods can
+// claim it. spec.modules is the gate between the two: declaring a
+// driver is what moves a device from one report to the other.
 //
-// The operator walks sysfs itself rather than riding init's facts,
-// deliberately. The facts channel carries what init observes for
-// the Machine status, and inventory is not status: it is a separate
-// report to a separate audience with a separate lifetime (slices
-// die with the Node, status lives with the Machine). The walk is
-// the same shared package init uses, so the two reports can never
-// disagree about what a device is, and at one walk per ten-second
-// pass it costs what init's uevent-triggered walks cost: nothing
-// worth engineering away.
+// The operator walks sysfs itself, rather than reading init's
+// facts. This is deliberate. The facts channel carries what init
+// observes for the Machine status, and inventory is not status: it
+// is a separate report, to a separate audience, with a separate
+// lifetime. Slices end with the Node; status lives with the Machine.
+// The walk uses the same shared package init uses, so the two
+// reports can never disagree about what a device is. At one walk
+// per ten-second pass, this costs the same as init's
+// uevent-triggered walks: a cost too small to engineer away.
 
 import (
 	"fmt"
@@ -38,18 +37,19 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// The operator reads the host's sysfs directly (this pod runs in the
-// host's namespaces) and names PCI devices from the database the
-// image ships. Variables so tests can substitute both, the same seam
-// init's hardware watcher leaves.
+// The operator reads the host's sysfs directly, because this pod
+// runs in the host's namespaces, and names PCI devices from the
+// database the image ships. These are variables so tests can
+// substitute both, the same seam init's hardware watcher leaves.
 var (
 	draSysfsRoot  = "/sys"
 	draPCIIDsPath = "/usr/share/hwdata/pci.ids"
 )
 
-// draNaming loads the PCI naming database once per process: the file
-// is part of the image, so it cannot change under a running operator.
-// A missing database degrades naming, never inventory.
+// draNaming loads the PCI naming database once per process. The
+// file is part of the image, so it cannot change while the operator
+// runs. A missing database degrades the device names, but never the
+// inventory itself.
 var draNaming = sync.OnceValue(func() *hardware.PCIIDs {
 	naming, err := hardware.LoadPCIIDs(draPCIIDsPath)
 	if err != nil {
@@ -59,19 +59,21 @@ var draNaming = sync.OnceValue(func() *hardware.PCIIDs {
 	return naming
 })
 
-// maxSliceDevices is the API's ceiling on devices in one
-// ResourceSlice. One slice per node is comfortably enough for whole
-// PCI and USB devices (a busy server has dozens, the limit is 128);
-// if a machine ever exceeds it, the overflow is dropped loudly
-// rather than split across slices, until real hardware demands the
+// maxSliceDevices is the API's limit on devices in one
+// ResourceSlice. One slice per node is enough for whole PCI and USB
+// devices: a busy server has dozens of devices, and the limit is
+// 128. If a machine ever exceeds this limit, the operator drops the
+// overflow and reports it loudly, rather than splitting devices
+// across slices. This will change if real hardware needs the
 // multi-slice pool protocol.
 const maxSliceDevices = 128
 
 // publishDeviceInventory converges this node's ResourceSlice with
-// what sysfs shows right now. Failures are logged and retried by the
-// next pass rather than surfaced as a condition: inventory is a
-// report about hardware, and a hiccup writing it is operator
-// plumbing, not a fact about the machine.
+// what sysfs shows right now. The function logs failures and lets
+// the next pass retry them, instead of reporting them as a
+// condition. Inventory is a report about hardware, and a failure to
+// write it is a problem in the operator's own machinery, not a fact
+// about the machine.
 func publishDeviceInventory(c *kubernetes.Client, node *nodeObject, facts *machine.MachineStatus) {
 	devices := inventoryDevices(
 		hardware.DiscoverDevices(draSysfsRoot, draNaming()),
@@ -95,11 +97,11 @@ func publishDeviceInventory(c *kubernetes.Client, node *nodeObject, facts *machi
 	}
 }
 
-// platformBlocks is the set of block devices the machine stands on:
-// every partition a storage role is backed by, straight from the
+// platformBlocks returns the block devices the machine depends on:
+// every partition that backs a storage role, read straight from the
 // facts. The system slots, the boot path, and the state and pod
 // filesystems are all storage roles, so this one set covers
-// everything whose loss would take the machine down.
+// everything the machine cannot lose without failing.
 func platformBlocks(facts *machine.MachineStatus) map[string]bool {
 	blocks := map[string]bool{}
 	if facts == nil {
@@ -115,25 +117,28 @@ func platformBlocks(facts *machine.MachineStatus) map[string]bool {
 }
 
 // inventoryDevices applies the publish rule. A device is offered to
-// workloads when all three tests pass:
+// workloads when it passes all three tests:
 //
-//  1. It is driven and not bus plumbing. Undriven hardware is the
-//     unclaimed report's story; usbcore's device nodes, hubs, and
-//     PCIe ports are the fabric the peripherals hang from.
-//  2. Claiming it would deliver something: its subtree carries
-//     device nodes a pod could be handed. A NIC or a bare
-//     controller fails here — real hardware, nothing to inject.
-//  3. The machine does not stand on it: nothing in its subtree
-//     backs a storage role. A claim on the system disk would hand
-//     an unprivileged pod the machine's own root, so the two
-//     claiming systems are made mutually exclusive — a disk is
-//     either the machine's (a storage role) or the workloads'
-//     (DRA), never both.
+//  1. The device has a driver and is not part of the bus structure
+//     itself. Undriven hardware belongs in the unclaimed report
+//     instead. usbcore's device nodes, hubs, and PCIe ports are the
+//     structure that the peripherals connect to, not peripherals
+//     themselves.
+//  2. Claiming the device would deliver something: its subtree
+//     carries device nodes that a pod could receive. A NIC or a
+//     bare controller fails this test, because it is real hardware
+//     with nothing to hand to a pod.
+//  3. The machine does not depend on the device: nothing in its
+//     subtree backs a storage role. A claim on the system disk
+//     would hand an unprivileged pod the machine's own root
+//     filesystem, so the two claiming systems exclude each other. A
+//     disk belongs either to the machine, as a storage role, or to
+//     the workloads, through DRA, never both.
 //
-// A ResourceSlice is the offer, not a census: the scheduler can
-// only allocate what a slice lists, which makes publication itself
-// the enforcement, ahead of whatever care a deployment's
-// DeviceClasses take.
+// A ResourceSlice is an offer, not a full record of the hardware.
+// The scheduler can only allocate what a slice lists, so publishing
+// the slice is itself the enforcement, ahead of whatever checks a
+// deployment's DeviceClasses perform.
 func inventoryDevices(discovered []hardware.Device,
 	inspect func(hardware.Device) hardware.Delivery, platform map[string]bool) []kubernetes.SliceDevice {
 	plumbing := map[string]bool{"usb": true, "hub": true, "pcieport": true}
@@ -150,10 +155,11 @@ func inventoryDevices(discovered []hardware.Device,
 			continue
 		}
 		attrs := map[string]kubernetes.DeviceAttribute{}
-		// Attribute names are unqualified, so they live under the
-		// driver's own domain: a DeviceClass selector reads them as
-		// device.attributes["liken.sh"].driver and friends. Absent
-		// facts are omitted, not published empty, so a selector like
+		// Attribute names are unqualified, so the Kubernetes API
+		// places them under the driver's own domain: a DeviceClass
+		// selector reads them as device.attributes["liken.sh"].driver
+		// and similar names. The code omits absent facts instead of
+		// publishing them empty, so a selector like
 		// `has(device.attributes["liken.sh"].serial)` means what it
 		// says.
 		for name, value := range map[string]string{
@@ -175,9 +181,10 @@ func inventoryDevices(discovered []hardware.Device,
 			Attributes: attrs,
 		})
 	}
-	// Sorted, so the same hardware always publishes the same slice
-	// and the change detection in EnsureResourceSlice sees inventory
-	// changes, never walk-order noise.
+	// The list is sorted, so the same hardware always publishes the
+	// same slice. This lets the change detection in
+	// EnsureResourceSlice see actual inventory changes, and nothing
+	// caused only by the order of the walk.
 	slices.SortFunc(out, func(a, b kubernetes.SliceDevice) int {
 		return strings.Compare(a.Name, b.Name)
 	})
@@ -185,14 +192,15 @@ func inventoryDevices(discovered []hardware.Device,
 }
 
 // deviceName turns a sysfs address into the DNS label the API
-// demands: bus-prefixed (addresses are only unique within a bus),
-// lowercased, with the address punctuation (PCI's colons and dots,
-// USB's dots and colons) dashed. The address is the right identity
-// for a slice device because it names the slot, not the unit:
-// replacing a failed dongle in the same port yields the same device
-// name, which is exactly how a claim against "the UPS on this wall"
-// should behave. Unit identity, when the hardware carries one, is
-// the serial attribute's job.
+// requires. The function prefixes the label with the bus, because
+// addresses are unique only within a bus, lowercases it, and
+// replaces the address punctuation (PCI's colons and dots, USB's
+// dots and colons) with dashes. The address is the right identity
+// for a slice device, because it names the slot, not the individual
+// unit. Replacing a failed dongle in the same port produces the
+// same device name, which is the behavior a claim against "the UPS
+// on this wall" needs. When the hardware carries a serial number,
+// the serial attribute is what identifies the individual unit.
 func deviceName(d hardware.Device) string {
 	sanitized := strings.ToLower(d.Address)
 	for _, r := range []string{":", "."} {
@@ -201,11 +209,12 @@ func deviceName(d hardware.Device) string {
 	return d.Bus + "-" + sanitized
 }
 
-// attributeString bounds a free-text value to the API's 64-character
-// limit on attribute strings. Identifiers (addresses, hex IDs,
-// modaliases on these buses) fit by construction; only the
-// human-readable names the hardware or pci.ids provides can run
-// long, and a truncated name still names.
+// attributeString limits a free-text value to the API's
+// 64-character limit on attribute strings. Identifiers, such as
+// addresses, hex IDs, and modaliases on these buses, always fit
+// within this limit. Only the human-readable names that the
+// hardware or pci.ids provides can run longer, and a truncated name
+// still identifies the device.
 func attributeString(s string) string {
 	if len(s) <= 64 {
 		return s

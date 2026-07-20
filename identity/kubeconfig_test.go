@@ -1,11 +1,11 @@
 package identity
 
-// Tests for the computed kubeconfig: it must be a self-contained
-// credential that kubectl can use against the cluster, which means
-// the embedded admin certificate has to chain to the client CA, carry
-// the clientAuth usage the API server requires, and claim the
-// identity (CN=admin, O=system:masters) that RBAC binds to
-// cluster-admin.
+// This file tests the computed kubeconfig. It must be a
+// self-contained credential that kubectl can use against the
+// cluster. This means the embedded admin certificate must chain to
+// the client CA, carry the clientAuth usage that the API server
+// requires, and claim the identity (CN=admin, O=system:masters) that
+// RBAC binds to cluster-admin.
 
 import (
 	"bytes"
@@ -19,8 +19,8 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// kubeconfigDocument is just enough of kubectl's config schema to
-// check what we write into it.
+// kubeconfigDocument is enough of kubectl's config schema to check
+// what this code writes into it.
 type kubeconfigDocument struct {
 	Clusters []struct {
 		Cluster struct {

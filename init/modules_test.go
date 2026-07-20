@@ -144,8 +144,9 @@ func TestLoadDeclaredModulesFromAFabricatedTree(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(base, "modules.builtin"), []byte(builtin), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// nvidia is indexed but its file doesn't exist here, so the load
-	// itself fails: the Failed path without a kernel in the loop.
+	// nvidia is indexed but its file does not exist here, so the
+	// load itself fails: this reaches the Failed path without a real
+	// kernel involved.
 	statuses := loadDeclaredModulesFrom(base, []string{"nvidia", "loop", "nbd"})
 	states := []machine.ModuleState{machine.ModuleFailed, machine.ModuleBuiltin, machine.ModuleMissing}
 	for i, want := range states {
@@ -204,8 +205,8 @@ func TestLoadModulesReportsAnUnreadableList(t *testing.T) {
 }
 
 func TestLoadModuleReportsAMissingModuleFile(t *testing.T) {
-	// The index promises a file the tree doesn't hold: the open fails
-	// as an ordinary error, and nothing counts as loaded.
+	// The index promises a file that the tree does not hold. The open
+	// fails as an ordinary error, and nothing counts as loaded.
 	base := t.TempDir()
 	deps := map[string][]string{"overlay": {"kernel/fs/overlayfs/overlay.ko.zst"}}
 	n, err := loadModule(base, "overlay", deps, map[string]bool{})
@@ -215,10 +216,10 @@ func TestLoadModuleReportsAMissingModuleFile(t *testing.T) {
 }
 
 func TestLoadModuleReportsAKernelRefusal(t *testing.T) {
-	// The file exists but the kernel refuses it (here, because an
+	// The file exists, but the kernel refuses it (here, because an
 	// ordinary process may not load modules; on a real boot, because
-	// the bytes aren't a module). Either way it is the same branch:
-	// finit_module's error, wrapped with the file's name.
+	// the bytes are not a module). Either way, this is the same
+	// branch: finit_module's error, wrapped with the file's name.
 	base := t.TempDir()
 	rel := "kernel/fake.ko.zst"
 	if err := os.MkdirAll(filepath.Join(base, "kernel"), 0o755); err != nil {
@@ -235,8 +236,8 @@ func TestLoadModuleReportsAKernelRefusal(t *testing.T) {
 }
 
 func TestLoadModuleSkipsFilesAlreadyLoaded(t *testing.T) {
-	// A dependency another chain already fed the kernel is skipped
-	// entirely: no open, no syscall, no count.
+	// A dependency that another chain already fed to the kernel is
+	// skipped entirely: no open, no syscall, no count.
 	deps := map[string][]string{"overlay": {"kernel/fs/overlayfs/overlay.ko.zst"}}
 	loaded := map[string]bool{"kernel/fs/overlayfs/overlay.ko.zst": true}
 	n, err := loadModule(t.TempDir(), "overlay", deps, loaded)

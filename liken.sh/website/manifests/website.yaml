@@ -1,16 +1,16 @@
 # The website: one static page, served by the cluster it describes.
 #
-# The page rides in a ConfigMap and nginx serves it — the smallest
-# arrangement that is still ordinary Kubernetes, so replacing it with
-# a real site later is editing these resources, not inventing new
-# machinery. The ConfigMap itself is not declared here: the Makefile
-# generates it from website/index.html on every deploy, so the page's
-# source of truth stays a plain HTML file.
+# The page is stored in a ConfigMap, and nginx serves it. This is the
+# smallest arrangement that is still ordinary Kubernetes, so
+# replacing it with a real site later means editing these resources,
+# not inventing new machinery. The ConfigMap itself is not declared
+# here. The Makefile generates it from website/index.html on every
+# deploy, so the page's source of truth stays a plain HTML file.
 #
 # Traffic arrives through Traefik, the cluster's declared ingress
-# (cluster.yaml opts into it), which the service load balancer binds
-# to the node's own addresses: the ports liken.sh resolves to are the
-# ports Traefik answers.
+# (cluster.yaml opts into it). The service load balancer binds
+# Traefik to the node's own addresses, so the ports that liken.sh
+# resolves to are the ports that Traefik answers.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -33,11 +33,11 @@ spec:
             - containerPort: 80
           volumeMounts:
             # The ConfigMap mounts as a whole directory, never by
-            # subPath: kubelet refreshes whole-directory mounts in
+            # subPath. kubelet refreshes whole-directory mounts in
             # place when the ConfigMap changes (an atomic symlink
-            # swap, within about a minute), while subPath mounts are
-            # frozen at pod start. That refresh is what makes a
-            # content deploy free of restarts.
+            # swap, within about a minute), while subPath mounts stay
+            # fixed at pod start. This refresh is what lets a content
+            # deploy skip restarts.
             - name: page
               mountPath: /usr/share/nginx/html
       volumes:
@@ -63,18 +63,20 @@ metadata:
   name: website
   namespace: website
   annotations:
-    # Traefik terminates TLS for this site with a certificate it
-    # maintains itself — the resolver named here is defined in
+    # Traefik terminates TLS for this site with a certificate that it
+    # maintains itself. The resolver named here is defined in
     # traefik-tls.yaml. Pointing this annotation at "staging" instead
-    # swaps in Let's Encrypt's staging environment: same dance,
-    # untrusted roots, generous rate limits — the way to rehearse a
-    # certificate change without spending real issuance attempts.
+    # swaps in Let's Encrypt's staging environment: the same steps,
+    # untrusted roots, and higher rate limits. This is the way to
+    # rehearse a certificate change without spending real issuance
+    # attempts.
     traefik.ingress.kubernetes.io/router.tls.certresolver: letsencrypt
 spec:
   ingressClassName: traefik
   tls:
     # The hosts named here are the names the certificate is issued
-    # for; the annotation only picks which resolver does the issuing.
+    # for. The annotation only picks which resolver does the
+    # issuing.
     - hosts:
         - liken.sh
         - www.liken.sh

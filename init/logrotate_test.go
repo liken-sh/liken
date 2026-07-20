@@ -1,10 +1,10 @@
 package main
 
 // Rotation is tested the way it runs: against real files in a
-// tempdir, shifted by name. The paths in logrotate.go's entry point
-// are constants aimed at clusterState, so these tests exercise the
-// mechanics (rotateGenerations, cappedLogFile) that take paths as
-// inputs.
+// temporary directory, shifted by name. The paths in logrotate.go's
+// entry point are constants aimed at clusterState, so these tests
+// exercise the mechanics (rotateGenerations, cappedLogFile) that
+// take paths as inputs.
 
 import (
 	"os"
@@ -71,7 +71,7 @@ func TestRotateGenerationsWithGaps(t *testing.T) {
 	dir := t.TempDir()
 	log := filepath.Join(dir, "k3s.log")
 	// Only the live file and .2 exist (a boot that never wrote .1,
-	// however that happened); the shift tolerates the hole.
+	// for whatever reason). The shift tolerates this gap.
 	writeLog(t, log, "current")
 	writeLog(t, log+".2", "older")
 
@@ -123,8 +123,8 @@ func TestCappedLogRotatesPastTheLimit(t *testing.T) {
 	}
 	defer c.Close()
 
-	// The first line blows straight past the limit: nothing rotates
-	// mid-line, so it lands whole.
+	// The first line goes straight past the limit. Nothing rotates
+	// mid-line, so the whole line lands in the file.
 	if _, err := c.Write([]byte("a line well past ten bytes\n")); err != nil {
 		t.Fatal(err)
 	}
@@ -151,9 +151,9 @@ func TestCappedLogNeverRotatesMidLine(t *testing.T) {
 	}
 	defer c.Close()
 
-	// A line arriving in fragments (k3s writes whatever chunks it
-	// likes) crosses the limit before its newline arrives; the
-	// rotation must wait for the boundary.
+	// A line that arrives in fragments (k3s writes whatever chunks it
+	// produces) crosses the limit before its newline arrives. The
+	// rotation must wait for the line boundary.
 	if _, err := c.Write([]byte("split ")); err != nil {
 		t.Fatal(err)
 	}
@@ -178,10 +178,10 @@ func TestCappedLogGoesQuietWhenTheFileBreaks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The file dies under the writer (a full disk's simplest stand-in
-	// is a closed descriptor). The Write contract holds: no error, the
-	// failure is reported once, and later writes are quiet no-ops so
-	// the console copy keeps flowing.
+	// The file breaks under the writer (a closed descriptor is the
+	// simplest substitute for a full disk). The Write contract still
+	// holds: no error, the failure is reported once, and later writes
+	// are quiet no-ops, so the console copy keeps flowing.
 	c.f.Close()
 	if n, err := c.Write([]byte("lost line\n")); err != nil || n != len("lost line\n") {
 		t.Errorf("Write never propagates failure: %d, %v", n, err)

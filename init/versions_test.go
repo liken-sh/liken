@@ -11,8 +11,9 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// componentsFile writes a components record the way image/build.sh
-// stages one, and points the package seam at it.
+// componentsFile writes a components record in the same form that
+// image/build.sh stages one. It also points componentsPath at the
+// new file for the test.
 func componentsFile(t *testing.T, content string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "components.yaml")
@@ -65,9 +66,9 @@ components:
 }
 
 func TestComponentFactsNeverOverrideObservedFacts(t *testing.T) {
-	// The record carries kernel and xtables pins too (the release
-	// document lists every component), but the running machine
-	// answers for those itself, in its own vocabulary: uname's
+	// The record also carries kernel and xtables pins, because the
+	// release document lists every component. But the running
+	// machine reports those itself, in its own vocabulary: uname's
 	// release string and iptables' version-and-variant, not the
 	// vendor pins.
 	componentsFile(t, `
@@ -111,9 +112,9 @@ func TestComponentFactsTolerateAMissingRecord(t *testing.T) {
 }
 
 func TestComponentFactsIgnoreUnknownComponents(t *testing.T) {
-	// A record from a build that knows a component this init does
-	// not: the known fields still fill, the stranger is simply not
-	// reported.
+	// This record comes from a build that knows about a component
+	// this init does not recognize. The known fields still fill in,
+	// and the unrecognized component is simply not reported.
 	componentsFile(t, `
 components:
   - name: quantum-flux

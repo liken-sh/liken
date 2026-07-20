@@ -1,6 +1,6 @@
 # The website's namespace. Everything the site needs lives here, and
-# nothing else does — which is what lets the CI deploy credential
-# (deployer.yaml) be scoped to exactly this namespace and spend
+# nothing else does. This is what lets the CI deploy credential
+# (deployer.yaml) stay scoped to exactly this namespace, and spend
 # nothing more if it ever leaks.
 apiVersion: v1
 kind: Namespace

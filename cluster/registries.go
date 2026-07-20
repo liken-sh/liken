@@ -1,17 +1,18 @@
 package cluster
 
 // Private registries, the cluster's half: spec.registries on the
-// Cluster (RegistriesSpec) declares mirror endpoints containerd pulls
-// through, and k3s's embedded peer-to-peer registry. Those are
-// cluster facts — any node may be asked to pull any image — and they
-// converge inside the canonical cluster document like every other
-// fleet-wide fact.
+// Cluster (RegistriesSpec) declares mirror endpoints that containerd
+// pulls through, and k3s's embedded peer-to-peer registry. These are
+// cluster facts, because any node may be asked to pull any image,
+// and they converge inside the canonical cluster document like every
+// other fleet-wide fact.
 //
 // Credentials are deliberately not declared here. A spec is public:
-// anyone who can get the Cluster can read every field. They enter
-// through a Kubernetes Secret instead, which the machine operator
-// renders into a per-machine credentials document riding the staged/
-// proven lifecycle (machine/registries.go tells that story).
+// anyone who can get the Cluster can read every field. Credentials
+// enter through a Kubernetes Secret instead, which the machine
+// operator renders into a per-machine credentials document that
+// follows the staged/proven lifecycle (machine/registries.go
+// explains it).
 
 import (
 	"fmt"
@@ -21,30 +22,30 @@ import (
 )
 
 // RegistriesSpec is the Cluster's declaration of how images arrive.
-// The zero value means nothing declared: no mirrors, no embedded
-// registry, no registries.yaml written at all.
+// The zero value means nothing is declared: no mirrors, no embedded
+// registry, and no registries.yaml written at all.
 type RegistriesSpec struct {
 	// Mirrors maps a registry host, as an image reference names it
-	// (docker.io, registry.example:5000), to the endpoint URLs
-	// containerd should try, in preference order, before falling
+	// (docker.io, registry.example:5000), to the endpoint URLs that
+	// containerd should try, in preference order, before it falls
 	// back to the registry itself.
 	Mirrors map[string][]string `json:"mirrors,omitempty"`
 
-	// Embedded turns on k3s's embedded registry mirror (Spegel):
-	// every node serves the images it already holds to its peers,
-	// which is what keeps a fleet on a slow uplink from pulling the
-	// same bytes once per machine.
+	// Embedded turns on k3s's embedded registry mirror (Spegel).
+	// Every node serves the images it already holds to its peers,
+	// which keeps a fleet on a slow uplink from pulling the same
+	// bytes once per machine.
 	Embedded bool `json:"embedded,omitempty"`
 }
 
 // validateRegistries holds spec.registries to its shape. The spec
-// itself may be null or absent — both decode to the zero struct and
-// genuinely mean "no registries configuration", a contrast with
-// spec.features, where a null could be mistaken for an opt-in. But a
-// mirror host with a null or empty endpoint list is refused loudly:
-// a mirror with nowhere to point is neither a mirror nor nothing,
-// and `docker.io:` in hand-written YAML is a mistake to name, not to
-// guess about.
+// itself may be null or absent. Both decode to the zero struct and
+// genuinely mean "no registries configuration", unlike
+// spec.features, where a null could be mistaken for an opt-in. But
+// the function refuses a mirror host with a null or empty endpoint
+// list loudly. A mirror with nowhere to point is neither a mirror
+// nor nothing, and `docker.io:` in hand-written YAML is a mistake to
+// name, not to guess about.
 func validateRegistries(r RegistriesSpec) error {
 	for _, host := range slices.Sorted(maps.Keys(r.Mirrors)) {
 		if host == "" {

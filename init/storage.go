@@ -1,31 +1,34 @@
 package main
 
-// Actuating spec.storage.
+// This file actuates spec.storage.
 //
-// The contract (machine/storage.go documents the API side): on every
-// boot, each declared role is either *recognized* or *claimed*. A
-// role is recognized when a partition carries the GPT partition name
-// written at claim time. Claiming happens exactly once: a blank disk
-// gets a partition table, fresh filesystems, and the roles' names
-// written into it. Two rules make this safe to run on every machine,
-// every boot:
+// machine/storage.go documents the API side of the contract. On every
+// boot, each declared role is either recognized or claimed. A role is
+// recognized when a partition carries the GPT partition name that was
+// written at claim time. Claiming happens exactly once. When a disk
+// is blank, claiming writes a partition table to it, adds fresh
+// filesystems, and writes the roles' names into it. Two rules make it
+// safe to run this process on every machine, on every boot:
 //
-//   - Reconciling never destroys data. Only a disk with no partition
-//     table and no filesystem, one that neither we nor anything else
-//     ever wrote to, may be claimed. Anything unrecognized is
-//     refused, with the reason printed to the console.
+//   - Reconciling never destroys data. The process may only claim a
+//     disk with no partition table and no filesystem: a disk that
+//     neither liken nor anything else has written to before. It
+//     refuses any disk it does not recognize, and it prints the
+//     reason to the console.
 //
-//   - An unsatisfiable role stops the boot. If a declared role can't
-//     be recognized or claimed, the machine powers off rather than
-//     start k3s with that state in RAM. A powered-off machine can be
-//     repaired and booted again; a cluster that silently wrote its
-//     state to memory loses that state at the next power cycle.
-//     (Roles *absent* from the spec carry no such obligation: those
-//     directories simply stay on the RAM root.)
+//   - An unsatisfiable role stops the boot. If the process cannot
+//     recognize or claim a declared role, the machine powers off. It
+//     does not start k3s with that state only in RAM. A person can
+//     repair a powered-off machine and boot it again. A cluster's
+//     state can end up only in memory without warning, and that
+//     state is lost at the next power cycle. (This rule does not
+//     apply to roles that are absent from the spec. Their
+//     directories stay on the RAM root.)
 //
-// This file owns the every-boot half: recognition, orchestration, and
-// mounting. Claiming a blank disk is claim.go's story, and growing a
-// recognized partition is grow.go's.
+// This file owns the part of the process that runs on every boot:
+// recognition, orchestration, and mounting. claim.go describes how
+// the process claims a blank disk. grow.go describes how it grows a
+// recognized partition.
 
 import (
 	"errors"
@@ -43,45 +46,52 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// Where each role lands in the filesystem. This translation is
-// liken's own, and it is deliberately kept out of the Machine API.
+// This comment lists where each role lands in the filesystem. liken
+// defines this translation; the Machine API does not include it.
 //
-//	biosBoot         no mount at all: a raw partition holding GRUB's
-//	                 core image, read by the MBR's boot code before
-//	                 any filesystem exists; liken writes it through
-//	                 the partition's device node, never through a
-//	                 mount
-//	bootHome         /var/lib/liken/boot: GRUB's config and its
-//	                 environment block, the BIOS machine's stand-in
-//	                 for boot variables; FAT32 because GRUB reads it
-//	                 with the same driver that reads the slots
-//	systemA/systemB  /var/lib/liken/system/{a,b}: the OS's own boot
-//	                 slots, FAT32 because the firmware reads them;
-//	                 no suid, no devices, no executables, because
-//	                 nothing runs *from* a slot; the firmware only
-//	                 loads it
-//	machineState     /var/lib/liken/machine: the machine's own durable
-//	                 data, chiefly the staged and proven manifests
-//	machineEphemeral /tmp, the OS's own scratch; nosuid/nodev and
-//	                 world-writable-with-sticky-bit, per long Unix
-//	                 tradition
-//	clusterState     /var/lib/rancher: all of k3s's state, its
-//	                 database, its TLS material, containerd's images
-//	podStorage       the local-path provisioner's root; the path also
-//	                 appears in the image's k3s config.yaml
-//	podEphemeral     kubelet's root directory: emptyDirs, pod scratch
+//	biosBoot         Not mounted. It is a raw partition that holds
+//	                 GRUB's core image. The MBR's boot code reads
+//	                 that image before any filesystem exists. liken
+//	                 writes to it through the partition's device
+//	                 node, never through a mount.
+//	bootHome         /var/lib/liken/boot. It holds GRUB's config and
+//	                 its environment block, the values a BIOS
+//	                 machine uses in place of boot variables. It is
+//	                 FAT32 because GRUB reads it with the same
+//	                 driver that reads the slots.
+//	systemA/systemB  /var/lib/liken/system/{a,b}. These are the
+//	                 OS's own boot slots. They are FAT32 because the
+//	                 firmware reads them. They allow no suid bit, no
+//	                 device files, and no executables, because
+//	                 nothing runs from a slot. The firmware only
+//	                 loads what is in a slot.
+//	machineState     /var/lib/liken/machine. It holds the machine's
+//	                 own durable data, chiefly the staged and proven
+//	                 manifests.
+//	machineEphemeral /tmp, the OS's own scratch space. It disallows
+//	                 suid and device files. It is world-writable
+//	                 with the sticky bit set, the standard Unix
+//	                 setup for /tmp.
+//	clusterState     /var/lib/rancher. It holds all of k3s's state:
+//	                 its database, its TLS material, and
+//	                 containerd's images.
+//	podStorage       The local-path provisioner's root directory.
+//	                 The same path also appears in the image's
+//	                 k3s config.yaml.
+//	podEphemeral     kubelet's root directory: emptyDirs and pod
+//	                 scratch space.
 type roleMount struct {
 	path   string
 	flags  uintptr
-	mode   os.FileMode // applied to the mounted root; 0 leaves the default
-	fstype string      // "" means ext4, the default for data roles
+	mode   os.FileMode // mode for the mounted root; 0 means the default mode
+	fstype string      // "" means ext4, the default file system for data roles
 }
 
 const slotMountFlags = unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC
 
-// bootHomeDir is where the bootHome role mounts: GRUB's config and
-// environment block, which init writes when it arms or settles a
-// slot trial on a BIOS machine.
+// bootHomeDir is the mount point for the bootHome role. It holds
+// GRUB's config and environment block. init writes to this block
+// when it arms or settles a slot trial on a BIOS machine.
 const bootHomeDir = "/var/lib/liken/boot"
 
 var roleMounts = map[machine.StorageRoleName]roleMount{
@@ -95,38 +105,39 @@ var roleMounts = map[machine.StorageRoleName]roleMount{
 	machine.PodEphemeralRole:     {path: "/var/lib/kubelet"},
 }
 
-// isSystemSlot reports whether a role is one of the firmware-read
-// system slots. The slots are the two roles with FAT32 semantics:
-// typed as EFI system partitions so the firmware finds them, and
-// fixed in size from the day they're claimed, because FAT doesn't
+// isSystemSlot reports whether a role is one of the two system slots
+// that the firmware reads. These two roles use FAT32. Each one is
+// typed as an EFI system partition, so the firmware can find it. Each
+// one has a fixed size from the day it is claimed, because FAT cannot
 // grow in place.
 func isSystemSlot(name machine.StorageRoleName) bool {
 	return name == machine.SystemARole || name == machine.SystemBRole
 }
 
-// isRawRole reports whether a role is a bare partition: recognized,
-// claimed, and reported like any other, but never formatted and never
-// mounted. biosBoot is the only one — GRUB's core image is read by
-// the MBR's boot code long before any filesystem driver exists, so a
-// filesystem there would only be in the way. liken writes it through
-// the partition's device node.
+// isRawRole reports whether a role is a bare partition. The process
+// recognizes, claims, and reports a bare partition like any other
+// role, but it never formats or mounts one. biosBoot is the only
+// bare-partition role. The MBR's boot code reads GRUB's core image
+// long before any filesystem driver exists, so a filesystem there
+// would only get in the way. liken writes to this partition through
+// its device node.
 func isRawRole(name machine.StorageRoleName) bool {
 	return name == machine.BIOSBootRole
 }
 
-// isFixedSizeRole reports whether a role's size is settled the day
-// it's claimed. The FAT32 roles are (FAT doesn't grow in place), and
-// so is biosBoot: GRUB's boot code holds the core image's location as
-// literal sector numbers, and a layout that never changes is the
-// foundation the boot-sector healing rewrite stands on.
+// isFixedSizeRole reports whether a role's size is set on the day it
+// is claimed. The FAT32 roles have a fixed size, because FAT cannot
+// grow in place. biosBoot also has a fixed size: GRUB's boot code
+// stores the core image's location as literal sector numbers, and the
+// boot-sector healing rewrite depends on a layout that never changes.
 func isFixedSizeRole(name machine.StorageRoleName) bool {
 	return isSystemSlot(name) || name == machine.BootHomeRole || name == machine.BIOSBootRole
 }
 
-// partitionTypeFor picks a role's GPT partition type: the system
-// slots are EFI system partitions (the type GUID is how firmware
-// finds them), biosBoot is GRUB's own well-known type, and everything
-// else is ordinary Linux data.
+// partitionTypeFor selects a role's GPT partition type. The system
+// slots are EFI system partitions; the firmware finds them by this
+// type GUID. biosBoot uses GRUB's own well-known type. Every other
+// role uses the ordinary Linux data type.
 func partitionTypeFor(name machine.StorageRoleName) [16]byte {
 	switch {
 	case isSystemSlot(name):
@@ -137,34 +148,36 @@ func partitionTypeFor(name machine.StorageRoleName) [16]byte {
 	return disks.LinuxFilesystemData
 }
 
-// teardownStorage unmounts whatever reconciliation may have mounted,
-// in reverse canonical order. That returns the machine to the state a
-// fresh reconcile expects, so a different spec can be tried. It works
-// from the mount table rather than from a status record, because a
-// reconcile that failed halfway may have mounted a role it never got
-// to report. Unmounting a path that isn't a mountpoint returns
-// EINVAL, which here just means there was nothing to unmount. Nothing
-// else is running this early in boot, so nothing can hold these
-// mounts busy.
+// teardownStorage unmounts everything that reconciliation may have
+// mounted, in reverse canonical order. This returns the machine to
+// the state that a fresh reconcile expects, so the process can try a
+// different spec. teardownStorage works from the mount table, not
+// from a status record, because a reconcile that failed partway
+// through may have mounted a role that it never reported. When a path
+// is not a mount point, unmounting it returns EINVAL; here that only
+// means there was nothing to unmount. Nothing else runs this early in
+// boot, so nothing can keep these mounts busy.
 func teardownStorage() {
-	// mountAndSeedClusterState (k3s.go) temporarily mounts
-	// clusterState's filesystem at the staging point while seeding it;
-	// a failure partway through leaves it mounted there.
+	// mountAndSeedClusterState (in k3s.go) mounts clusterState's file
+	// system at the staging point for a short time while it seeds it.
+	// If this step fails partway through, the file system stays
+	// mounted there.
 	_ = unix.Unmount(clusterStateStaging, 0)
 	unmountRoleMounts(0, true)
 }
 
-// unmountRoleMounts detaches every role filesystem in reverse
-// canonical order: the shared tail of two different shutdowns.
-// Boot-time teardown unmounts plainly and wants to hear about
-// failures, because nothing else is running this early and a failed
-// unmount is information. The reboot path (reboot.go) passes
-// MNT_DETACH and tolerates errors: a just-killed container's mount
-// namespace can pin a filesystem for a moment longer, and lazy
-// detachment lets the kernel finish the job as those references
-// drain, after the sync has already made the data safe. Unmounting a
-// path that isn't a mountpoint returns EINVAL, which just means there
-// was nothing to unmount.
+// unmountRoleMounts detaches every role file system in reverse
+// canonical order. Two different shutdown paths share this function.
+// Boot-time teardown unmounts each file system directly and reports
+// any failure, because nothing else runs this early in boot, and a
+// failed unmount here is useful information. The reboot path
+// (reboot.go) passes MNT_DETACH and ignores errors: a container that
+// was just killed can still hold its mount namespace open for a
+// moment, which can pin a file system in place, and lazy detachment
+// lets the kernel finish the unmount as those references clear, after
+// the sync has already made the data safe. When a path is not a mount
+// point, unmounting it returns EINVAL, which only means there was
+// nothing to unmount.
 func unmountRoleMounts(flags int, reportErrors bool) {
 	for _, name := range slices.Backward(machine.StorageRoleNames) {
 		target := roleMounts[name].path
@@ -181,14 +194,15 @@ func unmountRoleMounts(flags int, reportErrors bool) {
 	}
 }
 
-// A partition as sysfs presents it: a subdirectory of its disk's
-// /sys/block entry. The kernel parsed the GPT; the name it read is in
-// the partition's uevent, which is how recognition works without
-// re-reading any partition table ourselves.
+// partition is a partition as sysfs presents it: a subdirectory of
+// its disk's /sys/block entry. The kernel parses the GPT and writes
+// the name it reads into the partition's uevent file. Recognition
+// reads that name from uevent, so it never has to re-read any
+// partition table itself.
 type partition struct {
-	name      string // the kernel's node name: vda1, nvme0n1p2
-	disk      string // the parent disk's node name: vda, nvme0n1
-	partName  string // the GPT partition name, "" if the table has none
+	name      string // the kernel's node name, for example vda1 or nvme0n1p2
+	disk      string // the parent disk's node name, for example vda or nvme0n1
+	partName  string // the GPT partition name; "" if the table has no names
 	sizeBytes uint64
 }
 
@@ -202,8 +216,9 @@ func discoverPartitions() []partition {
 		}
 		for _, entry := range entries {
 			// A disk's partitions appear as subdirectories named after
-			// their device (vda → vda1); the `partition` file inside is
-			// what distinguishes them from the disk's other attributes.
+			// their device; for example, vda gives vda1. The `partition`
+			// file inside each one distinguishes it from the disk's
+			// other attribute directories.
 			if _, err := os.Stat(filepath.Join(dir, entry.Name(), "partition")); err != nil {
 				continue
 			}
@@ -213,8 +228,9 @@ func discoverPartitions() []partition {
 					p.sizeBytes = sectors * disks.SectorSize
 				}
 			}
-			// The uevent file is KEY=value lines; PARTNAME appears
-			// only for tables that carry names, which GPT does.
+			// The uevent file holds KEY=value lines. PARTNAME
+			// appears only in tables that carry names, and GPT is
+			// such a table.
 			if raw, err := os.ReadFile(filepath.Join(dir, entry.Name(), "uevent")); err == nil {
 				for line := range strings.SplitSeq(strings.TrimSpace(string(raw)), "\n") {
 					if v, ok := strings.CutPrefix(line, "PARTNAME="); ok {
@@ -228,27 +244,29 @@ func discoverPartitions() []partition {
 	return parts
 }
 
-// reconcileStorage actuates the storage spec. On success every
-// declared role is a filesystem mounted at its role's path (ext4 for
-// the data roles, FAT32 for the system slots the firmware reads), and
-// the returned status records where each role landed. The status
-// carries the same facts printed to the console, bound for the
-// Machine's status, because anything reported only to the serial port
-// is invisible to anyone operating the machine remotely. An error
-// means a declared role can't be satisfied, and the caller (main, the
-// only place with the authority) stops the boot rather than let k3s
-// start with that state in RAM.
+// reconcileStorage actuates the storage spec. On success, every
+// declared role becomes a file system mounted at its role's path:
+// ext4 for the data roles, FAT32 for the system slots that the
+// firmware reads. The returned status records where each role
+// landed. The status carries the same facts that the process prints
+// to the console, and it goes into the Machine's status, because
+// anything reported only to the serial port stays invisible to
+// anyone who operates the machine remotely. An error means the
+// process cannot satisfy a declared role. The caller (main, the only
+// place with the authority to do so) then stops the boot instead of
+// letting k3s start with that state only in RAM.
 //
-// The structure is plan everything, then apply: every claim's layout
-// and every growth's table edit is computed before the first byte is
-// written to any disk. A spec that will fail should fail before it
-// changes anything on disk, because the boot may go on to try a
-// different spec (the proven manifest, after a staged one is
-// rejected), and partitions half-created under the failed spec would
-// break that attempt too. What planning can't prevent is a genuine
-// mid-write I/O failure: a disk claimed by a failed attempt stays
-// claimed, and if that leaves two partitions carrying one role's
-// name, recognition refuses to guess and the boot stops.
+// The function plans everything, then applies the plan. It computes
+// every claim's layout and every growth's table edit before it
+// writes the first byte to any disk. A spec that will fail must fail
+// before it changes anything on disk, because the boot may go on to
+// try a different spec (for example, the proven manifest, after the
+// process rejects a staged one). Partitions half-created under the
+// failed spec would break that later attempt too. Planning cannot
+// prevent one problem: a genuine I/O failure partway through a write.
+// A disk claimed by a failed attempt stays claimed. If that leaves
+// two partitions carrying the same role's name, recognition refuses
+// to guess between them, and the boot stops.
 func reconcileStorage(spec machine.StorageSpec) (machine.StorageStatus, error) {
 	status := machine.AllRolesInMemory()
 	roles := spec.Roles()
@@ -259,18 +277,18 @@ func reconcileStorage(spec machine.StorageSpec) (machine.StorageStatus, error) {
 		return status, err
 	}
 
-	// Recognition: each declared role, found by the name written on
-	// its partition. The device in the spec is not consulted; a disk
-	// that moved controllers since it was claimed is still the same
-	// disk.
+	// Recognition finds each declared role by the name written on its
+	// partition. It does not consult the device listed in the spec. A
+	// disk that has moved to a different controller since it was
+	// claimed is still the same disk.
 	found, err := recognizeRoles(roles)
 	if err != nil {
 		return status, err
 	}
 
-	// Plan the claims: any role still missing must point at a blank
-	// disk. Group by device, since roles sharing a disk are claimed
-	// together in one partition table.
+	// Plan the claims. Any role that is still missing must point at a
+	// blank disk. Group the roles by device, because roles that share
+	// a disk are claimed together in one partition table.
 	var claims []claimPlan
 	planned := map[string]bool{}
 	for _, role := range roles {
@@ -285,16 +303,16 @@ func reconcileStorage(spec machine.StorageSpec) (machine.StorageStatus, error) {
 		planned[role.Device] = true
 	}
 
-	// Plan the growth: recognized partitions may be smaller than the
-	// spec now declares, or their disks may have grown underneath
-	// them. grow.go explains the rules.
+	// Plan the growth. A recognized partition may be smaller than the
+	// spec now declares, or its disk may have grown underneath it.
+	// grow.go explains the rules for growth.
 	grows, err := planAllGrowth(roles, found)
 	if err != nil {
 		return status, err
 	}
 
-	// Apply the plans. Every plan has already been validated, so any
-	// failure from here on is a real I/O problem.
+	// Apply the plans. The process has already validated every plan,
+	// so any failure from this point on is a real I/O problem.
 	for _, plan := range claims {
 		if err := applyClaim(plan); err != nil {
 			return status, err
@@ -319,11 +337,11 @@ func reconcileStorage(spec machine.StorageSpec) (machine.StorageStatus, error) {
 
 	for _, role := range roles {
 		p := found[role.Name]
-		// Raw roles are done once recognized: there is no filesystem
-		// to make and no mountpoint to serve. The status still says
-		// where the partition landed, because "which device holds the
-		// boot code" is exactly the kind of fact that must not live
-		// only on a serial console.
+		// A raw role needs nothing more once it is recognized: there
+		// is no file system to make and no mount point to serve. The
+		// status still records where the partition landed, because a
+		// fact such as which device holds the boot code must not
+		// live only on a serial console.
 		if isRawRole(role.Name) {
 			fmt.Printf("liken: storage: %s is %s/%s (%s), raw\n",
 				role.Name, devRoot, p.name, p.partName)
@@ -341,16 +359,16 @@ func reconcileStorage(spec machine.StorageSpec) (machine.StorageStatus, error) {
 }
 
 // recognizeRoles matches the declared roles against the machine's
-// partitions as sysfs reports them.
+// partitions, as sysfs reports them.
 func recognizeRoles(roles []machine.DeclaredRole) (map[machine.StorageRoleName]partition, error) {
 	return matchRoles(roles, discoverPartitions())
 }
 
-// matchRoles matches declared roles to partitions by name. Two
-// partitions carrying the same role name usually means a disk was
-// cloned or transplanted. Guessing wrong about which one holds the
-// real cluster would destroy data, so the ambiguity is an error
-// rather than a choice.
+// matchRoles matches declared roles to partitions by name. When two
+// partitions carry the same role name, a disk was usually cloned or
+// moved from another machine. A wrong guess about which partition
+// holds the real cluster would destroy data, so this ambiguity is an
+// error, not a choice to make.
 func matchRoles(roles []machine.DeclaredRole, parts []partition) (map[machine.StorageRoleName]partition, error) {
 	found := map[machine.StorageRoleName]partition{}
 	for _, role := range roles {
@@ -377,27 +395,29 @@ func diskByPath(device string) *machine.BlockDevice {
 	return nil
 }
 
-// mountRole mounts a role's filesystem at the role's path, making the
-// filesystem first if the partition is fresh from a claim.
-// (Recognizing our own name on a partition with no filesystem also
-// covers a boot that died between partitioning and mkfs; claiming is
-// resumable because the name is written first.)
+// mountRole mounts a role's file system at the role's path. It makes
+// the file system first if the partition is fresh from a claim.
+// (Recognizing liken's own name on a partition with no file system
+// also covers a boot that died between partitioning and mkfs.
+// Claiming is resumable because the process writes the name first.)
 func mountRole(role machine.DeclaredRole, p partition) error {
-	// The role's translation to a mount is looked up before anything
-	// touches the partition: a role liken doesn't know how to mount
-	// must be refused before mke2fs writes a filesystem onto it.
+	// The process looks up the role's translation to a mount before
+	// anything touches the partition. It must refuse a role that liken
+	// does not know how to mount, before mke2fs writes a file system
+	// onto it.
 	rm, ok := roleMounts[role.Name]
 	if !ok {
 		return fmt.Errorf("role %s has no mount translation; liken and its manifest disagree about the role vocabulary", role.Name)
 	}
 	target := rm.path
 
-	// Each filesystem type has its own maker. The system slots get
-	// FAT32 from our own formatter (fat32.go), because the firmware
-	// reads them and FAT is the only filesystem it reads; everything
-	// else gets ext4 from the vendored static mke2fs. Either way,
-	// recognizing our own name on a partition with no filesystem
-	// covers a boot that died between partitioning and mkfs.
+	// Each file system type has its own maker. The system slots get
+	// FAT32 from liken's own formatter (fat32.go), because the
+	// firmware reads them and FAT is the only file system it reads.
+	// Every other role gets ext4 from the vendored static mke2fs.
+	// Either way, recognizing liken's own name on a partition with no
+	// file system covers a boot that died between partitioning and
+	// mkfs.
 	dev := devRoot + "/" + p.name
 	if rm.fstype == "vfat" {
 		if !disks.HasFAT32(dev) {
@@ -413,9 +433,10 @@ func mountRole(role machine.DeclaredRole, p partition) error {
 		}
 	}
 
-	// clusterState mounts through its own path: the image bakes k3s's
-	// seed files underneath its mountpoint, and layering them in is
-	// k3s's business, not partition mechanics (k3s.go owns it).
+	// clusterState mounts through its own path. The image bakes k3s's
+	// seed files in underneath its mount point. Layering those seed
+	// files in belongs to k3s, not to partition mechanics; k3s.go
+	// handles it.
 	if role.Name == machine.ClusterStateRole {
 		if err := mountAndSeedClusterState(dev, target); err != nil {
 			return err
@@ -432,20 +453,21 @@ func mountRole(role machine.DeclaredRole, p partition) error {
 			return fmt.Errorf("mounting %s for %s: %w", dev, role.Name, err)
 		}
 	}
-	// A partition grown this boot still carries a filesystem sized for
-	// the old extent; now that it's mounted, ext4 can be grown online
-	// to fill it (ext4.go explains why mounted is the easy case). FAT
-	// can't be grown in place, which is fine: slots are fixed-size by
-	// design, and planAllGrowth refuses to grow them at the planning
-	// stage.
+	// A partition that grew this boot still carries a file system
+	// sized for its old extent. Now that the file system is mounted,
+	// ext4 can grow online to fill it (ext4.go explains why a mounted
+	// file system is the easy case). FAT cannot grow in place, and
+	// that is expected: slots have a fixed size by design, and
+	// planAllGrowth refuses to grow them at the planning stage.
 	if rm.fstype == "" {
 		if err := maybeGrowFilesystem(role, p, target); err != nil {
 			return err
 		}
 	}
 
-	// A freshly-made ext4 root is 0755 root-only; roles like /tmp need
-	// their conventional permissions applied to the mounted root.
+	// A freshly made ext4 root has mode 0755, root-only. Roles such as
+	// /tmp need their conventional permissions applied to the mounted
+	// root.
 	if rm.mode != 0 {
 		if err := os.Chmod(target, rm.mode); err != nil {
 			fmt.Fprintf(os.Stderr, "liken: storage: chmod %s: %v\n", target, err)

@@ -3,21 +3,21 @@ package machine
 // The release document defines what one version of liken is, by
 // digest.
 //
-// This document names the release's artifact files with their sha256
-// digests and sizes, and records which upstream components (the
-// kernel, k3s, and the rest) shipped inside them. It is the middle
-// link of the trust chain: the Cluster's release catalog pins a
-// version to the digest of this document's exact bytes, and this
-// document pins every artifact's exact bytes. A machine that verifies
-// the chain end to end has proven that what it is about to boot is
-// exactly what the catalog named. Nothing here is signed; liken
-// already trusts the Kubernetes API, and the catalog lives in it.
+// This document names the release's artifact files with their
+// sha256 digests and sizes. It also records which upstream
+// components (the kernel, k3s, and the rest) shipped inside them.
+// The Cluster's release catalog pins a version to the digest of this
+// document's exact bytes. This document, in turn, pins every
+// artifact's exact bytes. A machine that checks both digests has
+// proven that what it is about to boot is exactly what the catalog
+// named. Nothing here is signed, because liken already trusts the
+// Kubernetes API, and the catalog lives in it.
 //
-// Two consumers read it: the installer (a copy baked beside the
-// artifacts it describes, verified before anything is copied to a
-// slot) and the operator's release downloader (fetched from the
-// release server, verified against the catalog before any artifact
-// is fetched at all).
+// Two consumers read this document. The installer reads a copy
+// baked beside the artifacts it describes, and verifies it before it
+// copies anything to a slot. The operator's release downloader reads
+// a copy fetched from the release server, and verifies it against
+// the catalog before it fetches any artifact.
 
 import (
 	"crypto/sha256"
@@ -38,29 +38,31 @@ type Release struct {
 }
 
 // A ReleaseArtifact names one file of the release. The size is
-// informational (progress reporting, sanity checks); the digest is
-// the identity.
+// informational: the code uses it for progress reporting and
+// validity checks. The digest is the identity.
 type ReleaseArtifact struct {
 	Name   string `json:"name"`
 	SHA256 string `json:"sha256"`
 	Size   int64  `json:"size"`
 }
 
-// A ReleaseComponent records one vendored piece of the system and the
-// upstream version of it that shipped: the kernel, k3s, and the rest.
-// liken's own version is a calendar date that says when a release was
-// cut and nothing about what is inside it, so the document carries
-// the what. The versions are informational, in each upstream's own
-// format; the artifacts' digests remain the only identity.
+// A ReleaseComponent records one vendored piece of the system, and
+// the upstream version of it that shipped: the kernel, k3s, and the
+// rest. liken's own version is a calendar date. The date states when
+// a release was made, and it says nothing about what is inside the
+// release. So this document carries that information instead. The
+// versions are informational, each in its own upstream format. The
+// artifacts' digests remain the only identity.
 type ReleaseComponent struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
 }
 
-// ParseRelease validates a release document as it is read, the way
-// Parse and ParseCluster do for theirs: a document that isn't exactly
-// what it claims to be is rejected with the reason, never partially
-// accepted.
+// ParseRelease validates a release document as it reads the
+// document, the same way Parse and ParseCluster validate theirs. If
+// a document is not exactly what it claims to be, ParseRelease
+// rejects it and states the reason. It never accepts a document
+// partially.
 func ParseRelease(raw []byte) (*Release, error) {
 	r := &Release{}
 	if err := yaml.UnmarshalStrict(raw, r); err != nil {
@@ -94,11 +96,12 @@ func ParseRelease(raw []byte) (*Release, error) {
 	return r, nil
 }
 
-// Verify streams a reader through sha256 and compares the result
-// against this artifact's declared digest and size. Streaming means a
-// 100MB artifact never needs to be held in memory. Callers verify by
-// re-reading the file they wrote, which checks the bytes that
-// actually landed rather than the bytes they meant to write.
+// Verify streams a reader through sha256, and compares the result
+// against this artifact's declared digest and size. Because Verify
+// streams the data, a 100MB artifact never needs to stay in memory
+// all at once. Callers verify by reading again the file they wrote.
+// This checks the bytes that actually reached the disk, rather than
+// the bytes the caller meant to write.
 func (a ReleaseArtifact) Verify(r io.Reader) error {
 	h := sha256.New()
 	n, err := io.Copy(h, r)

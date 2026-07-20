@@ -1,20 +1,21 @@
 package hardware
 
-// Class words: turning bus class codes into the coarse kind a fleet
-// listing can print. Both tables are small, spec-defined enums —
-// the PCI SIG's class codes, the USB-IF's interface classes — so
-// they live here as Go tables rather than as a database file. (The
-// vendor and product names are the opposite case: tens of
-// thousands of entries that change monthly, which is what pci.ids
-// is for.)
+// Class words: this file turns bus class codes into the general
+// kind that a fleet listing can print. Both tables are small,
+// spec-defined enums: the PCI SIG's class codes and the USB-IF's
+// interface classes. For this reason, they exist here as Go tables
+// instead of a database file. The vendor and product names are the
+// opposite case. They have tens of thousands of entries that change
+// every month, and pci.ids exists for that case.
 
 import "strings"
 
-// pciClassWord decodes sysfs's class attribute ("0x038000": class
-// 03, subclass 80, interface 00) to the word for its class byte.
-// The vocabulary is the PCI code space at base-class granularity —
-// an operator deciding whether to care about an unclaimed device
-// needs "display" or "network", not the subclass taxonomy.
+// pciClassWord decodes sysfs's class attribute (for example,
+// "0x038000" means class 03, subclass 80, interface 00) to the word
+// for its class byte. The vocabulary uses the PCI code space at
+// base-class detail. An operator who decides whether to care about
+// an unclaimed device needs a word like "display" or "network", not
+// the subclass detail.
 func pciClassWord(class string) string {
 	hex := strings.TrimPrefix(class, "0x")
 	if len(hex) < 2 {
@@ -51,8 +52,8 @@ func pciClassWord(class string) string {
 	return ""
 }
 
-// usbClassWord decodes a USB interface's bInterfaceClass (two hex
-// digits, from the USB-IF's class code table) the same way.
+// usbClassWord decodes a USB interface's bInterfaceClass, two hex
+// digits from the USB-IF's class code table, the same way.
 func usbClassWord(class string) string {
 	switch strings.ToLower(class) {
 	case "01":

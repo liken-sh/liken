@@ -1,14 +1,14 @@
 # Getting started
 
-This is the walk from an empty directory to `kubectl get nodes`,
-written for a person with a downloaded liken release and some
-machines to install it on. Nothing here needs this repository or a
-build — the release carries everything, including the `liken`
-toolkit these steps run.
+This document describes the steps from an empty directory to
+`kubectl get nodes`. It is written for a person who has downloaded a
+liken release and has machines to install it on. None of these steps
+need this repository or a build. The release carries everything you
+need, including the `liken` toolkit that runs these steps.
 
 ## 1. Download a release and check it
 
-A release is five files and a document that names them:
+A release has five files and one document that names them:
 
     vmlinuz               the Linux kernel
     liken.sqfs            the operating system, nobody's in particular:
@@ -21,14 +21,15 @@ A release is five files and a document that names them:
     release.yaml          each of the above, by sha256 digest, and
                           which kernel, k3s, and friends are inside
 
-A release's version is the date it was cut plus a serial —
-2026.07.11-001 — and deliberately nothing more; `release.yaml`'s
-`components` section is where you read what shipped in it.
+A release's version is the date it was cut, plus a serial number: for
+example, 2026.07.11-001. The version carries nothing more than that
+on purpose. To see what shipped in a release, read the `components`
+section of its `release.yaml`.
 
-Verify what you downloaded against the document — `release.yaml`
-holds a `sha256:` line for each file, and the release's page
-publishes the digest of `release.yaml` itself, so the chain starts
-with something you can read on the site:
+Verify what you downloaded against the document. `release.yaml` holds
+a `sha256:` line for each file. The release's page also publishes the
+digest of `release.yaml` itself, so the chain of trust starts with
+something you can read on the site:
 
     sha256sum vmlinuz liken.sqfs boot.cpio liken systemd-bootx64.efi
 
@@ -40,79 +41,84 @@ Then make the toolkit runnable:
 
     ./liken new mycluster
 
-This asks a dozen plain questions — what your machines are called,
-which are leaders, their addresses, their disks — and writes
-`mycluster/`: a `cluster.yaml` and one manifest per machine. Every
-field carries a comment explaining what it means and why it's there,
-so the directory you get is also the documentation for changing it.
-Keep it in version control; it is your cluster, declared.
+This command asks about a dozen plain questions. It asks what your
+machines are called, which machines are leaders, their addresses, and
+their disks. Then it writes `mycluster/`: a `cluster.yaml` file and
+one manifest for each machine. Every field carries a comment that
+explains what the field means and why it is there. Because of these
+comments, the directory you get also documents how to change it. Keep
+`mycluster/` in version control. It is your cluster, declared.
 
 ## 3. Mint the cluster's identity
 
     ./liken mint mycluster/identity
 
 The identity is the set of certificate authorities and the join
-token that make your machines one cluster. The files include private
-keys — the scaffold's `.gitignore` already keeps them out of version
-control. (To join machines to a k3s cluster you already run, use
-`liken adopt` instead; running `./liken` with no arguments explains
-every command.)
+token that make your machines into one cluster. The files include
+private keys. The scaffold's `.gitignore` file already keeps these
+files out of version control. To join machines to a k3s cluster you
+already run, use `liken adopt` instead. Running `./liken` with no
+arguments lists and explains every command.
 
 ## 4. Pack your layer and build the stick
 
     ./liken layer mycluster mycluster/identity - mycluster/deployment.cpio
     ./liken stick . mycluster/deployment.cpio mycluster/install.img
 
-The layer is the small archive holding everything that is yours:
-your manifests and your identity. (The `-` stands in for a kernel
-directory, which is only consulted if a machine manifest declares
-extra kernel modules; the scaffold doesn't.) The stick command joins
-the release you downloaded (`.` here, the directory release.yaml is
-in) with your layer into one bootable disk image.
+The layer is the small archive that holds everything that is yours:
+your manifests and your identity. The `-` argument takes the place of
+a kernel directory argument. The command only reads that directory if
+a machine manifest declares extra kernel modules, which the scaffold
+does not do. The `stick` command joins the release you downloaded
+(`.` here is the directory that holds `release.yaml`) with your layer
+into one bootable disk image.
 
-Write it to a USB stick — double-check the device name, this
-overwrites it:
+Write the image to a USB stick. Check the device name first: this
+command overwrites the device.
 
     sudo dd if=mycluster/install.img of=/dev/YOUR-STICK bs=4M oflag=direct status=progress
 
 ## 5. Boot each machine from the stick
 
-Plug the stick in, boot the machine (you may need the firmware's
-boot-device menu the first time), and a menu appears listing your
-machines by name:
+Plug in the stick and boot the machine. The first time, you may need
+to open the firmware's boot-device menu. A menu then appears that
+lists your machines by name:
 
     install as big
     install as little
     install as tiny
 
-Pick the machine you are standing at. It partitions its own blank
-disks, copies the operating system onto them, registers itself with
-its firmware, and powers off. Unplug the stick, power it back on,
-and it boots from its own disk from then on — the same stick does
-every machine, starting with the first leader.
+Pick the entry for the machine in front of you. The machine
+partitions its own blank disks, copies the operating system onto
+them, registers itself with its firmware, and powers off. Unplug the
+stick and power the machine back on. From then on, it boots from its
+own disk. Use the same stick for every machine, starting with the
+first leader.
 
-Machines find each other on the addresses you declared, the leaders
-form the control plane, and the followers join.
+The machines find each other at the addresses you declared. The
+leaders form the control plane, and the followers join it.
 
 ## 6. Talk to your cluster
 
     ./liken kubeconfig mycluster/identity
 
-This writes `mycluster/identity/kubeconfig`, an administrator
-credential. It points at `https://127.0.0.1:16443` (the development
-lab's arrangement); edit its `server:` line to your cluster's
-endpoint — the `endpoint:` value in your `cluster.yaml`. Then:
+This command writes `mycluster/identity/kubeconfig`, an administrator
+credential. The file points at `https://127.0.0.1:16443`, which is
+the address used in the development lab. Edit its `server:` line to
+your cluster's endpoint: the `endpoint:` value in your `cluster.yaml`.
+Then run:
 
     kubectl --kubeconfig mycluster/identity/kubeconfig get nodes
 
-Every machine, Ready. From here it is an ordinary Kubernetes
-cluster, plus two liken resources worth meeting:
+Every machine shows as Ready. From here, it is an ordinary Kubernetes
+cluster, plus two liken resources worth knowing:
 
     kubectl get clusters      what the fleet is, as one document
     kubectl get machines      each machine, as the OS sees it
 
-Configuration changes are edits to those resources. And when a new
-liken release comes out, moving the whole fleet to it is two fields
-on the Cluster — its `spec.releases` comments explain — with no
-rebuilt media and no per-machine work: every machine fetches,
-verifies, and proves the new version itself, one at a time.
+You make configuration changes by editing those resources. When a new
+liken release comes out, you move the whole fleet to it by editing
+two fields on the Cluster. The comments on `spec.releases` explain
+the fields. This upgrade needs no rebuilt media and no per-machine
+work. Each machine fetches, verifies, and proves the new version
+itself, one machine at a time.

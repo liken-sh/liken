@@ -139,12 +139,12 @@ spec:
 }
 
 func TestClusterFeaturesParseUnknownSlugs(t *testing.T) {
-	// An unknown slug is not a parse error, deliberately: each
+	// An unknown slug is not a parse error, on purpose. Each
 	// machine's parser knows only its own image's vocabulary, and a
-	// document declaring a feature this binary predates must still
-	// parse, or a downgraded machine could not read its own proven
-	// document. The gap is reported through the feature pass instead
-	// (init/features.go); the CRD still refuses unknown slugs at
+	// document that declares a feature this binary predates must
+	// still parse. Otherwise a downgraded machine could not read its
+	// own proven document. The feature pass reports the gap instead
+	// (init/features.go). The CRD still refuses unknown slugs at
 	// admission, where the fleet's one current vocabulary lives.
 	path := writeClusterManifest(t, `
 apiVersion: liken.sh/v1alpha1

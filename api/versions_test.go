@@ -17,7 +17,7 @@ func TestValidVersionAcceptsTheGrammar(t *testing.T) {
 func TestValidVersionRejectsOtherShapes(t *testing.T) {
 	for _, v := range []string{
 		"",
-		"0.1.0",             // semver, the shape liken doesn't use
+		"0.1.0",             // semver, the shape liken does not use
 		"2026.7.11-001",     // month must be zero-padded
 		"2026.07.1-001",     // day must be zero-padded
 		"2026.07.11",        // the serial is not optional
@@ -42,8 +42,8 @@ func TestCompareVersions(t *testing.T) {
 		{"2026.07.11-001", "2026.07.11-001", 0},
 		{"2026.07.11-001", "2026.07.11-002", -1},
 		{"2026.07.11-002", "2026.07.11-001", 1},
-		// Zero-padding is what makes plain string comparison correct:
-		// without it, "010" and "9" would sort backwards.
+		// Zero-padding makes plain string comparison correct.
+		// Without it, "010" and "9" would sort backwards.
 		{"2026.07.11-009", "2026.07.11-010", -1},
 		{"2026.07.09-002", "2026.07.10-001", -1},
 		{"2026.09.30-001", "2026.10.01-001", -1},

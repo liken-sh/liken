@@ -2,8 +2,8 @@ package image
 
 // Tests for the install stick, read back the way firmware would:
 // find the ESP in the partition table, open the filesystem inside
-// it, and check every file the boot path and the installer depend
-// on.
+// it, and check every file that the boot path and the installer
+// depend on.
 
 import (
 	"io"
@@ -17,8 +17,8 @@ import (
 )
 
 // stickFixture builds a release directory (with the boot menu
-// artifact the stick requires) and a real two-machine layer, and
-// runs Stick over them.
+// artifact that the stick requires) and a real two-machine layer,
+// and runs Stick over them.
 func stickFixture(t *testing.T, consoles []string) (string, *disks.FATVolume) {
 	t.Helper()
 	releaseDir := releaseFixtureWith(t, map[string]string{
@@ -48,8 +48,8 @@ func stickFixture(t *testing.T, consoles []string) (string, *disks.FATVolume) {
 		t.Fatal(err)
 	}
 
-	// The firmware's path: the partition table names one EFI system
-	// partition, and the filesystem lives inside its extent.
+	// This is the firmware's path: the partition table names one EFI
+	// system partition, and the filesystem lives inside its extent.
 	table, err := disks.ReadGPT(f, uint64(info.Size())/disks.SectorSize)
 	if err != nil {
 		t.Fatal(err)
@@ -144,7 +144,7 @@ func TestStickCarriesTheBootFilesAndPayload(t *testing.T) {
 	}
 
 	// The payload is the slot layout: everything the document lists,
-	// the document itself, and the layer beside its sidecar.
+	// the document itself, and the layer beside its sidecar file.
 	payload, err := v.ReadFile("payload.cpio")
 	if err != nil {
 		t.Fatal(err)
@@ -252,8 +252,8 @@ func TestStickSizesToItsContents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Tiny fixtures: the FAT32 floor dominates, and the image stays
-	// close to it rather than ballooning to some fixed guess.
+	// The fixtures are tiny, so the FAT32 floor sets the size, and the
+	// image stays close to it instead of growing to some fixed guess.
 	if info.Size() < 300<<20 || info.Size() > 320<<20 {
 		t.Errorf("image is %d MB; expected just past the FAT32 floor for these contents", info.Size()>>20)
 	}

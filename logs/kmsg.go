@@ -1,37 +1,38 @@
 package main
 
-// The kernel's log buffer has a readable device, /dev/kmsg, and its
-// format is the one piece of parsing the kernel relays own. Each
-// read(2) returns exactly one record:
+// The kernel's log buffer has a readable device, /dev/kmsg. Its
+// format is the one format that the kernel relays parse. Each
+// read(2) call returns exactly one record:
 //
 //	priority,sequence,timestamp,flags[,caller];message
 //	 SUBSYSTEM=...
 //	 DEVICE=...
 //
 // The priority byte packs two syslog facts: facility<<3 | severity.
-// Facility is what separates the machine's two streams sharing this
-// buffer: records the kernel printed carry facility 0, and records
-// userspace wrote through /dev/kmsg (init's own lines) carry
-// facility 1. One relay ships one facility, so "which program said
-// this" is answered by which pod the line came from, not by string
-// matching.
+// Facility separates the machine's two streams that share this
+// buffer. Records that the kernel printed carry facility 0. Records
+// that userspace wrote through /dev/kmsg, such as init's own lines,
+// carry facility 1. Each relay sends one facility, so the pod that a
+// line came from answers "which program wrote this", instead of
+// matching strings.
 //
-// The sequence number is the buffer's own ordering, and it counts
-// every record regardless of facility. Gaps within one relay's
-// output are therefore normal (the other facility's records consumed
-// those numbers); actual loss is detectable, because a reader
-// that has fallen behind a wrapping buffer gets EPIPE from read(2)
-// and a notice goes into the stream. The timestamp is microseconds
-// since boot on the kernel's monotonic-ish printk clock, converted
-// to wall time here by anchoring against the current clocks.
+// The sequence number is the buffer's own ordering. It counts every
+// record, regardless of facility. Gaps within one relay's output are
+// therefore normal, because the other facility's records consumed
+// those numbers. Actual loss is detectable: a reader that has fallen
+// behind a wrapping buffer gets EPIPE from read(2), and the relay
+// writes a notice into the stream. The timestamp is microseconds
+// since boot, on the kernel's approximately monotonic printk clock.
+// This file converts the timestamp to wall time by anchoring it
+// against the current clocks.
 //
-// The device blocks a caught-up reader until the next record, so the
-// read loop is also the follow mechanism; there is no polling. A new
-// reader starts at the oldest record the buffer still holds, which
-// is what makes a fresh pod replay the boot from its head. The
-// device cannot seek to a sequence number, so resuming from a cursor
-// means reading from the oldest record and skipping until the cursor
-// passes.
+// The device blocks a reader that has caught up until the next
+// record arrives, so the read loop is also the follow mechanism;
+// there is no polling. A new reader starts at the oldest record the
+// buffer still holds. This is what makes a fresh pod replay the boot
+// from its start. The device cannot seek to a sequence number, so
+// resuming from a cursor means reading from the oldest record and
+// skipping records until the reader passes the cursor.
 
 import (
 	"bytes"
@@ -50,10 +51,10 @@ import (
 
 const kmsgPath = "/dev/kmsg"
 
-// kmsgRecord is one parsed record: the header's facts plus the
-// message line, verbatim. Continuation lines (the SUBSYSTEM=/DEVICE=
-// dictionary some records append) are device metadata, not part of
-// the message, and are dropped.
+// kmsgRecord is one parsed record: the header's facts, plus the
+// message line, verbatim. Continuation lines, the SUBSYSTEM=/DEVICE=
+// dictionary that some records append, are device metadata, not part
+// of the message. This code drops them.
 type kmsgRecord struct {
 	Facility int
 	Severity int
@@ -97,16 +98,17 @@ func parseKmsgRecord(raw []byte) (kmsgRecord, error) {
 }
 
 // kmsgCursor is the resume point: the last sequence number this
-// relay has read (read, not shipped, so a restart doesn't re-scan
-// the other facility's records either).
+// relay has read. This is the last number read, not the last number
+// sent, so a restart does not scan the other facility's records
+// again either.
 type kmsgCursor struct {
 	Seq uint64 `json:"seq"`
 }
 
 // kmsgRelay follows one facility of the kernel buffer. The read
-// function is /dev/kmsg's in production and a scripted fixture in
-// tests; anchor reports the wall-clock moment of boot as the clocks
-// currently stand.
+// function reads from /dev/kmsg in production, and from a scripted
+// fixture in tests. anchor reports the wall-clock moment of boot,
+// based on how the clocks currently stand.
 type kmsgRelay struct {
 	read      func([]byte) (int, error)
 	facility  int
@@ -125,17 +127,19 @@ func (r *kmsgRelay) run() error {
 	}
 
 	var lastCheckpoint time.Time
-	// first marks the first record parsed after a resume, the only
-	// moment when a jump past the cursor reveals expired records.
+	// first marks the first record parsed after a resume. This is
+	// the only moment when a jump past the cursor reveals expired
+	// records.
 	first := true
 	buf := make([]byte, 8192)
 	for {
 		n, err := r.read(buf)
 		if err != nil {
 			// EPIPE is the kernel's overrun signal: the buffer
-			// wrapped past our position. The read position has
-			// already been moved to the oldest surviving record, so
-			// the only job here is to record that a gap happened.
+			// wrapped past this reader's position. The kernel has
+			// already moved the read position to the oldest
+			// surviving record, so the only job here is to record
+			// that a gap happened.
 			if errors.Is(err, syscall.EPIPE) {
 				_ = r.out.notice(r.now(), "warning", cur.Seq, &r.facility,
 					"records were lost to a ring buffer overrun")
@@ -152,8 +156,8 @@ func (r *kmsgRelay) run() error {
 
 		if resuming {
 			// The buffer may have discarded records past the cursor
-			// while the relay was down; that is the same loss as an
-			// overrun and gets the same notice.
+			// while the relay was down. This is the same kind of
+			// loss as an overrun, and gets the same notice.
 			if first && rec.Seq > cur.Seq+1 {
 				_ = r.out.notice(r.now(), "warning", cur.Seq, &r.facility,
 					"records expired while the relay was down")
@@ -189,28 +193,29 @@ func (r *kmsgRelay) run() error {
 
 // wallAnchor computes the wall-clock time of boot from the current
 // clocks: CLOCK_REALTIME minus CLOCK_MONOTONIC. A record's wall time
-// is then anchor + its since-boot stamp. Sampling per record (the
-// two reads are vDSO calls, effectively free) means the conversion
-// always uses the clock as it stands now, so even records from
-// before init's one boot-time clock step land on the corrected
-// timeline: the step moved CLOCK_REALTIME, and the stamps are
-// monotonic.
+// is then anchor plus its since-boot stamp. This file samples the
+// clocks for every record. The two reads are vDSO calls, so they
+// cost almost nothing. Sampling on every record means the conversion
+// always uses the clock as it stands now. Because of this, even
+// records from before init's one boot-time clock step land on the
+// corrected timeline: the step moved CLOCK_REALTIME, and the stamps
+// stay monotonic.
 func wallAnchor() time.Time {
 	var ts unix.Timespec
 	if err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &ts); err != nil {
-		// Without the monotonic clock (which cannot really happen on
-		// Linux), record times degrade to relay time.
+		// Without the monotonic clock, which cannot really happen on
+		// Linux, record times fall back to relay time.
 		return time.Now()
 	}
 	return time.Now().Add(-(time.Duration(ts.Sec)*time.Second + time.Duration(ts.Nsec)))
 }
 
-// relayKmsg is the kernel and liken verbs: follow /dev/kmsg,
-// shipping one facility. Opening the device takes real privilege:
-// the kernel demands CAP_SYSLOG (CONFIG_SECURITY_DMESG_RESTRICT is
-// set), and the container runtime's devices cgroup separately gates
-// the open, which is why the two kmsg containers run privileged
-// (logs/manifests/logs.yaml tells that story).
+// relayKmsg follows /dev/kmsg, and sends one facility. Opening the
+// device requires real privilege. The kernel demands CAP_SYSLOG,
+// because CONFIG_SECURITY_DMESG_RESTRICT is set, and the container
+// runtime's devices cgroup separately controls the open call. This
+// is why the two kmsg containers run privileged (see
+// logs/manifests/logs.yaml for that explanation).
 func relayKmsg(facility int) error {
 	f, err := os.Open(kmsgPath)
 	if err != nil {

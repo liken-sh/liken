@@ -2,12 +2,12 @@ package main
 
 // Facts: init's half of the Machine status.
 //
-// Init is the only program that observes the boot (the DHCP
-// exchange, the hardware as the kernel first presented it), so it's
-// the only program that can report those facts. It writes them to
-// /run/liken, shaped exactly like the Machine's status block, and the
-// liken operator (which runs in the cluster and can't see any of this
-// firsthand) publishes them to the API. Init never talks to
+// Init is the only program that observes the boot: the DHCP
+// exchange, and the hardware as the kernel first presents it. So it
+// is the only program that can report those facts. It writes them to
+// /run/liken, shaped exactly like the Machine's status block. The
+// liken operator, which runs in the cluster and cannot see any of
+// this directly, publishes them to the API. Init never talks to
 // Kubernetes; this file is the entire interface between the two.
 
 import (
@@ -25,29 +25,29 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// factsFile is the facts' owner after boot: two writers share it,
-// the clock (folding in each new time measurement) and the restart
-// path (recording what a k3s restart just actuated). Each mutates
-// and rewrites only under the lock, because the file write
-// serializes the whole struct, so even writers of disjoint fields
-// race without one.
+// factsFile is the facts' owner after boot. Two writers share it: the
+// clock, which folds in each new time measurement, and the restart
+// path, which records what a k3s restart just did. Each writer
+// mutates and rewrites the facts only under the lock, because the
+// file write serializes the whole struct. Even writers of separate
+// fields would race without the lock.
 type factsFile struct {
 	mu     sync.Mutex
 	status *machine.MachineStatus
 }
 
-// mutate edits the facts in memory without rewriting the file: for
-// updates that aren't news on their own, but should ride along with
-// whatever write comes next.
+// mutate edits the facts in memory without rewriting the file. It
+// serves updates that are not news on their own, but should travel
+// with whatever write comes next.
 func (f *factsFile) mutate(edit func(*machine.MachineStatus)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	edit(f.status)
 }
 
-// publish edits the facts and rewrites the file, atomically as every
-// facts write is: the operator sees old facts or new, never torn
-// ones.
+// publish edits the facts and rewrites the file. Every facts write is
+// atomic, so the operator sees old facts or new facts, never a torn
+// mix of both.
 func (f *factsFile) publish(edit func(*machine.MachineStatus)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -57,23 +57,24 @@ func (f *factsFile) publish(edit func(*machine.MachineStatus)) {
 	}
 }
 
-// Where the facts and the boot manifest land. Package variables
-// rather than constants so tests can publish into a tempdir; a real
-// boot never points them anywhere but /run.
+// Where the facts and the boot manifest land. These are package
+// variables rather than constants, so tests can publish into a
+// tempdir. A real boot never points them anywhere but /run.
 var (
 	factsPath        = machine.FactsPath
 	bootManifestPath = machine.BootManifestPath
 
 	// xtablesProbe is the command that reports the netfilter
-	// userspace's version, a variable so tests can aim it at nothing.
+	// userspace's version. It is a variable so tests can aim it at
+	// nothing.
 	xtablesProbe = "iptables"
 )
 
 // factsInputs gathers everything the boot decided that the facts
-// report: publishFacts assembles it into the Machine status. A struct
-// rather than a parameter list for the same reason as k3sBootInputs:
-// nearly a dozen positional arguments invite transposition, and named
-// fields read correctly at the call site.
+// report. publishFacts assembles it into the Machine status. This is
+// a struct rather than a parameter list for the same reason as
+// k3sBootInputs: nearly a dozen positional arguments invite mixed-up
+// order, and named fields read correctly at the call site.
 type factsInputs struct {
 	clusterDoc  *cluster.Cluster
 	role        api.Role
@@ -90,15 +91,15 @@ type factsInputs struct {
 }
 
 // publishFacts returns the facts it wrote, wrapped in the guarded
-// owner the boot's long-lived writers share.
+// owner that the boot's long-lived writers share.
 func publishFacts(in factsInputs) *factsFile {
 	now := time.Now()
 	// Every block here carries the same facts the boot printed to the
-	// console — the console-parity principle: anything reported only
+	// console, the console-parity principle: anything reported only
 	// to the serial port is invisible to anyone operating the machine
-	// remotely, so what the console narrates, the status must repeat.
+	// remotely, so the status must repeat what the console reports.
 	// The hardware and firmware blocks are re-derived rather than
-	// remembered; storage and boot arrive as arguments because they
+	// remembered. Storage and boot arrive as arguments, because they
 	// were only observable while storage was settling.
 	facts := &machine.MachineStatus{
 		Role:       in.role,
@@ -122,22 +123,24 @@ func publishFacts(in factsInputs) *factsFile {
 	}
 
 	// The netfilter userspace reports itself as "iptables vX.Y.Z
-	// (legacy)"; the version and variant are the interesting part. Like
-	// the kernel release, this is asked of the running machine, not
-	// copied from a build pin.
+	// (legacy)"; the version and variant are the interesting part.
+	// Like the kernel release, the code asks the running machine for
+	// this, rather than copying it from a build pin.
 	if out, ok := run(xtablesProbe, "-V"); ok {
 		facts.Version.Xtables = strings.TrimPrefix(out, "iptables ")
 	}
 
-	// Everything that can't answer for itself — boot artifacts,
-	// bundled images, data files — reports from the record the image
-	// build staged beside the bytes (versions.go).
+	// Boot artifacts, bundled images, and data files have no version
+	// command of their own to ask. For these, applyComponentFacts
+	// reports from the record that the image build staged beside the
+	// bytes (versions.go).
 	applyComponentFacts(&facts.Version)
 
-	// Sysinfo is one syscall answering two questions: how much memory
-	// the machine has, and how long it's been up, which, subtracted
-	// from the clock, is the moment it booted. (The wall clock itself
-	// comes from the hypervisor's RTC; there's no NTP yet.)
+	// Sysinfo is one syscall that answers two questions: how much
+	// memory the machine has, and how long it has been up. Subtracted
+	// from the clock, uptime gives the moment the machine booted. (The
+	// wall clock itself comes from the hypervisor's RTC; there is no
+	// NTP synchronization yet at this point.)
 	var si unix.Sysinfo_t
 	if err := unix.Sysinfo(&si); err == nil {
 		facts.Hardware.MemoryBytes = uint64(si.Totalram) * uint64(si.Unit)
@@ -145,20 +148,21 @@ func publishFacts(in factsInputs) *factsFile {
 		facts.BootedAt = &booted
 	}
 
-	// Network facts only exist for interfaces that came up; a machine
-	// that failed DHCP still publishes what it knows. The top-level
-	// summary describes the primary interface: the cluster-facing one
-	// when the Cluster's nodeCIDR identifies it, otherwise the first
-	// that came up.
+	// Network facts exist only for interfaces that came up; a machine
+	// that failed DHCP still publishes the facts it has. The
+	// top-level summary describes the primary interface: the
+	// cluster-facing one when the Cluster's nodeCIDR identifies it,
+	// otherwise the first interface that came up.
 	facts.Network = networkFacts(in.clusterDoc, in.conns, now)
 
-	// The clock's state so far: the boot-time measurement if one
-	// succeeded, or an accurate unsynchronized/free-running report.
+	// The clock's state so far: the boot-time measurement, if one
+	// succeeded, or an accurate unsynchronized or free-running report.
 	facts.Time = timeStatus(in.firstSync, in.timeSources)
 
-	// The founding write happens directly rather than through
-	// publish: main is still the only goroutine at this point, and
-	// the success line should only print for a write that landed.
+	// The founding write happens directly, rather than through
+	// publish, because main is still the only goroutine at this
+	// point, and the success line should print only for a write that
+	// lands.
 	owner := &factsFile{status: facts}
 	if err := machine.WriteFacts(factsPath, facts); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: writing facts: %v\n", err)
@@ -166,10 +170,11 @@ func publishFacts(in factsInputs) *factsFile {
 	}
 	fmt.Printf("liken: facts published to %s\n", factsPath)
 
-	// The manifest this boot ran under, byte for byte: the operator's
-	// way to know which Machine it manages (and, on a first boot, the
-	// spec to seed the in-cluster Machine from). Published beside the
-	// facts because it shares their lifetime: it describes this boot.
+	// The manifest this boot ran under, byte for byte. This is how
+	// the operator identifies which Machine it manages, and, on a
+	// first boot, the spec to seed the in-cluster Machine from. The
+	// code publishes it beside the facts because it shares their
+	// lifetime: it describes this boot.
 	if len(in.choice.raw) > 0 {
 		if err := os.WriteFile(bootManifestPath, in.choice.raw, 0o644); err != nil {
 			fmt.Fprintf(os.Stderr, "liken: writing the boot manifest: %v\n", err)
@@ -180,8 +185,9 @@ func publishFacts(in factsInputs) *factsFile {
 
 // publishBootClusterManifest is the cluster document's version of the
 // boot manifest publication: the exact bytes this boot derived its
-// role from, for the operator's drift detection (which compares
-// documents by meaning, and needs bytes to parse, not just a hash).
+// role from. The operator's drift detection needs these bytes, since
+// it compares documents by meaning and needs bytes to parse, not
+// just a hash.
 func publishBootClusterManifest(raw []byte) {
 	if len(raw) == 0 {
 		return
@@ -220,8 +226,8 @@ func networkFacts(clusterDoc *cluster.Cluster, conns []*connection, now time.Tim
 	return status
 }
 
-// interfaceFacts is one connection as status: the same facts the
-// console report prints, made queryable.
+// interfaceFacts turns one connection into status: the same facts
+// the console report prints, in a form other code can query.
 func interfaceFacts(conn *connection, now time.Time) machine.InterfaceStatus {
 	status := machine.InterfaceStatus{
 		Name:        conn.ifname,

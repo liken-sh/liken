@@ -1,8 +1,9 @@
 package machine
 
-// Fixtures shared across this package's test files. They manufacture
-// the filesystem misfortunes the package's error paths exist for:
-// directories that refuse writes and files that refuse reads.
+// Fixtures shared across this package's test files. They create the
+// filesystem failures that the package's error paths exist to
+// handle: directories that refuse writes, and files that refuse
+// reads.
 
 import (
 	"os"
@@ -10,10 +11,10 @@ import (
 	"testing"
 )
 
-// readOnlyDir is a directory that refuses new entries, which is how
-// the package's writers fail: every one of them needs a writable
-// directory for its temp file or its removal. Cleanup restores write
-// permission so t.TempDir can remove the tree.
+// readOnlyDir returns a directory that refuses new entries. This is
+// how the package's writers fail: each writer needs a writable
+// directory for its temp file, or for removal of that file. Cleanup
+// restores write permission, so t.TempDir can remove the tree.
 func readOnlyDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -24,10 +25,10 @@ func readOnlyDir(t *testing.T) string {
 	return dir
 }
 
-// sealedStore is a manifest store whose directory already exists,
-// holds the given files, and refuses all further writes: the shape of
-// a machineState filesystem that has gone read-only underneath a
-// running lifecycle.
+// sealedStore returns a manifest store. Its directory already
+// exists, holds the given files, and refuses all further writes.
+// This is the shape of a machineState filesystem that has become
+// read-only while a lifecycle still runs on it.
 func sealedStore(t *testing.T, files map[string]string) ManifestStore {
 	t.Helper()
 	root := t.TempDir()
@@ -47,9 +48,10 @@ func sealedStore(t *testing.T, files map[string]string) ManifestStore {
 	return MachineManifests(root)
 }
 
-// unreadableFile plants a file that exists but cannot be read, so a
-// loader hits the "present but failing" branch rather than the
-// missing-file one it usually treats as a default.
+// unreadableFile creates a file that exists but cannot be read. This
+// makes a loader take the "present but failing" branch, instead of
+// the missing-file branch that the loader usually treats as a
+// default.
 func unreadableFile(t *testing.T, path string) string {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

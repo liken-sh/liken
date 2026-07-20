@@ -6,8 +6,9 @@ import (
 	"testing"
 )
 
-// fakeProcSys builds a miniature /proc/sys in a temp directory with one
-// pre-existing parameter file, the way the kernel presents real ones.
+// fakeProcSys builds a small /proc/sys in a temp directory, with one
+// parameter file already present, in the same way the kernel
+// presents real parameter files.
 func fakeProcSys(t *testing.T, relpath, value string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -29,7 +30,8 @@ func TestSysctlPathTranslation(t *testing.T) {
 		{"vm.overcommit_memory", "vm/overcommit_memory"},
 		{"net.ipv4.ip_forward", "net/ipv4/ip_forward"},
 		// The slash form is the kernel's own escape hatch for interface
-		// names that contain dots: with slashes present, dots are literal.
+		// names that contain dots. When slashes are present, dots stay
+		// literal.
 		{"net/ipv4/conf/eth0.100/rp_filter", "net/ipv4/conf/eth0.100/rp_filter"},
 	}
 	for _, tt := range tests {
@@ -90,9 +92,10 @@ func TestReadSysctlTrimsValue(t *testing.T) {
 }
 
 func TestApplySysctlRefusesToInventParameters(t *testing.T) {
-	// The open deliberately does not create: a parameter file the
-	// kernel didn't put there is a parameter this kernel doesn't
-	// have, and inventing it would silently hide the typo.
+	// The open call does not create the file, by design. A parameter
+	// file that the kernel did not put there names a parameter this
+	// kernel does not have. Creating the file would hide a typo
+	// silently.
 	err := ApplySysctl(t.TempDir(), "vm.nonsense", "1")
 	if err == nil {
 		t.Error("an unknown parameter must be an error someone sees")

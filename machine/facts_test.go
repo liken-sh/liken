@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// someFacts is a fully-populated status block, the shape init writes
-// after a successful boot.
+// someFacts returns a fully populated status block, in the shape
+// init writes after a successful boot.
 func someFacts(t *testing.T) *MachineStatus {
 	t.Helper()
 	booted := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)

@@ -9,9 +9,10 @@ import (
 )
 
 // importsFixture points the settle pass at a throwaway tree: a seed
-// images directory standing in for what the boot copied onto
-// clusterState, and an agent directory standing in for containerd's
-// world. It returns the machineState root the store lives under.
+// images directory that substitutes for what the boot copied onto
+// clusterState, and an agent directory that substitutes for
+// containerd's own directory tree. It returns the machineState root
+// that the store lives under.
 type importsFixture struct {
 	root      string
 	imagesDir string
@@ -242,9 +243,9 @@ func TestImportsUnreadableStagedRecordStillDiscards(t *testing.T) {
 }
 
 func TestImportsReportsUnhashableTarballs(t *testing.T) {
-	// The tarballs can't even be hashed (an unreadable file): the
+	// The tarballs cannot even be hashed (an unreadable file). The
 	// lifecycle makes no decision at all, because a record rendered
-	// from partial hashes would be a lie in both directions.
+	// from partial hashes would be wrong either way.
 	f := newImportsFixture(t)
 	f.writeTarball(t, "k3s-airgap.tar", "layers")
 	sealed := filepath.Join(f.imagesDir, "k3s-airgap.tar")
@@ -271,8 +272,9 @@ func TestDiscardContainerStoreToleratesAMissingAgentDir(t *testing.T) {
 }
 
 func TestDiscardContainerStoreReportsWhatItCannotRemove(t *testing.T) {
-	// One entry refuses removal (its parent is read-only): the others
-	// still go, and the failure is reported rather than hidden.
+	// One entry refuses removal (its parent is read-only). The other
+	// entries are still removed, and this test checks that the
+	// failure is reported rather than hidden.
 	f := newImportsFixture(t)
 	f.writeAgentState(t, "containerd/io.containerd.snapshotter.v1.overlayfs/torn", "")
 	if err := os.Chmod(f.agentDir, 0o555); err != nil {

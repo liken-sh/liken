@@ -1,17 +1,16 @@
 package main
 
 // Hardware observation: the boot-time walk and the live watch that
-// keep the unclaimed-device report true.
+// keep the unclaimed-device report correct.
 //
-// The posture comes from milestone 11: drivers are declared
-// (spec.modules), never auto-loaded, so a surprise device is an
-// inert, reported fact. The kernel does everything else — a
-// resident driver binds hot-plugged hardware without any userspace
-// help — which leaves exactly one job here: notice undriven
-// devices and report them, to the console and to the facts file,
-// where the operator lifts them into the Machine's status. One
-// watcher, two outputs, and the same watcher will one day feed
-// ResourceSlices too.
+// This approach comes from milestone 11: drivers are declared
+// (spec.modules) and never auto-loaded, so a surprise device is an
+// inert, reported fact. The kernel does everything else. A resident
+// driver binds hot-plugged hardware without any userspace help. This
+// leaves exactly one job here: notice undriven devices and report
+// them, to the console and to the facts file, where the operator
+// lifts them into the Machine's status. One watcher produces both
+// outputs, and the same watcher will one day feed ResourceSlices too.
 
 import (
 	"context"
@@ -24,18 +23,19 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// The observation's inputs, variables so tests can point them into
-// fabricated trees. pciIDsPath is where the image stages hwdata's
-// database; its absence just means numeric names.
+// The observation's inputs are variables, so tests can point them
+// into fabricated trees. pciIDsPath is where the image stages
+// hwdata's database. When this file is absent, devices show numeric
+// names instead.
 var (
 	sysfsRoot  = "/sys"
 	pciIDsPath = "/usr/share/hwdata/pci.ids"
 )
 
-// loadHardwareCatalog loads the judgment tables once per boot. A nil
+// loadHardwareCatalog loads the lookup tables once per boot. A nil
 // catalog (an image without the full alias table) disables the
-// report rather than the boot: the machine still runs, it just
-// can't name what it isn't driving.
+// report rather than the boot. The machine still runs; it just
+// cannot name the devices that it is not driving.
 func loadHardwareCatalog() *hardware.Catalog {
 	moduleDir := filepath.Join("/lib/modules", kernelRelease())
 	catalog, err := hardware.LoadCatalog(moduleDir, pciIDsPath)
@@ -55,28 +55,29 @@ func discoverUnclaimed(catalog *hardware.Catalog) []machine.UnclaimedDevice {
 	return catalog.Discover(sysfsRoot)
 }
 
-// watchHardware is the machine-plane component that keeps the
-// report live: sleep on the kernel's uevent socket, and when the
-// hardware changes, re-walk sysfs, narrate the difference to the
-// console, and republish the facts. The uevent is only a doorbell —
-// the walk re-reads the whole truth — so a missed or coalesced
-// event costs nothing.
+// watchHardware is the machine-plane component that keeps the report
+// current. It waits on the kernel's uevent socket, and when the
+// hardware changes, it re-walks sysfs, reports the difference to the
+// console, and republishes the facts. The uevent only signals that
+// something changed; the walk re-reads the whole truth, so a missed
+// or coalesced event costs nothing.
 func watchHardware(catalog *hardware.Catalog, facts *factsFile, last []machine.UnclaimedDevice) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		uevents, err := hardware.ListenForUevents(ctx)
 		if err != nil {
 			return err
 		}
-		// The disk inventory refreshes on the same doorbell, because
-		// it has the same failure mode the watch exists to prevent: a
-		// boot-time snapshot goes stale the moment hardware moves. It
-		// even races the boot — a disk behind a just-loaded driver
-		// (a USB stick binding at boot) can finish its SCSI probe
-		// after the facts were first published, and the probe's own
-		// uevents are what bring the inventory current moments later.
-		// The baseline comes from the published facts rather than a
-		// fresh walk, so a disk that appeared between the boot's walk
-		// and this one still reads as a change worth publishing.
+		// The disk inventory refreshes on the same uevent signal,
+		// because it has the same failure mode that the watch exists
+		// to prevent: a boot-time snapshot goes stale the moment
+		// hardware moves. This inventory can even race the boot. A
+		// disk behind a just-loaded driver (a USB stick binding at
+		// boot) can finish its SCSI probe after the facts were first
+		// published, and the probe's own uevents bring the inventory
+		// current moments later. The baseline comes from the published
+		// facts rather than a fresh walk, so a disk that appeared
+		// between the boot's walk and this one still reads as a change
+		// worth publishing.
 		var lastDisks []machine.BlockDevice
 		facts.mutate(func(s *machine.MachineStatus) {
 			lastDisks = slices.Clone(s.Hardware.BlockDevices)
@@ -87,9 +88,9 @@ func watchHardware(catalog *hardware.Catalog, facts *factsFile, last []machine.U
 				return nil
 			case <-uevents:
 			}
-			// One plugged-in device is a cascade of uevents (the lab
-			// measured eleven for one USB stick); wait for the burst
-			// to finish rather than walking once per event.
+			// One plugged-in device produces a burst of uevents (the lab
+			// measured eleven for one USB stick). This code waits for
+			// the burst to finish rather than walking once per event.
 			settle(ctx, uevents, time.Second, 5*time.Second)
 
 			devices := hardware.DiscoverDevices(sysfsRoot, catalog.PCI)
@@ -109,18 +110,18 @@ func watchHardware(catalog *hardware.Catalog, facts *factsFile, last []machine.U
 	}
 }
 
-// settle drains further doorbell rings until quiet lasts a full
-// interval, so a burst of arrivals becomes one walk — but only up
-// to a ceiling. Waiting for true silence is a trap on this machine:
-// a node running Kubernetes emits uevents continuously while
-// containers churn (every veth pair and overlay device announces
-// itself), and a settle that insists on quiet can be held captive
-// for minutes, which is exactly the staleness the watch exists to
-// prevent — the lab caught it holding a hot-plugged disk's report
-// hostage to an unrelated crash-looping pod. Walks are cheap and
-// idempotent, so when the stream won't quiet, walking anyway is
-// the correct move; anything that changes mid-walk rings the
-// doorbell again.
+// settle drains further uevent signals until quiet lasts a full
+// interval, so a burst of arrivals becomes one walk, but only up to
+// a ceiling. Waiting for true silence does not work on this machine.
+// A node running Kubernetes emits uevents continuously while
+// containers start and stop (every veth pair and overlay device
+// announces itself). A settle that insists on quiet can block for
+// minutes, which is exactly the staleness that the watch exists to
+// prevent. The lab observed this blocking a hot-plugged disk's report
+// for minutes because of an unrelated crash-looping pod. Walks are
+// cheap and idempotent, so when the stream will not go quiet, walking
+// anyway is the correct move. Anything that changes during the walk
+// sends another uevent signal.
 func settle(ctx context.Context, uevents <-chan struct{}, quiet, ceiling time.Duration) {
 	deadline := time.NewTimer(ceiling)
 	defer deadline.Stop()
@@ -140,10 +141,10 @@ func settle(ctx context.Context, uevents <-chan struct{}, quiet, ceiling time.Du
 	}
 }
 
-// hardwareTransitions narrates what changed between two walks, in
-// the same voice as the rest of the boot's console report. An entry
-// that appeared is a new gap; an entry that left either got its
-// driver (the happy line — say who) or was unplugged.
+// hardwareTransitions describes what changed between two walks, in
+// the same style as the rest of the boot's console report. An entry
+// that appeared is a new gap. An entry that left either got its
+// driver (this reports which driver) or was unplugged.
 func hardwareTransitions(before, after []machine.UnclaimedDevice, devices []hardware.Device) []string {
 	var lines []string
 	for _, u := range after {
@@ -171,7 +172,7 @@ func hardwareTransitions(before, after []machine.UnclaimedDevice, devices []hard
 }
 
 // describeUnclaimed renders one entry for a console line: bus and
-// class when known, then the best name there is.
+// class when known, then the best name available.
 func describeUnclaimed(u machine.UnclaimedDevice) string {
 	description := u.Bus
 	if u.Class != "" {

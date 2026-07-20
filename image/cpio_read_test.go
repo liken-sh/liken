@@ -1,7 +1,7 @@
 package image
 
-// Tests for the newc reader and what the stick builder asks of it:
-// the machine names a deployment layer carries.
+// Tests for the newc reader, and for what the stick builder asks of
+// it: the machine names a deployment layer carries.
 
 import (
 	"bytes"
@@ -24,7 +24,7 @@ func TestReadCPIOReturnsWhatFollowsTheTrailer(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := buf.Len()
-	// A second archive concatenated on, the way composed images are.
+	// This appends a second archive, the way images concatenate them.
 	w = newArchive(&buf)
 	if err := w.file("world", []byte("second archive"), 0o644); err != nil {
 		t.Fatal(err)
@@ -78,7 +78,7 @@ func TestReadCPIORefusesDamage(t *testing.T) {
 	}
 }
 
-// mintedLayer builds a real deployment layer carrying the named
+// mintedLayer builds a real deployment layer that carries the named
 // machines, through the same Layer call the build uses.
 func mintedLayer(t *testing.T, machines ...string) []byte {
 	t.Helper()
@@ -118,8 +118,8 @@ func TestMachineNamesComeFromTheLayer(t *testing.T) {
 }
 
 func TestMachineNamesRefusesAnEmptyDeployment(t *testing.T) {
-	// A layer packed from a deployment with no machine manifests:
-	// identity only. There is nobody to install.
+	// This is a layer packed from a deployment with no machine
+	// manifests, identity only. There is nobody to install.
 	if _, err := machineNames(mintedLayer(t)); err == nil {
 		t.Error("a layer with no machines must be refused")
 	}

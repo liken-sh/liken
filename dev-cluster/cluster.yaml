@@ -1,14 +1,15 @@
 # The Cluster manifest: the document that describes what the machines
-# form together. Everything here is a fact the whole fleet must agree
-# on, which is why it lives in its own document rather than being
-# repeated (and inevitably diverging) across Machine manifests. The
+# form together. Everything here is a fact that the whole fleet must
+# agree on. For this reason, it lives in its own document, instead of
+# repeating (and eventually disagreeing) across Machine manifests. The
 # same file travels in every machine's image, so cluster-scoped facts
-# have exactly one copy. Like the Machine manifest, it is seeded into
-# the cluster as a real resource once the API is up, so `kubectl get
-# clusters` answers the question "what is this fleet?".
+# have exactly one copy. Like the Machine manifest, the cluster
+# manifest is seeded into the cluster as a real resource once the API
+# is up. This lets `kubectl get clusters` answer the question "what is
+# this fleet?".
 #
-# The join token is deliberately not here. The spec carries topology;
-# secrets travel in the identity bundle (/etc/liken/token, minted
+# The join token is not here on purpose. The spec carries topology.
+# Secrets travel in the identity bundle (/etc/liken/token, minted
 # offline by `liken mint` alongside the CAs it hashes).
 apiVersion: liken.sh/v1alpha1
 kind: Cluster
@@ -16,66 +17,72 @@ metadata:
   name: lab
 spec:
   # The machines that run control planes, by Machine name. A machine
-  # derives its role by looking for its own name here: listed means
-  # leader, absent means follower. One name means k3s keeps its state
-  # in sqlite; more than one means embedded etcd, whose majority
-  # quorum needs an odd member count: three members, not two or four.
-  # The first name is the founding leader: it initializes etcd (or, if
-  # it originally ran as a lone sqlite leader, migrates that datastore
-  # into etcd in place on the boot where the list first grows), and
-  # every other leader joins through it. This lab seeds three leaders
-  # and two followers; changing the list is an ordinary Cluster edit,
-  # which the fleet stages and applies machine by machine.
+  # finds its role by looking for its own name in this list: a name
+  # that is listed is a leader; a name that is absent is a follower.
+  # One name means k3s keeps its state in sqlite. More than one name
+  # means embedded etcd, and etcd's majority quorum needs an odd
+  # member count: three members, not two or four. The first name is
+  # the founding leader. It initializes etcd, or, if it first ran as
+  # a lone sqlite leader, it migrates that datastore into etcd in
+  # place, on the boot when the list first grows. Every other leader
+  # joins the cluster through the founding leader. This lab seeds
+  # three leaders and two followers. Changing the list is an ordinary
+  # Cluster edit, and the fleet stages and applies that edit machine
+  # by machine.
   leaders: [node-1, node-2, node-3]
 
   # Where followers make first contact: a leader's address on the
-  # cluster segment, which its Machine manifest declares in
+  # cluster segment, declared by its Machine manifest in
   # machines/node-1.yaml. Port 6443 is the Kubernetes API's
   # conventional port, and k3s's join protocol uses the same
-  # listener. This endpoint only matters for first contact: after
-  # joining, k3s agents maintain a client-side load balancer that
+  # listener. This endpoint matters only for first contact. After a
+  # follower joins, k3s agents keep a client-side load balancer that
   # learns every leader, so a dead endpoint strands only brand-new
-  # followers. A deployment that wants the endpoint itself to survive
-  # its first leader points a DNS name or virtual IP here instead;
-  # that choice belongs to the deployment, never the OS.
+  # followers. A deployment that wants the endpoint to survive the
+  # loss of its first leader can point a DNS name or a virtual IP
+  # here instead. That choice belongs to the deployment, not the OS.
   endpoint: https://10.10.0.1:6443
 
   network:
-    # The subnet the nodes speak Kubernetes over. A machine may have
-    # several interfaces (the lab gives each an internet uplink too);
-    # the one whose address falls inside this subnet carries cluster
-    # traffic, and that address becomes the machine's node IP.
+    # The subnet that the nodes use for Kubernetes traffic. A machine
+    # can have several interfaces (the lab also gives each machine an
+    # internet uplink). The interface whose address falls inside this
+    # subnet carries cluster traffic, and that address becomes the
+    # machine's node IP.
     nodeCIDR: 10.10.0.0/24
 
-    # The cluster's internal address plan. These are k3s's defaults,
-    # written out rather than assumed: every node must agree on them,
-    # and a fact the whole fleet depends on shouldn't be implicit.
-    # Pod addresses come from clusterCIDR, service addresses from
-    # serviceCIDR, and clusterDNS is the address every pod's
-    # resolv.conf points at (it must sit inside serviceCIDR).
+    # The cluster's internal address plan. These values are k3s's
+    # defaults, written out here instead of left assumed, because
+    # every node must agree on them, and a fact that the whole fleet
+    # depends on should not stay implicit. Pod addresses come from
+    # clusterCIDR, service addresses come from serviceCIDR, and
+    # clusterDNS is the address that every pod's resolv.conf points
+    # at (this address must sit inside serviceCIDR).
     clusterCIDR: 10.42.0.0/16
     serviceCIDR: 10.43.0.0/16
     clusterDNS: 10.43.0.10
     clusterDomain: cluster.local
 
   time:
-    # Where the leaders get their time; followers don't appear here
+    # Where the leaders get their time. Followers do not appear here,
     # because they sync from the leaders themselves. Declaring an
     # upstream is the deployment's choice, never the OS's default.
-    # This lab picks Cloudflare's public NTP service, which (unlike
-    # the NTP pool) is run for exactly this kind of anonymous use.
+    # This lab picks Cloudflare's public NTP service, because
+    # Cloudflare, unlike the NTP pool, runs this service for exactly
+    # this kind of anonymous use.
     upstreams: [time.cloudflare.com, time.nist.gov]
 
   # The fleet's opt-ins from liken's feature vocabulary. liken
-  # disables k3s's bundled components by default; naming one here is
-  # the declaration that puts it back ({} is a feature's zero
-  # configuration). The lab keeps metrics-server standing the way
-  # node-4 keeps the dummy module: it exercises the computed disable
-  # list every boot, and `kubectl top nodes` proves it landed. The
-  # storage-client features (iscsi, nfs) are exercised by drills
-  # against the lab's storage server (dev-cluster/storage) and opted
-  # in only for those drills, so the storage guest doesn't have to
-  # stay running between them.
+  # disables k3s's bundled components by default. Naming a component
+  # here declares that the fleet wants it back ({} is a feature's
+  # zero configuration). The lab keeps metrics-server enabled at all
+  # times, the same way node-4 keeps the dummy module enabled: this
+  # exercises the computed disable list on every boot, and `kubectl
+  # top nodes` proves that the feature landed. The storage-client
+  # features (iscsi, nfs) are exercised by drills against the lab's
+  # storage server (dev-cluster/storage). These features are enabled
+  # only for those drills, so the storage guest does not have to keep
+  # running between drills.
   features:
     metrics-server: {}
 
@@ -83,13 +90,14 @@ spec:
     # Where release artifacts come from: the lab's release server
     # (`liken serve`, started with `make serve`), reached at QEMU's
     # built-in address for "the host machine" on a user-mode network.
-    # The catalog and a target version are deliberately not seeded
-    # here. A catalog entry is the digest of a release document, and
-    # releases built from this repo embed the checkout's own identity
-    # artifacts (the cluster CA and the join token, both gitignored
-    # and minted per checkout), so no digest is stable enough to
-    # commit. Publishing a release prints its catalog entry; adding it
-    # and setting spec.version are live edits to the Cluster resource.
-    # That is deliberate: an upgrade happens through the API, not
-    # through an image rebuild.
+    # The catalog and a target version are not seeded here on
+    # purpose. A catalog entry is the digest of a release document,
+    # and releases built from this repo embed the checkout's own
+    # identity artifacts (the cluster CA and the join token, both
+    # gitignored and minted for each checkout). Because of this, no
+    # digest stays stable enough to commit. Publishing a release
+    # prints its catalog entry. Adding that entry and setting
+    # spec.version are live edits to the Cluster resource. This is
+    # deliberate: an upgrade happens through the API, not through an
+    # image rebuild.
     source: http://10.0.2.2:8017/releases

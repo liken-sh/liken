@@ -1,11 +1,11 @@
 package main
 
 // Tests for the feature pass: what init reports about the cluster's
-// opt-ins, and what actuating a vendored payload does. The
-// disable-list rendering the bundled features act through is pinned
-// in k3s_test.go. Module verdicts use a fabricated tree the way the
-// module tests do, leaning on builtins, because only a real kernel
-// can truly load anything.
+// opt-ins, and what actuating a vendored payload does. k3s_test.go
+// pins the disable-list rendering that bundled features act through.
+// Module verdicts use a fabricated tree, the same as the module
+// tests, and lean on builtins, because only a real kernel can
+// actually load anything.
 
 import (
 	"os"
@@ -49,13 +49,14 @@ func TestActuateFeaturesReportsBundledFeaturesActive(t *testing.T) {
 		"traefik":        {},
 	}
 	got := actuateFeatures(c, "node-1")
-	// Three statuses from two declarations: traefik requires helm,
-	// and an implied feature reports its standing like a declared
-	// one, so status.features tells the whole truth about what runs.
+	// Three statuses come from two declarations: traefik requires
+	// helm, and an implied feature reports its standing the same as
+	// a declared one, so status.features tells the whole truth about
+	// what runs.
 	if len(got) != 3 {
 		t.Fatalf("expected three feature statuses, got %v", got)
 	}
-	// Sorted by slug, like every rendering of the same spec.
+	// Sorted by slug, the same as every rendering of the same spec.
 	if got[0].Name != "helm" || got[1].Name != "metrics-server" || got[2].Name != "traefik" {
 		t.Errorf("expected sorted slugs, got %v", got)
 	}
@@ -67,9 +68,9 @@ func TestActuateFeaturesReportsBundledFeaturesActive(t *testing.T) {
 }
 
 // featureFixture points the package's path variables at temporary
-// directories and builds a module tree where the feature's one module
-// is compiled into the kernel, so the healthy path needs no syscalls.
-// It returns the fabricated module tree's base.
+// directories, and builds a module tree where the feature's one
+// module is compiled into the kernel, so the healthy path needs no
+// syscalls. It returns the fabricated module tree's base directory.
 func featureFixture(t *testing.T) string {
 	t.Helper()
 	featuresDir = t.TempDir()

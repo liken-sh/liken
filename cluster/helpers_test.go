@@ -8,9 +8,9 @@ import (
 	"testing"
 )
 
-// unreadableFile plants a file that exists but cannot be read, so a
-// loader hits the "present but failing" branch rather than the
-// missing-file one it usually treats as a default.
+// unreadableFile plants a file that exists but cannot be read. This
+// makes a loader hit the "present but failing" branch, instead of
+// the missing-file branch it usually treats as a default.
 func unreadableFile(t *testing.T, path string) string {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

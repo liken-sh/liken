@@ -1,16 +1,16 @@
-# The website deploy: a push that touches the site is a publish. The
-# job regenerates the page's ConfigMap on the liken.sh cluster and
-# rolls the deployment (make website-content is the whole act), then
-# checks the served page byte-for-byte against what it shipped —
-# nothing here rebuilds an image or reboots a machine.
+# This is the website deploy. A push that touches the site is a
+# publish. The job regenerates the page's ConfigMap on the liken.sh
+# cluster and rolls the deployment (make website-content does this
+# whole task), then checks the served page byte for byte against what
+# it shipped. Nothing here rebuilds an image or reboots a machine.
 #
 # The credential is WEBSITE_KUBECONFIG, delivered to the secret store
 # by terraform and scoped to the website's namespace alone
-# (liken.sh/website/manifests/deployer.yaml), so this workflow can
+# (liken.sh/website/manifests/deployer.yaml). So this workflow can
 # rewrite the page and nothing else. It lands at the gitignored path
-# the ./kubectl wrapper already reads. Manifest changes are outside
-# this credential's reach on purpose; those deploy from a workstation
-# with `make website`.
+# that the ./kubectl wrapper already reads. Manifest changes are
+# outside this credential's reach on purpose. Those changes deploy
+# from a workstation with `make website`.
 name: website
 
 on:
@@ -23,8 +23,9 @@ on:
 permissions:
   contents: read
 
-# Deploys serialize: two pushes in quick succession would otherwise
-# race their rollouts, and the page check below wants the world still.
+# Deploys run one at a time: two pushes in quick succession would
+# otherwise race their rollouts, and the page check below needs
+# nothing else to change while it runs.
 concurrency:
   group: website
 
@@ -44,8 +45,9 @@ jobs:
 
       - run: make -C liken.sh website-content
 
-      # Prove the deploy the way a reader meets it: the page served
-      # over the public name is exactly the file this commit carries.
+      # This step proves the deploy the way a reader meets it: the
+      # page served over the public name is exactly the file that this
+      # commit carries.
       - name: verify the served page
         run: |
           curl --fail --silent --show-error --retry 5 --retry-delay 3 \

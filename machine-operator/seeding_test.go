@@ -1,8 +1,8 @@
 package main
 
 // The seeding loops: making the boot manifest's Machine and the
-// image's Cluster real in the API, tolerantly of the races and
-// not-served-yet CRDs of a fleet booting together.
+// image's Cluster real in the API. These loops tolerate the races
+// and not-yet-served CRDs of a fleet booting together.
 
 import (
 	"encoding/json"
@@ -14,11 +14,11 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// machineAPI is a miniature API server for the machine seeding loop:
-// it remembers whether the Machine exists, and it can be told to
+// machineAPI is a small API server for the machine seeding loop.
+// It remembers whether the Machine exists, and it can be told to
 // answer creates with 404 for a while (the CRD not served yet, the
-// ordinary condition of a machine's first minutes) or to fail them
-// outright.
+// ordinary condition during a machine's first minutes) or to fail
+// them outright.
 type machineAPI struct {
 	exists    bool
 	notServed int // creates to answer 404 before the CRD "arrives"
@@ -90,8 +90,9 @@ func TestEnsureMachineReturnsAnExistingMachine(t *testing.T) {
 }
 
 func TestEnsureMachineWaitsOutAnUnservedCRD(t *testing.T) {
-	// k3s applies the Machine CRD around the same time it starts this
-	// pod, so the first creates can land before the API serves it.
+	// k3s applies the Machine CRD around the same time it starts
+	// this pod, so the first creates can happen before the API
+	// serves it.
 	fake := &machineAPI{notServed: 2}
 	client := testClient(t, fake.handler())
 	if _, err := ensureMachine(client, seedMachine()); err != nil {
@@ -110,8 +111,8 @@ func TestEnsureMachineReturnsAHardCreateFailure(t *testing.T) {
 	}
 }
 
-// clusterAPI is a miniature API server for the cluster seeding loop:
-// it remembers whether the Cluster exists, and it can be told to
+// clusterAPI is a small API server for the cluster seeding loop.
+// It remembers whether the Cluster exists, and it can be told to
 // answer the first create with a conflict (as the real server would
 // when another machine's operator created the object first), with
 // 404 for a while (the CRD not served yet), or to fail outright.
@@ -147,8 +148,8 @@ func (fake *clusterAPI) handler() http.Handler {
 				return
 			}
 			if fake.conflict {
-				// Someone else's create landed first; the object
-				// exists now no matter who made it.
+				// Someone else's create landed first. The object
+				// exists now, no matter who created it.
 				fake.exists = true
 				w.WriteHeader(http.StatusConflict)
 				return

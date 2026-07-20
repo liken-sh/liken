@@ -1,9 +1,9 @@
 package main
 
-// Tests for locating the system image: the slot selection is pure
-// logic over discovered partitions, and the RAM path is a file
-// check, so both test against fixtures. The loop device and the
-// mounts are QEMU territory.
+// Tests for locating the system image. Slot selection is pure logic
+// over discovered partitions, and the RAM path is just a file check,
+// so both are tested against fixtures. The loop device and the
+// mounts are tested only under QEMU.
 
 import (
 	"os"
@@ -27,8 +27,9 @@ func TestSlotDeviceFindsTheNamedSlot(t *testing.T) {
 }
 
 func TestSlotDeviceMatchesByNameNotPosition(t *testing.T) {
-	// The disk may enumerate anywhere between boots; the GPT name is
-	// the identity, exactly as storage recognition treats it.
+	// A disk may enumerate at a different position between boots. The
+	// GPT name is the identity, the same way storage recognition
+	// treats it.
 	parts := []partition{
 		{name: "vdc7", disk: "vdc", partName: "liken:systemA"},
 	}
@@ -38,8 +39,9 @@ func TestSlotDeviceMatchesByNameNotPosition(t *testing.T) {
 }
 
 func TestSlotDeviceRefusesAmbiguity(t *testing.T) {
-	// Two partitions claiming one slot's name is exactly the state a
-	// torn claim can leave behind; recognition refuses to guess.
+	// Two partitions that claim one slot's name is exactly the state
+	// that a torn claim can leave behind. Recognition refuses to
+	// guess in that case.
 	parts := []partition{
 		{name: "sda1", disk: "sda", partName: "liken:systemA"},
 		{name: "sdb1", disk: "sdb", partName: "liken:systemA"},
@@ -56,8 +58,8 @@ func TestSlotDeviceReportsAMissingSlot(t *testing.T) {
 }
 
 func TestFindSystemImagePrefersTheRAMImage(t *testing.T) {
-	// A boot whose loader delivered the image into rootfs mounts it
-	// from there, no disk or slot parameter needed.
+	// If the loader delivers the image into rootfs, the boot mounts
+	// the image from there. It needs no disk or slot parameter.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "liken.sqfs")
 	if err := os.WriteFile(path, []byte("squash"), 0o644); err != nil {
@@ -85,9 +87,10 @@ func TestFindSystemImageNeedsAnImageOrASlot(t *testing.T) {
 }
 
 func TestFindSystemImageSearchesTheSlotByName(t *testing.T) {
-	// With no RAM image, the search goes to the machine's real
-	// partitions — which on the machine running this test carry no
-	// liken GPT names, so the error names the slot it looked for.
+	// With no RAM image, the search checks the machine's real
+	// partitions. On the machine that runs this test, none of the
+	// partitions carry liken GPT names, so the error names the slot
+	// that the search looked for.
 	old := ramImage
 	ramImage = filepath.Join(t.TempDir(), "absent.sqfs")
 	t.Cleanup(func() { ramImage = old })
@@ -99,20 +102,20 @@ func TestFindSystemImageSearchesTheSlotByName(t *testing.T) {
 }
 
 func TestLoadBootModulesReportsAMissingIndex(t *testing.T) {
-	// A boot archive without its depmod index is a build bug; the
-	// loader reports it and the boot carries on to fail (or not) at
-	// the mounts that wanted the modules.
+	// A boot archive without its depmod index has a build bug. The
+	// loader reports the error, and the boot continues. It may still
+	// fail later, at the mounts that needed the missing modules.
 	old := bootModulesDir
 	bootModulesDir = t.TempDir()
 	t.Cleanup(func() { bootModulesDir = old })
 
-	loadBootModules("overlay") // must not panic; the error is reported on stderr
+	loadBootModules("overlay") // must not panic; it reports the error on stderr
 }
 
 func TestLoadBootModulesReportsAModuleItCannotLoad(t *testing.T) {
-	// The index may name a file the archive doesn't carry (or the
-	// test may simply not run as root); either way each failure is
-	// reported per module and the loader keeps going.
+	// The index may name a file that the archive does not carry. Or
+	// the test may simply not run as root. Either way, the loader
+	// reports each failure per module and keeps going.
 	dir := t.TempDir()
 	dep := "kernel/fs/overlayfs/overlay.ko.zst:\n"
 	if err := os.WriteFile(filepath.Join(dir, "modules.dep"), []byte(dep), 0o644); err != nil {
@@ -126,7 +129,7 @@ func TestLoadBootModulesReportsAModuleItCannotLoad(t *testing.T) {
 }
 
 func TestMaybeSwitchRootIsIdempotent(t *testing.T) {
-	// The re-exec passes the marker; the second run must do nothing,
+	// The re-exec passes the marker. The second run must do nothing,
 	// because the switch already happened and the mount tree is no
 	// longer empty.
 	oldArgs := os.Args
@@ -137,10 +140,10 @@ func TestMaybeSwitchRootIsIdempotent(t *testing.T) {
 }
 
 // fakeEarlyBoot points the early boot's inputs at fixtures: a command
-// line of the test's choosing, a boot module dir with no index, and
-// no RAM image. Only meaningful for a non-root test process, whose
-// mount attempts all fail with EPERM — which is exactly the degraded
-// path these tests exercise.
+// line chosen by the test, a boot module directory with no index,
+// and no RAM image. This only matters for a non-root test process.
+// In that case, every mount attempt fails with EPERM, which is
+// exactly the degraded path that these tests exercise.
 func fakeEarlyBoot(t *testing.T, cmdline string) {
 	t.Helper()
 	if os.Geteuid() == 0 {
@@ -160,15 +163,16 @@ func fakeEarlyBoot(t *testing.T, cmdline string) {
 }
 
 func TestMaybeSwitchRootStaysPutForInstallBoots(t *testing.T) {
-	// The installer runs from rootfs and powers off; a switch would
-	// only stuff its oversized payload into the overlay's bound.
+	// The installer runs from rootfs and then powers off. If it
+	// switched root, its large payload would exceed the overlay's
+	// size limit.
 	fakeEarlyBoot(t, "console=ttyS0 rdinit=/liken liken.install\n")
 	maybeSwitchRoot() // must take the install branch and return
 }
 
 func TestMaybeSwitchRootDegradesWhenTheSwitchFails(t *testing.T) {
-	// A failed switch is a degraded machine, not a dead one: the
-	// error is reported and the boot carries on from rootfs.
+	// A failed switch leaves a degraded machine, not a dead one. The
+	// error is reported, and the boot continues from rootfs.
 	fakeEarlyBoot(t, "console=ttyS0 rdinit=/liken liken.slot=A\n")
 	maybeSwitchRoot() // the switch fails (no privileges) and returns
 }

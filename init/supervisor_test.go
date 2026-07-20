@@ -1,8 +1,8 @@
 package main
 
-// Tests for the supervisor's plumbing: exit narration, output
-// prefixing, and the reaper's registry. Starting and stopping k3s
-// itself is QEMU territory.
+// Tests for the supervisor's internal mechanics: exit narration,
+// output prefixing, and the reaper's registry. Tests that start and
+// stop k3s itself run separately, under QEMU.
 
 import (
 	"bytes"
@@ -15,10 +15,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// The runtime discipline scales with the machine and with what the
-// cluster asks k3s to hold: a quarter of memory for the minimum
-// viable control plane, seven sixteenths once the helm feature
-// brings the chart renderer and its CRDs into the process.
+// The runtime discipline scales with the machine's memory and with
+// what the cluster asks k3s to hold: a quarter of memory for the
+// minimum viable control plane, and seven sixteenths once the helm
+// feature brings the chart renderer and its CRDs into the process.
 func TestK3sRuntimeEnv(t *testing.T) {
 	lean := k3sRuntimeEnv(1024*1024*1024, false)
 	if want := []string{"GOMEMLIMIT=256MiB", "GOGC=50"}; !slices.Equal(lean, want) {
@@ -30,8 +30,9 @@ func TestK3sRuntimeEnv(t *testing.T) {
 	}
 }
 
-// Wait statuses use the kernel's packing: an exit code rides in the
-// second byte, a terminating signal in the low seven bits.
+// Wait statuses use the kernel's packed format: an exit code occupies
+// the second byte, and a terminating signal occupies the low seven
+// bits.
 func TestDescribeExitForACleanExit(t *testing.T) {
 	if got := describeExit(unix.WaitStatus(0)); got != "status 0" {
 		t.Errorf("got %q", got)
@@ -105,9 +106,9 @@ func TestDeathRegistryWakesAWaiter(t *testing.T) {
 	}
 	got := make(chan unix.WaitStatus, 1)
 	go func() { got <- d.await(42) }()
-	// The waiter parks first; the recorded death must find it. Await
-	// registers under the lock, so looping until the waiter appears
-	// is race-free.
+	// The waiter parks first; the recorded death must find the
+	// waiter. await registers the waiter under the lock, so looping
+	// until the waiter appears carries no race condition.
 	for {
 		d.mu.Lock()
 		waiting := len(d.waiters) == 1
@@ -124,9 +125,9 @@ func TestDeathRegistryWakesAWaiter(t *testing.T) {
 
 func TestStopK3sNarratesTheExitTheReaperReports(t *testing.T) {
 	// stopK3s only signals and receives; the death arrives on the
-	// channel the way the reaper would post it. A real k3s stop is
-	// QEMU territory; what's pinned here is that a posted status ends
-	// the wait without escalation.
+	// channel the way the reaper would post it. A test of a real k3s
+	// stop runs under QEMU. What this test checks is that a posted
+	// status ends the wait, without escalation to SIGKILL.
 	cmd := exec.Command("sleep", "60")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -138,15 +139,16 @@ func TestStopK3sNarratesTheExitTheReaperReports(t *testing.T) {
 }
 
 func TestDescribeExitForAStoppedProcess(t *testing.T) {
-	// 0x7f is the kernel's "stopped" packing: neither an exit nor a
-	// termination signal, so the description falls back to raw hex.
+	// 0x7f is the kernel's packed value for a stopped process: it is
+	// neither an exit nor a termination signal, so the description
+	// falls back to raw hex.
 	if got := describeExit(unix.WaitStatus(0x7f)); got != "wait status 0x7f" {
 		t.Errorf("got %q", got)
 	}
 }
 
-// scriptedFetch replays a sequence of kubectl tables, repeating the
-// last one forever: the shape of a cluster converging.
+// scriptedFetch replays a sequence of kubectl tables, and repeats the
+// last table forever. This simulates a cluster converging over time.
 func scriptedFetch(outputs ...string) func() (string, bool) {
 	i := 0
 	return func() (string, bool) {
@@ -176,8 +178,8 @@ func TestPollAndReportGivesUpAtTheDeadline(t *testing.T) {
 }
 
 func TestPollAndReportSkipsFailedFetches(t *testing.T) {
-	// A fetch that fails (k3s not serving yet) produces no lines and
-	// no verdict; the loop just looks again.
+	// A fetch that fails, because k3s is not serving yet, produces
+	// no lines and no verdict. The loop tries again.
 	failures := 0
 	fetch := func() (string, bool) {
 		failures++

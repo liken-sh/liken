@@ -1,2 +1,5 @@
-# The built binary; `make` recreates it from the sources here.
+# The built binaries; `make` recreates them from the sources here.
+# `make` writes into dist/. A bare `go build` in this directory
+# writes ./init, named after the directory.
 dist/
+/init

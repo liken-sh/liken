@@ -1,35 +1,37 @@
-# k3s's configuration for a machine in the server role: the file
-# /etc/rancher/k3s/config.yaml, which `k3s server` reads on its own;
-# liken passes no flags. (A machine in the agent role reads agent.yaml
-# beside this file instead: k3s maps config keys onto flags, and an
-# agent would refuse the server-only ones here.) Everything only the
-# boot can derive (the join token, the cluster's address plan, this
-# machine's node IP) lands in config.yaml.d/boot.yaml, a drop-in
-# directory k3s reads alongside this file; init writes it fresh every
-# boot (see init/k3s.go).
+# This is k3s's configuration for a machine in the server role: the
+# file /etc/rancher/k3s/config.yaml, which `k3s server` reads on its
+# own. liken passes no flags. (A machine in the agent role reads
+# agent.yaml beside this file instead: k3s maps config keys onto
+# flags, and an agent would refuse the server-only keys here.)
+# Everything that only the boot can derive (the join token, the
+# cluster's address plan, this machine's node IP) lands in
+# config.yaml.d/boot.yaml, a drop-in directory that k3s reads
+# alongside this file. Init writes the drop-in fresh every boot (see
+# init/k3s.go).
 #
-# One key a reader might expect is absent by design: disable, the
+# One key a reader might expect is missing by design: disable, the
 # list of k3s's bundled conveniences (Traefik for ingress, a service
 # load balancer, a metrics server) that stay off. liken disables them
-# on principle — anything beyond the control plane itself should be a
-# declared, visible workload — but the Cluster manifest's
+# on principle: anything beyond the control plane itself should be a
+# declared, visible workload. But the Cluster manifest's
 # spec.features lets a deployment declare exactly that, so the list
-# is computed, not static: init renders the bundled set minus the
-# cluster's opt-ins into the boot drop-in each boot (init/k3s.go). A
+# is computed, not static. Init renders the bundled set, minus the
+# cluster's opt-ins, into the boot drop-in each boot (init/k3s.go). A
 # machine with no cluster document disables everything bundled.
 # CoreDNS is not on the list and never appears in the computed one:
 # pods without DNS are barely usable.
 
-# The local-path storage provisioner stays: it is how the Machine
-# spec's podStorage role reaches pods. A PersistentVolumeClaim becomes
-# a directory under this root, which is where liken mounts that role's
-# partition. On a machine that declares no podStorage the directory is
-# simply part of the RAM root, and PVCs are as ephemeral as everything
-# else.
+# The local-path storage provisioner stays enabled: it is how the
+# Machine spec's podStorage role reaches pods. A PersistentVolumeClaim
+# becomes a directory under this root, which is where liken mounts
+# that role's partition. On a machine that declares no podStorage,
+# the directory is simply part of the RAM root, and PVCs are as
+# short-lived as everything else there.
 default-local-storage-path: /var/lib/liken/pod-storage
 
-# The admin kubeconfig k3s writes; group-readable is fine on a machine
-# with exactly one user, who is root.
+# This is the admin kubeconfig that k3s writes. Group-readable
+# permissions are fine on a machine with exactly one user, who is
+# root.
 write-kubeconfig-mode: "0644"
 
 # NodePort services listen only on the node IP's interface: the
@@ -40,17 +42,17 @@ write-kubeconfig-mode: "0644"
 kube-proxy-arg:
   - nodeport-addresses=primary
 
-# Every liken machine's Node carries this label, applied by the
-# kubelet when the node registers. The OS DaemonSets (the operator,
-# the log relays) select on it, so they are never scheduled onto a
-# node whose OS is something else. In an all-liken cluster the label
-# is on every node and the selector changes nothing; it matters in a
-# mixed cluster, during a migration, when liken machines and the
-# nodes they are replacing share one cluster.
+# The kubelet applies this label to every liken machine's Node when
+# the node registers. The OS DaemonSets (the operator, the log
+# relays) select on it, so they never get scheduled onto a node whose
+# OS is something else. In an all-liken cluster the label is on every
+# node and the selector changes nothing. It matters in a mixed
+# cluster, during a migration, when liken machines and the nodes they
+# are replacing share one cluster.
 #
 # A machine's own labels (spec.nodeLabels in its manifest) join this
 # list at boot: init renders them into the drop-in under node-label+,
-# whose + suffix asks k3s to append to this list rather than replace
+# whose + suffix tells k3s to append to this list rather than replace
 # it (init/k3s.go).
 node-label:
   - liken.sh/machine=true

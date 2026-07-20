@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// catalog builds a Catalog from inline table content, the fixture
-// for every judgment test: aliases in modules.alias form, shipped
-// and builtin as module names.
+// catalog builds a Catalog from inline table content. This is the
+// fixture for every judgment test. It takes aliases in modules.alias
+// form, and shipped and builtin as module names.
 func catalog(t *testing.T, aliases string, shipped, builtin []string) *Catalog {
 	t.Helper()
 	table, err := LoadAliasTable(aliasFile(t, aliases))

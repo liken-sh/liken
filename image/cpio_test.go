@@ -1,9 +1,9 @@
 package image
 
 // Tests for the cpio writer. The consumer that matters is the
-// kernel's initramfs unpacker, which can't run in a unit test, so
-// these tests parse the newc format back out of the archive and check
-// the properties the unpacker relies on: magic numbers, header
+// kernel's initramfs unpacker, which cannot run in a unit test. So
+// these tests parse the newc format back out of the archive and
+// check the properties the unpacker relies on: magic numbers, header
 // arithmetic, 4-byte alignment, root ownership, and the trailer.
 
 import (
@@ -13,9 +13,9 @@ import (
 )
 
 // readArchive parses one archive with the production reader
-// (cpio_read.go) and asserts it stands alone: exactly one archive,
-// nothing after the trailer. Tests that expect concatenation call
-// readCPIO themselves.
+// (cpio_read.go) and asserts that it stands alone: exactly one
+// archive, nothing after the trailer. Tests that expect concatenation
+// call readCPIO themselves.
 func readArchive(t *testing.T, raw []byte) []cpioEntry {
 	t.Helper()
 	entries, rest, err := readCPIO(raw)
@@ -73,8 +73,8 @@ func TestArchiveEntriesBelongToRoot(t *testing.T) {
 }
 
 func TestArchiveAlignsOddSizes(t *testing.T) {
-	// Names and file bodies of every length must keep the following
-	// header on a 4-byte boundary, or the kernel reads garbage.
+	// Names and file bodies of every length must keep the next header
+	// on a 4-byte boundary. Otherwise the kernel reads incorrect data.
 	var buf bytes.Buffer
 	w := newArchive(&buf)
 	for i := range 5 {

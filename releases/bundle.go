@@ -1,37 +1,38 @@
 package releases
 
-// Bundling a release of liken: the artifacts and the document that
-// every fleet, everywhere, upgrades from.
+// This file bundles a release of liken: the artifacts and the
+// document that every fleet, everywhere, upgrades from.
 //
-// The bundle is eight artifacts. vmlinuz, the system image
-// (liken.sqfs, the OS as a read-only filesystem a machine mounts as
-// its root), and the boot archive (boot.cpio, the small initramfs
-// the boot loader stages) are the operating system, with no
-// deployment inside; the liken binary is the toolkit that turns them
-// into a deployment's bootable media without this repo or a build;
+// The bundle holds eight artifacts. vmlinuz, the system image
+// (liken.sqfs, the OS as a read-only filesystem that a machine mounts
+// as its root), and the boot archive (boot.cpio, the small initramfs
+// that the boot loader stages) are the operating system, with no
+// deployment inside. The liken binary is the toolkit that turns them
+// into a deployment's bootable media without this repo or a build.
 // systemd-bootx64.efi is the menu program that media boots (the
 // systemd-boot domain explains why a stick needs one when installed
-// machines don't); grub-boot.img and grub-core.img are the two
-// halves of the bootloader BIOS machines carry (the grub domain
-// explains why they need one when UEFI machines don't) — inert
-// passengers on a UEFI machine, and the bytes init writes into the
-// MBR and the biosBoot partition on a BIOS one. LICENSES.md is the
-// third-party notices the licensing domain assembles: several of the
-// artifacts carry other projects' GPL- and LGPL-licensed binaries,
-// whose terms require the notices to travel with the bytes, so the
-// notices are an artifact like any other and ride the same channel,
-// sticks, and slots the binaries do. Because nothing here embeds a
-// deployment, every digest is stable for a given source tree:
-// publishable on a release page, and the same for everyone.
+// machines do not). grub-boot.img and grub-core.img are the two
+// halves of the bootloader that BIOS machines carry (the grub domain
+// explains why they need one when UEFI machines do not). These stay
+// inert on a UEFI machine; on a BIOS machine, init writes their bytes
+// into the MBR and the biosBoot partition. LICENSES.md is the
+// third-party notices that the licensing domain assembles: several of
+// the artifacts carry other projects' GPL- and LGPL-licensed
+// binaries, and the license terms of those projects require the
+// notices to travel with the bytes. So the notices are an artifact
+// like any other, and ride the same channel, sticks, and slots the
+// binaries do. Because nothing here embeds a deployment, every digest
+// stays stable for a given source tree. This makes it publishable on
+// a release page, and the same for everyone.
 //
 // That stability is what lets machines upgrade straight from the
 // public channel. A deployment pins the release document's digest in
-// its Cluster's spec.releases.catalog (the entry this bundle prints),
-// its machines verify the document against the catalog and the
-// artifacts against the document, and each machine supplies the one
-// thing the release can't: its own deployment layer, carried forward
-// from the slot it is running on. Nothing is composed or hosted per
-// deployment.
+// its Cluster's spec.releases.catalog (the entry this bundle
+// prints). Its machines verify the document against the catalog, and
+// verify the artifacts against the document. Each machine supplies
+// the one thing the release cannot: its own deployment layer,
+// carried forward from the slot it is running on. Nothing is
+// composed or hosted for one deployment specifically.
 
 import (
 	"crypto/sha256"
@@ -44,12 +45,12 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// Bundle lays out a release: the named artifacts copied into
-// <channel>/<version>/ beside a release.yaml naming each by sha256
-// digest and size, and recording which upstream components shipped.
-// The version must fit liken's calendar grammar (the api package
-// defines it); enforcing that here, where versions are authored,
-// means a malformed one never reaches a channel at all.
+// Bundle lays out a release: it copies the named artifacts into
+// <channel>/<version>/, beside a release.yaml that names each one by
+// sha256 digest and size, and records which upstream components
+// shipped. The version must fit liken's calendar grammar (the api
+// package defines it). Bundle enforces this here, where versions are
+// authored, so a malformed version never reaches a channel at all.
 func Bundle(vmlinuz, systemImage, bootArchive, cli, bootMenu, grubBoot, grubCore, licenses, channelDir, version string, components []machine.ReleaseComponent, out io.Writer) error {
 	if err := api.ValidVersion(version); err != nil {
 		return err
@@ -62,8 +63,8 @@ func Bundle(vmlinuz, systemImage, bootArchive, cli, bootMenu, grubBoot, grubCore
 		return err
 	}
 
-	// The artifacts keep canonical names in the channel whatever
-	// their build-tree paths were, so the document and the URLs are
+	// The artifacts keep canonical names in the channel, whatever
+	// their build-tree paths were, so the document and the URLs stay
 	// the same for every release.
 	sources := []struct {
 		src, name string
@@ -95,8 +96,8 @@ func Bundle(vmlinuz, systemImage, bootArchive, cli, bootMenu, grubBoot, grubCore
 	}
 
 	// The components record what shipped inside those artifacts. The
-	// version above is a calendar date and deliberately says nothing
-	// about contents, so the document is where a reader learns which
+	// version above is a calendar date, and deliberately says nothing
+	// about contents. So the document is where a reader learns which
 	// kernel or k3s this release carries.
 	if len(components) > 0 {
 		document += "components:\n"
@@ -105,17 +106,17 @@ func Bundle(vmlinuz, systemImage, bootArchive, cli, bootMenu, grubBoot, grubCore
 		}
 	}
 
-	// The document is generated from the copies in the channel, the
-	// bytes that will actually be served, so the two can never
+	// Bundle generates the document from the copies in the channel,
+	// the bytes that will actually be served, so the two can never
 	// disagree.
 	if err := os.WriteFile(filepath.Join(dest, "release.yaml"), []byte(document), 0o644); err != nil {
 		return err
 	}
 
-	// The channel document at the root announces the newest release
+	// The channel document at the root names the newest release
 	// present, so a cluster can discover that something newer exists
 	// without listing the channel (the machine package explains why
-	// the document is advisory, never trusted).
+	// the document is advisory, and never trusted).
 	latest, err := writeChannelDocument(channelDir)
 	if err != nil {
 		return err
@@ -126,9 +127,9 @@ func Bundle(vmlinuz, systemImage, bootArchive, cli, bootMenu, grubBoot, grubCore
 	}
 	fmt.Fprintf(out, "\nchannel.yaml names the latest release: %s\n", latest)
 
-	// The document's own digest is the root of the trust chain: a
-	// person verifies a download against it, and a deployment commits
-	// it to its Cluster so the fleet can verify what it fetches.
+	// The document's own digest is the root of the trust chain. A
+	// person verifies a download against it. A deployment commits it
+	// to its Cluster, so the fleet can verify what it fetches.
 	digest, err := fileSHA256(filepath.Join(dest, "release.yaml"))
 	if err != nil {
 		return err
@@ -140,11 +141,12 @@ func Bundle(vmlinuz, systemImage, bootArchive, cli, bootMenu, grubBoot, grubCore
 }
 
 // writeChannelDocument rewrites the channel's root document to name
-// the newest release present. The newest is computed from what is
+// the newest release present. It computes the newest from what is
 // actually in the channel, not from the version just bundled, so
 // re-bundling an old release never moves the channel backwards. The
-// zero-padded calendar grammar makes plain string order the version
-// order (releases/versioning.md), so the max is the latest.
+// zero-padded calendar grammar makes plain string order match the
+// version order (releases/versioning.md), so the maximum string is
+// the latest version.
 func writeChannelDocument(channelDir string) (string, error) {
 	entries, err := os.ReadDir(channelDir)
 	if err != nil {

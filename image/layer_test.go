@@ -2,9 +2,9 @@ package image
 
 // Tests for the deployment layer. The fixtures stand in for the three
 // inputs: a manifests directory (a cluster document and machines), a
-// minted identity, and a kernel dist tree with a depmod index — small
-// fakes with the same shapes, so the tests need no vendored kernel
-// and no real deployment.
+// minted identity, and a kernel dist tree with a depmod index. These
+// are small fakes with the same shapes as the real thing, so the
+// tests need no vendored kernel and no real deployment.
 
 import (
 	"io"
@@ -69,8 +69,8 @@ func fixtureKernel(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	// dummy stands alone; veth depends on dummy (not true of the real
-	// veth, but the point is the closure).
+	// dummy stands alone; veth depends on dummy. This is not true of
+	// the real veth, but the point here is the dependency set.
 	dep := "kernel/drivers/net/dummy.ko.zst:\n" +
 		"kernel/drivers/net/veth.ko.zst: kernel/drivers/net/dummy.ko.zst\n"
 	if err := os.WriteFile(filepath.Join(modules, "modules.dep"), []byte(dep), 0o644); err != nil {
@@ -130,9 +130,9 @@ func TestLayerCarriesTheDeployment(t *testing.T) {
 }
 
 func TestLayerLeavesTheKubeconfigBehind(t *testing.T) {
-	// The operator's credential lives beside the identity but is not
-	// part of it: a machine image carrying the admin certificate
-	// would hand cluster-admin to anyone who reads the disk.
+	// The operator's credential lives beside the identity, but is not
+	// part of it. A machine image carrying the admin certificate would
+	// hand cluster-admin access to anyone who reads the disk.
 	manifests := fixtureManifests(t)
 	identityDir := t.TempDir()
 	if err := identity.Mint(identityDir, io.Discard); err != nil {
@@ -158,8 +158,9 @@ func TestLayerLeavesTheKubeconfigBehind(t *testing.T) {
 
 func TestLayerShipsDeclaredModulesWithTheirClosure(t *testing.T) {
 	entries := builtLayer(t, fixtureManifests(t, "veth"))
-	// veth pulls dummy via modules.dep, and shipping any module means
-	// shipping the full index the composed image will resolve with.
+	// veth pulls in dummy through modules.dep. Shipping any module
+	// means shipping the full index that the composed image will
+	// resolve against.
 	for _, want := range []string{
 		"lib/modules/9.9.9-test/kernel/drivers/net/veth.ko.zst",
 		"lib/modules/9.9.9-test/kernel/drivers/net/dummy.ko.zst",
@@ -182,8 +183,8 @@ func TestLayerSkipsModulesForAModulelessDeployment(t *testing.T) {
 }
 
 func TestLayerAcceptsABuiltinModule(t *testing.T) {
-	// A declared name the kernel carries built in needs no file; the
-	// layer must not fail the build over it.
+	// A declared name that the kernel carries built in needs no file.
+	// The layer must not fail the build over it.
 	entries := builtLayer(t, fixtureManifests(t, "binfmt_misc"))
 	for name := range entries {
 		if strings.HasSuffix(name, ".ko.zst") {

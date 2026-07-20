@@ -1,8 +1,9 @@
 package kubernetes
 
-// Tests for the API client against a real HTTP server
-// (net/http/httptest) rather than mocks: the client's whole job is
-// HTTP, so the tests exercise real requests and responses.
+// These tests run the API client against a real HTTP server
+// (net/http/httptest) instead of mocks. The client's whole job is to
+// send HTTP requests, so the tests use real requests and real
+// responses.
 
 import (
 	"encoding/json"
@@ -18,8 +19,9 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// testClient wires a Client to a test server, with a credentials
-// directory holding a token the way kubelet would have mounted one.
+// testClient connects a Client to a test server. It creates a
+// credentials directory that holds a token, the same way kubelet
+// mounts one.
 func testClient(t *testing.T, handler http.Handler) *Client {
 	t.Helper()
 	server := httptest.NewServer(handler)
@@ -106,8 +108,8 @@ func TestListClustersReadsTheCollection(t *testing.T) {
 }
 
 func TestInClusterClientNeedsTheEnvironment(t *testing.T) {
-	// Outside a pod the injected variables are absent, and that is
-	// the whole diagnosis.
+	// Outside a pod, the injected variables are absent. That absence
+	// is the entire diagnosis.
 	t.Setenv("KUBERNETES_SERVICE_HOST", "")
 	t.Setenv("KUBERNETES_SERVICE_PORT", "")
 	if _, err := InClusterClient(); err == nil {
@@ -115,9 +117,9 @@ func TestInClusterClientNeedsTheEnvironment(t *testing.T) {
 	}
 }
 
-// testCA is a self-signed certificate standing in for the cluster's
-// server CA. The client only ever parses it into a trust pool, so
-// its subject and validity dates never matter to these tests.
+// testCA is a self-signed certificate used in place of the cluster's
+// server CA. The client only parses it into a trust pool, so its
+// subject and validity dates do not matter for these tests.
 const testCA = `-----BEGIN CERTIFICATE-----
 MIIBhTCCASugAwIBAgIUOGbmxgO5IBnZ+AdPZ+KxpFp/WSowCgYIKoZIzj0EAwIw
 GDEWMBQGA1UEAwwNbGlrZW4tdGVzdC1jYTAeFw0yNjA3MTAxNDM2NTVaFw0zNjA3
@@ -132,8 +134,8 @@ FHJFfRsR8TLD
 `
 
 // serviceAccount points the serviceAccountDir seam at a directory
-// holding the given files, the way kubelet would have mounted them,
-// and restores the real path when the test ends.
+// that holds the given files, the same way kubelet would mount them.
+// It restores the real path when the test ends.
 func serviceAccount(t *testing.T, files map[string]string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -162,8 +164,8 @@ func TestInClusterClientBuildsFromTheEnvironment(t *testing.T) {
 
 func TestInClusterClientAtPrefersTheGivenEndpoint(t *testing.T) {
 	// A hostNetwork pod on a server machine reaches the API through
-	// its own loopback instead of the service VIP; the credentials
-	// are the same either way.
+	// its own loopback address instead of the service VIP. The
+	// credentials stay the same in both cases.
 	serviceAccount(t, map[string]string{"token": "test-token", "ca.crt": testCA})
 	client, err := InClusterClientAt("https://127.0.0.1:6443")
 	if err != nil {
@@ -189,9 +191,10 @@ func TestInClusterClientAtRejectsAnEmptyCA(t *testing.T) {
 }
 
 func TestDoNeedsAServiceAccountToken(t *testing.T) {
-	// The token is re-read from disk on every request (kubelet
-	// refreshes it as it approaches expiry); a missing token is a
-	// broken pod, reported as one.
+	// The client reads the token from disk again on every request,
+	// because kubelet refreshes it as it nears expiry. A missing
+	// token means a broken pod, and the client reports it as an
+	// error.
 	client := NewClient("http://unreachable", http.DefaultClient, t.TempDir())
 	if _, err := client.Do(http.MethodGet, "/x", "", nil); err == nil {
 		t.Error("a missing token must fail the request")

@@ -2,25 +2,26 @@ package main
 
 // Supervising k3s.
 //
-// This file is the entire service management of this OS: start one
-// process, and when it dies, start it again. Everything a traditional
-// init manages above that line (orderings, dependencies, sockets,
-// timers) belongs to Kubernetes, which is the process being
-// supervised.
+// This file is the complete service manager for this OS. It starts
+// one process, and starts that process again when it dies. Kubernetes
+// manages everything a traditional init manages above that level:
+// order, dependencies, sockets, and timers. Kubernetes is the process
+// under supervision here.
 //
-// There's one genuinely subtle problem here, and it's worth
-// understanding because it's the classic bug in every homemade PID 1.
-// As PID 1 we must reap *every* dead process on the machine (orphans
-// reparent to us), so somewhere a loop calls wait(-1), "collect any
-// exited child". But the supervisor also needs the exit status of the
-// specific child it started, and wait(-1) in one goroutine races
-// wait(pid) in another: whichever call collects the status first
-// consumes it, and the loser gets an error instead. The fix is a
-// single authority: only the reaper ever waits, and everyone else
-// subscribes. The reaper posts every exit it collects; exits nobody
-// has claimed yet are parked (a child can die before its parent even
-// asks), and awaitDeath picks up parked statuses or blocks until one
-// arrives.
+// One problem here is subtle and worth understanding, because it is
+// the classic bug in every homemade PID 1. As PID 1, this program
+// must reap every dead process on the machine, because orphan
+// processes reparent to PID 1. So a loop somewhere calls wait(-1),
+// which collects the status of any exited child. But the supervisor
+// also requires the exit status of the specific child it started.
+// wait(-1) in one goroutine races wait(pid) in another goroutine. The
+// call that collects the status first consumes it. The other call
+// gets an error instead. The fix is a single authority. Only the
+// reaper calls wait. Every other part of the code subscribes to the
+// reaper. The reaper posts every exit status it collects. When
+// nobody has claimed an exit yet, the status stays parked, because a
+// child can die before its parent asks for it. The registry's await
+// method reads a parked status, or it waits until a status arrives.
 
 import (
 	"bytes"
@@ -42,13 +43,15 @@ import (
 )
 
 // lineWriter forwards each complete line it receives to its
-// destination with a prefix. Child processes write in arbitrary
-// chunks; buffering to line boundaries keeps their output and
-// liken's own messages from interleaving mid-line. The destination
-// is the raw console, not init's kmsg-routed stdout: k3s's volume
-// would churn the kernel's small ring buffer in seconds, and its
-// lines already reach the cluster from the log file the k3s log
-// relay tails, so buffering the echo would ship everything twice.
+// destination, with a prefix added. Child processes write output in
+// chunks of arbitrary size. Buffering the output to line boundaries
+// stops the child's output and liken's own messages from
+// interleaving in the middle of a line. The destination is the raw
+// console, not init's kmsg-routed stdout. k3s produces enough output
+// to fill the kernel's small ring buffer within seconds. k3s's lines
+// already reach the cluster through the log file that the k3s log
+// relay tails, so buffering the echo there too would send everything
+// twice.
 type lineWriter struct {
 	dest   io.Writer
 	prefix string
@@ -60,7 +63,8 @@ func (w *lineWriter) Write(p []byte) (int, error) {
 	for {
 		line, err := w.buf.ReadString('\n')
 		if err != nil {
-			// No newline yet: put the partial line back and wait.
+			// No newline has arrived yet. Put the partial line back in
+			// the buffer and wait.
 			w.buf.WriteString(line)
 			break
 		}
@@ -70,17 +74,18 @@ func (w *lineWriter) Write(p []byte) (int, error) {
 }
 
 // reap collects the exit status of any child process for as long as
-// the machine plane runs. The plane only stops at shutdown, after
-// every process it might collect has already been stopped. SIGCHLD
-// arrives whenever a child dies; because signal coalescing can fold
-// many deaths into one delivery, each wakeup collects every exited
+// the machine plane runs. The plane stops only at shutdown, after
+// every process it might collect has already stopped. SIGCHLD
+// arrives whenever a child dies. Signal coalescing can fold many
+// deaths into one delivery, so each wakeup collects every exited
 // child, not just one. This loop is the only place in liken that
-// calls wait; every exit status it collects is posted to the death
-// registry below, where whoever started the process can claim it.
-// (Go note: signal.Notify registers a handler with the runtime and
-// forwards deliveries onto a channel, turning an async interrupt into
-// an ordinary receive loop, and satisfying the "PID 1 must install
-// handlers" rule from main.go's header comment.)
+// calls wait. It posts every exit status it collects to the death
+// registry below, where whoever started the process can claim the
+// status.
+// (Go note: signal.Notify registers a handler with the runtime, and
+// forwards deliveries onto a channel. This turns an asynchronous
+// interrupt into an ordinary receive loop, and satisfies the "PID 1
+// must install handlers" rule from main.go's header comment.)
 func reap(ctx context.Context) error {
 	sigchld := make(chan os.Signal, 1)
 	signal.Notify(sigchld, unix.SIGCHLD)
@@ -92,8 +97,8 @@ func reap(ctx context.Context) error {
 		case <-sigchld:
 		}
 		for {
-			// -1 means "any child"; WNOHANG means "don't block if none
-			// have exited", in which case Wait4 returns pid 0.
+			// -1 means "any child". WNOHANG means "do not block if none
+			// have exited"; in that case, Wait4 returns pid 0.
 			var status unix.WaitStatus
 			pid, err := unix.Wait4(-1, &status, unix.WNOHANG, nil)
 			if pid <= 0 || err != nil {
@@ -105,10 +110,11 @@ func reap(ctx context.Context) error {
 }
 
 // deathRegistry connects the reaper (the only place wait() happens)
-// to everyone awaiting an exit: the reaper records each death, and a
-// waiter either picks up a status already parked or leaves a channel
-// to be filled. One value with methods, mirroring how machinePlane
-// encapsulates the other half of init's shared state.
+// to every part of the code that awaits an exit. The reaper records
+// each death, and a waiter either reads a status already parked, or
+// leaves a channel open to be filled later. deathRegistry is one
+// value with methods, the same pattern machinePlane uses to
+// encapsulate the other half of init's shared state.
 type deathRegistry struct {
 	mu        sync.Mutex
 	waiters   map[int]chan unix.WaitStatus
@@ -120,7 +126,8 @@ var deaths = &deathRegistry{
 	unclaimed: map[int]unix.WaitStatus{},
 }
 
-// record is called by the reaper as it collects each exit.
+// record stores the exit status that the reaper collects for each
+// process.
 func (d *deathRegistry) record(pid int, status unix.WaitStatus) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -132,7 +139,7 @@ func (d *deathRegistry) record(pid int, status unix.WaitStatus) {
 	}
 }
 
-// await blocks until the reaper has collected the given pid.
+// await waits until the reaper has collected the given pid.
 func (d *deathRegistry) await(pid int) unix.WaitStatus {
 	d.mu.Lock()
 	if status, ok := d.unclaimed[pid]; ok {
@@ -149,22 +156,22 @@ func (d *deathRegistry) await(pid int) unix.WaitStatus {
 const (
 	k3sBinary = "/bin/k3s"
 
-	// The k3s log lives on clusterState, in a directory that is
-	// plainly liken's so it can never be mistaken for a file k3s
-	// manages. Landing on the persistent disk (when the machine has
-	// one) is what lets a log survive the boot that wrote it, and
-	// what makes the log relay's mount a stable path. containerd's
-	// log is k3s's own choice of path on the same filesystem; init
-	// only ever touches it at rotation time (logrotate.go).
+	// The k3s log lives on clusterState, in a directory that clearly
+	// belongs to liken, so nothing can mistake it for a file that k3s
+	// manages. When the machine has a persistent disk, storing the
+	// log there lets the log survive the boot that wrote it, and
+	// gives the log relay's mount a stable path. containerd chooses
+	// its own log path on the same filesystem. init touches that log
+	// only at rotation time (logrotate.go).
 	likenLogDir   = "/var/lib/rancher/k3s/liken"
 	k3sLog        = likenLogDir + "/k3s.log"
 	containerdLog = "/var/lib/rancher/k3s/agent/containerd/containerd.log"
 )
 
-// postMortem is the end of a one-shot boot: with no shell to
-// investigate from, init answers the questions an investigator would
-// ask. What environment did children inherit, and do the tools they
-// need actually resolve and run?
+// postMortem runs at the end of a one-shot boot. There is no shell to
+// investigate from, so postMortem prints the facts an investigator
+// would need: the environment that child processes inherited, and
+// whether the tools they need resolve and run correctly.
 func postMortem() {
 	fmt.Printf("liken: post-mortem: init PATH=%s\n", os.Getenv("PATH"))
 	resolved, err := filepath.EvalSymlinks("/sbin/iptables")
@@ -180,38 +187,41 @@ func postMortem() {
 	}
 }
 
-// superviseK3s runs k3s forever, with two interruptions it honors:
-// a reboot request from the operator, and a restart request, the
-// lighter disruption that applies staged restart-class changes
-// (cluster/changes.go) by bouncing the k3s child in place. It never
-// returns otherwise: whenever k3s exits on its own, it gets
-// restarted, with backoff, so a fast crash loop doesn't flood the
-// console.
+// superviseK3s runs k3s forever, and honors two kinds of
+// interruption: a reboot request from the operator, and a restart
+// request. A restart request is the lighter disruption: it applies
+// staged restart-class changes (cluster/changes.go) by bouncing the
+// k3s child process in place. superviseK3s never returns for any
+// other reason. Whenever k3s exits on its own, superviseK3s restarts
+// it, with backoff, so a fast crash loop does not flood the console.
 //
-// The intent channels are selected in *both* of the supervisor's
-// states: while k3s runs, and during the backoff sleep between
-// restarts. That second select is what makes a request unable to
-// race the restart decision: they're alternatives of one select in
-// one goroutine, so an intent that arrives while k3s is crash-looping
-// neither waits out the sleep nor collides with a restart.
+// The code selects on the intent channels in *both* states of the
+// supervisor: while k3s runs, and during the backoff sleep between
+// restarts. That second select stops a request from racing the
+// restart decision. Both selects are alternatives within one select
+// statement in one goroutine, so an intent that arrives while k3s is
+// crash-looping does not wait out the sleep, and does not collide
+// with a restart.
 //
 // A deliberate bounce is not a crash. applyRestart runs while k3s
-// still serves (all the re-rendering happens before any downtime)
-// and answers whether anything was actually applied; only then is
-// k3s stopped, gracefully, and started again immediately — skipping
-// the oneshot check and the backoff entirely, whose subjects are
-// k3s failures, not liken decisions. Stopping k3s does not stop its
-// containers (the containerd shims hold them), which is the entire
-// premise of the restart tier: the machine and its pods stay up
-// while k3s reloads the configuration it only reads at start.
+// still serves traffic, so all the re-rendering happens before any
+// downtime, and applyRestart reports whether it actually applied
+// anything. Only then does superviseK3s stop k3s gracefully and
+// start it again immediately. This skips the oneshot check and the
+// backoff entirely, because both apply to k3s failures, not to liken
+// decisions. Stopping k3s does not stop its containers, because the
+// containerd shims hold them. This is the entire basis for the
+// restart tier: the machine and its pods stay up while k3s reloads
+// the configuration that k3s only reads at start.
 //
-// The liken.oneshot boot parameter disables the crash restart: k3s
-// runs once and its exit powers the machine down. That makes a k3s
-// failure observable from outside (QEMU exits, the console is a
-// complete record), which is what debugging and automated runs need
-// from a machine with no shell. A reboot intent is honored even in
-// oneshot: under QEMU's -no-reboot the restart is a clean exit,
-// which is exactly what a bounded harness run wants.
+// The liken.oneshot boot parameter disables the crash restart. k3s
+// runs once, and its exit powers the machine down. This makes a k3s
+// failure visible from outside the machine: QEMU exits, and the
+// console holds a complete record. Debugging and automated test runs
+// need this visibility on a machine with no shell. superviseK3s still
+// honors a reboot intent in oneshot mode. Under QEMU's -no-reboot
+// flag, the restart is a clean exit, exactly what a bounded harness
+// run needs.
 func superviseK3s(role api.Role, reboot <-chan machine.RebootIntent,
 	restarts <-chan machine.RestartIntent, applyRestart func(machine.RestartIntent) bool) {
 	backoff := time.Second
@@ -222,8 +232,9 @@ func superviseK3s(role api.Role, reboot <-chan machine.RebootIntent,
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "liken: k3s: %v\n", err)
 		} else {
-			// The reaper is the only waiter (see the file comment);
-			// this goroutine just carries its answer into the select.
+			// The reaper is the only waiter (see the file comment).
+			// This goroutine only carries the reaper's answer into
+			// the select statement.
 			died := make(chan unix.WaitStatus, 1)
 			go func() { died <- deaths.await(cmd.Process.Pid) }()
 
@@ -238,15 +249,15 @@ func superviseK3s(role api.Role, reboot <-chan machine.RebootIntent,
 				case intent := <-reboot:
 					stopK3s(cmd.Process.Pid, died)
 					_ = cmd.Process.Release()
-					// This close is part of the shutdown ordering, not
-					// tidiness: the log lives on clusterState, which
-					// rebootMachine is about to unmount, and an open
-					// handle there would make that unmount fail busy.
+					// This close is part of the shutdown order, not
+					// cleanup. The log lives on clusterState, which
+					// rebootMachine is about to unmount. An open file
+					// handle there would make that unmount fail as busy.
 					logf.Close()
 					rebootMachine(intent) // never returns
 				case intent := <-restarts:
-					// A stale or duplicate intent applies nothing, and
-					// a running k3s is not disturbed over it.
+					// A stale or duplicate intent applies nothing. A
+					// running k3s is not disturbed because of it.
 					if !applyRestart(intent) {
 						continue running
 					}
@@ -260,7 +271,7 @@ func superviseK3s(role api.Role, reboot <-chan machine.RebootIntent,
 			}
 		}
 		if bounced {
-			continue // straight back to startK3s: a bounce is not a crash
+			continue // goes straight back to startK3s: a bounce is not a crash
 		}
 		if bootParam("liken.oneshot") {
 			postMortem()
@@ -269,9 +280,9 @@ func superviseK3s(role api.Role, reboot <-chan machine.RebootIntent,
 			return
 		}
 
-		// A k3s that ran for a while resets the backoff; one that died
-		// immediately doubles it, capped so a truly broken
-		// configuration still retries every half minute.
+		// A k3s that ran for a while resets the backoff. One that died
+		// immediately doubles the backoff. The backoff is capped, so a
+		// truly broken configuration still retries every half minute.
 		if time.Since(started) > time.Minute {
 			backoff = time.Second
 		} else if backoff < 30*time.Second {
@@ -284,44 +295,48 @@ func superviseK3s(role api.Role, reboot <-chan machine.RebootIntent,
 		case intent := <-reboot:
 			rebootMachine(intent) // k3s is already dead; nothing to stop
 		case intent := <-restarts:
-			// k3s is already down: apply the staged changes now and
-			// skip the rest of the delay, since the next start will
-			// read them either way.
+			// k3s is already down. Apply the staged changes now, and
+			// skip the rest of the delay, because the next start
+			// reads the changes either way.
 			_ = applyRestart(intent)
 		}
 	}
 }
 
-// k3sRuntimeEnv is the Go runtime discipline init imposes on k3s,
-// derived from the machine's memory and from what the cluster asks
-// k3s to carry. Go's collector left alone lets a process's heap grow
-// to twice its live data before collecting, which is the right trade
-// on a machine with memory to spare and the wrong one on the small
-// machines liken targets, where k3s is the dominant resident and
-// every uncollected megabyte comes out of the workloads' budget.
+// k3sRuntimeEnv is the Go runtime discipline that init imposes on
+// k3s. init derives the discipline from the machine's memory, and
+// from what the cluster asks k3s to carry. Left alone, Go's
+// collector lets a process's heap grow to twice its live data before
+// it collects garbage. That trade is right on a machine with memory
+// to spare. It is the wrong trade on the small machines liken
+// targets, where k3s is the dominant resident process, and every
+// uncollected megabyte reduces the workloads' memory budget.
 //
-// GOMEMLIMIT is a soft ceiling on everything the runtime manages
-// (heap, stacks, its own metadata): approaching it, the collector
-// runs harder rather than growing; past it, the runtime caps GC at
-// half the process's CPU and lets the heap grow anyway, so a genuine
-// spike degrades into slowness, never a heap-exhaustion crash. The
-// ceiling scales with the features the cluster declares, because
-// they are what the heap holds: a minimum viable control plane fits
-// comfortably under a quarter of the machine, while the helm feature
-// (and everything that requires it, like traefik) brings the chart
-// renderer and Traefik's CRDs into the process and gets seven
-// sixteenths — the budget that leaves a 1GB machine room for the
+// GOMEMLIMIT is a soft ceiling on everything the runtime manages:
+// heap, stacks, and its own metadata. As memory use approaches the
+// ceiling, the collector runs harder instead of letting the heap
+// grow. Past the ceiling, the runtime caps garbage collection at half
+// the process's CPU and lets the heap grow anyway. So a genuine
+// memory spike degrades into slowness, and never causes a
+// heap-exhaustion crash. The ceiling scales with the features the
+// cluster declares, because those features are what fill the heap. A
+// minimum viable control plane fits comfortably under a quarter of
+// the machine's memory. The helm feature, and everything that
+// requires it, such as traefik, brings the chart renderer and
+// Traefik's CRDs into the process, and needs seven sixteenths of the
+// machine's memory. That budget leaves a 1GB machine room for the
 // container runtime, the pods themselves, the kernel's own caches,
 // and free headroom for the next convergence. GOGC=50 sets the
-// everyday pace under either ceiling: collect at fifty percent heap
-// growth instead of a hundred, trading a little CPU all the time so
-// the process's resting size stays near its live data.
+// everyday pace under either ceiling: it collects garbage at fifty
+// percent heap growth instead of a hundred percent. This trades a
+// little CPU all the time, so the process's resting size stays near
+// its live data size.
 //
-// containerd and the shims inherit this environment from k3s. That
+// containerd and the shims inherit this environment from k3s. This
 // is deliberate and cheap: they are Go programs a fraction of the
-// limit's size, so the ceiling never constrains them and the GC pace
-// keeps them lean too. Workload processes inherit nothing; their
-// environments come from their pod specs.
+// size of the limit, so the ceiling never constrains them, and the
+// GC pace keeps them lean too. Workload processes inherit nothing.
+// Their environments come from their pod specs.
 func k3sRuntimeEnv(memoryBytes uint64, helm bool) []string {
 	limit := memoryBytes / 4
 	if helm {
@@ -333,38 +348,40 @@ func k3sRuntimeEnv(memoryBytes uint64, helm bool) []string {
 	}
 }
 
-// k3sMemoryDiscipline is the runtime environment startK3s gives every
-// k3s it launches. writeK3sBootConfig derives it beside the boot
-// drop-in — at boot and again on every applied restart — so a
-// restart that changes the cluster's features re-scales the ceiling
-// on the same bounce that reconfigures k3s.
+// k3sMemoryDiscipline is the runtime environment that startK3s gives
+// every k3s process it launches. writeK3sBootConfig derives this
+// environment beside the boot drop-in, at boot and again on every
+// applied restart. So a restart that changes the cluster's features
+// re-scales the ceiling on the same bounce that reconfigures k3s.
 var k3sMemoryDiscipline []string
 
-// startK3s launches k3s in the machine's role and hands back the
-// running command and its log file (which must stay open as long as
-// the process writes; the console copy flows through an in-process
-// pipe).
+// startK3s launches k3s in the machine's role, and returns the
+// running command and its log file. The log file must stay open as
+// long as the process writes to it. The console copy flows through
+// an in-process pipe.
 func startK3s(role api.Role) (*exec.Cmd, io.Closer, error) {
-	// k3s's output goes two places: a file, and the console, where it
-	// arrives live, line-buffered, and prefixed so it's
-	// distinguishable from liken's own messages. On a machine with no
-	// shell, the console is the only way to read a log; the file is
-	// what the k3s log relay tails into the cluster. The file writer
-	// caps a boot's log so a chatty k3s can't fill the filesystem it
+	// k3s's output goes to two places: a file, and the console. On
+	// the console, the output arrives live, line-buffered, and
+	// prefixed, so a reader can tell it apart from liken's own
+	// messages. On a machine with no shell, the console is the only
+	// way to read a log. The file is what the k3s log relay tails
+	// into the cluster. The file writer caps a boot's log, so a k3s
+	// that writes a lot of output cannot fill the filesystem it
 	// shares with etcd (logrotate.go).
 	logf, err := openCappedLog(k3sLog, k3sLogCap)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// This is the one place liken's role vocabulary meets k3s's: a
-	// leader runs `k3s server`, a follower runs `k3s agent`
-	// (cluster/cluster.go). Configuration lives in files, not flags:
-	// a leader's k3s reads /etc/rancher/k3s/config.yaml on its own,
-	// and a follower's is pointed at its own file (whose leader-only
-	// sibling would otherwise be misread as unknown flags). Both were
-	// joined with this boot's derived drop-in by k3s.go before we got
-	// here.
+	// This is the one place where liken's role vocabulary meets
+	// k3s's own vocabulary: a leader runs `k3s server`, and a
+	// follower runs `k3s agent` (cluster/cluster.go). Configuration
+	// lives in files, not in flags. A leader's k3s reads
+	// /etc/rancher/k3s/config.yaml on its own. A follower's k3s is
+	// pointed at its own file, because the leader-only config file
+	// would otherwise be misread as unknown flags. k3s.go joins both
+	// config files with this boot's derived drop-in before this code
+	// runs.
 	args := []string{"server"}
 	if role == api.RoleFollower {
 		args = []string{"agent", "--config", k3sAgentConfig}
@@ -383,10 +400,11 @@ func startK3s(role api.Role) (*exec.Cmd, io.Closer, error) {
 	return cmd, logf, nil
 }
 
-// stopK3s asks k3s to exit and waits for the reaper's confirmation,
-// escalating to SIGKILL if it takes too long. It only signals and receives;
-// the reaper stays the sole authority on wait (the file comment's one
-// rule).
+// stopK3s asks k3s to exit, and waits for the reaper to confirm the
+// exit. If k3s takes too long to exit, stopK3s escalates to SIGKILL.
+// stopK3s only sends the signal and receives the confirmation. The
+// reaper stays the sole authority on calling wait (the file comment's
+// one rule).
 func stopK3s(pid int, died <-chan unix.WaitStatus) {
 	fmt.Printf("liken: stopping k3s (pid %d)\n", pid)
 	_ = unix.Kill(pid, unix.SIGTERM)
@@ -412,21 +430,23 @@ func describeExit(status unix.WaitStatus) string {
 }
 
 // reportWhenReady watches for the moment the machine becomes a
-// working Kubernetes node: it polls `k3s kubectl get nodes` (which
-// reads the admin kubeconfig k3s writes once its API is serving) and
-// prints the node's status as it changes: registering, NotReady, and
-// finally Ready. It's a machine-plane component whose work completes
-// once the report is finished, so every exit path returns nil.
+// working Kubernetes node. It polls `k3s kubectl get nodes`, which
+// reads the admin kubeconfig that k3s writes once its API starts
+// serving. reportWhenReady prints the node's status as the status
+// changes: registering, NotReady, and finally Ready. reportWhenReady
+// is a machine-plane component. Its work completes once it prints
+// the report, so every exit path returns nil.
 //
-// This reporter (and reportPods below) is the one resident of the
-// machine plane that k3s does not depend on, which the two-planes
-// rule (components.go) would normally send into the cluster. It
-// stays by deliberate exception: its whole subject is the window
-// before the cluster can speak for itself, when k3s is starting and
-// the operator pod doesn't exist yet, and on a shell-less machine
-// the console is the only place that story can be told. The operator
-// takes over the reporting the moment it runs; this is the bridge to
-// that moment.
+// This reporter, and reportPods below, is the one resident of the
+// machine plane that k3s does not depend on. The two-planes rule
+// (components.go) would normally send a component like this into the
+// cluster. It stays in the machine plane by deliberate exception. Its
+// entire subject is the window before the cluster can report on
+// itself: while k3s is starting, and before the operator pod exists.
+// On a machine with no shell, the console is the only place that can
+// show this information. The operator takes over reporting the
+// moment the operator runs. reportWhenReady is the bridge to that
+// moment.
 func reportWhenReady(ctx context.Context) error {
 	fetch := func() (string, bool) {
 		return run(k3sBinary, "kubectl", "get", "nodes", "--no-headers")
@@ -440,9 +460,10 @@ func reportWhenReady(ctx context.Context) error {
 	return nil
 }
 
-// reportPods prints the system pods starting up after the node goes
-// Ready, then goes quiet once everything is Running: the console
-// equivalent of watching `kubectl get pods -A` settle.
+// reportPods prints the system pods as they start, after the node
+// goes Ready. It stops printing once every pod reaches Running. This
+// is the console equivalent of watching `kubectl get pods -A` until
+// the output settles.
 func reportPods(ctx context.Context) {
 	fetch := func() (string, bool) {
 		return run(k3sBinary, "kubectl", "get", "pods", "-A", "--no-headers")
@@ -454,12 +475,13 @@ func reportPods(ctx context.Context) {
 	}
 }
 
-// pollAndReport is the shape both reporters share: fetch a kubectl
-// table on an interval, print it under the prefix whenever it
-// changes, and answer true the moment it satisfies settled — or false
-// when patience runs out or the plane shuts down. Printing only
-// changes is what keeps the console readable: a table that sits
-// unchanged for a minute produces no lines at all.
+// pollAndReport is the pattern both reporters share: fetch a kubectl
+// table on an interval, print the table under the prefix whenever it
+// changes, and return true the moment the table satisfies settled.
+// pollAndReport returns false when patience runs out, or when the
+// plane shuts down. Printing only the changes keeps the console
+// readable: a table that stays unchanged for a minute produces no
+// lines at all.
 func pollAndReport(ctx context.Context, interval, patience time.Duration, prefix string,
 	fetch func() (string, bool), settled func(string) bool) bool {
 	last := ""
@@ -485,8 +507,8 @@ func pollAndReport(ctx context.Context, interval, patience time.Duration, prefix
 	return false
 }
 
-// containsReady looks for the word Ready as a whole status field, so
-// NotReady doesn't match.
+// containsReady looks for the word Ready as a whole status field.
+// This means NotReady does not match.
 func containsReady(out string) bool {
 	for line := range strings.SplitSeq(out, "\n") {
 		fields := strings.Fields(line)
@@ -498,8 +520,7 @@ func containsReady(out string) bool {
 }
 
 // podsSettled reports whether every pod in the table has reached
-// Running or Completed, the status field being kubectl's fourth
-// column.
+// Running or Completed. The status field is kubectl's fourth column.
 func podsSettled(out string) bool {
 	for line := range strings.SplitSeq(out, "\n") {
 		fields := strings.Fields(line)
@@ -510,11 +531,12 @@ func podsSettled(out string) bool {
 	return true
 }
 
-// runNarrated executes a command with its output echoed live to the
-// console, prefixed like k3s's, and reports whether it exited
-// cleanly. It's for commands whose output matters to someone watching
-// a boot (mke2fs reporting on the filesystem it's making), where run's
-// captured-output shape would hide it.
+// runNarrated executes a command, echoes its output live to the
+// console with a prefix like k3s's output, and reports whether the
+// command exited cleanly. Use runNarrated for commands whose output
+// matters to someone watching a boot, such as mke2fs reporting on the
+// filesystem it creates. run's captured-output shape would hide that
+// output instead.
 func runNarrated(prefix, path string, args ...string) bool {
 	cmd := exec.Command(path, args...)
 	w := &lineWriter{dest: console, prefix: prefix}
@@ -529,10 +551,10 @@ func runNarrated(prefix, path string, args ...string) bool {
 	return status.Exited() && status.ExitStatus() == 0
 }
 
-// run executes a command and returns its output, waiting for it via
-// the reaper (see the file comment: nobody but the reaper calls
-// wait). Reading the pipe to EOF tells us the process is done writing;
-// the reaper tells us how it died.
+// run executes a command and returns its output. It waits for the
+// command through the reaper (see the file comment: nobody but the
+// reaper calls wait). Reading the pipe to EOF shows that the process
+// finished writing. The reaper reports how the process died.
 func run(path string, args ...string) (string, bool) {
 	cmd := exec.Command(path, args...)
 	out, err := cmd.StdoutPipe()
@@ -543,8 +565,8 @@ func run(path string, args ...string) (string, bool) {
 	if err := cmd.Start(); err != nil {
 		return "", false
 	}
-	// Reading the pipe to EOF is how we know the process is done
-	// writing; the reaper tells us how it died.
+	// Reading the pipe to EOF shows that the process finished
+	// writing. The reaper reports how the process died.
 	buf, _ := io.ReadAll(out)
 	status := deaths.await(cmd.Process.Pid)
 	_ = cmd.Process.Release()

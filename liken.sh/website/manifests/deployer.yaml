@@ -1,21 +1,21 @@
 # The CI deploy credential's authority: the user "website-deployer"
 # may update the website's content, and nothing else.
 #
-# The user is not declared anywhere — Kubernetes has no user objects.
-# CI presents a client certificate whose common name is
-# website-deployer, signed by the cluster's client CA; terraform
-# mints it offline from identity/ and delivers it to GitHub's secret
-# store (terraform.tf tells that story). These rules are what give
-# the name its meaning: exactly the verbs a content deploy performs —
-# rewrite the ConfigMap, restart the Deployment, watch the rollout
-# land — inside this one namespace. A leaked credential can deface
-# the website; it cannot read a secret, touch kube-system, or reach
-# the machines.
+# The user is not declared anywhere, because Kubernetes has no user
+# objects. CI presents a client certificate whose common name is
+# website-deployer, signed by the cluster's client CA. terraform
+# mints this certificate offline from identity/ and delivers it to
+# GitHub's secret store (terraform.tf tells that story). These rules
+# are what give the name its meaning: exactly the verbs that a
+# content deploy performs (rewrite the ConfigMap, restart the
+# Deployment, watch the rollout land), inside this one namespace. A
+# leaked credential can deface the website. It cannot read a secret,
+# touch kube-system, or reach the machines.
 #
-# Authority living here rather than in the certificate is also the
-# revocation story, since certificates themselves can't be recalled:
-# delete the RoleBinding and the certificate authenticates a user who
-# can do nothing.
+# Keeping authority here, rather than in the certificate, is also
+# the revocation story, since nobody can recall a certificate once
+# issued. Instead, delete the RoleBinding, and the certificate
+# authenticates a user who can do nothing.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:

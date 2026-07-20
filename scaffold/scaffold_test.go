@@ -1,8 +1,9 @@
 package scaffold
 
-// Tests for the scaffold: scripted answers in, a parseable deployment
-// directory out. The answers fixture types one line per question, so
-// each test reads as the interview it performs.
+// These tests run the scaffold with scripted answers as input, and
+// check the deployment directory it produces for parseable output.
+// The answers fixture types one line per question, so each test
+// reads like the interview it runs.
 
 import (
 	"io"
@@ -59,8 +60,8 @@ func parsedMachine(t *testing.T, dir, name string) *machine.Machine {
 	return m
 }
 
-// defaultAnswers accepts every default: a one-machine cluster on one
-// disk with two NICs.
+// defaultAnswers accepts every default. It produces a one-machine
+// cluster on one disk with two NICs.
 func defaultAnswers() []string {
 	return []string{
 		"", // cluster name: the directory's
@@ -184,9 +185,10 @@ func TestScaffoldsASingleNICMachine(t *testing.T) {
 }
 
 func TestScaffoldReasksUntilAnswersHold(t *testing.T) {
-	// Wrong answers ahead of right ones: an even leader count, an
-	// address outside the subnet, a two-disk answer, a misspelled
-	// policy. Each re-asks rather than fails.
+	// This sends wrong answers before right ones: an even leader
+	// count, an address outside the subnet, a two-disk answer, and a
+	// misspelled policy. Each wrong answer causes a re-ask, not a
+	// failure.
 	dir := scaffolded(t,
 		"",            // cluster name
 		"a b c",       // machines

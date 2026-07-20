@@ -1,28 +1,30 @@
 package image
 
-// The install stick: one bootable disk image per deployment.
+// This file builds the install stick: one bootable disk image for
+// each deployment.
 //
-// A stick is what turns a downloaded release and a deployment layer
-// into running machines. Its disk image is a GPT with a single EFI
-// system partition, and the partition holds two kinds of thing: the
-// boot half (systemd-boot as the well-known \EFI\BOOT\BOOTX64.EFI
-// that firmware runs from removable media, its menu configuration,
-// and the files the menu entries boot) and the install payload the
+// A stick turns a downloaded release and a deployment layer into
+// running machines. Its disk image is a GPT with a single EFI system
+// partition, and the partition holds two kinds of thing: the boot
+// half (systemd-boot as the well-known \EFI\BOOT\BOOTX64.EFI that
+// firmware runs from removable media, its menu configuration, and
+// the files the menu entries boot) and the install payload that the
 // booted installer copies onto the machine's own disk.
 //
 // The menu is the deployment's machine list. Every entry boots the
-// same kernel and the same two initramfs archives; what differs is
+// same kernel and the same two initramfs archives. What differs is
 // one argument, liken.machine=<name>, so the operator standing at a
 // machine picks its name and everything else follows. One stick
-// serves the whole fleet, and reflashing between machines is never
-// needed.
+// serves the whole fleet, so nobody ever needs to reflash it between
+// machines.
 //
 // The payload duplicates the OS files that also sit beside it on the
-// stick (~160MB): the installer reads /usr/share/liken/release from
-// its own initramfs and never looks back at the stick's filesystem.
-// Teaching the installer to read the stick would save the space; it
-// is deliberately not taken on, to keep the installer identical
-// across the stick and the lab's direct-kernel path.
+// stick (about 160MB): the installer reads /usr/share/liken/release
+// from its own initramfs and never reads the stick's filesystem
+// again after that. Teaching the installer to read the stick would
+// save this space, but this script deliberately does not do that, to
+// keep the installer identical across the stick and the lab's
+// direct-kernel path.
 
 import (
 	"fmt"
@@ -39,12 +41,13 @@ import (
 // bootMenuArtifact is systemd-boot's canonical name in a release.
 const bootMenuArtifact = "systemd-bootx64.efi"
 
-// Stick builds the install image: releaseDir is a downloaded release
-// (artifacts beside their release.yaml), layerPath the deployment's
-// layer, out the disk image to write. consoles adds console=
-// arguments to every menu entry — and through the installer, to the
-// machines' permanent boot entries — so the default (none) leaves
-// hardware on its own screen, and the lab passes ttyS0.
+// Stick builds the install image. releaseDir is a downloaded release
+// (artifacts beside their release.yaml), layerPath is the
+// deployment's layer, and out is the disk image to write. consoles
+// adds console= arguments to every menu entry, and through the
+// installer, to the machines' permanent boot entries. The default
+// (none) leaves hardware on its own screen, and the lab passes
+// ttyS0.
 func Stick(releaseDir, layerPath, out string, consoles []string, log io.Writer) error {
 	document, release, err := verifiedRelease(releaseDir)
 	if err != nil {
@@ -66,9 +69,9 @@ func Stick(releaseDir, layerPath, out string, consoles []string, log io.Writer) 
 		return err
 	}
 
-	// The payload spills to a temp file next to the image: it is
+	// The payload spills to a temp file next to the image. It is
 	// hundreds of megabytes, and its exact size is needed before the
-	// image can be laid out.
+	// build can lay out the image.
 	payload, err := os.CreateTemp(filepath.Dir(out), ".payload-*")
 	if err != nil {
 		return err
@@ -83,8 +86,8 @@ func Stick(releaseDir, layerPath, out string, consoles []string, log io.Writer) 
 		return err
 	}
 
-	// Everything the partition will hold, with the loader files
-	// generated up front so their sizes count too.
+	// This is everything the partition will hold. It generates the
+	// loader files up front, so their sizes count too.
 	loaderConf := loaderConfText()
 	entries := map[string][]byte{}
 	for _, name := range machines {
@@ -101,13 +104,13 @@ func Stick(releaseDir, layerPath, out string, consoles []string, log io.Writer) 
 		}
 	}
 	// The CLI is in the payload but not laid on the stick's
-	// filesystem: a person with the stick already ran the toolkit to
+	// filesystem. A person with the stick already ran the toolkit to
 	// make it, and the installer copies the slot's own copy from the
 	// payload.
 	espBytes := espSize(sizes)
 
-	// The image: 1MiB of alignment before the partition, the ESP,
-	// and the GPT's mirrored tail.
+	// This is the image: 1MiB of alignment before the partition, the
+	// ESP, and the GPT's mirrored tail.
 	totalBytes := int64(disks.PartitionAlignment)*disks.SectorSize + espBytes +
 		int64(disks.ReservedLBAs+disks.PartitionAlignment)*disks.SectorSize
 	f, err := os.Create(out)
@@ -140,7 +143,8 @@ func Stick(releaseDir, layerPath, out string, consoles []string, log io.Writer) 
 		}
 	}
 
-	// The filesystem, inside the partition's window of the image.
+	// This is the filesystem, inside the partition's window of the
+	// image.
 	esp := disks.NewSection(f, int64(firstLBA)*disks.SectorSize, espBytes)
 	if err := disks.FormatFAT32(esp, uint64(espBytes), "LIKEN-INST", 0x4C494B45); err != nil {
 		return err
@@ -208,10 +212,10 @@ func Stick(releaseDir, layerPath, out string, consoles []string, log io.Writer) 
 }
 
 // espSize is the partition size for a given content size: room for
-// the allocation tables and directories, a little slack, rounded to
-// whole MiB, and never below FAT32's ~260MiB floor (the FAT type is
-// determined by cluster count, so a smaller volume would not be
-// FAT32 at all).
+// the allocation tables and directories, a little slack, rounded up
+// to a whole MiB, and never below FAT32's floor of about 260MiB (the
+// FAT type depends on the cluster count, so a smaller volume would
+// not be FAT32 at all).
 func espSize(contentBytes int64) int64 {
 	size := contentBytes + contentBytes/10 + 8<<20
 	size = (size + (1 << 20) - 1) &^ ((1 << 20) - 1)
@@ -219,8 +223,9 @@ func espSize(contentBytes int64) int64 {
 }
 
 // loaderConfText is the menu's one setting: wait for a person,
-// forever. An installer must never pick a machine by timeout — the
-// whole point of the menu is that a human says which machine this is.
+// forever. An installer must never pick a machine by timeout. The
+// whole point of the menu is that a person says which machine this
+// is.
 func loaderConfText() string {
 	return `# The liken installer's menu. Each entry below installs one of this
 # deployment's machines; pick the machine you are standing at. The
@@ -229,14 +234,15 @@ timeout menu-force
 `
 }
 
-// entryText is one machine's menu entry, in systemd-boot's
-// Boot Loader Specification form. The three initrd lines concatenate
-// in order — the same composition an installed machine gets from the
-// two initrd= parameters in its boot entries, plus the installer's
-// payload. The sort-key matters more than it looks: without one,
-// systemd-boot orders entries the way it orders kernels, newest
-// first, which put node-5 at the top of the menu; sort-keys sort
-// ascending, so the machines read in their natural order.
+// entryText is one machine's menu entry, in systemd-boot's Boot
+// Loader Specification form. The three initrd lines concatenate in
+// order. This is the same composition an installed machine gets from
+// the two initrd= parameters in its boot entries, plus the
+// installer's payload. The sort-key matters more than it looks.
+// Without one, systemd-boot orders entries the way it orders
+// kernels, newest first, which puts node-5 at the top of the menu.
+// Sort-keys sort in ascending order, so the machines read in their
+// natural order instead.
 func entryText(name string, consoles []string) []byte {
 	options := []string{"rdinit=/liken", "liken.machine=" + name, "liken.install"}
 	for _, c := range consoles {

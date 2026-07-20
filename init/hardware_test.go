@@ -9,7 +9,7 @@ import (
 )
 
 // stick is the recurring unclaimed device in these tests: the lab's
-// QEMU USB stick, waiting on usb_storage.
+// QEMU USB stick, waiting for the usb_storage driver.
 var stick = machine.UnclaimedDevice{
 	Modalias:   "usb:v46F4p0001d0100dc00dsc00dp00ic08isc06ip50in00",
 	Bus:        "usb",
@@ -44,8 +44,9 @@ func TestTransitionsNarrateARemoval(t *testing.T) {
 	}
 }
 
-// noisyChannel rings a doorbell continuously, faster than any quiet
-// interval: the shape of a node whose containers are churning.
+// noisyChannel sends signals continuously, faster than any quiet
+// interval. This is the pattern of a node whose containers are
+// starting and stopping constantly.
 func noisyChannel(t *testing.T) chan struct{} {
 	t.Helper()
 	ch := make(chan struct{}, 1)

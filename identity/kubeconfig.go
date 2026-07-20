@@ -1,24 +1,25 @@
 package identity
 
-// The operator's kubeconfig, computed offline from a deployment's
-// identity. The machine is never asked for a credential. Pre-seeding
-// the CAs (mint.go) exists precisely so that the credential can be
-// computed without the machine's help.
+// This file computes the operator's kubeconfig offline from a
+// deployment's identity. This code never asks the machine for a
+// credential. Pre-seeding the CAs (mint.go) exists precisely so that
+// this code can compute the credential without contacting the
+// machine.
 //
-// A kubeconfig is three facts:
+// A kubeconfig states three facts:
 //
 //  1. where the cluster is (a URL),
-//  2. why to believe it's really the cluster (the server CA that
-//     signed its serving cert),
-//  3. who we are (a client certificate the cluster's client CA
-//     signed).
+//  2. why to trust that this is really the cluster (the server CA
+//     that signed its serving certificate),
+//  3. who the client is (a client certificate that the cluster's
+//     client CA signed).
 //
-// The identity in a client certificate lives in its subject: the API
-// server takes CN as the username and every O as a group. There is no
-// user database behind this. Presenting a cert with O=system:masters
-// makes the bearer a cluster admin, because RBAC binds that group to
-// cluster-admin; the certificates themselves are the only user
-// records.
+// The identity in a client certificate lives in its subject. The API
+// server reads CN as the username, and every O as a group. No user
+// database exists behind this. Presenting a certificate with
+// O=system:masters makes the bearer a cluster admin, because RBAC
+// binds that group to cluster-admin. The certificates themselves are
+// the only user records.
 
 import (
 	"crypto/ecdsa"
@@ -36,23 +37,24 @@ import (
 	"time"
 )
 
-// Where the cluster is: QEMU forwards this host port to the guest's
-// API server (the dev-cluster Makefile's run target defines that
-// mapping). The serving cert k3s mints covers 127.0.0.1 by default,
-// so the forwarded connection verifies without any extra SANs.
+// server is where the cluster is. QEMU forwards this host port to
+// the guest's API server. The dev-cluster Makefile's run target
+// defines that mapping. The serving certificate that k3s mints
+// covers 127.0.0.1 by default, so the forwarded connection verifies
+// without any extra SANs.
 const server = "https://127.0.0.1:16443"
 
-// Kubeconfig computes an admin credential from the identity in dir
-// and writes dir/kubeconfig. The result is written into the identity
-// directory and nowhere else: liken never touches ~/.kube/config or
-// any other kubeconfig the operator already has. Point kubectl at it
-// explicitly:
+// Kubeconfig computes an admin credential from the identity in dir,
+// and writes dir/kubeconfig. Kubeconfig writes the result into the
+// identity directory and nowhere else. liken never changes
+// ~/.kube/config or any other kubeconfig that the operator already
+// has. Point kubectl at the file explicitly:
 //
 //	kubectl --kubeconfig dev-cluster/identity/kubeconfig get nodes
 //
-// Each run mints a fresh keypair and certificate; the certificate
-// lasts one year, which is generous for a development credential, and
-// re-running replaces it in seconds.
+// Each run mints a fresh keypair and certificate. The certificate
+// lasts one year, which is generous for a development credential.
+// Running Kubeconfig again replaces it in seconds.
 func Kubeconfig(dir string, out io.Writer) error {
 	tls := filepath.Join(dir, "tls")
 
@@ -61,10 +63,10 @@ func Kubeconfig(dir string, out io.Writer) error {
 		return err
 	}
 
-	// Who we are: a fresh keypair, and a certificate for it signed by
-	// the client CA. A client cert needs the clientAuth extended key
-	// usage; the API server rejects certificates that don't declare
-	// what they're for.
+	// This code creates the client identity: a fresh keypair, and a
+	// certificate for it signed by the client CA. A client
+	// certificate needs the clientAuth extended key usage. The API
+	// server rejects certificates that do not declare their purpose.
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return err
@@ -102,9 +104,9 @@ func Kubeconfig(dir string, out io.Writer) error {
 		return err
 	}
 
-	// The kubeconfig itself, with the certificates embedded (base64,
-	// like every kubeconfig) so the file is self-contained and
-	// portable.
+	// This is the kubeconfig itself, with the certificates embedded
+	// in base64, as every kubeconfig does. This makes the file
+	// self-contained and portable.
 	b64 := base64.StdEncoding.EncodeToString
 	kubeconfig := fmt.Sprintf(`apiVersion: v1
 kind: Config

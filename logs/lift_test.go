@@ -1,10 +1,10 @@
 package main
 
-// Lifting has to be exact or absent: a header either matches its
+// Lifting must be exact or absent. A header either matches its
 // format byte for byte and yields its facts, or the line ships with
-// fallback facts and an untouched body. The near-miss cases here are
-// the important ones, because a half-matched header must never
-// produce half-lifted facts.
+// fallback facts and an untouched body. The near-miss cases here
+// matter most, because a half-matched header must never produce
+// half-lifted facts.
 
 import (
 	"testing"
@@ -89,7 +89,7 @@ func TestLiftKlog(t *testing.T) {
 			name: "december read in january belongs to last year",
 			line: `W1231 23:59:59.999999       1 reflector.go:484] watch closed`,
 			// observed is July 2026, so December 31 would land five
-			// months in the future; the lift pulls it back to 2025.
+			// months in the future. The lift moves it back to 2025.
 			time:     time.Date(2025, 12, 31, 23, 59, 59, 999999000, time.UTC),
 			severity: "warning",
 		},

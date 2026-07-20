@@ -1,8 +1,8 @@
 package main
 
-// The version-convergence truth table: which ask (if any) a machine
-// derives from the cluster's target, and how the fetcher's answer
-// becomes the VersionConverged condition.
+// The version-convergence truth table: which ask, if any, a
+// machine derives from the cluster's target, and how the fetcher's
+// answer becomes the VersionConverged condition.
 
 import (
 	"strings"
@@ -187,8 +187,8 @@ func TestAFallenBackTrialHolds(t *testing.T) {
 		t.Errorf("an identical decision must hold at the rejection: %+v", conv)
 	}
 
-	// A republished release carries a different digest: a different
-	// decision, and the rejection no longer applies.
+	// A republished release carries a different digest. This is a
+	// different decision, and the rejection no longer applies.
 	fixed := ask
 	fixed.digest = "sha256:" + strings.Repeat("cc", 32)
 	conv = decideSystemStaging(fixed, verifiedSnap(fixed), autoMachine(), rejection, "", turnGranted)
@@ -219,12 +219,12 @@ func slotFacts(version, slot string) *machine.MachineStatus {
 	}
 }
 
-// The tests deliberately promote records for version 0.2.0 while
-// this test binary's own machine.Version is "dev". Promotion judges
-// the OS the facts report, never the operator's own stamp: in a
-// mixed fleet the pod comes from whatever image the cluster's
-// DaemonSet still pins, and the pod is a bystander to the machine's
-// trial.
+// These tests deliberately promote records for version 0.2.0,
+// while this test binary's own machine.Version is "dev". Promotion
+// judges the OS that the facts report, never the operator's own
+// stamp. In a mixed fleet, the pod comes from whatever image the
+// cluster's DaemonSet still pins, and the pod plays no part in the
+// machine's trial.
 func TestPromotesTheReleaseThisBootProves(t *testing.T) {
 	root := t.TempDir()
 	store := machine.SystemReleases(root)
@@ -290,7 +290,7 @@ func TestRecordsTheRunningReleaseAsTheFirstProven(t *testing.T) {
 		t.Errorf("the seed record names the running release: %+v, %v", record, err)
 	}
 
-	// And only once: a second pass leaves it alone.
+	// And only once. A second pass leaves it alone.
 	settleSystemReleaseLifecycle(root, slotFacts("0.1.0", "A"))
 	if again, _ := store.LoadProven(); string(again) != string(proven) {
 		t.Error("the seed record is written once, not re-asserted")

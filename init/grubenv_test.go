@@ -2,9 +2,9 @@ package main
 
 // Tests for the GRUB environment block codec. The golden file in
 // testdata was produced by grub-editenv itself (create, then set
-// default_slot=A try_slot=B), pinning the format this codec must
-// agree with: what grub-editenv writes, parseGRUBEnv must read, and
-// what renderGRUBEnv writes, GRUB must read.
+// default_slot=A try_slot=B). It pins the format that this codec must
+// agree with: parseGRUBEnv must read what grub-editenv writes, and
+// GRUB must read what renderGRUBEnv writes.
 
 import (
 	"bytes"
@@ -115,7 +115,8 @@ func TestGRUBEnvUpdatePreservesOtherVariables(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The one-shot consumed: try_slot cleared, default_slot untouched.
+	// The one-shot is consumed: try_slot is cleared, and default_slot
+	// stays untouched.
 	if err := updateGRUBEnv(path, map[string]string{"try_slot": ""}); err != nil {
 		t.Fatal(err)
 	}

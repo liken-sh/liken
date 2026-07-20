@@ -1,19 +1,18 @@
 package machine
 
-// The channel document announces what a release channel currently
-// offers.
+// The channel document shows the newest release in a release channel.
 //
-// liken has one linear channel: releases only move forward, so the
-// only question a channel needs to answer is "what is the latest?"
-// This document lives at the channel's root — one URL up from the
-// releases themselves — and names the newest published version.
+// liken has one linear channel. Releases only move forward. So the
+// document needs only one fact: the latest version. The document is
+// at the root of the channel, one URL above the releases. It names
+// the newest published version.
 //
-// The document is advisory, deliberately outside the trust chain. A
-// cluster may poll it to learn that a newer release exists and to
-// surface that next to its running version, but *adopting* a release
-// still requires the digest-pinned catalog entry in the Cluster
-// document. A tampered channel document can misstate what exists; it
-// can never change what a machine installs.
+// The document is advisory. It stays outside the trust chain. A
+// cluster can poll the document to find a newer release, and show
+// that release next to the version it runs. Adopting a release still
+// needs the digest-pinned catalog entry in the Cluster document. A
+// tampered channel document can show wrong information. It cannot
+// change what a machine installs.
 
 import (
 	"fmt"
@@ -29,10 +28,10 @@ type Channel struct {
 	Latest     string         `json:"latest"`
 }
 
-// ParseChannel validates a channel document as it is read, the way
-// ParseRelease does for its document: a document that isn't exactly
-// what it claims to be is rejected with the reason, never partially
-// accepted.
+// ParseChannel validates a channel document when it reads the
+// document. ParseRelease validates a release document the same way.
+// If a document is not exactly what it claims to be, ParseChannel
+// rejects it with the reason. It never accepts a document partially.
 func ParseChannel(raw []byte) (*Channel, error) {
 	c := &Channel{}
 	if err := yaml.UnmarshalStrict(raw, c); err != nil {

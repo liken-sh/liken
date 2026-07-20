@@ -108,8 +108,9 @@ func TestArtifactVerify(t *testing.T) {
 }
 
 func TestArtifactVerifyReportsReadErrors(t *testing.T) {
-	// A directory opened as a file is a real reader whose Read fails,
-	// the shape of a download torn mid-stream.
+	// A directory opened as a file is a real reader whose Read call
+	// fails. This is the same failure shape as a download that stops
+	// partway through.
 	f, err := os.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

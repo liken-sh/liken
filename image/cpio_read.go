@@ -1,15 +1,16 @@
 package image
 
-// Reading newc archives: the inverse of cpio.go's writer, for the
-// few places the build tools need to look inside an archive they
-// didn't just write. The stick builder reads a deployment layer to
-// learn which machines it carries — the layer is what actually
-// boots, so it, and not some manifests directory that might have
-// drifted, is the authority on what the install menu should offer.
+// This file reads newc archives: the inverse of cpio.go's writer,
+// for the few places the build tools need to look inside an archive
+// they did not just write. The stick builder reads a deployment
+// layer to learn which machines it carries. The layer is what
+// actually boots, so the layer, not some manifests directory that
+// might have drifted out of step, is the authority on what the
+// install menu should offer.
 //
-// The reader is as strict as the writer is simple: a truncated or
-// malformed archive is an error, never a partial result, because
-// every caller is about to make decisions from what it read.
+// The reader is as strict as the writer is simple. A truncated or
+// malformed archive is always an error, never a partial result,
+// because every caller is about to make decisions from what it read.
 
 import (
 	"fmt"
@@ -29,10 +30,10 @@ type cpioEntry struct {
 }
 
 // readCPIO parses one newc archive into its entries, stopping at the
-// trailer, and returns whatever bytes follow it — a composed image is
-// several archives concatenated, so "the rest" is often the next one.
-// The data slices alias raw; callers that keep them keep the archive
-// alive, which every current caller wants anyway.
+// trailer, and returns whatever bytes follow it. A composed image is
+// several archives concatenated, so "the rest" is often the next
+// archive. The data slices alias raw. A caller that keeps them also
+// keeps the archive alive, which every current caller wants anyway.
 func readCPIO(raw []byte) ([]cpioEntry, []byte, error) {
 	var entries []cpioEntry
 	off := 0
@@ -90,11 +91,11 @@ func readCPIO(raw []byte) ([]cpioEntry, []byte, error) {
 }
 
 // machineNames lists the machines a deployment layer carries, from
-// its etc/liken/machines/*.yaml entries: the same files init selects
-// among by the liken.machine= parameter, so the names here are
-// exactly the names an install can be asked for. A layer carrying no
-// machines is refused — install media with nothing to offer is a
-// mistake worth catching while it is still a build.
+// its etc/liken/machines/*.yaml entries. Init selects among these
+// same files by the liken.machine= parameter, so the names here are
+// exactly the names an install can be asked for. machineNames refuses
+// a layer carrying no machines: install media with nothing to offer
+// is a mistake worth catching while it is still a build.
 func machineNames(layer []byte) ([]string, error) {
 	entries, _, err := readCPIO(layer)
 	if err != nil {

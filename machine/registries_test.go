@@ -28,9 +28,9 @@ func TestRenderRegistryCredentialsIsDeterministic(t *testing.T) {
 }
 
 func TestRenderRegistryCredentialsEmptyIsARealDocument(t *testing.T) {
-	// The empty document is the retraction rendering: a Secret that
-	// was deleted stages this, and it must have a real hash so the
-	// lifecycle can tell it apart from "never had credentials".
+	// The empty document is the retraction rendering. A deleted
+	// Secret stages this document, and it must have a real hash so
+	// the lifecycle can tell it apart from "never had credentials".
 	raw, hash, err := RenderRegistryCredentials(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -111,9 +111,9 @@ func TestRegistryCredentialsStoreIsItsOwnDirectory(t *testing.T) {
 }
 
 func TestCredentialsFilesAreOwnerOnly(t *testing.T) {
-	// The staged file carries passwords, and the design leans on
-	// WriteDurable's CreateTemp giving 0600: this test is the tripwire
-	// if anyone ever "fixes" those modes.
+	// The staged file carries passwords. The design depends on
+	// WriteDurable's CreateTemp to give the file mode 0600. This test
+	// fails if a future change alters that file mode.
 	store := RegistryCredentialsStore(t.TempDir())
 	if err := store.WriteStaged([]byte("creds")); err != nil {
 		t.Fatal(err)

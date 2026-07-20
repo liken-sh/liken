@@ -1,24 +1,24 @@
 package kubernetes
 
-// Reading a ResourceClaim's allocation.
+// This file reads a ResourceClaim's allocation.
 //
 // When the kubelet asks the DRA driver to prepare a claim, the
-// request names the claim but not what was allocated to it — the
-// allocation lives on the claim's status, written by the scheduler,
-// and the driver is expected to read it back from the API server.
-// That is deliberate on Kubernetes' part: the claim object is the
-// one source of truth for what a pod was granted, so a stale or
-// replayed prepare call can never deliver anything but what the
-// scheduler actually decided.
+// request names the claim, but not what was allocated to it. The
+// allocation lives in the claim's status, written by the scheduler,
+// and the driver must read it back from the API server. Kubernetes
+// designed it this way on purpose: the claim object is the one
+// source of truth for what a pod was granted, so a stale or replayed
+// prepare call can never deliver anything except what the scheduler
+// actually decided.
 //
-// The honest subset here is the read path only: liken never writes
-// claims (workloads create them, the scheduler allocates them), so
-// these types carry exactly the fields the driver reads.
+// This file covers only the read path: liken never writes claims.
+// Workloads create claims, and the scheduler allocates them. Because
+// of this, these types carry only the fields that the driver reads.
 
 import "net/http"
 
-// ResourceClaim is the sliver the driver needs: which devices from
-// which driver's pools were allocated.
+// ResourceClaim holds the part of the claim that the driver needs:
+// which devices were allocated from which driver's pools.
 type ResourceClaim struct {
 	Metadata struct {
 		Name      string `json:"name"`
@@ -34,11 +34,12 @@ type ResourceClaim struct {
 	} `json:"status"`
 }
 
-// AllocatedDevice is one allocation result: the scheduler chose
+// AllocatedDevice is one allocation result. The scheduler chose
 // Device from Pool, published by Driver, to satisfy the claim's
 // named Request. Pool and Device correspond to what the inventory
-// published (resourceslices.go); Driver says whose inventory, which
-// matters because one claim can mix devices from several drivers.
+// published (see resourceslices.go). Driver names whose inventory
+// this is, which matters because one claim can mix devices from
+// several drivers.
 type AllocatedDevice struct {
 	Request string `json:"request"`
 	Driver  string `json:"driver"`
@@ -46,9 +47,10 @@ type AllocatedDevice struct {
 	Device  string `json:"device"`
 }
 
-// GetResourceClaim reads one claim. Claims are namespaced — they
-// belong to the workload that made them — so the path carries the
-// namespace, unlike every other resource this package touches.
+// GetResourceClaim reads one claim. Claims are namespaced: each claim
+// belongs to the workload that created it. Because of this, the path
+// carries the namespace, unlike every other resource this package
+// touches.
 func GetResourceClaim(c *Client, namespace, name string) (*ResourceClaim, error) {
 	path := "/apis/resource.k8s.io/v1/namespaces/" + namespace + "/resourceclaims/" + name
 	claim := &ResourceClaim{}

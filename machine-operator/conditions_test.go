@@ -1,8 +1,9 @@
 package main
 
-// The condition constructors: how each aspect of the machine — the
-// facts, the sysctls, the storage, the modules, the features, the
-// Node's health — reads as a standard Kubernetes condition.
+// The condition constructors: how each aspect of the machine,
+// meaning the facts, the sysctls, the storage, the modules, the
+// features, and the Node's health, reads as a standard Kubernetes
+// condition.
 
 import (
 	"errors"
@@ -51,7 +52,7 @@ func TestSysctlsConditionCarriesTheApplyError(t *testing.T) {
 
 // sysctlDir builds a fake /proc/sys holding the given parameter
 // files, because ApplySysctl deliberately refuses to create files
-// the kernel didn't put there.
+// that the kernel did not put there.
 func sysctlDir(t *testing.T, names ...string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -83,7 +84,7 @@ func TestApplySysctlsAppliesAndReadsBack(t *testing.T) {
 
 func TestApplySysctlsReportsEveryFailure(t *testing.T) {
 	// The condition built from this error is the operator's whole
-	// report, so one bad parameter must not hide another: a person
+	// report, so one bad parameter must not hide another. A person
 	// fixing the spec should see the full list in one pass.
 	dir := sysctlDir(t, "vm.swappiness")
 	observed, err := applySysctls(dir, map[string]string{

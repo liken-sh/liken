@@ -1,8 +1,9 @@
 package main
 
-// The cursor's whole job is to be there after a container restart and
-// to fail soft in every other case, so these tests are mostly about
-// the failure cases: missing, corrupt, and torn writes.
+// The cursor's only job is to be available after a container restart,
+// and to fail without causing harm in every other case. Because of
+// this, these tests mostly cover the failure cases: missing,
+// corrupt, and torn writes.
 
 import (
 	"os"
@@ -59,9 +60,9 @@ func TestCorruptCursorIsAFreshStart(t *testing.T) {
 	}
 }
 
-// The temp file must not linger: a rename that happened leaves only
-// cursor.json, and a crash before the rename leaves only the temp,
-// which the loader ignores.
+// The temp file must not remain after a save. A rename that completed
+// leaves only cursor.json. A crash before the rename leaves only the
+// temp file, which the loader ignores.
 func TestSaveLeavesNoTempFile(t *testing.T) {
 	dir := t.TempDir()
 	if err := saveCursor(dir, kmsgCursor{Seq: 1}); err != nil {

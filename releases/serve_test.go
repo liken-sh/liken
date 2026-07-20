@@ -60,7 +60,7 @@ func TestAnswers404ForUnpublishedReleases(t *testing.T) {
 
 // The banner documents the QEMU contract: guests reach the host's
 // loopback at 10.0.2.2, so the hint must carry whatever port the
-// server actually listens on, not assume the default.
+// server actually listens on, and must not assume the default.
 func TestBannerDerivesTheGuestURLFromTheAddress(t *testing.T) {
 	cases := []struct {
 		name string

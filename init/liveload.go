@@ -4,32 +4,32 @@ package main
 //
 // Most machine-spec changes converge by reboot, because most of what
 // the spec declares (storage above all) can only be actuated by a
-// boot. Adding a module is the exception: loading is live-capable —
+// boot. Adding a module is the exception. Loading is live-capable:
 // the kernel binds a resident driver to already-plugged hardware on
-// its own, in either order — so an additive spec.modules edit
+// its own, in either order. So an additive spec.modules edit
 // converges here, in place, with nothing drained and nothing
 // restarted. The operator stages the manifest as it would for a
 // reboot (durability: the next boot must load the same list) and
-// writes a modules intent; this file is init's answer.
+// writes a modules intent. This file is init's response.
 //
-// The intent is only the doorbell. The staged store is the truth
-// about what to apply, and init re-derives the manifest's
-// live-applicability for itself with the same shared drift functions
-// the operator used: identical storage, no module retracted. That
-// re-derivation is what makes a stale, duplicate, or malicious
-// intent harmless — anything that would need a boot is refused and
-// left staged for one.
+// The intent is only a signal. The staged store is the truth about
+// what to apply, and init re-derives the manifest's live-applicability
+// for itself, with the same shared drift functions that the operator
+// used: identical storage, and no module retracted. This re-derivation
+// is what makes a stale, duplicate, or malicious intent harmless.
+// Anything that would need a boot is refused and left staged for a
+// boot.
 //
 // Promotion comes after the loads, deliberately. A module that
-// panics the kernel on load takes the machine down mid-apply, and
-// the manifest it came from must still be *staged* when the machine
-// comes back: the next boot tries it once, fails the same way, and
-// the rejection machinery quarantines it (staging.go). Promoting
-// first would enshrine a kernel-crashing spec as proven. A load that
-// merely fails (the kernel refuses the module) is not that case: the
-// outcome is recorded and the spec still promotes, exactly as a boot
-// would treat it, because retrying the same load changes nothing and
-// the ModulesLoaded condition carries the story.
+// panics the kernel on load takes the machine down in the middle of
+// applying, and the manifest it came from must still be staged when
+// the machine comes back. The next boot tries it once, fails the
+// same way, and the rejection machinery quarantines it (staging.go).
+// Promoting first would enshrine a kernel-crashing spec as proven. A
+// load that merely fails (the kernel refuses the module) is not that
+// case. The outcome is recorded, and the spec still promotes, exactly
+// as a boot would treat it, because retrying the same load changes
+// nothing, and the ModulesLoaded condition carries the record.
 
 import (
 	"fmt"
@@ -41,12 +41,12 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// applyModulesIntent performs one live load: read the staged
-// manifest, refuse it unless it is boot-equivalent plus added
-// modules, load the additions, promote, and republish the facts so
-// the operator sees convergence. Every refusal is a console line
-// and nothing else; the manifest stays staged for the reboot that
-// can actually apply it.
+// applyModulesIntent performs one live load. It reads the staged
+// manifest, refuses it unless it is boot-equivalent plus added
+// modules, loads the additions, promotes the manifest, and
+// republishes the facts so the operator sees convergence. Every
+// refusal is only a console line. The manifest stays staged for the
+// reboot that can actually apply it.
 func applyModulesIntent(intent machine.ModulesIntent, store machine.ManifestStore, moduleBase string, facts *factsFile) {
 	raw, err := store.LoadStaged()
 	if err != nil {
@@ -54,8 +54,8 @@ func applyModulesIntent(intent machine.ModulesIntent, store machine.ManifestStor
 		return
 	}
 	if raw == nil {
-		// A stale doorbell: the staged spec is already promoted (or
-		// withdrawn). The operator's next pass sees the truth.
+		// A stale signal: the staged spec is already promoted, or
+		// withdrawn. The operator's next pass sees the truth.
 		return
 	}
 	doc, err := machine.Parse(raw)
@@ -65,9 +65,10 @@ func applyModulesIntent(intent machine.ModulesIntent, store machine.ManifestStor
 	}
 	hash := machine.ManifestHash(raw)
 	if intent.ManifestHash != "" && intent.ManifestHash != hash {
-		// The store moved on since the intent was written; the newer
-		// staged bytes are what the operator wants now, so judge
-		// those. The hash difference is only worth narrating.
+		// The store moved on since the intent was written. The newer
+		// staged bytes are what the operator wants now, so this code
+		// judges those bytes. The hash difference is only worth
+		// reporting.
 		fmt.Printf("liken: modules: the staged spec (%.12s) is newer than the intent (%.12s); applying the store's copy\n",
 			hash, intent.ManifestHash)
 	}
@@ -94,10 +95,10 @@ func applyModulesIntent(intent machine.ModulesIntent, store machine.ManifestStor
 	outcomes := loadDeclaredModulesFrom(moduleBase, added)
 
 	if err := store.Promote(); err != nil {
-		// The loads happened but the record didn't move: the operator
-		// re-requests, the loads re-run as no-ops (an already-loaded
-		// module is EEXIST, which counts as loaded), and promotion
-		// gets another try.
+		// The loads happened, but the record did not move. The
+		// operator re-requests, the loads re-run as no-ops (an
+		// already-loaded module returns EEXIST, which counts as
+		// loaded), and promotion gets another try.
 		fmt.Fprintf(os.Stderr, "liken: modules: promoting the applied spec: %v\n", err)
 		return
 	}
@@ -112,9 +113,9 @@ func applyModulesIntent(intent machine.ModulesIntent, store machine.ManifestStor
 }
 
 // mergeModuleStatuses folds a load's outcomes into the standing
-// per-module report: a fresh outcome replaces its module's old
-// entry, everything else stands. The result stays sorted by name so
-// the facts are stable across publishes.
+// per-module report. A fresh outcome replaces its module's old
+// entry, and everything else stays unchanged. The result stays
+// sorted by name, so the facts are stable across publishes.
 func mergeModuleStatuses(standing, fresh []machine.ModuleStatus) []machine.ModuleStatus {
 	byName := map[string]machine.ModuleStatus{}
 	for _, s := range standing {

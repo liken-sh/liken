@@ -1,9 +1,10 @@
 package main
 
-// The tailer is tested against real files in a tempdir, doing the
-// things init's rotation actually does to them: growing, being
-// renamed aside, reappearing. The tailer runs in a goroutine against
-// a short poll interval and the tests watch its output arrive.
+// These tests run the tailer against real files in a tempdir, and do
+// the things that init's rotation actually does to them: growing,
+// being renamed aside, reappearing. The tailer runs in a goroutine
+// against a short poll interval, and the tests watch its output
+// arrive.
 
 import (
 	"bytes"
@@ -16,8 +17,8 @@ import (
 	"time"
 )
 
-// syncBuffer is a threadsafe output sink: the tailer writes from its
-// goroutine while the test reads.
+// syncBuffer is a threadsafe output destination. The tailer writes
+// from its own goroutine while the test reads.
 type syncBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
@@ -48,8 +49,8 @@ func fastPolls(t *testing.T) {
 }
 
 // appendLine grows the file the way a live writer does: open for
-// append, write, close. The line is written verbatim, terminator and
-// all, so a test can also leave a line unterminated.
+// append, write, close. It writes the line verbatim, including the
+// terminator, so a test can also leave a line unterminated.
 func appendLine(t *testing.T, path, line string) {
 	t.Helper()
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
@@ -65,7 +66,8 @@ func appendLine(t *testing.T, path, line string) {
 }
 
 // followedFile runs the tailer against path in the background. The
-// returned stop function cancels it and waits for a clean exit.
+// returned stop function cancels the tailer and waits for a clean
+// exit.
 func followedFile(t *testing.T, path, curDir string) (*syncBuffer, func()) {
 	t.Helper()
 	out := &syncBuffer{}
@@ -163,9 +165,10 @@ func TestTailerWaitsForTheFileToExist(t *testing.T) {
 }
 
 // awaitCheckpoint polls the cursor directory until the tailer has
-// checkpointed the given offset: a tailer only checkpoints once it
-// reaches EOF, so watching for the offset is how a test knows the
-// tailer has both shipped and recorded everything written so far.
+// checkpointed the given offset. A tailer only checkpoints once it
+// reaches EOF. Because of this, watching for the offset confirms
+// that the tailer has both sent and recorded everything written so
+// far.
 func awaitCheckpoint(t *testing.T, curDir string, offset int64) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -210,8 +213,9 @@ func TestTailerFollowsARotation(t *testing.T) {
 	fastPolls(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "k3s.log")
-	// The old generation ends with an unterminated line: a writer cut
-	// down mid-write. It ships as-is once the rotation is noticed.
+	// The old generation ends with an unterminated line, as if a
+	// writer stopped mid-write. It ships as it is, once the tailer
+	// notices the rotation.
 	if err := os.WriteFile(path, []byte("finished line\ncut off mid-wr"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -267,8 +271,9 @@ func TestTailerReplaysWhenTheFileShrinks(t *testing.T) {
 }
 
 // Everything written between the tailer's last catch-up and the
-// rename is only reachable through the held file, so the tailer must
-// drain the renamed generation to its final EOF before moving on.
+// rename is reachable only through the held file. Because of this,
+// the tailer must drain the renamed generation to its final EOF
+// before moving on.
 func TestTailerDrainsARotatedGenerationToItsEnd(t *testing.T) {
 	fastPolls(t)
 	dir := t.TempDir()
@@ -306,13 +311,13 @@ func TestTailerStopsCleanlyWhileAwaitingAFile(t *testing.T) {
 	fastPolls(t)
 	path := filepath.Join(t.TempDir(), "never-created.log")
 	_, stop := followedFile(t, path, t.TempDir())
-	// stop verifies the tailer exits with context.Canceled even though
-	// the file it was waiting for never appeared.
+	// stop verifies that the tailer exits with context.Canceled, even
+	// though the file it was waiting for never appeared.
 	stop()
 }
 
-// A tailer that cannot ship must exit with the write error so the
-// kubelet restarts it, rather than reading on and dropping lines.
+// A tailer that cannot send lines must exit with the write error, so
+// the kubelet restarts it, instead of reading on and dropping lines.
 func TestTailerStopsWhenItsOutputFails(t *testing.T) {
 	fastPolls(t)
 	path := filepath.Join(t.TempDir(), "k3s.log")
@@ -325,8 +330,9 @@ func TestTailerStopsWhenItsOutputFails(t *testing.T) {
 	}
 }
 
-// A cursor directory that refuses writes must stop the tailer the
-// same way a failed ship does: the checkpoint is its durability.
+// A cursor directory that refuses writes must stop the tailer, the
+// same way a failed send does. The checkpoint is what makes the
+// tailer durable.
 func TestTailerStopsWhenItCannotCheckpoint(t *testing.T) {
 	fastPolls(t)
 	path := filepath.Join(t.TempDir(), "k3s.log")

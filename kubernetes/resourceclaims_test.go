@@ -1,6 +1,6 @@
 package kubernetes
 
-// Reading a claim's allocation back from the API server.
+// This test reads a claim's allocation back from the API server.
 
 import (
 	"encoding/json"

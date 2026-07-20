@@ -1,14 +1,14 @@
-# k3s's configuration for a machine in the agent role.
+# This is k3s's configuration for a machine in the agent role.
 #
 # An agent cannot read the server's config.yaml sitting next to this
-# file: k3s maps config keys onto command-line flags, and `k3s agent`
+# file. k3s maps config keys onto command-line flags, and `k3s agent`
 # treats server-only flags (disable, default-local-storage-path, ...)
 # as unknown. So each role gets its own static file, and init points
-# the agent here explicitly (`k3s agent --config`). Everything only
-# the boot can derive (which server to join, the token, this
-# machine's node IP) lands in agent.yaml.d/boot.yaml, a drop-in
-# directory k3s reads alongside this file; init writes it fresh every
-# boot (see init/k3s.go).
+# the agent to this file explicitly (`k3s agent --config`). Everything
+# that only the boot can derive (which server to join, the token,
+# this machine's node IP) lands in agent.yaml.d/boot.yaml, a drop-in
+# directory that k3s reads alongside this file. Init writes the
+# drop-in fresh every boot (see init/k3s.go).
 
 # NodePort services listen only on the node IP's interface: the
 # cluster segment, where the rest of the cluster expects to find this
@@ -18,11 +18,11 @@
 kube-proxy-arg:
   - nodeport-addresses=primary
 
-# Every liken machine's Node wears this label, applied by the kubelet
-# when the node registers; the OS DaemonSets select on it. See the
-# fuller story in config.yaml — the label must be identical for both
+# The kubelet applies this label to every liken machine's Node when
+# the node registers, and the OS DaemonSets select on it. See the
+# fuller story in config.yaml. The label must be identical for both
 # roles, because the OS components run on leaders and followers alike.
-# The machine's own spec.nodeLabels join this list at boot through the
-# drop-in's node-label+ key, exactly as they do for a leader.
+# The machine's own spec.nodeLabels join this list at boot, through
+# the drop-in's node-label+ key, exactly as they do for a leader.
 node-label:
   - liken.sh/machine=true

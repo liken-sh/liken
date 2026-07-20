@@ -1,32 +1,32 @@
 #!/usr/bin/env bash
 #
 # Vendor the netfilter userspace: static xtables binaries for the
-# iptables rules kube-proxy, flannel, and the network policy controller
-# write.
+# iptables rules that kube-proxy, flannel, and the network policy
+# controller write.
 #
 # The kernel enforces netfilter rules, but userspace programs install
-# them, and Kubernetes networking execs those programs constantly.
-# liken ships them itself, at /sbin, so the machine's packet filter
-# doesn't depend on any other component unpacking its internals first.
+# them, and Kubernetes networking runs those programs constantly. liken
+# ships them itself, at /sbin, so the machine's packet filter does not
+# depend on any other component to unpack its internals first.
 #
 # The binaries come from k3s-root, the buildroot project that produces
-# k3s's own bundled userland, so the bytes on our PATH are the same
-# ones k3s carries. They are delivered the same way as every other
-# vendored input: a pinned version, fetched from the project's GitHub
-# releases, verified against the sha256 manifest published beside it.
-# The version pin (xtables/VERSION) must match the VERSION_ROOT in the
-# vendored k3s release's scripts/version.sh, so the two copies of
-# xtables on the machine can never disagree.
+# k3s's own bundled userland. As a result, the bytes on liken's PATH
+# are the same bytes k3s carries. This script fetches them the same way
+# as every other vendored input: a pinned version, fetched from the
+# project's GitHub releases, verified against the sha256 manifest
+# published beside it. The version pin (xtables/VERSION) must match the
+# VERSION_ROOT in the vendored k3s release's scripts/version.sh. This
+# keeps the two copies of xtables on the machine in agreement.
 #
-# One artifact in the tarball matters to us: xtables-legacy-multi, a
-# multi-call binary that behaves as whichever tool it's invoked as
-# (iptables, iptables-save, ...), the same approach busybox uses. The
-# image build stages it at /sbin under each of its names. We take the
-# legacy variant deliberately: it matches the iptable_* kernel modules
-# the image ships. The tarball's own bare "iptables" names point at a
-# legacy-vs-nftables detection script that needs /bin/sh, and this
-# machine has no shell, so liken makes that decision statically
-# instead.
+# One artifact in the tarball matters here: xtables-legacy-multi, a
+# multi-call binary that behaves as whichever tool the caller invokes
+# it as (iptables, iptables-save, and so on), the same approach
+# busybox uses. The image build stages it at /sbin under each of its
+# names. This script takes the legacy variant deliberately: it matches
+# the iptable_* kernel modules the image ships. The tarball's own bare
+# "iptables" names point at a legacy-vs-nftables detection script that
+# needs /bin/sh, and this machine has no shell, so liken makes that
+# choice statically instead.
 #
 # Usage:
 #   xtables/fetch.sh              fetch the version pinned in xtables/VERSION
@@ -56,7 +56,7 @@ out="$here/dist/$version"
 mkdir -p "$cache"
 
 # One sha256 manifest per architecture covers all of the release's
-# artifacts; we want the line for the xtables tarball.
+# artifacts. This script wants the line for the xtables tarball.
 digest="$(curl -fsSL "$base/sha256sum-$arch.txt" | awk -v t="$tarball" '$2 == t { print $1 }')"
 if [[ -z "$digest" ]]; then
     echo "fetch.sh: no $tarball listed in $base/sha256sum-$arch.txt" >&2
@@ -74,9 +74,10 @@ mkdir -p "$out"
 tar -xf "$cache/$tarball" -C "$out"
 
 # tar restores the archive's own timestamps, which predate this
-# script, so Make would judge the extracted binaries stale against
-# their prerequisites forever and re-run this fetch on every build.
-# Extraction time is the honest timestamp for a vendored artifact.
+# script. Without this fix, Make would always judge the extracted
+# binaries older than their prerequisites, and re-run this fetch on
+# every build. The extraction time is the correct timestamp for a
+# vendored artifact.
 find "$out" -exec touch {} +
 
 echo

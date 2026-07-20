@@ -1,7 +1,7 @@
 package machine
 
-// Tests for the channel document: the advisory "what's the latest?"
-// announcement at a channel's root.
+// Tests for the channel document. This document is advisory. It
+// shows the latest version at the root of a channel.
 
 import (
 	"strings"

@@ -1,8 +1,8 @@
 package main
 
 // Tests for the ext4 superblock parser. Hand-built superblocks pin
-// the offsets in ext4.go's comment; the resize ioctl itself needs a
-// mounted filesystem and belongs to the QEMU harness.
+// the offsets in ext4.go's comment. The resize ioctl itself needs a
+// mounted filesystem, so it belongs to the QEMU harness.
 
 import (
 	"encoding/binary"
@@ -31,7 +31,7 @@ func TestParseExt4Superblock(t *testing.T) {
 		want ext4Geometry
 	}{
 		{
-			// mke2fs's default for small filesystems: 1 KiB blocks.
+			// mke2fs's default for small filesystems is 1 KiB blocks.
 			"1KiB-blocks",
 			superblock(65_536, 0, 0, 0),
 			ext4Geometry{blockSize: 1_024, blockCount: 65_536},
@@ -44,14 +44,14 @@ func TestParseExt4Superblock(t *testing.T) {
 		},
 		{
 			// With the 64bit feature, the count's high bits live in a
-			// second field and must be assembled.
+			// second field, and the code must assemble them.
 			"64bit-count",
 			superblock(1, 2, 0x80, 1),
 			ext4Geometry{blockSize: 4_096, blockCount: 1<<32 | 1},
 		},
 		{
 			// Without the feature, those same bytes belong to other
-			// fields and must be ignored.
+			// fields, and the code must ignore them.
 			"high-bits-ignored-without-64bit",
 			superblock(100, 2, 0, 1),
 			ext4Geometry{blockSize: 4_096, blockCount: 100},
@@ -91,7 +91,8 @@ func TestParseExt4SuperblockRejectsTruncation(t *testing.T) {
 }
 
 func TestReadExt4GeometryFromADevice(t *testing.T) {
-	// A device node is just something to ReadAt; a file stands in.
+	// A device node is only something to ReadAt; a file stands in
+	// for it here.
 	dev := filepath.Join(t.TempDir(), "vda1")
 	image := make([]byte, 2048)
 	sb := image[ext4SuperblockOffset:]
@@ -129,7 +130,8 @@ func TestReadExt4GeometryReportsTruncatedDevices(t *testing.T) {
 func TestMaybeGrowFilesystemLeavesAFullFilesystemAlone(t *testing.T) {
 	// The superblock says 100 blocks of 4096 bytes; the partition is
 	// exactly that size, so there is nothing to grow and no ioctl to
-	// make. (An actual grow needs a mounted filesystem: QEMU's drill.)
+	// make. (An actual grow needs a mounted filesystem, so it belongs
+	// to the QEMU drill.)
 	sys, dev := fakeMachine(t)
 	_ = sys
 	image := make([]byte, 2048)

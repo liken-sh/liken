@@ -1,16 +1,18 @@
 # The machine operator domain: the node-local half of operating the
 # OS through the Kubernetes API.
 #
-# Two artifacts: the operator binary (a static Go build, same
-# discipline as init's) and the OCI image tarball that carries it into
-# the cluster, packaged by the recipe the image domain owns
-# (image/oci.sh). main.go's header comment explains what an operator
-# is, why this one uses no Kubernetes libraries, and where the line
-# sits between it and the cluster operator.
+# This domain builds two artifacts: the operator binary (a static Go
+# build, with the same discipline as init's) and the OCI image
+# tarball that carries it into the cluster, packaged by the recipe
+# the image domain owns (image/oci.sh). main.go's header comment
+# explains what an operator is, why this one uses no Kubernetes
+# libraries, and where the line sits between it and the cluster
+# operator.
 #
-# version.mk supplies the version stamp; the releases domain
-# overrides it and the output directory to rebuild this operator
-# under a release's name into its own tree, through these same rules.
+# version.mk supplies the version stamp. The releases domain
+# overrides the stamp and the output directory, to rebuild this
+# operator under a release's name into its own tree, through these
+# same rules.
 include ../version.mk
 DIST ?= dist
 
@@ -24,14 +26,14 @@ $(DIST)/liken-machine-operator: ../go.mod ../go.sum $(wildcard *.go) \
 		-o $(DIST)/liken-machine-operator .
 
 # The operator downloads releases over HTTPS, and its image has no
-# base layer to supply root certificates, so the machine's own
-# vendored trust bundle rides in the image (oci.sh explains where it
-# lands).
+# base layer to supply root certificates. So the machine's own
+# vendored trust bundle travels in the image (oci.sh explains where
+# it lands).
 CA_BUNDLE := ../trust/dist/$(strip $(file <../trust/VERSION))/cacert.pem
 
-# The PCI naming database, for the device inventory's human-readable
-# names (dra.go); oci.sh explains why it rides in this image rather
-# than as a mount of the OS's own copy.
+# The PCI naming database, for the device inventory's
+# human-readable names (dra.go). oci.sh explains why it travels in
+# this image, rather than as a mount of the OS's own copy.
 PCI_IDS := ../hwdata/dist/$(strip $(file <../hwdata/VERSION))/pci.ids
 
 $(DIST)/liken-machine-operator-image.tar: $(DIST)/liken-machine-operator ../image/oci.sh $(CA_BUNDLE) $(PCI_IDS)

@@ -25,11 +25,11 @@ import (
 	"github.com/liken-sh/liken/kubernetes"
 )
 
-// draFixture stands up everything one prepare call touches: a fake
+// draFixture builds everything one prepare call touches: a fake
 // sysfs with the stick plugged in, a fake API server holding one
 // allocated claim, and a CDI directory to write into. The package
-// seams (draSysfsRoot, cdiDir) are pointed at the fixture and
-// restored afterward.
+// seams (draSysfsRoot, cdiDir) point at the fixture, and the test
+// restores them afterward.
 type draFixture struct {
 	plugin *draPlugin
 	cdi    string
@@ -271,9 +271,9 @@ func TestServeAnswersOnBothSockets(t *testing.T) {
 	}
 
 	// The health stream must open and stay open, not answer
-	// Unimplemented: the kubelet retries a missing service every few
-	// seconds, forever, and that noise is exactly what registering
-	// the silent stream prevents.
+	// Unimplemented. The kubelet retries a missing service every
+	// few seconds, forever, and that noise is exactly what
+	// registering the silent stream prevents.
 	streamCtx, streamCancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 	defer streamCancel()
 	watch, err := healthv1alpha1.NewDRAResourceHealthClient(draConn).NodeWatchResources(streamCtx, &healthv1alpha1.NodeWatchResourcesRequest{})
@@ -286,8 +286,8 @@ func TestServeAnswersOnBothSockets(t *testing.T) {
 	}
 }
 
-// waitForSocket polls for a unix socket to exist: the server sets
-// its sockets up in a goroutine, and the test can outrun it.
+// waitForSocket polls for a unix socket to exist. The server sets
+// its sockets up in a goroutine, and the test can run ahead of it.
 func waitForSocket(t *testing.T, path string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

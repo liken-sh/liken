@@ -1,34 +1,34 @@
 #!/usr/bin/env bash
 #
 # Vendor mke2fs: the program that creates ext4 filesystems, statically
-# linked, for init to exec when it claims a blank disk.
+# linked, for init to run when it claims a blank disk.
 #
 # Making a filesystem is a userspace job. The kernel can read and
-# write ext4 (our vendored kernel builds the driver in), but it has no
-# code to create one. Laying down superblocks, block groups, inode
-# tables and the journal has always belonged to mke2fs, from the
+# write ext4 (liken's vendored kernel builds the driver in), but it has
+# no code to create one. Laying down superblocks, block groups, inode
+# tables, and the journal has always belonged to mke2fs, from the
 # e2fsprogs package every distribution ships. liken's image has no
-# libc and no shell, so a distro's dynamically-linked mke2fs can't
-# even exec here; the binary has to be static, like everything else on
+# libc and no shell, so a distro's dynamically-linked mke2fs cannot
+# even run here. The binary must be static, like everything else on
 # this machine.
 #
-# There is no pure-Go implementation to reach for instead, and the
-# strongest evidence comes from gokrazy, the appliance Linux whose
-# userland is otherwise entirely Go: when gokrazy needed to format its
-# permanent partition, it bundled a static mke2fs rather than rewrite
-# ext4 creation. That's exactly the binary vendored here. gokrazy
-# builds it from the official e2fsprogs release tarball on kernel.org
-# with a public, reproducible recipe (their repo's Dockerfile:
-# configure with LDFLAGS=-static, SOURCE_DATE_EPOCH pinned) and checks
-# the result into their repository, which is what makes it fetchable
-# at a pinned commit.
+# There is no pure-Go implementation to use instead. The strongest
+# evidence comes from gokrazy, the appliance Linux whose userland is
+# otherwise entirely Go: when gokrazy needed to format its permanent
+# partition, it bundled a static mke2fs instead of rewriting ext4
+# creation. That is exactly the binary vendored here. gokrazy builds it
+# from the official e2fsprogs release tarball on kernel.org, with a
+# public, reproducible recipe (their repo's Dockerfile: configure with
+# LDFLAGS=-static, SOURCE_DATE_EPOCH pinned), and checks the result
+# into their repository. This is what makes it fetchable at a pinned
+# commit.
 #
-# gokrazy publishes no checksum manifest, so the digest is recorded
-# here, computed when this pin was chosen. That protects against the
-# artifact changing out from under the pin. Anyone who'd rather not
+# gokrazy publishes no checksum manifest, so this file records the
+# digest, computed when this pin was chosen. This protects against the
+# artifact changing after the pin was set. Anyone who does not want to
 # take gokrazy's word for the original bytes can run their Dockerfile
-# and compare the results byte for byte; the reproducible build is
-# what makes that audit possible.
+# and compare the results byte for byte. The reproducible build is
+# what makes that check possible.
 #
 # Usage:
 #   e2fsprogs/fetch.sh    fetch the version pinned in e2fsprogs/VERSION
@@ -50,8 +50,8 @@ arch="amd64"
 version="$(cat "$here/VERSION")"
 
 # The commit in gokrazy/mkfs that carries this e2fsprogs version, and
-# the digest of the binary as vendored. A version bump means updating
-# all three of VERSION, the commit, and the digest together.
+# the digest of the binary as vendored. A version bump must update all
+# three together: VERSION, the commit, and the digest.
 commit="fbb07f9ec5fd85dbed6db8a3f64ef9c55315cc1d"
 digest="97beb7dc8af006067586f245d2a4fb63340f81227dab1f9f2d8ba6f3d9e65b1f"
 

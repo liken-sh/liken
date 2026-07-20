@@ -1,9 +1,9 @@
 package main
 
 // Tests for node-label reconciliation. The decision is a pure
-// function over the spec and the Node, so every case here pins the
-// patch and the condition without a cluster; the one I/O path
-// (applying the patch) is exercised against a test server.
+// function over the spec and the Node, so every case here checks
+// the patch and the condition without a cluster. The one I/O path,
+// applying the patch, is tested against a test server.
 
 import (
 	"encoding/json"
@@ -21,9 +21,9 @@ func nodeWearing(labels, annotations map[string]string) *nodeObject {
 	return n
 }
 
-// decodeLabelPatch unpacks a merge patch's metadata so assertions can
-// see exactly which labels are set, which are erased (present but
-// null), and what happened to the ownership annotation.
+// decodeLabelPatch unpacks a merge patch's metadata, so assertions
+// can see exactly which labels are set, which are erased (present
+// but null), and what happened to the ownership annotation.
 func decodeLabelPatch(t *testing.T, patch []byte) (labels, annotations map[string]any) {
 	t.Helper()
 	var doc struct {
@@ -78,8 +78,9 @@ func TestNodeLabelsSettledNodeNeedsNoPatch(t *testing.T) {
 }
 
 func TestNodeLabelsDriftIsReasserted(t *testing.T) {
-	// Someone rewrote the label's value out from under the spec; the
-	// next pass puts it back, the same way sysctls re-assert.
+	// Something else changed the label's value away from the spec.
+	// The next pass puts it back, the same way sysctls get
+	// reapplied.
 	desired := map[string]string{"guid.foo/gpu": "true"}
 	node := nodeWearing(
 		map[string]string{"guid.foo/gpu": "false"},
@@ -93,8 +94,9 @@ func TestNodeLabelsDriftIsReasserted(t *testing.T) {
 
 func TestNodeLabelsRetractedLabelIsRemoved(t *testing.T) {
 	// The spec no longer declares the label, and the ownership
-	// annotation proves it was liken's: merge-patch null erases it,
-	// and the emptied annotation goes with it.
+	// annotation proves it belonged to liken. A null value in the
+	// merge patch erases it, and the emptied annotation goes with
+	// it.
 	node := nodeWearing(
 		map[string]string{"guid.foo/gpu": "true"},
 		map[string]string{ownedLabelsAnnotation: "guid.foo/gpu"})
@@ -130,9 +132,9 @@ func TestNodeLabelsRetractionKeepsTheRest(t *testing.T) {
 }
 
 func TestNodeLabelsNeverTouchForeignLabels(t *testing.T) {
-	// A label someone applied by hand is not in the ownership
-	// annotation, so retracting nothing removes nothing: the operator
-	// only ever removes what it can prove it added.
+	// A label that someone applied by hand is not in the ownership
+	// annotation, so retracting nothing removes nothing. The
+	// operator only ever removes what it can prove it added.
 	node := nodeWearing(map[string]string{"team": "storage"}, nil)
 	step := decideNodeLabels(nil, node)
 	if step.patch != nil {

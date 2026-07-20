@@ -2,33 +2,34 @@ package main
 
 // Demotion cleanup finishes what a role change starts.
 //
-// Promotion is self-completing: a follower rebooted into the leader
-// role starts a control plane, and k3s labels the Node and registers
-// the etcd member on its own. Demotion is not. A leader rebooted
-// into the follower role runs `k3s agent`, but the Kubernetes Node
-// object it re-attaches to still claims control-plane and etcd, and,
-// worse, its etcd membership stays registered. A registered member
-// that never votes still counts toward the quorum size, so it breaks
-// the majority math the next time a real leader reboots.
+// Promotion completes on its own. A follower rebooted into the
+// leader role starts a control plane, and k3s labels the Node and
+// registers the etcd member without help. Demotion does not
+// complete on its own. A leader rebooted into the follower role
+// runs `k3s agent`, but the Kubernetes Node object it reattaches to
+// still claims control-plane and etcd. Worse, its etcd membership
+// stays registered. A registered member that never votes still
+// counts toward the quorum size, so it breaks the majority math the
+// next time an actual leader reboots.
 //
 // The demoted machine's own operator holds everything needed to
-// finish the job: the facts say what this machine is (follower), and
-// the Node object says what the cluster still thinks it is. When
-// they disagree, the operator requests a reboot through the intent
-// channel it already owns, then deletes its own Node object.
-// Deleting the Node is what triggers k3s's etcd member-removal
-// controller. The intent is written first, deliberately: deleting
-// the Node kills this very pod (pods bound to a deleted Node are
-// garbage-collected), and a machine whose Node is gone cannot
-// re-register without a reboot, so the reboot must already be in
-// flight before the delete lands. If the delete itself fails, the
-// next boot simply detects the same mismatch and retries. Each
-// retry costs a reboot, but the state converges.
+// finish this job. The facts state what this machine is (a
+// follower), and the Node object states what the cluster still
+// thinks it is. When these disagree, the operator requests a reboot
+// through the intent channel it already owns, then deletes its own
+// Node object. Deleting the Node triggers k3s's etcd
+// member-removal controller. The operator writes the intent first,
+// deliberately. Deleting the Node kills this same pod, because pods
+// bound to a deleted Node are garbage-collected, and a machine whose
+// Node is gone cannot re-register without a reboot. So the reboot
+// must already be in progress before the delete happens. If the
+// delete itself fails, the next boot detects the same mismatch and
+// tries again. Each retry costs a reboot, but the state converges.
 //
-// The reboot policy gates all of it, same as every other staged
-// change: under Manual the operator only reports (DemotionPending),
-// because deleting the Node without the reboot in hand would strand
-// a working machine.
+// The reboot policy gates all of this, the same as every other
+// staged change. Under Manual, the operator only reports the state
+// (DemotionPending), because deleting the Node without a reboot
+// already under way would strand a working machine.
 
 import (
 	"fmt"
@@ -38,9 +39,9 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// The role labels k3s stamps on a Node when it runs a control plane.
-// Their presence on a follower's Node is what a demotion leaves
-// behind.
+// The role labels that k3s applies to a Node when it runs a control
+// plane. Their presence on a follower's Node is what a demotion
+// leaves behind.
 var leaderNodeLabels = []string{
 	"node-role.kubernetes.io/control-plane",
 	"node-role.kubernetes.io/etcd",
@@ -53,17 +54,17 @@ type demotion struct {
 	condition api.Condition
 }
 
-// decideDemotion compares what this machine is (the derived role)
+// decideDemotion compares what this machine is, its derived role,
 // against what its Node object claims. Only one mismatch is the
-// operator's to fix: a follower whose Node still says control-plane.
-// The other direction, a leader whose Node lacks the labels, is
-// just a control plane still coming up, and k3s finishes that on
-// its own.
+// operator's job to fix: a follower whose Node still says
+// control-plane. The other direction, a leader whose Node lacks the
+// labels, only means a control plane still starting up, and k3s
+// finishes that on its own.
 //
-// The demotion's reboot waits its turn like any other: a demotion is
-// always the aftermath of a Cluster edit, which means other machines
-// are converging on the same edit at the same time, and this is
-// exactly the traffic the rollout conductor sequences.
+// The demotion's reboot waits its turn like any other reboot. A
+// demotion always follows a Cluster edit, so other machines are
+// converging on the same edit at the same time. This is exactly the
+// traffic the rollout conductor is built to sequence.
 func decideDemotion(role api.Role, nodeLabels map[string]string, rebootPolicy machine.RebootPolicy, t turn) demotion {
 	nodeCurrent := func(status api.ConditionStatus, reason, message string) api.Condition {
 		return api.Condition{Type: "NodeCurrent", Status: status, Reason: reason, Message: message}
@@ -97,9 +98,10 @@ func decideDemotion(role api.Role, nodeLabels map[string]string, rebootPolicy ma
 	}
 }
 
-// carryOutDemotion performs the cleanup: reboot intent first (the
-// delete kills this pod, so the reboot must already be in flight),
-// then the Node deletion that triggers etcd member removal.
+// carryOutDemotion performs the cleanup. It writes the reboot intent
+// first, because deleting the Node kills this pod, so the reboot
+// must already be in progress. Then it deletes the Node, which
+// triggers etcd member removal.
 func carryOutDemotion(c *kubernetes.Client, name string, d demotion) api.Condition {
 	if !d.cleanup {
 		return d.condition
@@ -110,8 +112,8 @@ func carryOutDemotion(c *kubernetes.Client, name string, d demotion) api.Conditi
 			Message: fmt.Sprintf("writing the reboot intent: %v", err)}
 	}
 	if err := deleteNode(c, name); err != nil {
-		// The reboot is already in flight; the next boot re-detects
-		// the mismatch and retries the delete.
+		// The reboot is already in progress. The next boot detects
+		// the mismatch again and retries the delete.
 		fmt.Printf("deleting the stale Node %s: %v\n", name, err)
 	} else {
 		fmt.Printf("deleted the stale control-plane Node %s; rebooting to re-register as a follower\n", name)

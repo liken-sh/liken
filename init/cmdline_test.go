@@ -1,8 +1,8 @@
 package main
 
 // Tests for the kernel command-line parsers. The real file is
-// /proc/cmdline; these point cmdlinePath at files of their own
-// making, so every shape (present, absent, unreadable) is pinned.
+// /proc/cmdline. These tests point cmdlinePath at files of their own
+// making, so they pin every shape: present, absent, unreadable.
 
 import (
 	"os"
@@ -11,7 +11,7 @@ import (
 )
 
 // fakeCmdline points the parsers at a command line of the test's
-// choosing, restoring the real path when the test ends. Like the
+// choosing, and restores the real path when the test ends. Like the
 // fake sysfs, this swaps a package variable, so tests in this
 // package must not run in parallel.
 func fakeCmdline(t *testing.T, content string) {
@@ -58,7 +58,7 @@ func TestBootParam(t *testing.T) {
 	if bootParam("liken.oneshot") {
 		t.Error("liken.oneshot is not on the command line")
 	}
-	// A flag is a whole word, never a prefix of one.
+	// A flag must be a whole word; a prefix of a word does not count.
 	if bootParam("liken.inst") {
 		t.Error("a prefix of a word is not the word")
 	}

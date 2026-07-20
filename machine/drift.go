@@ -1,14 +1,15 @@
 package machine
 
-// Drift: comparing what a Machine spec declares against what a boot
-// actuated. These are shared grammar rather than operator logic,
-// because two programs must agree on them exactly: the operator uses
-// them to decide whether (and how) to converge, and init uses them
-// to verify that a staged manifest really is applicable without a
-// reboot before it applies one live. Two implementations of "is
-// this the same storage?" would eventually disagree, and the
-// disagreement would surface as an operator requesting forever what
-// init keeps refusing.
+// Drift compares what a Machine spec declares against what a boot
+// actuated. This package holds shared logic, not logic specific to
+// the operator, because two programs must agree on the comparison
+// exactly. The operator uses the comparison to decide whether to
+// converge, and how. init uses the comparison to check that a staged
+// manifest is really applicable without a reboot, before init
+// applies the manifest live. If the operator and init used two
+// different implementations of "is this the same storage?", the two
+// implementations would eventually disagree. The operator would then
+// request an action forever that init keeps refusing.
 
 import (
 	"fmt"
@@ -17,9 +18,10 @@ import (
 )
 
 // StorageDrift compares the declared storage against what the boot
-// actuated, role by role, with sizes normalized (2048Mi and 2Gi
-// declare the same thing). The returned diffs are written for
-// humans; they appear verbatim in condition messages.
+// actuated. It compares role by role and normalizes sizes, so
+// 2048Mi and 2Gi declare the same thing. StorageDrift writes the
+// returned diffs for people to read. The diffs appear verbatim in
+// condition messages.
 func StorageDrift(desired, actuated StorageSpec) []string {
 	var diffs []string
 	desiredRoles := rolesByName(desired)
@@ -44,12 +46,13 @@ func StorageDrift(desired, actuated StorageSpec) []string {
 	return diffs
 }
 
-// ModuleSetDiff compares two module lists as sets — order and
-// repetition carry no meaning — and reports both directions
-// separately, because they converge differently: an added module
-// can be loaded into the running kernel, while a retracted one can
-// only leave at a reboot (the kernel offers no safe way to pull a
-// driver out from under whatever started using it).
+// ModuleSetDiff compares two module lists as sets. Order and
+// repetition carry no meaning in these lists. ModuleSetDiff reports
+// both directions separately, because the two directions converge in
+// different ways. The system can load an added module into the
+// running kernel. But a retracted module can only leave the system
+// at a reboot. The kernel has no safe way to remove a driver while
+// something else uses it.
 func ModuleSetDiff(desired, actuated []string) (added, retracted []string) {
 	want := map[string]bool{}
 	for _, name := range desired {
@@ -72,13 +75,14 @@ func ModuleSetDiff(desired, actuated []string) (added, retracted []string) {
 	return added, retracted
 }
 
-// ModulesDrift renders ModuleSetDiff for humans, in the same voice
-// as StorageDrift. The actuated side is the boot record's copy of
-// the ask, not the load outcomes, and that is deliberate: a
-// declared module the image lacked still counts as actuated,
-// because rebooting again with the same image would change nothing.
-// The ModulesLoaded condition is what reports that problem, and its
-// fix is a new image, not a reboot.
+// ModulesDrift writes ModuleSetDiff results for people to read, the
+// same way StorageDrift does. The actuated side is the boot record's
+// copy of the request, not the result of loading modules. This
+// design is deliberate. A declared module that the image lacked
+// still counts as actuated, because rebooting again with the same
+// image would change nothing. The ModulesLoaded condition reports
+// that problem instead. The fix for that problem is a new image, not
+// a reboot.
 func ModulesDrift(desired, actuated []string) []string {
 	added, retracted := ModuleSetDiff(desired, actuated)
 	var diffs []string
@@ -100,9 +104,9 @@ func rolesByName(spec StorageSpec) map[StorageRoleName]DeclaredRole {
 }
 
 // sameSize compares two size declarations by the number of bytes
-// they describe rather than by their spelling. An unparseable size
-// (which validation will refuse anyway) falls back to string
-// comparison rather than panicking here.
+// each one describes, not by the spelling. If a size cannot be
+// parsed, sameSize falls back to a string comparison instead of a
+// panic. Validation refuses an unparseable size anyway.
 func sameSize(a, b string) bool {
 	if a == "" || b == "" {
 		return a == b

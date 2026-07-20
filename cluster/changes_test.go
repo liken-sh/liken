@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// specWith applies one mutation to a fully-populated base spec, so
-// each case exercises exactly one domain and the comparison can't
-// pass by accident of zero values.
+// specWith applies one mutation to a fully populated base spec. Each
+// case then exercises exactly one domain, and the comparison cannot
+// pass by accident because of zero values.
 func specWith(mutate func(*ClusterSpec)) ClusterSpec {
 	spec := ClusterSpec{
 		Origin:   OriginFounded,
@@ -63,10 +63,11 @@ func TestRestartAppliesIdenticalSpecsNeedNoDisruption(t *testing.T) {
 }
 
 func TestRestartAppliesIgnoresVersionAndReleases(t *testing.T) {
-	// Canonical documents never carry version or releases (the
-	// operator strips them before hashing), so the classifier must
-	// never see them as drift either: alone they are no change, and
-	// alongside a feature toggle they must not drag it to a reboot.
+	// Canonical documents never carry version or releases, because
+	// the operator strips them before hashing. The classifier must
+	// never treat them as drift either. Alone, they are no change.
+	// Alongside a feature toggle, they must not drag the change to a
+	// reboot.
 	releasesOnly := specWith(func(s *ClusterSpec) {
 		s.Version = "0.3.0"
 		s.Releases = ClusterReleasesSpec{Source: "https://releases.example"}
@@ -84,14 +85,14 @@ func TestRestartAppliesIgnoresVersionAndReleases(t *testing.T) {
 }
 
 func TestRestartAppliesTreatsAnUnknownFieldAsRebootClass(t *testing.T) {
-	// The safety property is structural: a field the classifier has
-	// never heard of must read as reboot-class. Simulated by
-	// round-tripping a spec through JSON with an extra field is not
-	// possible (the strict parser refuses it), so this test pins the
-	// mechanism instead: the subtraction zeroes only the two
-	// restart-class fields, and anything else that differs — here, a
-	// stand-in for a future field, the endpoint — survives the
-	// subtraction and answers reboot.
+	// The safety property is structural: a field the classifier does
+	// not recognize must read as reboot-class. The test cannot
+	// simulate this by round-tripping a spec through JSON with an
+	// extra field, because the strict parser refuses it. Instead,
+	// this test pins the mechanism directly. The subtraction zeroes
+	// only the two restart-class fields. Anything else that differs
+	// survives the subtraction and answers reboot. Here, the endpoint
+	// field stands in for a future field.
 	changed := specWith(func(s *ClusterSpec) {
 		s.Endpoint = "https://10.10.0.9:6443"
 		s.Features["traefik"] = &FeatureConfig{}
@@ -102,9 +103,9 @@ func TestRestartAppliesTreatsAnUnknownFieldAsRebootClass(t *testing.T) {
 }
 
 func TestRestartAppliesDoesNotMutateItsArguments(t *testing.T) {
-	// RestartApplies zeroes fields on its (by-value) copies; the
-	// caller's specs must come back untouched, or the operator would
-	// corrupt the live document mid-reconcile.
+	// RestartApplies zeroes fields on its copies, which it holds by
+	// value. The caller's specs must come back untouched, or the
+	// operator would corrupt the live document mid-reconcile.
 	old, new := specWith(nil), specWith(func(s *ClusterSpec) { s.Features = nil })
 	before, _ := json.Marshal(old)
 	RestartApplies(old, new)

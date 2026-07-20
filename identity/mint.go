@@ -1,23 +1,26 @@
 // Package identity mints, adopts, and derives credentials from a
-// deployment's identity: the certificate authorities and join token
-// that make machines built from the same image members of the same
-// cluster.
+// deployment's identity. An identity is the certificate authorities
+// and join token that make machines built from the same image
+// members of the same cluster.
 //
-// Kubernetes trust is built from several small PKIs, each covering
-// one relationship. k3s checks for these files before generating its
-// own, so placing them in /var/lib/rancher/k3s/server/tls ahead of
-// first start reverses the usual flow. Normally the identity is an
-// output that has to be extracted from a running machine, which a
-// machine with no shell could never hand over anyway; here it is an
-// input the image carries. Everything k3s signs from here on (the
-// API server's serving cert, kubelet certs, all of it) chains up to
-// keys we held before the machine ever booted, which is what lets an
-// operator's kubeconfig be computed offline (see kubeconfig.go).
+// Kubernetes trust is built from several small PKIs, each one
+// covering a single relationship. k3s checks for these files before
+// it generates its own. Placing them in
+// /var/lib/rancher/k3s/server/tls before first start reverses the
+// usual flow. Normally, the identity is an output that must be
+// extracted from a running machine, something a machine with no
+// shell could never provide. Here, the identity is an input that the
+// image carries. Everything that k3s signs from this point on,
+// including the API server's serving certificate and the kubelet
+// certificates, chains up to keys that existed before the machine
+// ever booted. This is what lets an operator's kubeconfig be
+// computed offline (see kubeconfig.go).
 //
-// An identity belongs to a deployment, not to the OS: this package
-// knows how to produce one, and the caller decides which deployment
-// it is for. The files are private keys and never belong in history;
-// deployment directories gitignore them.
+// An identity belongs to a deployment, not to the OS. This package
+// knows how to produce an identity, and the caller decides which
+// deployment it belongs to. The files are private keys and must
+// never enter version-control history. Deployment directories list
+// them in .gitignore.
 package identity
 
 import (
@@ -37,14 +40,15 @@ import (
 	"time"
 )
 
-// Bundle is the identity, as paths relative to its directory:
-// everything mint produces and adopt copies, no more. The token lives
-// beside the tls tree, not in it, matching where k3s keeps its own
-// (/var/lib/rancher/k3s/server/token). The image package reads this
-// list to lay an identity into a deployment layer, so a new artifact
-// added here reaches the machines with no other change. The
-// kubeconfig is deliberately not part of the bundle: it is the
-// operator's credential, and it must never ride into an image.
+// Bundle lists the identity as paths relative to its directory. It
+// lists everything that mint produces and adopt copies, and nothing
+// more. The token lives beside the tls tree, not inside it, matching
+// where k3s keeps its own token (/var/lib/rancher/k3s/server/token).
+// The image package reads this list to place an identity into a
+// deployment layer, so a new artifact added here reaches the
+// machines with no other change. The kubeconfig is deliberately not
+// part of the bundle. It is the operator's credential, and it must
+// never be included in an image.
 var Bundle = []string{
 	"token",
 	"tls/server-ca.crt", "tls/server-ca.key",
@@ -55,38 +59,40 @@ var Bundle = []string{
 	"tls/etcd/peer-ca.crt", "tls/etcd/peer-ca.key",
 }
 
-// Mint creates the identity's artifacts in dir, keeping any that
+// Mint creates the identity's artifacts in dir, and keeps any that
 // already exist. The authorities:
 //
-//	server-ca          signs the API server's serving certificates,
-//	                   the thing kubectl verifies before trusting a
-//	                   connection
+//	server-ca          signs the API server's serving certificates.
+//	                   kubectl checks this signature before it trusts
+//	                   a connection.
 //	client-ca          signs client certificates. The API server reads
-//	                   identity out of the subject: CN is the
-//	                   username, each O is a group membership
-//	request-header-ca  the aggregation layer's trust root: extension
-//	                   API servers accept proxied-authentication
-//	                   headers only from a front proxy bearing a cert
-//	                   from this CA
-//	etcd/server-ca     etcd's two PKIs. liken's k3s keeps state in
-//	etcd/peer-ca       sqlite via kine, not etcd, but k3s manages the
-//	                   full CA family as a set
-//	service.key        not a CA: the key that signs every
+//	                   the identity from the certificate subject. CN
+//	                   is the username, and each O is a group.
+//	request-header-ca  is the aggregation layer's trust root.
+//	                   Extension API servers accept
+//	                   proxied-authentication headers only from a
+//	                   front proxy that presents a certificate from
+//	                   this CA.
+//	etcd/server-ca     are etcd's two PKIs. liken's k3s keeps its
+//	etcd/peer-ca       state in sqlite through kine, not etcd, but k3s
+//	                   still manages the full CA family as a set.
+//	service.key        is not a CA. It is the key that signs every
 //	                   ServiceAccount token. Whoever holds this key
-//	                   can mint valid identities for any pod
+//	                   can mint valid identities for any pod.
 //
-// Everything is ECDSA P-256, matching what k3s generates for itself.
-// Ten-year lifetimes; rotating these roots is work a later milestone
-// takes up, and until then a long life keeps the identity story
-// simple.
+// Every key is ECDSA P-256, matching what k3s generates for itself.
+// Every certificate has a ten-year lifetime. Rotating these roots is
+// work that a later milestone will take up. Until then, a long
+// lifetime keeps the identity simple to manage.
 //
-// Each artifact is minted only if it doesn't already exist, so adding
-// a new artifact (or re-running for any reason) never replaces an
-// identity that machines already carry: replacing the CAs would
-// orphan every kubeconfig computed from them, and replacing the token
-// would strand any machine that hasn't joined yet. Replacing the
-// identity is a deliberate act: delete the identity directory, and
-// the next mint creates a new one.
+// Mint creates each artifact only if it does not already exist.
+// Because of this, adding a new artifact, or running Mint again for
+// any reason, never replaces an identity that machines already
+// carry. Replacing the CAs would break every kubeconfig computed
+// from them, and replacing the token would prevent any machine that
+// has not joined yet from joining. Replacing the identity is a
+// deliberate act. Delete the identity directory, and the next call
+// to Mint creates a new one.
 func Mint(dir string, out io.Writer) error {
 	tls := filepath.Join(dir, "tls")
 	if err := os.MkdirAll(filepath.Join(tls, "etcd"), 0o755); err != nil {
@@ -114,13 +120,14 @@ func Mint(dir string, out io.Writer) error {
 		fmt.Fprintf(out, "minted %s: %s\n", ca.path, ca.cn)
 	}
 
-	// The ServiceAccount signing key is not like the CAs above:
-	// tokens are JWTs, so there's no certificate, just a keypair the
-	// API server signs with and verifies against. The encoding
-	// matters: kube-apiserver reads this file with a parser that
-	// understands the older SEC1 encoding ("EC PRIVATE KEY") but not
-	// PKCS#8 ("PRIVATE KEY"); given PKCS#8 it fails on startup with
-	// an error that the file contains no valid keys.
+	// The ServiceAccount signing key differs from the CAs above.
+	// Tokens are JWTs, so there is no certificate, only a keypair
+	// that the API server signs with and verifies against. The
+	// encoding matters. kube-apiserver reads this file with a parser
+	// that understands the older SEC1 encoding ("EC PRIVATE KEY") but
+	// not PKCS#8 ("PRIVATE KEY"). Given a PKCS#8 file, kube-apiserver
+	// fails at startup with an error that says the file contains no
+	// valid keys.
 	serviceKey := filepath.Join(tls, "service.key")
 	if _, err := os.Stat(serviceKey); err == nil {
 		fmt.Fprintln(out, "keeping service.key: the ServiceAccount token signing key")
@@ -139,23 +146,24 @@ func Mint(dir string, out io.Writer) error {
 		fmt.Fprintln(out, "minted service.key: the ServiceAccount token signing key")
 	}
 
-	// The cluster's join token, in k3s's "secure" format:
+	// This is the cluster's join token, in k3s's "secure" format:
 	//
 	//	K10<CA-HASH>::<user>:<password>
 	//
-	// Normally this has to be copied off a running server
-	// (/var/lib/rancher/k3s/server/node-token), because the CA it
-	// hashes doesn't exist until k3s generates it at first boot.
-	// liken reverses that: the server CA is minted above, before any
-	// machine exists, so the whole token is computable right here.
-	// The CA-HASH is the SHA256 of the cluster CA certificate file. A
-	// joining machine fetches the server's CA bundle, hashes it, and
-	// compares before it trusts the endpoint or presents the secret,
-	// so the token authenticates in both directions: the machine
-	// proves itself to the cluster, and the cluster proves itself to
+	// Normally, an operator must copy this token off a running
+	// server (/var/lib/rancher/k3s/server/node-token), because the CA
+	// that it hashes does not exist until k3s generates it at first
+	// boot. liken reverses that order. The server CA is minted above,
+	// before any machine exists, so this code can compute the whole
+	// token right here. CA-HASH is the SHA256 hash of the cluster CA
+	// certificate file. A joining machine fetches the server's CA
+	// bundle, hashes it, and compares the hash before it trusts the
+	// endpoint or presents the secret. Because of this, the token
+	// authenticates in both directions: the machine proves its
+	// identity to the cluster, and the cluster proves its identity to
 	// the machine. The secret half is 32 hex characters of real
-	// randomness, the same format k3s generates. "server" is the
-	// credential's username: whoever bears this token may join
+	// randomness, the same format that k3s generates. "server" is the
+	// credential's username. Whoever holds this token may join
 	// machines to the cluster.
 	tokenPath := filepath.Join(dir, "token")
 	if _, err := os.Stat(tokenPath); err == nil {
@@ -179,17 +187,18 @@ func Mint(dir string, out io.Writer) error {
 	return nil
 }
 
-// newCA creates one self-signed root: a fresh P-256 key and a
-// certificate whose extensions mark it as a CA that may sign other
-// certificates.
+// newCA creates one self-signed root. It creates a fresh P-256 key
+// and a certificate whose extensions mark it as a CA that can sign
+// other certificates.
 func newCA(tls, path, cn string) error {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return err
 	}
 
-	// Serial numbers must be unique per issuer; 128 random bits is
-	// how every CA in practice satisfies that without keeping state.
+	// Serial numbers must be unique for each issuer. In practice,
+	// every CA satisfies this requirement with 128 random bits,
+	// without keeping state.
 	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {
 		return err

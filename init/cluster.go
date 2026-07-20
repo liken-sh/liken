@@ -4,25 +4,26 @@ package main
 //
 // The Cluster manifest goes through the same lifecycle as the Machine
 // manifest (staged, proven, seed), but its selection is simpler,
-// because the two documents are needed at different moments of the
-// boot. The Machine manifest *drives* storage reconciliation, so init
-// must peek at it before any filesystem is properly mounted; the
-// Cluster document is only needed after storage settles (its
-// consumers are role derivation, k3s configuration, and time
-// sources), so by the time it's read, machineState is an ordinary
-// mounted filesystem and the store can be read in place.
+// because the boot needs the two documents at different moments. The
+// Machine manifest drives storage reconciliation, so init must read
+// it before the boot properly mounts any filesystem. The boot needs
+// the Cluster document only after storage settles, because role
+// derivation, k3s configuration, and time sources consume it. By the
+// time the boot reads it, machineState is an ordinary mounted
+// filesystem, and the code can read the store in place.
 //
-// A staged document is vetted before it is tried, like the Machine
-// manifest's: a staged document that won't parse or isn't a Cluster
-// would fail every future boot the same way, so it is rejected
-// without being tried and the boot falls back to proven, then seed.
-// What init cannot do is *prove* a staged cluster document, because
-// its failure modes are downstream: a bad endpoint means the
-// follower never joins, which init only discovers by k3s never
-// coming up. Promotion therefore belongs to the operator, whose own
-// existence as a pod is the proof that the join worked. The
-// operator's half of the lifecycle, and the attempted marker, are
-// described in cluster.go on the operator side.
+// The code vets a staged document before it tries the document, the
+// same as with the Machine manifest. A staged document that will not
+// parse, or is not a Cluster, will fail every future boot the same
+// way. So the code rejects it without trying it, and the boot falls
+// back to proven, then to seed. Init cannot prove a staged cluster
+// document, because its failure modes appear downstream: a bad
+// endpoint means the follower never joins, and init discovers this
+// only when k3s never starts. Promotion therefore belongs to the
+// operator. The operator's own existence as a pod is the proof that
+// the join worked. The operator's half of the lifecycle, and the
+// attempted marker, are described in cluster.go on the operator
+// side.
 
 import (
 	"errors"
@@ -35,20 +36,21 @@ import (
 )
 
 // chooseCluster returns the cluster document this boot runs under,
-// both parsed and as its exact bytes (which are published to /run for
-// the operator's drift detection), and records the choice in the boot
-// record. The preference order is staged (vetted), then proven, then
-// the image's seed. A memory-backed machine has no durable store, so
-// it reads only the seed, every boot. No document anywhere is a valid
-// answer, because a machine alone is its own cluster. A seed that
-// exists and won't parse is an error the caller treats as fatal,
-// because a machine that can't tell its role must not guess.
+// both parsed and as its exact bytes, and records the choice in the
+// boot record. The code publishes the exact bytes to /run for the
+// operator's drift detection. The preference order is staged
+// (vetted), then proven, then the image's seed. A memory-backed
+// machine has no durable store, so it reads only the seed, every
+// boot. Finding no document anywhere is a valid answer, because a
+// machine alone is its own cluster. A seed that exists but will not
+// parse is an error the caller treats as fatal, because a machine
+// that cannot tell its role must not guess it.
 func chooseCluster(stateRoot, seedPath string, durable bool, boot *machine.BootStatus) (*cluster.Cluster, []byte, error) {
 	if durable {
 		store := machine.ClusterManifests(stateRoot)
 
-		// The standing rejection is republished into the boot record
-		// every boot (rejectStagedDocument explains why).
+		// The code republishes the standing rejection into the boot
+		// record every boot (rejectStagedDocument explains why).
 		boot.ClusterRejection, _ = store.LoadRejection()
 
 		if raw, err := store.LoadStaged(); err != nil {
@@ -62,11 +64,11 @@ func chooseCluster(stateRoot, seedPath string, durable bool, boot *machine.BootS
 				boot.ClusterRejection = rejectStagedDocument("cluster", "document", store.Reject,
 					raw, fmt.Sprintf("the staged cluster document does not parse: %v", perr))
 			case attempted == hash:
-				// A previous boot ran this exact document and nobody
-				// promoted it: the machine never joined its cluster
-				// under it, and the operator that would have carried
-				// the proof never ran. A staged document gets exactly
-				// one trial boot.
+				// A previous boot ran this exact document, and nobody
+				// promoted it. The machine never joined its cluster
+				// under the document, and the operator that would
+				// have carried the proof never ran. A staged document
+				// gets exactly one trial boot.
 				boot.ClusterRejection = rejectStagedDocument("cluster", "document", store.Reject,
 					raw, "the last boot ran this staged cluster document and never joined the cluster under it")
 			default:
@@ -85,9 +87,10 @@ func chooseCluster(stateRoot, seedPath string, durable bool, boot *machine.BootS
 		} else if raw != nil {
 			c, perr := cluster.ParseCluster(raw)
 			if perr != nil {
-				// A proven document that won't parse is a corrupted
-				// last-known-good: report it and fall through to the
-				// seed rather than dying over a recovery file.
+				// A proven document that will not parse is a
+				// corrupted last-known-good copy. The code reports it
+				// and falls through to the seed, rather than failing
+				// the boot over a recovery file.
 				fmt.Fprintf(os.Stderr, "liken: cluster: the proven document is unreadable: %v\n", perr)
 			} else {
 				boot.ClusterManifestSource = machine.ManifestSourceProven

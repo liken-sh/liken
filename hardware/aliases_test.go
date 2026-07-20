@@ -36,7 +36,7 @@ func TestMatchModalias(t *testing.T) {
 	}
 }
 
-// aliasFile writes a modules.alias-shaped file and returns its path.
+// aliasFile writes a file shaped like modules.alias and returns its path.
 func aliasFile(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "modules.alias")

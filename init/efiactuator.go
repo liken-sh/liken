@@ -1,15 +1,15 @@
 package main
 
-// The UEFI dialect of the boot actuator (actuator.go describes the
-// interface and why it exists).
+// The UEFI implementation of the boot actuator (actuator.go describes
+// the interface and why it exists).
 //
 // UEFI firmware keeps its boot preferences as variables (efi.go), and
 // the specification already provides exactly the two mechanisms
-// blue-green needs. BootNext is a one-shot: the firmware consumes it
-// as it boots, so a slot on trial gets exactly one chance, and any
-// reset after that falls back to BootOrder. BootOrder is the standing
-// preference list, and keeping the proven slot at its head is what
-// makes the fallback real.
+// blue-green upgrades need. BootNext is a one-shot: the firmware
+// consumes it as it boots, so a slot on trial gets exactly one
+// chance, and any reset after that falls back to BootOrder.
+// BootOrder is the standing preference list, and keeping the proven
+// slot at its head is what makes the fallback real.
 
 import (
 	"fmt"
@@ -17,7 +17,7 @@ import (
 )
 
 type efiActuator struct {
-	// dir is the efivarfs mount (or a test's stand-in for one).
+	// dir is the efivarfs mount, or a test's stand-in for one.
 	dir string
 }
 
@@ -49,9 +49,9 @@ func (a efiActuator) fallbackLeads(slot string) bool {
 }
 
 // assertProven puts the slot's entry at the head of BootOrder and
-// keeps everything else in its relative order. A lost or mangled
-// BootOrder (a dead NVRAM battery, someone editing the setup menu) is
-// corrected the next time this runs.
+// keeps everything else in its relative order. This method corrects
+// a lost or corrupted BootOrder, for example from a dead NVRAM
+// battery or someone editing the setup menu, the next time it runs.
 func (a efiActuator) assertProven(slot string) {
 	leader, ok := findSlotEntry(a.dir, slot)
 	if !ok {
@@ -74,9 +74,9 @@ func (a efiActuator) assertProven(slot string) {
 		fmt.Fprintf(os.Stderr, "liken: system: repairing BootOrder: %v\n", err)
 		return
 	}
-	// Trust the readback, not the write: some firmware accepts a
+	// Trust the readback, not the write. Some firmware accepts a
 	// write and then fails to hold it, and every later report would
-	// be wrong if the write were taken at face value.
+	// be wrong if the code took the write result at face value.
 	if readback := readBootOrder(a.dir); len(readback) == 0 || readback[0] != leader {
 		fmt.Fprintf(os.Stderr, "liken: system: BootOrder was written but reads back unchanged; the firmware is not holding it\n")
 		return
@@ -85,8 +85,9 @@ func (a efiActuator) assertProven(slot string) {
 		bootEntryID(leader), slot)
 }
 
-// findSlotEntry locates a slot's firmware entry the way everything in
-// liken finds things: by the name written on it at install time.
+// findSlotEntry locates a slot's firmware entry the same way
+// everything in liken finds things: by the name written on it at
+// install time.
 func findSlotEntry(efiDir, slot string) (uint16, bool) {
 	for number, option := range listBootEntries(efiDir) {
 		if option.description == "liken slot "+slot {

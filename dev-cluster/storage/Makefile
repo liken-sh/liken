@@ -1,93 +1,97 @@
-# The lab's storage server: the fixture the iscsi and nfs features
-# and the registry mirror are drilled against.
+# The lab's storage server: the fixture that the iscsi and nfs
+# features and the registry mirror are drilled against.
 #
 # liken is a client of network storage
 # (plans/17-network-storage-clients.md), and a client needs a
-# server. This guest is that server, and it is deliberately not a
-# liken machine: it runs stock Debian, because the point of the
-# drill is liken's side of the wire, and the server side should be
-# the boring reference implementation everyone else runs — the kernel
-# NFS server, a standard iSCSI target, and CNCF distribution, the
+# server. This guest is that server, and it is not a liken machine,
+# on purpose. It runs stock Debian, because the point of the drill is
+# liken's side of the wire, and the server side should be the plain
+# reference implementation that everyone else runs: the kernel NFS
+# server, a standard iSCSI target, and CNCF distribution, the
 # reference container registry. It sits on the same multicast segment
-# as the fleet, at 10.10.0.100, serving one NFSv4 export, one iSCSI
-# LUN, and one authenticated pull-through registry: the way the NFS
-# export answers on 2049 for the nfs feature, the registry answers on
-# 5000 for spec.registries and the registry-credentials Secret
-# (milestone 20).
+# as the fleet, at 10.10.0.100, and serves one NFSv4 export, one
+# iSCSI LUN, and one authenticated pull-through registry. The NFS
+# export answers on 2049 for the nfs feature, and the registry
+# answers on 5000 for spec.registries and the registry-credentials
+# Secret (milestone 20).
 #
 # There is no installer. Debian publishes cloud images: generic qcow2
 # disks that boot ready-made and configure themselves on first boot
 # from a cloud-init seed. The seed here is a small ISO (the NoCloud
-# datasource: a volume labeled "cidata" carrying user-data, meta-data,
-# and network-config), and seed/ is the server's entire
-# configuration — addresses, packages, the export, the target. Wipe
-# the guest (make clean) and the next boot rebuilds the identical
-# server from the seed alone.
+# datasource: a volume labeled "cidata" that carries user-data,
+# meta-data, and network-config), and seed/ holds the server's entire
+# configuration: addresses, packages, the export, and the target.
+# Wipe the guest (make clean), and the next boot rebuilds the
+# identical server from the seed alone.
 #
 # Run it in its own terminal, like any node:
 #
 #   make -C dev-cluster storage
 #
-# It participates in nothing: no cluster document, no operator, no
+# It takes part in nothing: no cluster document, no operator, no
 # manifests. The fleet only ever sees it as an address that answers
 # on ports 2049 (NFS), 3260 (iSCSI), and 5000 (the registry).
 
-# override keeps this pin authoritative even under a release build:
+# override keeps this pin authoritative even under a release build.
 # `make release VERSION=<stamp>` passes VERSION on the command line,
 # and command-line variables silently replace plain assignments in
-# every sub-make they reach. This domain's version comes from the
-# VERSION file beside this Makefile, never from a caller.
+# every sub-make that they reach. This domain's version comes from
+# the VERSION file beside this Makefile, and never from a caller.
 override VERSION := $(strip $(file <VERSION))
 BASE := cache/$(VERSION)/debian-13-genericcloud-amd64-$(VERSION).qcow2
 
-# MACs continue the lab's scheme (52:54:00 is QEMU's prefix, 4c:4b/4c
-# read "LK"); the machines take 01–05, the storage server takes 10.
+# MACs continue the lab's scheme (52:54:00 is QEMU's prefix, and
+# 4c:4b/4c reads as "LK"). The machines take 01 to 05, and the
+# storage server takes 10.
 UPLINK_MAC := 52:54:00:4c:4b:10
 CLUSTER_MAC := 52:54:00:4c:4c:10
 
 $(BASE): VERSION fetch.sh
 	./fetch.sh
 
-# The host's door into the server: an SSH keypair minted per
-# checkout, never committed, the same posture as the lab's CAs and
-# join token (see ../identity). The public half is appended to the
-# seed's user-data below, so the committed seed carries no identity
-# at all, and any checkout that builds the fixture can operate it.
+# The host's way into the server: an SSH keypair, minted for each
+# checkout and never committed, the same approach as the lab's CAs
+# and join token (see ../identity). The Makefile appends the public
+# half to the seed's user-data below, so the committed seed carries
+# no identity at all, and any checkout that builds the fixture can
+# operate it.
 guest/ssh guest/ssh.pub &:
 	mkdir -p guest
 	ssh-keygen -q -t ed25519 -N "" -C liken-lab-storage -f guest/ssh
 
 # The seed's user-data is the committed file plus this checkout's
-# public key; ssh_authorized_keys lands on the image's default user
-# (debian), who holds passwordless sudo.
+# public key. ssh_authorized_keys goes onto the image's default user
+# (debian), who holds sudo access with no password.
 guest/user-data: seed/user-data guest/ssh.pub
 	cat seed/user-data > $@
 	printf 'ssh_authorized_keys:\n  - %s\n' "$$(cat guest/ssh.pub)" >> $@
 
-# The seed ISO. xorriso in its mkisofs guise builds it from the
-# assembled user-data and the two files in seed/; the "cidata" volume
-# label is how cloud-init's NoCloud datasource recognizes the disk as
-# its seed. Rock Ridge extensions preserve the lowercase filenames
-# cloud-init looks for.
+# The seed ISO. xorriso, run in its mkisofs mode, builds the ISO from
+# the assembled user-data and the two files in seed/. The "cidata"
+# volume label is how cloud-init's NoCloud datasource recognizes the
+# disk as its seed. Rock Ridge extensions keep the lowercase file
+# names that cloud-init looks for.
 guest/seed.iso: guest/user-data seed/meta-data seed/network-config
 	xorriso -as mkisofs -quiet -volid cidata -joliet -rational-rock \
 		-output $@ guest/user-data seed/meta-data seed/network-config
 
 # The root disk: a copy-on-write overlay whose backing file is the
-# fetched Debian image, so the pristine base is shared, never
-# written, and the guest's own state stays in guest/ where make clean
-# can factory-reset it. The overlay is created larger than the base;
-# reads past the base return zeros, and cloud-init grows the root
-# partition and filesystem into the extra space on first boot.
+# fetched Debian image. This keeps the clean base image shared and
+# never written, and keeps the guest's own state in guest/, where
+# make clean can reset it to factory state. The overlay is created
+# larger than the base. Reads past the end of the base return zeros,
+# and cloud-init grows the root partition and filesystem into the
+# extra space on first boot.
 guest/root.qcow2: $(BASE)
 	mkdir -p guest
 	qemu-img create -f qcow2 -F qcow2 -b $(abspath $(BASE)) $@ 8G
 
 # The payload disks, blank like every disk in this lab. The server
-# formats the exports disk ext4 and serves it over NFS; the luns disk
-# is never formatted by the server at all — it is handed whole to the
-# iSCSI target as the LUN, and whatever filesystem it carries is the
-# initiator's business, which is the entire idea of block storage.
+# formats the exports disk as ext4 and serves it over NFS. The server
+# never formats the luns disk at all. It hands the whole disk to the
+# iSCSI target as the LUN, and whatever filesystem the disk carries
+# is the initiator's business. This is the whole idea of block
+# storage.
 guest/exports.qcow2:
 	mkdir -p guest
 	qemu-img create -f qcow2 $@ 8G
@@ -96,25 +100,25 @@ guest/luns.qcow2:
 	mkdir -p guest
 	qemu-img create -f qcow2 $@ 8G
 
-# Boot the server. The flags are the same vocabulary as the machines'
-# (documented flag by flag in ../Makefile); what differs is the
-# firmware and the size. SeaBIOS, QEMU's default, is plenty — the
-# Debian image boots under BIOS or UEFI, and nothing here exercises
-# firmware behavior the way the machines' install path does. Two
-# vCPUs and one gigabyte are enough: nfsd and tgtd are nearly free,
-# and the registry, the heaviest of the three, is still far lighter
-# than a kubelet.
+# Boot the server. The flags use the same vocabulary as the
+# machines' flags (documented flag by flag in ../Makefile). What
+# differs is the firmware and the size. SeaBIOS, QEMU's default, is
+# enough: the Debian image boots under BIOS or UEFI, and nothing here
+# exercises firmware behavior the way the machines' install path
+# does. Two vCPUs and one gigabyte are enough, because nfsd and tgtd
+# use almost no resources, and the registry, the heaviest of the
+# three services, is still far lighter than a kubelet.
 #
-# The NICs come before the disks so PCI slot order keeps the uplink
-# and cluster segment stable; the disks carry serial numbers so the
+# The NICs come before the disks, so PCI slot order keeps the uplink
+# and cluster segment stable. The disks carry serial numbers, so the
 # seed can name them by identity (/dev/disk/by-id/virtio-storage-*)
-# instead of by probe order. The seed rides an IDE CD drive, keeping
-# it out of the virtio disk namespace entirely.
+# instead of by probe order. The seed rides an IDE CD drive, which
+# keeps it out of the virtio disk namespace entirely.
 #
-# The uplink's hostfwd is the operator's door: host port 2210,
-# loopback only, forwards to the server's sshd, so drills can load
-# fixtures and inspect the server without touching its serial
-# console:
+# The uplink's hostfwd is the operator's way in: host port 2210,
+# bound to loopback only, forwards to the server's sshd. This lets
+# drills load fixtures and inspect the server without touching its
+# serial console:
 #
 #   ssh -i guest/ssh -p 2210 debian@127.0.0.1
 run: guest/root.qcow2 guest/exports.qcow2 guest/luns.qcow2 guest/seed.iso
@@ -140,10 +144,10 @@ run: guest/root.qcow2 guest/exports.qcow2 guest/luns.qcow2 guest/seed.iso
 
 .PHONY: run clean
 
-# A factory reset: the server's disks and seed ISO go, the fetched
-# base image stays cached. The next run rebuilds the same server —
-# including reformatting the exports disk and re-serving a blank LUN,
-# so anything the fleet stored here is gone, which is the right
-# meaning for a lab fixture's clean.
+# A factory reset: this target removes the server's disks and seed
+# ISO, and keeps the fetched base image cached. The next run rebuilds
+# the same server, including reformatting the exports disk and
+# serving a new blank LUN, so anything the fleet stored here is gone.
+# This is the right meaning for a lab fixture's clean target.
 clean:
 	rm -rf guest

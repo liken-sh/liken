@@ -8,9 +8,10 @@ import (
 	"testing"
 )
 
-// formatTestPartition formats a sparse file standing in for a
-// partition of the given size, with a fixed volume ID so the output
-// is deterministic, and returns the file open for reading.
+// formatTestPartition formats a sparse file that stands in for a
+// partition of the given size. It uses a fixed volume ID, so that
+// the output is deterministic, and returns the file open for
+// reading.
 func formatTestPartition(t *testing.T, sizeBytes uint64) *os.File {
 	t.Helper()
 	f, err := os.Create(filepath.Join(t.TempDir(), "slot"))
@@ -42,8 +43,9 @@ func TestFAT32BootSector(t *testing.T) {
 	f := formatTestPartition(t, testSlotBytes)
 	bs := readSector(t, f, 0)
 
-	// The fields firmware and the kernel actually read, at the
-	// offsets Microsoft's specification fixes forever.
+	// These are the fields that firmware and the kernel actually
+	// read, at the offsets that Microsoft's specification fixes
+	// permanently.
 	if bs[0] != 0xEB || bs[2] != 0x90 {
 		t.Errorf("jump instruction: got % X, want EB xx 90", bs[0:3])
 	}
@@ -135,8 +137,8 @@ func TestFAT32FSInfo(t *testing.T) {
 
 func TestFAT32BackupSectors(t *testing.T) {
 	f := formatTestPartition(t, testSlotBytes)
-	// The backup copies at sectors 6 and 7 are byte-for-byte
-	// identical to the primaries: that is their whole job.
+	// The backup copies at sectors 6 and 7 must be byte-for-byte
+	// identical to the primaries. This is their entire purpose.
 	if string(readSector(t, f, 0)) != string(readSector(t, f, 6)) {
 		t.Error("backup boot sector differs from the primary")
 	}
@@ -172,8 +174,8 @@ func TestFAT32RootDirectoryCarriesTheLabel(t *testing.T) {
 	f := formatTestPartition(t, testSlotBytes)
 	// Cluster 2 begins right after the reserved region and both
 	// FATs. A fresh root directory holds exactly one entry: the
-	// volume-label entry (attribute 0x08) matching the boot sector's
-	// label field.
+	// volume-label entry (attribute 0x08), which matches the boot
+	// sector's label field.
 	root := readSector(t, f, 32+2*1023)
 	if got := string(root[0:11]); got != "LIKEN-SYS-A" {
 		t.Errorf("volume label entry: got %q", got)
@@ -189,10 +191,10 @@ func TestFAT32RootDirectoryCarriesTheLabel(t *testing.T) {
 }
 
 func TestFAT32RefusesTinyPartitions(t *testing.T) {
-	// Below 65,525 clusters the volume would legally be FAT16 — the
-	// FAT type is determined by cluster count, nothing else — and a
-	// mislabeled FAT16 volume misparses everywhere. Even at one
-	// sector per cluster, 16 MiB is well under the line.
+	// Below 65,525 clusters, the volume would legally be FAT16.
+	// Cluster count alone determines the FAT type. A volume labeled
+	// FAT32 but below this line would be misread everywhere. Even at
+	// one sector per cluster, 16 MiB is well under this line.
 	f, err := os.Create(filepath.Join(t.TempDir(), "tiny"))
 	if err != nil {
 		t.Fatal(err)
@@ -210,14 +212,14 @@ func TestFAT32RefusesTinyPartitions(t *testing.T) {
 }
 
 func TestFAT32SectorsPerClusterFollowsTheSpecTable(t *testing.T) {
-	// Microsoft's size table, spot-checked at each step and just
-	// across each boundary. The 512 MiB slots stay at 8 sectors, so
+	// This checks Microsoft's size table, at each step and just
+	// past each boundary. The 512 MiB slots stay at 8 sectors, so
 	// nothing already formatted changes shape.
 	cases := []struct {
 		bytes uint64
 		want  uint64
 	}{
-		{64 << 20, 1},  // the GRUB boot home's neighborhood
+		{64 << 20, 1},  // near the GRUB boot home's size
 		{260 << 20, 1}, // still at or under the 260 MB line
 		{512 << 20, 8}, // the system slots
 		{8 << 30, 8},   // the 8 GB line itself
@@ -235,9 +237,10 @@ func TestFAT32SectorsPerClusterFollowsTheSpecTable(t *testing.T) {
 }
 
 func TestFAT32FormatsASmallVolume(t *testing.T) {
-	// 64 MiB — the GRUB boot home's size class, far below the old
-	// 4 KiB-cluster floor of ~260 MiB. At one sector per cluster the
-	// cluster count clears FAT32's minimum with room to spare.
+	// 64 MiB is in the GRUB boot home's size class, far below the
+	// old 4 KiB-cluster floor of ~260 MiB. At one sector per
+	// cluster, the cluster count clears FAT32's minimum with room to
+	// spare.
 	f := formatTestPartition(t, 64<<20)
 	bs := readSector(t, f, 0)
 
@@ -254,7 +257,7 @@ func TestFAT32FormatsASmallVolume(t *testing.T) {
 	if clusters < 65_525 {
 		t.Fatalf("test arithmetic is off: %d clusters would misparse as FAT16", clusters)
 	}
-	// The layout holds together: the root directory's label entry
+	// The layout is consistent: the root directory's label entry
 	// sits where the geometry says cluster 2 begins.
 	root := readSector(t, f, 32+2*fatSize)
 	if got := string(root[0:11]); got != "LIKEN-SYS-A" {

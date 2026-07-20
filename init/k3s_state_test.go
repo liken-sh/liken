@@ -1,9 +1,10 @@
 package main
 
-// Tests for k3s's on-disk state: the seed files clusterState receives
-// when it mounts, and the control-plane datastore a demotion leaves
-// behind. The drop-in rendering and role derivations are k3s_test.go's
-// side of the seam; the mounts themselves are QEMU territory.
+// Tests for k3s's on-disk state: the seed files that clusterState
+// receives when it mounts, and the control-plane datastore that a
+// demotion leaves behind. The drop-in rendering and role derivations
+// are k3s_test.go's side of the split. The mounts themselves run
+// only under QEMU.
 
 import (
 	"os"
@@ -51,7 +52,7 @@ func TestALeaderKeepsItsDatastore(t *testing.T) {
 	}
 }
 
-// fakeSeedSource stands in for the image's /var/lib/rancher tree.
+// fakeSeedSource substitutes for the image's /var/lib/rancher tree.
 func fakeSeedSource(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -104,7 +105,7 @@ func TestSeedClusterStateKeepsIdentityAndRefreshesManifests(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "k3s/server/tls", "seeded")); err == nil {
 		t.Error("the seed must not overwrite existing TLS material")
 	}
-	// Manifests are the running image's: refreshed wholesale.
+	// Manifests belong to the running image: they refresh completely.
 	if _, err := os.Stat(filepath.Join(root, "k3s/server/manifests", "existing")); err == nil {
 		t.Error("old manifests are replaced by the image's")
 	}
@@ -139,15 +140,15 @@ func TestPurgeLeaderLeftoversReportsAFailedRemoval(t *testing.T) {
 }
 
 func TestPurgeLeaderLeftoversWithNoDatastoreDoesNothing(t *testing.T) {
-	// A follower that was never a leader has nothing to purge; the
+	// A follower that was never a leader has nothing to purge. The
 	// missing directory is the ordinary case, not an error.
 	purgeLeaderLeftovers(api.RoleFollower, machine.ManifestSourceProven,
 		filepath.Join(t.TempDir(), "absent"))
 }
 
 func TestPersistNodePasswordSkipsAMemoryBackedMachine(t *testing.T) {
-	// Nothing about a memory-backed machine survives a reboot, so the
-	// tmpfs default is left alone and no symlink is attempted.
+	// Nothing about a memory-backed machine survives a reboot, so this
+	// code leaves the tmpfs default alone and attempts no symlink.
 	persistNodePassword(machine.AllRolesInMemory())
 }
 
@@ -173,8 +174,8 @@ func TestMintNodePasswordWritesOne(t *testing.T) {
 }
 
 func TestMintNodePasswordKeepsAnExistingOne(t *testing.T) {
-	// A password the machine already registered with must never be
-	// replaced: the cluster would refuse the new one.
+	// A password that the machine already registered with must not be
+	// replaced. The cluster would refuse the new one.
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "password"), []byte("registered\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -193,8 +194,8 @@ func TestMintNodePasswordKeepsAnExistingOne(t *testing.T) {
 
 func TestMintNodePasswordReplacesATornEmptyFile(t *testing.T) {
 	// A 0-byte password is a torn write from a power cut, not a
-	// credential; presenting it earns "node password not set" from
-	// the cluster forever, so minting a real one is strictly better.
+	// credential. Presenting it gets "node password not set" from
+	// the cluster forever, so minting a real password is far better.
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "password"), nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -212,8 +213,8 @@ func TestMintNodePasswordReplacesATornEmptyFile(t *testing.T) {
 }
 
 // tornStateTree builds a clusterState root the way a power cut can
-// leave one: healthy identity files beside 0-byte torn ones, and a
-// legitimate 0-byte lock file that must survive the sweep.
+// leave one: healthy identity files beside 0-byte torn files, and a
+// valid 0-byte lock file that must survive the sweep.
 func tornStateTree(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -268,7 +269,7 @@ func TestSweepTornK3sFilesKeepsHealthyAndUnrelatedFiles(t *testing.T) {
 }
 
 func TestSweepTornK3sFilesOnAFreshDiskDoesNothing(t *testing.T) {
-	// A first boot has no k3s state yet; the sweep finding nothing is
+	// A first boot has no k3s state yet. The sweep finding nothing is
 	// the ordinary case, not an error.
 	sweepTornK3sFiles(t.TempDir())
 }

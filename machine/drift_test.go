@@ -5,8 +5,9 @@ import (
 	"testing"
 )
 
-// driftLabStorage is the lab machine's shape: five roles across two
-// disks, the recurring fixture for drift comparisons.
+// driftLabStorage returns the lab machine's storage shape: five
+// roles across two disks. Tests reuse this fixture for drift
+// comparisons.
 func driftLabStorage() StorageSpec {
 	return StorageSpec{
 		MachineState:     &StorageRole{Device: "/dev/vda", Size: "64Mi"},
@@ -25,7 +26,7 @@ func TestStorageDriftSeesNoDriftInTheSameSpec(t *testing.T) {
 
 func TestStorageDriftNormalizesSizes(t *testing.T) {
 	desired := driftLabStorage()
-	desired.PodStorage.Size = "2048Mi" // the same ask as 2Gi, spelled differently
+	desired.PodStorage.Size = "2048Mi" // the same size as 2Gi, written differently
 	if diffs := StorageDrift(desired, driftLabStorage()); len(diffs) != 0 {
 		t.Errorf("2048Mi and 2Gi are the same size: %v", diffs)
 	}
@@ -68,9 +69,8 @@ func TestStorageDriftSeesADeviceChange(t *testing.T) {
 }
 
 func TestStorageDriftFallsBackToStringsForUnparseableSizes(t *testing.T) {
-	// Validation will refuse these anyway; drift detection just has to
-	// not panic on them, and string equality is the only comparison
-	// left.
+	// Validation refuses these sizes anyway. Drift detection must not
+	// panic on them. String equality is the only comparison left.
 	desired := driftLabStorage()
 	desired.PodStorage.Size = "a-whole-bunch"
 	actuated := driftLabStorage()
@@ -85,10 +85,10 @@ func TestStorageDriftFallsBackToStringsForUnparseableSizes(t *testing.T) {
 }
 
 func TestStorageDriftNamesTheRemainder(t *testing.T) {
-	// A remainder role's size is spelled "" in the spec; the diff
-	// message should say "(remainder)" rather than showing nothing.
+	// A remainder role's size is spelled "" in the spec. The diff
+	// message must say "(remainder)" instead of showing nothing.
 	desired := driftLabStorage()
-	desired.ClusterState.Size = "3Gi" // was the remainder
+	desired.ClusterState.Size = "3Gi" // held the remainder before this line
 	diffs := StorageDrift(desired, driftLabStorage())
 	if len(diffs) != 1 || !strings.Contains(diffs[0], "(remainder)") {
 		t.Errorf("expected the diff to name the remainder: %v", diffs)

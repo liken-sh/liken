@@ -1,7 +1,8 @@
 package main
 
-// Shared test fixture: a client wired to an httptest server, the
-// same arrangement the kubernetes package's own tests use.
+// This file provides a shared test fixture: a client wired to an
+// httptest server. The kubernetes package's own tests use the same
+// arrangement.
 
 import (
 	"net/http"
@@ -13,8 +14,9 @@ import (
 	"github.com/liken-sh/liken/kubernetes"
 )
 
-// testClient wires a client to a test server, with a credentials
-// directory holding a token the way kubelet would have mounted one.
+// testClient wires a client to a test server. The client has a
+// credentials directory holding a token, the same way kubelet would
+// mount one.
 func testClient(t *testing.T, handler http.Handler) *kubernetes.Client {
 	t.Helper()
 	server := httptest.NewServer(handler)

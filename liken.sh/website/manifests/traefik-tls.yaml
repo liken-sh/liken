@@ -1,48 +1,51 @@
 # HTTPS: Let's Encrypt, answered by Traefik itself.
 #
 # The usual Kubernetes answer to certificates is cert-manager, and on
-# a 1 GB node it is the wrong one: three always-on controllers to
-# automate the issuance of exactly one certificate. Traefik — already
-# running as the cluster's declared ingress — has the ACME protocol
-# built in, so the frugal arrangement is to let it hold the
-# certificate itself: zero additional pods, one small volume for its
-# certificate store (acme.json), and renewal happens in-process.
+# a 1 GB node it is the wrong answer: it runs three always-on
+# controllers to automate the issuance of exactly one certificate.
+# Traefik already runs as the cluster's declared ingress, and it has
+# the ACME protocol built in. So the frugal arrangement is to let
+# Traefik hold the certificate itself: zero additional pods, one
+# small volume for its certificate store (acme.json), and renewal
+# that happens in the same process.
 #
 # k3s deploys Traefik as a packaged Helm chart, and this
-# HelmChartConfig is the sanctioned way to reshape it: its values
-# overlay the chart's own, and k3s's helm controller re-renders the
-# deployment whenever they change. That re-render is the one
-# expensive moment on a 1 GB node (the website README says when to
-# spend it); re-applying this file unchanged is a no-op and costs
-# nothing. Three things are asked of the chart here:
+# HelmChartConfig is the approved way to reshape it: its values
+# overlay the chart's own values, and k3s's helm controller
+# re-renders the deployment whenever they change. That re-render is
+# the one expensive moment on a 1 GB node (the website README says
+# when to spend it). Re-applying this file unchanged is a no-op and
+# costs nothing. This file asks three things of the chart:
 #
-#  * Two ACME resolvers, production and staging, differing only in
-#    which CA they talk to. They share the certificate store —
-#    acme.json is keyed by resolver name — so flipping an ingress
-#    between them never trips over a stale account. The challenge is
-#    TLS-ALPN-01: Let's Encrypt calls back on port 443 and the proof
+#  * Two ACME resolvers, production and staging, that differ only in
+#    which CA they talk to. They share the certificate store
+#    (acme.json is keyed by resolver name), so flipping an ingress
+#    between them never runs into a stale account. The challenge is
+#    TLS-ALPN-01: Let's Encrypt calls back on port 443, and the proof
 #    happens inside the TLS handshake itself, which keeps the
 #    challenge clear of HTTP routing and the redirect below. The
 #    email is the zone's operational contact (the SOA in
-#    terraform.tf); Let's Encrypt uses it to warn about certificates
+#    terraform.tf). Let's Encrypt uses it to warn about certificates
 #    that are failing to renew.
 #
 #  * A persistent volume for /data, where acme.json lives. Without
-#    it, every Traefik restart discards the certificate and re-asks
-#    Let's Encrypt, which real rate limits punish. The volume rides
-#    the local-path provisioner (the cluster default, backed by the
-#    data disk's podStorage role, so it survives reboots and OS
-#    ships), and fsGroup matches the chart's non-root UID so Traefik
-#    owns what it writes. One caveat, acceptable at one replica and
-#    wrong at more: acme.json is a file, not a shared store, so this
-#    arrangement cannot scale Traefik out.
+#    it, every Traefik restart discards the certificate and asks
+#    Let's Encrypt again, and real rate limits punish that. The
+#    volume comes from the local-path provisioner (the cluster default,
+#    backed by the data disk's podStorage role, so it survives
+#    reboots and OS ships), and fsGroup matches the chart's non-root
+#    UID, so Traefik owns what it writes. One limit applies here,
+#    acceptable at one replica and wrong at more: acme.json is a
+#    file, not a shared store, so this arrangement cannot scale
+#    Traefik out to more replicas.
 #
 #  * A permanent redirect from HTTP to HTTPS at the entrypoint. This
-#    is half taste and half necessity: a Traefik router that
+#    comes from both taste and necessity: a Traefik router that
 #    terminates TLS stops matching plaintext requests, so without the
-#    redirect, plain http://liken.sh would 404 rather than upgrade.
-#    The redirect nests at exactly ports.web.http.redirections — one
-#    level shallower renders nothing, silently.
+#    redirect, plain http://liken.sh would return 404 instead of
+#    upgrading. The redirect nests at exactly
+#    ports.web.http.redirections; one level shallower renders
+#    nothing, with no warning.
 apiVersion: helm.cattle.io/v1
 kind: HelmChartConfig
 metadata:

@@ -1,27 +1,28 @@
 # The machine operator's deployment: everything the program in this
-# directory needs to exist in the cluster. Like the CRDs, this file is
-# applied by k3s from its auto-deploy manifests directory at every
+# directory needs to exist in the cluster. Like the CRDs, k3s applies
+# this file from its auto-deploy manifests directory at every
 # startup.
 #
-# The image reference below is the airgapped one: image/build.sh
+# The image reference below is the airgapped one. image/build.sh
 # ships the operator as an OCI tarball inside the initramfs, k3s
 # imports it into containerd at start, and imagePullPolicy: Never
-# guarantees this machine never contacts a registry to run its own OS
-# components. LIKEN_VERSION is substituted with the real version when
-# the image is assembled.
+# guarantees this machine never contacts a registry to run its own
+# OS components. LIKEN_VERSION is substituted with the real version
+# when the image is assembled.
 #
-# That arrangement makes the operator's image part of the OS, and the
-# DaemonSet below is shaped around the consequence: a node can only
-# run the operator its own OS carries. In a fleet mid-upgrade the
-# nodes carry different versions, and any leader's k3s re-applies
-# this file at startup, so the template must never demand an image
-# some node doesn't have. See the DaemonSet's own comments and
-# cluster-operator/steward.go for how the pieces fit.
+# This arrangement makes the operator's image part of the OS, and
+# the DaemonSet below is shaped around that fact: a node can only
+# run the operator its own OS carries. In a fleet in the middle of
+# an upgrade, the nodes carry different versions, and any leader's
+# k3s re-applies this file at startup, so the template must never
+# demand an image that some node does not have. See the DaemonSet's
+# own comments and cluster-operator/steward.go for how the pieces
+# fit together.
 ---
-# The ServiceAccount is the machine operator's identity: kubelet
-# mounts a token for it into the pod, and every API request the
-# operator makes carries it. See the kubernetes package for the
-# client half.
+# The ServiceAccount is the machine operator's identity. The
+# kubelet mounts a token for it into the pod, and every API request
+# the operator makes carries that token. See the kubernetes package
+# for the client half.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -29,28 +30,29 @@ metadata:
   namespace: liken-system
 ---
 # The machine operator's permissions, and deliberately nothing more.
-# This program is powerful on the machine it stands on (the pod spec
-# below is privileged) and correspondingly narrow in the cluster: it
-# reads and writes its own Machine, seeds the Cluster, and touches
-# its own Node. Everything fleet-shaped — other machines' statuses,
-# the Cluster's status, the OS pods on other nodes — belongs to the
-# cluster operator's role, not this one, so a compromised or confused
-# machine operator cannot rewrite the fleet's story. RBAC can grant
-# spec and status separately precisely because both CRDs declare
-# status as a subresource. Note what's absent for clusters: no update
-# on the resource itself, and no update on its status either. The
-# operator seeds the Cluster once and may never rewrite the spec a
-# person (or one day a git repository) edits afterward; the status is
-# the cluster operator's to write.
+# This program is powerful on the machine it runs on (the pod spec
+# below is privileged), and correspondingly narrow in the cluster:
+# it reads and writes its own Machine, seeds the Cluster, and
+# touches its own Node. Everything about the whole fleet, such as
+# other machines' statuses, the Cluster's status, and the OS pods on
+# other nodes, belongs to the cluster operator's role, not this one.
+# This means a compromised or confused machine operator cannot
+# rewrite the fleet's record. RBAC can grant spec and status
+# separately, because both CRDs declare status as a subresource.
+# Note what is missing for clusters: no update on the resource
+# itself, and no update on its status either. The operator seeds the
+# Cluster once and may never rewrite the spec that a person, or one
+# day a git repository, edits afterward. The status belongs to the
+# cluster operator to write.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: liken-machine-operator
 rules:
-  # Its own Machine: read it, watch it, create it on first boot. The
-  # verbs cover the whole collection because RBAC has no way to say
-  # "only the Machine named for your node" (resourceNames can't be
-  # templated per pod), but the program only ever watches its own
+  # Its own Machine: read it, watch it, create it on first boot.
+  # The verbs cover the whole collection, because RBAC has no way to
+  # say "only the Machine named for your node" (resourceNames cannot
+  # be templated per pod). The program only ever watches its own
   # object, by fieldSelector.
   - apiGroups: [liken.sh]
     resources: [machines]
@@ -58,9 +60,9 @@ rules:
   - apiGroups: [liken.sh]
     resources: [machines/status]
     verbs: [update]
-  # The Cluster: seed it from the image's manifest and read it back
-  # every pass for document convergence. No list or watch: the boot
-  # manifest names the one cluster this machine belongs to.
+  # The Cluster: seed it from the image's manifest and read it
+  # back on every pass, for document convergence. No list or watch:
+  # the boot manifest names the one cluster this machine belongs to.
   - apiGroups: [liken.sh]
     resources: [clusters]
     verbs: [get, create]
@@ -68,39 +70,40 @@ rules:
   # demotion cleanup (demotion.go; deleting the stale Node is what
   # triggers k3s's etcd member removal), and patch for the drain's
   # cordon and uncordon (drain.go) and for the spec's node labels
-  # (labels.go). Patch rather than update, deliberately: the operator
-  # touches only the fields it owns (the unschedulable flag, the
-  # labels the spec declares, its own annotations) and never rewrites
-  # a whole Node.
+  # (labels.go). This uses patch rather than update, deliberately:
+  # the operator touches only the fields it owns (the unschedulable
+  # flag, the labels the spec declares, and its own annotations) and
+  # never rewrites a whole Node.
   - apiGroups: [""]
     resources: [nodes]
     verbs: [get, delete, patch]
   # The device inventory (dra.go): this node's ResourceSlice, the
-  # DRA census of driven devices that workloads can claim. Like the
-  # machines rule, the verbs cover the collection because RBAC
-  # cannot say "only the slice named for your node"; the program
+  # DRA record of driven devices that workloads can claim. Like the
+  # machines rule, the verbs cover the collection, because RBAC
+  # cannot say "only the slice named for your node". The program
   # only ever writes its own. No list or watch: the slice's name is
   # deterministic, and reading anyone else's inventory is the
   # scheduler's job, not this operator's.
   - apiGroups: [resource.k8s.io]
     resources: [resourceslices]
     verbs: [get, create, update, delete]
-  # The DRA plugin (draplugin.go): when the kubelet asks this driver
-  # to prepare a claim, the request names the claim and nothing
-  # more; the allocation lives on the claim's status, so the driver
-  # reads it back. Read-only, any namespace — claims belong to
-  # workloads, and the driver serves whichever namespace claims its
-  # hardware — but no list or watch: prepare calls arrive with exact
-  # names.
+  # The DRA plugin (draplugin.go): when the kubelet asks this
+  # driver to prepare a claim, the request names the claim and
+  # nothing more. The allocation lives on the claim's status, so the
+  # driver reads that back. This grants read-only access across any
+  # namespace, because claims belong to workloads, and the driver
+  # serves whichever namespace claims its hardware. Still no list or
+  # watch: prepare calls arrive with exact names.
   - apiGroups: [resource.k8s.io]
     resources: [resourceclaims]
     verbs: [get]
   # The drain (drain.go): list to see what still runs on this
   # machine's node, and create on the eviction subresource to ask
-  # each pod to leave. Eviction-by-subresource rather than pod
-  # delete, deliberately: an eviction is refused while it would
-  # violate the workload's PodDisruptionBudget, which is the entire
-  # difference between draining a node and killing it.
+  # each pod to leave. This uses eviction through the subresource,
+  # rather than pod delete, deliberately: the API server refuses an
+  # eviction when it would violate the workload's
+  # PodDisruptionBudget, and that refusal is the entire difference
+  # between draining a node and killing it.
   - apiGroups: [""]
     resources: [pods]
     verbs: [list]
@@ -121,16 +124,16 @@ subjects:
     name: liken-machine-operator
     namespace: liken-system
 ---
-# The heartbeat lease (the kubernetes package): each machine's
+# The heartbeat lease (the kubernetes package). Each machine's
 # operator creates and renews the one Lease named for its machine,
 # the way a kubelet is the only writer of its node lease. No list,
-# deliberately: renewing your own heartbeat never requires seeing
-# anyone else's, and reading the fleet's liveness is the cluster
-# operator's job. A namespaced Role rather than another ClusterRole
-# rule, also deliberately: leases exist all over a cluster (every
-# kubelet heartbeats through one in kube-node-lease), and the
-# operator has no business with any lease outside liken's own
-# namespace.
+# deliberately: renewing this machine's own heartbeat never requires
+# seeing anyone else's, and reading the fleet's liveness is the
+# cluster operator's job. This uses a namespaced Role rather than
+# another ClusterRole rule, also deliberately: leases exist all over
+# a cluster (every kubelet sends its heartbeat through one in
+# kube-node-lease), and the operator has no reason to touch any
+# lease outside liken's own namespace.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -155,15 +158,16 @@ subjects:
     name: liken-machine-operator
     namespace: liken-system
 ---
-# The one Secret the machine operator may read: the fleet's registry
-# credentials, by exact name (the kubernetes package's secrets.go).
-# A namespaced Role like the leases', because the operator has no
-# business with any other Secret anywhere — resourceNames is what
-# makes "one named Secret" enforceable, and get-only (no list, no
-# watch) means even a compromised operator could not enumerate what
-# else the namespace holds. Polling the one name each pass is the
-# right consumption for a level-triggered loop anyway; a Secret edit
-# takes effect within one reconcile tick.
+# The one Secret the machine operator may read: the fleet's
+# registry credentials, by exact name (the kubernetes package's
+# secrets.go). This uses a namespaced Role, like the leases' Role,
+# because the operator has no reason to touch any other Secret
+# anywhere. resourceNames is what makes "one named Secret"
+# enforceable, and get-only access (no list, no watch) means even a
+# compromised operator could not enumerate what else the namespace
+# holds. Reading the one name on each pass is the right way for a
+# level-triggered loop to consume it anyway. A Secret edit takes
+# effect within one reconcile pass.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -189,28 +193,29 @@ subjects:
     name: liken-machine-operator
     namespace: liken-system
 ---
-# A DaemonSet rather than a Deployment because the machine operator's
-# job is node-local by nature: each pod manages the machine it stands
-# on. Contrast cluster-operator/manifests/cluster-operator.yaml,
-# whose job is fleet-wide and runs as an ordinary Deployment.
+# This is a DaemonSet rather than a Deployment, because the
+# machine operator's job is local to each node: each pod manages the
+# machine it runs on. Compare
+# cluster-operator/manifests/cluster-operator.yaml, whose job covers
+# the whole fleet and runs as an ordinary Deployment.
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: liken-machine-operator
   namespace: liken-system
   # The recommended app.kubernetes.io labels, for every tool that
-  # keys on them. The selector below stays the minimal app: label,
+  # keys on them. The selector below keeps the minimal app: label,
   # because a DaemonSet's selector is immutable after creation and
-  # should carry identity only, never anything that might want to
+  # should carry identity only, never anything that might need to
   # change.
   labels:
     app.kubernetes.io/name: liken-machine-operator
     app.kubernetes.io/part-of: liken
   # The release these manifests shipped with. The pod steward
-  # (cluster-operator/steward.go) compares this against each
-  # machine's running version to know when a machine is ready for a
-  # pod from this template. This annotation is the authority, the
-  # pods below inherit it, and a pod is stale exactly when its
+  # (cluster-operator/steward.go) compares this value against each
+  # machine's running version, to know when a machine is ready for a
+  # pod from this template. This annotation is the source of truth.
+  # The pods below inherit it, and a pod is stale exactly when its
   # inherited copy differs from the DaemonSet's.
   annotations:
     liken.sh/os-version: "LIKEN_VERSION"
@@ -218,13 +223,13 @@ spec:
   selector:
     matchLabels:
       app: liken-machine-operator
-  # OnDelete, never a rolling update: the image is baked into each
-  # node's OS, so a template change must not recreate pods on nodes
-  # that haven't rebooted into the release that carries it. Doing so
-  # would kill the one operator a machine needs to drive its own
-  # upgrade, and imagePullPolicy: Never means the replacement could
-  # never start. Pods are refreshed by the steward, one machine at a
-  # time, only after each machine's own upgrade lands.
+  # This uses OnDelete, never a rolling update. The image is baked
+  # into each node's OS, so a template change must not recreate pods
+  # on nodes that have not rebooted into the release that carries
+  # it. Doing so would kill the one operator a machine needs to
+  # drive its own upgrade, and imagePullPolicy: Never means the
+  # replacement could never start. The steward refreshes pods, one
+  # machine at a time, only after each machine's own upgrade lands.
   updateStrategy:
     type: OnDelete
   template:
@@ -237,41 +242,44 @@ spec:
         liken.sh/os-version: "LIKEN_VERSION"
     spec:
       serviceAccountName: liken-machine-operator
-      # The OS layer should outrank workloads when memory gets tight;
-      # this is the same priority class kube-proxy and CNI pods use.
+      # The OS layer should outrank workloads when memory gets
+      # tight. This is the same priority class kube-proxy and CNI
+      # pods use.
       priorityClassName: system-node-critical
       # Only liken nodes run liken's OS components. Every liken
-      # machine registers with this label (image/etc/rancher/k3s); a
-      # node without it belongs to the cluster but not to the fleet,
-      # which happens during a migration, when liken machines and
-      # the nodes they are replacing share one cluster. Without this
-      # selector the pod would be scheduled there and sit in
-      # ErrImageNeverPull forever, since the image below exists only
-      # in a liken machine's containerd.
+      # machine registers with this label (image/etc/rancher/k3s). A
+      # node without it belongs to the cluster but not to the fleet.
+      # This happens during a migration, when liken machines and the
+      # nodes they are replacing share one cluster. Without this
+      # selector, the pod would be scheduled there and sit in
+      # ErrImageNeverPull forever, because the image below exists
+      # only in a liken machine's containerd.
       nodeSelector:
         liken.sh/machine: "true"
-      # Manage the machine even while its node is cordoned or not yet
-      # ready, exactly the moments an OS operator matters most.
+      # This manages the machine even while its node is cordoned or
+      # not yet ready, exactly the moments when an OS operator
+      # matters most.
       tolerations:
         - operator: Exists
-      # This pod deliberately gives up most of a container's isolation,
-      # because it manages the machine itself. hostNetwork puts it in
-      # the host's network namespace, so the net.* sysctls it writes
-      # tune the real stack, not a pod-private copy; privileged makes
-      # the container's /proc/sys writable (unprivileged pods get it
-      # read-only). The RBAC above bounds the trade: the pod is
-      # powerful on this machine but narrow in the cluster.
+      # This pod deliberately gives up most of a container's
+      # isolation, because it manages the machine itself. hostNetwork
+      # puts it in the host's network namespace, so the net.*
+      # sysctls it writes tune the real network stack, not a
+      # pod-private copy. privileged makes the container's /proc/sys
+      # writable (unprivileged pods get it read-only). The RBAC above
+      # limits the trade-off: the pod is powerful on this machine but
+      # narrow in the cluster.
       hostNetwork: true
       containers:
         - name: operator
-          # The stable tag: every release tags its own operator build
-          # liken.sh/machine-operator:installed (the Makefile here
-          # runs image/oci.sh), so this same pod spec resolves to
-          # whatever build each node's OS imported, and applying a
-          # new release's manifests never changes the image field at
-          # all. A versioned tag here would demand one specific build
-          # on every node at once, which a fleet mid-upgrade cannot
-          # satisfy.
+          # The stable tag. Every release tags its own operator
+          # build liken.sh/machine-operator:installed (the Makefile
+          # here runs image/oci.sh), so this same pod spec resolves
+          # to whatever build each node's OS imported, and applying
+          # a new release's manifests never changes the image field
+          # at all. A versioned tag here would demand one specific
+          # build on every node at once, which a fleet in the middle
+          # of an upgrade cannot satisfy.
           image: liken.sh/machine-operator:installed
           imagePullPolicy: Never
           securityContext:
@@ -280,9 +288,9 @@ spec:
             # These are the operator's inputs: the facts init
             # published and, beside them, the manifest this boot ran
             # under (which tells the operator which Machine it
-            # manages). Read-only by mount rather than by convention:
-            # status is observed, never asserted, and the operator
-            # cannot rewrite its own input.
+            # manages). This is read-only by mount rather than by
+            # convention: status is observed, never asserted, and
+            # the operator cannot rewrite its own input.
             - name: run-liken
               mountPath: /run/liken
               readOnly: true
@@ -291,40 +299,42 @@ spec:
             - name: etc-liken
               mountPath: /etc/liken
               readOnly: true
-            # The machineState filesystem, where the operator stages a
-            # manifest for the next boot: its one output channel to
-            # the init program of the next boot.
+            # The machineState filesystem, where the operator stages
+            # a manifest for the next boot. This is its one output
+            # channel to the init program of the next boot.
             - name: machine-state
               mountPath: /var/lib/liken/machine
-            # The reboot channel: a subdirectory of /run/liken the
-            # operator may write while the facts above stay behind a
-            # read-only mount. There are two mounts because data flows
-            # in two directions: facts flow from init to the operator,
-            # and intents flow from the operator to init.
+            # The reboot channel: a subdirectory of /run/liken that
+            # the operator may write, while the facts above stay
+            # behind a read-only mount. There are two mounts here
+            # because data flows in two directions: facts flow from
+            # init to the operator, and intents flow from the
+            # operator to init.
             - name: run-liken-operator
               mountPath: /run/liken/operator
-            # The system slots, where downloaded releases land: the
+            # The system slots, where downloaded releases land. The
             # operator writes the inactive slot's filesystem (init
-            # mounted both under here at boot). Writable because the
-            # download is itself the actuation, for the same reason
-            # machine-state is writable.
+            # mounted both slots under here at boot). This is
+            # writable because the download is itself the actuation,
+            # for the same reason machine-state is writable.
             - name: system-slots
               mountPath: /var/lib/liken/system
-            # The container store's filesystem, held only as a syncfs
-            # handle: promoting an imports trial flushes every byte
-            # the imports wrote before the record says "proven"
-            # (imports.go). Read-only because the operator never edits
-            # the store; init alone discards it, and containerd alone
-            # writes it.
+            # The container store's filesystem, held only as a
+            # syncfs handle. Promoting an imports trial flushes every
+            # byte the imports wrote, before the record says
+            # "proven" (imports.go). This is read-only because the
+            # operator never edits the store: only init discards it,
+            # and only containerd writes it.
             - name: container-store
               mountPath: /var/lib/rancher/k3s/agent
               readOnly: true
-            # The DRA plugin's two conversations (draplugin.go, cdi.go):
-            # the kubelet's plugin directories, where the driver's
-            # sockets live, and the CDI directory, where prepared
-            # claims become device-node grants for containerd to
-            # resolve. All three writable, because serving a socket
-            # and publishing a spec are the actuation.
+            # The DRA plugin's two conversations (draplugin.go,
+            # cdi.go): the kubelet's plugin directories, where the
+            # driver's sockets live, and the CDI directory, where
+            # prepared claims become device-node grants for
+            # containerd to resolve. All three are writable, because
+            # serving a socket and publishing a spec are the
+            # actuation.
             - name: kubelet-plugins
               mountPath: /var/lib/kubelet/plugins
             - name: kubelet-plugins-registry
@@ -332,8 +342,8 @@ spec:
             - name: cdi
               mountPath: /var/run/cdi
       # Staging and rebooting need no RBAC at all: they are
-      # host-filesystem acts, bounded by these mounts rather than by
-      # cluster permissions.
+      # host-filesystem actions, limited by these mounts rather than
+      # by cluster permissions.
       volumes:
         - name: run-liken
           hostPath:
@@ -341,11 +351,12 @@ spec:
         - name: etc-liken
           hostPath:
             path: /etc/liken
-        # DirectoryOrCreate because these paths only exist as real
-        # mounts/directories when init created them; the default type
-        # would fail the pod outright on a machine without them, while
-        # the operator prefers to start and report (the facts say
-        # whether machineState is really a disk).
+        # This uses DirectoryOrCreate, because these paths only
+        # exist as real mounts or directories when init created
+        # them. The default type would fail the pod outright on a
+        # machine without them, while the operator prefers to start
+        # and report instead (the facts say whether machineState is
+        # really a disk).
         - name: machine-state
           hostPath:
             path: /var/lib/liken/machine

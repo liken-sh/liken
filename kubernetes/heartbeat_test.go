@@ -1,7 +1,8 @@
 package kubernetes
 
-// The heartbeat protocol from both sides: a machine keeping its own
-// lease fresh, and the fleet's observer reading every renewal.
+// These tests cover the heartbeat protocol from both sides: a machine
+// keeping its own lease current, and the fleet's observer reading
+// every renewal.
 
 import (
 	"encoding/json"
@@ -22,11 +23,11 @@ func testLease(name string, renewedAgo time.Duration) *lease {
 	return l
 }
 
-// leaseAPI is a miniature API server holding one Lease: it answers
-// GETs with the standing lease (404 when there is none) and
-// remembers whatever a create or update writes. fail scripts a
-// refusal: any request with that method is answered with the given
-// status instead of being served.
+// leaseAPI is a small API server that holds one Lease. It answers GET
+// requests with the current lease, or 404 when there is none. It
+// stores whatever a create or update request writes. The fail field
+// scripts a refusal: the server answers any request that uses that
+// method with the given status, instead of serving the request.
 type leaseAPI struct {
 	lease *lease
 	fail  map[string]int
@@ -83,11 +84,11 @@ func TestHeartbeatLeavesAFreshLeaseAlone(t *testing.T) {
 	}
 }
 
-// The heartbeat's failure handling is "report it and wait for the
-// next pass": each machine is its lease's only writer, so nothing is
-// lost by trying again in a few seconds. These three tests refuse
-// each of the protocol's requests in turn and expect the standing
-// lease to come through untouched.
+// The heartbeat's failure handling follows one rule: report the
+// failure and wait for the next pass. Each machine is the only
+// writer of its own lease, so trying again in a few seconds loses
+// nothing. These three tests refuse each of the protocol's requests
+// in turn, and expect the current lease to remain untouched.
 
 func TestHeartbeatSurvivesARefusedRead(t *testing.T) {
 	fake := &leaseAPI{fail: map[string]int{http.MethodGet: http.StatusInternalServerError}}
@@ -154,9 +155,9 @@ func TestListHeartbeatsReadsRenewals(t *testing.T) {
 }
 
 func TestListHeartbeatsSkipsAnUnreadableRenewal(t *testing.T) {
-	// A lease whose renewal can't be parsed carries no liveness
-	// claim; it simply doesn't appear, and the sweep reads its
-	// machine as never heard from.
+	// A lease whose renewal cannot be parsed carries no liveness
+	// claim. It does not appear in the result, and the sweep reads
+	// its machine as never heard from.
 	broken := testLease("node-2", -1)
 	broken.Spec.RenewTime = "not a timestamp"
 	fake := &leaseListAPI{leases: []*lease{

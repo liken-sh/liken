@@ -1,7 +1,7 @@
 package main
 
-// The rollout conductor's decision table: who gets a reboot turn, in
-// what order, and when the rollout pauses entirely.
+// This file tests the rollout's decision table: who gets a reboot
+// turn, in what order, and when the rollout pauses entirely.
 
 import (
 	"slices"
@@ -14,10 +14,10 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// A rolloutEntry is one machine as the conductor sees it: its phase,
-// its heartbeat age (negative means no lease), whether it is asking
-// for a reboot turn, and how long ago it was granted one (negative
-// means no grant outstanding).
+// A rolloutEntry describes one machine as the rollout sees it: its
+// phase, its heartbeat age (a negative value means no lease), whether
+// it is asking for a reboot turn, and how long ago it was granted one
+// (a negative value means no grant is outstanding).
 type rolloutEntry struct {
 	name       string
 	phase      api.Phase
@@ -189,9 +189,9 @@ func TestRolloutAnOutstandingGrantConsumesTheBudget(t *testing.T) {
 }
 
 func TestRolloutKeepsTheGrantThroughTheReboot(t *testing.T) {
-	// The granted machine has gone silent. That silence is the reboot
-	// the conductor asked for, not a loss, so the grant stands and the
-	// budget stays consumed.
+	// The granted machine has gone silent. That silence is the
+	// reboot that this program asked for, not a loss. So the grant
+	// stands, and the budget stays consumed.
 	machines, renewals := rolloutInputs(
 		rolloutEntry{"node-1", api.PhaseReady, fresh, false, -1},
 		rolloutEntry{"node-4", api.PhaseUpdating, 3 * time.Minute, false, 3 * time.Minute},
@@ -240,9 +240,9 @@ func TestRolloutStallsOnAMachineThatNeverReturns(t *testing.T) {
 }
 
 func TestRolloutAManualMachineDoesNotHoldTheQueue(t *testing.T) {
-	// A Manual machine reports RebootPending, not AwaitingTurn: it is
-	// waiting on its human, not on the cluster, so it gets no grant and
-	// blocks nobody.
+	// A Manual machine reports RebootPending, not AwaitingTurn. It is
+	// waiting on a person, not on the cluster, so it gets no grant
+	// and blocks nobody.
 	machines, renewals := rolloutInputs(
 		rolloutEntry{"node-1", api.PhaseReady, fresh, false, -1},
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, false, -1},
@@ -255,9 +255,10 @@ func TestRolloutAManualMachineDoesNotHoldTheQueue(t *testing.T) {
 }
 
 func TestRolloutRevokesAGrantTheMachineNoLongerWants(t *testing.T) {
-	// Granted, then the edit was reverted (or the policy flipped to
-	// Manual) before the machine acted: it is available and no longer
-	// asking, so the grant comes back.
+	// The machine was granted a turn, then the edit was reverted, or
+	// the policy changed to Manual, before the machine acted. The
+	// machine is available and no longer asking, so the grant comes
+	// back.
 	machines, renewals := rolloutInputs(
 		rolloutEntry{"node-1", api.PhaseReady, fresh, false, -1},
 		rolloutEntry{"node-4", api.PhaseReady, fresh, false, time.Minute},

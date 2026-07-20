@@ -1,21 +1,21 @@
 # The iscsid DaemonSet: the daemon half of the iscsi feature.
 #
-# iscsiadm, which CSI drivers exec on the host, is a client for this
+# iscsiadm, which CSI drivers run on the host, is a client for this
 # daemon: login, logout, and session management all happen by asking
 # iscsid over an abstract unix socket. On a systemd distribution the
-# daemon is socket-activated the first time iscsiadm connects; liken
+# daemon is socket-activated the first time iscsiadm connects. liken
 # has no systemd, and the two-planes rule keeps iscsid out of init
 # (k3s does not depend on it to exist; network-backed volumes do, and
-# volumes are workloads), so the workload plane runs it.
+# volumes are workloads). So the workload plane runs it.
 #
 # Unlike the operator manifests beside it in k3s's auto-deploy
 # directory, this file is not applied on every machine that boots.
-# It rides the image at /etc/liken/features/iscsi/manifests/, and
+# It is stored in the image at /etc/liken/features/iscsi/manifests/, and
 # init seeds it into the auto-deploy directory only when the cluster
 # document declares the iscsi feature (init/features.go). The image
 # it runs is built from the same vendored binaries as the host's
-# iscsiadm (open-iscsi/Makefile runs image/oci.sh), so the daemon and
-# the tool that speaks to it are always the same build.
+# iscsiadm (open-iscsi/Makefile runs image/oci.sh). This keeps the
+# daemon and the tool that talks to it as the same build.
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -26,13 +26,13 @@ metadata:
     app.kubernetes.io/name: liken-iscsid
     app.kubernetes.io/part-of: liken
   # The release these manifests shipped with, for the pod steward
-  # (cluster-operator/steward.go), exactly as on the operator's
+  # (cluster-operator/steward.go), the same as on the operator's
   # DaemonSet: a pod is stale when its inherited copy differs. The
   # feature annotation is the retraction janitor's contract
-  # (cluster-operator/janitor.go): init only removes this manifest
-  # from the auto-deploy directory at boot, when k3s isn't running to
-  # see the file go, so the janitor deletes this object once the
-  # cluster document stops declaring the feature named here.
+  # (cluster-operator/janitor.go). init removes this manifest from the
+  # auto-deploy directory only at boot, when k3s is not running to see
+  # the file go. So the janitor deletes this object once the cluster
+  # document stops declaring the feature named here.
   annotations:
     liken.sh/os-version: "LIKEN_VERSION"
     liken.sh/feature: iscsi
@@ -42,7 +42,7 @@ spec:
       app: liken-iscsid
   # OnDelete, like every OS DaemonSet: the image is baked into each
   # node's OS and imagePullPolicy is Never, so a template change must
-  # not recreate pods on nodes that haven't rebooted into the release
+  # not recreate pods on nodes that have not rebooted into the release
   # that carries the new image. The steward refreshes pods machine by
   # machine as upgrades land.
   updateStrategy:
@@ -56,47 +56,48 @@ spec:
       annotations:
         liken.sh/os-version: "LIKEN_VERSION"
     spec:
-      # iscsid never talks to the Kubernetes API; it needs no identity
-      # there, so it gets none.
+      # iscsid never talks to the Kubernetes API, so it needs no
+      # identity there and gets none.
       automountServiceAccountToken: false
       # Storage should outrank ordinary workloads under memory
       # pressure: killing iscsid to make room for a pod could stall
-      # the very volumes that pod is writing.
+      # the very volumes that pod is writing to.
       priorityClassName: system-node-critical
       nodeSelector:
         liken.sh/machine: "true"
       # Attach and detach must keep working while a node is cordoned:
-      # a drain is precisely when volumes are unmounting.
+      # a drain is exactly when volumes are unmounting.
       tolerations:
         - operator: Exists
-      # hostNetwork is a requirement, not a preference, twice over.
-      # With the in-kernel initiator, iscsid opens the TCP connection
-      # to the target in userspace and hands the socket to the kernel,
-      # so the session lives in whatever network namespace iscsid was
-      # in; a pod-private namespace would tear down every session with
-      # the pod. And iscsiadm reaches iscsid over an abstract unix
-      # socket, which is scoped to the network namespace too, so the
-      # host's iscsiadm can only find an iscsid that shares the host's.
+      # hostNetwork is required for two reasons. First, with the
+      # in-kernel initiator, iscsid opens the TCP connection to the
+      # target in userspace and hands the socket to the kernel, so the
+      # session lives in whatever network namespace iscsid was in. A
+      # pod-private namespace would tear down every session when the
+      # pod ends. Second, iscsiadm reaches iscsid over an abstract
+      # unix socket, which is also scoped to the network namespace, so
+      # the host's iscsiadm can find only an iscsid that shares the
+      # host's namespace.
       hostNetwork: true
       containers:
         - name: iscsid
-          # The stable tag, resolved per node to the build that node's
-          # own OS imported, exactly as the operator's image is.
+          # The stable tag, resolved per node to the build that
+          # node's own OS imported, the same as the operator's image.
           image: liken.sh/iscsid:installed
           imagePullPolicy: Never
-          # Foreground, so the container's lifetime is the daemon's
-          # and its log stream is the pod's.
+          # Foreground, so the container's lifetime matches the
+          # daemon's, and its log stream is the pod's.
           args: ["--foreground"]
-          # Privileged for the netlink and sysfs access session
-          # management needs; the blast radius is bounded by the pod
-          # having no API identity and only these mounts.
+          # Privileged for the netlink and sysfs access that session
+          # management needs. The blast radius is bounded: the pod has
+          # no API identity and only these mounts.
           securityContext:
             privileged: true
           volumeMounts:
             # The initiator's identity and configuration: the IQN init
-            # wrote at boot and the iscsid.conf the image carries. The
-            # same files the host's iscsiadm reads, which is the
-            # point: one initiator, two doors.
+            # wrote at boot and the iscsid.conf the image carries.
+            # These are the same files the host's iscsiadm reads: one
+            # initiator, reached through two doors.
             - name: etc-iscsi
               mountPath: /etc/iscsi
             # The node database iscsiadm writes during discovery and
@@ -104,9 +105,9 @@ spec:
             # drivers that re-run discovery on every attach.
             - name: var-lib-iscsi
               mountPath: /var/lib/iscsi
-            # The lock directory serializing database access. iscsid
-            # and the host's iscsiadm must agree on it, or their locks
-            # guard nothing.
+            # The lock directory that serializes database access.
+            # iscsid and the host's iscsiadm must agree on it, or
+            # their locks guard nothing.
             - name: iscsi-locks
               mountPath: /run/lock/iscsi
       volumes:

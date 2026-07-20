@@ -1,10 +1,10 @@
 # The rough path
 
-The full story of each milestone — the design, the reasoning, and
-what the lab taught when it ran — lives beside this file, one
-numbered document per milestone, with [00-design.md](00-design.md)
-as the overview. This file is the index and the scratch space for
-what's still ahead.
+The full story of each milestone, the design, the reasoning, and what
+the lab taught when it ran, lives beside this file. There is one
+numbered document for each milestone, with
+[00-design.md](00-design.md) as the overview. This file is the index,
+and the scratch space for what remains ahead.
 
 1. [x] [Boot to a hello world](01-boot-to-hello-world.md) —
    a vendored kernel, a Go init, an initramfs, and QEMU.
@@ -23,7 +23,7 @@ what's still ahead.
    declared upstreams and serve everyone else; the two-planes rule
    written down.
 8. [x] [The Cluster converges](08-the-cluster-converges.md) —
-   the cluster document rides the same staging machinery, promoted
+   the cluster document uses the same staging machinery, promoted
    by the join itself.
 9. [x] [Multiple leaders: quorum](09-multiple-leaders.md) —
    sqlite grows into embedded etcd by one Cluster edit; promotion
@@ -40,7 +40,7 @@ what's still ahead.
     node's deliverable, non-platform devices as a ResourceSlice and
     answering the kubelet's prepare calls with CDI device nodes —
     an unprivileged pod claims a disk by DeviceClass and finds
-    /dev/sda inside. Real GPU stacks await milestone 32's images.
+    /dev/sda inside. Real GPU stacks wait for milestone 32's images.
 12. [x] [Declarative upgrades](12-declarative-upgrades.md) —
     A/B slots, the digest chain, firmware fallback, and one field
     that moves the fleet.
@@ -48,8 +48,8 @@ what's still ahead.
     conductor: budgets, drains, and one leader at a time.
 14. [ ] [GitOps from first boot](14-gitops-from-first-boot.md) —
     flux as an opt-in feature with parameters (repository, path,
-    branch): the vocabulary's first parameterized feature, riding
-    the machinery 17 built.
+    branch): the vocabulary's first parameterized feature, built on
+    the machinery that milestone 17 built.
 15. [x] [Observability below Kubernetes](15-observability-below-kubernetes.md) —
     every host log stream becomes a pod's stdout.
 16. [x] [Adopting an existing cluster](16-adopting-a-cluster.md) —
@@ -57,7 +57,7 @@ what's still ahead.
     join its etcd, rotate the old members out, promote.
 
 Surveying a real deployment's workloads (part of milestone 16) turned
-up capabilities the OS still needs before it can host a working
+up capabilities that the OS still needs before it can host a working
 cluster's workloads. Each is written as the general capability, not
 the specific workload that revealed it:
 
@@ -75,24 +75,24 @@ the specific workload that revealed it:
     folded into 17's feature vocabulary.
 20. [x] [Private registries](20-private-registries.md) —
     spec.registries (mirrors and Spegel), credentials by Secret, and
-    the k3s restart tier: changes k3s reads only at process start
-    converge by bouncing k3s in place, pods surviving, with the
-    feature toggles migrated onto it.
+    the k3s restart tier: changes that k3s reads only at process
+    start converge by restarting k3s in place, with pods surviving,
+    and the feature toggles moved onto it.
 21. [x] [Node labels on the Machine](21-node-labels.md) —
     scheduling identity declared on the Machine spec: registered at
     boot, reconciled live, and retractions actually retract.
 
-One the milestone-17 lab work demanded:
+One thing the milestone-17 lab work demanded:
 
 23. [x] [Crash-safe image imports](23-crash-safe-image-imports.md) —
     a machine killed mid-unpack is no longer left permanently unable
-    to run its own operator: image imports ride the staged/proven
+    to run its own operator: image imports use the staged/proven
     lifecycle, an unproven trial discards the container store, and
     the operator proves the unpacks before anything trusts them.
 
 And the arc that looks past any single deployment, where liken stops
 being this checkout and becomes a public project. Milestone 22 was
-numbered before the arc existed; it belongs second in this order:
+numbered before this arc existed; it belongs second in this order:
 
 24. [x] [A real repository and CI builds](24-repo-and-ci.md) — a
     public home for the code, and CI that fetches every pin, builds
@@ -115,8 +115,8 @@ numbered before the arc existed; it belongs second in this order:
     every version tag; release pages wait for the website.
 27. [ ] [Documentation on the website](27-documentation-on-the-website.md) —
     the repo stays the documentation; the site extracts and arranges
-    it, plus the reading order and getting-started path a repo can't
-    impose.
+    it, plus the reading order and getting-started path that a repo
+    on its own cannot provide.
 29. [x] [Root on disk](29-root-on-disk.md) — the OS stops living in
     RAM: the system artifact becomes a read-only filesystem image
     mounted from the boot slot, and a 1 GB machine becomes the lab's
@@ -133,16 +133,16 @@ numbered before the arc existed; it belongs second in this order:
     controllers, staged first, and a hard lesson in the node's
     memory envelope.
 32. [ ] [Batteries included](32-batteries-included.md) — one
-    milestone for everything the image carries so real hardware just
-    works: the whole module tree, driver firmware derived from it
-    (nvidia excepted, for now), and microcode as an early initrd,
-    with the slot budget that carries them. The published image
-    becomes the one that boots bare metal.
+    milestone for everything the image carries so real hardware
+    works without extra configuration: the whole module tree, driver
+    firmware derived from it (nvidia excepted, for now), and
+    microcode as an early initrd, with the slot budget that carries
+    them. The published image becomes the one that boots bare metal.
 33. [ ] [Updating the machine's own firmware](33-firmware-updates.md) —
-    fwupd as an eventual feature slug: firmware updates riding the
-    rolling-reboot orchestration liken already has. Not a battery —
-    an agent — so it waits for bare-metal experience rather than
-    riding 32.
+    fwupd as an eventual feature slug: firmware updates using the
+    rolling-reboot orchestration that liken already has. Not inert
+    payload, but an agent, so it waits for bare-metal experience
+    rather than landing together with 32.
 
 Deferred until the fundamentals above are proven, the hardening
 tier: UKIs, dm-verity, secure boot, TPM-sealed secrets, and signed
@@ -150,14 +150,16 @@ releases.
 
 # Open problems
 
-Questions we know we owe answers, without pretending to have them yet:
+Questions we know we owe answers to, without pretending to have them
+yet:
 
 * **Claiming unknown machines.** `liken.machine=` identifies machines
-  someone declared ahead of time. The deferred half is the machine
-  nobody declared: a Machine template carried on the Cluster that an
-  unknown node claims on first boot. It would be named from a hardware
-  fact (probably its MAC, the one identity the network already forces
-  to be unique) and addressed from a pool (probably by ARP-probe
-  claiming, in the same spirit as storage claiming: probe reality,
-  take what's free, refuse ambiguity). This waits until the
-  declared-machine flow is proven.
+  that someone declared ahead of time. The deferred half is the
+  machine that nobody declared: a Machine template carried on the
+  Cluster that an unknown node claims on first boot. It would be
+  named from a hardware fact (probably its MAC address, the one
+  identity that the network already forces to be unique) and
+  addressed from a pool (probably by ARP-probe claiming, in the same
+  spirit as storage claiming: probe reality, take what is free,
+  refuse ambiguity). This waits until the declared-machine flow is
+  proven.

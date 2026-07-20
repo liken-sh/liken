@@ -1,15 +1,16 @@
 package machine
 
-// The facts file is how init passes what it observed to the operator.
+// The facts file carries what init observed to the operator.
 //
-// Init learns things no in-cluster program can observe firsthand: the
-// DHCP exchange, the moment of boot, the hardware as the kernel first
-// presented it. It writes them here, shaped exactly like
-// MachineStatus, so the operator's half is nearly a copy: read the
-// file, fold in what it observes itself (sysctl values, conditions),
-// publish to the API. The protocol is deliberately just a file: init
-// stays free of any Kubernetes dependency, and the operator needs
-// only a read-only hostPath mount.
+// Init learns facts that no program inside the cluster can observe
+// directly: the DHCP exchange, the moment of boot, the hardware as
+// the kernel first showed it. Init writes these facts to this file,
+// in the same shape as MachineStatus. So the operator's half of the
+// work is close to a copy: read the file, add what the operator
+// observes itself (sysctl values, conditions), and publish the
+// result to the API. The protocol is a plain file by design. Init
+// stays free of any Kubernetes dependency. The operator needs only a
+// read-only hostPath mount.
 
 import (
 	"fmt"
@@ -19,9 +20,10 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// WriteFacts publishes the machine's facts atomically (writeAtomic),
-// so the operator, which re-reads this file on its own schedule, sees
-// either the old facts or the new, never a torn write.
+// WriteFacts publishes the machine's facts atomically, through
+// writeAtomic. The operator rereads this file on its own schedule.
+// The operator always sees either the old facts or the new facts,
+// never a torn write.
 func WriteFacts(path string, facts *MachineStatus) error {
 	raw, err := yaml.Marshal(facts)
 	if err != nil {
@@ -34,9 +36,10 @@ func WriteFacts(path string, facts *MachineStatus) error {
 }
 
 // ReadFacts is the operator's side of the channel. A missing file is
-// an error rather than a default: facts describe a boot, and if they
-// are missing on a running machine, the operator should report that
-// in a condition instead of publishing an empty status.
+// an error, not a default value. Facts describe a boot. If the facts
+// are missing on a running machine, the operator must report that
+// fact in a condition. The operator must not publish an empty status
+// instead.
 func ReadFacts(path string) (*MachineStatus, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {

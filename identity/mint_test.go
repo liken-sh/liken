@@ -1,11 +1,11 @@
 package identity
 
-// Tests for minting: the properties k3s and kubectl will actually
-// check. The certificates must be real CAs (the API server refuses to
-// chain to anything else), the ServiceAccount key must be in the one
-// encoding kube-apiserver parses, and the token must hash the server
-// CA it ships beside, because a joining machine verifies exactly that
-// before trusting the endpoint.
+// This file tests minting for the properties that k3s and kubectl
+// actually check. The certificates must be real CAs, because the API
+// server refuses to chain to anything else. The ServiceAccount key
+// must use the one encoding that kube-apiserver parses. The token
+// must hash the server CA that it ships beside, because a joining
+// machine verifies exactly that before it trusts the endpoint.
 
 import (
 	"bytes"

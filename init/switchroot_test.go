@@ -1,9 +1,9 @@
 package main
 
-// Tests for the tree carry that brings the boot loader's extra cargo
-// (the deployment layer) onto the overlay root, against real
-// temporary directories. The switch_root procedure itself (loop
-// devices, mounts, chroot, exec) is QEMU territory.
+// Tests for the tree carry that brings the boot loader's extra files
+// (the deployment layer) onto the overlay root, run against real
+// temporary directories. Tests for the switch_root procedure itself
+// (loop devices, mounts, chroot, exec) run separately, under QEMU.
 
 import (
 	"os"
@@ -41,8 +41,8 @@ func TestCarryTreeReplicatesDirsFilesAndSymlinks(t *testing.T) {
 }
 
 func TestCarryTreeSkipsTheBootArchivesOwnSubtrees(t *testing.T) {
-	// The boot archive's module tree (and /dev, and the staging
-	// mounts) must never land on the real root; the skip list names
+	// The boot archive's module tree, and /dev, and the staging
+	// mounts, must never land on the real root. The skip list names
 	// them by path.
 	src, dst := t.TempDir(), t.TempDir()
 	if err := os.MkdirAll(filepath.Join(src, "lib", "modules", "boot"), 0o755); err != nil {
@@ -84,9 +84,9 @@ func TestCarryTreeSkipsTheBootArchivesOwnSubtrees(t *testing.T) {
 
 func TestCarryTreeOverwritesWhatTheDestinationAlreadyHas(t *testing.T) {
 	// The destination is the overlay, whose lower layer already
-	// carries the system's copy of anything the layer overrides — the
-	// depmod index, most importantly. Later archives win: that is the
-	// initramfs contract the carry preserves.
+	// carries the system's copy of anything that the layer overrides.
+	// The depmod index is the most important example. Later archives
+	// win: that is the initramfs contract that the carry preserves.
 	src, dst := t.TempDir(), t.TempDir()
 	if err := os.MkdirAll(filepath.Join(src, "lib", "modules", "r1"), 0o755); err != nil {
 		t.Fatal(err)
@@ -131,9 +131,9 @@ func TestCarryTreeRefusesUnexpectedFileTypes(t *testing.T) {
 }
 
 func TestCarryTreeToleratesAnExistingSymlink(t *testing.T) {
-	// The overlay's lower layer ships symlinks of its own (mtab, the
-	// iptables aliases); carrying the same link again is a no-op, not
-	// a failure.
+	// The overlay's lower layer ships symlinks of its own, such as
+	// mtab and the iptables aliases. Carrying the same link again does
+	// nothing, and is not a failure.
 	src, dst := t.TempDir(), t.TempDir()
 	if err := os.Symlink("target", filepath.Join(src, "alias")); err != nil {
 		t.Fatal(err)

@@ -3,25 +3,24 @@
 # Vendor the PCI naming database: the file that turns "1af4:1050"
 # into "Red Hat, Inc. Virtio 1.0 GPU".
 #
-# PCI devices carry only numeric IDs; the names every tool prints
-# come from pci.ids, a community-maintained compilation that the
-# hwdata project snapshots in versioned releases. liken ships it so
-# the unclaimed-hardware report (the hardware package) can name
-# devices the way an operator knows them. USB devices need no
-# database — they carry their manufacturer and product strings in
-# the hardware itself.
+# PCI devices carry only numeric IDs. The names every tool prints come
+# from pci.ids, a community-maintained compilation that the hwdata
+# project snapshots in versioned releases. liken ships it so the
+# unclaimed-hardware report (the hardware package) can name devices
+# the way an operator knows them. USB devices need no database. They
+# carry their manufacturer and product strings in the hardware itself.
 #
-# The pin is an hwdata release tag (hwdata/VERSION), and the fetch
+# The pin is an hwdata release tag (hwdata/VERSION), and this fetch
 # takes just the one file, at that tag, from hwdata's repository.
-# hwdata publishes no checksum manifest, so the digest is recorded
-# here, the same arrangement as the mke2fs vendoring: a version bump
-# means updating VERSION and the digest together, and the fetch
-# fails loudly when they disagree.
+# hwdata publishes no checksum manifest, so this file records the
+# digest, the same arrangement as the mke2fs vendoring: a version bump
+# must update VERSION and the digest together, and the fetch fails
+# with an error when they disagree.
 #
-# pci.ids is dual-licensed (GPL-2-or-later or 3-clause BSD); liken
-# redistributes it under the BSD license, which asks for notices,
-# not source — and the file is its own source anyway, the same way
-# the CA bundle is. The licensing domain carries its notice.
+# pci.ids is dual-licensed (GPL-2-or-later or 3-clause BSD). liken
+# redistributes it under the BSD license, which asks for notices, not
+# source. The file is its own source anyway, the same as the CA
+# bundle. The licensing domain carries its notice.
 #
 # Usage:
 #   hwdata/fetch.sh              fetch the version pinned in hwdata/VERSION

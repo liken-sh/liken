@@ -1,9 +1,9 @@
 package main
 
-// Tests for the channel poller. The fetch edge is injected, so these
-// drive Observe the way the sweep does and watch what the poller
-// asks for and remembers; the real HTTP fetch gets its own test
-// against a local server.
+// Tests for the channel poller. Each test injects the fetch
+// function, then calls Observe the way the sweep does, and checks
+// what the poller asks for and remembers. A separate test checks the
+// real HTTP fetch against a local server.
 
 import (
 	"errors"
@@ -22,8 +22,8 @@ func channelDocument(latest string) []byte {
 	return []byte(fmt.Sprintf("apiVersion: liken.sh/v1alpha1\nkind: Channel\nmetadata:\n  name: liken\nlatest: %s\n", latest))
 }
 
-// pollerWith returns a poller whose fetches serve the given latest
-// version, counting calls.
+// pollerWith returns a poller whose fetch function serves the given
+// latest version. It counts how many times the fetch function runs.
 func pollerWith(latest string, calls *atomic.Int64) *channelPoller {
 	p := newChannelPoller()
 	p.fetch = func(url string) ([]byte, error) {
@@ -33,9 +33,10 @@ func pollerWith(latest string, calls *atomic.Int64) *channelPoller {
 	return p
 }
 
-// awaitAvailable spins until the poller's background poll lands, the
-// same wait-for-the-goroutine shape the supervisor's registry tests
-// use, bounded so a broken poller fails instead of hanging.
+// awaitAvailable waits until the poller's background poll finishes.
+// The supervisor's registry tests use the same wait-for-the-goroutine
+// method. The wait has a limit, so a broken poller makes the test
+// fail instead of hang.
 func awaitAvailable(t *testing.T, p *channelPoller, want string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -48,9 +49,9 @@ func awaitAvailable(t *testing.T, p *channelPoller, want string) {
 	t.Fatalf("available = %q, want %q", p.Available(), want)
 }
 
-// awaitCalls spins until the fake fetch has been asked n times: polls
-// run on their own goroutine, so a test that counts them has to wait
-// for them, bounded the same way awaitAvailable is.
+// awaitCalls waits until the fake fetch function has run n times.
+// Polls run on their own goroutine, so a test that counts them must
+// wait for them. The wait has the same limit as awaitAvailable.
 func awaitCalls(t *testing.T, calls *atomic.Int64, n int64) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -77,7 +78,7 @@ func TestPollerIsLazyBetweenSweeps(t *testing.T) {
 	var calls atomic.Int64
 	p := pollerWith("2026.07.13-002", &calls)
 
-	// Sweeps run every ten seconds; the channel is asked once per
+	// Sweeps run every ten seconds. The channel is asked once per
 	// interval, not once per sweep.
 	now := time.Now()
 	p.Observe(channelSpec, now)
@@ -109,14 +110,14 @@ func TestCheckEditForcesAnImmediatePoll(t *testing.T) {
 	p.Observe(channelSpec, now)
 	awaitAvailable(t, p, "2026.07.13-002")
 
-	// One sweep later the spec carries a new check value: the poll
-	// happens now, not at the interval.
+	// One sweep later, the spec carries a new check value. The poll
+	// happens now, not at the next interval.
 	nudged := channelSpec
 	nudged.Check = "again please"
 	p.Observe(nudged, now.Add(10*time.Second))
 	awaitCalls(t, &calls, 2)
 
-	// The same check value on later sweeps is not a new nudge.
+	// The same check value on later sweeps is not a new signal.
 	p.Observe(nudged, now.Add(20*time.Second))
 	if calls.Load() != 2 {
 		t.Errorf("fetches after a repeated check: %d, want 2", calls.Load())
@@ -128,9 +129,9 @@ func TestANewSourceDropsTheOldAnswer(t *testing.T) {
 	p := newChannelPoller()
 	p.fetch = func(url string) ([]byte, error) {
 		calls.Add(1)
-		// Block the second channel's answer so the gap shows: the
-		// old channel's latest must not linger while the new one is
-		// still being asked.
+		// This blocks the second channel's answer, so the test can
+		// show the gap. The old channel's latest version must not
+		// stay while the poller is still asking the new one.
 		if calls.Load() > 1 {
 			return nil, errors.New("unreachable")
 		}
@@ -160,7 +161,7 @@ func TestAFailedPollKeepsTheLastAnswer(t *testing.T) {
 	p.Observe(channelSpec, now)
 	awaitAvailable(t, p, "2026.07.13-002")
 	p.Observe(channelSpec, now.Add(channelPollInterval))
-	// The failed poll must complete and leave the answer standing.
+	// The failed poll must finish and leave the answer unchanged.
 	awaitCalls(t, &calls, 2)
 	awaitAvailable(t, p, "2026.07.13-002")
 }
@@ -173,8 +174,8 @@ func TestNoSourceMeansNothingAvailable(t *testing.T) {
 	p.Observe(channelSpec, now)
 	awaitAvailable(t, p, "2026.07.13-002")
 
-	// The channel leaves the spec entirely: the stale answer goes
-	// with it, and nothing is fetched.
+	// The channel is removed from the spec entirely. The stale
+	// answer goes with it, and the poller fetches nothing.
 	p.Observe(cluster.ClusterReleasesSpec{}, now.Add(10*time.Second))
 	awaitAvailable(t, p, "")
 	if calls.Load() != 1 {

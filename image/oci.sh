@@ -1,37 +1,40 @@
 #!/usr/bin/env bash
 #
-# Package one static binary as a container image, by hand.
+# This script packages one static binary as a container image, by
+# hand.
 #
-# A container image is a simple artifact: a tarball of tarballs plus
+# A container image is a simple artifact: a tarball of tarballs, plus
 # three small JSON documents, laid out the way the OCI image spec
-# describes. Each *layer* is a tar of a filesystem tree (ours has
-# exactly one file in it, the static binary); the *config* records how
-# to run it and which layers stack into the root filesystem; the
-# *manifest* binds config and layers together; and the *index* is the
-# entry point that names the manifest. Every blob is stored under the
-# SHA-256 of its bytes and referred to only by that digest. An image
-# is a small content-addressed database, which is why layers dedupe,
-# caches work, and digests can be trusted end to end.
+# describes. Each layer is a tar of a filesystem tree (ours has
+# exactly one file in it, the static binary). The config records how
+# to run the image and which layers stack into the root filesystem.
+# The manifest binds the config and the layers together. The index is
+# the entry point that names the manifest. The image stores every
+# blob under the SHA-256 digest of its bytes, and refers to it only
+# by that digest. An image is therefore a small content-addressed
+# database. This is why layers dedupe, why caches work, and why a
+# program can trust a digest end to end.
 #
-# Docker would produce this same structure through BuildKit; we write
-# it out directly for the same reason image/build.sh drives cpio
-# directly: every part of the format stays visible. The result lands
-# in the initramfs at /var/lib/rancher/k3s/agent/images/, where k3s
-# imports every archive it finds into containerd at startup. That is
-# liken's entire image distribution mechanism: no registry, no pull,
-# no network. The OS image therefore carries every byte the machine
-# will run.
+# Docker would produce this same structure through BuildKit. This
+# script writes the structure out directly, for the same reason
+# image/build.sh drives cpio directly: every part of the format stays
+# visible. The result lands in the initramfs at
+# /var/lib/rancher/k3s/agent/images/, where k3s imports every archive
+# it finds into containerd at startup. That is liken's entire image
+# distribution mechanism: no registry, no pull, no network. The OS
+# image therefore carries every byte the machine will run.
 #
-# The recipe is one static binary in, one image tarball out, so it
-# lives here in the image domain and each consumer's Makefile invokes
-# it. Four images ship this way: the machine operator, the cluster
-# operator, the log relays, and the iscsi feature's iscsid (a vendored
-# binary, not a liken program, packaged all the same):
+# The recipe takes one static binary in and produces one image
+# tarball out, so it lives here in the image domain, and each
+# consumer's Makefile calls it. Four images ship this way: the
+# machine operator, the cluster operator, the log relays, and the
+# iscsi feature's iscsid (a vendored binary, not a liken program, but
+# packaged the same way):
 #
 #   oci.sh <binary> <image>     e.g. oci.sh liken-machine-operator liken.sh/machine-operator
 #
-# with DIST naming the directory that holds <binary> and receives
-# <binary>-image.tar, and LIKEN_VERSION the version to stamp into the
+# DIST names the directory that holds <binary> and receives
+# <binary>-image.tar. LIKEN_VERSION is the version to stamp into the
 # image's name.
 
 set -euo pipefail
@@ -46,9 +49,10 @@ blobs="$layout/blobs/sha256"
 rm -rf "$layout"
 mkdir -p "$blobs"
 
-# Store a file as a blob: content-addressing is just "the filename is
-# the hash". Prints the digest so callers can reference what they
-# stored; the byte sizes the JSON documents need come from stat.
+# add_blob stores a file as a blob: content-addressing simply means
+# "the filename is the hash". It prints the digest so callers can
+# reference what they stored. The byte sizes the JSON documents need
+# come from stat.
 add_blob() {
     local file="$1" digest
     digest="$(sha256sum "$file" | cut -d' ' -f1)"
@@ -56,35 +60,35 @@ add_blob() {
     echo "$digest"
 }
 
-# The layer: one file, owned by root. The tar flags make the archive a
-# pure function of its contents (fixed timestamps, numeric ownership,
-# sorted names), so rebuilding an unchanged binary yields a
-# byte-identical layer and therefore the same digest.
+# This builds the layer: one file, owned by root. The tar flags make
+# the archive depend only on its contents (fixed timestamps, numeric
+# ownership, sorted names), so rebuilding an unchanged binary produces
+# a byte-identical layer, and therefore the same digest.
 rootfs="$dist/rootfs"
 rm -rf "$rootfs"
 mkdir -p "$rootfs"
 cp "$dist/$binary" "$rootfs/$binary"
 
-# TLS trust, for the programs that dial out of the cluster. There is
-# no base image here, so there is no root certificate store unless we
-# put one in — without it, Go's crypto/x509 rejects every certificate
-# as unknown. Consumers whose binaries fetch over HTTPS (the
-# operators, polling and downloading from release channels) pass
-# CA_BUNDLE, and the machine's own vendored bundle lands at the path
-# Go checks first on Linux.
+# This stages TLS trust, for the programs that connect out of the
+# cluster. There is no base image here, so there is no root
+# certificate store unless this script adds one. Without it, Go's
+# crypto/x509 rejects every certificate as unknown. Consumers whose
+# binaries fetch over HTTPS (the operators, polling and downloading
+# from release channels) pass CA_BUNDLE, and the machine's own
+# vendored bundle lands at the path Go checks first on Linux.
 if [ -n "${CA_BUNDLE:-}" ]; then
     mkdir -p "$rootfs/etc/ssl/certs"
     cp "$CA_BUNDLE" "$rootfs/etc/ssl/certs/ca-certificates.crt"
 fi
 
-# The PCI naming database, for the machine operator's device
-# inventory (machine-operator/dra.go). It rides in the operator's own
-# image rather than as a hostPath mount of the OS's copy,
-# deliberately: a DaemonSet template is applied fleet-wide while a
+# This stages the PCI naming database, for the machine operator's
+# device inventory (machine-operator/dra.go). It is part of the
+# operator's own image rather than a hostPath mount of the OS's
+# copy, on purpose. A DaemonSet template applies fleet-wide, while a
 # fleet mid-upgrade runs mixed OS versions, so the template must
-# never mount a path some node's OS lacks — and a naming database
-# that versions with the binary reading it can never disagree with
-# it either.
+# never mount a path that some node's OS lacks. A naming database
+# that shares a version with the binary reading it can never disagree
+# with that binary either.
 if [ -n "${PCI_IDS:-}" ]; then
     mkdir -p "$rootfs/usr/share/hwdata"
     cp "$PCI_IDS" "$rootfs/usr/share/hwdata/pci.ids"
@@ -95,12 +99,13 @@ tar --create --file "$dist/layer.tar" \
 layer_size="$(stat -c%s "$dist/layer.tar")"
 layer_digest="$(add_blob "$dist/layer.tar")"
 
-# The config: the runtime half of the image. diff_ids are digests of
-# the *uncompressed* layer tars; ours is stored uncompressed, so the
-# same digest appears in both the manifest and here. There is no base
-# image and no shell to name; the Entrypoint is the entire runtime
-# configuration. A pod that needs to vary behavior varies its args,
-# the way the machine-logs DaemonSet passes each container its verb.
+# This writes the config: the runtime half of the image. diff_ids are
+# digests of the uncompressed layer tars. This image's layer is
+# stored uncompressed, so the same digest appears in both the
+# manifest and here. There is no base image and no shell to name, so
+# the Entrypoint is the entire runtime configuration. A pod that
+# needs to vary its behavior varies its args instead, the way the
+# machine-logs DaemonSet passes each container its verb.
 cat >"$dist/config.json" <<EOF
 {
   "created": "1970-01-01T00:00:00Z",
@@ -118,7 +123,8 @@ EOF
 config_size="$(stat -c%s "$dist/config.json")"
 config_digest="$(add_blob "$dist/config.json")"
 
-# The manifest: config plus layers, each named by digest and size.
+# This writes the manifest: the config plus the layers, each named by
+# digest and size.
 cat >"$dist/manifest.json" <<EOF
 {
   "schemaVersion": 2,
@@ -140,18 +146,18 @@ EOF
 manifest_size="$(stat -c%s "$dist/manifest.json")"
 manifest_digest="$(add_blob "$dist/manifest.json")"
 
-# The index: the entry point a consumer reads first. The containerd
-# annotation is how the image keeps its name through an import: an
-# OCI layout has no registry to imply one, so the reference travels
-# inside the archive itself.
+# This writes the index: the entry point a consumer reads first. The
+# containerd annotation is how the image keeps its name through an
+# import. An OCI layout has no registry to imply a name, so the
+# reference travels inside the archive itself.
 #
 # The same manifest is named twice: two references to one image. The
-# versioned tag says what this build is; the stable "installed" tag
+# versioned tag says what this build is. The stable "installed" tag
 # is the one the OS workloads pin (each operator's and the log
-# relays' manifests): every release tags its own build
-# "installed", so one unchanging pod spec resolves, on every node, to
-# the build that node's own OS imported. Content addressing makes the
-# aliasing free: both names point at the same digest.
+# relays' manifests). Every release tags its own build "installed",
+# so one unchanging pod spec resolves, on every node, to the build
+# that node's own OS imported. Content addressing makes this dual
+# naming free: both names point at the same digest.
 cat >"$layout/index.json" <<EOF
 {
   "schemaVersion": 2,
@@ -181,7 +187,7 @@ cat >"$layout/index.json" <<EOF
 EOF
 
 # The marker file declares that this directory is an OCI image
-# layout; the whole layout then becomes one archive.
+# layout. The whole layout then becomes one archive.
 echo '{"imageLayoutVersion": "1.0.0"}' >"$layout/oci-layout"
 tar --create --file "$dist/$binary-image.tar" \
     --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \

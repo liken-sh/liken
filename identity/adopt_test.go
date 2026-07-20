@@ -1,12 +1,13 @@
 package identity
 
-// Tests for adoption: laying an existing cluster's harvested identity
-// into a deployment directory. The interesting behavior is all
-// refusal — a partial harvest, a token from a different cluster, or a
-// deployment that already holds an identity each produce a distinct
-// error before anything is written — and the happy path is a faithful
-// copy. A minted identity doubles as the harvest fixture, because
-// mint produces exactly the layout a harvest carries.
+// This file tests adoption: placing an existing cluster's harvested
+// identity into a deployment directory. Most of the interesting
+// behavior is refusal. A partial harvest, a token from a different
+// cluster, and a deployment that already holds an identity each
+// produce a distinct error before anything is written. The
+// successful case is a faithful copy. A minted identity also serves
+// as the harvest fixture, because mint produces exactly the layout
+// that a harvest carries.
 
 import (
 	"bytes"

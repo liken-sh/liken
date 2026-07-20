@@ -1,8 +1,8 @@
 package main
 
-// Tests for the grub.cfg renderer: the config is generated text, so
-// the tests pin the load-bearing lines — the one-shot consumption
-// order, the fallback entry, and the command-line parity with what
+// Tests for the grub.cfg renderer. The config is generated text, so
+// these tests pin the load-bearing lines: the one-shot consumption
+// order, the fallback entry, and the command-line match with what
 // writeSlotBootEntry gives UEFI machines.
 
 import (
@@ -13,8 +13,8 @@ import (
 func TestGRUBConfigCarriesTheChoreography(t *testing.T) {
 	cfg := renderGRUBConfig("node-1", []string{"console=ttyS0"})
 
-	// The one-shot: try_slot must be consumed (cleared and saved)
-	// before any menuentry can run a kernel.
+	// The one-shot: this test checks that try_slot is consumed
+	// (cleared and saved) before any menuentry can run a kernel.
 	saveAt := strings.Index(cfg, "save_env try_slot")
 	entryAt := strings.Index(cfg, "menuentry")
 	if saveAt < 0 || entryAt < 0 || saveAt > entryAt {
@@ -59,8 +59,8 @@ func TestGRUBConfigSerialConsole(t *testing.T) {
 		t.Error("GRUB's output should reach both the serial and local consoles")
 	}
 
-	// No serial console, no serial directives: GRUB's default output
-	// stands.
+	// No serial console means no serial directives: GRUB's default
+	// output applies.
 	plain := renderGRUBConfig("node-1", []string{"console=tty0"})
 	if strings.Contains(plain, "serial --unit") {
 		t.Error("a machine without a serial console should not configure one")

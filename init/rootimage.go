@@ -1,36 +1,39 @@
 package main
 
-// Finding and mounting the system image: the read-only squashfs that
-// becomes the root filesystem.
+// Finding and mounting the system image: the read-only squashfs file
+// that becomes the root filesystem.
 //
-// The boot loader stages almost nothing in RAM — the kernel, the
-// small boot archive this program rides in, and the deployment layer.
-// The operating system itself is liken.sqfs, and it arrives one of
-// two ways:
+// The boot loader stages almost nothing in RAM: the kernel, the small
+// boot archive that holds this program, and the deployment layer. The
+// operating system itself is liken.sqfs. It arrives in one of two
+// ways:
 //
-//   - From a boot slot. An installed machine's kernel command line
-//     carries liken.slot=A (or B), the installer's record of which
-//     slot the boot entry belongs to. The slot is a FAT32 partition
-//     recognized by the GPT name written when it was claimed
-//     (liken:systemA), and the image is a file on it.
+//   - From a boot slot. On an installed machine, the kernel command
+//     line carries liken.slot=A (or B). This is the installer's
+//     record of which slot the boot entry belongs to. The slot is a
+//     FAT32 partition, recognized by the GPT name written when it
+//     was claimed (liken:systemA). The image is a file on that
+//     partition.
 //
-//   - From RAM. A boot with no disk (the lab's from-blank-disks
-//     drills, QEMU -kernel boots) wraps the image in a cpio archive
-//     so the kernel unpacks it into rootfs at /liken.sqfs, and init
-//     mounts it from there. The loop device pins the file's memory
-//     for as long as it is mounted; that is the RAM cost of not
-//     having a disk, paid only by boots that chose it.
+//   - From RAM. A boot with no disk, such as the lab's
+//     from-blank-disks drills or QEMU -kernel boots, wraps the image
+//     in a cpio archive. The kernel unpacks this archive into rootfs
+//     at /liken.sqfs, and init mounts the image from there. The loop
+//     device holds the file's memory in place for as long as it
+//     stays mounted. This is the RAM cost of having no disk. Only
+//     boots that run without a disk pay this cost.
 //
-// Either way the image is loop-mounted read-only, exactly the bytes
-// the release published: the running root is the digest-verified
-// artifact, immutable by construction. A bounded tmpfs is overlaid
-// above it for the runtime's writes (switchroot.go tells that half).
+// Either way, init loop-mounts the image read-only, with exactly the
+// bytes the release published. The running root is the
+// digest-verified artifact. Nothing can change it, because of how
+// the system builds and mounts it. A bounded tmpfs sits above it for
+// the runtime's writes (see switchroot.go for that part).
 //
-// This file's work happens first thing at boot, when almost nothing
-// is mounted; the caller mounts /proc before asking, because the
-// liken.* parameters live in /proc/cmdline and nowhere else (the
-// kernel treats dotted parameter names as module parameters and
-// never passes them to init directly).
+// This file's work happens first, at the start of boot, when almost
+// nothing else is mounted. The caller must mount /proc before it
+// calls into this file, because the liken.* parameters live only in
+// /proc/cmdline. The kernel treats dotted parameter names as module
+// parameters and never passes them to init directly.
 
 import (
 	"fmt"
@@ -42,27 +45,30 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// ramImage is where a cpio-wrapped system image lands in rootfs; its
-// presence selects the from-RAM path. A package variable rather than
-// a constant so tests can point the search at a file of their own
-// making.
+// ramImage is where a cpio-wrapped system image lands in rootfs. If
+// this file exists, init uses the from-RAM path. This is a package
+// variable, not a constant, so tests can point the search at a file
+// of their own.
 var ramImage = "/liken.sqfs"
 
-// bootModulesDir is the boot archive's module tree. The directory is
-// deliberately not named for the kernel release: when init carries
-// the boot-time files onto the real root, nothing under this name can
-// shadow the system image's complete index at /lib/modules/<release>.
-// A package variable for the same testing reason as ramImage.
+// bootModulesDir is the boot archive's module tree. The directory
+// name does not include the kernel release, on purpose. When init
+// carries the boot-time files onto the real root, nothing under this
+// name can hide the system image's full index at
+// /lib/modules/<release>. This is a package variable, for the same
+// testing reason as ramImage.
 var bootModulesDir = "/lib/modules/boot"
 
-// slotImageName is the image's filename on a boot slot, one of the
-// artifacts the installer copies and the release document names.
+// slotImageName is the image's file name on a boot slot. It is one
+// of the artifacts that the installer copies, and the release
+// document names it.
 const slotImageName = "liken.sqfs"
 
-// loadBootModules loads the boot archive's few modules (overlayfs,
-// vfat's encoding table), resolved through the archive's own depmod
-// index. Failures are reported, not fatal: the mounts that need a
-// missing module will say so themselves.
+// loadBootModules loads the boot archive's few modules, such as
+// overlayfs and vfat's encoding table. It resolves each module
+// through the archive's own depmod index. A failure to load a module
+// is reported, not fatal. Any mount that needs a missing module
+// reports its own failure.
 func loadBootModules(names ...string) {
 	deps, err := readModulesDep(filepath.Join(bootModulesDir, "modules.dep"))
 	if err != nil {
@@ -77,9 +83,10 @@ func loadBootModules(names ...string) {
 	}
 }
 
-// findSystemImage locates liken.sqfs and returns its path, mounting
-// the boot slot when the image isn't already in rootfs. slotMount is
-// where the slot lands when one is used ("" for the RAM path).
+// findSystemImage finds liken.sqfs and returns its path. It mounts
+// the boot slot when the image is not already in rootfs. slotMount
+// is where the slot mounts when init uses one (use "" for the RAM
+// path).
 func findSystemImage(slotParam, slotMount string) (imagePath string, err error) {
 	if _, err := os.Stat(ramImage); err == nil {
 		fmt.Println("liken: system image found in RAM (no disk needed for this boot)")
@@ -97,12 +104,13 @@ func findSystemImage(slotParam, slotMount string) (imagePath string, err error) 
 	if err := os.MkdirAll(slotMount, 0o755); err != nil {
 		return "", err
 	}
-	// Read-write not because this mount writes anything — the early
-	// boot only reads the image — but because storage reconciliation
-	// later mounts the same partition at its role path, sharing the
-	// one superblock, and a superblock cannot be read-only here and
-	// read-write there. The slot must stay writable for the machine:
-	// the fetcher writes downloaded releases into slots.
+	// This mount is read-write, but not because it writes anything
+	// here. The early boot only reads the image. Storage
+	// reconciliation later mounts the same partition at its role
+	// path, and both mounts share one superblock. A superblock cannot
+	// be read-only in one mount and read-write in the other. The slot
+	// must stay writable, because the fetcher writes downloaded
+	// releases into slots.
 	if err := unix.Mount(device, slotMount, "vfat", 0, ""); err != nil {
 		return "", fmt.Errorf("mounting slot %s (%s): %w", slotParam, device, err)
 	}
@@ -110,12 +118,13 @@ func findSystemImage(slotParam, slotMount string) (imagePath string, err error) 
 	return filepath.Join(slotMount, slotImageName), nil
 }
 
-// slotDevice picks the partition holding the named slot from the
-// machine's discovered partitions. The slot is recognized exactly the
-// way storage roles are: by the GPT partition name the claim wrote,
-// wherever the disk enumerated this boot. Device paths in specs are
-// claim-time hints; names are identity — and two partitions claiming
-// one name is a refusal, never a guess.
+// slotDevice picks the partition that holds the named slot, from the
+// machine's discovered partitions. It recognizes the slot the same
+// way storage roles are recognized: by the GPT partition name that
+// the claim wrote, wherever the disk enumerated during this boot.
+// Device paths in specs are only hints from claim time. Names are
+// the identity. If two partitions claim one name, slotDevice refuses
+// to guess and returns an error.
 func slotDevice(parts []partition, slotParam string) (string, error) {
 	role := machine.SystemARole
 	if slotParam == "B" {
@@ -138,9 +147,10 @@ func slotDevice(parts []partition, slotParam string) (string, error) {
 	return device, nil
 }
 
-// loopMount attaches path to a free loop device read-only and mounts
-// it at target as squashfs. Autoclear detaches the loop device when
-// the mount goes away, so nothing needs tearing down by hand.
+// loopMount attaches path to a free loop device, read-only, and
+// mounts it at target as squashfs. The autoclear flag detaches the
+// loop device when the mount goes away, so nothing needs to be torn
+// down by hand.
 func loopMount(path, target string) error {
 	ctl, err := os.OpenFile("/dev/loop-control", os.O_RDWR, 0)
 	if err != nil {

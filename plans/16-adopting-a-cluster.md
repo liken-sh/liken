@@ -2,74 +2,85 @@
 
 Milestone 16 — Done
 
-liken can found a cluster; adoption is joining one it didn't found (a
-running k3s cluster on some other OS) so that its machines can be
-replaced with liken machines one at a time while the cluster keeps
-serving. Nothing in etcd — Secrets, PVs, workloads — is exported or
-restored at any point.
+liken can found a cluster. Adoption means joining a cluster that liken
+did not found, such as a running k3s cluster on some other OS.
+Adoption lets the cluster's machines be replaced with liken machines
+one at a time, while the cluster keeps serving. At no point does the
+process export or restore anything in etcd, such as Secrets, PVs, or
+workloads.
 
-Most of the mechanism falls out of the identity design. The image
-already carries the cluster's CAs and join token, so adopting a
-cluster means importing its identity instead of minting one:
-`liken adopt` takes the token and CA tree harvested from any of
-the existing cluster's servers and lays them into the same dist/
-layout minting produces. From there the build doesn't care where the
-identity came from, and an image built this way joins the existing
-cluster directly; followers need no code changes at all.
+Most of the mechanism follows from the identity design. The image
+already carries the cluster's CAs and join token. So adopting a
+cluster means importing its identity instead of minting a new one.
+`liken adopt` takes the token and CA tree harvested from any of the
+existing cluster's servers, and lays them into the same `dist/`
+layout that minting produces. After that step, the build does not
+care where the identity came from. An image built this way joins the
+existing cluster directly. Follower machines need no code changes at
+all.
 
-The one genuine change is the founder's datastore decision, gated by
-a new Cluster field, spec.origin (founded | adopted). An adopted
-cluster's datastore already exists, so every leader joins it: the
-founder through the endpoint, never cluster-init, never sqlite,
-because initializing a second datastore beside a live one would split
-the cluster in two. The state is never copied: each liken leader that
-joins becomes an etcd member and raft replicates the keyspace to it.
-The foreign servers rotate out by ordinary member removal (kubectl
-delete node, the same mechanism demotion already uses), one at a time
-so quorum holds.
+The one real change is the founder's datastore decision. A new
+Cluster field, `spec.origin` (`founded` | `adopted`), gates this
+decision. An adopted cluster's datastore already exists, so every
+leader joins that existing datastore. The founder joins through the
+endpoint, never through `cluster-init`, and never through sqlite.
+Initializing a second datastore beside a live one would split the
+cluster into two.
 
-The origin field permits exactly one edit, adopted → founded,
-enforced by a CEL transition rule and made by a human after the last
-foreign member is gone. Promotion changes nothing on a running fleet,
-since k3s ignores cluster-init when the datastore already exists. It
-matters if the cluster is ever rebuilt from scratch: a founded
-cluster's founder may create the datastore again.
+The process never copies state. Each liken leader that joins becomes
+an etcd member, and raft replicates the keyspace to it. The foreign
+servers rotate out through ordinary member removal (`kubectl delete
+node`, the same mechanism that demotion already uses). They rotate
+out one at a time, so that quorum holds.
 
-Mixed-cluster hygiene came out of this work and stands on its own:
-every liken node registers with a liken.sh/machine=true label, and
-the OS DaemonSets (operator, log relays) select on it, so they are
-never scheduled onto nodes that can't run their images. Foreign nodes
-are otherwise deliberately invisible to the fleet controllers: they
-have no Machine resources, and liken manages Machines while
-Kubernetes manages Nodes.
+The origin field permits exactly one edit: `adopted` → `founded`. A
+CEL transition rule enforces this, and a human makes the edit after
+the last foreign member is gone. Promotion changes nothing on a
+running fleet, because k3s ignores `cluster-init` when the datastore
+already exists. Promotion matters only if someone rebuilds the
+cluster from scratch later: a founded cluster's founder may create
+the datastore again.
 
-Everything else a real migration needs (the CSI plugin's host
-dependencies, workloads that rely on the bundled components liken
-disables, version skew between the two k3s builds) is deployment
-work, not OS work, and belongs in the deployment's own runbook.
+Mixed-cluster hygiene came out of this work and stands on its own.
+Every liken node registers with a `liken.sh/machine=true` label. The
+OS DaemonSets (the operator and the log relays) select on that label,
+so Kubernetes never schedules them onto nodes that cannot run their
+images. Otherwise, foreign nodes stay deliberately invisible to the
+fleet controllers. Foreign nodes have no Machine resources. liken
+manages Machines, while Kubernetes manages Nodes.
 
-1. [x] Prove it in the lab: a stock multi-server k3s cluster in QEMU
-   guests plays the foreign cluster, its identity is harvested and
-   adopted, and the full rotation runs end to end: leader-first join,
-   members rotated out one at a time, the endpoint re-pointed, the
-   cluster promoted. A marker Secret created before adoption must
-   survive to the end, and no OS DaemonSet pod may ever land on a
-   foreign node. Proven: two Ubuntu 24.04 guests ran stock k3s
-   (embedded etcd, the same version liken pins), and a marker Secret
-   planted before adoption was still there after promotion with its
-   uid unchanged: the same etcd object, never recreated. The first
-   liken machine joined through the endpoint wearing its node label,
-   and the OS DaemonSets scheduled no pods on the foreign nodes at
+A real migration needs other things too: the CSI plugin's host
+dependencies, workloads that rely on bundled components that liken
+disables, and version skew between the two k3s builds. These are
+deployment work, not OS work, and belong in the deployment's own
+runbook.
+
+1. [x] Prove it in the lab. A stock multi-server k3s cluster in QEMU
+   guests plays the role of the foreign cluster. The plan harvests
+   and adopts its identity, then runs the full rotation end to end:
+   leader-first join, members rotated out one at a time, the endpoint
+   re-pointed, and the cluster promoted. A marker Secret created
+   before adoption must survive to the end. No OS DaemonSet pod may
+   ever land on a foreign node.
+
+   This was proven in the lab. Two Ubuntu 24.04 guests ran stock k3s
+   with embedded etcd, at the same version liken pins. A marker
+   Secret planted before adoption was still there after promotion,
+   with its uid unchanged: the same etcd object, never recreated. The
+   first liken machine joined through the endpoint wearing its node
+   label. The OS DaemonSets scheduled no pods on the foreign nodes at
    any point. The endpoint re-point and the promotion each rolled
    through the fleet as ordinary staged cluster edits, one granted
    reboot at a time. The founder's post-promotion boot rendered
-   cluster-init: true against the live datastore and rejoined as an
-   ordinary member, confirming that k3s ignores cluster-init when a
-   datastore exists. The CEL rule refused founded → adopted after the
-   promotion. One finding to remember: a server's disable list acts
-   on the whole cluster. The moment the first liken server joined, it
+   `cluster-init: true` against the live datastore and rejoined as an
+   ordinary member. This confirmed that k3s ignores `cluster-init`
+   when a datastore already exists. The CEL rule refused the
+   `founded → adopted` edit after the promotion.
+
+   One finding is worth remembering: a server's disable list acts on
+   the whole cluster. The moment the first liken server joined, it
    submitted the helm-delete job for the foreign cluster's packaged
-   traefik and removed it cluster-wide. A deployment that relies on
-   the bundled components must have replacements running before the
-   first liken server joins, not merely before the last foreign one
-   leaves.
+   traefik, and removed traefik cluster-wide. A deployment that
+   relies on the bundled components must have replacements running
+   before the first liken server joins, not merely before the last
+   foreign server leaves.

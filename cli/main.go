@@ -1,20 +1,21 @@
-// The liken CLI: the toolkit for producing and operating a deployment
-// of liken.
+// The liken CLI is the toolkit for producing and operating a
+// deployment of liken.
 //
-// Everything an operator does to a deployment that isn't running a
-// machine lives here: minting or adopting a cluster identity,
-// computing credentials from it, packing a deployment layer, and
-// assembling install media from a public release. The other Go
-// programs in this repo run *inside* the machine — init as PID 1,
-// the operators as pods; this one runs on the operator's
-// workstation, and it ships with public releases so that producing a
-// cluster never requires this repo or a build.
+// This program does everything an operator needs to do to a
+// deployment that is not running a machine: minting or adopting a
+// cluster identity, computing credentials from that identity,
+// packing a deployment layer, and assembling install media from a
+// public release. The other Go programs in this repo run inside the
+// machine: init as PID 1, and the operators as pods. This program
+// runs on the operator's workstation, and it ships with public
+// releases, so producing a cluster never requires this repo or a
+// build.
 //
 // The command is a thin dispatcher. The logic lives with the domain
 // that owns it (the identity package, and later the image and
-// releases packages), so the CLI stays a table of names while each
-// capability keeps its own file, its own tests, and its own
-// documentation.
+// releases packages). Because of this, the CLI stays a table of
+// names, while each capability keeps its own file, its own tests,
+// and its own documentation.
 package main
 
 import (
@@ -173,8 +174,9 @@ func run(args []string) error {
 		}
 		return image.Media(args[1], args[2], args[3], os.Stdout)
 	case "stick":
-		// The CLI's first flags; stdlib flag over a subcommand's own
-		// FlagSet, so the positional arguments stay positional.
+		// The CLI's first flags. This uses the standard library's
+		// flag package over a subcommand's own FlagSet, so the
+		// positional arguments stay positional.
 		fs := flag.NewFlagSet("stick", flag.ContinueOnError)
 		var consoles consoleList
 		fs.Var(&consoles, "console", "add console=<value> to every menu entry (repeatable)")

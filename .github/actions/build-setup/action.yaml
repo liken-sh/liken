@@ -1,8 +1,8 @@
-# The build environment, shared by every workflow that assembles the
-# operating system. The build and release workflows run the same
-# Makefiles and need the same runner preparation — toolchain, virtual
-# hardware, and caches — so that preparation lives here once, and the
-# two workflows cannot drift apart.
+# This is the build environment, shared by every workflow that
+# assembles the operating system. The build and release workflows run
+# the same Makefiles and need the same runner preparation: toolchain,
+# virtual hardware, and caches. So that preparation lives here once,
+# and the two workflows cannot grow apart.
 name: build setup
 description: Toolchain, KVM access, and vendored-input caches for building liken
 
@@ -13,21 +13,23 @@ runs:
       with:
         go-version-file: go.mod
 
-    # The fetch scripts document their own host requirements; the
-    # runner image has most of them (curl, tar, ar, zstd, openssl,
-    # docker) already. cpio archives the image and depmod (kmod)
+    # The fetch scripts document their own host requirements, and the
+    # runner image already has most of them (curl, tar, ar, zstd,
+    # openssl, docker). cpio archives the image, and depmod (kmod)
     # indexes the kernel's modules. QEMU, qemu-img (qemu-utils), and
     # OVMF are the smoke drill's virtual hardware: the same packages,
-    # at the same firmware path, the dev-cluster Makefile documents.
+    # at the same firmware path, that the dev-cluster Makefile
+    # documents.
     - name: install host tools
       shell: bash
       run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cpio kmod qemu-system-x86 qemu-utils ovmf
 
-    # The runners expose /dev/kvm, but root-only. This is the
-    # standard rule to open it to everyone, which on a single-use
-    # throwaway VM is fine. If this ever breaks, the smoke drill gets
-    # slower rather than failing: the QEMU flags fall back from KVM
-    # to pure emulation (-accel kvm -accel tcg, in that order).
+    # The runners expose /dev/kvm, but only to root. This is the
+    # standard rule to open it to every user, which is fine on a
+    # single-use throwaway VM. If this rule ever breaks, the smoke
+    # drill gets slower rather than failing: the QEMU flags fall back
+    # from KVM to pure emulation (-accel kvm -accel tcg, in that
+    # order).
     - name: open /dev/kvm to the runner user
       shell: bash
       run: |
@@ -36,13 +38,13 @@ runs:
         sudo udevadm control --reload-rules
         sudo udevadm trigger --name-match=kvm
 
-    # One cache per vendored domain, keyed on the same prerequisites
-    # the root Makefile declares for that domain's artifact. A pin
-    # bump changes the key and only that domain rebuilds cold; the
-    # kernel's 187M doesn't re-download because k3s moved. The Go
-    # programs are deliberately uncached here (beyond setup-go's
-    # module and build caches): they are the code under test and
-    # rebuild every run.
+    # This is one cache for each vendored domain, keyed on the same
+    # prerequisites that the root Makefile declares for that domain's
+    # artifact. A pin bump changes the key, so only that domain
+    # rebuilds cold; the kernel's 187M does not download again just
+    # because k3s moved. The Go programs are deliberately not cached
+    # here (beyond setup-go's module and build caches): they are the
+    # code under test, and they rebuild on every run.
     - uses: actions/cache@v6
       with:
         path: kernel/dist
@@ -63,13 +65,13 @@ runs:
       with:
         path: e2fsprogs/dist
         key: e2fsprogs-${{ hashFiles('e2fsprogs/VERSION', 'e2fsprogs/fetch.sh') }}
-    # The cache carries only what fetch.sh built; the iscsid image
-    # tar in it is always stale, because the tar bakes the liken
-    # version and that moves with every commit now. The version
-    # stamp file (version.mk) is born during the run with a fresh
-    # timestamp, so make rebuilds the tar from the cached binaries
-    # every time — cheap, next to the container build the cache
-    # exists to avoid.
+    # The cache carries only what fetch.sh built. The iscsid image
+    # tar in it is always stale, because the tar bakes in the liken
+    # version, and that version now changes with every commit. The
+    # version stamp file (version.mk) gets a fresh timestamp during
+    # the run. So make rebuilds the tar from the cached binaries every
+    # time. This step is cheap, compared to the container build that
+    # the cache exists to avoid.
     - uses: actions/cache@v6
       with:
         path: open-iscsi/dist
@@ -82,24 +84,24 @@ runs:
       with:
         path: systemd-boot/dist
         key: systemd-boot-${{ hashFiles('systemd-boot/VERSION', 'systemd-boot/fetch.sh') }}
-    # grub's dist carries the fetched module tree and tool plus the
-    # core image linked from them, so the key also covers the inputs
-    # of the link: the embedded config and the module list in the
-    # Makefile.
+    # grub's dist carries the fetched module tree and tool, plus the
+    # core image linked from them. So the key also covers the inputs
+    # to the link step: the embedded config and the module list in
+    # the Makefile.
     - uses: actions/cache@v6
       with:
         path: grub/dist
         key: grub-${{ hashFiles('grub/VERSION', 'grub/fetch.sh', 'grub/early.cfg', 'grub/Makefile') }}
 
     # Make decides staleness by timestamps, and the two halves of
-    # this working tree carry different ones: checkout stamps the
-    # sources with the time of the run, while the cache restores its
-    # artifacts with the older times they were archived with. Left
-    # alone, every cached artifact looks out of date and make
-    # re-fetches it all. Touching the restored artifacts is sound
-    # precisely because each cache key hashes the artifact's real
-    # prerequisites: a hit means those inputs are unchanged, so the
-    # artifact is current no matter what the clock says.
+    # this working tree carry different timestamps: checkout stamps
+    # the sources with the time of the run, while the cache restores
+    # its artifacts with the older times they were archived with. Left
+    # alone, every cached artifact looks out of date, and make
+    # fetches it all again. Touching the restored artifacts is
+    # correct, because each cache key hashes the artifact's real
+    # prerequisites. A cache hit means those inputs are unchanged, so
+    # the artifact is current regardless of its timestamp.
     - name: refresh cached artifact timestamps
       shell: bash
       run: |

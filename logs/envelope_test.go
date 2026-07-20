@@ -1,8 +1,8 @@
 package main
 
-// The envelope's JSON is a contract read by strangers (whatever log
-// stack someone runs), so these tests pin the exact bytes: field
-// order, escaping, and when facility appears.
+// The envelope's JSON is a contract read by other software (whatever
+// log stack someone runs). Because of this, these tests fix the
+// exact bytes: field order, escaping, and when facility appears.
 
 import (
 	"bytes"
@@ -52,8 +52,9 @@ func TestEnvelopeGoldenBytes(t *testing.T) {
 	}
 }
 
-// The kernel's facility is zero, which omitempty would swallow if
-// Facility were a plain int; the pointer is what keeps it visible.
+// The kernel's facility value is zero. omitempty would omit a zero if
+// Facility were a plain int. The pointer keeps the zero value
+// visible.
 func TestEnvelopeKernelFacilityZeroSerializes(t *testing.T) {
 	facility := 0
 	var buf bytes.Buffer
@@ -69,8 +70,9 @@ func TestEnvelopeKernelFacilityZeroSerializes(t *testing.T) {
 	}
 }
 
-// Log lines are full of angle brackets and quotes; the verbatim body
-// must survive them (and never be HTML-escaped into < noise).
+// Log lines are full of angle brackets and quotes. The verbatim body
+// must keep these characters exactly, and must never turn into
+// HTML-escaped entities such as &lt;.
 func TestEnvelopePreservesAwkwardBytes(t *testing.T) {
 	var buf bytes.Buffer
 	err := newEnvelopeWriter(&buf).emit(envelope{

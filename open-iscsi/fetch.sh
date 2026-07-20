@@ -5,8 +5,8 @@
 # plans/17-network-storage-clients.md).
 #
 # CSI drivers that attach iSCSI volumes carry no initiator of their
-# own. synology-csi, for one, mounts the host's root filesystem and
-# chroots into it to exec whatever iscsiadm it finds there, and
+# own. synology-csi, for example, mounts the host's root filesystem
+# and chroots into it to run whatever iscsiadm it finds there, and
 # iscsiadm is in turn a client for a running iscsid daemon. So the OS
 # must provide both binaries, and they must be static, because liken
 # ships no shared libraries.
@@ -14,15 +14,15 @@
 # Unlike the other vendored domains, there is nothing trustworthy to
 # download: nobody publishes static builds of open-iscsi. So this
 # script builds them, from source tarballs pinned by sha256, inside a
-# container image pinned by digest, which fixes the toolchain the way
-# the pins fix the source. (Talos compiles these same binaries for its
-# iscsi-tools extension, a useful independent comparison when
-# auditing.) Building from source inside a container (nfs-utils does
-# the same) needs a container runtime on the build host: docker or
-# podman, whichever is present.
+# container image pinned by digest. The pinned image fixes the
+# toolchain the same way the other pins fix the source. (Talos
+# compiles these same binaries for its iscsi-tools extension, a useful
+# independent comparison for an audit.) Building from source inside a
+# container (nfs-utils does the same) needs a container runtime on the
+# build host: docker or podman, whichever is present.
 #
 # Two more pinned sources ride along, because a fully static link
-# needs static libraries that alpine doesn't package:
+# needs static libraries that alpine does not package:
 #
 #   kmod      iscsid links libkmod (it checks that iscsi_tcp is
 #             loaded); alpine ships only the shared library.
@@ -37,9 +37,9 @@
 #                                         tarballs, skipping the build
 #
 # --sources-only exists for the licensing domain: the release channel
-# mirrors these same tarballs as the binaries' corresponding source,
-# and mirroring needs the verified bytes, not the build (and no
-# container runtime).
+# mirrors these same tarballs as the source that corresponds to the
+# binaries. Mirroring needs the verified bytes, not the build, and it
+# has no container runtime.
 #
 # Results land in open-iscsi/dist/<version>/, with the source
 # tarballs cached in open-iscsi/cache/.
@@ -72,10 +72,10 @@ done
 
 version="$(cat "$here/VERSION")"
 
-# Every input pinned by hash: the builder by image digest, each source
-# by the sha256 of its tarball. Bumping any of them is a reviewable
-# diff on this file. The open-iscsi pin matches the version in
-# open-iscsi/VERSION; building any other version means updating both.
+# Every input is pinned by hash: the builder by image digest, each
+# source by the sha256 of its tarball. A bump to any of them is a
+# reviewable diff on this file. The open-iscsi pin matches the version
+# in open-iscsi/VERSION. To build any other version, update both.
 builder="docker.io/library/alpine@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce" # 3.22
 openiscsi_sha256="f288d1823b15782432608e5f53723159562e2c44e9a72b40fe15a5ca064ac86a"
 kmod_version="34"
@@ -87,8 +87,8 @@ cache="$here/cache/$version"
 out="$here/dist/$version"
 mkdir -p "$cache" "$out"
 
-# Download once, verify every time: a cached tarball that stops
-# matching its pin fails the build rather than feeding it.
+# Download once, verify every time. If a cached tarball stops matching
+# its pin, the build fails instead of using the tarball.
 fetch() {
     local url="$1" sha="$2" file="$cache/$3"
     if [[ ! -f "$file" ]]; then
@@ -107,10 +107,10 @@ fetch "https://github.com/openSUSE/libeconf/archive/refs/tags/v$libeconf_version
 
 [[ -z "$sources_only" ]] || exit 0
 
-# The build itself, inside the pinned container: sources mounted
+# The build runs inside the pinned container: sources mounted
 # read-only at /in, the dist directory writable at /out, and the
 # script below piped to the container's shell. Each stage leaves a
-# static library the next one links.
+# static library that the next stage links.
 "$runtime" run --rm -i \
     -v "$cache:/in:ro" \
     -v "$out:/out" \
@@ -124,24 +124,24 @@ apk add --quiet build-base bash meson ninja pkgconf util-linux-dev \
     util-linux-static openssl-dev openssl-libs-static linux-headers file
 mkdir /build
 
-# libeconf, static, installed into the toolchain's default prefix.
-# Alpine's blkid.pc doesn't declare this dependency for static links,
-# so a static consumer of libblkid comes up one library short; the
-# appended line says what the packager left out.
+# This installs libeconf, static, into the toolchain's default prefix.
+# Alpine's blkid.pc does not declare this dependency for static links,
+# so a static consumer of libblkid comes up one library short. The
+# appended line supplies what the packager left out.
 tar xzf "/in/libeconf-$LIBECONF_VERSION.tar.gz" -C /build
 cd "/build/libeconf-$LIBECONF_VERSION"
 meson setup build --prefix=/usr -Ddefault_library=static >/dev/null
 ninja -C build install >/dev/null
 echo "Libs.private: -leconf" >>/usr/lib/pkgconfig/blkid.pc
 
-# kmod, static, into its own prefix. Upstream hardcodes the public
-# libkmod as a shared library, but builds the identical objects into
-# an internal static archive for its own tools, so the real libkmod.a
-# is assembled from that archive's members (it is a thin archive, so
-# copying the file alone would carry references, not objects).
-# Compression and tools are disabled: iscsid only ever asks libkmod
-# whether iscsi_tcp is loaded (init loads it before k3s starts), never
-# to read a module off disk.
+# This installs kmod, static, into its own prefix. Upstream hardcodes
+# the public libkmod as a shared library, but builds the identical
+# objects into an internal static archive for its own tools. So this
+# step assembles the real libkmod.a from that archive's members (it is
+# a thin archive, so copying the file alone would carry references,
+# not objects). Compression and tools are disabled: iscsid only ever
+# asks libkmod whether iscsi_tcp is loaded (init loads it before k3s
+# starts), never to read a module from disk.
 tar xJf "/in/kmod-$KMOD_VERSION.tar.xz" -C /build
 cd "/build/kmod-$KMOD_VERSION"
 meson setup build --prefix=/opt/kmod -Ddefault_library=static \
@@ -152,14 +152,15 @@ cd build
 ar crs /opt/kmod/lib/libkmod.a $(ar t libkmod-internal.a) $(ar t libshared.a)
 rm /opt/kmod/lib/libkmod.so*
 
-# open-iscsi itself. Two small patches to its build definition, both
-# consequences of a fully static link upstream never aimed for: the
-# internal libopeniscsiusr is hardcoded shared (a shared library can't
-# be built with -static in the link line), and version: is a kwarg
-# only shared libraries accept. The pkg-config block's own version
-# line is indented differently and survives the second sed. iSNS is a
-# discovery directory service this feature doesn't offer; disabling it
-# drops the open-isns dependency entirely.
+# This builds open-iscsi itself, with two small patches to its build
+# definition. Both patches address a fully static link that upstream
+# never aimed for: the internal libopeniscsiusr is hardcoded shared (a
+# shared library cannot be built with -static in the link line), and
+# version: is a keyword argument that only shared libraries accept.
+# The pkg-config block's own version line is indented differently and
+# survives the second sed. iSNS is a discovery directory service this
+# feature does not offer; disabling it drops the open-isns dependency
+# entirely.
 tar xzf "/in/open-iscsi-$VERSION.tar.gz" -C /build
 cd "/build/open-iscsi-$VERSION"
 sed -i 's/libiscsi_usr = shared_library(/libiscsi_usr = static_library(/' meson.build
@@ -170,8 +171,8 @@ PKG_CONFIG_PATH=/opt/kmod/lib/pkgconfig \
 ninja -C build iscsid iscsiadm >/dev/null
 
 # A dynamically linked binary here would run fine in this container
-# and fail on the machine, which has no loader and no libraries;
-# refuse to produce one.
+# and fail on the machine, which has no loader and no libraries. This
+# step refuses to produce one.
 strip build/iscsid build/iscsiadm
 for bin in iscsid iscsiadm; do
     file "build/$bin" | grep -q "statically linked" || {

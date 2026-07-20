@@ -1,15 +1,17 @@
 package main
 
-// The kmsg plumbing is tested at the seams that don't need the real
-// device: the line splitter (pure), the drainer (fed through an
-// io.Pipe into a fake kmsg), and the console fallback (the package
-// console variable swapped for a buffer, the disks_test.go pattern).
+// The kmsg plumbing is tested at the seams that do not need the real
+// device: the line splitter, which is pure; the drainer, fed through
+// an io.Pipe into a fake kmsg; and the console fallback, where the
+// tests swap the package console variable for a buffer, the same
+// pattern as disks_test.go.
 
 import (
 	"bytes"
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -49,8 +51,8 @@ func TestSplitKmsgLineAtAnExactBoundary(t *testing.T) {
 	}
 }
 
-// collectingWriter gathers each Write as one record, the way
-// /dev/kmsg treats each write, and is safe for the drainer goroutine
+// collectingWriter gathers each Write as one record, the same way
+// /dev/kmsg treats each write. It is safe for the drainer goroutine
 // and the test to share.
 type collectingWriter struct {
 	mu      sync.Mutex
@@ -71,12 +73,12 @@ func (w *collectingWriter) Write(p []byte) (int, error) {
 func (w *collectingWriter) snapshot() []string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return append([]string(nil), w.records...)
+	return slices.Clone(w.records)
 }
 
-// drained runs the drainer over a pipe, returning a write function
-// for the test to feed it and a close function that waits for the
-// drainer to finish.
+// drained runs the drainer over a pipe. It returns a write function
+// for the test to feed the drainer, and a close function that waits
+// for the drainer to finish.
 func drained(t *testing.T, kmsg io.Writer, priority int) (func(string), func()) {
 	t.Helper()
 	r, w := io.Pipe()
@@ -115,7 +117,7 @@ func TestDrainerHoldsFragmentsForTheirNewline(t *testing.T) {
 	kmsg := &collectingWriter{}
 	write, stop := drained(t, kmsg, kmsgWarning)
 	write("liken: a line arriving ")
-	// The fragment must not have been shipped yet.
+	// The code must not have shipped the fragment yet.
 	if got := kmsg.snapshot(); len(got) != 0 {
 		t.Fatalf("a fragment shipped early: %q", got)
 	}
@@ -158,7 +160,7 @@ func TestEmitKmsgLineSplitsLongLines(t *testing.T) {
 }
 
 // syncLogs is a bounded pause, and the bound is the contract: a
-// reboot path calls it, so it must never balloon.
+// reboot path calls it, so the pause must never grow larger.
 func TestSyncLogsIsBounded(t *testing.T) {
 	start := time.Now()
 	syncLogs()
@@ -167,8 +169,8 @@ func TestSyncLogsIsBounded(t *testing.T) {
 	}
 }
 
-// A sanity pin on the priority arithmetic: facility 1, severities 6
-// and 4, exactly what the liken-logs relay filters for.
+// A pin on the priority arithmetic: facility 1, severities 6 and 4,
+// exactly what the liken-logs relay filters for.
 func TestKmsgPriorities(t *testing.T) {
 	if kmsgInfo != 14 {
 		t.Errorf("info priority: %d", kmsgInfo)
@@ -183,7 +185,7 @@ func TestKmsgPriorities(t *testing.T) {
 
 func TestDrainToKmsgCarriesWholeLines(t *testing.T) {
 	var kmsg bytes.Buffer
-	// Two complete lines and a trailing fragment: the fragment must
+	// Two complete lines and a trailing fragment. The fragment must
 	// wait for its newline, which EOF never delivers, so exactly two
 	// records come out.
 	drainToKmsg(strings.NewReader("first\nsecond\nfragment"), &kmsg, kmsgInfo)
@@ -194,7 +196,8 @@ func TestDrainToKmsgCarriesWholeLines(t *testing.T) {
 }
 
 // panickingWriter stands in for a kmsg device so broken that writing
-// panics, the worst case emitKmsgLine promises to absorb.
+// to it panics, the worst case that emitKmsgLine promises to
+// absorb.
 type panickingWriter struct{}
 
 func (panickingWriter) Write([]byte) (int, error) { panic("the device is gone") }

@@ -12,8 +12,8 @@ func TestGetRegistryCredentialsSecretDecodesData(t *testing.T) {
 		if r.URL.Path != RegistryCredentialsSecretPath {
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
-		// The API serves Secret data base64-encoded; the client's
-		// []byte fields must arrive decoded.
+		// The API serves Secret data base64-encoded. The client's
+		// []byte fields must arrive already decoded.
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"kind": "Secret",
 			"type": "kubernetes.io/dockerconfigjson",

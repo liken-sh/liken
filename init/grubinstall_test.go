@@ -1,10 +1,11 @@
 package main
 
 // Tests for the boot-sector patcher. The offsets under test are
-// grub-bios-setup's own (grub-core/boot/i386/pc/{boot,diskboot}.S fix
-// them forever); the grub domain's introduction proved the arithmetic
-// end to end by booting a hand-patched disk under SeaBIOS, and these
-// tests pin it against synthetic images where every byte is known.
+// grub-bios-setup's own offsets (grub-core/boot/i386/pc/{boot,diskboot}.S
+// fix them permanently). The grub domain's introduction proved the
+// arithmetic end to end by booting a hand-patched disk under SeaBIOS.
+// These tests pin the same arithmetic against synthetic images where
+// every byte is known.
 
 import (
 	"bytes"
@@ -18,7 +19,7 @@ import (
 )
 
 // testGRUBImages builds a recognizable fake boot.img and core.img:
-// patterned bytes, the load segment planted where diskboot carries
+// patterned bytes, with the load segment set where diskboot expects
 // it.
 func testGRUBImages(coreBytes int) ([]byte, []byte) {
 	bootImg := bytes.Repeat([]byte{0xB0}, disks.SectorSize)
@@ -55,7 +56,7 @@ func TestPlanGRUBBootSectorsPatchesTheChain(t *testing.T) {
 	if got := binary.LittleEndian.Uint64(plan.core[grubBlocklistStart:]); got != 2_049 {
 		t.Errorf("blocklist start: got %d, want the sector after diskboot", got)
 	}
-	// 1200 bytes is 3 sectors; the blocklist counts the sectors after
+	// 1200 bytes is 3 sectors. The blocklist counts the sectors after
 	// the first.
 	if got := binary.LittleEndian.Uint16(plan.core[grubBlocklistLength:]); got != 2 {
 		t.Errorf("blocklist length: got %d, want 2", got)
@@ -63,8 +64,8 @@ func TestPlanGRUBBootSectorsPatchesTheChain(t *testing.T) {
 	if got := binary.LittleEndian.Uint16(plan.core[grubBlocklistSegment:]); got != grubLoadSegment {
 		t.Errorf("the load segment is compiled in and must not change: %#x", got)
 	}
-	// The inputs were not mutated: healing recomputes from the slot's
-	// pristine artifacts every time.
+	// The inputs were not changed. Healing recomputes from the slot's
+	// original artifacts every time.
 	if bootImg[grubKernelSectorOffset] != 0xB0 || coreImg[grubBlocklistStart] != 0xC0 {
 		t.Error("the release's artifact bytes must not be modified in place")
 	}
@@ -110,8 +111,9 @@ func TestGRUBBootSectorsVerifyAndHeal(t *testing.T) {
 	if err := disk.Truncate(8 << 20); err != nil {
 		t.Fatal(err)
 	}
-	// Sector 0's tail belongs to the partition table; plant a
-	// sentinel there to prove the boot-code write stays in its lane.
+	// Sector 0's tail belongs to the partition table. This test plants
+	// a sentinel value there to prove that the boot-code write does
+	// not touch it.
 	sentinel := bytes.Repeat([]byte{0xEE}, disks.SectorSize-440)
 	if _, err := disk.WriteAt(sentinel, 440); err != nil {
 		t.Fatal(err)
@@ -135,8 +137,8 @@ func TestGRUBBootSectorsVerifyAndHeal(t *testing.T) {
 		t.Error("the write must not touch sector 0 past the boot code")
 	}
 
-	// The Linode wound: the boot code zeroed out from under the
-	// machine. Healing is just noticing and writing again.
+	// The Linode failure: the boot code is zeroed out from under the
+	// machine. Healing only notices this and writes the chain again.
 	if _, err := disk.WriteAt(make([]byte, 440), 0); err != nil {
 		t.Fatal(err)
 	}

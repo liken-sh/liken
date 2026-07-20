@@ -1,9 +1,9 @@
 package main
 
-// Tests for the convergence decisions. They follow the same rule as
-// init's tests: decisions are pure functions over plain values, so
-// every row of the convergence truth table runs without a cluster, a
-// disk, or a mount.
+// Tests for the convergence decisions. They follow the same rule
+// as init's tests: decisions are pure functions over plain values,
+// so every row of the convergence truth table runs without a
+// cluster, a disk, or a mount.
 
 import (
 	"strings"
@@ -64,10 +64,10 @@ func labMachine() *machine.Machine {
 }
 
 func TestDecideConvergenceLoadsAddedModulesLive(t *testing.T) {
-	// An additive modules edit is the one machine-spec change that
-	// needs no disruption: the manifest stages (for durability), and
-	// instead of a reboot the operator asks init to load the added
-	// modules into the running kernel.
+	// Adding modules is the one machine-spec change that needs no
+	// disruption. The manifest stages for durability, and instead
+	// of a reboot, the operator asks init to load the added modules
+	// into the running kernel.
 	m := labMachine()
 	m.Spec.Modules = []string{"nvidia"}
 	conv := decideConvergence(m, labFacts(), nil, "", turnStandalone)
@@ -80,9 +80,10 @@ func TestDecideConvergenceLoadsAddedModulesLive(t *testing.T) {
 }
 
 func TestLiveLoadNeedsNoPolicyOrTurn(t *testing.T) {
-	// Loading a module is not a disruption: nothing drains, nothing
-	// restarts. So it takes no reboot turn and waits for no Manual
-	// approval, exactly like the sysctls the operator reconciles live.
+	// Loading a module is not a disruption: nothing drains, and
+	// nothing restarts. So it takes no reboot turn and waits for no
+	// Manual approval, exactly like the sysctls the operator
+	// reconciles live.
 	m := labMachine()
 	m.Spec.Modules = []string{"nvidia"}
 	m.Spec.RebootPolicy = machine.RebootManual
@@ -93,9 +94,9 @@ func TestLiveLoadNeedsNoPolicyOrTurn(t *testing.T) {
 }
 
 func TestModuleRetractionStillConvergesByReboot(t *testing.T) {
-	// Loading is one-way: the kernel offers no safe way to pull a
-	// driver out from under whatever started using it, so retracting
-	// a module keeps the reboot tier.
+	// Loading is one-way. The kernel offers no safe way to remove a
+	// driver while something is using it, so retracting a module
+	// keeps the reboot tier.
 	m := labMachine()
 	facts := labFacts()
 	facts.Boot.Modules = []string{"nvidia"}
@@ -153,9 +154,9 @@ func TestValidateStagingRefusesAShrink(t *testing.T) {
 }
 
 func TestValidateStagingRefusesFixingARemainderBelowItsSize(t *testing.T) {
-	// clusterState is a remainder occupying 1Gi; giving it a fixed
-	// 512Mi is still a shrink, even though the declared size grew from
-	// nothing.
+	// clusterState is a remainder occupying 1Gi. Giving it a fixed
+	// 512Mi is still a shrink, even though the declared size grew
+	// from nothing.
 	spec := labStorage()
 	spec.ClusterState.Size = "512Mi"
 	if err := validateStaging(spec, labFacts()); err == nil {
@@ -241,9 +242,9 @@ func TestDecideConvergenceWhenTheBootIsCurrent(t *testing.T) {
 }
 
 func TestDecideConvergenceWithdrawsAStagedManifestNobodyWants(t *testing.T) {
-	// The spec was edited and then edited back before any reboot: no
-	// drift, but the earlier edit still sits staged. Left there, the
-	// next boot would apply it.
+	// The spec was edited and then edited back before any reboot.
+	// There is no drift, but the earlier edit still sits staged.
+	// Left there, the next boot would apply it.
 	conv := decideConvergence(labMachine(), labFacts(), nil, "some-staged-hash", turnStandalone)
 	if conv.condition.Reason != "Converged" {
 		t.Fatalf("got %+v", conv.condition)
@@ -257,9 +258,10 @@ func TestDecideConvergenceWithdrawsAStagedManifestNobodyWants(t *testing.T) {
 }
 
 func TestDecideConvergenceClearsARejectionOnceTheSpecMovesOn(t *testing.T) {
-	// A staged spec was rejected at boot, and the cluster's spec has
-	// since been edited back to what the machine runs. The rejection
-	// blocked exactly that abandoned spec; it has nothing left to do.
+	// A staged spec was rejected at boot, and the cluster's spec
+	// has since been edited back to what the machine runs. The
+	// rejection blocked exactly that abandoned spec, and now it has
+	// nothing left to block.
 	rejection := &machine.Rejection{Hash: "the-abandoned-spec", Reason: "could not grow"}
 	conv := decideConvergence(labMachine(), labFacts(), rejection, "", turnStandalone)
 	if conv.condition.Reason != "Converged" {
@@ -340,8 +342,8 @@ func TestDecideConvergenceHonorsARejection(t *testing.T) {
 }
 
 func TestDecideConvergenceStagesAgainForADifferentEdit(t *testing.T) {
-	// The rejection blocks exactly one spec; a genuinely different
-	// edit clears it naturally.
+	// The rejection blocks exactly one spec. A genuinely different
+	// edit clears it without special handling.
 	m := grownLabMachine()
 	rejection := &machine.Rejection{Hash: "some-other-hash", Reason: "old news"}
 	conv := decideConvergence(m, labFacts(), rejection, "", turnStandalone)

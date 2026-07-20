@@ -1,9 +1,10 @@
 package main
 
-// Tests for the operator's half of the cluster document lifecycle:
-// promotion. The operator's own existence proves the join, so these
-// tests simulate a running operator with facts naming the document
-// this boot ran, and check what happens to the store.
+// Tests for the operator's half of the cluster document
+// lifecycle: promotion. The operator's own existence proves the
+// join, so these tests simulate a running operator with facts
+// naming the document this boot ran, and check what happens to the
+// store.
 
 import (
 	"os"
@@ -29,9 +30,9 @@ func partitionBackedFacts(source machine.ManifestSource, hash string) *machine.M
 			MachineState: machine.StorageRoleStatus{Backing: machine.BackingPartition},
 		},
 		Boot: machine.BootStatus{
-			// The machine manifest's record is what indicates that
-			// this init publishes boot records at all; the cluster
-			// fields sit beside it.
+			// The machine manifest's record is what shows that this
+			// init publishes boot records at all. The cluster fields
+			// sit beside it.
 			ManifestSource:        machine.ManifestSourceProven,
 			ClusterManifestSource: source,
 			ClusterManifestHash:   hash,
@@ -75,8 +76,9 @@ func TestPromotesTheStagedClusterDocumentThisBootRuns(t *testing.T) {
 func TestDoesNotPromoteADocumentThisBootIsNotRunning(t *testing.T) {
 	root := t.TempDir()
 	store := machine.ClusterManifests(root)
-	// A newer document was staged after this boot came up: it has not
-	// had its proving boot, and promoting it would skip the trial.
+	// A newer document was staged after this boot came up. It has
+	// not had its proving boot, and promoting it would skip the
+	// trial.
 	newer := testCluster + "  endpoint: https://10.10.0.1:6443\n"
 	if err := store.WriteStaged([]byte(newer)); err != nil {
 		t.Fatal(err)
@@ -109,8 +111,9 @@ func TestRecordsTheSeedAsFirstProven(t *testing.T) {
 func TestDoesNotRecordASeedTheBootDidNotRun(t *testing.T) {
 	root := t.TempDir()
 	store := machine.ClusterManifests(root)
-	// The seed file changed since this machine booted (an image swap
-	// mid-flight); recording it would prove bytes nobody ran.
+	// The seed file changed after this machine booted, from an
+	// image swap in progress. Recording it would mark as proven
+	// bytes that nobody ran.
 	seed := seedFile(t, testCluster+"  endpoint: https://10.10.0.9:6443\n")
 
 	settleClusterLifecycle(root, seed, partitionBackedFacts(machine.ManifestSourceSeed, machine.ManifestHash([]byte(testCluster))))
@@ -256,8 +259,8 @@ func TestClusterConvergenceWaitsForItsTurn(t *testing.T) {
 
 func TestClusterFeatureDriftConvergesByRestart(t *testing.T) {
 	// The desired document differs from the boot's only in
-	// spec.features, which k3s reads at process start: a restart
-	// applies it, so the machine and its pods stay up.
+	// spec.features, which k3s reads when its process starts. A
+	// restart applies it, so the machine and its pods stay up.
 	desired := decisionCluster()
 	desired.Spec.Features = map[string]*cluster.FeatureConfig{"traefik": {}}
 	bootDoc := decisionCluster()
@@ -284,8 +287,8 @@ func TestClusterRegistriesDriftConvergesByRestart(t *testing.T) {
 }
 
 func TestClusterRebootClassDriftStillReboots(t *testing.T) {
-	// The endpoint is consumed at join time, not at k3s start: the
-	// reboot tier owns it.
+	// The endpoint is used at join time, not when k3s starts. The
+	// reboot tier handles it.
 	desired := decisionCluster()
 	desired.Spec.Endpoint = "https://10.10.0.2:6443"
 	bootDoc := decisionCluster()
@@ -298,8 +301,9 @@ func TestClusterRebootClassDriftStillReboots(t *testing.T) {
 }
 
 func TestClusterMixedDriftFallsToReboot(t *testing.T) {
-	// One edit touching a restart-class domain and a reboot-class one
-	// takes the heavier tier: a reboot is a restart plus more.
+	// One edit that touches a restart-class domain and a
+	// reboot-class one takes the heavier tier. A reboot does
+	// everything a restart does, and more.
 	desired := decisionCluster()
 	desired.Spec.Features = map[string]*cluster.FeatureConfig{"traefik": {}}
 	desired.Spec.Endpoint = "https://10.10.0.2:6443"
@@ -314,8 +318,8 @@ func TestClusterMixedDriftFallsToReboot(t *testing.T) {
 
 func TestClusterDriftWithoutABootDocumentFallsToReboot(t *testing.T) {
 	// No parsed boot document means the classifier has nothing to
-	// diff, and guessing lighter could under-apply: the reboot tier
-	// always works.
+	// compare against, and guessing a lighter tier could
+	// under-apply the change. The reboot tier always works.
 	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-hash")
 
 	conv := decideClusterConvergence(decisionCluster(), machineWithPolicy(machine.RebootAuto), facts, nil, nil, "some-old-hash", "", turnGranted)
@@ -325,9 +329,10 @@ func TestClusterDriftWithoutABootDocumentFallsToReboot(t *testing.T) {
 }
 
 func TestClusterRestartDriftAwaitsItsTurn(t *testing.T) {
-	// A leader's k3s restart bounces embedded etcd, so restarts take
-	// conductor turns exactly like reboots — same reason, so the
-	// conductor needs no new vocabulary.
+	// A leader's k3s restart also restarts the embedded etcd, so
+	// restarts take conductor turns exactly like reboots do. Both
+	// share the same reason, so the conductor needs no separate
+	// case to handle it.
 	desired := decisionCluster()
 	desired.Spec.Features = map[string]*cluster.FeatureConfig{"traefik": {}}
 	bootDoc := decisionCluster()

@@ -1,45 +1,49 @@
 package main
 
-// The release fetcher runs one background download at a time, and
+// The release fetcher runs one background download at a time and
 // never blocks the reconcile loop.
 //
-// Reconcile passes never download anything themselves; they ask the
-// fetcher. Ensure records what the machine currently wants (an ask:
-// version, digest, source, destination slot), starts the download on
-// its own goroutine if one isn't already running, and returns
-// immediately with the current state. The pass that started a
-// download and the pass that finds it verified are different passes,
-// minutes apart, and every pass in between kept the heartbeat fresh.
-// The lease must never wait on a socket.
+// Reconcile passes never download anything themselves. They ask the
+// fetcher instead. Ensure records what the machine currently wants
+// (an ask: version, digest, source, and destination slot), starts
+// the download on its own goroutine if one is not already running,
+// and returns immediately with the current state. The pass that
+// starts a download and the pass that finds it verified are
+// different passes, minutes apart, and every pass in between keeps
+// the heartbeat fresh. The lease must never wait on a socket.
 //
-// A complete fetch leaves a bootable slot, which takes more than the
-// release: the public artifacts are downloaded and verified against
-// the document, and then the machine's own deployment layer is
-// carried over from the slot it is running on (carryLayer), because
-// the layer never travels the network and no release can supply it.
+// A complete fetch leaves a bootable slot, and this takes more than
+// downloading the release. The public artifacts are downloaded and
+// verified against the document. Then the machine's own deployment
+// layer is carried over from the slot it is running on (carryLayer),
+// because the layer never travels the network, and no release can
+// supply it.
 //
-// Downloads are resumable by re-verification rather than by byte
-// ranges: each run first verifies whatever the slot already holds
-// against the release document and fetches only what fails. A torn
-// download (a power cut, a killed server) leaves either a .partial
-// file, which no verification ever counts, or a final file that
-// either verifies or doesn't; the next run converges either way. FAT
-// has no journal, so every file lands the way the installer's copies
-// do (temp file, fsync, rename) and is re-read and verified after
-// writing, because bytes sitting in the page cache are not durable
-// until they are synced and re-read.
+// Downloads resume through re-verification, not through byte
+// ranges. Each run first verifies whatever the slot already holds
+// against the release document, and fetches only what fails
+// verification. A torn download, from a power cut or a killed
+// server, leaves either a .partial file, which no verification ever
+// counts, or a final file that either verifies or does not. The next
+// run converges either way. FAT has no journal, so every file lands
+// the way the installer's copies do: temp file, fsync, rename. The
+// function re-reads and verifies the file after writing it, because
+// bytes sitting in the page cache are not durable until they are
+// synced and read back.
 //
-// Failure comes in two kinds, and the distinction runs through
-// everything here. A *transient* failure means the server is down or
-// the network dropped; it is retried every pass, forever. A *corrupt*
-// failure means the bytes don't match the digests the catalog
-// promised; it is held, without retrying, until the ask itself
-// changes, because refetching cannot change what the server
-// publishes. Corruption is why the whole chain exists: the API named
-// the document, the document named the artifacts, and a mismatch
-// anywhere means someone's bytes are wrong. A corrupt release is
-// abandoned, never patched: the recovery is to publish a corrected
-// release under a new version and point the catalog at it.
+// Failure comes in two kinds, and the distinction matters
+// throughout this file. A transient failure means the server is
+// down or the network dropped. The fetcher retries a transient
+// failure every pass, forever. A corrupt failure means the bytes do
+// not match the digests the catalog promised. The fetcher holds a
+// corrupt failure, without retrying, until the ask itself changes,
+// because refetching cannot change what the server publishes.
+// Corruption is the reason this whole chain of checks exists: the
+// API names the document, the document names the artifacts, and a
+// mismatch anywhere means someone's bytes are wrong. The fetcher
+// abandons a corrupt release rather than patching it. The recovery
+// is to publish a corrected release under a new version and point
+// the catalog at it.
 
 import (
 	"bytes"
@@ -57,10 +61,10 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// A fetchAsk is one reconcile decision's work order: fetch this
-// version, vouched for by this digest, from this source, onto this
-// slot. Asks compare by value, so a changed catalog digest is a
-// different ask, and a different ask is what clears a corruption
+// A fetchAsk is one reconcile decision's request: fetch this
+// version, confirmed by this digest, from this source, onto this
+// slot. Asks compare by value, so a changed catalog digest produces
+// a different ask, and a different ask is what clears a corruption
 // hold.
 type fetchAsk struct {
 	version       string
@@ -96,30 +100,31 @@ type fetcher struct {
 }
 
 // errCorrupt distinguishes verification failures from transport
-// failures. It is wrapped into any error that should stop the
-// retries, and an error carrying it is what holds the fetcher at
-// Rejected.
+// failures. The code wraps it into any error that should stop the
+// retries, and an error carrying it holds the fetcher at Rejected.
 var errCorrupt = errors.New("the bytes do not match the release's digests")
 
 // errLayer marks a failure in the machine's own deployment layer.
-// It holds the way corruption does — no retry can repair the slot
-// the machine is standing on — but the remedy is local (repair or
-// reinstall this machine), so the condition must not send the
-// operator off to republish a release that was never the problem.
+// It holds the fetcher the same way corruption does, because no
+// retry can repair the slot the machine is running on. But the
+// remedy is local: repair or reinstall this machine. So the
+// condition must not send a person off to republish a release that
+// was never the problem.
 var errLayer = errors.New("this machine's deployment layer is unusable")
 
 // Ensure records the ask, starts a download when one is needed and
 // none is running, and returns the current state. It never blocks:
-// the heaviest thing here is starting a goroutine.
+// the heaviest thing it does is start a goroutine.
 func (f *fetcher) Ensure(ask fetchAsk) fetchSnapshot {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	if f.snap.ask != ask {
-		// A different release, digest, or destination: everything
-		// known so far was about the old ask, including a Rejected
-		// hold. A changed catalog is precisely the event that should
-		// clear the hold, so the state resets with the ask.
+		// This is a different release, digest, or destination.
+		// Everything known so far, including a Rejected hold, was
+		// about the old ask. A changed catalog is exactly the event
+		// that should clear the hold, so the state resets with the
+		// ask.
 		f.snap = fetchSnapshot{ask: ask, state: fetchIdle, detail: "waiting to start"}
 	}
 	if f.busy || f.snap.state == fetchVerified || f.snap.state == fetchRejected {
@@ -127,11 +132,11 @@ func (f *fetcher) Ensure(ask fetchAsk) fetchSnapshot {
 	}
 
 	// A restart after a transient failure keeps the failure's reason.
-	// A Failed state only exists between passes, and the pass that
-	// reads it is the same pass that restarts the download, so the
-	// restarted Running state is the only one any condition will ever
-	// see. If that state didn't carry the reason the last attempt
-	// failed, the reason would never be observable at all.
+	// A Failed state exists only between passes. The pass that reads
+	// it is the same pass that restarts the download, so the
+	// restarted Running state is the only state any condition will
+	// ever see. If that state did not carry the reason the last
+	// attempt failed, no condition could ever report that reason.
 	detail := "starting"
 	if f.snap.state == fetchFailed {
 		detail = "retrying after: " + f.snap.detail
@@ -143,9 +148,10 @@ func (f *fetcher) Ensure(ask fetchAsk) fetchSnapshot {
 	return f.snap
 }
 
-// run is the goroutine: do the fetch, then record the verdict. If
-// the ask changed while the fetch ran, the verdict describes a
-// release the machine no longer wants, so it is discarded.
+// run is the goroutine. It runs the fetch, then records the
+// verdict. If the ask changed while the fetch ran, the verdict
+// describes a release the machine no longer wants, so the function
+// discards it.
 func (f *fetcher) run(ask fetchAsk) {
 	fetched, err := fetchRelease(ask)
 
@@ -171,12 +177,13 @@ func (f *fetcher) run(ask fetchAsk) {
 	}
 }
 
-// fetchRelease does one complete pass: fetch and vet the release
-// document, verify or fetch each artifact, and leave the document
-// itself on the slot last, so a slot carrying release.yaml is a slot
-// whose artifacts were complete when it was written. Returns how many
-// artifacts were actually downloaded (zero is the idempotent case:
-// everything already verified in place).
+// fetchRelease runs one complete pass. It fetches and checks the
+// release document, verifies or fetches each artifact, and writes
+// the document itself to the slot last. This order means a slot
+// carrying release.yaml is a slot whose artifacts were complete
+// when the document was written. fetchRelease returns how many
+// artifacts it actually downloaded. Zero is the idempotent case,
+// where everything was already verified in place.
 func fetchRelease(ask fetchAsk) (int, error) {
 	base := strings.TrimSuffix(ask.source, "/") + "/" + ask.version
 
@@ -185,9 +192,9 @@ func fetchRelease(ask fetchAsk) (int, error) {
 		return 0, fmt.Errorf("fetching the release document: %w", err)
 	}
 
-	// The trust chain's first link: the document's bytes must hash to
-	// exactly what the catalog promised. Until that holds, nothing
-	// the document says can be trusted.
+	// The first check in the trust chain: the document's bytes must
+	// hash to exactly what the catalog promised. Until that check
+	// passes, nothing the document says can be trusted.
 	sum := sha256.Sum256(raw)
 	if digest := "sha256:" + hex.EncodeToString(sum[:]); digest != ask.digest {
 		return 0, fmt.Errorf("the release document's digest %s does not match the catalog's %s: %w", digest, ask.digest, errCorrupt)
@@ -212,31 +219,34 @@ func fetchRelease(ask fetchAsk) (int, error) {
 		fetched++
 	}
 
-	// The deployment layer is the one file the release cannot supply:
-	// it is this cluster's own, so the machine carries it forward from
-	// the slot it is running on. It rides between the artifacts and
-	// the document deliberately — a slot with release.yaml is bootable,
-	// and a slot without its layer is not.
+	// The deployment layer is the one file the release cannot
+	// supply. It belongs to this cluster alone, so the machine
+	// carries it forward from the slot it is running on. This step
+	// runs between the artifacts and the document deliberately: a
+	// slot with release.yaml is bootable, and a slot without its
+	// layer is not.
 	if err := carryLayer(ask); err != nil {
 		return fetched, err
 	}
 
-	// The document lands after the artifacts it describes, durably,
-	// which makes the slot self-describing: it records which release
-	// it holds, byte for byte, without asking the network.
+	// The document lands after the artifacts it describes, written
+	// durably. This makes the slot self-describing: it records
+	// which release it holds, byte for byte, without asking the
+	// network.
 	if err := writeDurably(filepath.Join(ask.slotDir, "release.yaml"), raw); err != nil {
 		return fetched, fmt.Errorf("writing the release document to the slot: %w", err)
 	}
 	return fetched, nil
 }
 
-// carryLayer copies the running slot's deployment layer and sidecar
-// to the inactive slot. The active slot is the source of truth: its
-// sidecar was written from verified bytes at install (or by the carry
-// that filled it), so a layer that fails the active sidecar means the
-// running slot itself is damaged — a condition no retry and no
-// download can repair, which is why it holds like corruption does.
-// The remedy is a person's: repair or reinstall the machine.
+// carryLayer copies the running slot's deployment layer and
+// sidecar to the inactive slot. The active slot is the source of
+// truth. Its sidecar was written from verified bytes at install, or
+// by the carry that filled it. So a layer that fails to verify
+// against the active sidecar means the running slot itself is
+// damaged, a condition that no retry and no download can repair.
+// This is why the fetcher holds it the way it holds corruption. The
+// remedy belongs to a person: repair or reinstall the machine.
 func carryLayer(ask fetchAsk) error {
 	sidecar, err := os.ReadFile(filepath.Join(ask.activeSlotDir, machine.LayerSidecarName))
 	if err != nil {
@@ -259,11 +269,11 @@ func carryLayer(ask fetchAsk) error {
 		return fmt.Errorf("the running slot's deployment layer does not verify (%v); repair or reinstall this machine: %w", err, errLayer)
 	}
 
-	// Resumable the way the artifacts are: a layer already carried
-	// (and a sidecar matching the active one) needs nothing. A layer
-	// from some older install fails this check and is replaced, and a
-	// carry that died between the layer and its sidecar resumes by
-	// rewriting just the sidecar.
+	// This resumes the same way the artifacts do. A layer already
+	// carried, with a sidecar matching the active one, needs nothing
+	// more. A layer from some older install fails this check and
+	// gets replaced. A carry that died between writing the layer and
+	// writing its sidecar resumes by rewriting only the sidecar.
 	dest := filepath.Join(ask.slotDir, machine.LayerName)
 	destSidecar := filepath.Join(ask.slotDir, machine.LayerSidecarName)
 	if verify(dest) != nil {
@@ -285,8 +295,8 @@ func carryLayer(ask fetchAsk) error {
 		}
 	}
 
-	// The sidecar lands last, durably: a slot whose sidecar matches
-	// its layer is a slot whose carry completed.
+	// The sidecar lands last, written durably. A slot whose sidecar
+	// matches its layer is a slot whose carry completed.
 	if existing, err := os.ReadFile(destSidecar); err != nil || !bytes.Equal(existing, sidecar) {
 		if err := writeDurably(destSidecar, sidecar); err != nil {
 			return fmt.Errorf("carrying %s: %w", machine.LayerSidecarName, err)
@@ -295,10 +305,10 @@ func carryLayer(ask fetchAsk) error {
 	return nil
 }
 
-// fetchArtifact streams one artifact onto the slot: temp file, fsync,
-// verify the durable bytes by re-reading them, then rename into
-// place. The verify-before-rename order means a final-looking name
-// never points at unverified bytes.
+// fetchArtifact streams one artifact onto the slot: temp file,
+// fsync, verify the durable bytes by re-reading them, then rename
+// into place. Verifying before renaming means a final-looking file
+// name never points at unverified bytes.
 func fetchArtifact(base string, artifact machine.ReleaseArtifact, dest string) error {
 	resp, err := http.Get(base + "/" + artifact.Name)
 	if err != nil {
@@ -309,9 +319,10 @@ func fetchArtifact(base string, artifact machine.ReleaseArtifact, dest string) e
 		return fmt.Errorf("fetching %s: the server answered %s", artifact.Name, resp.Status)
 	}
 
-	// The size cap protects the slot: an artifact that runs past its
-	// declared size is already wrong, and there is no reason to fill
-	// a 512Mi filesystem with the rest of it before finding out.
+	// The size cap protects the slot. An artifact that runs past its
+	// declared size is already wrong, and there is no reason to
+	// fill a 512Mi filesystem with the rest of it before finding
+	// that out.
 	tmp, err := spillDurably(dest, io.LimitReader(resp.Body, artifact.Size+1))
 	if err != nil {
 		return fmt.Errorf("writing %s: %w", artifact.Name, err)
@@ -324,10 +335,10 @@ func fetchArtifact(base string, artifact machine.ReleaseArtifact, dest string) e
 	return os.Rename(tmp, dest)
 }
 
-// verifySlotFile checks one file on the slot against its artifact's
-// digest and size, returning an error for any reason the file fails,
-// including that it doesn't exist, which is the common case on a
-// first run.
+// verifySlotFile checks one file on the slot against its
+// artifact's digest and size. It returns an error for any reason
+// the file fails, including that the file does not exist, which is
+// the common case on a first run.
 func verifySlotFile(artifact machine.ReleaseArtifact, path string) error {
 	f, err := os.Open(path)
 	if err != nil {
@@ -337,9 +348,9 @@ func verifySlotFile(artifact machine.ReleaseArtifact, path string) error {
 	return artifact.Verify(f)
 }
 
-// fetchBytes GETs a small document whole. The 1MiB limit is far
-// larger than any reasonable release.yaml and small enough to read
-// into memory without concern.
+// fetchBytes reads a small document whole with an HTTP GET. The
+// 1MiB limit is far larger than any reasonable release.yaml, and
+// small enough to read into memory without concern.
 func fetchBytes(url string) ([]byte, error) {
 	resp, err := http.Get(url)
 	if err != nil {
@@ -352,12 +363,13 @@ func fetchBytes(url string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 }
 
-// spillDurably lands a stream next to its destination with the same
-// discipline the installer applies to file copies: write to a
-// .partial temp file, fsync, close. On any failure the temp file is
-// removed and never seen again. On success the temp path comes back
-// for the caller to finish: verify first and then rename
-// (fetchArtifact), or rename immediately (writeDurably).
+// spillDurably writes a stream next to its destination with the
+// same steps the installer applies to file copies: write to a
+// .partial temp file, fsync, close. On any failure, the function
+// removes the temp file, and nothing further sees it. On success,
+// the function returns the temp path for the caller to finish: the
+// caller either verifies first and then renames (fetchArtifact), or
+// renames immediately (writeDurably).
 func spillDurably(dest string, r io.Reader) (string, error) {
 	tmp := dest + ".partial"
 	f, err := os.Create(tmp)
@@ -379,7 +391,7 @@ func spillDurably(dest string, r io.Reader) (string, error) {
 }
 
 // writeDurably writes bytes already in memory with the same
-// discipline: temp file, fsync, rename.
+// steps: temp file, fsync, rename.
 func writeDurably(dest string, contents []byte) error {
 	tmp, err := spillDurably(dest, bytes.NewReader(contents))
 	if err != nil {

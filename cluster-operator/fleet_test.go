@@ -1,7 +1,7 @@
 package main
 
-// The fleet sweep's decision table: who counts as ready, who gets
-// declared Lost, and who is left alone.
+// This file tests the fleet sweep's decision table: who counts as
+// ready, who gets declared Lost, and who is left alone.
 
 import (
 	"strings"
@@ -14,9 +14,9 @@ import (
 
 var sweepNow = time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
 
-// A fleetEntry is one machine as the sweep would see it: a name, a
-// phase, and a heartbeat lease renewed some age ago (negative means
-// the machine has no lease at all).
+// A fleetEntry describes one machine as the sweep would see it: a
+// name, a phase, and a heartbeat lease renewed some time ago. A
+// negative age means the machine has no lease at all.
 type fleetEntry struct {
 	name  string
 	phase api.Phase
@@ -24,7 +24,8 @@ type fleetEntry struct {
 }
 
 // fleetInputs builds the sweep's two inputs together: the Machine
-// list and the heartbeat renewals read from the machines' leases.
+// list, and the heartbeat renewal times read from the machines'
+// leases.
 func fleetInputs(entries ...fleetEntry) ([]machine.Machine, map[string]time.Time) {
 	var machines []machine.Machine
 	renewals := map[string]time.Time{}
@@ -128,8 +129,8 @@ func TestSweepLeavesAlreadyLostMachinesAlone(t *testing.T) {
 
 func TestSweepTreatsAMissingHeartbeatAsSilence(t *testing.T) {
 	// A Machine with no lease at all has never had an operator
-	// heartbeat: it may have been declared, but it has never
-	// reported in.
+	// heartbeat. The machine may have been declared, but it has
+	// never reported in.
 	machines, renewals := fleetInputs(
 		fleetEntry{"node-1", api.PhaseReady, 10 * time.Second},
 		fleetEntry{"node-2", "", -1},
@@ -145,9 +146,9 @@ func TestSweepTreatsAMissingHeartbeatAsSilence(t *testing.T) {
 
 func TestSweepReadsGrantedSilenceAsTheRebootInProgress(t *testing.T) {
 	// A machine holding a fresh reboot grant that goes silent is doing
-	// exactly what it was told; the sweep counts it mid-transition and
-	// does not declare it Lost until the grant is old enough to be a
-	// stall.
+	// exactly what it was told to do. The sweep counts it as
+	// mid-transition and does not declare it Lost until the grant is
+	// old enough to count as a stall.
 	machines, renewals := fleetInputs(
 		fleetEntry{"node-1", api.PhaseReady, 10 * time.Second},
 		fleetEntry{"node-2", api.PhaseUpdating, 3 * time.Minute},

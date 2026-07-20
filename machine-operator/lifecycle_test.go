@@ -1,9 +1,10 @@
 package main
 
-// The acting halves that work against real files: carrying out a
-// convergence decision against a manifest store, reading the staged
-// document's identity back out of one, and settling the cluster
-// document's lifecycle after a boot proved (or didn't prove) it.
+// The acting halves that work against real files: carrying out
+// a convergence decision against a manifest store, reading the
+// staged document's identity back out of one, and settling the
+// cluster document's lifecycle after a boot proved it, or failed
+// to.
 
 import (
 	"os"
@@ -57,9 +58,9 @@ func TestCarryOutConvergenceWithdrawsAndClears(t *testing.T) {
 }
 
 func TestCarryOutConvergenceReportsAFailedStaging(t *testing.T) {
-	// A store rooted somewhere unwritable can't stage; the condition
-	// downgrades to StagingFailed rather than reporting a reboot that
-	// will not happen.
+	// A store rooted somewhere unwritable cannot stage. The
+	// condition downgrades to StagingFailed, instead of reporting a
+	// reboot that will not happen.
 	parent := t.TempDir()
 	if err := os.Chmod(parent, 0o555); err != nil {
 		t.Fatal(err)
@@ -78,10 +79,10 @@ func TestCarryOutConvergenceReportsAFailedStaging(t *testing.T) {
 }
 
 func TestCarryOutConvergenceReportsAFailedRestartRequest(t *testing.T) {
-	// The intent channel directory is init's to create, and on a
-	// machine where it is missing the request must downgrade to
-	// StagingFailed rather than report a restart that will not
-	// happen — the same posture a failed staging takes.
+	// The intent channel directory belongs to init to create. On a
+	// machine where it is missing, the request must downgrade to
+	// StagingFailed, instead of reporting a restart that will not
+	// happen. This is the same behavior a failed staging takes.
 	store := machine.RegistryCredentialsStore(t.TempDir())
 	conv := convergence{
 		condition:      notConverged("CredentialsConverged", "RestartRequested", "restarting"),
@@ -152,8 +153,8 @@ func TestSettleClusterLifecyclePromotesTheBootedStagedDocument(t *testing.T) {
 }
 
 func TestSettleClusterLifecycleLeavesANewerStagedDocumentAlone(t *testing.T) {
-	// A document staged after this boot hasn't had its proving boot;
-	// promoting it would skip the trial.
+	// A document staged after this boot has not had its proving
+	// boot. Promoting it would skip the trial.
 	root := t.TempDir()
 	store := machine.ClusterManifests(root)
 	if err := store.WriteStaged([]byte("kind: Cluster\nmetadata: {name: newer}\n")); err != nil {

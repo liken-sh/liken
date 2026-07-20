@@ -2,50 +2,57 @@ package main
 
 // Disciplining the clock.
 //
-// A computer's clock drifts: cheap oscillators gain or lose seconds
-// a day. Kubernetes assumes nobody's does. TLS certificates carry
-// notBefore/notAfter instants, leases carry renew deadlines, and
-// etcd, on multi-leader clusters, orders events by time. A machine whose
-// clock is wrong enough can't even *join* a cluster, because every
-// certificate the CA minted appears to be from the future. That's
-// why time is a machine-plane concern and why the first correction
-// happens before k3s starts: the cluster cannot fix a clock that is
-// keeping the machine out of the cluster.
+// A computer's clock drifts. Cheap oscillators gain or lose seconds
+// each day. Kubernetes assumes that no clock drifts. TLS
+// certificates carry notBefore and notAfter instants, leases carry
+// renew deadlines, and, on multi-leader clusters, etcd orders events
+// by time. If a machine's clock is wrong enough, the machine cannot
+// even join a cluster, because every certificate that the CA issued
+// appears to be from the future. This is why time is a machine-plane
+// concern, and why the first correction happens before k3s starts:
+// the cluster cannot fix a clock that is keeping the machine out of
+// the cluster.
 //
-// The protocol is SNTP, the stateless subset of NTP: one 48-byte
-// request, one 48-byte reply, four timestamps between them. The
-// client notes when it asked (t1) and when the answer arrived (t4);
-// the server stamps when the request landed (t2) and when the reply
-// left (t3). (t2-t1) is the outbound trip plus the clock error;
-// (t3-t4) is the return trip minus it; averaging the two cancels the
-// travel whenever the path is symmetric, leaving just the error.
-// That algebra is the core of the protocol. The vendored client
-// (github.com/beevik/ntp, the same library Talos uses) implements it
-// along with the protocol's sanity checks: leap-second flags,
-// kiss-of-death codes, stratum bounds. As with the DHCP client,
-// liken uses the established library for the wire format and keeps
-// the decisions (who to ask, when to step, how hard to slew) in
-// plain sight here.
+// The protocol is SNTP, the stateless subset of NTP. Each exchange
+// sends one 48-byte request and receives one 48-byte reply, with
+// four timestamps between them. The client records when it sent the
+// request (t1) and when the reply arrived (t4). The server records
+// when the request arrived (t2) and when the reply left (t3). The
+// value (t2-t1) is the outbound trip time plus the clock error. The
+// value (t3-t4) is the return trip time minus the clock error.
+// Averaging the two values cancels the travel time when the path is
+// symmetric, and leaves only the error. This calculation is the core
+// of the protocol.
 //
-// The hierarchy follows liken's usual pattern: explicit inputs, no
-// discovery. Leaders ask the upstreams declared on the Cluster.
-// Followers ask the leaders themselves, resolved from the fleet's
-// Machine manifests, with the endpoint's host as the fallback, and a
-// leader answers from its own disciplined clock (responder.go). A
-// cluster with no upstreams free-runs: it is internally consistent,
-// correct only if the hardware clocks happen to be, and its status
-// reports that state.
+// The vendored client, github.com/beevik/ntp, is the same library
+// that Talos uses. It implements this calculation and the protocol's
+// checks: leap-second flags, kiss-of-death codes, and stratum
+// bounds. As with the DHCP client, liken uses this established
+// library for the wire format, and keeps the decisions in this file:
+// which source to ask, when to step the clock, and how hard to slew
+// it.
 //
-// Correction comes in two strengths, chosen by whether anything is
-// running that could observe a change. At boot, before k3s, the
-// clock simply *steps* to the measured time (clock_settime): nothing
-// is running that could care, and a machine must not join the
-// cluster with a wrong clock. After that, the clock only ever
-// *slews* (adjtimex): the kernel trims the clock's rate so it drifts
-// gently onto the right time, seconds always moving forward at
-// nearly one per second. Stepping a running node would change the
-// time underneath lease renewals and container logs; a slew removes
-// the drift without any visible jump.
+// The source hierarchy follows liken's usual pattern: explicit
+// inputs, not discovery. Leaders ask the upstreams declared on the
+// Cluster. Followers ask the leaders directly, resolved from the
+// fleet's Machine manifests, with the endpoint's host as the
+// fallback. A leader answers from its own disciplined clock (see
+// responder.go). A cluster with no upstreams free-runs. A
+// free-running cluster is internally consistent, but it is correct
+// only if the hardware clocks happen to be correct, and the
+// machine's status reports this free-running state.
+//
+// Correction comes in two strengths. The choice depends on whether
+// anything is running that could notice a sudden change in time. At
+// boot, before k3s starts, the clock steps to the measured time,
+// using clock_settime. Nothing is running yet that would be
+// affected, and a machine must not join the cluster with a wrong
+// clock. After boot, the clock only slews, using adjtimex. The
+// kernel trims the clock's rate so the clock drifts gradually onto
+// the correct time, with seconds always moving forward at close to
+// one per second. Stepping the clock on a running node would change
+// the time underneath lease renewals and container logs. A slew
+// removes the drift without any visible jump in time.
 
 import (
 	"context"
@@ -66,30 +73,33 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// timePollInterval is how often the discipline loop measures. 64
-// seconds is NTP's classic starting cadence (minpoll 6, 2^6 s):
-// frequent enough to catch drift measured in parts per million,
-// infrequent enough not to burden anyone's upstream.
+// timePollInterval sets how often the discipline loop measures the
+// clock. 64 seconds is NTP's classic starting interval (minpoll 6,
+// or 2^6 seconds). This interval is frequent enough to catch drift
+// measured in parts per million, and infrequent enough that it does
+// not burden an upstream time source.
 const timePollInterval = 64 * time.Second
 
-// stepThreshold is the offset below which a boot doesn't bother
-// stepping: the running slew will absorb it faster than the step's
-// disruption is worth. 128ms is ntpd's own line between "slew it"
-// and "step it".
+// stepThreshold is the offset below which a boot does not step the
+// clock. Below this offset, the slew absorbs the error faster than
+// the step's disruption is worth. 128ms is the same line that ntpd
+// uses between slewing and stepping.
 const stepThreshold = 128 * time.Millisecond
 
-// The stratum vocabulary status reports. NTP counts distance from a
-// reference clock: 1 is attached to one, each hop adds one. 10 is
-// the widespread convention for a deliberately local clock, and 16
-// means "unsynchronized": the machine has time sources but hasn't
+// The stratum values that status reports. NTP counts distance from a
+// reference clock: stratum 1 is attached to a reference clock
+// directly, and each hop away adds one. Stratum 10 is the common
+// convention for a clock that is deliberately local. Stratum 16
+// means unsynchronized: the machine has time sources, but has not
 // reached one yet.
 const (
 	stratumFreeRunning    = 10
 	stratumUnsynchronized = 16
 )
 
-// timeSync is one successful measurement: who answered, from what
-// stratum, how far off this machine's clock was, and when.
+// timeSync records one successful measurement: which source
+// answered, its stratum, how far off this machine's clock was, and
+// when the measurement happened.
 type timeSync struct {
 	source  string
 	stratum int
@@ -97,12 +107,12 @@ type timeSync struct {
 	at      time.Time
 }
 
-// clock is the machine's account of its own timekeeping, shared by
-// the two components that care: the discipline loop records each
-// measurement, and (on a leader) the responder reads the latest to
-// know what to advertise. This is what running the machine plane in
-// one process buys: two daemons would need a socket between them;
-// two goroutines need a mutex.
+// clock holds the machine's timekeeping state. Two components share
+// it: the discipline loop records each measurement, and, on a
+// leader, the responder reads the latest measurement to know what to
+// advertise. Running the machine plane in one process makes this
+// possible with a mutex. Two separate daemons would need a socket
+// between them; two goroutines only need a mutex.
 type clock struct {
 	mu      sync.Mutex
 	sources []string
@@ -119,17 +129,19 @@ func (c *clock) record(measured *timeSync) {
 	c.last = measured
 }
 
-// timeSources derives where this machine gets its time, the same way
-// it derives everything: from declared inputs, by role. Leaders ask
-// the Cluster's upstreams. Followers ask every leader, resolved from
-// the Machine manifests the image already carries (one boot medium
-// holds the whole fleet's), each leader identified by its declared
-// address on the node network. The endpoint's host is appended as
-// the fallback for leaders that couldn't be resolved (a
-// DHCP-addressed leader declares no address to find). Every source
-// therefore comes from inputs the machine already needed to find its
-// cluster; no new information is required. nil means free-running: a
-// leader with no upstreams declared.
+// timeSources works out where this machine gets its time. It uses
+// declared inputs by role, the same way liken works out other
+// machine state. Leaders ask the Cluster's upstreams. Followers ask
+// every leader. timeSources resolves each leader's address from the
+// Machine manifests that the image already carries; one boot medium
+// carries manifests for the whole fleet. Each leader is identified
+// by its declared address on the node network. timeSources appends
+// the endpoint's host as a fallback for any leader it could not
+// resolve, for example a DHCP-addressed leader that declares no
+// address to find. Every source therefore comes from inputs the
+// machine already needed to find its cluster, so no new information
+// is required. timeSources returns nil for a leader with no
+// upstreams declared, which means the leader free-runs.
 func timeSources(clusterDoc *cluster.Cluster, role api.Role, manifestDir string) []string {
 	if clusterDoc == nil {
 		return nil
@@ -146,11 +158,12 @@ func timeSources(clusterDoc *cluster.Cluster, role api.Role, manifestDir string)
 }
 
 // leaderAddresses resolves each machine named in spec.leaders to its
-// static address on the node network, by reading its manifest from
-// the image. A leader that can't be resolved (no manifest, no
-// address inside nodeCIDR) is simply skipped: the endpoint fallback
-// covers it, and the source list is a preference order in which
-// missing entries are acceptable.
+// static address on the node network. It reads each machine's
+// manifest from the image. leaderAddresses skips a leader it cannot
+// resolve, for example one with no manifest or no address inside
+// nodeCIDR. The endpoint fallback covers a skipped leader, and the
+// source list is a preference order in which missing entries are
+// acceptable.
 func leaderAddresses(clusterDoc *cluster.Cluster, manifestDir string) []string {
 	var addresses []string
 	for _, name := range clusterDoc.Spec.Leaders {
@@ -162,10 +175,11 @@ func leaderAddresses(clusterDoc *cluster.Cluster, manifestDir string) []string {
 }
 
 // declaredNodeAddress resolves one machine's declared address on the
-// node network from its manifest in the image, "" when the machine
-// declares none (a DHCP machine has no address to find). This is how
-// machines find each other before any of them is up: the fleet's
-// declared inputs, not discovery.
+// node network from its manifest in the image. It returns "" when
+// the machine declares no address, for example a DHCP machine, which
+// has no address to find. This is how machines find each other
+// before any of them has started: through the fleet's declared
+// inputs, not through discovery.
 func declaredNodeAddress(clusterDoc *cluster.Cluster, manifestDir, name string) string {
 	_, subnet, err := net.ParseCIDR(clusterDoc.Spec.Network.NodeCIDR)
 	if err != nil {
@@ -184,11 +198,12 @@ func declaredNodeAddress(clusterDoc *cluster.Cluster, manifestDir, name string) 
 	return ""
 }
 
-// timeStatus reports the clock's state as status: the same facts the
-// console prints, made queryable. A machine with sources that hasn't
-// synced yet is Unsynchronized (stratum 16); a machine with no
-// sources at all is deliberately FreeRunning (stratum 10); neither
-// claims Synchronized, because that word is reserved for a clock
+// timeStatus reports the clock's state as machine status. It reports
+// the same facts that the console prints, in a form other systems
+// can query. A machine that has sources but has not synced yet is
+// Unsynchronized, at stratum 16. A machine with no sources at all is
+// deliberately FreeRunning, at stratum 10. Neither state is reported
+// as Synchronized, because that word is reserved for a clock that is
 // currently following a source that is itself synchronized.
 func timeStatus(sync *timeSync, sources []string) machine.TimeStatus {
 	if sync == nil {
@@ -207,12 +222,12 @@ func timeStatus(sync *timeSync, sources []string) machine.TimeStatus {
 	}
 }
 
-// querySources asks each source in turn and takes the first valid
-// answer. A full NTP daemon polls every source, scores them by delay
-// and dispersion, and combines survivors. SNTP's simpler approach,
-// trusting the first sane reply, is fine for a machine whose sources
-// were each explicitly chosen by an operator rather than drawn from
-// a public pool.
+// querySources asks each source in turn and uses the first valid
+// answer. A full NTP daemon polls every source, scores each one by
+// delay and dispersion, and combines the results that pass its
+// checks. SNTP's simpler approach, trusting the first valid reply,
+// works for a machine whose sources were each chosen directly by an
+// operator, rather than drawn from a public pool.
 func querySources(sources []string) (*timeSync, error) {
 	var lastErr error
 	for _, source := range sources {
@@ -234,12 +249,13 @@ func querySources(sources []string) (*timeSync, error) {
 	return nil, lastErr
 }
 
-// stepClockAtBoot is the one moment liken ever jumps the clock: k3s
-// hasn't started, so no lease, log, or watch depends on the current
-// time yet. The attempts are bounded because a machine's boot must
-// not hinge on the internet being up. If no source answers, the boot
-// proceeds on the hardware clock and the discipline loop keeps
-// trying forever. It returns the first sync so status can carry it.
+// stepClockAtBoot is the one moment when liken jumps the clock. k3s
+// has not started yet, so no lease, log, or watch depends on the
+// current time. The number of attempts is limited, because a
+// machine's boot must not depend on the internet being available. If
+// no source answers, the boot continues on the hardware clock, and
+// the discipline loop keeps trying without limit. stepClockAtBoot
+// returns the first successful sync so that status can report it.
 func stepClockAtBoot(sources []string) *timeSync {
 	if len(sources) == 0 {
 		fmt.Println("liken: time: no sources declared; free-running on the hardware clock")
@@ -273,21 +289,21 @@ func stepClockAtBoot(sources []string) *timeSync {
 	return nil
 }
 
-// slewAmount bounds how much correction one adjtimex call requests.
+// slewAmount limits how much correction one adjtimex call requests.
 // The kernel's old-style singleshot adjustment works best within
-// half a second; a larger error is corrected across several polls
-// rather than one large request. The clamp, not the caller, owns
-// this limit.
+// half a second. slewAmount corrects a larger error across several
+// polls, instead of requesting it all at once. This clamp owns the
+// limit, not the code that calls slewAmount.
 func slewAmount(offset time.Duration) time.Duration {
 	return min(max(offset, -500*time.Millisecond), 500*time.Millisecond)
 }
 
-// slewClock asks the kernel to gently absorb the offset: the
-// old-style adjtime interface (ADJ_OFFSET_SINGLESHOT) trims the
-// clock's tick rate by about 0.5ms per second until the requested
-// offset has been absorbed, then resumes normal ticking. Time never
-// jumps and never runs backward, which is the entire point of
-// slewing over stepping.
+// slewClock asks the kernel to absorb the offset gradually. The
+// old-style adjtime interface, ADJ_OFFSET_SINGLESHOT, trims the
+// clock's tick rate by about 0.5ms per second until it has absorbed
+// the requested offset, then resumes normal ticking. Time never
+// jumps and never runs backward. This is the reason to slew the
+// clock instead of stepping it.
 func slewClock(offset time.Duration) error {
 	tx := &unix.Timex{
 		Modes:  unix.ADJ_OFFSET_SINGLESHOT,
@@ -297,24 +313,25 @@ func slewClock(offset time.Duration) error {
 	return err
 }
 
-// syncStaleAfter is how long the loop keeps claiming synchronized
-// after its last good measurement: three missed polls means the
-// source is gone, not just busy, and status must stop saying
-// otherwise.
+// syncStaleAfter is how long the loop keeps reporting synchronized
+// after its last good measurement. Three missed polls means the
+// source is gone, not just busy, and status must stop reporting
+// synchronized at that point.
 const syncStaleAfter = 3 * timePollInterval
 
-// worthRepublishing decides whether a fresh measurement changes the
-// story the published time facts tell. A change of state, source, or
-// stratum is always news. The offset is only news when it has moved
-// past offsetPublishThreshold since the last publish, because SNTP
-// measurements wobble by microseconds on every poll, and every
-// republished fact ripples outward: the operator publishes a status
-// whenever the facts change, and each of those writes is a raft
-// round and an fsync on every one of the cluster's leaders. A fleet
-// whose clocks are fine should cost etcd nothing. The freshness
-// floor bounds the one lie suppression could tell: lastSync must not
-// drift so stale that the status claims a silent sync loop while
-// init is happily hearing its sources.
+// worthRepublishing decides whether a fresh measurement changes what
+// the published time facts report. A change in state, source, or
+// stratum must always be reported. The offset must be reported only
+// when it has moved past offsetPublishThreshold since the last
+// publish. SNTP measurements wobble by microseconds on every poll,
+// and each republished fact has a cost: the machine publishes a
+// status update whenever the facts change, and each such write
+// causes a raft round and an fsync on every one of the cluster's
+// leaders. A fleet whose clocks are working correctly should cost
+// etcd nothing extra. The freshness floor limits the one case where
+// suppressing updates could mislead: lastSync must not go so stale
+// that the status reports a silent sync loop, while init is actually
+// still receiving answers from its sources.
 const (
 	offsetPublishThreshold = 25 * time.Millisecond
 	timePublishFloor       = 10 * time.Minute
@@ -328,15 +345,17 @@ func worthRepublishing(published, fresh machine.TimeStatus, drift, sincePublishe
 }
 
 // writeRTC copies the system clock into the hardware clock. Linux
-// never does this on its own: on a traditional distro it's a
-// shutdown script's job, so here it's init's. The RTC is the clock
-// the machine starts its next boot from. Writing it after a sync
-// means even a power-cut machine boots with roughly right time, and
-// writing it at clean shutdown carries the best final estimate into
-// the next boot. Those are the only two moments; the RTC ticks on
-// its own battery between them. The value written is UTC: storing
-// local time in the RTC is a desktop-PC legacy, and a fleet spanning
-// time zones needs its hardware clocks to share one convention.
+// never does this by itself. On a traditional distribution, a
+// shutdown script does this job; here, init does it. The RTC is the
+// clock that the machine starts its next boot from. Writing the RTC
+// after a sync means that even a machine that loses power boots with
+// roughly correct time. Writing the RTC at a clean shutdown carries
+// the best final time estimate into the next boot. These are the
+// only two moments when init writes the RTC; between them, the RTC
+// keeps time on its own battery. The value written is UTC. Storing
+// local time in the RTC is a desktop-PC convention from the past,
+// and a fleet spanning time zones needs its hardware clocks to share
+// one convention.
 func writeRTC() {
 	f, err := os.OpenFile("/dev/rtc0", os.O_WRONLY, 0)
 	if err != nil {
@@ -345,9 +364,10 @@ func writeRTC() {
 	}
 	defer f.Close()
 	now := time.Now().UTC()
-	// The RTC interface takes a broken-down calendar time in the
-	// style of C's struct tm: months count from zero and years from
-	// 1900, quirks the ioctl inherits from four decades of C.
+	// The RTC interface takes a broken-down calendar time, in the
+	// style of C's struct tm. Months count from zero and years count
+	// from 1900. The ioctl inherits these conventions from four
+	// decades of C programming.
 	rt := unix.RTCTime{
 		Sec:  int32(now.Second()),
 		Min:  int32(now.Minute()),
@@ -363,22 +383,25 @@ func writeRTC() {
 	fmt.Printf("liken: time: hardware clock set to %s\n", now.Format(time.RFC3339))
 }
 
-// disciplineClock builds the machine plane's time component: measure,
-// slew, publish, sleep, forever. It is the only writer of facts.Time,
-// but not of the facts file — the restart path also rewrites it — so
-// every touch goes through the guarded owner (facts.go). It prints
-// transitions rather than every poll: a sync gained, a sync lost,
-// and an offset only when it exceeds the step threshold, which means
-// drift is outrunning the slew. The facts get the same restraint: a
-// poll's measurement replaces facts.Time in memory every time (so
-// any other writer's rewrite carries the freshest clock), but this
-// loop only rewrites the file when the measurement is news
-// (worthRepublishing), never for microsecond wobble.
+// disciplineClock builds the machine plane's time component. It
+// measures, slews, publishes, sleeps, and repeats. disciplineClock
+// is the only writer of facts.Time, but it is not the only writer of
+// the facts file; the restart path also rewrites the file. Because
+// of this, every write goes through the guarded owner in facts.go.
+// disciplineClock prints transitions rather than every poll: a sync
+// gained, a sync lost, and an offset only when the offset exceeds
+// the step threshold, which means drift is outrunning the slew. The
+// facts follow the same rule. Each poll's measurement replaces
+// facts.Time in memory every time, so any other writer's rewrite
+// carries the freshest clock value. This loop rewrites the file
+// itself only when worthRepublishing reports that the measurement
+// matters, and never for microsecond wobble.
 func disciplineClock(clk *clock, facts *factsFile) func(context.Context) error {
 	return func(ctx context.Context) error {
-		// current mirrors facts.Time: this loop is its only writer,
-		// so a local copy reads consistently without holding the lock
-		// through the loop's judgments.
+		// current mirrors facts.Time. This loop is the only writer
+		// of facts.Time, so a local copy lets the loop read a
+		// consistent value without holding the lock while it makes
+		// its decisions.
 		var current machine.TimeStatus
 		facts.mutate(func(s *machine.MachineStatus) { current = s.Time })
 
@@ -386,21 +409,22 @@ func disciplineClock(clk *clock, facts *factsFile) func(context.Context) error {
 		if current.LastSync != nil {
 			lastGood = *current.LastSync
 		}
-		// What the facts file currently says, the baseline every
-		// "is this news?" judgment compares against. The boot step
-		// published facts.Time as it stands now, moments ago.
+		// published holds what the facts file currently says. It is
+		// the baseline that every worthRepublishing check compares
+		// against. The boot step published facts.Time as it stands
+		// now, moments ago.
 		published := current
 		publishedOffset, _ := time.ParseDuration(current.Offset)
 		publishedAt := time.Now()
-		// The boot step (or its absence) decided whether the RTC has
-		// been written yet; a boot that came up on a wrong hardware
-		// clock gets its RTC corrected at the first sync this loop
-		// achieves instead.
+		// The boot step, or the lack of one, decided whether the RTC
+		// has been written yet. If the boot came up on a wrong
+		// hardware clock, this loop corrects the RTC at the first
+		// sync it achieves.
 		rtcWritten := current.State == machine.TimeSynchronized
 		for {
 			if !sleepUnlessCancelled(ctx, timePollInterval) {
-				// Clean shutdown: leave the hardware clock holding
-				// the best estimate this machine ever had.
+				// Clean shutdown. Leave the hardware clock holding
+				// the best time estimate this machine ever had.
 				if !lastGood.IsZero() {
 					writeRTC()
 				}
@@ -408,9 +432,9 @@ func disciplineClock(clk *clock, facts *factsFile) func(context.Context) error {
 			}
 			sync, err := querySources(clk.sources)
 			if err != nil {
-				// A failed poll is only worth reporting when it
-				// changes the machine's state: past the staleness
-				// window, the machine stops claiming a synchronized
+				// A failed poll is worth reporting only when it
+				// changes the machine's state. Past the staleness
+				// window, the machine stops reporting a synchronized
 				// clock.
 				if current.State == machine.TimeSynchronized && time.Since(lastGood) > syncStaleAfter {
 					fmt.Fprintf(os.Stderr, "liken: time: lost every source (%v); the clock is on its own\n", err)
@@ -438,10 +462,10 @@ func disciplineClock(clk *clock, facts *factsFile) func(context.Context) error {
 				writeRTC()
 				rtcWritten = true
 			}
-			// The drift judged here is against the offset last
-			// *published*, not the last poll's, so small wobbles
-			// accumulate toward the threshold instead of resetting it
-			// every 64 seconds.
+			// This drift check compares against the offset that was
+			// last published, not the offset from the last poll.
+			// Small wobbles accumulate toward the threshold this
+			// way, instead of resetting every 64 seconds.
 			current = timeStatus(sync, clk.sources)
 			if worthRepublishing(published, current, sync.offset-publishedOffset, time.Since(publishedAt)) {
 				facts.publish(func(s *machine.MachineStatus) { s.Time = current })

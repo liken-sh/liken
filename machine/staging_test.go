@@ -1,9 +1,10 @@
 package machine
 
-// Tests for the manifest lifecycle, including every crash window
-// staging.go's comments describe: each half-done state must converge
-// on retry, never strand a boot without a manifest. The store deals
-// in bytes; parsing belongs to its callers, so nothing here parses.
+// These are tests for the manifest lifecycle. They include every
+// crash window that staging.go's comments describe: each half-done
+// state must converge on retry, and must never strand a boot without
+// a manifest. The store deals in bytes. Parsing belongs to its
+// callers, so nothing here parses.
 
 import (
 	"os"
@@ -96,7 +97,7 @@ func TestPromoteReplacesTheOldProvenAndClearsRejections(t *testing.T) {
 	if err := s.WriteProven([]byte(sampleManifest)); err != nil {
 		t.Fatal(err)
 	}
-	// An earlier staged manifest was rejected; its quarantine stands.
+	// An earlier staged manifest was rejected. Its quarantine stands.
 	if err := s.WriteStaged([]byte(sampleManifest)); err != nil {
 		t.Fatal(err)
 	}
@@ -156,8 +157,9 @@ func TestRejectQuarantinesTheStagedManifest(t *testing.T) {
 }
 
 func TestCrashBetweenRejectionNoteAndRename(t *testing.T) {
-	// The crash window in Reject: the note landed, the rename didn't.
-	// The next boot must still see the staged manifest and retry it.
+	// This is the crash window in Reject: the note landed, but the
+	// rename did not. The next boot must still see the staged
+	// manifest and retry it.
 	root := t.TempDir()
 	s := MachineManifests(root)
 	if err := s.WriteStaged([]byte(sampleManifest)); err != nil {
@@ -181,8 +183,9 @@ func TestCrashBetweenRejectionNoteAndRename(t *testing.T) {
 }
 
 func TestPromoteWithoutAStagedManifestFails(t *testing.T) {
-	// Promotion is only ever called on the manifest that just booted;
-	// a missing staged file at that moment is a bug worth reporting.
+	// The system calls promotion only on the manifest that just
+	// booted; a missing staged file at that moment is a bug worth
+	// reporting.
 	if err := MachineManifests(t.TempDir()).Promote(); err == nil {
 		t.Error("expected an error promoting nothing")
 	}

@@ -2,8 +2,8 @@ package main
 
 // Tests for manifest selection: finding the machineState partition
 // before any spec exists, and the attempt-order policy. The peek's
-// mount/unmount and the settle loop's actuation are QEMU territory;
-// the decisions they act on are pinned here.
+// mount and unmount, and the settle loop's actuation, run only under
+// QEMU. The decisions they act on are pinned here.
 
 import (
 	"errors"
@@ -39,9 +39,9 @@ func TestFindMachineStatePartitionAbsentIsAFirstBoot(t *testing.T) {
 }
 
 func TestFindMachineStatePartitionRefusesDuplicates(t *testing.T) {
-	// A cloned or transplanted disk: two partitions carry the name,
-	// and guessing which holds the real manifests could boot the
-	// machine under a stranger's configuration.
+	// A cloned or transplanted disk: two partitions carry the name.
+	// Guessing which one holds the real manifests could boot the
+	// machine under the wrong configuration.
 	sys, dev := fakeMachine(t)
 	addDisk(t, sys, dev, "vda", 1<<30, nil)
 	addDisk(t, sys, dev, "vdb", 1<<30, nil)
@@ -305,8 +305,8 @@ func TestLoadManifestCandidatesBeforeTheFilesystemExists(t *testing.T) {
 }
 
 func TestSettleManifestsPromoteFailureIsLoudButNotFatal(t *testing.T) {
-	// Nothing is staged, so promotion fails; the machine is up and the
-	// next boot repeats the step, so the boot record is left alone.
+	// Nothing is staged, so promotion fails. The machine is up, and
+	// the next boot repeats the step, so the boot record is left alone.
 	store := machine.MachineManifests(t.TempDir())
 	status := machine.AllRolesInMemory()
 	status.MachineState = machine.StorageRoleStatus{Backing: machine.BackingPartition}

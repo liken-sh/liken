@@ -2,9 +2,9 @@ package main
 
 // Tests for the clock discipline's decisions: where a machine gets
 // its time, what it reports about its clock, and how much slewing it
-// will ask of the kernel at once. The syscalls that act on those
-// decisions (clock_settime, adjtimex) are PID-1 territory and belong
-// to the QEMU harness.
+// asks of the kernel at once. The syscalls that act on these
+// decisions, clock_settime and adjtimex, run only as PID 1. Tests
+// for those syscalls belong to the QEMU harness.
 
 import (
 	"os"
@@ -32,9 +32,9 @@ func clusterWithTime(upstreams []string, endpoint string, leaders ...string) *cl
 	}
 }
 
-// manifestsDir builds an image-style machines directory: one Machine
-// manifest per name, each declaring a static address on the node
-// network.
+// manifestsDir builds a machines directory in the same form the
+// image uses: one Machine manifest per name, each declaring a static
+// address on the node network.
 func manifestsDir(t *testing.T, addresses map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -82,7 +82,7 @@ func TestTimeSourcesFollowerAsksEveryLeader(t *testing.T) {
 	c := clusterWithTime(nil, "https://cluster.example.com:6443", "node-1", "node-3")
 	dir := manifestsDir(t, map[string]string{
 		"node-1": "10.10.0.1/24",
-		"node-2": "10.10.0.2/24", // a follower: present in the image, not a source
+		"node-2": "10.10.0.2/24", // a follower's manifest: present in the image, not a time source
 		"node-3": "10.10.0.3/24",
 	})
 	sources := timeSources(c, api.RoleFollower, dir)
@@ -241,11 +241,12 @@ func TestQuerySourcesReportsTheLastFailure(t *testing.T) {
 }
 
 func TestStepClockAtBootSlewsWhenTheClockIsClose(t *testing.T) {
-	// The responder answers from this same machine's clock, so the
-	// measured offset is microseconds: far under the step threshold,
-	// which means stepClockAtBoot returns the measurement without ever
-	// calling clock_settime. (An actual step needs a wrong clock,
-	// which only the QEMU harness's -rtc drills can arrange.)
+	// The responder answers using this same machine's clock, so the
+	// measured offset is only microseconds, far under the step
+	// threshold. This means stepClockAtBoot returns the measurement
+	// without calling clock_settime. An actual step needs a wrong
+	// clock, and only the QEMU harness's -rtc drills can arrange
+	// that.
 	addr := startResponder(t, syncedClock())
 	sync := stepClockAtBoot([]string{addr})
 	if sync == nil || sync.source != addr {

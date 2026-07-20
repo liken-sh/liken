@@ -1,11 +1,11 @@
 package image
 
-// Install media: a public release and a deployment layer become the
-// image a machine boots once, to install itself.
+// This file builds install media: a public release and a deployment
+// layer become the image a machine boots once, to install itself.
 //
-// An install boot is a small one: the installer is init itself, and
-// it never needs the running system — just the manifests that say
-// how to partition, and the payload to copy. So the install image is
+// An install boot is a small one. The installer is init itself, and
+// it never needs the running system, only the manifests that say how
+// to partition, and the payload to copy. So the install image is
 // three cpio archives concatenated: the release's boot archive
 // (boot.cpio: init and the early boot's modules), the deployment
 // layer (the manifests whose storage specs drive the partitioning),
@@ -19,10 +19,11 @@ package image
 // document lists, the document itself byte for byte, and the layer
 // beside its sidecar. Carrying the document verbatim, rather than
 // generating one, is what lets the installed machine verify later
-// downloads against the same catalog digest the release was published
-// under — the stick and the internet vouch for the same bytes.
+// downloads against the same catalog digest the release was
+// published under. The stick and the internet then vouch for the
+// same bytes.
 //
-// Everything is verified before a single byte is packed: an artifact
+// Everything is verified before a single byte is packed. An artifact
 // that fails its document here would fail it again in the installer,
 // on a machine, where the only remedy is new media.
 
@@ -37,13 +38,14 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// payloadDir is where the wrapper archive carries the release, the
-// path the installer reads (init's releasePayloadDir).
+// payloadDir is the path where the wrapper archive carries the
+// release. It is the path the installer reads (init's
+// releasePayloadDir).
 const payloadDir = "usr/share/liken/release"
 
 // Media assembles install media from a release directory (a public
 // bundle: artifacts beside their release.yaml) and a deployment
-// layer, writing the bootable image to out.
+// layer, and writes the bootable image to out.
 func Media(releaseDir, layerPath, out string, log io.Writer) error {
 	document, release, err := verifiedRelease(releaseDir)
 	if err != nil {
@@ -61,8 +63,8 @@ func Media(releaseDir, layerPath, out string, log io.Writer) error {
 	}
 	defer f.Close()
 
-	// The boot archive first, then the layer, so the layer's entries
-	// override at unpack.
+	// This writes the boot archive first, then the layer, so the
+	// layer's entries override at unpack.
 	generic, err := os.Open(filepath.Join(releaseDir, "boot.cpio"))
 	if err != nil {
 		return err
@@ -90,10 +92,10 @@ func Media(releaseDir, layerPath, out string, log io.Writer) error {
 }
 
 // verifiedRelease reads a release directory's document and proves
-// every listed artifact against it: the same check the fetch path
-// performs, done before a single byte is packed, because an artifact
-// that fails its document here would fail it again on a machine,
-// where the only remedy is new media.
+// every listed artifact against it. This is the same check the fetch
+// path performs, done before a single byte is packed, because an
+// artifact that fails its document here would fail it again on a
+// machine, where the only remedy is new media.
 func verifiedRelease(releaseDir string) ([]byte, *machine.Release, error) {
 	document, err := os.ReadFile(filepath.Join(releaseDir, "release.yaml"))
 	if err != nil {
@@ -118,11 +120,11 @@ func verifiedRelease(releaseDir string) ([]byte, *machine.Release, error) {
 }
 
 // writePayload packs the installer's payload as a wrapper archive:
-// the slot layout, exactly — every artifact the document lists, the
-// document itself byte for byte, and the layer beside the sidecar
-// computed from it. The artifacts were verified before this is
-// called and are read again here; the document and the layer travel
-// as the bytes already in hand.
+// the slot layout, exactly. It includes every artifact the document
+// lists, the document itself byte for byte, and the layer beside the
+// sidecar computed from it. The artifacts were verified before this
+// function was called, and this function reads them again here. The
+// document and the layer travel as the bytes already in hand.
 func writePayload(w io.Writer, releaseDir string, release *machine.Release, document, layer []byte) error {
 	sum := sha256.Sum256(layer)
 	sidecar := machine.FormatLayerSidecar(hex.EncodeToString(sum[:]))

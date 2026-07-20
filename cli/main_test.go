@@ -1,8 +1,9 @@
 package main
 
-// Tests for the dispatcher: each command routes to its capability
-// with the arguments checked first. The capabilities test themselves
-// in their own packages; what's under test here is only the table.
+// These tests cover the dispatcher. Each command routes to its
+// capability, after this package checks its arguments first. The
+// capabilities test themselves in their own packages. What is under
+// test here is only the routing table.
 
 import (
 	"os"
@@ -70,8 +71,9 @@ func TestRunPacksADeploymentLayer(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := filepath.Join(t.TempDir(), "deployment.cpio")
-	// A deployment with no manifests declares no modules, so the
-	// kernel dist is never consulted and the layer is identity only.
+	// A deployment with no manifests declares no modules. Because of
+	// this, the kernel dist is never consulted, and the layer holds
+	// only identity.
 	if err := run([]string{"layer", t.TempDir(), identityDir, "unused", out}); err != nil {
 		t.Fatal(err)
 	}
@@ -81,8 +83,9 @@ func TestRunPacksADeploymentLayer(t *testing.T) {
 }
 
 func TestRunAssemblesInstallMedia(t *testing.T) {
-	// A tiny release round-trip: bundle a release, pack a layer for an
-	// empty deployment, and turn the two into install media.
+	// This is a small release round-trip: bundle a release, pack a
+	// layer for an empty deployment, and turn the two into install
+	// media.
 	src := t.TempDir()
 	for _, name := range []string{"vmlinuz", "liken.sqfs", "boot.cpio", "liken", "systemd-bootx64.efi", "grub-boot.img", "grub-core.img", "LICENSES.md"} {
 		if err := os.WriteFile(filepath.Join(src, name), []byte(name+" bytes"), 0o644); err != nil {
@@ -118,8 +121,8 @@ func TestRunAssemblesInstallMedia(t *testing.T) {
 }
 
 func TestRunBundlesARelease(t *testing.T) {
-	// One tiny release through the bundle command; the artifacts just
-	// need to exist.
+	// This sends one small release through the bundle command. The
+	// artifacts only need to exist.
 	src := t.TempDir()
 	for _, name := range []string{"vmlinuz", "liken.sqfs", "boot.cpio", "liken", "systemd-bootx64.efi", "grub-boot.img", "grub-core.img", "LICENSES.md"} {
 		if err := os.WriteFile(filepath.Join(src, name), []byte(name+" bytes"), 0o644); err != nil {

@@ -1,9 +1,9 @@
 # The NoCloud datasource's instance identity. cloud-init runs its
 # per-instance configuration (formatting the exports disk, installing
-# packages) once per instance-id and never again, so editing
-# user-data on a server that has already booted takes a new
-# instance-id to apply — or, cleaner, a factory reset (make clean),
-# since the whole point of this fixture is that it rebuilds itself
-# from the seed.
+# packages) once for each instance-id, and never again. Because of
+# this, editing user-data on a server that has already booted needs
+# a new instance-id before the change takes effect. A cleaner option
+# is a factory reset (make clean), since the whole point of this
+# fixture is that it rebuilds itself from the seed.
 instance-id: liken-lab-storage-1
 local-hostname: storage

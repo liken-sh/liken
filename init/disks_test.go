@@ -2,10 +2,10 @@ package main
 
 // Tests for disk discovery, run against a fake machine: a sysfs tree
 // and a /dev directory built in tempdirs. The fixtures here write the
-// same files the kernel would (a `device` entry marking real storage,
-// a `size` in 512-byte sectors, a `uevent` of KEY=value lines), which
-// is the point: discovery is only ever reading small text files, and
-// these tests show exactly which ones.
+// same files the kernel would write: a `device` entry marking real
+// storage, a `size` in 512-byte sectors, and a `uevent` of KEY=value
+// lines. This is the point of the tests: discovery only ever reads
+// small text files, and these tests show exactly which ones.
 
 import (
 	"fmt"
@@ -17,9 +17,9 @@ import (
 )
 
 // fakeMachine points discovery at an empty fake /sys/block and /dev,
-// restoring the real paths when the test ends. Because sysBlock and
-// devRoot are package variables, tests in this package must not run
-// in parallel.
+// and restores the real paths when the test ends. Because sysBlock
+// and devRoot are package variables, tests in this package must not
+// run in parallel.
 func fakeMachine(t *testing.T) (sys string, dev string) {
 	t.Helper()
 	sys, dev = t.TempDir(), t.TempDir()
@@ -73,11 +73,11 @@ func TestDiscoverBlockDevicesReadsSysfs(t *testing.T) {
 	sys, dev := fakeMachine(t)
 	addDisk(t, sys, dev, "vda", 2<<30, nil)
 	// SCSI-style identity on the bus device, padded the way the wire
-	// format pads it; the trimming is part of what's under test.
+	// format pads it. The trimming is part of what the test checks.
 	writeSysfs(t, filepath.Join(sys, "vda", "device"), "model", "QEMU HARDDISK   \n")
 	// virtio-style identity: a serial directly on the disk.
 	writeSysfs(t, filepath.Join(sys, "vda"), "serial", "liken-lab-state\n")
-	// A loop device has no `device` entry and is not storage.
+	// A loop device has no `device` entry, so it is not storage.
 	if err := os.MkdirAll(filepath.Join(sys, "loop0"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -114,8 +114,8 @@ func TestDiscoverPartitionsParsesUevent(t *testing.T) {
 	addDisk(t, sys, dev, "vda", 2<<30, nil)
 	addPartition(t, sys, "vda", "vda1", "liken:clusterState", 1<<30)
 	addPartition(t, sys, "vda", "vda2", "", 1<<20)
-	// A disk's sysfs directory holds much more than partitions; only
-	// entries with a `partition` file count.
+	// A disk's sysfs directory holds much more than partitions. Only
+	// entries with a `partition` file count as partitions.
 	if err := os.MkdirAll(filepath.Join(sys, "vda", "queue"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestDiscoverPartitionsParsesUevent(t *testing.T) {
 
 func TestReportBlockDevicesNarratesTheInventory(t *testing.T) {
 	// The report prints the same inventory the facts publish; both
-	// read the same fake sysfs, which is the parity under test.
+	// read the same fake sysfs, and this test checks that parity.
 	sys, dev := fakeMachine(t)
 	addDisk(t, sys, dev, "vda", 2<<30, nil)
 	writeSysfs(t, filepath.Join(sys, "vda"), "serial", "liken-lab-state\n")
@@ -162,7 +162,7 @@ func TestDiscoverBlockDevicesWithNoSysfsReportsNothing(t *testing.T) {
 
 func TestReportBlockDevicesWithNoDisks(t *testing.T) {
 	fakeMachine(t)
-	// A machine with no storage at all still narrates that fact; the
-	// world report must never be silent about a whole section.
+	// A machine with no storage at all still reports that fact. The
+	// world report must never stay silent about a whole section.
 	reportBlockDevices()
 }

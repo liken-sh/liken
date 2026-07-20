@@ -1,21 +1,21 @@
-# The image domain, where the pieces are assembled into a bootable
-# system.
+# This is the image domain, where the pieces are assembled into a
+# bootable system.
 #
 # The system is two artifacts (build.sh documents everything that
-# goes into each and why): liken.sqfs, the whole OS as a read-only
+# goes into each, and why): liken.sqfs, the whole OS as a read-only
 # squashfs image that init mounts as the root filesystem, and
-# boot.cpio, the small initramfs the boot loader stages in RAM —
-# init and the early boot's modules, nothing more.
+# boot.cpio, the small initramfs that the boot loader stages in RAM,
+# holding init and the early boot's modules and nothing more.
 #
 # Both are generic: they carry no identity and no manifests, so they
-# are the OS's own artifacts and land in this domain's dist/ by
-# default. What makes the system a deployment's is the deployment
-# layer (layer.go), loaded as a further initrd by whoever owns the
-# deployment (the root Makefile for the dev cluster, the releases
-# domain for a release build). version.mk supplies the version stamp;
-# it and the input locations are overridable because the releases
-# domain rebuilds these same artifacts under a different version into
-# its own tree.
+# are the OS's own artifacts, and they land in this domain's dist/ by
+# default. What makes the system belong to a deployment is the
+# deployment layer (layer.go), loaded as a further initrd by whoever
+# owns the deployment (the root Makefile for the dev cluster, the
+# releases domain for a release build). version.mk supplies the
+# version stamp. Both the stamp and the input locations can be
+# overridden, because the releases domain rebuilds these same
+# artifacts under a different version into its own tree.
 include ../version.mk
 DIST ?= dist
 INIT_DIST ?= ../init/dist
@@ -33,8 +33,8 @@ TRUST_VERSION := $(strip $(file <../trust/VERSION))
 HWDATA_VERSION := $(strip $(file <../hwdata/VERSION))
 
 # The prerequisites here mirror the ones the root Makefile's rule
-# declares (from its side of the directory boundary); when either
-# list changes, change the other to match.
+# declares, from its side of the directory boundary. When either list
+# changes, change the other one to match.
 $(DIST)/liken.sqfs $(DIST)/boot.cpio &: build.sh boot-modules.conf \
 		$(shell find etc -type f) \
 		$(INIT_DIST)/liken \

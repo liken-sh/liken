@@ -1,30 +1,34 @@
 package disks
 
-// Writing files into a FAT32 volume, without mounting it.
+// This file writes files into a FAT32 volume, without mounting it.
 //
-// On a running machine the kernel's vfat driver does this; a build
-// tool laying out an install image has no kernel to ask, so it plays
-// the driver's role directly. The job is smaller than it sounds
-// because of what a FAT filesystem is: the FAT itself is one 32-bit
-// entry per cluster, each naming the next cluster of its file, and a
-// directory is just a file whose bytes are 32-byte records. Writing
-// a file is: pick clusters, chain them in the table, put the bytes
-// in the clusters, and add a record to the parent directory's bytes.
+// On a running machine, the kernel's vfat driver does this. A build
+// tool that lays out an install image has no kernel to ask, so it
+// performs the driver's role directly. The job is smaller than it
+// sounds, because of what a FAT filesystem is. The FAT itself is one
+// 32-bit entry for each cluster, and each entry names the next
+// cluster of its file. A directory is only a file whose bytes are
+// 32-byte records. Writing a file means: pick clusters, chain them
+// in the table, put the bytes in the clusters, and add a record to
+// the parent directory's bytes.
 //
 // This writer is deliberately narrower than a driver. It only ever
-// fills a freshly formatted volume, once, so allocation is a bump
-// pointer (the next free cluster is always the next cluster), there
-// are no deletes and no fragmentation, and everything about the
-// directory tree can be held in memory until Close lays it down.
+// fills a freshly formatted volume, once. Because of this,
+// allocation is a bump pointer: the next free cluster is always the
+// next cluster in sequence. There are no deletes and no
+// fragmentation, and this code can hold the whole directory tree in
+// memory until Close writes it out.
 //
-// The one genuinely fiddly part is names. FAT's native names are the
-// DOS 8.3 form, eleven uppercase bytes; everything longer or
-// lowercase rides the VFAT retrofit: a chain of "long name" records
-// ahead of the real one, each carrying thirteen UTF-16 characters
-// and marked with an attribute combination (read-only + hidden +
-// system + volume label) that DOS-era readers were guaranteed to
-// skip. Firmware and every OS read them; loader.conf and
-// deployment.cpio don't fit 8.3, so this writer speaks them.
+// The one genuinely complex part is names. FAT's native names use
+// the DOS 8.3 form: eleven uppercase bytes. Any name that is longer,
+// or that uses lowercase letters, uses the VFAT extension instead: a
+// chain of "long name" records placed ahead of the real one. Each
+// long-name record carries thirteen UTF-16 characters, and carries
+// an attribute combination (read-only + hidden + system + volume
+// label) that DOS-era readers were guaranteed to skip. Firmware and
+// every current OS read these long-name records. loader.conf and
+// deployment.cpio do not fit the 8.3 form, so this writer produces
+// long-name records for them.
 
 import (
 	"encoding/binary"
@@ -35,24 +39,24 @@ import (
 	"unicode/utf16"
 )
 
-// endOfChain is the FAT entry marking a file's last cluster. Values
-// at and above 0x0FFFFFF8 all mean end-of-chain; this is the
-// conventional one every formatter writes.
+// endOfChain is the FAT entry that marks a file's last cluster.
+// Every value at and above 0x0FFFFFF8 means end-of-chain. This is
+// the conventional value that every formatter writes.
 const endOfChain = 0x0FFFFFF7 + 1
 
-// A fatFile is one file waiting for its directory record: where its
-// chain starts and how long it really is (FAT records exact sizes;
-// the chain rounds up to clusters).
+// A fatFile is one file waiting for its directory record. It
+// records where its chain starts and how long the file really is.
+// FAT records exact sizes, but the chain rounds up to full clusters.
 type fatFile struct {
 	name         string
 	firstCluster uint32
 	size         int64
 }
 
-// A fatDir accumulates a directory's children until Close writes the
-// records. Directories get their clusters at Close, after every
-// file's chain is known, because a record needs its child's first
-// cluster.
+// A fatDir accumulates a directory's children until Close writes
+// the records. Directories get their clusters at Close, after this
+// code knows every file's chain, because a record needs its child's
+// first cluster.
 type fatDir struct {
 	name         string
 	parent       *fatDir
@@ -63,7 +67,7 @@ type fatDir struct {
 
 // A FATWriter fills a formatted FAT32 volume with files. The
 // geometry comes from the volume's own boot sector, so the writer
-// agrees with the format about where everything is by construction.
+// and the format always agree about where everything is.
 type FATWriter struct {
 	dev interface {
 		io.ReaderAt
@@ -81,8 +85,9 @@ type FATWriter struct {
 	labelEntry        []byte // the volume-label record the format wrote
 }
 
-// NewFATWriter opens a freshly formatted volume for filling, reading
-// the geometry back from the boot sector the format just wrote.
+// NewFATWriter opens a freshly formatted volume for filling. It
+// reads the geometry back from the boot sector that the format just
+// wrote.
 func NewFATWriter(dev interface {
 	io.ReaderAt
 	io.WriterAt
@@ -111,9 +116,10 @@ func NewFATWriter(dev interface {
 	totalSectors := binary.LittleEndian.Uint32(boot[32:36])
 	clusters := (totalSectors - w.dataStart) / w.sectorsPerCluster
 
-	// The whole table in memory: clusters plus the two flag entries.
-	// Entries 0 and 1 echo what the format wrote; cluster 2 is the
-	// root directory's single starting cluster.
+	// This holds the whole table in memory: the clusters, plus the
+	// two flag entries. Entries 0 and 1 repeat what the format
+	// wrote. Cluster 2 is the root directory's single starting
+	// cluster.
 	w.fat = make([]uint32, clusters+2)
 	w.fat[0] = 0x0FFFFFF8
 	w.fat[1] = 0x0FFFFFFF
@@ -121,8 +127,8 @@ func NewFATWriter(dev interface {
 	w.next = 3
 
 	// The format left exactly one record in the root: the volume
-	// label. Keep it, so Close can lay the root back down label-first
-	// the way tools expect.
+	// label. This code keeps it, so that Close can write the root
+	// back with the label first, the way tools expect.
 	w.labelEntry = make([]byte, 32)
 	if _, err := dev.ReadAt(w.labelEntry, int64(w.dataStart)*SectorSize); err != nil {
 		return nil, fmt.Errorf("reading the volume label: %w", err)
@@ -141,13 +147,14 @@ func (w *FATWriter) clusterBytes() int64 {
 }
 
 // clusterOffset is a cluster's first byte on the volume. Clusters 0
-// and 1 don't exist; the data region begins at cluster 2.
+// and 1 do not exist. The data region begins at cluster 2.
 func (w *FATWriter) clusterOffset(n uint32) int64 {
 	return (int64(w.dataStart) + int64(n-2)*int64(w.sectorsPerCluster)) * SectorSize
 }
 
-// allocate takes n consecutive clusters and chains them, returning
-// the first. Write-once is what makes this a bump pointer.
+// allocate takes n consecutive clusters and chains them, and
+// returns the first one. Because the writer writes each volume only
+// once, allocate can work as a simple bump pointer.
 func (w *FATWriter) allocate(n int64) (uint32, error) {
 	if n == 0 {
 		n = 1 // even an empty directory owns one cluster
@@ -164,8 +171,9 @@ func (w *FATWriter) allocate(n int64) (uint32, error) {
 	return first, nil
 }
 
-// Mkdir registers a directory. Parents must already exist, the way
-// the archive writers here expect to be driven.
+// Mkdir registers a directory. Its parent must already exist. This
+// matches how the archive writers in this package expect to be
+// called.
 func (w *FATWriter) Mkdir(dirPath string) error {
 	dirPath = strings.Trim(dirPath, "/")
 	if _, exists := w.dirs[dirPath]; exists {
@@ -181,9 +189,10 @@ func (w *FATWriter) Mkdir(dirPath string) error {
 	return nil
 }
 
-// WriteFile streams one file's bytes into freshly allocated clusters
-// and remembers it for its directory record. Streaming matters: the
-// files here are hundreds of megabytes of OS image.
+// WriteFile streams one file's bytes into freshly allocated
+// clusters, and records the file for its directory record. Streaming
+// matters here, because the files in an OS image can be hundreds of
+// megabytes.
 func (w *FATWriter) WriteFile(filePath string, r io.Reader, size int64) error {
 	filePath = strings.Trim(filePath, "/")
 	dir, ok := w.dirs[parentOf(filePath)]
@@ -214,11 +223,12 @@ func (w *FATWriter) WriteFile(filePath string, r io.Reader, size int64) error {
 	return nil
 }
 
-// Close lays down what only the whole picture determines: each
-// directory's records (which need every child's first cluster), both
-// copies of the FAT, and the free-space accounting. Directories are
-// assigned clusters first, in one pass, so parent and child records
-// can point at each other regardless of order.
+// Close writes the data that depends on the complete directory
+// tree: each directory's records, which need every child's first
+// cluster, both copies of the FAT, and the free-space accounting.
+// Close assigns clusters to every directory first, in one pass, so
+// that parent and child records can point at each other regardless
+// of order.
 func (w *FATWriter) Close() error {
 	var all []*fatDir
 	var walk func(d *fatDir)
@@ -230,9 +240,10 @@ func (w *FATWriter) Close() error {
 	}
 	walk(w.root)
 
-	// Assignment pass: every directory gets a chain sized for its
-	// records. The root's chain starts at its fixed cluster 2 and is
-	// extended only if the label and children outgrow one cluster.
+	// This is the assignment pass. Every directory gets a chain
+	// sized for its records. The root's chain starts at its fixed
+	// cluster 2, and Close extends it only if the label and children
+	// outgrow one cluster.
 	clusterBytes := w.clusterBytes()
 	for _, d := range all {
 		size := int64(len(w.dirRecords(d, 0))) // cluster numbers don't change the length
@@ -253,8 +264,8 @@ func (w *FATWriter) Close() error {
 		d.firstCluster = first
 	}
 
-	// Content pass: with every cluster known, write each directory's
-	// records along its chain.
+	// This is the content pass. With every cluster known, this code
+	// writes each directory's records along its chain.
 	for _, d := range all {
 		records := w.dirRecords(d, d.firstCluster)
 		cluster := d.firstCluster
@@ -267,8 +278,9 @@ func (w *FATWriter) Close() error {
 		}
 	}
 
-	// Both FATs, byte for byte the same: the second copy is FAT's
-	// only redundancy, so writing it identically is the whole point.
+	// This writes both FATs, byte for byte the same. The second
+	// copy is FAT's only redundancy, so writing it identically is
+	// the whole purpose of the copy.
 	table := make([]byte, int64(w.fatSectors)*SectorSize)
 	for i, entry := range w.fat {
 		binary.LittleEndian.PutUint32(table[i*4:], entry)
@@ -280,8 +292,9 @@ func (w *FATWriter) Close() error {
 		}
 	}
 
-	// FSInfo, primary and backup: the free count is exact because the
-	// bump allocator knows precisely what it used.
+	// This writes the primary and backup FSInfo sectors. The free
+	// count is exact, because the bump allocator tracks precisely
+	// what it used.
 	free := uint32(len(w.fat)) - w.next
 	info := buildFAT32FSInfo(free, w.next)
 	for _, sector := range []int64{1, 7} {
@@ -292,12 +305,13 @@ func (w *FATWriter) Close() error {
 	return w.dev.Sync()
 }
 
-// dirRecords lays out one directory's 32-byte records: the label
-// (root only), dot entries (subdirectories only), then every child,
-// each preceded by its long-name records when the 8.3 form can't
-// carry the name alone. Short names must be unique within their
-// directory — fsck treats a duplicate as corruption — so collisions
-// among the truncated stand-ins get the classic ~N tail.
+// dirRecords lays out one directory's 32-byte records. It writes
+// the label (root only), the dot entries (subdirectories only), and
+// then every child. Each child record is preceded by its long-name
+// records when the 8.3 form cannot carry the name alone. Short
+// names must be unique within their directory, because fsck treats
+// a duplicate as corruption. For this reason, when two truncated
+// stand-in names collide, this code adds the classic ~N tail.
 func (w *FATWriter) dirRecords(d *fatDir, self uint32) []byte {
 	var records []byte
 	if d == w.root {
@@ -305,7 +319,8 @@ func (w *FATWriter) dirRecords(d *fatDir, self uint32) []byte {
 	} else {
 		// "." and ".." are ordinary records with fixed names. By
 		// specification, ".." pointing at the root writes cluster 0,
-		// not 2 — a DOS-era quirk every reader expects.
+		// not 2. This is a DOS-era exception that every reader
+		// expects.
 		parent := d.parent.firstCluster
 		if d.parent == w.root {
 			parent = 0
@@ -323,12 +338,13 @@ func (w *FATWriter) dirRecords(d *fatDir, self uint32) []byte {
 	return records
 }
 
-// plainRecord is one 32-byte record whose 8.3 name is already known.
-// The timestamps are all zero, for the same reason the cpio writer's
-// are: the image's bytes should depend on its contents, not on when
-// it was built. (FAT can't express a year before 1980, so zero dates
-// read back as nonsense-but-harmless 1980-00-00; nothing on an
-// install stick consults them.)
+// plainRecord is one 32-byte record whose 8.3 name is already
+// known. The timestamps are all zero, for the same reason as the
+// cpio writer's timestamps: the image's bytes should depend on its
+// contents, not on when it was built. FAT cannot express a year
+// before 1980, so a zero date reads back as 1980-00-00. This value
+// is meaningless but harmless, because nothing on an install stick
+// reads it.
 func plainRecord(shortName string, attr byte, firstCluster uint32, size int64) []byte {
 	r := make([]byte, 32)
 	copy(r[0:11], shortName)
@@ -339,10 +355,10 @@ func plainRecord(shortName string, attr byte, firstCluster uint32, size int64) [
 	return r
 }
 
-// namedRecords is a child's full record set: the plain record under
-// its 8.3 name, preceded by long-name records when the real name
-// needs them. taken tracks the directory's short names so no two
-// children share one.
+// namedRecords builds a child's full record set: the plain record
+// under its 8.3 name, preceded by long-name records when the real
+// name needs them. taken tracks the directory's short names, so
+// that no two children share one.
 func namedRecords(name string, attr byte, firstCluster uint32, size int64, taken map[string]bool) []byte {
 	short, needsLong := shortNameFor(name, taken)
 	taken[short] = true
@@ -354,12 +370,13 @@ func namedRecords(name string, attr byte, firstCluster uint32, size int64, taken
 }
 
 // shortNameFor derives the 11-byte 8.3 form. A name that is already
-// a valid uppercase 8.3 name needs no long-name records; everything
-// else gets an uppercased, truncated stand-in and rides with them.
-// The extension comes from the last dot, the DOS convention, and a
-// stand-in that collides with an earlier sibling's gets the classic
-// ~N tail: readers match on the long names, but the short names
-// still have to be unique or fsck calls the directory corrupt.
+// a valid uppercase 8.3 name needs no long-name records. Every
+// other name gets an uppercased, truncated stand-in, and carries
+// long-name records alongside it. The extension comes from the last
+// dot, following the DOS convention. When a stand-in collides with
+// an earlier sibling's, this code adds the classic ~N tail. Readers
+// match names using the long-name records, but the short names
+// still must be unique, or fsck reports the directory as corrupt.
 func shortNameFor(name string, taken map[string]bool) (string, bool) {
 	base, ext := name, ""
 	if i := strings.LastIndex(name, "."); i > 0 {
@@ -390,11 +407,12 @@ func shortNameFor(name string, taken map[string]bool) (string, bool) {
 	return short, needsLong
 }
 
-// longNameRecords encodes a name as VFAT long-name records: thirteen
-// UTF-16 characters per record, stored last-first, the final piece
-// flagged 0x40, every record carrying a checksum of the 8.3 name it
-// belongs to so a reader can tell an orphaned long name from a live
-// one.
+// longNameRecords encodes a name as VFAT long-name records. Each
+// record holds thirteen UTF-16 characters, and the records are
+// stored last piece first. The final piece is flagged 0x40. Every
+// record carries a checksum of the 8.3 name that it belongs to, so
+// a reader can tell a stray long-name record from one that belongs
+// to a live entry.
 func longNameRecords(name, short string) []byte {
 	units := utf16.Encode([]rune(name))
 	units = append(units, 0) // NUL-terminated, then padded with 0xFFFF

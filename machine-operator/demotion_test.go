@@ -1,11 +1,11 @@
 package main
 
-// Tests for the demotion cleanup decision: a machine whose derived
-// role is follower but whose Node object still claims control-plane
-// was demoted, and the leftover Node (with its etcd membership) must
-// be removed automatically, because a dead etcd member still counts
-// toward the quorum size and breaks the majority math the next time
-// a real leader reboots.
+// Tests for the demotion cleanup decision. A machine whose
+// derived role is follower, but whose Node object still claims
+// control-plane, was demoted. The leftover Node, with its etcd
+// membership, must be removed automatically, because a dead etcd
+// member still counts toward the quorum size and breaks the
+// majority math the next time an actual leader reboots.
 
 import (
 	"testing"
@@ -44,9 +44,9 @@ func TestACleanFollowerNeedsNothing(t *testing.T) {
 }
 
 func TestALeaderIsAlwaysCurrent(t *testing.T) {
-	// A leader's control-plane labels are exactly right, and a leader
-	// still coming up (labels not yet set) is k3s's business, not the
-	// operator's.
+	// A leader's control-plane labels are exactly right. A leader
+	// still starting up, with labels not yet set, is k3s's job, not
+	// the operator's.
 	labels := map[string]string{"node-role.kubernetes.io/control-plane": "true"}
 	d := decideDemotion(api.RoleLeader, labels, machine.RebootAuto, turnGranted)
 	if d.cleanup || d.condition.Status != "True" {

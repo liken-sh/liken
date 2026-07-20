@@ -4,29 +4,30 @@ package main
 //
 // A UEFI machine keeps its boot menu in firmware variables named
 // Boot0000, Boot0001, and so on, each holding one EFI_LOAD_OPTION:
-// the record for one bootable thing, carrying a human-readable name,
-// the location of the executable, and the arguments to hand it.
-// Three companion variables make the list mean something: BootOrder
-// (the durable preference list), BootNext (the entry to try on the
-// next boot, once; the firmware erases it after use, and that
-// one-shot behavior is what makes the blue-green fallback work), and
-// BootCurrent (read-only: the entry actually used this boot).
+// the record for one bootable thing. Each record carries a
+// human-readable name, the location of the executable, and the
+// arguments to hand it. Three companion variables give the list its
+// meaning: BootOrder (the durable preference list), BootNext (the
+// entry to try on the next boot, once; the firmware erases it after
+// use, and that one-shot behavior is what makes the blue-green
+// fallback work), and BootCurrent (read-only: the entry actually
+// used this boot).
 //
 // The record is a packed binary format much like the GPT's, with the
 // same Microsoft heritage: strings are UTF-16LE, and the location of
 // the executable is a "device path", a chain of variable-length
-// nodes narrowing from hardware to file. liken's entries need
+// nodes that narrows from hardware to file. liken's entries need
 // exactly two nodes: a hard-drive node that pins one GPT partition
 // by its unique GUID (position-independent, like liken's own
-// recognition-by-name), and a file-path node naming the executable
-// inside it, backslashes and all. Whatever follows the path list is
-// "optional data", which for a Linux EFI-stub kernel is simply the
-// kernel command line.
+// recognition by name), and a file-path node that names the
+// executable inside it, backslashes and all. Whatever follows the
+// path list is "optional data", which for a Linux EFI-stub kernel is
+// simply the kernel command line.
 //
-// The encoder writes only the entries liken itself creates. The
+// The encoder writes only the entries that liken itself creates. The
 // parser must handle more, because real firmware fills these
-// variables with vendor nodes of every kind; unknown node types are
-// skipped by their declared lengths and otherwise ignored.
+// variables with vendor nodes of every kind. This code skips unknown
+// node types by their declared lengths and otherwise ignores them.
 
 import (
 	"encoding/binary"
@@ -38,16 +39,17 @@ import (
 // own; without it an entry is listed but never chosen automatically.
 const loadOptionActive = 0x00000001
 
-// A loadOption is one Boot#### variable, decoded. Fields liken
-// doesn't model (vendor device-path nodes, exotic attributes) survive
-// a decode only to the extent each field's comment describes.
+// A loadOption is one Boot#### variable, decoded. Fields that liken
+// does not model (vendor device-path nodes, unusual attributes)
+// survive a decode only to the extent that each field's comment
+// describes.
 type loadOption struct {
 	attributes  uint32
 	description string
 
-	// hardDrive and filePath are the two device-path nodes liken
-	// cares about; nil/empty when an entry doesn't carry them (a PXE
-	// entry, a vendor recovery tool).
+	// hardDrive and filePath are the two device-path nodes that liken
+	// cares about. They are nil or empty when an entry does not
+	// carry them (a PXE entry, a vendor recovery tool).
 	hardDrive *hardDriveNode
 	filePath  string
 
@@ -57,10 +59,10 @@ type loadOption struct {
 }
 
 // A hardDriveNode identifies one partition three redundant ways: by
-// index, by extent, and by GUID. The GUID is the one that matters: it's
-// the partition's unique GUID from the GPT itself, so the entry
-// survives disks being reordered, exactly like liken's
-// recognition-by-partition-name.
+// index, by extent, and by GUID. The GUID is the one that matters.
+// It is the partition's unique GUID from the GPT itself, so the
+// entry survives disks being reordered, exactly like liken's
+// recognition by partition name.
 type hardDriveNode struct {
 	partitionNumber uint32
 	firstLBA        uint64
@@ -96,9 +98,10 @@ func parseLoadOption(b []byte) (loadOption, error) {
 	}
 	o.optionalData = rest[pathListLen:]
 
-	// Walk the device-path nodes: type, subtype, a little-endian
-	// length that includes the 4-byte header, then that node's data.
-	// The walk trusts each node's declared length and nothing else.
+	// This walks the device-path nodes: type, subtype, a
+	// little-endian length that includes the 4-byte header, then
+	// that node's data. The walk trusts each node's declared length
+	// and nothing else.
 	paths := rest[:pathListLen]
 	for len(paths) > 0 {
 		if len(paths) < 4 {
@@ -137,9 +140,10 @@ func parseLoadOption(b []byte) (loadOption, error) {
 	return o, nil
 }
 
-// encodeLoadOption is the inverse, producing the exact bytes a
-// Boot#### variable holds (again minus the efivarfs attribute word,
-// which belongs to the write, not the record).
+// encodeLoadOption is the inverse of parseLoadOption. It produces
+// the exact bytes that a Boot#### variable holds (again minus the
+// efivarfs attribute word, which belongs to the write, not the
+// record).
 func encodeLoadOption(o loadOption) []byte {
 	var paths []byte
 	if o.hardDrive != nil {

@@ -1,31 +1,32 @@
 package main
 
-// Lifting is the narrow slice of parsing the relay is allowed to do:
-// recognize the timestamp-and-level header a log format puts at the
-// front of every line, copy those two facts into the envelope, and
-// leave the line itself untouched. The k3s and containerd logs mix
-// two such formats. k3s itself and containerd log through logrus
-// (time="..." level=... msg=...), while the Kubernetes components
-// embedded in k3s log through klog, whose header is a single
-// severity letter, the month and day, and a wall-clock time
-// (I0707 13:51:16.123456 ...). A line matching neither format ships
-// with the relay's own observation time and info severity, which is
-// exact for a line just written and wrong only for unliftable lines
-// replayed long after the fact.
+// Lifting is the narrow part of parsing that the relay is allowed to
+// do. It recognizes the timestamp-and-level header that a log format
+// puts at the front of every line, copies those two facts into the
+// envelope, and leaves the line itself untouched. The k3s and
+// containerd logs mix two such formats. k3s itself and containerd
+// log through logrus (time="..." level=... msg=...). The Kubernetes
+// components embedded in k3s log through klog, whose header is a
+// single severity letter, the month and day, and a wall-clock time
+// (I0707 13:51:16.123456 ...). A line that matches neither format
+// ships with the relay's own observation time and info severity.
+// This is exact for a line just written, and wrong only for
+// unliftable lines replayed long after the fact.
 //
-// These are hand-written scanners rather than regular expressions
-// because each format is a fixed prefix: a handful of index checks
-// reads clearer than a pattern, runs on every single log line, and
-// can't backtrack.
+// This file uses hand-written scanners instead of regular
+// expressions, because each format is a fixed prefix. A handful of
+// index checks is clearer to read than a pattern, runs on every
+// single log line, and cannot backtrack.
 
 import (
 	"strings"
 	"time"
 )
 
-// lift extracts (event time, severity word) from a line's header,
-// trying logrus first (k3s's own lines dominate the volume), then
-// klog, then falling back to the observation time.
+// lift extracts the event time and severity word from a line's
+// header. It tries logrus first, because k3s's own lines make up
+// most of the volume, then tries klog, then falls back to the
+// observation time.
 func lift(line string, now time.Time) (time.Time, string) {
 	if when, severity, ok := liftLogrus(line); ok {
 		return when, severity
@@ -49,10 +50,10 @@ var logrusSeverities = map[string]string{
 	"trace":   "debug",
 }
 
-// liftLogrus recognizes logrus's text format, which always leads
+// liftLogrus recognizes logrus's text format, which always starts
 // with time="<RFC3339>" level=<word>. Any byte out of place means
-// this is not a logrus line, and the whole lift is abandoned rather
-// than half-applied.
+// this line is not a logrus line, and the function abandons the
+// whole lift instead of applying it halfway.
 func liftLogrus(line string) (time.Time, string, bool) {
 	const timePrefix = `time="`
 	if len(line) < len(timePrefix) || line[:len(timePrefix)] != timePrefix {
@@ -95,13 +96,14 @@ var klogSeverities = map[byte]string{
 }
 
 // liftKlog recognizes klog's header: Lmmdd hh:mm:ss.uuuuuu, fixed
-// width, no year. The year is taken from the observation clock, with
-// one correction: a December line read in January would land eleven
-// months in the future, so anything more than a day ahead of now is
-// pulled back a year. (Log lines from the future are otherwise
-// impossible; log lines from months ago are just an old file.)
+// width, with no year. The function takes the year from the
+// observation clock, with one correction. A December line read in
+// January would otherwise land eleven months in the future, so
+// anything more than a day ahead of now is moved back a year. Log
+// lines from the future are otherwise impossible. Log lines from
+// months ago are simply from an old file.
 func liftKlog(line string, now time.Time) (time.Time, string, bool) {
-	// Lmmdd hh:mm:ss.uuuuuu — 21 bytes before the rest of the header.
+	// Lmmdd hh:mm:ss.uuuuuu: 21 bytes before the rest of the header.
 	const headerLen = 21
 	if len(line) < headerLen {
 		return time.Time{}, "", false

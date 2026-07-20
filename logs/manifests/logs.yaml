@@ -1,46 +1,47 @@
-# The machine-logs DaemonSet: one pod per node, one relay container
-# per host log stream, so that reading any stream is `kubectl logs`
-# against the container named for it:
+# This is the machine-logs DaemonSet: one pod per node, one relay
+# container per host log stream. Because of this, reading any stream
+# is `kubectl logs` against the container named for it:
 #
 #   -c kernel      /dev/kmsg, records with syslog facility 0
 #   -c liken       /dev/kmsg, records with syslog facility 1
 #   -c k3s         the k3s log on clusterState
 #   -c containerd  containerd's log on clusterState
 #
-# One relay per source is the design; one pod for all four is the
+# One relay per source is the design. One pod for all four is the
 # packaging. Containers in a pod share the sandbox and the runtime
-# shim, so consolidating cuts the per-node overhead roughly in half
-# versus a DaemonSet per stream, while everything the per-source
-# split exists for survives at container granularity: each container
-# keeps its own stdout (the runtime files them separately, so
-# consumers still see four distinct streams), its own securityContext
-# (privilege follows the source: the kmsg relays run privileged, the
-# tailers get read-only mounts and nothing more), and its own restart
-# counter (a bug in one parser crash-loops one container, not the
-# pod). Container identity is the tag; adding a source is adding a
-# container.
+# shim, so consolidating them into one pod cuts the per-node overhead
+# roughly in half compared with a DaemonSet per stream. Everything
+# the per-source split exists for still survives at container
+# granularity: each container keeps its own stdout (the runtime
+# stores them separately, so consumers still see four distinct
+# streams), its own securityContext (privilege follows the source:
+# the kmsg relays run privileged, and the tailers get read-only
+# mounts and nothing more), and its own restart counter (a bug in
+# one parser crash-loops one container, not the whole pod). Container
+# identity is the tag. Adding a source means adding a container.
 #
 # Everything these containers emit is a JSON envelope around a
-# verbatim log line (logs/envelope.go documents the contract), so any
-# log stack someone later runs consumes the machine's own streams the
-# way it consumes every other pod's logs, with no host privileges of
-# its own.
+# verbatim log line (logs/envelope.go documents the contract).
+# Because of this, any log stack someone later runs reads the
+# machine's own streams the same way it reads every other pod's
+# logs, with no host privileges of its own.
 #
-# Delivery follows the operator wholesale, and the reasoning lives in
-# machine-operator/manifests/machine-operator.yaml: the "installed" tag resolving
-# per-node to that node's baked build, imagePullPolicy Never,
-# updateStrategy OnDelete so applying manifests never kills a pod on
-# a node that hasn't upgraded yet, and the liken.sh/os-version
-# annotation the pod steward (cluster-operator/steward.go) uses to refresh
-# each machine's pod after its upgrade lands.
+# Delivery follows the operator's pattern exactly. The reasoning
+# lives in machine-operator/manifests/machine-operator.yaml: the
+# "installed" tag that resolves per-node to that node's baked build,
+# imagePullPolicy Never, updateStrategy OnDelete so applying
+# manifests never kills a pod on a node that has not upgraded yet,
+# and the liken.sh/os-version annotation that the pod steward
+# (cluster-operator/steward.go) uses to refresh each machine's pod
+# after its upgrade lands.
 #
-# Unlike the operator, the relays hold no cluster credentials at all:
-# they read host files and write their own stdout, so there is no
+# Unlike the operator, the relays hold no cluster credentials at all.
+# They read host files and write their own stdout, so there is no
 # ServiceAccount, no RBAC, and no token mounted. The cursors emptyDir
-# holds each relay's resume point in its own subdirectory; its
-# lifecycle is the design (it survives container restarts and dies
-# with the pod or a reboot, which are exactly the moments a replay
-# from the head is correct).
+# holds each relay's resume point in its own subdirectory. This
+# lifecycle is deliberate: the emptyDir survives container restarts,
+# and is removed with the pod or on a reboot, which are exactly the
+# moments when a replay from the start is correct.
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -68,13 +69,14 @@ spec:
     spec:
       automountServiceAccountToken: false
       priorityClassName: system-node-critical
-      # Only liken nodes carry the log relays: the image exists only
-      # in a liken machine's containerd, and in a mixed cluster (a
-      # migration in progress) a foreign node could never start it.
+      # Only liken nodes carry the log relays. The image exists only
+      # in a liken machine's containerd. In a mixed cluster, such as
+      # one in the middle of a migration, a foreign node could never
+      # start it.
       nodeSelector:
         liken.sh/machine: "true"
-      # Relay logs even from a cordoned or NotReady node: a sick
-      # machine's logs are the ones somebody is looking for.
+      # Relay logs even from a cordoned or NotReady node. A failing
+      # machine's logs are usually the ones somebody needs to read.
       tolerations:
         - operator: Exists
       containers:
@@ -83,20 +85,20 @@ spec:
           imagePullPolicy: Never
           args: ["kernel"]
           securityContext:
-            # Reading /dev/kmsg takes two permissions, and only one
+            # Reading /dev/kmsg needs two permissions, and only one
             # of them can be granted narrowly. CAP_SYSLOG is the
-            # kernel's own check (the vendored kernel sets
+            # kernel's own check: the vendored kernel sets
             # CONFIG_SECURITY_DMESG_RESTRICT, so even uid 0 is
-            # refused without it). But the container runtime also
-            # gates every device open through the devices cgroup,
+            # refused without it. But the container runtime also
+            # controls every device open through the devices cgroup,
             # whose allowlist (tty, null, urandom, ...) does not
-            # include kmsg, and Kubernetes offers no per-device
-            # grant: the only spelling that opens a hostPath device
-            # is privileged, which implies every capability too.
-            # The container still only reads one device and writes
-            # its own stdout; the mount below is what actually
-            # bounds it, and privilege stays confined to the two
-            # kmsg containers rather than the pod.
+            # include kmsg. Kubernetes offers no per-device grant:
+            # the only way to open a hostPath device is privileged,
+            # which also grants every capability. The container
+            # still only reads one device and writes its own stdout.
+            # The mount below is what actually limits it, and
+            # privilege stays confined to the two kmsg containers,
+            # not the whole pod.
             privileged: true
           volumeMounts:
             - name: kmsg
@@ -108,17 +110,17 @@ spec:
         - name: liken
           image: liken.sh/logs:installed
           imagePullPolicy: Never
-          # Same device as the kernel container, the other facility:
-          # init writes its lines to /dev/kmsg precisely so they
-          # interleave with the kernel's in true order
-          # (init/console.go), and the facility field is what splits
-          # the two voices back apart.
+          # This uses the same device as the kernel container, at the
+          # other facility. init writes its lines to /dev/kmsg so
+          # they interleave with the kernel's lines in true order
+          # (see init/console.go). The facility field is what splits
+          # the two streams back apart.
           args: ["liken"]
           securityContext:
-            # privileged for the same reason as the kernel container:
-            # the runtime's devices cgroup gates the /dev/kmsg open,
-            # and privileged is the only per-container grant
-            # Kubernetes has.
+            # This container runs privileged for the same reason as
+            # the kernel container: the runtime's devices cgroup
+            # controls the /dev/kmsg open, and privileged is the
+            # only per-container grant that Kubernetes has.
             privileged: true
           volumeMounts:
             - name: kmsg
@@ -132,12 +134,13 @@ spec:
           imagePullPolicy: Never
           args: ["k3s"]
           volumeMounts:
-            # The parent directory, never the file: a hostPath of the
-            # file itself would bind-mount the inode present when the
-            # pod started, and after init's size-cap rotation renames
-            # it the container would follow the old generation
-            # forever. A directory mount resolves the name on every
-            # open, so the tailer's reopen lands on each new file.
+            # This mounts the parent directory, never the file
+            # itself. A hostPath of the file itself would bind-mount
+            # the inode present when the pod started. After init's
+            # size-cap rotation renames that file, the container
+            # would keep following the old generation forever. A
+            # directory mount resolves the name on every open, so
+            # the tailer's reopen lands on each new file.
             - name: liken-logs-dir
               mountPath: /var/lib/rancher/k3s/liken
               readOnly: true
@@ -163,9 +166,10 @@ spec:
         - name: liken-logs-dir
           hostPath:
             path: /var/lib/rancher/k3s/liken
-            # init creates this directory before k3s starts;
-            # DirectoryOrCreate keeps the pod startable in odd states
-            # (the tailer waits politely for the file either way).
+            # init creates this directory before k3s starts.
+            # DirectoryOrCreate keeps the pod startable in unusual
+            # states; the tailer waits for the file to appear either
+            # way.
             type: DirectoryOrCreate
         - name: containerd-dir
           hostPath:
@@ -173,7 +177,8 @@ spec:
             # k3s creates this directory when it first starts
             # containerd, which is after these manifests apply.
             type: DirectoryOrCreate
-        # One emptyDir, one subdirectory per relay: the cursors are
-        # all "this pod's resume state" and share one lifecycle.
+        # This is one emptyDir, with one subdirectory per relay. All
+        # the cursors together are this pod's resume state, and
+        # share one lifecycle.
         - name: cursors
           emptyDir: {}

@@ -1,8 +1,9 @@
 package machine
 
-// Tests for the deployment layer's sidecar: the digest record that
-// rides beside deployment.cpio on a boot slot, written once at
-// install time and checked at every carry.
+// Tests for the deployment layer's sidecar file. This file is the
+// digest record that sits beside deployment.cpio on a boot slot. A
+// machine writes the sidecar file once, at install time, and checks
+// it at every carry forward.
 
 import (
 	"bytes"

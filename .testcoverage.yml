@@ -1,18 +1,18 @@
-# The coverage gate, enforced before every commit (see
+# This is the coverage gate, enforced before every commit (see
 # .pre-commit-config.yaml, which runs go-test-coverage over the
-# profile the test hook writes).
+# profile that the test hook writes).
 #
-# The thresholds are a ratchet: each one is set just under what the
-# tests actually measure today, so a change that loses coverage fails
-# loudly, and a change that gains coverage should raise the number
-# here to keep the gain. Numbers only go up, and no package sits
-# below 60.
+# The thresholds only rise over time. Each one is set just under what
+# the tests actually measure today. So a change that loses coverage
+# makes the check fail with a clear error, and a change that gains
+# coverage should raise the number here to keep the gain. The numbers
+# only go up, and no package sits below 60.
 #
 # The numbers deliberately differ by package. machine/ is pure types
 # and parsing, testable to the last line. init/ is mostly boot
 # machinery (mounting, supervising k3s, the reboot syscall) that only
-# a real machine can exercise; what's unit-testable there is the
-# decision-making, which is why the decisions live in separate
+# a real machine can exercise. What is unit-testable there is the
+# decision-making. This is why the decisions live in separate
 # functions from the syscalls that act on them, and why the fake
 # sysfs, efivars, and command-line fixtures exist.
 
@@ -24,62 +24,65 @@ threshold:
 
 override:
   # The Machine API: pure functions over declared types. (Paths here
-  # are regexes over module-relative package paths.)
+  # are regular expressions over module-relative package paths.)
   - path: ^machine$
     threshold: 87
   # The identity package: minting, adoption, and the kubeconfig are
-  # pure crypto and file layout, tested end to end; what goes
-  # untested is a scattering of I/O error returns.
+  # pure crypto and file layout, and the tests cover them end to end.
+  # What stays untested is a scattering of I/O error returns.
   - path: ^identity$
     threshold: 76
   # The CLI: a dispatch table over the domain packages, which carry
-  # their own tests; untested here is main itself.
+  # their own tests. What stays untested here is main itself.
   - path: ^cli$
     threshold: 79
-  # The Kubernetes client: every verb is exercised against a real
-  # HTTP test server; what goes untested is the in-cluster
+  # The Kubernetes client: the tests exercise every verb against a
+  # real HTTP test server. What stays untested is the in-cluster
   # bootstrapping that only a pod's mounted credentials can satisfy.
   - path: ^kubernetes$
     threshold: 81
   # The machine operator: its decisions (drift, staging validation,
-  # the convergence truth table, the drain) are pure and tested; the
-  # reconcile pass that strings them together against the real facts
-  # files and the live API is exercised by the QEMU harness, not unit
-  # tests.
+  # the convergence truth table, the drain) are pure and tested. The
+  # reconcile pass that strings the decisions together, against the
+  # real facts files and the live API, is exercised by the QEMU
+  # harness, not unit tests.
   - path: ^machine-operator$
     threshold: 61
   # The cluster operator: the sweep and rollout decisions are pure
   # and tested, and the acting halves run against a miniature API
-  # server; what goes untested is main's loop.
+  # server. What stays untested is main's loop.
   - path: ^cluster-operator$
     threshold: 82
   # Init: the boot machinery itself (mounting, DHCP, the reboot
-  # syscall) is exercised by the QEMU harness, not unit tests; the
+  # syscall) is exercised by the QEMU harness, not unit tests. The
   # parsers, planners, derivations, and file-shaped actuators around
   # it are tested here against fakes.
   - path: ^init$
     threshold: 66
-  # The disks package: GPT and FAT32 are pure byte layout, tested by
-  # round-tripping against the package's own readers; untested is the
-  # ioctl that only a real block device answers.
+  # The disks package: GPT and FAT32 are pure byte layout, and the
+  # tests check them by round-tripping against the package's own
+  # readers. What stays untested is the ioctl that only a real block
+  # device answers.
   - path: ^disks$
     threshold: 85
-  # The image package: the cpio writer and the deployment layer,
-  # exercised end to end against fixture trees; what goes untested is
-  # a scattering of I/O error returns.
+  # The image package: the cpio writer and the deployment layer, and
+  # the tests exercise them end to end against fixture trees. What
+  # stays untested is a scattering of I/O error returns.
   - path: ^image$
     threshold: 83
-  # The log relays: parsing and tailing are pure or run against real
-  # temp files; what goes untested is the real /dev/kmsg device and
+  # The log relays: parsing and tailing are pure, or run against real
+  # temp files. What stays untested is the real /dev/kmsg device and
   # the clock syscalls.
   - path: ^logs$
     threshold: 77
   # The releases package: publishing, bundling, the corruption drill,
-  # and the file server, exercised against fixture channels and
-  # httptest; untested is Serve's real listener.
+  # and the file server, and the tests exercise them against fixture
+  # channels and httptest. What stays untested is Serve's real
+  # listener.
   - path: ^releases$
     threshold: 77
-  # The scaffold: the interview and the templates, exercised with
-  # scripted answers; untested is a scattering of I/O error returns.
+  # The scaffold: the interview and the templates, and the tests
+  # exercise them with scripted answers. What stays untested is a
+  # scattering of I/O error returns.
   - path: ^scaffold$
     threshold: 79

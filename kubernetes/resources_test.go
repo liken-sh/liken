@@ -1,7 +1,8 @@
 package kubernetes
 
-// The resource verbs against miniature API servers: listing, reading,
-// publishing status, patching, and evicting.
+// These tests cover the resource operations against small API
+// servers: listing, reading, publishing status, patching, and
+// evicting.
 
 import (
 	"encoding/json"

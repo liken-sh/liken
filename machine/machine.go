@@ -1,33 +1,38 @@
-// Package machine is the Machine API: liken's one configuration
-// document, as Go types.
+// Package machine is the Machine API. It defines liken's one
+// configuration document as Go types.
 //
-// A Machine is deliberately shaped like a Kubernetes resource
-// (kubelet's KubeletConfiguration, k0s's config, and Talos's machine
-// config all use the same shape) because one schema-validated
-// document can be delivered two ways. At boot, init reads it from a file baked into
-// the image (there is no API server yet). Once the cluster is up, the
-// same document exists in it as a custom resource, where the liken
-// operator publishes the machine's live facts into its status. The
-// file you hand-write and the object `kubectl get machine -o yaml`
-// returns are the same document.
+// A Machine has the same shape as a Kubernetes resource. Kubelet's
+// KubeletConfiguration, k0s's config, and Talos's machine config also
+// use this shape. This design lets one schema-validated document
+// reach the machine in two ways. At boot, init reads the document
+// from a file baked into the image, because no API server exists yet
+// at that point. After the cluster starts, the same document exists
+// in the cluster as a custom resource. There, the liken operator
+// publishes the machine's live facts into the document's status. The
+// file that a person writes by hand and the object that the command
+// `kubectl get machine -o yaml` returns are the same document.
 //
-// Two programs use this API and this package is what they share. Init
-// consumes the spec (it applies the network and sysctls at boot) and
-// produces facts; the operator consumes the facts and reconciles the
-// spec for as long as the machine runs. The division is deliberate:
-// init never talks to Kubernetes, the operator never touches boot-time
-// state, and the file at /run/liken/facts.yaml is the one-way channel
-// between them.
+// Two programs use this API, and this package is what they share.
+// Init reads the spec and applies the network settings and the
+// sysctls at boot. Init also produces the facts. The operator reads
+// the facts and reconciles the spec for as long as the machine runs.
+// This division is deliberate. Init never talks to Kubernetes. The
+// operator never touches boot-time state. The file at
+// `/run/liken/facts.yaml` is the one-way channel between the two
+// programs.
 //
-// The document's shape — the group/version it declares, its
-// metadata, the condition and phase vocabulary its status speaks —
-// is the api package's, shared with every other liken document.
+// The api package defines the document's shape: the group and
+// version it declares, its metadata, and the condition and phase
+// vocabulary that its status uses. Every other liken document shares
+// this same shape.
 //
-// A note on naming: machine.MachineSpec and machine.MachineStatus
-// stutter against Go's naming advice, deliberately. The types mirror
-// the CRD kind (Machine) and Kubernetes' XxxSpec/XxxStatus
-// convention, and matching what `kubectl explain machine.spec` shows
-// is worth more here than avoiding the echo.
+// A note on naming: the names `machine.MachineSpec` and
+// `machine.MachineStatus` repeat the package name. Go's naming advice
+// warns against this repetition, but this package repeats it on
+// purpose. The types mirror the CRD kind, `Machine`, and Kubernetes'
+// `XxxSpec`/`XxxStatus` convention. Matching what the command
+// `kubectl explain machine.spec` shows is worth more than avoiding
+// this repetition.
 package machine
 
 import (
@@ -41,50 +46,55 @@ import (
 )
 
 const (
-	// MachineManifestDir is where the image carries Machine manifests,
-	// one file per machine (<name>.yaml). One image boots a whole
-	// fleet, so the image carries every machine's manifest and each
-	// boot selects its own: by the liken.machine=<name> kernel
-	// parameter, or, on a machine with exactly one manifest, by its
-	// being the only choice.
+	// MachineManifestDir is the directory where the image carries
+	// Machine manifests, one file for each machine (<name>.yaml). One
+	// image boots a whole fleet of machines, so the image carries
+	// every machine's manifest. Each boot selects its own manifest by
+	// the liken.machine=<name> kernel parameter. On a machine with
+	// exactly one manifest, that manifest is the only choice, and the
+	// boot uses it automatically.
 	MachineManifestDir = "/etc/liken/machines"
 
-	// BootManifestPath is where init publishes the manifest this boot
-	// actually ran under (the staged or proven copy from machineState,
-	// or the image's seed on a first boot). The operator reads it
-	// through a hostPath mount to know which Machine it manages and to
-	// seed the in-cluster Machine on first boot. Like the facts file,
-	// it lives under /run because it describes the current boot only.
+	// BootManifestPath is the file where init publishes the manifest
+	// that this boot actually ran under. This manifest is the staged
+	// or proven copy from machineState, or, on a first boot, the
+	// image's seed manifest. The operator reads this file through a
+	// hostPath mount. The operator uses the file to know which Machine
+	// it manages, and to seed the in-cluster Machine on the first
+	// boot. Like the facts file, this file lives under /run because it
+	// describes only the current boot.
 	BootManifestPath = "/run/liken/machine.yaml"
 
-	// FactsPath is where init publishes what it learned about the
-	// machine, shaped exactly like MachineStatus. /run is a fresh
-	// tmpfs every boot, which suits the facts exactly: they describe
-	// the current boot only, and never survive into the next one.
+	// FactsPath is the file where init publishes what it learned about
+	// the machine. The file has the exact same shape as MachineStatus.
+	// /run is a fresh tmpfs on every boot, and this suits the facts
+	// well. The facts describe only the current boot, and never
+	// survive into the next boot.
 	FactsPath = "/run/liken/facts.yaml"
 
-	// SysctlDir is the kernel's tuning interface: one file per
-	// parameter. The sysctl helpers take the directory as a parameter
-	// so tests can point them at a miniature copy; real callers pass
-	// this.
+	// SysctlDir is the kernel's tuning interface: one file for each
+	// parameter. The sysctl helper functions take the directory as a
+	// parameter, so tests can point them at a small copy of the
+	// directory. Real callers pass this constant.
 	SysctlDir = "/proc/sys"
 )
 
-// Version is the liken version this binary was built as, stamped by
-// the build (-ldflags -X): a release name when the releases domain is
-// building, the git-described commit for a development build
-// (version.mk at the repo root explains the mechanism). It reaches
-// the cluster as status.version.liken, which the operator compares
-// against the Cluster's spec.version target to decide whether this
-// machine needs an upgrade.
+// Version is the liken version that this binary was built as. The
+// build process stamps this value using -ldflags -X. When the
+// releases domain builds the binary, the value is a release name. For
+// a development build, the value is the git-described commit
+// (version.mk at the repo root explains this mechanism). This value
+// reaches the cluster as status.version.liken. The operator compares
+// this value against the Cluster's spec.version target to decide
+// whether this machine needs an upgrade.
 var Version = "dev"
 
 // The struct tags are json, not yaml, because parsing goes through
-// sigs.k8s.io/yaml, the same converter Kubernetes tooling uses. It
-// turns YAML into JSON before unmarshalling, which is what gives
-// Kubernetes documents their camelCase convention and means these
-// structs serialize identically whether they're read from a file or
-// from the API server.
+// sigs.k8s.io/yaml, the same converter that Kubernetes tooling uses.
+// This converter turns YAML into JSON before it unmarshals the data.
+// This step gives Kubernetes documents their camelCase convention. It
+// also means these structs serialize the same way, whether the data
+// comes from a file or from the API server.
 type Machine struct {
 	APIVersion string         `json:"apiVersion"`
 	Kind       string         `json:"kind"`
@@ -93,71 +103,79 @@ type Machine struct {
 	Status     MachineStatus  `json:"status,omitzero"`
 }
 
-// MachineSpec is the declared half: what a person (or a git
-// repository, via whatever GitOps engine a deployment chooses) asks
-// this machine to be. Each field notes who acts on
-// it and when, because the actuators differ: some state can only be
-// set while the machine is being built, some can be reconciled live.
+// MachineSpec is the declared half of a Machine. It states what a
+// person asks this machine to be. A git repository can also declare
+// this, through whatever GitOps engine a deployment chooses. Each
+// field notes who acts on it and when, because the actuators differ.
+// Some state can only be set while the machine is being built. Some
+// state can be reconciled live.
 type MachineSpec struct {
-	// Network is applied by init at boot. It can't be reconciled from
-	// inside the cluster, because reaching the cluster depends on it;
-	// changes take effect on the next boot.
+	// Network is applied by init at boot. The cluster cannot reconcile
+	// this field from inside the cluster, because reaching the cluster
+	// depends on the network settings. Changes to this field take
+	// effect at the next boot.
 	Network NetworkSpec `json:"network,omitzero"`
 
-	// Sysctls is kernel tuning: parameter name to desired value, e.g.
-	// "vm.overcommit_memory": "1". Applied twice, by design: init sets
-	// them at boot so they hold before k3s starts, and the operator
-	// reconciles them live afterward, so a kubectl edit takes effect
-	// without a reboot.
+	// Sysctls is kernel tuning: it maps a parameter name to its
+	// desired value, for example "vm.overcommit_memory": "1". The
+	// system applies sysctls twice, by design. Init sets them at boot,
+	// so they hold their values before k3s starts. The operator then
+	// reconciles them live, so a kubectl edit takes effect without a
+	// reboot.
 	Sysctls map[string]string `json:"sysctls,omitempty"`
 
-	// Modules names extra kernel modules this machine loads at boot,
-	// beyond the fixed list the OS itself needs (the image's
-	// modules.conf): the drivers for whatever hardware this machine's
-	// workloads use. Init loads them once the boot's manifest is
-	// known, so they cannot serve the boot path itself; a driver the
-	// boot depends on belongs in the fixed list. The image build ships
-	// the union of every machine's declared modules, reading the same
-	// manifests it bakes, which means a module declared here is only
-	// loadable if the booted image was built from manifests that
-	// declared it; status.modules reports each name's outcome either
-	// way. Edits are staged and take effect at the next boot, like
-	// storage.
+	// Modules names extra kernel modules that this machine loads at
+	// boot, beyond the fixed list that the OS itself needs (the
+	// image's modules.conf). These extra modules are the drivers for
+	// whatever hardware this machine's workloads use. Init loads them
+	// only after it knows the boot's manifest, so these modules cannot
+	// serve the boot path itself. A driver that the boot depends on
+	// must belong in the fixed list instead. The image build ships the
+	// union of every machine's declared modules, because it reads the
+	// same manifests that it bakes into the image. This means a module
+	// declared here is only loadable if the booted image was built
+	// from manifests that also declared it. status.modules reports the
+	// outcome for each module name, either way. Edits to this field
+	// are staged and take effect at the next boot, like storage.
 	Modules []string `json:"modules,omitempty"`
 
-	// NodeLabels is this machine's scheduling identity: the labels its
-	// Kubernetes Node object carries, which is what workloads select
-	// on (which machine has the GPU, which one sits on battery-backed
-	// power). Applied twice, like sysctls: init renders them into the
-	// k3s boot drop-in so the node registers already wearing them, and
-	// the operator reconciles them live afterward. The operator also
-	// removes a label this spec once declared and no longer does; the
-	// kubelet applies registration labels but never removes stale
-	// ones, so without that pass a retracted label would linger until
-	// someone noticed. Labels applied outside this spec (kubectl
-	// label, other controllers) are never touched.
+	// NodeLabels is this machine's scheduling identity: the labels
+	// that its Kubernetes Node object carries. Workloads select
+	// machines using these labels, for example to find which machine
+	// has the GPU, or which machine runs on battery-backed power. The
+	// system applies node labels twice, like sysctls. Init renders the
+	// labels into the k3s boot drop-in, so the node already carries
+	// them when it registers. The operator then reconciles the labels
+	// live afterward. The operator also removes a label that this spec
+	// once declared but no longer declares. The kubelet applies
+	// registration labels but never removes stale ones, so without
+	// this removal step, a retracted label would remain until someone
+	// noticed it. The operator never touches labels applied outside
+	// this spec, such as labels set by kubectl label or by other
+	// controllers.
 	NodeLabels map[string]string `json:"nodeLabels,omitempty"`
 
-	// Storage assigns storage roles to disks (see storage.go). Applied
-	// by init at boot, before k3s: a filesystem can't be swapped under
-	// a running cluster. Edits are staged to the machineState
-	// filesystem and take effect at the next boot; RebootPolicy says
-	// who initiates that boot.
+	// Storage assigns storage roles to disks (see storage.go). Init
+	// applies this field at boot, before k3s starts, because a
+	// filesystem cannot be swapped while a cluster is running. Edits
+	// are staged to the machineState filesystem and take effect at the
+	// next boot. RebootPolicy says who starts that boot.
 	Storage StorageSpec `json:"storage,omitzero"`
 
-	// RebootPolicy is what the operator may do when applying the spec
-	// requires a reboot (today: any storage change). Manual, the
-	// default, stages the change and reports it; any next boot
-	// applies it. Auto lets the operator reboot the machine itself.
-	// Manual is the default because on a single-node cluster a reboot
-	// is a total outage, and a mistyped edit should never reboot the
-	// machine automatically.
+	// RebootPolicy states what the operator may do when applying the
+	// spec requires a reboot. Today, only a storage change requires a
+	// reboot. Manual, the default, stages the change and reports it;
+	// the next boot, whenever it happens, applies the change. Auto
+	// lets the operator reboot the machine itself. Manual is the
+	// default because a reboot on a single-node cluster is a total
+	// outage, and a mistyped edit should never reboot the machine
+	// automatically.
 	RebootPolicy RebootPolicy `json:"rebootPolicy,omitempty"`
 }
 
-// RebootPolicy is who initiates the reboot a staged change waits on.
-// Anything unrecognized reads as Manual, so an unrecognized value can
-// never cause an automatic reboot.
+// RebootPolicy states who starts the reboot that a staged change
+// waits on. The system treats any unrecognized value as Manual, so an
+// unrecognized value can never cause an automatic reboot.
 type RebootPolicy string
 
 const (
@@ -173,45 +191,51 @@ func (s MachineSpec) RebootPolicyOrDefault() RebootPolicy {
 }
 
 // NetworkSpec is deliberately almost empty. The default is zero
-// configuration: DHCP on the first physical interface, hostname from
-// the manifest, DNS from the lease. Fields exist here only for
-// machines that need to deviate from that.
+// configuration: DHCP on the first physical interface, the hostname
+// from the manifest, and DNS from the DHCP lease. Fields exist here
+// only for machines that need to differ from this default.
 type NetworkSpec struct {
 	// Interfaces configures the machine's interfaces explicitly, each
-	// by name. Empty means the zero-configuration default above. A
-	// machine in a cluster typically declares two: an uplink that
-	// still speaks DHCP, and the cluster-facing interface with the
-	// static address its peers were told to find it at.
+	// by name. An empty value means the zero-configuration default
+	// described above. A machine in a cluster typically declares two
+	// interfaces. One is an uplink that still uses DHCP. The other is
+	// the cluster-facing interface, which uses the static address
+	// that other machines were configured to use when they contact
+	// it.
 	Interfaces []InterfaceSpec `json:"interfaces,omitempty"`
 }
 
-// InterfaceSpec configures one interface. The zero value beyond Name
-// means DHCP: static addressing is the deviation, so it's the part
-// that must be spelled out.
+// InterfaceSpec configures one interface. Beyond Name, the zero value
+// means DHCP. Static addressing is the deviation from the default, so
+// a person must spell it out explicitly.
 type InterfaceSpec struct {
-	// Name is the interface to configure (e.g. "eth1"), as the kernel
-	// names it. With no udev to rename anything, kernel names follow
-	// hardware enumeration order, which is stable for fixed hardware.
+	// Name is the interface to configure (for example, "eth1"), using
+	// the name that the kernel gives it. Because no udev process
+	// renames interfaces, kernel names follow the hardware enumeration
+	// order, which stays stable for fixed hardware.
 	Name string `json:"name"`
 
-	// Address is a static address in CIDR form ("10.10.0.1/24"); the
-	// prefix length is how the kernel learns the subnet, so it is not
-	// optional. Empty means DHCP on this interface.
+	// Address is a static address in CIDR form (for example,
+	// "10.10.0.1/24"). The prefix length tells the kernel the subnet,
+	// so the prefix length is not optional. An empty value means DHCP
+	// on this interface.
 	Address string `json:"address,omitempty"`
 
-	// Gateway makes this interface the default route. Optional even
-	// for static addresses: a cluster segment with nothing to route to
-	// declares none, and the uplink's DHCP lease supplies the real one.
+	// Gateway makes this interface the default route. This field is
+	// optional, even for static addresses. A cluster segment with
+	// nothing to route to declares no gateway, and the uplink's DHCP
+	// lease supplies the real default route.
 	Gateway string `json:"gateway,omitempty"`
 
-	// Nameservers to use alongside whatever DHCP leases supply.
+	// Nameservers lists nameservers to use in addition to any that
+	// DHCP leases supply.
 	Nameservers []string `json:"nameservers,omitempty"`
 }
 
-// Parse reads a Machine manifest from its bytes. Parsing is strict
+// Parse reads a Machine manifest from its bytes. Parsing is strict,
 // because a misspelled field name in a manifest should produce an
-// error someone sees, rather than becoming a setting that silently
-// never applies.
+// error that someone sees. Without strict parsing, a misspelled field
+// would become a setting that silently never applies.
 func Parse(raw []byte) (*Machine, error) {
 	m := &Machine{}
 	if err := yaml.UnmarshalStrict(raw, m); err != nil {
@@ -224,9 +248,10 @@ func Parse(raw []byte) (*Machine, error) {
 }
 
 // Load reads a Machine manifest from a file. A machine with no
-// manifest is still a valid machine (everything defaults), but a
-// manifest that exists and doesn't parse, or declares some other kind,
-// is a configuration error and is reported as one.
+// manifest is still a valid machine, because every field defaults.
+// But a manifest that exists and does not parse, or that declares
+// some other kind, is a configuration error. Load reports this error
+// as a configuration error.
 func Load(path string) (*Machine, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {

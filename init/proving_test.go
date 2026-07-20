@@ -1,8 +1,8 @@
 package main
 
-// The proving lifecycle's decision points, exercised against a
-// tempdir store and a fake efivarfs: trial detection, the fallback
-// verdict, BootNext arming, and BootOrder repair.
+// This file tests the proving lifecycle's decision points against a
+// tempdir store and a fake efivarfs. It tests trial detection, the
+// fallback verdict, BootNext arming, and BootOrder repair.
 
 import (
 	"os"
@@ -13,8 +13,9 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// slotFirmware is a fake efivarfs carrying both slots' entries and a
-// BootOrder, the way an installed machine's firmware looks.
+// slotFirmware is a fake efivarfs that carries both slots' entries
+// and a BootOrder. This matches the way an installed machine's
+// firmware looks.
 func slotFirmware(t *testing.T, order ...uint16) string {
 	t.Helper()
 	return fakeEFIVars(t, map[string][]byte{
@@ -92,8 +93,9 @@ func TestAStagedReleaseAwaitingItsRebootIsLeftStanding(t *testing.T) {
 	}
 }
 
-// provenRelease records a proven release standing on a slot, the way
-// promotion (or the first reconcile's seed) leaves the store.
+// provenRelease records a proven release standing on a slot. This
+// matches the state that promotion, or the seed from the first
+// reconcile, leaves in the store.
 func provenRelease(t *testing.T, root, version, slot string) {
 	t.Helper()
 	raw, _, err := machine.RenderSystemRelease(version, slot, "")
@@ -125,9 +127,10 @@ func TestArmProvingBootWritesTheMarkerThenBootNext(t *testing.T) {
 
 func TestArmProvingBootRefusesWithoutAVerifiedFallback(t *testing.T) {
 	root := t.TempDir()
-	// No proven record at all: the fallback can't be verified, so the
-	// trial must be refused; arming it anyway could brick the machine
-	// with its own upgrade.
+	// No proven record exists. The code cannot verify the fallback,
+	// so it must refuse the trial. Arming the trial anyway could
+	// make the machine permanently unusable through its own
+	// upgrade.
 	stagedRelease(t, root, "0.2.0", "B")
 	dir := slotFirmware(t, 0x0002, 0x0003)
 
@@ -145,8 +148,9 @@ func TestArmProvingBootAssertsTheFallbackFirst(t *testing.T) {
 	root := t.TempDir()
 	provenRelease(t, root, "0.2.0", "B")
 	stagedRelease(t, root, "0.3.0", "A")
-	// The firmware still prefers slot A from install time: arming a
-	// trial of slot A must first flip the fallback to proven slot B.
+	// The firmware still prefers slot A from install time. Arming a
+	// trial of slot A must first change the fallback to proven slot
+	// B.
 	dir := slotFirmware(t, 0x0002, 0x0003)
 
 	armProvingBoot(efiActuator{dir: dir}, root, "B")
@@ -191,7 +195,7 @@ func TestAssertProvenSlotPutsTheProvenSlotFirst(t *testing.T) {
 	if err := machine.SystemReleases(root).WriteProven(raw); err != nil {
 		t.Fatal(err)
 	}
-	// The firmware still remembers the install's order: A first.
+	// The firmware still holds the install's order: slot A first.
 	dir := slotFirmware(t, 0x0002, 0x0003, 0x0000)
 
 	assertProvenSlot(efiActuator{dir: dir}, root)
@@ -200,7 +204,8 @@ func TestAssertProvenSlotPutsTheProvenSlotFirst(t *testing.T) {
 		t.Errorf("slot B should lead, everything else in order: % x", got)
 	}
 
-	// Idempotent: a second assertion writes nothing new and keeps the order.
+	// The assertion is idempotent: a second call writes nothing new
+	// and keeps the same order.
 	assertProvenSlot(efiActuator{dir: dir}, root)
 	if got := readBootOrder(dir); !slices.Equal(got, []uint16{0x0003, 0x0002, 0x0000}) {
 		t.Errorf("the assertion must be idempotent: % x", got)
@@ -229,9 +234,9 @@ func TestSettleSystemReleaseIgnoresExternalMediaBoots(t *testing.T) {
 }
 
 func TestRejectStagedSystemSurvivesAFailedRecord(t *testing.T) {
-	// The record's write can fail (machineState remounted read-only by
-	// a dying disk, say); the rejection must still be reported for
-	// this boot's facts.
+	// The record's write can fail, for example when a dying disk
+	// remounts machineState read-only. Even then, the code must
+	// still report the rejection as part of this boot's facts.
 	parent := t.TempDir()
 	if err := os.Chmod(parent, 0o555); err != nil {
 		t.Fatal(err)
@@ -245,8 +250,9 @@ func TestRejectStagedSystemSurvivesAFailedRecord(t *testing.T) {
 }
 
 func TestAStagedReleaseWaitsForAFromDiskBoot(t *testing.T) {
-	// External media is running (bootSlot is empty): the boot can't
-	// judge a slot trial it isn't part of, so the record just waits.
+	// External media is running, so bootSlot is empty. This boot
+	// cannot judge a slot trial that it is not part of, so the
+	// record just waits.
 	root := t.TempDir()
 	stagedRelease(t, root, "0.2.0", "B")
 	boot := machine.BootStatus{}
@@ -259,8 +265,8 @@ func TestAStagedReleaseWaitsForAFromDiskBoot(t *testing.T) {
 }
 
 func TestArmProvingBootIgnoresARecordForTheRunningSlot(t *testing.T) {
-	// A record staged for the very slot that is running has no trial
-	// to arm: rebooting into yourself proves nothing.
+	// A record staged for the slot that is already running has no
+	// trial to arm. Rebooting into the same slot proves nothing.
 	root := t.TempDir()
 	stagedRelease(t, root, "0.2.0", "B")
 	dir := slotFirmware(t, 0x0002, 0x0003)
@@ -300,8 +306,8 @@ func TestSettleSystemReleaseToleratesAnUnreadableStagedRecord(t *testing.T) {
 	}
 }
 
-// sealFile makes one file unreadable for the duration of a test, the
-// shape of a store on a dying disk.
+// sealFile makes one file unreadable for the duration of a test.
+// This matches the shape of a store on a dying disk.
 func sealFile(t *testing.T, path string) {
 	t.Helper()
 	if err := os.Chmod(path, 0o000); err != nil {
@@ -338,9 +344,10 @@ func TestAssertProvenSlotToleratesAGarbageProvenRecord(t *testing.T) {
 }
 
 func TestAssertProvenSlotLeavesTheOrderWhenTheSlotHasNoEntry(t *testing.T) {
-	// The store says slot B is proven but the firmware has no entry
-	// answering to it (a machine whose NVRAM was reset): rewriting the
-	// order around a missing entry would prefer nothing.
+	// The store says that slot B is proven, but the firmware has no
+	// entry for it. This happens on a machine whose NVRAM was reset.
+	// Rewriting the order around a missing entry would prefer
+	// nothing.
 	root := t.TempDir()
 	provenRelease(t, root, "0.2.0", "B")
 	dir := fakeEFIVars(t, map[string][]byte{
@@ -359,7 +366,8 @@ func TestAssertProvenSlotReportsAFailedWrite(t *testing.T) {
 	root := t.TempDir()
 	provenRelease(t, root, "0.2.0", "B")
 	dir := slotFirmware(t, 0x0002, 0x0003)
-	// The variable refuses the write, the way flaky firmware does.
+	// The variable rejects the write. This matches the behavior of
+	// flaky firmware.
 	if err := os.Chmod(filepath.Join(dir, "BootOrder-"+efiGlobalVariable), 0o444); err != nil {
 		t.Fatal(err)
 	}
@@ -372,8 +380,8 @@ func TestAssertProvenSlotReportsAFailedWrite(t *testing.T) {
 }
 
 func TestArmProvingBootIgnoresAGarbageStagedRecord(t *testing.T) {
-	// Boot-time vetting owns the rejection verdict; the reboot path
-	// just declines to arm anything.
+	// Boot-time vetting owns the rejection verdict. The reboot path
+	// does not arm anything in this case.
 	root := t.TempDir()
 	if err := machine.SystemReleases(root).WriteStaged([]byte("not a release record")); err != nil {
 		t.Fatal(err)

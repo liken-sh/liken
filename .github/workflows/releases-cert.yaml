@@ -1,22 +1,23 @@
-# The channel's certificate. Linode terminates TLS for the
-# releases.liken.sh bucket with a certificate its owner uploads —
-# there is no ACME on their side — so this workflow is the ACME
-# client, run monthly: prove control of the name with a DNS-01
-# challenge against the liken.sh zone, then hand the fresh
-# certificate to the bucket. Let's Encrypt certificates live 90 days;
-# a monthly cadence means the one being replaced always has plenty of
-# life left, so a failed run is a warning, not an outage.
+# This is the channel's certificate. Linode terminates TLS for the
+# releases.liken.sh bucket with a certificate that its owner uploads.
+# Linode offers no ACME on their side. So this workflow is the ACME
+# client, run monthly: it proves control of the name with a DNS-01
+# challenge against the liken.sh zone, then gives the fresh
+# certificate to the bucket. Let's Encrypt certificates last 90 days.
+# A monthly cadence means the certificate being replaced always has
+# plenty of time left before expiry, so a failed run is a warning, not
+# an outage.
 #
-# Everything here rides one credential: RELEASES_CERT_TOKEN, a Linode
-# token scoped to Domains and Object Storage read/write, delivered to
-# this repository by Terraform (liken.sh/terraform.tf). Nothing
-# persists between runs — each run mints a fresh ACME account and a
-# fresh certificate, which Let's Encrypt's rate limits accommodate at
-# this volume many times over.
+# Everything here depends on one credential: RELEASES_CERT_TOKEN, a
+# Linode token scoped to Domains and Object Storage read/write,
+# delivered to this repository by Terraform (liken.sh/terraform.tf).
+# Nothing persists between runs. Each run mints a fresh ACME account
+# and a fresh certificate, and Let's Encrypt's rate limits allow this
+# volume many times over.
 #
-# workflow_dispatch is not just for rehearsal: dispatching this
-# workflow is also how the certificate exists in the first place, and
-# the remedy any time the handshake check below reports trouble.
+# workflow_dispatch is not just for rehearsal. Dispatching this
+# workflow is also how the certificate first comes to exist, and it
+# is the remedy any time the handshake check below reports trouble.
 name: releases-cert
 
 on:
@@ -35,9 +36,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      # lego is a single static binary and the runner needs nothing
-      # else, so there is no checkout here. Pinned by version, like
-      # every vendored input in this repository.
+      # lego is a single static binary, and the runner needs nothing
+      # else. So this workflow has no checkout step. This step pins
+      # lego by version, like every vendored input in this
+      # repository.
       - name: fetch lego
         run: |
           curl --fail --silent --show-error --location \
@@ -45,11 +47,11 @@ jobs:
             https://github.com/go-acme/lego/releases/download/v5.2.2/lego_v5.2.2_linux_amd64.tar.gz
           tar -xzf lego.tar.gz lego
 
-      # DNS-01: lego plants a TXT record in the liken.sh zone through
-      # Linode's API, waits for Let's Encrypt to see it, and cleans it
-      # up. The generous propagation window is for Linode's
-      # nameservers, which pick up zone edits on a refresh cycle
-      # rather than instantly.
+      # This is the DNS-01 challenge: lego adds a TXT record to the
+      # liken.sh zone through Linode's API, waits for Let's Encrypt to
+      # see it, then removes it. The long propagation window accounts
+      # for Linode's nameservers, which pick up zone edits on a
+      # refresh cycle rather than immediately.
       - name: obtain a certificate
         env:
           LINODE_TOKEN: ${{ secrets.RELEASES_CERT_TOKEN }}
@@ -59,10 +61,10 @@ jobs:
           ./lego run --accept-tos --email c@guid.foo \
             --dns linode --domains releases.liken.sh
 
-      # The bucket holds at most one certificate, so renewal is
-      # delete-then-upload. The delete is allowed to fail: a bucket
-      # that has never held a certificate answers it with an error
-      # that means nothing here.
+      # The bucket holds at most one certificate, so renewal deletes
+      # the old one, then uploads the new one. The delete step is
+      # allowed to fail: a bucket that has never held a certificate
+      # returns an error here, and that error means nothing here.
       - name: install the certificate on the bucket
         env:
           LINODE_TOKEN: ${{ secrets.RELEASES_CERT_TOKEN }}
@@ -81,11 +83,12 @@ jobs:
               --data @- \
               https://api.linode.com/v4/object-storage/buckets/us-east/releases.liken.sh/ssl
 
-      # Prove it the way a downloader meets it: a real handshake with
-      # the public name, presenting a certificate that both names the
-      # channel and has at least 60 days to live — which a freshly
-      # minted 90-day certificate always does, so anything less means
-      # an old certificate is still answering. The retry loop gives
+      # This step proves the certificate the way a downloader meets
+      # it: a real handshake with the public name, checking that the
+      # served certificate both names the channel and has at least 60
+      # days left before expiry. A freshly minted 90-day certificate
+      # always meets that condition, so anything less means an old
+      # certificate is still being served. The retry loop gives
       # Linode's edge a bounded few minutes to start serving the new
       # certificate.
       - name: prove the handshake

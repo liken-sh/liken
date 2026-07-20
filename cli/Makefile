@@ -1,20 +1,21 @@
-# The cli domain: the liken toolkit, the one program here that runs on
-# an operator's workstation instead of inside a machine (main.go's
-# header comment explains what it is and why the logic lives in the
-# domain packages it dispatches to).
+# This is the cli domain: the liken toolkit, the one program here
+# that runs on an operator's workstation instead of inside a machine.
+# main.go's header comment explains what the toolkit is, and why its
+# logic lives in the domain packages it dispatches to.
 
-# The same version stamp every liken binary carries (see
+# This is the same version stamp that every liken binary carries. See
 # init/Makefile for the full explanation of the -X mechanism, and
-# version.mk for where the version comes from); the toolkit reports
-# it via `liken version`, which matters once the binary ships with
-# releases and outlives any one checkout.
+# version.mk for where the version comes from. The toolkit reports
+# this version through `liken version`, which matters once the
+# binary ships with releases and outlives any one checkout.
 include ../version.mk
 DIST ?= dist
 
-# Static for the same practical reason as everything else here: the
-# toolkit ships in a release tarball and has to run on whatever Linux
-# the operator has, with no libc expectations. -trimpath keeps this
-# machine's filesystem layout out of the binary.
+# This build is static for the same practical reason as everything
+# else here. The toolkit ships in a release tarball and has to run on
+# whatever Linux the operator has, with no libc expectations.
+# -trimpath keeps this machine's filesystem layout out of the
+# binary.
 $(DIST)/liken: ../go.mod ../go.sum $(wildcard *.go) \
 		$(wildcard ../identity/*.go) $(wildcard ../machine/*.go) \
 		$(wildcard ../image/*.go) $(wildcard ../releases/*.go) \

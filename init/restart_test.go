@@ -1,9 +1,9 @@
 package main
 
 // Tests for the restart path's decisions and file effects: what a
-// restart intent applies, what it refuses, and what story the facts
-// tell afterward. The bounce itself (stop k3s, start k3s) is the
-// supervisor's, proven in the lab.
+// restart intent applies, what it refuses, and what the facts show
+// afterward. The supervisor handles the restart itself, stopping and
+// starting k3s, and the lab tests prove that part.
 
 import (
 	"os"
@@ -17,9 +17,9 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// restartFixture builds a restartState over tempdir stores with
-// recording seams instead of the real renderers, plus the current
-// cluster document it pretends this boot ran.
+// restartFixture builds a restartState over tempdir stores. It uses
+// recording seams instead of the real renderers, plus a current
+// cluster document that stands in for the one this boot ran.
 type restartFixture struct {
 	state           *restartState
 	root            string
@@ -62,7 +62,7 @@ func newRestartFixture(t *testing.T) *restartFixture {
 	return f
 }
 
-// stageCluster stages a mutation of the fixture's current document.
+// stageCluster stages a change to the fixture's current document.
 func (f *restartFixture) stageCluster(t *testing.T, mutate func(*cluster.ClusterSpec)) string {
 	t.Helper()
 	doc := *f.state.clusterDoc
@@ -156,9 +156,10 @@ func TestRestartRefusesWithNothingStaged(t *testing.T) {
 }
 
 func TestRestartRefusesAnAlreadyAttemptedDocument(t *testing.T) {
-	// The intent is just a doorbell; the stores are the authority. A
-	// document this restart (or a previous boot) already tried waits
-	// for the operator's promotion or the next boot's verdict.
+	// The intent only signals that work might exist; the stores
+	// decide what to apply. A document that this restart, or a
+	// previous boot, already tried waits for the operator's promotion
+	// or the next boot's decision.
 	f := newRestartFixture(t)
 	hash := f.stageCluster(t, func(s *cluster.ClusterSpec) {
 		s.Features = map[string]*cluster.FeatureConfig{"traefik": {}}
@@ -209,8 +210,8 @@ func TestRestartRejectsAGarbageStagedDocument(t *testing.T) {
 func TestRestartRetractsADroppedFeaturesManifests(t *testing.T) {
 	f := newRestartFixture(t)
 
-	// The image ships a manifest for the iscsi feature, and a prior
-	// boot seeded it into k3s's auto-deploy directory.
+	// The image includes a manifest for the iscsi feature, and a
+	// previous boot seeded it into k3s's auto-deploy directory.
 	features := t.TempDir()
 	seeded := t.TempDir()
 	originalFeatures, originalManifests := featuresDir, k3sManifestsDir
@@ -228,7 +229,7 @@ func TestRestartRetractsADroppedFeaturesManifests(t *testing.T) {
 		}
 	}
 
-	// This boot ran with iscsi declared; the staged document drops it.
+	// This boot ran with iscsi declared. The staged document drops it.
 	f.state.clusterDoc.Spec.Features = map[string]*cluster.FeatureConfig{"iscsi": {}}
 	f.stageCluster(t, func(s *cluster.ClusterSpec) {
 		s.Features = nil

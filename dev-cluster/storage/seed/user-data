@@ -1,21 +1,22 @@
 #cloud-config
 # The storage server's entire configuration. cloud-init reads this
-# file from the seed ISO on first boot and turns a stock Debian image
-# into the lab's filer: an NFSv4 export and an iSCSI target (the two
-# protocols liken's storage-client features speak), and an
-# authenticated container registry (the fixture liken's registry
-# mirrors and credentials are drilled against). Nothing is
-# configured by hand; wipe the root disk (make clean) and the next
-# boot rebuilds the server from this file alone. (Almost alone: the
-# Makefile appends ssh_authorized_keys with this checkout's minted
-# lab key, so the committed seed carries no identity.)
+# file from the seed ISO on first boot, and turns a stock Debian
+# image into the lab's filer: an NFSv4 export and an iSCSI target
+# (the two protocols that liken's storage-client features speak),
+# and an authenticated container registry (the fixture that liken's
+# registry mirrors and credentials are drilled against). Nothing is
+# configured by hand. Wipe the root disk (make clean), and the next
+# boot rebuilds the server from this file alone. This file is almost
+# the whole story: the Makefile appends ssh_authorized_keys with this
+# checkout's minted lab key, so the committed seed carries no
+# identity.
 
 hostname: storage
 
-# A serial-console login for poking at the server. This guest lives
+# A serial-console login for inspecting the server. This guest lives
 # on a host-local network segment and holds nothing but lab fixtures,
-# so a trivial root password costs nothing and saves fishing for SSH
-# keys during a drill.
+# so a simple root password costs nothing, and saves the trouble of
+# finding SSH keys during a drill.
 chpasswd:
   expire: false
   users:
@@ -26,33 +27,34 @@ chpasswd:
 package_update: true
 packages:
   # The kernel NFS server: nfsd itself is in the kernel, and this
-  # package is the userspace that starts it and feeds it the exports
-  # table. The reference implementation liken's mount.nfs is drilled
-  # against.
+  # package is the userspace program that starts it and feeds it the
+  # exports table. This is the reference implementation that liken's
+  # mount.nfs is drilled against.
   - nfs-kernel-server
-  # The iSCSI target. Linux has two: LIO, the in-kernel target
-  # configured through configfs by targetcli, and tgt, a userspace
+  # The iSCSI target. Linux has two: LIO, the in-kernel target that
+  # targetcli configures through configfs, and tgt, a userspace
   # daemon configured by a text file. LIO is what production filers
-  # embed; tgt is one process reading one config file, which is
-  # exactly the amount of machinery a fixture serving one LUN needs.
-  # Performance is beside the point here — the drill is the client's
-  # login, not the server's throughput.
+  # embed. tgt is one process that reads one config file, which is
+  # exactly the amount of machinery that a fixture serving one LUN
+  # needs. Performance does not matter here, because the drill tests
+  # the client's login, not the server's throughput.
   - tgt
   # The container registry: Debian's build of CNCF distribution, the
-  # reference registry everyone else's is measured against. One
-  # daemon, one YAML config. It runs here as an authenticated
-  # pull-through mirror of Docker Hub, which is both halves of what
-  # liken's registries drill needs: a mirror endpoint for
-  # spec.registries, and a login for the registry-credentials Secret.
+  # reference registry that everyone else's registry is measured
+  # against. It has one daemon and one YAML config. It runs here as
+  # an authenticated pull-through mirror of Docker Hub, which covers
+  # both parts of what liken's registries drill needs: a mirror
+  # endpoint for spec.registries, and a login for the
+  # registry-credentials Secret.
   - docker-registry
-  # htpasswd, to mint the registry's credential file.
+  # htpasswd, to create the registry's credential file.
   - apache2-utils
 
-# The exports disk arrives blank, like every disk in this lab; the
-# server formats it on first boot. The by-id path is the disk's QEMU
-# serial number (see the Makefile), so this never depends on probe
-# order. fs_setup skips a disk that already carries a filesystem, so
-# a reboot never reformats the exports.
+# The exports disk arrives blank, like every disk in this lab, and
+# the server formats it on first boot. The by-id path is the disk's
+# QEMU serial number (see the Makefile), so this never depends on
+# probe order. fs_setup skips a disk that already carries a
+# filesystem, so a reboot never reformats the exports disk.
 fs_setup:
   - device: /dev/disk/by-id/virtio-storage-exports
     filesystem: ext4
@@ -67,44 +69,47 @@ mounts:
       "defaults,nofail",
     ]
 
-# Both services read drop-in directories, which is what makes writing
-# their configuration before their packages install safe: dpkg owns
-# /etc/exports and /etc/tgt/targets.conf as conffiles and would
-# quarrel over pre-existing copies, but a .d file is nobody's
-# conffile.
+# Both services read drop-in directories, and this is what makes it
+# safe to write their configuration before their packages install.
+# dpkg owns /etc/exports and /etc/tgt/targets.conf as conffiles, and
+# would raise a conflict over copies that exist beforehand, but a .d
+# file is not a conffile for any package.
 write_files:
   # The NFS export: the whole exports filesystem, to the cluster
-  # segment only. NFSv4 needs no fsid=0 pseudo-root gymnastics on a
-  # modern kernel; clients mount the real path (storage:/srv/nfs).
-  # no_root_squash because the clients are CSI provisioners creating
-  # per-volume directories as root; squashing root is a courtesy for
-  # multi-tenant filers, and this one has exactly one tenant.
+  # segment only. NFSv4 needs no fsid=0 pseudo-root arrangement on a
+  # modern kernel, so clients mount the real path (storage:/srv/nfs).
+  # no_root_squash is set because the clients are CSI provisioners
+  # that create per-volume directories as root. Squashing root is a
+  # courtesy for multi-tenant filers, and this filer has exactly one
+  # tenant.
   - path: /etc/exports.d/liken.exports
     content: |
       /srv/nfs 10.10.0.0/24(rw,sync,no_subtree_check,no_root_squash)
   # The iSCSI target: one target, one LUN, backed by the whole luns
-  # disk. tgt with no initiator restrictions accepts any initiator
-  # that logs in — an open door that would be negligent on a real
-  # filer and is exactly right for a fixture every lab machine must
-  # reach. The IQN's naming authority is the lab itself; the machines'
-  # initiator IQNs (iqn.2026-07.sh.liken:<name>) name liken.
+  # disk. tgt, with no initiator restrictions, accepts any initiator
+  # that logs in. This open door would be careless on a real filer,
+  # and is exactly right for a fixture that every lab machine must
+  # reach. The lab itself is the IQN's naming authority; the
+  # machines' initiator IQNs (iqn.2026-07.sh.liken:<name>) name
+  # liken.
   - path: /etc/tgt/conf.d/liken.conf
     content: |
       <target iqn.2026-07.sh.liken.lab:storage>
           backing-store /dev/disk/by-id/virtio-storage-luns
       </target>
-  # The registry's configuration, at a path of our own rather than
+  # The registry's configuration, at a path of its own rather than
   # the package's config.yml, which is a dpkg conffile (the same
-  # reasoning as the .d files above; the systemd drop-in below points
-  # the daemon here). Plain HTTP, deliberately: the machines' trust
-  # store carries only the Mozilla roots, so a lab CA would mean
-  # rebuilding images, and containerd treats an http:// mirror
-  # endpoint as plain by its URL scheme alone. htpasswd auth over
-  # plain HTTP is the fixture's whole point — the drill is whether
-  # containerd presents credentials, not whether TLS works.
-  # proxy.remoteurl makes it a pull-through mirror: a pull for any
-  # Docker Hub image lands here, is fetched upstream once, cached on
-  # the root disk, and served to the whole fleet after.
+  # reasoning as the .d files above applies here; the systemd
+  # drop-in below points the daemon at this path). This uses plain
+  # HTTP on purpose: the machines' trust store carries only the
+  # Mozilla roots, so a lab CA would mean rebuilding images, and
+  # containerd treats an http:// mirror endpoint as plain by its URL
+  # scheme alone. htpasswd authentication over plain HTTP is the
+  # whole point of this fixture: the drill tests whether containerd
+  # presents credentials, not whether TLS works. proxy.remoteurl
+  # makes this registry a pull-through mirror: a pull for any Docker
+  # Hub image lands here, is fetched from upstream once, is cached on
+  # the root disk, and is served to the whole fleet after that.
   - path: /etc/docker/registry/liken-config.yml
     content: |
       version: 0.1
@@ -126,13 +131,14 @@ write_files:
       ExecStart=/usr/bin/docker-registry serve /etc/docker/registry/liken-config.yml
 
 # Package install starts the daemons before this stage runs, and tgt
-# reads conf.d only at startup, so restart it once its config is
-# certainly in place. exportfs -ra does the same for nfsd without a
-# restart: the exports table is pushed into the kernel, not read at
-# start. The registry gets its credential first — one committed lab
-# login (liken / pull-through-lab; a fixture on a host-local segment,
-# the same posture as the root password above) — then a restart to
-# pick up the drop-in pointing at our config.
+# reads conf.d only at startup, so this restarts tgt once its config
+# is certainly in place. exportfs -ra does the same job for nfsd
+# without a restart: it pushes the exports table into the kernel,
+# rather than relying on nfsd to read it at start. The registry gets
+# its credential first, a single committed lab login (liken /
+# pull-through-lab, a fixture on a host-local segment, the same
+# approach as the root password above), then a restart to pick up
+# the drop-in that points at this config.
 runcmd:
   - [systemctl, restart, tgt]
   - [exportfs, -ra]

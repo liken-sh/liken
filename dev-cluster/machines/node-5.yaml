@@ -1,7 +1,7 @@
-# node-5: the lab's second follower. It exists so drills can watch
-# workload machines run through control-plane changes: a leader's
-# rolling reboot, or its outright loss, should be invisible to a
-# follower.
+# node-5: the lab's second follower. It exists so drills can watch a
+# workload machine run through control-plane changes. A leader's
+# rolling reboot, or the outright loss of a leader, should be
+# invisible to a follower.
 apiVersion: liken.sh/v1alpha1
 kind: Machine
 metadata:
@@ -10,14 +10,15 @@ spec:
   # node-1.yaml explains why the lab's machines choose Auto.
   rebootPolicy: Auto
   # The unclaimed-hardware drill (milestone 11): declaring the USB
-  # mass-storage drivers here puts them aboard the deployment layer
-  # — the layer ships the union of every machine's declared modules
-  # — without loading them anywhere else. A stick hot-plugged into
-  # *another* node then plays the whole story: its interface sits
-  # unclaimed (status names these modules as the candidates), the
-  # operator declares one on that machine's spec, and the reboot
-  # binds it. Both drivers ship so the report shows a multi-candidate
-  # match, which is USB mass storage's normal condition.
+  # mass-storage drivers here puts them aboard the deployment layer.
+  # The layer ships the union of every machine's declared modules, so
+  # this declaration does not load these drivers anywhere else. A
+  # stick plugged into a different node then shows the whole story:
+  # its interface stays unclaimed (status names these modules as the
+  # candidates), the operator declares one module on that machine's
+  # spec, and the reboot binds it. Both drivers ship so the report
+  # shows a match with more than one candidate, which is the normal
+  # condition for USB mass storage.
   modules: [usb-storage, uas]
   network:
     interfaces:

@@ -53,12 +53,12 @@ func TestRolesAreOrderedAndSkipUndeclared(t *testing.T) {
 	}
 }
 
-// The canonical order matters in two ways: it is the partition
+// The canonical order matters in two ways. It is the partition
 // layout when roles share a disk, and it puts the earliest readers
-// first. The boot roles lead for the firmware's sake (the BIOS boot
-// code earliest of all), and machineState comes before the data
-// roles because a boot must find that partition before it has read
-// any spec.
+// first. The boot roles lead so the firmware can find them: the BIOS
+// boot code comes earliest of all. machineState comes before the
+// data roles, because a boot must find that partition before it has
+// read any spec.
 func TestRolesCanonicalOrder(t *testing.T) {
 	one := &StorageRole{Device: "/dev/vda"}
 	spec := StorageSpec{

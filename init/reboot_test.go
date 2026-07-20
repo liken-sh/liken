@@ -1,9 +1,10 @@
 package main
 
-// Tests for the intent watcher's decisions: when each disruption
-// kind fires and what it carries. The shutdown sequence a reboot
-// triggers (kill, unmount, the reboot syscall) is PID-1 territory
-// and belongs to the QEMU harness.
+// These tests check the intent watcher's decisions: when each
+// disruption kind fires, and what data it carries. The shutdown
+// sequence that a reboot triggers (kill, unmount, the reboot
+// syscall) runs only as PID 1. Tests for that sequence belong to
+// the QEMU harness.
 
 import (
 	"context"
@@ -15,8 +16,8 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// watchIntents arms the watcher over a tempdir with fast polls and
-// hands back all three channels.
+// watchIntents starts the watcher over a temporary directory with
+// fast polls, and it returns all three channels.
 func watchIntents(t *testing.T) (string, chan machine.RebootIntent, chan machine.RestartIntent, chan machine.ModulesIntent) {
 	t.Helper()
 	dir := t.TempDir()
@@ -30,7 +31,8 @@ func watchIntents(t *testing.T) (string, chan machine.RebootIntent, chan machine
 func TestWatchDeliversARebootIntent(t *testing.T) {
 	dir, reboots, _, _ := watchIntents(t)
 
-	// A few empty polls happen first: no file, no delivery.
+	// A few empty polls happen first: no file exists yet, so nothing
+	// is delivered.
 	select {
 	case got := <-reboots:
 		t.Fatalf("nothing was requested yet: %+v", got)
@@ -52,9 +54,9 @@ func TestWatchDeliversARebootIntent(t *testing.T) {
 }
 
 func TestWatchHonorsAnUnreadableRebootIntent(t *testing.T) {
-	// The file's presence is the trigger; content only improves the
-	// message. A garbled intent must still reboot the machine rather
-	// than strand a request.
+	// The file's presence is the trigger. Its content only improves
+	// the message. Even a garbled intent must still reboot the
+	// machine; the watcher must not lose the request.
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "reboot-intent.yaml"), []byte("{garbled"), 0o644); err != nil {
 		t.Fatal(err)
@@ -88,8 +90,8 @@ func TestWatchConsumesARestartIntentAndKeepsWatching(t *testing.T) {
 		t.Fatal("the watcher never delivered the restart intent")
 	}
 
-	// The intent was consumed: the file is gone, so the poll can't
-	// fire it twice.
+	// The function consumed the intent: the file is gone, so a poll
+	// cannot deliver it twice.
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		if intent, _ := machine.ReadRestartIntent(dir); intent == nil {
@@ -101,7 +103,7 @@ func TestWatchConsumesARestartIntentAndKeepsWatching(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 
-	// And the watch is still alive: a second request also arrives.
+	// The watch is still running: a second request also arrives.
 	if err := machine.WriteRestartIntent(dir, &machine.RestartIntent{Reason: "another change"}); err != nil {
 		t.Fatal(err)
 	}
@@ -131,8 +133,9 @@ func TestWatchConsumesAModulesIntentAndKeepsWatching(t *testing.T) {
 		t.Fatal("the watcher never delivered the modules intent")
 	}
 
-	// Consumed, like the restart intent: the machine lives on, so the
-	// file must not fire twice.
+	// The function consumes this intent like the restart intent,
+	// because the machine keeps running. The file must not deliver
+	// twice.
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		if intent, _ := machine.ReadModulesIntent(dir); intent == nil {
@@ -144,7 +147,7 @@ func TestWatchConsumesAModulesIntentAndKeepsWatching(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 
-	// And the watch is still alive for the next one.
+	// The watch is still running for the next intent.
 	if err := machine.WriteModulesIntent(dir, &machine.ModulesIntent{Reason: "another edit"}); err != nil {
 		t.Fatal(err)
 	}
@@ -159,9 +162,9 @@ func TestWatchConsumesAModulesIntentAndKeepsWatching(t *testing.T) {
 }
 
 func TestWatchPrefersARebootWhenBothIntentsStand(t *testing.T) {
-	// A reboot re-renders everything a restart would, so when both
-	// files exist the heavier one wins and the restart file simply
-	// burns with the boot.
+	// A reboot re-renders everything that a restart would also
+	// render. So when both files exist, the reboot takes priority,
+	// and the restart file disappears with the boot's tmpfs.
 	dir := t.TempDir()
 	if err := machine.WriteRestartIntent(dir, &machine.RestartIntent{Reason: "restart"}); err != nil {
 		t.Fatal(err)

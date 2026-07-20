@@ -3,25 +3,27 @@ package main
 // From one machine to a cluster: deciding what this machine is, and
 // telling k3s.
 //
-// k3s draws the same line liken does: leaders run a control plane,
-// followers run workloads and take direction (k3s's names for the
-// same roles are "server" and "agent", and those words appear here
-// only where k3s's own files and flags demand them). Which one this
-// machine should be is not the machine's own business to declare:
-// the Cluster manifest names the leaders, and a machine derives its
-// role by looking for its own name in that list. Everything
-// role-specific about starting k3s follows from that one derivation.
+// k3s draws the same line that liken does: leaders run a control
+// plane, and followers run workloads and take direction (k3s's names
+// for the same roles are "server" and "agent", and those words
+// appear here only where k3s's own files and flags require them).
+// Which role this machine should have is not the machine's own
+// business to declare. The Cluster manifest names the leaders, and a
+// machine derives its role by looking for its own name in that list.
+// Everything role-specific about starting k3s follows from that one
+// derivation.
 //
-// k3s is configured by file, not flags (the supervisor's empty
-// argument lists are deliberate), and its config loader has a feature
-// built for exactly liken's situation: alongside a config file, k3s
-// reads every *.yaml in a sibling <name>.yaml.d/ directory as
-// drop-ins. So the split is: what a person decided lives in the
-// image's static files (/etc/rancher/k3s/config.yaml for leaders,
-// agent.yaml for followers, both reviewable in the repo), and what
-// only the boot can know (this machine's node IP, the cluster's
-// address plan, where the join token sits) lands in a drop-in
-// written here. Init never rewrites a file a person wrote.
+// k3s is configured by file, not by flags (the supervisor's empty
+// argument lists are deliberate), and its config loader has a
+// feature built for exactly liken's situation: alongside a config
+// file, k3s reads every *.yaml in a sibling <name>.yaml.d/ directory
+// as drop-ins. So the split is this: what a person decided lives in
+// the image's static files (/etc/rancher/k3s/config.yaml for
+// leaders, agent.yaml for followers, both reviewable in the repo),
+// and what only the boot can know (this machine's node IP, the
+// cluster's address plan, where the join token sits) lands in a
+// drop-in that this file writes. Init never rewrites a file that a
+// person wrote.
 
 import (
 	"crypto/rand"
@@ -41,53 +43,57 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// Package variables rather than constants so tests can point the
-// derivations at files of their own making.
+// These are package variables rather than constants, so tests can
+// point the derivations at files of their own making.
 var (
 	// The static halves, shipped in the image.
 	k3sServerConfig = "/etc/rancher/k3s/config.yaml"
 	k3sAgentConfig  = "/etc/rancher/k3s/agent.yaml"
 
 	// tokenPath is where the image carries the cluster's join token,
-	// minted offline like the CAs it hashes (see the identity package).
-	// Handed to k3s as a token-file so the secret itself never
-	// appears in a config file or on a command line.
+	// minted offline like the CAs it hashes (see the identity
+	// package). This code hands the token to k3s as a token-file, so
+	// the secret itself never appears in a config file or on a
+	// command line.
 	tokenPath = "/etc/liken/token"
 
 	// seedSourceDir is where the image bakes k3s's seed files, the
-	// tree seedClusterState copies onto the clusterState filesystem.
+	// tree that seedClusterState copies onto the clusterState
+	// filesystem.
 	seedSourceDir = "/var/lib/rancher"
 )
 
-// leaderJoinConfig decides a leader's datastore keys, by leader
-// count. One leader is exactly the cluster liken has always run:
-// sqlite (via kine), no etcd, nothing to join. Keeping single-node
-// cheap is deliberate. More than one leader means embedded etcd, and
-// the first entry in spec.leaders is the founding leader: it renders
-// cluster-init: true, which on the migration boot tells k3s to move
-// the existing sqlite datastore into etcd in place (the documented
-// path that made starting on sqlite safe rather than a dead end).
-// Every other leader points server: at the founder, using the
-// founder's declared address on the node network, or the endpoint
-// when it declares none, and joins. Rejoins keep the same flags
-// every boot, which is k3s's recommended steady state.
+// leaderJoinConfig decides a leader's datastore keys, based on leader
+// count. One leader is exactly the cluster that liken has always
+// run: sqlite (via kine), no etcd, nothing to join. Keeping
+// single-node cheap is deliberate. More than one leader means
+// embedded etcd, and the first entry in spec.leaders is the founding
+// leader. The founding leader renders cluster-init: true, which on
+// the migration boot tells k3s to move the existing sqlite datastore
+// into etcd in place (the documented path that made starting on
+// sqlite safe rather than a dead end). Every other leader points
+// server: at the founder, using the founder's declared address on
+// the node network, or the endpoint when the founder declares no
+// address, and joins. Rejoins keep the same flags every boot, which
+// is k3s's recommended steady state.
 //
 // The founding leader matters only for deriving configuration: it is
 // the first name in a list, nothing more. etcd's raft leader is
-// elected and moves between members; the founder holds no ongoing
-// special position, and once the cluster is up it is an ordinary
+// elected and moves between members. The founder holds no ongoing
+// special position, and once the cluster is up, it is an ordinary
 // member among an odd number of them.
 //
 // An adopted cluster (spec.origin: adopted) changes one assumption:
-// the datastore already exists, in a cluster liken did not create,
-// and initializing a second one next to it would split the cluster
-// in two. So under adoption every leader joins: the founder through
-// the endpoint (the one address the existing control plane is known
-// to be reachable at), the others preferring the founder as usual.
-// Nobody renders cluster-init or falls back to sqlite, not even a
-// lone leader. Each joining leader becomes an etcd member and raft
-// replicates the existing keyspace to it, so the cluster's state
-// carries over without ever being exported or copied.
+// the datastore already exists, in a cluster that liken did not
+// create, and initializing a second one next to it would split the
+// cluster in two. So under adoption, every leader joins: the founder
+// through the endpoint (the one address that the existing control
+// plane is known to be reachable at), and the others prefer the
+// founder as usual. No leader renders cluster-init or falls back to
+// sqlite, not even a lone leader. Each joining leader becomes an etcd
+// member, and raft replicates the existing keyspace to it, so the
+// cluster's state carries over without ever being exported or
+// copied.
 func leaderJoinConfig(clusterDoc *cluster.Cluster, name, manifestDir string) (clusterInit bool, joinURL string) {
 	if clusterDoc == nil {
 		return false, ""
@@ -114,12 +120,13 @@ func leaderJoinConfig(clusterDoc *cluster.Cluster, name, manifestDir string) (cl
 }
 
 // nodeAddress picks which of the machine's addresses is its node IP:
-// the address Kubernetes traffic uses, and the one other nodes are
-// told to reach it at. The Cluster's nodeCIDR decides: the interface
-// whose address falls inside it is the cluster-facing one. A machine
-// with several interfaces needs this to be explicit; k3s left to
-// itself picks the interface holding the default route, which on a
-// machine with an internet uplink is exactly the wrong one.
+// the address that Kubernetes traffic uses, and the one that other
+// nodes are told to reach it at. The Cluster's nodeCIDR decides
+// this. The interface whose address falls inside nodeCIDR is the
+// cluster-facing one. A machine with several interfaces needs this
+// choice to be explicit. If left to decide on its own, k3s picks the
+// interface that holds the default route, which on a machine with an
+// internet uplink is exactly the wrong interface.
 func nodeAddress(clusterDoc *cluster.Cluster, conns []*connection) (ip, ifname string) {
 	if clusterDoc == nil || clusterDoc.Spec.Network.NodeCIDR == "" {
 		return "", ""
@@ -137,11 +144,12 @@ func nodeAddress(clusterDoc *cluster.Cluster, conns []*connection) (ip, ifname s
 	return "", ""
 }
 
-// k3sBootInputs gathers everything the drop-in needs that only this
-// boot could decide: writeK3sBootConfig fills it in, k3sBootConfig
-// renders it. A struct rather than a parameter list because seven
-// positional arguments with adjacent strings and bools invite
-// transposition; named fields read correctly at the call site.
+// k3sBootInputs gathers everything that the drop-in needs and that
+// only this boot could decide. writeK3sBootConfig fills it in, and
+// k3sBootConfig renders it. This is a struct rather than a parameter
+// list, because seven positional arguments with adjacent strings and
+// bools invite mistakes. Named fields read correctly at the call
+// site.
 type k3sBootInputs struct {
 	role          api.Role
 	clusterDoc    *cluster.Cluster
@@ -153,19 +161,21 @@ type k3sBootInputs struct {
 	nodeLabels    map[string]string
 }
 
-// k3sBootConfig renders the drop-in: everything k3s must be told that
-// only this boot could decide. Plain key: value lines, because every
-// value here is a string k3s maps onto one of its flags.
+// k3sBootConfig renders the drop-in: everything that k3s must be
+// told and that only this boot could decide. It renders plain
+// key: value lines, because every value here is a string that k3s
+// maps onto one of its flags.
 func k3sBootConfig(in k3sBootInputs) string {
 	role, clusterDoc := in.role, in.clusterDoc
 	var b strings.Builder
 	b.WriteString("# Written by liken at boot: the configuration only the boot can\n")
 	b.WriteString("# derive, joined with the static file this directory sits beside.\n")
 
-	// The join token, for both roles: the leader requires exactly this
-	// token from anyone joining, and a follower presents it. Because
-	// the token embeds a hash of the cluster CA, a follower also uses
-	// it to verify it is joining the cluster it thinks it is.
+	// The join token applies to both roles: the leader requires
+	// exactly this token from anyone joining, and a follower presents
+	// it. Because the token embeds a hash of the cluster CA, a
+	// follower also uses it to verify that it is joining the cluster
+	// it thinks it is.
 	if in.haveToken {
 		fmt.Fprintf(&b, "token-file: %s\n", tokenPath)
 	}
@@ -175,81 +185,86 @@ func k3sBootConfig(in k3sBootInputs) string {
 		// direction from": a follower points at the endpoint.
 		fmt.Fprintf(&b, "server: %s\n", clusterDoc.Spec.Endpoint)
 	} else {
-		// The disable list: which of k3s's bundled components (Traefik,
-		// the service load balancer, metrics-server) stay off. liken
-		// disables them on principle — anything beyond the control
-		// plane should be a declared, visible workload — and the
-		// Cluster's spec.features is that declaration, so the list is
-		// computed: the bundled set minus the cluster's opt-ins
-		// (DisabledComponents, in the cluster package). It renders on
-		// leaders only, because disable is a server-side key an agent
-		// would refuse, and always as the complete list, never a
-		// fragment merged with a default somewhere else, so the value
-		// has exactly one author. A machine with no cluster document
-		// disables everything bundled: the minimum viable cluster is
-		// the default, and features are always an opt-in.
+		// The disable list: which of k3s's bundled components
+		// (Traefik, the service load balancer, metrics-server) stay
+		// off. liken disables them on principle: anything beyond the
+		// control plane should be a declared, visible workload. The
+		// Cluster's spec.features is that declaration, so this code
+		// computes the list as the bundled set minus the cluster's
+		// opt-ins (DisabledComponents, in the cluster package). This
+		// renders on leaders only, because disable is a server-side
+		// key that an agent would refuse. It always renders as the
+		// complete list, never a fragment merged with a default
+		// somewhere else, so the value has exactly one author. A
+		// machine with no cluster document disables everything
+		// bundled: the minimum viable cluster is the default, and
+		// features are always an opt-in.
 		if disabled := clusterDoc.DisabledComponents(); len(disabled) > 0 {
 			b.WriteString("disable:\n")
 			for _, name := range disabled {
 				fmt.Fprintf(&b, "  - %s\n", name)
 			}
 		}
-		// The Helm controller is not on the disable list because it is
-		// not a deployable component: it is a controller compiled into
-		// the k3s server process, watching for HelmChart resources to
-		// render, and holding informer caches whether or not any
-		// exist. On a small machine that residency is worth naming, so
-		// it follows the same rule as the bundled components: off
-		// unless the cluster declares the helm feature — or a feature
-		// that requires it, the way traefik does, since k3s deploys
-		// Traefik through a HelmChart.
+		// The Helm controller is not on the disable list, because it
+		// is not a deployable component. It is a controller compiled
+		// into the k3s server process. It watches for HelmChart
+		// resources to render, and it holds informer caches whether
+		// or not any exist. On a small machine, this memory use is
+		// worth naming, so this controller follows the same rule as
+		// the bundled components: off unless the cluster declares the
+		// helm feature, or a feature that requires it, the way
+		// traefik does, since k3s deploys Traefik through a
+		// HelmChart.
 		if !clusterDoc.FeatureEnabled("helm") {
 			b.WriteString("disable-helm-controller: true\n")
 		}
 		// The embedded cloud controller manager is in the same
 		// position: a controller inside the k3s server process,
 		// spending memory and holding a leader-election lease on
-		// every leader. On real clouds an external provider replaces
-		// it; on bare metal its only real job here is running the
-		// service load balancer (klipper-lb lives inside it since k3s
-		// moved ServiceLB there), so it runs exactly when servicelb
-		// is declared. Without it the kubelet initializes the node
-		// itself — addresses and all — which is the ordinary
-		// arrangement for a machine that is not in anyone's cloud.
+		// every leader. On real clouds, an external provider replaces
+		// it. On bare metal, its only real job here is running the
+		// service load balancer (klipper-lb lives inside it, since
+		// k3s moved ServiceLB there), so it runs exactly when
+		// servicelb is declared. Without it, the kubelet initializes
+		// the node itself, addresses included, which is the ordinary
+		// arrangement for a machine that runs in no cloud.
 		if !clusterDoc.FeatureEnabled("servicelb") {
 			b.WriteString("disable-cloud-controller: true\n")
 		}
-		// The network policy controller, likewise embedded: it turns
-		// NetworkPolicy resources into per-node packet filtering,
-		// which the flannel CNI cannot do alone. A cluster that
-		// wants that enforcement declares it; on one that doesn't,
-		// the controller would spend its memory watching for
-		// resources that never come. Kubernetes without it accepts
-		// NetworkPolicy documents and enforces nothing — precisely
-		// flannel's own posture, and the reason the feature's
-		// absence is a safe default rather than a broken one.
+		// The network policy controller is likewise embedded. It
+		// turns NetworkPolicy resources into per-node packet
+		// filtering, which the flannel CNI cannot do alone. A cluster
+		// that wants that enforcement declares it. On a cluster that
+		// does not, the controller would spend its memory watching
+		// for resources that never come. Without this controller,
+		// Kubernetes accepts NetworkPolicy documents and enforces
+		// nothing, which matches flannel's own behavior. This is why
+		// the feature's absence is a safe default rather than a
+		// broken one.
 		if !clusterDoc.FeatureEnabled("network-policy") {
 			b.WriteString("disable-network-policy: true\n")
 		}
 		if clusterDoc != nil {
 			// The datastore keys, decided by leaderJoinConfig: the
-			// founding leader of a multi-leader cluster runs (and, on the
-			// migration boot, creates) embedded etcd; the other leaders
-			// join it. A single leader renders neither and stays sqlite.
+			// founding leader of a multi-leader cluster runs embedded
+			// etcd (and creates it, on the migration boot), and the
+			// other leaders join it. A single leader renders neither
+			// key and stays on sqlite.
 			if in.clusterInit {
 				b.WriteString("cluster-init: true\n")
 			} else if in.joinURL != "" {
 				fmt.Fprintf(&b, "server: %s\n", in.joinURL)
 			}
 			// The embedded registry mirror (Spegel) is a server-side
-			// key: the control plane runs the coordination, and every
-			// node participates through the mirror entries init renders
-			// into registries.yaml (registries.go).
+			// key. The control plane runs the coordination, and every
+			// node participates through the mirror entries that init
+			// renders into registries.yaml (registries.go).
 			if clusterDoc.Spec.Registries.Embedded {
 				b.WriteString("embedded-registry: true\n")
 			}
-			// The cluster's address plan is leader configuration;
-			// followers learn it from the control plane they join.
+			// The cluster's address plan is leader configuration.
+			// Followers learn it from the control plane that they
+			// join.
 			net := clusterDoc.Spec.Network
 			for _, entry := range []struct{ key, value string }{
 				{"cluster-cidr", net.ClusterCIDR},
@@ -265,22 +280,23 @@ func k3sBootConfig(in k3sBootInputs) string {
 	}
 
 	// The node IP and the interface it lives on, when the Cluster's
-	// nodeCIDR identified one. node-ip is what the kubelet advertises;
-	// flannel-iface is which wire pod-to-pod traffic rides. They must
-	// agree, and they must both point at the cluster segment.
+	// nodeCIDR identified one. node-ip is what the kubelet
+	// advertises. flannel-iface is which interface carries pod-to-pod
+	// traffic. They must agree, and they must both point at the
+	// cluster segment.
 	if in.nodeIP != "" {
 		fmt.Fprintf(&b, "node-ip: %s\n", in.nodeIP)
 		fmt.Fprintf(&b, "flannel-iface: %s\n", in.nodeInterface)
 	}
 
-	// The spec's node labels, so the node registers already wearing
-	// its scheduling identity: a freshly reinstalled machine must not
-	// spend its first minutes as a blank node that workloads select
-	// against wrongly. The + suffix is k3s's append syntax for list
-	// values; a plain node-label key in a drop-in would replace the
-	// static file's list, erasing liken.sh/machine=true, and appending
-	// is the point of a drop-in. Sorted, so the same spec always
-	// renders the same bytes.
+	// The spec's node labels, so the node registers with its
+	// scheduling identity already set. A freshly reinstalled machine
+	// must not spend its first minutes as a blank node that workloads
+	// wrongly select against. The + suffix is k3s's append syntax for
+	// list values. A plain node-label key in a drop-in would replace
+	// the static file's list, erasing liken.sh/machine=true, and
+	// appending is the whole point of a drop-in. This code sorts the
+	// labels, so the same spec always renders the same bytes.
 	if len(in.nodeLabels) > 0 {
 		b.WriteString("node-label+:\n")
 		for _, name := range slices.Sorted(maps.Keys(in.nodeLabels)) {
@@ -296,19 +312,19 @@ const k3sServerDB = "/var/lib/rancher/k3s/server/db"
 
 // purgeLeaderLeftovers removes a demoted machine's old control-plane
 // datastore. A machine that served as a leader and was demoted keeps
-// its etcd data on clusterState, and etcd refuses to let a
-// permanently-removed member rejoin with its old data-dir, so a
-// later re-promotion would fail against the leftover data. A
+// its etcd data on clusterState. etcd refuses to let a
+// permanently-removed member rejoin with its old data directory, so
+// a later re-promotion would fail against the leftover data. A
 // follower has no reason to keep a datastore, and deleting it is
 // what makes demotion truly reversible.
 //
-// The proven-source guard is what makes this safe to automate: a
-// *staged* document that demotes this machine is still on trial, and
-// if it fails to prove (imagine an edit that wrongly demotes the
-// only leader), the fallback boots the leader role again and needs
-// its datastore exactly where it was. The cleanup happens only after
-// a demotion has already proved out, meaning the machine joined its
-// cluster as a follower and the operator promoted the document; it
+// The proven-source guard is what makes this safe to automate. A
+// staged document that demotes this machine is still on trial. If it
+// fails to prove (for example, an edit that wrongly demotes the only
+// leader), the fallback boots the leader role again and needs its
+// datastore exactly where it was. The cleanup happens only after a
+// demotion has already proved out: the machine joined its cluster as
+// a follower, and the operator promoted the document. The cleanup
 // runs on the boot after that.
 func purgeLeaderLeftovers(role api.Role, clusterManifestSource machine.ManifestSource, dbDir string) {
 	if role != api.RoleFollower || clusterManifestSource != machine.ManifestSourceProven {
@@ -326,17 +342,18 @@ func purgeLeaderLeftovers(role api.Role, clusterManifestSource machine.ManifestS
 
 // persistNodePassword gives k3s's node password durable storage. On
 // its first join, a machine mints a random secret (its "node
-// password"), the leader records it, and every reconnect after must
-// present the same one: it's what stops a stranger from registering
-// as an existing node and receiving its kubelet certificates. k3s
-// keeps it at /etc/rancher/node/password, which on liken is the RAM
-// root: the password would vanish every reboot, and the machine
-// would present the wrong secret when it tried to rejoin its own
-// cluster. The password is machine identity, and the machine's
-// durable identity data lives on machineState, so /etc/rancher/node
-// becomes a symlink onto that filesystem. A machine whose
-// machineState is memory-backed keeps the tmpfs default: nothing
-// about it survives reboots anyway.
+// password"). The leader records it, and every reconnect after that
+// must present the same secret. This is what stops a stranger from
+// registering as an existing node and receiving its kubelet
+// certificates. k3s keeps this secret at
+// /etc/rancher/node/password, which on liken is the RAM root: the
+// password would vanish on every reboot, and the machine would
+// present the wrong secret when it tried to rejoin its own cluster.
+// The password is machine identity, and the machine's durable
+// identity data lives on machineState, so /etc/rancher/node becomes
+// a symlink onto that filesystem. A machine whose machineState is
+// memory-backed keeps the tmpfs default, since nothing about it
+// survives reboots anyway.
 func persistNodePassword(storage machine.StorageStatus) {
 	if storage.MachineState.Backing != machine.BackingPartition {
 		return
@@ -361,22 +378,23 @@ func persistNodePassword(storage machine.StorageStatus) {
 	fmt.Printf("liken: node identity: /etc/rancher/node persists on machineState\n")
 }
 
-// mintNodePassword writes the node password k3s would otherwise mint
-// for itself on first join. Letting k3s write it is a power cut away
-// from a machine locked out of its own cluster: k3s's write is a
-// plain create, and a cut between the create and the data reaching
-// disk leaves a 0-byte file, which every boot after presents as an
-// empty password and the cluster refuses ("node password not set"),
-// forever. k3s honors a password file that already exists, so init
-// mints it first, with the same atomic, fsynced write the staging
-// files get, in the same format k3s generates (32 hex characters of
-// real randomness).
+// mintNodePassword writes the node password that k3s would otherwise
+// mint for itself on first join. Letting k3s write it risks locking
+// a machine out of its own cluster after a single power cut. k3s's
+// write is a plain create, and a cut between the create and the data
+// reaching disk leaves a 0-byte file. Every boot after that presents
+// an empty password, and the cluster refuses it ("node password not
+// set"), forever. k3s honors a password file that already exists, so
+// init mints the password first, with the same atomic, fsynced write
+// that the staging files get, in the same format that k3s generates
+// (32 hex characters of real randomness).
 //
-// A password that is already here is kept: the cluster recorded it
-// at registration and would refuse a replacement. A 0-byte file is
-// the torn write described above, not a credential, so it counts as
-// absent; the machine this recovers is one whose cut happened before
-// registration, and one cut after was unrecoverable either way.
+// A password that already exists here is kept, because the cluster
+// recorded it at registration and would refuse a replacement. A
+// 0-byte file is the torn write described above, not a credential,
+// so it counts as absent. This recovers a machine whose cut happened
+// before registration; a cut after registration was unrecoverable
+// either way.
 func mintNodePassword(dir string) error {
 	path := filepath.Join(dir, "password")
 	if existing, err := os.ReadFile(path); err == nil && len(existing) > 0 {
@@ -395,10 +413,11 @@ func mintNodePassword(dir string) error {
 // to start.
 func writeK3sBootConfig(clusterDoc *cluster.Cluster, m *machine.Machine, conns []*connection) (api.Role, error) {
 	name := m.Metadata.Name
-	// Role is nil-safe by design: a machine with no cluster document
-	// is a leader of one. That invariant is what keeps the follower
-	// branches below (which dereference cluster freely) off the nil
-	// path — a follower can only be derived *from* a document.
+	// Role is safe to call with a nil cluster document by design: a
+	// machine with no cluster document is a leader of one. This rule
+	// is what keeps the follower branches below, which dereference
+	// cluster freely, off the nil path. A follower can only be
+	// derived from a document.
 	role := clusterDoc.Role(name)
 	if clusterDoc != nil {
 		fmt.Printf("liken: this machine is a cluster %s (cluster %s)\n", role, clusterDoc.Metadata.Name)
@@ -456,12 +475,13 @@ func writeK3sBootConfig(clusterDoc *cluster.Cluster, m *machine.Machine, conns [
 		}
 	}
 
-	// The Go runtime discipline rides beside the configuration: it is
-	// derived from the same cluster document (the helm feature is what
-	// swells the k3s heap), and re-deriving it here means an applied
-	// restart re-scales the ceiling on the same bounce that
-	// reconfigures k3s. Echoed like the config lines, because an
-	// invisible environment variable is where a memory mystery hides.
+	// The Go runtime discipline is set alongside the configuration.
+	// It is derived from the same cluster document (the helm feature
+	// is what enlarges the k3s heap), and re-deriving it here means
+	// an applied restart re-scales the ceiling on the same restart
+	// that reconfigures k3s. This code echoes it like the config
+	// lines, because an invisible environment variable is where a
+	// memory problem is hard to find.
 	var si unix.Sysinfo_t
 	if err := unix.Sysinfo(&si); err == nil {
 		k3sMemoryDiscipline = k3sRuntimeEnv(uint64(si.Totalram)*uint64(si.Unit), clusterDoc.FeatureEnabled("helm"))
@@ -480,14 +500,15 @@ const clusterStateStaging = "/.liken-claim"
 
 // mountAndSeedClusterState mounts clusterState's filesystem with the
 // image's seed files layered in. The image bakes the seeds (the
-// pre-generated CAs, the operator's manifests and container image)
-// underneath clusterState's very mountpoint, and mounting over them
-// would hide them all. So the filesystem is first mounted to the
-// side, seeded from the image's copies, and only then moved into
-// place; MS_MOVE re-attaches a live mount atomically. This lives here
-// rather than with the partition machinery because everything it
-// knows — the seed paths, what refreshes and what persists — is k3s's
-// on-disk layout.
+// pre-generated CAs, the operator's manifests, and the container
+// image) underneath clusterState's own mountpoint, and mounting over
+// them would hide all of them. So this function first mounts the
+// filesystem to the side, seeds it from the image's copies, and only
+// then moves it into place. MS_MOVE re-attaches a live mount
+// atomically. This function lives here rather than with the
+// partition machinery, because everything it knows, the seed paths,
+// what refreshes, and what persists, belongs to k3s's on-disk
+// layout.
 func mountAndSeedClusterState(dev, target string) error {
 	staging := clusterStateStaging
 	if err := os.MkdirAll(staging, 0o755); err != nil {
@@ -510,23 +531,24 @@ func mountAndSeedClusterState(dev, target string) error {
 	return nil
 }
 
-// sweepTornK3sFiles removes the 0-byte identity files a power cut
-// can leave under k3s's state. ext4 can commit a file's creation
+// sweepTornK3sFiles removes the 0-byte identity files that a power
+// cut can leave under k3s's state. ext4 can commit a file's creation
 // before its data reaches disk, so a machine that loses power just
 // after k3s writes a certificate, key, or credential can reboot to a
 // file that exists with no bytes in it. k3s treats these files as
-// create-once: an empty one is read and trusted rather than
-// regenerated, and the result is a control plane that cannot start
-// (an apiserver reading a 0-byte loopback certificate reports
-// "failed to find any PEM data" and exits, every restart, forever).
-// None of them is precious: every certificate, key, and credential
-// here is re-minted on demand from the CAs and token the image
-// carries, so deleting a torn one turns an unbootable machine into
-// an ordinary boot. The sweep is deliberately scoped to k3s's
-// identity directories; 0-byte files elsewhere (lock files, disabled
-// charts) are none of init's business. The node password is the same
-// story with its own arrangement (mintNodePassword), because it
-// lives on machineState and k3s would not re-mint a registered one.
+// create-once: it reads and trusts an empty one rather than
+// regenerating it, and the result is a control plane that cannot
+// start (an apiserver that reads a 0-byte loopback certificate
+// reports "failed to find any PEM data" and exits, on every restart,
+// forever). None of these files matter on their own: every
+// certificate, key, and credential here is re-minted on demand from
+// the CAs and token that the image carries, so deleting a torn one
+// turns an unbootable machine into an ordinary boot. This sweep is
+// deliberately scoped to k3s's identity directories. 0-byte files
+// elsewhere (lock files, disabled charts) are not init's concern.
+// The node password follows the same pattern with its own handling
+// (mintNodePassword), because it lives on machineState, and k3s
+// would not re-mint a password that is already registered.
 func sweepTornK3sFiles(root string) {
 	remove := func(path string, info os.FileInfo) {
 		if info.IsDir() || info.Size() > 0 {
@@ -560,12 +582,12 @@ func sweepTornK3sFiles(root string) {
 }
 
 // seedClusterState copies the image's seed files into a clusterState
-// filesystem. The TLS material is copied only if the disk has none:
-// those keys are the cluster's identity, and a disk that already has
-// an identity keeps it. The manifests and the operator image are
-// refreshed every boot: they're pinned to the liken version of the
-// running image, and an upgraded image must deliver its upgraded
-// operator.
+// filesystem. This code copies the TLS material only if the disk has
+// none, because those keys are the cluster's identity, and a disk
+// that already has an identity keeps it. The manifests and the
+// operator image refresh on every boot, because they are pinned to
+// the liken version of the running image, and an upgraded image must
+// deliver its upgraded operator.
 func seedClusterState(root string) error {
 	for _, seed := range []struct {
 		rel     string

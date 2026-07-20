@@ -1,10 +1,11 @@
 package disks
 
-// Reading a FAT32 volume back: the inverse of the writer, kept
-// deliberately small. Its consumers are verification — tests that
-// prove the writer's output, and tooling that wants to look inside
-// an install image without mounting it — so it reads whole files and
-// resolves long names, and does nothing else a real driver would.
+// This file implements reading a FAT32 volume back. It is the
+// reverse of the writer, and it is kept deliberately small. Its
+// consumers are verification: tests that check the writer's output,
+// and tooling that looks inside an install image without mounting
+// it. Because of this, it reads whole files and resolves long
+// names, and does nothing else that a real driver would do.
 
 import (
 	"encoding/binary"
@@ -15,23 +16,26 @@ import (
 	"unicode/utf16"
 )
 
-// A FATVolume is an opened FAT32 filesystem: its geometry, its
-// allocation table, and the free-space accounting the writer left.
+// A FATVolume is an opened FAT32 filesystem. It holds the volume's
+// geometry, its allocation table, and the free-space accounting
+// that the writer left.
 type FATVolume struct {
 	dev               io.ReaderAt
 	sectorsPerCluster uint32
 	dataStart         uint32
 	fat               []uint32
 
-	// FreeClusters and NextFree echo the FSInfo sector, the writer's
-	// accounting, for callers checking it against the table itself.
+	// FreeClusters and NextFree repeat the FSInfo sector, the
+	// writer's accounting, so that callers can check it against the
+	// table itself.
 	FreeClusters uint32
 	NextFree     uint32
 }
 
-// OpenFATVolume parses a volume's boot sector and allocation table,
-// verifying that the two FAT copies agree — FAT's only redundancy is
-// that pair, so disagreement means a writer failed halfway.
+// OpenFATVolume parses a volume's boot sector and allocation table.
+// It verifies that the two FAT copies agree. That pair is FAT's
+// only redundancy, so a disagreement means a writer failed partway
+// through.
 func OpenFATVolume(dev io.ReaderAt) (*FATVolume, error) {
 	boot := make([]byte, SectorSize)
 	if _, err := dev.ReadAt(boot, 0); err != nil {
@@ -78,8 +82,9 @@ func OpenFATVolume(dev io.ReaderAt) (*FATVolume, error) {
 	return v, nil
 }
 
-// UsedClusters counts occupied entries in the table itself, for
-// checking the FSInfo accounting against reality.
+// UsedClusters counts the occupied entries in the table itself, so
+// that callers can check the FSInfo accounting against the actual
+// table.
 func (v *FATVolume) UsedClusters() uint32 {
 	used := uint32(0)
 	for _, entry := range v.fat[2:] {
@@ -90,8 +95,9 @@ func (v *FATVolume) UsedClusters() uint32 {
 	return used
 }
 
-// chain reads a whole cluster chain's bytes, rounded up to clusters;
-// callers trim by the directory record's size.
+// chain reads a whole cluster chain's bytes, rounded up to full
+// clusters. Callers trim the result using the directory record's
+// size.
 func (v *FATVolume) chain(first uint32) ([]byte, error) {
 	var out []byte
 	clusterBytes := int64(v.sectorsPerCluster) * SectorSize
@@ -117,8 +123,9 @@ type FATEntry struct {
 	Size         uint32
 }
 
-// Entries decodes one directory's records: long-name chains resolved
-// and checksum-verified, dot entries and the volume label skipped.
+// Entries decodes one directory's records. It resolves and
+// checksum-verifies long-name chains, and skips dot entries and the
+// volume label.
 func (v *FATVolume) Entries(firstCluster uint32) ([]FATEntry, error) {
 	raw, err := v.chain(firstCluster)
 	if err != nil {

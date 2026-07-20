@@ -24,33 +24,33 @@ on hardware other systems would call too small.
 
 ## The tiles
 
-Many crustose lichens, the kind that grow flat against rock, crack
-their surface into small polygonal plates as they age and as repeated
-wetting and drying shrinks the crust. Each plate is called an
-*areole*, and a thallus built this way is *areolate*: a natural mosaic
-that looks like cracked mud, dried paint, or a field of little
-islands. The icon is that mosaic, one areole to a tile.
+Many crustose lichens grow flat against rock. As they age, and as
+repeated wetting and drying shrinks the crust, the surface cracks into
+small polygonal plates. Each plate is called an *areole*, and a
+thallus built this way is *areolate*. The cracking forms a natural
+mosaic of small plates. The icon reproduces that mosaic, one areole to
+a tile.
 
-Drawing the areoles as hexagons is a second small joke. The hexagon
-is the shape the Kubernetes world draws itself in, from Helm's logo
-to the backdrops of community talks, so the same picture reads as
-lichen on rock to a botanist and as something Kubernetes-shaped to
-anyone from that world.
+Drawing the areoles as hexagons adds a second reference. The
+Kubernetes community commonly uses the hexagon shape, from Helm's logo
+to the backdrops of community talks. Because of this, the same
+picture reads as lichen on rock to a botanist, and as a
+Kubernetes shape to someone from that community.
 
-One tile is orange rather than green. Some of the most common rock
-lichens, the *Xanthoria*, are a vivid orange, and the single warm
-tile gives the mark a focal point.
+One tile is orange, not green. Some of the most common rock lichens,
+the *Xanthoria*, are a vivid orange. This single warm tile gives the
+mark a focal point.
 
-The tiles grow smaller toward one edge. That part is invention, not
-biology: real areoles do not reliably shrink toward the margin (the
-cracking tends to start in the older center). The gradient is there
-to suggest a colony still spreading into bare rock, even though real
-lichens do not grow that way.
+The tiles grow smaller toward one edge of the mark. This detail is an
+invention and not biology: real areoles do not reliably shrink toward
+the margin, because the cracking tends to start in the older center.
+The gradient suggests a colony still spreading into bare rock, though
+real lichens do not grow that way.
 
 ## The colors
 
-The greens are sampled from crustose lichens on stone, deep moss
-through pale sage, with the one orange tile from *Xanthoria*.
+The greens come from crustose lichens on stone, from deep moss to
+pale sage. The one orange tile comes from *Xanthoria*.
 
 | Swatch | Hex | Name |
 | --- | --- | --- |
@@ -60,31 +60,33 @@ through pale sage, with the one orange tile from *Xanthoria*.
 | Pale sage | `#b4c49a` | lightest green |
 | Xanthoria | `#e0872f` | the one warm tile |
 
-There is no background. The mark is transparent so it works on light
-and dark surfaces alike, and every tile is drawn in flat color with no
-gradients or effects, so it stays legible shrunk to a favicon and
-would print cleanly in one ink.
+The mark has no background. It is transparent, so it works on both
+light and dark surfaces. Every tile uses a flat color with no
+gradients or effects. Because of this, the mark stays legible when
+shrunk to a favicon, and it would print cleanly in one ink.
 
 ## The files
 
-`liken.svg` is the source of truth. Everything else is derived from it
-by `make`, and the derived files are committed too so that anyone can
-grab a favicon or an avatar without a rasterizer installed:
+`liken.svg` is the original file; every other file in this list comes
+from it. `make` derives the other files, and the repository also
+commits them. Because of this, anyone can get a favicon or an avatar
+without installing a rasterizer:
 
-* `liken.svg` — the master, for any use at any size.
-* `favicon.ico` — 16, 32, and 48 pixel raster, for the browser tab.
-  The website also serves the SVG itself, which modern browsers prefer
-  and render sharp at any size; this is the fallback for those that
-  cannot.
-* `liken.png` — a 1024-pixel transparent export, sized for a GitHub
-  organization avatar or anywhere else that wants a raster.
+* `liken.svg` — the original file, for any use at any size.
+* `favicon.ico` — a 16, 32, and 48 pixel raster image, for the browser
+  tab. The website also serves the SVG file itself. Modern browsers
+  prefer the SVG file and render it sharp at any size; `favicon.ico`
+  is the fallback for browsers that cannot use the SVG file.
+* `liken.png` — a 1024-pixel transparent export. Use it for a GitHub
+  organization avatar or anywhere else that needs a raster image.
 
-Rebuilding them needs `rsvg-convert` (from librsvg) and ImageMagick.
-Edit `liken.svg`, run `make`, and commit what changes.
+To rebuild these files, you need `rsvg-convert` (from librsvg) and
+ImageMagick. Edit `liken.svg`, run `make`, and commit the files that
+change.
 
 ## Sources
 
-The biology here is standard lichenology, drawn from:
+The biology in this document comes from standard lichenology sources:
 
 * Irwin M. Brodo, Sylvia Duran Sharnoff, and Stephen Sharnoff,
   *Lichens of North America* (Yale University Press, 2001) — the

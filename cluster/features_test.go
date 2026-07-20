@@ -28,9 +28,9 @@ func TestFeatureKindsAreValid(t *testing.T) {
 	}
 }
 
-// A feature's requirements must name slugs the vocabulary itself
-// carries, or the closure in EnabledFeatures would enable a feature
-// no table entry defines.
+// A feature's requirements must name slugs that the vocabulary
+// itself carries. Otherwise the closure in EnabledFeatures would
+// enable a feature that no table entry defines.
 func TestFeatureRequirementsAreInTheVocabulary(t *testing.T) {
 	for _, f := range Features {
 		for _, req := range f.Requires {
@@ -50,12 +50,12 @@ func TestFeatureBySlug(t *testing.T) {
 	}
 }
 
-// The Cluster CRD is hand-written so its schema can teach the API,
-// which means nothing mechanical keeps its feature validation aligned
-// with the vocabulary in features.go. This test is that alignment: a
-// slug added to either side without the other fails here, in both
-// directions, because the CEL rule's vocabulary list is compared
-// against the table exactly.
+// The Cluster CRD is hand-written, so its schema can teach the API.
+// This means nothing mechanical keeps its feature validation aligned
+// with the vocabulary in features.go. This test provides that
+// alignment. A slug added to either side without the other fails
+// here, in both directions, because the test compares the CEL rule's
+// vocabulary list against the table exactly.
 func TestClusterCRDMatchesTheVocabulary(t *testing.T) {
 	raw, err := os.ReadFile("manifests/clusters-crd.yaml")
 	if err != nil {
@@ -98,8 +98,8 @@ func TestClusterCRDMatchesTheVocabulary(t *testing.T) {
 	features := crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties.Spec.Properties.Features
 
 	// The vocabulary rule must name exactly the table's slugs, in
-	// table order, or an admission error would name a vocabulary the
-	// file parser disagrees with.
+	// table order. Otherwise an admission error would name a
+	// vocabulary that the file parser disagrees with.
 	wantRule := fmt.Sprintf("self.all(slug, slug in ['%s'])",
 		strings.Join(FeatureSlugs(), "', '"))
 	var rules []string
@@ -110,9 +110,10 @@ func TestClusterCRDMatchesTheVocabulary(t *testing.T) {
 		t.Errorf("the CRD's vocabulary rule must be exactly %q; its rules are %q", wantRule, rules)
 	}
 
-	// The null refusal depends on two things standing together: a
-	// rule that names the mistake, and nullable values, without which
-	// the decoder drops a null before validation can see it.
+	// The null refusal depends on two things that work together: a
+	// rule that names the mistake, and nullable values. Without
+	// nullable values, the decoder drops a null before validation
+	// can see it.
 	if !slices.Contains(rules, "self.all(slug, self[slug] != null)") {
 		t.Errorf("the CRD must refuse null feature values by rule; its rules are %q", rules)
 	}
@@ -121,12 +122,12 @@ func TestClusterCRDMatchesTheVocabulary(t *testing.T) {
 			features.AdditionalProperties)
 	}
 
-	// No feature has parameters yet, and the guard is a pair that
-	// stands together: preserving unknown fields stops the API server
-	// pruning a guessed parameter (which would quietly flip the
-	// feature on as {}), and a maximum of zero properties refuses the
-	// preserved value by name. When the first parameter arrives, this
-	// assertion is what changes.
+	// No feature has parameters yet, and the guard is a pair of
+	// rules that work together. Preserving unknown fields stops the
+	// API server from pruning a guessed parameter, which would
+	// otherwise quietly flip the feature on as {}. A maximum of zero
+	// properties then refuses the preserved value by name. When the
+	// first parameter arrives, this assertion is what changes.
 	if features.AdditionalProperties.MaxProperties == nil ||
 		*features.AdditionalProperties.MaxProperties != 0 ||
 		!features.AdditionalProperties.Preserve {

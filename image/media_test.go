@@ -1,7 +1,7 @@
 package image
 
-// Tests for install-media assembly: a public release directory plus a
-// deployment layer become one bootable install image. The release
+// Tests for install-media assembly: a public release directory, plus
+// a deployment layer, become one bootable install image. The release
 // fixture is a channel-shaped directory whose document is generated
 // the same way the publisher generates it, from the artifact bytes.
 
@@ -19,7 +19,7 @@ import (
 )
 
 // releaseFixtureWith lays out a release directory: the given
-// artifacts and a release.yaml naming them by digest and size.
+// artifacts, and a release.yaml naming them by digest and size.
 func releaseFixtureWith(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -79,7 +79,7 @@ func TestMediaLeadsWithTheComposedSystem(t *testing.T) {
 	raw := buildMedia(t, releaseDir, layerPath)
 
 	// The install boot runs from the boot archive and the layer, in
-	// override order, ahead of the payload wrapper; the system image
+	// override order, ahead of the payload wrapper. The system image
 	// travels only inside the payload.
 	composed := append([]byte("boot archive bytes"), []byte("deployment layer bytes")...)
 	if !bytes.HasPrefix(raw, composed) {

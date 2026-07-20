@@ -1,7 +1,7 @@
 package main
 
 // The operator's access to its own Kubernetes Node object. The Node
-// is the kubelet's account of this machine, and the operator reads
+// is the kubelet's record of this machine, and the operator reads
 // and writes it for several jobs: mirroring its health onto the
 // Machine (conditions.go), reconciling its labels (labels.go),
 // cordoning and draining it ahead of a reboot (drain.go), and
@@ -18,14 +18,14 @@ import (
 // a version, which is what "core" means in the URL scheme.
 const nodesPath = "/api/v1/nodes"
 
-// nodeObject is the sliver of a Kubernetes Node the operator needs:
-// the labels, where a demoted machine's old role still shows; the
-// conditions, where the kubelet's health shows (reconcile.go mirrors
-// the Node's Ready condition onto the Machine); the cordon state,
-// meaning the unschedulable flag plus the annotations that record
-// whether liken set it (drain.go); and the UID, which anchors the
-// device inventory's owner reference to this incarnation of the
-// node (dra.go).
+// nodeObject holds the small part of a Kubernetes Node that the
+// operator needs: the labels, where a demoted machine's old role
+// still shows; the conditions, where the kubelet's health shows
+// (reconcile.go mirrors the Node's Ready condition onto the
+// Machine); the cordon state, meaning the unschedulable flag plus
+// the annotations that record whether liken set it (drain.go); and
+// the UID, which ties the device inventory's owner reference to this
+// instance of the node (dra.go).
 type nodeObject struct {
 	Metadata struct {
 		Name        string            `json:"name"`

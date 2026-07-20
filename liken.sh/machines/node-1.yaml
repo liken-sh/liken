@@ -1,54 +1,57 @@
-# node-1: the founding leader of the liken.sh cluster, and (so far)
-# its only machine — the Linode instance terraform.tf provisions as
-# liken-node-1. Like every Machine manifest, this file is a seed,
-# consulted exactly once: the install bakes it into the deployment
-# layer, the first boot proves it, and from then on the machine reads
-# its manifests from its own machineState disk and is edited through
-# the cluster's API.
+# node-1: the founding leader of the liken.sh cluster, and, so far,
+# its only machine: the Linode instance that terraform.tf provisions
+# as liken-node-1. Like every Machine manifest, this file is a seed,
+# and the machine consults it exactly once. The install bakes it into
+# the deployment layer, the first boot proves it, and from then on
+# the machine reads its manifests from its own machineState disk and
+# is edited through the cluster's API.
 apiVersion: liken.sh/v1alpha1
 kind: Machine
 metadata:
   name: node-1
 spec:
-  # Nobody sits at this machine's console (there isn't one — a serial
-  # line reachable over lish is the closest thing), so staged changes
-  # that need a reboot get one automatically.
+  # Nobody sits at this machine's console. There is no console; a
+  # serial line reachable over lish is the closest thing to one. For
+  # this reason, staged changes that need a reboot get one
+  # automatically.
   rebootPolicy: Auto
   network:
-    # Two interfaces, two jobs, exactly as the boot config in
-    # terraform.tf attaches them. eth0 is Linode's public network,
-    # which serves addresses over DHCP; the lease carries the
-    # machine's static public IPv4, the gateway, and resolvers.
-    # eth1 is the private VLAN — the cluster segment — where the
-    # founding leader's address must exist before any negotiation
-    # could assign it, because cluster.yaml's endpoint names it.
+    # Two interfaces, two jobs, attached exactly as the boot config
+    # in terraform.tf sets them up. eth0 is Linode's public network,
+    # which serves addresses over DHCP. The lease carries the
+    # machine's static public IPv4 address, the gateway, and the
+    # resolvers. eth1 is the private VLAN, the cluster segment, where
+    # the founding leader's address must exist before any
+    # negotiation could assign it, because cluster.yaml's endpoint
+    # names it.
     interfaces:
       - name: eth0
       - name: eth1
         address: 10.10.0.1/24
-  # Two disks, split by lifetime. The system disk (/dev/sda) holds the
-  # OS: boot slots and the machine's own state. It ships whole, as a
-  # disk image terraform.tf uploads and stamps onto the disk, so every
-  # ship erases it. The data disk (/dev/sdb) holds everything that
-  # must outlive a ship — the cluster's database, the container
-  # store, pod volumes. Terraform creates it raw and blank exactly
-  # once, and liken claims it on the machine's first boot; after that
-  # ships replace the system disk around it and the cluster comes back
-  # with its state. The device paths matter only on the boot that
-  # claims each disk; after that every partition is recognized by the
-  # role name written into the GPT.
+  # Two disks, split by lifetime. The system disk (/dev/sda) holds
+  # the OS: boot slots and the machine's own state. It ships whole,
+  # as a disk image that terraform.tf uploads and stamps onto the
+  # disk, so every ship erases it. The data disk (/dev/sdb) holds
+  # everything that must outlive a ship: the cluster's database, the
+  # container store, and pod volumes. Terraform creates this disk raw
+  # and blank exactly once, and liken claims it on the machine's
+  # first boot. After that, ships replace the system disk around it,
+  # and the cluster comes back with its state intact. The device
+  # paths matter only on the boot that claims each disk. After that,
+  # every partition is recognized by the role name written into the
+  # GPT.
   storage:
-    # The GRUB boot path: Linode's hosts boot BIOS-style only, and
+    # The GRUB boot path: Linode's hosts boot only in BIOS style, and
     # declaring these two roles is the machine's whole declaration
-    # that it boots through GRUB. biosBoot is a raw partition holding
-    # GRUB's core image where the MBR's boot code can find it;
-    # bootHome is a small FAT32 filesystem holding GRUB's config and
-    # the environment block that stands in for the boot variables
-    # this firmware doesn't have. The installer lays all of it down,
-    # and the machine heals it from its proven slot's artifacts on
-    # every boot and every reboot — Linode is known to zero MBR boot
-    # code under running machines, and healing is what makes that
-    # survivable.
+    # that it boots through GRUB. biosBoot is a raw partition that
+    # holds GRUB's core image where the MBR's boot code can find it.
+    # bootHome is a small FAT32 filesystem that holds GRUB's config
+    # and the environment block, which takes the place of the boot
+    # variables that this firmware lacks. The installer lays all of
+    # this down, and the machine heals it from its proven slot's
+    # artifacts on every boot and every reboot. Linode is known to
+    # zero MBR boot code under running machines, and this healing is
+    # what makes that survivable.
     biosBoot:
       device: /dev/sda
       size: 1Mi
@@ -71,14 +74,14 @@ spec:
     machineEphemeral:
       device: /dev/sda
       size: 1Gi
-    # k3s's database, TLS material, and containerd's images — the
-    # role that makes reboots cheap and upgrades incremental.
+    # k3s's database, TLS material, and containerd's images: the role
+    # that makes reboots cheap and upgrades incremental.
     clusterState:
       device: /dev/sdb
       size: 6Gi
-    # Durable storage pods claim by name (the local-path provisioner
-    # pool). The website's content ships in images, so this pool
-    # starts modest.
+    # Durable storage that pods claim by name (the local-path
+    # provisioner pool). The website's content ships in images, so
+    # this pool starts small.
     podStorage:
       device: /dev/sdb
       size: 8Gi

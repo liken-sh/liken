@@ -1,9 +1,10 @@
 package main
 
 // Tests for the facts: the derivations that are pure over their
-// inputs (how connections become network status) and the assembly
-// and publication of the whole file, aimed at a tempdir through the
-// package's path seams. Only the real boot ever writes under /run.
+// inputs, for example how connections become network status, and the
+// assembly and publication of the whole file, aimed at a tempdir
+// through the package's path seams. Only the real boot ever writes
+// under /run.
 
 import (
 	"net"
@@ -19,8 +20,8 @@ import (
 var factsNow = time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
 
 // fullConn builds a connection the way DHCP or static assignment
-// would have: k3s_test's conn covers derivations that only need an
-// address; these tests need every field filled in.
+// would build one. k3s_test's conn covers derivations that need only
+// an address; these tests need every field filled in.
 func fullConn(t *testing.T, ifname, cidr string, method machine.AddressMethod) *connection {
 	t.Helper()
 	c := conn(t, ifname, cidr)
@@ -94,8 +95,8 @@ func TestInterfaceFactsForAStaticAddress(t *testing.T) {
 // fakeFactsMachine assembles every seam publishFacts probes: an empty
 // fake sysfs and /dev, an empty fake firmware store, tempdir
 // destinations for the facts and boot manifest files, and an xtables
-// probe that names no real binary, so the version goes unreported the
-// way it would on an image without iptables.
+// probe that names no real binary. This leaves the version
+// unreported, the same as it would be on an image without iptables.
 func fakeFactsMachine(t *testing.T) (factsDest, manifestDest string) {
 	t.Helper()
 	fakeMachine(t)
@@ -159,7 +160,7 @@ func TestPublishFactsSurvivesAnUnwritableDestination(t *testing.T) {
 	factsPath = filepath.Join(sealed, "run", "facts.yaml")
 
 	// The facts still exist in memory for the boot's later writers,
-	// even when the founding write never landed.
+	// even when the founding write never lands.
 	owner := publishFacts(factsInputs{
 		role:    api.RoleFollower,
 		choice:  &manifestChoice{},
@@ -174,13 +175,14 @@ func TestFactsFileMutateRidesTheNextPublish(t *testing.T) {
 	factsDest, _ := fakeFactsMachine(t)
 	owner := &factsFile{status: &machine.MachineStatus{}}
 
-	// mutate edits only the memory: nothing lands on disk yet.
+	// mutate edits only memory: nothing lands on disk yet.
 	owner.mutate(func(s *machine.MachineStatus) { s.Role = api.RoleFollower })
 	if _, err := os.Stat(factsDest); !os.IsNotExist(err) {
 		t.Errorf("mutate must not write the file: %v", err)
 	}
 
-	// The next publish carries the earlier edit along with its own.
+	// The next publish carries the earlier edit along with its own
+	// edit.
 	owner.publish(func(s *machine.MachineStatus) { s.Boot.Restarts++ })
 	facts, err := machine.ReadFacts(factsDest)
 	if err != nil {

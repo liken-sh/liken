@@ -1,9 +1,9 @@
 package main
 
-// The GRUB dialect of the boot actuator, exercised against a tempdir
-// boot home and the fake machine's disks: arming, readback, the
-// proven assertion, and the healing that re-derives the on-disk boot
-// chain from a slot's artifacts.
+// Tests for the GRUB dialect of the boot actuator. These tests use a
+// temporary directory as the boot home and the fake machine's disks.
+// They cover arming, readback, the proven assertion, and the healing
+// that re-derives the on-disk boot chain from a slot's artifacts.
 
 import (
 	"bytes"
@@ -17,9 +17,10 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// installedGRUBHome is a boot home the way the installer leaves it:
-// a grub directory holding an environment block with the given
-// variables. It returns the actuator pointed at it.
+// installedGRUBHome builds a boot home the way the installer leaves
+// it: a grub directory that holds an environment block with the
+// given variables. It returns the actuator that points at this boot
+// home.
 func installedGRUBHome(t *testing.T, vars map[string]string) grubActuator {
 	t.Helper()
 	home := fakeBootHomeMount(t)
@@ -78,8 +79,9 @@ func TestGRUBActuatorReadsTheFallbackBack(t *testing.T) {
 }
 
 func TestGRUBActuatorAssertProvenFlipsTheDefaultAndClearsTheTrial(t *testing.T) {
-	// The disk fixture keeps the healing half of assertProven quiet:
-	// the slot carries no artifacts, so only the env block changes.
+	// The disk fixture keeps the healing half of assertProven silent:
+	// the slot carries no artifacts, so only the environment block
+	// changes.
 	installedBIOSDisk(t)
 	fakeSlotAMount(t)
 	act := installedGRUBHome(t, map[string]string{"default_slot": "A", "try_slot": "B"})
@@ -119,8 +121,8 @@ func TestGRUBActuatorAssertProvenIsIdempotent(t *testing.T) {
 }
 
 // grubArtifactsOnSlot puts the GRUB pair on a slot mount the way a
-// verified release lays them down, returning the mount and the two
-// images (the same shapes fakePayload uses).
+// verified release lays them down. It returns the mount and the two
+// images (in the same shapes that fakePayload uses).
 func grubArtifactsOnSlot(t *testing.T) (mount string, bootImg, coreImg []byte) {
 	t.Helper()
 	mount = fakeSlotAMount(t)
@@ -137,10 +139,10 @@ func grubArtifactsOnSlot(t *testing.T) (mount string, bootImg, coreImg []byte) {
 }
 
 func TestGRUBActuatorHealsTheBootSectors(t *testing.T) {
-	// The installed BIOS disk's boot sectors start as zeroes: exactly
-	// what a host that rewrote the MBR under a running machine leaves
-	// behind. Asserting the proven slot must put the whole chain back
-	// from the slot's own artifacts.
+	// The installed BIOS disk's boot sectors start as zeroes. This is
+	// exactly what a host leaves behind when it rewrites the MBR under
+	// a running machine. Asserting the proven slot must put the whole
+	// chain back from the slot's own artifacts.
 	_, dev := installedBIOSDisk(t)
 	grubArtifactsOnSlot(t)
 	act := installedGRUBHome(t, map[string]string{"default_slot": "A", "try_slot": ""})
@@ -198,8 +200,8 @@ func TestGRUBActuatorHealingIsQuietWhenTheChainAgrees(t *testing.T) {
 }
 
 func TestGRUBActuatorHealingSkipsASlotWithoutTheArtifacts(t *testing.T) {
-	// A proven release from before liken carried GRUB artifacts has
-	// no opinion about the boot sectors; the chain that booted the
+	// A proven release from before liken carried GRUB artifacts says
+	// nothing about the boot sectors. The chain that booted the
 	// machine must stay untouched.
 	_, dev := installedBIOSDisk(t)
 	fakeSlotAMount(t)
@@ -260,8 +262,8 @@ func TestBIOSFirmwareFactsReadTheGRUBEnvironment(t *testing.T) {
 }
 
 func TestBIOSFirmwareFactsWithoutAGRUBHome(t *testing.T) {
-	// A -kernel lab boot: BIOS mode, no boot home, no facts beyond
-	// the mode itself.
+	// A -kernel lab boot: BIOS mode, no boot home, and no facts
+	// beyond the mode itself.
 	fakeBIOSRegime(t)
 	fakeCmdline(t, "console=ttyS0 rdinit=/liken liken.machine=node-1")
 	fakeBootHomeMount(t)

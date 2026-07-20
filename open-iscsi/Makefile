@@ -3,18 +3,19 @@
 #
 # Two artifacts. The static binaries (iscsid and iscsiadm) come from
 # fetch.sh, which builds them from pinned source inside a pinned
-# container; CSI drivers exec the host's iscsiadm, so those binaries
-# ship at /sbin in every image. And the OCI image tarball carries
-# iscsid into the cluster as the feature's DaemonSet
-# (manifests/iscsid.yaml), packaged by the recipe the image domain
-# owns (image/oci.sh), from the very same binary, so the daemon and
-# the tool that speaks to it are always one build.
+# container. CSI drivers run the host's iscsiadm, so those binaries
+# ship at /sbin in every image. The OCI image tarball carries iscsid
+# into the cluster as the feature's DaemonSet (manifests/iscsid.yaml),
+# packaged by the recipe the image domain owns (image/oci.sh), from
+# the same binary. This keeps the daemon and the tool that talks to it
+# as one build.
 #
-# The version stamp and output directory are overridable for the same
-# reason the operators' are: a release rebuilds the iscsid image under
-# its own version into its own tree. The binaries don't vary by liken
-# version, so they always come from this domain's dist/<version>/ and
-# are copied into an overridden DIST for packaging.
+# The version stamp and output directory can be overridden for the
+# same reason as the operators': a release rebuilds the iscsid image
+# under its own version into its own tree. The binaries do not vary by
+# liken version, so they always come from this domain's
+# dist/<version>/, and this Makefile copies them into an overridden
+# DIST for packaging.
 include ../version.mk
 OPENISCSI_VERSION := $(strip $(file <VERSION))
 DIST ?= dist/$(OPENISCSI_VERSION)

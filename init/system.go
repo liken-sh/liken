@@ -1,12 +1,12 @@
 package main
 
-// The rest of the environment k3s expects.
+// The rest of the environment that k3s expects.
 //
-// The essential mounts in main.go make a machine minimally usable;
-// Kubernetes has a longer list of assumptions, accumulated from years
-// of running on full distributions. Each function here recreates one
-// of those assumptions from first principles: the pieces of systemd's
-// setup work that this machine actually needs.
+// The essential mounts in main.go make a machine usable at a basic
+// level. Kubernetes has a longer list of assumptions, built up over
+// years of running on full distributions. Each function here
+// recreates one of those assumptions directly: it does the part of
+// systemd's setup work that this machine needs.
 
 import (
 	"fmt"
@@ -20,32 +20,36 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// osSysctls are the kernel opinions every liken machine boots with,
-// applied before the Machine spec's own sysctls so a deployment can
-// override any of them.
+// osSysctls are the kernel settings that every liken machine boots
+// with. This code applies them before the Machine spec's own
+// sysctls, so a deployment can override any of them.
 //
-// watermark_scale_factor sizes the gap between the memory watermarks
-// that wake and rest kswapd, the kernel's background reclaimer, as a
-// fraction of the machine (units of 0.01%). The default gap of 0.1%
-// means kswapd on a small machine barely runs until allocation is
-// nearly failing, and then everything learns at once: allocations
-// stall in direct reclaim at the worst moment, exactly the kind of
-// latency spike that costs k3s's datastore its IO deadlines under
-// load. One percent makes reclaim a steady background habit instead:
-// pages the boot touched once age out on a calm machine, and a
-// convergence burst finds free memory waiting rather than a reclaim
-// stall. The cost is a modestly smaller page cache and a little
-// background CPU — and the value is a balance between them: twice
-// this kept kswapd visibly busy on a well-filled machine, reclaiming
-// pages nothing was waiting for.
+// watermark_scale_factor sets the size of the gap between the memory
+// watermarks that start and stop kswapd, the kernel's background
+// reclaimer. The value is a fraction of the machine's memory, in
+// units of 0.01%. At the default gap of 0.1%, kswapd on a small
+// machine runs rarely, only once allocation is close to failing.
+// When that happens, many allocations stall in direct reclaim at
+// once. This is the worst possible moment for a stall, because it
+// produces the kind of latency spike that makes k3s's datastore miss
+// its IO deadlines under load. A gap of one percent makes reclaim
+// run steadily in the background instead: pages that the boot
+// touched once are freed while the machine is calm, so a burst of
+// activity finds free memory waiting, rather than causing a reclaim
+// stall. The cost of the one percent value is a somewhat smaller
+// page cache and a little more background CPU use; this cost is
+// balanced against the benefit above. A gap of two percent, twice
+// this value, kept kswapd visibly busy even on a well-filled
+// machine, reclaiming pages that nothing needed yet.
 var osSysctls = map[string]string{
 	"vm.watermark_scale_factor": "100",
 }
 
-// applySysctls actuates spec.sysctls at boot. Failures are reported and
-// skipped rather than fatal (a typo'd parameter shouldn't cost the
-// machine its boot), and the keys are applied in sorted order so the
-// console reads the same every time.
+// applySysctls applies spec.sysctls at boot. If a sysctl fails,
+// applySysctls reports the failure and skips it, rather than
+// treating it as fatal, because a mistyped parameter should not cost
+// the machine its boot. applySysctls applies the keys in sorted
+// order, so the console shows the same order every time.
 func applySysctls(sysctls map[string]string) {
 	for _, name := range slices.Sorted(maps.Keys(sysctls)) {
 		value := sysctls[name]
@@ -57,27 +61,31 @@ func applySysctls(sysctls map[string]string) {
 	}
 }
 
-// k3sMounts are the filesystems Kubernetes assumes beyond the
-// essentials. Same table-driven shape as main.go's essentials.
+// k3sMounts lists the filesystems that Kubernetes assumes beyond the
+// essential mounts. It uses the same table-driven form as the
+// essentials list in main.go.
 var k3sMounts = []mount{
-	// cgroup2 is how Kubernetes meters and limits every container:
-	// one hierarchy under /sys/fs/cgroup where each cgroup's CPU,
-	// memory, and process counts are accounted and capped. kubelet
-	// flatly refuses to run without it. (Our kernel builds all the
-	// controllers in; this mount is the whole setup.)
+	// Kubernetes uses cgroup2 to measure and limit every container.
+	// cgroup2 is one hierarchy under /sys/fs/cgroup. Under it, the
+	// kernel accounts for and caps each cgroup's CPU use, memory use,
+	// and process count. kubelet does not run without this mount.
+	// The kernel builds every controller in, so this mount is the
+	// whole setup this step needs.
 	{"cgroup2", "/sys/fs/cgroup", "cgroup2", unix.MS_NOSUID | unix.MS_NOEXEC | unix.MS_NODEV},
 
-	// /run is the conventional home for runtime state: sockets, pids,
-	// locks. Everything in liken's root is RAM already, but containerd
-	// and k3s hardcode paths under /run and expect it to exist.
+	// /run is the standard location for runtime state: sockets,
+	// PIDs, and locks. Everything under liken's root is already in
+	// RAM, but containerd and k3s use hardcoded paths under /run, so
+	// /run must exist.
 	{"tmpfs", "/run", "tmpfs", unix.MS_NOSUID | unix.MS_NODEV},
 
-	// Pseudo-terminals. kubectl exec, the only interactive access to
-	// an OS with no shell, allocates its terminals here.
+	// Pseudo-terminals. kubectl exec is the only interactive access
+	// on an OS with no shell, and it allocates its terminals here.
 	{"devpts", "/dev/pts", "devpts", unix.MS_NOSUID | unix.MS_NOEXEC},
 
-	// POSIX shared memory. Pods get a /dev/shm per-container, but the
-	// runtime occasionally wants the host's to exist.
+	// POSIX shared memory. Each pod gets its own /dev/shm per
+	// container, but the container runtime sometimes needs the
+	// host's /dev/shm to exist too.
 	{"tmpfs", "/dev/shm", "tmpfs", unix.MS_NOSUID | unix.MS_NODEV},
 }
 
@@ -93,22 +101,23 @@ func prepareForK3s() {
 		}
 	}
 
-	// kubelet demands that mounts made under / propagate into the
-	// mount namespaces of its containers ("rshared"); it's how a
-	// volume mounted after a pod starts can still appear inside it.
-	// A plain root mount defaults to private; this flips the whole
-	// tree, recursively.
+	// kubelet requires that mounts made under / propagate into the
+	// mount namespaces of its containers. This propagation mode is
+	// called rshared. It lets a volume that is mounted after a pod
+	// starts still appear inside the pod. A plain root mount
+	// defaults to private propagation. This command changes
+	// propagation for the whole tree, recursively, to shared.
 	if err := unix.Mount("", "/", "", unix.MS_REC|unix.MS_SHARED, ""); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: making / rshared: %v\n", err)
 	}
 
-	// /etc/machine-id is the systemd convention for "a stable unique
-	// identifier for this installation", and enough software reads it
-	// (k3s included) that a machine should have one. The kernel
-	// generates a fresh UUID on every read of this /proc file;
-	// machine-id is that, without the dashes. Ours is random per
-	// boot: on a machine with no writable disk, nothing persists
-	// across boots.
+	// /etc/machine-id is the systemd convention for a stable, unique
+	// identifier for the installation. Enough software reads it,
+	// including k3s, that a machine needs one. The kernel generates
+	// a fresh UUID on every read of the /proc file
+	// /proc/sys/kernel/random/uuid; machine-id is that UUID, without
+	// the dashes. This machine's ID is random on every boot, because
+	// a machine with no writable disk keeps nothing across boots.
 	if raw, err := os.ReadFile("/proc/sys/kernel/random/uuid"); err == nil {
 		id := strings.NewReplacer("-", "", "\n", "").Replace(string(raw))
 		if err := os.WriteFile("/etc/machine-id", []byte(id+"\n"), 0o444); err != nil {
@@ -116,37 +125,42 @@ func prepareForK3s() {
 		}
 	}
 
-	// /etc/hosts: with no nsswitch and no local DNS, this file is the
-	// only way "localhost" (and our own hostname) resolve. Kubernetes
-	// components talk to themselves via localhost constantly.
+	// /etc/hosts: this machine has no nsswitch and no local DNS, so
+	// this file is the only way that "localhost", and the machine's
+	// own hostname, resolve. Kubernetes components connect to
+	// localhost often.
 	hosts := fmt.Sprintf("127.0.0.1 localhost\n::1 localhost\n127.0.1.1 %s\n", hostname)
 	if err := os.WriteFile("/etc/hosts", []byte(hosts), 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: /etc/hosts: %v\n", err)
 	}
 
-	// A node that can't forward packets can't route pod traffic; every
-	// Kubernetes networking layer assumes this ancient sysctl is on.
+	// A node that cannot forward packets cannot route pod traffic.
+	// Every Kubernetes networking layer assumes that this old sysctl
+	// is on.
 	if err := os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1\n"), 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: ip_forward: %v\n", err)
 	}
 
-	// k3s consults $HOME and $PATH like any Unix program; PID 1 gets
-	// neither from the kernel, so we set them. The conventional four
-	// directories are enough: k3s prepends its own unpacked userland
-	// when it builds PATHs for the children it starts.
+	// k3s reads $HOME and $PATH like any Unix program. PID 1 gets
+	// neither variable from the kernel, so this code sets them. The
+	// four conventional directories are enough, because k3s adds its
+	// own unpacked userland to the front of PATH when it builds PATH
+	// for the child processes it starts.
 	os.Setenv("HOME", "/root")
 	os.Setenv("PATH", "/sbin:/bin:/usr/sbin:/usr/bin")
 
 	_ = os.MkdirAll("/root", 0o700)
 	_ = os.MkdirAll("/var/log", 0o755)
 
-	// /tmp exists on every machine (the container runtime stages
-	// kubectl exec sessions there), world-writable with the sticky
-	// bit, per Unix convention. On a machine that declares the
-	// machineEphemeral storage role, a disk partition is already
-	// mounted here and this is a no-op; everywhere else it's RAM like
-	// the rest of the root. (Chmod because MkdirAll filters modes
-	// through the umask, and the sticky bit matters.)
+	// /tmp exists on every machine. The container runtime stages
+	// kubectl exec sessions there. By Unix convention, /tmp is
+	// world-writable with the sticky bit set. On a machine that
+	// declares the machineEphemeral storage role, a disk partition
+	// is already mounted at /tmp, so this step does nothing there.
+	// On every other machine, /tmp is RAM, like the rest of the root
+	// filesystem. This code calls chmod separately because MkdirAll
+	// applies the umask to the mode it is given, and the sticky bit
+	// must be set exactly.
 	_ = os.MkdirAll("/tmp", 0o1777)
 	_ = os.Chmod("/tmp", 0o1777)
 }

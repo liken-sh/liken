@@ -1,6 +1,6 @@
 package main
 
-// The reconcile loop's writes against a miniature API server: the
+// The reconcile loop's writes against a small API server: the
 // operator's access to its own Node object, and the status publish
 // that resolves conflicts without discarding a pass's observations.
 
@@ -16,8 +16,9 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// nodeAPI is a miniature API server holding one Node, remembering
-// whether it was deleted and what status the operator publishes.
+// nodeAPI is a small API server holding one Node. It remembers
+// whether the Node was deleted and what status the operator
+// publishes.
 type nodeAPI struct {
 	deleted       bool
 	publishedPath string
@@ -66,7 +67,7 @@ func TestPublishStatusWritesTheStatusSubresource(t *testing.T) {
 	}
 }
 
-// conflictAPI is a miniature API server that answers the first
+// conflictAPI is a small API server that answers the first
 // `conflicts` status PUTs with 409, serves a fresh copy of the
 // machine on GET, and records the body of the PUT that finally
 // lands.
@@ -108,9 +109,9 @@ func freshMachine(conditions ...api.Condition) machine.Machine {
 }
 
 func TestPublishOwnStatusSkipsAnUnchangedStatus(t *testing.T) {
-	// A settled machine observes the same status pass after pass, and
-	// a write that would change nothing should never leave the
-	// process: the API server would drop it as a no-op anyway, but
+	// A settled machine observes the same status pass after pass.
+	// A write that would change nothing should never leave the
+	// process. The API server would drop it as a no-op anyway, but
 	// only after this machine made every leader consider it.
 	fake := &conflictAPI{}
 	client := testClient(t, fake.handler())
@@ -134,9 +135,9 @@ func TestPublishOwnStatusSkipsAnUnchangedStatus(t *testing.T) {
 func TestPublishOwnStatusResolvesAConflictWithAFreshRead(t *testing.T) {
 	// The conductor granted a turn between this pass's read and its
 	// write. The retry must carry the resourceVersion of the fresh
-	// copy and adopt the conductor's grant exactly as written,
-	// including its transition time, which the rollout's stall clock
-	// measures from.
+	// copy, and it must adopt the conductor's grant exactly as
+	// written, including its transition time, which the rollout's
+	// stall clock measures from.
 	granted := grantCondition(testNow)
 	fake := &conflictAPI{conflicts: 1, fresh: freshMachine(granted)}
 	client := testClient(t, fake.handler())
@@ -161,8 +162,9 @@ func TestPublishOwnStatusResolvesAConflictWithAFreshRead(t *testing.T) {
 }
 
 func TestPublishOwnStatusHonorsAReclaimedGrant(t *testing.T) {
-	// The reverse race: this pass carried a grant read before the
-	// conductor reclaimed it. The retry must not resurrect it.
+	// The reverse race: this pass carried a grant that it read
+	// before the conductor reclaimed it. The retry must not bring
+	// it back.
 	fake := &conflictAPI{conflicts: 1, fresh: freshMachine()}
 	client := testClient(t, fake.handler())
 
@@ -177,9 +179,9 @@ func TestPublishOwnStatusHonorsAReclaimedGrant(t *testing.T) {
 }
 
 func TestPublishOwnStatusRetriesOnlyOnce(t *testing.T) {
-	// A second conflict means the object is changing faster than we
-	// can read it; the watch has already queued the event that will
-	// trigger the next pass, so the write waits for that.
+	// A second conflict means the object is changing faster than
+	// this pass can read it. The watch has already queued the event
+	// that will trigger the next pass, so the write waits for that.
 	fake := &conflictAPI{conflicts: 2, fresh: freshMachine()}
 	client := testClient(t, fake.handler())
 

@@ -1,28 +1,29 @@
 package main
 
-// The file relays are a hand-written tail -F: follow a growing file,
-// and when the file at the path is suddenly a different file, finish
-// the old one and start the new one. That rename dance is exactly
-// what init's rotate-at-boot (and the in-boot size cap on k3s.log)
-// produces, and the reason the DaemonSets mount the parent directory
-// rather than the file: a bind mount of the file itself would pin
-// the old inode forever, while a lookup through the directory sees
-// each new generation.
+// The file relays implement a hand-written version of tail -F:
+// follow a growing file, and when the file at the path suddenly
+// becomes a different file, finish the old one and start the new
+// one. This rename sequence is exactly what init's rotate-at-boot
+// produces (along with the in-boot size cap on k3s.log). This is
+// also why the DaemonSets mount the parent directory instead of the
+// file: a bind mount of the file itself would keep the old inode
+// pinned forever, while a lookup through the directory sees each new
+// generation.
 //
-// Rotation is detected by identity, not by name: the tailer holds
-// the inode it opened, and when the path's (device, inode) no longer
-// match, the held file is the renamed previous generation. It gets
-// drained to its final EOF (the writer may have gotten a few last
-// lines in before the rename) and the path is reopened from the top.
-// Rotated generations sitting on disk (.1, .2, ...) are never read;
-// they are boot forensics, and shipping previous boots is
-// deliberately unsolved here.
+// Rotation is detected by identity, not by name. The tailer holds
+// the inode it opened, and when the path's (device, inode) pair no
+// longer matches, the held file is the renamed previous generation.
+// The tailer drains that file to its final EOF, because the writer
+// may have added a few last lines before the rename, and then
+// reopens the path from the top. Rotated generations that sit on
+// disk (.1, .2, ...) are never read. They exist for boot forensics,
+// and shipping previous boots is left unsolved here on purpose.
 //
-// The follow mechanism is polling. inotify could push instead, but a
-// half-second poll is two wakeups a second for sub-second shipping
-// latency, needs no event plumbing, and behaves identically on every
-// filesystem, which is the kind of boring that belongs under PID 1's
-// logs.
+// The follow mechanism is polling. inotify could push updates
+// instead, but a half-second poll is only two wakeups a second,
+// gives sub-second shipping latency, needs no event plumbing, and
+// behaves the same way on every filesystem. This kind of plain,
+// predictable behavior belongs in code that runs under PID 1.
 
 import (
 	"bytes"
@@ -38,26 +39,28 @@ import (
 
 var pollInterval = 500 * time.Millisecond
 
-// tailCursor is the resume point: which file (by identity, not
-// name) and the offset of the first byte of the next line. Offsets
-// only ever point at line starts, so a resumed relay re-reads a
-// partially-shipped line whole rather than emitting a fragment.
+// tailCursor is the resume point: which file, identified by identity
+// rather than name, and the offset of the first byte of the next
+// line. Offsets always point at the start of a line. Because of
+// this, a resumed relay re-reads a partially sent line as a whole
+// line, instead of sending a fragment.
 type tailCursor struct {
 	Dev    uint64 `json:"dev"`
 	Ino    uint64 `json:"ino"`
 	Offset int64  `json:"offset"`
 }
 
-// fileIdentity reads the (device, inode) pair that names a file
+// fileIdentity reads the (device, inode) pair that identifies a file
 // independent of its path.
 func fileIdentity(info fs.FileInfo) (uint64, uint64) {
 	st := info.Sys().(*syscall.Stat_t)
 	return uint64(st.Dev), st.Ino
 }
 
-// awaitFile opens the path, waiting for it to exist: containerd.log
-// isn't created until k3s brings containerd up, and after a rotation
-// there is a moment before the writer recreates the file.
+// awaitFile opens the path, and waits for the file to exist.
+// containerd.log is not created until k3s brings containerd up.
+// After a rotation, there is also a moment before the writer creates
+// the file again.
 func awaitFile(ctx context.Context, path string) (*os.File, error) {
 	for {
 		f, err := os.Open(path)
@@ -75,9 +78,9 @@ func awaitFile(ctx context.Context, path string) (*os.File, error) {
 	}
 }
 
-// tailFile follows one log file forever (until the context ends),
-// emitting an envelope per line with the line's starting byte offset
-// as its sequence number. Each pass of the loop handles one
+// tailFile follows one log file forever, until the context ends. It
+// sends an envelope for each line, using the line's starting byte
+// offset as its sequence number. Each pass of the loop handles one
 // generation of the file: open it, decide where to start reading,
 // and follow it until a rotation replaces it.
 func tailFile(ctx context.Context, path string, out *envelopeWriter, curDir string, now func() time.Time) error {
@@ -96,11 +99,11 @@ func tailFile(ctx context.Context, path string, out *envelopeWriter, curDir stri
 		}
 		dev, ino := fileIdentity(info)
 
-		// Resume only into the same file the cursor described, and
-		// only within its current size. A shrunken file means
-		// something truncated it in place, which nothing on a liken
-		// machine should do; say so and start over rather than read
-		// from the middle of unrelated bytes.
+		// Resume only into the same file that the cursor described,
+		// and only within its current size. A shrunken file means
+		// something truncated it in place, and nothing on a liken
+		// machine should do that. Report this and start over, instead
+		// of reading from the middle of unrelated bytes.
 		offset := int64(0)
 		if resuming && dev == cur.Dev && ino == cur.Ino {
 			if cur.Offset <= info.Size() {
@@ -120,12 +123,12 @@ func tailFile(ctx context.Context, path string, out *envelopeWriter, curDir stri
 	}
 }
 
-// followGeneration reads one generation of the file: seek to the
-// starting offset, follow the file as it grows, and when a rotation
-// replaces it at the path, drain the renamed generation to its final
-// EOF. It owns the open file, closing it on every return; a nil
-// return means the generation rotated and the caller should reopen
-// the path.
+// followGeneration reads one generation of the file. It seeks to the
+// starting offset, follows the file as it grows, and when a rotation
+// replaces the file at the path, drains the renamed generation to
+// its final EOF. This function owns the open file, and closes it on
+// every return. A nil return means the generation rotated, and the
+// caller should reopen the path.
 func followGeneration(ctx context.Context, f *os.File, path string, offset int64, dev, ino uint64, out *envelopeWriter, curDir string, now func() time.Time) error {
 	defer f.Close()
 
@@ -135,14 +138,14 @@ func followGeneration(ctx context.Context, f *os.File, path string, offset int64
 		}
 	}
 
-	// The line assembler: partial carries an incomplete line
-	// across reads, lineStart is the file offset of its first
-	// byte (and the seq of the next line emitted), pos is the
+	// This is the line assembler. partial carries an incomplete line
+	// across reads. lineStart is the file offset of that line's
+	// first byte, and also the seq of the next line sent. pos is the
 	// offset of the next unread byte.
 	var partial []byte
 	lineStart, pos := offset, offset
 
-	// ship emits one complete line as an envelope, with the line's
+	// ship sends one complete line as an envelope, using the line's
 	// starting byte offset as its sequence number.
 	ship := func(line string) error {
 		when, severity := lift(line, now())
@@ -191,8 +194,9 @@ func followGeneration(ctx context.Context, f *os.File, path string, offset int64
 			return err
 		}
 
-		// Caught up. Checkpoint (throttled), sleep one poll interval,
-		// then check whether the path still names the file we hold.
+		// The tailer has caught up. Checkpoint (at a limited rate),
+		// sleep for one poll interval, then check whether the path
+		// still names the file this loop holds.
 		if t := now(); t.Sub(lastCheckpoint) >= checkpointInterval {
 			lastCheckpoint = t
 			if err := saveCursor(curDir, tailCursor{Dev: dev, Ino: ino, Offset: lineStart}); err != nil {
@@ -216,10 +220,10 @@ func followGeneration(ctx context.Context, f *os.File, path string, offset int64
 	}
 
 	// The held file is the renamed previous generation. Drain
-	// whatever the writer appended before the rename, ship a
-	// trailing unterminated line as-is (a crash mid-write is the
-	// only way one exists, and it will never be finished), and
-	// move on to the new file at the path.
+	// whatever the writer appended before the rename. Send a
+	// trailing unterminated line as it is: a crash mid-write is the
+	// only way such a line can exist, and it will never be
+	// completed. Then move on to the new file at the path.
 	for {
 		n, err := f.Read(buf)
 		if n > 0 {
@@ -240,7 +244,7 @@ func followGeneration(ctx context.Context, f *os.File, path string, offset int64
 	return nil
 }
 
-// relayFile is the k3s and containerd verbs.
+// relayFile implements the k3s and containerd verbs.
 func relayFile(path string) error {
 	return tailFile(context.Background(), path, newEnvelopeWriter(os.Stdout), cursorDir, time.Now)
 }

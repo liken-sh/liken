@@ -1,11 +1,12 @@
 package main
 
-// The world report reads only: the kernel's uname, the firmware's
-// variables, /proc, and the block inventory. Pointing the firmware
-// and disk paths at fakes makes the whole report exercisable as an
-// ordinary process; what it prints for real is QEMU territory, but
-// every reader it calls through is shared with the facts, so running
-// it here pins that the report never writes and never panics.
+// The world report only reads: the kernel's uname, the firmware's
+// variables, /proc, and the block device inventory. This test points
+// the firmware and disk paths at fakes, which makes the whole report
+// runnable as an ordinary process. What the report prints on real
+// hardware is tested by the QEMU harness, but every reader function
+// it calls is shared with the facts code. So running the report here
+// confirms that it never writes and never panics.
 
 import "testing"
 

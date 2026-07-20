@@ -1,8 +1,8 @@
 package releases
 
-// Tests for bundling a release. The fixtures are small stand-ins
-// with the same shape as the real thing: artifact files and a
-// document generated from their real bytes.
+// Tests for bundling a release. The fixtures are small stand-ins with
+// the same shape as the real thing: artifact files and a document
+// generated from their real bytes.
 
 import (
 	"bytes"
@@ -20,7 +20,7 @@ var testComponents = []machine.ReleaseComponent{
 	{Name: "k3s", Version: "v1.36.2+k3s1"},
 }
 
-// bundledRelease lays out a tiny release through Bundle itself and
+// bundledRelease lays out a tiny release through Bundle itself, and
 // returns the channel directory and Bundle's report.
 func bundledRelease(t *testing.T, version string) (string, string) {
 	t.Helper()
@@ -56,9 +56,9 @@ func bundledRelease(t *testing.T, version string) (string, string) {
 func TestBundleProducesAVerifiableRelease(t *testing.T) {
 	channel, _ := bundledRelease(t, "2026.07.11-001")
 
-	// The document must parse as the same Release kind machines
-	// verify, and every artifact must verify against it: the same
-	// check the fetch path performs.
+	// The document must parse as the same Release kind that machines
+	// verify, and every artifact must verify against it. This is the
+	// same check the fetch path performs.
 	raw, err := os.ReadFile(filepath.Join(channel, "2026.07.11-001", "release.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -89,8 +89,8 @@ func TestBundleRecordsTheComponents(t *testing.T) {
 	channel, _ := bundledRelease(t, "2026.07.11-001")
 
 	// The version is a calendar date that says nothing about what
-	// shipped; the document's components section is where the what
-	// lives, so a bundle must carry it through verbatim.
+	// shipped. The document's components section is where that
+	// information lives, so a bundle must carry it through unchanged.
 	raw, err := os.ReadFile(filepath.Join(channel, "2026.07.11-001", "release.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -114,8 +114,8 @@ func TestBundleReportsTheCatalogEntry(t *testing.T) {
 	channel, report := bundledRelease(t, "2026.07.11-002")
 
 	// The catalog entry is what a deployment commits to its Cluster:
-	// the release document named by its own digest, computed from the
-	// published copy, the root of the trust chain.
+	// the release document, named by its own digest, computed from the
+	// published copy. This digest is the root of the trust chain.
 	digest, err := fileSHA256(filepath.Join(channel, "2026.07.11-002", "release.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -131,7 +131,7 @@ func TestBundleReportsTheCatalogEntry(t *testing.T) {
 func TestBundleWritesTheChannelDocument(t *testing.T) {
 	channel, report := bundledRelease(t, "2026.07.11-001")
 
-	// One bundle in a fresh channel makes that bundle the latest; the
+	// One bundle in a fresh channel makes that bundle the latest. The
 	// document at the channel's root must say so, in the same Channel
 	// kind a polling cluster will read.
 	raw, err := os.ReadFile(filepath.Join(channel, "channel.yaml"))
@@ -152,9 +152,9 @@ func TestBundleWritesTheChannelDocument(t *testing.T) {
 
 func TestChannelDocumentNamesTheNewestRelease(t *testing.T) {
 	// Bundling an older release after a newer one must not move the
-	// channel backwards: the latest is the newest version present, not
-	// the most recently bundled. The zero-padded calendar grammar makes
-	// plain string order the version order.
+	// channel backwards. The latest is the newest version present, not
+	// the most recently bundled version. The zero-padded calendar
+	// grammar makes plain string order match the version order.
 	channel, _ := bundledRelease(t, "2026.07.11-002")
 	rebundleInto(t, channel, "2026.07.11-001")
 
@@ -172,9 +172,9 @@ func TestChannelDocumentNamesTheNewestRelease(t *testing.T) {
 }
 
 func TestChannelDocumentIgnoresForeignDirectories(t *testing.T) {
-	// A channel directory may hold things that aren't releases (notes,
-	// scratch space); only version-shaped directories are candidates
-	// for latest.
+	// A channel directory may hold things that are not releases
+	// (notes, scratch space). Only version-shaped directories are
+	// candidates for latest.
 	channel, _ := bundledRelease(t, "2026.07.11-001")
 	if err := os.MkdirAll(filepath.Join(channel, "not-a-version"), 0o755); err != nil {
 		t.Fatal(err)
@@ -195,7 +195,7 @@ func TestChannelDocumentIgnoresForeignDirectories(t *testing.T) {
 }
 
 // rebundleInto runs Bundle again against an existing channel
-// directory, the way successive releases land in the same channel.
+// directory, the way each new release lands in the same channel.
 func rebundleInto(t *testing.T, channel, version string) {
 	t.Helper()
 	src := t.TempDir()
@@ -255,9 +255,9 @@ func TestBundleRefusesAMissingArtifact(t *testing.T) {
 }
 
 func TestBundleRefusesAMalformedVersion(t *testing.T) {
-	// The grammar is enforced where versions are authored, so a typo
-	// is refused here rather than discovered when a machine fails to
-	// fetch. Nothing may land in the channel under the bad name.
+	// Bundle enforces the grammar where versions are authored, so a
+	// typo is refused here rather than discovered when a machine fails
+	// to fetch. Nothing may land in the channel under the bad name.
 	channel := t.TempDir()
 	err := Bundle("vmlinuz", "liken.sqfs", "boot.cpio", "liken", "menu.efi",
 		"grub-boot.img", "grub-core.img", "LICENSES.md",

@@ -1,9 +1,9 @@
 package main
 
-// The condition constructors reconcile publishes each pass: each one
-// judges one aspect of the machine — the facts, the sysctls, the
-// storage, the modules, the features, the Node's health — and reports
-// it as a standard Kubernetes condition.
+// The condition constructors that reconcile publishes on each pass.
+// Each one checks one aspect of the machine: the facts, the sysctls,
+// the storage, the modules, the features, or the Node's health. Each
+// one reports its check as a standard Kubernetes condition.
 
 import (
 	"errors"
@@ -36,17 +36,18 @@ func sysctlsCondition(err error) api.Condition {
 	return api.Condition{Type: "SysctlsApplied", Status: api.ConditionTrue, Reason: "Applied"}
 }
 
-// applySysctls actuates spec.sysctls against the host's /proc/sys
-// (dir, reachable directly because this pod runs privileged in the
-// host's namespaces), then reads every parameter back. The returned
-// map is what the kernel now reports, not what we wrote: if some
-// other agent resets a value, the next pass both re-asserts it and
-// reports what was actually observed. One failure never stops the
-// rest of the parameters from being applied, and every failure is
-// joined into the returned error, because the condition built from it
-// is the operator's whole report: a message naming one bad parameter
-// when three are failing would send a person around this loop three
-// times.
+// applySysctls writes spec.sysctls to the host's /proc/sys (dir).
+// The pod runs privileged in the host's namespaces, so it reaches
+// /proc/sys directly. After writing, the function reads every
+// parameter back. The returned map holds what the kernel now
+// reports, not what the function wrote. If another process resets a
+// value, the next pass writes it again and reports what the pass
+// actually observed. One failure never stops the function from
+// applying the rest of the parameters. The function joins every
+// failure into the returned error, because the condition built from
+// it is the operator's whole report on this check. A message that
+// names one bad parameter, when three parameters are failing, would
+// send a person through this loop three times.
 func applySysctls(dir string, desired map[string]string) (map[string]string, error) {
 	var errs []error
 	observed := map[string]string{}
@@ -63,12 +64,13 @@ func applySysctls(dir string, desired map[string]string) (map[string]string, err
 }
 
 // storageCondition summarizes storage as one standard Kubernetes
-// condition, comparing what the spec declared against where each role
-// is actually backed. True means every declared role sits on its
-// partition. False should be unreachable on a running machine, since
-// init powers off rather than boot with a declared role unsatisfied.
-// But a condition has to be able to express every state it names, and
-// a future, softer failure mode may need it.
+// condition. It compares what the spec declared against where the
+// system actually backs each role. True means every declared role
+// sits on its partition. False should not happen on a running
+// machine, because init powers off instead of booting with a
+// declared role left unsatisfied. But a condition must be able to
+// report every state it names, and a future, softer failure mode may
+// need this one.
 func storageCondition(spec machine.StorageSpec, status machine.StorageStatus) api.Condition {
 	var placed, inMemory []string
 	for _, role := range spec.Roles() {
@@ -98,10 +100,11 @@ func storageCondition(spec machine.StorageSpec, status machine.StorageStatus) ap
 	}
 }
 
-// outcomesCondition reduces a boot's per-item outcomes (modules,
-// features) to one condition: any problem makes it False carrying
-// every item's message, all healthy is True with a summary, and
-// nothing declared is True on its own terms.
+// outcomesCondition reduces a boot's outcomes for individual items
+// (modules, features) to one condition. Any problem makes the
+// condition False and carries every item's message. When every item
+// is healthy, the condition is True with a summary. When nothing is
+// declared, the condition is also True, with its own message.
 func outcomesCondition(condType string, observed int, problems []string, failedReason, healthyReason, healthyMessage, noneMessage string) api.Condition {
 	switch {
 	case len(problems) > 0:
@@ -122,12 +125,12 @@ func outcomesCondition(condType string, observed int, problems []string, failedR
 	}
 }
 
-// modulesCondition summarizes the boot's declared-module outcomes as
-// one condition. Loaded and Builtin are both healthy; anything else
-// carries init's message, which names the fix (a rebuilt image for a
-// Missing module, the hardware's error for a Failed one), because a
-// status that says what would repair it beats one that only says
-// what's wrong.
+// modulesCondition summarizes the boot's outcomes for declared
+// modules as one condition. Loaded and Builtin are both healthy
+// states. Any other state carries init's message, which names the
+// fix: a rebuilt image for a Missing module, or the hardware's error
+// for a Failed one. A status that names the fix is more useful than
+// one that only names the problem.
 func modulesCondition(observed []machine.ModuleStatus) api.Condition {
 	var problems []string
 	for _, s := range observed {
@@ -143,10 +146,11 @@ func modulesCondition(observed []machine.ModuleStatus) api.Condition {
 }
 
 // featuresCondition summarizes the boot's feature outcomes as one
-// condition, the same shape modulesCondition takes. Anything not
-// Active carries init's message, which names the fix: for a Missing
-// feature that is a release whose image carries the payload, because
-// enabling a feature never rebuilds anything by itself.
+// condition, in the same form as modulesCondition. Any state other
+// than Active carries init's message, which names the fix. For a
+// Missing feature, the fix is a release whose image carries the
+// needed payload, because enabling a feature never rebuilds anything
+// by itself.
 func featuresCondition(observed []machine.FeatureStatus) api.Condition {
 	var problems []string
 	for _, s := range observed {
@@ -162,9 +166,9 @@ func featuresCondition(observed []machine.FeatureStatus) api.Condition {
 }
 
 // nodeHealthyCondition translates the Node's Ready condition into the
-// Machine's vocabulary. A missing Ready condition on the Node reads
-// as unhealthy: a kubelet that has never reported in cannot be
-// assumed to be serving.
+// Machine's own condition. When the Node carries no Ready condition,
+// this function reports the machine as unhealthy: a kubelet that has
+// never reported in cannot be assumed to be serving.
 func nodeHealthyCondition(node *nodeObject) api.Condition {
 	for _, c := range node.Status.Conditions {
 		if c.Type != "Ready" {

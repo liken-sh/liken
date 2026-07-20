@@ -1,9 +1,9 @@
 package main
 
-// The fetcher, exercised against a real HTTP server (httptest)
+// The fetcher, tested against a real HTTP server (httptest)
 // serving a real, tiny release: two artifacts and a release.yaml
-// whose digests are computed from their actual bytes, exactly the way
-// the releases package computes them at publish time.
+// whose digests are computed from their actual bytes, exactly the
+// way the releases package computes them at publish time.
 
 import (
 	"crypto/sha256"
@@ -73,9 +73,9 @@ func serveRelease(t *testing.T, r *fakeRelease, hits *atomic.Int64) *httptest.Se
 	return server
 }
 
-// activeSlot builds the slot this machine is running from, as far as
-// the fetcher cares: the deployment layer and the sidecar vouching
-// for it, which every fetch must carry to the inactive slot.
+// activeSlot builds the slot this machine is running from, as far
+// as the fetcher cares: the deployment layer and the sidecar that
+// confirms it, which every fetch must carry to the inactive slot.
 func activeSlot(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -102,8 +102,8 @@ func askFor(r *fakeRelease, serverURL, slotDir, activeSlotDir string) fetchAsk {
 	}
 }
 
-// awaitSettled polls until the fetcher leaves Running/Idle, the async
-// test's stand-in for "the goroutine finished".
+// awaitSettled polls until the fetcher leaves Running or Idle.
+// This is how these async tests wait for the goroutine to finish.
 func awaitSettled(t *testing.T, f *fetcher) fetchSnapshot {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -182,8 +182,8 @@ func TestAMissingActiveLayerIsRejectedAndHeld(t *testing.T) {
 	slot := t.TempDir()
 
 	// The active slot has no layer at all: an old-format install, or
-	// real damage. Either way no retry can conjure the layer, so this
-	// holds like corruption does.
+	// real damage. Either way, no retry can produce the layer, so
+	// this holds the way corruption does.
 	f := &fetcher{}
 	ask := askFor(release, server.URL, slot, t.TempDir())
 	f.Ensure(ask)
@@ -232,9 +232,9 @@ func TestAStaleInactiveLayerIsReplaced(t *testing.T) {
 	slot := t.TempDir()
 	active := activeSlot(t)
 
-	// The inactive slot still carries an older install's layer, with
-	// a sidecar that vouches for those older bytes. The carry must
-	// replace both with the running slot's.
+	// The inactive slot still carries an older install's layer,
+	// with a sidecar that confirms those older bytes. The carry
+	// must replace both with the running slot's.
 	stale := []byte("a previous deployment layer")
 	sum := sha256.Sum256(stale)
 	if err := os.WriteFile(filepath.Join(slot, machine.LayerName), stale, 0o644); err != nil {
@@ -263,8 +263,9 @@ func TestALayerWithoutItsSidecarIsRecompleted(t *testing.T) {
 	active := activeSlot(t)
 
 	// A previous carry died between the layer's rename and the
-	// sidecar's write. The layer is already right; the next pass must
-	// finish the job rather than reject or recopy blindly.
+	// sidecar's write. The layer is already correct. The next pass
+	// must finish the job, instead of rejecting it or blindly
+	// copying it again.
 	layer, err := os.ReadFile(filepath.Join(active, machine.LayerName))
 	if err != nil {
 		t.Fatal(err)
@@ -297,8 +298,8 @@ func TestResumesByVerificationNotRefetching(t *testing.T) {
 	server := serveRelease(t, release, &hits)
 	slot := t.TempDir()
 
-	// One artifact already landed (a previous run, interrupted after
-	// vmlinuz): only the other should be fetched.
+	// One artifact already landed, from a previous run interrupted
+	// after vmlinuz. Only the other artifact should be fetched.
 	if err := os.WriteFile(filepath.Join(slot, "vmlinuz"), release.artifacts["vmlinuz"], 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +336,7 @@ func TestVerifiedIsIdempotentAcrossPasses(t *testing.T) {
 
 func TestCorruptArtifactIsRejectedAndHeld(t *testing.T) {
 	release := makeRelease("0.2.0")
-	// The server's copy of liken.cpio is damaged after publish: the
+	// The server's copy of liken.cpio is damaged after publish. The
 	// document still promises the original digest (make corrupt).
 	release.artifacts["liken.cpio"] = []byte("pretend initramfs 0.2.0 with a flipped bit")
 	var hits atomic.Int64
@@ -388,8 +389,8 @@ func TestAChangedAskClearsTheHold(t *testing.T) {
 	f.Ensure(askFor(bad, server.URL, slot, activeSlot(t)))
 	awaitSettled(t, f)
 
-	// The corrected release is published under a new version, which
-	// is the recovery the design prescribes, and the new ask fetches.
+	// The corrected release is published under a new version. This
+	// is the recovery the design calls for, and the new ask fetches.
 	good := makeRelease("0.2.1")
 	goodServer := serveRelease(t, good, new(atomic.Int64))
 	f.Ensure(askFor(good, goodServer.URL, slot, activeSlot(t)))
@@ -429,9 +430,9 @@ func TestServerFailuresAreTransientAndRetried(t *testing.T) {
 		t.Fatalf("a down server is a transient failure: %+v", snap)
 	}
 
-	// The retry must carry the failure's reason: the restarted state
-	// is the only one a reconcile pass ever reads, so the reason the
-	// last attempt failed has to appear in it.
+	// The retry must carry the failure's reason. The restarted
+	// state is the only one a reconcile pass ever reads, so the
+	// reason the last attempt failed has to appear in it.
 	broken.Store(false)
 	if snap := f.Ensure(ask); snap.state != fetchRunning || !strings.Contains(snap.detail, "retrying after") {
 		t.Errorf("a retry should say what it's retrying after: %+v", snap)
@@ -456,8 +457,9 @@ func TestEnsureNeverBlocksOnTheDownload(t *testing.T) {
 	done := make(chan fetchSnapshot, 1)
 	go func() { done <- f.Ensure(ask) }()
 
-	// This is the heartbeat's guarantee in miniature: Ensure must
-	// return while the server still hasn't answered a byte.
+	// This is a small-scale version of the heartbeat's guarantee.
+	// Ensure must return while the server still has not answered a
+	// byte.
 	select {
 	case snap := <-done:
 		if snap.state != fetchRunning {

@@ -1,17 +1,18 @@
-# The release, run when a version tag lands: build the bundle under
-# the tagged version, prove the same tree still boots, and publish it
-# to the channel at https://releases.liken.sh. The tag is the act of
-# release (releases/versioning.md); this workflow is just the tag's
-# consequences, so cutting a release from a workstation is only
+# This is the release. It runs when a version tag lands: it builds
+# the bundle under the tagged version, proves that the same tree
+# still boots, and publishes the bundle to the channel at
+# https://releases.liken.sh. The tag is the act of release
+# (releases/versioning.md). This workflow only carries out what the
+# tag requires. So cutting a release from a workstation is only
 #
 #   git tag v2026.07.11-001 && git push origin v2026.07.11-001
 #
-# The channel is object storage, and the workflow talks straight to
-# it with the scoped key Terraform delivered as repository secrets
-# (liken.sh/terraform.tf). Nothing here is reachable by a machine
+# The channel is object storage, and the workflow talks directly to
+# it, using the scoped key that Terraform delivered as repository
+# secrets (liken.sh/terraform.tf). No machine can reach anything here
 # until its Cluster document names the version and pins the digest
-# this run prints — publishing makes bytes available, never adopts
-# them anywhere.
+# that this run prints. Publishing makes bytes available. It never
+# adopts them anywhere.
 name: release
 
 on:
@@ -19,8 +20,8 @@ on:
     tags: ["v*"]
 
 # contents: write is what lets the last step create the GitHub
-# release; everything before it only reads the tree. The publishing
-# credentials proper (the channel's key) arrive as secrets, not
+# release. Every step before it only reads the tree. The real
+# publishing credentials (the channel's key) arrive as secrets, not
 # through this token.
 permissions:
   contents: write
@@ -33,19 +34,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      # Full history and tags: version.mk names dev artifacts with
-      # git describe even during a release build, and describe needs
-      # to see the tags to do it.
+      # This step checks out full history and tags: version.mk names
+      # dev artifacts with git describe even during a release build,
+      # and describe needs to see the tags to do that.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       # The version is the tag without its conventional v prefix, and
-      # it must be a real release version: the CalVer grammar the
-      # whole system agrees on, and not serial 000, which versioning.md
-      # reserves for lab stand-ins that must never be published. The
-      # releases Makefile checks the grammar again; failing here just
-      # names the problem before spending a build on it.
+      # it must be a real release version: it must follow the CalVer
+      # grammar that the whole system agrees on, and it must not be
+      # serial 000, which versioning.md reserves for lab substitutes
+      # that must never be published. The releases Makefile checks the
+      # grammar again. Failing here just names the problem before the
+      # workflow spends a build on it.
       - name: derive the version from the tag
         id: version
         run: |
@@ -62,22 +64,24 @@ jobs:
 
       - uses: ./.github/actions/build-setup
 
-      # Build every liken binary under the release version and lay
-      # out releases/dist/<version>/ exactly as the channel serves it.
+      # This step builds every liken binary under the release version,
+      # and lays out releases/dist/<version>/ exactly as the channel
+      # serves it.
       - run: make release VERSION=${{ steps.version.outputs.version }}
 
-      # Then boot the same tree before a byte leaves the runner: the
-      # smoke drill starts node-1 from blank disks and passes when its
-      # node reports Ready over the cluster's API. Releases are
-      # immutable, so a bundle that can't boot must be caught here —
-      # after publication the only remedy is the next serial.
+      # Then this step boots the same tree before a byte leaves the
+      # runner: the smoke drill starts node-1 from blank disks and
+      # passes when its node reports Ready over the cluster's API.
+      # Releases are immutable, so this run must catch a bundle that
+      # cannot boot. After publication, the only remedy is the next
+      # serial.
       - run: make smoke-uefi
 
-      # s3cmd is the uploader because it speaks plain S3 to non-AWS
-      # endpoints without protest; recent aws-cli versions attach
+      # s3cmd is the uploader, because it speaks plain S3 to non-AWS
+      # endpoints without errors. Recent aws-cli versions attach
       # AWS-only integrity checksums that Linode's S3 implementation
-      # rejects. The config names the endpoint; the key arrives from
-      # the repository secrets Terraform keeps delivered.
+      # rejects. The config names the endpoint. The key comes from the
+      # repository secrets that Terraform keeps delivered.
       - name: configure the uploader
         env:
           RELEASES_ACCESS_KEY: ${{ secrets.RELEASES_ACCESS_KEY }}
@@ -93,9 +97,10 @@ jobs:
           use_https = True
           EOF
 
-      # Releases are immutable: a published version is never rewritten,
-      # only superseded by the next serial. A tag that names an already
-      # published version fails here, before any byte moves.
+      # Releases are immutable: the workflow never rewrites a
+      # published version, and only the next serial supersedes it. A
+      # tag that names an already published version fails here, before
+      # any byte moves.
       - name: refuse to republish
         run: |
           if s3cmd info "s3://releases.liken.sh/${{ steps.version.outputs.version }}/release.yaml" >/dev/null 2>&1; then
@@ -104,16 +109,17 @@ jobs:
           fi
 
       # The corresponding sources go up before the release does. The
-      # GPL- and LGPL-licensed components in the artifacts oblige the
+      # GPL- and LGPL-licensed components in the artifacts require the
       # channel to offer their source from the same place it offers
-      # the binaries (licensing/sources.sh explains), so no release
-      # may be discoverable before its sources are. The mirror is
-      # keyed by component version, not release version, and the
-      # script skips everything the channel already serves, so a
-      # release whose pins haven't moved downloads and uploads
-      # nothing here; only a pin bump moves new bytes. When every
-      # file is already published, the sources tree isn't produced
-      # at all and the publish loop below has nothing to do.
+      # the binaries (licensing/sources.sh explains this). So no
+      # release may be discoverable before its sources are. The mirror
+      # is keyed by component version, not release version, and the
+      # script skips everything the channel already serves. So a
+      # release whose pins have not moved downloads and uploads
+      # nothing here; only a pin bump moves new bytes. When every file
+      # is already published, the workflow does not produce the
+      # sources tree at all, and the publish loop below has nothing to
+      # do.
       - name: mirror the corresponding sources
         run: make -C licensing sources
 
@@ -131,15 +137,16 @@ jobs:
             fi
           done
 
-      # Artifacts first, the document last: release.yaml is how anyone
-      # discovers the artifacts, so until it lands the half-uploaded
-      # release simply doesn't exist yet. Every object is public-read —
-      # the channel is public by design — while the bucket itself
-      # refuses to list, so only named paths answer. channel.yaml goes
-      # last of all and is the channel's one mutable object: the
-      # advisory pointer clusters poll to learn the latest version
-      # (the immutability guard above keeps a re-run of an old tag
-      # from ever moving it backwards).
+      # This step publishes the artifacts first, and the document
+      # last: release.yaml is how anyone discovers the artifacts, so
+      # until it lands, the half-uploaded release simply does not
+      # exist yet. Every object is public-read, because the channel is
+      # public by design, while the bucket itself refuses to list its
+      # contents, so only named paths answer. channel.yaml goes last
+      # of all, and it is the channel's one mutable object: the
+      # advisory pointer that clusters poll to learn the latest
+      # version (the immutability guard above stops a re-run of an old
+      # tag from ever moving that pointer backwards).
       - name: publish
         working-directory: releases/dist/${{ steps.version.outputs.version }}
         run: |
@@ -160,11 +167,12 @@ jobs:
             ../../index.html \
             "s3://releases.liken.sh/index.html"
 
-      # Prove the release the way a consumer meets it: fetch the
-      # document over the public URL, byte-compare it against what was
-      # built, and print the catalog entry a Cluster commits to adopt
-      # this release — the digest is the root of the trust chain, so
-      # it's worth surfacing where a person will copy it from.
+      # This step proves the release the way a consumer meets it: it
+      # fetches the document over the public URL, compares it byte for
+      # byte against what was built, and prints the catalog entry that
+      # a Cluster commits to when it adopts this release. The digest
+      # is the root of the trust chain, so it is worth showing where a
+      # person will copy it from.
       - name: verify from the public channel
         run: |
           VERSION=${{ steps.version.outputs.version }}
@@ -192,15 +200,16 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       # The GitHub release is the announcement, not the distribution:
-      # a page people can watch and an RSS feed clusters' operators
-      # can follow, carrying the catalog entry so adopting the
-      # release is copy-paste from the release page. The artifacts
-      # deliberately stay off it — the channel is the one place
-      # binaries live, because the GPL notice obligations travel with
-      # the binaries and the channel is where LICENSES.md and the
-      # source mirror already satisfy them. Notes are the commit
-      # subjects since the last release: commit messages here are
-      # written as prose, so the log *is* the changelog.
+      # a page that people can watch, and an RSS feed that clusters'
+      # operators can follow, carrying the catalog entry so that
+      # adopting the release is a copy and a paste from the release
+      # page. The artifacts deliberately stay off this page. The
+      # channel is the one place binaries live, because the GPL notice
+      # requirements travel with the binaries, and the channel is
+      # where LICENSES.md and the source mirror already satisfy them.
+      # The notes are the commit subjects since the last release:
+      # commit messages here are written as prose, so the log is the
+      # changelog.
       - name: publish the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

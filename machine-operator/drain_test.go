@@ -51,8 +51,8 @@ func TestEvictablePodsSkipsWhatCannotMove(t *testing.T) {
 	}
 }
 
-// drainNode builds a Node in a given cordon state; since is the
-// draining-since annotation, "" for none.
+// drainNode builds a Node in a given cordon state. since is the
+// draining-since annotation, or "" for none.
 func drainNode(unschedulable bool, cordonedByUs bool, since string) *nodeObject {
 	n := &nodeObject{}
 	n.Metadata.Name = "node-4"
@@ -87,10 +87,10 @@ func TestDrainBeginsByCordoning(t *testing.T) {
 }
 
 func TestDrainRespectsAHumanCordon(t *testing.T) {
-	// The node was already unschedulable when the drain arrived: some
-	// human cordoned it. The drain records its deadline anchor but does
-	// not claim the cordon, so it will never uncordon what it didn't
-	// cordon.
+	// The node was already unschedulable when the drain arrived,
+	// because a person cordoned it. The drain records its deadline
+	// marker but does not claim the cordon, so it will never
+	// uncordon what it did not cordon.
 	step := decideDrainStep(drainNode(true, false, ""), nil, drainNow)
 	if step.patch == nil || strings.Contains(string(step.patch), cordonedAnnotation) {
 		t.Errorf("the cordon belongs to whoever set it: %s", step.patch)
@@ -143,9 +143,10 @@ func TestUncordonOnlyTakesBackOurOwnCordon(t *testing.T) {
 	}
 }
 
-// drainAPI is a miniature API server recording pod listings, eviction
-// posts, and node patches, and it can be told to fail the listing or
-// the patch, the two reads and writes a drain step depends on.
+// drainAPI is a small API server that records pod listings,
+// eviction posts, and node patches. It can be told to fail the
+// listing or the patch, the two reads and writes a drain step
+// depends on.
 type drainAPI struct {
 	pods      []kubernetes.Pod
 	listFail  bool

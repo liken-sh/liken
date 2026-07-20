@@ -1,24 +1,25 @@
 # The Machine API, declared to Kubernetes.
 #
-# A CustomResourceDefinition is how Kubernetes learns a new resource
-# type: apply this document and the API server starts serving
-# /apis/liken.sh/v1alpha1/machines, with storage, validation, watches,
-# RBAC and kubectl support included and no code written. The schema below
-# is the same shape as the Go types in the machine package; the
-# descriptions surface in `kubectl explain machine.spec`, which makes
-# the API self-documenting at the terminal.
+# A CustomResourceDefinition tells Kubernetes about a new resource
+# type. When you apply this document, the API server starts to serve
+# /apis/liken.sh/v1alpha1/machines. This includes storage, validation,
+# watches, RBAC, and kubectl support, and it needs no written code.
+# The schema below has the same shape as the Go types in the machine
+# package. The descriptions appear in the output of
+# `kubectl explain machine.spec`, so the API documents itself at the
+# terminal.
 #
-# This file lands in /var/lib/rancher/k3s/server/manifests, k3s's
-# auto-deploy directory: everything there is applied to the cluster at
-# startup and re-applied whenever the file changes. That is a tiny,
-# built-in GitOps loop, and it is the reason liken needs no
-# `kubectl apply` step anywhere.
+# This file goes in /var/lib/rancher/k3s/server/manifests, the
+# auto-deploy directory for k3s. k3s applies every file in this
+# directory to the cluster at startup, and it re-applies a file each
+# time the file changes. This is a small, built-in GitOps loop. It is
+# the reason liken does not need a `kubectl apply` step anywhere.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  # CRD names are always <plural>.<group>; the group is a DNS name we
-  # own, which is what keeps different organizations' custom "Machine"
-  # types from colliding.
+  # A CRD name always has the form <plural>.<group>. The group is a
+  # DNS name that we own. This keeps different organizations' custom
+  # "Machine" types from colliding with each other.
   name: machines.liken.sh
 spec:
   group: liken.sh
@@ -27,42 +28,45 @@ spec:
     listKind: MachineList
     plural: machines
     singular: machine
-    # `kubectl get liken` shows the whole OS layer at once, the way
-    # `kubectl get all` shows workloads.
+    # `kubectl get liken` shows the whole OS layer at once, in the
+    # same way that `kubectl get all` shows workloads.
     categories: [liken]
-  # Cluster-scoped, like Node: a machine underlies the cluster and
-  # belongs to no namespace within it.
+  # This resource is cluster-scoped, like Node: a machine underlies
+  # the cluster and belongs to no namespace within it.
   scope: Cluster
   versions:
     - name: v1alpha1
       served: true
       storage: true
-      # The status subresource splits the object into two endpoints
-      # with separate write paths: ordinary updates cannot touch
-      # status, and status updates cannot touch spec. That boundary is
-      # what makes "spec is declared, status is observed" enforceable
-      # rather than just a convention.
+      # The status subresource splits the object into two endpoints,
+      # each with its own write path. An ordinary update cannot touch
+      # status, and a status update cannot touch spec. This boundary
+      # enforces the rule "spec is declared, status is observed". The
+      # rule is not just a convention.
       subresources:
         status: {}
-      # What `kubectl get machines` prints, without -o yaml. Every
-      # column here is deliberately a word rather than a boolean:
-      # True/False can only say whether something is wrong, while an
-      # enumerated state says what kind of wrong and what would fix it.
+      # This section controls what `kubectl get machines` prints,
+      # without -o yaml. Each column here shows a word on purpose,
+      # not a boolean. A True/False value can say only whether
+      # something is wrong. An enumerated state says what kind of
+      # wrong condition exists and what would fix it.
       additionalPrinterColumns:
         - name: Role
           type: string
           jsonPath: .status.role
-        # The machine's state summarized in one word (see status.phase
-        # below); the Ready condition still exists for programs, but
-        # the phase is what a human scans a fleet listing for.
+        # This column summarizes the machine's state in one word (see
+        # status.phase below). The Ready condition still exists for
+        # programs, but a person who scans a fleet listing looks at
+        # the phase.
         - name: Status
           type: string
           jsonPath: .status.phase
-        # Uptime is computed by kubectl at read time, exactly like the
-        # Age column: a date-typed column renders as the time elapsed
-        # since its timestamp. Deriving it from bootedAt means it is
-        # always current; a literal uptime figure written into status
-        # would be stale the moment the operator wrote it.
+        # kubectl computes Uptime at read time, in the same way it
+        # computes the Age column: a date-typed column renders as the
+        # time elapsed since its timestamp. Deriving this from
+        # bootedAt keeps the value always current. A literal uptime
+        # figure written into status would go stale the moment the
+        # operator wrote it.
         - name: Uptime
           type: date
           jsonPath: .status.bootedAt
@@ -75,23 +79,24 @@ spec:
         - name: Kernel
           type: string
           jsonPath: .status.version.kernel
-        # The two convergence conditions, one per document: Cluster is
-        # the Cluster document (ClusterConverged), Spec is the Machine
-        # manifest (SpecConverged). The columns show the condition's
-        # *reason* rather than its True/False, because the reasons are
-        # already an enumerated vocabulary that says why: Converged at
-        # rest, RebootPending when a change waits on a Manual reboot,
-        # RejectedLastBoot when an edit was quarantined, and so on.
+        # These are the two convergence conditions, one per document.
+        # Cluster shows the Cluster document (ClusterConverged); Spec
+        # shows the Machine manifest (SpecConverged). Each column
+        # shows the condition's *reason* rather than its True/False
+        # value, because the reasons already form an enumerated
+        # vocabulary that says why: Converged at rest, RebootPending
+        # when a change waits on a Manual reboot, RejectedLastBoot
+        # when an edit was quarantined, and so on.
         - name: Cluster
           type: string
           jsonPath: .status.conditions[?(@.type=="ClusterConverged")].reason
         - name: Spec
           type: string
           jsonPath: .status.conditions[?(@.type=="SpecConverged")].reason
-        # The clock's state: Synchronized, FreeRunning (no upstreams
-        # declared, by design), or Unsynchronized (sources declared
-        # but unreachable, which is an outage), plus the measured
-        # offset from the last exchange.
+        # This shows the clock's state: Synchronized, FreeRunning (no
+        # upstream sources declared, by design), or Unsynchronized
+        # (sources declared but unreachable, which is an outage). It
+        # also shows the measured offset from the last exchange.
         - name: Time
           type: string
           jsonPath: .status.time.state
@@ -105,31 +110,33 @@ spec:
         openAPIV3Schema:
           type: object
           description: >-
-            A Machine is one computer running liken: the declared
-            state of the operating system beneath this cluster, and
-            the observed facts of the hardware it's running on.
-          # Admission-time validation, run by the API server itself.
-          # Partition sizes are grow-only, and the invariant is about
-          # the disk, not the spec's history: a role may not be
-          # declared smaller than the size the machine last booted
-          # with, which status.boot.storage records. Comparing spec
-          # against status (rather than against the spec's previous
-          # value with oldSelf) is what keeps an edit reversible: a
-          # size the machine turned out unable to satisfy can be
-          # edited back down to what is actually on disk, because
-          # that is not a shrink of anything real. These rules live
-          # at the root of the schema because they need to see both
-          # spec and status.
+            A Machine is one computer that runs liken. It holds the
+            declared state of the operating system beneath this
+            cluster, and the observed facts about the hardware the
+            operating system runs on.
+          # This section defines admission-time validation, run by
+          # the API server itself. Partition sizes are grow-only. The
+          # invariant is about the disk, not the history of the spec:
+          # a role may not be declared smaller than the size the
+          # machine last booted with, and status.boot.storage records
+          # that size. Comparing spec against status, rather than
+          # against the spec's previous value with oldSelf, keeps an
+          # edit reversible. A size that the machine turned out
+          # unable to satisfy can be edited back down to the size
+          # actually on disk, because that edit does not shrink
+          # anything real. These rules live at the root of the schema
+          # because they need to see both spec and status.
           #
           # CEL cannot see the machine itself, so this is one of
-          # three places the same rule is enforced: a spec that
-          # passes admission can still be refused by the operator
-          # before staging (it checks against the real disk
-          # inventory), and init never shrinks anything at boot.
+          # three places where the system enforces the same rule. A
+          # spec that passes admission can still be refused by the
+          # operator before staging, because the operator checks
+          # against the real disk inventory. Init also never shrinks
+          # anything at boot.
           #
-          # Note the method form for comparison: Kubernetes Quantity
-          # values do not support the >= operator in CEL, only
-          # isLessThan and friends.
+          # Note the method form used for comparison: Kubernetes
+          # Quantity values do not support the >= operator in CEL,
+          # only isLessThan and similar methods.
           x-kubernetes-validations:
             - rule: >-
                 !has(self.spec) || !has(self.spec.storage) ||
@@ -199,30 +206,33 @@ spec:
               type: object
               description: >-
                 The declared state of this machine. Fields differ in
-                when they take effect: network is read by init at boot,
-                sysctls and nodeLabels are both applied at boot and
-                reconciled live by the liken operator, and storage and
-                modules are staged and take effect at the next boot.
+                when they take effect. Init reads network at boot.
+                The liken operator applies sysctls and nodeLabels at
+                boot and also reconciles them live. Storage and
+                modules are staged, and they take effect at the next
+                boot.
               properties:
                 network:
                   type: object
                   description: >-
-                    The machine's network configuration. Empty means the
-                    default: DHCP on the first interface that looks like
-                    real hardware. Applied by init at boot; changing it
-                    in-cluster takes effect next boot.
+                    The machine's network configuration. When empty,
+                    it means the default: DHCP on the first interface
+                    that looks like real hardware. Init applies this
+                    at boot; a change made in-cluster takes effect at
+                    the next boot.
                   properties:
                     interfaces:
                       type: array
                       description: >-
-                        Configures the machine's interfaces explicitly,
-                        each by its kernel name. A clustered machine
-                        typically declares two: a DHCP uplink, and the
+                        Configures the machine's interfaces
+                        explicitly, each by its kernel name. A
+                        clustered machine typically declares two
+                        interfaces: a DHCP uplink, and the
                         cluster-facing interface with the static
                         address its peers were told to find it at.
-                      # One entry per interface: a map keyed by name,
-                      # which the API server can now enforce instead
-                      # of trusting.
+                      # This is one entry per interface: a map keyed
+                      # by name. The API server can now enforce this
+                      # instead of trusting the caller.
                       x-kubernetes-list-type: map
                       x-kubernetes-list-map-keys: [name]
                       items:
@@ -232,29 +242,32 @@ spec:
                           name:
                             type: string
                             description: >-
-                              The interface to configure, as the kernel
-                              names it (e.g. eth1).
+                              The interface to configure, named as
+                              the kernel names it (for example,
+                              eth1).
                           address:
                             type: string
                             maxLength: 64
                             pattern: ^[0-9a-fA-F:.]+/[0-9]{1,3}$
                             description: >-
                               A static address in CIDR form
-                              (10.10.0.1/24); the prefix length is how
-                              the kernel learns the subnet. Empty means
-                              DHCP on this interface.
+                              (10.10.0.1/24). The kernel learns the
+                              subnet from the prefix length. When
+                              empty, it means DHCP on this interface.
                           gateway:
                             type: string
                             maxLength: 64
                             pattern: ^[0-9a-fA-F:.]+$
                             description: >-
                               Makes this interface the default route.
-                              Optional even for static addresses; a
-                              DHCP lease elsewhere may supply it.
+                              This field is optional even for static
+                              addresses, because a DHCP lease
+                              elsewhere may supply the route.
                           nameservers:
                             type: array
-                            # Atomic: nameserver order is preference
-                            # order, so the list replaces as a whole.
+                            # This list is atomic: nameserver order is
+                            # preference order, so the list replaces
+                            # as a whole.
                             x-kubernetes-list-type: atomic
                             items:
                               type: string
@@ -262,28 +275,31 @@ spec:
                 sysctls:
                   type: object
                   description: >-
-                    Kernel tuning, parameter name to desired value, e.g.
-                    vm.overcommit_memory: "1". Applied by init at boot
-                    and re-asserted continuously by the liken operator,
-                    so an edit here takes effect without a reboot.
+                    Kernel tuning values, from a parameter name to its
+                    desired value, for example vm.overcommit_memory:
+                    "1". Init applies these at boot, and the liken
+                    operator re-asserts them continuously, so an edit
+                    here takes effect without a reboot.
                   additionalProperties:
                     type: string
                 modules:
                   type: array
                   description: >-
-                    Extra kernel modules this machine loads at boot,
-                    beyond the fixed list the OS itself needs: the
-                    drivers for whatever hardware this machine's
-                    workloads use. The image build ships the union of
-                    every machine's declared modules, so a module
-                    declared here is only loadable if the booted image
-                    was built from manifests that declared it;
-                    status.modules reports each name's outcome either
-                    way. Admission checks shape only, because only the
-                    build (for baked manifests) and the boot (for
-                    later edits) can know whether a name exists.
-                  # A set: order carries no meaning, and the API
-                  # server can refuse duplicates instead of trusting.
+                    Extra kernel modules that this machine loads at
+                    boot, beyond the fixed list the OS itself needs.
+                    These are the drivers for whatever hardware this
+                    machine's workloads use. The image build ships
+                    the union of every machine's declared modules, so
+                    a module declared here is loadable only if the
+                    booted image was built from manifests that
+                    declared it. status.modules reports each name's
+                    outcome either way. Admission checks the shape
+                    only, because only the build (for baked
+                    manifests) and the boot (for later edits) can
+                    know whether a name exists.
+                  # This is a set: order carries no meaning, and the
+                  # API server can refuse duplicates instead of
+                  # trusting the caller.
                   x-kubernetes-list-type: set
                   maxItems: 64
                   items:
@@ -294,31 +310,35 @@ spec:
                   type: object
                   maxProperties: 64
                   description: >-
-                    This machine's scheduling identity: the labels its
-                    Node object carries, which is what workloads select
-                    on (which machine has the GPU, which one sits on
-                    battery-backed power). Rendered into the k3s boot
-                    configuration so the node registers already wearing
-                    them, and reconciled live by the liken operator
-                    afterward, including removing a label this spec
-                    retracts, which the kubelet never does on its own.
-                    Labels applied outside this spec are never touched.
-                  # Three admission rules stand between a label edit and
-                  # a machine that won't boot. Registration labels pass
-                  # through the kubelet, and under the NodeRestriction
-                  # admission plugin (which k3s enables) a kubelet given
-                  # a kubernetes.io or k8s.io label outside its own
-                  # allowlist refuses to start at all, so admission
-                  # refuses exactly what would take the machine down and
-                  # permits exactly what the kubelet permits itself: the
-                  # well-known identity labels (hostname, arch, os, the
-                  # topology pair, instance-type) and anything in the
-                  # kubelet.kubernetes.io and node.kubernetes.io
-                  # namespaces. The liken.sh namespace is refused as
-                  # OS-owned: the static config stamps liken.sh/machine,
-                  # and a spec fighting the OS over its own vocabulary
-                  # (or over node-role, which demotion cleanup reads)
-                  # has no good outcome.
+                    This machine's scheduling identity: the labels
+                    that its Node object carries. Workloads select on
+                    these labels, for example to find which machine
+                    has the GPU or which one sits on battery-backed
+                    power. The system renders these labels into the
+                    k3s boot configuration, so the node registers
+                    already wearing them. The liken operator then
+                    reconciles them live, including removing a label
+                    that this spec retracts, which the kubelet never
+                    does on its own. The system never touches labels
+                    applied outside this spec.
+                  # Three admission rules stand between a label edit
+                  # and a machine that will not boot. Registration
+                  # labels pass through the kubelet. Under the
+                  # NodeRestriction admission plugin, which k3s
+                  # enables, a kubelet given a kubernetes.io or
+                  # k8s.io label outside its own allowlist refuses to
+                  # start at all. So admission refuses exactly what
+                  # would take the machine down, and it permits
+                  # exactly what the kubelet permits itself: the
+                  # well-known identity labels (hostname, arch, os,
+                  # the topology pair, instance-type) and anything in
+                  # the kubelet.kubernetes.io and node.kubernetes.io
+                  # namespaces. Admission refuses the liken.sh
+                  # namespace because the OS owns it: the static
+                  # config stamps liken.sh/machine, and a spec that
+                  # fights the OS over its own vocabulary (or over
+                  # node-role, which demotion cleanup reads) has no
+                  # good outcome.
                   x-kubernetes-validations:
                     - rule: >-
                         self.all(key, key.size() <= 317 && key.matches('^([a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$'))
@@ -353,42 +373,44 @@ spec:
                   default: Manual
                   description: >-
                     What the operator may do when applying the spec
-                    requires a reboot (today: any storage change).
-                    Manual, the default, stages the change to the
-                    machineState filesystem and reports RebootPending;
-                    any next boot applies it. Auto lets the operator
-                    reboot the machine itself.
+                    requires a reboot (today, this means any storage
+                    change). Manual, the default, stages the change
+                    to the machineState filesystem and reports
+                    RebootPending; the next boot applies it. Auto
+                    lets the operator reboot the machine itself.
                 storage:
                   type: object
                   description: >-
                     Assigns storage roles to disks. Each role is a
                     singleton field (a machine has one cluster state,
-                    one pod-storage pool) naming the device it lives
-                    on and, when sharing a disk, how much of it to
-                    take; one role per disk may omit its size and take
-                    the remainder. Applied by init at boot, before k3s.
-                    The device path is consulted only on the boot that
-                    claims a blank disk; from then on the role's
-                    partition is recognized by the GPT partition name
-                    written on it. Edits here are staged and take
-                    effect at the next boot; a staged spec that can't
-                    be satisfied is quarantined and the machine boots
-                    its last proven spec instead, and only a machine
-                    with no proven spec to fall back to stops the
-                    boot. Roles absent from the spec are backed by the
-                    machine's RAM root.
+                    one pod-storage pool). Each role names the device
+                    it lives on and, when it shares a disk, how much
+                    of the disk to take; one role per disk may omit
+                    its size and take the remainder. Init applies
+                    this at boot, before k3s. The system reads the
+                    device path only on the boot that claims a blank
+                    disk. After that, the system recognizes the
+                    role's partition by the GPT partition name
+                    written on it. Edits here are staged, and they
+                    take effect at the next boot. If a staged spec
+                    cannot be satisfied, the system quarantines it,
+                    and the machine boots its last proven spec
+                    instead. Only a machine with no proven spec to
+                    fall back to stops the boot. The machine's RAM
+                    root backs any role absent from the spec.
                   properties:
                     biosBoot:
                       type: object
                       description: >-
-                        Declaring this role (with bootHome) is how a
-                        machine says it boots BIOS-style, through
-                        liken's own GRUB, rather than through UEFI
-                        firmware. A tiny raw partition — about 1Mi,
-                        no filesystem — holding GRUB's core image,
-                        the code the MBR's 440 boot bytes jump into.
-                        Fixed in size once claimed; the MBR refers to
-                        it by literal sector numbers.
+                        When a machine declares this role, together
+                        with bootHome, it says that it boots
+                        BIOS-style, through liken's own GRUB, rather
+                        than through UEFI firmware. This is a tiny
+                        raw partition, about 1Mi in size, with no
+                        filesystem. It holds GRUB's core image, the
+                        code that the MBR's 440 boot bytes jump into.
+                        Its size is fixed once claimed, because the
+                        MBR refers to it by literal sector numbers.
                       required: [device]
                       properties:
                         device:
@@ -402,14 +424,16 @@ spec:
                     bootHome:
                       type: object
                       description: >-
-                        The other half of the BIOS boot declaration: a
-                        small FAT32 partition (about 64Mi) holding
-                        GRUB's configuration and its environment
-                        block, the file that stands in for the boot
-                        variables UEFI firmware would have provided.
-                        It lives on neither system slot so that both
-                        slots can be written freely while the boot
-                        machinery keeps its own ground.
+                        The other half of the BIOS boot declaration.
+                        This is a small FAT32 partition, about 64Mi
+                        in size, that holds GRUB's configuration and
+                        its environment block. The environment block
+                        is the file that holds the boot variables
+                        that UEFI firmware would otherwise have
+                        provided. It lives on neither system slot, so
+                        the system can write both slots freely while
+                        the boot machinery keeps its own separate
+                        space.
                       required: [device]
                       properties:
                         device:
@@ -425,12 +449,13 @@ spec:
                       description: >-
                         The first of the operating system's two boot
                         slots. Each slot holds one complete liken
-                        version; the machine runs from one while
-                        upgrades are written to the other. The slots
-                        are EFI system partitions carrying FAT32,
-                        because the firmware itself is their first
-                        reader. They are fixed in size once claimed:
-                        FAT32 doesn't grow in place.
+                        version. The machine runs from one slot while
+                        the system writes upgrades to the other. The
+                        slots are EFI system partitions that carry
+                        FAT32, because the firmware itself is the
+                        first reader of each slot. Their size is
+                        fixed once claimed, because FAT32 does not
+                        grow in place.
                       required: [device]
                       properties:
                         device:
@@ -444,7 +469,7 @@ spec:
                     systemB:
                       type: object
                       description: >-
-                        The second boot slot; the systemA description
+                        The second boot slot. The systemA description
                         explains how the two slots work.
                       required: [device]
                       properties:
@@ -460,11 +485,12 @@ spec:
                       type: object
                       description: >-
                         The machine's own durable data, chiefly the
-                        staged and proven manifests that let a spec
-                        edit survive a reboot and apply at the next
-                        one. It comes first among the data roles in
-                        the canonical partition order, so a future
-                        boot can find it before it has read any spec.
+                        staged and proven manifests. These manifests
+                        let a spec edit survive a reboot and apply at
+                        the next one. This role comes first among the
+                        data roles in the canonical partition order,
+                        so a future boot can find it before it has
+                        read any spec.
                       required: [device]
                       properties:
                         device:
@@ -493,9 +519,9 @@ spec:
                       type: object
                       description: >-
                         k3s's state: its database, TLS material, and
-                        containerd's images. Persisting this is what
-                        lets a reboot resume the same cluster instead
-                        of starting a new one.
+                        containerd's images. Because the system keeps
+                        this data, a reboot can resume the same
+                        cluster instead of starting a new one.
                       required: [device]
                       properties:
                         device:
@@ -509,9 +535,9 @@ spec:
                     podStorage:
                       type: object
                       description: >-
-                        Durable storage pods claim by name: the
-                        PersistentVolumeClaim pool, served by the
-                        local-path provisioner.
+                        Durable storage that pods claim by name: the
+                        PersistentVolumeClaim pool. The local-path
+                        provisioner serves this pool.
                       required: [device]
                       properties:
                         device:
@@ -541,51 +567,56 @@ spec:
             status:
               type: object
               description: >-
-                What the machine observed about itself, written by init
-                (via the facts file) and published by the liken
-                operator. Everything here is re-derived on every
-                reconcile pass (nothing is remembered), so it reports
-                what currently holds, not what once did.
+                What the machine observed about itself. Init writes
+                this through the facts file, and the liken operator
+                publishes it. The system re-derives everything here
+                on every reconcile pass; it remembers nothing. So
+                this reports what currently holds, not what once
+                held.
               properties:
                 phase:
                   type: string
                   enum: [Unknown, Booting, Lost, Blocked, Updating, UpdatePending, Degraded, Ready]
                   description: >-
-                    The machine's state in one word, derived
-                    from the conditions on every reconcile pass (so it
-                    can never disagree with them). Ready means every
-                    condition holds. UpdatePending and Updating mean a
-                    staged change is waiting on a reboot (Manual) or
-                    one is in flight (Auto). Blocked means drift
-                    exists that liken refuses or is unable to stage;
-                    it needs a different edit, not time. Degraded is
-                    everything else wrong; Booting means init hasn't
-                    finished publishing this boot; Unknown means the
-                    operator can't read the machine's facts at all.
-                    Lost is the exception to self-reporting: a leader
-                    writes it when this machine's heartbeat lease
-                    (in liken-system) goes silent, because a
-                    dead machine can't report its own death.
+                    The machine's state in one word. The system
+                    derives this from the conditions on every
+                    reconcile pass, so the phase can never disagree
+                    with them. Ready means every condition holds.
+                    UpdatePending and Updating mean a staged change
+                    is waiting on a reboot (Manual) or is in flight
+                    (Auto). Blocked means drift exists that liken
+                    refuses to stage or cannot stage; this state
+                    needs a different edit, not time. Degraded covers
+                    everything else that is wrong. Booting means
+                    init has not finished publishing this boot.
+                    Unknown means the operator cannot read the
+                    machine's facts at all. Lost is the exception to
+                    self-reporting: a leader writes this value when
+                    this machine's heartbeat lease (in liken-system)
+                    goes silent, because a dead machine cannot report
+                    its own failure.
                 role:
                   type: string
                   description: >-
-                    What this machine is in its cluster: a leader (it
-                    runs a control plane) or a follower (it runs
-                    workloads). Derived at boot from the Cluster
-                    manifest's leaders list, never declared here.
+                    What this machine is in its cluster: a leader
+                    (it runs a control plane) or a follower (it runs
+                    workloads). The system derives this at boot from
+                    the Cluster manifest's leaders list. No one
+                    declares this field directly.
                 version:
                   type: object
                   description: >-
                     The complete inventory of what this machine runs:
                     liken's own version and every outside component
-                    the OS carries. The kernel and xtables are
-                    observed on the running machine; the rest report
-                    from the components record the image build staged
-                    beside the bytes — the same pins the release
-                    document publishes. k3s appears here as well as
-                    on the Node object because the two answer
-                    different questions: the Node reports the running
-                    kubelet, this reports what the OS image carried.
+                    the OS carries. The system observes the kernel
+                    and xtables versions on the running machine. The
+                    rest report from the components record that the
+                    image build staged beside the bytes, the same
+                    pins that the release document publishes. k3s
+                    appears here and also on the Node object, because
+                    the two answer different questions: the Node
+                    reports the running kubelet, and this reports
+                    what the OS image carried.
                   properties:
                     liken:
                       type: string
@@ -594,8 +625,9 @@ spec:
                     xtables:
                       type: string
                       description: >-
-                        The netfilter userspace as iptables -V reports
-                        it: version and variant (legacy vs nft).
+                        The netfilter userspace, as iptables -V
+                        reports it: version and variant (legacy or
+                        nft).
                     k3s:
                       type: string
                     trust:
@@ -621,11 +653,12 @@ spec:
                 network:
                   type: object
                   description: >-
-                    The boot's networking outcome, DHCP leases and
-                    static assignments alike. The top-level fields
-                    summarize the primary interface (the cluster-facing
-                    one when the Cluster's nodeCIDR identifies it);
-                    interfaces carries the full per-interface detail.
+                    The boot's networking outcome, for DHCP leases
+                    and static assignments alike. The top-level
+                    fields summarize the primary interface (the
+                    cluster-facing interface, when the Cluster's
+                    nodeCIDR identifies it). The interfaces field
+                    carries the full per-interface detail.
                   properties:
                     interface:
                       type: string
@@ -678,27 +711,28 @@ spec:
                   type: object
                   description: >-
                     The state of this machine's clock. Unlike most of
-                    status it changes for the machine's whole life,
-                    because the clock is disciplined continuously,
-                    not configured once at boot.
+                    status, this field changes for the machine's
+                    whole life, because the system disciplines the
+                    clock continuously, not just once at boot.
                   properties:
                     state:
                       type: string
                       enum: [Synchronized, FreeRunning, Unsynchronized]
                       description: >-
-                        Whether the clock is currently disciplined
-                        against a source that is itself synchronized,
-                        and when it isn't, whether that's by design or
-                        by outage. FreeRunning means no sources were
-                        ever declared: the machine deliberately runs
-                        on its hardware clock. Unsynchronized means
-                        sources are declared but none currently
-                        answers. A free-running fleet may agree with
-                        itself, but it still doesn't claim
-                        Synchronized: agreement within the fleet is a
-                        different claim from agreement with real-world
-                        time, and certificate validation cares about
-                        the difference.
+                        Whether the system currently disciplines the
+                        clock against a source that is itself
+                        synchronized. When it does not, this field
+                        shows whether that is by design or by outage.
+                        FreeRunning means the spec never declared any
+                        sources: the machine deliberately runs on its
+                        hardware clock. Unsynchronized means the spec
+                        declares sources but none currently answers.
+                        A free-running fleet may agree with itself,
+                        but it still does not claim Synchronized.
+                        Agreement within the fleet is a different
+                        claim from agreement with real-world time,
+                        and certificate validation depends on that
+                        difference.
                     source:
                       type: string
                       description: >-
@@ -710,15 +744,16 @@ spec:
                       description: >-
                         Distance from a reference clock, in NTP's
                         vocabulary: a source at stratum n makes this
-                        machine n+1. A server that free-runs by design
-                        reports the local-clock convention (10); 16
-                        means unsynchronized.
+                        machine n+1. A server that free-runs by
+                        design reports the local-clock convention
+                        (10); 16 means unsynchronized.
                     offset:
                       type: string
                       description: >-
-                        The clock error measured at the last exchange,
-                        as a duration ("1.28ms"): positive when this
-                        machine was behind its source.
+                        The clock error measured at the last
+                        exchange, as a duration ("1.28ms"). The value
+                        is positive when this machine was behind its
+                        source.
                     lastSync:
                       type: string
                       format: date-time
@@ -734,10 +769,11 @@ spec:
                     blockDevices:
                       type: array
                       description: >-
-                        The machine's storage inventory: every real disk
-                        the kernel found, declared in the spec or not.
-                        The name is the kernel's for this boot; it is
-                        assigned in probe order, so it identifies the
+                        The machine's storage inventory: every real
+                        disk the kernel found, whether the spec
+                        declares it or not. The name is the kernel's
+                        name for this boot. The kernel assigns it in
+                        probe order, so the name identifies the
                         device for this boot only, not permanently.
                         The model and serial come from the device
                         itself.
@@ -758,16 +794,18 @@ spec:
                     unclaimed:
                       type: array
                       description: >-
-                        Devices the kernel enumerated but nothing
-                        drives: hardware waiting on a module that
-                        spec.modules doesn't declare. This is the
-                        gap, never the census — a machine whose
-                        hardware is fully driven reports nothing
-                        here. Each entry names the device in words,
-                        the candidate modules whose alias patterns
-                        match its fingerprint, and the fix: declare
-                        a candidate the image carries, or upgrade
-                        to a release that carries one.
+                        Devices that the kernel enumerated but that
+                        nothing drives: hardware that lacks a driver
+                        because spec.modules does not declare the
+                        module it needs. This list shows only that
+                        gap; it is not a full inventory. A machine
+                        whose hardware is fully driven reports
+                        nothing here. Each entry names the device in
+                        words, lists the candidate modules whose
+                        alias patterns match the device's identifier,
+                        and states the fix: declare a candidate
+                        module that the image carries, or upgrade to
+                        a release that carries one.
                       x-kubernetes-list-type: map
                       x-kubernetes-list-map-keys: [modalias]
                       items:
@@ -794,15 +832,16 @@ spec:
                     The machine's standing firmware state: its boot
                     mode and the boot menu from its non-volatile
                     store. UEFI mode reports the firmware's variables
-                    decoded into words; BIOS is shorthand for any
-                    environment without firmware variables to consult,
-                    such as a legacy server or a direct-kernel boot
-                    under a hypervisor. This describes the machine,
-                    not the boot: everything here survives a power
-                    cycle unchanged, while status.boot is freshly
-                    re-made every boot. Each entry renders as the
-                    firmware's variable name plus the entry's own
-                    description, e.g. "Boot0001 (liken slot A)".
+                    decoded into words. BIOS is shorthand for any
+                    environment with no firmware variables to
+                    consult, such as a legacy server or a
+                    direct-kernel boot under a hypervisor. This field
+                    describes the machine, not the boot: everything
+                    here survives a power cycle unchanged, while the
+                    system remakes status.boot fresh on every boot.
+                    Each entry renders as the firmware's variable
+                    name plus the entry's own description, for
+                    example "Boot0001 (liken slot A)".
                   properties:
                     mode:
                       type: string
@@ -813,8 +852,8 @@ spec:
                       type: string
                     bootOrder:
                       type: array
-                      # Atomic: the order is the point; entries
-                      # replace as a whole list.
+                      # This list is atomic: the order is the point,
+                      # so entries replace as a whole list.
                       x-kubernetes-list-type: atomic
                       items:
                         type: string
@@ -822,13 +861,15 @@ spec:
                 storage:
                   type: object
                   description: >-
-                    Where every storage role is actually backed this
-                    boot, declared or not. The spec says what was asked
-                    for and hardware.blockDevices says what's attached;
-                    this connects the two. Memory-backed roles
-                    deliberately report no capacity: they all share
-                    the one RAM root, and per-role figures would count
-                    it multiple times.
+                    Where the system actually backs every storage
+                    role this boot, whether the spec declares the
+                    role or not. The spec says what the machine
+                    asked for, and hardware.blockDevices says what is
+                    attached; this field connects the two.
+                    Memory-backed roles deliberately report no
+                    capacity, because they all share the one RAM
+                    root, and a per-role figure would count that
+                    capacity multiple times.
                   properties:
                     biosBoot:
                       type: object
@@ -932,24 +973,25 @@ spec:
                 boot:
                   type: object
                   description: >-
-                    What this boot ran under: the perishable record,
-                    re-made every boot, that the operator diffs the
-                    spec against (contrast firmware, the standing
-                    state that survives reboots). The manifest
-                    sources say which documents the boot used: the
-                    staged copy awaiting its proving boot, the proven
-                    last-known-good, or, on the first boot only, the
-                    seed baked into the image. They are recorded
+                    What this boot ran under: a short-lived record
+                    that the system remakes every boot, and that the
+                    operator diffs the spec against. Contrast this
+                    with firmware, the standing state that survives
+                    reboots. The manifest sources say which documents
+                    the boot used: the staged copy awaiting its
+                    proving boot, the proven last-known-good copy, or,
+                    on the first boot only, the seed baked into the
+                    image. The system records these sources
                     separately for the Machine manifest and the
                     Cluster document, because the two stage and prove
                     independently.
                     The hashes identify exact bytes, and the storage
-                    and modules blocks are the spec as actuated;
-                    together they are the reference point for
-                    detecting drift between what the cluster asks and
-                    what the machine did.
+                    and modules blocks show the spec as actuated.
+                    Together they are the reference point for
+                    detecting drift between what the cluster asks
+                    for and what the machine did.
                     A rejection reports a staged document that failed
-                    and was quarantined; it stands until a different
+                    and was quarantined. It stands until a different
                     edit proves out.
                   properties:
                     manifestSource:
@@ -964,66 +1006,71 @@ spec:
                       type: string
                     credentialsSource:
                       type: string
-                      # No Seed here, deliberately: the operator is
-                      # the credentials document's only author, so no
-                      # image ever carries one and no first boot ever
-                      # reads one.
+                      # This field has no Seed value on purpose: the
+                      # operator is the only author of the
+                      # credentials document, so no image ever
+                      # carries one and no first boot ever reads one.
                       enum: [Staged, Proven]
                       description: >-
                         Which copy of the registry-credentials
                         document this boot (or the latest k3s
-                        restart) rendered into registries.yaml.
-                        Absent on a machine that has never had
-                        credentials, which is an ordinary state: its
-                        pulls are anonymous.
+                        restart) rendered into registries.yaml. This
+                        field is absent on a machine that has never
+                        had credentials, which is an ordinary state:
+                        its pulls are anonymous.
                     credentialsHash:
                       type: string
                     importsSource:
                       type: string
-                      # No Seed: the record describes this disk's own
-                      # container store, so nothing baked into an
-                      # image could ever stand in for it.
+                      # This field has no Seed value: the record
+                      # describes this disk's own container store, so
+                      # nothing baked into an image could ever
+                      # replace it.
                       enum: [Staged, Proven]
                       description: >-
                         Which imported-images record this boot ran
-                        under. Staged means the tarballs are on trial
-                        and the operator has not yet proven the
-                        container store serves them; Proven is the
-                        ordinary boot whose tarballs all match the
-                        record. Absent when the lifecycle isn't
-                        running (ephemeral machineState or an
-                        ephemeral container store).
+                        under. Staged means the tarballs are on
+                        trial, and the operator has not yet proven
+                        that the container store serves them. Proven
+                        is the ordinary boot whose tarballs all match
+                        the record. This field is absent when the
+                        lifecycle is not running (ephemeral
+                        machineState or an ephemeral container
+                        store).
                     importsHash:
                       type: string
                     importsDiscarded:
                       type: boolean
                       description: >-
                         True when this boot found an imports trial
-                        still standing from a boot that died unproven,
-                        and discarded the container store rather than
-                        trust it. OS images re-unpacked from this
-                        boot's tarballs; workload images re-pull.
+                        still standing from a boot that died
+                        unproven, and discarded the container store
+                        rather than trust it. OS images unpack again
+                        from this boot's tarballs; workload images
+                        pull again.
                     restarts:
                       type: integer
                       description: >-
                         How many in-place k3s restarts this boot has
-                        performed to apply restart-class changes
-                        (feature toggles, registry configuration). It
-                        shares the boot record's lifetime on purpose:
-                        a change that arrived by restart increments
-                        this without moving bootedAt, and a change
-                        that arrived by reboot moves bootedAt and
-                        returns this to zero.
+                        performed, to apply restart-class changes
+                        (feature toggles, registry configuration).
+                        This field shares the boot record's lifetime
+                        on purpose. A change that arrived by restart
+                        increments this field without moving
+                        bootedAt. A change that arrived by reboot
+                        moves bootedAt and returns this field to
+                        zero.
                     slot:
                       type: string
                       enum: [A, B]
                       description: >-
-                        The system slot this boot came from, read from
-                        the liken.slot= parameter the installer baked
-                        into each boot entry. Absent when the boot
-                        didn't come from a slot (direct-kernel boots,
-                        install media). Releases download to the slot
-                        the machine is not running from, which is the
+                        The system slot this boot came from, read
+                        from the liken.slot= parameter that the
+                        installer baked into each boot entry. This
+                        field is absent when the boot did not come
+                        from a slot (direct-kernel boots, install
+                        media). Releases download to the slot the
+                        machine is not running from; this is the
                         point of the blue-green arrangement.
                     storage:
                       type: object
@@ -1094,12 +1141,13 @@ spec:
                     modules:
                       type: array
                       description: >-
-                        The module list the winning manifest declared,
-                        recorded as actuated whatever each load's
-                        outcome was: rebooting again with the same
-                        image would ask the same, so this is the drift
-                        reference and status.modules carries the
-                        health.
+                        The module list that the winning manifest
+                        declared, recorded as actuated whatever the
+                        outcome of each load was. Rebooting again
+                        with the same image would ask for the same
+                        modules, so this field is the drift
+                        reference, and status.modules carries the
+                        health of each module.
                       x-kubernetes-list-type: atomic
                       items:
                         type: string
@@ -1127,12 +1175,12 @@ spec:
                     systemRejection:
                       type: object
                       description: >-
-                        The standing verdict on a system release whose
-                        proving boot fell back: the machine booted the
-                        staged slot, never proved out, and the
-                        firmware returned it to the proven one. It
-                        holds until the catalog names a different
-                        release.
+                        The standing verdict on a system release
+                        whose proving boot fell back: the machine
+                        booted the staged slot, never proved it, and
+                        the firmware returned the machine to the
+                        proven slot. This verdict holds until the
+                        catalog names a different release.
                       properties:
                         hash:
                           type: string
@@ -1146,8 +1194,8 @@ spec:
                       description: >-
                         The standing verdict on a staged
                         registry-credentials document that would not
-                        parse. It holds until a different rendering
-                        (a Secret edit) supersedes it.
+                        parse. This verdict holds until a different
+                        rendering (a Secret edit) supersedes it.
                       properties:
                         hash:
                           type: string
@@ -1160,21 +1208,22 @@ spec:
                   type: object
                   description: >-
                     The observed value of every parameter named in
-                    spec.sysctls, read back from the kernel, so the
-                    desired and actual values can be compared in one
-                    place.
+                    spec.sysctls, read back from the kernel, so a
+                    reader can compare the desired and actual values
+                    in one place.
                   additionalProperties:
                     type: string
                 modules:
                   type: array
                   description: >-
-                    The outcome of every module named in spec.modules,
-                    as this boot resolved them. Loaded and Builtin are
-                    healthy; Missing means the booted image never
-                    shipped the module and only a rebuilt image or a
-                    newer release fixes it; Failed means the kernel
-                    refused a module the image does ship. The message
-                    carries the detail, phrased to name the fix.
+                    The outcome of every module named in
+                    spec.modules, as this boot resolved them. Loaded
+                    and Builtin are healthy states. Missing means the
+                    booted image never shipped the module, and only
+                    a rebuilt image or a newer release fixes it.
+                    Failed means the kernel refused a module that the
+                    image does ship. The message field carries the
+                    detail, phrased to name the fix.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [name]
                   items:
@@ -1193,18 +1242,18 @@ spec:
                 features:
                   type: array
                   description: >-
-                    This machine's standing on every feature the
+                    This machine's standing on every feature that the
                     Cluster's spec.features enables. The Cluster
-                    declares features for the whole fleet; the answer
-                    is per machine, because honoring a feature depends
-                    on what the booted image carries, and machines run
-                    different releases mid-rollout. Active means this
-                    boot could honor everything the feature asks of
-                    this machine. Missing means the booted image
-                    predates the feature and the fix is a release
-                    whose image carries it. Failed means the image
-                    carries the payload and actuating it went wrong;
-                    the message carries the detail.
+                    declares features for the whole fleet, but the
+                    answer is per machine, because honoring a feature
+                    depends on what the booted image carries, and
+                    machines run different releases during a rollout.
+                    Active means this boot could honor everything the
+                    feature asks of this machine. Missing means the
+                    booted image predates the feature, and the fix is
+                    a release whose image carries it. Failed means
+                    the image carries the payload, but actuating it
+                    went wrong; the message field carries the detail.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [name]
                   items:
@@ -1226,9 +1275,9 @@ spec:
                     What this machine rendered into k3s's
                     registries.yaml: which registries are mirrored,
                     which have credentials, and whether the embedded
-                    registry is on. Hosts and counts only — the
-                    credential material itself never appears in
-                    status.
+                    registry is on. This field carries only hosts and
+                    counts; the credential material itself never
+                    appears in status.
                   properties:
                     mirrors:
                       type: array
@@ -1255,14 +1304,15 @@ spec:
                 conditions:
                   type: array
                   # A conditions array is really a map with one entry
-                  # per type. Declaring that (list-type map, keyed by
-                  # type) lets the API server reject duplicate types
-                  # and, under server-side apply, merge writes per
-                  # condition instead of clobbering the whole list.
-                  # The field constraints below are metav1.Condition's
-                  # own, so these conditions validate exactly like the
-                  # ones on Pods and Nodes rather than just resembling
-                  # them.
+                  # per type. Declaring it this way (list-type map,
+                  # keyed by type) lets the API server reject
+                  # duplicate types. It also lets server-side apply
+                  # merge writes per condition instead of overwriting
+                  # the whole list. The field constraints below
+                  # belong to metav1.Condition itself, so these
+                  # conditions validate in exactly the same way as
+                  # the ones on Pods and Nodes, not just in a similar
+                  # way.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:
@@ -1281,11 +1331,11 @@ spec:
                         format: int64
                         minimum: 0
                         description: >-
-                          The metadata.generation this condition
+                          The metadata.generation that this condition
                           judged. Generation counts spec edits, so
-                          this is how a consumer tells a verdict on
-                          the current spec from a verdict on one
-                          already edited past. That distinction
+                          this field lets a consumer tell a verdict on
+                          the current spec apart from a verdict on a
+                          spec already edited past. That distinction
                           matters here, where edits wait for a reboot.
                       reason:
                         type: string

@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-// fakeSysfs builds the corner of sysfs this package reads: bus
-// device directories with the attribute files and driver symlinks a
-// real kernel populates. Tests describe devices; the builder owns
-// the layout.
+// fakeSysfs builds the part of sysfs that this package reads: bus
+// device directories with the attribute files and driver symlinks
+// that a real kernel populates. Tests describe devices, and the
+// builder owns the layout.
 type fakeSysfs struct {
 	t    *testing.T
 	root string
@@ -21,8 +21,8 @@ func newFakeSysfs(t *testing.T) *fakeSysfs {
 }
 
 // device creates one device directory on a bus, with the given
-// attribute files, and optionally a driver symlink named for the
-// driver that claimed it.
+// attribute files. It optionally adds a driver symlink named for
+// the driver that claimed the device.
 func (f *fakeSysfs) device(bus, name, driver string, attrs map[string]string) {
 	f.t.Helper()
 	dir := filepath.Join(f.root, "bus", bus, "devices", name)

@@ -37,8 +37,8 @@ spec:
 
 func TestParseClusterRegistriesNullIsAbsent(t *testing.T) {
 	// registries: null decodes to the zero struct, which genuinely
-	// means "no registries configuration" — unlike a null feature,
-	// where null could be mistaken for an opt-in.
+	// means "no registries configuration". This differs from a null
+	// feature, where null could be mistaken for an opt-in.
 	c, err := ParseCluster([]byte(`
 apiVersion: liken.sh/v1alpha1
 kind: Cluster
@@ -123,14 +123,14 @@ spec:
 	}
 }
 
-// The registries schema's pruning defense is the same
-// nullable-plus-rule pair the features map pioneered, and this test
-// pins it the same way: a well-meaning cleanup that drops either
-// half would turn `docker.io:` in hand-written YAML into a quiet
-// nothing. The dyn() cast in the rule is load-bearing too — CEL
-// types a nullable array as list(string) and refuses a bare null
-// comparison at compile time, so removing the cast would break the
-// CRD at apply time (the scratch drill caught this).
+// The registries schema's pruning defense uses the same
+// nullable-plus-rule pair that the features map introduced first,
+// and this test pins it the same way. A well-meaning cleanup that
+// drops either half would turn `docker.io:` in hand-written YAML
+// into a quiet nothing. The dyn() cast in the rule matters just as
+// much. CEL types a nullable array as list(string) and refuses a
+// bare null comparison at compile time, so removing the cast would
+// break the CRD at apply time (the scratch drill caught this).
 func TestClusterCRDRegistriesSchema(t *testing.T) {
 	raw, err := os.ReadFile("manifests/clusters-crd.yaml")
 	if err != nil {

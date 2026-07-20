@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
 #
-# Vendor the machine's trust store: the CA certificates that let it
-# verify who it's talking to when it pulls container images over TLS.
+# Vendor the machine's trust store: the CA certificates it uses to
+# verify who it is talking to when it pulls container images over TLS.
 #
 # This domain is the counterpart of the identity domain. The identity
-# domain mints the machine's own certificate authorities; this domain
+# domain mints the machine's own certificate authorities. This domain
 # vendors the roots the machine trusts: the Mozilla CA program's root
 # certificates, the same set nearly every Linux distribution ships at
-# /etc/ssl/certs. There is no way around taking someone's word for
+# /etc/ssl/certs. There is no way to avoid taking someone's word for
 # which roots belong there. Mozilla's list is the most heavily
-# scrutinized one available, and the curl project publishes it,
-# extracted from Firefox's source and converted to PEM, as dated
-# immutable snapshots.
+# scrutinized one available. The curl project publishes it, extracted
+# from Firefox's source and converted to PEM, as dated immutable
+# snapshots.
 #
-# So the pin here is a date (trust/VERSION), and the fetch is verified
-# against the sha256 published beside the snapshot, just like every
-# other vendored input. As a result, the image's trust store doesn't
-# depend on whichever build host assembled it, and a change in what
-# the machine trusts shows up in this repo as a deliberate, reviewable
-# version bump.
+# So the pin here is a date (trust/VERSION), and this script verifies
+# the fetch against the sha256 published beside the snapshot, the same
+# as every other vendored input. As a result, the image's trust store
+# does not depend on whichever build host assembled it. A change in
+# what the machine trusts shows up in this repo as a deliberate,
+# reviewable version bump.
 #
 # Usage:
 #   trust/fetch.sh               fetch the snapshot pinned in trust/VERSION

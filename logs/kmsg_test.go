@@ -1,10 +1,11 @@
 package main
 
-// The kmsg relay is tested against a scripted device: a read function
-// that plays back records and errors the way /dev/kmsg would produce
-// them. The device's one un-fakeable behavior (blocking until the
-// next record) doesn't matter to the logic, which only ever sees the
-// results of read calls.
+// These tests run the kmsg relay against a scripted device: a read
+// function that plays back records and errors the way /dev/kmsg
+// would produce them. The device has one behavior that these tests
+// cannot fake: blocking until the next record. This does not matter
+// to the relay's logic, which only ever sees the results of read
+// calls.
 
 import (
 	"bytes"
@@ -88,11 +89,11 @@ func TestParseKmsgRecordRejectsMalformedRecords(t *testing.T) {
 	}
 }
 
-// scriptedDevice plays back a fixed sequence of reads: a string is a
-// record, an error is returned as-is. When the script runs out the
-// device reports io.EOF, which the relay treats as any other
-// unexpected error and returns — the test's way of ending a loop
-// that in production never ends.
+// scriptedDevice plays back a fixed sequence of reads. A string in
+// the sequence is a record. An error in the sequence is returned
+// as-is. When the script runs out, the device reports io.EOF. The
+// relay treats this like any other unexpected error, and returns it.
+// This is how the test ends a loop that never ends in production.
 func scriptedDevice(events ...any) func([]byte) (int, error) {
 	i := 0
 	return func(buf []byte) (int, error) {
@@ -112,8 +113,8 @@ func scriptedDevice(events ...any) func([]byte) (int, error) {
 }
 
 // testKmsgRelay builds a relay over a scripted device with fixed
-// clocks: the boot anchor at noon UTC, so a record stamped N seconds
-// after boot converts to noon plus N.
+// clocks. The boot anchor sits at noon UTC, so a record stamped N
+// seconds after boot converts to noon plus N seconds.
 func testKmsgRelay(t *testing.T, facility int, read func([]byte) (int, error)) (*kmsgRelay, *bytes.Buffer) {
 	t.Helper()
 	var out bytes.Buffer
@@ -219,9 +220,9 @@ func TestKmsgRelayCheckpointsAndResumes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The restarted relay reads the whole buffer again (kmsg cannot
-	// seek to a sequence number) and must skip everything at or
-	// before the cursor.
+	// The restarted relay reads the whole buffer again, because kmsg
+	// cannot seek to a sequence number. It must skip every record at
+	// or before the cursor.
 	restarted, out := testKmsgRelay(t, 0, scriptedDevice(
 		"6,100,1000000,-;first\n",
 		"6,101,2000000,-;second\n",
@@ -243,9 +244,9 @@ func TestKmsgRelayCheckpointsAndResumes(t *testing.T) {
 	}
 }
 
-// The cursor tracks the last sequence read, not the last shipped, so
-// a liken relay that mostly skips kernel records still resumes past
-// them.
+// The cursor tracks the last sequence read, not the last sequence
+// sent. Because of this, a liken relay that skips most kernel
+// records still resumes past those records.
 func TestKmsgRelayCursorAdvancesPastOtherFacilities(t *testing.T) {
 	immediateCheckpoints(t)
 
@@ -273,7 +274,7 @@ func TestKmsgRelayNoticesRecordsExpiredWhileDown(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// While the relay was down the buffer wrapped: the oldest
+	// While the relay was down, the buffer wrapped. The oldest
 	// surviving record is far past the cursor.
 	restarted, out := testKmsgRelay(t, 0, scriptedDevice("6,500,9000000,-;much later\n"))
 	restarted.cursorDir = relay.cursorDir
@@ -292,8 +293,9 @@ func TestKmsgRelayNoticesRecordsExpiredWhileDown(t *testing.T) {
 	}
 }
 
-// A relay that cannot ship must exit with the write error so the
-// kubelet restarts it, rather than reading on and dropping records.
+// A relay that cannot send records must exit with the write error,
+// so the kubelet restarts it, instead of reading on and dropping
+// records.
 func TestKmsgRelayStopsWhenItsOutputFails(t *testing.T) {
 	relay, _ := testKmsgRelay(t, 0, scriptedDevice("6,100,1000000,-;doomed\n"))
 	relay.out = newEnvelopeWriter(brokenWriter{})
@@ -302,8 +304,9 @@ func TestKmsgRelayStopsWhenItsOutputFails(t *testing.T) {
 	}
 }
 
-// Checkpointing is the relay's durability, so a cursor directory that
-// refuses writes must stop the relay the same way a failed ship does.
+// Checkpointing is what makes the relay durable. Because of this, a
+// cursor directory that refuses writes must stop the relay, the same
+// way a failed send does.
 func TestKmsgRelayStopsWhenItCannotCheckpoint(t *testing.T) {
 	relay, _ := testKmsgRelay(t, 0, scriptedDevice("6,100,1000000,-;x\n"))
 	if err := os.Chmod(relay.cursorDir, 0o500); err != nil {
@@ -315,9 +318,9 @@ func TestKmsgRelayStopsWhenItCannotCheckpoint(t *testing.T) {
 	}
 }
 
-// wallAnchor recovers the wall-clock moment of boot, so it must land
-// in the past, and adding the monotonic clock's elapsed time back to
-// it must land at the present.
+// wallAnchor recovers the wall-clock moment of boot. Because of this,
+// the result must land in the past. Adding the monotonic clock's
+// elapsed time back to that result must land at the present moment.
 func TestWallAnchorRecoversTheBootMoment(t *testing.T) {
 	anchor := wallAnchor()
 	if !anchor.Before(time.Now()) {

@@ -10,8 +10,8 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// fakeEFIVars builds a directory standing in for efivarfs, each
-// variable a file of 4 attribute bytes plus payload, exactly the
+// fakeEFIVars builds a directory that stands in for efivarfs. Each
+// variable is a file of 4 attribute bytes plus payload, exactly the
 // shape the kernel presents.
 func fakeEFIVars(t *testing.T, vars map[string][]byte) string {
 	t.Helper()
@@ -71,8 +71,8 @@ func TestFirmwareFactsReportsAnArmedBootNext(t *testing.T) {
 }
 
 func TestFirmwareFactsNamesUndecodableEntriesHonestly(t *testing.T) {
-	// An entry in the order whose variable is missing or mangled
-	// still shows its ID, so nothing in the order is hidden.
+	// An entry in the order whose variable is missing or corrupted
+	// still shows its ID, so nothing in the order stays hidden.
 	dir := fakeEFIVars(t, map[string][]byte{
 		"BootOrder": u16le(0x2001, 0x2002),
 		"Boot2002":  {0xFF}, // too short to even carry attributes
@@ -84,8 +84,8 @@ func TestFirmwareFactsNamesUndecodableEntriesHonestly(t *testing.T) {
 }
 
 func TestFirmwareFactsOnABIOSMachine(t *testing.T) {
-	// No variable store at all: the mode says BIOS and every other
-	// field stays empty.
+	// With no variable store at all, the mode says BIOS, and every
+	// other field stays empty.
 	fw := firmwareFacts(filepath.Join(t.TempDir(), "nonexistent"))
 	if fw.Mode != machine.FirmwareBIOS {
 		t.Errorf("mode: got %q", fw.Mode)
@@ -118,7 +118,8 @@ func TestWriteEFIVarRoundTrips(t *testing.T) {
 	if len(b) != 2 || binary.LittleEndian.Uint16(b) != 3 {
 		t.Errorf("payload: got % X", b)
 	}
-	// Overwriting must replace, not append: efivarfs semantics.
+	// Overwriting must replace the value, not append to it: this is
+	// how efivarfs behaves.
 	if err := writeEFIVar(dir, "BootNext", u16le(7)); err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +133,8 @@ func TestSetBootEntryFindsItsOwnByDescription(t *testing.T) {
 		"Boot0000": encodeLoadOption(loadOption{description: "BootManagerMenuApp"}),
 		"Boot0001": encodeLoadOption(loadOption{description: "liken slot A"}),
 	})
-	// Rewriting slot A lands on its existing number, not a new one.
+	// Rewriting slot A lands on its existing number, not on a new
+	// one.
 	n, err := setBootEntry(dir, loadOption{description: "liken slot A", filePath: `\vmlinuz`})
 	if err != nil {
 		t.Fatal(err)
@@ -140,8 +142,8 @@ func TestSetBootEntryFindsItsOwnByDescription(t *testing.T) {
 	if n != 1 {
 		t.Errorf("slot A should overwrite Boot0001, landed on Boot%04X", n)
 	}
-	// A new description takes the lowest free number, skipping the
-	// firmware's entries rather than clobbering them.
+	// A new description takes the lowest free number, and skips the
+	// firmware's entries rather than overwriting them.
 	n, err = setBootEntry(dir, loadOption{description: "liken slot B"})
 	if err != nil {
 		t.Fatal(err)
@@ -155,8 +157,8 @@ func TestSetBootEntryFindsItsOwnByDescription(t *testing.T) {
 }
 
 // fakeFirmwareVars points the package's efivars path at a fake store,
-// restoring the real one afterward; reportFirmware and the facts read
-// through the variable.
+// and restores the real one afterward. reportFirmware and the facts
+// read through this variable.
 func fakeFirmwareVars(t *testing.T, vars map[string][]byte) string {
 	t.Helper()
 	dir := fakeEFIVars(t, vars)
@@ -173,8 +175,8 @@ func TestReportFirmwareUEFI(t *testing.T) {
 		"BootNext":    u16le(0x0002),
 		"BootOrder":   u16le(0x0002),
 	})
-	// The report prints; what the test pins is that the same facts
-	// decode for status, console parity's other half.
+	// The report prints. What the test checks is that the same
+	// facts decode for status, the other half of console parity.
 	reportFirmware()
 	fw := firmwareFacts(efiVarsDir)
 	if fw.Mode != machine.FirmwareUEFI {
@@ -200,8 +202,8 @@ func TestReportFirmwareBIOS(t *testing.T) {
 
 func TestReadEFIVarRejectsATruncatedVariable(t *testing.T) {
 	dir := t.TempDir()
-	// Two bytes can't even hold the attribute word the kernel always
-	// prepends; such a file is mangled, not empty.
+	// Two bytes cannot even hold the attribute word that the kernel
+	// always prepends; such a file is corrupted, not empty.
 	if err := os.WriteFile(filepath.Join(dir, "BootNext-"+efiGlobalVariable), []byte{1, 2}, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +215,7 @@ func TestReadEFIVarRejectsATruncatedVariable(t *testing.T) {
 func TestListBootEntriesSkipsWhatItCannotDecode(t *testing.T) {
 	dir := fakeEFIVars(t, map[string][]byte{
 		"Boot0007": encodeLoadOption(loadOption{attributes: loadOptionActive, description: "liken slot A"}),
-		"Boot0008": {0x01}, // truncated: not even a whole load option header
+		"Boot0008": {0x01}, // truncated: not even a whole load-option header
 	})
 	// Something else's variable, not a Boot#### entry at all.
 	if err := os.WriteFile(filepath.Join(dir, "SecureBoot-"+efiGlobalVariable), []byte{7, 0, 0, 0, 1}, 0o644); err != nil {

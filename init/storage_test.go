@@ -1,14 +1,15 @@
 package main
 
-// Tests for the storage decisions: which partitions carry which
-// roles, how a blank disk gets carved, and every reason a spec must
-// be refused. Everything here runs as an ordinary process against
-// plain files and tempdir trees, because the decisions are separable
-// from the machinery they authorize. The actions themselves (writing
-// a GPT through the kernel, mke2fs, the mount syscalls, and the
-// power-off a refusal triggers) need a real machine, and belong to
-// the QEMU harness in dev-cluster/, which watches for the same
-// refusal messages these tests pin, on the serial console.
+// These are tests for the storage decisions: which partitions carry
+// which roles, how the process carves up a blank disk, and every
+// reason a spec must be refused. Every test here runs as an ordinary
+// process against plain files and tempdir trees, because these
+// decisions are separable from the machinery they authorize. The
+// actions themselves need a real machine: writing a GPT through the
+// kernel, mke2fs, the mount syscalls, and the power-off that a
+// refusal triggers. Those actions belong to the QEMU harness in
+// dev-cluster/, which watches the serial console for the same
+// refusal messages that these tests pin.
 
 import (
 	"os"
@@ -21,8 +22,8 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// declared builds the DeclaredRole the spec's Roles() would produce,
-// letting each test state just the fields it's about.
+// declared builds the DeclaredRole that the spec's Roles() would
+// produce, so each test can state only the fields it is about.
 func declared(name machine.StorageRoleName, device, size string) machine.DeclaredRole {
 	return machine.DeclaredRole{
 		Name:        name,
@@ -53,9 +54,9 @@ func TestMatchRolesFindsRolesByPartitionName(t *testing.T) {
 }
 
 func TestMatchRolesRefusesDuplicatePartitionNames(t *testing.T) {
-	// Two partitions with the same role name is what a cloned or
-	// transplanted disk looks like; guessing which one holds the real
-	// cluster would destroy data on the other.
+	// Two partitions with the same role name show what a cloned or
+	// moved disk looks like. A wrong guess about which one holds the
+	// real cluster would destroy data on the other.
 	roles := []machine.DeclaredRole{declared("clusterState", "/dev/vda", "")}
 	parts := []partition{
 		{name: "vda1", partName: "liken:clusterState"},
@@ -73,10 +74,10 @@ func TestMatchRolesRefusesDuplicatePartitionNames(t *testing.T) {
 }
 
 func TestPlanPartitionsPacksSizedRolesAligned(t *testing.T) {
-	// A 2 GiB disk (4,194,304 sectors) carrying a 1 KiB role, a
-	// 512 MiB role, and a remainder. The 1 KiB role occupies two
-	// sectors but the next role still starts on the following MiB
-	// boundary; the remainder runs to the last usable sector.
+	// This is a 2 GiB disk (4,194,304 sectors) that carries a 1 KiB
+	// role, a 512 MiB role, and a remainder. The 1 KiB role occupies
+	// two sectors, but the next role still starts on the following
+	// MiB boundary. The remainder runs to the last usable sector.
 	mine := []machine.DeclaredRole{
 		declared("machineEphemeral", "/dev/vdb", "1Ki"),
 		declared("podStorage", "/dev/vdb", "512Mi"),
@@ -102,9 +103,9 @@ func TestPlanPartitionsPacksSizedRolesAligned(t *testing.T) {
 }
 
 func TestPlanPartitionsTypesSystemSlotsAsESP(t *testing.T) {
-	// The system slots must be typed as EFI system partitions — the
-	// type GUID is how firmware finds boot candidates — while every
-	// data role stays ordinary Linux filesystem data.
+	// The system slots must be typed as EFI system partitions. The
+	// firmware finds boot candidates by this type GUID. Every data
+	// role stays ordinary Linux file system data.
 	mine := []machine.DeclaredRole{
 		declared("systemA", "/dev/vdc", "512Mi"),
 		declared("systemB", "/dev/vdc", "512Mi"),
@@ -128,10 +129,10 @@ func TestPlanPartitionsTypesSystemSlotsAsESP(t *testing.T) {
 }
 
 func TestPlanPartitionsTypesTheBIOSBootRoles(t *testing.T) {
-	// A BIOS machine's boot roles lead the disk in canonical order:
-	// the raw core-image partition carries GRUB's own well-known type
-	// GUID (nothing else will claim it), and the boot home is an
-	// ordinary Linux data partition — GRUB finds it by filesystem
+	// A BIOS machine's boot roles lead the disk in canonical order.
+	// The raw core-image partition carries GRUB's own well-known type
+	// GUID; nothing else claims that type. The boot home is an
+	// ordinary Linux data partition. GRUB finds it by filesystem
 	// label, not by type.
 	mine := []machine.DeclaredRole{
 		declared("biosBoot", "/dev/vdc", "1Mi"),
@@ -159,7 +160,7 @@ func TestPlanPartitionsTypesTheBIOSBootRoles(t *testing.T) {
 
 func TestPlanPartitionsRejectsDiskTooSmall(t *testing.T) {
 	// 4,096 sectors is 2 MiB of disk, but the table's reservations
-	// leave less than that usable; a 2 MiB role can't fit.
+	// leave less than that usable. A 2 MiB role cannot fit.
 	mine := []machine.DeclaredRole{declared("clusterState", "/dev/vda", "2Mi")}
 	_, err := planPartitions("/dev/vda", mine, 4_096)
 	if err == nil {
@@ -173,7 +174,7 @@ func TestPlanPartitionsRejectsDiskTooSmall(t *testing.T) {
 }
 
 func TestPlanPartitionsRejectsNoRoomForRemainder(t *testing.T) {
-	// The sized role fits exactly, to the last usable sector; the
+	// The sized role fits exactly, to the last usable sector. The
 	// remainder role is left with nothing.
 	mine := []machine.DeclaredRole{
 		declared("machineEphemeral", "/dev/vdb", "1Mi"),
@@ -188,8 +189,8 @@ func TestPlanPartitionsRejectsNoRoomForRemainder(t *testing.T) {
 	}
 }
 
-// signedDevice writes a fake device file: 2 KiB of zeros with an
-// optional signature stamped in, which is all isBlank and hasExt4
+// signedDevice writes a fake device file: 2 KiB of zeros, with an
+// optional signature stamped in. This is all that isBlank and hasExt4
 // ever read.
 func signedDevice(t *testing.T, stamp func(b []byte)) string {
 	t.Helper()
@@ -235,8 +236,8 @@ func TestIsBlankReportsMissingDevices(t *testing.T) {
 }
 
 func TestIsBlankReportsUnreadableDevices(t *testing.T) {
-	// A device that can't supply even the first 2 KiB can't be judged
-	// blank, and a disk that can't be judged must not be claimed.
+	// A device that cannot supply even the first 2 KiB cannot be
+	// judged blank. A disk that cannot be judged must not be claimed.
 	path := filepath.Join(t.TempDir(), "truncated")
 	if err := os.WriteFile(path, make([]byte, 100), 0o600); err != nil {
 		t.Fatal(err)
@@ -270,8 +271,8 @@ func TestReconcileStorageEmptySpecStaysInMemory(t *testing.T) {
 }
 
 func TestReconcileStorageRejectsInvalidSpec(t *testing.T) {
-	// Validation runs before any discovery, so a bad spec is refused
-	// without this test needing a fake machine at all.
+	// Validation runs before any discovery, so the process refuses a
+	// bad spec without this test needing a fake machine at all.
 	_, err := reconcileStorage(machine.StorageSpec{ClusterState: &machine.StorageRole{}})
 	if err == nil {
 		t.Fatal("expected an error for a role with no device")
@@ -282,9 +283,9 @@ func TestReconcileStorageRejectsInvalidSpec(t *testing.T) {
 }
 
 func TestPlanClaimRefusesPartialClaim(t *testing.T) {
-	// One of this disk's roles was recognized but another is missing:
-	// the table was liken's and then something changed, which is not
-	// safe to repair automatically.
+	// The process recognized one of this disk's roles, but another
+	// role is missing. The table was liken's, and then something
+	// changed. This is not safe to repair automatically.
 	roles := []machine.DeclaredRole{
 		declared("clusterState", "/dev/vda", "1Mi"),
 		declared("podStorage", "/dev/vda", ""),
@@ -338,8 +339,8 @@ func TestPlanClaimRefusesForeignDisks(t *testing.T) {
 }
 
 func TestPlanClaimReportsUnreadableDevices(t *testing.T) {
-	// The disk shows up in sysfs but its device node can't supply
-	// enough bytes to judge blankness; a disk that can't be judged
+	// The disk shows up in sysfs, but its device node cannot supply
+	// enough bytes to judge blankness. A disk that cannot be judged
 	// must not be claimed.
 	sys, dev := fakeMachine(t)
 	addDisk(t, sys, dev, "vda", 1<<30, make([]byte, 100))
@@ -374,8 +375,9 @@ func TestWaitForPartitionsReportsMissingPartitions(t *testing.T) {
 }
 
 func TestWaitForPartitionsReportsStaleSizes(t *testing.T) {
-	// The partition exists but sysfs still shows its old geometry: as
-	// wrong as no partition at all, and named as such.
+	// The partition exists, but sysfs still shows its old geometry.
+	// This is as wrong as no partition at all, and the error names it
+	// that way.
 	sys, dev := fakeMachine(t)
 	addDisk(t, sys, dev, "vda", 1<<30, nil)
 	addPartition(t, sys, "vda", "vda1", "liken:clusterState", 1<<20)
@@ -393,9 +395,9 @@ func TestWaitForPartitionsReportsStaleSizes(t *testing.T) {
 }
 
 func TestMountRoleRejectsUnknownRoleVocabulary(t *testing.T) {
-	// The mount translation is checked before anything touches the
-	// partition, so an unknown role is refused without this test
-	// needing a device to exist.
+	// The process checks the mount translation before anything
+	// touches the partition, so it refuses an unknown role without
+	// this test needing a device to exist.
 	err := mountRole(declared("archive", "/dev/vda", ""), partition{name: "vda9"})
 	if err == nil || !strings.Contains(err.Error(), "no mount translation") {
 		t.Errorf("expected a vocabulary error: %v", err)
@@ -439,10 +441,10 @@ func TestPlanClaimLaysOutABlankDisk(t *testing.T) {
 
 func TestReconcileStorageClaimFailureIsARealError(t *testing.T) {
 	// Planning succeeds against the blank fake disk, so reconciliation
-	// proceeds to apply — and the fake device, being a plain file,
-	// refuses the kernel's re-read ioctl. That is exactly the shape of
-	// a mid-apply I/O failure: reconcile reports it and the caller
-	// stops the boot.
+	// proceeds to apply. The fake device is a plain file, and it
+	// refuses the kernel's re-read ioctl. This is exactly the shape of
+	// an I/O failure partway through apply: reconcile reports it, and
+	// the caller stops the boot.
 	sys, dev := fakeMachine(t)
 	addDisk(t, sys, dev, "vdb", 2<<30, make([]byte, 2_048))
 	device := filepath.Join(dev, "vdb")
@@ -458,8 +460,9 @@ func TestReconcileStorageClaimFailureIsARealError(t *testing.T) {
 }
 
 func TestReconcileStorageRefusesAnUnsatisfiableGrow(t *testing.T) {
-	// A recognized system slot declared larger than its partition is
-	// refused at planning time, before anything is written.
+	// The process refuses a recognized system slot that is declared
+	// larger than its partition. It refuses this at planning time,
+	// before anything is written.
 	sys, dev := fakeMachine(t)
 	addDisk(t, sys, dev, "vda", 2<<30, nil)
 	addPartition(t, sys, "vda", "vda1", "liken:systemA", 1<<20)

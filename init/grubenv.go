@@ -5,28 +5,28 @@ package main
 // UEFI firmware gives liken a small durable store with exactly the
 // right shape for blue-green boots: BootNext (try this once) and
 // BootOrder (prefer this from now on). BIOS firmware stores nothing,
-// so GRUB provides the analogue: a preallocated 1024-byte file at a
-// fixed location that GRUB itself can read *and write* at boot time,
+// so GRUB provides the equivalent: a preallocated 1024-byte file at a
+// fixed location that GRUB itself can read and write at boot time,
 // designed for exactly this bookkeeping. liken keeps two variables in
-// it: default_slot, the proven slot every unremarkable boot should
-// run (BootOrder's stand-in), and try_slot, the one-shot trial
-// (BootNext's stand-in), which grub.cfg consumes before it loads a
-// single kernel byte.
+// it: default_slot, the proven slot that every unremarkable boot
+// should run (it corresponds to BootOrder), and try_slot, the
+// one-shot trial (it corresponds to BootNext), which grub.cfg
+// consumes before it loads a single kernel byte.
 //
-// The format is fixed so GRUB can rewrite the file in place through
-// its own filesystem driver: a signature line, then name=value lines
-// (lines starting with # are comments), padded with '#' characters to
-// exactly 1024 bytes. The size never changes, which is what makes the
-// boot-time write safe on FAT — the file's blocks are simply
-// overwritten, no allocation moves.
+// The format is fixed so that GRUB can rewrite the file in place
+// through its own filesystem driver: a signature line, then
+// name=value lines (lines starting with # are comments), padded with
+// '#' characters to exactly 1024 bytes. The size never changes. This
+// is what makes the boot-time write safe on FAT: the file's blocks
+// are simply overwritten, and no allocation moves.
 //
-// liken writes the block from Go rather than shipping grub-editenv:
-// it is a 1 KiB documented format, squarely inside the write-it-by-
-// hand discipline the GPT and FAT writers already follow. Writes from
-// Linux go through the durable temp-and-rename path — unlike GRUB,
-// init has a real filesystem driver underneath, and GRUB re-resolves
-// the file's blocks fresh each boot, so the in-place constraint binds
-// only GRUB's own save_env.
+// liken writes the block from Go rather than shipping grub-editenv,
+// because it is a 1 KiB documented format, and it fits the same
+// write-it-by-hand approach that the GPT and FAT writers already
+// follow. Writes from Linux go through the durable temp-and-rename
+// path. Unlike GRUB, init has a real filesystem driver underneath,
+// and GRUB re-resolves the file's blocks fresh each boot, so the
+// in-place constraint applies only to GRUB's own save_env.
 
 import (
 	"fmt"
@@ -41,8 +41,8 @@ const (
 	grubEnvSignature = "# GRUB Environment Block\n"
 )
 
-// parseGRUBEnv reads an environment block's variables. Strictness
-// mirrors what GRUB itself accepts: exactly 1024 bytes, the signature
+// parseGRUBEnv reads an environment block's variables. Its strictness
+// matches what GRUB itself accepts: exactly 1024 bytes, the signature
 // first, comments ignored, and the padding after the last variable
 // never parsed as content.
 func parseGRUBEnv(block []byte) (map[string]string, error) {
@@ -101,13 +101,13 @@ func renderGRUBEnv(vars map[string]string) ([]byte, error) {
 	return block, nil
 }
 
-// updateGRUBEnv is the read-modify-write the actuator uses: load the
-// block at path, apply the given values (an empty value still writes
-// the variable, present-but-empty, which is how a one-shot reads
-// after GRUB consumes it), and write the result durably. A variable
-// mapped to the empty string stays in the block deliberately: absent
-// and empty read the same to grub.cfg's -n tests, and keeping the
-// name visible makes the block self-documenting under inspection.
+// updateGRUBEnv is the read-modify-write function that the actuator
+// uses. It loads the block at path, applies the given values (an
+// empty value still writes the variable, present but empty, which is
+// how a one-shot reads after GRUB consumes it), and writes the result
+// durably. A variable mapped to the empty string stays in the block on
+// purpose: absent and empty read the same to grub.cfg's -n tests, and
+// keeping the name visible makes the block easier to inspect.
 func updateGRUBEnv(path string, set map[string]string) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -134,9 +134,10 @@ func readGRUBEnv(path string) (map[string]string, error) {
 	return parseGRUBEnv(raw)
 }
 
-// writeFileDurably writes bytes through a temporary name, fsyncs, and
-// renames: the same discipline copyDurably applies to slot artifacts,
-// for the same reason (FAT has no journal; durability is discipline).
+// writeFileDurably writes bytes through a temporary name, then it
+// runs fsync and renames the file. This is the same method that
+// copyDurably applies to slot artifacts, for the same reason: FAT has
+// no journal, so the code itself must enforce durability.
 func writeFileDurably(path string, data []byte) error {
 	tmp := path + ".partial"
 	f, err := os.Create(tmp)

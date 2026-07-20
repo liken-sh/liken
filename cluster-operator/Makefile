@@ -1,10 +1,11 @@
-# The cluster operator domain: the fleet-level half of operating the
-# OS through the Kubernetes API.
+# The cluster operator domain covers the fleet-level half of
+# operating the OS through the Kubernetes API.
 #
-# Two artifacts, on exactly the machine operator's pattern: the
-# static binary and the OCI image tarball image/oci.sh wraps around
-# it. main.go's header comment explains what this program watches,
-# what it writes, and why it needs no leader election.
+# This domain builds two artifacts, following the same pattern as the
+# machine operator: the static binary, and the OCI image tarball that
+# image/oci.sh wraps around it. main.go's header comment explains
+# what this program watches, what it writes, and why it needs no
+# leader election.
 include ../version.mk
 DIST ?= dist
 
@@ -16,10 +17,10 @@ $(DIST)/liken-cluster-operator: ../go.mod ../go.sum $(wildcard *.go) \
 		-ldflags "-X github.com/liken-sh/liken/machine.Version=$(LIKEN_VERSION)" \
 		-o $(DIST)/liken-cluster-operator .
 
-# The operator polls release channels over HTTPS, and its image has
-# no base layer to supply root certificates, so the machine's own
-# vendored trust bundle rides in the image (oci.sh explains where it
-# lands).
+# The operator polls release channels over HTTPS. Its image has no
+# base layer to supply root certificates, so the machine's own
+# vendored trust bundle rides in the image. oci.sh explains where the
+# bundle lands.
 CA_BUNDLE := ../trust/dist/$(strip $(file <../trust/VERSION))/cacert.pem
 
 $(DIST)/liken-cluster-operator-image.tar: $(DIST)/liken-cluster-operator ../image/oci.sh $(CA_BUNDLE)

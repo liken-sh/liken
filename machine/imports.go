@@ -1,29 +1,31 @@
 package machine
 
-// The imported-images record is how a machine remembers which OS
-// image tarballs its container store has proven it can serve.
+// The imported-images record stores which OS image tarballs a
+// machine's container store has proven it can serve.
 //
 // At startup, k3s's embedded containerd imports every OCI tarball in
-// its agent/images directory: content and metadata land in its
-// database, and each layer is extracted into a snapshot directory on
-// clusterState. Those writes are not crash-ordered. A machine that
-// dies at the wrong moment can be left with a database that says a
-// layer is unpacked while the extracted files are torn, and because
-// containerd trusts its own record, the same digest is never
-// unpacked again: every container from that image fails with "exec
-// format error", on every later boot, forever. When the torn image
-// is the machine operator's, the machine has lost the program that
-// would have reported the problem.
+// its agent/images directory. Content and metadata land in its
+// database, and containerd extracts each layer into a snapshot
+// directory on clusterState. Those writes do not happen in a
+// crash-safe order. A machine that dies at the wrong moment can be
+// left with a database that says a layer is unpacked, while the
+// extracted files are torn. containerd trusts its own record, so it
+// never unpacks the same digest again. Every container from that
+// image then fails with "exec format error", on every later boot,
+// forever. If the torn image is the machine operator's image, the
+// machine has lost the program that would have reported the
+// problem.
 //
-// The fix is not inside containerd, whose unpack cannot be made
-// transactional from outside. Instead the imports ride the same
-// staged/proven lifecycle as every liken document (staging.go), with
-// this record as the document: the tarballs' digests, staged before
-// k3s first sees them, proven once the operator observes the images
-// actually serving containers. A boot that finds a staged record
-// still standing knows the store took writes that were never proven
-// and discards it wholesale rather than trusting it (init's
-// imports.go carries that half).
+// The fix does not sit inside containerd. containerd's unpack cannot
+// become transactional from outside containerd. Instead, the imports
+// go through the same staged and proven lifecycle as every liken
+// document (staging.go), with this record as the document. The
+// tarballs' digests are staged before k3s first sees them, and
+// proven once the operator observes the images actually serving
+// containers. If a boot finds a staged record still present, the
+// boot knows the store took writes that were never proven. The boot
+// discards the record completely, instead of trusting it. init's
+// imports.go carries that half of the work.
 
 import (
 	"crypto/sha256"
@@ -38,37 +40,39 @@ import (
 	"github.com/liken-sh/liken/api"
 )
 
-// K3sAgentDir is the tree this record vouches for: k3s's agent
-// state, where containerd keeps its store and the tarballs arrive
-// (in its images/ subdirectory). One spelling, shared by both halves
-// of the protocol, because their safety depends on agreeing: init
-// discards this tree when a trial died unproven, and the operator's
-// promotion barrier flushes exactly this filesystem.
+// K3sAgentDir names the tree this record covers: k3s's agent state,
+// where containerd keeps its store and the tarballs arrive (in its
+// images/ subdirectory). Both halves of the protocol share this one
+// spelling, because their safety depends on agreement. init discards
+// this tree when a trial died unproven. The operator's promotion
+// barrier flushes exactly this filesystem.
 const K3sAgentDir = "/var/lib/rancher/k3s/agent"
 
-// ImportedImages lists the OS image tarballs one boot handed to
-// containerd, each under the sha256 of its bytes. The digests are of
-// the tarballs, not of the OCI images inside them: the record's job
-// is to notice that the boot brought different bytes to import, and
-// the tarball is the unit that arrives.
+// ImportedImages lists the OS image tarballs that one boot handed to
+// containerd, each keyed by the sha256 of its bytes. The digests
+// cover the tarballs, not the OCI images inside them. The record
+// exists to notice that the boot brought different bytes to import,
+// and the tarball is the unit that arrives.
 type ImportedImages struct {
 	APIVersion string `json:"apiVersion"`
 	Kind       string `json:"kind"`
 
 	// Images maps each tarball's basename to the sha256 of its
-	// contents. Empty on machines whose image carries no tarballs.
+	// contents. Images is empty on machines whose image carries no
+	// tarballs.
 	Images map[string]string `json:"images,omitempty"`
 }
 
-// ImportedImagesStore is the record's lifecycle store under the given
-// machineState root, beside the other documents'.
+// ImportedImagesStore returns the record's lifecycle store under the
+// given machineState root, beside the other documents' stores.
 func ImportedImagesStore(root string) ManifestStore {
 	return ManifestStore{dir: filepath.Join(root, "imports")}
 }
 
 // RenderImportedImages produces the record's canonical bytes and
-// their hash: the identity a boot compares against the proven record
-// to decide whether it is bringing different tarballs to import.
+// their hash. A boot compares this hash against the proven record's
+// hash, to decide whether the boot is bringing different tarballs to
+// import.
 func RenderImportedImages(images map[string]string) ([]byte, string, error) {
 	return renderDocument(ImportedImages{
 		APIVersion: api.APIVersion,
@@ -78,8 +82,9 @@ func RenderImportedImages(images map[string]string) ([]byte, string, error) {
 }
 
 // HashImageTarballs digests every .tar file in a directory, keyed by
-// basename. A missing directory means no tarballs (an image without
-// k3s), which is a normal answer, not an error.
+// basename. A missing directory means no tarballs are present, as
+// happens with an image that has no k3s. HashImageTarballs treats a
+// missing directory as a normal answer, not an error.
 func HashImageTarballs(dir string) (map[string]string, error) {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {

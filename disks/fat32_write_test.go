@@ -1,12 +1,13 @@
 package disks
 
-// Tests for the FAT file writer, read back through the package's own
-// reader (fat32_read.go). The consumers that matter are firmware and
-// the kernel's vfat driver, which can't run in a unit test; what the
-// reader checks — geometry, chains, long names, checksums, the
-// agreement of the two FAT copies — is exactly what those real
-// consumers rely on, and a drill proved the kernel agrees (fsck and
-// a loop mount of a writer-built volume).
+// This file tests the FAT file writer, reading the result back
+// through the package's own reader (fat32_read.go). The consumers
+// that matter are firmware and the kernel's vfat driver, and neither
+// can run in a unit test. What the reader checks (geometry, chains,
+// long names, checksums, and the agreement of the two FAT copies) is
+// exactly what those real consumers rely on. A drill confirmed that
+// the kernel agrees, using fsck and a loop mount of a writer-built
+// volume.
 
 import (
 	"bytes"
@@ -16,8 +17,9 @@ import (
 	"testing"
 )
 
-// formattedVolume creates a sparse file just past FAT32's floor and
-// formats it: the smallest honest volume these tests can use.
+// formattedVolume creates a sparse file just past FAT32's minimum
+// size, and formats it. This is the smallest valid volume that
+// these tests can use.
 func formattedVolume(t *testing.T) *os.File {
 	t.Helper()
 	f, err := os.Create(filepath.Join(t.TempDir(), "volume"))
@@ -104,8 +106,9 @@ func TestFATWriterSpansClusters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Three clusters and change: the chain, not the record, carries
-	// the shape, and the size field trims the tail.
+	// This file spans three clusters and part of a fourth. The
+	// chain, not the record, carries the shape, and the size field
+	// trims the extra bytes at the end.
 	big := bytes.Repeat([]byte("0123456789abcdef"), (3*4096+700)/16)
 	if err := w.WriteFile("big.bin", bytes.NewReader(big), int64(len(big))); err != nil {
 		t.Fatal(err)
@@ -156,8 +159,9 @@ func TestFATWriterKeepsTheVolumeLabelFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// fsck expects the boot-sector label and the root's label record
-	// to agree; the writer must carry the format's record through.
+	// fsck expects the boot-sector label and the root's label
+	// record to agree. The writer must carry the format's record
+	// through unchanged.
 	v := openVolume(t, vol)
 	raw, err := v.chain(2)
 	if err != nil {

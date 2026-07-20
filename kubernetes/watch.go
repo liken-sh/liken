@@ -1,7 +1,8 @@
 package kubernetes
 
-// The watch protocol: how a controller hears about changes the
-// moment they happen, and how it recovers when the stream drops.
+// This file implements the watch protocol: how a controller learns
+// about changes the moment they happen, and how it recovers when the
+// stream drops.
 
 import (
 	"encoding/json"
@@ -12,39 +13,41 @@ import (
 )
 
 // WatchMachines turns the API server's watch mechanism into a channel
-// of fresh Machine objects. A watch is an ordinary GET with
-// ?watch=true: the response never ends, and each line of it is a JSON
-// event like {"type": "MODIFIED", "object": {…}}, pushed the moment
-// the object changes. This is the mechanism informers, kubectl get -w,
-// and every controller's responsiveness are built on.
+// of fresh Machine objects. A watch is an ordinary GET request with
+// ?watch=true. The response never ends, and each line of it is a
+// JSON event, such as {"type": "MODIFIED", "object": {…}}, sent the
+// moment the object changes. This is the mechanism that informers,
+// kubectl get -w, and every controller's responsiveness are built on.
 //
-// fieldSelector scopes the watch, and it is where the two operators
-// part ways: the machine operator passes metadata.name=<self>,
-// because its own object is the only one whose changes concern it,
-// while the cluster operator passes "" and hears the whole fleet,
-// because the Cluster's status is derived from every Machine. The
-// server does the filtering either way; a selector is just a query
-// parameter on the same request.
+// fieldSelector limits the scope of the watch, and this is where the
+// two operators differ. The machine operator passes
+// metadata.name=<self>, because its own object is the only one whose
+// changes concern it. The cluster operator passes "" and hears about
+// the whole fleet, because the Cluster's status is derived from
+// every Machine. The server filters the results either way; a
+// selector is only a query parameter on the same request.
 //
-// resourceVersion tells the server where to resume so no change is
-// missed between reconnects; when history has been compacted away the
-// server says 410 Gone. Stream drops are routine too (the server ends
-// watches on its own schedule). Both recover the same way, the one
-// informers use: list the collection and watch from the *list's*
-// resourceVersion, which is the current revision of the world. A
-// single object's version would not do here: it is the revision of
-// that object's own last write, and on a quiet object that can be old
-// enough to have been compacted away, which would earn another 410
-// and strand the loop. The recovery list's items are delivered as
-// events, so the caller's working copy is refreshed along the way.
+// resourceVersion tells the server where to resume, so no change is
+// missed between reconnects. When history has been compacted away,
+// the server answers with 410 Gone. Stream drops are also routine,
+// because the server ends watches on its own schedule. Both cases
+// recover the same way, the way informers do: list the collection
+// and watch again from the list's own resourceVersion, which is the
+// current revision of the whole collection. A single object's
+// version does not work here. That version is the revision of that
+// object's own last write, and on a quiet object, that revision can
+// be old enough to have been compacted away. Using it would earn
+// another 410 and leave the loop stuck. The recovery list's items
+// are delivered as events, so the caller's working copy is
+// refreshed along the way.
 //
 // allowWatchBookmarks asks the server to send an occasional BOOKMARK
-// event: no object change, just "you are current through version X."
-// A watch on a quiet fleet would otherwise sit on an ever-staler
-// resourceVersion, and the next reconnect would be more likely to
-// find that version compacted away (the 410 above). Bookmarks keep
-// the resume point fresh for free; informers request them for
-// exactly this reason.
+// event: no object change, just a signal that says "you are current
+// through version X." Without this, a watch on a quiet fleet would
+// sit on an increasingly old resourceVersion, and the next reconnect
+// would more likely find that version already compacted away (see
+// the 410 case above). Bookmarks keep the resume point fresh at no
+// extra cost; informers request them for this reason.
 func WatchMachines(c *Client, fieldSelector, resourceVersion string, events chan<- *machine.Machine) {
 	selector := ""
 	if fieldSelector != "" {
@@ -67,13 +70,13 @@ func WatchMachines(c *Client, fieldSelector, resourceVersion string, events chan
 					break
 				}
 				if event.Type == "ERROR" {
-					// Usually 410 Gone wrapped in an event; fall back to
-					// a fresh list below.
+					// Usually a 410 Gone status wrapped in an event. Fall
+					// back to a fresh list below.
 					break
 				}
 				resourceVersion = event.Object.Metadata.ResourceVersion
 				if event.Type == "BOOKMARK" {
-					// A bookmark only refreshes the resume point; there
+					// A bookmark only refreshes the resume point. There
 					// is no change to reconcile.
 					continue
 				}

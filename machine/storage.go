@@ -1,22 +1,24 @@
 package machine
 
-// The storage half of the Machine spec.
+// This file holds the storage half of the Machine spec.
 //
 // Storage is declared by purpose, not by mount path. The manifest
-// never says "/var/lib/rancher" (that's a k3s implementation detail
-// liken owns); it says "this disk holds the cluster's state", and
-// liken translates. The roles are deliberately fields rather than a
-// list: each is a singleton (a machine has one cluster state, one
-// pod-storage pool), so making them schema means a duplicate role
-// can't even be expressed, and a new role is visibly an API change.
+// never says "/var/lib/rancher" (a k3s implementation detail that
+// liken owns). Instead it says "this disk holds the cluster's
+// state", and liken translates that purpose into the actual path.
+// The roles are fields rather than a list, on purpose. Each role is
+// a singleton: a machine has one cluster state, and one pod-storage
+// pool. Making the roles fields in the schema means a duplicate role
+// cannot even be expressed. A new role is visibly a change to the
+// API.
 //
 // The device path in each role matters only on the boot that claims
-// the disk: kernel device names are assigned in driver probe order,
-// so a name addresses a disk within one boot but does not identify
-// it across boots. Claiming writes the
-// role's name onto the partition itself (its GPT partition name), and
-// every boot after finds it by that name, wherever the disk
-// enumerates.
+// the disk. The kernel assigns device names in driver probe order,
+// so a name addresses a disk within one boot, but the name does not
+// identify the disk across boots. Claiming a disk writes the role's
+// name onto the partition itself, as its GPT partition name. Every
+// boot after that finds the partition by that name, wherever the
+// disk enumerates.
 
 import (
 	"fmt"
@@ -24,16 +26,16 @@ import (
 	"strings"
 )
 
-// PartitionPrefix namespaces liken's GPT partition names, so a glance
-// at any partition table shows which partitions belong to liken and
-// which role each serves.
+// PartitionPrefix namespaces liken's GPT partition names. Anyone who
+// looks at a partition table can see which partitions belong to
+// liken, and which role each partition serves.
 const PartitionPrefix = "liken:"
 
 // StorageRoleName names one of the storage roles. The vocabulary is
-// closed: these five names are the spec's field names, the GPT
-// partition names (behind PartitionPrefix), and the status's keys,
-// so they are defined once here and everything else ranges over
-// StorageRoleNames instead of respelling them.
+// closed: these nine names are the spec's field names, the GPT
+// partition names (behind PartitionPrefix), and the status's keys.
+// The names are defined once here, and everything else ranges over
+// StorageRoleNames instead of spelling them out again.
 type StorageRoleName string
 
 const (
@@ -48,18 +50,23 @@ const (
 	PodEphemeralRole     StorageRoleName = "podEphemeral"
 )
 
-// StorageRoleNames is the canonical order: the order partitions are
-// laid down when roles share a disk (fixed here rather than by YAML
-// map order, which Kubernetes doesn't preserve). The boot roles lead,
-// earliest reader first: BIOS firmware executes the MBR before
-// anything else exists, so the partition its boot code jumps into
-// comes first, then GRUB's own config home, then the system slots
-// (an EFI system partition conventionally leads its disk, and here it
-// leads everything the firmware doesn't read). machineState comes
-// next, ahead of all the data roles, because it holds the partition a
-// future boot must find before it has read any spec. Recognition is
-// by partition name, never by position; the order is a layout
-// convention, not a discovery mechanism.
+// StorageRoleNames is the canonical order. It is the order that
+// liken lays partitions down when roles share a disk. The order is
+// fixed here, rather than by YAML map order, because Kubernetes does
+// not preserve YAML map order.
+//
+// The boot roles lead the list, with the earliest reader first. BIOS
+// firmware executes the MBR before anything else exists, so the
+// partition that its boot code jumps into comes first. GRUB's own
+// config home comes next. The system slots come after that: an EFI
+// system partition conventionally leads its disk, and here it leads
+// everything that the firmware does not read. machineState comes
+// next, ahead of all the data roles. It holds the partition that a
+// future boot must find, before that boot has read any spec.
+//
+// liken recognizes a role by its partition name, never by its
+// position in this order. The order is a layout convention, not a
+// way to discover roles.
 var StorageRoleNames = []StorageRoleName{
 	BIOSBootRole,
 	BootHomeRole,
@@ -74,114 +81,120 @@ var StorageRoleNames = []StorageRoleName{
 
 type StorageSpec struct {
 	// BIOSBoot and BootHome are how a machine declares that it boots
-	// through GRUB rather than UEFI firmware — there is no separate
-	// firmware field; declaring the partitions GRUB needs *is* the
-	// declaration. A BIOS machine has no boot variables to hold the
-	// blue-green bookkeeping, so liken supplies the pieces the
-	// firmware would have provided: BIOSBoot is a tiny raw partition
-	// (about 1Mi, no filesystem) holding GRUB's core image, the code
-	// the MBR's 440 boot bytes jump into; BootHome is a small FAT32
-	// partition (about 64Mi) holding GRUB's config and its
-	// environment block — the file that stands in for BootNext and
-	// BootOrder. Machines that boot UEFI leave both out.
+	// through GRUB rather than UEFI firmware. There is no separate
+	// firmware field. Declaring the partitions that GRUB needs is
+	// itself the declaration. A BIOS machine has no boot variables to
+	// hold the blue-green bookkeeping, so liken supplies the pieces
+	// that the firmware would otherwise provide. BIOSBoot is a tiny
+	// raw partition (about 1Mi, with no filesystem) that holds GRUB's
+	// core image, the code that the MBR's 440 boot bytes jump into.
+	// BootHome is a small FAT32 partition (about 64Mi) that holds
+	// GRUB's config and its environment block, the file that holds
+	// the same role as BootNext and BootOrder. Machines that boot
+	// UEFI leave both fields out.
 	BIOSBoot *StorageRole `json:"biosBoot,omitempty"`
 	BootHome *StorageRole `json:"bootHome,omitempty"`
 
-	// SystemA and SystemB are the operating system's own boot slots:
-	// each holds one complete liken version (the kernel and the
-	// initramfs that is the rest of the OS), and the machine runs
-	// from one while upgrades are written to the other: a blue-green
-	// deployment at the scale of the whole operating system. They are
-	// EFI system partitions carrying FAT32, because the firmware
-	// itself is their first reader and FAT is the only filesystem it
-	// promises to understand. A machine without them boots from
-	// external media forever (the lab's -kernel flag, a USB stick); a
-	// machine with them can be installed once and upgraded
-	// declaratively.
+	// SystemA and SystemB are the operating system's own boot slots.
+	// Each slot holds one complete liken version: the kernel and the
+	// initramfs that makes up the rest of the OS. The machine runs
+	// from one slot while it writes upgrades to the other slot. This
+	// is a blue-green deployment at the scale of the whole operating
+	// system. The slots are EFI system partitions that carry FAT32,
+	// because the firmware itself is their first reader, and FAT is
+	// the only filesystem that the firmware promises to understand. A
+	// machine without these slots boots from external media forever,
+	// for example the lab's -kernel flag or a USB stick. A machine
+	// with these slots can be installed once, and upgraded
+	// declaratively after that.
 	SystemA *StorageRole `json:"systemA,omitempty"`
 	SystemB *StorageRole `json:"systemB,omitempty"`
 
 	// MachineState is the machine's own durable data: the manifests
-	// that configure it (the staged and proven copies that let a spec
-	// edit survive a reboot and apply at the next one). The data is
-	// small, but it changes the machine fundamentally: with it,
-	// configuration outlives the image that first delivered it.
+	// that configure the machine. It holds the staged and proven
+	// copies that let a spec edit survive a reboot, and apply at the
+	// next reboot. The data is small, but it changes the machine in a
+	// fundamental way. With this data, the configuration outlives the
+	// image that first delivered it.
 	MachineState *StorageRole `json:"machineState,omitempty"`
 
 	// MachineEphemeral is the operating system's own scratch space:
-	// /tmp. Small but necessary: the container runtime stages exec
-	// sessions there, and on a machine whose root is RAM, moving it
-	// to disk frees that memory for pods.
+	// /tmp. It is small, but necessary, because the container runtime
+	// stages exec sessions there. On a machine whose root filesystem
+	// is RAM, moving /tmp to disk frees that memory for pods.
 	MachineEphemeral *StorageRole `json:"machineEphemeral,omitempty"`
 
 	// ClusterState is k3s's state: the etcd or sqlite database, TLS
-	// material, and containerd's images. Persisting it is what lets a
-	// reboot resume the same cluster instead of starting a new one.
-	// (It is named for the cluster, not the machine, because this
-	// data belongs to the cluster rather than to any one machine.)
+	// material, and containerd's images. Persisting this state is
+	// what lets a reboot resume the same cluster, instead of starting
+	// a new one. This role is named for the cluster, not the machine,
+	// because this data belongs to the cluster rather than to any one
+	// machine.
 	ClusterState *StorageRole `json:"clusterState,omitempty"`
 
-	// PodStorage is durable storage pods claim by name: the
-	// PersistentVolumeClaim pool, served by k3s's local-path
-	// provisioner from this role's filesystem.
+	// PodStorage is durable storage that pods claim by name: the
+	// PersistentVolumeClaim pool. k3s's local-path provisioner serves
+	// this pool from this role's filesystem.
 	PodStorage *StorageRole `json:"podStorage,omitempty"`
 
 	// PodEphemeral is kubelet's working space: emptyDir volumes and
-	// per-pod scratch, the pool that pods meter with
+	// per-pod scratch space. It is the pool that pods measure with
 	// ephemeral-storage requests and limits.
 	PodEphemeral *StorageRole `json:"podEphemeral,omitempty"`
 }
 
-// StorageRole places one role onto hardware. A role missing from the
-// spec isn't an error; that role's directory simply stays on the
-// machine's RAM root.
+// StorageRole places one role onto hardware. A role that is missing
+// from the spec is not an error. That role's directory simply stays
+// on the machine's RAM root.
 type StorageRole struct {
-	// Device is the disk this role lives on, as a device path
-	// (/dev/vda). Consulted only when claiming a blank disk.
+	// Device is the disk that this role lives on, as a device path
+	// (/dev/vda). The code consults this field only when it claims a
+	// blank disk.
 	Device string `json:"device"`
 
 	// Size is how much of the device this role takes, as a binary
-	// quantity ("2Gi"): an exact allocation, not a request. Omitted,
-	// the role takes the rest of its disk; only one role per disk may
-	// do that.
+	// quantity ("2Gi"). This is an exact allocation, not a request.
+	// If Size is omitted, the role takes the rest of its disk. Only
+	// one role per disk may omit Size.
 	Size string `json:"size,omitempty"`
 }
 
-// A DeclaredRole is one role present in the spec, paired with its
-// name: the form the rest of liken works with, since the name becomes
-// the partition's on-disk identity.
+// A DeclaredRole is one role that is present in the spec, paired
+// with its name. This is the form that the rest of liken works with,
+// because the name becomes the partition's on-disk identity.
 type DeclaredRole struct {
 	Name StorageRoleName
 	StorageRole
 }
 
 // PartitionName is the role's on-disk identity: the GPT partition
-// name written when the role's disk is claimed, and matched on every
-// boot after.
+// name. liken writes this name when it claims the role's disk, and
+// matches it on every boot after that.
 func (r DeclaredRole) PartitionName() string {
 	return PartitionPrefix + string(r.Name)
 }
 
 // systemSlotsDir is where the system slots' filesystems are mounted:
-// slot A at system/a, slot B at system/b. Init mounts them there
-// (its roleMounts table) and the operator writes downloaded releases
-// there (through a hostPath mount), so the path is defined once, in
-// the package both programs share.
+// slot A at system/a, and slot B at system/b. Init mounts the slots
+// there, through its roleMounts table. The operator writes
+// downloaded releases there too, through a hostPath mount. So this
+// path is defined once, in the package that both programs share.
 const systemSlotsDir = "/var/lib/liken/system"
 
 // SystemSlotDir is one slot's mountpoint. Slots are named "A" and
-// "B" everywhere a person sees them (boot entries, conditions, the
-// liken.slot= parameter); the directory names are the same letters
-// in lowercase.
+// "B" everywhere a person sees them: boot entries, conditions, and
+// the liken.slot= parameter. The directory names use the same
+// letters, in lowercase.
 func SystemSlotDir(slot string) string {
 	return systemSlotsDir + "/" + strings.ToLower(slot)
 }
 
-// InactiveSlot is the slot a machine is not running from, which is
-// where a downloaded release lands: that is the point of the
-// blue-green arrangement. It returns "" for a machine whose boot
-// didn't come from a slot at all. Such a machine has no inactive
-// side, and should never download releases it could not boot.
+// InactiveSlot is the slot that a machine is not running from. A
+// downloaded release lands on this slot; that placement is the point
+// of the blue-green arrangement. InactiveSlot returns "" for a
+// machine whose boot did not come from a slot at all. Such a machine
+// has no inactive slot, and it should never download a release that
+// it could not boot.
 func InactiveSlot(running string) string {
 	switch running {
 	case "A":
@@ -192,8 +205,9 @@ func InactiveSlot(running string) string {
 	return ""
 }
 
-// Role addresses one role's declaration by name; nil for names
-// outside the vocabulary and for roles the spec leaves out.
+// Role addresses one role's declaration by name. It returns nil for
+// names outside the vocabulary, and for roles that the spec leaves
+// out.
 func (s *StorageSpec) Role(name StorageRoleName) *StorageRole {
 	switch name {
 	case BIOSBootRole:
@@ -230,8 +244,9 @@ func (s StorageSpec) Roles() []DeclaredRole {
 	return roles
 }
 
-// Validate checks the spec's internal consistency: the errors a
-// person can fix in the manifest, caught before any disk is touched.
+// Validate checks the spec's internal consistency. It catches the
+// errors that a person can fix in the manifest, before the code
+// touches any disk.
 func (s StorageSpec) Validate() error {
 	remainders := map[string]StorageRoleName{}
 	for _, role := range s.Roles() {
@@ -255,17 +270,19 @@ func (s StorageSpec) Validate() error {
 }
 
 // ParseSize reads a binary quantity ("2Gi", "512Mi", or a plain
-// count of bytes) into bytes. Only the power-of-two suffixes are
-// accepted: disks are carved in the same units their partition math
-// uses, and accepting "2G" (decimal) alongside "2Gi" (binary) would
-// invite subtle mistakes, since the two differ by about 7%.
+// count of bytes) into bytes. ParseSize accepts only the
+// power-of-two suffixes. liken divides disks into partitions using
+// the same units that its partition math uses. Accepting "2G"
+// (decimal) alongside "2Gi" (binary) would invite subtle mistakes,
+// because the two units differ by about 7%.
 func ParseSize(s string) (uint64, error) {
-	// The units are an ordered list rather than a map: the search
+	// The units form an ordered list rather than a map. The search
 	// stops at the first suffix that matches, so the order of the
-	// candidates must be fixed, and a map's iteration order is not.
-	// No suffix here is a suffix of another, so any fixed order works;
-	// were one added that overlaps (say "KiB"), it would have to come
-	// before the shorter suffix it ends in.
+	// candidates must stay fixed, and a map's iteration order does
+	// not stay fixed. No suffix here is a suffix of another suffix,
+	// so any fixed order works. If someone adds a suffix that
+	// overlaps another (for example "KiB"), that suffix must come
+	// before the shorter suffix that it ends with.
 	units := []struct {
 		suffix string
 		factor uint64
@@ -287,9 +304,10 @@ func ParseSize(s string) (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("size %q: expected bytes or a Ki/Mi/Gi/Ti quantity", s)
 	}
-	// Zero is rejected here rather than left for the partition math to
-	// fail on: a zero-sector partition would have an end before its
-	// start, and a zero-byte role is always a manifest mistake.
+	// ParseSize rejects zero here, instead of leaving it for the
+	// partition math to fail on. A zero-sector partition would have
+	// an end before its start, and a zero-byte role is always a
+	// mistake in the manifest.
 	if n == 0 {
 		return 0, fmt.Errorf("size %q: a storage role can't be zero bytes", s)
 	}

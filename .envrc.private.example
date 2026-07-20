@@ -1,4 +1,4 @@
-# Copy to .envrc.private (gitignored) and fill in the values.
+# Copy this file to .envrc.private (gitignored) and fill in the values.
 export LINODE_TOKEN=""           # Linode API token (DNS, the node, release storage)
 export AWS_ACCESS_KEY_ID=""      # Linode Object Storage key (Terraform state)
 export AWS_SECRET_ACCESS_KEY=""  # Linode Object Storage secret (Terraform state)

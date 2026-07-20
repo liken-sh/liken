@@ -63,7 +63,7 @@ func TestStewardLeavesFreshPodsAlone(t *testing.T) {
 }
 
 func TestStewardWaitsForTheMachineToUpgrade(t *testing.T) {
-	// The machine still runs 0.1.0: its old pod is the only operator
+	// The machine still runs 0.1.0. Its old pod is the only operator
 	// image the machine has, and evicting it would leave the machine
 	// with no operator to drive its own upgrade.
 	machines := []machine.Machine{machineRunning("node-1", "0.1.0")}
@@ -74,9 +74,9 @@ func TestStewardWaitsForTheMachineToUpgrade(t *testing.T) {
 }
 
 func TestStewardWaitsForTheManifestsToCatchUp(t *testing.T) {
-	// The machine is ahead of the applied manifests (workers upgrade
-	// before any leader has applied the new release's DaemonSet): a
-	// refresh now would just recreate another stale pod, thrashing
+	// The machine is ahead of the applied manifests. Workers upgrade
+	// before any leader has applied the new release's DaemonSet. A
+	// refresh now would just recreate another stale pod, repeating
 	// every sweep until the leaders catch up.
 	machines := []machine.Machine{machineRunning("node-1", "0.2.3")}
 	pods := []kubernetes.Pod{operatorPod("op-1", "node-1", "0.2.2")}
@@ -86,8 +86,8 @@ func TestStewardWaitsForTheManifestsToCatchUp(t *testing.T) {
 }
 
 func TestStewardDoesNothingWithoutAVersionedDaemonSet(t *testing.T) {
-	// A DaemonSet with no os-version annotation predates this design;
-	// there is no authority to refresh toward.
+	// A DaemonSet with no os-version annotation predates this
+	// design. There is no release to refresh toward.
 	machines := []machine.Machine{machineRunning("node-1", "0.2.2")}
 	pods := []kubernetes.Pod{operatorPod("op-1", "node-1", "0.1.0")}
 	if refresh := decideRefresh("", machines, pods); len(refresh) != 0 {
@@ -103,10 +103,11 @@ func TestStewardIgnoresPodsOnUnknownMachines(t *testing.T) {
 	}
 }
 
-// stewardServer fakes the API's steward-facing corner: each named
-// DaemonSet exists with the given os-version annotation, every
-// DaemonSet's listing returns one stale pod on node-1, and evictions
-// are recorded. Lookups of DaemonSets not in the map 404.
+// stewardServer fakes the part of the API that the steward uses.
+// Each named DaemonSet exists with the given os-version annotation,
+// every DaemonSet's pod listing returns one stale pod on node-1, and
+// evictions are recorded. A lookup of a DaemonSet that is not in the
+// map returns a 404.
 func stewardServer(t *testing.T, daemonSets map[string]string, evicted *[]string) *kubernetes.Client {
 	t.Helper()
 	return testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -139,7 +140,7 @@ func stewardServer(t *testing.T, daemonSets map[string]string, evicted *[]string
 }
 
 // The acting half sweeps every OS DaemonSet, the operator's and the
-// relays', refreshing each one's stale pods.
+// relays', and refreshes each one's stale pods.
 func TestStewardSweepsEveryOSDaemonSet(t *testing.T) {
 	var evicted []string
 	client := stewardServer(t, map[string]string{
@@ -154,8 +155,9 @@ func TestStewardSweepsEveryOSDaemonSet(t *testing.T) {
 	}
 }
 
-// A DaemonSet that doesn't exist (a partial rollout, a cluster from
-// before the relays) is skipped without complaint or eviction.
+// A DaemonSet that does not exist, for example during a partial
+// rollout or on a cluster from before the relays, is skipped without
+// complaint or eviction.
 func TestStewardSkipsMissingDaemonSets(t *testing.T) {
 	var evicted []string
 	client := stewardServer(t, map[string]string{

@@ -1,15 +1,16 @@
-// Package scaffold starts a deployment from answers: `liken new`
-// asks a short series of plain questions and writes the deployment
-// directory — cluster.yaml and one machine manifest per machine —
-// that the rest of the toolkit (mint, layer, stick) builds on.
+// Package scaffold starts a deployment from answers. `liken new` asks
+// a short series of plain questions, and writes the deployment
+// directory: cluster.yaml and one machine manifest per machine. The
+// rest of the toolkit (mint, layer, stick) builds on that directory.
 //
-// The generated documents are the documentation: each one carries
-// the teaching comments a person needs to change it later, adapted
-// from the dev cluster's manifests. And because a scaffold that
-// writes an invalid document would fail its user at first boot,
-// everything generated here is parsed back through the same strict
-// parsers machines use before a single file is written; a failure
-// there is a bug in this package, and it says so.
+// The generated documents are the documentation. Each one carries the
+// teaching comments that a person needs to change it later, adapted
+// from the dev cluster's manifests. A scaffold that writes an invalid
+// document would fail its user at first boot. Because of this, this
+// package parses everything it generates back through the same
+// strict parsers that machines use, before it writes a single file.
+// A failure there is a bug in this package, and the error message
+// says so.
 package scaffold
 
 import (
@@ -31,8 +32,8 @@ import (
 //go:embed cluster.yaml.tmpl machine.yaml.tmpl
 var templates embed.FS
 
-// answers is everything the questions collect, and the templates'
-// input.
+// answers holds everything the questions collect. It is also the
+// templates' input.
 type answers struct {
 	ClusterName string
 	Machines    []machineAnswers
@@ -43,9 +44,10 @@ type answers struct {
 	Features    []string
 	Source      string
 
-	// The fleet-wide hardware shape: interface names and the disk
-	// layout are asked once and written into every manifest, where
-	// they can be edited per machine afterward.
+	// This is the fleet-wide hardware shape. The interview asks for
+	// interface names and the disk layout once, and writes them into
+	// every manifest, where a person can edit them per machine
+	// afterward.
 	UplinkNIC    string // empty means single-NIC machines
 	ClusterNIC   string
 	Gateway      string // single-NIC only: no DHCP to supply a route
@@ -59,9 +61,10 @@ type machineAnswers struct {
 	Address string // CIDR form, inside NodeCIDR
 }
 
-// New runs the questions against in/out and writes the deployment
-// directory. It refuses a directory that already has a cluster.yaml:
-// scaffolding is for starting, not overwriting.
+// New runs the questions against in/out, and writes the deployment
+// directory. It refuses a directory that already has a cluster.yaml,
+// because scaffolding is for starting a deployment, not overwriting
+// one.
 func New(dir string, in io.Reader, out io.Writer) error {
 	if _, err := os.Stat(filepath.Join(dir, "cluster.yaml")); err == nil {
 		return fmt.Errorf("%s already has a cluster.yaml; the scaffold only starts new deployments", dir)
@@ -107,9 +110,9 @@ func New(dir string, in io.Reader, out io.Writer) error {
 		return err
 	}
 	for name, doc := range machines {
-		// The filename must equal the machine's name: the image
-		// carries every manifest, and a boot selects its own as
-		// machines/<liken.machine>.yaml.
+		// The filename must equal the machine's name. The image
+		// carries every manifest, and a boot selects its own
+		// manifest as machines/<liken.machine>.yaml.
 		if err := os.WriteFile(filepath.Join(dir, "machines", name+".yaml"), doc, 0o644); err != nil {
 			return err
 		}
@@ -141,9 +144,9 @@ func render(name string, data any) ([]byte, error) {
 	return []byte(buf.String()), nil
 }
 
-// interview asks everything, validating each answer as it arrives
-// and re-asking until it holds. The prompts always show the default
-// an empty answer takes.
+// interview asks every question, validates each answer as it
+// arrives, and asks again until the answer holds. The prompts always
+// show the default that an empty answer takes.
 func interview(in *bufio.Scanner, out io.Writer, defaultName string) (answers, error) {
 	a := answers{}
 	ask := func(prompt, deflt string) (string, error) {
@@ -167,8 +170,9 @@ func interview(in *bufio.Scanner, out io.Writer, defaultName string) (answers, e
 		return a, err
 	}
 
-	// Machines, then leaders among them: one leader for a lone
-	// machine or a small fleet, three once there are three to have —
+	// This asks for the machines, then for leaders among them. One
+	// leader works for a lone machine or a small fleet. Three leaders
+	// work once there are three machines to choose from, because
 	// etcd's quorum needs an odd count.
 	names, err := ask("machine names, space-separated", "machine-1")
 	if err != nil {
@@ -203,10 +207,11 @@ func interview(in *bufio.Scanner, out io.Writer, defaultName string) (answers, e
 		break
 	}
 
-	// The cluster subnet and each machine's fixed address on it. The
-	// founding leader's address becomes the endpoint every follower
-	// makes first contact through, which is why these are fixed
-	// addresses and not DHCP.
+	// This asks for the cluster subnet, and each machine's fixed
+	// address on it. The founding leader's address becomes the
+	// endpoint that every follower uses to make first contact. This
+	// is why these addresses are fixed, and not assigned through
+	// DHCP.
 	var prefix netip.Prefix
 	for {
 		cidr, err := ask("cluster subnet (the machines' own network)", "10.10.0.0/24")
@@ -221,8 +226,8 @@ func interview(in *bufio.Scanner, out io.Writer, defaultName string) (answers, e
 	}
 	base := prefix.Addr()
 	for i, name := range machines {
-		// Defaults walk up from the subnet's first host address:
-		// .1, .2, ... in machine order.
+		// The defaults count up from the subnet's first host address:
+		// .1, .2, and so on, in machine order.
 		addr := base
 		for range i + 1 {
 			addr = addr.Next()
@@ -249,11 +254,12 @@ func interview(in *bufio.Scanner, out io.Writer, defaultName string) (answers, e
 		}
 	}
 
-	// The interfaces, asked once for the fleet. Two NICs is the
-	// designed shape (an uplink on DHCP, the cluster segment fixed);
-	// a single-NIC machine puts its fixed address on its only
-	// interface and needs a gateway and nameservers spelled out,
-	// because there is no DHCP lease to supply them.
+	// This asks for the interfaces once for the whole fleet. Two NICs
+	// is the designed shape: an uplink on DHCP, and a fixed address
+	// on the cluster segment. A single-NIC machine puts its fixed
+	// address on its only interface, and needs a gateway and
+	// nameservers spelled out, because there is no DHCP lease to
+	// supply them.
 	uplink, err := ask(`uplink interface for internet access ("none" if machines have only one interface)`, "eth0")
 	if err != nil {
 		return a, err
@@ -288,10 +294,11 @@ func interview(in *bufio.Scanner, out io.Writer, defaultName string) (answers, e
 		a.Nameservers = strings.Fields(ns)
 	}
 
-	// Disks: one device is a real machine with one drive (all seven
-	// roles carved from it); three matches the dev cluster's shape
-	// (state, pods, boot). The roles and sizes come from the same
-	// reasoning the dev cluster's comments teach.
+	// This asks for the disks. One device fits a real machine with
+	// one drive, with all seven roles carved from it. Three devices
+	// match the dev cluster's shape: state, pods, boot. The roles and
+	// sizes follow the same reasoning that the dev cluster's comments
+	// teach.
 	for {
 		disks, err := ask("disk devices, space-separated (1 disk, or 3 for state/pods/boot)", "/dev/sda")
 		if err != nil {

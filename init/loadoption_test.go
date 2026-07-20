@@ -10,8 +10,9 @@ import (
 // specification, mirroring the structure of a real "ubuntu" entry
 // read from a laptop's firmware: active, named, pointing at a file
 // on one GPT partition, no optional data. Building it by hand rather
-// than with our encoder is the point: the decoder is tested against
-// the specification, not against our own encoder's output.
+// than with this package's own encoder is the point: this test checks
+// the decoder against the specification, not against the encoder's
+// own output.
 func specFixture() []byte {
 	var b bytes.Buffer
 	b.Write([]byte{0x01, 0x00, 0x00, 0x00}) // attributes: LOAD_OPTION_ACTIVE
@@ -66,8 +67,8 @@ func TestParseLoadOptionAgainstTheSpecification(t *testing.T) {
 
 func TestEncodeLoadOptionAgainstTheSpecification(t *testing.T) {
 	// The encoder must produce the hand-assembled fixture byte for
-	// byte — a much stronger check than the round trip below, which
-	// a self-consistent pair of bugs could pass.
+	// byte. This is a much stronger check than the round trip below,
+	// which a self-consistent pair of bugs could still pass.
 	o := loadOption{
 		attributes:  loadOptionActive,
 		description: "ubuntu",
@@ -130,8 +131,8 @@ func TestParseLoadOptionRejectsUnterminatedDescription(t *testing.T) {
 
 func TestParseLoadOptionSkipsUnknownNodes(t *testing.T) {
 	// Firmware entries routinely carry vendor-specific device-path
-	// nodes; the parser keeps what it understands and walks past the
-	// rest by each node's own declared length.
+	// nodes. The parser keeps what it understands and walks past the
+	// rest, using each node's own declared length.
 	var b bytes.Buffer
 	b.Write([]byte{0x01, 0, 0, 0})
 	b.Write([]byte{14, 0})                                    // device path list: one 10-byte vendor node + end
