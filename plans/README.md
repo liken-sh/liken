@@ -143,6 +143,14 @@ numbered before this arc existed; it belongs second in this order:
     rolling-reboot orchestration that liken already has. Not inert
     payload, but an agent, so it waits for bare-metal experience
     rather than landing together with 32.
+34. [ ] [GPU add-ons](34-gpu-add-ons.md) — the stock image ships no
+    GPU compute stack; a machine that needs one declares an add-on:
+    a second squashfs on its boot slot, digest-pinned and fetched
+    like everything else there, overlay-mounted at boot. The first
+    add-on is NVIDIA compute (open modules built against the kernel
+    pin, GSP firmware, the userspace driver, the container toolkit;
+    CUDA stays in pods). Console firmware for motherboard graphics,
+    amdgpu included, stays stock.
 
 Deferred until the fundamentals above are proven, the hardening
 tier: UKIs, dm-verity, secure boot, TPM-sealed secrets, and signed
