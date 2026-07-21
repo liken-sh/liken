@@ -70,11 +70,11 @@ jobs:
       - run: make release VERSION=${{ steps.version.outputs.version }}
 
       # Then this step boots the same tree before a byte leaves the
-      # runner: the smoke drill starts node-1 from blank disks and
-      # passes when its node reports Ready over the cluster's API.
-      # Releases are immutable, so this run must catch a bundle that
-      # cannot boot. After publication, the only remedy is the next
-      # serial.
+      # runner: the smoke drill installs node-1 onto a blank disk,
+      # boots that disk, and passes when its node reports Ready over
+      # the cluster's API. Releases are immutable, so this run must
+      # catch a bundle that cannot boot. After publication, the only
+      # remedy is the next serial.
       - run: make smoke-uefi
 
       # s3cmd is the uploader, because it speaks plain S3 to non-AWS

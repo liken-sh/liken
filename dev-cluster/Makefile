@@ -30,13 +30,19 @@
 #   make run                    the founding leader, node-1
 #   make run NODE=node-4        a follower, in a second terminal
 #
-# MEM sets the memory size of each guest. The default is the smallest
-# cloud machine that liken targets: 1 GB, the amount a Linode nanode
-# has. The OS runs from a read-only system image on disk, so the
-# guest's memory goes to Kubernetes, not to a copy of the OS. Every
-# drill that runs at this size proves that this stays true. If a
-# machine stops converging at 1 GB, that is a regression in liken. It
-# is not a reason to raise this default.
+# MEM sets the memory size of each guest. The default depends on the
+# boot arrangement (BOOT, below). A disk boot gets 1 GB, the smallest
+# cloud machine that liken targets: the amount a Linode nanode has.
+# The OS runs from a read-only system image on disk, so the guest's
+# memory goes to Kubernetes, not to a copy of the OS. Every drill
+# that runs at this size proves that this stays true. If a machine
+# stops converging at 1 GB from disk, that is a regression in liken.
+# It is not a reason to raise this default.
+# A -kernel boot gets 2 GB, because its one composed initrd carries
+# the whole OS: the boot archive, the system image, and the layer all
+# unpack into RAM. That cost belongs to the lab's composition, not to
+# the OS. The 1 GB claim lives with the disk boots, the arrangement
+# that real machines use.
 #
 # SMP sets each guest's CPU count. This setting matters more than it
 # looks: QEMU's default is a single vCPU, and a Kubernetes server
@@ -57,7 +63,9 @@
 # points at them. The root Makefile is the orchestrator that makes
 # sure they exist before boot. Run `make run` from the repo root.
 NODE ?= node-1
-MEM ?= 1024
+MEM_disk := 1024
+MEM_kernel := 2048
+MEM ?= $(MEM_$(BOOT))
 SMP ?= 4
 CONSOLE ?= stdio
 KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
@@ -198,10 +206,13 @@ endif
 #                            deadlines cannot share a single vCPU with
 #                            the rest of the control plane (see SMP
 #                            above)
-#   -m $(MEM)                enough memory for Kubernetes. The OS
-#                            itself runs from its system image on
-#                            disk, so this memory is the workloads'
-#                            budget, not liken's
+#   -m $(MEM)                enough memory for Kubernetes. The
+#                            default depends on the boot arrangement
+#                            (see MEM above): on a disk boot the OS
+#                            runs from its system image on disk, so
+#                            this memory is the workloads' budget,
+#                            not liken's; a -kernel boot also holds
+#                            the OS payload in RAM
 #   $(QEMU_FIRMWARE)         the machine's firmware. Under UEFI, two
 #                            pflash drives: OVMF's code, then this
 #                            node's private variable store, in that
@@ -431,22 +442,20 @@ storage:
 grow-pods:
 	qemu-img resize guests/$(NODE)/pods.qcow2 +4G
 
-# The unattended boot: it takes node-1 from blank disks to a Ready
-# node, and reads the verdict from the cluster's API instead of
-# having a person read the console. This is what CI runs.
-# smoke-uefi.sh explains the whole arrangement. Run it from the repo
-# root (`make smoke-uefi`), which first builds the artifacts and
-# creates the kubeconfig that the drill needs.
+# The unattended smoke drills. Each drill takes node-1 from blank
+# disks to a Ready node: the machine installs itself, then boots the
+# installed disk under real firmware. The verdict comes from the
+# cluster's API instead of a person reading the console. This is what
+# CI runs. One script runs both drills, and the argument picks the
+# firmware dialect; smoke.sh explains the whole arrangement. Run the
+# drills from the repo root (`make smoke-uefi`, `make smoke-bios`),
+# which first builds the artifacts and creates the kubeconfig that
+# the drill needs.
 smoke-uefi:
-	./smoke-uefi.sh
+	./smoke.sh uefi
 
-# The same drill under BIOS, starting from further back: it installs
-# first, then boots the installed disk under SeaBIOS. The UEFI smoke
-# drill boots through -kernel, so this drill is the one that exercises
-# the install path and the disk boot path from end to end.
-# smoke-bios.sh explains the arrangement.
 smoke-bios:
-	./smoke-bios.sh
+	./smoke.sh bios
 
 .PHONY: run run-once install install-stick storage grow-pods smoke-uefi smoke-bios clean
 

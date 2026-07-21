@@ -45,16 +45,15 @@ jobs:
       - run: make all
 
       # Then this step boots it. The UEFI smoke drill
-      # (dev-cluster/smoke-uefi.sh) starts node-1 from blank disks and
-      # passes when its node reports Ready over the cluster's API.
-      # This proves that the assembled image actually runs Kubernetes,
-      # not just that the image exists.
+      # (dev-cluster/smoke.sh) installs node-1 onto a blank disk,
+      # boots that disk through OVMF's NVRAM boot entries, and passes
+      # when its node reports Ready over the cluster's API. This
+      # proves the install path, the UEFI boot chain, and that the
+      # assembled image actually runs Kubernetes.
       - run: make smoke-uefi
 
-      # Then this step installs it and boots the installed disk under
-      # BIOS firmware (dev-cluster/smoke-bios.sh). The drill above
-      # boots through -kernel. So this run proves the install path
-      # and the whole disk boot chain: MBR boot code, GRUB's core
+      # Then this step runs the same drill under BIOS firmware. This
+      # run proves the other boot chain: MBR boot code, GRUB's core
       # image, its config on the boot home, and the chosen slot's
       # kernel.
       - run: make smoke-bios

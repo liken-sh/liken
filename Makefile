@@ -341,19 +341,17 @@ storage:
 run-once: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/initrd.cpio
 	$(MAKE) -C dev-cluster run-once
 
-# The UEFI smoke drill boots node-1 unattended from blank disks. It
-# passes when node-1 reports Ready over the cluster's API. See
-# dev-cluster/smoke-uefi.sh. CI runs this drill after building
-# everything. It needs the same artifacts as `run`, plus the admin
+# The smoke drills boot node-1 unattended from blank disks: the
+# machine installs itself, boots the installed disk under real
+# firmware, and must report Ready over the cluster's API. See
+# dev-cluster/smoke.sh. CI runs both drills after building
+# everything. The UEFI drill proves the NVRAM boot-entry chain under
+# OVMF, and the BIOS drill proves the MBR-and-GRUB chain under
+# SeaBIOS. Each drill needs the install image and the admin
 # kubeconfig that the readiness poll uses to authenticate.
-smoke-uefi: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/initrd.cpio kubeconfig
+smoke-uefi: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/install.cpio kubeconfig
 	$(MAKE) -C dev-cluster smoke-uefi
 
-# The BIOS smoke drill installs node-1 onto a blank disk, then boots
-# that disk under SeaBIOS. It passes on the same Ready verdict. See
-# dev-cluster/smoke-bios.sh. This drill covers the install path and
-# the disk boot path, which the -kernel smoke drill above never
-# tests. So it needs the install image too.
 smoke-bios: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/install.cpio kubeconfig
 	$(MAKE) -C dev-cluster smoke-bios
 
