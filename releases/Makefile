@@ -94,6 +94,12 @@ HWDATA_VERSION := $(strip $(file <../hwdata/VERSION))
 LINUXFIRMWARE_VERSION := $(strip $(file <../linux-firmware/VERSION))
 MICROCODE_VERSION := $(strip $(file <../microcode/VERSION))
 
+# The boot slot size the fleet's machines format (the systemA and
+# systemB roles in the machine manifests and the scaffold). The
+# bundle refuses a release whose artifacts, plus headroom, outgrow
+# this. When the fleet's slot size changes, change this with it.
+SLOT_SIZE := 1Gi
+
 # This is the version-stamped build: every liken component, rebuilt
 # under VERSION into build/<version>/, generic image included. This
 # is the release's input, and nothing else's: deployments never
@@ -124,7 +130,7 @@ release: build
 	$(MAKE) -C ../systemd-boot
 	$(MAKE) -C ../grub
 	$(MAKE) -C ../licensing
-	$(BUILD)/cli/liken bundle \
+	$(BUILD)/cli/liken bundle -slot-size $(SLOT_SIZE) \
 		../kernel/dist/$(KERNEL_VERSION)/vmlinuz \
 		$(BUILD)/generic/liken.sqfs \
 		$(BUILD)/generic/boot.cpio \

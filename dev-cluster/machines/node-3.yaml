@@ -24,10 +24,10 @@ spec:
       size: 64Mi
     systemA:
       device: /dev/vdc
-      size: 512Mi
+      size: 1Gi
     systemB:
       device: /dev/vdc
-      size: 512Mi
+      size: 1Gi
     machineState:
       device: /dev/vda
       size: 64Mi

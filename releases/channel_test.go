@@ -47,7 +47,7 @@ func bundledRelease(t *testing.T, version string) (string, string) {
 		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"),
 		filepath.Join(src, "grub-boot.img"), filepath.Join(src, "grub-core.img"),
 		filepath.Join(src, "LICENSES.md"),
-		channel, version, testComponents, &out)
+		channel, version, "1Gi", testComponents, &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func rebundleInto(t *testing.T, channel, version string) {
 		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"),
 		filepath.Join(src, "grub-boot.img"), filepath.Join(src, "grub-core.img"),
 		filepath.Join(src, "LICENSES.md"),
-		channel, version, testComponents, &out)
+		channel, version, "1Gi", testComponents, &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func TestBundleReplacesAPreviousAttempt(t *testing.T) {
 		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"),
 		filepath.Join(src, "grub-boot.img"), filepath.Join(src, "grub-core.img"),
 		filepath.Join(src, "LICENSES.md"),
-		channel, "2026.07.11-001", testComponents, io.Discard)
+		channel, "2026.07.11-001", "1Gi", testComponents, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,8 +250,34 @@ func TestBundleReplacesAPreviousAttempt(t *testing.T) {
 func TestBundleRefusesAMissingArtifact(t *testing.T) {
 	if err := Bundle("no-such-vmlinuz", "no-such-sqfs", "no-such-cpio", "no-such-ucode", "no-such-cli", "no-such-menu",
 		"no-such-mbr", "no-such-core", "no-such-licenses",
-		t.TempDir(), "2026.07.11-001", testComponents, io.Discard); err == nil {
+		t.TempDir(), "2026.07.11-001", "1Gi", testComponents, io.Discard); err == nil {
 		t.Error("bundling artifacts that don't exist must fail")
+	}
+}
+
+func TestBundleRefusesAReleaseThatOutgrowsItsSlots(t *testing.T) {
+	// The slot budget is a build-time gate: an image that outgrows
+	// the fleet's boot slots must fail here, not at install time. The
+	// fixture's artifacts are tiny, so a slot size below the fixed
+	// headroom trips the check. Nothing may remain in the channel.
+	src := t.TempDir()
+	for _, name := range []string{"vmlinuz", "liken.sqfs", "boot.cpio", "microcode.cpio", "liken", "systemd-bootx64.efi", "grub-boot.img", "grub-core.img", "LICENSES.md"} {
+		if err := os.WriteFile(filepath.Join(src, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	channel := t.TempDir()
+	err := Bundle(filepath.Join(src, "vmlinuz"), filepath.Join(src, "liken.sqfs"),
+		filepath.Join(src, "boot.cpio"), filepath.Join(src, "microcode.cpio"),
+		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"),
+		filepath.Join(src, "grub-boot.img"), filepath.Join(src, "grub-core.img"),
+		filepath.Join(src, "LICENSES.md"),
+		channel, "2026.07.11-001", "32Mi", testComponents, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "outgrow") {
+		t.Fatalf("an oversized release must be refused by the budget: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(channel, "2026.07.11-001")); !os.IsNotExist(statErr) {
+		t.Error("a refused bundle must not leave the version directory behind")
 	}
 }
 
@@ -262,7 +288,7 @@ func TestBundleRefusesAMalformedVersion(t *testing.T) {
 	channel := t.TempDir()
 	err := Bundle("vmlinuz", "liken.sqfs", "boot.cpio", "microcode.cpio", "liken", "menu.efi",
 		"grub-boot.img", "grub-core.img", "LICENSES.md",
-		channel, "1.2.3", testComponents, io.Discard)
+		channel, "1.2.3", "1Gi", testComponents, io.Discard)
 	if err == nil {
 		t.Fatal("a version outside the grammar must be refused")
 	}

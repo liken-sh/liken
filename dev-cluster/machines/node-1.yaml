@@ -80,10 +80,10 @@ spec:
     # firmware reads, cannot grow in place.
     systemA:
       device: /dev/vdc
-      size: 512Mi
+      size: 1Gi
     systemB:
       device: /dev/vdc
-      size: 512Mi
+      size: 1Gi
     # The machine's own durable data: the staged and proven manifests
     # that let a spec edit survive a reboot. This role comes first
     # among the data roles in the canonical order, so it is an early

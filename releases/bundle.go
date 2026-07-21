@@ -50,15 +50,32 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
+// slotHeadroom is the room a boot slot must keep beyond the release
+// artifacts: the deployment layer and its sidecar (carried between
+// slots, never part of a release), the release document, and FAT32's
+// own tables. 64 MiB is generous for all of them together, so the
+// budget check below fails before a real slot would.
+const slotHeadroom = 64 << 20
+
 // Bundle lays out a release: it copies the named artifacts into
 // <channel>/<version>/, beside a release.yaml that names each one by
 // sha256 digest and size, and records which upstream components
 // shipped. The version must fit liken's calendar grammar (the api
 // package defines it). Bundle enforces this here, where versions are
 // authored, so a malformed version never reaches a channel at all.
-func Bundle(vmlinuz, systemImage, bootArchive, microcode, cli, bootMenu, grubBoot, grubCore, licenses, channelDir, version string, components []machine.ReleaseComponent, out io.Writer) error {
+//
+// slotSize declares the boot slot the fleet's machines format (the
+// manifests' systemA and systemB roles). Every artifact lands on the
+// slot at install and at upgrade, so their sum plus slotHeadroom
+// must fit, and a release that outgrows its slots fails right here,
+// at build time, rather than surprising someone at install time.
+func Bundle(vmlinuz, systemImage, bootArchive, microcode, cli, bootMenu, grubBoot, grubCore, licenses, channelDir, version, slotSize string, components []machine.ReleaseComponent, out io.Writer) error {
 	if err := api.ValidVersion(version); err != nil {
 		return err
+	}
+	slotBytes, err := machine.ParseSize(slotSize)
+	if err != nil {
+		return fmt.Errorf("slot size: %w", err)
 	}
 	dest := filepath.Join(channelDir, version)
 	if err := os.RemoveAll(dest); err != nil {
@@ -85,6 +102,7 @@ func Bundle(vmlinuz, systemImage, bootArchive, microcode, cli, bootMenu, grubBoo
 		{licenses, "LICENSES.md"},
 	}
 	document := fmt.Sprintf("apiVersion: liken.sh/v1alpha1\nkind: Release\nmetadata:\n  name: %s\nartifacts:\n", version)
+	var slotPayload uint64
 	for _, s := range sources {
 		dst := filepath.Join(dest, s.name)
 		if err := copyFile(s.src, dst); err != nil {
@@ -98,7 +116,18 @@ func Bundle(vmlinuz, systemImage, bootArchive, microcode, cli, bootMenu, grubBoo
 		if err != nil {
 			return err
 		}
+		slotPayload += uint64(info.Size())
 		document += fmt.Sprintf("  - name: %s\n    sha256: %s\n    size: %d\n", s.name, digest, info.Size())
+	}
+
+	// The budget check the doc comment describes. It runs after the
+	// copies so the message can state real sizes, and it removes the
+	// oversized bundle so nothing serves it by accident.
+	if slotPayload+slotHeadroom > slotBytes {
+		os.RemoveAll(dest)
+		return fmt.Errorf(
+			"the release's artifacts total %s, and with %s of slot headroom they outgrow the %s boot slots; shrink the image or grow the fleet's slots first",
+			humanSize(int64(slotPayload)), humanSize(int64(slotHeadroom)), slotSize)
 	}
 
 	// The components record what shipped inside those artifacts. The

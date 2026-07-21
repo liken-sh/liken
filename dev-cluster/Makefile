@@ -117,10 +117,12 @@ guests/$(NODE)/pods.qcow2:
 # other disks. The machine claims it, formats the two FAT32 system
 # slots on it, and later boots from it. QEMU attaches this disk
 # third, so the data disks keep the /dev/vda and /dev/vdb device
-# names that their claims declared.
+# names that their claims declared. 4G holds the two 1Gi system
+# slots, the boot home, and slack; qcow2 allocates sparsely, so the
+# unused part costs the host nothing.
 guests/$(NODE)/boot.qcow2:
 	mkdir -p guests/$(NODE)
-	qemu-img create -f qcow2 $@ 2G
+	qemu-img create -f qcow2 $@ 4G
 
 # The guest's firmware. liken supports two firmware types, and both
 # exist on real machines: UEFI is the firmware on every modern

@@ -62,10 +62,10 @@ spec:
     # release with headroom.
     systemA:
       device: /dev/sda
-      size: 512Mi
+      size: 1Gi
     systemB:
       device: /dev/sda
-      size: 512Mi
+      size: 1Gi
     # The machine's own durable data: staged and proven manifests.
     machineState:
       device: /dev/sda

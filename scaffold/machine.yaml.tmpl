@@ -62,10 +62,10 @@ spec:
     # pods' scratch space.
     systemA:
       device: {{ $disk }}
-      size: 512Mi
+      size: 1Gi
     systemB:
       device: {{ $disk }}
-      size: 512Mi
+      size: 1Gi
     machineState:
       device: {{ $disk }}
       size: 64Mi
@@ -92,10 +92,10 @@ spec:
     # space.
     systemA:
       device: {{ $boot }}
-      size: 512Mi
+      size: 1Gi
     systemB:
       device: {{ $boot }}
-      size: 512Mi
+      size: 1Gi
     machineState:
       device: {{ $state }}
       size: 64Mi
