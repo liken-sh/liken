@@ -1,7 +1,7 @@
 # Batteries included
 
-Milestone 32 — Not started; the design settled during milestone 11's
-drills
+Milestone 32 — Done; the design settled during milestone 11's
+drills, and release 2026.07.20-001 ships it
 
 One milestone owns everything the image must carry so that hardware
 runs correctly without extra configuration: the kernel's loadable
@@ -131,3 +131,28 @@ firmware-hungry NIC links, and, eventually, with a GPU and its own
 milestone, that a compute stack starts correctly. The shipping
 mechanics all work correctly in the lab; proving them needs a
 machine.
+
+## What landed (measured)
+
+Release 2026.07.20-001 ships the milestone. The measured numbers
+moved from the estimates above. The firmware set came to 133 MiB in
+the image, not 103: the newer upstream release grew, and glob
+declarations (which modern Qualcomm Wi-Fi ships through) added
+files the estimate missed. The blobs ship uncompressed, because the
+squashfs already compresses and deduplicates them. The system image
+is 375 MiB, and the slot payload is about 440 MiB.
+
+Two design points settled differently than the text above assumed.
+linux-firmware does get a source mirror: some of its blobs carry the
+GPL, so the release workflow mirrors the one verified upstream
+tarball, which carries what source exists. Microcode is the
+notices-only case. And status gained two fields instead of one: the
+microcode pin, and the revision the CPUs report, so metal can prove
+the early cpio applied.
+
+The 1 Gi slot growth reached the whole fleet, liken.sh's node-1
+included; its machineEphemeral shrank to 512Mi so the 3 GiB system
+image still holds every role. The lab pays for its own composition:
+-kernel guests now default to 4 GB, because the composed initrd
+carries the whole OS in RAM, while every Ready proof runs from disk
+at 1 GB, the arrangement real machines use.

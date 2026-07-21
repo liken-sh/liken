@@ -132,7 +132,7 @@ numbered before this arc existed; it belongs second in this order:
     built-in ACME rather than cert-manager's three always-on
     controllers, staged first, and a hard lesson in the node's
     memory envelope.
-32. [ ] [Batteries included](32-batteries-included.md) — one
+32. [x] [Batteries included](32-batteries-included.md) — one
     milestone for everything the image carries so real hardware
     works without extra configuration: the whole module tree, driver
     firmware derived from it (nvidia excepted, for now), and

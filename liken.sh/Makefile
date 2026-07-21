@@ -115,17 +115,15 @@ identity: identity/tls/server-ca.crt identity/token
 kubeconfig: identity/tls/server-ca.crt $(CLI)
 	$(CLI) kubeconfig identity
 
-# The deployment layer: this cluster's manifests, identity, and its
-# machines' declared kernel modules, packed as the second cpio
-# archive that every boot loads over the generic OS. The kernel
-# directory is `-` because node-1 declares no modules. A release
-# publishes vmlinuz but not the module tree, so a machine that later
-# declares modules will need the repo's kernel vendored at the
-# version that the release's components record.
+# The deployment layer: this cluster's manifests and identity,
+# packed as a cpio archive that every boot loads over the generic
+# OS. Kernel modules are not part of it: the release's system image
+# carries the kernel's whole module tree, and spec.modules loads
+# from that tree at boot.
 image/deployment.cpio: $(CLI) cluster.yaml $(wildcard machines/*.yaml) \
 		identity/tls/server-ca.crt identity/token
 	@mkdir -p image
-	$(CLI) layer . identity - $@
+	$(CLI) layer . identity $@
 
 # The install image: the downloaded release composed with this
 # deployment's layer, carrying the payload that the installer
@@ -147,6 +145,20 @@ image/install.cpio: channel/$(RELEASE)/release.yaml image/deployment.cpio $(CLI)
 # power-off into QEMU's exit. The console log lands next to the image
 # for reading afterward.
 #
+# The guest gets 4 GB because the install image carries the whole OS
+# in its initrd, in RAM, and under SeaBIOS the kernel reports almost
+# all of the memory below a large initrd as reserved until the
+# unpack finishes (the dev-cluster Makefile documents the observed
+# numbers). The machine that boots the finished disk still needs
+# only its 1 GB: the OS runs from the disk there.
+#
+# scsi_mod.scan=sync makes the kernel probe the two SCSI disks in
+# attachment order, so /dev/sda is always the system disk that the
+# Machine manifest names. The kernel's default asynchronous scan can
+# finish out of order, and a blank-disk claim is the one moment when
+# device paths matter: after the claim, the GPT partition names are
+# the identity, and enumeration order stops mattering.
+#
 # Shipping this image is a plain Linode image deploy. Linode's
 # deploys copy data byte for byte, end to end, boot code included
 # (Linode once zeroed the MBR's first 440 bytes, a hazard that the
@@ -161,9 +173,9 @@ image/disk.img: image/install.cpio channel/$(RELEASE)/release.yaml
 		-accel kvm -accel tcg \
 		-cpu max \
 		-smp 2 \
-		-m 2048 \
+		-m 4096 \
 		-kernel channel/$(RELEASE)/vmlinuz -initrd image/install.cpio \
-		-append "console=ttyS0 rdinit=/liken liken.machine=node-1 liken.install" \
+		-append "console=ttyS0 scsi_mod.scan=sync rdinit=/liken liken.machine=node-1 liken.install" \
 		-display none \
 		-serial file:image/install.log \
 		-monitor none \

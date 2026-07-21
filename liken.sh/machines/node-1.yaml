@@ -70,10 +70,12 @@ spec:
     machineState:
       device: /dev/sda
       size: 64Mi
-    # The OS's scratch space: /tmp.
+    # The OS's scratch space: /tmp. 512Mi keeps the system disk's
+    # roles inside the 3 GiB image now that the boot slots hold 1Gi
+    # each, and it matches what the dev cluster's machines give /tmp.
     machineEphemeral:
       device: /dev/sda
-      size: 1Gi
+      size: 512Mi
     # k3s's database, TLS material, and containerd's images: the role
     # that makes reboots cheap and upgrades incremental.
     clusterState:
