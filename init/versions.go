@@ -68,6 +68,8 @@ func applyComponentFacts(v *machine.VersionStatus) {
 			v.Grub = c.Version
 		case "hwdata":
 			v.Hwdata = c.Version
+		case "linux-firmware":
+			v.LinuxFirmware = c.Version
 		}
 	}
 }

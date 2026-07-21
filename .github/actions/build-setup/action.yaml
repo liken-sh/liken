@@ -92,6 +92,15 @@ runs:
       with:
         path: grub/dist
         key: grub-${{ hashFiles('grub/VERSION', 'grub/fetch.sh', 'grub/early.cfg', 'grub/Makefile') }}
+    # The firmware cache carries the derived set, not the upstream
+    # tarball, so a hit skips both the 400 MB download and the
+    # derivation. The key includes the kernel pin because the derived
+    # set is a function of the kernel's module tree: a kernel bump
+    # must re-derive even when the firmware pin is unchanged.
+    - uses: actions/cache@v6
+      with:
+        path: linux-firmware/dist
+        key: linux-firmware-${{ hashFiles('linux-firmware/VERSION', 'linux-firmware/fetch.sh', 'linux-firmware/derive.sh', 'kernel/VERSION') }}
 
     # Make decides staleness by timestamps, and the two halves of
     # this working tree carry different timestamps: checkout stamps
@@ -107,7 +116,7 @@ runs:
       run: |
         for dist in kernel/dist k3s/dist xtables/dist trust/dist \
                     e2fsprogs/dist open-iscsi/dist nfs-utils/dist \
-                    systemd-boot/dist grub/dist; do
+                    systemd-boot/dist grub/dist linux-firmware/dist; do
             [ -d "$dist" ] && find "$dist" -type f -exec touch {} +
         done
         true

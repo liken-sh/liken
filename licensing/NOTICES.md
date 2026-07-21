@@ -132,6 +132,24 @@ It is the database that names PCI vendors and devices in the
 Machine's unclaimed-hardware report. The file is its own source form,
 and it is mirrored under `sources/hwdata/`.
 
+## Driver firmware (`/lib/firmware`)
+
+License: per family, as the WHENCE manifest records. Most families
+are redistributable binaries under vendor terms; some files carry
+the GPL or a dual license.
+
+These are the device firmware blobs from the linux-firmware project,
+cut down to the set that the shipped kernel's modules can request
+(the linux-firmware domain documents the derivation). The image
+carries the WHENCE manifest and every license text beside the blobs,
+at `/lib/firmware/WHENCE` and `/lib/firmware/LICENSES/`. WHENCE is
+the authoritative per-file record of copyright and terms. The
+upstream release tarball is mirrored under `sources/linux-firmware/`.
+For most blobs the binary is its own source form; for the GPL blobs
+whose source exists, upstream keeps that source in the same tree, so
+the one mirror satisfies the source offer for every file the image
+carries.
+
 ## liken's programs and their Go dependencies
 
 liken's binaries — `/liken`, the operators, the log relays, and the

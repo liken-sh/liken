@@ -44,8 +44,10 @@ GRUB_VERSION := $(strip $(file <grub/VERSION))
 GRUB_DIST := grub/dist/$(GRUB_VERSION)
 HWDATA_VERSION := $(strip $(file <hwdata/VERSION))
 HWDATA_DIST := hwdata/dist/$(HWDATA_VERSION)
+LINUXFIRMWARE_VERSION := $(strip $(file <linux-firmware/VERSION))
+LINUXFIRMWARE_DIST := linux-firmware/dist/$(LINUXFIRMWARE_VERSION)
 
-all: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata licensing init machine-operator cluster-operator logs cli identity image
+all: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata linux-firmware licensing init machine-operator cluster-operator logs cli identity image
 
 # The version is part of the artifact's name. So a pin bump changes
 # the target path itself, and Make rebuilds the artifact with no
@@ -83,6 +85,17 @@ $(HWDATA_DIST)/pci.ids: hwdata/VERSION hwdata/fetch.sh
 	$(MAKE) -C hwdata
 
 hwdata: $(HWDATA_DIST)/pci.ids
+
+# The driver firmware blobs, derived from the kernel's own module
+# tree rather than curated. The vmlinuz prerequisite is load-bearing
+# twice: the derivation reads the kernel's modules, and a kernel bump
+# must re-derive the set. See linux-firmware/fetch.sh and derive.sh.
+$(LINUXFIRMWARE_DIST)/derived.txt: linux-firmware/VERSION \
+		linux-firmware/fetch.sh linux-firmware/derive.sh \
+		$(KERNEL_DIST)/vmlinuz
+	$(MAKE) -C linux-firmware
+
+linux-firmware: $(LINUXFIRMWARE_DIST)/derived.txt
 
 # mke2fs is the program that init runs to make a filesystem on a
 # claimed disk. It is a static binary, and the build vendors it. See
@@ -275,6 +288,7 @@ $(SYSTEM_IMAGE) $(BOOT_ARCHIVE) &: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_
 		$(wildcard logs/manifests/*.yaml) \
 		image/build.sh image/boot-modules.conf \
 		$(HWDATA_DIST)/pci.ids \
+		$(LINUXFIRMWARE_DIST)/derived.txt \
 		$(shell find image/etc -type f) image/Makefile
 	$(MAKE) -C image
 
@@ -421,7 +435,7 @@ install-stick: $(IMAGE_DIR)/stick.img
 # no per-deployment channel. The lab's machines upgrade from this
 # bundle directly, and they carry their own deployment layer between
 # slots.
-release: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils hwdata
+release: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils hwdata linux-firmware
 	$(MAKE) -C releases release
 
 # This target serves the release channel to the lab over HTTP. The
@@ -457,4 +471,4 @@ clean:
 	$(MAKE) -C image clean
 	rm -rf $(IMAGE_DIR)
 
-.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata licensing init machine-operator cluster-operator logs cli identity kubeconfig image run run-once smoke-uefi smoke-bios install install-stick storage release serve clean
+.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata linux-firmware licensing init machine-operator cluster-operator logs cli identity kubeconfig image run run-once smoke-uefi smoke-bios install install-stick storage release serve clean

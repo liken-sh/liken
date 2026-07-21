@@ -152,14 +152,15 @@ type VersionStatus struct {
 	// is observed, not echoed from a build pin.
 	Xtables string `json:"xtables,omitempty"`
 
-	K3s         string `json:"k3s,omitempty"`
-	Trust       string `json:"trust,omitempty"`
-	E2fsprogs   string `json:"e2fsprogs,omitempty"`
-	OpenISCSI   string `json:"openIscsi,omitempty"`
-	NFSUtils    string `json:"nfsUtils,omitempty"`
-	SystemdBoot string `json:"systemdBoot,omitempty"`
-	Grub        string `json:"grub,omitempty"`
-	Hwdata      string `json:"hwdata,omitempty"`
+	K3s           string `json:"k3s,omitempty"`
+	Trust         string `json:"trust,omitempty"`
+	E2fsprogs     string `json:"e2fsprogs,omitempty"`
+	OpenISCSI     string `json:"openIscsi,omitempty"`
+	NFSUtils      string `json:"nfsUtils,omitempty"`
+	SystemdBoot   string `json:"systemdBoot,omitempty"`
+	Grub          string `json:"grub,omitempty"`
+	Hwdata        string `json:"hwdata,omitempty"`
+	LinuxFirmware string `json:"linuxFirmware,omitempty"`
 }
 
 // NetworkStatus reports how the boot attached this machine to the

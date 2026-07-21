@@ -70,6 +70,7 @@ nfsutils_version="$(cat "$here/../nfs-utils/VERSION")"
 systemdboot_version="$(cat "$here/../systemd-boot/VERSION")"
 grub_version="$(cat "$here/../grub/VERSION")"
 hwdata_version="$(cat "$here/../hwdata/VERSION")"
+linuxfirmware_version="$(cat "$here/../linux-firmware/VERSION")"
 
 cache="$here/cache"
 out="$here/dist/sources"
@@ -249,6 +250,24 @@ place "trust/$trust_version" "cacert-$trust_version.pem" \
 # release carries, the channel can give you the source.
 place "hwdata/$hwdata_version" "pci.ids" \
     "$here/../hwdata/dist/$hwdata_version/pci.ids"
+
+# The driver firmware: the upstream release tarball, already fetched
+# and verified by the linux-firmware domain. Most blobs are
+# redistributable binaries whose blob is its own source form, but a
+# few carry the GPL, and where their source exists upstream keeps it
+# in this same tree. Mirroring the one tarball satisfies the source
+# offer for all of them at once, and the WHENCE file inside it is the
+# per-blob record of terms. The tarball lives in that domain's cache,
+# which CI does not keep between runs, so this entry re-runs the
+# domain's own verifying fetch when the tarball is absent and the
+# channel does not already serve it.
+linuxfirmware_tarball="linux-firmware-$linuxfirmware_version.tar.xz"
+if ! published "linux-firmware/$linuxfirmware_version" "$linuxfirmware_tarball" &&
+    [[ ! -f "$here/../linux-firmware/cache/$linuxfirmware_tarball" ]]; then
+    "$here/../linux-firmware/fetch.sh"
+fi
+place "linux-firmware/$linuxfirmware_version" "$linuxfirmware_tarball" \
+    "$here/../linux-firmware/cache/$linuxfirmware_tarball"
 
 echo
 if [[ -d "$out" ]]; then

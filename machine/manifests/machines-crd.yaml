@@ -650,6 +650,11 @@ spec:
                       description: >-
                         The PCI naming database that turns vendor and
                         device IDs into words.
+                    linuxFirmware:
+                      type: string
+                      description: >-
+                        The linux-firmware release that supplied the
+                        driver blobs under /lib/firmware.
                 network:
                   type: object
                   description: >-

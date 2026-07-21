@@ -91,6 +91,7 @@ NFSUTILS_VERSION := $(strip $(file <../nfs-utils/VERSION))
 SYSTEMDBOOT_VERSION := $(strip $(file <../systemd-boot/VERSION))
 GRUB_VERSION := $(strip $(file <../grub/VERSION))
 HWDATA_VERSION := $(strip $(file <../hwdata/VERSION))
+LINUXFIRMWARE_VERSION := $(strip $(file <../linux-firmware/VERSION))
 
 # This is the version-stamped build: every liken component, rebuilt
 # under VERSION into build/<version>/, generic image included. This
@@ -141,7 +142,8 @@ release: build
 		nfs-utils=$(NFSUTILS_VERSION) \
 		systemd-boot=$(SYSTEMDBOOT_VERSION) \
 		grub=$(GRUB_VERSION) \
-		hwdata=$(HWDATA_VERSION)
+		hwdata=$(HWDATA_VERSION) \
+		linux-firmware=$(LINUXFIRMWARE_VERSION)
 
 # This serves the channel over HTTP: the lab's release server, which
 # stands in for the website. The dev cluster's guests reach it at

@@ -48,6 +48,12 @@
 #                                 ships inert; a module costs disk
 #                                 space only, until init or a declared
 #                                 spec.modules entry loads it
+#   /lib/firmware/                the driver blobs those modules can
+#                                 request at probe time, derived from
+#                                 the module tree by the
+#                                 linux-firmware domain, with the
+#                                 WHENCE ledger and license texts
+#                                 beside them
 #   /bin/k3s                      all of Kubernetes, in one binary
 #   /etc/rancher/k3s/config.yaml  k3s's configuration for leaders
 #   /etc/rancher/k3s/agent.yaml   the followers' configuration. Init
@@ -299,7 +305,7 @@ cp "$here/../hwdata/dist/$hwdata_version/pci.ids" \
 mkdir -p "$root/usr/share/liken"
 {
     echo "components:"
-    for component in kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata; do
+    for component in kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata linux-firmware; do
         echo "  - name: $component"
         echo "    version: $(cat "$here/../$component/VERSION")"
     done
@@ -341,6 +347,17 @@ check_modules() {
 check_modules <"$here/etc/liken/modules.conf"
 check_modules <"$here/../open-iscsi/modules.conf"
 check_modules <"$here/../nfs-utils/modules.conf"
+
+# The driver firmware ships beside the modules that request it. Real
+# hardware's drivers load blobs from /lib/firmware at probe time,
+# directly, with no udev involved. The set is derived from the module
+# tree above, not curated (linux-firmware/derive.sh explains the
+# derivation and the one named exception). The blobs are inert bytes:
+# they cost slot space only, until a driver requests one. The kernel
+# reads them from this mounted image, so they cost no RAM either.
+linuxfirmware_version="$(cat "$here/../linux-firmware/VERSION")"
+cp -a "$here/../linux-firmware/dist/$linuxfirmware_version/lib/firmware" \
+    "$root/lib/firmware"
 
 # This builds the system image: the staged tree as a read-only,
 # mountable filesystem. It uses squashfs because this kernel mounts a
