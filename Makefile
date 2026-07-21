@@ -282,15 +282,12 @@ image: $(SYSTEM_IMAGE) $(BOOT_ARCHIVE)
 
 # The deployment layer is the small archive that turns the generic
 # image into the dev cluster's image. It carries the dev cluster's
-# manifests, its identity, and its machines' declared kernel modules.
-# image/layer.go explains the contents. The kernel dist is where the
-# module files and the depmod index come from.
+# manifests and its identity. image/layer.go explains the contents.
 $(IMAGE_DIR)/deployment.cpio: cli/dist/liken \
 		dev-cluster/cluster.yaml $(wildcard dev-cluster/machines/*.yaml) \
-		$(IDENTITY_DIR)/tls/server-ca.crt $(IDENTITY_DIR)/token \
-		$(KERNEL_DIST)/vmlinuz
+		$(IDENTITY_DIR)/tls/server-ca.crt $(IDENTITY_DIR)/token
 	@mkdir -p $(IMAGE_DIR)
-	cli/dist/liken layer dev-cluster $(IDENTITY_DIR) $(KERNEL_DIST) $@
+	cli/dist/liken layer dev-cluster $(IDENTITY_DIR) $@
 
 # The dev cluster's -kernel boot initrd concatenates three parts: the
 # boot archive; the system image, wrapped in a bare cpio so the

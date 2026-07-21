@@ -64,7 +64,7 @@ func TestUnclaimedNamesTheFixWhenTheImageLacksTheDriver(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("Unclaimed = %+v, want 1 entry", got)
 	}
-	if got[0].Message != "usb_storage or uas would drive it, but this image carries neither; upgrade to a release that does" {
+	if got[0].Message != "usb_storage or uas would drive it, but this image carries neither; use an image that does" {
 		t.Errorf("Message = %q", got[0].Message)
 	}
 }

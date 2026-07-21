@@ -114,10 +114,12 @@ func (c *Catalog) Unclaimed(devices []Device) []machine.UnclaimedDevice {
 
 // unclaimedMessage states the fix in words. When the image carries
 // a candidate module, the fix is an edit, and the message names only
-// the modules that a person can actually declare. When the image
-// carries none, the fix is a different image, and the message still
-// names the modules. This lets a person find the release, or build
-// the image, that carries them.
+// the modules that a person can actually declare. On a stock image
+// this is every candidate, because the image carries the kernel's
+// whole module tree. When the image carries none (a composed image
+// can remove modules), the fix is a different image, and the message
+// still names the modules, so a person can find an image that
+// carries them.
 func unclaimedMessage(candidates, aboard []string) string {
 	if len(aboard) > 0 {
 		return "declare " + strings.Join(aboard, " or ") + " in spec.modules"
@@ -129,7 +131,7 @@ func unclaimedMessage(candidates, aboard []string) string {
 		verb = "carries none of them"
 	}
 	return strings.Join(candidates, " or ") +
-		" would drive it, but this image " + verb + "; upgrade to a release that does"
+		" would drive it, but this image " + verb + "; use an image that does"
 }
 
 // LoadShippedModules finds which modules are actually present on

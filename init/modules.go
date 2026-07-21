@@ -140,9 +140,10 @@ func loadDeclaredModulesFrom(base string, names []string) []machine.ModuleStatus
 // asks the kernel for anything, so the verdicts do not depend on the
 // order that failures happen to occur in. The vocabulary belongs to
 // machine.ModuleState: Loaded and Builtin are healthy. Missing means
-// the booted image never shipped the module (an edit outran its
-// image, and only a new image fixes it). Failed means the kernel
-// refused a module that the image does ship.
+// the image's kernel build has no module by this name: the image
+// carries the kernel's whole module tree, so a missing name is a
+// misspelled name, or a driver from outside this kernel build.
+// Failed means the kernel refused a module that the image does ship.
 func declaredModuleOutcomes(names []string, deps map[string][]string,
 	builtin map[string]bool, load func(name string) error) []machine.ModuleStatus {
 	statuses := make([]machine.ModuleStatus, 0, len(names))
@@ -161,7 +162,7 @@ func declaredModuleOutcomes(names []string, deps map[string][]string,
 			status.State = machine.ModuleBuiltin
 		default:
 			status.State = machine.ModuleMissing
-			status.Message = "not in this image; rebuild the deployment's image, or upgrade to a release built from manifests that declare it"
+			status.Message = "not a module in this image's kernel build; check the spelling against the machine's unclaimed-hardware report"
 		}
 		statuses = append(statuses, status)
 	}

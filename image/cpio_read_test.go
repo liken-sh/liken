@@ -97,7 +97,7 @@ func mintedLayer(t *testing.T, machines ...string) []byte {
 		t.Fatal(err)
 	}
 	out := filepath.Join(t.TempDir(), "deployment.cpio")
-	if err := Layer(manifests, identityDir, "unused", out, io.Discard); err != nil {
+	if err := Layer(manifests, identityDir, out); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(out)

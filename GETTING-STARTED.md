@@ -62,16 +62,13 @@ arguments lists and explains every command.
 
 ## 4. Pack your layer and build the stick
 
-    ./liken layer mycluster mycluster/identity - mycluster/deployment.cpio
+    ./liken layer mycluster mycluster/identity mycluster/deployment.cpio
     ./liken stick . mycluster/deployment.cpio mycluster/install.img
 
 The layer is the small archive that holds everything that is yours:
-your manifests and your identity. The `-` argument takes the place of
-a kernel directory argument. The command only reads that directory if
-a machine manifest declares extra kernel modules, which the scaffold
-does not do. The `stick` command joins the release you downloaded
-(`.` here is the directory that holds `release.yaml`) with your layer
-into one bootable disk image.
+your manifests and your identity. The `stick` command joins the
+release you downloaded (`.` here is the directory that holds
+`release.yaml`) with your layer into one bootable disk image.
 
 Write the image to a USB stick. Check the device name first: this
 command overwrites the device.

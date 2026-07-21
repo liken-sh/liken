@@ -65,12 +65,12 @@ usage:
       Write an admin kubeconfig: the credential kubectl uses to
       administer the cluster.
 
-  liken layer <manifests-dir> <identity-dir> <kernel-dist> <output.cpio>
+  liken layer <manifests-dir> <identity-dir> <output.cpio>
       Pack your cluster's half of the operating system into one small
-      archive: your cluster and machine manifests, your identity, and
-      any kernel modules your machines ask for. The kernel directory
-      is only consulted when a machine declares modules; pass - when
-      none do.
+      archive: your cluster and machine manifests, and your identity.
+      Kernel modules are not part of it: the system image carries the
+      kernel's whole module tree, and spec.modules loads from that
+      tree at boot.
 
   liken fetch [-digest sha256:<hex>] <source-url> <version|latest> <channel-dir>
       Download a published release from a channel into a local
@@ -154,10 +154,10 @@ func run(args []string) error {
 		}
 		return identity.Kubeconfig(args[1], os.Stdout)
 	case "layer":
-		if len(args) != 5 {
-			return fmt.Errorf("usage: liken layer <manifests-dir> <identity-dir> <kernel-dist> <output.cpio>")
+		if len(args) != 4 {
+			return fmt.Errorf("usage: liken layer <manifests-dir> <identity-dir> <output.cpio>")
 		}
-		return image.Layer(args[1], args[2], args[3], args[4], os.Stdout)
+		return image.Layer(args[1], args[2], args[3])
 	case "fetch":
 		fs := flag.NewFlagSet("fetch", flag.ContinueOnError)
 		digest := fs.String("digest", "", "pin the release document to a catalog entry's sha256:<hex> digest")

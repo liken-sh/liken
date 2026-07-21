@@ -35,7 +35,7 @@ func TestRunChecksArgumentCounts(t *testing.T) {
 		{"mint without a directory", []string{"mint"}},
 		{"adopt without directories", []string{"adopt", "only-one"}},
 		{"kubeconfig without a directory", []string{"kubeconfig"}},
-		{"layer without its inputs", []string{"layer", "manifests", "identity"}},
+		{"layer without its inputs", []string{"layer", "manifests"}},
 		{"fetch without its inputs", []string{"fetch", "https://example.com"}},
 		{"media without its inputs", []string{"media", "release-dir"}},
 		{"stick without its inputs", []string{"stick", "-console", "ttyS0", "release-dir"}},
@@ -71,10 +71,9 @@ func TestRunPacksADeploymentLayer(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := filepath.Join(t.TempDir(), "deployment.cpio")
-	// A deployment with no manifests declares no modules. Because of
-	// this, the kernel dist is never consulted, and the layer holds
-	// only identity.
-	if err := run([]string{"layer", t.TempDir(), identityDir, "unused", out}); err != nil {
+	// A deployment with no manifests still has an identity, so the
+	// layer holds only identity.
+	if err := run([]string{"layer", t.TempDir(), identityDir, out}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(out); err != nil {
@@ -107,7 +106,7 @@ func TestRunAssemblesInstallMedia(t *testing.T) {
 		t.Fatal(err)
 	}
 	layer := filepath.Join(t.TempDir(), "deployment.cpio")
-	if err := run([]string{"layer", t.TempDir(), identityDir, "unused", layer}); err != nil {
+	if err := run([]string{"layer", t.TempDir(), identityDir, layer}); err != nil {
 		t.Fatal(err)
 	}
 

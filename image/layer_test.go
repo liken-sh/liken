@@ -1,10 +1,9 @@
 package image
 
-// Tests for the deployment layer. The fixtures stand in for the three
-// inputs: a manifests directory (a cluster document and machines), a
-// minted identity, and a kernel dist tree with a depmod index. These
-// are small fakes with the same shapes as the real thing, so the
-// tests need no vendored kernel and no real deployment.
+// Tests for the deployment layer. The fixtures stand in for the two
+// inputs: a manifests directory (a cluster document and machines) and
+// a minted identity. These are small fakes with the same shapes as
+// the real thing, so the tests need no real deployment.
 
 import (
 	"io"
@@ -50,44 +49,6 @@ metadata:
 	return dir
 }
 
-// fixtureKernel builds a fake kernel dist: a release name, a module
-// tree with a couple of modules, and the depmod index files the
-// build would have vendored.
-func fixtureKernel(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	release := "9.9.9-test"
-	if err := os.WriteFile(filepath.Join(dir, "release"), []byte(release+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	modules := filepath.Join(dir, "lib", "modules", release)
-	if err := os.MkdirAll(filepath.Join(modules, "kernel", "drivers", "net"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, ko := range []string{"kernel/drivers/net/dummy.ko.zst", "kernel/drivers/net/veth.ko.zst"} {
-		if err := os.WriteFile(filepath.Join(modules, ko), []byte("elf bytes of "+ko), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// dummy stands alone; veth depends on dummy. This is not true of
-	// the real veth, but the point here is the dependency set.
-	dep := "kernel/drivers/net/dummy.ko.zst:\n" +
-		"kernel/drivers/net/veth.ko.zst: kernel/drivers/net/dummy.ko.zst\n"
-	if err := os.WriteFile(filepath.Join(modules, "modules.dep"), []byte(dep), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	builtin := "kernel/fs/binfmt_misc.ko\n"
-	if err := os.WriteFile(filepath.Join(modules, "modules.builtin"), []byte(builtin), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, f := range []string{"modules.builtin.modinfo", "modules.order"} {
-		if err := os.WriteFile(filepath.Join(modules, f), []byte(""), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return dir
-}
-
 // builtLayer runs Layer over the fixtures and parses the archive.
 func builtLayer(t *testing.T, manifests string) map[string]cpioEntry {
 	t.Helper()
@@ -96,7 +57,7 @@ func builtLayer(t *testing.T, manifests string) map[string]cpioEntry {
 		t.Fatal(err)
 	}
 	out := filepath.Join(t.TempDir(), "deployment.cpio")
-	if err := Layer(manifests, identityDir, fixtureKernel(t), out, io.Discard); err != nil {
+	if err := Layer(manifests, identityDir, out); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(out)
@@ -142,7 +103,7 @@ func TestLayerLeavesTheKubeconfigBehind(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := filepath.Join(t.TempDir(), "deployment.cpio")
-	if err := Layer(manifests, identityDir, fixtureKernel(t), out, io.Discard); err != nil {
+	if err := Layer(manifests, identityDir, out); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(out)
@@ -156,54 +117,42 @@ func TestLayerLeavesTheKubeconfigBehind(t *testing.T) {
 	}
 }
 
-func TestLayerShipsDeclaredModulesWithTheirClosure(t *testing.T) {
-	entries := builtLayer(t, fixtureManifests(t, "veth"))
-	// veth pulls in dummy through modules.dep. Shipping any module
-	// means shipping the full index that the composed image will
-	// resolve against.
-	for _, want := range []string{
-		"lib/modules/9.9.9-test/kernel/drivers/net/veth.ko.zst",
-		"lib/modules/9.9.9-test/kernel/drivers/net/dummy.ko.zst",
-		"lib/modules/9.9.9-test/modules.dep",
-		"lib/modules/9.9.9-test/modules.builtin",
-	} {
-		if _, ok := entries[want]; !ok {
-			t.Errorf("missing %s", want)
-		}
-	}
-}
-
-func TestLayerSkipsModulesForAModulelessDeployment(t *testing.T) {
-	entries := builtLayer(t, fixtureManifests(t))
-	for name := range entries {
-		if strings.HasPrefix(name, "lib/modules/") {
-			t.Errorf("moduleless deployment shipped %s", name)
-		}
-	}
-}
-
-func TestLayerAcceptsABuiltinModule(t *testing.T) {
-	// A declared name that the kernel carries built in needs no file.
-	// The layer must not fail the build over it.
-	entries := builtLayer(t, fixtureManifests(t, "binfmt_misc"))
-	for name := range entries {
-		if strings.HasSuffix(name, ".ko.zst") {
-			t.Errorf("builtin declaration shipped %s", name)
-		}
-	}
-}
-
-func TestLayerRefusesAnUnknownModule(t *testing.T) {
-	manifests := fixtureManifests(t, "no-such-driver")
+func TestLayerRefusesAnUnwritableOutput(t *testing.T) {
 	identityDir := t.TempDir()
 	if err := identity.Mint(identityDir, io.Discard); err != nil {
 		t.Fatal(err)
 	}
+	out := filepath.Join(t.TempDir(), "no-such-dir", "deployment.cpio")
+	if err := Layer(fixtureManifests(t), identityDir, out); err == nil {
+		t.Error("an unwritable output path was not refused")
+	}
+}
+
+func TestLayerNeedsACompleteIdentity(t *testing.T) {
+	// The identity package's Bundle list is the contract: every file
+	// on it must exist, or the layer would install machines that can
+	// never join their cluster.
+	identityDir := t.TempDir()
+	if err := identity.Mint(identityDir, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(identityDir, "token")); err != nil {
+		t.Fatal(err)
+	}
 	out := filepath.Join(t.TempDir(), "deployment.cpio")
+	if err := Layer(fixtureManifests(t), identityDir, out); err == nil {
+		t.Error("an incomplete identity was not refused")
+	}
+}
 
-	err := Layer(manifests, identityDir, fixtureKernel(t), out, io.Discard)
-
-	if err == nil || !strings.Contains(err.Error(), "no-such-driver") {
-		t.Errorf("unknown module was not refused: %v", err)
+func TestLayerCarriesNoModules(t *testing.T) {
+	// A declared module is a boot-time load from the system image's
+	// whole tree, never layer content. Even a manifest that declares
+	// modules yields a layer with no lib/modules entries.
+	entries := builtLayer(t, fixtureManifests(t, "veth", "usb_storage"))
+	for name := range entries {
+		if strings.HasPrefix(name, "lib/modules/") {
+			t.Errorf("the layer carries %s", name)
+		}
 	}
 }

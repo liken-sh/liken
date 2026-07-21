@@ -38,11 +38,17 @@
 # that runs at this size proves that this stays true. If a machine
 # stops converging at 1 GB from disk, that is a regression in liken.
 # It is not a reason to raise this default.
-# A -kernel boot gets 2 GB, because its one composed initrd carries
+# A -kernel boot gets 4 GB, because its one composed initrd carries
 # the whole OS: the boot archive, the system image, and the layer all
-# unpack into RAM. That cost belongs to the lab's composition, not to
-# the OS. The 1 GB claim lives with the disk boots, the arrangement
-# that real machines use.
+# travel in RAM, and the unpack briefly holds the packed and the
+# unpacked bytes at the same time. The margin is deliberate. Under
+# SeaBIOS, QEMU places a ~300 MB initrd near the top of the guest's
+# low memory, and the kernel then reports almost all of the memory
+# below it as reserved until the unpack finishes: a 2 GB guest was
+# observed with only ~118 MB available, and its unpack failed. That
+# cost belongs to the lab's composition, not to the OS. The 1 GB
+# claim lives with the disk boots, the arrangement that real
+# machines use.
 #
 # SMP sets each guest's CPU count. This setting matters more than it
 # looks: QEMU's default is a single vCPU, and a Kubernetes server
@@ -64,7 +70,7 @@
 # sure they exist before boot. Run `make run` from the repo root.
 NODE ?= node-1
 MEM_disk := 1024
-MEM_kernel := 2048
+MEM_kernel := 4096
 MEM ?= $(MEM_$(BOOT))
 SMP ?= 4
 CONSOLE ?= stdio

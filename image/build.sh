@@ -42,9 +42,12 @@
 #                                 (rdinit=/liken)
 #   /etc/liken/modules.conf       lists the kernel modules init loads
 #                                 for the OS's own needs
-#   /lib/modules/<release>/       holds those modules, the features'
-#                                 modules, and everything they depend
-#                                 on, exactly as Ubuntu built them
+#   /lib/modules/<release>/       the kernel build's complete module
+#                                 tree, with depmod's indexes, exactly
+#                                 as Ubuntu built it. Every module
+#                                 ships inert; a module costs disk
+#                                 space only, until init or a declared
+#                                 spec.modules entry loads it
 #   /bin/k3s                      all of Kubernetes, in one binary
 #   /etc/rancher/k3s/config.yaml  k3s's configuration for leaders
 #   /etc/rancher/k3s/agent.yaml   the followers' configuration. Init
@@ -302,70 +305,42 @@ mkdir -p "$root/usr/share/liken"
     done
 } > "$root/usr/share/liken/components.yaml"
 
-# The image carries only the modules the machines will load, plus
-# everything those modules depend on. Two lists feed this: the OS's
-# own fixed needs (etc/liken/modules.conf) and whatever extra modules
-# the deployment's Machine manifests declare (spec.modules). The same
-# resolution below ships both lists. The host's modprobe resolves
-# each name against the vendored kernel's depmod index (--show-depends
-# prints one "insmod <path>" line per file, dependencies first),
-# without loading anything anywhere. A name the vendored kernel does
-# not have fails the build right here. This is the point: a
-# deployment learns about a misspelled module at build time, not on
-# a booted fleet.
-ship_modules() {
-    local dest="$1"
+# The image ships the kernel build's whole module tree, exactly as
+# Ubuntu built and indexed it: about 170 MiB of compressed modules,
+# every one of them inert until something loads it. This applies the
+# same principle as the feature vocabulary to hardware support:
+# enabling a driver is a runtime act (spec.modules), never an image
+# rebuild. A machine installed from the public channel can declare
+# any module its kernel can load, and a new device is a pure edit. A
+# tree pruned to declared modules would tie every image to the
+# manifests it was built beside, and would make "I plugged in a
+# serial adapter" wait for a release.
+#
+# The copy carries depmod's complete indexes too, built by
+# kernel/fetch.sh at fetch time. The indexes and the modules they
+# name describe the same system: modules.dep resolves any module's
+# dependency chain, and modules.alias, the naming database for the
+# unclaimed-hardware report, names only drivers that are really
+# aboard.
+mkdir -p "$root/lib/modules"
+cp -a "$kdist/lib/modules/$release" "$root/lib/modules/"
+
+# The module lists that init reads at boot still get checked here:
+# the OS's own fixed needs (etc/liken/modules.conf) and each
+# feature's kernel half (staged above under /etc/liken/features).
+# The whole tree makes the copy unconditional, but the host's
+# modprobe still resolves each name against the kernel's depmod
+# index, without loading anything anywhere. A misspelled name fails
+# the build right here, not on a booted fleet.
+check_modules() {
     while IFS= read -r name; do
         [[ -z "$name" || "$name" == \#* ]] && continue
-        modprobe -d "$kdist" -S "$release" --show-depends "$name"
-    done |
-        awk '$1 == "insmod" { print $2 }' |
-        sort -u |
-        while IFS= read -r file; do
-            rel="${file#"$kdist"/lib/modules/"$release"/}"
-            mkdir -p "$dest/lib/modules/$release/$(dirname "$rel")"
-            cp "$file" "$dest/lib/modules/$release/$rel"
-        done
+        modprobe -d "$kdist" -S "$release" --show-depends "$name" >/dev/null
+    done
 }
-mkdir -p "$root/lib/modules/$release"
-ship_modules "$root" <"$here/etc/liken/modules.conf"
-
-# The features' kernel halves ship unconditionally too, one list per
-# feature (staged above under /etc/liken/features). Whether they load
-# is the cluster document's decision, made at boot, never at build.
-ship_modules "$root" <"$here/../open-iscsi/modules.conf"
-ship_modules "$root" <"$here/../nfs-utils/modules.conf"
-
-# The deployment's declared modules (spec.modules) are not here. The
-# deployment layer ships them, with their full dependency set,
-# resolved against the same index by image/layer.go.
-
-# depmod indexes what actually shipped, so init's dependency
-# resolution (which reads modules.dep) agrees exactly with the files
-# present. A deployment layer that adds modules overrides this index
-# with the kernel's complete one, so the composed system resolves
-# everything actually present (image/layer.go explains the override).
-# modules.builtin tells depmod which names live inside vmlinuz
-# itself. modules.order settles the case when two modules claim one
-# alias.
-cp "$kdist/lib/modules/$release/modules.builtin" \
-   "$kdist/lib/modules/$release/modules.builtin.modinfo" \
-   "$kdist/lib/modules/$release/modules.order" \
-   "$root/lib/modules/$release/"
-depmod --basedir "$root" "$release"
-
-# One index is deliberately not depmod's pruned output. The alias
-# table ships complete, from the kernel build, and covers every
-# module the kernel could load, not just the modules shipped in this
-# image. It is the naming database for the unclaimed-hardware report.
-# When a device appears that nothing drives, the report matches its
-# modalias against this table to say "declare usb_storage" (or "this
-# image does not carry it"). A table describing only the shipped
-# modules could never say that about the very driver that is
-# missing. Nothing loads modules from this file. init resolves loads
-# through modules.dep, which still describes exactly what shipped.
-cp "$kdist/lib/modules/$release/modules.alias" \
-   "$root/lib/modules/$release/modules.alias"
+check_modules <"$here/etc/liken/modules.conf"
+check_modules <"$here/../open-iscsi/modules.conf"
+check_modules <"$here/../nfs-utils/modules.conf"
 
 # This builds the system image: the staged tree as a read-only,
 # mountable filesystem. It uses squashfs because this kernel mounts a
@@ -401,6 +376,27 @@ boot_root="$dist/boot-root"
 mkdir -p "$boot_root/lib/modules/$release" "$boot_root/sbin"
 cp "$init_dist/liken" "$boot_root/liken"
 cp "$here/../e2fsprogs/dist/$e2fsprogs_version/mke2fs" "$boot_root/sbin/mke2fs"
+
+# The boot archive is the one place that still prunes. It stages only
+# the few modules on boot-modules.conf, with their dependencies,
+# because its size sets the RAM the boot loader stages. The host's
+# modprobe resolves each name against the kernel's depmod index
+# (--show-depends prints one "insmod <path>" line per file,
+# dependencies first), without loading anything anywhere.
+ship_modules() {
+    local dest="$1"
+    while IFS= read -r name; do
+        [[ -z "$name" || "$name" == \#* ]] && continue
+        modprobe -d "$kdist" -S "$release" --show-depends "$name"
+    done |
+        awk '$1 == "insmod" { print $2 }' |
+        sort -u |
+        while IFS= read -r file; do
+            rel="${file#"$kdist"/lib/modules/"$release"/}"
+            mkdir -p "$dest/lib/modules/$release/$(dirname "$rel")"
+            cp "$file" "$dest/lib/modules/$release/$rel"
+        done
+}
 ship_modules "$boot_root" <"$here/boot-modules.conf"
 cp "$kdist/lib/modules/$release/modules.builtin" \
    "$kdist/lib/modules/$release/modules.builtin.modinfo" \
