@@ -1,0 +1,123 @@
+# This is the website deploy. A push that touches the docs domain, or
+# a CRD schema the reference pages are generated from, is a publish.
+# The job builds the site, bakes it into an nginx image, pushes the
+# image to ghcr.io, and points the website Deployment on the liken.sh
+# cluster at the new tag. On a pull request, the job stops after the
+# image build: it proves the site still builds, and publishes nothing.
+#
+# Two credentials, two scopes. GITHUB_TOKEN pushes the image, because
+# the ghcr.io package belongs to this repository. WEBSITE_KUBECONFIG
+# (delivered by terraform, scoped by liken.sh/website/manifests/
+# deployer.yaml) patches the Deployment's image and watches the
+# rollout, and can do nothing else. Manifest changes are outside this
+# credential's reach on purpose: those deploy from a workstation with
+# `make -C liken.sh website`, and this workflow assumes the manifests
+# are already in place.
+#
+# The cluster pulls the image anonymously, so the ghcr.io package
+# must be public. The package is born private on its first push, and
+# a maintainer makes it public once in the GitHub UI; the deploy
+# fails with ImagePullBackOff until then.
+name: docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/**
+      - machine/manifests/machines-crd.yaml
+      - cluster/manifests/clusters-crd.yaml
+      - .github/workflows/docs.yaml
+  pull_request:
+    branches: [main]
+    paths:
+      - docs/**
+      - machine/manifests/machines-crd.yaml
+      - cluster/manifests/clusters-crd.yaml
+      - .github/workflows/docs.yaml
+
+permissions:
+  contents: read
+  packages: write
+
+# Deploys run one at a time: two pushes in quick succession would
+# otherwise race their rollouts, and the served-site check below
+# needs nothing else to change while it runs.
+concurrency:
+  group: docs
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: test the generator
+        run: go test ./docs/crdref/
+
+      # The site builds outside Docker, by the same make target a
+      # workstation runs, so local and CI builds produce the same
+      # tree. The Dockerfile only copies the result.
+      - name: build the site
+        run: make -C docs build
+
+      - name: build the image
+        run: |
+          docker build \
+            --tag ghcr.io/liken-sh/website:${{ github.sha }} \
+            --tag ghcr.io/liken-sh/website:latest \
+            docs
+
+      # Everything below publishes, so pull requests stop here.
+      - name: log in to ghcr.io
+        if: github.event_name == 'push'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      # Both tags push: the sha tag is what the Deployment runs, and
+      # the latest tag is what a bare manifest apply falls back to.
+      - name: push the image
+        if: github.event_name == 'push'
+        run: |
+          docker push ghcr.io/liken-sh/website:${{ github.sha }}
+          docker push ghcr.io/liken-sh/website:latest
+
+      - name: place the credential
+        if: github.event_name == 'push'
+        env:
+          WEBSITE_KUBECONFIG: ${{ secrets.WEBSITE_KUBECONFIG }}
+        run: |
+          mkdir -p liken.sh/identity
+          printf '%s' "$WEBSITE_KUBECONFIG" > liken.sh/identity/kubeconfig
+
+      - name: roll the deployment
+        if: github.event_name == 'push'
+        run: |
+          liken.sh/kubectl set image --namespace website \
+            deployment/website nginx=ghcr.io/liken-sh/website:${{ github.sha }}
+          liken.sh/kubectl rollout status --namespace website deployment/website
+
+      # This step proves the deploy the way a reader meets it: the
+      # site served over the public name is the one this commit
+      # built. release.txt carries the commit, and the other checks
+      # cover each kind of page the site serves.
+      - name: verify the served site
+        if: github.event_name == 'push'
+        run: |
+          curl --fail --silent --show-error --retry 5 --retry-delay 3 \
+            https://liken.sh/release.txt -o served.txt
+          echo "${{ github.sha }}" | cmp - served.txt
+          curl --fail --silent https://liken.sh/ \
+            | grep -q "boots a machine straight"
+          curl --fail --silent https://liken.sh/docs/guides/install/ \
+            | grep -q "<title>Install a cluster"
+          curl --fail --silent --head https://liken.sh/docs/guides/install/index.md \
+            | grep -qi "content-type: text/markdown"
+          curl --fail --silent https://liken.sh/sitemap.xml >/dev/null
+          curl --fail --silent https://liken.sh/llms.txt | grep -q "^# liken"

@@ -1,0 +1,21 @@
+{{- /*
+The /llms.txt convention (https://llmstxt.org): a short description
+of the site and an index of its pages, for agents that read Markdown.
+Each link points at a page's Markdown twin, grouped the way the
+manual is grouped.
+*/ -}}
+# {{ .Site.Title }}
+
+> `liken` is a small operating system that boots a machine straight
+> into Kubernetes. This site is its manual.
+
+Every page of this site is also served as Markdown: append index.md
+to the page's URL. /llms-full.txt holds the whole manual in one file.
+The repository at https://github.com/liken-sh/liken is the deep
+documentation.
+{{ range (.Site.GetPage "/docs").Sections }}
+## {{ .Title }}
+{{ range .RegularPages }}
+- [{{ .Title }}]({{ with .OutputFormats.Get "markdown" }}{{ .Permalink }}{{ end }})
+{{- end }}
+{{ end }}

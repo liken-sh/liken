@@ -463,11 +463,20 @@ release: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils hwdata linux-fi
 serve:
 	$(MAKE) -C releases serve
 
+# The website: the front page and the manual, built as static files
+# (docs/README.md tells the whole story). The site is not an OS
+# artifact, so `all` does not build it and a release does not bundle
+# it. It ships on its own path, as a container image published by CI
+# when a push touches the docs domain.
+docs:
+	$(MAKE) -C docs
+
 # Cleaning includes the dev cluster's disks. If the build removed
 # every domain's artifacts but left the machine state behind, the
 # next boot would still carry the old cluster's state. That would not
 # be a clean boot.
 clean:
+	$(MAKE) -C docs clean
 	$(MAKE) -C releases clean
 	$(MAKE) -C dev-cluster clean
 	$(MAKE) -C kernel clean
@@ -489,4 +498,4 @@ clean:
 	$(MAKE) -C image clean
 	rm -rf $(IMAGE_DIR)
 
-.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata linux-firmware microcode licensing init machine-operator cluster-operator logs cli identity kubeconfig image run run-once smoke-uefi smoke-bios install install-stick storage release serve clean
+.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata linux-firmware microcode licensing init machine-operator cluster-operator logs cli identity kubeconfig image run run-once smoke-uefi smoke-bios install install-stick storage release serve docs clean

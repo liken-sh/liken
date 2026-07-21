@@ -113,10 +113,11 @@ numbered before this arc existed; it belongs second in this order:
     the release channel gets its public home at releases.liken.sh:
     digest-verified downloads from object storage, published by CI on
     every version tag; release pages wait for the website.
-27. [ ] [Documentation on the website](27-documentation-on-the-website.md) —
-    the repo stays the documentation; the site extracts and arranges
-    it, plus the reading order and getting-started path that a repo
-    on its own cannot provide.
+27. [x] [Documentation on the website](27-documentation-on-the-website.md) —
+    a user manual on liken.sh: hand-written guides in plain
+    technical English, a CRD reference generated from the schemas,
+    every page served as HTML and as Markdown, shipped as a
+    container image on every push.
 29. [x] [Root on disk](29-root-on-disk.md) — the OS stops living in
     RAM: the system artifact becomes a read-only filesystem image
     mounted from the boot slot, and a 1 GB machine becomes the lab's

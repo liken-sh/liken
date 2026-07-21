@@ -1,0 +1,12 @@
+{{- /*
+The whole manual in one file, for agents that want one fetch instead
+of a crawl. Pages appear in reading order: guides first, then the
+reference, each as its authored Markdown. Every page carries its own
+top-level heading, so the headings delimit the pages.
+*/ -}}
+{{- $docs := .Site.GetPage "/docs" -}}
+{{- range $docs.Sections }}
+{{- range .RegularPages }}
+{{ .RawContent }}
+{{- end }}
+{{- end }}

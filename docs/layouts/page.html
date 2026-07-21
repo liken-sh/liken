@@ -1,0 +1,16 @@
+{{ define "main" }}
+{{/* One manual page. The content carries its own top-level heading,
+so this template adds nothing but the shell. Keeping the heading in
+the content means the Markdown twin carries it too.
+
+A page that sets toc: true in its front matter gets an "On this
+page" list built from its headings. The long reference pages ask for
+it; the guides read top to bottom and do not. */}}
+{{ if .Params.toc }}
+<nav class="toc">
+  <strong>On this page</strong>
+  {{ .TableOfContents }}
+</nav>
+{{ end }}
+{{ .Content }}
+{{ end }}

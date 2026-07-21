@@ -1,11 +1,20 @@
-# The website: one static page, served by the cluster it describes.
+# The website: the front page and the manual, served by the cluster
+# it describes.
 #
-# The page is stored in a ConfigMap, and nginx serves it. This is the
-# smallest arrangement that is still ordinary Kubernetes, so
-# replacing it with a real site later means editing these resources,
-# not inventing new machinery. The ConfigMap itself is not declared
-# here. The Makefile generates it from website/index.html on every
-# deploy, so the page's source of truth stays a plain HTML file.
+# The whole site is baked into one nginx image, built by the docs
+# domain and published to ghcr.io by CI (.github/workflows/docs.yaml).
+# The image is the artifact: nested paths work, there is no size cap,
+# and rolling the site back is running the previous tag.
+#
+# The image field here says latest, and that is only the fallback. On
+# every publish, CI patches this Deployment to the pushed commit's
+# own tag, so the cluster normally runs a sha-pinned image. A
+# workstation apply of this file resets the field to latest, which
+# still serves the current site (the tags move together, and Always
+# makes the kubelet check), until the next docs push pins it again.
+#
+# The cluster holds no ghcr.io credential, so the website package on
+# ghcr.io must be public for the pull to work.
 #
 # Traffic arrives through Traefik, the cluster's declared ingress
 # (cluster.yaml opts into it). The service load balancer binds
@@ -28,22 +37,10 @@ spec:
     spec:
       containers:
         - name: nginx
-          image: nginx:1.29-alpine
+          image: ghcr.io/liken-sh/website:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 80
-          volumeMounts:
-            # The ConfigMap mounts as a whole directory, never by
-            # subPath. kubelet refreshes whole-directory mounts in
-            # place when the ConfigMap changes (an atomic symlink
-            # swap, within about a minute), while subPath mounts stay
-            # fixed at pod start. This refresh is what lets a content
-            # deploy skip restarts.
-            - name: page
-              mountPath: /usr/share/nginx/html
-      volumes:
-        - name: page
-          configMap:
-            name: website
 ---
 apiVersion: v1
 kind: Service

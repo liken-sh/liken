@@ -1,36 +1,35 @@
 # The website
 
-The site is one static page (`index.html`), served by the liken.sh
-cluster as ordinary Kubernetes: nginx behind Traefik, with the page
-stored in a ConfigMap. `manifests/` holds everything the site needs,
-and the comments in each file explain the shape. This README adds
-the deploy story: how a change here reaches liken.sh, and the few
-operational facts that a future deployer would otherwise have to
+The site is served by the liken.sh cluster as ordinary Kubernetes:
+nginx behind Traefik, with the whole site baked into a container
+image. The content lives in the docs domain at the repository root
+(`docs/README.md` explains it); this directory holds the manifests
+that serve it, and the comments in each file explain the shape. This
+README adds the deploy story: how a change reaches liken.sh, and the
+few operational facts that a future deployer would otherwise have to
 rediscover the hard way.
 
 ## How a change ships
 
-Two paths, one destination:
+Two paths, two halves of the site:
 
-* **CI, on every push.** A push to main that touches this directory
-  runs `.github/workflows/website.yaml`. This workflow regenerates
-  the ConfigMap from `index.html` and rolls the deployment. Editing
-  the page and pushing it is the whole publishing workflow.
-* **`make website`, from a workstation.** This is the full deploy:
-  both the manifests and the content, using the admin credential. Use
-  this path for manifest changes, since CI's credential deliberately
-  cannot touch them, and to set up the site from nothing.
+* **Content ships through CI.** A push to main that touches the docs
+  domain runs `.github/workflows/docs.yaml`. The workflow builds the
+  site, pushes it to ghcr.io as `ghcr.io/liken-sh/website`, and
+  patches the Deployment to the new tag. Editing a page and pushing
+  it is the whole publishing workflow.
+* **Manifests ship with `make website`, from a workstation.** CI's
+  credential deliberately cannot touch them. Use this path for
+  changes under `manifests/`, and to set up the site from nothing.
 
 Neither path touches the OS. The resources live in the cluster's own
 datastore on the data disk, so they survive reboots and release
-rolls. Changing the page rebuilds no image and reboots no machine.
+rolls. Publishing a page reboots no machine.
 
-Content updates do not strictly need the restart that the targets
-perform. The page mounts as a whole-directory ConfigMap volume, and
-kubelet refreshes this volume in place within about a minute of the
-ConfigMap changing. The restart exists so a deploy has a definite
-end: when `rollout status` returns, the cluster is serving the new
-page, and CI can check that it shipped what it intended.
+The cluster pulls the image anonymously, so the `website` package on
+ghcr.io must be public. A workstation apply resets the Deployment's
+image to `latest`, which still serves the current site; the next
+docs push pins it back to a commit's own tag.
 
 ## Order matters once
 

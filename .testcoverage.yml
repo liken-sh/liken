@@ -36,6 +36,11 @@ override:
   # their own tests. What stays untested here is main itself.
   - path: ^cli$
     threshold: 79
+  # The CRD reference generator: the walk and the rendering are pure
+  # and pinned by a golden file. What stays untested is main and the
+  # file I/O around it.
+  - path: ^docs/crdref$
+    threshold: 80
   # The Kubernetes client: the tests exercise every verb against a
   # real HTTP test server. What stays untested is the in-cluster
   # bootstrapping that only a pod's mounted credentials can satisfy.

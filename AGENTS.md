@@ -44,6 +44,33 @@ image. Each directory must contain everything that domain needs:
 scripts, configuration, and documentation together. Do not create one
 shared `scripts/` directory for every domain.
 
+## The manual
+
+The docs domain is the website: the front page of liken.sh and the
+user manual under /docs/. The manual is written in ASD-STE100, plain
+technical English: short sentences, one instruction per sentence, no
+metaphor. `docs/README.md` explains the domain.
+
+When you change what an operator sees or does, evaluate whether the
+manual must change with it, and make both changes together. The
+cases to check:
+
+* A `liken` CLI command or flag changes: update
+  `docs/content/docs/reference/cli.md`, and check the guides that
+  run the command.
+* An operational flow changes (install, adoption, adding machines,
+  upgrades, rollback): update the guide in
+  `docs/content/docs/guides/`.
+* The release channel's layout or artifacts change: update
+  `docs/content/docs/reference/release-channel.md`.
+* A CRD schema changes: the Machine and Cluster reference pages
+  regenerate from the schemas at build time, so the schema's own
+  descriptions are the fix. Write them knowing they become the
+  manual.
+
+A change that only touches internals needs no manual change. The
+repository's comments carry that story.
+
 ## Licensing
 
 liken's own code uses the MIT license, but a release also redistributes

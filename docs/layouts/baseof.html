@@ -1,0 +1,97 @@
+<!--
+The shared shell around every HTML page. There is no theme: these
+few templates are the whole presentation, and the stylesheet below is
+the whole stylesheet. It extends the front page's original look (a
+narrow measure, the system font) with just enough for a manual: a
+one-line nav, readable tables, and code blocks that scroll instead of
+overflowing. No JavaScript anywhere.
+
+Two things orient the reader. Every page below the front page
+carries a breadcrumb trail, built from the page's ancestors. Pages
+inside the manual also get a sidebar with the whole manual's tree,
+on screens wide enough to hold one; on narrow screens the
+breadcrumbs alone carry the orientation. The sidebar and breadcrumbs
+exist only in the HTML: a page's Markdown twin is the authored file,
+navigation and all chrome excluded.
+-->
+{{- $docs := .Site.GetPage "/docs" -}}
+{{- $inManual := or (eq .Page $docs) (.IsDescendant $docs) -}}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ if not .IsHome }}{{ .Title }} — {{ end }}{{ .Site.Title }}</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<style>
+  body { max-width: 44rem; margin: 2rem auto 4rem; padding: 0 1rem;
+         font-family: system-ui, sans-serif; line-height: 1.6; }
+  nav.site { margin-bottom: 2rem; }
+  nav.site a { margin-right: 1rem; }
+  nav.crumbs { font-size: 0.9em; margin-bottom: 1.5rem; }
+  nav.crumbs span[aria-current] { color: #555; }
+  table { border-collapse: collapse; display: block; overflow-x: auto; }
+  th, td { border: 1px solid #ccc; padding: 0.3rem 0.6rem;
+           text-align: left; vertical-align: top; }
+  pre { overflow-x: auto; padding: 0.6rem; background: #f6f6f6; }
+  code { font-size: 0.95em; }
+  footer { margin-top: 3rem; font-size: 0.9em; }
+  nav.toc { font-size: 0.9em; background: #f6f6f6; padding: 0.6rem 1rem;
+            margin: 1.5rem 0; }
+  nav.toc ul { list-style: none; margin: 0; padding-left: 0; }
+  nav.toc ul ul { padding-left: 1rem; }
+  /* The sidebar appears only when the viewport can hold it beside
+     the text column without squeezing either. Below that width it
+     stays hidden, and the breadcrumbs do the orienting. */
+  aside { display: none; }
+  @media (min-width: 70rem) {
+    body.manual { max-width: 63rem; display: grid;
+                  grid-template-columns: 15rem minmax(0, 44rem);
+                  column-gap: 3rem; align-items: start; }
+    body.manual > nav.site { grid-column: 1 / -1; }
+    body.manual > footer { grid-column: 2; }
+    body.manual > aside { display: block; position: sticky; top: 2rem;
+                          font-size: 0.9em; }
+    aside p { margin: 0 0 0.5rem; }
+    aside ul { list-style: none; padding-left: 1rem; margin: 0 0 1rem; }
+    aside li { margin: 0.2rem 0; }
+    aside a[aria-current] { font-weight: 600; text-decoration: none; }
+  }
+</style>
+</head>
+<body{{ if $inManual }} class="manual"{{ end }}>
+<nav class="site">
+  <a href="/"><code>liken</code></a>
+  <a href="/docs/">manual</a>
+  <a href="https://github.com/liken-sh/liken">repository</a>
+  <a href="https://releases.liken.sh/">releases</a>
+</nav>
+{{ if $inManual }}
+<aside>
+  <p><a href="{{ $docs.RelPermalink }}"{{ if eq .Page $docs }} aria-current="page"{{ end }}>Manual</a></p>
+  {{ range $docs.Sections }}
+  <p><a href="{{ .RelPermalink }}"{{ if eq $.Page .Page }} aria-current="page"{{ end }}>{{ .Title }}</a></p>
+  <ul>
+    {{ range .RegularPages }}
+    <li><a href="{{ .RelPermalink }}"{{ if eq $.Page .Page }} aria-current="page"{{ end }}>{{ .Title }}</a></li>
+    {{ end }}
+  </ul>
+  {{ end }}
+</aside>
+{{ end }}
+<main>
+{{ if not .IsHome }}
+<nav class="crumbs">
+  {{ range .Ancestors.Reverse }}<a href="{{ .RelPermalink }}">{{ .Title }}</a> / {{ end }}<span aria-current="page">{{ .Title }}</span>
+</nav>
+{{ end }}
+{{ block "main" . }}{{ end }}
+</main>
+<footer>
+  {{ with .OutputFormats.Get "markdown" -}}
+  <a href="{{ .RelPermalink }}">This page as Markdown</a>
+  {{- end }}
+</footer>
+</body>
+</html>

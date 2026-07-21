@@ -201,42 +201,24 @@ image/disk.img.gz: image/disk.img
 	gzip --keep --force $<
 
 # ---------------------------------------------------------------------------
-# The website (website/), deployed straight to the cluster's API: no
-# image is rebuilt, and no machine reboots to publish a page. The
-# resources land in the cluster's own datastore on the data disk, so
-# they survive reboots and release rolls. website/README.md tells the
-# whole deploy story, including the one-time cost of the Traefik TLS
-# overlay, and why DNS must resolve before the first deploy.
+# The website (website/): the manifests that serve the site. The
+# site's content lives in the docs domain at the repository root, and
+# ships as a container image: CI builds it and repoints the
+# Deployment on every push that touches it
+# (.github/workflows/docs.yaml). The resources here land in the
+# cluster's own datastore on the data disk, so they survive reboots
+# and release rolls. website/README.md tells the whole deploy story,
+# including the one-time cost of the Traefik TLS overlay, and why DNS
+# must resolve before the first deploy.
 
-# The full deploy: manifests, then content, using the operator's
-# admin credential. The namespace is applied by name first, because
-# every other resource lands inside it, and `kubectl apply` walks a
-# directory in filename order.
+# The manifest deploy, using the operator's admin credential. CI's
+# credential deliberately cannot touch manifests, so changes to them
+# always ship from a workstation, through this target. The namespace
+# is applied by name first, because every other resource lands inside
+# it, and `kubectl apply` walks a directory in filename order.
 website:
 	./kubectl apply -f website/manifests/namespace.yaml
 	./kubectl apply -f website/manifests/
-	$(MAKE) website-content
-
-# The content deploy, which is all that CI is allowed to do:
-# regenerate the page's ConfigMap from the HTML beside it, then
-# restart and wait. kubelet would refresh the mounted page within a
-# minute on its own, but the restart gives the deploy a definite end,
-# so a deployer can check that the site serves what it just shipped.
-#
-# The page's icon comes along from the brand domain, renamed to match
-# the names the page links to: the vector at /icon.svg, which modern
-# browsers prefer, and the /favicon.ico raster as the fallback. The
-# .ico file is binary, so kubectl files it under the ConfigMap's
-# binaryData on its own.
-website-content:
-	./kubectl create configmap website --namespace website \
-		--from-file website/index.html \
-		--from-file=icon.svg=../brand/liken.svg \
-		--from-file=favicon.ico=../brand/favicon.ico \
-		--dry-run=client -o yaml \
-		| ./kubectl apply -f -
-	./kubectl rollout restart --namespace website deployment/website
-	./kubectl rollout status --namespace website deployment/website
 
 # clean removes the assembled artifacts, but leaves channel/ alone.
 # Those files are verified downloads, gigabytes that redownload
@@ -245,4 +227,4 @@ website-content:
 clean:
 	rm -rf image
 
-.PHONY: all latest identity kubeconfig website website-content clean
+.PHONY: all latest identity kubeconfig website clean

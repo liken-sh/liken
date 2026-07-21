@@ -1,0 +1,35 @@
+# The site's configuration. The interesting part is the output
+# formats: every page renders twice, once as HTML for people and once
+# as the authored Markdown for agents and scripts. The two files land
+# side by side, so the Markdown twin of /docs/guides/install/ is
+# /docs/guides/install/index.md. The home page also renders llms.txt
+# and llms-full.txt, the convention (https://llmstxt.org) agents check
+# at a site's root: an index of the Markdown twins, and the whole
+# manual in one file.
+baseURL: https://liken.sh/
+title: liken
+# No taxonomies and no feeds: the site is a manual, not a blog. The
+# sitemap stays, because it is free and crawlers use it.
+disableKinds: [taxonomy, term, rss]
+
+outputFormats:
+  markdown:
+    # text/markdown is a media type Hugo already knows, with the md
+    # suffix. baseName index makes the output index.md, beside
+    # index.html in the same pretty-URL directory.
+    mediaType: text/markdown
+    baseName: index
+    isPlainText: true
+  llms:
+    mediaType: text/plain
+    baseName: llms
+    isPlainText: true
+  llms-full:
+    mediaType: text/plain
+    baseName: llms-full
+    isPlainText: true
+
+outputs:
+  home: [html, markdown, llms, llms-full]
+  section: [html, markdown]
+  page: [html, markdown]

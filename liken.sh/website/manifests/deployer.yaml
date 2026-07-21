@@ -7,10 +7,11 @@
 # mints this certificate offline from identity/ and delivers it to
 # GitHub's secret store (terraform.tf tells that story). These rules
 # are what give the name its meaning: exactly the verbs that a
-# content deploy performs (rewrite the ConfigMap, restart the
-# Deployment, watch the rollout land), inside this one namespace. A
-# leaked credential can deface the website. It cannot read a secret,
-# touch kube-system, or reach the machines.
+# content deploy performs (patch the Deployment's image to a new
+# tag, watch the rollout land), inside this one namespace. A leaked
+# credential can point the site at a different already-pushed image,
+# and nothing more. It cannot read a secret, touch kube-system, or
+# reach the machines.
 #
 # Keeping authority here, rather than in the certificate, is also
 # the revocation story, since nobody can recall a certificate once
@@ -22,9 +23,6 @@ metadata:
   name: website-deployer
   namespace: website
 rules:
-  - apiGroups: [""]
-    resources: [configmaps]
-    verbs: [get, list, create, update, patch]
   - apiGroups: [apps]
     resources: [deployments]
     verbs: [get, list, watch, patch]

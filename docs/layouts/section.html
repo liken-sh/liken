@@ -1,0 +1,11 @@
+{{ define "main" }}
+{{/* A section index: the section's own prose, then its pages in
+weight order. Sections nested below (guides, reference) list here
+too, because .Pages holds both. */}}
+{{ .Content }}
+<ul>
+{{ range .Pages }}
+  <li><a href="{{ .RelPermalink }}">{{ .Title }}</a></li>
+{{ end }}
+</ul>
+{{ end }}
