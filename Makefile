@@ -46,8 +46,10 @@ HWDATA_VERSION := $(strip $(file <hwdata/VERSION))
 HWDATA_DIST := hwdata/dist/$(HWDATA_VERSION)
 LINUXFIRMWARE_VERSION := $(strip $(file <linux-firmware/VERSION))
 LINUXFIRMWARE_DIST := linux-firmware/dist/$(LINUXFIRMWARE_VERSION)
+MICROCODE_VERSION := $(strip $(file <microcode/VERSION))
+MICROCODE_DIST := microcode/dist/$(MICROCODE_VERSION)
 
-all: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata linux-firmware licensing init machine-operator cluster-operator logs cli identity image
+all: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata linux-firmware microcode licensing init machine-operator cluster-operator logs cli identity image
 
 # The version is part of the artifact's name. So a pin bump changes
 # the target path itself, and Make rebuilds the artifact with no
@@ -96,6 +98,15 @@ $(LINUXFIRMWARE_DIST)/derived.txt: linux-firmware/VERSION \
 	$(MAKE) -C linux-firmware
 
 linux-firmware: $(LINUXFIRMWARE_DIST)/derived.txt
+
+# The CPU microcode early cpio. The linux-firmware prerequisite is
+# where the AMD families come from; the Intel half has its own pin
+# and fetch. See microcode/fetch.sh.
+$(MICROCODE_DIST)/microcode.cpio: microcode/VERSION microcode/fetch.sh \
+		$(LINUXFIRMWARE_DIST)/derived.txt
+	$(MAKE) -C microcode
+
+microcode: $(MICROCODE_DIST)/microcode.cpio
 
 # mke2fs is the program that init runs to make a filesystem on a
 # claimed disk. It is a static binary, and the build vendors it. See
@@ -156,7 +167,8 @@ grub: $(GRUB_DIST)/grub-core.img
 # terms of those licenses require the notices to travel with the
 # bytes. See licensing/Makefile, which also owns the
 # corresponding-source mirror that the release workflow publishes.
-licensing/dist/LICENSES.md: licensing/NOTICES.md licensing/Makefile LICENSE $(wildcard licensing/texts/*.txt)
+licensing/dist/LICENSES.md: licensing/NOTICES.md licensing/Makefile LICENSE $(wildcard licensing/texts/*.txt) \
+		$(MICROCODE_DIST)/microcode.cpio
 	$(MAKE) -C licensing
 
 licensing: licensing/dist/LICENSES.md
@@ -303,19 +315,23 @@ $(IMAGE_DIR)/deployment.cpio: cli/dist/liken \
 	@mkdir -p $(IMAGE_DIR)
 	cli/dist/liken layer dev-cluster $(IDENTITY_DIR) $@
 
-# The dev cluster's -kernel boot initrd concatenates three parts: the
-# boot archive; the system image, wrapped in a bare cpio so the
-# kernel unpacks it into rootfs as a file (init loop-mounts it from
-# there, the from-RAM path that rootimage.go describes); and the
-# deployment layer.
+# The dev cluster's -kernel boot initrd concatenates four parts: the
+# microcode early cpio, which must come first because the kernel
+# scans the very start of its initrd for microcode before it
+# decompresses anything; the boot archive; the system image, wrapped
+# in a bare cpio so the kernel unpacks it into rootfs as a file (init
+# loop-mounts it from there, the from-RAM path that rootimage.go
+# describes); and the deployment layer.
 #
 # The kernel's initramfs unpacker processes concatenated cpio
 # archives in order into one filesystem. So this build joins the
 # parts instead of rebuilding them: the system image is never opened,
 # only wrapped and joined. Installed boots (BOOT=disk) do not use
-# this file. Their slots carry the same artifacts unwrapped.
-$(IMAGE_DIR)/initrd.cpio: $(BOOT_ARCHIVE) $(SYSTEM_IMAGE) $(IMAGE_DIR)/deployment.cpio
-	cat $(BOOT_ARCHIVE) > $@
+# this file. Their slots carry the same artifacts unwrapped, and
+# their boot entries pass each one as its own initrd, in this same
+# order.
+$(IMAGE_DIR)/initrd.cpio: $(MICROCODE_DIST)/microcode.cpio $(BOOT_ARCHIVE) $(SYSTEM_IMAGE) $(IMAGE_DIR)/deployment.cpio
+	cat $(MICROCODE_DIST)/microcode.cpio $(BOOT_ARCHIVE) > $@
 	(cd image/dist && echo liken.sqfs | cpio --quiet -o -H newc -R +0:+0) >> $@
 	cat $(IMAGE_DIR)/deployment.cpio >> $@
 
@@ -381,12 +397,14 @@ smoke-bios: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/install.cpio kubeconfig
 LAB_VERSION := $(shell date +%Y.%m.%d)-000
 
 $(IMAGE_DIR)/channel/$(LAB_VERSION)/release.yaml: $(SYSTEM_IMAGE) $(BOOT_ARCHIVE) \
-		$(KERNEL_DIST)/vmlinuz cli/dist/liken $(LIKEN_VERSION_STAMP) \
+		$(KERNEL_DIST)/vmlinuz $(MICROCODE_DIST)/microcode.cpio \
+		cli/dist/liken $(LIKEN_VERSION_STAMP) \
 		$(SYSTEMDBOOT_DIST)/systemd-bootx64.efi \
 		$(GRUB_DIST)/grub-boot.img $(GRUB_DIST)/grub-core.img \
 		licensing/dist/LICENSES.md
 	rm -rf $(IMAGE_DIR)/channel
 	cli/dist/liken bundle $(KERNEL_DIST)/vmlinuz $(SYSTEM_IMAGE) $(BOOT_ARCHIVE) \
+		$(MICROCODE_DIST)/microcode.cpio \
 		cli/dist/liken $(SYSTEMDBOOT_DIST)/systemd-bootx64.efi \
 		$(GRUB_DIST)/grub-boot.img $(GRUB_DIST)/grub-core.img \
 		licensing/dist/LICENSES.md \
@@ -435,7 +453,7 @@ install-stick: $(IMAGE_DIR)/stick.img
 # no per-deployment channel. The lab's machines upgrade from this
 # bundle directly, and they carry their own deployment layer between
 # slots.
-release: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils hwdata linux-firmware
+release: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils hwdata linux-firmware microcode
 	$(MAKE) -C releases release
 
 # This target serves the release channel to the lab over HTTP. The
@@ -471,4 +489,4 @@ clean:
 	$(MAKE) -C image clean
 	rm -rf $(IMAGE_DIR)
 
-.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata linux-firmware licensing init machine-operator cluster-operator logs cli identity kubeconfig image run run-once smoke-uefi smoke-bios install install-stick storage release serve clean
+.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata linux-firmware microcode licensing init machine-operator cluster-operator logs cli identity kubeconfig image run run-once smoke-uefi smoke-bios install install-stick storage release serve clean

@@ -161,6 +161,14 @@ type VersionStatus struct {
 	Grub          string `json:"grub,omitempty"`
 	Hwdata        string `json:"hwdata,omitempty"`
 	LinuxFirmware string `json:"linuxFirmware,omitempty"`
+
+	// Microcode is the pin: which early cpio the release carries.
+	// MicrocodeRevision is observed from the running CPUs. The two
+	// agreeing is the proof that the early cpio applied, and only
+	// real hardware can give it; on a virtual machine the revision is
+	// the hypervisor's.
+	Microcode         string `json:"microcode,omitempty"`
+	MicrocodeRevision string `json:"microcodeRevision,omitempty"`
 }
 
 // NetworkStatus reports how the boot attached this machine to the

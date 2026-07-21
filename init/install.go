@@ -395,9 +395,13 @@ func partitionNumber(p partition) (uint32, error) {
 //	console=...      copied from this boot, so the installed system
 //	                 keeps using whatever console its operator wired
 //	rdinit=/liken    run our program as PID 1
-//	initrd=          appears twice: \boot.cpio (init and the early
+//	initrd=          appears three times: \microcode.cpio first (the
+//	                 CPU microcode early cpio, which must lead
+//	                 because the kernel scans the very start of its
+//	                 initrd for microcode before it decompresses
+//	                 anything), then \boot.cpio (init and the early
 //	                 boot's modules), then \deployment.cpio (this
-//	                 deployment's layer), both next to the kernel. The
+//	                 deployment's layer), all next to the kernel. The
 //	                 EFI stub loads every initrd= file, in order, from
 //	                 the same filesystem that it loaded the kernel
 //	                 from. The system itself (liken.sqfs) is
@@ -419,6 +423,7 @@ func writeSlotBootEntry(dir, description, slot string, part *slotPartition, mach
 	args := consoleArgs()
 	args = append(args,
 		"rdinit=/liken",
+		`initrd=\microcode.cpio`,
 		`initrd=\boot.cpio`,
 		`initrd=\`+machine.LayerName,
 		"liken.machine="+machineName,

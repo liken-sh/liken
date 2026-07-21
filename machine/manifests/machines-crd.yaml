@@ -655,6 +655,18 @@ spec:
                       description: >-
                         The linux-firmware release that supplied the
                         driver blobs under /lib/firmware.
+                    microcode:
+                      type: string
+                      description: >-
+                        The CPU microcode release that supplied the
+                        early cpio on this machine's boot slot.
+                    microcodeRevision:
+                      type: string
+                      description: >-
+                        The microcode revision the CPUs report. On
+                        real hardware this proves whether the early
+                        cpio applied; on a virtual machine it is the
+                        hypervisor's value.
                 network:
                   type: object
                   description: >-

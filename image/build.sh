@@ -305,7 +305,7 @@ cp "$here/../hwdata/dist/$hwdata_version/pci.ids" \
 mkdir -p "$root/usr/share/liken"
 {
     echo "components:"
-    for component in kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata linux-firmware; do
+    for component in kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata linux-firmware microcode; do
         echo "  - name: $component"
         echo "    version: $(cat "$here/../$component/VERSION")"
     done

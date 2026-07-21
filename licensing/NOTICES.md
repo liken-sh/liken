@@ -150,6 +150,21 @@ whose source exists, upstream keeps that source in the same tree, so
 the one mirror satisfies the source offer for every file the image
 carries.
 
+## CPU microcode (`microcode.cpio`)
+
+License: Intel's microcode license and AMD's microcode license (see
+the appendix: Intel-microcode and AMD-microcode). Copyright Intel
+Corporation and Advanced Micro Devices, Inc.
+
+This is the early cpio that boot entries load ahead of the real
+initrd, holding both vendors' CPU microcode updates. Both licenses
+allow redistribution of the unmodified binaries and neither requires
+source, because no source form exists: microcode ships from the
+vendors as opaque updates. This is the one component with notices
+and no mirror under `sources/`. Intel's half comes from Intel's
+microcode repository; AMD's half comes from the linux-firmware tree,
+whose tarball is mirrored under `sources/linux-firmware/`.
+
 ## liken's programs and their Go dependencies
 
 liken's binaries — `/liken`, the operators, the log relays, and the

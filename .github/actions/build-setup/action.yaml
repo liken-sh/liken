@@ -101,6 +101,12 @@ runs:
       with:
         path: linux-firmware/dist
         key: linux-firmware-${{ hashFiles('linux-firmware/VERSION', 'linux-firmware/fetch.sh', 'linux-firmware/derive.sh', 'kernel/VERSION') }}
+    # The microcode key includes the linux-firmware pin because the
+    # AMD half comes from that domain's tree.
+    - uses: actions/cache@v6
+      with:
+        path: microcode/dist
+        key: microcode-${{ hashFiles('microcode/VERSION', 'microcode/fetch.sh', 'linux-firmware/VERSION') }}
 
     # Make decides staleness by timestamps, and the two halves of
     # this working tree carry different timestamps: checkout stamps
@@ -116,7 +122,8 @@ runs:
       run: |
         for dist in kernel/dist k3s/dist xtables/dist trust/dist \
                     e2fsprogs/dist open-iscsi/dist nfs-utils/dist \
-                    systemd-boot/dist grub/dist linux-firmware/dist; do
+                    systemd-boot/dist grub/dist linux-firmware/dist \
+                    microcode/dist; do
             [ -d "$dist" ] && find "$dist" -type f -exec touch {} +
         done
         true

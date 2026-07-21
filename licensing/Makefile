@@ -34,7 +34,13 @@ all: dist/LICENSES.md
 # The license texts, in the order the aggregate meets them: liken's
 # own MIT license first, then the copyleft family, then the
 # permissive texts that the Go dependencies and static libraries
-# reference.
+# reference, then the microcode vendors' redistribution terms. The
+# microcode texts come from the microcode domain's verified fetch,
+# not from copies in this repo, so they can never drift from the
+# vendored bytes. (The driver firmware's many per-family texts are
+# deliberately not here: they ship in the image at
+# /lib/firmware/LICENSES, as NOTICES.md explains.)
+MICROCODE_VERSION := $(strip $(file <../microcode/VERSION))
 TEXTS = texts/GPL-2.0.txt \
         texts/LGPL-2.0.txt \
         texts/LGPL-2.1.txt \
@@ -43,7 +49,9 @@ TEXTS = texts/GPL-2.0.txt \
         texts/MPL-2.0.txt \
         texts/MIT.txt \
         texts/BSD-2-Clause.txt \
-        texts/BSD-3-Clause.txt
+        texts/BSD-3-Clause.txt \
+        ../microcode/dist/$(MICROCODE_VERSION)/Intel-microcode.txt \
+        ../microcode/dist/$(MICROCODE_VERSION)/AMD-microcode.txt
 
 # This produces one document: the authored notices, then every
 # license text as an appendix. Each text is fenced, so the text stays

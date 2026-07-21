@@ -130,6 +130,14 @@ func publishFacts(in factsInputs) *factsFile {
 		facts.Version.Xtables = strings.TrimPrefix(out, "iptables ")
 	}
 
+	// The CPU's running microcode revision is observed the same way.
+	// The microcode pin (below) says which early cpio the release
+	// carries; this says which revision the CPU actually runs. The
+	// two agreeing is the proof that the early cpio applied, and only
+	// real hardware can give it: on a virtual machine the hypervisor
+	// owns the microcode, and this reports the hypervisor's value.
+	facts.Version.MicrocodeRevision = microcodeRevision(cpuinfoPath)
+
 	// Boot artifacts, bundled images, and data files have no version
 	// command of their own to ask. For these, applyComponentFacts
 	// reports from the record that the image build staged beside the

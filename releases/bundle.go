@@ -3,12 +3,17 @@ package releases
 // This file bundles a release of liken: the artifacts and the
 // document that every fleet, everywhere, upgrades from.
 //
-// The bundle holds eight artifacts. vmlinuz, the system image
+// The bundle holds nine artifacts. vmlinuz, the system image
 // (liken.sqfs, the OS as a read-only filesystem that a machine mounts
 // as its root), and the boot archive (boot.cpio, the small initramfs
 // that the boot loader stages) are the operating system, with no
-// deployment inside. The liken binary is the toolkit that turns them
-// into a deployment's bootable media without this repo or a build.
+// deployment inside. microcode.cpio is the CPU microcode early cpio:
+// boot entries name it as their first initrd, ahead of everything,
+// at the point where the kernel looks for microcode before it
+// decompresses anything (the microcode domain explains the format).
+// It is vendored with its own pin, so an OS update never recomposes
+// it. The liken binary is the toolkit that turns the artifacts into
+// a deployment's bootable media without this repo or a build.
 // systemd-bootx64.efi is the menu program that media boots (the
 // systemd-boot domain explains why a stick needs one when installed
 // machines do not). grub-boot.img and grub-core.img are the two
@@ -51,7 +56,7 @@ import (
 // shipped. The version must fit liken's calendar grammar (the api
 // package defines it). Bundle enforces this here, where versions are
 // authored, so a malformed version never reaches a channel at all.
-func Bundle(vmlinuz, systemImage, bootArchive, cli, bootMenu, grubBoot, grubCore, licenses, channelDir, version string, components []machine.ReleaseComponent, out io.Writer) error {
+func Bundle(vmlinuz, systemImage, bootArchive, microcode, cli, bootMenu, grubBoot, grubCore, licenses, channelDir, version string, components []machine.ReleaseComponent, out io.Writer) error {
 	if err := api.ValidVersion(version); err != nil {
 		return err
 	}
@@ -72,6 +77,7 @@ func Bundle(vmlinuz, systemImage, bootArchive, cli, bootMenu, grubBoot, grubCore
 		{vmlinuz, "vmlinuz"},
 		{systemImage, "liken.sqfs"},
 		{bootArchive, "boot.cpio"},
+		{microcode, "microcode.cpio"},
 		{cli, "liken"},
 		{bootMenu, "systemd-bootx64.efi"},
 		{grubBoot, "grub-boot.img"},

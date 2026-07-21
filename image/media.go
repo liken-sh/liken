@@ -6,13 +6,16 @@ package image
 // An install boot is a small one. The installer is init itself, and
 // it never needs the running system, only the manifests that say how
 // to partition, and the payload to copy. So the install image is
-// three cpio archives concatenated: the release's boot archive
+// four cpio archives concatenated: the release's microcode early
+// cpio first (the kernel scans the very start of its initrd for
+// microcode, and an install boot is a full kernel boot that deserves
+// current microcode like any other), then the boot archive
 // (boot.cpio: init and the early boot's modules), the deployment
 // layer (the manifests whose storage specs drive the partitioning),
 // and a wrapper carrying the release payload at
 // /usr/share/liken/release. The kernel's initramfs unpacker
 // processes concatenated archives in order into one filesystem, the
-// same mechanism the machine's boot entries use to join their two
+// same mechanism the machine's boot entries use to join their
 // halves from the slot.
 //
 // The payload is the slot layout, exactly: every artifact the release
@@ -63,16 +66,20 @@ func Media(releaseDir, layerPath, out string, log io.Writer) error {
 	}
 	defer f.Close()
 
-	// This writes the boot archive first, then the layer, so the
+	// This writes the microcode early cpio first (it must lead the
+	// whole initrd), then the boot archive, then the layer, so the
 	// layer's entries override at unpack.
-	generic, err := os.Open(filepath.Join(releaseDir, "boot.cpio"))
-	if err != nil {
-		return err
-	}
-	_, err = io.Copy(f, generic)
-	generic.Close()
-	if err != nil {
-		return err
+	for _, name := range []string{microcodeArtifact, "boot.cpio"} {
+		part, err := os.Open(filepath.Join(releaseDir, name))
+		if err != nil {
+			return fmt.Errorf("release %s carries no %s; use a newer release",
+				release.Metadata.Name, name)
+		}
+		_, err = io.Copy(f, part)
+		part.Close()
+		if err != nil {
+			return err
+		}
 	}
 	if _, err := f.Write(layer); err != nil {
 		return err

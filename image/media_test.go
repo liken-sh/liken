@@ -37,14 +37,15 @@ func releaseFixtureWith(t *testing.T, files map[string]string) string {
 	return dir
 }
 
-// releaseFixture is the media tests' four-artifact release.
+// releaseFixture is the media tests' five-artifact release.
 func releaseFixture(t *testing.T) string {
 	t.Helper()
 	return releaseFixtureWith(t, map[string]string{
-		"vmlinuz":    "kernel bytes",
-		"liken.sqfs": "system image bytes",
-		"boot.cpio":  "boot archive bytes",
-		"liken":      "toolkit bytes",
+		"vmlinuz":        "kernel bytes",
+		"liken.sqfs":     "system image bytes",
+		"boot.cpio":      "boot archive bytes",
+		"microcode.cpio": "early microcode bytes",
+		"liken":          "toolkit bytes",
 	})
 }
 
@@ -78,12 +79,15 @@ func TestMediaLeadsWithTheComposedSystem(t *testing.T) {
 	layerPath := layerFixture(t)
 	raw := buildMedia(t, releaseDir, layerPath)
 
-	// The install boot runs from the boot archive and the layer, in
-	// override order, ahead of the payload wrapper. The system image
-	// travels only inside the payload.
-	composed := append([]byte("boot archive bytes"), []byte("deployment layer bytes")...)
+	// The install boot runs from the microcode early cpio, the boot
+	// archive, and the layer, in that order, ahead of the payload
+	// wrapper. Microcode leads because the kernel scans the start of
+	// its initrd for it. The system image travels only inside the
+	// payload.
+	composed := append([]byte("early microcode bytes"), []byte("boot archive bytes")...)
+	composed = append(composed, []byte("deployment layer bytes")...)
 	if !bytes.HasPrefix(raw, composed) {
-		t.Error("the image must begin with the boot archive followed by the layer")
+		t.Error("the image must begin with microcode, the boot archive, and the layer, in order")
 	}
 }
 
@@ -92,7 +96,7 @@ func TestMediaCarriesTheReleasePayload(t *testing.T) {
 	layerPath := layerFixture(t)
 	raw := buildMedia(t, releaseDir, layerPath)
 
-	wrapper := raw[len("boot archive bytes")+len("deployment layer bytes"):]
+	wrapper := raw[len("early microcode bytes")+len("boot archive bytes")+len("deployment layer bytes"):]
 	files := map[string][]byte{}
 	for _, e := range readArchive(t, wrapper) {
 		if e.mode&0o170000 == 0o100000 {
@@ -109,6 +113,7 @@ func TestMediaCarriesTheReleasePayload(t *testing.T) {
 		"vmlinuz":                "kernel bytes",
 		"liken.sqfs":             "system image bytes",
 		"boot.cpio":              "boot archive bytes",
+		"microcode.cpio":         "early microcode bytes",
 		"liken":                  "toolkit bytes",
 		"release.yaml":           string(document),
 		machine.LayerName:        "deployment layer bytes",
@@ -130,7 +135,7 @@ func TestMediaSidecarVouchesForTheLayer(t *testing.T) {
 	layerPath := layerFixture(t)
 	raw := buildMedia(t, releaseDir, layerPath)
 
-	wrapper := raw[len("boot archive bytes")+len("deployment layer bytes"):]
+	wrapper := raw[len("early microcode bytes")+len("boot archive bytes")+len("deployment layer bytes"):]
 	var sidecar []byte
 	for _, e := range readArchive(t, wrapper) {
 		if strings.HasSuffix(e.name, machine.LayerSidecarName) {

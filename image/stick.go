@@ -41,6 +41,10 @@ import (
 // bootMenuArtifact is systemd-boot's canonical name in a release.
 const bootMenuArtifact = "systemd-bootx64.efi"
 
+// microcodeArtifact is the CPU microcode early cpio's canonical name
+// in a release. Every boot's initrd list leads with it.
+const microcodeArtifact = "microcode.cpio"
+
 // Stick builds the install image. releaseDir is a downloaded release
 // (artifacts beside their release.yaml), layerPath is the
 // deployment's layer, and out is the disk image to write. consoles
@@ -53,11 +57,13 @@ func Stick(releaseDir, layerPath, out string, consoles []string, log io.Writer) 
 	if err != nil {
 		return err
 	}
-	if !slices.ContainsFunc(release.Artifacts, func(a machine.ReleaseArtifact) bool {
-		return a.Name == bootMenuArtifact
-	}) {
-		return fmt.Errorf("release %s carries no %s; it predates install sticks — use a newer release",
-			release.Metadata.Name, bootMenuArtifact)
+	for _, required := range []string{bootMenuArtifact, microcodeArtifact} {
+		if !slices.ContainsFunc(release.Artifacts, func(a machine.ReleaseArtifact) bool {
+			return a.Name == required
+		}) {
+			return fmt.Errorf("release %s carries no %s; use a newer release",
+				release.Metadata.Name, required)
+		}
 	}
 
 	layer, err := os.ReadFile(layerPath)
@@ -186,6 +192,9 @@ func Stick(releaseDir, layerPath, out string, consoles []string, log io.Writer) 
 	if err := copyIn("vmlinuz", filepath.Join(releaseDir, "vmlinuz")); err != nil {
 		return err
 	}
+	if err := copyIn(microcodeArtifact, filepath.Join(releaseDir, microcodeArtifact)); err != nil {
+		return err
+	}
 	if err := copyIn("boot.cpio", filepath.Join(releaseDir, "boot.cpio")); err != nil {
 		return err
 	}
@@ -235,14 +244,15 @@ timeout menu-force
 }
 
 // entryText is one machine's menu entry, in systemd-boot's Boot
-// Loader Specification form. The three initrd lines concatenate in
-// order. This is the same composition an installed machine gets from
-// the two initrd= parameters in its boot entries, plus the
-// installer's payload. The sort-key matters more than it looks.
-// Without one, systemd-boot orders entries the way it orders
-// kernels, newest first, which puts node-5 at the top of the menu.
-// Sort-keys sort in ascending order, so the machines read in their
-// natural order instead.
+// Loader Specification form. The four initrd lines concatenate in
+// order, microcode first because the kernel scans the very start of
+// its initrd for microcode. This is the same composition an
+// installed machine gets from the three initrd= parameters in its
+// boot entries, plus the installer's payload. The sort-key matters
+// more than it looks. Without one, systemd-boot orders entries the
+// way it orders kernels, newest first, which puts node-5 at the top
+// of the menu. Sort-keys sort in ascending order, so the machines
+// read in their natural order instead.
 func entryText(name string, consoles []string) []byte {
 	options := []string{"rdinit=/liken", "liken.machine=" + name, "liken.install"}
 	for _, c := range consoles {
@@ -253,6 +263,7 @@ func entryText(name string, consoles []string) []byte {
 title install as %s
 sort-key %s
 linux /vmlinuz
+initrd /microcode.cpio
 initrd /boot.cpio
 initrd /%s
 initrd /payload.cpio

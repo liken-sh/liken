@@ -75,22 +75,27 @@ set fallback=1
 
 `
 	// The two entries differ only in which slot variable they read.
-	// Each mirrors the UEFI entry's command line: the kernel and both
-	// initrds from the slot found by its label, liken.slot= to tell
-	// the booted system which half of the blue-green pair it is on,
-	// and panic=10 so that a panicking trial resets into the fallback
-	// instead of hanging.
+	// Each mirrors the UEFI entry's command line: the kernel and its
+	// three initrds from the slot found by its label, liken.slot= to
+	// tell the booted system which half of the blue-green pair it is
+	// on, and panic=10 so that a panicking trial resets into the
+	// fallback instead of hanging.
 	kernelArgs := grubKernelArgs(machineName, consoles)
 	cfg += grubMenuEntry("liken (chosen slot)", "$slot", kernelArgs)
 	cfg += grubMenuEntry("liken (default slot)", "$default_slot", kernelArgs)
 	return cfg
 }
 
+// grubMenuEntry writes one slot's entry. GRUB's initrd directive
+// takes a space-separated list and concatenates the files in order,
+// so the microcode early cpio leads, the same order the UEFI entry's
+// initrd= lines declare and for the same reason: the kernel scans
+// the very start of its initrd for microcode.
 func grubMenuEntry(title, slotExpr, kernelArgs string) string {
 	return "menuentry '" + title + "' {\n" +
 		"    search --no-floppy --label LIKEN-SYS-" + slotExpr + " --set=root\n" +
 		"    linux /vmlinuz " + kernelArgs + " liken.slot=" + slotExpr + " panic=10\n" +
-		"    initrd /boot.cpio /" + machine.LayerName + "\n" +
+		"    initrd /microcode.cpio /boot.cpio /" + machine.LayerName + "\n" +
 		"}\n"
 }
 

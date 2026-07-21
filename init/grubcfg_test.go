@@ -30,7 +30,7 @@ func TestGRUBConfigCarriesTheChoreography(t *testing.T) {
 		"search --no-floppy --label LIKEN-SYS-$default_slot --set=root",
 		"liken.slot=$slot",
 		"liken.slot=$default_slot",
-		"initrd /boot.cpio /deployment.cpio",
+		"initrd /microcode.cpio /boot.cpio /deployment.cpio",
 	} {
 		if !strings.Contains(cfg, want) {
 			t.Errorf("the config must contain %q", want)

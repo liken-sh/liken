@@ -31,13 +31,16 @@
 # Because of this check, a release cannot silently ship binaries
 # whose sources are not mirrored.
 #
-# Two components need no mirror. k3s uses the Apache-2.0 license,
+# Three components need no mirror. k3s uses the Apache-2.0 license,
 # which requires notices, not source, but its release page carries
 # the source anyway. The GPL-licensed userland embedded inside the
 # k3s binary is built by the same k3s-root recipe mirrored under
 # xtables/. The CA bundle is its own source: the PEM file is the
 # preferred form for editing it, so the mirror is a copy of the
-# artifact itself.
+# artifact itself. CPU microcode has no source form at all: the
+# vendors publish opaque binary updates whose licenses permit
+# redistribution and forbid modification, so notices are the whole
+# obligation (licensing/NOTICES.md carries them).
 #
 # Usage:
 #   licensing/sources.sh    mirror the sources for the pinned versions

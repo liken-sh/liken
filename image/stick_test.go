@@ -25,6 +25,7 @@ func stickFixture(t *testing.T, consoles []string) (string, *disks.FATVolume) {
 		"vmlinuz":             "kernel bytes",
 		"liken.sqfs":          "system image bytes",
 		"boot.cpio":           "boot archive bytes",
+		"microcode.cpio":      "early microcode bytes",
 		"liken":               "toolkit bytes",
 		"systemd-bootx64.efi": "boot menu program bytes",
 	})
@@ -99,6 +100,7 @@ func TestStickListsEveryMachine(t *testing.T) {
 			"title install as " + name,
 			"sort-key " + name,
 			"linux /vmlinuz",
+			"initrd /microcode.cpio",
 			"initrd /boot.cpio",
 			"initrd /deployment.cpio",
 			"initrd /payload.cpio",
@@ -133,6 +135,9 @@ func TestStickCarriesTheBootFilesAndPayload(t *testing.T) {
 	}
 	if got, err := v.ReadFile("boot.cpio"); err != nil || string(got) != "boot archive bytes" {
 		t.Errorf("boot.cpio: %v", err)
+	}
+	if got, err := v.ReadFile("microcode.cpio"); err != nil || string(got) != "early microcode bytes" {
+		t.Errorf("microcode.cpio: %v", err)
 	}
 
 	layer, err := v.ReadFile(machine.LayerName)
@@ -173,19 +178,29 @@ func TestStickCarriesTheBootFilesAndPayload(t *testing.T) {
 	}
 }
 
-func TestStickRefusesAReleaseWithoutTheMenu(t *testing.T) {
-	releaseDir := releaseFixtureWith(t, map[string]string{
-		"vmlinuz":    "kernel bytes",
-		"liken.sqfs": "system image bytes",
-		"liken":      "toolkit bytes",
-	})
-	layer := filepath.Join(t.TempDir(), machine.LayerName)
-	if err := os.WriteFile(layer, mintedLayer(t, "node-1"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	err := Stick(releaseDir, layer, filepath.Join(t.TempDir(), "out.img"), nil, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "predates install sticks") {
-		t.Errorf("a release without systemd-boot must be refused by name: %v", err)
+func TestStickRefusesAnIncompleteRelease(t *testing.T) {
+	// A release from before install sticks (no menu program) or from
+	// before early microcode (no microcode.cpio) must be refused by
+	// the name of what it lacks.
+	for _, missing := range []string{"systemd-bootx64.efi", "microcode.cpio"} {
+		files := map[string]string{
+			"vmlinuz":             "kernel bytes",
+			"liken.sqfs":          "system image bytes",
+			"boot.cpio":           "boot archive bytes",
+			"microcode.cpio":      "early microcode bytes",
+			"liken":               "toolkit bytes",
+			"systemd-bootx64.efi": "boot menu program bytes",
+		}
+		delete(files, missing)
+		releaseDir := releaseFixtureWith(t, files)
+		layer := filepath.Join(t.TempDir(), machine.LayerName)
+		if err := os.WriteFile(layer, mintedLayer(t, "node-1"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		err := Stick(releaseDir, layer, filepath.Join(t.TempDir(), "out.img"), nil, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), missing) {
+			t.Errorf("a release without %s must be refused by name: %v", missing, err)
+		}
 	}
 }
 
@@ -194,6 +209,7 @@ func TestStickRefusesATamperedRelease(t *testing.T) {
 		"vmlinuz":             "kernel bytes",
 		"liken.sqfs":          "system image bytes",
 		"boot.cpio":           "boot archive bytes",
+		"microcode.cpio":      "early microcode bytes",
 		"liken":               "toolkit bytes",
 		"systemd-bootx64.efi": "boot menu program bytes",
 	})
@@ -214,6 +230,7 @@ func TestStickRefusesBadInputs(t *testing.T) {
 		"vmlinuz":             "kernel bytes",
 		"liken.sqfs":          "system image bytes",
 		"boot.cpio":           "boot archive bytes",
+		"microcode.cpio":      "early microcode bytes",
 		"liken":               "toolkit bytes",
 		"systemd-bootx64.efi": "boot menu program bytes",
 	})

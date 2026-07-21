@@ -24,6 +24,7 @@ package main
 
 import (
 	"os"
+	"strings"
 
 	"sigs.k8s.io/yaml"
 
@@ -36,6 +37,29 @@ import (
 // a fact about the image, not about any deployment of it. This is a
 // variable so tests can override it.
 var componentsPath = "/usr/share/liken/components.yaml"
+
+// cpuinfoPath is where the kernel reports each CPU's state. This is
+// a variable so tests can override it.
+var cpuinfoPath = "/proc/cpuinfo"
+
+// microcodeRevision reads the running CPUs' microcode revision, for
+// example "0x28". Every core reports the same value once the early
+// loader has run, so the first microcode line answers for the
+// machine. An architecture or hypervisor that reports none leaves
+// the fact empty, and the status omits it.
+func microcodeRevision(path string) string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	for line := range strings.SplitSeq(string(raw), "\n") {
+		key, value, found := strings.Cut(line, ":")
+		if found && strings.TrimSpace(key) == "microcode" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
 
 // applyComponentFacts folds the record into the version block. It
 // fills only the fields that no runtime probe owns.
@@ -70,6 +94,8 @@ func applyComponentFacts(v *machine.VersionStatus) {
 			v.Hwdata = c.Version
 		case "linux-firmware":
 			v.LinuxFirmware = c.Version
+		case "microcode":
+			v.Microcode = c.Version
 		}
 	}
 }

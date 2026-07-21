@@ -138,7 +138,7 @@ func TestWriteSlotBootEntry(t *testing.T) {
 	if option.filePath != `\vmlinuz` {
 		t.Errorf("file path: got %q", option.filePath)
 	}
-	wantArgs := `console=ttyS0 rdinit=/liken initrd=\boot.cpio initrd=\deployment.cpio liken.machine=node-1 liken.slot=A panic=10`
+	wantArgs := `console=ttyS0 rdinit=/liken initrd=\microcode.cpio initrd=\boot.cpio initrd=\deployment.cpio liken.machine=node-1 liken.slot=A panic=10`
 	if !bytes.Equal(option.optionalData, encodeUTF16Z(wantArgs)) {
 		t.Errorf("the baked command line is assembled from scratch: % x", option.optionalData)
 	}

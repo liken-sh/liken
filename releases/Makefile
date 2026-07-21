@@ -92,6 +92,7 @@ SYSTEMDBOOT_VERSION := $(strip $(file <../systemd-boot/VERSION))
 GRUB_VERSION := $(strip $(file <../grub/VERSION))
 HWDATA_VERSION := $(strip $(file <../hwdata/VERSION))
 LINUXFIRMWARE_VERSION := $(strip $(file <../linux-firmware/VERSION))
+MICROCODE_VERSION := $(strip $(file <../microcode/VERSION))
 
 # This is the version-stamped build: every liken component, rebuilt
 # under VERSION into build/<version>/, generic image included. This
@@ -127,6 +128,7 @@ release: build
 		../kernel/dist/$(KERNEL_VERSION)/vmlinuz \
 		$(BUILD)/generic/liken.sqfs \
 		$(BUILD)/generic/boot.cpio \
+		../microcode/dist/$(MICROCODE_VERSION)/microcode.cpio \
 		$(BUILD)/cli/liken \
 		../systemd-boot/dist/$(SYSTEMDBOOT_VERSION)/systemd-bootx64.efi \
 		../grub/dist/$(GRUB_VERSION)/grub-boot.img \
@@ -143,7 +145,8 @@ release: build
 		systemd-boot=$(SYSTEMDBOOT_VERSION) \
 		grub=$(GRUB_VERSION) \
 		hwdata=$(HWDATA_VERSION) \
-		linux-firmware=$(LINUXFIRMWARE_VERSION)
+		linux-firmware=$(LINUXFIRMWARE_VERSION) \
+		microcode=$(MICROCODE_VERSION)
 
 # This serves the channel over HTTP: the lab's release server, which
 # stands in for the website. The dev cluster's guests reach it at
