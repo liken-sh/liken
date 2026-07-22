@@ -55,7 +55,7 @@ from.
 
 Edit `mycluster/cluster.yaml`:
 
-* Set [`spec.origin`](/docs/reference/cluster/#spec) to `adopted`.
+* Set [`spec.origin`](/docs/reference/cluster/#spec) to `Adopted`.
 * Set `spec.endpoint` to the existing cluster's join URL.
 
 An adopted cluster's datastore already exists. Every `liken` leader
@@ -88,7 +88,7 @@ edit it to a `liken` leader's address before you remove that server.
 ## 6. Promote the cluster
 
 After the last foreign member is gone, edit the Cluster resource and
-set `spec.origin` to `founded`:
+set `spec.origin` to `Founded`:
 
     kubectl edit cluster
 

@@ -110,7 +110,7 @@ func TestLeaderJoinConfigFallsBackToTheEndpoint(t *testing.T) {
 
 // adoptedCluster is an HA cluster whose datastore liken did not
 // create. The endpoint points at the existing (foreign) control
-// plane, and origin: adopted says that no leader may initialize a
+// plane, and origin: Adopted says that no leader may initialize a
 // new datastore.
 func adoptedCluster() *cluster.Cluster {
 	c := haCluster()

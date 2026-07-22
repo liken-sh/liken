@@ -18,9 +18,12 @@ every release. The cluster also watches the channel for you:
     kubectl get clusters
 
 The AVAILABLE column shows the latest version the channel announces.
-To make the cluster poll the channel now, set
-[`spec.releases.check`](/docs/reference/cluster/#specreleases) to any
-new value.
+To make the cluster poll the channel now, set the
+`liken.sh/check-releases` annotation to any new value:
+
+    kubectl annotate cluster --all --overwrite liken.sh/check-releases="$(date -Is)"
+
+The annotation's content means nothing; the change is the request.
 
 An upgrade needs two facts: the version, and the digest of that
 release's `release.yaml`. The release's page on GitHub publishes

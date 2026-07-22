@@ -35,7 +35,7 @@ kind: Cluster
 metadata:
   name: lab
 spec:
-  origin: adopted
+  origin: Adopted
   leaders: [node-1]
   endpoint: https://10.10.0.1:6443
   network:

@@ -595,6 +595,18 @@ spec:
                     this machine's heartbeat lease (in liken-system)
                     goes silent, because a dead machine cannot report
                     its own failure.
+                observedGeneration:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                  description: >-
+                    The metadata.generation of the spec this status
+                    judged, stamped by the operator on every pass.
+                    Each condition carries the same stamp, but a
+                    client that only asks "has the operator seen my
+                    edit yet" reads it here, at the top of status,
+                    where Kubernetes controllers conventionally
+                    publish it.
                 role:
                   type: string
                   description: >-

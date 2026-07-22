@@ -115,7 +115,8 @@ func sweep(c *kubernetes.Client, name string, poller *channelPoller) {
 		fmt.Printf("reading cluster %s: %v\n", name, err)
 		return
 	}
-	poller.Observe(clusterDoc.Spec.Releases, time.Now())
+	poller.Observe(clusterDoc.Spec.Releases,
+		clusterDoc.Metadata.Annotations[cluster.CheckReleasesAnnotation], time.Now())
 	sweepFleet(c, clusterDoc, poller.Available(), time.Now())
 }
 

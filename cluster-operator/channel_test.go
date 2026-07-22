@@ -70,7 +70,7 @@ func TestPollerLearnsTheChannelsLatest(t *testing.T) {
 	var calls atomic.Int64
 	p := pollerWith("2026.07.13-002", &calls)
 
-	p.Observe(channelSpec, time.Now())
+	p.Observe(channelSpec, "", time.Now())
 	awaitAvailable(t, p, "2026.07.13-002")
 }
 
@@ -81,10 +81,10 @@ func TestPollerIsLazyBetweenSweeps(t *testing.T) {
 	// Sweeps run every ten seconds. The channel is asked once per
 	// interval, not once per sweep.
 	now := time.Now()
-	p.Observe(channelSpec, now)
+	p.Observe(channelSpec, "", now)
 	awaitAvailable(t, p, "2026.07.13-002")
-	p.Observe(channelSpec, now.Add(10*time.Second))
-	p.Observe(channelSpec, now.Add(20*time.Second))
+	p.Observe(channelSpec, "", now.Add(10*time.Second))
+	p.Observe(channelSpec, "", now.Add(20*time.Second))
 	if calls.Load() != 1 {
 		t.Errorf("fetches: %d, want 1", calls.Load())
 	}
@@ -95,30 +95,28 @@ func TestPollerReasksWhenTheAnswerAgesOut(t *testing.T) {
 	p := pollerWith("2026.07.13-002", &calls)
 
 	now := time.Now()
-	p.Observe(channelSpec, now)
+	p.Observe(channelSpec, "", now)
 	awaitAvailable(t, p, "2026.07.13-002")
-	p.Observe(channelSpec, now.Add(channelPollInterval))
+	p.Observe(channelSpec, "", now.Add(channelPollInterval))
 	awaitCalls(t, &calls, 2)
 	awaitAvailable(t, p, "2026.07.13-002")
 }
 
-func TestCheckEditForcesAnImmediatePoll(t *testing.T) {
+func TestCheckAnnotationForcesAnImmediatePoll(t *testing.T) {
 	var calls atomic.Int64
 	p := pollerWith("2026.07.13-002", &calls)
 
 	now := time.Now()
-	p.Observe(channelSpec, now)
+	p.Observe(channelSpec, "", now)
 	awaitAvailable(t, p, "2026.07.13-002")
 
-	// One sweep later, the spec carries a new check value. The poll
-	// happens now, not at the next interval.
-	nudged := channelSpec
-	nudged.Check = "again please"
-	p.Observe(nudged, now.Add(10*time.Second))
+	// One sweep later, the Cluster carries a new check-releases
+	// annotation. The poll happens now, not at the next interval.
+	p.Observe(channelSpec, "again please", now.Add(10*time.Second))
 	awaitCalls(t, &calls, 2)
 
-	// The same check value on later sweeps is not a new signal.
-	p.Observe(nudged, now.Add(20*time.Second))
+	// The same annotation on later sweeps is not a new signal.
+	p.Observe(channelSpec, "again please", now.Add(20*time.Second))
 	if calls.Load() != 2 {
 		t.Errorf("fetches after a repeated check: %d, want 2", calls.Load())
 	}
@@ -139,11 +137,11 @@ func TestANewSourceDropsTheOldAnswer(t *testing.T) {
 	}
 
 	now := time.Now()
-	p.Observe(channelSpec, now)
+	p.Observe(channelSpec, "", now)
 	awaitAvailable(t, p, "2026.07.13-002")
 
 	moved := cluster.ClusterReleasesSpec{Source: "https://elsewhere.example"}
-	p.Observe(moved, now.Add(10*time.Second))
+	p.Observe(moved, "", now.Add(10*time.Second))
 	awaitAvailable(t, p, "")
 }
 
@@ -158,9 +156,9 @@ func TestAFailedPollKeepsTheLastAnswer(t *testing.T) {
 	}
 
 	now := time.Now()
-	p.Observe(channelSpec, now)
+	p.Observe(channelSpec, "", now)
 	awaitAvailable(t, p, "2026.07.13-002")
-	p.Observe(channelSpec, now.Add(channelPollInterval))
+	p.Observe(channelSpec, "", now.Add(channelPollInterval))
 	// The failed poll must finish and leave the answer unchanged.
 	awaitCalls(t, &calls, 2)
 	awaitAvailable(t, p, "2026.07.13-002")
@@ -171,12 +169,12 @@ func TestNoSourceMeansNothingAvailable(t *testing.T) {
 	p := pollerWith("2026.07.13-002", &calls)
 
 	now := time.Now()
-	p.Observe(channelSpec, now)
+	p.Observe(channelSpec, "", now)
 	awaitAvailable(t, p, "2026.07.13-002")
 
 	// The channel is removed from the spec entirely. The stale
 	// answer goes with it, and the poller fetches nothing.
-	p.Observe(cluster.ClusterReleasesSpec{}, now.Add(10*time.Second))
+	p.Observe(cluster.ClusterReleasesSpec{}, "", now.Add(10*time.Second))
 	awaitAvailable(t, p, "")
 	if calls.Load() != 1 {
 		t.Errorf("fetches: %d, want 1", calls.Load())

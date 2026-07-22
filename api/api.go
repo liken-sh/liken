@@ -26,12 +26,12 @@
 // is the YAML converter. Importing apimachinery for two structs
 // would add its whole dependency tree and release cadence. The
 // narrow copies also do real work. metav1.ObjectMeta has about
-// twenty-five fields, and liken uses three of them. Every liken
+// twenty-five fields, and liken uses four of them. Every liken
 // document parses strictly, so liken refuses metadata it would
-// otherwise ignore silently: labels, annotations, and owner
-// references in a hand-written manifest. The wire format stays
-// compatible with the Kubernetes convention. The Go types represent
-// only the fields liken uses.
+// otherwise ignore silently: labels and owner references in a
+// hand-written manifest. The wire format stays compatible with the
+// Kubernetes convention. The Go types represent only the fields
+// liken uses.
 package api
 
 // APIVersion is the full group/version string every liken document
@@ -47,10 +47,22 @@ const APIVersion = "liken.sh/v1alpha1"
 // changes to the spec. The API server increases generation on spec
 // writes and leaves it unchanged on status writes. This lets a
 // condition record which version of the spec it judged.
+//
+// Annotations carry the signals that are not desired state. A spec
+// declares what should hold, and a controller works until it holds.
+// A request such as "poll the channel now" does not fit that
+// contract: it asks for one action, not a standing state. Kubernetes
+// puts these signals in annotations (kubectl writes restartedAt to
+// request a Deployment rollout the same way), and liken follows.
+// The operators that render canonical documents build their metadata
+// fresh, from the name alone, so an annotation can never change a
+// staged document's hash, and an annotation edit can never reboot a
+// machine.
 type ObjectMeta struct {
-	Name            string `json:"name"`
-	ResourceVersion string `json:"resourceVersion,omitempty"`
-	Generation      int64  `json:"generation,omitempty"`
+	Name            string            `json:"name"`
+	ResourceVersion string            `json:"resourceVersion,omitempty"`
+	Generation      int64             `json:"generation,omitempty"`
+	Annotations     map[string]string `json:"annotations,omitempty"`
 }
 
 // Phase summarizes a document's state in one word. Go models a

@@ -24,6 +24,17 @@ type MachineStatus struct {
 	// vocabulary.
 	Phase api.Phase `json:"phase,omitempty"`
 
+	// ObservedGeneration is the metadata.generation of the spec that
+	// this status judged, stamped by the operator on every pass. The
+	// conditions each carry the same stamp, but a client that only
+	// asks "has the operator seen my edit yet" should not have to
+	// parse conditions to learn it. Kubernetes controllers publish
+	// this field at the top of status for exactly that question.
+	// Init leaves this field empty in the facts, because init runs
+	// before the cluster exists and a generation is the API server's
+	// number to hand out.
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
 	// Version reports what this machine runs. It does not include the
 	// k3s and kubelet versions, because Kubernetes already reports
 	// them on the built-in Node object. Version covers the layer

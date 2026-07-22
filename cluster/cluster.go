@@ -72,11 +72,14 @@ type Cluster struct {
 // adopted cluster's founder joins like every other machine, because
 // initializing a second datastore next to a live one would split the
 // cluster in two.
+// The values are CamelCase because Kubernetes API constants are
+// CamelCase, the same convention the phase and policy vocabularies
+// follow.
 type ClusterOrigin string
 
 const (
-	OriginFounded ClusterOrigin = "founded"
-	OriginAdopted ClusterOrigin = "adopted"
+	OriginFounded ClusterOrigin = "Founded"
+	OriginAdopted ClusterOrigin = "Adopted"
 )
 
 // ClusterStatus is what a reader can observe about the cluster as a
@@ -96,10 +99,21 @@ const (
 // server down with it, so nobody is left to write the status. When
 // quorum is lost, the symptom is a status that stops updating.
 type ClusterStatus struct {
-	Phase      api.Phase             `json:"phase,omitempty"`
-	Machines   MachineTally          `json:"machines,omitzero"`
-	Releases   ClusterReleasesStatus `json:"releases,omitzero"`
-	Conditions []api.Condition       `json:"conditions,omitempty"`
+	Phase    api.Phase             `json:"phase,omitempty"`
+	Machines MachineTally          `json:"machines,omitzero"`
+	Releases ClusterReleasesStatus `json:"releases,omitzero"`
+
+	// ObservedGeneration is the metadata.generation of the spec that
+	// this status judged, stamped by the sweep on every write. The
+	// conditions each carry the same stamp, but a client that only
+	// asks "has any controller seen my edit yet" should not have to
+	// parse conditions to learn it. Kubernetes controllers publish
+	// this field at the top of status for exactly that question, and
+	// `kubectl rollout status` and the common wait libraries read it
+	// there.
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	Conditions []api.Condition `json:"conditions,omitempty"`
 }
 
 // ClusterReleasesStatus is what the sweep observes about releases.
@@ -129,12 +143,12 @@ type MachineTally struct {
 }
 
 type ClusterSpec struct {
-	// Origin is how the cluster's datastore came to exist: founded
-	// (the default when unset) or adopted. An adopted cluster is one
+	// Origin is how the cluster's datastore came to exist: Founded
+	// (the default when unset) or Adopted. An adopted cluster is one
 	// liken is migrating into, rather than one it created. Its
 	// machines join an existing datastore through the endpoint, and
 	// no leader ever initializes a new one. The one legal edit is
-	// the promotion, adopted to founded, made once the last foreign
+	// the promotion, Adopted to Founded, made once the last foreign
 	// member is gone. After that edit, a rebuild from scratch
 	// behaves like any founded cluster, with the founder running
 	// cluster-init.
@@ -253,15 +267,18 @@ type ClusterReleasesSpec struct {
 	// the document names the artifacts, and the system checks every
 	// downloaded byte against one or the other.
 	Catalog []ReleaseCatalogEntry `json:"catalog,omitempty"`
-
-	// Check is a signal to poll the channel now. The fleet observer
-	// polls the channel's root document on a lazy interval. Any
-	// change to this value, such as a timestamp or a counter (the
-	// content itself means nothing), makes the very next sweep poll
-	// immediately. The edit is the request, the same declarative
-	// shape as a Deployment's restartedAt annotation.
-	Check string `json:"check,omitempty"`
 }
+
+// CheckReleasesAnnotation is the annotation that requests an
+// immediate channel poll. The fleet observer polls the channel's
+// root document on a lazy interval. Setting this annotation on the
+// Cluster to any new value, such as a timestamp (the content itself
+// means nothing), makes the very next sweep poll immediately. This
+// is an annotation, not a spec field, because it asks for one
+// action rather than declaring a standing state. kubectl requests a
+// Deployment rollout with the restartedAt annotation in the same
+// shape.
+const CheckReleasesAnnotation = "liken.sh/check-releases"
 
 // ReleaseCatalogEntry names one release: its version and the digest
 // of its release document, as "sha256:<64 hex digits>".

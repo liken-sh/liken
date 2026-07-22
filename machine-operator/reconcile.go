@@ -362,7 +362,10 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	// verdict on the current spec apart from a verdict on a spec
 	// that has since been edited. The conductor's grant keeps its
 	// own generation stamp, because it is the conductor's verdict,
-	// and this writer must not overwrite it.
+	// and this writer must not overwrite it. The status carries the
+	// same stamp at its top, where clients that only ask "has the
+	// operator seen my edit yet" expect to find it.
+	status.ObservedGeneration = m.Metadata.Generation
 	for i := range status.Conditions {
 		if status.Conditions[i].Type == machine.RebootApprovedCondition {
 			continue

@@ -83,7 +83,7 @@ var (
 // special position, and once the cluster is up, it is an ordinary
 // member among an odd number of them.
 //
-// An adopted cluster (spec.origin: adopted) changes one assumption:
+// An adopted cluster (spec.origin: Adopted) changes one assumption:
 // the datastore already exists, in a cluster that liken did not
 // create, and initializing a second one next to it would split the
 // cluster in two. So under adoption, every leader joins: the founder

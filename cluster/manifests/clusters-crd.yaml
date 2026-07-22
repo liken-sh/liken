@@ -119,13 +119,13 @@ spec:
                 # unconstrained. This is exactly how a document born
                 # adopted gets in.
                 - rule: >-
-                    !has(self.origin) || self.origin == 'founded' ||
-                    (has(oldSelf.origin) && oldSelf.origin == 'adopted')
+                    !has(self.origin) || self.origin == 'Founded' ||
+                    (has(oldSelf.origin) && oldSelf.origin == 'Adopted')
                   message: >-
-                    origin: adopted is declared when the cluster
+                    origin: Adopted is declared when the cluster
                     document is born, never by editing a founded
                     cluster; the only legal edit is the promotion,
-                    adopted to founded
+                    Adopted to Founded
               properties:
                 version:
                   type: string
@@ -158,7 +158,16 @@ spec:
                     and reboot into. Publishing a release must move
                     machines through downloads and sequenced reboots.
                     It must never stage a fleet-wide configuration
-                    reboot of its own.
+                    reboot of its own. The fleet observer polls the
+                    channel's root document on a lazy interval; to
+                    request an immediate poll, set the Cluster's
+                    liken.sh/check-releases annotation to any new
+                    value, such as a timestamp. The content itself
+                    means nothing: the edit is the request. This is
+                    an annotation rather than a spec field, because
+                    it asks for one action instead of declaring a
+                    standing state, the same shape kubectl uses to
+                    request a Deployment rollout.
                   properties:
                     source:
                       type: string
@@ -199,32 +208,22 @@ spec:
                             type: string
                             maxLength: 71
                             pattern: ^sha256:[0-9a-f]{64}$
-                    check:
-                      type: string
-                      maxLength: 64
-                      description: >-
-                        A signal to poll the channel now. The fleet
-                        observer polls the channel's root document
-                        (channel.yaml, which names the latest
-                        published version) on a lazy interval.
-                        Changing this value to anything new, such as
-                        a timestamp or a counter (the content itself
-                        means nothing), makes the very next sweep
-                        poll immediately. The edit is the request.
                 origin:
                   type: string
-                  enum: [founded, adopted]
+                  # CamelCase values, because Kubernetes API constants
+                  # are CamelCase, like the phases and rebootPolicy.
+                  enum: [Founded, Adopted]
                   description: >-
                     How the cluster's datastore came to exist.
-                    founded (the default when unset) means liken
+                    Founded (the default when unset) means liken
                     created it, through the founding leader's
-                    cluster-init. adopted means the datastore already
+                    cluster-init. Adopted means the datastore already
                     exists in a cluster liken did not create. Machines
                     built with that cluster's identity join it as
                     members, including the founding leader, and none
                     may initialize a new one. A deployment declares
                     adoption when the document is born. The one legal
-                    edit is the promotion, adopted to founded, made
+                    edit is the promotion, Adopted to Founded, made
                     after the last foreign member is gone. Promotion
                     changes nothing on a running fleet, because k3s
                     ignores cluster-init when the datastore already
@@ -572,6 +571,17 @@ spec:
                     the API server down with it, so nobody is left to
                     write here. When quorum is lost, the signal is
                     that this status stops updating.
+                observedGeneration:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                  description: >-
+                    The metadata.generation of the spec this status
+                    judged, stamped by the sweep on every write. Each
+                    condition carries the same stamp, but a client
+                    that only asks "has the sweep seen my edit yet"
+                    reads it here, at the top of status, where
+                    Kubernetes controllers conventionally publish it.
                 conditions:
                   type: array
                   # The same metav1.Condition schema that the
@@ -648,8 +658,8 @@ spec:
                         The latest version the release channel itself
                         announces: the channel.yaml document at
                         spec.releases.source, polled lazily by the
-                        fleet observer (spec.releases.check forces
-                        the next poll). Advisory only. It may name a
-                        version the catalog does not hold yet, and
-                        adopting it still means committing a
-                        digest-pinned catalog entry.
+                        fleet observer (the liken.sh/check-releases
+                        annotation forces the next poll). Advisory
+                        only. It may name a version the catalog does
+                        not hold yet, and adopting it still means
+                        committing a digest-pinned catalog entry.

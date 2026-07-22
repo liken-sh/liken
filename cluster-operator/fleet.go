@@ -203,12 +203,14 @@ func publishClusterStatus(c *kubernetes.Client, clusterDoc *cluster.Cluster, s f
 	if clusterDoc.Status.Machines != s.tally || clusterDoc.Status.Phase != s.phase ||
 		clusterDoc.Status.Releases.Newest != newest ||
 		clusterDoc.Status.Releases.Available != available ||
+		clusterDoc.Status.ObservedGeneration != clusterDoc.Metadata.Generation ||
 		!slices.Equal(conditions, clusterDoc.Status.Conditions) {
 		updated := *clusterDoc
 		updated.Status.Machines = s.tally
 		updated.Status.Phase = s.phase
 		updated.Status.Releases.Newest = newest
 		updated.Status.Releases.Available = available
+		updated.Status.ObservedGeneration = clusterDoc.Metadata.Generation
 		updated.Status.Conditions = conditions
 		if err := kubernetes.PublishClusterStatus(c, &updated); err != nil {
 			fmt.Printf("publishing cluster status: %v\n", err)

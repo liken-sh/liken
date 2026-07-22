@@ -15,8 +15,10 @@ package main
 // every ten seconds, but the channel changes about once a week. So
 // the poller fetches the document on a long interval instead of every
 // sweep. Two things make the poller fetch immediately: a new source,
-// or a new value in spec.releases.check. The check field is a
-// declared request to poll immediately.
+// or a new value in the Cluster's liken.sh/check-releases annotation.
+// The annotation is a declared request to poll immediately (the
+// cluster package's CheckReleasesAnnotation explains why the request
+// is an annotation and not a spec field).
 //
 // The fetch runs on its own goroutine. The machine operator's release
 // fetcher uses the same method. The sweep must keep judging the fleet
@@ -42,14 +44,14 @@ import (
 // on a human timescale, and the poll answers the question "should
 // someone think about upgrading?", not a real-time telemetry
 // question. A person who just published a release and wants the
-// answer now can edit spec.releases.check to request an immediate
-// poll.
+// answer now can set the check-releases annotation to request an
+// immediate poll.
 const channelPollInterval = 6 * time.Hour
 
 type channelPoller struct {
 	mu        sync.Mutex
 	source    string    // the channel this poller last asked
-	check     string    // the last check value this poller handled
+	check     string    // the last check-releases annotation this poller handled
 	polled    time.Time // when the last attempt started
 	inFlight  bool
 	available string // the channel's last known answer
@@ -65,10 +67,11 @@ func newChannelPoller() *channelPoller {
 }
 
 // Observe runs once per sweep. It receives the spec's current
-// releases section. It decides whether a poll is due: the source or
-// the check value changed, or the last answer is too old. If a poll
-// is due, Observe starts it in the background. Observe never blocks.
-func (p *channelPoller) Observe(releases cluster.ClusterReleasesSpec, now time.Time) {
+// releases section and the Cluster's check-releases annotation. It
+// decides whether a poll is due: the source or the annotation
+// changed, or the last answer is too old. If a poll is due, Observe
+// starts it in the background. Observe never blocks.
+func (p *channelPoller) Observe(releases cluster.ClusterReleasesSpec, check string, now time.Time) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -83,14 +86,14 @@ func (p *channelPoller) Observe(releases cluster.ClusterReleasesSpec, now time.T
 	if releases.Source != p.source {
 		// A different channel's answer does not apply here. The
 		// poller drops it and asks the new channel immediately.
-		p.source, p.check, p.available = releases.Source, releases.Check, ""
+		p.source, p.check, p.available = releases.Source, check, ""
 		p.polled = time.Time{}
-	} else if releases.Check != p.check {
+	} else if check != p.check {
 		// This is the request to poll immediately. The poller honors
 		// it once, by marking the last answer as stale right away.
 		// The last answer stays visible until the fresh answer
 		// replaces it.
-		p.check = releases.Check
+		p.check = check
 		p.polled = time.Time{}
 	}
 
