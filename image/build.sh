@@ -109,6 +109,11 @@
 #                                 trust domain), so a program pulling
 #                                 images over TLS can verify the
 #                                 server's certificate
+#   /etc/os-release               the distribution's identity file,
+#                                 written by this build so it can
+#                                 carry the version. The kubelet
+#                                 reads PRETTY_NAME from it and
+#                                 reports it as the node's osImage
 #   /etc/passwd, group,           the Unix identity files. This machine
 #     subuid, subgid              has exactly two users, root and
 #                                 nobody, and no way to log in as
@@ -164,6 +169,23 @@ mkdir -p "$root/etc/ssl/certs" "$root/bin" "$root/sbin"
 cp -r "$here/etc" "$root/"
 cp "$init_dist/liken" "$root/liken"
 cp "$here/../k3s/dist/$k3s_version/k3s" "$root/bin/k3s"
+
+# /etc/os-release is where a Linux distribution names itself. The
+# freedesktop specification defines the file, and tools across the
+# ecosystem read it to learn what system they run on. The kubelet is
+# one of them: it reads PRETTY_NAME and reports it as the node's
+# nodeInfo.osImage, the OS-IMAGE column of `kubectl get nodes -o
+# wide`. Without the file, that column reads "Unknown". The build
+# writes the file here instead of shipping it in image/etc, because
+# the identity includes the version, and only the build knows it.
+cat > "$root/etc/os-release" <<EOF
+NAME=liken
+ID=liken
+VERSION_ID=$liken_version
+PRETTY_NAME="liken $liken_version"
+HOME_URL="https://liken.sh/"
+BUG_REPORT_URL="https://github.com/liken-sh/liken/issues"
+EOF
 
 # This is the netfilter userspace: one real static binary, then a
 # symlink for each tool name. The multi-call binary reads argv[0] to
