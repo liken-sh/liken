@@ -126,11 +126,25 @@ jobs:
             echo "the site still serves ${served:-nothing}, expected $expected"
             exit 1
           }
-          curl --fail --silent https://liken.sh/ \
-            | grep -q "boots a machine straight"
-          curl --fail --silent https://liken.sh/docs/guides/install/ \
+          # The content checks name themselves before they run, so a
+          # failure's last log line says which page broke. Each curl
+          # retries all errors, because the serving node is small and
+          # a request right after a rollout can catch a transient
+          # 5xx; a wrong-content grep still fails at once, because
+          # wrong content is not transient.
+          fetch() {
+            curl --fail --silent --retry 5 --retry-delay 3 \
+              --retry-all-errors "$@"
+          }
+          echo "checking the front page"
+          fetch https://liken.sh/ | grep -q "boots a machine straight"
+          echo "checking a manual page"
+          fetch https://liken.sh/docs/guides/install/ \
             | grep -q "<title>Install a cluster"
-          curl --fail --silent --head https://liken.sh/docs/guides/install/index.md \
+          echo "checking the markdown mirror"
+          fetch --head https://liken.sh/docs/guides/install/index.md \
             | grep -qi "content-type: text/markdown"
-          curl --fail --silent https://liken.sh/sitemap.xml >/dev/null
-          curl --fail --silent https://liken.sh/llms.txt | grep -q "^# liken"
+          echo "checking the sitemap"
+          fetch https://liken.sh/sitemap.xml >/dev/null
+          echo "checking llms.txt"
+          fetch https://liken.sh/llms.txt | grep -q "^# liken"
