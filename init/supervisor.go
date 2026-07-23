@@ -222,8 +222,16 @@ func postMortem() {
 // honors a reboot intent in oneshot mode. Under QEMU's -no-reboot
 // flag, the restart is a clean exit, exactly what a bounded harness
 // run needs.
+// afterStop runs each time a restart has stopped k3s, before the
+// next start. It exists for the retractions that k3s must never
+// see happen: a janitor-teardown feature's seeded manifests are
+// removed here, in the window where k3s is down, so the addon
+// machinery never deletes the feature's objects itself
+// (retractFeatureManifests explains why that deletion would be
+// dangerous for flux).
 func superviseK3s(role api.Role, reboot <-chan machine.RebootIntent,
-	restarts <-chan machine.RestartIntent, applyRestart func(machine.RestartIntent) bool) {
+	restarts <-chan machine.RestartIntent, applyRestart func(machine.RestartIntent) bool,
+	afterStop func()) {
 	backoff := time.Second
 	for {
 		started := time.Now()
@@ -263,6 +271,7 @@ func superviseK3s(role api.Role, reboot <-chan machine.RebootIntent,
 					}
 					fmt.Println("liken: restarting k3s to apply the staged changes")
 					stopK3s(cmd.Process.Pid, died)
+					afterStop()
 					_ = cmd.Process.Release()
 					logf.Close()
 					bounced = true
@@ -299,6 +308,7 @@ func superviseK3s(role api.Role, reboot <-chan machine.RebootIntent,
 			// skip the rest of the delay, because the next start
 			// reads the changes either way.
 			_ = applyRestart(intent)
+			afterStop()
 		}
 	}
 }

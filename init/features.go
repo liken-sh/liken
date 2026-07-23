@@ -285,6 +285,15 @@ func writeInitiatorName(machineName string) error {
 	return os.WriteFile(filepath.Join(iscsiDir, "initiatorname.iscsi"), []byte(name), 0o600)
 }
 
+// renderedFeatureManifests names the files a feature's actuation
+// renders into the auto-deploy directory, beyond the manifests
+// copied verbatim from the image. Retraction must know these names,
+// because a glob over the image's manifests cannot see a rendered
+// file.
+var renderedFeatureManifests = map[string][]string{
+	cluster.FeatureFlux: {"flux-sync.yaml"},
+}
+
 // featureManifestPaths lists one feature's workload manifests as the
 // image ships them. This is the single place that spells out the
 // layout (featuresDir/<slug>/manifests/*.yaml), so seeding and

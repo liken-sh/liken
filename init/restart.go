@@ -60,6 +60,11 @@ type restartState struct {
 	creds       *machine.RegistryCredentials
 	credsSource machine.ManifestSource
 
+	// The seeded files of retracted janitor-teardown features, queued
+	// by retractFeatureManifests for removal in the window where k3s
+	// is down (removeOfflineRetractions).
+	offlineRetractions []string
+
 	writeBootConfig  func(*cluster.Cluster, *machine.Machine, []*connection) (api.Role, error)
 	actuateFeatures  func(*cluster.Cluster, string) []machine.FeatureStatus
 	renderRegistries func(*cluster.Cluster, *machine.RegistryCredentials, machine.ManifestStore, machine.ManifestSource) machine.RegistriesStatus
@@ -222,12 +227,22 @@ func (s *restartState) stagedCredentials() (*machine.RegistryCredentials, []byte
 }
 
 // retractFeatureManifests removes the seeded manifests of features
-// that the new document no longer declares. k3s still runs and
-// watches its auto-deploy directory, so it detects each removal and
-// deletes the addon itself. This is better than the boot path, where
-// the file disappears while k3s is down, and the cluster operator's
-// janitor must clean up after it. The janitor still handles exactly
-// that boot path.
+// that the new document no longer declares. For the default
+// teardown, k3s still runs and watches its auto-deploy directory,
+// so it detects each removal and deletes the addon itself. This is
+// better than the boot path, where the file disappears while k3s is
+// down, and the cluster operator's janitor must clean up after it.
+// The janitor still handles exactly that boot path.
+//
+// A janitor-teardown feature is the deliberate exception: k3s must
+// never delete its objects, so its files are only queued here, and
+// removeOfflineRetractions removes them after k3s stops. For flux,
+// the k3s cascade would delete the sync objects while their
+// controller still runs, and the engine's deletion finalizer would
+// then prune everything the repository ever applied, the fleet's
+// own documents included. The cluster operator's janitor owns that
+// teardown instead, in an order that kills the controllers first
+// (cluster-operator/janitor.go).
 func (s *restartState) retractFeatureManifests(old, new *cluster.Cluster) {
 	declared := map[string]bool{}
 	for _, slug := range new.EnabledFeatures() {
@@ -241,11 +256,37 @@ func (s *restartState) retractFeatureManifests(old, new *cluster.Cluster) {
 		if err != nil {
 			continue
 		}
+		var files []string
 		for _, manifest := range manifests {
-			seeded := filepath.Join(k3sManifestsDir, filepath.Base(manifest))
-			if err := os.Remove(seeded); err == nil {
-				fmt.Printf("liken: restart: retracted %s; k3s deletes its workload\n", filepath.Base(manifest))
+			files = append(files, filepath.Base(manifest))
+		}
+		files = append(files, renderedFeatureManifests[slug]...)
+
+		def := cluster.FeatureBySlug(slug)
+		if def != nil && def.Teardown == cluster.TeardownJanitor {
+			for _, file := range files {
+				s.offlineRetractions = append(s.offlineRetractions, filepath.Join(k3sManifestsDir, file))
+			}
+			continue
+		}
+		for _, file := range files {
+			if err := os.Remove(filepath.Join(k3sManifestsDir, file)); err == nil {
+				fmt.Printf("liken: restart: retracted %s; k3s deletes its workload\n", file)
 			}
 		}
 	}
+}
+
+// removeOfflineRetractions removes the files that
+// retractFeatureManifests queued, in the window where k3s is down.
+// The supervisor calls it right after each restart's stop. k3s never
+// sees these files disappear, so its addon machinery never deletes
+// the objects; the cluster operator's janitor owns that teardown.
+func (s *restartState) removeOfflineRetractions() {
+	for _, path := range s.offlineRetractions {
+		if err := os.Remove(path); err == nil {
+			fmt.Printf("liken: restart: retracted %s while k3s is down; the janitor tears its objects down\n", filepath.Base(path))
+		}
+	}
+	s.offlineRetractions = nil
 }

@@ -242,3 +242,55 @@ func TestRestartRetractsADroppedFeaturesManifests(t *testing.T) {
 		t.Error("the retracted feature's manifest must leave the auto-deploy directory while k3s watches")
 	}
 }
+
+// A janitor-teardown feature's files must survive the apply, while
+// k3s still watches the directory, and leave only after the stop.
+// If k3s saw the removal, it would delete the sync objects while
+// their controller still runs, and the engine's deletion finalizer
+// would prune everything the repository ever applied.
+func TestRestartRetractsFluxOnlyAfterTheStop(t *testing.T) {
+	f := newRestartFixture(t)
+
+	features := t.TempDir()
+	seeded := t.TempDir()
+	originalFeatures, originalManifests := featuresDir, k3sManifestsDir
+	featuresDir, k3sManifestsDir = features, seeded
+	t.Cleanup(func() { featuresDir, k3sManifestsDir = originalFeatures, originalManifests })
+	if err := os.MkdirAll(filepath.Join(features, "flux", "manifests"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The feature's ground rides the image; the sync objects are
+	// rendered, so retraction must know both.
+	for _, path := range []string{
+		filepath.Join(features, "flux", "manifests", "flux-system.yaml"),
+		filepath.Join(seeded, "flux-system.yaml"),
+		filepath.Join(seeded, "flux-sync.yaml"),
+	} {
+		if err := os.WriteFile(path, []byte("kind: Namespace\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	f.state.clusterDoc.Spec.Features = map[string]*cluster.FeatureConfig{
+		"flux": {"repository": "ssh://git@forge.example/fleet.git"},
+	}
+	f.stageCluster(t, func(s *cluster.ClusterSpec) {
+		s.Features = nil
+	})
+
+	if !f.state.apply(machine.RestartIntent{Reason: "retraction"}) {
+		t.Fatal("a flux retraction is restart work")
+	}
+	for _, file := range []string{"flux-system.yaml", "flux-sync.yaml"} {
+		if _, err := os.Stat(filepath.Join(seeded, file)); err != nil {
+			t.Errorf("%s must still exist while k3s watches: %v", file, err)
+		}
+	}
+
+	f.state.removeOfflineRetractions()
+	for _, file := range []string{"flux-system.yaml", "flux-sync.yaml"} {
+		if _, err := os.Stat(filepath.Join(seeded, file)); !os.IsNotExist(err) {
+			t.Errorf("%s must leave once k3s is down", file)
+		}
+	}
+}

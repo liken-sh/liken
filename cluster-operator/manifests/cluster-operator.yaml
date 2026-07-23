@@ -82,6 +82,52 @@ rules:
   - apiGroups: [apps]
     resources: [daemonsets]
     verbs: [get, list, delete]
+  # The flux janitor (janitor.go): the teardown rights for a
+  # retracted flux feature. These are standing, unlike the planter's
+  # grant, which the feature's own manifests deliver: the janitor's
+  # job begins exactly when those delivered grants disappear, so
+  # delivered rights could never clean up after the feature that
+  # delivered them. Every rule is held to exact names, and the whole
+  # set can only remove the engine, never create or read anything.
+  # The CRD and RBAC names must match the engine seed; the parity
+  # test in flux_test.go holds them to it. The sync objects also
+  # need patch, to strip their finalizers once no controller exists
+  # to honor them.
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [source-controller, kustomize-controller]
+    verbs: [get, delete]
+  - apiGroups: [""]
+    resources: [namespaces]
+    resourceNames: [flux-system]
+    verbs: [delete]
+  - apiGroups: [source.toolkit.fluxcd.io]
+    resources: [gitrepositories]
+    resourceNames: [flux-system]
+    verbs: [patch, delete]
+  - apiGroups: [kustomize.toolkit.fluxcd.io]
+    resources: [kustomizations]
+    resourceNames: [flux-system]
+    verbs: [patch, delete]
+  - apiGroups: [apiextensions.k8s.io]
+    resources: [customresourcedefinitions]
+    resourceNames:
+      - buckets.source.toolkit.fluxcd.io
+      - externalartifacts.source.toolkit.fluxcd.io
+      - gitrepositories.source.toolkit.fluxcd.io
+      - helmcharts.source.toolkit.fluxcd.io
+      - helmrepositories.source.toolkit.fluxcd.io
+      - ocirepositories.source.toolkit.fluxcd.io
+      - kustomizations.kustomize.toolkit.fluxcd.io
+    verbs: [delete]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [clusterroles]
+    resourceNames: [crd-controller-flux-system, flux-edit-flux-system, flux-view-flux-system, liken-engine-planter]
+    verbs: [delete]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [clusterrolebindings]
+    resourceNames: [cluster-reconciler-flux-system, crd-controller-flux-system, liken-engine-planter]
+    verbs: [delete]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

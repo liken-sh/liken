@@ -29,8 +29,10 @@ package main
 // namespace, and no feature owns them.
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/kubernetes"
@@ -100,6 +102,133 @@ func janitorFeatureWorkloads(c *kubernetes.Client, clusterDoc *cluster.Cluster) 
 			} else {
 				fmt.Printf("the cluster no longer declares the %s feature; deleted %s %s\n", slug, k.kind, name)
 			}
+		}
+	}
+}
+
+// The flux janitor: the teardown half of the seed-once engine.
+//
+// The generic janitor above deletes annotated workloads, but the
+// flux feature cannot use that shape, because its objects are not
+// inert. Deleting the Kustomization while its controller still runs
+// triggers the engine's own deletion finalizer, and with prune on,
+// that finalizer garbage-collects everything the repository ever
+// applied: the workloads, the Machine documents, and the Cluster
+// document itself. So flux's retraction is ordered, and the order
+// is the whole design: kill the controllers first, so the finalizer
+// can never fire, then remove the finalizers by hand, and only then
+// delete the objects.
+//
+// Each sweep advances one stage and returns, so the stages are
+// separated by real observations, never by in-process waits:
+//
+//  1. Engine Deployments still exist: delete them.
+//  2. Controller pods still exist: wait. A Deployment's deletion is
+//     asynchronous, and a controller that is still terminating could
+//     still process a finalizer.
+//  3. Controllers provably gone: strip the sync objects' finalizers,
+//     delete them, and delete the engine's cluster-scoped remains:
+//     the CRDs, the engine's RBAC, the planter's grant, and the
+//     namespace.
+//
+// What survives is deliberate: nothing. Retraction burns the deploy
+// key with the namespace, and a re-enabled feature mints a fresh
+// key to register. Keeping the key was considered and rejected: it
+// would mean k3s's addon machinery must never touch the namespace,
+// and the ground would outlive the feature as unowned state. Off
+// means off. The repository's own workloads also survive, as
+// orphans: stopping the sync must not undeploy what the sync
+// deployed.
+//
+// The janitor's rights are standing, in the operator's own manifest,
+// unlike the planter's, which arrive with the feature. This is
+// deliberate too: the janitor's job begins exactly when the
+// feature's delivered grants disappear, so delivered rights could
+// never clean up after the feature that delivered them. The
+// standing rights are deletes on exact names, powerless to create
+// or read anything.
+
+// fluxTeardownPaths are the delete targets of the final stage, in
+// order. The sync objects come first, finalizers already stripped;
+// the namespace's own deletion then sweeps everything namespaced
+// that remains, the deploy key Secret included; the cluster-scoped
+// remains close it out. The CRD and RBAC names must match the
+// engine seed; the parity test in flux_test.go holds them to it.
+var fluxTeardownPaths = []string{
+	"/apis/kustomize.toolkit.fluxcd.io/v1/namespaces/flux-system/kustomizations/flux-system",
+	"/apis/source.toolkit.fluxcd.io/v1/namespaces/flux-system/gitrepositories/flux-system",
+	"/api/v1/namespaces/flux-system",
+	"/apis/apiextensions.k8s.io/v1/customresourcedefinitions/buckets.source.toolkit.fluxcd.io",
+	"/apis/apiextensions.k8s.io/v1/customresourcedefinitions/externalartifacts.source.toolkit.fluxcd.io",
+	"/apis/apiextensions.k8s.io/v1/customresourcedefinitions/gitrepositories.source.toolkit.fluxcd.io",
+	"/apis/apiextensions.k8s.io/v1/customresourcedefinitions/helmcharts.source.toolkit.fluxcd.io",
+	"/apis/apiextensions.k8s.io/v1/customresourcedefinitions/helmrepositories.source.toolkit.fluxcd.io",
+	"/apis/apiextensions.k8s.io/v1/customresourcedefinitions/ocirepositories.source.toolkit.fluxcd.io",
+	"/apis/apiextensions.k8s.io/v1/customresourcedefinitions/kustomizations.kustomize.toolkit.fluxcd.io",
+	"/apis/rbac.authorization.k8s.io/v1/clusterroles/crd-controller-flux-system",
+	"/apis/rbac.authorization.k8s.io/v1/clusterroles/flux-edit-flux-system",
+	"/apis/rbac.authorization.k8s.io/v1/clusterroles/flux-view-flux-system",
+	"/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/cluster-reconciler-flux-system",
+	"/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/crd-controller-flux-system",
+	"/apis/rbac.authorization.k8s.io/v1/clusterroles/liken-engine-planter",
+	"/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/liken-engine-planter",
+}
+
+// fluxControllerPodsPath lists the engine's controller pods, alive
+// or terminating. The engine's own labels select them.
+var fluxControllerPodsPath = "/api/v1/namespaces/flux-system/pods?labelSelector=" +
+	url.QueryEscape("app in (source-controller,kustomize-controller)")
+
+// janitorFlux tears the flux feature down when the cluster document
+// no longer declares it. Every call is one stage at most; the sweep
+// calls it again ten seconds later, and silence is the converged
+// state.
+func janitorFlux(c *kubernetes.Client, clusterDoc *cluster.Cluster) {
+	if clusterDoc.FeatureEnabled(cluster.FeatureFlux) {
+		return
+	}
+
+	// Stage 1: the controllers must die before anything else is
+	// touched. A successful delete means this pass's work is done;
+	// the pod check below needs a fresh observation anyway.
+	deleted := false
+	for _, name := range []string{"source-controller", "kustomize-controller"} {
+		path := "/apis/apps/v1/namespaces/flux-system/deployments/" + name
+		if err := c.RequestJSON(http.MethodGet, path, nil, nil); errors.Is(err, kubernetes.ErrNotFound) {
+			continue
+		}
+		if err := c.RequestJSON(http.MethodDelete, path+"?propagationPolicy=Background", nil, nil); err == nil {
+			fmt.Printf("the cluster no longer declares flux; deleted the %s Deployment\n", name)
+			deleted = true
+		}
+	}
+	if deleted {
+		return
+	}
+
+	// Stage 2: wait out terminating controller pods. This gate is
+	// what makes the finalizer unreachable: no controller process
+	// exists past it.
+	pods, err := kubernetes.List[featureWorkload](c, fluxControllerPodsPath)
+	if err != nil || len(pods) > 0 {
+		return
+	}
+
+	// Stage 3: nothing can react anymore. Strip the sync objects'
+	// finalizers so their deletion, and the namespace's, completes
+	// instead of waiting forever for a controller that no longer
+	// exists. Then delete what remains, and let 404s stay silent:
+	// this function runs on every sweep, and the converged state is
+	// nothing but 404s.
+	for _, path := range fluxTeardownPaths[:2] {
+		_ = c.PatchJSON(path, []byte(`{"metadata": {"finalizers": null}}`))
+	}
+	for _, path := range fluxTeardownPaths {
+		err := c.RequestJSON(http.MethodDelete, path, nil, nil)
+		if err == nil {
+			fmt.Printf("the cluster no longer declares flux; deleted %s\n", path)
+		} else if !errors.Is(err, kubernetes.ErrNotFound) && !errors.Is(err, kubernetes.ErrConflict) {
+			fmt.Printf("flux teardown, deleting %s: %v\n", path, err)
 		}
 	}
 }

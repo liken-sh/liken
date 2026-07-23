@@ -435,7 +435,14 @@ spec:
                     to be private, and the cluster mints its own
                     SSH deploy key: the private half never leaves
                     the cluster, and status.flux.publicKey carries
-                    the half to register at the forge. The first
+                    the half to register at the forge. Removing
+                    flux from this object retracts the feature
+                    whole: the sync
+                    stops, the engine and its namespace go, and the
+                    deploy key goes with them, so re-enabling mints
+                    a fresh key to register. What the repository
+                    deployed stays running; retraction stops the
+                    sync, it does not undeploy. The first
                     three features (traefik, servicelb,
                     metrics-server) are components the k3s binary
                     already bundles, and liken disables them by

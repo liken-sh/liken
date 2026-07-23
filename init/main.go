@@ -442,7 +442,8 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 		fmt.Println("liken: fault injection: wedging instead of starting k3s")
 		select {}
 	}
-	superviseK3s(role, rebootRequests, restartRequests, restarter.apply) // never returns
+	superviseK3s(role, rebootRequests, restartRequests, restarter.apply,
+		restarter.removeOfflineRetractions) // never returns
 }
 
 // powerOff shuts the machine down cleanly. sync flushes dirty pages to

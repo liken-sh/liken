@@ -119,7 +119,31 @@ type FeatureDefinition struct {
 	Kind     FeatureKind
 	Requires []string
 	Params   []string
+	Teardown FeatureTeardown
 }
+
+// FeatureTeardown is who removes a retracted feature's objects from
+// the cluster.
+type FeatureTeardown string
+
+const (
+	// TeardownAddon is the default: retraction removes the feature's
+	// seeded manifests while k3s runs, and k3s deletes the addon's
+	// objects itself. This is the right shape for a feature whose
+	// objects are inert data and simple workloads.
+	TeardownAddon FeatureTeardown = ""
+
+	// TeardownJanitor means k3s must never delete this feature's
+	// objects: retraction removes the seeded manifests only while
+	// k3s is down, and the cluster operator's janitor tears the
+	// objects down in a deliberate order. flux needs this because
+	// its objects are not inert: deleting the Kustomization while
+	// its controller still runs triggers the engine's own garbage
+	// collection, which would prune everything the repository ever
+	// applied, the fleet's own documents included. The janitor kills
+	// the controllers first, so that finalizer can never fire.
+	TeardownJanitor FeatureTeardown = "Janitor"
+)
 
 // Features is the vocabulary, listed in the order that explains it
 // best. The bundled components' slugs are exactly k3s's names for
@@ -145,7 +169,7 @@ var Features = []FeatureDefinition{
 	// repository against, so a generic gitops slug would promise a
 	// swappability the design could never honor. A deployment that
 	// needs a different engine needs a different feature.
-	{Slug: "flux", Kind: FeatureWorkload,
+	{Slug: "flux", Kind: FeatureWorkload, Teardown: TeardownJanitor,
 		Params: []string{"repository", "path", "branch", "knownHosts"}},
 }
 

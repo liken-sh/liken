@@ -140,8 +140,10 @@ func sweepFleet(c *kubernetes.Client, clusterDoc *cluster.Cluster, available str
 	// A retracted feature leaves its workloads behind. k3s only
 	// deletes an addon when it sees the addon's manifest disappear
 	// while k3s is running, but retraction removes the manifest while
-	// k3s is down (see janitor.go).
+	// k3s is down (see janitor.go). The flux feature's teardown is
+	// always the janitor's, in a deliberate order (janitorFlux).
 	janitorFeatureWorkloads(c, clusterDoc)
+	janitorFlux(c, clusterDoc)
 
 	// The flux feature's deploy key is fleet state too: minted once,
 	// then read on every pass so the status always carries the

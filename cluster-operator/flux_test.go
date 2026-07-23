@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -290,5 +291,44 @@ func TestEnsureFluxDeployKeyYieldsToAConcurrentMint(t *testing.T) {
 	}))
 	if got := ensureFluxDeployKey(c, fluxCluster()); got != "" {
 		t.Errorf("a lost race publishes nothing this pass: got %q", got)
+	}
+}
+
+// Retraction's other half of the seed contract: every cluster-scoped
+// object the seed creates must be on the janitor's teardown list,
+// and the operator's standing rights must name it. A Flux version
+// bump that adds a CRD fails here until both keep up. Namespaced
+// objects need no entry: the namespace's own deletion sweeps them.
+func TestTheTeardownAndItsRightsCoverTheSeed(t *testing.T) {
+	seed, err := engineSeed()
+	if err != nil {
+		t.Skip("no seed copied yet; the Makefile supplies it")
+	}
+	objects, err := parseSeed(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rights, err := os.ReadFile("manifests/cluster-operator.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range objects {
+		var path string
+		switch o.Kind {
+		case "CustomResourceDefinition":
+			path = "/apis/apiextensions.k8s.io/v1/customresourcedefinitions/" + o.Name
+		case "ClusterRole":
+			path = "/apis/rbac.authorization.k8s.io/v1/clusterroles/" + o.Name
+		case "ClusterRoleBinding":
+			path = "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/" + o.Name
+		default:
+			continue
+		}
+		if !slices.Contains(fluxTeardownPaths, path) {
+			t.Errorf("the teardown must cover %s %s", o.Kind, o.Name)
+		}
+		if !strings.Contains(string(rights), o.Name) {
+			t.Errorf("the operator's standing rights must name %s %s", o.Kind, o.Name)
+		}
 	}
 }

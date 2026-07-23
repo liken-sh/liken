@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -88,5 +89,92 @@ func TestJanitorDeletesRetractedWorkloadsThroughTheAPI(t *testing.T) {
 	want := "/apis/apps/v1/namespaces/liken-system/daemonsets/liken-iscsid"
 	if len(deletes) != 1 || deletes[0] != want {
 		t.Fatalf("expected exactly [%s] deleted, got %v", want, deletes)
+	}
+}
+
+func TestJanitorFluxLeavesADeclaredFeatureAlone(t *testing.T) {
+	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("no API call should happen: %s %s", r.Method, r.URL.Path)
+	}))
+	janitorFlux(c, fluxCluster())
+}
+
+// Stage 1: the controllers die first, and nothing else is touched on
+// the same pass. This ordering is the safety property: a controller
+// that processed a sync object's deletion would garbage-collect
+// everything the repository ever applied.
+func TestJanitorFluxKillsTheControllersFirst(t *testing.T) {
+	var deleted []string
+	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.Write([]byte(`{"metadata": {"name": "x"}}`))
+		case http.MethodDelete:
+			deleted = append(deleted, r.URL.Path)
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{}`))
+		default:
+			t.Errorf("unexpected call: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	plain := &cluster.Cluster{}
+	plain.Metadata.Name = "lab"
+	janitorFlux(c, plain)
+	want := []string{
+		"/apis/apps/v1/namespaces/flux-system/deployments/source-controller",
+		"/apis/apps/v1/namespaces/flux-system/deployments/kustomize-controller",
+	}
+	if !slices.Equal(deleted, want) {
+		t.Errorf("deleted %v, want exactly the two Deployments", deleted)
+	}
+}
+
+// Stage 2: deployments gone, but a controller pod still terminating
+// means nothing more happens this pass.
+func TestJanitorFluxWaitsOutTerminatingControllers(t *testing.T) {
+	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/deployments/"):
+			http.NotFound(w, r)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/pods"):
+			w.Write([]byte(`{"items": [{"metadata": {"name": "kustomize-controller-x"}}]}`))
+		default:
+			t.Errorf("unexpected call: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	plain := &cluster.Cluster{}
+	plain.Metadata.Name = "lab"
+	janitorFlux(c, plain)
+}
+
+// Stage 3: with the controllers provably gone, the sync objects lose
+// their finalizers and everything else goes, the namespace and the
+// deploy key with it.
+func TestJanitorFluxTearsDownOnceControllersAreGone(t *testing.T) {
+	var patched, deleted []string
+	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/deployments/"):
+			http.NotFound(w, r)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/pods"):
+			w.Write([]byte(`{"items": []}`))
+		case r.Method == http.MethodPatch:
+			patched = append(patched, r.URL.Path)
+			w.Write([]byte(`{}`))
+		case r.Method == http.MethodDelete:
+			deleted = append(deleted, r.URL.Path)
+			w.Write([]byte(`{}`))
+		default:
+			t.Errorf("unexpected call: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	plain := &cluster.Cluster{}
+	plain.Metadata.Name = "lab"
+	janitorFlux(c, plain)
+	if len(patched) != 2 {
+		t.Errorf("both sync objects lose their finalizers, got %v", patched)
+	}
+	if !slices.Equal(deleted, fluxTeardownPaths) {
+		t.Errorf("the teardown must cover every path, in order:\n got %v\nwant %v", deleted, fluxTeardownPaths)
 	}
 }

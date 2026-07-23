@@ -182,11 +182,46 @@ something that already has an owner, at the cost of an always-on
 controller and a second manifest channel outside both git and the
 release.)
 
-Three questions stay open. Where does `known_hosts` come from: the
-forge's host key is public material, but something must put it in
-the Secret before the first clone can verify the forge. What does
-the rescue drill for a present-but-broken engine look like, given
-that no commit can fix a sync loop the last commit killed? And the
-memory question moved rather than closed: the repository now
-decides how many controllers run, so the manual, not the
+Retraction is settled, and its design is the mirror of the
+planter's. Removing the feature removes everything: the sync
+objects, the engine, its CRDs and RBAC, and the namespace, the
+deploy key included, so off means off and a re-enable mints a fresh
+key. What the repository deployed stays running as orphans, because
+stopping the sync must not undeploy anything. The teardown belongs
+to the cluster operator's janitor alone, in a deliberate order:
+kill the controllers, prove their pods are gone, then strip the
+sync objects' finalizers and delete the rest. The order exists
+because the engine's deletion finalizer garbage-collects everything
+the repository ever applied; k3s's addon machinery must never
+delete these objects, so a flux retraction removes its seeded files
+only while k3s is down (the Teardown field in the feature
+vocabulary carries this distinction). The janitor's rights are
+standing in the operator's manifest, delete-only and name-held,
+because rights delivered by the feature could never clean up after
+the feature that delivered them.
+
+The failure drills ran on the GitOps lab, and each one recovered:
+a commit that cannot apply (the sync refuses loudly and the last
+good state persists), poisoned `knownHosts` (the rescue is
+repo-first, then a live edit; the operator heals the Secret in
+seconds), a bad live edit to the repository URL (the sync reverts
+it in seconds; git wins), key rotation (delete the Secret, register
+the fresh half), a deleted engine (re-planted in six seconds), and
+the full off-and-on cycle.
+
+The drills surfaced one truth the manual must teach: server-side
+apply tracks field ownership, and a live `kubectl` edit makes the
+person a co-owner of the fields they touched. Git cannot delete a
+field a person co-owns. A later git-side retraction then projects a
+partial object, and the CRD's own validation refuses it, which
+stops the sync loudly instead of applying half a retraction. The
+recovery is to make the same edit live, which hands the object back
+to git. The mirror also holds: a feature enabled only by live edit
+does not flap off, because git cannot remove what it never owned.
+Every rescue in this design is a live edit, so every rescue leaves
+fingerprints, and the rescue guide must end with the step that
+removes them.
+
+One question stays open, moved rather than closed: the repository
+now decides how many controllers run, so the manual, not the
 vocabulary, must warn what a 1 GB machine can carry.
