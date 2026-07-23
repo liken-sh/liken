@@ -110,9 +110,22 @@ jobs:
       - name: verify the served site
         if: github.event_name == 'push'
         run: |
-          curl --fail --silent --show-error --retry 5 --retry-delay 3 \
-            https://liken.sh/release.txt -o served.txt
-          echo "${{ github.sha }}" | cmp - served.txt
+          # The rollout finishing does not mean the router follows
+          # yet: the ingress updates its endpoints asynchronously,
+          # and the old pod can answer for a few more seconds. curl's
+          # --retry only covers transport errors, never stale
+          # content, so the freshness check needs its own deadline
+          # loop before the content checks below can mean anything.
+          expected="${{ github.sha }}"
+          for _ in $(seq 1 20); do
+            served="$(curl --fail --silent https://liken.sh/release.txt || true)"
+            if [ "$served" = "$expected" ]; then break; fi
+            sleep 3
+          done
+          [ "$served" = "$expected" ] || {
+            echo "the site still serves ${served:-nothing}, expected $expected"
+            exit 1
+          }
           curl --fail --silent https://liken.sh/ \
             | grep -q "boots a machine straight"
           curl --fail --silent https://liken.sh/docs/guides/install/ \
