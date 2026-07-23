@@ -1,0 +1,43 @@
+# The GitOps lab's Cluster manifest. This deployment exists to
+# develop liken's GitOps feature: a fleet whose declared state lives
+# in a git repository and reaches the cluster through a sync engine.
+# The dev cluster (dev-cluster/cluster.yaml) teaches what every field
+# means, and it stays a purely local deployment on purpose, so that
+# everyday drills never depend on a forge. This file records only
+# what this lab chooses differently.
+apiVersion: liken.sh/v1alpha1
+kind: Cluster
+metadata:
+  name: gitops
+spec:
+  # One leader: the smallest cluster liken can form, with k3s keeping
+  # its state in sqlite. The GitOps drills exercise documents and
+  # reboots, not quorum. The multi-leader drills belong to the dev
+  # cluster.
+  leaders: [node-1]
+
+  # First contact for followers, at node-1's address on the cluster
+  # segment. This lab uses 10.20.0.0/24 where the dev cluster uses
+  # 10.10.0.0/24, so an address in a log always names its lab.
+  endpoint: https://10.20.0.1:6443
+
+  network:
+    nodeCIDR: 10.20.0.0/24
+    # k3s's defaults, stated because the whole fleet must agree on
+    # them. dev-cluster/cluster.yaml explains each one.
+    clusterCIDR: 10.42.0.0/16
+    serviceCIDR: 10.43.0.0/16
+    clusterDNS: 10.43.0.10
+    clusterDomain: cluster.local
+
+  time:
+    upstreams: [time.cloudflare.com, time.nist.gov]
+
+  # No features yet. The flux declaration that this lab exists for
+  # lands here once the feature vocabulary knows the slug.
+
+  releases:
+    # The lab's release server on the host (`make serve`), at QEMU's
+    # user-mode address for the host machine. A release channel
+    # carries no deployment, so both labs share the same server.
+    source: http://10.0.2.2:8017/releases

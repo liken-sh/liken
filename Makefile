@@ -441,6 +441,49 @@ install: $(IMAGE_DIR)/install.cpio
 install-stick: $(IMAGE_DIR)/stick.img
 	$(MAKE) -C dev-cluster install-stick
 
+# The GitOps lab (gitops-cluster/) is the repo's second deployment:
+# a one-leader fleet whose declared state lives in a git repository,
+# kept for developing the GitOps feature. Its own Makefile explains
+# what it is and how it differs from the dev cluster. The rules here
+# mirror the dev cluster's composition rules above, against this
+# lab's manifests and identity. The release channel bundle is
+# shared on purpose: a channel carries no deployment, so the one
+# bundle above serves both labs.
+GITOPS_IDENTITY_DIR := gitops-cluster/identity
+GITOPS_IMAGE_DIR := gitops-cluster/image
+
+$(GITOPS_IDENTITY_DIR)/tls/server-ca.crt $(GITOPS_IDENTITY_DIR)/token &: | cli/dist/liken
+	cli/dist/liken mint $(GITOPS_IDENTITY_DIR)
+
+# The computed kubeconfig points at the dev cluster's forwarded port
+# (identity/kubeconfig.go). This lab's leader forwards 17443, so
+# this rule edits the server line, the same edit the manual has a
+# real deployment make toward its own endpoint.
+kubeconfig-gitops: $(GITOPS_IDENTITY_DIR)/tls/server-ca.crt cli/dist/liken
+	cli/dist/liken kubeconfig $(GITOPS_IDENTITY_DIR)
+	sed -i 's|https://127.0.0.1:16443|https://127.0.0.1:17443|' $(GITOPS_IDENTITY_DIR)/kubeconfig
+
+$(GITOPS_IMAGE_DIR)/deployment.cpio: cli/dist/liken \
+		gitops-cluster/cluster.yaml $(wildcard gitops-cluster/machines/*.yaml) \
+		$(GITOPS_IDENTITY_DIR)/tls/server-ca.crt $(GITOPS_IDENTITY_DIR)/token
+	@mkdir -p $(GITOPS_IMAGE_DIR)
+	cli/dist/liken layer gitops-cluster $(GITOPS_IDENTITY_DIR) $@
+
+$(GITOPS_IMAGE_DIR)/initrd.cpio: $(MICROCODE_DIST)/microcode.cpio $(BOOT_ARCHIVE) $(SYSTEM_IMAGE) $(GITOPS_IMAGE_DIR)/deployment.cpio
+	cat $(MICROCODE_DIST)/microcode.cpio $(BOOT_ARCHIVE) > $@
+	(cd image/dist && echo liken.sqfs | cpio --quiet -o -H newc -R +0:+0) >> $@
+	cat $(GITOPS_IMAGE_DIR)/deployment.cpio >> $@
+
+$(GITOPS_IMAGE_DIR)/install.cpio: $(IMAGE_DIR)/channel/$(LAB_VERSION)/release.yaml \
+		$(GITOPS_IMAGE_DIR)/deployment.cpio cli/dist/liken
+	cli/dist/liken media $(IMAGE_DIR)/channel/$(LAB_VERSION) $(GITOPS_IMAGE_DIR)/deployment.cpio $@
+
+run-gitops: $(KERNEL_DIST)/vmlinuz $(GITOPS_IMAGE_DIR)/initrd.cpio
+	$(MAKE) -C gitops-cluster run
+
+install-gitops: $(GITOPS_IMAGE_DIR)/install.cpio
+	$(MAKE) -C gitops-cluster install
+
 # This target produces a release: the same system, rebuilt under a
 # different version stamp and bundled into releases/dist/ the way a
 # release webserver lays it out. The releases Makefile explains the
@@ -479,6 +522,7 @@ clean:
 	$(MAKE) -C docs clean
 	$(MAKE) -C releases clean
 	$(MAKE) -C dev-cluster clean
+	$(MAKE) -C gitops-cluster clean
 	$(MAKE) -C kernel clean
 	$(MAKE) -C k3s clean
 	$(MAKE) -C xtables clean
@@ -498,4 +542,4 @@ clean:
 	$(MAKE) -C image clean
 	rm -rf $(IMAGE_DIR)
 
-.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata linux-firmware microcode licensing init machine-operator cluster-operator logs cli identity kubeconfig image run run-once smoke-uefi smoke-bios install install-stick storage release serve docs clean
+.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata linux-firmware microcode licensing init machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios install install-stick install-gitops storage release serve docs clean

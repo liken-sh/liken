@@ -1,0 +1,44 @@
+# node-1: the GitOps lab's founding, and only, leader. The dev
+# cluster's machines/node-1.yaml teaches what every field means and
+# how a seed manifest becomes the machine's first proven manifest.
+# This file records only what this lab chooses differently.
+apiVersion: liken.sh/v1alpha1
+kind: Machine
+metadata:
+  name: node-1
+spec:
+  # The GitOps drills must prove that a git edit rolls the fleet
+  # with nobody at a console, so this machine reboots at a granted
+  # turn.
+  rebootPolicy: Auto
+  network:
+    interfaces:
+      - name: eth0
+      - name: eth1
+        address: 10.20.0.1/24
+  # The same storage shape as the dev cluster's machines, minus the
+  # GRUB roles (biosBoot, bootHome): this lab boots UEFI only, and
+  # a machine that declares no GRUB roles states exactly that. The
+  # firmware dialects are the dev cluster's business.
+  storage:
+    systemA:
+      device: /dev/vdc
+      size: 1Gi
+    systemB:
+      device: /dev/vdc
+      size: 1Gi
+    machineState:
+      device: /dev/vda
+      size: 64Mi
+    machineEphemeral:
+      device: /dev/vdb
+      size: 512Mi
+    clusterState:
+      device: /dev/vda
+    podStorage:
+      device: /dev/vdb
+      size: 2Gi
+    podEphemeral:
+      device: /dev/vdb
+  sysctls:
+    fs.inotify.max_user_instances: "8192"

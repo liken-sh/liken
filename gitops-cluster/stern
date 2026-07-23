@@ -1,0 +1,9 @@
+#!/bin/sh
+# stern, aimed at the GitOps lab.
+#
+# The admin kubeconfig already points at this lab's forwarded API
+# endpoint (the kubectl wrapper beside this one explains why no
+# overrides are needed), so stern can read it directly.
+exec stern \
+  --kubeconfig "$(dirname "$0")/identity/kubeconfig" \
+  "$@"
