@@ -176,7 +176,7 @@ spec:
                       description: >-
                         The base URL releases are served under. A
                         release's artifacts live at
-                        <source>/<version>/, starting with
+                        `<source>/<version>/`, starting with
                         release.yaml, the document that names every
                         artifact by digest.
                     catalog:

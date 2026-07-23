@@ -23,6 +23,8 @@ HUGO := dist/hugo/$(VERSION)/hugo
 # server enforces.
 GENERATED := content/docs/reference/machine.md content/docs/reference/cluster.md
 
+BRAND := static/icon.svg static/favicon.ico static/brand/liken.svg static/brand/liken.png
+
 .PHONY: all build generate serve image test clean
 
 all: build
@@ -30,14 +32,26 @@ all: build
 $(HUGO): VERSION fetch.sh
 	./fetch.sh
 
-# The icons are copies. The brand domain owns the originals, and the
-# site takes them under the names its pages link to.
+# The brand assets are copies. The brand domain owns the originals,
+# and the site takes them under the names its pages link to: the two
+# icon names that browsers fetch, and a brand/ directory that gives
+# the mark a stable public URL, so anything outside this repository
+# can embed the image from liken.sh instead of deep-linking into the
+# forge.
 static/icon.svg: ../brand/liken.svg
 	mkdir -p static
 	cp $< $@
 
 static/favicon.ico: ../brand/favicon.ico
 	mkdir -p static
+	cp $< $@
+
+static/brand/liken.svg: ../brand/liken.svg
+	mkdir -p static/brand
+	cp $< $@
+
+static/brand/liken.png: ../brand/liken.png
+	mkdir -p static/brand
 	cp $< $@
 
 content/docs/reference/machine.md: ../machine/manifests/machines-crd.yaml $(wildcard crdref/*.go)
@@ -52,7 +66,7 @@ generate: $(GENERATED)
 # an edit to any page rebuilds. release.txt is the deploy marker: CI
 # checks the served copy against the commit it shipped. It lives in
 # the output tree, never in content/, because it is not a page.
-dist/site/index.html: $(HUGO) hugo.yaml $(GENERATED) static/icon.svg static/favicon.ico $(shell find content layouts -type f)
+dist/site/index.html: $(HUGO) hugo.yaml $(GENERATED) $(BRAND) $(shell find content layouts -type f)
 	$(HUGO) build --cleanDestinationDir --destination dist/site
 	git rev-parse HEAD > dist/site/release.txt
 
@@ -66,7 +80,7 @@ build: dist/site/index.html
 # --disableFastRender makes every change rebuild every page: fast
 # render only re-renders pages a live-reload browser is watching, so
 # a layout edit would go stale for any page fetched another way.
-serve: $(HUGO) $(GENERATED) static/icon.svg static/favicon.ico
+serve: $(HUGO) $(GENERATED) $(BRAND)
 	$(HUGO) server --renderToMemory --disableFastRender
 
 # The production preview: the same image the cluster runs, serving on

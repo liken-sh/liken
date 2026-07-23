@@ -1,0 +1,14 @@
+{{- /* Markdown has no syntax for a captioned figure, so this hook
+supplies one: an image with a title renders as a figure, and the
+title becomes the caption. An image without a title stays a bare
+img. The hook shapes only the HTML output; a page's Markdown twin
+carries the authored image line untouched, because the twin renders
+from RawContent. */ -}}
+{{- if .Title -}}
+<figure>
+<img src="{{ .Destination }}" alt="{{ .PlainText }}">
+<figcaption>{{ .Title }}</figcaption>
+</figure>
+{{- else -}}
+<img src="{{ .Destination }}" alt="{{ .PlainText }}">
+{{- end -}}

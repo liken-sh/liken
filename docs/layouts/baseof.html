@@ -37,6 +37,14 @@ navigation and all chrome excluded.
   pre { overflow-x: auto; padding: 0.6rem; background: #f6f6f6; }
   code { font-size: 0.95em; }
   footer { margin-top: 3rem; font-size: 0.9em; }
+  /* A figure is a floated aside: the image rides the right margin
+     with its caption under it, and the text wraps beside it. The
+     width matches the mark on the repository's README, small enough
+     to leave the text column readable on a phone. */
+  figure { float: right; width: 8rem; margin: 0 0 1rem 1.5rem; }
+  figure img { width: 100%; height: auto; }
+  figcaption { font-size: 0.75em; font-style: italic; line-height: 1.4;
+               color: #555; text-align: center; }
   nav.toc { font-size: 0.9em; background: #f6f6f6; padding: 0.6rem 1rem;
             margin: 1.5rem 0; }
   nav.toc ul { list-style: none; margin: 0; padding-left: 0; }

@@ -4,6 +4,8 @@ title: liken
 
 # `liken`
 
+![The liken mark: a patch of lichen drawn as hexagonal tiles](/brand/liken.svg "A patch of crustose lichen. Each tile is one areole.")
+
 `liken` is a small operating system that boots a machine straight
 into Kubernetes.
 
