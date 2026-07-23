@@ -1,0 +1,21 @@
+#!/bin/sh
+# flux, aimed at the GitOps lab.
+#
+# The engine's own CLI, for inspecting and nudging the sync:
+# `flux get all`, `flux reconcile source git flux-system`, and the
+# rest. It runs the flux domain's vendored CLI, the same verified
+# binary that renders the engine seed, so the CLI and the engine
+# share one version pin and nothing extra is installed on the host.
+# The admin kubeconfig already points at this lab's forwarded API
+# endpoint (the kubectl wrapper beside this one explains why no
+# overrides are needed).
+here="$(dirname "$0")"
+version="$(cat "$here/../flux/VERSION")"
+cli="$here/../flux/cache/$version/flux"
+if [ ! -x "$cli" ]; then
+  echo "the vendored flux CLI is not fetched yet; run: make -C flux" >&2
+  exit 1
+fi
+exec "$cli" \
+  --kubeconfig "$here/identity/kubeconfig" \
+  "$@"
