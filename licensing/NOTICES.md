@@ -160,10 +160,26 @@ This is the early cpio that boot entries load ahead of the real
 initrd, holding both vendors' CPU microcode updates. Both licenses
 allow redistribution of the unmodified binaries and neither requires
 source, because no source form exists: microcode ships from the
-vendors as opaque updates. This is the one component with notices
-and no mirror under `sources/`. Intel's half comes from Intel's
+vendors as opaque updates, so notices are the whole obligation and
+`sources/` holds no mirror. Intel's half comes from Intel's
 microcode repository; AMD's half comes from the linux-firmware tree,
 whose tarball is mirrored under `sources/linux-firmware/`.
+
+## The Flux engine seed (inside the cluster-operator image)
+
+License: Apache-2.0 (see the appendix). Copyright The Flux authors.
+
+The cluster operator embeds `gotk-components.yaml`: the manifest for
+Flux's source and kustomize controllers, rendered at build time by
+the Flux CLI that `flux/fetch.sh` downloads, at the version
+`flux/VERSION` pins. The operator plants this manifest once when a
+cluster declares the `flux` feature, so every release redistributes
+it inside the cluster-operator image. The manifest is the Flux
+project's work. Apache-2.0 requires notices, not source, and the
+project serves its source at <https://github.com/fluxcd/flux2>. The
+controller images the manifest names are pulled from `ghcr.io` at
+run time; the release never redistributes them. The Flux CLI itself
+is a build tool, like Hugo: a release never redistributes its bytes.
 
 ## liken's programs and their Go dependencies
 
@@ -189,15 +205,20 @@ Under the BSD 3-Clause license:
 * github.com/insomniacslk/dhcp — copyright 2018 Andrea Barberio
 * github.com/pierrec/lz4/v4 — copyright 2015 Pierre Curto
 * github.com/u-root/uio — copyright 2012–2021 u-root Authors
-* golang.org/x/net, golang.org/x/sync, golang.org/x/sys — copyright
-  2009 The Go Authors
+* golang.org/x/crypto, golang.org/x/net, golang.org/x/sync,
+  golang.org/x/sys, golang.org/x/text — copyright 2009 The Go
+  Authors
+* google.golang.org/protobuf — copyright 2018 The Go Authors
 
 Under the Apache License 2.0:
 
 * github.com/vishvananda/netlink — copyright 2014 Vishvananda Ishaya
 * github.com/vishvananda/netns — copyright 2014 Vishvananda Ishaya
 * go.yaml.in/yaml/v2 — copyright 2011–2016 Canonical Ltd.
+* google.golang.org/genproto — copyright Google LLC
+* google.golang.org/grpc — copyright 2014 gRPC authors
+* k8s.io/kubelet — copyright The Kubernetes Authors
 
-The appendix reproduces the MIT and BSD license texts that these
-modules are offered under, once each. The copyright lines above
-complete each text for its holder.
+The appendix reproduces the MIT, BSD, and Apache license texts that
+these modules are offered under, once each. The copyright lines
+above complete each text for its holder.

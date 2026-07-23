@@ -93,6 +93,7 @@ GRUB_VERSION := $(strip $(file <../grub/VERSION))
 HWDATA_VERSION := $(strip $(file <../hwdata/VERSION))
 LINUXFIRMWARE_VERSION := $(strip $(file <../linux-firmware/VERSION))
 MICROCODE_VERSION := $(strip $(file <../microcode/VERSION))
+FLUX_VERSION := $(strip $(file <../flux/VERSION))
 
 # The boot slot size the fleet's machines format (the systemA and
 # systemB roles in the machine manifests and the scaffold). The
@@ -152,7 +153,8 @@ release: build
 		grub=$(GRUB_VERSION) \
 		hwdata=$(HWDATA_VERSION) \
 		linux-firmware=$(LINUXFIRMWARE_VERSION) \
-		microcode=$(MICROCODE_VERSION)
+		microcode=$(MICROCODE_VERSION) \
+		flux=$(FLUX_VERSION)
 
 # This serves the channel over HTTP: the lab's release server, which
 # stands in for the website. The dev cluster's guests reach it at

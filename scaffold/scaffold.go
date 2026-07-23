@@ -329,6 +329,13 @@ func interview(in *bufio.Scanner, out io.Writer, defaultName string) (answers, e
 		fmt.Fprintln(out, "Manual or Auto, capitalized the way the API spells them")
 	}
 
+	// The interview offers the simple opt-ins, not the whole
+	// vocabulary. flux is deliberately absent: it takes parameters,
+	// and enabling GitOps ends at the forge, after boot, when the
+	// minted deploy key is registered. No interview can finish that
+	// handshake, so the manual's GitOps guide owns the flow. The
+	// rest of the vocabulary stays reachable the ordinary way, by
+	// editing the cluster document this scaffold writes.
 	features, err := ask("features to enable, space-separated (traefik servicelb metrics-server iscsi nfs), or none", "")
 	if err != nil {
 		return a, err
@@ -336,7 +343,7 @@ func interview(in *bufio.Scanner, out io.Writer, defaultName string) (answers, e
 	a.Features = strings.Fields(features)
 	for _, f := range a.Features {
 		if !slices.Contains([]string{"traefik", "servicelb", "metrics-server", "iscsi", "nfs"}, f) {
-			return a, fmt.Errorf("%q is not in liken's feature vocabulary", f)
+			return a, fmt.Errorf("%q is not a feature this interview can enable; the manual's Cluster reference lists the whole vocabulary", f)
 		}
 	}
 

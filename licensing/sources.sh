@@ -31,9 +31,12 @@
 # Because of this check, a release cannot silently ship binaries
 # whose sources are not mirrored.
 #
-# Three components need no mirror. k3s uses the Apache-2.0 license,
+# Some components need no mirror. k3s uses the Apache-2.0 license,
 # which requires notices, not source, but its release page carries
-# the source anyway. The GPL-licensed userland embedded inside the
+# the source anyway. The Flux engine seed embedded in the cluster
+# operator is Apache-2.0 as well, and the Flux project serves its
+# source at https://github.com/fluxcd/flux2. The GPL-licensed
+# userland embedded inside the
 # k3s binary is built by the same k3s-root recipe mirrored under
 # xtables/. The CA bundle is its own source: the PEM file is the
 # preferred form for editing it, so the mirror is a copy of the

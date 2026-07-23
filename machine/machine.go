@@ -105,7 +105,7 @@ type Machine struct {
 
 // MachineSpec is the declared half of a Machine. It states what a
 // person asks this machine to be. A git repository can also declare
-// this, through whatever GitOps engine a deployment chooses. Each
+// this, through the cluster's flux feature. Each
 // field notes who acts on it and when, because the actuators differ.
 // Some state can only be set while the machine is being built. Some
 // state can be reconciled live.
