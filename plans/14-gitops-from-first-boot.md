@@ -1,8 +1,8 @@
 # GitOps from first boot
 
-Milestone 14 — In progress: the feature parameters, the flux
-vocabulary row, and the deploy key landed; the sync engine and the
-end-to-end loop remain
+Milestone 14 — Complete: the flux feature, the seed-once engine,
+the deploy key, retraction, and the failure drills all landed, and
+the manual teaches the loop
 
 GitOps from first boot is an opt-in feature. An earlier version of
 this plan refused to vendor an engine. That version sketched generic
@@ -50,13 +50,19 @@ features stay exactly `{}`, and `flux` requires `repository` with
 `cluster/features.go` declares each feature's parameter names, and
 the parity test holds the CRD's rules to that table.
 
-Toggling or re-pointing `flux` converges like any other feature edit.
-The parameters live in the canonical rendered document. So a changed
-repository produces a changed hash, and the fleet stages and applies
-that change by reboot. This process is heavyweight for what amounts
-to re-rendering one object. It is also consistent with everything
-else the document declares. The first live re-point will show whether
-this approach stays in place.
+Toggling or re-pointing `flux` converges like any other feature
+edit. The parameters live in the canonical rendered document, so a
+changed repository produces a changed hash, and the fleet stages
+that change. Features are restart-class: k3s reads them only at
+process start, so the change applies by restarting k3s in place,
+machine by machine, with no reboot. The drills proved this live.
+
+`liken new` does not ask about flux, and this is a decision, not an
+omission. The scaffold's feature question covers the parameterless
+slugs. Enabling flux is not an answer; it is a handshake with the
+forge, finished only when the forge holds the key the cluster mints
+after boot. No interview can finish that, so the manual's guide
+owns the flow instead.
 
 ## The seed-once engine
 
@@ -135,9 +141,9 @@ avoids the bootstrap deadlock that forced `iscsid` to be included in the
 image. A fleet that cannot reach `ghcr.io` is the problem that
 milestone 20's mirrors solve.
 
-Init's part grows one new trick. Today, init seeds feature manifests
-by copying them verbatim. Flux's sync objects also need the declared
-parameters rendered into them.
+Init's part is one new trick: where every other feature's manifests
+are seeded verbatim, init renders Flux's sync objects from the
+declared parameters.
 
 Identity keeps the design that this plan settled on when the team
 first argued it, with its open questions now closed. The repository
@@ -166,12 +172,12 @@ Manifest authority resolves the way the earlier plan described: git
 wins, and the seeded Machine and Cluster copies stay downstream of
 it. That statement hides the milestone's sharpest question: Flux
 syncs a repository that contains the Cluster document that declares
-Flux itself. The answer to that question needs a live proof, not an
-argument. The fleet repository for it exists
-(`github.com/liken-sh/liken-dev-cluster`), and the GitOps lab
-(`gitops-cluster/`) is the deployment that declares it. The proof is
-this loop: edit the repository, Flux applies the Cluster, and the
-fleet stages and rolls the change.
+Flux itself. That question needed a live proof, not an argument,
+and the proof ran on the GitOps lab (`gitops-cluster/`), against
+its fleet repository (`github.com/liken-sh/liken-dev-cluster`).
+The loop held: a commit to the repository moved the Cluster, and
+the fleet staged and applied each change, feature edits by restart
+and version edits by sequenced reboot.
 
 The engine questions an earlier draft left open are settled above:
 the seed carries the floor components only, and the repository
@@ -240,8 +246,10 @@ the Cluster and Machine documents in the repository. The garbage
 collector then leaves the marked documents in place, and removing
 the fleet stays a deliberate live act.
 
-Two questions stay open, moved rather than closed, and both land
-on the manual: the repository now decides how many controllers
-run, so the manual must warn what a 1 GB machine can carry, and
-the manual must teach the `prune: disabled` mark above as part of
-the repository layout it recommends.
+The manual's guide (`docs/content/docs/guides/gitops.md`) closes
+the milestone. It teaches the repository layout with the
+`prune: disabled` mark in it, the never-commit-the-sync-objects
+rule, the field-ownership rule for rescues, and the memory warning
+that came with moving component choice to the repository: the
+repository decides how many controllers run, and a 1 GB machine
+carries the two floor controllers with little room past them.

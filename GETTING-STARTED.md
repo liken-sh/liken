@@ -119,3 +119,8 @@ two fields on the Cluster. The comments on `spec.releases` explain
 the fields. This upgrade needs no rebuilt media and no per-machine
 work. Each machine fetches, verifies, and proves the new version
 itself, one machine at a time.
+
+To make a git repository the source of these edits, declare the
+`flux` feature. The cluster then syncs your manifests and your
+workloads from the repository. The manual has the steps:
+<https://liken.sh/docs/guides/gitops/>.

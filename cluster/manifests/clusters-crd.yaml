@@ -396,7 +396,7 @@ spec:
                     as a whole offers, beyond the minimum viable
                     cluster. Keyed by feature slug. The key's presence
                     is the opt-in, and a feature's zero configuration
-                    is {}. The vocabulary today has eight entries.
+                    is {}.
                     traefik is k3s's bundled ingress controller.
                     servicelb is klipper-lb, which realizes Services
                     of type LoadBalancer on the nodes' own addresses.
@@ -449,9 +449,12 @@ spec:
                     default on principle: anything beyond the
                     control plane should be a declared, visible
                     workload, and declaring it here is that
-                    declaration. Toggling a feature converges
-                    like any other cluster edit, rolling through the
-                    fleet as staged changes and granted reboots.
+                    declaration. k3s reads the features only when
+                    its process starts, so a features-only edit
+                    converges by restarting k3s in place on each
+                    machine. The restart is sequenced through the
+                    same one-leader-at-a-time turns as a reboot,
+                    but the machine, and its pods, stay up.
                   # The schema is a map with validation rules, rather
                   # than named per-slug properties, and this choice
                   # matters. Named properties look natural, but the

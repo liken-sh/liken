@@ -44,13 +44,15 @@ Some results follow from this naturally:
   images with each other directly, so re-pulls come from the LAN and
   keep working even when the internet connection is down.
 
-The project has not built the layer that completes this idea yet. That
-layer will treat system services, user apps, and node configuration as a
-[Flux](https://fluxcd.io) `Kustomization`, reconciled from a git
-repository. Then a machine's identity will be nothing more than the
-repository and path it reconciles from. See
+The `flux` feature completes this idea. Declare a git repository on
+the `Cluster` resource, and the cluster syncs it with
+[Flux](https://fluxcd.io): the repository holds the Cluster document,
+the Machine documents, and the workloads, and the fleet converges to
+every commit. The cluster mints its own deploy key, so no private
+material ever leaves it. [The GitOps
+guide](https://liken.sh/docs/guides/gitops/) shows the steps, and
 [plans/14-gitops-from-first-boot.md](plans/14-gitops-from-first-boot.md)
-for this plan.
+records the design.
 
 ## Prior art
 
@@ -71,8 +73,9 @@ This idea is not new. These projects explore similar ground:
   container.
 
 None of these projects are GitOps-native from first boot. In each one,
-the git repository is a layer added on top of the OS. `liken` is moving
-in that direction too, but it is not there yet.
+the git repository is a layer added on top of the OS. In `liken`, the
+repository is a feature the OS itself declares, and a new cluster can
+sync from its first boot.
 
 ## Status
 
@@ -88,11 +91,10 @@ release to a running cluster of your own.
 The milestones in [plans/](plans/) record the project's progress so far.
 Each one was proven in the QEMU lab, from a bare PID 1 to a five-node HA
 cluster. Later milestones added declarative upgrades, rolling reboots,
-adoption of existing `k3s` clusters, and updates straight from the
-internet, under both UEFI and BIOS firmware. `liken` has never run on
-bare metal, and the GitOps layer described above is not built yet.
-[plans/](plans/) also holds the design overview and the plan for what
-comes next.
+adoption of existing `k3s` clusters, updates straight from the
+internet under both UEFI and BIOS firmware, and GitOps through Flux.
+`liken` has never run on bare metal. [plans/](plans/) also holds the
+design overview and the plan for what comes next.
 
 ## License
 
