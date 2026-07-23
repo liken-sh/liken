@@ -58,12 +58,76 @@ to re-rendering one object. It is also consistent with everything
 else the document declares. The first live re-point will show whether
 this approach stays in place.
 
-What ships in the image stays small. This keeps the kitchen-sink rule
-intact: the image carries manifests only. It carries Flux's install
-manifests, pinned to a Flux version the way the project pins every
-vendored input. It also carries a sync object rendered at boot from
-the declared parameters: the `GitRepository` and `Kustomization`
-objects that do what `flux bootstrap` would otherwise do.
+## The seed-once engine
+
+The engine is git's to own, and liken only plants it. This settles
+the question of who owns the Flux installation, and the argument is
+worth recording whole.
+
+`flux bootstrap` commits the engine's own manifests into the
+repository, so Flux manages itself from git and a Flux upgrade is a
+commit. An earlier version of this plan rejected that shape and had
+liken own the engine, pinned and released like every vendored
+component. The rejection rested on the trust chain: the engine
+would update outside the release's digest chain. That argument does
+not survive inspection. A fleet that declares GitOps has handed the
+repository the power to run any workload, including privileged
+ones, so repository access is already cluster-root. The engine is
+cluster content, and the repository owning cluster content is the
+feature's entire point. Keeping the engine on the release would
+only make Flux worse at being Flux: no commit-speed engine
+upgrades, and a liken release between a deployment and every Flux
+patch.
+
+So the engine follows liken's own seed pattern, the way a Machine
+manifest does: the image carries a pinned copy, the system plants
+it exactly once, and the live side owns it from then on.
+
+* The seed is `gotk-components.yaml` for the floor components, the
+  source and kustomize controllers, fetched and pinned by the flux
+  domain (`flux/VERSION`, `fetch.sh`). It only has to be good
+  enough to reach the first sync.
+* The repository carries its own `gotk-components.yaml` inside the
+  synced path, so the first sync upgrades the engine to what the
+  repository pins, and every later engine change is a commit.
+  Component choice belongs to the repository too: a deployment that
+  wants the helm-controller commits it. The vocabulary never grows
+  a component parameter.
+* The cluster operator plants the seed, with the same
+  if-absent shape as the deploy key, run on every sweep. The probe
+  is one object: the kustomize-controller Deployment in
+  flux-system. That Deployment is the applier that heals everything
+  else from git, so its absence means nothing can heal, and liken
+  re-plants the whole seed. Present but broken stays git's problem
+  on purpose; liken answers only for gone. Because the probe runs
+  every sweep, a deleted engine heals in seconds, not at the next
+  boot.
+* The seed travels embedded in the operator binary (`go:embed`),
+  because the cluster operator deliberately has no hostPath mounts.
+  Embedded bytes live in the binary's read-only data segment,
+  demand-paged and evictable, so the seed costs nothing resident;
+  the apply path parses it transiently and lets the allocations
+  die with the pass.
+* Planting the seed creates CRDs, ClusterRoles, and bindings, and
+  RBAC's escalation rule means the planter must be granted what
+  those roles grant. The feature's seeded manifests deliver that
+  installer grant, the same path as the minting Role, so the
+  operator holds it only while the feature is declared. The grant
+  is the feature: declaring GitOps declares that this operator may
+  install the engine.
+
+The ownership line is then clean, and one rule keeps it clean.
+liken owns the ground forever: the flux-system namespace, the
+minting Role, the deploy key, and the sync objects
+(`GitRepository`, `Kustomization`), which init renders from the
+declared parameters so that editing the Cluster document stays a
+real act. Git owns the engine and everything above it. The
+repository must never carry the sync objects, or git and liken
+would fight over them; the manual owns that warning. The
+`clusters/<cluster-name>` layout is a convention the manual
+teaches, not a default the system derives: `path` defaults to the
+repository root, because a derived default would let a rename
+silently change what a fleet syncs.
 
 The controller images are deliberately not baked into the OS image.
 They are ordinary workload images pulled from a registry. This design
@@ -72,8 +136,8 @@ image. A fleet that cannot reach `ghcr.io` is the problem that
 milestone 20's mirrors solve.
 
 Init's part grows one new trick. Today, init seeds feature manifests
-by copying them verbatim. Flux's sync object also needs the declared
-parameters rendered into it.
+by copying them verbatim. Flux's sync objects also need the declared
+parameters rendered into them.
 
 Identity keeps the design that this plan settled on when the team
 first argued it, with its open questions now closed. The repository
@@ -109,10 +173,20 @@ argument. The fleet repository for it exists
 this loop: edit the repository, Flux applies the Cluster, and the
 fleet stages and rolls the change.
 
-Two questions stay open. Which controllers ship in the install
-manifests? The source and kustomize controllers are the floor; the
-helm and notification controllers are judgment calls. And does liken
-carry Flux's own install manifests at a pinned version, or carry the
-flux-operator and render one FluxInstance? The operator decouples
-Flux's version from liken's releases, at the cost of one more
-always-on controller inside a tight memory envelope.
+The engine questions an earlier draft left open are settled above:
+the seed carries the floor components only, and the repository
+decides everything past the floor. (The flux-operator, a
+meta-controller that manages the engine's lifecycle, was considered
+and rejected: once git owns the engine, the operator manages
+something that already has an owner, at the cost of an always-on
+controller and a second manifest channel outside both git and the
+release.)
+
+Three questions stay open. Where does `known_hosts` come from: the
+forge's host key is public material, but something must put it in
+the Secret before the first clone can verify the forge. What does
+the rescue drill for a present-but-broken engine look like, given
+that no commit can fix a sync loop the last commit killed? And the
+memory question moved rather than closed: the repository now
+decides how many controllers run, so the manual, not the
+vocabulary, must warn what a 1 GB machine can carry.

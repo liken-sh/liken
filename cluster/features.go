@@ -146,7 +146,7 @@ var Features = []FeatureDefinition{
 	// swappability the design could never honor. A deployment that
 	// needs a different engine needs a different feature.
 	{Slug: "flux", Kind: FeatureWorkload,
-		Params: []string{"repository", "path", "branch"}},
+		Params: []string{"repository", "path", "branch", "knownHosts"}},
 }
 
 // FeatureConfig is one feature's configuration: the object under its
@@ -210,11 +210,18 @@ const (
 
 // FluxConfig is the flux feature's configuration, typed: where the
 // fleet's declared state lives, and which part of it this cluster
-// syncs.
+// syncs. KnownHosts is the forge's SSH host keys in known_hosts
+// form, one line per key. It rides the spec because a host key is
+// public material: it is the forge's identity, not a secret, and
+// declaring it here is what lets the first clone verify the forge
+// without anyone answering a trust prompt. The cluster operator
+// keeps the flux-system Secret's known_hosts entry synchronized
+// with it.
 type FluxConfig struct {
 	Repository string
 	Path       string
 	Branch     string
+	KnownHosts string
 }
 
 // FluxConfig reads the flux feature's declaration, applies the sync
@@ -245,6 +252,9 @@ func (c *Cluster) FluxConfig() (*FluxConfig, error) {
 		}
 		if s, _ := (*cfg)["branch"].(string); s != "" {
 			out.Branch = s
+		}
+		if s, _ := (*cfg)["knownHosts"].(string); s != "" {
+			out.KnownHosts = s
 		}
 	}
 	if out.Repository == "" {

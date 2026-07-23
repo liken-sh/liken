@@ -11,8 +11,22 @@ DIST ?= dist
 
 all: $(DIST)/liken-cluster-operator-image.tar
 
+# The engine seed rides inside the binary (flux.go embeds seed/),
+# because this operator deliberately has no hostPath mounts to read
+# the image's files through. The flux domain renders the seed at its
+# pinned version, and this rule copies it to where go:embed can see
+# it; embed paths cannot leave the package directory.
+FLUX_VERSION := $(strip $(file <../flux/VERSION))
+
+seed/gotk-components.yaml: ../flux/dist/$(FLUX_VERSION)/gotk-components.yaml
+	cp $< $@
+
+../flux/dist/$(FLUX_VERSION)/gotk-components.yaml: ../flux/VERSION ../flux/fetch.sh
+	$(MAKE) -C ../flux
+
 $(DIST)/liken-cluster-operator: ../go.mod ../go.sum $(wildcard *.go) \
-		$(wildcard ../machine/*.go) $(wildcard ../kubernetes/*.go) $(LIKEN_VERSION_STAMP)
+		$(wildcard ../machine/*.go) $(wildcard ../kubernetes/*.go) \
+		seed/gotk-components.yaml $(LIKEN_VERSION_STAMP)
 	CGO_ENABLED=0 go build -trimpath \
 		-ldflags "-X github.com/liken-sh/liken/machine.Version=$(LIKEN_VERSION)" \
 		-o $(DIST)/liken-cluster-operator .

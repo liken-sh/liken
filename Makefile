@@ -199,7 +199,8 @@ machine-operator/dist/liken-machine-operator-image.tar: $(wildcard machine-opera
 
 machine-operator: machine-operator/dist/liken-machine-operator-image.tar
 
-cluster-operator/dist/liken-cluster-operator-image.tar: $(wildcard cluster-operator/*.go) \
+cluster-operator/dist/liken-cluster-operator-image.tar: flux/VERSION flux/fetch.sh \
+		$(wildcard cluster-operator/*.go) \
 		go.mod go.sum image/oci.sh \
 		$(wildcard machine/*.go) $(wildcard kubernetes/*.go) $(LIKEN_VERSION_STAMP)
 	$(MAKE) -C cluster-operator

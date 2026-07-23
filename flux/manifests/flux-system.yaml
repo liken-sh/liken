@@ -24,12 +24,14 @@ kind: Namespace
 metadata:
   name: flux-system
 ---
-# get and create, never update or delete: the operator mints the key
-# once and reads it forever after. Rotation is a person's decision,
-# made by deleting the Secret; the next sweep then mints a fresh key
-# to register. The get rule is held to the one Secret by name. The
-# create rule cannot be, because a create request names no resource
-# until it succeeds, so the namespace boundary is its limit.
+# get, patch, and create, never delete: the operator mints the key
+# once and reads it forever after, and patch keeps the Secret's
+# known_hosts entry following the declared parameter. Rotation is a
+# person's decision, made by deleting the Secret; the next sweep
+# then mints a fresh key to register. The get and patch rules are
+# held to the one Secret by name. The create rule cannot be, because
+# a create request names no resource until it succeeds, so the
+# namespace boundary is its limit.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -39,7 +41,7 @@ rules:
   - apiGroups: [""]
     resources: [secrets]
     resourceNames: [flux-system]
-    verbs: [get]
+    verbs: [get, patch]
   - apiGroups: [""]
     resources: [secrets]
     verbs: [create]
@@ -53,6 +55,82 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: liken-deploy-key-minter
+subjects:
+  - kind: ServiceAccount
+    name: liken-cluster-operator
+    namespace: liken-system
+---
+# The planter's grant, namespaced half: what the engine seed creates
+# inside flux-system, plus the probe. The probe is a get on one
+# Deployment by name; the creates cannot be name-held, as above.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: liken-engine-planter
+  namespace: flux-system
+rules:
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [kustomize-controller]
+    verbs: [get]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [serviceaccounts, services, resourcequotas]
+    verbs: [create]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: liken-engine-planter
+  namespace: flux-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: liken-engine-planter
+subjects:
+  - kind: ServiceAccount
+    name: liken-cluster-operator
+    namespace: liken-system
+---
+# The planter's grant, cluster-scoped half. This is the loud one,
+# and it is the feature: a fleet that declares GitOps declares that
+# this operator may install the engine. The seed creates the
+# engine's CRDs and its RBAC, and RBAC's escalation rule requires
+# the creator to hold, or be granted escalate and bind over, what
+# the created roles grant; the engine's own roles are wide, so the
+# planter needs these verbs. The grant exists only while the
+# feature is declared, because this file only reaches the cluster
+# through the feature's seeding. The planter itself only ever
+# creates: it fills absence and never updates or deletes what
+# exists, so those verbs are absent here.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: liken-engine-planter
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [create]
+  - apiGroups: [apiextensions.k8s.io]
+    resources: [customresourcedefinitions]
+    verbs: [create]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [clusterroles, clusterrolebindings]
+    verbs: [create, escalate, bind]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: liken-engine-planter
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: liken-engine-planter
 subjects:
   - kind: ServiceAccount
     name: liken-cluster-operator

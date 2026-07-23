@@ -200,6 +200,7 @@ func TestFluxConfigReadsEveryParameter(t *testing.T) {
 			"repository": "ssh://git@forge.example/fleet.git",
 			"path":       "clusters/lab",
 			"branch":     "trunk",
+			"knownHosts": "forge.example ssh-ed25519 AAAA",
 		},
 	}}}
 	cfg, err := c.FluxConfig()
@@ -208,6 +209,9 @@ func TestFluxConfigReadsEveryParameter(t *testing.T) {
 	}
 	if cfg.Path != "clusters/lab" || cfg.Branch != "trunk" {
 		t.Errorf("got path %q, branch %q", cfg.Path, cfg.Branch)
+	}
+	if cfg.KnownHosts != "forge.example ssh-ed25519 AAAA" {
+		t.Errorf("got knownHosts %q", cfg.KnownHosts)
 	}
 }
 

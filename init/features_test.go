@@ -136,6 +136,44 @@ func TestWorkloadFeatureSeedsItsManifests(t *testing.T) {
 	}
 }
 
+// The flux feature's sync objects are rendered, not copied: the
+// declared parameters become the GitRepository and Kustomization
+// that point the engine at the fleet's repository. liken owns these
+// two objects forever (the repository must never carry them), so
+// they re-render on every boot like any seeded manifest.
+func TestWorkloadFeatureRendersTheFluxSyncObjects(t *testing.T) {
+	featureFixture(t)
+	c := labCluster()
+	c.Spec.Features = map[string]*cluster.FeatureConfig{
+		"flux": {
+			"repository": "ssh://git@forge.example/fleet.git",
+			"branch":     "trunk",
+		},
+	}
+	got := actuateFeatures(c, "node-1")
+	if len(got) != 1 || got[0].State != machine.FeatureActive {
+		t.Fatalf("expected Active, got %+v", got)
+	}
+	raw, err := os.ReadFile(filepath.Join(k3sManifestsDir, "flux-sync.yaml"))
+	if err != nil {
+		t.Fatalf("the sync objects should be rendered for k3s: %v", err)
+	}
+	rendered := string(raw)
+	for _, want := range []string{
+		"kind: GitRepository",
+		"kind: Kustomization",
+		`url: "ssh://git@forge.example/fleet.git"`,
+		`branch: "trunk"`,
+		`path: "./"`,
+		"prune: true",
+		"name: flux-system",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("the rendering should contain %q:\n%s", want, rendered)
+		}
+	}
+}
+
 func TestWorkloadFeatureFailsOnABadConfiguration(t *testing.T) {
 	featureFixture(t)
 	c := labCluster()

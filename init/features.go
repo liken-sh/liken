@@ -184,7 +184,11 @@ func actuateVendoredFeature(moduleBase, slug, machineName string) machine.Featur
 func actuateWorkloadFeature(clusterDoc *cluster.Cluster, slug string) machine.FeatureStatus {
 	status := machine.FeatureStatus{Name: slug, State: machine.FeatureActive}
 	if slug == cluster.FeatureFlux {
-		if _, err := clusterDoc.FluxConfig(); err != nil {
+		cfg, err := clusterDoc.FluxConfig()
+		if err == nil {
+			err = seedFluxSync(cfg)
+		}
+		if err != nil {
 			status.State = machine.FeatureFailed
 			status.Message = err.Error()
 			return status
@@ -196,6 +200,62 @@ func actuateWorkloadFeature(clusterDoc *cluster.Cluster, slug string) machine.Fe
 		return status
 	}
 	return status
+}
+
+// seedFluxSync renders the flux feature's two sync objects from the
+// declared parameters and seeds them beside the feature's manifests.
+// These are the objects `flux bootstrap` would otherwise commit to
+// the repository. Here they stay liken's forever: they re-render on
+// every boot from the Cluster document, so editing the declaration
+// is a real act, and the repository must never carry its own copies,
+// or git and liken would fight over them. The engine itself takes
+// the opposite arrangement, planted once by the cluster operator and
+// owned by the repository from then on (cluster-operator/flux.go).
+func seedFluxSync(cfg *cluster.FluxConfig) error {
+	// Flux spells sync paths relative to the repository root. The
+	// default "." becomes "./", and a declared path gains the "./"
+	// prefix the convention expects.
+	path := "./"
+	if cfg.Path != "." {
+		path = "./" + strings.TrimPrefix(cfg.Path, "./")
+	}
+	// The rendered values are quoted with %q, which is JSON string
+	// quoting, and JSON strings are valid YAML scalars. This keeps a
+	// hostile-looking branch name or path from becoming YAML
+	// structure.
+	rendered := fmt.Sprintf(`# Rendered by liken from the Cluster document's flux declaration.
+# The repository must not carry these two objects; liken re-renders
+# them on every boot, and a copy in git would fight this one.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: flux-system
+  namespace: flux-system
+spec:
+  interval: 1m0s
+  url: %q
+  ref:
+    branch: %q
+  secretRef:
+    name: flux-system
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: flux-system
+  namespace: flux-system
+spec:
+  interval: 10m0s
+  path: %q
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+`, cfg.Repository, cfg.Branch, path)
+	if err := os.MkdirAll(k3sManifestsDir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(k3sManifestsDir, "flux-sync.yaml"), []byte(rendered), 0o644)
 }
 
 // featureBootHooks are the per-feature boot-time contributions, keyed

@@ -1,0 +1,4 @@
+# Build products: the fetched flux CLI and the rendered seed; `make`
+# recreates both from the VERSION pin.
+cache/
+dist/

@@ -145,8 +145,16 @@ func sweepFleet(c *kubernetes.Client, clusterDoc *cluster.Cluster, available str
 
 	// The flux feature's deploy key is fleet state too: minted once,
 	// then read on every pass so the status always carries the
-	// public half (see flux.go).
+	// public half (see flux.go). The engine gets the same standing
+	// care: gone means re-planted, on this same pass.
 	publicKey := ensureFluxDeployKey(c, clusterDoc)
+	if seed, err := engineSeed(); err != nil {
+		if clusterDoc.FeatureEnabled(cluster.FeatureFlux) {
+			fmt.Printf("this build carries no engine seed (a plain go build outside make): %v\n", err)
+		}
+	} else {
+		ensureFluxEngine(c, clusterDoc, seed)
+	}
 
 	markLost(c, machines, s.lost, now)
 	publishClusterStatus(c, clusterDoc, s, r, available, publicKey, now)

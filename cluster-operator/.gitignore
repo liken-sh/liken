@@ -1,3 +1,6 @@
 # The built binary and the OCI image assembled from it; `make`
 # recreates both from the sources here.
 dist/
+# The engine seed is a build product too, copied from ../flux/dist
+# by the Makefile; seed/README.md explains the arrangement.
+seed/gotk-components.yaml

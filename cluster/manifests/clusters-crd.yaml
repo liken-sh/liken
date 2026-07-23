@@ -427,7 +427,11 @@ spec:
                     ssh://git@forge.example/fleet.git. Its path
                     (default ".") and branch (default "main")
                     parameters choose which part of the repository
-                    this cluster syncs. The repository is expected
+                    this cluster syncs. Its knownHosts parameter is
+                    the forge's SSH host keys in known_hosts form,
+                    one line per key: public material that lets the
+                    first clone verify the forge, so it rides the
+                    spec rather than a Secret. The repository is expected
                     to be private, and the cluster mints its own
                     SSH deploy key: the private half never leaves
                     the cluster, and status.flux.publicKey carries
@@ -485,11 +489,12 @@ spec:
                         feature's configuration is exactly {}
                     # flux's shape: repository is required, and every
                     # parameter must be one the vocabulary defines.
-                    - rule: "!('flux' in self) || dyn(self['flux']) == null || ('repository' in self['flux'] && self['flux'].all(param, param in ['repository', 'path', 'branch']))"
+                    - rule: "!('flux' in self) || dyn(self['flux']) == null || ('repository' in self['flux'] && self['flux'].all(param, param in ['repository', 'path', 'branch', 'knownHosts']))"
                       message: >-
                         flux requires the repository parameter (the
                         git URL the fleet syncs from), and its only
-                        parameters are repository, path, and branch
+                        parameters are repository, path, branch, and
+                        knownHosts
                   additionalProperties:
                     type: object
                     # Nullable, so that an explicit null survives
