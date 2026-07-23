@@ -42,9 +42,14 @@ CLUSTER_MAC := 52:54:00:47:50:0$(NODE_NUM)
 
 # The guest's blank disks and its private UEFI variable store, the
 # same shapes as the dev cluster's.
+# The state disk is 4G where the dev cluster's is 2G. clusterState,
+# the disk's remainder role, holds containerd's images, and this lab
+# deliberately runs more of them at once: the flux controllers, the
+# ingress tier, and whatever the fleet repository deploys. The 2G
+# size met disk pressure the first time a commit enabled traefik.
 guests/$(NODE)/state.qcow2:
 	mkdir -p guests/$(NODE)
-	qemu-img create -f qcow2 $@ 2G
+	qemu-img create -f qcow2 $@ 4G
 
 guests/$(NODE)/pods.qcow2:
 	mkdir -p guests/$(NODE)
