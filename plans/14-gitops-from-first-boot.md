@@ -222,6 +222,26 @@ Every rescue in this design is a live edit, so every rescue leaves
 fingerprints, and the rescue guide must end with the step that
 removes them.
 
-One question stays open, moved rather than closed: the repository
-now decides how many controllers run, so the manual, not the
-vocabulary, must warn what a 1 GB machine can carry.
+The prune bomb has one last edge, and it stays with the user by
+design. The synced path carries the Cluster document that declares
+Flux itself. So a commit that drops that path, while the feature
+stays declared and the engine stays alive, would let the engine's
+garbage collector delete the Cluster and its Machines from the
+live cluster. Retraction does not have this edge: the janitor
+kills the controllers before any sync object dies, so disabling
+the feature never fires the prune. liken adds no code guard for
+the commit case. A finalizer
+would stall deletion instead of refusing it, and it would wedge
+every honest teardown. An operator-stamped annotation was
+considered and set aside: git owns these documents, so the mark
+belongs in the repository with them. The manual tells the user to
+set the `kustomize.toolkit.fluxcd.io/prune: disabled` annotation on
+the Cluster and Machine documents in the repository. The garbage
+collector then leaves the marked documents in place, and removing
+the fleet stays a deliberate live act.
+
+Two questions stay open, moved rather than closed, and both land
+on the manual: the repository now decides how many controllers
+run, so the manual must warn what a 1 GB machine can carry, and
+the manual must teach the `prune: disabled` mark above as part of
+the repository layout it recommends.
