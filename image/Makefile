@@ -51,6 +51,7 @@ $(DIST)/liken.sqfs $(DIST)/boot.cpio &: build.sh boot-modules.conf \
 		../open-iscsi/modules.conf ../open-iscsi/iscsid.conf \
 		../nfs-utils/dist/$(NFSUTILS_VERSION)/mount.nfs \
 		../nfs-utils/modules.conf \
+		$(wildcard ../flux/manifests/*.yaml) \
 		$(MACHINE_OPERATOR_DIST)/liken-machine-operator-image.tar \
 		$(wildcard ../machine-operator/manifests/*.yaml) \
 		$(CLUSTER_OPERATOR_DIST)/liken-cluster-operator-image.tar \

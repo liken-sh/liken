@@ -49,6 +49,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 )
 
 // FeatureKind is how a feature is delivered. Deployments never see
@@ -90,17 +91,34 @@ const (
 	// machine reports the gap, instead of silently lacking the
 	// capability.
 	FeatureVendored FeatureKind = "Vendored"
+
+	// FeatureWorkload is a capability that runs entirely as cluster
+	// workloads: manifests that ride the image and seed into k3s's
+	// auto-deploy directory when the feature is declared, with no
+	// vendored host binaries and no kernel modules. The workload's
+	// container images are ordinary registry pulls, not baked
+	// payloads, so the feature needs no image-side presence check:
+	// an image whose vocabulary knows the slug also carries its
+	// manifests, because one build produces both. flux takes this
+	// shape.
+	FeatureWorkload FeatureKind = "Workload"
 )
 
 // FeatureDefinition names one feature: its slug, which is the key
 // deployments write in spec.features, and its kind. Requires names
 // the features this one cannot work without. Enabling a feature
 // enables everything it requires, so a deployment declares what it
-// wants and never has to know the dependency exists.
+// wants and never has to know the dependency exists. Params names
+// the parameters the feature's configuration accepts; most features
+// have none, and their configuration is exactly {}. The CRD holds a
+// parameterized feature to these names at admission, the parity
+// test holds the CRD to this table, and ValidateParams is the same
+// judgment at the file doors.
 type FeatureDefinition struct {
 	Slug     string
 	Kind     FeatureKind
 	Requires []string
+	Params   []string
 }
 
 // Features is the vocabulary, listed in the order that explains it
@@ -117,18 +135,124 @@ var Features = []FeatureDefinition{
 	{Slug: "network-policy", Kind: FeatureEmbedded},
 	{Slug: "iscsi", Kind: FeatureVendored},
 	{Slug: "nfs", Kind: FeatureVendored},
+	// flux names the project, not the capability, and this is a
+	// deliberate exception to the naming rule above. The rule exists
+	// so an implementation can change behind a stable name, and for
+	// iscsi that holds: the kernel interface is the capability, and
+	// open-iscsi could be swapped behind it. A GitOps engine is
+	// different. Its in-cluster resources and its repository
+	// conventions are the interface the deployment builds its whole
+	// repository against, so a generic gitops slug would promise a
+	// swappability the design could never honor. A deployment that
+	// needs a different engine needs a different feature.
+	{Slug: "flux", Kind: FeatureWorkload,
+		Params: []string{"repository", "path", "branch"}},
 }
 
-// FeatureConfig is one feature's configuration. Every feature today
-// has zero configuration, so the struct is empty, and {} is how a
-// deployment enables a feature. A feature's first parameter will
-// land here as a field, together with a matching property in the
-// CRD. Until then, the strict parse rejects any key inside the
-// object. (When that first parameter arrives, validation must also
-// grow a per-slug check. Without it, a shared struct would accept
-// one feature's parameter under another feature's slug, which the
-// CRD's named properties already refuse.)
-type FeatureConfig struct{}
+// FeatureConfig is one feature's configuration: the object under its
+// slug in spec.features. {} is every feature's zero configuration,
+// and a parameterized feature's parameters are its keys. The type is
+// a plain map on purpose, never a struct of named fields. Each
+// machine's binary knows only the parameter vocabulary its image was
+// built with, and a fleet mid-upgrade holds several of those
+// vocabularies at once. A struct parsed strictly would refuse a
+// document from a newer vocabulary, and then a downgraded machine
+// could not read its own proven document, could not derive its role,
+// and would sit Blocked. So the file doors accept any parameters,
+// and the judgment happens where a verdict can be reported: the CRD
+// refuses a parameter its vocabulary does not know at admission, and
+// init's feature pass reports a parameter this image cannot honor
+// (ValidateParams below), leaving the machine degraded rather than
+// down.
+type FeatureConfig map[string]any
+
+// ValidateParams holds one feature's configuration to this
+// definition's parameter vocabulary: every key must be a declared
+// parameter, and every value must be a string, the one value type
+// the vocabulary uses. A nil configuration validates like {}; the
+// null refusal belongs to validateFeatures, at parse time. The error
+// names both possible causes, because an unknown parameter reads the
+// same from here whether a newer vocabulary defined it or a
+// hand-written seed misspelled it.
+func (def *FeatureDefinition) ValidateParams(cfg *FeatureConfig) error {
+	if cfg == nil {
+		return nil
+	}
+	for _, key := range slices.Sorted(maps.Keys(*cfg)) {
+		if !slices.Contains(def.Params, key) {
+			offers := "no parameters"
+			if len(def.Params) > 0 {
+				offers = strings.Join(def.Params, ", ")
+			}
+			return fmt.Errorf(
+				"%s: this image's vocabulary has no %q parameter; upgrade to a release that carries it, or fix the name if it is a misspelling (this image offers: %s)",
+				def.Slug, key, offers)
+		}
+		if _, ok := (*cfg)[key].(string); !ok {
+			return fmt.Errorf("%s: %s must be a string", def.Slug, key)
+		}
+	}
+	return nil
+}
+
+// FeatureFlux is the GitOps feature's slug: the declaration that the
+// fleet's workloads and configuration sync from a git repository
+// through Flux.
+const FeatureFlux = "flux"
+
+// The sync defaults: the repository's root, on the branch most
+// forges create by default. A deployment that keeps several clusters
+// in one repository sets path to its cluster's directory instead.
+const (
+	FluxDefaultPath   = "."
+	FluxDefaultBranch = "main"
+)
+
+// FluxConfig is the flux feature's configuration, typed: where the
+// fleet's declared state lives, and which part of it this cluster
+// syncs.
+type FluxConfig struct {
+	Repository string
+	Path       string
+	Branch     string
+}
+
+// FluxConfig reads the flux feature's declaration, applies the sync
+// defaults, and requires the one parameter that has no default: the
+// repository. It returns nil with no error when the cluster does not
+// declare the feature; that is the ordinary state, not a mistake. An
+// empty string counts as unset, so `path: ""` gets the default
+// rather than an impossible sync path.
+func (c *Cluster) FluxConfig() (*FluxConfig, error) {
+	if c == nil {
+		return nil, nil
+	}
+	cfg, declared := c.Spec.Features[FeatureFlux]
+	if !declared {
+		return nil, nil
+	}
+	def := FeatureBySlug(FeatureFlux)
+	if err := def.ValidateParams(cfg); err != nil {
+		return nil, err
+	}
+	out := &FluxConfig{Path: FluxDefaultPath, Branch: FluxDefaultBranch}
+	if cfg != nil {
+		if s, _ := (*cfg)["repository"].(string); s != "" {
+			out.Repository = s
+		}
+		if s, _ := (*cfg)["path"].(string); s != "" {
+			out.Path = s
+		}
+		if s, _ := (*cfg)["branch"].(string); s != "" {
+			out.Branch = s
+		}
+	}
+	if out.Repository == "" {
+		return nil, fmt.Errorf(
+			"flux: repository is required: the git URL the fleet's declared state syncs from, for example ssh://git@forge.example/fleet.git")
+	}
+	return out, nil
+}
 
 // FeatureBySlug finds one feature's definition. It returns nil when
 // the vocabulary does not include the slug.

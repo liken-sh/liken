@@ -143,8 +143,13 @@ func sweepFleet(c *kubernetes.Client, clusterDoc *cluster.Cluster, available str
 	// k3s is down (see janitor.go).
 	janitorFeatureWorkloads(c, clusterDoc)
 
+	// The flux feature's deploy key is fleet state too: minted once,
+	// then read on every pass so the status always carries the
+	// public half (see flux.go).
+	publicKey := ensureFluxDeployKey(c, clusterDoc)
+
 	markLost(c, machines, s.lost, now)
-	publishClusterStatus(c, clusterDoc, s, r, available, now)
+	publishClusterStatus(c, clusterDoc, s, r, available, publicKey, now)
 }
 
 // markLost writes the Lost verdict onto each machine that the sweep
@@ -194,15 +199,29 @@ func markLost(c *kubernetes.Client, machines []machine.Machine, lost []string, n
 // Cluster's status, so deriving every field is its job. The function
 // writes the status only when something actually changed, so a
 // settled fleet causes no write.
-func publishClusterStatus(c *kubernetes.Client, clusterDoc *cluster.Cluster, s fleetSweep, r rollout, available string, now time.Time) {
+func publishClusterStatus(c *kubernetes.Client, clusterDoc *cluster.Cluster, s fleetSweep, r rollout, available, publicKey string, now time.Time) {
 	newest := cluster.NewestVersion(clusterDoc.Spec.Releases.Catalog)
 	s.condition.ObservedGeneration = clusterDoc.Metadata.Generation
 	r.progressing.ObservedGeneration = clusterDoc.Metadata.Generation
 	conditions := api.SetCondition(slices.Clone(clusterDoc.Status.Conditions), s.condition, now)
 	conditions = api.SetCondition(conditions, r.progressing, now)
+	// The deploy key's public half. A declared feature with an empty
+	// answer means this pass could not read the Secret (a permission
+	// still being seeded, a lost mint race); the last published
+	// value is still the fleet's key, so the status keeps it. A
+	// retracted feature clears the section: the Secret keeps the key
+	// for a re-enable, but a status should not advertise a feature
+	// the spec no longer declares.
+	flux := clusterDoc.Status.Flux
+	if !clusterDoc.FeatureEnabled(cluster.FeatureFlux) {
+		flux = cluster.ClusterFluxStatus{}
+	} else if publicKey != "" {
+		flux = cluster.ClusterFluxStatus{PublicKey: publicKey}
+	}
 	if clusterDoc.Status.Machines != s.tally || clusterDoc.Status.Phase != s.phase ||
 		clusterDoc.Status.Releases.Newest != newest ||
 		clusterDoc.Status.Releases.Available != available ||
+		clusterDoc.Status.Flux != flux ||
 		clusterDoc.Status.ObservedGeneration != clusterDoc.Metadata.Generation ||
 		!slices.Equal(conditions, clusterDoc.Status.Conditions) {
 		updated := *clusterDoc
@@ -210,6 +229,7 @@ func publishClusterStatus(c *kubernetes.Client, clusterDoc *cluster.Cluster, s f
 		updated.Status.Phase = s.phase
 		updated.Status.Releases.Newest = newest
 		updated.Status.Releases.Available = available
+		updated.Status.Flux = flux
 		updated.Status.ObservedGeneration = clusterDoc.Metadata.Generation
 		updated.Status.Conditions = conditions
 		if err := kubernetes.PublishClusterStatus(c, &updated); err != nil {

@@ -289,6 +289,7 @@ $(SYSTEM_IMAGE) $(BOOT_ARCHIVE) &: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_
 		$(wildcard open-iscsi/manifests/*.yaml) \
 		open-iscsi/modules.conf open-iscsi/iscsid.conf \
 		$(NFSUTILS_DIST)/mount.nfs nfs-utils/modules.conf \
+		$(wildcard flux/manifests/*.yaml) \
 		machine-operator/dist/liken-machine-operator-image.tar \
 		$(wildcard machine-operator/manifests/*.yaml) \
 		cluster-operator/dist/liken-cluster-operator-image.tar \

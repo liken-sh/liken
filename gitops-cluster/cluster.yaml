@@ -33,8 +33,15 @@ spec:
   time:
     upstreams: [time.cloudflare.com, time.nist.gov]
 
-  # No features yet. The flux declaration that this lab exists for
-  # lands here once the feature vocabulary knows the slug.
+  # The declaration this lab exists for: the fleet's declared state
+  # lives in the liken-dev-cluster repository, and the cluster syncs
+  # this lab's directory of it. The repository is private. The
+  # cluster mints its own deploy key, and status.flux.publicKey
+  # carries the half to register at the forge.
+  features:
+    flux:
+      repository: ssh://git@github.com/liken-sh/liken-dev-cluster.git
+      path: clusters/gitops
 
   releases:
     # The lab's release server on the host (`make serve`), at QEMU's

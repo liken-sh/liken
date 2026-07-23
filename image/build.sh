@@ -295,6 +295,12 @@ cp "$openiscsi_dist/iscsid-image.tar" \
    "$root/var/lib/rancher/k3s/agent/images/liken-iscsid.tar"
 mkdir -p "$root/etc/liken/features/nfs"
 cp "$here/../nfs-utils/modules.conf" "$root/etc/liken/features/nfs/modules.conf"
+# The flux feature is pure workload: manifests with no modules.conf
+# and no vendored binaries. Its engine's container images are
+# ordinary registry pulls, never baked payloads (the flux domain
+# explains the feature).
+mkdir -p "$root/etc/liken/features/flux/manifests"
+cp "$here"/../flux/manifests/*.yaml "$root/etc/liken/features/flux/manifests/"
 
 # This is the machine's trust store, vendored by the trust domain
 # (trust/fetch.sh explains where these roots come from). The staged

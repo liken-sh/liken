@@ -102,6 +102,7 @@ type ClusterStatus struct {
 	Phase    api.Phase             `json:"phase,omitempty"`
 	Machines MachineTally          `json:"machines,omitzero"`
 	Releases ClusterReleasesStatus `json:"releases,omitzero"`
+	Flux     ClusterFluxStatus     `json:"flux,omitzero"`
 
 	// ObservedGeneration is the metadata.generation of the spec that
 	// this status judged, stamped by the sweep on every write. The
@@ -129,6 +130,18 @@ type ClusterStatus struct {
 type ClusterReleasesStatus struct {
 	Newest    string `json:"newest,omitempty"`
 	Available string `json:"available,omitempty"`
+}
+
+// ClusterFluxStatus is the flux feature's observable half.
+// PublicKey is the fleet's deploy key: the public half, in the
+// authorized_keys form a forge accepts. The private half lives only
+// in the flux-system Secret, minted there by the cluster operator
+// (cluster-operator/flux.go), so nobody ever handles private
+// material to set the sync up: they register this value at the
+// forge, and the fleet does the rest. An empty status means the
+// feature is not declared, or the key is not minted yet.
+type ClusterFluxStatus struct {
+	PublicKey string `json:"publicKey,omitempty"`
 }
 
 // MachineTally counts the cluster's Machines: how many are fully

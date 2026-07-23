@@ -54,6 +54,10 @@ func actuateFeatures(clusterDoc *cluster.Cluster, machineName string) []machine.
 	for _, slug := range slugs {
 		var status machine.FeatureStatus
 		def := cluster.FeatureBySlug(slug)
+		var paramsErr error
+		if def != nil {
+			paramsErr = def.ValidateParams(clusterDoc.Spec.Features[slug])
+		}
 		switch {
 		case def == nil:
 			// A slug that this binary's vocabulary does not include.
@@ -70,8 +74,22 @@ func actuateFeatures(clusterDoc *cluster.Cluster, machineName string) []machine.
 					"this image's vocabulary has no %q feature; upgrade to a release that carries it, or fix the name if it is a misspelling (this image offers: %s)",
 					slug, strings.Join(cluster.FeatureSlugs(), ", ")),
 			}
+		case paramsErr != nil:
+			// A parameter this binary's vocabulary does not include,
+			// on a slug it does. The parser lets it through for the
+			// same downgrade reason as an unknown slug, and the same
+			// two causes apply, so the report happens here too. The
+			// feature fails whole, rather than actuating the part of
+			// the declaration this image understands.
+			status = machine.FeatureStatus{
+				Name:    slug,
+				State:   machine.FeatureFailed,
+				Message: paramsErr.Error(),
+			}
 		case def.Kind == cluster.FeatureVendored:
 			status = actuateVendoredFeature(moduleBase, slug, machineName)
+		case def.Kind == cluster.FeatureWorkload:
+			status = actuateWorkloadFeature(clusterDoc, slug)
 		default:
 			status = machine.FeatureStatus{Name: slug, State: machine.FeatureActive}
 		}
@@ -148,6 +166,30 @@ func actuateVendoredFeature(moduleBase, slug, machineName string) machine.Featur
 	// reads the directory, an extra file on a follower has no
 	// effect, and contents that varied by role would be one more
 	// thing to reason about during a promotion.
+	if err := seedFeatureManifests(slug); err != nil {
+		status.State = machine.FeatureFailed
+		status.Message = err.Error()
+		return status
+	}
+	return status
+}
+
+// actuateWorkloadFeature makes one workload feature real. There is
+// no payload gate like the vendored features' modules.conf check: an
+// image whose vocabulary knows the slug also carries its manifests,
+// because one build produces both. The flux feature also proves its
+// configuration first, so a declaration that cannot sync reports the
+// missing parameter instead of seeding workloads that would only
+// fail in pods.
+func actuateWorkloadFeature(clusterDoc *cluster.Cluster, slug string) machine.FeatureStatus {
+	status := machine.FeatureStatus{Name: slug, State: machine.FeatureActive}
+	if slug == cluster.FeatureFlux {
+		if _, err := clusterDoc.FluxConfig(); err != nil {
+			status.State = machine.FeatureFailed
+			status.Message = err.Error()
+			return status
+		}
+	}
 	if err := seedFeatureManifests(slug); err != nil {
 		status.State = machine.FeatureFailed
 		status.Message = err.Error()

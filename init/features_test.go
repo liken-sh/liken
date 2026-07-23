@@ -98,6 +98,60 @@ func writeTreeFile(t *testing.T, path, content string) {
 	}
 }
 
+// An unknown parameter on a known feature has the same two causes as
+// an unknown slug: a newer vocabulary defined it, or a hand-written
+// seed misspelled it. The pass reports it the same way, degraded
+// with both causes named, rather than quietly ignoring the key and
+// actuating half a declaration.
+func TestActuateFeaturesReportsUnknownParameters(t *testing.T) {
+	c := labCluster()
+	c.Spec.Features = map[string]*cluster.FeatureConfig{
+		"metrics-server": {"replicas": "2"},
+	}
+	got := actuateFeatures(c, "node-1")
+	if len(got) != 1 || got[0].State != machine.FeatureFailed {
+		t.Fatalf("an unknown parameter reports Failed: %+v", got)
+	}
+	if !strings.Contains(got[0].Message, "replicas") ||
+		!strings.Contains(got[0].Message, "misspelling") {
+		t.Errorf("the message should name the parameter and both causes: %q", got[0].Message)
+	}
+}
+
+func TestWorkloadFeatureSeedsItsManifests(t *testing.T) {
+	featureFixture(t)
+	writeTreeFile(t, filepath.Join(featuresDir, "flux", "manifests", "flux-system.yaml"),
+		"kind: Namespace\n")
+	c := labCluster()
+	c.Spec.Features = map[string]*cluster.FeatureConfig{
+		"flux": {"repository": "ssh://git@forge.example/fleet.git"},
+	}
+	got := actuateFeatures(c, "node-1")
+	if len(got) != 1 || got[0].State != machine.FeatureActive {
+		t.Fatalf("a declared workload feature reports Active: %+v", got)
+	}
+	seeded := filepath.Join(k3sManifestsDir, "flux-system.yaml")
+	if _, err := os.Stat(seeded); err != nil {
+		t.Errorf("the manifest should be seeded for k3s: %v", err)
+	}
+}
+
+func TestWorkloadFeatureFailsOnABadConfiguration(t *testing.T) {
+	featureFixture(t)
+	c := labCluster()
+	c.Spec.Features = map[string]*cluster.FeatureConfig{"flux": {}}
+	got := actuateFeatures(c, "node-1")
+	if len(got) != 1 || got[0].State != machine.FeatureFailed {
+		t.Fatalf("flux without a repository reports Failed: %+v", got)
+	}
+	if !strings.Contains(got[0].Message, "repository") {
+		t.Errorf("the message should name the missing parameter: %q", got[0].Message)
+	}
+	if entries, _ := os.ReadDir(k3sManifestsDir); len(entries) != 0 {
+		t.Errorf("a failed feature must not seed workloads: %v", entries)
+	}
+}
+
 func TestVendoredFeatureMissingFromAnOlderImage(t *testing.T) {
 	base := featureFixture(t)
 	got := actuateVendoredFeature(base, "iscsi", "node-1")

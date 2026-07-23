@@ -1,6 +1,8 @@
 # GitOps from first boot
 
-Milestone 14 — Not started
+Milestone 14 — In progress: the feature parameters, the flux
+vocabulary row, and the deploy key landed; the sync engine and the
+end-to-end loop remain
 
 GitOps from first boot is an opt-in feature. An earlier version of
 this plan refused to vendor an engine. That version sketched generic
@@ -36,19 +38,17 @@ that the user builds their whole repository against. So a generic
 never honor. Naming it `flux` states the contract honestly. If a
 deployment needs a different engine, it needs a different feature.
 
-This is the vocabulary's first feature with parameters. It becomes
-the pathfinder for the empty slots that milestone 17 built into the
-machinery. `FeatureConfig` stops being one shared empty struct.
-Validation grows a shape for each slug: the `flux` feature requires
-`repository`, and it defaults `path` and `branch`. The CRD's features
-schema is a map with one shared value schema. This is the form that
-the admission drills forced. This schema now needs parameter rules
-for each slug, which will likely mean CEL rules over the map values.
-
-This work needs the same kind of live drills against a scratch CRD
-that settled the original schema. Those drills are necessary because
-apiextensions' pruning has already surprised this plan family once
-before.
+This is the vocabulary's first feature with parameters, and the
+parameter machinery landed with it. `FeatureConfig` is a plain map,
+parsed leniently at every file door, because a document from a newer
+parameter vocabulary must still parse on an older binary; the
+refusals live where a verdict can be reported. The CRD types each
+feature's configuration as a map of string parameters, because map
+keys are never pruned, and CEL rules hold the shapes: parameterless
+features stay exactly `{}`, and `flux` requires `repository` with
+`path` and `branch` optional. The feature table in
+`cluster/features.go` declares each feature's parameter names, and
+the parity test holds the CRD's rules to that table.
 
 Toggling or re-pointing `flux` converges like any other feature edit.
 The parameters live in the canonical rendered document. So a changed
@@ -76,32 +76,43 @@ by copying them verbatim. Flux's sync object also needs the declared
 parameters rendered into it.
 
 Identity keeps the design that this plan settled on when the team
-first argued it. The repository is private. The deployment mints a
-deploy key into a `flux-system` Secret and publishes the public half
-in status and on the console. This lets the user register the key at
-the forge without ever handling private material. (The key is
-read-write, because image-update automation will eventually commit
-tag bumps back to the repository.)
+first argued it, with its open questions now closed. The repository
+is private. The cluster operator mints one deploy key for the whole
+cluster into the `flux-system` Secret, and publishes the public half
+in the Cluster's status (`status.flux.publicKey`). The user registers
+that value at the forge without ever handling private material. (The
+key is read-write, because image-update automation will eventually
+commit tag bumps back to the repository.)
 
-The exact mechanism for minting the key is still open to change. Init
-cannot write Secrets, because init runs before k3s. So the minting
-will most likely belong to the machine operator instead. The public
-key will surface through the same console-parity path that every
-other boot fact takes.
+The key is per-cluster, not per-machine, because per-machine keys
+would narrow nothing: every key would live in the same datastore
+that every leader carries, so the datastore is the unit of exposure
+either way. Rotation is one act: delete the Secret, and the next
+sweep mints a fresh pair to register. The minting belongs to the
+cluster operator because the credential is cluster-scoped, and the
+sweep is the one writer of Cluster status. Init cannot do it anyway,
+because init runs before k3s. The console does not show the key:
+console parity covers the boot facts that init discovers, and this
+key is a post-boot operator fact. The permission to write the Secret
+travels with the feature itself, as a Role in the feature's own
+seeded manifests, so the operator holds no standing Secret access on
+a fleet that never declares GitOps.
 
 Manifest authority resolves the way the earlier plan described: git
 wins, and the seeded Machine and Cluster copies stay downstream of
 it. That statement hides the milestone's sharpest question: Flux
 syncs a repository that contains the Cluster document that declares
-Flux itself. The answer to that question needs a drill, not an
-argument. The dev repo for this drill already exists (`liken-dev`).
-The lab proof is this loop: edit the repository, Flux applies the
-Cluster, and the fleet stages and rolls the change.
+Flux itself. The answer to that question needs a live proof, not an
+argument. The fleet repository for it exists
+(`github.com/liken-sh/liken-dev-cluster`), and the GitOps lab
+(`gitops-cluster/`) is the deployment that declares it. The proof is
+this loop: edit the repository, Flux applies the Cluster, and the
+fleet stages and rolls the change.
 
-Some questions stay deliberately unanswered here. Which controllers
-ship in the install manifests? The source and kustomize controllers
-are the floor; the helm and notification controllers are judgment
-calls. How does per-slug parameter validation work in the CRD without
-breaking the map schema's refusal properties? Is the deploy key
-per-cluster or per-machine? This last question really asks what must
-rotate when a machine is lost.
+Two questions stay open. Which controllers ship in the install
+manifests? The source and kustomize controllers are the floor; the
+helm and notification controllers are judgment calls. And does liken
+carry Flux's own install manifests at a pinned version, or carry the
+flux-operator and render one FluxInstance? The operator decouples
+Flux's version from liken's releases, at the cost of one more
+always-on controller inside a tight memory envelope.

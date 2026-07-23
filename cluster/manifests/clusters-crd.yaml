@@ -396,7 +396,7 @@ spec:
                     as a whole offers, beyond the minimum viable
                     cluster. Keyed by feature slug. The key's presence
                     is the opt-in, and a feature's zero configuration
-                    is {}. The vocabulary today has seven entries.
+                    is {}. The vocabulary today has eight entries.
                     traefik is k3s's bundled ingress controller.
                     servicelb is klipper-lb, which realizes Services
                     of type LoadBalancer on the nodes' own addresses.
@@ -417,13 +417,28 @@ spec:
                     DaemonSet. This is the host contract that CSI
                     drivers like synology-csi depend on. nfs is the
                     NFSv4 client: a static mount.nfs and the nfsv4
-                    kernel module, with no daemons, and v4 only. The
-                    first three (traefik, servicelb, metrics-server)
-                    are components the k3s binary already bundles,
-                    and liken disables them by default on principle:
-                    anything beyond the control plane should be a
-                    declared, visible workload, and declaring it here
-                    is that declaration. Toggling a feature converges
+                    kernel module, with no daemons, and v4 only.
+                    flux is GitOps sync through Flux: the fleet's
+                    declared state lives in a git repository, and
+                    the cluster applies what the repository holds.
+                    flux is the vocabulary's first parameterized
+                    feature. Its repository parameter is required:
+                    the git URL the fleet syncs from, for example
+                    ssh://git@forge.example/fleet.git. Its path
+                    (default ".") and branch (default "main")
+                    parameters choose which part of the repository
+                    this cluster syncs. The repository is expected
+                    to be private, and the cluster mints its own
+                    SSH deploy key: the private half never leaves
+                    the cluster, and status.flux.publicKey carries
+                    the half to register at the forge. The first
+                    three features (traefik, servicelb,
+                    metrics-server) are components the k3s binary
+                    already bundles, and liken disables them by
+                    default on principle: anything beyond the
+                    control plane should be a declared, visible
+                    workload, and declaring it here is that
+                    declaration. Toggling a feature converges
                     like any other cluster edit, rolling through the
                     fleet as staged changes and granted reboots.
                   # The schema is a map with validation rules, rather
@@ -440,17 +455,41 @@ spec:
                   # machine/features_test.go holds the first rule's
                   # vocabulary to the table in cluster/features.go.
                   x-kubernetes-validations:
-                    - rule: "self.all(slug, slug in ['traefik', 'servicelb', 'metrics-server', 'helm', 'network-policy', 'iscsi', 'nfs'])"
+                    - rule: "self.all(slug, slug in ['traefik', 'servicelb', 'metrics-server', 'helm', 'network-policy', 'iscsi', 'nfs', 'flux'])"
                       message: >-
                         unknown feature; the vocabulary is
                         traefik, servicelb, metrics-server, helm,
-                        network-policy, iscsi, nfs
-                    - rule: "self.all(slug, self[slug] != null)"
+                        network-policy, iscsi, nfs, flux
+                    # The dyn() casts in the rules below are the same
+                    # arrangement the registries mirror schema uses:
+                    # CEL types these values as map(string, string),
+                    # a type it refuses to compare with null at
+                    # compile time, and the cast is what lets the
+                    # null checks compile.
+                    - rule: "self.all(slug, dyn(self[slug]) != null)"
                       message: >-
                         a null feature is neither enabled nor
                         disabled; presence is the opt-in, so write
                         {} to enable a feature or remove its key
                         entirely
+                    # A parameterless feature's configuration must
+                    # stay exactly {}. Without this rule, a patch
+                    # guessing at {replicas: 2} would count as an
+                    # opt-in, with the guess quietly ignored. The
+                    # null guard keeps this rule from evaluating a
+                    # null value; the rule above already refuses it
+                    # with the better message.
+                    - rule: "self.all(slug, dyn(self[slug]) == null || slug in ['flux'] || self[slug].size() == 0)"
+                      message: >-
+                        only flux takes parameters; every other
+                        feature's configuration is exactly {}
+                    # flux's shape: repository is required, and every
+                    # parameter must be one the vocabulary defines.
+                    - rule: "!('flux' in self) || dyn(self['flux']) == null || ('repository' in self['flux'] && self['flux'].all(param, param in ['repository', 'path', 'branch']))"
+                      message: >-
+                        flux requires the repository parameter (the
+                        git URL the fleet syncs from), and its only
+                        parameters are repository, path, and branch
                   additionalProperties:
                     type: object
                     # Nullable, so that an explicit null survives
@@ -461,18 +500,19 @@ spec:
                     # bare `traefik:` in hand-written YAML would
                     # quietly mean nothing.
                     nullable: true
-                    # No feature has parameters yet, and this pair of
-                    # settings enforces that. Without them, the API
-                    # server prunes an unrecognized parameter and
-                    # keeps the emptied object, so a patch guessing at
-                    # {replicas: 2} would quietly become {} and turn
-                    # the feature on. Preserving unknown fields stops
-                    # the pruning, and a maximum of zero properties
-                    # then refuses the value, naming the exact field.
-                    # When the first feature grows a parameter, this
-                    # pair is what changes.
-                    maxProperties: 0
-                    x-kubernetes-preserve-unknown-fields: true
+                    # A feature's configuration is a map of string
+                    # parameters, never a schema of named properties,
+                    # for the same reason the features object itself
+                    # is a map: the API server prunes unknown named
+                    # properties before validation runs, so a
+                    # misspelled parameter would vanish silently.
+                    # Map keys are never pruned. Every parameter
+                    # survives to the rules above, which refuse the
+                    # mistakes by name. The parity test in
+                    # cluster/features_test.go holds those rules to
+                    # the vocabulary table in cluster/features.go.
+                    additionalProperties:
+                      type: string
                 registries:
                   type: object
                   description: >-
@@ -637,6 +677,26 @@ spec:
                       type: integer
                     summary:
                       type: string
+                flux:
+                  type: object
+                  description: >-
+                    The flux feature's observable half. publicKey is
+                    the fleet's deploy key: the public half, in the
+                    authorized_keys form a forge accepts. The private
+                    half never appears anywhere a person can read. The
+                    cluster operator mints the pair into the
+                    flux-system Secret when the feature is declared,
+                    and publishes the public half here. Register it
+                    at the forge as a deploy key with write access,
+                    and the fleet syncs from then on. To rotate the
+                    key, delete the flux-system Secret in the
+                    flux-system namespace; the next sweep mints a
+                    fresh pair, and this field shows the new half to
+                    register.
+                  properties:
+                    publicKey:
+                      type: string
+                      maxLength: 4096
                 releases:
                   type: object
                   description: >-

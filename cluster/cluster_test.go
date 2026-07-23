@@ -164,7 +164,14 @@ spec:
 	}
 }
 
-func TestClusterFeaturesRejectParameters(t *testing.T) {
+func TestClusterFeaturesParseParameters(t *testing.T) {
+	// Parameters are not a parse error, for the same reason unknown
+	// slugs are not: each machine's parser knows only its own image's
+	// parameter vocabulary, and a document from a newer vocabulary
+	// must still parse, or a downgraded machine could not read its
+	// own proven document. The CRD refuses a parameter its vocabulary
+	// does not know at admission, and init's feature pass reports one
+	// this image cannot honor (init/features.go).
 	path := writeClusterManifest(t, `
 apiVersion: liken.sh/v1alpha1
 kind: Cluster
@@ -172,11 +179,18 @@ metadata:
   name: lab
 spec:
   features:
+    flux:
+      repository: ssh://git@forge.example/fleet.git
     metrics-server:
       replicas: 2
 `)
-	if _, err := LoadCluster(path); err == nil {
-		t.Fatal("expected an error: no feature has parameters yet")
+	c, err := LoadCluster(path)
+	if err != nil {
+		t.Fatalf("feature parameters must parse: %v", err)
+	}
+	flux := *c.Spec.Features["flux"]
+	if flux["repository"] != "ssh://git@forge.example/fleet.git" {
+		t.Errorf("the parameter must survive the parse, got %v", flux)
 	}
 }
 

@@ -1,0 +1,59 @@
+# The flux feature's ground: the namespace, and the narrow
+# permission the cluster operator needs to mint the fleet's deploy
+# key.
+#
+# These objects ride the image, and init seeds them into k3s's
+# auto-deploy directory only while the cluster document declares the
+# flux feature (init/features.go). Delivering the permission this way
+# keeps the operator's standing RBAC honest: on a fleet that does not
+# declare the feature, the operator cannot touch a Secret at all.
+#
+# flux-system is the namespace the Flux project's tooling expects,
+# and the deploy key Secret carries Flux's conventional name for a
+# sync credential, flux-system, so the sync engine finds the key
+# without any configuration.
+#
+# None of these objects carries the liken.sh/feature annotation that
+# the retraction janitor acts on, and that is deliberate. Retracting
+# the feature must keep this namespace, because the namespace holds
+# the deploy key, and the key's public half is registered at the
+# forge. A re-enabled feature then returns with its identity intact,
+# instead of asking for a new registration.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: flux-system
+---
+# get and create, never update or delete: the operator mints the key
+# once and reads it forever after. Rotation is a person's decision,
+# made by deleting the Secret; the next sweep then mints a fresh key
+# to register. The get rule is held to the one Secret by name. The
+# create rule cannot be, because a create request names no resource
+# until it succeeds, so the namespace boundary is its limit.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: liken-deploy-key-minter
+  namespace: flux-system
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [flux-system]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: liken-deploy-key-minter
+  namespace: flux-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: liken-deploy-key-minter
+subjects:
+  - kind: ServiceAccount
+    name: liken-cluster-operator
+    namespace: liken-system

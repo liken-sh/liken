@@ -22,7 +22,8 @@ func TestFeatureSlugsAreUnique(t *testing.T) {
 
 func TestFeatureKindsAreValid(t *testing.T) {
 	for _, f := range Features {
-		if f.Kind != FeatureBundled && f.Kind != FeatureEmbedded && f.Kind != FeatureVendored {
+		if f.Kind != FeatureBundled && f.Kind != FeatureEmbedded &&
+			f.Kind != FeatureVendored && f.Kind != FeatureWorkload {
 			t.Errorf("feature %q has kind %q", f.Slug, f.Kind)
 		}
 	}
@@ -75,10 +76,11 @@ func TestClusterCRDMatchesTheVocabulary(t *testing.T) {
 											Message string `json:"message"`
 										} `json:"x-kubernetes-validations"`
 										AdditionalProperties struct {
-											Type          string `json:"type"`
-											Nullable      bool   `json:"nullable"`
-											MaxProperties *int   `json:"maxProperties"`
-											Preserve      bool   `json:"x-kubernetes-preserve-unknown-fields"`
+											Type                 string `json:"type"`
+											Nullable             bool   `json:"nullable"`
+											AdditionalProperties struct {
+												Type string `json:"type"`
+											} `json:"additionalProperties"`
 										} `json:"additionalProperties"`
 									} `json:"features"`
 								} `json:"properties"`
@@ -114,7 +116,7 @@ func TestClusterCRDMatchesTheVocabulary(t *testing.T) {
 	// rule that names the mistake, and nullable values. Without
 	// nullable values, the decoder drops a null before validation
 	// can see it.
-	if !slices.Contains(rules, "self.all(slug, self[slug] != null)") {
+	if !slices.Contains(rules, "self.all(slug, dyn(self[slug]) != null)") {
 		t.Errorf("the CRD must refuse null feature values by rule; its rules are %q", rules)
 	}
 	if features.AdditionalProperties.Type != "object" || !features.AdditionalProperties.Nullable {
@@ -122,17 +124,143 @@ func TestClusterCRDMatchesTheVocabulary(t *testing.T) {
 			features.AdditionalProperties)
 	}
 
-	// No feature has parameters yet, and the guard is a pair of
-	// rules that work together. Preserving unknown fields stops the
-	// API server from pruning a guessed parameter, which would
-	// otherwise quietly flip the feature on as {}. A maximum of zero
-	// properties then refuses the preserved value by name. When the
-	// first parameter arrives, this assertion is what changes.
-	if features.AdditionalProperties.MaxProperties == nil ||
-		*features.AdditionalProperties.MaxProperties != 0 ||
-		!features.AdditionalProperties.Preserve {
-		t.Errorf("feature values must preserve unknown fields and cap properties at zero, got %+v",
+	// A feature's configuration is a map of string parameters, never
+	// a schema of named properties. Map keys are never pruned, so a
+	// guessed parameter survives to validation, and the rules below
+	// refuse it by name instead of quietly flipping the feature on
+	// as {}.
+	if features.AdditionalProperties.AdditionalProperties.Type != "string" {
+		t.Errorf("feature parameters must be a map of strings, got %+v",
 			features.AdditionalProperties)
+	}
+
+	// A parameterless feature's configuration must stay exactly {}.
+	// This rule is built from the table, so a feature that grows
+	// parameters must declare them in Params, in the same change.
+	var parameterized []string
+	for _, f := range Features {
+		if len(f.Params) > 0 {
+			parameterized = append(parameterized, f.Slug)
+		}
+	}
+	wantEmptyRule := fmt.Sprintf(
+		"self.all(slug, dyn(self[slug]) == null || slug in ['%s'] || self[slug].size() == 0)",
+		strings.Join(parameterized, "', '"))
+	if !slices.Contains(rules, wantEmptyRule) {
+		t.Errorf("the CRD must hold parameterless features to {} with exactly %q; its rules are %q",
+			wantEmptyRule, rules)
+	}
+
+	// Each parameterized feature gets its own shape rule, holding
+	// its parameters to the table's names.
+	for _, f := range Features {
+		if len(f.Params) == 0 {
+			continue
+		}
+		wantShapeRule := fmt.Sprintf(
+			"!('%[1]s' in self) || dyn(self['%[1]s']) == null || ('%[2]s' in self['%[1]s'] && self['%[1]s'].all(param, param in ['%[3]s']))",
+			f.Slug, f.Params[0], strings.Join(f.Params, "', '"))
+		if !slices.Contains(rules, wantShapeRule) {
+			t.Errorf("the CRD must hold %s's parameters to the table with exactly %q; its rules are %q",
+				f.Slug, wantShapeRule, rules)
+		}
+	}
+}
+
+func TestFluxConfigIsAbsentUntilDeclared(t *testing.T) {
+	var none *Cluster
+	if cfg, err := none.FluxConfig(); cfg != nil || err != nil {
+		t.Errorf("nil cluster: got %v, %v", cfg, err)
+	}
+	lean := &Cluster{}
+	if cfg, err := lean.FluxConfig(); cfg != nil || err != nil {
+		t.Errorf("undeclared: got %v, %v", cfg, err)
+	}
+}
+
+func TestFluxConfigAppliesDefaults(t *testing.T) {
+	c := &Cluster{Spec: ClusterSpec{Features: map[string]*FeatureConfig{
+		"flux": {"repository": "ssh://git@forge.example/fleet.git"},
+	}}}
+	cfg, err := c.FluxConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Repository != "ssh://git@forge.example/fleet.git" {
+		t.Errorf("repository: got %q", cfg.Repository)
+	}
+	if cfg.Path != "." || cfg.Branch != "main" {
+		t.Errorf("defaults: got path %q, branch %q", cfg.Path, cfg.Branch)
+	}
+}
+
+func TestFluxConfigReadsEveryParameter(t *testing.T) {
+	c := &Cluster{Spec: ClusterSpec{Features: map[string]*FeatureConfig{
+		"flux": {
+			"repository": "ssh://git@forge.example/fleet.git",
+			"path":       "clusters/lab",
+			"branch":     "trunk",
+		},
+	}}}
+	cfg, err := c.FluxConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Path != "clusters/lab" || cfg.Branch != "trunk" {
+		t.Errorf("got path %q, branch %q", cfg.Path, cfg.Branch)
+	}
+}
+
+func TestFluxConfigRequiresARepository(t *testing.T) {
+	for name, features := range map[string]map[string]*FeatureConfig{
+		"empty configuration": {"flux": {}},
+		"null configuration":  {"flux": nil},
+		"empty repository":    {"flux": {"repository": ""}},
+	} {
+		c := &Cluster{Spec: ClusterSpec{Features: features}}
+		if _, err := c.FluxConfig(); err == nil ||
+			!strings.Contains(err.Error(), "repository") {
+			t.Errorf("%s: the error must name the missing parameter, got %v", name, err)
+		}
+	}
+}
+
+func TestFluxConfigRefusesANonStringParameter(t *testing.T) {
+	c := &Cluster{Spec: ClusterSpec{Features: map[string]*FeatureConfig{
+		"flux": {"repository": 7},
+	}}}
+	if _, err := c.FluxConfig(); err == nil ||
+		!strings.Contains(err.Error(), "repository") {
+		t.Errorf("the error must name the parameter, got %v", err)
+	}
+}
+
+// An unknown parameter has the same two causes as an unknown slug: a
+// newer vocabulary defined it, or a hand-written seed misspelled it.
+// The error must name both, because the reader cannot tell which one
+// happened from where they sit.
+func TestValidateFeatureParamsNamesBothCauses(t *testing.T) {
+	def := FeatureBySlug("flux")
+	err := def.ValidateParams(&FeatureConfig{
+		"repository": "ssh://git@forge.example/fleet.git",
+		"pathh":      "clusters/lab",
+	})
+	if err == nil || !strings.Contains(err.Error(), "pathh") ||
+		!strings.Contains(err.Error(), "misspelling") {
+		t.Errorf("the error must name the parameter and both causes, got %v", err)
+	}
+}
+
+func TestValidateFeatureParamsHoldsParameterlessFeaturesToEmpty(t *testing.T) {
+	def := FeatureBySlug("metrics-server")
+	if err := def.ValidateParams(&FeatureConfig{"replicas": 2}); err == nil {
+		t.Error("a parameterless feature must refuse any parameter")
+	}
+	if err := def.ValidateParams(&FeatureConfig{}); err != nil {
+		t.Errorf("{} is every feature's zero configuration: %v", err)
+	}
+	if err := def.ValidateParams(nil); err != nil {
+		t.Errorf("an absent configuration validates like {}: %v", err)
 	}
 }
 
