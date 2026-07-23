@@ -63,6 +63,17 @@ newest published version. The cluster polls this document to fill
 the AVAILABLE column of `kubectl get clusters`, and `liken fetch
 ... latest ...` reads it to resolve `latest`.
 
+## The release page
+
+Every release also has a page on GitHub, under
+[liken-sh/liken/releases](https://github.com/liken-sh/liken/releases).
+CI creates the page after it publishes the release to the channel.
+The page is the announcement, not the distribution. It carries the
+digest, the catalog entry ready to paste, and the changes since the
+last release. The binaries stay on the channel, where the license
+notices and the source mirror travel with them. The page's feed is a
+way to hear about new releases.
+
 ## The trust chain
 
 The chain has three links:

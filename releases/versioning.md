@@ -74,7 +74,18 @@ same tree to a Ready node. Only then does it publish the release to
 https://releases.liken.sh/2026.07.11-001/. The digest discipline
 exists to rule out a release that someone assembled on a laptop. The
 run's summary ends with the catalog entry that a deployment commits to
-adopt the release. You can build and inspect the same bundle locally,
+adopt the release.
+
+The workflow's last step creates the GitHub release for the tag. Do
+not create it by hand: the workflow writes the notes after the
+publish, because only then does the digest exist, and a release page
+that already exists is skipped, notes and all. The page is the
+announcement, not the distribution. It carries the catalog entry
+ready to paste, and the commit subjects since the last release as
+the changelog; the binaries stay on the channel, where LICENSES.md
+and the source mirror travel with them.
+
+You can build and inspect the same bundle locally,
 without publishing anything:
 
        make -C releases release VERSION=2026.07.11-001
