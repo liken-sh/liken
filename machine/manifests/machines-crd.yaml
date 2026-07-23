@@ -1322,6 +1322,53 @@ spec:
                         maxLength: 256
                     embedded:
                       type: boolean
+                lastCrash:
+                  type: object
+                  description: >-
+                    The newest kernel crash this machine still holds
+                    records for. When the kernel panics, it writes the
+                    tail of its log to the firmware's storage, and the
+                    next boot moves that record onto the machine's own
+                    disk. Each boot derives this summary from the
+                    records again. The crash is not always the
+                    previous boot's crash: the summary stays until the
+                    records leave the machine's retention window, and
+                    the time field says how old the news is. An empty
+                    field means the machine holds no crash records.
+                  properties:
+                    time:
+                      type: string
+                      format: date-time
+                      description: >-
+                        The machine's own clock at the moment of the
+                        crash. A crash usually comes before the boot's
+                        first clock synchronization, so this time
+                        comes from the hardware clock.
+                    reason:
+                      type: string
+                      maxLength: 32
+                      description: >-
+                        The kernel's word for the crash. Panic and
+                        Oops are the two words the shipped kernel
+                        records. The vocabulary belongs to the kernel,
+                        so this field is a free string, not a fixed
+                        list.
+                    message:
+                      type: string
+                      maxLength: 1024
+                      description: >-
+                        The kernel's first description of the failure,
+                        in the kernel's own words: the "Kernel panic -
+                        not syncing:" line, or the "BUG:" line of an
+                        oops.
+                    records:
+                      type: string
+                      maxLength: 256
+                      description: >-
+                        The directory on the machine that holds the
+                        full kernel log tail: a directory in the crash
+                        store under machineState, or /sys/fs/pstore on
+                        a machine whose machineState runs in memory.
                 bootedAt:
                   type: string
                   format: date-time

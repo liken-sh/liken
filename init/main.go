@@ -161,6 +161,18 @@ func main() {
 		}
 	}
 
+	// A crash in an earlier boot left its evidence in the platform
+	// store. This step reads it, preserves it under machineState, and
+	// derives the one-line summary that becomes status.lastCrash
+	// (crash.go). It sits here because it needs settled storage: the
+	// machineState mount to preserve into, and the backing verdict to
+	// know whether preserving is possible at all. An install boot
+	// never reaches this line, which is correct: the store belongs to
+	// the installed machine's history, not to the install medium's.
+	mountPstore()
+	lastCrash := settleCrashRecords(machine.MachineStateDir,
+		storage.MachineState.Backing == machine.BackingPartition)
+
 	// This block settles where this boot sits in the system release
 	// lifecycle. This boot may be the trial of a staged release, in
 	// which case the staged record comes back to arm the proving
@@ -251,7 +263,7 @@ func main() {
 	// boot, then powers off.
 	if _, err := os.Stat(k3sBinary); err == nil {
 		clusterLife(choice, storage, boot, clusterDoc, clusterRaw, creds,
-			conns, moduleStatuses, featureStatuses, actuator, trial) // never returns
+			conns, moduleStatuses, featureStatuses, actuator, trial, lastCrash) // never returns
 	}
 
 	// With no k3s to supervise, a boot is complete once the report is
@@ -272,7 +284,8 @@ func main() {
 func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot machine.BootStatus,
 	clusterDoc *cluster.Cluster, clusterRaw []byte, creds *machine.RegistryCredentials,
 	conns []*connection, moduleStatuses []machine.ModuleStatus,
-	featureStatuses []machine.FeatureStatus, actuator bootActuator, trial *machine.SystemRelease) {
+	featureStatuses []machine.FeatureStatus, actuator bootActuator, trial *machine.SystemRelease,
+	lastCrash *machine.CrashStatus) {
 	m := choice.m
 
 	// Before k3s can touch its container store, this call decides
@@ -355,6 +368,7 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 		firstSync:   firstSync,
 		timeSources: clk.sources,
 		unclaimed:   unclaimed,
+		lastCrash:   lastCrash,
 	})
 	publishBootClusterManifest(clusterRaw)
 	// The hardware watch keeps that walk correct for the whole

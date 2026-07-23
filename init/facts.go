@@ -88,6 +88,7 @@ type factsInputs struct {
 	firstSync   *timeSync
 	timeSources []string
 	unclaimed   []machine.UnclaimedDevice
+	lastCrash   *machine.CrashStatus
 }
 
 // publishFacts returns the facts it wrote, wrapped in the guarded
@@ -115,6 +116,11 @@ func publishFacts(in factsInputs) *factsFile {
 		Firmware: firmwareFacts(efiVarsDir),
 		Storage:  in.storage,
 		Boot:     in.boot,
+		// The crash stub arrives settled rather than being re-read
+		// here, because settling it has side effects (preserving and
+		// clearing the platform store) that belong to one moment
+		// early in boot, not to every facts rewrite.
+		LastCrash: in.lastCrash,
 	}
 
 	var u unix.Utsname

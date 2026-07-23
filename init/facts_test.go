@@ -171,6 +171,33 @@ func TestPublishFactsSurvivesAnUnwritableDestination(t *testing.T) {
 	}
 }
 
+func TestPublishFactsCarriesLastCrash(t *testing.T) {
+	factsDest, _ := fakeFactsMachine(t)
+	when := time.Date(2026, 7, 23, 4, 12, 9, 0, time.UTC)
+
+	publishFacts(factsInputs{
+		choice:  &manifestChoice{},
+		storage: machine.AllRolesInMemory(),
+		lastCrash: &machine.CrashStatus{
+			Time:    &when,
+			Reason:  machine.CrashPanic,
+			Message: "Kernel panic - not syncing: sysrq triggered crash",
+			Records: "/sys/fs/pstore",
+		},
+	})
+
+	facts, err := machine.ReadFacts(factsDest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if facts.LastCrash == nil || facts.LastCrash.Reason != machine.CrashPanic {
+		t.Fatalf("the crash stub rides the facts file: %+v", facts.LastCrash)
+	}
+	if !facts.LastCrash.Time.Equal(when) || facts.LastCrash.Records != "/sys/fs/pstore" {
+		t.Errorf("the stub round-trips whole: %+v", facts.LastCrash)
+	}
+}
+
 func TestFactsFileMutateRidesTheNextPublish(t *testing.T) {
 	factsDest, _ := fakeFactsMachine(t)
 	owner := &factsFile{status: &machine.MachineStatus{}}

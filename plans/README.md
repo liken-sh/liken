@@ -152,6 +152,12 @@ numbered before this arc existed; it belongs second in this order:
     pin, GSP firmware, the userspace driver, the container toolkit;
     CUDA stays in pods). Console firmware for motherboard graphics,
     amdgpu included, stays stock.
+35. [x] [The machine reports its last crash](35-crash-capture.md) —
+    a kernel panic leaves its story in pstore, the firmware's own
+    store; the next boot preserves the records on machineState and
+    publishes the one-line summary as status.lastCrash. The full
+    trace stays on the machine; the watchdog for silent hangs is
+    deferred.
 
 Deferred until the fundamentals above are proven, the hardening
 tier: UKIs, dm-verity, secure boot, TPM-sealed secrets, and signed

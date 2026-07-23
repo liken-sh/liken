@@ -117,6 +117,16 @@ type MachineStatus struct {
 	// reports the standing state that carried across the reboot.
 	Boot BootStatus `json:"boot,omitzero"`
 
+	// LastCrash is the newest kernel crash this machine still holds
+	// records for: a panic or an oops that pstore carried across the
+	// reboot. It is not necessarily the previous boot's crash. A
+	// machine can boot cleanly for years while an old crash stays on
+	// record, and the timestamp is what says how old the news is.
+	// Every boot re-derives this field from the preserved records on
+	// machineState, so an erased status rebuilds it, and it clears
+	// only when the records themselves leave the retention window.
+	LastCrash *CrashStatus `json:"lastCrash,omitempty"`
+
 	// BootedAt is the moment the machine booted, derived by init from
 	// the kernel's uptime counter. It is a timestamp rather than a
 	// duration, because a timestamp never goes out of date in the
@@ -591,6 +601,49 @@ type BootStatus struct {
 	ClusterRejection     *Rejection `json:"clusterRejection,omitempty"`
 	SystemRejection      *Rejection `json:"systemRejection,omitempty"`
 	CredentialsRejection *Rejection `json:"credentialsRejection,omitempty"`
+}
+
+// CrashReason is the kernel's own word for why it dumped its log:
+// the kmsg-dump reason, taken from the first line of each pstore
+// record. Panic and Oops are the two words the vendored kernel's
+// configuration dumps. The type stays an open string rather than a
+// closed vocabulary, because the kernel owns these words and a
+// future kernel may say something new. A status write must not fail
+// over an unexpected word.
+type CrashReason string
+
+const (
+	CrashPanic CrashReason = "Panic"
+	CrashOops  CrashReason = "Oops"
+)
+
+// CrashStatus summarizes one kernel crash from the records that
+// pstore preserved across the reboot. It is a stub, not the
+// evidence: the kernel log tail around a crash runs to kilobytes,
+// and status is read on every list and watch, so the full text
+// stays on disk and this block carries just enough to say what
+// happened and where to read the rest.
+type CrashStatus struct {
+	// Time is the machine's own clock at the moment of the crash. A
+	// crash usually beats the boot's first clock sync, so this is
+	// RTC time, reported as recorded.
+	Time *time.Time `json:"time,omitempty"`
+
+	// Reason is the kernel's word for the crash: Panic or Oops.
+	Reason CrashReason `json:"reason,omitempty"`
+
+	// Message is the kernel's own first description of the failure:
+	// the "Kernel panic - not syncing:" line, or the oops's BUG
+	// line. It is capped and cleaned of control bytes before it
+	// leaves the machine.
+	Message string `json:"message,omitempty"`
+
+	// Records is where the full kernel log tail lives on the
+	// machine: a directory under machineState's crash store, or
+	// /sys/fs/pstore itself on a machine whose machineState fell
+	// back to memory and whose records therefore stay in the
+	// firmware's own store.
+	Records string `json:"records,omitempty"`
 }
 
 // RebootApprovedCondition is the rollout conductor's grant of a
