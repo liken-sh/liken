@@ -63,3 +63,15 @@ spec:
     # catalog and a target version arrive as live Cluster edits when
     # someone adopts a release; nothing is fetched before then.
     source: https://releases.liken.sh
+
+  runtime:
+    # The Go runtime environment for the k3s process. k3s uses the
+    # most memory of any process on this machine. Under the website
+    # workload, it rests near 480Mi. This ceiling is above that
+    # resting size, so the collector does not work against the ceiling
+    # when the load is steady. The ceiling is well below the machine's
+    # 1Gi, so containerd, the shims, the pods, and the kernel keep
+    # free memory. This value is the measured fit for this node.
+    k3s:
+      goMemoryLimit: "512Mi"
+      goGC: 50
