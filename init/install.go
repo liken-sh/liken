@@ -38,12 +38,6 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// installParam is the command-line flag that makes a boot an
-// install. It is a flag rather than a separate image, because the
-// installer is the OS. Whoever configures the bootloader decides
-// which job this boot performs.
-const installParam = "liken.install"
-
 // releasePayloadDir is where the install image carries the release
 // it installs: the artifacts that the release document lists, byte
 // for byte, plus the deployment layer and its sidecar. image/media.go
@@ -504,4 +498,28 @@ func copyDurably(source, dest string) error {
 		return err
 	}
 	return os.Rename(tmp, dest)
+}
+
+// holdInstallerConsole keeps a failed install's console on screen
+// until a person acknowledges it. An install boot is the one boot
+// with a person present by construction: someone chose it from the
+// install menu moments ago. Powering off on a timer would take the
+// explanation with it, which is how a refused install looks like a
+// machine that silently did nothing. The disk inventory prints
+// again here because the spec's device paths resolved against these
+// disks, and an install boot has one more contestant in the naming
+// race than the installed machine will: the install medium itself.
+// If the console cannot be read, the hold gives up rather than
+// strand an unattended machine.
+func holdInstallerConsole() {
+	reportBlockDevices()
+	fmt.Fprintln(os.Stderr, "liken: press Enter to power off")
+	console, err := os.Open("/dev/console")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "liken: opening the console to wait: %v\n", err)
+		return
+	}
+	defer console.Close()
+	buf := make([]byte, 1)
+	_, _ = console.Read(buf)
 }

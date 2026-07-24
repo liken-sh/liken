@@ -39,6 +39,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -277,6 +278,15 @@ func reconcileStorage(spec machine.StorageSpec) (machine.StorageStatus, error) {
 		return status, err
 	}
 
+	// Storage settles less than a second into boot, and on real
+	// hardware that is the middle of the bus probe: a SATA link
+	// trains and a USB device negotiates for seconds after their
+	// drivers load. A declared disk that has not appeared yet is
+	// indistinguishable from one that does not exist, so the spec
+	// gets a bounded window to become satisfiable before any of it
+	// is judged.
+	awaitStorageDevices(roles)
+
 	// Recognition finds each declared role by the name written on its
 	// partition. It does not consult the device listed in the spec. A
 	// disk that has moved to a different controller since it was
@@ -393,6 +403,60 @@ func diskByPath(device string) *machine.BlockDevice {
 		}
 	}
 	return nil
+}
+
+// awaitStorageDevices waits, boundedly, for the disks the spec
+// names to finish attaching. The wait ends the moment the spec is
+// satisfiable, through either of the two doors reconciliation can
+// take: every declared device is attached (a claim can proceed), or
+// every declared role is recognized on some attached disk (a disk
+// that moved controllers since its claim still carries its roles'
+// names, and recognition never consults the device path). A spec
+// that is still unsatisfiable at the deadline proceeds to judgment,
+// and the ordinary errors report what is missing. Polling, rather
+// than uevents, keeps this simple: the window is short, boots are
+// rare, and a walk of /sys/block costs nothing.
+func awaitStorageDevices(roles []machine.DeclaredRole) {
+	const (
+		poll     = 500 * time.Millisecond
+		deadline = 30 * time.Second
+	)
+	devices := map[string]bool{}
+	for _, role := range roles {
+		devices[role.Device] = true
+	}
+	attached := func() bool {
+		for device := range devices {
+			if diskByPath(device) == nil {
+				return false
+			}
+		}
+		return true
+	}
+	recognized := func() bool {
+		found, err := recognizeRoles(roles)
+		if err != nil {
+			return false
+		}
+		for _, role := range roles {
+			if _, ok := found[role.Name]; !ok {
+				return false
+			}
+		}
+		return true
+	}
+	if attached() || recognized() {
+		return
+	}
+	fmt.Println("liken: storage: waiting for the declared disks to attach")
+	for begin := time.Now(); time.Since(begin) < deadline; {
+		time.Sleep(poll)
+		if attached() || recognized() {
+			fmt.Println("liken: storage: the declared disks attached")
+			return
+		}
+	}
+	fmt.Fprintf(os.Stderr, "liken: storage: the declared disks did not all attach within %s\n", deadline)
 }
 
 // mountRole mounts a role's file system at the role's path. It makes

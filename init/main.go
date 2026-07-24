@@ -115,6 +115,17 @@ func main() {
 	// boot runs under.
 	loadModules()
 
+	// A reinstall boot blanks the disks its manifest declares before
+	// storage settles, so a machine that already carries a liken
+	// install can be installed over with no external tool. It runs
+	// after loadModules (the device nodes exist) and before
+	// settleStorage (which then finds the disks blank and claims
+	// them). It does not power off; the boot goes on to install
+	// (reinstall.go).
+	if bootParam(reinstallParam) {
+		reclaimManifestDisks()
+	}
+
 	// Storage settles first. This also settles which manifest this
 	// boot runs under: the staged manifest awaiting its proving boot,
 	// the proven last-known-good manifest, or, on the first boot only,
@@ -148,10 +159,11 @@ func main() {
 	// must power off rather than reboot. The install medium is still
 	// first in the boot order, so a reboot would run the installer
 	// again.
-	if bootParam(installParam) {
+	if installing() {
 		if err := installToDisk(m.Metadata.Name); err != nil {
 			fmt.Fprintf(os.Stderr, "liken: %v\n", err)
 			fmt.Fprintln(os.Stderr, "liken: install failed; powering off (installs are idempotent: fix the cause and boot the installer again)")
+			holdInstallerConsole()
 		} else {
 			fmt.Println("liken: install complete; powering off; the next boot comes from the disk")
 		}
@@ -506,6 +518,9 @@ func failBoot(err error) {
 	}
 	fmt.Fprintf(os.Stderr, "liken: %v\n", err)
 	fmt.Fprintf(os.Stderr, "liken: %s\n", rationale)
+	if installing() {
+		holdInstallerConsole()
+	}
 	powerOff()
 	// powerOff returns only if the reboot syscall failed. PID 1 still
 	// must not exit, so this loop keeps the machine here for a person
