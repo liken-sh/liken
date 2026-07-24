@@ -33,7 +33,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -150,15 +149,23 @@ func installToDisk(machineName string) (string, error) {
 	}
 
 	// Everything must reach the disk before the caller announces
-	// success, because the machine holds at the console after that
-	// announcement and a person may cut power instead of pressing
+	// success, because an attended install holds at the console after
+	// that announcement and a person may cut power instead of pressing
 	// Enter. The per-file fsync in copyDurably makes each file's data
 	// durable, but not the rename that gave the file its final name:
 	// on FAT, that directory update sits in the page cache until
 	// something flushes it. The power-off after the hold would flush
 	// it, but the success message must be true at the moment it
 	// prints, not at the moment the machine obeys it.
+	//
+	// Two calls, because they do different halves of the job. unix.Sync
+	// walks every mounted filesystem and writes its dirty pages back to
+	// the drivers. It stops there: it asks no drive to empty its own
+	// write cache. syncDirectory does that for the slot.
 	unix.Sync()
+	if err := syncDirectory(slotMount); err != nil {
+		return "", fmt.Errorf("install: flushing the slot's directory to the disk: %w", err)
+	}
 	return installSlot, nil
 }
 
@@ -257,6 +264,14 @@ func installGRUB(parts []partition, machineName, slotMount string) error {
 	}
 	if err := writeFileDurably(filepath.Join(grubDir, "grubenv"), env); err != nil {
 		return fmt.Errorf("install: writing grubenv: %w", err)
+	}
+	// Both files landed through a rename, and a rename is a directory
+	// update. This flush carries those updates, and the drive's write
+	// cache with them, out to the medium. A BIOS machine whose boot home
+	// lost its grub.cfg to a power cut has no bootloader configuration
+	// at all, and GRUB stops at a rescue prompt.
+	if err := syncDirectory(grubDir); err != nil {
+		return fmt.Errorf("install: flushing the boot home to the disk: %w", err)
 	}
 
 	fmt.Printf("liken: install: GRUB installed on %s; grub.cfg and grubenv on the boot home prefer slot A\n", diskDev)
@@ -478,91 +493,4 @@ func consoleArgs() []string {
 		}
 	}
 	return consoles
-}
-
-// verifyFile checks one file on disk against its release artifact.
-func verifyFile(artifact machine.ReleaseArtifact, path string) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return artifact.Verify(f)
-}
-
-// copyDurably copies through a temporary name, runs fsync, and
-// renames the file, so the slot never holds a file that looks final
-// but is not. FAT has no journal, so durability here depends entirely
-// on this discipline. Without the explicit sync before the rename,
-// the page cache may still hold the file's bytes when the rename
-// happens, and a power cut then leaves a final-looking file with
-// incomplete contents.
-func copyDurably(source, dest string) error {
-	src, err := os.Open(source)
-	if err != nil {
-		return err
-	}
-	defer src.Close()
-	tmp := dest + ".partial"
-	dst, err := os.Create(tmp)
-	if err != nil {
-		return err
-	}
-	if _, err := dst.ReadFrom(src); err != nil {
-		dst.Close()
-		return err
-	}
-	if err := dst.Sync(); err != nil {
-		dst.Close()
-		return err
-	}
-	if err := dst.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp, dest)
-}
-
-// holdInstallerConsole keeps an attended boot's console on screen until
-// a person acknowledges it. A menu pick makes a boot attended: someone
-// chose this entry from the install menu moments ago and is present by
-// construction. Every terminal state of an attended boot ends here, so
-// its message survives on screen instead of vanishing behind a power-off
-// on a timer. A finished install and a refused one say different things,
-// so the caller supplies the message to show.
-//
-// The failure paths also print the disk inventory. The spec's device
-// paths resolved against these disks, and an install boot has one more
-// contestant in the naming race than the installed machine will: the
-// install medium itself. A finished install needs no such evidence, so
-// its message stays short.
-//
-// If the console cannot be read, the hold gives up rather than strand an
-// unattended machine, so a truly headless install still powers off.
-func holdInstallerConsole(message string, inventory bool) {
-	if inventory {
-		reportBlockDevices()
-	}
-
-	// The prompt is not a log line, and it does not travel with them.
-	// Ordinary output goes through the kmsg pipeline, which is
-	// asynchronous: lines written just before this hold may still be
-	// draining, and a prompt racing them can interleave into their
-	// middle, or arrive at the console late. A prompt is the one line
-	// a person must see, whole, on the device they must answer, so it
-	// writes straight to that device, after a moment's pause that
-	// lets the pipeline finish the lines the prompt follows.
-	time.Sleep(500 * time.Millisecond)
-	console, err := os.OpenFile("/dev/console", os.O_RDWR, 0)
-	if err != nil {
-		// With no console to prompt on, there is no one to wait for.
-		// The message still goes to the logs, and the machine moves
-		// on, so a headless boot never hangs here.
-		fmt.Fprintln(os.Stderr, message)
-		fmt.Fprintf(os.Stderr, "liken: opening the console to wait: %v\n", err)
-		return
-	}
-	defer console.Close()
-	fmt.Fprintln(console, message)
-	buf := make([]byte, 1)
-	_, _ = console.Read(buf)
 }

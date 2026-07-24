@@ -38,9 +38,26 @@ and why the interface names hold.
 ## How it runs
 
 `make smoke-hardware` from the repo root builds this deployment's own
-install image, then runs the parity drill: it installs `node-1` from
-blank disks on the metal-shaped hardware, boots the installed disk, and
-waits for the node to report Ready over the cluster's API. This is the
-same verdict the `smoke-uefi` and `smoke-bios` drills use. The lab's
-Makefile selects the hardware shape with `HARDWARE=metal`; the default,
-`HARDWARE=virtio`, is the shape every other target uses.
+install image and stick, then runs the parity drill. The drill walks
+the whole first-machine flow, in the order a person walks it: it boots
+the hardware report and checks the proposal that the report writes onto
+the stick, then installs `node-1` from blank disks, then boots the
+installed disk and waits for the node to report Ready over the
+cluster's API. Ready is the same verdict the `smoke-uefi` and
+`smoke-bios` drills use. The lab's Makefile selects the hardware shape
+with `HARDWARE=metal`; the default, `HARDWARE=virtio`, is the shape
+every other target uses.
+
+## When to run it
+
+Run this drill by hand. It is the only drill that exercises the module
+path and the report boot, so run it before a release, and whenever a
+change touches the boot archive's module list, the storage wait, the
+report, or the installer's boot-time behavior.
+
+The two firmware drills run on every push, and this one does not. It
+costs about a minute of guest time on top of the build, which is more
+than the gate should carry for every change. The trade is deliberate,
+and it has a cost: a fault on the module path can reach `main` and wait
+here until someone runs this drill. That is the reason for the list
+above.

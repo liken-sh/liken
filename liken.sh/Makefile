@@ -145,6 +145,14 @@ image/install.cpio: channel/$(RELEASE)/release.yaml image/deployment.cpio $(CLI)
 # power-off into QEMU's exit. The console log lands next to the image
 # for reading afterward.
 #
+# The command line below says liken.install and stops there. It does
+# not say liken.attended, and that word is what an installer stick's
+# menu adds to say a person is standing at the machine. Without it,
+# init prints the install's ending and powers off. With it, init would
+# wait at the console for a keypress, and the file this rule points
+# QEMU's serial port at can never deliver one, so this rule would
+# never return.
+#
 # The guest gets 4 GB because the install image carries the whole OS
 # in its initrd, in RAM, and under SeaBIOS the kernel reports almost
 # all of the memory below a large initrd as reserved until the
@@ -191,7 +199,7 @@ image/disk.img: image/install.cpio channel/$(RELEASE)/release.yaml
 		-device scsi-hd,drive=data,serial=liken-node-1-data
 	rm -f image/data-scratch.img
 	grep -q 'install failed' image/install.log && { tail -5 image/install.log; rm -f $@; exit 1; } || true
-	grep -q 'install complete' image/install.log || { tail -5 image/install.log; rm -f $@; exit 1; }
+	grep -q 'liken: installed to slot' image/install.log || { tail -5 image/install.log; rm -f $@; exit 1; }
 
 # The disk, made small for transport: all but about 1GB of the image
 # is zeros, which compress to almost nothing. This uses gzip, rather

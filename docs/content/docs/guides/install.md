@@ -125,9 +125,29 @@ manifest with the evidence for each line beside it as a comment: the
 drivers each device wants, in load order; each disk's size, model, and
 path; each interface's name, MAC, and link state. Copy the
 `spec.modules`, `spec.network`, and `spec.storage` sections into this
-machine's manifest in `mycluster/`. Edit the parts marked `CHANGE-ME`
-and set each storage size. Then rebuild the stick with step 4, so it
-carries the corrected manifest.
+machine's manifest in `mycluster/`. Edit the parts marked `CHANGE-ME`,
+then rebuild the stick with step 4, so it carries the corrected
+manifest.
+
+Three parts of the proposal need your judgement.
+
+The storage sizes fit the disks the report measured, so you can
+install from them as they are. They are still only a starting point.
+Set `clusterState` and `podStorage` to the sizes your cluster and your
+workloads need.
+
+The proposal declares only the network ports that had a cable when the
+report ran. It lists the dark ports below them, commented out, with
+their names and MAC addresses. Uncomment a port after you connect its
+cable. A declared port with no cable delays every boot, because the
+machine waits up to thirty seconds for its DHCP lease.
+
+The report may warn that a disk needs a driver that this image does
+not carry on its boot path. Such a driver cannot go in `spec.modules`,
+because the machine reads that list only after it has already found
+its disks. That machine needs an image built with the driver in its
+boot modules. The proposal says which driver, and leaves that disk
+out of the layout.
 
 Run the report on each new machine. Its answers are the disks, the
 interface names, and the drivers you cannot know from a datasheet.

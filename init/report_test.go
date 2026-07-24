@@ -1,174 +1,127 @@
 package main
 
-// Tests for the report boot's disk-side helpers: finding the
-// installation stick, keeping it out of the disk walk, and telling a
-// recommendation that serves the machine from one that serves only
-// the stick. The helpers read the same fake /sys/block and /dev that
-// the storage tests build (disks_test.go), because the report
-// recognizes the stick exactly the way storage recognizes a role: by
-// the name written into the GPT.
+// Tests for what the report boot recommends. The recommendation is
+// the one part of the boot flow that a test can drive whole: it reads
+// a sysfs tree and a module tree, and both can be fabricated. The
+// disk-side helpers have their own tests in reportdisks_test.go.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
-	"time"
+
+	"github.com/liken-sh/liken/hardware"
 )
 
-func TestStickDiskFindsTheStickByPartitionName(t *testing.T) {
-	sys, dev := fakeMachine(t)
-	addDisk(t, sys, dev, "sda", 500<<30, nil)
-	addPartition(t, sys, "sda", "sda1", "liken:systemA", 1<<30)
-	addDisk(t, sys, dev, "sdb", 1<<30, nil)
-	addPartition(t, sys, "sdb", "sdb1", "liken:install", 1<<30)
-
-	name, path := stickDisk()
-	if name != "sdb" {
-		t.Errorf("stick disk: %q", name)
-	}
-	if path != dev+"/sdb" {
-		t.Errorf("stick path: %q", path)
-	}
-}
-
-func TestStickDiskRefusesAnAmbiguousStick(t *testing.T) {
-	sys, dev := fakeMachine(t)
-	addDisk(t, sys, dev, "sdb", 1<<30, nil)
-	addPartition(t, sys, "sdb", "sdb1", "liken:install", 1<<30)
-	addDisk(t, sys, dev, "sdc", 1<<30, nil)
-	addPartition(t, sys, "sdc", "sdc1", "liken:install", 1<<30)
-
-	name, path := stickDisk()
-	if name != "" || path != "" {
-		t.Errorf("two sticks must exclude nothing: %q %q", name, path)
-	}
-}
-
-func TestStickDiskWithNoStick(t *testing.T) {
-	sys, dev := fakeMachine(t)
-	addDisk(t, sys, dev, "sda", 500<<30, nil)
-
-	name, path := stickDisk()
-	if name != "" || path != "" {
-		t.Errorf("no stick must exclude nothing: %q %q", name, path)
-	}
-}
-
-func TestAwaitInstallStickEndsTheMomentTheStickExists(t *testing.T) {
-	sys, dev := fakeMachine(t)
-	addDisk(t, sys, dev, "sdb", 1<<30, nil)
-	addPartition(t, sys, "sdb", "sdb1", "liken:install", 1<<30)
-
-	name, _ := awaitInstallStick(0)
-	if name != "sdb" {
-		t.Errorf("an already-present stick must be found at once: %q", name)
-	}
-}
-
-func TestAwaitInstallStickGivesUpAtTheCeiling(t *testing.T) {
-	fakeMachine(t)
-
-	start := time.Now()
-	name, _ := awaitInstallStick(time.Millisecond)
-	if name != "" {
-		t.Errorf("no stick must resolve to none: %q", name)
-	}
-	if time.Since(start) > 5*time.Second {
-		t.Error("the wait must stop at its ceiling")
-	}
-}
-
-func TestReadReportDisksExcludesTheStick(t *testing.T) {
-	sys, dev := fakeMachine(t)
-	addDisk(t, sys, dev, "sda", 500<<30, nil)
-	writeSysfs(t, filepath.Join(sys, "sda", "device"), "model", "REAL DISK\n")
-	addDisk(t, sys, dev, "sdb", 1<<30, nil)
-
-	disks := readReportDisks("sdb")
-	if len(disks) != 1 {
-		t.Fatalf("disks: %v", disks)
-	}
-	if disks[0].Path != dev+"/sda" || disks[0].Model != "REAL DISK" {
-		t.Errorf("the kept disk: %+v", disks[0])
-	}
-	if disks[0].SizeBytes != 500<<30 {
-		t.Errorf("the kept disk's size: %d", disks[0].SizeBytes)
-	}
-}
-
-func TestDiskTransportReadsTheBusFromTheDeviceTree(t *testing.T) {
-	sys, _ := fakeMachine(t)
-	// A SATA disk's sysfs entry is a symlink whose target path passes
-	// through the ata layer; the helper reads the bus from that
-	// resolved path.
-	target := filepath.Join(sys, "devices", "pci0000:00", "ata2", "host1", "block", "sdx")
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(target, filepath.Join(sys, "sdx")); err != nil {
-		t.Fatal(err)
-	}
-
-	if got := diskTransport("sdx"); got != "sata" {
-		t.Errorf("transport: %q", got)
-	}
-	if got := diskTransport("absent"); got != "" {
-		t.Errorf("an absent disk has no transport: %q", got)
-	}
-}
-
-// stickTree builds the shape withoutStickRecommendations judges: a
-// stick disk whose /sys/block entry resolves under a USB device's
-// directory, and the sysfs directory of that USB device.
-func stickTree(t *testing.T, sys string) (stickName, usbDevice string) {
+// fakeBus points the hardware walk at a sysfs tree of the test's
+// making, and restores the real one when the test ends.
+func fakeBus(t *testing.T) string {
 	t.Helper()
-	usbDevice = filepath.Join(sys, "devices", "usb2", "2-1", "2-1:1.0")
-	disk := filepath.Join(usbDevice, "host8", "block", "sdd")
-	if err := os.MkdirAll(disk, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(disk, filepath.Join(sys, "sdd")); err != nil {
-		t.Fatal(err)
-	}
-	return "sdd", usbDevice
+	root := t.TempDir()
+	old := sysfsRoot
+	sysfsRoot = root
+	t.Cleanup(func() { sysfsRoot = old })
+	return root
 }
 
-func TestWithoutStickRecommendationsDropsOnlyTheSticksDriver(t *testing.T) {
-	sys, _ := fakeMachine(t)
-	stick, usbDevice := stickTree(t, sys)
-	elsewhere := filepath.Join(sys, "devices", "pci0000:00", "00:03.0")
-	if err := os.MkdirAll(elsewhere, 0o755); err != nil {
+// addPCIDevice writes the four attributes the walk reads for a PCI
+// function: its fingerprint, its class code, and its numeric identity.
+// The class code is what decides whether the report will touch the
+// device at all: 0x02 is a network controller, 0x01 is storage, and
+// 0x03 is a display.
+func addPCIDevice(t *testing.T, root, address, class, modalias string) {
+	t.Helper()
+	dir := filepath.Join(root, "bus", "pci", "devices", address)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	writeSysfs(t, dir, "modalias", modalias+"\n")
+	writeSysfs(t, dir, "class", class+"\n")
+	writeSysfs(t, dir, "vendor", "0x10ec\n")
+	writeSysfs(t, dir, "device", "0x8168\n")
+}
 
-	recs := []moduleRecommendation{
-		{Device: "the stick", Chain: []string{"usb-storage"}, SysfsDirs: []string{usbDevice}},
-		{Device: "a NIC", Chain: []string{"e1000"}, SysfsDirs: []string{elsewhere}},
+// fixtureCatalog builds the smallest catalog that can name a driver:
+// an alias table with one line per module. Nothing is built in and
+// nothing is shipped, so every match reads as a loadable candidate.
+func fixtureCatalog(t *testing.T, aliases map[string]string) (*hardware.Catalog, string) {
+	t.Helper()
+	base := t.TempDir()
+	var table strings.Builder
+	for pattern, module := range aliases {
+		fmt.Fprintf(&table, "alias %s %s\n", pattern, module)
 	}
+	writeSysfs(t, base, "modules.alias", table.String())
+	catalog, err := hardware.LoadCatalog(base, filepath.Join(base, "pci.ids"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return catalog, base
+}
 
-	kept := withoutStickRecommendations(recs, stick)
-	if len(kept) != 1 || kept[0].Device != "a NIC" {
-		t.Errorf("only the stick's driver may drop: %+v", kept)
+const (
+	nicModalias     = "pci:v000010ECd00008168sv00sd00bc02sc00i00"
+	displayModalias = "pci:v00001234d00001111sv00sd00bc03sc00i00"
+	hbaModalias     = "pci:v00001000d00000097sv00sd00bc01sc07i00"
+)
+
+func TestRecommendationsCoverStorageAndNetworkOnly(t *testing.T) {
+	// A display controller wants a driver as much as the NIC does, and
+	// loading it would switch the framebuffer console the person is
+	// reading the report on. The report leaves it alone.
+	root := fakeBus(t)
+	addPCIDevice(t, root, "0000:00:02.0", "0x030000", displayModalias)
+	addPCIDevice(t, root, "0000:00:1f.6", "0x020000", nicModalias)
+	addPCIDevice(t, root, "0000:03:00.0", "0x010700", hbaModalias)
+	catalog, base := fixtureCatalog(t, map[string]string{
+		displayModalias: "bochs",
+		nicModalias:     "r8169",
+		hbaModalias:     "mpt3sas",
+	})
+
+	recs := recommendModules(catalog, base)
+
+	var chains []string
+	for _, rec := range recs {
+		chains = append(chains, strings.Join(rec.Chain, ","))
+	}
+	if len(recs) != 2 {
+		t.Fatalf("the report must recommend the NIC and the HBA only: %v", chains)
+	}
+	for _, rec := range recs {
+		if rec.Class != "network" && rec.Class != "storage" {
+			t.Errorf("a %s device has no place in the report: %+v", rec.Class, rec)
+		}
 	}
 }
 
-func TestWithoutStickRecommendationsKeepsEverythingWithoutAStick(t *testing.T) {
-	recs := []moduleRecommendation{
-		{Device: "a NIC", Chain: []string{"e1000"}, SysfsDirs: []string{"/nowhere"}},
-	}
+func TestRecommendationsAreOnePerFingerprint(t *testing.T) {
+	// Two identical NICs are one recommendation with two devices behind
+	// it. One chain drives both cards, and a proposal that printed the
+	// same evidence twice would read as two different findings.
+	root := fakeBus(t)
+	addPCIDevice(t, root, "0000:01:00.0", "0x020000", nicModalias)
+	addPCIDevice(t, root, "0000:01:00.1", "0x020000", nicModalias)
+	catalog, base := fixtureCatalog(t, map[string]string{nicModalias: "r8169"})
 
-	if kept := withoutStickRecommendations(recs, ""); len(kept) != 1 {
-		t.Errorf("no stick must drop nothing: %+v", kept)
+	recs := recommendModules(catalog, base)
+
+	if len(recs) != 1 {
+		t.Fatalf("two identical cards are one recommendation: %+v", recs)
+	}
+	if len(recs[0].SysfsDirs) != 2 {
+		t.Errorf("the recommendation must keep both devices: %+v", recs[0].SysfsDirs)
 	}
 }
 
-func TestWithoutStickRecommendationsKeepsEverythingWhenTheStickIsUnreadable(t *testing.T) {
-	fakeMachine(t)
-	recs := []moduleRecommendation{
-		{Device: "a NIC", Chain: []string{"e1000"}, SysfsDirs: []string{"/nowhere"}},
-	}
+func TestRecommendationsSkipDevicesWithNoCandidate(t *testing.T) {
+	root := fakeBus(t)
+	addPCIDevice(t, root, "0000:00:1f.6", "0x020000", nicModalias)
+	catalog, base := fixtureCatalog(t, map[string]string{"pci:v0000FFFFd*": "nothing"})
 
-	if kept := withoutStickRecommendations(recs, "ghost"); len(kept) != 1 {
-		t.Errorf("an unresolvable stick must drop nothing: %+v", kept)
+	if recs := recommendModules(catalog, base); len(recs) != 0 {
+		t.Errorf("a device no module matches has no recommendation: %+v", recs)
 	}
 }

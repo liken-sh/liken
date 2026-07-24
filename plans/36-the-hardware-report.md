@@ -91,10 +91,21 @@ Every terminal state of the three menu entries now holds:
 * Report: "this report was written to the stick as
   hardware-report.yaml; press Enter to reboot."
 
-Unattended boots — from disk, upgrade slots — keep their abrupt
-semantics on purpose. Nobody watches them, and `panic=10` with the
-fall-back slot is their recovery story. The hold already gives up when
-no console opens, so a truly headless install still terminates.
+Unattended boots keep their abrupt semantics on purpose: boots from
+disk, boots of an upgrade slot, and every install that a script or a
+Makefile started. Nobody watches them, and `panic=10` with the
+fall-back slot is their recovery story.
+
+The menu is what tells the two kinds apart, so the menu says so. Each
+entry carries `liken.attended`, and only that word makes init hold.
+The boot words cannot carry the meaning, because anything can write
+them: liken.sh's image build boots `liken.install` in QEMU with its
+serial port pointed at a file, and a PXE server boots it with nobody
+in the room. Both power off as they always did.
+
+A headless server powers off too. No test of the console device could
+give that result: `/dev/console` opens on a machine with no keyboard,
+and only the read blocks.
 
 ## The unclaimed-hardware report learns softdeps
 

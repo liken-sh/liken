@@ -169,6 +169,11 @@ func main() {
 	// must power off rather than reboot. The install medium is still
 	// first in the boot order, so a reboot would run the installer
 	// again.
+	//
+	// Both endings report through holdInstallerConsole, which is also
+	// where an attended install waits for the person who picked the
+	// entry (attended.go). An install nobody picked prints the same
+	// message and goes straight to the power-off below.
 	if installing() {
 		slot, err := installToDisk(m.Metadata.Name)
 		if err != nil {
@@ -529,6 +534,12 @@ func failBoot(err error) {
 	}
 	fmt.Fprintf(os.Stderr, "liken: %v\n", err)
 	fmt.Fprintf(os.Stderr, "liken: %s\n", rationale)
+	// An install boot's refusal is one of the install menu's terminal
+	// states, so it reports the disk inventory as its evidence and, if a
+	// person picked this boot, holds for them (attended.go). A boot from
+	// disk never comes here for a person's benefit, and an install that
+	// nobody picked must reach the power-off below rather than stop at a
+	// prompt that nobody can answer.
 	if installing() {
 		holdInstallerConsole("liken: press Enter to power off", true)
 	}

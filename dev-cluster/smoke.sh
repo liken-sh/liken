@@ -94,9 +94,20 @@ REPORT_STICK="${REPORT_STICK:-}"
 K3S_VERSION="$(<../k3s/VERSION)"
 K3S="../k3s/dist/${K3S_VERSION}/k3s"
 KUBECONFIG_FILE="identity/kubeconfig"
+
+# Every boot keeps two records, and each boot keeps its own pair. The
+# console log is what the machine said over its serial port. The QEMU
+# log is what QEMU and make said about the machine, and it is the only
+# record of a boot that failed before the machine could speak. The
+# drill boots the same guest up to three times, so the pairs carry the
+# boot's name: a shared file would let the last boot erase the
+# evidence of the boot that actually failed.
 CONSOLE_LOG="guests/node-1/console.log"
+QEMU_LOG="guests/node-1/qemu.log"
 INSTALL_LOG="guests/node-1/install-console.log"
+INSTALL_QEMU_LOG="guests/node-1/install-qemu.log"
 REPORT_LOG="guests/node-1/report-console.log"
+REPORT_QEMU_LOG="guests/node-1/report-qemu.log"
 
 # How long the node gets to become Ready. A KVM boot reaches Ready in
 # under half a minute. Two minutes covers a CI runner's slower disks
@@ -120,38 +131,58 @@ done
 rm -rf guests/node-1
 mkdir -p guests/node-1
 
-# On failure, return the evidence: whichever console logs exist, and
-# QEMU's own output. QEMU's output holds the explanation for cases
-# where the machine never got far enough to write a console log, for
-# example because of a missing host tool, a bad flag, or missing
-# firmware.
-evidence() {
-    for log in "$REPORT_LOG" "$INSTALL_LOG" "$CONSOLE_LOG"; do
-        if [[ -e "$log" ]]; then
-            echo "$drill: the last of $log:" >&2
-            tail -n 40 "$log" >&2
-        fi
-    done
-    echo "$drill: the last of QEMU's own output (guests/node-1/qemu.log):" >&2
-    tail -n 20 guests/node-1/qemu.log >&2 || true
+# On failure, return the evidence of every boot that ran, in the order
+# the drill ran them. The reader gets the whole sequence, because the
+# fault often starts in an earlier boot than the one that failed: an
+# install that wrote a bad boot entry looks healthy until the disk boot
+# cannot find a kernel.
+#
+# tail_log prints one record if the drill produced it. A boot that
+# never ran leaves no file, and a file that is absent is not a fault.
+tail_log() {
+    local log="$1" lines="$2"
+    [[ -e "$log" ]] || return 0
+    echo "$drill: the last of $log:" >&2
+    tail -n "$lines" "$log" >&2
 }
 
-# The install and report boots are attended boots: they finish their
-# work, sync it, and then hold the console for a person to acknowledge
-# before they stop. A person proved they were present when they picked
-# the menu entry, so the message waits for them instead of vanishing
-# behind a power-off on a timer. A drill has no person, so these two
-# helpers stand in for one: the drill runs an attended boot in the
-# background and watches its console log for the boot's own verdict
-# line. The verdict prints only after the boot's work has reached the
-# disk and been synced, so ending the guest at that moment loses
-# nothing.
-#
-# teardown_group ends one attended guest. setsid (below) gave the boot
-# its own session, so one SIGTERM to the process group ends the whole
-# tree: make, the shell make spawned, and QEMU.
-teardown_group() {
-    local leader="$1"
+evidence() {
+    # The console log gets more lines than the QEMU log, because it
+    # carries the machine's own account of the boot. The QEMU log holds
+    # the explanation for cases where the machine never got far enough
+    # to speak, for example a missing host tool, a bad flag, or missing
+    # firmware, and those faults are short.
+    tail_log "$REPORT_LOG" 40
+    tail_log "$REPORT_QEMU_LOG" 20
+    tail_log "$INSTALL_LOG" 40
+    tail_log "$INSTALL_QEMU_LOG" 20
+    tail_log "$CONSOLE_LOG" 40
+    tail_log "$QEMU_LOG" 20
+}
+
+# The drill runs one guest at a time, and this variable names the one
+# that runs now. Each boot below starts make with setsid, which puts
+# the whole boot in a new session of its own, and records the session
+# leader's process ID here. The leader's ID is also the process group
+# ID, so a signal sent to the negative of this number reaches the whole
+# tree: make, the shell that make spawned, and QEMU itself. The drill
+# starts make, not QEMU, so the group is the only handle it has on the
+# machine.
+guest=""
+
+# teardown ends the guest that runs now, and does nothing when no guest
+# runs. A guest that outlives the drill is not a harmless leftover: it
+# keeps the write locks on node-1's qcow2 disks, and it stays on the
+# multicast segment that carries the cluster's wire, so it breaks both
+# the next boot of this drill and the next run of the whole drill.
+teardown() {
+    [[ -n "$guest" ]] || return 0
+    local leader="$guest"
+    # Clear the handle first, so that a second call (the exit trap
+    # after a signal handler, for example) does not signal a process
+    # group that another program may have taken over in the meantime.
+    guest=""
+
     kill -TERM -- "-$leader" 2>/dev/null || true
     wait "$leader" 2>/dev/null || true
     # wait wakes when make exits, but QEMU is a sibling in the same
@@ -161,36 +192,69 @@ teardown_group() {
     # it is empty. The bound keeps a stuck guest from hanging the
     # drill.
     for _ in $(seq 1 50); do
-        kill -0 -- "-$leader" 2>/dev/null || break
+        kill -0 -- "-$leader" 2>/dev/null || return 0
         sleep 0.2
     done
+
+    # The guest ignored SIGTERM for ten seconds. The drill goes on,
+    # because a stuck QEMU is not a reason to lose the run, but it says
+    # so plainly here. Without this line the next boot fails on the
+    # image lock that this guest still holds, and it reports that the
+    # guest exited before its node became Ready, which sends the reader
+    # to the machine instead of to the leftover process.
+    echo "$drill: the previous guest did not exit within 10s" >&2
+    echo "$drill: it still holds node-1's disk images, so the next boot can fail to open them" >&2
 }
 
-# watch_hold waits for an attended boot's verdict: the success line
-# tears the guest down and returns; the failure line, a guest that
-# dies first, or the deadline ends the drill with the evidence.
+# Every way out of this script must take the guest with it: a passed
+# drill, a failed check, a deadline, an unexpected error under set -e,
+# a cancelled CI job, or a Ctrl-C at the keyboard. setsid gives each
+# guest its own session on purpose, which also means the keyboard's
+# SIGINT reaches this script and never reaches the guest. The script
+# must therefore pass the interruption on itself.
+trap teardown EXIT
+trap 'teardown; exit 130' INT
+trap 'teardown; exit 143' TERM
+
+# The install and report boots are attended boots: they finish their
+# work, sync it, and then hold the console for a person to acknowledge
+# before they stop. A person proved they were present when they picked
+# the menu entry, so the message waits for them instead of vanishing
+# behind a power-off on a timer. A drill has no person, so watch_hold
+# stands in for one: the drill runs an attended boot in the background
+# and watches its console log for the boot's own verdict line. The
+# verdict prints only after the boot's work has reached the disk and
+# been synced, so ending the guest at that moment loses nothing.
+#
+# watch_hold waits for that verdict: the success line tears the guest
+# down and returns; the failure line, a guest that dies first, or the
+# deadline ends the drill with the evidence. Every one of those paths
+# tears the guest down, including the one where make has already gone:
+# make is only the parent, and a QEMU that outlived it is still holding
+# the disks.
 watch_hold() {
-    local leader="$1" log="$2" success="$3" failure="$4" what="$5"
+    local log="$1" success="$2" failure="$3" what="$4"
     local started
     started="$(date +%s)"
     while true; do
         if grep -q "$success" "$log" 2>/dev/null; then
-            teardown_group "$leader"
+            teardown
             return 0
         fi
         if grep -q "$failure" "$log" 2>/dev/null; then
-            teardown_group "$leader"
+            teardown
             echo "$drill: $what reported a failure" >&2
             evidence
             exit 1
         fi
-        if ! kill -0 "$leader" 2>/dev/null; then
+        if ! kill -0 "$guest" 2>/dev/null; then
+            teardown
             echo "$drill: $what exited without completing" >&2
             evidence
             exit 1
         fi
         if (( $(date +%s) - started >= 180 )); then
-            teardown_group "$leader"
+            teardown
             echo "$drill: $what did not finish within 180s" >&2
             evidence
             exit 1
@@ -214,8 +278,9 @@ if [[ -n "$REPORT_STICK" ]]; then
         QEMU_EXIT_ON_REBOOT=-no-reboot \
         QEMU_EXTRA="-device qemu-xhci -drive file=guests/node-1/stick.img,format=raw,if=none,id=stick -device usb-storage,drive=stick" \
         CONSOLE="file:$REPORT_LOG" \
-        </dev/null >guests/node-1/qemu.log 2>&1 &
-    watch_hold $! "$REPORT_LOG" \
+        </dev/null >"$REPORT_QEMU_LOG" 2>&1 &
+    guest=$!
+    watch_hold "$REPORT_LOG" \
         "this report was written to the stick" \
         "to the stick FAILED" \
         "the report boot"
@@ -254,34 +319,25 @@ echo "$drill: installing node-1 ($FIRMWARE, $HARDWARE)"
 setsid make install NODE=node-1 FIRMWARE="$FIRMWARE" HARDWARE="$HARDWARE" \
     INSTALL_CPIO="$INSTALL_CPIO" \
     CONSOLE="file:$INSTALL_LOG" \
-    </dev/null >guests/node-1/qemu.log 2>&1 &
-watch_hold $! "$INSTALL_LOG" \
+    </dev/null >"$INSTALL_QEMU_LOG" 2>&1 &
+guest=$!
+watch_hold "$INSTALL_LOG" \
     "liken: installed to slot" \
     "liken: install failed" \
     "the install boot"
 echo "$drill: install complete; booting the installed disk"
 
 # Step two: boot the disk that the installer just wrote. The boot
-# runs in the background, in its own session (setsid), so that one
-# signal can later end the whole process tree: make, the shell that
-# make spawns, and QEMU. The guest's serial console goes to the
-# console log. make's own chatter and QEMU's own chatter go to a
+# runs in the background, in its own session (setsid), the same
+# arrangement the attended boots use, and the exit trap above ends it
+# whichever way the drill finishes. The guest's serial console goes to
+# the console log. make's own chatter and QEMU's own chatter go to a
 # separate file, because QEMU owns the console file, and a second
 # writer would corrupt it.
 setsid make run NODE=node-1 BOOT=disk FIRMWARE="$FIRMWARE" HARDWARE="$HARDWARE" \
     CONSOLE="file:$CONSOLE_LOG" \
-    </dev/null >guests/node-1/qemu.log 2>&1 &
+    </dev/null >"$QEMU_LOG" 2>&1 &
 guest=$!
-
-# Whatever happens below (success, timeout, or an unexpected error),
-# the guest must not outlive the drill. Killing the process group
-# (the negative PID) reaches QEMU, even though the script started
-# make instead.
-teardown() {
-    kill -TERM -- "-$guest" 2>/dev/null || true
-    wait "$guest" 2>/dev/null || true
-}
-trap teardown EXIT
 
 # Poll for the verdict. Each attempt is bounded (--request-timeout),
 # so a half-open connection cannot consume the whole deadline, and
@@ -300,13 +356,19 @@ while true; do
         exit 0
     fi
 
+    # Both failures tear the guest down before they read the logs, so
+    # that QEMU has flushed its own output by the time the evidence is
+    # printed. make can be gone while QEMU still runs, so this call
+    # matters even in the branch that found the guest dead.
     if ! kill -0 "$guest" 2>/dev/null; then
+        teardown
         echo "$drill: the guest exited before its node became Ready" >&2
         evidence
         exit 1
     fi
 
     if (( $(date +%s) - started >= SMOKE_DEADLINE )); then
+        teardown
         echo "$drill: node-1 was not Ready within ${SMOKE_DEADLINE}s" >&2
         evidence
         exit 1

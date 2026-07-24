@@ -1,0 +1,282 @@
+package main
+
+// Fitting liken's storage roles onto the disks the report measured.
+//
+// A proposal that names sizes the disks cannot hold is worse than no
+// proposal: it reads as a manifest a person can install from, and the
+// install refuses it at the first disk it claims. The installer lays
+// each disk out with exact allocations (claim.go), so every byte a
+// role asks for must exist on the disk that role names. This file is
+// the arithmetic that keeps that promise. It takes the disks the
+// report measured and returns the roles those disks can carry, at
+// sizes those disks can hold.
+//
+// The planner is pure. It reads no sysfs and touches no disk, so the
+// tests drive it with disks made up by hand, and check the result
+// against the same partition math the install runs.
+
+import (
+	"fmt"
+
+	"github.com/liken-sh/liken/machine"
+)
+
+// These are the sizes the layout starts from. The boot and system
+// roles are fixed, because their contents are fixed: a slot holds one
+// whole OS image, and the GRUB roles hold structures whose sizes the
+// firmware and GRUB decide. The data roles are wants, not
+// requirements. They shrink to fit a small disk, because the cluster's
+// state and the pods' volumes are as large as the machine can afford
+// and no larger.
+//
+// Every size here is a whole number of mebibytes, which is also the
+// alignment the installer gives each partition, so a role never
+// occupies more of a disk than its size says.
+const (
+	biosBootBytes         = 1 << 20
+	bootHomeBytes         = 64 << 20
+	systemSlotBytes       = 1 << 30
+	machineStateBytes     = 64 << 20
+	machineEphemeralBytes = 512 << 20
+	dataRoleBytes         = 4 << 30
+
+	// dataRoleFloor is the smallest a data role may be before the
+	// layout leaves the role out. A role below this size holds too
+	// little to be worth the space it takes from the roles beside it,
+	// and a role that is absent from the spec is not an error: its
+	// directory stays on the machine's RAM root.
+	dataRoleFloor = 256 << 20
+
+	// dataShareUnit rounds a scaled data role down to a size a person
+	// reads without effort. An exact third of a disk is a number
+	// nobody wants to see in a manifest.
+	dataShareUnit = 64 << 20
+
+	// gptOverhead is what the partition table itself costs. The
+	// primary header and its entry array sit in the first sectors, and
+	// a mirror of both sits in the last 33; the installer then starts
+	// the first partition on the 1MiB boundary that every partitioner
+	// aligns to. One mebibyte at each end covers both ends with room
+	// to spare.
+	gptOverhead = 2 << 20
+)
+
+// plannedRole is one role placed on one disk at one size. An empty
+// Size means the role takes the rest of its disk, which the spec
+// allows for one role per disk. Comment is the reason a person reads
+// beside the number.
+type plannedRole struct {
+	Name    machine.StorageRoleName
+	Device  string
+	Size    string
+	Comment string
+}
+
+// storageLayout is the plan for a whole machine: the roles, in the
+// canonical order the installer lays them down, and the notes that
+// explain what the plan could not do. A layout with no roles is a
+// real answer: it means no disk this report saw can carry a liken
+// install, and the notes say what would.
+type storageLayout struct {
+	Roles []plannedRole
+	Notes []string
+}
+
+// planStorageLayout fits the roles onto the disks. It puts the
+// machine's own roles on one disk and the cluster's data on another
+// when the machine has one to spare, so the cluster's state survives a
+// reinstall that replaces the system disk. It never plans a role onto
+// a disk that might be the installation stick, and it prefers a disk
+// the install can reach over one that only this boot can see.
+func planStorageLayout(measured []reportDisk, uefi bool) storageLayout {
+	candidates := placeableDisks(measured)
+	if len(candidates) == 0 {
+		return storageLayout{Notes: []string{
+			"This report saw no disk that can carry a storage role."}}
+	}
+
+	system, ok := pickSystemDisk(candidates, uefi)
+	if !ok {
+		grubRoles := ""
+		if !uefi {
+			grubRoles = fmt.Sprintf(", %s for GRUB's core image, and %s for GRUB's config",
+				sizeText(biosBootBytes), sizeText(bootHomeBytes))
+		}
+		return storageLayout{Notes: []string{fmt.Sprintf(
+			"No disk here can hold liken's own roles. They need %s on one disk: two %s system slots, %s of machine state, %s of /tmp%s. The largest disk this report saw offers %s. Attach a larger disk, then run this report again.",
+			gib(systemRoleBytes(uefi)), sizeText(systemSlotBytes), sizeText(machineStateBytes),
+			sizeText(machineEphemeralBytes), grubRoles, gib(largestDisk(candidates).SizeBytes))}}
+	}
+
+	layout := storageLayout{Roles: systemRoles(system.Path, uefi)}
+	data, available := pickDataDisk(candidates, system, uefi)
+	if data.Path == system.Path {
+		layout.Notes = append(layout.Notes, fmt.Sprintf(
+			"Every role lives on %s. No other disk here gives the cluster's data more room than this disk has left over. A reinstall replaces the system slots and the data roles together.", system.Path))
+	} else {
+		layout.Notes = append(layout.Notes, fmt.Sprintf(
+			"The durable roles live on %s, so the cluster's state and its volumes survive a reinstall that replaces the system disk.", data.Path))
+	}
+
+	roles, notes := dataRoles(data.Path, available)
+	layout.Roles = append(layout.Roles, roles...)
+	layout.Notes = append(layout.Notes, notes...)
+	return layout
+}
+
+// placeableDisks is the disks a role may land on, best first. A disk
+// that might be the installation stick is out entirely: the stick
+// leaves the machine with the person, and a role on it would vanish
+// with them. A disk that appeared only after this boot loaded a driver
+// comes last, because an install claims its disks before it loads any
+// module a manifest declares, so it never sees that disk at all.
+func placeableDisks(measured []reportDisk) []reportDisk {
+	var reachable, behind []reportDisk
+	for _, d := range measured {
+		switch {
+		case d.MaybeStick:
+			continue
+		case len(d.BehindModules) > 0:
+			behind = append(behind, d)
+		default:
+			reachable = append(reachable, d)
+		}
+	}
+	return append(reachable, behind...)
+}
+
+// usableBytes is what one disk offers to roles: its size, less what
+// the partition table takes at each end.
+func usableBytes(d reportDisk) uint64 {
+	if d.SizeBytes <= gptOverhead {
+		return 0
+	}
+	return d.SizeBytes - gptOverhead
+}
+
+// systemRoleBytes is the space the machine's own roles need: the two
+// system slots, the machine's state, its /tmp, and, on a BIOS machine,
+// the two roles that UEFI firmware would otherwise supply.
+func systemRoleBytes(uefi bool) uint64 {
+	total := uint64(2*systemSlotBytes + machineStateBytes + machineEphemeralBytes + gptOverhead)
+	if !uefi {
+		total += biosBootBytes + bootHomeBytes
+	}
+	return total
+}
+
+// pickSystemDisk chooses the disk that boots the machine: the first
+// placeable disk with room for the machine's own roles. Order matters
+// more than size here. The disks come in the kernel's enumeration
+// order, and the first disk is the one a person points at when they
+// say "the system disk".
+func pickSystemDisk(candidates []reportDisk, uefi bool) (reportDisk, bool) {
+	for _, d := range candidates {
+		if usableBytes(d)+gptOverhead >= systemRoleBytes(uefi) {
+			return d, true
+		}
+	}
+	return reportDisk{}, false
+}
+
+// pickDataDisk chooses where the cluster's data lives, and says how
+// much room it has there. A second disk is the better home, because it
+// survives a reinstall of the system disk, but only when it holds more
+// than the system disk has left over. A 64Mi flash card is a second
+// disk and not a home for a cluster's state.
+func pickDataDisk(candidates []reportDisk, system reportDisk, uefi bool) (reportDisk, uint64) {
+	leftover := usableBytes(system) - (systemRoleBytes(uefi) - gptOverhead)
+	best, bestAvailable := system, leftover
+	for _, d := range candidates {
+		if d.Path == system.Path {
+			continue
+		}
+		if available := usableBytes(d); available > bestAvailable {
+			best, bestAvailable = d, available
+		}
+	}
+	return best, bestAvailable
+}
+
+// systemRoles places the machine's own roles, at their fixed sizes.
+func systemRoles(device string, uefi bool) []plannedRole {
+	var roles []plannedRole
+	if !uefi {
+		roles = append(roles,
+			plannedRole{machine.BIOSBootRole, device, sizeText(biosBootBytes), "# GRUB core image; a tiny raw partition"},
+			plannedRole{machine.BootHomeRole, device, sizeText(bootHomeBytes), "# GRUB config and environment block"})
+	}
+	return append(roles,
+		plannedRole{machine.SystemARole, device, sizeText(systemSlotBytes), "# one OS slot; the blue-green pair"},
+		plannedRole{machine.SystemBRole, device, sizeText(systemSlotBytes), ""},
+		plannedRole{machine.MachineStateRole, device, sizeText(machineStateBytes), "# staged and proven manifests"},
+		plannedRole{machine.MachineEphemeralRole, device, sizeText(machineEphemeralBytes), "# the OS's /tmp"})
+}
+
+// dataRoles fits the cluster's roles into the space that is left. The
+// conventional sizes apply when they fit. When they do not, the roles
+// take equal shares of what there is, and podEphemeral takes the rest,
+// down to the point where a share is too small to be worth having. A
+// role that does not fit is left out rather than shrunk to nothing,
+// and every departure from the conventional layout gets a note.
+func dataRoles(device string, available uint64) ([]plannedRole, []string) {
+	cluster := plannedRole{machine.ClusterStateRole, device, "", "# size to your cluster's state"}
+	pods := plannedRole{machine.PodStorageRole, device, "", "# size to your workloads' volumes"}
+	ephemeral := plannedRole{machine.PodEphemeralRole, device, "", "# takes the rest of this disk"}
+
+	if available >= 2*dataRoleBytes+dataRoleFloor {
+		cluster.Size, pods.Size = sizeText(dataRoleBytes), sizeText(dataRoleBytes)
+		return []plannedRole{cluster, pods, ephemeral}, nil
+	}
+	if share := shareOf(available, 3); share >= dataRoleFloor {
+		cluster.Size, pods.Size = sizeText(share), sizeText(share)
+		return []plannedRole{cluster, pods, ephemeral}, []string{fmt.Sprintf(
+			"%s is too small for the conventional %s data roles, so clusterState and podStorage take an equal share of it and podEphemeral takes the rest. Check that these sizes suit your workloads.",
+			device, sizeText(dataRoleBytes))}
+	}
+	if share := shareOf(available, 2); share >= dataRoleFloor {
+		cluster.Size = sizeText(share)
+		return []plannedRole{cluster, ephemeral}, []string{fmt.Sprintf(
+			"%s has no room for podStorage, so the role is left out. Pods that claim a volume get one from the machine's RAM root, and lose it at the next reboot.", device)}
+	}
+	if available >= dataRoleFloor {
+		return []plannedRole{ephemeral}, []string{fmt.Sprintf(
+			"%s has room for podEphemeral only. clusterState and podStorage are left out, so the cluster's state and its volumes stay in RAM and start new after every reboot.", device)}
+	}
+	return nil, []string{fmt.Sprintf(
+		"%s has no room for any data role. The cluster's state, its volumes, and kubelet's scratch space all stay on the machine's RAM root. Attach a larger disk before this machine runs real workloads.", device)}
+}
+
+// shareOf divides the space among a number of roles, and rounds each
+// share down so the number reads well in a manifest.
+func shareOf(available, parts uint64) uint64 {
+	return available / parts / dataShareUnit * dataShareUnit
+}
+
+// largestDisk is the biggest of a set, for the message that says what
+// the machine offers against what liken needs.
+func largestDisk(disks []reportDisk) reportDisk {
+	largest := reportDisk{}
+	for _, d := range disks {
+		if d.SizeBytes > largest.SizeBytes {
+			largest = d
+		}
+	}
+	return largest
+}
+
+// sizeText renders a byte count as the manifest's own quantity: the
+// largest binary unit that divides it exactly. The spec accepts only
+// the power-of-two suffixes, so "1Gi" here means the same 2^30 bytes
+// that the partition math allocates.
+func sizeText(bytes uint64) string {
+	switch {
+	case bytes%(1<<30) == 0:
+		return fmt.Sprintf("%dGi", bytes>>30)
+	case bytes%(1<<20) == 0:
+		return fmt.Sprintf("%dMi", bytes>>20)
+	case bytes%(1<<10) == 0:
+		return fmt.Sprintf("%dKi", bytes>>10)
+	}
+	return fmt.Sprintf("%d", bytes)
+}

@@ -46,6 +46,15 @@ const bootMenuArtifact = "systemd-bootx64.efi"
 // in a release. Every boot's initrd list leads with it.
 const microcodeArtifact = "microcode.cpio"
 
+// attendedParam is the word every menu entry carries to tell init that
+// a person picked this boot. init/attended.go owns the meaning.
+const attendedParam = "liken.attended"
+
+// sortKeySeparator divides a machine name from the action in a menu
+// entry's sort-key. entryText explains why it must sort below every
+// character a machine name can hold.
+const sortKeySeparator = "+"
+
 // Stick builds the install image. releaseDir is a downloaded release
 // (artifacts beside their release.yaml), layerPath is the
 // deployment's layer, and out is the disk image to write. consoles
@@ -261,32 +270,52 @@ timeout menu-force
 // the same composition an installed machine gets from the three initrd=
 // parameters in its boot entries, plus the installer's payload.
 //
+// Every entry also carries liken.attended, the word that tells init a
+// person is standing at this machine. The menu is the only thing that
+// can say this truthfully: it waits forever, so a boot that starts from
+// it started because somebody pressed a key. init holds the console at
+// the end of an attended boot, and powers off without a prompt when the
+// word is absent (init/attended.go).
+//
 // The sort-key keeps a machine's two entries together and in order.
 // Both keys begin with the machine name, so all of one machine's
 // entries sort before the next machine's, and "install" sorts before
 // "reinstall" within the pair. Without a sort-key, systemd-boot orders
 // entries the way it orders kernels, newest first, which would scatter
 // the pairs.
+//
+// The character between the name and the action decides whether that
+// grouping survives names that are prefixes of other names.
+// systemd-boot compares sort keys as plain UTF-16 code units
+// (strcmp16), and a machine name is an RFC-1123 label, so the lowest
+// character a name can contain is "-" at 0x2D. sortKeySeparator sits
+// one below it. That inequality is the whole mechanism: comparing
+// "node+install" against "node-old+install" decides at "+" against "-",
+// so both of node's keys land before both of node-old's. A separator at
+// or above "-" would interleave the two machines instead, and a menu
+// that shows "wipe and reinstall as node-old" directly above "wipe and
+// reinstall as node" invites the one misread that wipes the wrong
+// machine.
 func entryText(name string, reinstall bool, consoles []string) []byte {
 	word, action, sortSuffix := "liken.install", "install", "install"
 	if reinstall {
 		word, action, sortSuffix = "liken.reinstall", "wipe and reinstall", "reinstall"
 	}
-	options := []string{"rdinit=/liken", "liken.machine=" + name, word}
+	options := []string{"rdinit=/liken", "liken.machine=" + name, word, attendedParam}
 	for _, c := range consoles {
 		options = append(options, "console="+c)
 	}
 	return fmt.Appendf(nil, `# Boot this deployment's OS with the identity %q and %s
 # this machine's own disks.
 title %s as %s
-sort-key %s-%s
+sort-key %s%s%s
 linux /vmlinuz
 initrd /microcode.cpio
 initrd /boot.cpio
 initrd /%s
 initrd /payload.cpio
 options %s
-`, name, action, action, name, name, sortSuffix, machine.LayerName, strings.Join(options, " "))
+`, name, action, action, name, name, sortKeySeparator, sortSuffix, machine.LayerName, strings.Join(options, " "))
 }
 
 // reportEntryText is the stick-wide hardware report entry. It carries
@@ -299,8 +328,12 @@ options %s
 // that carries a sort-key before every entry that does not, so the one
 // report entry always lands after all the machine entries, wherever the
 // machine names would otherwise sort it.
+//
+// Like the install entries, it carries liken.attended: the report ends
+// by printing a proposal that a person reads, so it must hold the
+// console until they have read it.
 func reportEntryText(consoles []string) []byte {
-	options := []string{"rdinit=/liken", "liken.report"}
+	options := []string{"rdinit=/liken", "liken.report", attendedParam}
 	for _, c := range consoles {
 		options = append(options, "console="+c)
 	}

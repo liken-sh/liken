@@ -22,6 +22,13 @@ import (
 // and runs Stick over them.
 func stickFixture(t *testing.T, consoles []string) (string, *disks.FATVolume) {
 	t.Helper()
+	return stickFixtureFor(t, consoles, "node-1", "node-2")
+}
+
+// stickFixtureFor is stickFixture over a named fleet, for the tests
+// that care which machine names the menu holds.
+func stickFixtureFor(t *testing.T, consoles []string, machines ...string) (string, *disks.FATVolume) {
+	t.Helper()
 	releaseDir := releaseFixtureWith(t, map[string]string{
 		"vmlinuz":             "kernel bytes",
 		"liken.sqfs":          "system image bytes",
@@ -31,7 +38,7 @@ func stickFixture(t *testing.T, consoles []string) (string, *disks.FATVolume) {
 		"systemd-bootx64.efi": "boot menu program bytes",
 	})
 	layer := filepath.Join(t.TempDir(), machine.LayerName)
-	if err := os.WriteFile(layer, mintedLayer(t, "node-1", "node-2"), 0o644); err != nil {
+	if err := os.WriteFile(layer, mintedLayer(t, machines...), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -98,13 +105,13 @@ func TestStickGivesEachMachineInstallAndReinstall(t *testing.T) {
 		}
 		for _, want := range []string{
 			"title install as " + name,
-			"sort-key " + name + "-install",
+			"sort-key " + name + "+install",
 			"linux /vmlinuz",
 			"initrd /microcode.cpio",
 			"initrd /boot.cpio",
 			"initrd /deployment.cpio",
 			"initrd /payload.cpio",
-			"options rdinit=/liken liken.machine=" + name + " liken.install",
+			"options rdinit=/liken liken.machine=" + name + " liken.install liken.attended",
 		} {
 			if !strings.Contains(string(install), want) {
 				t.Errorf("%s's install entry is missing %q:\n%s", name, want, install)
@@ -117,8 +124,8 @@ func TestStickGivesEachMachineInstallAndReinstall(t *testing.T) {
 		}
 		for _, want := range []string{
 			"title wipe and reinstall as " + name,
-			"sort-key " + name + "-reinstall",
-			"options rdinit=/liken liken.machine=" + name + " liken.reinstall",
+			"sort-key " + name + "+reinstall",
+			"options rdinit=/liken liken.machine=" + name + " liken.reinstall liken.attended",
 		} {
 			if !strings.Contains(string(reinstall), want) {
 				t.Errorf("%s's reinstall entry is missing %q:\n%s", name, want, reinstall)
@@ -147,7 +154,7 @@ func TestStickCarriesTheHardwareReportEntry(t *testing.T) {
 	for _, want := range []string{
 		"title liken hardware report",
 		"initrd /payload.cpio",
-		"options rdinit=/liken liken.report",
+		"options rdinit=/liken liken.report liken.attended",
 		"hardware-report.yaml",
 	} {
 		if !strings.Contains(text, want) {
@@ -171,6 +178,8 @@ func TestStickSortKeysKeepEachMachinePairAdjacentAndOrdered(t *testing.T) {
 	// The install key sorts before the reinstall key within a machine,
 	// and both sort before the next machine's keys, so the menu reads
 	// install/reinstall for node-1, then install/reinstall for node-2.
+	// Go compares these strings by byte, and systemd-boot compares them
+	// by UTF-16 code unit; the keys are ASCII, so the two orders agree.
 	keys := []string{
 		sortKey(t, v, "node-1-install"),
 		sortKey(t, v, "node-1-reinstall"),
@@ -179,6 +188,23 @@ func TestStickSortKeysKeepEachMachinePairAdjacentAndOrdered(t *testing.T) {
 	}
 	if !slices.IsSorted(keys) {
 		t.Errorf("the sort-keys must place the pairs in menu order: %v", keys)
+	}
+}
+
+func TestStickSortKeysGroupNamesThatArePrefixesOfOtherNames(t *testing.T) {
+	// "node" is a prefix of "node-old", the case that a separator at or
+	// above "-" gets wrong: the four keys interleave, and the menu
+	// offers "wipe and reinstall as node-old" directly above "wipe and
+	// reinstall as node". Each machine's pair must stay whole.
+	_, v := stickFixtureFor(t, nil, "node", "node-old")
+	keys := []string{
+		sortKey(t, v, "node-install"),
+		sortKey(t, v, "node-reinstall"),
+		sortKey(t, v, "node-old-install"),
+		sortKey(t, v, "node-old-reinstall"),
+	}
+	if !slices.IsSorted(keys) {
+		t.Errorf("one machine's pair must not split another's: %v", keys)
 	}
 }
 

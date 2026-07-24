@@ -133,27 +133,3 @@ func readGRUBEnv(path string) (map[string]string, error) {
 	}
 	return parseGRUBEnv(raw)
 }
-
-// writeFileDurably writes bytes through a temporary name, then it
-// runs fsync and renames the file. This is the same method that
-// copyDurably applies to slot artifacts, for the same reason: FAT has
-// no journal, so the code itself must enforce durability.
-func writeFileDurably(path string, data []byte) error {
-	tmp := path + ".partial"
-	f, err := os.Create(tmp)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}

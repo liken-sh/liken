@@ -473,6 +473,13 @@ run-once: run
 # install is idempotent: if something interrupts it, running it again
 # finishes the job.
 #
+# The command line carries liken.install alone. The stick's menu adds
+# liken.attended to say that a person picked the boot, and init then
+# holds the console at the end instead of powering off. This target has
+# no person in it, so it must not claim one: the hold would keep QEMU
+# alive until something killed it. The install-from-stick target below
+# gets the hold, because a person drives that one.
+#
 # INSTALL_CPIO names the install image to boot. The default is the dev
 # cluster's own. The parity smoke overrides it to point at the
 # hardware deployment's install image, which carries the same release
