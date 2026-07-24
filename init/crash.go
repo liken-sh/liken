@@ -22,7 +22,7 @@ package main
 // journal that small must be emptied after every read, or the next
 // crash finds no room to record itself. It then derives a one-line
 // summary, the newest crash's time, reason, and the kernel's own
-// message, and hands it to the facts file, which is how the fact
+// message, and hands it to the facts tree, which is how the fact
 // becomes status.lastCrash in the cluster.
 //
 // Two rules shape everything here. First, the copy must land before
@@ -271,7 +271,7 @@ var syslogPrefixRE = regexp.MustCompile(`^<\d+>\[\s*\d+\.\d+\] ?`)
 // here printable and bounded or not at all.
 func crashMessage(text string) string {
 	var lines []string
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		line = syslogPrefixRE.ReplaceAllString(strings.TrimRight(line, "\r"), "")
 		if strings.TrimSpace(line) != "" {
 			lines = append(lines, line)

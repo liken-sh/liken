@@ -285,12 +285,15 @@ spec:
           securityContext:
             privileged: true
           volumeMounts:
-            # These are the operator's inputs: the facts init
-            # published and, beside them, the manifest this boot ran
+            # These are the operator's inputs: the facts tree init
+            # published and, beside it, the manifest this boot ran
             # under (which tells the operator which Machine it
             # manages). This is read-only by mount rather than by
             # convention: status is observed, never asserted, and
-            # the operator cannot rewrite its own input.
+            # the operator cannot rewrite its own input. The operator
+            # also watches the tree with inotify through this mount.
+            # inotify events are per-inode, so a read-only bind mount
+            # delivers them the same as the source directory would.
             - name: run-liken
               mountPath: /run/liken
               readOnly: true

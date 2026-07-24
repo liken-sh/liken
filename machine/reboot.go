@@ -5,8 +5,8 @@ package machine
 //
 // Only PID 1 can shut a machine down properly, so the operator never
 // reboots the machine itself. Instead, the operator writes an intent
-// file. Init polls for this file. When init finds the file, init
-// stops k3s cleanly and reboots the machine.
+// file. Init watches this directory with inotify. When init finds the
+// file, init stops k3s cleanly and reboots the machine.
 //
 // The channel is a directory of its own under /run/liken, because
 // the two programs' mounts enforce the two directions of the flow.
@@ -44,11 +44,12 @@ type RebootIntent struct {
 }
 
 // writeIntent writes one intent file atomically, using writeAtomic,
-// the same function the facts use. This atomic write matters because
-// init, when it polls the file mid-write, must see either a whole
-// intent or no file at all. The channel directory belongs to init to
-// create, so writeIntent reports a missing directory as an error.
-// writeIntent never creates the directory itself.
+// the same function the facts use. writeAtomic renames a finished file
+// into the directory, so init reads either a whole intent or no file at
+// all, and that same rename is the event that wakes init's watch. The
+// channel directory belongs to init to create, so writeIntent reports a
+// missing directory as an error. writeIntent never creates the
+// directory itself.
 func writeIntent(dir, name string, intent any) error {
 	raw, err := yaml.Marshal(intent)
 	if err != nil {
@@ -59,7 +60,7 @@ func writeIntent(dir, name string, intent any) error {
 
 // readIntent reads one intent file into out, and reports whether the
 // file was present. A result of false with no error means that no
-// intent exists, which is the result for almost every poll.
+// intent exists, which is the result for almost every scan.
 func readIntent(dir, name string, out any) (bool, error) {
 	raw, err := os.ReadFile(filepath.Join(dir, name))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -109,7 +110,7 @@ const restartIntentFile = "restart-intent.yaml"
 // The two intents also differ in how they are used. Init never
 // consumes a reboot intent, because /run is destroyed along with the
 // boot that the intent requested. But init must consume a restart
-// intent, or the poll that found it would bounce k3s forever. Like
+// intent, or the scan that found it would bounce k3s forever. Like
 // the reboot intent, the presence of the restart-intent file is the
 // trigger. The staged stores on machineState hold the truth about
 // what to apply. This means a duplicate intent is harmless: init
@@ -140,7 +141,7 @@ func ReadRestartIntent(dir string) (*RestartIntent, error) {
 // the machine loses one restart request, but the operator's next pass
 // re-requests it. This order is the self-healing order. The reverse
 // order would bounce k3s forever, because init would find the same
-// intent file on every poll after each bounce. An absent file is
+// intent file on every scan after each bounce. An absent file is
 // fine; clearing an absent file is idempotent.
 func ClearRestartIntent(dir string) error {
 	err := os.Remove(filepath.Join(dir, restartIntentFile))
@@ -165,7 +166,7 @@ const modulesIntentFile = "modules-intent.yaml"
 // file is invisible to any init that predates it. Second, init must
 // consume the file, like the restart intent, because the machine
 // keeps running afterward. If init left the file in place, init would
-// load the modules again on every later poll. The presence of the
+// load the modules again on every later scan. The presence of the
 // file is the trigger, and the staged store holds the truth about
 // what to load. Init re-derives whether the staged manifest can be
 // applied live, on its own, and init refuses to act on anything that

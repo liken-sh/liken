@@ -22,12 +22,11 @@ import (
 )
 
 // Read assembles a MachineStatus from the facts tree. A missing root is
-// an error that wraps fs.ErrNotExist, the same condition as a missing
-// facts file: the facts describe a boot, and their absence on a running
-// machine is a fact the operator must report, not a default it may
-// invent. Read ignores a file or directory it does not know, so a tree
-// can carry more than this reader consumes. A file that does not parse
-// is an error that names its path.
+// an error that wraps fs.ErrNotExist: the facts describe a boot, and
+// their absence on a running machine is a fact the operator must report,
+// not a default it may invent. Read ignores a file or directory it does
+// not know, so a tree can carry more than this reader consumes. A file
+// that does not parse is an error that names its path.
 func (t FactsTree) Read() (*MachineStatus, error) {
 	if _, err := os.Stat(t.Dir); err != nil {
 		return nil, fmt.Errorf("reading facts tree %s: %w", t.Dir, err)

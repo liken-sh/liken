@@ -5,7 +5,7 @@ package main
 // The Cluster document's spec.features lists the fleet's opt-ins from
 // liken's curated vocabulary (the cluster package's features.go).
 // This pass is init's half of carrying them out: one verdict per
-// enabled feature, bound for status.features through the facts file,
+// enabled feature, bound for status.features through the facts tree,
 // with a console line for each, so the console and the API tell the
 // same story. The code validates the cluster document against the
 // vocabulary at parse time, so every slug that reaches this pass is a

@@ -16,7 +16,7 @@ package main
 // driver is what moves a device from one report to the other.
 //
 // The operator walks sysfs itself, rather than reading init's
-// facts. This is deliberate. The facts channel carries what init
+// facts. This is deliberate. The facts tree carries what init
 // observes for the Machine status, and inventory is not status: it
 // is a separate report, to a separate audience, with a separate
 // lifetime. Slices end with the Node; status lives with the Machine.

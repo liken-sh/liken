@@ -91,7 +91,7 @@ func loadModules() {
 // the fixed list, whose failures are printed and forgotten (the OS
 // knows its own list is shippable), a declared module is a
 // deployment's request, and the answer must reach the cluster.
-// These outcomes travel through the facts file into status.modules.
+// These outcomes travel through the facts tree into status.modules.
 // Nothing here can stop the boot. A machine missing a workload's
 // driver is degraded, not down.
 func loadDeclaredModules(names []string) []machine.ModuleStatus {

@@ -39,7 +39,7 @@ package machine
 // alone makes a write atomic against a crash of the writer, but not
 // against power loss. The rename itself lives in the directory, and
 // an unsynced directory update can vanish when the power goes out.
-// Facts skip the fsyncs, because /run is tmpfs. These lifecycle files
+// The facts tree skips the fsyncs, because /run is tmpfs. These lifecycle files
 // exist precisely to survive a power loss, so they perform both
 // fsyncs every time.
 

@@ -568,7 +568,7 @@ spec:
               type: object
               description: >-
                 What the machine observed about itself. Init writes
-                this through the facts file, and the liken operator
+                this through the facts tree, and the liken operator
                 publishes it. The system re-derives everything here
                 on every reconcile pass; it remembers nothing. So
                 this reports what currently holds, not what once

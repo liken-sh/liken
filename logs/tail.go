@@ -19,11 +19,13 @@ package main
 // disk (.1, .2, ...) are never read. They exist for boot forensics,
 // and shipping previous boots is left unsolved here on purpose.
 //
-// The follow mechanism is polling. inotify could push updates
-// instead, but a half-second poll is only two wakeups a second,
-// gives sub-second shipping latency, needs no event plumbing, and
-// behaves the same way on every filesystem. This kind of plain,
-// predictable behavior belongs in code that runs under PID 1.
+// The follow mechanism is polling, though liken watches other
+// channels with inotify. A tailer follows a growing file, and inotify
+// reports that growth only on the filesystems that raise the event: an
+// overlay or a network filesystem can miss it. A half-second poll
+// behaves the same way on every filesystem, and it is a cheap wakeup,
+// only two a second, with sub-second shipping latency. This kind of
+// uniform, predictable behavior belongs in code that runs under PID 1.
 
 import (
 	"bytes"
