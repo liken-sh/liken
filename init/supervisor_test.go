@@ -17,31 +17,29 @@ import (
 	"github.com/liken-sh/liken/cluster"
 )
 
-// The default discipline scales with the machine's memory and with
-// what the cluster asks k3s to hold: a quarter of memory for the
-// minimum viable control plane, and seven sixteenths once the helm
-// feature brings the chart renderer and its CRDs into the process. An
-// unset spec.runtime.k3s must produce exactly that, byte for byte.
+// The runtime section is an opt-in. An unset section adds no variable,
+// so an unset spec produces an empty environment, and k3s runs on Go's
+// own defaults. Each set field contributes only its own variable: a
+// memory limit gives GOMEMLIMIT alone, a collector pace gives GOGC
+// alone, and a section that sets both gives both.
 func TestK3sRuntimeEnv(t *testing.T) {
 	gib := uint64(1024 * 1024 * 1024)
 	gogc := func(n int) *int { return &n }
 	cases := map[string]struct {
 		spec cluster.K3sRuntimeSpec
 		mem  uint64
-		helm bool
 		want []string
 	}{
-		"absentLean":     {cluster.K3sRuntimeSpec{}, gib, false, []string{"GOMEMLIMIT=256MiB", "GOGC=50"}},
-		"absentHelm":     {cluster.K3sRuntimeSpec{}, gib, true, []string{"GOMEMLIMIT=448MiB", "GOGC=50"}},
-		"percent":        {cluster.K3sRuntimeSpec{GoMemoryLimit: "25%"}, gib, false, []string{"GOMEMLIMIT=256MiB", "GOGC=50"}},
-		"percentIgnores": {cluster.K3sRuntimeSpec{GoMemoryLimit: "50%"}, gib, true, []string{"GOMEMLIMIT=512MiB", "GOGC=50"}},
-		"absolute":       {cluster.K3sRuntimeSpec{GoMemoryLimit: "448Mi"}, gib, false, []string{"GOMEMLIMIT=448MiB", "GOGC=50"}},
-		"off":            {cluster.K3sRuntimeSpec{GoMemoryLimit: "off"}, gib, true, []string{"GOGC=50"}},
-		"customGoGC":     {cluster.K3sRuntimeSpec{GoGC: gogc(80)}, gib, false, []string{"GOMEMLIMIT=256MiB", "GOGC=80"}},
+		"absent":     {cluster.K3sRuntimeSpec{}, gib, nil},
+		"percent":    {cluster.K3sRuntimeSpec{GoMemoryLimit: "25%"}, gib, []string{"GOMEMLIMIT=256MiB"}},
+		"absolute":   {cluster.K3sRuntimeSpec{GoMemoryLimit: "448Mi"}, gib, []string{"GOMEMLIMIT=448MiB"}},
+		"off":        {cluster.K3sRuntimeSpec{GoMemoryLimit: "off"}, gib, nil},
+		"customGoGC": {cluster.K3sRuntimeSpec{GoGC: gogc(80)}, gib, []string{"GOGC=80"}},
+		"both":       {cluster.K3sRuntimeSpec{GoMemoryLimit: "512Mi", GoGC: gogc(50)}, gib, []string{"GOMEMLIMIT=512MiB", "GOGC=50"}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := k3sRuntimeEnv(tc.spec, tc.mem, tc.helm); !slices.Equal(got, tc.want) {
+			if got := k3sRuntimeEnv(tc.spec, tc.mem); !slices.Equal(got, tc.want) {
 				t.Errorf("got %v, want %v", got, tc.want)
 			}
 		})

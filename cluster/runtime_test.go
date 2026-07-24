@@ -7,21 +7,18 @@ import (
 
 func gogcPtr(n int) *int { return &n }
 
-// An unset section resolves to today's defaults, byte for byte: a
-// quarter of memory, seven sixteenths with helm, and GOGC 50.
-func TestRuntimeDefaultsMatchTodaysDerivation(t *testing.T) {
+// An unset section imposes nothing: the memory limit resolves to off,
+// and the collector pace reports itself unset. So init hands k3s no
+// GOMEMLIMIT and no GOGC, and k3s runs on Go's own runtime defaults.
+func TestRuntimeDefaultsImposeNothing(t *testing.T) {
 	gib := uint64(1 << 30)
 	spec := K3sRuntimeSpec{}
-	if spec.GoGCPercent() != 50 {
-		t.Errorf("default GoGC: got %d, want 50", spec.GoGCPercent())
+	if _, ok := spec.GoGCPercent(); ok {
+		t.Error("an unset section must report no collector pace")
 	}
-	lean, off, err := spec.GoMemoryLimitBytes(gib, false)
-	if err != nil || off || lean != gib/4 {
-		t.Errorf("lean default: got %d off=%v err=%v, want %d", lean, off, err, gib/4)
-	}
-	helm, _, _ := spec.GoMemoryLimitBytes(gib, true)
-	if helm != gib/16*7 {
-		t.Errorf("helm default: got %d, want %d", helm, gib/16*7)
+	bytes, off, err := spec.GoMemoryLimitBytes(gib)
+	if err != nil || !off || bytes != 0 {
+		t.Errorf("unset limit: got %d off=%v err=%v, want off with no ceiling", bytes, off, err)
 	}
 }
 
@@ -39,7 +36,7 @@ func TestRuntimeMemoryLimitForms(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			bytes, off, err := K3sRuntimeSpec{GoMemoryLimit: tc.limit}.GoMemoryLimitBytes(gib, false)
+			bytes, off, err := K3sRuntimeSpec{GoMemoryLimit: tc.limit}.GoMemoryLimitBytes(gib)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -51,8 +48,9 @@ func TestRuntimeMemoryLimitForms(t *testing.T) {
 }
 
 func TestRuntimeGoGCResolves(t *testing.T) {
-	if got := (K3sRuntimeSpec{GoGC: gogcPtr(80)}).GoGCPercent(); got != 80 {
-		t.Errorf("custom GoGC: got %d, want 80", got)
+	got, ok := (K3sRuntimeSpec{GoGC: gogcPtr(80)}).GoGCPercent()
+	if !ok || got != 80 {
+		t.Errorf("custom GoGC: got %d ok=%v, want 80 set", got, ok)
 	}
 }
 
@@ -139,7 +137,8 @@ spec:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Spec.Runtime.K3s.GoMemoryLimit != "448Mi" || c.RuntimeSpec().GoGCPercent() != 80 {
+	gc, ok := c.RuntimeSpec().GoGCPercent()
+	if c.Spec.Runtime.K3s.GoMemoryLimit != "448Mi" || !ok || gc != 80 {
 		t.Errorf("runtime not parsed: %+v", c.Spec.Runtime)
 	}
 }

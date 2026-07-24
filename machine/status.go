@@ -513,8 +513,10 @@ type RuntimeStatus struct {
 // K3sRuntimeStatus is the Go runtime environment init handed the k3s
 // process this boot. GoMemoryLimit is the resolved ceiling as an
 // absolute quantity in MiB, for example "256Mi"; it is empty when the
-// cluster turned the ceiling off, so the field's absence reads as "no
-// ceiling". GoGC is the resolved collector pace.
+// cluster left the ceiling unset or turned it off, so the field's
+// absence reads as "no ceiling, Go's own default". GoGC is the resolved
+// collector pace; it is empty when the cluster set none, so its absence
+// reads as "Go's own pace".
 type K3sRuntimeStatus struct {
 	GoMemoryLimit string `json:"goMemoryLimit,omitempty"`
 	GoGC          int    `json:"goGC,omitempty"`

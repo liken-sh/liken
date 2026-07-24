@@ -141,15 +141,18 @@ func publishBootFacts(tree machine.FactsTree, in bootFacts) {
 // runtimeFacts resolves the Go runtime environment init handed the
 // k3s process, so the facts carry the same values init printed to the
 // console. It reports the resolved ceiling, not the spec string: an
-// absolute quantity in MiB, or no ceiling at all when the cluster
-// turned the limit off. It reads the same section, memory, and helm
-// feature that k3sRuntimeEnv reads, so the facts and the process
-// environment can never disagree.
+// absolute quantity in MiB, or no ceiling at all when the cluster left
+// the limit unset or turned it off. It reads the same section and
+// memory that k3sRuntimeEnv reads, so the facts and the process
+// environment can never disagree. An unset section yields a zero
+// status, so WriteRuntime writes no files and status.runtime is absent.
 func runtimeFacts(clusterDoc *cluster.Cluster, memoryBytes uint64) machine.RuntimeStatus {
 	spec := clusterDoc.RuntimeSpec()
 	st := machine.RuntimeStatus{}
-	st.K3s.GoGC = spec.GoGCPercent()
-	limit, off, err := spec.GoMemoryLimitBytes(memoryBytes, clusterDoc.FeatureEnabled("helm"))
+	if gc, ok := spec.GoGCPercent(); ok {
+		st.K3s.GoGC = gc
+	}
+	limit, off, err := spec.GoMemoryLimitBytes(memoryBytes)
 	if err == nil && !off && limit > 0 {
 		st.K3s.GoMemoryLimit = fmt.Sprintf("%dMi", limit/(1<<20))
 	}

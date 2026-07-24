@@ -3,15 +3,19 @@ package cluster
 // The runtime discipline the cluster imposes on the k3s process.
 //
 // liken runs k3s under a Go runtime environment that init chooses at
-// boot. The Go collector, left alone, lets a process heap grow to
-// twice its live data before it collects. That trade is right on a
-// machine with memory to spare, and wrong on the small machines liken
-// targets, where k3s is the dominant resident process. This section
-// is the operator's control over that trade. It shapes only the
-// environment init hands the k3s process. containerd and the shims
-// k3s starts inherit it, because k3s is their parent. No other
-// process reads it: not init, not the operators, not the workloads,
-// which get their environment from their own pod specs.
+// boot. This section is the operator's control over that environment.
+// It shapes only the environment init hands the k3s process. containerd
+// and the shims k3s starts inherit it, because k3s is their parent. No
+// other process reads it: not init, not the operators, not the
+// workloads, which get their environment from their own pod specs.
+//
+// The section is an opt-in. An unset section imposes nothing, so k3s
+// runs on Go's own runtime defaults: no memory ceiling, and a heap that
+// grows to twice its live data before the collector runs. That trade is
+// right on a machine with memory to spare. It is worth tuning on the
+// small machines liken targets, where k3s is the dominant resident
+// process, and every uncollected megabyte takes memory from the
+// workloads.
 //
 // The section nests under a k3s key so the process it governs is
 // named in the path. spec.runtime.k3s.goMemoryLimit reads as "the
@@ -24,12 +28,6 @@ import (
 	"strings"
 )
 
-// DefaultGoGC is the collector pace liken uses when the cluster does
-// not set one: collect at fifty percent heap growth, rather than Go's
-// own hundred. It trades a little CPU all the time to keep the k3s
-// process resting near its live data size.
-const DefaultGoGC = 50
-
 // ClusterRuntimeSpec is the runtime discipline section of a
 // ClusterSpec. It holds one subsection per process liken supervises
 // directly. Today that is k3s alone.
@@ -41,7 +39,8 @@ type ClusterRuntimeSpec struct {
 
 // K3sRuntimeSpec is the Go runtime environment for the k3s process.
 // Both fields are read only when k3s starts, so an edit converges by
-// restarting k3s in place, the same tier as a features edit.
+// restarting k3s in place, the same tier as a features edit. An unset
+// field imposes nothing, so k3s keeps Go's own default for it.
 type K3sRuntimeSpec struct {
 	// GoMemoryLimit is the soft ceiling on everything the k3s
 	// runtime manages: heap, stacks, and its own metadata (Go's
@@ -49,42 +48,36 @@ type K3sRuntimeSpec struct {
 	// A percent such as "25%" is that share of this machine's memory,
 	// so one setting scales across a fleet of different sizes. An
 	// absolute quantity such as "448Mi" is a fixed ceiling on every
-	// machine. Left unset, the ceiling is a quarter of the machine's
-	// memory, or seven sixteenths when the helm feature is on, because
-	// the chart renderer and its CRDs enlarge the k3s heap.
+	// machine. Left unset, k3s runs with no ceiling, the same as "off".
 	GoMemoryLimit string `json:"goMemoryLimit,omitempty"`
 
 	// GoGC is the collector's everyday pace, as a percent of heap
-	// growth between collections (Go's GOGC). Left unset, it is 50.
-	// It is a pointer so an explicit value is told apart from unset,
-	// and the file doors refuse a value below 1.
+	// growth between collections (Go's GOGC). Left unset, init sets no
+	// GOGC, so k3s keeps Go's own pace of one hundred percent. It is a
+	// pointer so an explicit value is told apart from unset, and the
+	// file doors refuse a value below 1.
 	GoGC *int `json:"goGC,omitempty"`
 }
 
-// GoGCPercent resolves the collector pace: the set value, or the
-// default when the cluster names none.
-func (k K3sRuntimeSpec) GoGCPercent() int {
+// GoGCPercent resolves the collector pace. It reports the set value and
+// true, or zero and false when the cluster names none, so a caller can
+// tell an explicit pace from Go's own default.
+func (k K3sRuntimeSpec) GoGCPercent() (int, bool) {
 	if k.GoGC == nil {
-		return DefaultGoGC
+		return 0, false
 	}
-	return *k.GoGC
+	return *k.GoGC, true
 }
 
-// GoMemoryLimitBytes resolves the memory ceiling against this
-// machine's memory and the helm feature. It returns the ceiling in
-// bytes, whether the ceiling is off, and any error in the setting. An
-// unset limit is the default share, so the returned bytes match
-// today's derivation exactly. "off" returns off true and no ceiling.
-func (k K3sRuntimeSpec) GoMemoryLimitBytes(memoryBytes uint64, helm bool) (uint64, bool, error) {
+// GoMemoryLimitBytes resolves the memory ceiling against this machine's
+// memory. It returns the ceiling in bytes, whether the ceiling is off,
+// and any error in the setting. An unset limit is no ceiling, the same
+// as "off", so k3s runs on Go's own default. "off" returns off true and
+// no ceiling.
+func (k K3sRuntimeSpec) GoMemoryLimitBytes(memoryBytes uint64) (uint64, bool, error) {
 	s := strings.TrimSpace(k.GoMemoryLimit)
 	switch {
-	case s == "":
-		limit := memoryBytes / 4
-		if helm {
-			limit = memoryBytes / 16 * 7
-		}
-		return limit, false, nil
-	case s == "off":
+	case s == "" || s == "off":
 		return 0, true, nil
 	case strings.HasSuffix(s, "%"):
 		pct, err := parseMemoryPercent(s)
@@ -162,7 +155,7 @@ func (r ClusterRuntimeSpec) Validate() error {
 
 // Validate checks one k3s runtime section.
 func (k K3sRuntimeSpec) Validate() error {
-	if _, _, err := k.GoMemoryLimitBytes(1<<30, false); err != nil {
+	if _, _, err := k.GoMemoryLimitBytes(1 << 30); err != nil {
 		return err
 	}
 	if k.GoGC != nil && *k.GoGC < 1 {

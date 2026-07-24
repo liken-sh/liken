@@ -1352,13 +1352,15 @@ spec:
                           description: >-
                             The resolved memory ceiling, as an absolute
                             quantity in MiB, for example "256Mi". It is
-                            empty when the cluster turned the ceiling
-                            off, so an absent value means no ceiling.
+                            empty when the cluster left the ceiling unset
+                            or turned it off, so an absent value means no
+                            ceiling and Go's own default.
                         goGC:
                           type: integer
                           description: >-
-                            The resolved collector pace (Go's GOGC), 50
-                            by default.
+                            The resolved collector pace (Go's GOGC). It
+                            is absent when the cluster set none, so k3s
+                            keeps Go's own pace.
                 lastCrash:
                   type: object
                   description: >-

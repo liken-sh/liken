@@ -449,7 +449,7 @@ func ParseCluster(raw []byte) (*Cluster, error) {
 
 // RuntimeSpec is the k3s runtime section, safe on a nil Cluster. A
 // machine on its own, with no cluster document, gets the zero section,
-// which resolves to the same defaults as an unset section.
+// which imposes nothing, the same as an unset section.
 func (c *Cluster) RuntimeSpec() K3sRuntimeSpec {
 	if c == nil {
 		return K3sRuntimeSpec{}

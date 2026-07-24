@@ -475,16 +475,16 @@ func writeK3sBootConfig(clusterDoc *cluster.Cluster, m *machine.Machine, conns [
 		}
 	}
 
-	// The Go runtime discipline is set alongside the configuration.
-	// It is derived from the same cluster document (the helm feature
-	// is what enlarges the k3s heap), and re-deriving it here means
-	// an applied restart re-scales the ceiling on the same restart
-	// that reconfigures k3s. This code echoes it like the config
-	// lines, because an invisible environment variable is where a
-	// memory problem is hard to find.
+	// The Go runtime discipline is set alongside the configuration. It
+	// is derived from the same cluster document, and re-deriving it here
+	// means an applied restart re-resolves the environment on the same
+	// restart that reconfigures k3s. This code echoes it like the config
+	// lines, because an invisible environment variable is where a memory
+	// problem is hard to find. An unset spec.runtime.k3s section yields
+	// an empty environment, and the echo line is then empty too.
 	var si unix.Sysinfo_t
 	if err := unix.Sysinfo(&si); err == nil {
-		k3sMemoryDiscipline = k3sRuntimeEnv(clusterDoc.RuntimeSpec(), uint64(si.Totalram)*uint64(si.Unit), clusterDoc.FeatureEnabled("helm"))
+		k3sMemoryDiscipline = k3sRuntimeEnv(clusterDoc.RuntimeSpec(), uint64(si.Totalram)*uint64(si.Unit))
 		fmt.Printf("liken: k3s env: %s\n", strings.Join(k3sMemoryDiscipline, " "))
 	}
 	return role, nil

@@ -314,68 +314,48 @@ func superviseK3s(role api.Role, reboot <-chan machine.RebootIntent,
 	}
 }
 
-// k3sRuntimeEnv is the Go runtime discipline that init imposes on
-// k3s. The cluster document's spec.runtime.k3s section sets it, and
-// init resolves that section against this machine's memory and the
-// helm feature (cluster/runtime.go). Left alone, Go's collector lets
-// a process's heap grow to twice its live data before it collects
-// garbage. That trade is right on a machine with memory to spare. It
-// is the wrong trade on the small machines liken targets, where k3s
-// is the dominant resident process, and every uncollected megabyte
-// reduces the workloads' memory budget.
+// k3sRuntimeEnv is the Go runtime discipline that init hands the k3s
+// process. The cluster document's spec.runtime.k3s section sets it,
+// and init resolves that section against this machine's memory
+// (cluster/runtime.go). The section is an opt-in: an unset field adds
+// no variable, so the returned environment carries only what the
+// cluster names, and an unset section returns nothing at all. k3s then
+// runs on Go's own defaults for whatever the cluster left alone.
 //
-// GOMEMLIMIT is a soft ceiling on everything the runtime manages:
-// heap, stacks, and its own metadata. As memory use approaches the
-// ceiling, the collector runs harder instead of letting the heap
-// grow. Past the ceiling, the runtime caps garbage collection at half
-// the process's CPU and lets the heap grow anyway. So a genuine
-// memory spike degrades into slowness, and never causes a
-// heap-exhaustion crash. Left unset, the ceiling scales with the
-// features the cluster declares, because those features are what fill
-// the heap. A minimum viable control plane fits comfortably under a
-// quarter of the machine's memory. The helm feature, and everything
-// that requires it, such as traefik, brings the chart renderer and
-// Traefik's CRDs into the process, and needs seven sixteenths of the
-// machine's memory. That budget leaves a 1GB machine room for the
-// container runtime, the pods themselves, the kernel's own caches,
-// and free headroom for the next convergence. GOGC sets the everyday
-// pace under the ceiling, 50 by default: it collects garbage at fifty
-// percent heap growth instead of Go's own hundred percent. This
-// trades a little CPU all the time, so the process's resting size
-// stays near its live data size.
+// GOMEMLIMIT is a soft ceiling on everything the runtime manages: heap,
+// stacks, and its own metadata. As memory use approaches the ceiling,
+// the collector runs harder instead of letting the heap grow. Past the
+// ceiling, the runtime caps collection at half the process's CPU and
+// lets the heap grow anyway, so a genuine memory spike degrades into
+// slowness rather than a heap-exhaustion crash. GOGC sets the everyday
+// pace under the ceiling, as a percent of heap growth between
+// collections.
 //
-// The two knobs fail in opposite directions, and reading the symptom
-// tells which way an experiment went wrong. A ceiling turned off, or
-// set too high, leaves the collector nothing to push against, so the
-// heap grows until the kernel's OOM killer is the only backstop, and
-// the process dies outright under a spike. A ceiling set too tight
-// makes the collector run against a wall it cannot clear: it collects
-// again and again to hold the line, burning CPU on collection with
-// little real work done. The symptom is high pure-user CPU on the k3s
-// process with no matching workload, and the control plane slows to a
-// crawl without ever crashing. The healthy setting sits between
-// these, and the defaults are that setting for the fleets liken
-// targets.
-//
-// containerd and the shims inherit this environment from k3s. This
-// is deliberate and cheap: they are Go programs a fraction of the
-// size of the limit, so the ceiling never constrains them, and the
-// GC pace keeps them lean too. Workload processes inherit nothing.
-// Their environments come from their pod specs.
-func k3sRuntimeEnv(spec cluster.K3sRuntimeSpec, memoryBytes uint64, helm bool) []string {
+// init sets the environment when it launches the process, because Go
+// reads both variables only at startup. containerd and the shims k3s
+// starts inherit this environment, because k3s is their parent. This is
+// deliberate and cheap: they are Go programs far smaller than the
+// ceiling, so it never constrains them, and the collector pace keeps
+// them lean too. Workload processes inherit nothing; their environments
+// come from their pod specs.
+func k3sRuntimeEnv(spec cluster.K3sRuntimeSpec, memoryBytes uint64) []string {
 	var env []string
-	if limit, off, err := spec.GoMemoryLimitBytes(memoryBytes, helm); err == nil && !off {
+	if limit, off, err := spec.GoMemoryLimitBytes(memoryBytes); err == nil && !off {
 		env = append(env, fmt.Sprintf("GOMEMLIMIT=%dMiB", limit/(1<<20)))
 	}
-	env = append(env, fmt.Sprintf("GOGC=%d", spec.GoGCPercent()))
+	if gc, ok := spec.GoGCPercent(); ok {
+		env = append(env, fmt.Sprintf("GOGC=%d", gc))
+	}
 	return env
 }
 
 // k3sMemoryDiscipline is the runtime environment that startK3s gives
 // every k3s process it launches. writeK3sBootConfig derives this
 // environment beside the boot drop-in, at boot and again on every
-// applied restart. So a restart that changes the cluster's features
-// re-scales the ceiling on the same bounce that reconfigures k3s.
+// applied restart. So a restart that edits spec.runtime.k3s re-resolves
+// the environment on the same bounce that reconfigures k3s. An unset
+// section leaves the list empty, and startK3s then launches k3s with
+// init's own environment untouched.
 var k3sMemoryDiscipline []string
 
 // startK3s launches k3s in the machine's role, and returns the
