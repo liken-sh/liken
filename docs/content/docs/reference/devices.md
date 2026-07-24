@@ -104,8 +104,10 @@ itself, so they are not the operating system's to publish.
 ## Sharing
 
 A device is allocated to one claim, unless liken publishes
-`allowMultipleAllocations` for it. liken publishes it for a device
-whose every delivered node is a DRM node, and for nothing else.
+`allowMultipleAllocations` for it. liken publishes it for a graphics
+device, and for nothing else: the device must deliver a DRM render
+node, and every node it delivers must belong to the graphics stack,
+which is the DRM nodes and the legacy framebuffer beside them.
 
 A DRM render node multiplexes by the kernel's own contract: the
 driver arbitrates concurrent clients. The lab measured this on an

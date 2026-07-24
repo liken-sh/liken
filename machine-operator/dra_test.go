@@ -56,14 +56,18 @@ func TestInventoryPublishesDrivenDeliverableDevices(t *testing.T) {
 }
 
 // gpu is the lab's virtio GPU and the testbed's integrated one: a
-// driven display device whose subtree delivers both DRM nodes.
+// driven display device that delivers its two DRM nodes and the
+// legacy framebuffer the kernel's fbdev emulation creates beside
+// them. The lab guest showed the framebuffer, and a rule written
+// against the DRM nodes alone would have passed its tests and then
+// shared nothing on a real machine.
 func gpu() ([]hardware.Device, func(hardware.Device) hardware.Delivery) {
 	return []hardware.Device{{
 			Bus: "pci", Address: "0000:00:02.0", Driver: "i915", Class: "display",
 			ClassCode: "030000", Name: "Alder Lake-N [UHD Graphics]", Vendor: "8086", Product: "46d1",
 		}}, delivering(hardware.Delivery{
-			DevNodes:   []string{"/dev/dri/card0", "/dev/dri/renderD128"},
-			Subsystems: []string{"drm"},
+			DevNodes:   []string{"/dev/dri/card0", "/dev/dri/renderD128", "/dev/fb0"},
+			Subsystems: []string{"drm", "graphics"},
 		})
 }
 
@@ -81,11 +85,24 @@ func TestInventorySharesADeviceThatMultiplexes(t *testing.T) {
 	if d.Attributes["renderNode"].Bool == nil || !*d.Attributes["renderNode"].Bool {
 		t.Error("a render node is the fact a transcoding workload selects on")
 	}
-	if got := d.Attributes["subsystem"].String; got == nil || *got != "drm" {
-		t.Errorf("subsystem = %v, want drm", got)
-	}
 	if got := d.Attributes["classCode"].String; got == nil || *got != "030000" {
 		t.Errorf("classCode = %v, want the whole code", got)
+	}
+}
+
+func TestInventoryRefusesToShareARenderNodeBesideSomethingElse(t *testing.T) {
+	// A render node beside a node from outside the graphics stack is
+	// hardware liken has not met. It stays exclusive until somebody
+	// looks at it.
+	devices := inventoryDevices([]hardware.Device{
+		{Bus: "pci", Address: "0000:00:02.0", Driver: "novel", Class: "display"},
+	}, delivering(hardware.Delivery{
+		DevNodes:   []string{"/dev/dri/renderD128", "/dev/ttyS4"},
+		Subsystems: []string{"drm", "tty"},
+	}), nil)
+
+	if devices[0].AllowMultipleAllocations != nil {
+		t.Error("only a whole graphics device may be shared")
 	}
 }
 

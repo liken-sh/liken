@@ -79,16 +79,24 @@ The slice gains three attributes and one flag:
 * `classCode` — the whole class code, six hex digits on PCI and two on
   USB. A selector can ask for a VGA controller without liken shipping a
   subclass table it would have to maintain.
-* `allowMultipleAllocations` — true when every node the device delivers
-  is a DRM node, and absent otherwise.
+* `allowMultipleAllocations` — true for a graphics device: one that
+  delivers a DRM render node, and delivers nothing from outside the
+  graphics stack.
 
-The shareability rule is deliberately one entry wide. A DRM render node
+The shareability rule is deliberately narrow. A DRM render node
 multiplexes by the kernel's own contract, and the lab measured twelve
 concurrent VAAPI encoders dividing one iGPU evenly, two pods reaching
 2.39 and 2.38 times realtime against 4.76 for one pod alone. Every
 other device stays exclusive, because a device wrongly marked shareable
 cannot be corrected by any other layer, while a device wrongly marked
 exclusive is a claim that waits.
+
+The first rule written here tested for DRM nodes and nothing else, and
+the lab guest disproved it within the hour: a GPU also delivers the
+legacy framebuffer that fbdev emulation creates, so the rule would have
+passed its unit tests and shared nothing on a real machine. The test
+that matters is the render node, and the graphics stack is what may
+accompany it.
 
 List-valued attributes stay out of this: `DRAListTypeAttributes` is
 alpha and off, so every attribute is a single value.

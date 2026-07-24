@@ -226,26 +226,45 @@ func hasRenderNode(delivery hardware.Delivery) bool {
 	})
 }
 
+// graphicsSubsystems are the kernel subsystems a graphics device
+// delivers nodes through. drm is the modern interface, and graphics is
+// the legacy framebuffer that the kernel's fbdev emulation creates for
+// the same hardware. A GPU delivers both, so a rule that accepted drm
+// alone would never fire on a real machine.
+var graphicsSubsystems = map[string]bool{"drm": true, "graphics": true}
+
 // shareable decides whether the API may allocate this device to more
 // than one claim.
 //
-// The rule is one entry wide, and it is meant to stay narrow. A DRM
-// device is shareable because the kernel's own contract says so: the
-// driver arbitrates concurrent clients on a render node, and the lab
-// measured this holding, with twelve encoders on one integrated GPU
-// dividing it evenly between them. Nothing else on these buses has
-// that contract. A tty has one writer. A dongle's control endpoint
-// has one owner.
+// The rule is narrow, and it is meant to stay narrow. A GPU is
+// shareable because the kernel's own contract says so: the driver
+// arbitrates concurrent clients on a render node, and the lab measured
+// this holding, with twelve encoders on one integrated GPU dividing it
+// evenly between them. Nothing else on these buses has that contract.
+// A tty has one writer. A dongle's control endpoint has one owner.
 //
-// The asymmetry decides the default. A device wrongly published as
-// shareable hands the same hardware to two workloads that each
-// believe they hold it, and no DeviceClass, claim, or workload can
-// take that back, because only the driver writes a slice. A device
-// wrongly published as exclusive costs a claim that waits, and a
-// person can see it waiting. So a device is exclusive unless every
-// node it delivers is a DRM node.
+// So the test is the render node, and then the other nodes the device
+// hands over. A render node beside a card node and a framebuffer is a
+// graphics device, whole. A render node beside a node from any other
+// subsystem is hardware liken has not met, and it stays exclusive
+// until somebody looks at it.
+//
+// The asymmetry decides that default. A device wrongly published as
+// shareable hands the same hardware to two workloads that each believe
+// they hold it, and no DeviceClass, claim, or workload can take that
+// back, because only the driver writes a slice. A device wrongly
+// published as exclusive costs a claim that waits, where a person can
+// see it waiting.
 func shareable(delivery hardware.Delivery) bool {
-	return len(delivery.Subsystems) == 1 && delivery.Subsystems[0] == "drm"
+	if !hasRenderNode(delivery) {
+		return false
+	}
+	for _, subsystem := range delivery.Subsystems {
+		if !graphicsSubsystems[subsystem] {
+			return false
+		}
+	}
+	return true
 }
 
 // deviceName turns a sysfs address into the DNS label the API
