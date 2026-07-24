@@ -309,8 +309,10 @@ func TestProposalPutsEveryRoleOnOneDiskWhenThereIsOnlyOne(t *testing.T) {
 
 func TestProposalSizesTheRolesToASmallDisk(t *testing.T) {
 	// The parity drill's own disks: 2 GiB and 4 GiB. Only the second
-	// can hold liken's roles, and the data roles must shrink to what is
-	// left on it.
+	// can hold liken's roles, so the 2 GiB disk carries the cluster's
+	// data, and it is under the floor an image store needs. The
+	// proposal names no clusterState there rather than a size that
+	// installs and then fails on a pull.
 	r := sampleReport()
 	r.UEFI = true
 	r.Disks = []reportDisk{
@@ -322,8 +324,29 @@ func TestProposalSizesTheRolesToASmallDisk(t *testing.T) {
 	if m.Spec.Storage.SystemA.Device != "/dev/sdb" {
 		t.Errorf("the system slots must land on the disk that can hold them: %q", m.Spec.Storage.SystemA.Device)
 	}
-	if size := m.Spec.Storage.ClusterState; size != nil && size.Size == "4Gi" {
-		t.Error("the conventional data size cannot stand on a 4 GiB disk")
+	if m.Spec.Storage.ClusterState != nil {
+		t.Errorf("no disk here can hold an image store: %+v", m.Spec.Storage.ClusterState)
+	}
+	if text := composeHardwareReport(r); !strings.Contains(text, "image store") {
+		t.Errorf("the proposal must say why clusterState is missing:\n%s", text)
+	}
+}
+
+func TestProposalTeachesWhatEachDurableRoleHolds(t *testing.T) {
+	// A person reading the proposal has to know which size is theirs to
+	// choose. clusterState follows the images the node runs; podStorage
+	// is the volume pool, and it carries the "size to" marker the
+	// header tells them to edit.
+	text := composeHardwareReport(sampleReport())
+	for _, want := range []string{
+		"containerd's image store",
+		"local-path provisioner",
+		"size: 6Gi",
+		"size: 4Gi  # size to your workloads' volumes",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the proposal must carry %q:\n%s", want, text)
+		}
 	}
 }
 

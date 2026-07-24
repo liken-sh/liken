@@ -132,9 +132,12 @@ manifest.
 Three parts of the proposal need your judgement.
 
 The storage sizes fit the disks the report measured, so you can
-install from them as they are. They are still only a starting point.
-Set `clusterState` and `podStorage` to the sizes your cluster and your
-workloads need.
+install from them as they are. Two roles still deserve a look.
+`clusterState` holds k3s's database, its TLS material, and
+containerd's image store, so what the node runs decides its size.
+Raise it if this machine runs many images, or large ones. Set
+`podStorage` to the size your workloads' volumes need. The report says
+so in the file when it had to reduce either one.
 
 The proposal declares only the network ports that had a cable when the
 report ran. It lists the dark ports below them, commented out, with

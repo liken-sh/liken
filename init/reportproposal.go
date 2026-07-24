@@ -269,6 +269,10 @@ func writeDarkInterfaces(b *strings.Builder, dark []reportInterface) {
 // disk the report saw as comments, the evidence a person matches
 // against the machine in front of them, then writes the layout the
 // planner fitted onto those disks, with the planner's notes above it.
+// Those notes carry what the sizes alone cannot say: which role the
+// machine sizes for itself because containerd's images live in it,
+// which role is the operator's to choose, and what the planner had to
+// give up on a small disk.
 func composeStorage(b *strings.Builder, r hardwareReport) {
 	b.WriteString("  # The disks this report saw. The device path is only a hint\n")
 	b.WriteString("  # that matters on the boot that claims the disk; after that,\n")

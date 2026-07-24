@@ -67,6 +67,12 @@ func mustFit(t *testing.T, layout storageLayout, sized []reportDisk) {
 	}
 }
 
+// notes joins a layout's notes, for the tests that read what the plan
+// told the operator.
+func notes(layout storageLayout) string {
+	return strings.Join(layout.Notes, " ")
+}
+
 func TestLayoutUsesTheConventionalSizesOnALargeDisk(t *testing.T) {
 	measured := []reportDisk{{Path: "/dev/sda", SizeBytes: 500 << 30}}
 	layout := planStorageLayout(measured, true)
@@ -74,28 +80,115 @@ func TestLayoutUsesTheConventionalSizesOnALargeDisk(t *testing.T) {
 	if got := role(t, layout, machine.SystemARole).Size; got != "1Gi" {
 		t.Errorf("systemA size: %q", got)
 	}
-	if got := role(t, layout, machine.ClusterStateRole).Size; got != "4Gi" {
+	if got := role(t, layout, machine.ClusterStateRole).Size; got != "6Gi" {
 		t.Errorf("clusterState size: %q", got)
+	}
+	if got := role(t, layout, machine.PodStorageRole).Size; got != "4Gi" {
+		t.Errorf("podStorage size: %q", got)
 	}
 	if got := role(t, layout, machine.PodEphemeralRole).Size; got != "" {
 		t.Errorf("podEphemeral must take the rest: %q", got)
 	}
+	if !strings.Contains(notes(layout), "containerd's image store") {
+		t.Errorf("the plan must teach what clusterState holds: %v", layout.Notes)
+	}
 	mustFit(t, layout, measured)
 }
 
-func TestLayoutSharesASmallDiskAmongTheDataRoles(t *testing.T) {
-	// A 4 GiB disk holds the machine's own roles with about 1.4 GiB
-	// left. The conventional 4Gi data roles cannot fit, so they take
-	// an equal share of what is left instead.
+// smallDataDisk is a machine whose system disk has almost nothing left
+// over, so the second disk carries the cluster's roles at the size the
+// test names. The system disk holds liken's own roles and 446 MiB
+// more, which every data disk in these tests beats.
+func smallDataDisk(dataBytes uint64) []reportDisk {
+	return []reportDisk{
+		{Path: "/dev/sda", SizeBytes: 3 << 30},
+		{Path: "/dev/sdb", SizeBytes: dataBytes},
+	}
+}
+
+func TestLayoutShrinksPodStorageBeforeItTouchesClusterState(t *testing.T) {
+	// An 8 GiB data disk cannot hold 6Gi of cluster state beside 4Gi of
+	// volume pool. podStorage is the operator's own space, so it gives
+	// up what is missing and clusterState keeps every byte it asked for.
+	measured := smallDataDisk(8 << 30)
+	layout := planStorageLayout(measured, true)
+
+	if got := role(t, layout, machine.ClusterStateRole).Size; got != "6Gi" {
+		t.Errorf("clusterState must keep its size while podStorage can give: %q", got)
+	}
+	if got := role(t, layout, machine.PodStorageRole).Size; got != "1728Mi" {
+		t.Errorf("podStorage must take what is left: %q", got)
+	}
+	if !strings.Contains(notes(layout), "podStorage") {
+		t.Errorf("a shrunken role must be explained: %v", layout.Notes)
+	}
+	mustFit(t, layout, measured)
+}
+
+func TestLayoutDropsPodStorageToKeepClusterStateWhole(t *testing.T) {
+	// 6.5 GiB leaves podStorage less than the 256Mi that makes a role
+	// worth its space, so the role goes rather than shrinking to a size
+	// nobody can use.
+	measured := smallDataDisk(6656 << 20)
+	layout := planStorageLayout(measured, true)
+
+	if got := role(t, layout, machine.ClusterStateRole).Size; got != "6Gi" {
+		t.Errorf("clusterState must outlive podStorage: %q", got)
+	}
+	if hasRole(layout, machine.PodStorageRole) {
+		t.Error("podStorage must be left out before clusterState gives up a byte")
+	}
+	if !strings.Contains(notes(layout), "RAM root") {
+		t.Errorf("the plan must say what a dropped podStorage costs: %v", layout.Notes)
+	}
+	mustFit(t, layout, measured)
+}
+
+func TestLayoutReducesClusterStateOnlyAfterPodStorageIsGone(t *testing.T) {
+	// The parity drill's data disk. podStorage is already gone, so
+	// clusterState takes what is left above podEphemeral's floor.
+	measured := smallDataDisk(4 << 30)
+	layout := planStorageLayout(measured, true)
+
+	if got := role(t, layout, machine.ClusterStateRole).Size; got != "3776Mi" {
+		t.Errorf("clusterState must take what is left: %q", got)
+	}
+	if hasRole(layout, machine.PodStorageRole) {
+		t.Error("podStorage cannot stand while clusterState is short")
+	}
+	if !strings.Contains(notes(layout), "pull") {
+		t.Errorf("the plan must say what a short clusterState costs: %v", layout.Notes)
+	}
+	mustFit(t, layout, measured)
+}
+
+func TestLayoutHoldsClusterStateAtItsFloor(t *testing.T) {
+	// This disk holds the 2Gi floor and podEphemeral's own floor, and
+	// nothing more. It is the smallest disk that gets a clusterState.
+	measured := smallDataDisk(2306 << 20)
+	layout := planStorageLayout(measured, true)
+
+	if got := role(t, layout, machine.ClusterStateRole).Size; got != "2Gi" {
+		t.Errorf("clusterState must stop at its floor: %q", got)
+	}
+	mustFit(t, layout, measured)
+}
+
+func TestLayoutLeavesClusterStateOutBelowItsFloor(t *testing.T) {
+	// A 4 GiB disk holds liken's own roles with about 1.4 GiB left,
+	// which is under the floor a node is known to converge in. The plan
+	// names no size at all there, and says what the disk is short by.
 	measured := []reportDisk{{Path: "/dev/sda", SizeBytes: 4 << 30}}
 	layout := planStorageLayout(measured, true)
 
-	cluster := role(t, layout, machine.ClusterStateRole)
-	if cluster.Size == "4Gi" || cluster.Size == "" {
-		t.Errorf("clusterState must scale to the disk: %q", cluster.Size)
+	if hasRole(layout, machine.ClusterStateRole) {
+		t.Errorf("a disk under the floor must get no clusterState: %+v", layout.Roles)
 	}
 	if role(t, layout, machine.PodEphemeralRole).Size != "" {
 		t.Error("podEphemeral must still take the rest")
+	}
+	if !strings.Contains(notes(layout), "2.0 GiB") || !strings.Contains(notes(layout), "1.4 GiB") {
+		t.Errorf("the plan must state the shortfall: %v", layout.Notes)
 	}
 	mustFit(t, layout, measured)
 }
@@ -115,9 +208,9 @@ func TestLayoutRefusesADiskTooSmallForTheMachinesOwnRoles(t *testing.T) {
 }
 
 func TestLayoutDropsDataRolesThatDoNotFit(t *testing.T) {
-	// Just enough room for the machine's own roles and a little more:
-	// the data roles that cannot reach a useful size are left out, and
-	// the layout says so.
+	// Just enough room for the machine's own roles and 446 MiB more:
+	// the durable roles cannot reach a useful size, so kubelet's
+	// scratch space takes the disk on its own and the layout says so.
 	measured := []reportDisk{{Path: "/dev/sda", SizeBytes: 3 << 30}}
 	layout := planStorageLayout(measured, true)
 

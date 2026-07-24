@@ -24,10 +24,13 @@ import (
 // These are the sizes the layout starts from. The boot and system
 // roles are fixed, because their contents are fixed: a slot holds one
 // whole OS image, and the GRUB roles hold structures whose sizes the
-// firmware and GRUB decide. The data roles are wants, not
-// requirements. They shrink to fit a small disk, because the cluster's
-// state and the pods' volumes are as large as the machine can afford
-// and no larger.
+// firmware and GRUB decide.
+//
+// The three data roles are not equal, and the difference decides which
+// one gives up space on a small disk. clusterState is the operating
+// system's own working set: containerd unpacks every image the node
+// runs underneath it. podStorage and podEphemeral are the workloads'
+// space, and a workload that runs out of it fails one workload.
 //
 // Every size here is a whole number of mebibytes, which is also the
 // alignment the installer gives each partition, so a role never
@@ -38,17 +41,42 @@ const (
 	systemSlotBytes       = 1 << 30
 	machineStateBytes     = 64 << 20
 	machineEphemeralBytes = 512 << 20
-	dataRoleBytes         = 4 << 30
 
-	// dataRoleFloor is the smallest a data role may be before the
-	// layout leaves the role out. A role below this size holds too
-	// little to be worth the space it takes from the roles beside it,
-	// and a role that is absent from the spec is not an error: its
-	// directory stays on the machine's RAM root.
+	// clusterStateBytes is what clusterState asks for when a disk can
+	// hold it. The role mounts /var/lib/rancher, which holds k3s's
+	// database, its TLS material, and containerd's image store, so its
+	// size follows what the node runs and not what a person prefers.
+	// The images add up faster than the number suggests: liken's own
+	// bundled images, k3s's packaged ones (coredns, traefik,
+	// metrics-server, the local-path provisioner), and every workload
+	// image the operator deploys, and an upgrade holds the old set and
+	// the new set at the same time. 6Gi is what liken's own public node
+	// runs on, which is the one place a person has had to choose this
+	// number against real work.
+	clusterStateBytes = 6 << 30
+
+	// clusterStateFloorBytes is the smallest clusterState this layout
+	// will name. The lab's hardware-parity guest converges with the
+	// whole control-plane pod set in this much, so it is the smallest
+	// size with evidence behind it. Under the floor the layout names no
+	// clusterState at all, for the reason belowFloorNote gives.
+	clusterStateFloorBytes = 2 << 30
+
+	// podStorageBytes is what podStorage asks for. This role is the
+	// local-path provisioner's pool: the space pods claim by name. It
+	// is the operator's to size against their own workloads, so it is
+	// also the first space the layout takes back when a disk is small.
+	podStorageBytes = 4 << 30
+
+	// dataRoleFloor is the smallest podStorage or podEphemeral may be
+	// before the layout leaves the role out. A role below this size
+	// holds too little to be worth the space it takes from the roles
+	// beside it, and a role that is absent from the spec is not an
+	// error: its directory stays on the machine's RAM root.
 	dataRoleFloor = 256 << 20
 
 	// dataShareUnit rounds a scaled data role down to a size a person
-	// reads without effort. An exact third of a disk is a number
+	// reads without effort. An exact remainder of a disk is a number
 	// nobody wants to see in a manifest.
 	dataShareUnit = 64 << 20
 
@@ -213,44 +241,70 @@ func systemRoles(device string, uefi bool) []plannedRole {
 		plannedRole{machine.MachineEphemeralRole, device, sizeText(machineEphemeralBytes), "# the OS's /tmp"})
 }
 
-// dataRoles fits the cluster's roles into the space that is left. The
-// conventional sizes apply when they fit. When they do not, the roles
-// take equal shares of what there is, and podEphemeral takes the rest,
-// down to the point where a share is too small to be worth having. A
-// role that does not fit is left out rather than shrunk to nothing,
-// and every departure from the conventional layout gets a note.
+// roleNote is the sentence every proposal that plans the durable roles
+// carries. It teaches the one distinction a person needs before they
+// edit a size: which number is theirs to choose, and which number the
+// machine chooses for them.
+const roleNote = "clusterState holds k3s's database, its TLS material, and containerd's image store, so this node's images decide its size. Raise it if this node runs many images or large ones. podStorage is the local-path provisioner's pool, which is yours to size for the volumes your workloads claim."
+
+// dataRoles fits the cluster's roles into the space that is left, in
+// the order that keeps the node able to run at all.
+//
+// The order follows from what each role holds. A node with too little
+// podStorage refuses one workload's volume claim. A node with too
+// little clusterState cannot unpack the images it is told to run, so
+// it fails when an operator deploys anything, weeks after the install
+// that sized it. So podStorage shrinks and then goes, then podEphemeral
+// falls toward its floor, and clusterState gives up space last and
+// never below the floor a node is known to converge in. A role that
+// does not fit is left out rather
+// than shrunk to nothing, and every departure from the conventional
+// layout gets a note that says what it costs.
 func dataRoles(device string, available uint64) ([]plannedRole, []string) {
-	cluster := plannedRole{machine.ClusterStateRole, device, "", "# size to your cluster's state"}
+	cluster := plannedRole{machine.ClusterStateRole, device, "", "# k3s's database, TLS material, and containerd's images"}
 	pods := plannedRole{machine.PodStorageRole, device, "", "# size to your workloads' volumes"}
 	ephemeral := plannedRole{machine.PodEphemeralRole, device, "", "# takes the rest of this disk"}
 
-	if available >= 2*dataRoleBytes+dataRoleFloor {
-		cluster.Size, pods.Size = sizeText(dataRoleBytes), sizeText(dataRoleBytes)
-		return []plannedRole{cluster, pods, ephemeral}, nil
+	if available >= clusterStateBytes+podStorageBytes+dataRoleFloor {
+		cluster.Size, pods.Size = sizeText(clusterStateBytes), sizeText(podStorageBytes)
+		return []plannedRole{cluster, pods, ephemeral}, []string{roleNote}
 	}
-	if share := shareOf(available, 3); share >= dataRoleFloor {
-		cluster.Size, pods.Size = sizeText(share), sizeText(share)
-		return []plannedRole{cluster, pods, ephemeral}, []string{fmt.Sprintf(
-			"%s is too small for the conventional %s data roles, so clusterState and podStorage take an equal share of it and podEphemeral takes the rest. Check that these sizes suit your workloads.",
-			device, sizeText(dataRoleBytes))}
+	if share := spareAfter(available, clusterStateBytes+dataRoleFloor); share >= dataRoleFloor {
+		cluster.Size, pods.Size = sizeText(clusterStateBytes), sizeText(share)
+		return []plannedRole{cluster, pods, ephemeral}, []string{roleNote, fmt.Sprintf(
+			"%s cannot hold the conventional %s of podStorage beside clusterState, so podStorage takes %s. clusterState keeps its %s, because a node that cannot unpack an image cannot run the pod that wants it.",
+			device, sizeText(podStorageBytes), sizeText(share), sizeText(clusterStateBytes))}
 	}
-	if share := shareOf(available, 2); share >= dataRoleFloor {
+	if available >= clusterStateBytes+dataRoleFloor {
+		cluster.Size = sizeText(clusterStateBytes)
+		return []plannedRole{cluster, ephemeral}, []string{roleNote, fmt.Sprintf(
+			"%s has room for clusterState and kubelet's scratch space only, so podStorage is left out. A pod that claims a volume gets one from the machine's RAM root, and loses it at the next reboot. clusterState keeps its %s, because the images this node runs live there.",
+			device, sizeText(clusterStateBytes))}
+	}
+	if share := spareAfter(available, dataRoleFloor); share >= clusterStateFloorBytes {
 		cluster.Size = sizeText(share)
-		return []plannedRole{cluster, ephemeral}, []string{fmt.Sprintf(
-			"%s has no room for podStorage, so the role is left out. Pods that claim a volume get one from the machine's RAM root, and lose it at the next reboot.", device)}
+		return []plannedRole{cluster, ephemeral}, []string{roleNote, fmt.Sprintf(
+			"%s cannot hold a %s clusterState, so podStorage is left out and clusterState takes %s. That is enough for the images liken and k3s bring, and little more: a pull of a large image can fail with no space left, and an upgrade that holds the old images and the new ones at the same time may not fit. Attach a larger disk before this machine runs many images.",
+			device, sizeText(clusterStateBytes), sizeText(share))}
 	}
 	if available >= dataRoleFloor {
 		return []plannedRole{ephemeral}, []string{fmt.Sprintf(
-			"%s has room for podEphemeral only. clusterState and podStorage are left out, so the cluster's state and its volumes stay in RAM and start new after every reboot.", device)}
+			"%s offers %s to the cluster's roles, and a liken node's image store needs %s at the least, so this proposal declares no clusterState and no podStorage. A size under that floor installs without complaint and then fails on an image the node pulls weeks later, which is worse than no role at all. kubelet's scratch space takes this disk. The cluster's state and its volumes stay on the machine's RAM root, so the node imports every image again after every reboot. Attach a larger disk for this machine's durable roles.",
+			device, gib(available), gib(clusterStateFloorBytes))}
 	}
 	return nil, []string{fmt.Sprintf(
 		"%s has no room for any data role. The cluster's state, its volumes, and kubelet's scratch space all stay on the machine's RAM root. Attach a larger disk before this machine runs real workloads.", device)}
 }
 
-// shareOf divides the space among a number of roles, and rounds each
-// share down so the number reads well in a manifest.
-func shareOf(available, parts uint64) uint64 {
-	return available / parts / dataShareUnit * dataShareUnit
+// spareAfter is what a disk has left once a reservation is taken out
+// of it, rounded down so the number reads well in a manifest. The
+// arithmetic is unsigned, so a reservation larger than the disk has to
+// return zero rather than wrap to an enormous size.
+func spareAfter(available, reserved uint64) uint64 {
+	if available <= reserved {
+		return 0
+	}
+	return (available - reserved) / dataShareUnit * dataShareUnit
 }
 
 // largestDisk is the biggest of a set, for the message that says what
