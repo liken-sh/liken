@@ -2,9 +2,12 @@ package main
 
 // These tests run the tailer against real files in a tempdir, and do
 // the things that init's rotation actually does to them: growing,
-// being renamed aside, reappearing. The tailer runs in a goroutine
-// against a short poll interval, and the tests watch its output
-// arrive.
+// being renamed aside, reappearing. The tailer follows the file through
+// inotify events, and the tests watch its output arrive. A short
+// backstop keeps the timing tests fast. The event tests hold the
+// backstop far off, so only an inotify wake can deliver a change in
+// time, which proves the tailer is event-driven and not just polling
+// under another name.
 
 import (
 	"bytes"
@@ -36,16 +39,30 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-// fastPolls shortens the tailer's poll interval and makes every
-// checkpoint immediate, so tests measure behavior instead of
-// sleeping. The poll interval is a package variable, which is why
-// tests in this package must not run in parallel.
-func fastPolls(t *testing.T) {
+// fastBackstop shortens the tailer's backstop timer and makes every
+// checkpoint immediate, so a timing test measures behavior instead of
+// waiting. It lets the backstop, not an event, drive the tailer, which
+// is what a behavior test wants: the outcome must hold whichever wakes
+// the tailer. The backstop is a package variable, which is why tests in
+// this package must not run in parallel.
+func fastBackstop(t *testing.T) {
 	t.Helper()
 	immediateCheckpoints(t)
-	old := pollInterval
-	pollInterval = 2 * time.Millisecond
-	t.Cleanup(func() { pollInterval = old })
+	old := backstopInterval
+	backstopInterval = 2 * time.Millisecond
+	t.Cleanup(func() { backstopInterval = old })
+}
+
+// eventOnly holds the backstop timer far out of reach and makes every
+// checkpoint immediate. A test that still sees fast delivery under this
+// helper proves the inotify path carried the change, because the timer
+// could not have.
+func eventOnly(t *testing.T) {
+	t.Helper()
+	immediateCheckpoints(t)
+	old := backstopInterval
+	backstopInterval = time.Minute
+	t.Cleanup(func() { backstopInterval = old })
 }
 
 // appendLine grows the file the way a live writer does: open for
@@ -102,7 +119,7 @@ func awaitEnvelopes(t *testing.T, out *syncBuffer, n int) []envelope {
 }
 
 func TestTailerFollowsAGrowingFile(t *testing.T) {
-	fastPolls(t)
+	fastBackstop(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "k3s.log")
 	if err := os.WriteFile(path, []byte("first line\nsecond line\n"), 0o600); err != nil {
@@ -127,7 +144,7 @@ func TestTailerFollowsAGrowingFile(t *testing.T) {
 }
 
 func TestTailerLiftsHeadersItRecognizes(t *testing.T) {
-	fastPolls(t)
+	fastBackstop(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "k3s.log")
 	line := `time="2026-07-07T13:51:16Z" level=error msg="tunnel disconnected"`
@@ -147,13 +164,13 @@ func TestTailerLiftsHeadersItRecognizes(t *testing.T) {
 }
 
 func TestTailerWaitsForTheFileToExist(t *testing.T) {
-	fastPolls(t)
+	fastBackstop(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "containerd.log")
 
 	out, stop := followedFile(t, path, t.TempDir())
 	defer stop()
-	// Give the tailer a few polls against nothing, then create it.
+	// Let the tailer's watch settle against nothing, then create it.
 	time.Sleep(10 * time.Millisecond)
 	if err := os.WriteFile(path, []byte("containerd successfully booted\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -183,7 +200,7 @@ func awaitCheckpoint(t *testing.T, curDir string, offset int64) {
 }
 
 func TestTailerResumesFromItsCursor(t *testing.T) {
-	fastPolls(t)
+	fastBackstop(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "k3s.log")
 	curDir := t.TempDir()
@@ -210,7 +227,7 @@ func TestTailerResumesFromItsCursor(t *testing.T) {
 }
 
 func TestTailerFollowsARotation(t *testing.T) {
-	fastPolls(t)
+	fastBackstop(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "k3s.log")
 	// The old generation ends with an unterminated line, as if a
@@ -242,7 +259,7 @@ func TestTailerFollowsARotation(t *testing.T) {
 }
 
 func TestTailerReplaysWhenTheFileShrinks(t *testing.T) {
-	fastPolls(t)
+	fastBackstop(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "k3s.log")
 	curDir := t.TempDir()
@@ -275,7 +292,7 @@ func TestTailerReplaysWhenTheFileShrinks(t *testing.T) {
 // the tailer must drain the renamed generation to its final EOF
 // before moving on.
 func TestTailerDrainsARotatedGenerationToItsEnd(t *testing.T) {
-	fastPolls(t)
+	fastBackstop(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "k3s.log")
 	if err := os.WriteFile(path, []byte("first\n"), 0o600); err != nil {
@@ -308,7 +325,7 @@ func TestTailerDrainsARotatedGenerationToItsEnd(t *testing.T) {
 }
 
 func TestTailerStopsCleanlyWhileAwaitingAFile(t *testing.T) {
-	fastPolls(t)
+	fastBackstop(t)
 	path := filepath.Join(t.TempDir(), "never-created.log")
 	_, stop := followedFile(t, path, t.TempDir())
 	// stop verifies that the tailer exits with context.Canceled, even
@@ -319,7 +336,7 @@ func TestTailerStopsCleanlyWhileAwaitingAFile(t *testing.T) {
 // A tailer that cannot send lines must exit with the write error, so
 // the kubelet restarts it, instead of reading on and dropping lines.
 func TestTailerStopsWhenItsOutputFails(t *testing.T) {
-	fastPolls(t)
+	fastBackstop(t)
 	path := filepath.Join(t.TempDir(), "k3s.log")
 	if err := os.WriteFile(path, []byte("doomed\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -334,7 +351,7 @@ func TestTailerStopsWhenItsOutputFails(t *testing.T) {
 // same way a failed send does. The checkpoint is what makes the
 // tailer durable.
 func TestTailerStopsWhenItCannotCheckpoint(t *testing.T) {
-	fastPolls(t)
+	fastBackstop(t)
 	path := filepath.Join(t.TempDir(), "k3s.log")
 	if err := os.WriteFile(path, []byte("a line\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -348,5 +365,93 @@ func TestTailerStopsWhenItCannotCheckpoint(t *testing.T) {
 	err := tailFile(context.Background(), path, out, curDir, time.Now)
 	if !errors.Is(err, os.ErrPermission) {
 		t.Errorf("tailFile should surface the checkpoint error, got %v", err)
+	}
+}
+
+// TestTailerShipsGrowthOnAnEvent proves the tailer follows a growing
+// file through inotify, not a timer. The backstop is a minute away, so
+// the appended line can only arrive on an IN_MODIFY event. It arrives
+// fast, which is the proof.
+func TestTailerShipsGrowthOnAnEvent(t *testing.T) {
+	eventOnly(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "k3s.log")
+	if err := os.WriteFile(path, []byte("first\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out, stop := followedFile(t, path, t.TempDir())
+	defer stop()
+	// The first envelope proves the tailer has reached EOF and parked in
+	// the wait, with its watch already in place.
+	awaitEnvelopes(t, out, 1)
+
+	appendLine(t, path, "second\n")
+	es := awaitEnvelopes(t, out, 2)
+	if es[1].Message != "second" {
+		t.Errorf("growth should ship on the event: %+v", es[1])
+	}
+}
+
+// TestTailerFollowsARotationOnAnEvent proves the tailer notices a
+// rotation through inotify. The rename raises IN_MOVED_FROM, which wakes
+// the tailer to drain the renamed generation. With the backstop a minute
+// away, only that event can deliver the trailing fragment in time.
+func TestTailerFollowsARotationOnAnEvent(t *testing.T) {
+	eventOnly(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "k3s.log")
+	if err := os.WriteFile(path, []byte("before\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out, stop := followedFile(t, path, t.TempDir())
+	defer stop()
+	awaitEnvelopes(t, out, 1)
+
+	appendLine(t, path, "trailing fragment")
+	if err := os.Rename(path, path+".1"); err != nil {
+		t.Fatal(err)
+	}
+	es := awaitEnvelopes(t, out, 2)
+	if es[1].Message != "trailing fragment" {
+		t.Errorf("rotation should ship the drained fragment on the event: %+v", es[1])
+	}
+}
+
+// TestTailerAwaitsCreationOnAnEvent proves awaitFile wakes on the
+// creation event, not the backstop. containerd.log does not exist when
+// the tailer starts, so the tailer parks in awaitFile. With the backstop
+// a minute away, only the IN_CREATE event can wake it to open the new
+// file.
+func TestTailerAwaitsCreationOnAnEvent(t *testing.T) {
+	eventOnly(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "containerd.log")
+
+	out, stop := followedFile(t, path, t.TempDir())
+	defer stop()
+	// Let the watch establish before the file appears, so the creation
+	// event is the thing that wakes the tailer.
+	time.Sleep(10 * time.Millisecond)
+	if err := os.WriteFile(path, []byte("containerd up\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	es := awaitEnvelopes(t, out, 1)
+	if es[0].Message != "containerd up" {
+		t.Errorf("creation should wake awaitFile on the event: %+v", es[0])
+	}
+}
+
+// A watch that cannot start is a real fault. The tailer returns the
+// error, so the relay exits nonzero and the kubelet restarts it, rather
+// than falling back to a poll that would hide the fault. A parent
+// directory that does not exist makes the watch fail.
+func TestTailerStopsWhenTheWatchCannotStart(t *testing.T) {
+	fastBackstop(t)
+	path := filepath.Join(t.TempDir(), "gone", "k3s.log")
+	err := tailFile(context.Background(), path, newEnvelopeWriter(&syncBuffer{}), t.TempDir(), time.Now)
+	if err == nil || errors.Is(err, context.Canceled) {
+		t.Errorf("tailFile should surface the watch error, got %v", err)
 	}
 }

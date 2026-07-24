@@ -19,13 +19,27 @@ package main
 // disk (.1, .2, ...) are never read. They exist for boot forensics,
 // and shipping previous boots is left unsolved here on purpose.
 //
-// The follow mechanism is polling, though liken watches other
-// channels with inotify. A tailer follows a growing file, and inotify
-// reports that growth only on the filesystems that raise the event: an
-// overlay or a network filesystem can miss it. A half-second poll
-// behaves the same way on every filesystem, and it is a cheap wakeup,
-// only two a second, with sub-second shipping latency. This kind of
-// uniform, predictable behavior belongs in code that runs under PID 1.
+// The follow mechanism is inotify on the parent directory. The kernel
+// raises an event on the directory for each append and each rename, and
+// the tailer waits on that event instead of a timer, so an idle log
+// costs almost no wakeups and a growing one ships within a fraction of a
+// millisecond. The watch is on the directory, not the file, for the
+// same reason the mount is: the directory's inode is stable across the
+// rename that rotation makes, while a watch on the file would go dead
+// the moment the file is renamed away. The writer holds one descriptor
+// open for the whole boot and only appends, so the growth event is
+// IN_MODIFY; the descriptor never closes, so IN_CLOSE_WRITE never fires.
+//
+// An event is per-inode, so it crosses the DaemonSet's read-only bind
+// mount: the writer appends on the host side and the tailer wakes on the
+// container side. The two filesystems that hold liken's logs, ext4 on
+// disk machines and tmpfs on memory machines, both raise IN_MODIFY on
+// every append. A burst of appends coalesces into one wake, which is
+// harmless, because the tailer reads to EOF on any wake and ships
+// everything the burst wrote. An event is only a trigger. On a wake the
+// tailer re-reads the file and re-stats the path to learn the current
+// state, and never trusts what the event claimed. A slow backstop timer
+// bounds the damage if an event is ever lost.
 
 import (
 	"bytes"
@@ -35,11 +49,31 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/liken-sh/liken/machine"
+	"golang.org/x/sys/unix"
 )
 
-var pollInterval = 500 * time.Millisecond
+// tailMask is the event set for the watch on a log's parent directory.
+// IN_MODIFY is the growth event, because the writer only ever appends to
+// a descriptor it holds open. IN_CREATE fires when a new generation
+// appears, and also when containerd.log is first created. IN_MOVED_FROM
+// fires when rotation renames the old generation away. Each is only a
+// trigger to re-read and re-stat; the tailer never reads the event's
+// content.
+const tailMask = unix.IN_MODIFY | unix.IN_CREATE | unix.IN_MOVED_FROM
+
+// backstopInterval bounds how long a lost event can hide growth or a
+// rotation. inotify raises an event on every append and every rename, so
+// a healthy tailer wakes on the event and never waits this long. The
+// timer only covers two faults that liken does not currently have: an
+// inotify queue that overflows and drops events, and a filesystem that
+// does not raise IN_MODIFY. On either fault the tailer still catches up
+// within one interval. A long interval keeps the idle cost near zero.
+var backstopInterval = 30 * time.Second
 
 // tailCursor is the resume point: which file, identified by identity
 // rather than name, and the offset of the first byte of the next
@@ -63,7 +97,7 @@ func fileIdentity(info fs.FileInfo) (uint64, uint64) {
 // containerd.log is not created until k3s brings containerd up.
 // After a rotation, there is also a moment before the writer creates
 // the file again.
-func awaitFile(ctx context.Context, path string) (*os.File, error) {
+func awaitFile(ctx context.Context, path string, wake <-chan struct{}) (*os.File, error) {
 	for {
 		f, err := os.Open(path)
 		if err == nil {
@@ -75,7 +109,8 @@ func awaitFile(ctx context.Context, path string) (*os.File, error) {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(pollInterval):
+		case <-wake:
+		case <-time.After(backstopInterval):
 		}
 	}
 }
@@ -89,8 +124,18 @@ func tailFile(ctx context.Context, path string, out *envelopeWriter, curDir stri
 	var cur tailCursor
 	resuming := loadCursor(curDir, &cur)
 
+	// Establish the watch on the parent directory before the first open,
+	// so a file that is created between the open and the watch still
+	// raises an event this tailer will see. A watch that cannot start is
+	// a real fault: the relay exits nonzero and the kubelet restarts it,
+	// rather than falling back to a poll that would hide the fault.
+	wake, err := machine.WatchDirMask(ctx, filepath.Dir(path), tailMask)
+	if err != nil {
+		return err
+	}
+
 	for {
-		f, err := awaitFile(ctx, path)
+		f, err := awaitFile(ctx, path, wake)
 		if err != nil {
 			return err
 		}
@@ -119,7 +164,7 @@ func tailFile(ctx context.Context, path string, out *envelopeWriter, curDir stri
 		}
 		resuming = false
 
-		if err := followGeneration(ctx, f, path, offset, dev, ino, out, curDir, now); err != nil {
+		if err := followGeneration(ctx, f, path, offset, dev, ino, out, curDir, now, wake); err != nil {
 			return err
 		}
 	}
@@ -131,7 +176,7 @@ func tailFile(ctx context.Context, path string, out *envelopeWriter, curDir stri
 // its final EOF. This function owns the open file, and closes it on
 // every return. A nil return means the generation rotated, and the
 // caller should reopen the path.
-func followGeneration(ctx context.Context, f *os.File, path string, offset int64, dev, ino uint64, out *envelopeWriter, curDir string, now func() time.Time) error {
+func followGeneration(ctx context.Context, f *os.File, path string, offset int64, dev, ino uint64, out *envelopeWriter, curDir string, now func() time.Time, wake <-chan struct{}) error {
 	defer f.Close()
 
 	if offset > 0 {
@@ -196,9 +241,12 @@ func followGeneration(ctx context.Context, f *os.File, path string, offset int64
 			return err
 		}
 
-		// The tailer has caught up. Checkpoint (at a limited rate),
-		// sleep for one poll interval, then check whether the path
-		// still names the file this loop holds.
+		// The tailer has caught up. Checkpoint (at a limited rate), wait
+		// for a wake, then check whether the path still names the file
+		// this loop holds. The wake arrives on an append or a rename;
+		// the backstop timer covers a lost event. Both are pure
+		// triggers, so after either the tailer re-reads to EOF and
+		// re-stats the path, and acts on what it finds now.
 		if t := now(); t.Sub(lastCheckpoint) >= checkpointInterval {
 			lastCheckpoint = t
 			if err := saveCursor(curDir, tailCursor{Dev: dev, Ino: ino, Offset: lineStart}); err != nil {
@@ -208,7 +256,8 @@ func followGeneration(ctx context.Context, f *os.File, path string, offset int64
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(pollInterval):
+		case <-wake:
+		case <-time.After(backstopInterval):
 		}
 		st, err := os.Stat(path)
 		if err != nil {

@@ -236,23 +236,40 @@ func parseInotifyEvents(buf []byte, visit func(wd int32, mask uint32, name strin
 	}
 }
 
-// WatchDir watches one directory and coalesces every event into a
-// wake channel of capacity one. The watch exists before the function
-// returns, so a caller that scans right after the call cannot miss a
-// change that lands between the watch and the scan. The context ends
-// the watch: when it is done, the reader returns and the channel goes
-// quiet. A directory that does not exist is an error.
-func WatchDir(ctx context.Context, dir string) (<-chan struct{}, error) {
+// WatchDirMask watches one directory for the events in mask and
+// coalesces every event into a wake channel of capacity one. It is the
+// seam under WatchDir: a caller whose writer produces a different set of
+// events than the fact writers do passes its own mask. The tailer, for
+// example, follows a file that a held-open descriptor keeps appending
+// to, so it asks for IN_MODIFY rather than the rename and close that a
+// fact write ends with. IN_ONLYDIR is always added to the mask, so the
+// kernel refuses a watch on a path that is not a directory and a caller
+// cannot end up with a stale watch on a file. The watch exists before
+// the function returns, so a caller that scans right after the call
+// cannot miss a change that lands between the watch and the scan. The
+// context ends the watch. A directory that does not exist is an error.
+func WatchDirMask(ctx context.Context, dir string, mask uint32) (<-chan struct{}, error) {
 	w, err := newWatch()
 	if err != nil {
 		return nil, err
 	}
-	if _, err := unix.InotifyAddWatch(w.fd, dir, dirMask); err != nil {
+	if _, err := unix.InotifyAddWatch(w.fd, dir, mask|unix.IN_ONLYDIR); err != nil {
 		w.closeFds()
 		return nil, err
 	}
 	w.start(ctx)
 	return w.wake, nil
+}
+
+// WatchDir watches one directory for the fact writers' events and
+// coalesces every event into a wake channel of capacity one. The watch
+// exists before the function returns, so a caller that scans right after
+// the call cannot miss a change that lands between the watch and the
+// scan. The context ends the watch: when it is done, the reader returns
+// and the channel goes quiet. A directory that does not exist is an
+// error.
+func WatchDir(ctx context.Context, dir string) (<-chan struct{}, error) {
+	return WatchDirMask(ctx, dir, dirMask)
 }
 
 // TreeWatch is the recursive form of WatchDir, for the facts tree.
