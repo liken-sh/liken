@@ -371,6 +371,45 @@ func unwrapped(text string) string {
 	return strings.Join(words, " ")
 }
 
+// withGPU is the testbed: a machine whose integrated GPU nothing
+// drives, because an install needs no display.
+func withGPU() hardwareReport {
+	r := sampleReport()
+	r.Claimable = []moduleRecommendation{{
+		Device: "pci display device Intel Alder Lake-N [UHD Graphics] (modalias pci:v00008086d000046D1)",
+		Class:  "display",
+		Chain:  []string{"i915"},
+	}}
+	return r
+}
+
+func TestProposalNamesHardwareAWorkloadCouldClaim(t *testing.T) {
+	text := composeHardwareReport(withGPU())
+	if !strings.Contains(text, "#- i915") {
+		t.Errorf("the proposal must name the driver that would make the GPU claimable:\n%s", text)
+	}
+	if !strings.Contains(unwrapped(text), "UHD Graphics") {
+		t.Errorf("the proposal must say which device the driver is for:\n%s", text)
+	}
+}
+
+func TestProposalLeavesClaimableHardwareUndeclared(t *testing.T) {
+	// The line stays commented, so the proposal installs exactly as it
+	// reads. Driving a GPU is a decision a person makes, and the report
+	// changes nothing on the machine it describes.
+	m := mustInstall(t, withGPU())
+	if slices.Contains(m.Spec.Modules, "i915") {
+		t.Errorf("claimable hardware must not reach spec.modules: %v", m.Spec.Modules)
+	}
+}
+
+func TestProposalWithNoClaimableHardwareSaysNothing(t *testing.T) {
+	text := composeHardwareReport(sampleReport())
+	if strings.Contains(text, "hardware that nothing drives") {
+		t.Errorf("a machine with nothing to claim gets no section:\n%s", text)
+	}
+}
+
 func TestProposalRefusesToLayOutADiskThatIsTooSmall(t *testing.T) {
 	r := sampleReport()
 	r.Disks = []reportDisk{{Name: "sda", Path: "/dev/sda", SizeBytes: 2 << 30, Transport: "sata"}}

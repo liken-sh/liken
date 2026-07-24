@@ -45,6 +45,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/klauspost/compress/zstd"
@@ -325,6 +326,41 @@ func kernelRelease() string {
 // binds, so it changes that outcome. A "post" dependency loads after
 // the module and does not change whether the device appears, so the
 // recommendation ignores it.
+
+// busCompanions names the modules that a driver needs beside it, which
+// no index in the module tree can name.
+//
+// A recommendation starts from modules.alias, which maps a device's
+// fingerprint to the drivers that claim that fingerprint. Some drivers
+// claim nothing there, because they bind over a bus that another
+// driver creates: usbhid turns a USB interface into a HID device, and
+// hid-generic then binds that HID device. No modalias points at
+// hid-generic, and no soft dependency names it, so a report that reads
+// only the index recommends a keyboard's transport and stops one
+// module short of a working keyboard.
+//
+// The table is the place to record each of these pairs as hardware
+// proves them. It stays short on purpose: an entry here is a claim
+// that the index cannot express, not a shortcut around reading it.
+var busCompanions = map[string][]string{
+	"usbhid": {"hid_generic"},
+}
+
+// driverChain is the full ordered list a person declares to make one
+// driver work: its soft dependencies, the driver, and any companion
+// that binds over the bus the driver creates. The companions come last
+// because they bind to what the driver produces.
+func driverChain(base, name string) []string {
+	chain := softdepChain(base, name)
+	for _, module := range chain {
+		for _, companion := range busCompanions[strings.ReplaceAll(module, "-", "_")] {
+			if !slices.Contains(chain, companion) {
+				chain = append(chain, companion)
+			}
+		}
+	}
+	return chain
+}
 
 // softdepChain expands one module name into the ordered list of
 // modules to declare so the kernel binds the intended driver: the

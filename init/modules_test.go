@@ -444,3 +444,22 @@ func TestSoftdepChainReturnsTheNameAloneWithoutAnIndex(t *testing.T) {
 		t.Errorf("a tree with no index resolves to the name alone: %v", got)
 	}
 }
+
+func TestDriverChainAddsTheCompanionABusDriverNeeds(t *testing.T) {
+	// hid-generic binds the HID device that usbhid creates, so no
+	// modalias and no soft dependency ever names it. A recommendation
+	// that stops at usbhid leaves a keyboard that still types nothing.
+	if got := driverChain(t.TempDir(), "usbhid"); !slices.Equal(got, []string{"usbhid", "hid_generic"}) {
+		t.Errorf("got %v", got)
+	}
+}
+
+func TestDriverChainLeavesAnOrdinaryDriverAlone(t *testing.T) {
+	base := softdepTree(t, map[string][]byte{
+		"kernel/drivers/net/ethernet/realtek/r8169.ko": modinfoBytes("softdep=pre: realtek"),
+		"kernel/drivers/net/phy/realtek.ko":            modinfoBytes("license=GPL"),
+	})
+	if got := driverChain(base, "r8169"); !slices.Equal(got, []string{"realtek", "r8169"}) {
+		t.Errorf("got %v", got)
+	}
+}

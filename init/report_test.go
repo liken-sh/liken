@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -93,6 +94,46 @@ func TestRecommendationsCoverStorageAndNetworkOnly(t *testing.T) {
 	for _, rec := range recs {
 		if rec.Class != "network" && rec.Class != "storage" {
 			t.Errorf("a %s device has no place in the report: %+v", rec.Class, rec)
+		}
+	}
+}
+
+func TestClaimableCoversWhatTheReportWillNotLoad(t *testing.T) {
+	// The display controller the loading filter drops is exactly the
+	// hardware a workload would claim, so the second list names it. The
+	// NIC and the HBA belong to the install, and stay out of it.
+	root := fakeBus(t)
+	addPCIDevice(t, root, "0000:00:02.0", "0x030000", displayModalias)
+	addPCIDevice(t, root, "0000:00:1f.6", "0x020000", nicModalias)
+	addPCIDevice(t, root, "0000:03:00.0", "0x010700", hbaModalias)
+	catalog, base := fixtureCatalog(t, map[string]string{
+		displayModalias: "bochs",
+		nicModalias:     "r8169",
+		hbaModalias:     "mpt3sas",
+	})
+
+	recs := recommendClaimable(catalog, base)
+
+	if len(recs) != 1 || recs[0].Class != "display" {
+		t.Fatalf("the claimable list is the display device alone: %+v", recs)
+	}
+	if !slices.Equal(recs[0].Chain, []string{"bochs"}) {
+		t.Errorf("the chain must name the driver that would bind it: %+v", recs[0].Chain)
+	}
+}
+
+func TestClaimableSkipsThePlatformsOwnPlumbing(t *testing.T) {
+	// A bridge is the machine's own structure. Driving it delivers
+	// nothing a pod could hold, so naming it would be noise in the one
+	// list that exists to be read.
+	for _, class := range []string{"bridge", "memory", "system", ""} {
+		if claimableClass(class) {
+			t.Errorf("%q is not hardware a workload can claim", class)
+		}
+	}
+	for _, class := range []string{"display", "multimedia", "vendor-specific", "hid"} {
+		if !claimableClass(class) {
+			t.Errorf("%q is hardware a workload could claim", class)
 		}
 	}
 }

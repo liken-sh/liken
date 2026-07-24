@@ -109,8 +109,15 @@ type hardwareReport struct {
 	// disks finds every one accounted for.
 	StickPath       string
 	Recommendations []moduleRecommendation
-	Disks           []reportDisk
-	Interfaces      []reportInterface
+	// Claimable is the hardware this machine has and does not drive,
+	// beyond the disks and network ports the install needs. The report
+	// never loads these drivers, and the proposal never declares them:
+	// it names them in comments, because whether this machine should
+	// drive its GPU is the operator's decision, and they cannot make it
+	// if nothing tells them the GPU is there.
+	Claimable  []moduleRecommendation
+	Disks      []reportDisk
+	Interfaces []reportInterface
 }
 
 const reportHeader = `# A proposed Machine manifest, written by the liken hardware report.
@@ -141,7 +148,7 @@ func composeHardwareReport(r hardwareReport) string {
 	b.WriteString("  # stick's menu offers.\n")
 	b.WriteString("  name: CHANGE-ME\n")
 	b.WriteString("spec:\n")
-	composeModules(&b, r.Recommendations)
+	composeModules(&b, r.Recommendations, r.Claimable)
 	composeNetwork(&b, r.Interfaces)
 	composeStorage(&b, r)
 	return b.String()
@@ -154,7 +161,7 @@ func composeHardwareReport(r hardwareReport) string {
 // would ask the loader to load it twice. Storage chains are held back
 // from the list and stated as a warning instead, for the reason
 // storageClass explains.
-func composeModules(b *strings.Builder, recs []moduleRecommendation) {
+func composeModules(b *strings.Builder, recs, claimable []moduleRecommendation) {
 	b.WriteString("  # Extra kernel modules this machine's hardware wants, beyond\n")
 	b.WriteString("  # the drivers the OS already loads. Each comment names a device\n")
 	b.WriteString("  # with no driver bound and the modules that would bind it, in\n")
@@ -187,11 +194,44 @@ func composeModules(b *strings.Builder, recs []moduleRecommendation) {
 		b.WriteString("  # expect is missing below, its controller may need a driver\n")
 		b.WriteString("  # this image does not carry.\n")
 		b.WriteString("  modules: []\n")
+		composeClaimable(b, claimable)
 		return
 	}
 	b.WriteString("  modules:\n")
 	for _, name := range dedupChains(declarable) {
 		fmt.Fprintf(b, "    - %s\n", name)
+	}
+	composeClaimable(b, claimable)
+}
+
+// composeClaimable writes the hardware this machine has and does not
+// drive, as lines a person uncomments.
+//
+// The report loads storage and network drivers and no others, because
+// loading a driver changes the machine while a person stands in front
+// of it, and a display driver changes the very screen they are
+// reading. That limit is about loading, not about knowing. This
+// machine's GPU is often the reason someone bought it, and a proposal
+// that says nothing about it asks a person to already know what to ask
+// for.
+//
+// The lines stay commented, so the proposal installs exactly as it
+// reads, and driving this hardware stays a decision somebody makes.
+func composeClaimable(b *strings.Builder, claimable []moduleRecommendation) {
+	if len(claimable) == 0 {
+		return
+	}
+	b.WriteString("  # This machine also has hardware that nothing drives. The\n")
+	b.WriteString("  # install does not need it, so the report left it alone.\n")
+	b.WriteString("  # Uncomment a line to load its driver, and the machine\n")
+	b.WriteString("  # publishes the device for workloads to claim. A device with\n")
+	b.WriteString("  # no driver is not claimable, and appears in the node's\n")
+	b.WriteString("  # unclaimed hardware instead.\n")
+	for _, rec := range claimable {
+		writeComment(b, "    ", rec.Device)
+		for _, name := range rec.Chain {
+			fmt.Fprintf(b, "    #- %s\n", name)
+		}
 	}
 }
 

@@ -160,7 +160,7 @@ func gatherHardwareReport() (hardwareReport, installStick) {
 	// appeared yet is indistinguishable from one that is not there.
 	quiesceHardware()
 
-	var recommendations []moduleRecommendation
+	var recommendations, claimable []moduleRecommendation
 	base, pciIDs, unmount, err := mountPayloadModules()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "liken: report: %v\n", err)
@@ -171,6 +171,10 @@ func gatherHardwareReport() (hardwareReport, installStick) {
 			fmt.Fprintf(os.Stderr, "liken: report: no hardware catalog, so no driver recommendations: %v\n", err)
 		} else {
 			recommendations = recommendModules(catalog, base)
+			// The claimable list is read from the same catalog before
+			// any load, and it is never loaded. It describes the
+			// machine as the person found it.
+			claimable = recommendClaimable(catalog, base)
 			// Load the full ordered chains from the payload's tree. The
 			// declared-module loader loads each name in order and prints
 			// the outcome, exactly as a from-disk boot loads spec.modules.
@@ -204,6 +208,7 @@ func gatherHardwareReport() (hardwareReport, installStick) {
 		UEFI:            uefi,
 		StickPath:       stick.Path,
 		Recommendations: recommendations,
+		Claimable:       claimable,
 		Disks:           disks,
 		Interfaces:      observeInterfaces(),
 	}, stick
@@ -242,18 +247,34 @@ func mountPayloadModules() (base, pciIDs string, unmount func(), err error) {
 // twice. One chain covers both cards, and the recommendation keeps
 // both sysfs paths, so the fingerprint is what this loop keeps once.
 func recommendModules(catalog *hardware.Catalog, base string) []moduleRecommendation {
+	return recommendFor(catalog, base, reportableClass)
+}
+
+// recommendClaimable is the same walk over the same undriven devices,
+// for the kinds the report will not load: the hardware a workload
+// could claim once a module drives it. A GPU is the case that named
+// this. The install does not need it, so the report neither loads it
+// nor declares it, but a person who does not know to ask for it never
+// learns their machine has it.
+func recommendClaimable(catalog *hardware.Catalog, base string) []moduleRecommendation {
+	return recommendFor(catalog, base, claimableClass)
+}
+
+// recommendFor turns the undriven devices of the kinds a caller wants
+// into ordered driver recommendations.
+func recommendFor(catalog *hardware.Catalog, base string, want func(string) bool) []moduleRecommendation {
 	devices := hardware.DiscoverDevices(sysfsRoot, catalog.PCI)
 	seen := map[string]bool{}
 	var recommendations []moduleRecommendation
 	for _, u := range catalog.Unclaimed(devices) {
-		if len(u.Candidates) == 0 || seen[u.Modalias] || !reportableClass(u.Class) {
+		if len(u.Candidates) == 0 || seen[u.Modalias] || !want(u.Class) {
 			continue
 		}
 		seen[u.Modalias] = true
 		rec := moduleRecommendation{
 			Device: describeUnclaimed(u) + " (modalias " + u.Modalias + ")",
 			Class:  u.Class,
-			Chain:  softdepChain(base, u.Candidates[0]),
+			Chain:  driverChain(base, u.Candidates[0]),
 		}
 		for _, d := range devices {
 			if d.Modalias == u.Modalias {
@@ -289,6 +310,24 @@ func reportableClass(class string) bool {
 		return true
 	}
 	return false
+}
+
+// claimableClass decides which undriven devices the report names as
+// hardware a workload could claim. This list loads nothing, so it can
+// be generous where reportableClass cannot.
+//
+// It leaves out the two kinds the section above already covers, and
+// the kinds that never hand a device node to a pod: a bridge, a memory
+// controller, and the system devices are the machine's own plumbing,
+// and a claim on one would deliver nothing. Everything else that a
+// module could drive stays in, because whether it is worth driving is
+// the operator's judgement and not the report's.
+func claimableClass(class string) bool {
+	switch class {
+	case "", "storage", "network", "mass-storage", "bridge", "memory", "system":
+		return false
+	}
+	return true
 }
 
 // observeInterfaces brings every real interface admin-up and reads back
