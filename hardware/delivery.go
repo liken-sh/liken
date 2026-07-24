@@ -24,16 +24,26 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
 // Delivery is the report that the walk produces. It lists the device
-// nodes that a claim on this device would inject, and the
-// block-device names among them. The platform test checks these
-// block-device names against the storage roles' partitions.
+// nodes that a claim on this device would inject, the block-device
+// names among them, and the kernel subsystems they belong to. The
+// platform test checks the block-device names against the storage
+// roles' partitions.
+//
+// Subsystems is the answer to "what kind of thing is a claim handing
+// over": drm for a GPU's nodes, tty for a serial port, hidraw for an
+// input device. The kernel already sorted every node into one, and
+// the subsystem is what decides how a node behaves when two
+// processes open it. Nothing else in the system knows this, so the
+// walk keeps it rather than reading it and dropping it.
 type Delivery struct {
-	DevNodes []string
-	Blocks   []string
+	DevNodes   []string
+	Blocks     []string
+	Subsystems []string
 }
 
 // InspectDelivery walks one device's sysfs subtree and finds its
@@ -66,11 +76,16 @@ func InspectDelivery(sysRoot string, d Device) Delivery {
 			return nil
 		}
 		delivery.DevNodes = append(delivery.DevNodes, "/dev/"+devname)
-		if subsystemName(path) == "block" {
+		subsystem := subsystemName(path)
+		if subsystem == "block" {
 			delivery.Blocks = append(delivery.Blocks, filepath.Base(path))
+		}
+		if subsystem != "" && !slices.Contains(delivery.Subsystems, subsystem) {
+			delivery.Subsystems = append(delivery.Subsystems, subsystem)
 		}
 		return nil
 	})
+	slices.Sort(delivery.Subsystems)
 	return delivery
 }
 

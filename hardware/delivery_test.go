@@ -75,6 +75,28 @@ func TestDeliveryFindsCharNodesAndReportsNoBlocks(t *testing.T) {
 	if len(delivery.Blocks) != 0 {
 		t.Errorf("Blocks = %v, want none for character devices", delivery.Blocks)
 	}
+	if !slices.Equal(delivery.Subsystems, []string{"drm"}) {
+		t.Errorf("Subsystems = %v, want the one kind these nodes are", delivery.Subsystems)
+	}
+}
+
+func TestDeliveryReportsEachSubsystemOnce(t *testing.T) {
+	// A device can deliver nodes of more than one kind. The list names
+	// each kind once, sorted, so the same hardware always reports the
+	// same list.
+	sysfs := newFakeSysfs(t)
+	sysfs.device("usb", "3-1:1.0", "cdc_acm", map[string]string{
+		"modalias": "usb:v10C4p0001d0100dc00dsc00dp00ic02isc02ip01in00",
+	})
+	sysfs.child("usb", "3-1:1.0", "tty/ttyACM0", "tty", "ttyACM0")
+	sysfs.child("usb", "3-1:1.0", "usbmisc/cdc-wdm0", "usbmisc", "cdc-wdm0")
+	sysfs.child("usb", "3-1:1.0", "tty/ttyACM1", "tty", "ttyACM1")
+
+	delivery := InspectDelivery(sysfs.root, Device{Bus: "usb", Address: "3-1:1.0"})
+
+	if !slices.Equal(delivery.Subsystems, []string{"tty", "usbmisc"}) {
+		t.Errorf("Subsystems = %v", delivery.Subsystems)
+	}
 }
 
 func TestDeliveryIsEmptyForADeviceWithNoNodes(t *testing.T) {

@@ -111,6 +111,10 @@ func TestDiscoverNamesUSBDevicesFromTheirOwnStrings(t *testing.T) {
 	if iface.Class != "mass-storage" {
 		t.Errorf("Class = %q, want mass-storage", iface.Class)
 	}
+	// USB publishes two digits where PCI publishes six.
+	if iface.ClassCode != "08" {
+		t.Errorf("ClassCode = %q, want the interface class as the bus wrote it", iface.ClassCode)
+	}
 	if iface.Bus != "usb" {
 		t.Errorf("Bus = %q, want usb", iface.Bus)
 	}
@@ -135,6 +139,11 @@ func TestDiscoverNamesPCIDevicesNumericallyWithoutADatabase(t *testing.T) {
 	}
 	if devices[0].Class != "display" {
 		t.Errorf("Class = %q, want display", devices[0].Class)
+	}
+	// The word drops the subclass, so the full code travels beside it:
+	// 0380 is a display controller that is neither VGA nor 3D.
+	if devices[0].ClassCode != "038000" {
+		t.Errorf("ClassCode = %q, want the whole code the bus published", devices[0].ClassCode)
 	}
 }
 

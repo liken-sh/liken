@@ -168,6 +168,11 @@ numbered before this arc existed; it belongs second in this order:
     reinstall erases what it claims instead of remounting the
     previous install's state. The proposed layout scales
     clusterState with the disk, because that size is permanent.
+38. [ ] [Devices that say what they are](38-devices-that-say-what-they-are.md)
+    — a published device says whether it may be shared, what kind of
+    node it delivers, and its whole class code, so a DeviceClass can
+    ask a real question. The hardware report names claimable
+    hardware it will not load. The manual gains the device story.
 
 Deferred until the fundamentals above are proven, the hardening
 tier: UKIs, dm-verity, secure boot, TPM-sealed secrets, and signed

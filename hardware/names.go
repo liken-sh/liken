@@ -16,6 +16,14 @@ import "strings"
 // base-class detail. An operator who decides whether to care about
 // an unclaimed device needs a word like "display" or "network", not
 // the subclass detail.
+// classCode normalizes a bus's class attribute to bare lowercase hex.
+// The buses write it differently: PCI writes "0x038000" and USB writes
+// "03". Both are published as they are, minus the prefix, so a
+// selector matches what the bus said.
+func classCode(class string) string {
+	return strings.ToLower(strings.TrimPrefix(class, "0x"))
+}
+
 func pciClassWord(class string) string {
 	hex := strings.TrimPrefix(class, "0x")
 	if len(hex) < 2 {

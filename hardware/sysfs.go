@@ -51,16 +51,26 @@ import (
 // Vendor and Product are the numeric identity underneath Name: bare
 // lowercase hex, without the 0x prefix. The struct keeps both forms
 // because selectors match on numbers, while people read words.
+//
+// Class and ClassCode are the same fact at two depths. Class is the
+// base class in one word, which is what a person reads. ClassCode is
+// what the bus published, with no detail removed: six hex digits on
+// PCI (base class, subclass, and programming interface) and two on
+// USB (the interface class). The full code is what tells a VGA
+// controller from a 3D one, and neither the kernel nor a database is
+// needed to read it, so liken publishes it rather than growing a
+// table of its own for every distinction a selector might want.
 type Device struct {
-	Bus      string
-	Address  string
-	Modalias string
-	Driver   string
-	Name     string
-	Class    string
-	Serial   string
-	Vendor   string
-	Product  string
+	Bus       string
+	Address   string
+	Modalias  string
+	Driver    string
+	Name      string
+	Class     string
+	ClassCode string
+	Serial    string
+	Vendor    string
+	Product   string
 }
 
 // DiscoverDevices walks the pci and usb buses under one sysfs root.
@@ -90,11 +100,13 @@ func DiscoverDevices(sysRoot string, naming *PCIIDs) []Device {
 				d.Product = strings.TrimPrefix(readAttr(path, "device"), "0x")
 				d.Name = pciName(d.Vendor, d.Product, naming)
 				d.Class = pciClassWord(readAttr(path, "class"))
+				d.ClassCode = classCode(readAttr(path, "class"))
 			case "usb":
 				d.Vendor = parentAttr(dir, entry.Name(), "idVendor")
 				d.Product = parentAttr(dir, entry.Name(), "idProduct")
 				d.Name = usbName(dir, entry.Name())
 				d.Class = usbClassWord(readAttr(path, "bInterfaceClass"))
+				d.ClassCode = classCode(readAttr(path, "bInterfaceClass"))
 				d.Serial = parentAttr(dir, entry.Name(), "serial")
 			}
 			devices = append(devices, d)
