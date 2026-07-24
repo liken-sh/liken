@@ -339,8 +339,6 @@ func TestProposalTeachesWhatEachDurableRoleHolds(t *testing.T) {
 	// header tells them to edit.
 	text := composeHardwareReport(sampleReport())
 	for _, want := range []string{
-		"containerd's image store",
-		"local-path provisioner",
 		"size: 6Gi",
 		"size: 4Gi  # size to your workloads' volumes",
 	} {
@@ -348,6 +346,29 @@ func TestProposalTeachesWhatEachDurableRoleHolds(t *testing.T) {
 			t.Errorf("the proposal must carry %q:\n%s", want, text)
 		}
 	}
+	// The notes are wrapped into comment lines, so a sentence a person
+	// reads across two lines is one the test must read the same way.
+	prose := unwrapped(text)
+	for _, want := range []string{
+		"containerd's image store",
+		"local-path provisioner",
+		"clusterState cannot grow later",
+	} {
+		if !strings.Contains(prose, want) {
+			t.Errorf("the proposal must teach %q:\n%s", want, text)
+		}
+	}
+}
+
+// unwrapped turns the proposal's wrapped comment lines back into one
+// run of words, so a test can assert on a sentence without pinning
+// where the wrapper broke it.
+func unwrapped(text string) string {
+	var words []string
+	for line := range strings.Lines(text) {
+		words = append(words, strings.Fields(strings.TrimLeft(strings.TrimSpace(line), "# "))...)
+	}
+	return strings.Join(words, " ")
 }
 
 func TestProposalRefusesToLayOutADiskThatIsTooSmall(t *testing.T) {

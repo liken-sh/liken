@@ -62,6 +62,27 @@ const (
 	// clusterState at all, for the reason belowFloorNote gives.
 	clusterStateFloorBytes = 2 << 30
 
+	// clusterStateShare is the fraction of a roomy disk that
+	// clusterState takes, and clusterStateCeilingBytes is where that
+	// growth stops. The size is permanent: podStorage sits directly
+	// behind clusterState in the canonical order, and a partition can
+	// only grow into free space that follows it, so the number this
+	// proposal names is the number the machine keeps. A disk with room
+	// to spare should spend it here rather than on scratch space,
+	// because this is the role that cannot be corrected later. The
+	// ceiling exists because an image store is large, not unbounded,
+	// and a person who needs more than this is a person who should
+	// choose the number themselves.
+	clusterStateShare        = 8
+	clusterStateCeilingBytes = 64 << 30
+
+	// podEphemeralCeilingBytes bounds what kubelet's scratch space
+	// takes from a roomy disk. podEphemeral is last in the canonical
+	// order, so it is the role that takes the rest, and on a large disk
+	// that leaves the volumes a workload claims with almost nothing.
+	// Above this size, the space goes to podStorage instead.
+	podEphemeralCeilingBytes = 64 << 30
+
 	// podStorageBytes is what podStorage asks for. This role is the
 	// local-path provisioner's pool: the space pods claim by name. It
 	// is the operator's to size against their own workloads, so it is
@@ -143,7 +164,7 @@ func planStorageLayout(measured []reportDisk, uefi bool) storageLayout {
 			"Every role lives on %s. No other disk here gives the cluster's data more room than this disk has left over. A reinstall replaces the system slots and the data roles together.", system.Path))
 	} else {
 		layout.Notes = append(layout.Notes, fmt.Sprintf(
-			"The durable roles live on %s, so the cluster's state and its volumes survive a reinstall that replaces the system disk.", data.Path))
+			"The durable roles live on %s, so the cluster's state and its volumes survive an install onto a replaced system disk. A wipe and reinstall is the other case: it erases every disk this manifest declares, including this one.", data.Path))
 	}
 
 	roles, notes := dataRoles(data.Path, available)
@@ -245,7 +266,7 @@ func systemRoles(device string, uefi bool) []plannedRole {
 // carries. It teaches the one distinction a person needs before they
 // edit a size: which number is theirs to choose, and which number the
 // machine chooses for them.
-const roleNote = "clusterState holds k3s's database, its TLS material, and containerd's image store, so this node's images decide its size. Raise it if this node runs many images or large ones. podStorage is the local-path provisioner's pool, which is yours to size for the volumes your workloads claim."
+const roleNote = "clusterState holds k3s's database, its TLS material, and containerd's image store, so this node's images decide its size. Raise it if this node runs many images or large ones. This size is permanent: podStorage follows clusterState on the disk, so clusterState cannot grow later. podStorage is the local-path provisioner's pool, which is yours to size for the volumes your workloads claim."
 
 // dataRoles fits the cluster's roles into the space that is left, in
 // the order that keeps the node able to run at all.
@@ -265,6 +286,21 @@ func dataRoles(device string, available uint64) ([]plannedRole, []string) {
 	pods := plannedRole{machine.PodStorageRole, device, "", "# size to your workloads' volumes"}
 	ephemeral := plannedRole{machine.PodEphemeralRole, device, "", "# takes the rest of this disk"}
 
+	// A disk with room to spare. The conventional sizes were measured
+	// against the smallest machines liken runs, and naming them on a
+	// large disk spends that disk on scratch space: podEphemeral takes
+	// the rest, so a 477Gi disk would carry 6Gi of images, 4Gi of
+	// volumes, and 466Gi of /var/lib/kubelet. The roles that hold
+	// something a person cares about take the space instead.
+	if scaled := scaledClusterState(available); scaled > clusterStateBytes {
+		left := available - scaled
+		scratch := min(uint64(podEphemeralCeilingBytes), left/2)
+		cluster.Size = sizeText(scaled)
+		pods.Size = sizeText((left - scratch) / (1 << 30) * (1 << 30))
+		return []plannedRole{cluster, pods, ephemeral}, []string{roleNote, fmt.Sprintf(
+			"%s has room beyond the conventional sizes, so clusterState takes %s and podStorage takes %s. A larger clusterState is worth more here than a larger scratch space, because clusterState cannot grow after the install and podEphemeral takes whatever is left.",
+			device, cluster.Size, pods.Size)}
+	}
 	if available >= clusterStateBytes+podStorageBytes+dataRoleFloor {
 		cluster.Size, pods.Size = sizeText(clusterStateBytes), sizeText(podStorageBytes)
 		return []plannedRole{cluster, pods, ephemeral}, []string{roleNote}
@@ -294,6 +330,16 @@ func dataRoles(device string, available uint64) ([]plannedRole, []string) {
 	}
 	return nil, []string{fmt.Sprintf(
 		"%s has no room for any data role. The cluster's state, its volumes, and kubelet's scratch space all stay on the machine's RAM root. Attach a larger disk before this machine runs real workloads.", device)}
+}
+
+// scaledClusterState is what clusterState asks for on a disk of a
+// given size: a share of the disk, in whole gibibytes, up to the
+// ceiling. The result is rounded down to a gibibyte because a person
+// reads this number and decides whether to keep it, and an exact
+// fraction of a disk reads as arithmetic rather than as a choice.
+func scaledClusterState(available uint64) uint64 {
+	scaled := available / clusterStateShare / (1 << 30) * (1 << 30)
+	return min(scaled, uint64(clusterStateCeilingBytes))
 }
 
 // spareAfter is what a disk has left once a reservation is taken out

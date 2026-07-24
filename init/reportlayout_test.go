@@ -73,8 +73,8 @@ func notes(layout storageLayout) string {
 	return strings.Join(layout.Notes, " ")
 }
 
-func TestLayoutUsesTheConventionalSizesOnALargeDisk(t *testing.T) {
-	measured := []reportDisk{{Path: "/dev/sda", SizeBytes: 500 << 30}}
+func TestLayoutUsesTheConventionalSizesOnAnOrdinaryDisk(t *testing.T) {
+	measured := []reportDisk{{Path: "/dev/sda", SizeBytes: 40 << 30}}
 	layout := planStorageLayout(measured, true)
 
 	if got := role(t, layout, machine.SystemARole).Size; got != "1Gi" {
@@ -91,6 +91,38 @@ func TestLayoutUsesTheConventionalSizesOnALargeDisk(t *testing.T) {
 	}
 	if !strings.Contains(notes(layout), "containerd's image store") {
 		t.Errorf("the plan must teach what clusterState holds: %v", layout.Notes)
+	}
+	mustFit(t, layout, measured)
+}
+
+func TestLayoutSpendsARoomyDiskOnTheRolesThatKeepSomething(t *testing.T) {
+	// The testbed's SSD. The conventional sizes would give this disk
+	// 6Gi of image store, 4Gi of volumes, and the other 466Gi to
+	// kubelet's scratch space.
+	measured := []reportDisk{{Path: "/dev/sda", SizeBytes: 477 << 30}}
+	layout := planStorageLayout(measured, true)
+
+	if got := role(t, layout, machine.ClusterStateRole).Size; got != "59Gi" {
+		t.Errorf("clusterState takes an eighth of the disk: %q", got)
+	}
+	if got := role(t, layout, machine.PodStorageRole).Size; got != "351Gi" {
+		t.Errorf("podStorage takes what is left beyond the scratch share: %q", got)
+	}
+	if got := role(t, layout, machine.PodEphemeralRole).Size; got != "" {
+		t.Errorf("podEphemeral still takes the rest: %q", got)
+	}
+	if !strings.Contains(notes(layout), "cannot grow after the install") {
+		t.Errorf("the plan must say why the larger clusterState is worth it: %v", layout.Notes)
+	}
+	mustFit(t, layout, measured)
+}
+
+func TestLayoutCapsClusterStateOnAVeryLargeDisk(t *testing.T) {
+	measured := []reportDisk{{Path: "/dev/sda", SizeBytes: 4 << 40}}
+	layout := planStorageLayout(measured, true)
+
+	if got := role(t, layout, machine.ClusterStateRole).Size; got != "64Gi" {
+		t.Errorf("clusterState stops at its ceiling: %q", got)
 	}
 	mustFit(t, layout, measured)
 }
