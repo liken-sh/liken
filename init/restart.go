@@ -51,7 +51,12 @@ type restartState struct {
 	root  string
 	m     *machine.Machine
 	conns []*connection
-	facts *factsFile
+	tree  machine.FactsTree
+
+	// restarts counts the in-place k3s restarts this boot performed. The
+	// restart path is the only writer of boot/restarts, so it holds the
+	// count itself and starts it at zero: a fresh boot has done none.
+	restarts int
 
 	// What k3s runs now: the choices from the boot, updated by each
 	// applied restart.
@@ -73,11 +78,11 @@ type restartState struct {
 // newRestartState creates a restartState with the real
 // implementations. Tests build the struct directly, with seams of
 // their own.
-func newRestartState(root string, m *machine.Machine, conns []*connection, facts *factsFile,
+func newRestartState(root string, m *machine.Machine, conns []*connection, tree machine.FactsTree,
 	clusterDoc *cluster.Cluster, clusterRaw []byte, creds *machine.RegistryCredentials,
 	credsSource machine.ManifestSource) *restartState {
 	return &restartState{
-		root: root, m: m, conns: conns, facts: facts,
+		root: root, m: m, conns: conns, tree: tree,
 		clusterDoc: clusterDoc, clusterRaw: clusterRaw, creds: creds, credsSource: credsSource,
 		writeBootConfig:  writeK3sBootConfig,
 		actuateFeatures:  actuateFeatures,
@@ -136,25 +141,22 @@ func (s *restartState) apply(intent machine.RestartIntent) bool {
 	}
 	registries := s.renderRegistries(clusterDoc, creds, machine.RegistryCredentialsStore(s.root), credsSource)
 
-	// The facts update before the restart. The facts name the staged
-	// documents. The cluster document's entry tells the operator when
-	// to promote it. The boot cluster manifest publication carries
-	// the bytes the operator compares against. The restart counter
-	// records that this change happened without a boot.
-	s.facts.publish(func(status *machine.MachineStatus) {
-		if applyingCluster {
-			status.Boot.ClusterManifestSource = machine.ManifestSourceStaged
-			status.Boot.ClusterManifestHash = clusterHash
-		}
-		if stagedCreds != nil {
-			status.Boot.CredentialsSource = machine.ManifestSourceStaged
-			status.Boot.CredentialsHash = machine.ManifestHash(stagedCredsRaw)
-		}
-		status.Boot.Restarts++
-		status.Features = featureStatuses
-		status.Registries = registries
-	})
+	// The facts update before the restart. They name the staged
+	// documents, so the operator knows what this restart applied. The
+	// write order is a commit protocol: features/ and registries/ land
+	// first, then the restart counter, and boot/clusterManifest lands
+	// last, because the operator's promotion keys on that record
+	// (machine-operator/cluster.go). The boot cluster manifest
+	// publication carries the exact bytes the operator compares against.
+	s.restarts++
+	logFactsError(s.tree.WriteFeatures(featureStatuses))
+	logFactsError(s.tree.WriteRegistries(registries))
+	if stagedCreds != nil {
+		logFactsError(s.tree.WriteBootCredentials(machine.ManifestSourceStaged, machine.ManifestHash(stagedCredsRaw)))
+	}
+	logFactsError(s.tree.WriteBootRestarts(s.restarts))
 	if applyingCluster {
+		logFactsError(s.tree.WriteBootClusterManifest(machine.ManifestSourceStaged, clusterHash))
 		publishBootClusterManifest(clusterRaw)
 	}
 

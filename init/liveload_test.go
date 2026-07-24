@@ -13,10 +13,12 @@ import (
 
 // liveLoadFixture builds everything that a live load touches: a
 // manifest store with a staged Machine document, a fabricated module
-// tree where "loop" is builtin (so outcomes need no real kernel), and
-// a facts owner that publishes into a temporary directory. It returns
-// the store, the tree, the facts, and the staged document's hash.
-func liveLoadFixture(t *testing.T, stagedModules []string, bootModules []string, stagedStorage machine.StorageSpec) (machine.ManifestStore, string, *factsFile, string) {
+// tree where "loop" is builtin (so outcomes need no real kernel), and a
+// module loader that publishes into a temporary facts tree. The tree is
+// seeded with boot/manifest = Proven/before, so a refused load leaves a
+// record to prove the boot state stayed untouched. It returns the
+// store, the module tree, the loader, and the staged document's hash.
+func liveLoadFixture(t *testing.T, stagedModules []string, bootModules []string, stagedStorage machine.StorageSpec) (machine.ManifestStore, string, *moduleLoader, string) {
 	t.Helper()
 
 	base := t.TempDir()
@@ -45,18 +47,27 @@ func liveLoadFixture(t *testing.T, stagedModules []string, bootModules []string,
 		t.Fatal(err)
 	}
 
-	restore := factsPath
-	factsPath = filepath.Join(t.TempDir(), "facts.yaml")
-	t.Cleanup(func() { factsPath = restore })
-	facts := &factsFile{status: &machine.MachineStatus{
-		Boot: machine.BootStatus{
-			ManifestSource: machine.ManifestSourceProven,
-			ManifestHash:   "before",
-			Storage:        bootStorage,
-			Modules:        bootModules,
-		},
-	}}
-	return store, base, facts, machine.ManifestHash(raw)
+	tree := machine.FactsTree{Dir: filepath.Join(t.TempDir(), "facts")}
+	if err := tree.WriteBootManifest(machine.ManifestSourceProven, "before"); err != nil {
+		t.Fatal(err)
+	}
+	loader := &moduleLoader{
+		tree:        tree,
+		bootStorage: bootStorage,
+		bootModules: bootModules,
+	}
+	return store, base, loader, machine.ManifestHash(raw)
+}
+
+// bootManifestRecord reads the loader's boot/manifest record back as a
+// status, so a test can assert the source and hash the load committed.
+func bootManifestRecord(t *testing.T, loader *moduleLoader) machine.BootStatus {
+	t.Helper()
+	facts, err := loader.tree.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return facts.Boot
 }
 
 // bootStorageSpec is the storage that the fixture's boot record
@@ -68,9 +79,9 @@ func bootStorageSpec() machine.StorageSpec {
 }
 
 func TestLiveLoadAppliesAnAdditiveSpec(t *testing.T) {
-	store, base, facts, hash := liveLoadFixture(t, []string{"loop"}, nil, bootStorageSpec())
+	store, base, loader, hash := liveLoadFixture(t, []string{"loop"}, nil, bootStorageSpec())
 
-	applyModulesIntent(machine.ModulesIntent{ManifestHash: hash}, store, base, facts)
+	loader.apply(machine.ModulesIntent{ManifestHash: hash}, store, base)
 
 	if staged, _ := store.LoadStaged(); staged != nil {
 		t.Error("the staged manifest should have been promoted")
@@ -78,58 +89,64 @@ func TestLiveLoadAppliesAnAdditiveSpec(t *testing.T) {
 	if proven, _ := store.LoadProven(); machine.ManifestHash(proven) != hash {
 		t.Error("the proven manifest should be the staged one")
 	}
-	if facts.status.Boot.ManifestHash != hash || facts.status.Boot.ManifestSource != machine.ManifestSourceProven {
-		t.Errorf("the boot record should carry the applied spec: %+v", facts.status.Boot)
+	boot := bootManifestRecord(t, loader)
+	if boot.ManifestHash != hash || boot.ManifestSource != machine.ManifestSourceProven {
+		t.Errorf("the boot record should carry the applied spec: %+v", boot)
 	}
-	if len(facts.status.Boot.Modules) != 1 || facts.status.Boot.Modules[0] != "loop" {
-		t.Errorf("Boot.Modules = %v", facts.status.Boot.Modules)
+	if len(boot.Modules) != 1 || boot.Modules[0] != "loop" {
+		t.Errorf("boot/modules = %v", boot.Modules)
 	}
-	if len(facts.status.Modules) != 1 || facts.status.Modules[0].State != machine.ModuleBuiltin {
-		t.Errorf("status.Modules = %+v", facts.status.Modules)
+	// cat parity: the applied manifest is one record file, and the
+	// module's outcome is its own file. The write order pins these to
+	// land before the manifest record the operator reads to converge.
+	record, err := os.ReadFile(filepath.Join(loader.tree.Dir, "boot", "manifest"))
+	if err != nil || string(record) != "source=Proven\nhash="+hash+"\n" {
+		t.Errorf("boot/manifest record = %q, %v", record, err)
 	}
-	if _, err := os.Stat(factsPath); err != nil {
-		t.Error("the facts should have been republished")
+	state, err := os.ReadFile(filepath.Join(loader.tree.Dir, "modules", "loop", "state"))
+	if err != nil || string(state) != "Builtin\n" {
+		t.Errorf("modules/loop/state = %q, %v", state, err)
 	}
 }
 
 func TestLiveLoadRefusesAStorageChange(t *testing.T) {
 	changed := bootStorageSpec()
 	changed.MachineState.Size = "128Mi"
-	store, base, facts, hash := liveLoadFixture(t, []string{"loop"}, nil, changed)
+	store, base, loader, hash := liveLoadFixture(t, []string{"loop"}, nil, changed)
 
-	applyModulesIntent(machine.ModulesIntent{ManifestHash: hash}, store, base, facts)
+	loader.apply(machine.ModulesIntent{ManifestHash: hash}, store, base)
 
 	if staged, _ := store.LoadStaged(); staged == nil {
 		t.Error("a storage-changing manifest must stay staged for its proving boot")
 	}
-	if facts.status.Boot.ManifestHash != "before" {
-		t.Errorf("the boot record must be untouched: %+v", facts.status.Boot)
+	if boot := bootManifestRecord(t, loader); boot.ManifestHash != "before" {
+		t.Errorf("the boot record must be untouched: %+v", boot)
 	}
 }
 
 func TestLiveLoadRefusesARetraction(t *testing.T) {
-	store, base, facts, hash := liveLoadFixture(t, []string{"loop"}, []string{"loop", "zram"}, bootStorageSpec())
+	store, base, loader, hash := liveLoadFixture(t, []string{"loop"}, []string{"loop", "zram"}, bootStorageSpec())
 
-	applyModulesIntent(machine.ModulesIntent{ManifestHash: hash}, store, base, facts)
+	loader.apply(machine.ModulesIntent{ManifestHash: hash}, store, base)
 
 	if staged, _ := store.LoadStaged(); staged == nil {
 		t.Error("a retracting manifest must stay staged for its reboot")
 	}
-	if facts.status.Boot.ManifestHash != "before" {
-		t.Errorf("the boot record must be untouched: %+v", facts.status.Boot)
+	if boot := bootManifestRecord(t, loader); boot.ManifestHash != "before" {
+		t.Errorf("the boot record must be untouched: %+v", boot)
 	}
 }
 
 func TestLiveLoadToleratesAStaleIntent(t *testing.T) {
-	store, base, facts, _ := liveLoadFixture(t, []string{"loop"}, nil, bootStorageSpec())
+	store, base, loader, _ := liveLoadFixture(t, []string{"loop"}, nil, bootStorageSpec())
 	if err := store.WithdrawStaged(); err != nil {
 		t.Fatal(err)
 	}
 
-	applyModulesIntent(machine.ModulesIntent{ManifestHash: "whatever"}, store, base, facts)
+	loader.apply(machine.ModulesIntent{ManifestHash: "whatever"}, store, base)
 
-	if facts.status.Boot.ManifestHash != "before" {
-		t.Errorf("a stale intent must change nothing: %+v", facts.status.Boot)
+	if boot := bootManifestRecord(t, loader); boot.ManifestHash != "before" {
+		t.Errorf("a stale intent must change nothing: %+v", boot)
 	}
 }
 

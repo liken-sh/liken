@@ -41,13 +41,24 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// applyModulesIntent performs one live load. It reads the staged
-// manifest, refuses it unless it is boot-equivalent plus added
-// modules, loads the additions, promotes the manifest, and
-// republishes the facts so the operator sees convergence. Every
-// refusal is only a console line. The manifest stays staged for the
-// reboot that can actually apply it.
-func applyModulesIntent(intent machine.ModulesIntent, store machine.ManifestStore, moduleBase string, facts *factsFile) {
+// moduleLoader owns the subtrees a live load rewrites: modules/,
+// boot/modules, and boot/manifest. It holds the boot's values so a load
+// judges the staged spec against what actually booted, without reading
+// anything back from the tree. The struct is the module loader's whole
+// state, seeded from the boot and updated by each successful load.
+type moduleLoader struct {
+	tree        machine.FactsTree
+	bootStorage machine.StorageSpec
+	bootModules []string
+	statuses    []machine.ModuleStatus
+}
+
+// apply performs one live load. It reads the staged manifest, refuses
+// it unless it is boot-equivalent plus added modules, loads the
+// additions, promotes the manifest, and republishes the facts so the
+// operator sees convergence. Every refusal is only a console line. The
+// manifest stays staged for the reboot that can actually apply it.
+func (l *moduleLoader) apply(intent machine.ModulesIntent, store machine.ManifestStore, moduleBase string) {
 	raw, err := store.LoadStaged()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "liken: modules: reading the staged spec: %v\n", err)
@@ -73,19 +84,12 @@ func applyModulesIntent(intent machine.ModulesIntent, store machine.ManifestStor
 			hash, intent.ManifestHash)
 	}
 
-	var bootStorage machine.StorageSpec
-	var bootModules []string
-	facts.mutate(func(s *machine.MachineStatus) {
-		bootStorage = s.Boot.Storage
-		bootModules = slices.Clone(s.Boot.Modules)
-	})
-
-	if diffs := machine.StorageDrift(doc.Spec.Storage, bootStorage); len(diffs) != 0 {
+	if diffs := machine.StorageDrift(doc.Spec.Storage, l.bootStorage); len(diffs) != 0 {
 		fmt.Printf("liken: modules: the staged spec (%.12s) changes storage (%s); it needs a boot, not a load\n",
 			hash, strings.Join(diffs, "; "))
 		return
 	}
-	added, retracted := machine.ModuleSetDiff(doc.Spec.Modules, bootModules)
+	added, retracted := machine.ModuleSetDiff(doc.Spec.Modules, l.bootModules)
 	if len(retracted) != 0 {
 		fmt.Printf("liken: modules: the staged spec (%.12s) retracts %s; loading is one-way, so it needs a boot\n",
 			hash, strings.Join(retracted, ", "))
@@ -102,12 +106,17 @@ func applyModulesIntent(intent machine.ModulesIntent, store machine.ManifestStor
 		fmt.Fprintf(os.Stderr, "liken: modules: promoting the applied spec: %v\n", err)
 		return
 	}
-	facts.publish(func(s *machine.MachineStatus) {
-		s.Boot.Modules = slices.Sorted(slices.Values(doc.Spec.Modules))
-		s.Boot.ManifestHash = hash
-		s.Boot.ManifestSource = machine.ManifestSourceProven
-		s.Modules = mergeModuleStatuses(s.Modules, outcomes)
-	})
+
+	l.bootModules = slices.Sorted(slices.Values(doc.Spec.Modules))
+	l.statuses = mergeModuleStatuses(l.statuses, outcomes)
+	// The write order is the commit protocol. boot/modules and modules/
+	// land first, and boot/manifest lands last, because the manifest
+	// record is the commit point the operator's convergence judges
+	// (machine-operator/converge.go). The operator must never read a
+	// promoted manifest hash before the module facts that explain it.
+	logFactsError(l.tree.WriteBootModules(l.bootModules))
+	logFactsError(l.tree.WriteModules(l.statuses))
+	logFactsError(l.tree.WriteBootManifest(machine.ManifestSourceProven, hash))
 	fmt.Printf("liken: spec %.12s applied in place: %s loaded without a reboot\n",
 		hash, strings.Join(added, ", "))
 }

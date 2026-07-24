@@ -8,7 +8,7 @@ package main
 // inert, reported fact. The kernel does everything else. A resident
 // driver binds hot-plugged hardware without any userspace help. This
 // leaves exactly one job here: notice undriven devices and report
-// them, to the console and to the facts file, where the operator
+// them, to the console and to the facts tree, where the operator
 // lifts them into the Machine's status. One watcher produces both
 // outputs, and the same watcher will one day feed ResourceSlices too.
 
@@ -60,28 +60,25 @@ func discoverUnclaimed(catalog *hardware.Catalog) []machine.UnclaimedDevice {
 // hardware changes, it re-walks sysfs, reports the difference to the
 // console, and republishes the facts. The uevent only signals that
 // something changed; the walk re-reads the whole truth, so a missed
-// or coalesced event costs nothing.
-func watchHardware(catalog *hardware.Catalog, facts *factsFile, last []machine.UnclaimedDevice) func(ctx context.Context) error {
+// or coalesced event costs nothing. The watch owns
+// hardware/blockDevices/ and hardware/unclaimed/, so it is the only
+// writer of those subtrees.
+//
+// lastDisks is the boot's own disk snapshot, passed in rather than
+// read back. The disk inventory has the same failure mode the watch
+// exists to prevent: a boot-time snapshot goes stale the moment
+// hardware moves. This inventory can even race the boot. A disk behind
+// a just-loaded driver (a USB stick binding at boot) can finish its
+// SCSI probe after the facts were first published, and the probe's own
+// uevents bring the inventory current moments later. The baseline is
+// the boot's snapshot, so a disk that appeared between the boot's walk
+// and this watch's start still reads as a change worth publishing.
+func watchHardware(catalog *hardware.Catalog, tree machine.FactsTree, last []machine.UnclaimedDevice, lastDisks []machine.BlockDevice) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		uevents, err := hardware.ListenForUevents(ctx)
 		if err != nil {
 			return err
 		}
-		// The disk inventory refreshes on the same uevent signal,
-		// because it has the same failure mode that the watch exists
-		// to prevent: a boot-time snapshot goes stale the moment
-		// hardware moves. This inventory can even race the boot. A
-		// disk behind a just-loaded driver (a USB stick binding at
-		// boot) can finish its SCSI probe after the facts were first
-		// published, and the probe's own uevents bring the inventory
-		// current moments later. The baseline comes from the published
-		// facts rather than a fresh walk, so a disk that appeared
-		// between the boot's walk and this one still reads as a change
-		// worth publishing.
-		var lastDisks []machine.BlockDevice
-		facts.mutate(func(s *machine.MachineStatus) {
-			lastDisks = slices.Clone(s.Hardware.BlockDevices)
-		})
 		for {
 			select {
 			case <-ctx.Done():
@@ -100,10 +97,8 @@ func watchHardware(catalog *hardware.Catalog, facts *factsFile, last []machine.U
 				fmt.Println(line)
 			}
 			if !slices.EqualFunc(last, unclaimed, unclaimedEqual) || !slices.Equal(lastDisks, disks) {
-				facts.publish(func(s *machine.MachineStatus) {
-					s.Hardware.Unclaimed = unclaimed
-					s.Hardware.BlockDevices = disks
-				})
+				logFactsError(tree.WriteUnclaimed(unclaimed))
+				logFactsError(tree.WriteBlockDevices(disks))
 			}
 			last, lastDisks = unclaimed, disks
 		}

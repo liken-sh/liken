@@ -101,7 +101,7 @@ func main() {
 
 	// The firmware's variable store, when the machine has one, holds
 	// the boot entries and the boot order. Both the world report and
-	// the facts file read this store (efi.go).
+	// the facts tree read this store (efi.go).
 	mountEFIVars()
 
 	// The OS's own kernel modules load before storage settles, because
@@ -213,7 +213,7 @@ func main() {
 	// chosen manifest. The boot record keeps the request (the drift
 	// reference: rebooting with the same image would request the same
 	// modules). The statuses keep the results, bound for
-	// status.modules through the facts file.
+	// status.modules through the facts tree.
 	boot.Modules = slices.Sorted(slices.Values(m.Spec.Modules))
 	moduleStatuses := loadDeclaredModules(m.Spec.Modules)
 
@@ -351,25 +351,28 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	// result of a race with the rest of boot.
 	catalog := loadHardwareCatalog()
 	unclaimed := discoverUnclaimed(catalog)
-	// The facts step waits until this point because the facts
-	// file lives under /run, and prepareForK3s just mounted a
-	// fresh tmpfs there. The mount would hide anything written to
-	// /run earlier.
-	facts := publishFacts(factsInputs{
-		clusterDoc:  clusterDoc,
-		role:        role,
-		choice:      choice,
-		conns:       conns,
-		storage:     storage,
-		boot:        boot,
-		modules:     moduleStatuses,
-		features:    featureStatuses,
-		registries:  registries,
-		firstSync:   firstSync,
-		timeSources: clk.sources,
-		unclaimed:   unclaimed,
-		lastCrash:   lastCrash,
+	blockDevices := discoverBlockDevices()
+	initialTime := timeStatus(firstSync, clk.sources)
+	// The facts step waits until this point because the facts tree
+	// lives under /run, and prepareForK3s just mounted a fresh tmpfs
+	// there. The mount would hide anything written to /run earlier.
+	// Each boot step held its discovered facts locally, and hands them
+	// here, once /run is the tmpfs that lasts the machine's life.
+	publishBootFacts(factsTree, bootFacts{
+		clusterDoc:   clusterDoc,
+		role:         role,
+		conns:        conns,
+		storage:      storage,
+		boot:         boot,
+		modules:      moduleStatuses,
+		features:     featureStatuses,
+		registries:   registries,
+		time:         initialTime,
+		blockDevices: blockDevices,
+		unclaimed:    unclaimed,
+		lastCrash:    lastCrash,
 	})
+	publishBootManifest(choice)
 	publishBootClusterManifest(clusterRaw)
 	// The hardware watch keeps that walk correct for the whole
 	// life of the machine. Hot-plugged devices arrive as uevents,
@@ -380,13 +383,13 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 		for _, line := range hardwareTransitions(nil, unclaimed, nil) {
 			fmt.Println(line)
 		}
-		plane.start("the hardware watch", watchHardware(catalog, facts, unclaimed))
+		plane.start("the hardware watch", watchHardware(catalog, factsTree, unclaimed, blockDevices))
 	}
 	// A machine with time sources keeps disciplining its clock for
 	// as long as it runs. A free-running machine has no source to
 	// follow, and its status already states this.
 	if len(clk.sources) > 0 {
-		plane.start("the clock", disciplineClock(clk, facts))
+		plane.start("the clock", disciplineClock(clk, factsTree, initialTime))
 	}
 	// Only leaders serve time, because only leaders receive time
 	// requests. Followers sync from the leaders themselves.
@@ -416,6 +419,12 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	// no reboot and no k3s restart involved (liveload.go). It runs
 	// beside the supervisor rather than inside it, because, unlike
 	// the other two intents, this intent does not involve k3s.
+	loader := &moduleLoader{
+		tree:        factsTree,
+		bootStorage: boot.Storage,
+		bootModules: boot.Modules,
+		statuses:    moduleStatuses,
+	}
 	plane.start("the module loader", func(ctx context.Context) error {
 		store := machine.MachineManifests(machine.MachineStateDir)
 		moduleBase := filepath.Join("/lib/modules", kernelRelease())
@@ -424,13 +433,13 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 			case <-ctx.Done():
 				return nil
 			case intent := <-loadRequests:
-				applyModulesIntent(intent, store, moduleBase, facts)
+				loader.apply(intent, store, moduleBase)
 			}
 		}
 	})
 	// The restart path gathers everything that a k3s restart may
 	// re-render, while that data is available (restart.go).
-	restarter := newRestartState(machine.MachineStateDir, m, conns, facts,
+	restarter := newRestartState(machine.MachineStateDir, m, conns, factsTree,
 		clusterDoc, clusterRaw, creds, boot.CredentialsSource)
 	// A proving boot watches for its own promotion. When the
 	// operator's first reconcile proves the staged release, init

@@ -2,20 +2,37 @@ package main
 
 // Facts: init's half of the Machine status.
 //
-// Init is the only program that observes the boot: the DHCP
-// exchange, and the hardware as the kernel first presents it. So it
-// is the only program that can report those facts. It writes them to
-// /run/liken, shaped exactly like the Machine's status block. The
-// liken operator, which runs in the cluster and cannot see any of
-// this directly, publishes them to the API. Init never talks to
-// Kubernetes; this file is the entire interface between the two.
+// Init is the only program that observes the boot: the DHCP exchange,
+// and the hardware as the kernel first presents it. So it is the only
+// program that can report those facts. It writes them under
+// /run/liken/facts as a tree of small files (machine/factstree.go),
+// shaped exactly like the Machine's status block. The liken operator,
+// which runs in the cluster and cannot see any of this directly,
+// reads the tree and publishes it to the API. Init never talks to
+// Kubernetes; this tree is the entire interface between the two.
+//
+// No single owner holds the facts. Each fact has its own file, so each
+// init component writes its own subtree with no shared lock. A boot
+// step writes its subtree once, at the point where it discovered the
+// fact. The long-lived components own the subtrees that change after
+// boot: the clock owns time/, the hardware watch owns
+// hardware/blockDevices/ and hardware/unclaimed/, the module loader
+// owns modules/ and boot/manifest, and the restart path owns
+// features/, registries/, and the boot/ manifest records it rewrites.
+// factstree.go documents the whole ownership map.
+//
+// The boot's write-once facts land together, in publishBootFacts,
+// rather than each at its own discovery line. The facts tree lives
+// under /run, and prepareForK3s mounts a fresh tmpfs there partway
+// through the boot. A write before that mount would be hidden. So each
+// boot step holds its discovered facts locally and hands them here,
+// once /run is the tmpfs that lasts the machine's life.
 
 import (
 	"fmt"
 	"os"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -25,43 +42,11 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// factsFile is the facts' owner after boot. Two writers share it: the
-// clock, which folds in each new time measurement, and the restart
-// path, which records what a k3s restart just did. Each writer
-// mutates and rewrites the facts only under the lock, because the
-// file write serializes the whole struct. Even writers of separate
-// fields would race without the lock.
-type factsFile struct {
-	mu     sync.Mutex
-	status *machine.MachineStatus
-}
-
-// mutate edits the facts in memory without rewriting the file. It
-// serves updates that are not news on their own, but should travel
-// with whatever write comes next.
-func (f *factsFile) mutate(edit func(*machine.MachineStatus)) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	edit(f.status)
-}
-
-// publish edits the facts and rewrites the file. Every facts write is
-// atomic, so the operator sees old facts or new facts, never a torn
-// mix of both.
-func (f *factsFile) publish(edit func(*machine.MachineStatus)) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	edit(f.status)
-	if err := machine.WriteFacts(factsPath, f.status); err != nil {
-		fmt.Fprintf(os.Stderr, "liken: writing facts: %v\n", err)
-	}
-}
-
-// Where the facts and the boot manifest land. These are package
+// Where the facts tree and the boot manifest land. These are package
 // variables rather than constants, so tests can publish into a
 // tempdir. A real boot never points them anywhere but /run.
 var (
-	factsPath        = machine.FactsPath
+	factsTree        = machine.FactsTree{Dir: machine.FactsDir}
 	bootManifestPath = machine.BootManifestPath
 
 	// xtablesProbe is the command that reports the netfilter
@@ -70,131 +55,148 @@ var (
 	xtablesProbe = "iptables"
 )
 
-// factsInputs gathers everything the boot decided that the facts
-// report. publishFacts assembles it into the Machine status. This is
-// a struct rather than a parameter list for the same reason as
-// k3sBootInputs: nearly a dozen positional arguments invite mixed-up
-// order, and named fields read correctly at the call site.
-type factsInputs struct {
-	clusterDoc  *cluster.Cluster
-	role        api.Role
-	choice      *manifestChoice
-	conns       []*connection
-	storage     machine.StorageStatus
-	boot        machine.BootStatus
-	modules     []machine.ModuleStatus
-	features    []machine.FeatureStatus
-	registries  machine.RegistriesStatus
-	firstSync   *timeSync
-	timeSources []string
-	unclaimed   []machine.UnclaimedDevice
-	lastCrash   *machine.CrashStatus
+// logFactsError reports a failed facts write to stderr and returns.
+// A write failure must never stop the boot: the machine keeps running
+// and the operator falls back to a partial tree, which reads a missing
+// fact as its zero value. Losing a fact is a reporting gap, not a
+// reason to halt PID 1.
+func logFactsError(err error) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "liken: writing facts: %v\n", err)
+	}
 }
 
-// publishFacts returns the facts it wrote, wrapped in the guarded
-// owner that the boot's long-lived writers share.
-func publishFacts(in factsInputs) *factsFile {
+// bootFacts gathers the write-once facts that the boot discovered. It
+// is a struct rather than a parameter list because nearly a dozen
+// positional arguments invite mixed-up order, and named fields read
+// correctly at the call site. It carries values the boot already
+// holds; nothing routes through a shared owner.
+type bootFacts struct {
+	clusterDoc   *cluster.Cluster
+	role         api.Role
+	conns        []*connection
+	storage      machine.StorageStatus
+	boot         machine.BootStatus
+	modules      []machine.ModuleStatus
+	features     []machine.FeatureStatus
+	registries   machine.RegistriesStatus
+	time         machine.TimeStatus
+	blockDevices []machine.BlockDevice
+	unclaimed    []machine.UnclaimedDevice
+	lastCrash    *machine.CrashStatus
+}
+
+// publishBootFacts writes every fact the boot discovered once and never
+// revisits. It calls one per-subtree writer for each, so each fact
+// lands in its own file through the same atomic rename as every later
+// write. The tree carries the same facts the boot printed to the
+// console, the console-parity principle: anything reported only to the
+// serial port is invisible to anyone operating the machine remotely, so
+// the status must repeat what the console reports. The hardware,
+// version, and firmware blocks are re-derived here rather than
+// remembered from earlier boot steps.
+func publishBootFacts(tree machine.FactsTree, in bootFacts) {
 	now := time.Now()
-	// Every block here carries the same facts the boot printed to the
-	// console, the console-parity principle: anything reported only
-	// to the serial port is invisible to anyone operating the machine
-	// remotely, so the status must repeat what the console reports.
-	// The hardware and firmware blocks are re-derived rather than
-	// remembered. Storage and boot arrive as arguments, because they
-	// were only observable while storage was settling.
-	facts := &machine.MachineStatus{
-		Role:       in.role,
-		Version:    machine.VersionStatus{Liken: machine.Version},
-		Modules:    in.modules,
-		Features:   in.features,
-		Registries: in.registries,
-		Hardware: machine.HardwareStatus{
-			CPUs:         runtime.NumCPU(),
-			BlockDevices: discoverBlockDevices(),
-			Unclaimed:    in.unclaimed,
-		},
-		Firmware: firmwareFacts(efiVarsDir),
-		Storage:  in.storage,
-		Boot:     in.boot,
-		// The crash stub arrives settled rather than being re-read
-		// here, because settling it has side effects (preserving and
-		// clearing the platform store) that belong to one moment
-		// early in boot, not to every facts rewrite.
-		LastCrash: in.lastCrash,
+	memoryBytes, bootedAt := machineUptimeFacts(now)
+
+	logFactsError(tree.WriteRole(in.role))
+	logFactsError(tree.WriteBootedAt(bootedAt))
+	// The crash stub arrives settled rather than being re-read here,
+	// because settling it has side effects (preserving and clearing the
+	// platform store) that belong to one moment early in boot.
+	logFactsError(tree.WriteLastCrash(in.lastCrash))
+	logFactsError(tree.WriteVersion(versionFacts()))
+	// Network facts exist only for interfaces that came up; a machine
+	// that failed DHCP still publishes the facts it has.
+	logFactsError(tree.WriteNetwork(networkFacts(in.clusterDoc, in.conns, now)))
+	// The clock's state so far: the boot-time measurement, if one
+	// succeeded, or an accurate unsynchronized or free-running report.
+	// The clock loop owns time/ after this seed.
+	logFactsError(tree.WriteTime(in.time))
+	logFactsError(tree.WriteHardwareBasics(runtime.NumCPU(), memoryBytes))
+	logFactsError(tree.WriteBlockDevices(in.blockDevices))
+	logFactsError(tree.WriteUnclaimed(in.unclaimed))
+	logFactsError(tree.WriteFirmware(firmwareFacts(efiVarsDir)))
+	logFactsError(tree.WriteStorage(in.storage))
+	logFactsError(tree.WriteModules(in.modules))
+	logFactsError(tree.WriteFeatures(in.features))
+	logFactsError(tree.WriteRegistries(in.registries))
+
+	// The boot record: what this boot ran under. The four manifest
+	// records seed here at boot; the module loader and the restart path
+	// own the ones they rewrite afterward.
+	logFactsError(tree.WriteBootSlot(in.boot.Slot))
+	logFactsError(tree.WriteBootStorage(in.boot.Storage))
+	logFactsError(tree.WriteBootModules(in.boot.Modules))
+	logFactsError(tree.WriteBootManifest(in.boot.ManifestSource, in.boot.ManifestHash))
+	logFactsError(tree.WriteBootClusterManifest(in.boot.ClusterManifestSource, in.boot.ClusterManifestHash))
+	logFactsError(tree.WriteBootCredentials(in.boot.CredentialsSource, in.boot.CredentialsHash))
+	logFactsError(tree.WriteBootImports(in.boot.ImportsSource, in.boot.ImportsHash, in.boot.ImportsDiscarded))
+	logFactsError(tree.WriteRejection(machine.RejectMachine, in.boot.Rejection))
+	logFactsError(tree.WriteRejection(machine.RejectCluster, in.boot.ClusterRejection))
+	logFactsError(tree.WriteRejection(machine.RejectSystem, in.boot.SystemRejection))
+	logFactsError(tree.WriteRejection(machine.RejectCredentials, in.boot.CredentialsRejection))
+}
+
+// machineUptimeFacts answers two questions from one syscall: how much
+// memory the machine has, and the moment it booted. Sysinfo reports
+// total memory and uptime; subtracting uptime from the clock gives the
+// boot instant. The wall clock at this point comes from the
+// hypervisor's RTC, because no NTP synchronization has happened yet.
+func machineUptimeFacts(now time.Time) (memoryBytes uint64, bootedAt *time.Time) {
+	var si unix.Sysinfo_t
+	if err := unix.Sysinfo(&si); err != nil {
+		return 0, nil
 	}
+	booted := now.Add(-time.Duration(si.Uptime) * time.Second)
+	return uint64(si.Totalram) * uint64(si.Unit), &booted
+}
+
+// versionFacts assembles the machine's version inventory. Two kinds of
+// value live here. The kernel release and the netfilter userspace
+// version are observed from the running machine, so the code asks the
+// machine itself rather than copying a build pin. The rest, the boot
+// artifacts and bundled payloads, have no version command of their own,
+// so applyComponentFacts reports them from the record the image build
+// staged beside the bytes (versions.go).
+func versionFacts() machine.VersionStatus {
+	v := machine.VersionStatus{Liken: machine.Version}
 
 	var u unix.Utsname
 	if err := unix.Uname(&u); err == nil {
-		facts.Version.Kernel = unix.ByteSliceToString(u.Release[:])
+		v.Kernel = unix.ByteSliceToString(u.Release[:])
 	}
 
 	// The netfilter userspace reports itself as "iptables vX.Y.Z
 	// (legacy)"; the version and variant are the interesting part.
-	// Like the kernel release, the code asks the running machine for
-	// this, rather than copying it from a build pin.
 	if out, ok := run(xtablesProbe, "-V"); ok {
-		facts.Version.Xtables = strings.TrimPrefix(out, "iptables ")
+		v.Xtables = strings.TrimPrefix(out, "iptables ")
 	}
 
 	// The CPU's running microcode revision is observed the same way.
-	// The microcode pin (below) says which early cpio the release
-	// carries; this says which revision the CPU actually runs. The
-	// two agreeing is the proof that the early cpio applied, and only
-	// real hardware can give it: on a virtual machine the hypervisor
-	// owns the microcode, and this reports the hypervisor's value.
-	facts.Version.MicrocodeRevision = microcodeRevision(cpuinfoPath)
+	// The microcode pin says which early cpio the release carries; this
+	// says which revision the CPU actually runs. The two agreeing is the
+	// proof that the early cpio applied, and only real hardware can give
+	// it: on a virtual machine the hypervisor owns the microcode, and
+	// this reports the hypervisor's value.
+	v.MicrocodeRevision = microcodeRevision(cpuinfoPath)
 
-	// Boot artifacts, bundled images, and data files have no version
-	// command of their own to ask. For these, applyComponentFacts
-	// reports from the record that the image build staged beside the
-	// bytes (versions.go).
-	applyComponentFacts(&facts.Version)
+	applyComponentFacts(&v)
+	return v
+}
 
-	// Sysinfo is one syscall that answers two questions: how much
-	// memory the machine has, and how long it has been up. Subtracted
-	// from the clock, uptime gives the moment the machine booted. (The
-	// wall clock itself comes from the hypervisor's RTC; there is no
-	// NTP synchronization yet at this point.)
-	var si unix.Sysinfo_t
-	if err := unix.Sysinfo(&si); err == nil {
-		facts.Hardware.MemoryBytes = uint64(si.Totalram) * uint64(si.Unit)
-		booted := now.Add(-time.Duration(si.Uptime) * time.Second)
-		facts.BootedAt = &booted
+// publishBootManifest writes the Machine manifest this boot ran under,
+// byte for byte. This is how the operator identifies which Machine it
+// manages, and, on a first boot, the spec to seed the in-cluster
+// Machine from. It stays one whole file, beside the facts tree, because
+// it shares the tree's lifetime and the operator needs its exact bytes.
+func publishBootManifest(choice *manifestChoice) {
+	if len(choice.raw) == 0 {
+		return
 	}
-
-	// Network facts exist only for interfaces that came up; a machine
-	// that failed DHCP still publishes the facts it has. The
-	// top-level summary describes the primary interface: the
-	// cluster-facing one when the Cluster's nodeCIDR identifies it,
-	// otherwise the first interface that came up.
-	facts.Network = networkFacts(in.clusterDoc, in.conns, now)
-
-	// The clock's state so far: the boot-time measurement, if one
-	// succeeded, or an accurate unsynchronized or free-running report.
-	facts.Time = timeStatus(in.firstSync, in.timeSources)
-
-	// The founding write happens directly, rather than through
-	// publish, because main is still the only goroutine at this
-	// point, and the success line should print only for a write that
-	// lands.
-	owner := &factsFile{status: facts}
-	if err := machine.WriteFacts(factsPath, facts); err != nil {
-		fmt.Fprintf(os.Stderr, "liken: writing facts: %v\n", err)
-		return owner
+	if err := os.WriteFile(bootManifestPath, choice.raw, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "liken: writing the boot manifest: %v\n", err)
 	}
-	fmt.Printf("liken: facts published to %s\n", factsPath)
-
-	// The manifest this boot ran under, byte for byte. This is how
-	// the operator identifies which Machine it manages, and, on a
-	// first boot, the spec to seed the in-cluster Machine from. The
-	// code publishes it beside the facts because it shares their
-	// lifetime: it describes this boot.
-	if len(in.choice.raw) > 0 {
-		if err := os.WriteFile(bootManifestPath, in.choice.raw, 0o644); err != nil {
-			fmt.Fprintf(os.Stderr, "liken: writing the boot manifest: %v\n", err)
-		}
-	}
-	return owner
 }
 
 // publishBootClusterManifest is the cluster document's version of the

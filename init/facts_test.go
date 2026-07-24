@@ -2,9 +2,9 @@ package main
 
 // Tests for the facts: the derivations that are pure over their
 // inputs, for example how connections become network status, and the
-// assembly and publication of the whole file, aimed at a tempdir
-// through the package's path seams. Only the real boot ever writes
-// under /run.
+// boot's write-once publication into the facts tree, aimed at a tempdir
+// through the package's seams. Only the real boot ever writes under
+// /run.
 
 import (
 	"net"
@@ -92,45 +92,46 @@ func TestInterfaceFactsForAStaticAddress(t *testing.T) {
 	}
 }
 
-// fakeFactsMachine assembles every seam publishFacts probes: an empty
-// fake sysfs and /dev, an empty fake firmware store, tempdir
-// destinations for the facts and boot manifest files, and an xtables
-// probe that names no real binary. This leaves the version
-// unreported, the same as it would be on an image without iptables.
-func fakeFactsMachine(t *testing.T) (factsDest, manifestDest string) {
+// fakeFactsMachine assembles every seam publishBootFacts probes: an
+// empty fake sysfs and /dev, an empty fake firmware store, a tempdir
+// facts tree and boot manifest, and an xtables probe that names no real
+// binary. This leaves the version's xtables unreported, the same as it
+// would be on an image without iptables.
+func fakeFactsMachine(t *testing.T) (tree machine.FactsTree, manifestDest string) {
 	t.Helper()
 	fakeMachine(t)
 	fakeFirmwareVars(t, map[string][]byte{})
 	dir := t.TempDir()
-	oldFacts, oldManifest, oldProbe := factsPath, bootManifestPath, xtablesProbe
-	factsPath = filepath.Join(dir, "facts.yaml")
+	oldTree, oldManifest, oldProbe := factsTree, bootManifestPath, xtablesProbe
+	factsTree = machine.FactsTree{Dir: filepath.Join(dir, "facts")}
 	bootManifestPath = filepath.Join(dir, "machine.yaml")
 	xtablesProbe = filepath.Join(dir, "no-such-iptables")
-	t.Cleanup(func() { factsPath, bootManifestPath, xtablesProbe = oldFacts, oldManifest, oldProbe })
-	return factsPath, bootManifestPath
+	t.Cleanup(func() { factsTree, bootManifestPath, xtablesProbe = oldTree, oldManifest, oldProbe })
+	return factsTree, bootManifestPath
 }
 
-func TestPublishFactsPublishesTheBootStory(t *testing.T) {
-	factsDest, manifestDest := fakeFactsMachine(t)
+func TestPublishBootFactsPublishesTheBootStory(t *testing.T) {
+	tree, manifestDest := fakeFactsMachine(t)
 	raw := []byte("kind: Machine\nmetadata:\n  name: node-1\n")
 
-	owner := publishFacts(factsInputs{
+	publishBootFacts(tree, bootFacts{
 		clusterDoc: labCluster(),
 		role:       api.RoleLeader,
-		choice:     &manifestChoice{raw: raw},
 		conns:      []*connection{fullConn(t, "eth1", "10.10.0.2/24", machine.MethodStatic)},
 		storage:    machine.AllRolesInMemory(),
 		boot:       machine.BootStatus{Slot: "A"},
 		modules:    []machine.ModuleStatus{{Name: "overlay", State: machine.ModuleLoaded}},
 		registries: machine.RegistriesStatus{Embedded: true},
+		time:       timeStatus(nil, nil),
 	})
+	publishBootManifest(&manifestChoice{raw: raw})
 
-	facts, err := machine.ReadFacts(factsDest)
+	facts, err := tree.Read()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if facts.Role != api.RoleLeader || facts.Boot.Slot != "A" {
-		t.Errorf("the file carries the boot's identity: %+v", facts)
+		t.Errorf("the tree carries the boot's identity: %+v", facts)
 	}
 	if facts.Network.Interface != "eth1" {
 		t.Errorf("the network summary names the cluster-facing interface: %+v", facts.Network)
@@ -141,43 +142,45 @@ func TestPublishFactsPublishesTheBootStory(t *testing.T) {
 	if facts.Version.Kernel == "" || facts.Hardware.CPUs == 0 || facts.BootedAt == nil {
 		t.Errorf("the machine's own answers are asked, not pinned: %+v", facts)
 	}
+	// cat parity: role is one file, the API word plus one newline.
+	roleFile, err := os.ReadFile(filepath.Join(tree.Dir, "role"))
+	if err != nil || string(roleFile) != "leader\n" {
+		t.Errorf("the role file reads as one word: %q, %v", roleFile, err)
+	}
 	published, err := os.ReadFile(manifestDest)
 	if err != nil || string(published) != string(raw) {
 		t.Errorf("the boot manifest is the choice's exact bytes: %q, %v", published, err)
 	}
-	if owner.status.Role != api.RoleLeader {
-		t.Errorf("the returned owner wraps the same facts: %+v", owner.status)
-	}
 }
 
-func TestPublishFactsSurvivesAnUnwritableDestination(t *testing.T) {
+func TestPublishBootFactsSurvivesAnUnwritableTree(t *testing.T) {
 	fakeFactsMachine(t)
 	sealed := t.TempDir()
 	if err := os.Chmod(sealed, 0o555); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(sealed, 0o755) })
-	factsPath = filepath.Join(sealed, "run", "facts.yaml")
+	factsTree = machine.FactsTree{Dir: filepath.Join(sealed, "facts")}
 
-	// The facts still exist in memory for the boot's later writers,
-	// even when the founding write never lands.
-	owner := publishFacts(factsInputs{
+	// A boot must never stop on a facts write. Every write fails against
+	// the read-only tree, and the call still returns.
+	publishBootFacts(factsTree, bootFacts{
 		role:    api.RoleFollower,
-		choice:  &manifestChoice{},
 		storage: machine.AllRolesInMemory(),
+		time:    timeStatus(nil, nil),
 	})
-	if owner == nil || owner.status.Role != api.RoleFollower {
-		t.Errorf("a failed write still returns the guarded owner: %+v", owner)
+	if _, err := factsTree.Read(); err == nil {
+		t.Error("the sealed tree has no root to read")
 	}
 }
 
-func TestPublishFactsCarriesLastCrash(t *testing.T) {
-	factsDest, _ := fakeFactsMachine(t)
+func TestPublishBootFactsCarriesLastCrash(t *testing.T) {
+	tree, _ := fakeFactsMachine(t)
 	when := time.Date(2026, 7, 23, 4, 12, 9, 0, time.UTC)
 
-	publishFacts(factsInputs{
-		choice:  &manifestChoice{},
+	publishBootFacts(tree, bootFacts{
 		storage: machine.AllRolesInMemory(),
+		time:    timeStatus(nil, nil),
 		lastCrash: &machine.CrashStatus{
 			Time:    &when,
 			Reason:  machine.CrashPanic,
@@ -186,36 +189,19 @@ func TestPublishFactsCarriesLastCrash(t *testing.T) {
 		},
 	})
 
-	facts, err := machine.ReadFacts(factsDest)
+	facts, err := tree.Read()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if facts.LastCrash == nil || facts.LastCrash.Reason != machine.CrashPanic {
-		t.Fatalf("the crash stub rides the facts file: %+v", facts.LastCrash)
+		t.Fatalf("the crash stub rides the facts tree: %+v", facts.LastCrash)
 	}
 	if !facts.LastCrash.Time.Equal(when) || facts.LastCrash.Records != "/sys/fs/pstore" {
 		t.Errorf("the stub round-trips whole: %+v", facts.LastCrash)
 	}
-}
-
-func TestFactsFileMutateRidesTheNextPublish(t *testing.T) {
-	factsDest, _ := fakeFactsMachine(t)
-	owner := &factsFile{status: &machine.MachineStatus{}}
-
-	// mutate edits only memory: nothing lands on disk yet.
-	owner.mutate(func(s *machine.MachineStatus) { s.Role = api.RoleFollower })
-	if _, err := os.Stat(factsDest); !os.IsNotExist(err) {
-		t.Errorf("mutate must not write the file: %v", err)
-	}
-
-	// The next publish carries the earlier edit along with its own
-	// edit.
-	owner.publish(func(s *machine.MachineStatus) { s.Boot.Restarts++ })
-	facts, err := machine.ReadFacts(factsDest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if facts.Role != api.RoleFollower || facts.Boot.Restarts != 1 {
-		t.Errorf("both edits publish together: %+v", facts)
+	// cat parity: the reason is its own file under lastCrash/.
+	reason, err := os.ReadFile(filepath.Join(tree.Dir, "lastCrash", "reason"))
+	if err != nil || string(reason) != "Panic\n" {
+		t.Errorf("the crash reason is one file: %q, %v", reason, err)
 	}
 }

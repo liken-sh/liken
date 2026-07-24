@@ -384,35 +384,31 @@ func writeRTC() {
 }
 
 // disciplineClock builds the machine plane's time component. It
-// measures, slews, publishes, sleeps, and repeats. disciplineClock
-// is the only writer of facts.Time, but it is not the only writer of
-// the facts file; the restart path also rewrites the file. Because
-// of this, every write goes through the guarded owner in facts.go.
-// disciplineClock prints transitions rather than every poll: a sync
-// gained, a sync lost, and an offset only when the offset exceeds
+// measures, slews, publishes, sleeps, and repeats. The clock loop is
+// the only writer of the time/ subtree, so it keeps a local copy of the
+// clock's state and needs no lock: no other component ever writes those
+// files. disciplineClock prints transitions rather than every poll: a
+// sync gained, a sync lost, and an offset only when the offset exceeds
 // the step threshold, which means drift is outrunning the slew. The
-// facts follow the same rule. Each poll's measurement replaces
-// facts.Time in memory every time, so any other writer's rewrite
-// carries the freshest clock value. This loop rewrites the file
-// itself only when worthRepublishing reports that the measurement
-// matters, and never for microsecond wobble.
-func disciplineClock(clk *clock, facts *factsFile) func(context.Context) error {
+// facts follow the same rule. The loop rewrites the time/ files only
+// when worthRepublishing reports that the measurement matters, and never
+// for microsecond wobble; between writes it holds the latest value in
+// its local copy.
+func disciplineClock(clk *clock, tree machine.FactsTree, initial machine.TimeStatus) func(context.Context) error {
 	return func(ctx context.Context) error {
-		// current mirrors facts.Time. This loop is the only writer
-		// of facts.Time, so a local copy lets the loop read a
-		// consistent value without holding the lock while it makes
-		// its decisions.
-		var current machine.TimeStatus
-		facts.mutate(func(s *machine.MachineStatus) { current = s.Time })
+		// current holds the clock's state. This loop is the only writer
+		// of the time/ subtree, so a local copy lets the loop read a
+		// consistent value as it makes its decisions. It starts from the
+		// seed the boot step published.
+		current := initial
 
 		lastGood := time.Time{}
 		if current.LastSync != nil {
 			lastGood = *current.LastSync
 		}
-		// published holds what the facts file currently says. It is
+		// published holds what the time/ subtree currently says. It is
 		// the baseline that every worthRepublishing check compares
-		// against. The boot step published facts.Time as it stands
-		// now, moments ago.
+		// against. The boot step published this value, moments ago.
 		published := current
 		publishedOffset, _ := time.ParseDuration(current.Offset)
 		publishedAt := time.Now()
@@ -440,7 +436,7 @@ func disciplineClock(clk *clock, facts *factsFile) func(context.Context) error {
 					fmt.Fprintf(os.Stderr, "liken: time: lost every source (%v); the clock is on its own\n", err)
 					current.State = machine.TimeUnsynchronized
 					current.Stratum = stratumUnsynchronized
-					facts.publish(func(s *machine.MachineStatus) { s.Time = current })
+					logFactsError(tree.WriteTime(current))
 					published, publishedAt = current, time.Now()
 				}
 				continue
@@ -468,10 +464,8 @@ func disciplineClock(clk *clock, facts *factsFile) func(context.Context) error {
 			// way, instead of resetting every 64 seconds.
 			current = timeStatus(sync, clk.sources)
 			if worthRepublishing(published, current, sync.offset-publishedOffset, time.Since(publishedAt)) {
-				facts.publish(func(s *machine.MachineStatus) { s.Time = current })
+				logFactsError(tree.WriteTime(current))
 				published, publishedOffset, publishedAt = current, sync.offset, time.Now()
-			} else {
-				facts.mutate(func(s *machine.MachineStatus) { s.Time = current })
 			}
 		}
 	}

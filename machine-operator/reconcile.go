@@ -17,6 +17,11 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
+// factsTree is the facts init publishes, read through the operator's
+// read-only /run/liken hostPath. It is a package variable so a test can
+// point it at a tempdir instead of the machine's real /run.
+var factsTree = machine.FactsTree{Dir: machine.FactsDir}
+
 // carryOutConvergence performs one convergence decision's side
 // effects against one document's store, and returns the condition
 // to publish. An I/O failure downgrades the condition to
@@ -134,7 +139,7 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 
 	status := &machine.MachineStatus{}
 
-	facts, err := machine.ReadFacts(machine.FactsPath)
+	facts, err := factsTree.Read()
 	if err == nil {
 		*status = *facts
 	}
@@ -246,11 +251,11 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	// target, registries.go for the credentials). The decisions are
 	// pure functions. carryOutConvergence performs their side
 	// effects against each document's own store. The rejection
-	// records come from the durable store, not from facts. Facts are
-	// a snapshot taken at boot, and they do not change while the
-	// machine runs. But a rejection cleared in the middle of a boot,
-	// by an edit that reverted, must unblock a retry without waiting
-	// for a reboot to refresh the facts. Every decision passes
+	// records come from the durable store, not from facts, because the
+	// store is the rejections' authority. A rejection cleared in the
+	// middle of a boot, by an edit that reverted, must unblock a retry
+	// the moment it lands, and the store carries that change at once.
+	// Every decision passes
 	// through the disruption gate on its way to its side effects,
 	// and the gate depends on the order in which the documents
 	// converge (see disruptions).

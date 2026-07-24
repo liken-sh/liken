@@ -17,9 +17,9 @@
 // sysctls at boot. Init also produces the facts. The operator reads
 // the facts and reconciles the spec for as long as the machine runs.
 // This division is deliberate. Init never talks to Kubernetes. The
-// operator never touches boot-time state. The file at
-// `/run/liken/facts.yaml` is the one-way channel between the two
-// programs.
+// operator never touches boot-time state. The facts tree under
+// `/run/liken/facts` is the one-way channel between the two programs
+// (see factstree.go, which defines the tree and its grammar).
 //
 // The api package defines the document's shape: the group and
 // version it declares, its metadata, and the condition and phase
@@ -61,16 +61,10 @@ const (
 	// image's seed manifest. The operator reads this file through a
 	// hostPath mount. The operator uses the file to know which Machine
 	// it manages, and to seed the in-cluster Machine on the first
-	// boot. Like the facts file, this file lives under /run because it
-	// describes only the current boot.
+	// boot. Like the facts tree, this file lives under /run because it
+	// describes only the current boot. It stays one whole file, so the
+	// operator reads the manifest's exact bytes, not a rendering.
 	BootManifestPath = "/run/liken/machine.yaml"
-
-	// FactsPath is the file where init publishes what it learned about
-	// the machine. The file has the exact same shape as MachineStatus.
-	// /run is a fresh tmpfs on every boot, and this suits the facts
-	// well. The facts describe only the current boot, and never
-	// survive into the next boot.
-	FactsPath = "/run/liken/facts.yaml"
 
 	// SysctlDir is the kernel's tuning interface: one file for each
 	// parameter. The sysctl helper functions take the directory as a

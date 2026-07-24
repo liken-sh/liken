@@ -134,13 +134,17 @@ func main() {
 		clusterName = clusterDoc.Metadata.Name
 	}
 
-	// The core of every operator is a level-triggered loop. Watch
-	// events tell the loop when to look. The ticker guarantees the
-	// loop looks even when nothing happened, because facts can change
-	// without the object changing, and there is no event for drift.
-	// Every pass reconciles from the current state as it is, never
-	// from the event that woke the loop, so that missing one event
-	// can never matter.
+	// The core of every operator is a level-triggered loop. Three
+	// things wake it, and every pass reconciles from the current state
+	// as it is, never from the event that woke it, so missing one wake
+	// can never matter. The Kubernetes watch wakes the loop when this
+	// machine's own object changes, so a conductor's grant or a
+	// person's edit is acted on at once. The facts watch wakes the loop
+	// when init publishes a change under /run/liken/facts, so a fresh
+	// fact like a time sync reaches status without waiting on a timer.
+	// The ticker wakes the loop on a fixed cadence, so it renews the
+	// heartbeat lease and backstops any drift that neither watch
+	// reported; it is no longer the bound on facts latency.
 	//
 	// The watch covers exactly one object: this machine's own. The
 	// fieldSelector asks the server to filter, so no other machine's
@@ -161,6 +165,18 @@ func main() {
 	// piece of state that connects them (fetch.go).
 	f := &fetcher{}
 
+	// The facts watch turns init's writes into wakes. inotify does not
+	// recurse, so the watch reconciles its set with the tree before
+	// every read (Sync, below). A watch that cannot start is not fatal:
+	// the tree may not exist yet this early, so the operator logs the
+	// error, runs on the ticker alone, and retries the watch on a later
+	// ticker pass. The cost of a missing watch is latency, never
+	// correctness.
+	factsWatch, err := machine.WatchFactsTree(context.Background(), machine.FactsDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "watching the facts tree: %v\n", err)
+	}
+
 	// The ticker sets the pace for the heartbeat and also acts as the
 	// drift backstop, so it runs at the kubelet's own lease cadence
 	// of ten seconds (the kubernetes package explains the numbers).
@@ -170,6 +186,14 @@ func main() {
 	// confirming a reconcile loop that had gotten stuck.
 	ticker := time.NewTicker(10 * time.Second)
 	for {
+		// Sync before the read closes the window between a new subtree
+		// and the watch on it: a directory that init created since the
+		// last pass gets a watch now, before this pass reads the tree.
+		if factsWatch != nil {
+			if err := factsWatch.Sync(); err != nil {
+				fmt.Fprintf(os.Stderr, "syncing the facts watch: %v\n", err)
+			}
+		}
 		reconcile(client, current, clusterName, f)
 		select {
 		case m := <-events:
@@ -181,7 +205,18 @@ func main() {
 			// Skipping intermediate copies also keeps this pass from
 			// publishing against a version it already knows is stale.
 			current = drainEvents(events, m)
+		case <-factsWake(factsWatch):
+			// A fact changed on disk. The next pass rereads the tree;
+			// the current object is reused as is, because the publish
+			// conflict retry already handles a stale working copy.
 		case <-ticker.C:
+			// A watch that failed to start earlier gets another try
+			// here, once the tree's root is likely to exist.
+			if factsWatch == nil {
+				if w, werr := machine.WatchFactsTree(context.Background(), machine.FactsDir); werr == nil {
+					factsWatch = w
+				}
+			}
 			// This rereads the object on timer passes too. Status
 			// writes change resourceVersion, and reconciling against
 			// a stale copy would make every status update a conflict.
@@ -190,6 +225,17 @@ func main() {
 			}
 		}
 	}
+}
+
+// factsWake returns the facts watch's wake channel, or a nil channel
+// when there is no watch. A receive on a nil channel blocks forever, so
+// the select arm simply never fires while the watch is down, and the
+// ticker drives the passes on its own.
+func factsWake(w *machine.TreeWatch) <-chan struct{} {
+	if w == nil {
+		return nil
+	}
+	return w.Wake
 }
 
 // drainEvents empties whatever the watch queued while the last pass
