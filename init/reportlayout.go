@@ -149,12 +149,12 @@ func planStorageLayout(measured []reportDisk, uefi bool) storageLayout {
 		grubRoles := ""
 		if !uefi {
 			grubRoles = fmt.Sprintf(", %s for GRUB's core image, and %s for GRUB's config",
-				sizeText(biosBootBytes), sizeText(bootHomeBytes))
+				machine.SizeText(biosBootBytes), machine.SizeText(bootHomeBytes))
 		}
 		return storageLayout{Notes: []string{fmt.Sprintf(
 			"No disk here can hold liken's own roles. They need %s on one disk: two %s system slots, %s of machine state, %s of /tmp%s. The largest disk this report saw offers %s. Attach a larger disk, then run this report again.",
-			gib(systemRoleBytes(uefi)), sizeText(systemSlotBytes), sizeText(machineStateBytes),
-			sizeText(machineEphemeralBytes), grubRoles, gib(largestDisk(candidates).SizeBytes))}}
+			gib(systemRoleBytes(uefi)), machine.SizeText(systemSlotBytes), machine.SizeText(machineStateBytes),
+			machine.SizeText(machineEphemeralBytes), grubRoles, gib(largestDisk(candidates).SizeBytes))}}
 	}
 
 	layout := storageLayout{Roles: systemRoles(system.Path, uefi)}
@@ -252,14 +252,14 @@ func systemRoles(device string, uefi bool) []plannedRole {
 	var roles []plannedRole
 	if !uefi {
 		roles = append(roles,
-			plannedRole{machine.BIOSBootRole, device, sizeText(biosBootBytes), "# GRUB core image; a tiny raw partition"},
-			plannedRole{machine.BootHomeRole, device, sizeText(bootHomeBytes), "# GRUB config and environment block"})
+			plannedRole{machine.BIOSBootRole, device, machine.SizeText(biosBootBytes), "# GRUB core image; a tiny raw partition"},
+			plannedRole{machine.BootHomeRole, device, machine.SizeText(bootHomeBytes), "# GRUB config and environment block"})
 	}
 	return append(roles,
-		plannedRole{machine.SystemARole, device, sizeText(systemSlotBytes), "# one OS slot; the blue-green pair"},
-		plannedRole{machine.SystemBRole, device, sizeText(systemSlotBytes), ""},
-		plannedRole{machine.MachineStateRole, device, sizeText(machineStateBytes), "# staged and proven manifests"},
-		plannedRole{machine.MachineEphemeralRole, device, sizeText(machineEphemeralBytes), "# the OS's /tmp"})
+		plannedRole{machine.SystemARole, device, machine.SizeText(systemSlotBytes), "# one OS slot; the blue-green pair"},
+		plannedRole{machine.SystemBRole, device, machine.SizeText(systemSlotBytes), ""},
+		plannedRole{machine.MachineStateRole, device, machine.SizeText(machineStateBytes), "# staged and proven manifests"},
+		plannedRole{machine.MachineEphemeralRole, device, machine.SizeText(machineEphemeralBytes), "# the OS's /tmp"})
 }
 
 // roleNote is the sentence every proposal that plans the durable roles
@@ -295,33 +295,33 @@ func dataRoles(device string, available uint64) ([]plannedRole, []string) {
 	if scaled := scaledClusterState(available); scaled > clusterStateBytes {
 		left := available - scaled
 		scratch := min(uint64(podEphemeralCeilingBytes), left/2)
-		cluster.Size = sizeText(scaled)
-		pods.Size = sizeText((left - scratch) / (1 << 30) * (1 << 30))
+		cluster.Size = machine.SizeText(scaled)
+		pods.Size = machine.SizeText((left - scratch) / (1 << 30) * (1 << 30))
 		return []plannedRole{cluster, pods, ephemeral}, []string{roleNote, fmt.Sprintf(
 			"%s has room beyond the conventional sizes, so clusterState takes %s and podStorage takes %s. A larger clusterState is worth more here than a larger scratch space, because clusterState cannot grow after the install and podEphemeral takes whatever is left.",
 			device, cluster.Size, pods.Size)}
 	}
 	if available >= clusterStateBytes+podStorageBytes+dataRoleFloor {
-		cluster.Size, pods.Size = sizeText(clusterStateBytes), sizeText(podStorageBytes)
+		cluster.Size, pods.Size = machine.SizeText(clusterStateBytes), machine.SizeText(podStorageBytes)
 		return []plannedRole{cluster, pods, ephemeral}, []string{roleNote}
 	}
 	if share := spareAfter(available, clusterStateBytes+dataRoleFloor); share >= dataRoleFloor {
-		cluster.Size, pods.Size = sizeText(clusterStateBytes), sizeText(share)
+		cluster.Size, pods.Size = machine.SizeText(clusterStateBytes), machine.SizeText(share)
 		return []plannedRole{cluster, pods, ephemeral}, []string{roleNote, fmt.Sprintf(
 			"%s cannot hold the conventional %s of podStorage beside clusterState, so podStorage takes %s. clusterState keeps its %s, because a node that cannot unpack an image cannot run the pod that wants it.",
-			device, sizeText(podStorageBytes), sizeText(share), sizeText(clusterStateBytes))}
+			device, machine.SizeText(podStorageBytes), machine.SizeText(share), machine.SizeText(clusterStateBytes))}
 	}
 	if available >= clusterStateBytes+dataRoleFloor {
-		cluster.Size = sizeText(clusterStateBytes)
+		cluster.Size = machine.SizeText(clusterStateBytes)
 		return []plannedRole{cluster, ephemeral}, []string{roleNote, fmt.Sprintf(
 			"%s has room for clusterState and kubelet's scratch space only, so podStorage is left out. A pod that claims a volume gets one from the machine's RAM root, and loses it at the next reboot. clusterState keeps its %s, because the images this node runs live there.",
-			device, sizeText(clusterStateBytes))}
+			device, machine.SizeText(clusterStateBytes))}
 	}
 	if share := spareAfter(available, dataRoleFloor); share >= clusterStateFloorBytes {
-		cluster.Size = sizeText(share)
+		cluster.Size = machine.SizeText(share)
 		return []plannedRole{cluster, ephemeral}, []string{roleNote, fmt.Sprintf(
 			"%s cannot hold a %s clusterState, so podStorage is left out and clusterState takes %s. That is enough for the images liken and k3s bring, and little more: a pull of a large image can fail with no space left, and an upgrade that holds the old images and the new ones at the same time may not fit. Attach a larger disk before this machine runs many images.",
-			device, sizeText(clusterStateBytes), sizeText(share))}
+			device, machine.SizeText(clusterStateBytes), machine.SizeText(share))}
 	}
 	if available >= dataRoleFloor {
 		return []plannedRole{ephemeral}, []string{fmt.Sprintf(
@@ -363,20 +363,4 @@ func largestDisk(disks []reportDisk) reportDisk {
 		}
 	}
 	return largest
-}
-
-// sizeText renders a byte count as the manifest's own quantity: the
-// largest binary unit that divides it exactly. The spec accepts only
-// the power-of-two suffixes, so "1Gi" here means the same 2^30 bytes
-// that the partition math allocates.
-func sizeText(bytes uint64) string {
-	switch {
-	case bytes%(1<<30) == 0:
-		return fmt.Sprintf("%dGi", bytes>>30)
-	case bytes%(1<<20) == 0:
-		return fmt.Sprintf("%dMi", bytes>>20)
-	case bytes%(1<<10) == 0:
-		return fmt.Sprintf("%dKi", bytes>>10)
-	}
-	return fmt.Sprintf("%d", bytes)
 }

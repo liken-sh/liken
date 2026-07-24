@@ -56,8 +56,15 @@ func validateStaging(spec machine.StorageSpec, facts *machine.MachineStatus) err
 				return err
 			}
 			if declared < placed.CapacityBytes {
-				return fmt.Errorf("%s: declared %s is smaller than its partition's %d bytes; storage roles are grow-only",
-					role.Name, role.Size, placed.CapacityBytes)
+				// The message carries the remedy, because the person who
+				// reads it is usually meeting this for the first time,
+				// after a reinstall laid the disk out differently from
+				// the Machine document that outlived it. The document is
+				// authoritative, so the fix is always to edit the
+				// document, and the size it must name is a size they can
+				// paste.
+				return fmt.Errorf("%s: the spec declares %s, and this machine's partition holds %s; storage roles are grow-only, so declare %s or more. A machine reinstalled with a different layout needs its Machine document edited to the layout it now carries",
+					role.Name, role.Size, machine.SizeText(placed.CapacityBytes), machine.SizeText(placed.CapacityBytes))
 			}
 			continue
 		}

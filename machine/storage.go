@@ -313,3 +313,23 @@ func ParseSize(s string) (uint64, error) {
 	}
 	return n * unit, nil
 }
+
+// SizeText renders a byte count as the quantity a manifest would carry:
+// the largest binary unit that divides it exactly. It is the inverse of
+// ParseSize for every size a spec can name, so a number the system
+// prints back to a person is a number they can paste into a spec. A
+// count that no unit divides exactly renders as plain bytes, which
+// ParseSize also accepts.
+func SizeText(bytes uint64) string {
+	switch {
+	case bytes%(1<<40) == 0:
+		return fmt.Sprintf("%dTi", bytes>>40)
+	case bytes%(1<<30) == 0:
+		return fmt.Sprintf("%dGi", bytes>>30)
+	case bytes%(1<<20) == 0:
+		return fmt.Sprintf("%dMi", bytes>>20)
+	case bytes%(1<<10) == 0:
+		return fmt.Sprintf("%dKi", bytes>>10)
+	}
+	return fmt.Sprintf("%d", bytes)
+}

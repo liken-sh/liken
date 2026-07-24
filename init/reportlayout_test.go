@@ -344,20 +344,3 @@ func TestLayoutWithNoUsableDiskPlansNothing(t *testing.T) {
 		t.Errorf("no disk means no roles: %+v", layout.Roles)
 	}
 }
-
-func TestSizeTextRendersTheLargestExactUnit(t *testing.T) {
-	for _, c := range []struct {
-		bytes uint64
-		want  string
-	}{
-		{1 << 30, "1Gi"},
-		{512 << 20, "512Mi"},
-		{1 << 20, "1Mi"},
-		{5 << 30, "5Gi"},
-		{1536 << 20, "1536Mi"},
-	} {
-		if got := sizeText(c.bytes); got != c.want {
-			t.Errorf("sizeText(%d) = %q, want %q", c.bytes, got, c.want)
-		}
-	}
-}

@@ -151,6 +151,14 @@ func TestValidateStagingRefusesAShrink(t *testing.T) {
 	if !strings.Contains(err.Error(), "grow-only") {
 		t.Errorf("error should teach the rule: %v", err)
 	}
+	// The person reading this has an edit to make, so the message must
+	// carry the size to make it with, and where to make it.
+	if !strings.Contains(err.Error(), "declare 2Gi or more") {
+		t.Errorf("error should name the size that would be accepted: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Machine document") {
+		t.Errorf("error should say what to edit: %v", err)
+	}
 }
 
 func TestValidateStagingRefusesFixingARemainderBelowItsSize(t *testing.T) {

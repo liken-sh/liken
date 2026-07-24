@@ -39,6 +39,43 @@ func TestParseSizeRejectsNonsense(t *testing.T) {
 	}
 }
 
+func TestSizeTextRendersTheLargestExactUnit(t *testing.T) {
+	cases := []struct {
+		bytes uint64
+		want  string
+	}{
+		{1 << 30, "1Gi"},
+		{512 << 20, "512Mi"},
+		{1 << 20, "1Mi"},
+		{5 << 30, "5Gi"},
+		{1536 << 20, "1536Mi"},
+		{1 << 40, "1Ti"},
+		{700, "700"},
+	}
+	for _, c := range cases {
+		t.Run(c.want, func(t *testing.T) {
+			if got := SizeText(c.bytes); got != c.want {
+				t.Errorf("SizeText(%d) = %q, want %q", c.bytes, got, c.want)
+			}
+		})
+	}
+}
+
+func TestSizeTextRoundTripsThroughParseSize(t *testing.T) {
+	// A size the system prints back to a person is a size they can
+	// paste into a spec, so every rendering must parse to what it came
+	// from.
+	for _, bytes := range []uint64{1 << 20, 1536 << 20, 6 << 30, 59 << 30, 1 << 40, 700} {
+		got, err := ParseSize(SizeText(bytes))
+		if err != nil {
+			t.Fatalf("SizeText(%d) does not parse: %v", bytes, err)
+		}
+		if got != bytes {
+			t.Errorf("SizeText(%d) parsed back as %d", bytes, got)
+		}
+	}
+}
+
 func TestRolesAreOrderedAndSkipUndeclared(t *testing.T) {
 	spec := StorageSpec{
 		PodEphemeral: &StorageRole{Device: "/dev/vdb"},
