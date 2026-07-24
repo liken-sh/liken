@@ -17,6 +17,7 @@ go 1.26.5
 require (
 	github.com/beevik/ntp v1.5.0
 	github.com/insomniacslk/dhcp v0.0.0-20260603135910-a415979eb11e
+	github.com/klauspost/compress v1.18.0
 	github.com/vishvananda/netlink v1.3.1
 	golang.org/x/crypto v0.54.0
 	golang.org/x/sys v0.47.0

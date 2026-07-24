@@ -33,6 +33,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/liken-sh/liken/disks"
 	"github.com/liken-sh/liken/machine"
@@ -47,13 +50,21 @@ import (
 // is a variable, so tests can supply a payload of their own.
 var releasePayloadDir = "/usr/share/liken/release"
 
+// installSlot is the slot a fresh install lands on. An install always
+// writes slot A and registers slot B empty, because the blue-green pair
+// fills its second slot only at the first upgrade. installToDisk returns
+// this letter so an attended install can name the slot in the message a
+// person reads before the machine powers off.
+const installSlot = "A"
+
 // installToDisk performs the whole install against the slots that
 // storage reconciliation just mounted. It returns rather than powers
-// off, so main can apply boot policy. On success, the machine has
-// nothing left to do but stop.
-func installToDisk(machineName string) error {
+// off, so main can apply boot policy. On success it returns the slot
+// letter it installed to, and the machine has nothing left to do but
+// stop.
+func installToDisk(machineName string) (string, error) {
 	if machineName == "" {
-		return fmt.Errorf("install: this machine has no name (liken.machine= or a manifest must supply one); boot entries carry identity, so an anonymous install would be wrong on every later boot")
+		return "", fmt.Errorf("install: this machine has no name (liken.machine= or a manifest must supply one); boot entries carry identity, so an anonymous install would be wrong on every later boot")
 	}
 
 	// The slots must both exist before anything is copied. The design
@@ -62,11 +73,11 @@ func installToDisk(machineName string) error {
 	parts := discoverPartitions()
 	slotA, err := findSlotPartition(parts, machine.SystemARole)
 	if err != nil {
-		return err
+		return "", err
 	}
 	slotB, err := findSlotPartition(parts, machine.SystemBRole)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// This code verifies the payload before it copies a single byte.
@@ -74,11 +85,11 @@ func installToDisk(machineName string) error {
 	// copies that this image carries must match it exactly.
 	raw, err := os.ReadFile(filepath.Join(releasePayloadDir, "release.yaml"))
 	if err != nil {
-		return fmt.Errorf("install: reading the release document: %w", err)
+		return "", fmt.Errorf("install: reading the release document: %w", err)
 	}
 	release, err := machine.ParseRelease(raw)
 	if err != nil {
-		return fmt.Errorf("install: %w", err)
+		return "", fmt.Errorf("install: %w", err)
 	}
 	fmt.Printf("liken: install: release %s, %d artifacts\n", release.Metadata.Name, len(release.Artifacts))
 
@@ -86,18 +97,18 @@ func installToDisk(machineName string) error {
 	for _, artifact := range release.Artifacts {
 		source := filepath.Join(releasePayloadDir, artifact.Name)
 		if err := verifyFile(artifact, source); err != nil {
-			return fmt.Errorf("install: the payload this image carries doesn't match its own release document: %w", err)
+			return "", fmt.Errorf("install: the payload this image carries doesn't match its own release document: %w", err)
 		}
 		dest := filepath.Join(slotMount, artifact.Name)
 		if err := copyDurably(source, dest); err != nil {
-			return fmt.Errorf("install: copying %s: %w", artifact.Name, err)
+			return "", fmt.Errorf("install: copying %s: %w", artifact.Name, err)
 		}
 		// This verifies what was written, not what was meant to be
 		// written. The copy is re-read from the slot and hashed
 		// again, so a torn or corrupted write is caught now rather
 		// than on a later boot.
 		if err := verifyFile(artifact, dest); err != nil {
-			return fmt.Errorf("install: the copy on the slot doesn't verify: %w", err)
+			return "", fmt.Errorf("install: the copy on the slot doesn't verify: %w", err)
 		}
 		fmt.Printf("liken: install: %s verified and installed (%d bytes)\n", artifact.Name, artifact.Size)
 	}
@@ -110,7 +121,7 @@ func installToDisk(machineName string) error {
 	// written last, so a slot with a sidecar is a slot whose layer
 	// was complete when it was written.
 	if err := installLayer(slotMount); err != nil {
-		return err
+		return "", err
 	}
 
 	// The actuator half: register the slots with whatever will hold
@@ -124,20 +135,31 @@ func installToDisk(machineName string) error {
 	actuators := 0
 	if firmwareIsUEFI() {
 		if err := installBootEntries(slotA, slotB, machineName); err != nil {
-			return err
+			return "", err
 		}
 		actuators++
 	}
 	if hasPartition(parts, machine.BIOSBootRole) {
 		if err := installGRUB(parts, machineName, slotMount); err != nil {
-			return err
+			return "", err
 		}
 		actuators++
 	}
 	if actuators == 0 {
-		return fmt.Errorf("install: this machine's firmware holds no boot variables (BIOS) and its spec declares no biosBoot/bootHome roles for GRUB; there is nothing that could boot the installed disk")
+		return "", fmt.Errorf("install: this machine's firmware holds no boot variables (BIOS) and its spec declares no biosBoot/bootHome roles for GRUB; there is nothing that could boot the installed disk")
 	}
-	return nil
+
+	// Everything must reach the disk before the caller announces
+	// success, because the machine holds at the console after that
+	// announcement and a person may cut power instead of pressing
+	// Enter. The per-file fsync in copyDurably makes each file's data
+	// durable, but not the rename that gave the file its final name:
+	// on FAT, that directory update sits in the page cache until
+	// something flushes it. The power-off after the hold would flush
+	// it, but the success message must be true at the moment it
+	// prints, not at the moment the machine obeys it.
+	unix.Sync()
+	return installSlot, nil
 }
 
 // installBootEntries registers both slots with UEFI firmware. Slot
@@ -229,7 +251,7 @@ func installGRUB(parts []partition, machineName, slotMount string) error {
 	if err := writeFileDurably(filepath.Join(grubDir, "grub.cfg"), []byte(cfg)); err != nil {
 		return fmt.Errorf("install: writing grub.cfg: %w", err)
 	}
-	env, err := renderGRUBEnv(map[string]string{"default_slot": "A", "try_slot": ""})
+	env, err := renderGRUBEnv(map[string]string{"default_slot": installSlot, "try_slot": ""})
 	if err != nil {
 		return err
 	}
@@ -500,26 +522,47 @@ func copyDurably(source, dest string) error {
 	return os.Rename(tmp, dest)
 }
 
-// holdInstallerConsole keeps a failed install's console on screen
-// until a person acknowledges it. An install boot is the one boot
-// with a person present by construction: someone chose it from the
-// install menu moments ago. Powering off on a timer would take the
-// explanation with it, which is how a refused install looks like a
-// machine that silently did nothing. The disk inventory prints
-// again here because the spec's device paths resolved against these
-// disks, and an install boot has one more contestant in the naming
-// race than the installed machine will: the install medium itself.
-// If the console cannot be read, the hold gives up rather than
-// strand an unattended machine.
-func holdInstallerConsole() {
-	reportBlockDevices()
-	fmt.Fprintln(os.Stderr, "liken: press Enter to power off")
-	console, err := os.Open("/dev/console")
+// holdInstallerConsole keeps an attended boot's console on screen until
+// a person acknowledges it. A menu pick makes a boot attended: someone
+// chose this entry from the install menu moments ago and is present by
+// construction. Every terminal state of an attended boot ends here, so
+// its message survives on screen instead of vanishing behind a power-off
+// on a timer. A finished install and a refused one say different things,
+// so the caller supplies the message to show.
+//
+// The failure paths also print the disk inventory. The spec's device
+// paths resolved against these disks, and an install boot has one more
+// contestant in the naming race than the installed machine will: the
+// install medium itself. A finished install needs no such evidence, so
+// its message stays short.
+//
+// If the console cannot be read, the hold gives up rather than strand an
+// unattended machine, so a truly headless install still powers off.
+func holdInstallerConsole(message string, inventory bool) {
+	if inventory {
+		reportBlockDevices()
+	}
+
+	// The prompt is not a log line, and it does not travel with them.
+	// Ordinary output goes through the kmsg pipeline, which is
+	// asynchronous: lines written just before this hold may still be
+	// draining, and a prompt racing them can interleave into their
+	// middle, or arrive at the console late. A prompt is the one line
+	// a person must see, whole, on the device they must answer, so it
+	// writes straight to that device, after a moment's pause that
+	// lets the pipeline finish the lines the prompt follows.
+	time.Sleep(500 * time.Millisecond)
+	console, err := os.OpenFile("/dev/console", os.O_RDWR, 0)
 	if err != nil {
+		// With no console to prompt on, there is no one to wait for.
+		// The message still goes to the logs, and the machine moves
+		// on, so a headless boot never hangs here.
+		fmt.Fprintln(os.Stderr, message)
 		fmt.Fprintf(os.Stderr, "liken: opening the console to wait: %v\n", err)
 		return
 	}
 	defer console.Close()
+	fmt.Fprintln(console, message)
 	buf := make([]byte, 1)
 	_, _ = console.Read(buf)
 }

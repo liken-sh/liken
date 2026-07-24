@@ -29,6 +29,7 @@ package image
 import (
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -97,8 +98,10 @@ func Stick(releaseDir, layerPath, out string, consoles []string, log io.Writer) 
 	loaderConf := loaderConfText()
 	entries := map[string][]byte{}
 	for _, name := range machines {
-		entries["loader/entries/"+name+".conf"] = entryText(name, consoles)
+		entries["loader/entries/"+name+"-install.conf"] = entryText(name, false, consoles)
+		entries["loader/entries/"+name+"-reinstall.conf"] = entryText(name, true, consoles)
 	}
+	entries["loader/entries/hardware-report.conf"] = reportEntryText(consoles)
 
 	sizes := int64(len(loaderConf)) + int64(payloadInfo.Size()) + int64(len(layer))
 	for _, e := range entries {
@@ -183,9 +186,9 @@ func Stick(releaseDir, layerPath, out string, consoles []string, log io.Writer) 
 	if err := w.WriteFile("loader/loader.conf", strings.NewReader(loaderConf), int64(len(loaderConf))); err != nil {
 		return err
 	}
-	for _, name := range machines {
-		text := entries["loader/entries/"+name+".conf"]
-		if err := w.WriteFile("loader/entries/"+name+".conf", strings.NewReader(string(text)), int64(len(text))); err != nil {
+	for _, path := range slices.Sorted(maps.Keys(entries)) {
+		text := entries[path]
+		if err := w.WriteFile(path, strings.NewReader(string(text)), int64(len(text))); err != nil {
 			return err
 		}
 	}
@@ -233,40 +236,82 @@ func espSize(contentBytes int64) int64 {
 
 // loaderConfText is the menu's one setting: wait for a person,
 // forever. An installer must never pick a machine by timeout. The
-// whole point of the menu is that a person says which machine this
-// is.
+// whole point of the menu is that a person says what this boot does.
 func loaderConfText() string {
-	return `# The liken installer's menu. Each entry below installs one of this
-# deployment's machines; pick the machine you are standing at. The
+	return `# The liken installer's menu. Each machine has two entries: install
+# it onto blank disks, or wipe and reinstall it over an existing liken
+# install. The last entry is the hardware report, which writes a
+# proposed manifest for the machine you are standing at and changes
+# nothing on its disks. Pick the entry for what you mean to do. The
 # "e" key edits an entry's options for one boot, if you ever need to.
 timeout menu-force
 `
 }
 
-// entryText is one machine's menu entry, in systemd-boot's Boot
-// Loader Specification form. The four initrd lines concatenate in
-// order, microcode first because the kernel scans the very start of
-// its initrd for microcode. This is the same composition an
-// installed machine gets from the three initrd= parameters in its
-// boot entries, plus the installer's payload. The sort-key matters
-// more than it looks. Without one, systemd-boot orders entries the
-// way it orders kernels, newest first, which puts node-5 at the top
-// of the menu. Sort-keys sort in ascending order, so the machines
-// read in their natural order instead.
-func entryText(name string, consoles []string) []byte {
-	options := []string{"rdinit=/liken", "liken.machine=" + name, "liken.install"}
+// entryText is one machine's menu entry, in systemd-boot's Boot Loader
+// Specification form. Each machine has two entries: install onto blank
+// disks (liken.install), and wipe and reinstall over an existing liken
+// install (liken.reinstall). The installer only ever claims a blank
+// disk, so reinstall is the escape hatch for a disk liken itself wrote;
+// picking the entry at the keyboard is the confirmation the reinstall
+// needs.
+//
+// The four initrd lines concatenate in order, microcode first because
+// the kernel scans the very start of its initrd for microcode. This is
+// the same composition an installed machine gets from the three initrd=
+// parameters in its boot entries, plus the installer's payload.
+//
+// The sort-key keeps a machine's two entries together and in order.
+// Both keys begin with the machine name, so all of one machine's
+// entries sort before the next machine's, and "install" sorts before
+// "reinstall" within the pair. Without a sort-key, systemd-boot orders
+// entries the way it orders kernels, newest first, which would scatter
+// the pairs.
+func entryText(name string, reinstall bool, consoles []string) []byte {
+	word, action, sortSuffix := "liken.install", "install", "install"
+	if reinstall {
+		word, action, sortSuffix = "liken.reinstall", "wipe and reinstall", "reinstall"
+	}
+	options := []string{"rdinit=/liken", "liken.machine=" + name, word}
 	for _, c := range consoles {
 		options = append(options, "console="+c)
 	}
-	return fmt.Appendf(nil, `# Boot this deployment's OS with the identity %q and install it
-# onto this machine's own disks.
-title install as %s
-sort-key %s
+	return fmt.Appendf(nil, `# Boot this deployment's OS with the identity %q and %s
+# this machine's own disks.
+title %s as %s
+sort-key %s-%s
 linux /vmlinuz
 initrd /microcode.cpio
 initrd /boot.cpio
 initrd /%s
 initrd /payload.cpio
 options %s
-`, name, name, name, machine.LayerName, strings.Join(options, " "))
+`, name, action, action, name, name, sortSuffix, machine.LayerName, strings.Join(options, " "))
+}
+
+// reportEntryText is the stick-wide hardware report entry. It carries
+// liken.report and no liken.machine=, because it describes the hardware
+// in front of it, not a machine in the deployment. It boots the same
+// kernel and initrd stack as the install entries, so the report reads
+// its drivers from the same payload.
+//
+// The entry has no sort-key on purpose. systemd-boot shows every entry
+// that carries a sort-key before every entry that does not, so the one
+// report entry always lands after all the machine entries, wherever the
+// machine names would otherwise sort it.
+func reportEntryText(consoles []string) []byte {
+	options := []string{"rdinit=/liken", "liken.report"}
+	for _, c := range consoles {
+		options = append(options, "console="+c)
+	}
+	return fmt.Appendf(nil, `# Describe this machine's hardware and write a proposed manifest to
+# the stick as %s. This entry changes nothing on the machine's disks.
+title liken hardware report
+linux /vmlinuz
+initrd /microcode.cpio
+initrd /boot.cpio
+initrd /%s
+initrd /payload.cpio
+options %s
+`, "hardware-report.yaml", machine.LayerName, strings.Join(options, " "))
 }

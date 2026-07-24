@@ -420,6 +420,51 @@ $(IMAGE_DIR)/install.cpio: $(IMAGE_DIR)/channel/$(LAB_VERSION)/release.yaml \
 		$(IMAGE_DIR)/deployment.cpio cli/dist/liken
 	cli/dist/liken media $(IMAGE_DIR)/channel/$(LAB_VERSION) $(IMAGE_DIR)/deployment.cpio $@
 
+# The hardware-parity deployment (dev-cluster/hardware) boots the dev
+# cluster on the shape a real machine has: the disks on an AHCI SATA
+# controller and the network cards e1000, the controllers the kernel
+# ships as modules. It reuses the dev cluster's cluster document (its
+# cluster.yaml is a symlink to the dev cluster's) and the same
+# identity, so its node-1 is the same founding leader and the same
+# admin kubeconfig authenticates the readiness poll. Only the machine
+# manifest differs, so only the layer and the install image differ.
+# These rules mirror the dev cluster's own layer and install rules
+# above, and share the one release channel. See
+# dev-cluster/hardware/README.md.
+HW_DIR := dev-cluster/hardware
+HW_IMAGE_DIR := dev-cluster/hardware/image
+
+$(HW_IMAGE_DIR)/deployment.cpio: cli/dist/liken \
+		$(HW_DIR)/cluster.yaml $(wildcard $(HW_DIR)/machines/*.yaml) \
+		$(IDENTITY_DIR)/tls/server-ca.crt $(IDENTITY_DIR)/token
+	@mkdir -p $(HW_IMAGE_DIR)
+	cli/dist/liken layer $(HW_DIR) $(IDENTITY_DIR) $@
+
+$(HW_IMAGE_DIR)/install.cpio: $(IMAGE_DIR)/channel/$(LAB_VERSION)/release.yaml \
+		$(HW_IMAGE_DIR)/deployment.cpio cli/dist/liken
+	cli/dist/liken media $(IMAGE_DIR)/channel/$(LAB_VERSION) $(HW_IMAGE_DIR)/deployment.cpio $@
+
+# The parity deployment's install stick, the same composition as the
+# dev cluster's stick above. The parity smoke's report step needs a
+# real stick: the hardware report writes its proposal onto the stick's
+# filesystem, and it finds the stick by the GPT name the stick image
+# carries, so no other medium can stand in for it.
+$(HW_IMAGE_DIR)/stick.img: $(IMAGE_DIR)/channel/$(LAB_VERSION)/release.yaml \
+		$(HW_IMAGE_DIR)/deployment.cpio cli/dist/liken
+	cli/dist/liken stick -console ttyS0 $(IMAGE_DIR)/channel/$(LAB_VERSION) $(HW_IMAGE_DIR)/deployment.cpio $@
+
+# The parity smoke walks the whole first-machine flow on the metal
+# shape, from blank disks: boot the hardware report and check the
+# proposal it writes to the stick, install, boot the installed disk,
+# and wait for Ready, the same verdict as smoke-uefi. It proves the
+# storage and network module paths a virtio guest never walks. This
+# target sits beside the dev cluster's smoke targets in spirit; it
+# lives here because it needs the hardware install image and stick
+# defined just above.
+smoke-hardware: $(KERNEL_DIST)/vmlinuz $(HW_IMAGE_DIR)/install.cpio \
+		$(HW_IMAGE_DIR)/stick.img kubeconfig
+	$(MAKE) -C dev-cluster smoke-hardware
+
 # The install stick holds the same release and layer as a bootable
 # disk image, with the machine menu. This is the medium that real
 # hardware uses. The lab sets console=ttyS0 so the menu and every
@@ -543,5 +588,6 @@ clean:
 	rm -rf $(IDENTITY_DIR)
 	$(MAKE) -C image clean
 	rm -rf $(IMAGE_DIR)
+	rm -rf $(HW_IMAGE_DIR)
 
-.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata linux-firmware microcode licensing init machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios install install-stick install-gitops storage release serve docs clean
+.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata linux-firmware microcode licensing init machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware install install-stick install-gitops storage release serve docs clean

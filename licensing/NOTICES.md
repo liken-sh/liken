@@ -203,6 +203,11 @@ Under the BSD 2-Clause license:
 Under the BSD 3-Clause license:
 
 * github.com/insomniacslk/dhcp — copyright 2018 Andrea Barberio
+* github.com/klauspost/compress — copyright 2012 The Go Authors,
+  2019 Klaus Post; portions BSD-3 (copyright 2011 The Snappy-Go
+  Authors, 2016 The filepathx Authors), Apache 2.0 (copyright
+  2016–2017 The New York Times Company), and MIT (copyright 2015
+  Klaus Post)
 * github.com/pierrec/lz4/v4 — copyright 2015 Pierre Curto
 * github.com/u-root/uio — copyright 2012–2021 u-root Authors
 * golang.org/x/crypto, golang.org/x/net, golang.org/x/sync,

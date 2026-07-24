@@ -123,11 +123,13 @@ func maybeSwitchRoot() {
 		fmt.Fprintf(os.Stderr, "liken: boot modules: %v\n", err)
 	}
 
-	if bootParam(installParam) {
-		// The installer runs from rootfs, copies its payload to disk,
-		// and powers off. None of this work needs the overlay, and the
+	if bootParam(installParam) || bootParam(reportParam) {
+		// The installer and the hardware report both run from rootfs.
+		// The installer copies its payload to disk and powers off; the
+		// report reads hardware, mounts the payload's module tree to
+		// load drivers, and reboots. Neither needs the overlay, and the
 		// payload is far bigger than the overlay's size bound.
-		fmt.Println("liken: install boot; staying on rootfs")
+		fmt.Println("liken: install or report boot; staying on rootfs")
 		_ = unix.Unmount("/proc", unix.MNT_DETACH)
 		return
 	}

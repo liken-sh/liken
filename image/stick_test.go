@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -87,18 +88,17 @@ func TestStickBootsTheMenu(t *testing.T) {
 	}
 }
 
-func TestStickListsEveryMachine(t *testing.T) {
+func TestStickGivesEachMachineInstallAndReinstall(t *testing.T) {
 	_, v := stickFixture(t, nil)
 
 	for _, name := range []string{"node-1", "node-2"} {
-		entry, err := v.ReadFile("loader/entries/" + name + ".conf")
+		install, err := v.ReadFile("loader/entries/" + name + "-install.conf")
 		if err != nil {
-			t.Fatalf("%s has no menu entry: %v", name, err)
+			t.Fatalf("%s has no install entry: %v", name, err)
 		}
-		text := string(entry)
 		for _, want := range []string{
 			"title install as " + name,
-			"sort-key " + name,
+			"sort-key " + name + "-install",
 			"linux /vmlinuz",
 			"initrd /microcode.cpio",
 			"initrd /boot.cpio",
@@ -106,24 +106,110 @@ func TestStickListsEveryMachine(t *testing.T) {
 			"initrd /payload.cpio",
 			"options rdinit=/liken liken.machine=" + name + " liken.install",
 		} {
-			if !strings.Contains(text, want) {
-				t.Errorf("%s's entry is missing %q:\n%s", name, want, text)
+			if !strings.Contains(string(install), want) {
+				t.Errorf("%s's install entry is missing %q:\n%s", name, want, install)
 			}
 		}
-		if strings.Contains(text, "console=") {
-			t.Errorf("no console= without the flag; hardware defaults to its screen:\n%s", text)
+
+		reinstall, err := v.ReadFile("loader/entries/" + name + "-reinstall.conf")
+		if err != nil {
+			t.Fatalf("%s has no reinstall entry: %v", name, err)
+		}
+		for _, want := range []string{
+			"title wipe and reinstall as " + name,
+			"sort-key " + name + "-reinstall",
+			"options rdinit=/liken liken.machine=" + name + " liken.reinstall",
+		} {
+			if !strings.Contains(string(reinstall), want) {
+				t.Errorf("%s's reinstall entry is missing %q:\n%s", name, want, reinstall)
+			}
+		}
+		// The reinstall entry differs from install in exactly one word:
+		// liken.reinstall in place of liken.install.
+		if strings.Contains(string(reinstall), "liken.install") {
+			t.Errorf("%s's reinstall entry must not carry liken.install:\n%s", name, reinstall)
+		}
+
+		if strings.Contains(string(install), "console=") || strings.Contains(string(reinstall), "console=") {
+			t.Errorf("no console= without the flag; hardware defaults to its screen")
 		}
 	}
 }
 
-func TestStickBakesConsoles(t *testing.T) {
-	_, v := stickFixture(t, []string{"ttyS0", "tty0"})
-	entry, err := v.ReadFile("loader/entries/node-1.conf")
+func TestStickCarriesTheHardwareReportEntry(t *testing.T) {
+	_, v := stickFixture(t, nil)
+
+	entry, err := v.ReadFile("loader/entries/hardware-report.conf")
+	if err != nil {
+		t.Fatalf("the stick has no hardware report entry: %v", err)
+	}
+	text := string(entry)
+	for _, want := range []string{
+		"title liken hardware report",
+		"initrd /payload.cpio",
+		"options rdinit=/liken liken.report",
+		"hardware-report.yaml",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the report entry is missing %q:\n%s", want, text)
+		}
+	}
+	// The report describes hardware, not a machine, so it carries no
+	// identity.
+	if strings.Contains(text, "liken.machine=") {
+		t.Errorf("the report entry must carry no liken.machine=:\n%s", text)
+	}
+	// No sort-key: an entry without one sorts after every machine entry,
+	// which all carry sort-keys.
+	if strings.Contains(text, "sort-key") {
+		t.Errorf("the report entry must have no sort-key so it sorts last:\n%s", text)
+	}
+}
+
+func TestStickSortKeysKeepEachMachinePairAdjacentAndOrdered(t *testing.T) {
+	_, v := stickFixture(t, nil)
+	// The install key sorts before the reinstall key within a machine,
+	// and both sort before the next machine's keys, so the menu reads
+	// install/reinstall for node-1, then install/reinstall for node-2.
+	keys := []string{
+		sortKey(t, v, "node-1-install"),
+		sortKey(t, v, "node-1-reinstall"),
+		sortKey(t, v, "node-2-install"),
+		sortKey(t, v, "node-2-reinstall"),
+	}
+	if !slices.IsSorted(keys) {
+		t.Errorf("the sort-keys must place the pairs in menu order: %v", keys)
+	}
+}
+
+// sortKey reads one entry's sort-key line back from the stick.
+func sortKey(t *testing.T, v *disks.FATVolume, entry string) string {
+	t.Helper()
+	raw, err := v.ReadFile("loader/entries/" + entry + ".conf")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(entry), "console=ttyS0 console=tty0") {
-		t.Errorf("every -console lands on the options line, in order:\n%s", entry)
+	for line := range strings.SplitSeq(string(raw), "\n") {
+		if key, ok := strings.CutPrefix(line, "sort-key "); ok {
+			return key
+		}
+	}
+	t.Fatalf("%s has no sort-key line:\n%s", entry, raw)
+	return ""
+}
+
+func TestStickBakesConsoles(t *testing.T) {
+	_, v := stickFixture(t, []string{"ttyS0", "tty0"})
+	// Consoles land on every entry: the machine's install and reinstall,
+	// and the stick-wide report.
+	for _, entry := range []string{"node-1-install", "node-1-reinstall", "hardware-report"} {
+		raw, err := v.ReadFile("loader/entries/" + entry + ".conf")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), "console=ttyS0 console=tty0") {
+			t.Errorf("%s: every -console lands on the options line, in order:\n%s", entry, raw)
+		}
 	}
 }
 

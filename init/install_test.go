@@ -375,8 +375,14 @@ func TestInstallToDisk(t *testing.T) {
 		"BootOrder": u16le(0x0000),
 	})
 
-	if err := installToDisk("node-1"); err != nil {
+	slot, err := installToDisk("node-1")
+	if err != nil {
 		t.Fatal(err)
+	}
+	// A fresh install always lands on slot A. The returned letter names
+	// the slot in the message a person reads at the end of an install.
+	if slot != "A" {
+		t.Errorf("a fresh install lands on slot A, not %q", slot)
 	}
 
 	for _, name := range []string{"vmlinuz", "liken.sqfs", machine.LayerName, machine.LayerSidecarName} {
@@ -405,7 +411,7 @@ func TestInstallToDisk(t *testing.T) {
 }
 
 func TestInstallToDiskNeedsAName(t *testing.T) {
-	if err := installToDisk(""); err == nil {
+	if _, err := installToDisk(""); err == nil {
 		t.Error("an anonymous install would be wrong on every later boot")
 	}
 }
@@ -418,7 +424,7 @@ func TestInstallToDiskLaysDownGRUB(t *testing.T) {
 	fakeCmdline(t, "console=ttyS0 rdinit=/liken liken.install\n")
 	fakeBIOSRegime(t)
 
-	if err := installToDisk("node-1"); err != nil {
+	if _, err := installToDisk("node-1"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -481,7 +487,7 @@ func TestInstallToDiskRefusesWithoutAnyActuator(t *testing.T) {
 	fakeCmdline(t, "console=ttyS0 rdinit=/liken liken.install\n")
 	fakeBIOSRegime(t)
 
-	err := installToDisk("node-1")
+	_, err := installToDisk("node-1")
 	if err == nil || !strings.Contains(err.Error(), "biosBoot") {
 		t.Errorf("an install with no actuator must be refused with the reason: %v", err)
 	}
@@ -496,7 +502,7 @@ func TestInstallToDiskRefusesACorruptPayload(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "vmlinuz"), []byte("the kernal"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := installToDisk("node-1"); err == nil {
+	if _, err := installToDisk("node-1"); err == nil {
 		t.Error("a payload that fails its own release document must refuse to install")
 	}
 }
@@ -525,7 +531,7 @@ func TestInstallToDiskNeedsBothSlots(t *testing.T) {
 	addDisk(t, sys, dev, "vdc", totalSectors*disks.SectorSize, make([]byte, totalSectors*disks.SectorSize))
 	addPartition(t, sys, "vdc", "vdc1", "liken:systemA", 16384*disks.SectorSize)
 	fakePayload(t)
-	if err := installToDisk("node-1"); err == nil {
+	if _, err := installToDisk("node-1"); err == nil {
 		t.Error("one slot is not blue-green; the install must refuse")
 	}
 }
@@ -538,7 +544,7 @@ func TestInstallToDiskNeedsTheLayerSidecar(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, machine.LayerSidecarName)); err != nil {
 		t.Fatal(err)
 	}
-	err := installToDisk("node-1")
+	_, err := installToDisk("node-1")
 	if err == nil || !strings.Contains(err.Error(), "sidecar") {
 		t.Errorf("media without the layer's sidecar is incomplete and must refuse: %v", err)
 	}
@@ -554,7 +560,7 @@ func TestInstallToDiskRefusesATornLayer(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, machine.LayerName), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := installToDisk("node-1"); err == nil {
+	if _, err := installToDisk("node-1"); err == nil {
 		t.Error("a layer that fails its sidecar must refuse to install")
 	}
 }
@@ -565,7 +571,7 @@ func TestInstallToDiskNeedsItsReleaseDocument(t *testing.T) {
 	releasePayloadDir = filepath.Join(t.TempDir(), "no-payload")
 	t.Cleanup(func() { releasePayloadDir = old })
 
-	err := installToDisk("node-1")
+	_, err := installToDisk("node-1")
 	if err == nil || !strings.Contains(err.Error(), "release document") {
 		t.Errorf("a payload without its document must refuse: %v", err)
 	}
@@ -578,7 +584,7 @@ func TestInstallToDiskRefusesAGarbageReleaseDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installToDisk("node-1"); err == nil {
+	if _, err := installToDisk("node-1"); err == nil {
 		t.Error("a release document that won't parse must refuse the install")
 	}
 }

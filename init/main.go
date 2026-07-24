@@ -115,6 +115,16 @@ func main() {
 	// boot runs under.
 	loadModules()
 
+	// A report boot changes nothing on the machine. It mounts the
+	// payload's module tree, loads the drivers this hardware wants,
+	// observes which disks and interfaces appear, writes a proposed
+	// manifest to the installation stick, and reboots. It runs here,
+	// before storage settles, because it must never claim, format, or
+	// write to any of the machine's own disks (report.go).
+	if reporting() {
+		runHardwareReport() // never returns; it reboots
+	}
+
 	// A reinstall boot blanks the disks its manifest declares before
 	// storage settles, so a machine that already carries a liken
 	// install can be installed over with no external tool. It runs
@@ -160,12 +170,13 @@ func main() {
 	// first in the boot order, so a reboot would run the installer
 	// again.
 	if installing() {
-		if err := installToDisk(m.Metadata.Name); err != nil {
+		slot, err := installToDisk(m.Metadata.Name)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "liken: %v\n", err)
 			fmt.Fprintln(os.Stderr, "liken: install failed; powering off (installs are idempotent: fix the cause and boot the installer again)")
-			holdInstallerConsole()
+			holdInstallerConsole("liken: press Enter to power off", true)
 		} else {
-			fmt.Println("liken: install complete; powering off; the next boot comes from the disk")
+			holdInstallerConsole(fmt.Sprintf("liken: installed to slot %s; remove the stick, then press Enter to power off; the next power-on boots from the disk.", slot), false)
 		}
 		powerOff()
 		for {
@@ -519,7 +530,7 @@ func failBoot(err error) {
 	fmt.Fprintf(os.Stderr, "liken: %v\n", err)
 	fmt.Fprintf(os.Stderr, "liken: %s\n", rationale)
 	if installing() {
-		holdInstallerConsole()
+		holdInstallerConsole("liken: press Enter to power off", true)
 	}
 	powerOff()
 	// powerOff returns only if the reboot syscall failed. PID 1 still

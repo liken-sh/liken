@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/liken-sh/liken/hardware"
@@ -141,10 +142,11 @@ func settle(ctx context.Context, uevents <-chan struct{}, quiet, ceiling time.Du
 // that appeared is a new gap. An entry that left either got its
 // driver (this reports which driver) or was unplugged.
 func hardwareTransitions(before, after []machine.UnclaimedDevice, devices []hardware.Device) []string {
+	base := moduleBase()
 	var lines []string
 	for _, u := range after {
 		if !slices.ContainsFunc(before, func(b machine.UnclaimedDevice) bool { return b.Modalias == u.Modalias }) {
-			lines = append(lines, fmt.Sprintf("liken: hardware: unclaimed %s: %s", describeUnclaimed(u), u.Message))
+			lines = append(lines, fmt.Sprintf("liken: hardware: unclaimed %s: %s", describeUnclaimed(u), unclaimedAdvice(base, u)))
 		}
 	}
 	for _, u := range before {
@@ -174,6 +176,51 @@ func describeUnclaimed(u machine.UnclaimedDevice) string {
 		description += " " + u.Class
 	}
 	return description + " device " + nameOrModalias(u)
+}
+
+// softdepBase points the soft-dependency reader at a module tree.
+// Empty means the running kernel's own tree; tests set it to a
+// fixture so their advice does not depend on the host's modules.
+var softdepBase = ""
+
+func moduleBase() string {
+	if softdepBase != "" {
+		return softdepBase
+	}
+	return filepath.Join("/lib/modules", kernelRelease())
+}
+
+// unclaimedAdvice states the fix for one unclaimed device, and
+// improves the stock advice with the soft dependencies the loader does
+// not read. The catalog already named the candidate drivers and said
+// to declare them in spec.modules. A candidate can want another module
+// loaded first (r8169 wants realtek), which modules.dep never records,
+// so the plain advice would send a person to declare a driver that
+// then binds to the wrong thing. This walks each candidate's soft
+// dependency chain and names the full ordered list, so the advice
+// reads "declare realtek, then r8169 in spec.modules".
+//
+// When no candidate gains a soft dependency, the catalog's own message
+// stands unchanged. That keeps the wording for the case the catalog
+// alone already handles, including the composed image that carries no
+// candidate at all, where the fix is a different image and there is
+// nothing to expand.
+func unclaimedAdvice(base string, u machine.UnclaimedDevice) string {
+	expanded := false
+	choices := make([]string, 0, len(u.Candidates))
+	for _, candidate := range u.Candidates {
+		chain := softdepChain(base, candidate)
+		if len(chain) == 1 {
+			choices = append(choices, candidate)
+			continue
+		}
+		expanded = true
+		choices = append(choices, strings.Join(chain[:len(chain)-1], ", ")+", then "+chain[len(chain)-1])
+	}
+	if !expanded {
+		return u.Message
+	}
+	return "declare " + strings.Join(choices, " or ") + " in spec.modules"
 }
 
 func nameOrModalias(u machine.UnclaimedDevice) string {

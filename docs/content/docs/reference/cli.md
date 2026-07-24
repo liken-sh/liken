@@ -86,9 +86,10 @@ for direct-kernel boots, such as QEMU or PXE.
     liken stick [-console ttyS0] <release-dir> <deployment.cpio> <output.img>
 
 Builds the USB install stick's disk image: one stick for the whole
-deployment, with a boot menu that lists every machine by name. Boot
-it, pick the machine you are standing at, and the machine installs
-itself and powers off. `-console` is repeatable, and adds a
+deployment. Its boot menu gives each machine an install entry and a
+wipe-and-reinstall entry, and ends with a hardware report entry that
+describes the machine and changes nothing on its disks. Boot it, pick
+an entry, and follow the console. `-console` is repeatable, and adds a
 `console=` argument that the machines keep permanently.
 
 ## liken bundle

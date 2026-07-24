@@ -1,0 +1,94 @@
+# node-1, the hardware-parity guest.
+#
+# This is the same node-1 the dev cluster runs, with one difference:
+# its hardware has the shape a real machine has, not the paravirtual
+# shape the lab's other guests use. The vendored kernel builds the
+# virtio drivers in (CONFIG_VIRTIO_BLK=y, CONFIG_VIRTIO_NET=y), so a
+# virtio guest never loads a storage or a network module, and a driver
+# that a real controller needs stays untested until a real machine
+# boots. This manifest, together with the guest that
+# dev-cluster/Makefile builds under HARDWARE=metal, closes that gap:
+# the disks hang off an AHCI SATA controller and the interfaces are
+# e1000 cards, the two controller classes the kernel ships as modules
+# (CONFIG_SATA_AHCI=m, CONFIG_E1000=m).
+#
+# The cluster document this guest reads is the dev cluster's own
+# (cluster.yaml here is a symlink to ../cluster.yaml), so node-1 is
+# still the founding leader and still comes up Ready on its own. Only
+# the hardware differs. See dev-cluster/hardware/README.md.
+apiVersion: liken.sh/v1alpha1
+kind: Machine
+metadata:
+  name: node-1
+spec:
+  # node-1.yaml in the dev cluster explains why the lab's machines
+  # choose Auto.
+  rebootPolicy: Auto
+  network:
+    # The same two interfaces as the dev cluster's node-1: eth0 is the
+    # DHCP uplink, eth1 is the static cluster segment. The names hold
+    # even though these are e1000 cards, not virtio. The kernel names
+    # an interface when its driver registers it, and it names them in
+    # PCI-slot order. Both cards use e1000, so the whole module loads
+    # once (from spec.modules, below), and it registers the two cards
+    # in slot order in one pass: the uplink card sits first, so it
+    # becomes eth0, and the cluster card becomes eth1. A guest that
+    # mixed a built-in virtio card with an e1000 card would name them
+    # in the reverse order, because the built-in driver registers its
+    # card during kernel boot, before init loads any module.
+    interfaces:
+      - name: eth0
+      - name: eth1
+        address: 10.10.0.1/24
+  # The storage roles are the dev cluster's node-1 roles, moved from
+  # the virtio disks (/dev/vd*) to the SATA disks (/dev/sd*). A device
+  # path matters only on the boot that claims the disk: claiming writes
+  # each role's name into its partition, and every later boot finds the
+  # partition by that name, wherever the disk enumerates. The names
+  # differ because the kernel names a disk for the stack that drives
+  # it. virtio-blk disks are vd*; a disk on an AHCI controller reaches
+  # the kernel through libata and the SCSI layer, which names it sd*.
+  # The three disks enumerate in SATA-port order: the state disk on
+  # port 0 is /dev/sda, the pods disk on port 1 is /dev/sdb, and the
+  # boot disk on port 2 is /dev/sdc.
+  storage:
+    # The dev cluster's node-1.yaml explains the GRUB boot path these
+    # two roles declare and the two system slots below.
+    biosBoot:
+      device: /dev/sdc
+      size: 1Mi
+    bootHome:
+      device: /dev/sdc
+      size: 64Mi
+    systemA:
+      device: /dev/sdc
+      size: 1Gi
+    systemB:
+      device: /dev/sdc
+      size: 1Gi
+    machineState:
+      device: /dev/sda
+      size: 64Mi
+    machineEphemeral:
+      device: /dev/sdb
+      size: 512Mi
+    clusterState:
+      device: /dev/sda
+    podStorage:
+      device: /dev/sdb
+      size: 2Gi
+    podEphemeral:
+      device: /dev/sdb
+  # The declared modules the OS loads for this machine. A real machine
+  # names its NIC driver here, because the kernel builds no network
+  # driver for a real card in. This is the same flow an operator walks
+  # after the hardware report names the driver: the report proposes
+  # spec.modules, the operator writes it, and the next boot binds the
+  # card. e1000 needs nothing loaded before it (no softdep), so the
+  # ordered list is the single name. Init loads it before it brings the
+  # network up, so eth0 and eth1 exist by the time the interfaces
+  # above are configured.
+  modules: [e1000]
+  # The dev cluster's node-1.yaml explains this sysctl.
+  sysctls:
+    vm.max_map_count: "262144"

@@ -288,30 +288,30 @@ endif
 #                            declare it. 239.192.0.0/14 is the
 #                            organization-local multicast scope (RFC
 #                            2365), so these frames stay on this host
-#   -device virtio-net-pci   the NICs that these netdevs attach to.
-#                            They use virtio because our vendored
-#                            kernel builds that driver in
-#                            (CONFIG_VIRTIO_NET=y). Device order sets
-#                            PCI slot order, which sets probe order,
-#                            so the uplink is always eth0 and the
-#                            cluster segment is always eth1, matching
-#                            the names the manifests pin
+#   $(QEMU_NICS)             the NICs that these netdevs attach to.
+#                            Their class depends on HARDWARE (above):
+#                            virtio-net for the paravirtual shape, or
+#                            e1000 for the metal shape. Device order
+#                            sets PCI slot order, which sets probe
+#                            order, so the uplink is always eth0 and
+#                            the cluster segment is always eth1,
+#                            matching the names the manifests pin
 #   -drive                   the machine's disks (the qcow2 files
 #                            above). if=none only registers a backing
-#                            file under an id; the -device lines below
-#                            do the attaching. This is the same
+#                            file under an id; the $(QEMU_DISKS) lines
+#                            below do the attaching. This is the same
 #                            declare-then-attach split that
 #                            -netdev/-device use for the NICs
-#   -device virtio-blk-pci   the disk controllers, using virtio for
-#                            the same reason (CONFIG_VIRTIO_BLK=y).
-#                            The guest sees /dev/vda and /dev/vdb, in
-#                            -device order. serial= gives each disk a
-#                            serial number that the guest can read
-#                            from sysfs. This takes the place of the
-#                            serial number a real drive would carry,
-#                            so identifying a disk by its identity,
-#                            rather than by its kernel name, also
-#                            works in the lab
+#   $(QEMU_DISKS)            the disk controller that attaches those
+#                            backing files. Its class depends on
+#                            HARDWARE (above): a virtio-blk device per
+#                            disk (the guest sees /dev/vda, /dev/vdb,
+#                            /dev/vdc), or one AHCI controller fronting
+#                            three SATA disks (the guest sees /dev/sda,
+#                            /dev/sdb, /dev/sdc). serial= gives each
+#                            disk the identity a real drive carries, so
+#                            a disk is identifiable by its identity and
+#                            not only by its kernel name
 # A reboot that the guest starts itself resets the VM in place: QEMU
 # reloads the firmware (and -kernel/-initrd, when present), the
 # qcow2 disks and the NVRAM persist, and the serial console shows the
@@ -364,6 +364,74 @@ RTC_BASE := -rtc base=$(RTC)
 # empty for every ordinary boot.
 QEMU_EXTRA ?=
 
+# HARDWARE selects the controller classes the guest presents. The two
+# values name the two hardware shapes the lab drills.
+#
+# HARDWARE=virtio (the default) is the lab's fast paravirtual shape.
+# The disks are virtio-blk and the network cards are virtio-net. The
+# vendored kernel builds both drivers in (CONFIG_VIRTIO_BLK=y,
+# CONFIG_VIRTIO_NET=y), so this shape needs no module to see a disk or
+# a card. Every ordinary lab boot uses it, because it is the fastest to
+# emulate and the simplest to reason about.
+#
+# HARDWARE=metal is the shape a real machine has. The disks sit on an
+# AHCI SATA controller and the network cards are e1000, the two
+# controller classes the kernel ships as modules (CONFIG_SATA_AHCI=m,
+# CONFIG_E1000=m). This shape exists because the paravirtual shape
+# hides a whole class of faults: a virtio guest never loads a storage
+# or a network module, so a driver a real controller needs stays
+# untested until a real machine boots. The parity smoke boots this
+# shape so the lab exercises the module path a real machine's first
+# boot walks.
+#
+# Selected by name at recipe expansion, the same idiom as FIRMWARE and
+# BOOT. Two groups of devices change with the shape: the network cards
+# and the disk controller. The -netdev backends and the -drive backing
+# files do not change, because a backend and a backing file are the
+# same whichever controller fronts them.
+HARDWARE ?= virtio
+
+# The network cards. Under metal, both cards are e1000, so the whole
+# driver loads once (from spec.modules) and registers the two cards in
+# PCI-slot order in one pass: the uplink card sits first and becomes
+# eth0, the cluster card becomes eth1. This is the order the manifests
+# pin. A mix of a built-in virtio card and an e1000 card would reverse
+# the names, because the built-in driver registers its card during
+# kernel boot, before init loads any module. Making both cards e1000
+# keeps the names the manifests expect and matches a real machine,
+# whose cards usually share one driver.
+QEMU_NICS_virtio = \
+	-device virtio-net-pci,netdev=uplink,mac=$(UPLINK_MAC) \
+	-device virtio-net-pci,netdev=cluster,mac=$(CLUSTER_MAC)
+QEMU_NICS_metal = \
+	-device e1000,netdev=uplink,mac=$(UPLINK_MAC) \
+	-device e1000,netdev=cluster,mac=$(CLUSTER_MAC)
+QEMU_NICS = $(QEMU_NICS_$(HARDWARE))
+
+# The disk controller. Under virtio, each disk is its own
+# virtio-blk-pci device, and the guest sees /dev/vda, /dev/vdb, and
+# /dev/vdc in -device order. Under metal, one AHCI controller (id=sata)
+# fronts three SATA disks, each an ide-hd on its own port; the guest
+# reaches them through libata and the SCSI layer, which names them
+# /dev/sda, /dev/sdb, and /dev/sdc in port order. The metal manifest
+# (hardware/machines/node-1.yaml) declares the sd* names for exactly
+# this reason. serial= gives each disk the identity a real drive
+# carries; the SCSI layer surfaces a SATA disk's serial differently
+# from virtio's, but liken matches a disk to its role by device path at
+# claim time, not by serial, so the boot does not depend on where the
+# serial appears. QEMU_BOOTINDEX rides on the boot disk under BIOS, the
+# same way it does for virtio.
+QEMU_DISKS_virtio = \
+	-device virtio-blk-pci,drive=state,serial=liken-$(NODE)-state \
+	-device virtio-blk-pci,drive=pods,serial=liken-$(NODE)-pods \
+	-device virtio-blk-pci,drive=boot,serial=liken-$(NODE)-boot$(QEMU_BOOTINDEX)
+QEMU_DISKS_metal = \
+	-device ahci,id=sata \
+	-device ide-hd,drive=state,bus=sata.0,serial=liken-$(NODE)-state \
+	-device ide-hd,drive=pods,bus=sata.1,serial=liken-$(NODE)-pods \
+	-device ide-hd,drive=boot,bus=sata.2,serial=liken-$(NODE)-boot$(QEMU_BOOTINDEX)
+QEMU_DISKS = $(QEMU_DISKS_$(HARDWARE))
+
 run: guests/$(NODE)/state.qcow2 guests/$(NODE)/pods.qcow2 guests/$(NODE)/boot.qcow2 $(FIRMWARE_DEPS)
 	qemu-system-x86_64 \
 		-accel kvm -accel tcg \
@@ -379,15 +447,12 @@ run: guests/$(NODE)/state.qcow2 guests/$(NODE)/pods.qcow2 guests/$(NODE)/boot.qc
 		$(RTC_BASE) \
 		$(QEMU_EXIT_ON_REBOOT) \
 		-netdev user,id=uplink$(API_FORWARD) \
-		-device virtio-net-pci,netdev=uplink,mac=$(UPLINK_MAC) \
 		-netdev socket,id=cluster,mcast=239.192.76.75:26443 \
-		-device virtio-net-pci,netdev=cluster,mac=$(CLUSTER_MAC) \
+		$(QEMU_NICS) \
 		-drive file=guests/$(NODE)/state.qcow2,format=qcow2,if=none,id=state \
-		-device virtio-blk-pci,drive=state,serial=liken-$(NODE)-state \
 		-drive file=guests/$(NODE)/pods.qcow2,format=qcow2,if=none,id=pods \
-		-device virtio-blk-pci,drive=pods,serial=liken-$(NODE)-pods \
 		-drive file=guests/$(NODE)/boot.qcow2,format=qcow2,if=none,id=boot \
-		-device virtio-blk-pci,drive=boot,serial=liken-$(NODE)-boot$(QEMU_BOOTINDEX)
+		$(QEMU_DISKS)
 
 # One-shot boots, for debugging and automation. liken.oneshot tells
 # init not to restart k3s. When k3s exits for the first time, the
@@ -407,8 +472,15 @@ run-once: run
 # this, `make run BOOT=disk` boots the machine from its own disk. The
 # install is idempotent: if something interrupts it, running it again
 # finishes the job.
+#
+# INSTALL_CPIO names the install image to boot. The default is the dev
+# cluster's own. The parity smoke overrides it to point at the
+# hardware deployment's install image, which carries the same release
+# but the metal-shaped machine manifest. The variable is not
+# target-specific, so a caller can set it on the command line.
+INSTALL_CPIO ?= image/install.cpio
 install: BOOT = kernel
-install: INITRD = image/install.cpio
+install: INITRD = $(INSTALL_CPIO)
 install: LIKEN_BOOT_ARGS = liken.install
 install: QEMU_EXIT_ON_REBOOT := -no-reboot
 install: run
@@ -465,7 +537,20 @@ smoke-uefi:
 smoke-bios:
 	./smoke.sh bios
 
-.PHONY: run run-once install install-stick storage grow-pods smoke-uefi smoke-bios clean
+# The hardware-parity smoke. It is the same drill as smoke-uefi, on the
+# metal hardware shape (HARDWARE=metal): the disks on an AHCI SATA
+# controller and the network cards e1000, the module-loaded controllers
+# a real machine has. It boots the hardware deployment's install image,
+# whose node-1 manifest declares the sd* disks and the e1000 module, so
+# the drill proves the whole module path a virtio guest skips. The
+# firmware is UEFI, the firmware on a modern motherboard. See
+# hardware/README.md, and smoke.sh, which explains the shared drill.
+smoke-hardware:
+	HARDWARE=metal INSTALL_CPIO=hardware/image/install.cpio \
+		REPORT_STICK=hardware/image/stick.img \
+		./smoke.sh uefi hardware
+
+.PHONY: run run-once install install-stick storage grow-pods smoke-uefi smoke-bios smoke-hardware clean
 
 clean:
 	rm -rf guests

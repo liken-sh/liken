@@ -60,6 +60,11 @@ manifest for each machine. Every field carries a comment that
 explains what the field means. Keep `mycluster/` in version control.
 It is your cluster, declared.
 
+If you do not know a machine's disks, its network interface names, or
+the extra drivers it needs, fill in your best guess now. The hardware
+report in step 5 boots the machine, observes its hardware, and writes
+a corrected manifest for you.
+
 ## 3. Mint the cluster's identity
 
     ./liken mint mycluster/identity
@@ -92,18 +97,71 @@ command overwrites the device.
 ## 5. Boot each machine from the stick
 
 Plug in the stick and boot the machine. The first time, you may need
-to open the firmware's boot-device menu. A menu appears that lists
-your machines by name:
+to open the firmware's boot-device menu. The stick's menu appears. It
+gives each machine two entries, and it ends with one entry for the
+report:
 
     install as big
+    wipe and reinstall as big
     install as little
-    install as tiny
+    wipe and reinstall as little
+    liken hardware report
 
-Pick the entry for the machine in front of you. The machine
+The menu never times out. You must pick an entry.
+
+### First, run the hardware report
+
+Pick `liken hardware report`. This boot changes nothing on the
+machine's disks. It loads the drivers the hardware wants, watches
+which disks and network interfaces appear, and writes a proposed
+manifest to the stick as `hardware-report.yaml`. It prints the whole
+proposal, then holds:
+
+    liken: this report was written to the stick as hardware-report.yaml; press Enter to reboot.
+
+Press Enter to reboot the machine. Take the stick to your
+workstation. Read `hardware-report.yaml`. It is a valid Machine
+manifest with the evidence for each line beside it as a comment: the
+drivers each device wants, in load order; each disk's size, model, and
+path; each interface's name, MAC, and link state. Copy the
+`spec.modules`, `spec.network`, and `spec.storage` sections into this
+machine's manifest in `mycluster/`. Edit the parts marked `CHANGE-ME`
+and set each storage size. Then rebuild the stick with step 4, so it
+carries the corrected manifest.
+
+Run the report on each new machine. Its answers are the disks, the
+interface names, and the drivers you cannot know from a datasheet.
+
+### Then install the machine
+
+Pick `install as <name>` for the machine in front of you. The machine
 partitions its blank disks, copies the operating system onto them,
-registers itself with its firmware, and powers off. Unplug the stick
-and power the machine back on. From then on, it boots from its own
-disk.
+registers itself with its firmware, and holds:
+
+    liken: installed to slot A; remove the stick, then press Enter to power off; the next power-on boots from the disk.
+
+Remove the stick before you press Enter. The stick is first in the
+boot order, so a power-on with the stick still in returns to the menu.
+Press Enter. The machine powers off. Power it back on. From then on,
+it boots from its own disk.
+
+If the install cannot finish, it prints the error, lists the machine's
+disks, and holds:
+
+    liken: press Enter to power off
+
+Fix the cause and boot the install again. An install is idempotent, so
+a second attempt is safe.
+
+### To reinstall a machine liken already wrote
+
+`install as <name>` claims only blank disks. It refuses a disk it does
+not recognize, so it never erases data it did not write. This protects
+you, but it also means the plain install cannot replace an install
+liken itself made. To do that, pick `wipe and reinstall as <name>`. It
+blanks the disks this machine's manifest declares, then installs, in
+one boot. Picking the entry at the keyboard is your confirmation. It
+ends at the same held messages as a plain install.
 
 Use the same stick for every machine. Start with the first leader.
 The machines find each other at the addresses you declared. The

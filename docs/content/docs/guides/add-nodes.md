@@ -48,9 +48,21 @@ overwrites the device.
 
 ## 4. Boot the new machine from the stick
 
-The stick's menu now lists the new machine. Pick its entry. The
-machine installs itself and powers off. Unplug the stick and power
-the machine back on.
+The stick's menu now lists the new machine, with an `install as
+<name>` entry and a `wipe and reinstall as <name>` entry. If the
+hardware is new to you, boot `liken hardware report` first. It writes
+`hardware-report.yaml` to the stick, so you can correct the machine's
+disks, interfaces, and drivers before you install. [Install a
+cluster](/docs/guides/install/#5-boot-each-machine-from-the-stick)
+describes the report and the held console messages in full.
+
+Pick `install as <name>`. The machine installs itself and holds the
+console:
+
+    liken: installed to slot A; remove the stick, then press Enter to power off; the next power-on boots from the disk.
+
+Remove the stick, then press Enter. The machine powers off. Power it
+back on, and it boots from its own disk.
 
 ## 5. Watch it join
 
