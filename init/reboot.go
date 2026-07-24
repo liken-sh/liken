@@ -18,9 +18,12 @@ package main
 // IN_MOVED_TO is the event that every intent write produces, and the
 // watch asks for it.
 //
-// If inotify cannot start, init falls back to a 2-second poll. PID 1
-// must keep working, so a watch that fails to start must not stop the
-// machine. The poll is a degraded mode. It adds latency, never error.
+// The machine guarantees its inotify headroom at boot (osSysctls in
+// system.go raises the per-uid watch and instance limits), so a watch
+// that fails to start is a real fault, not an expected shortage. Init
+// runs the watch as a component of the machine plane, so a failed
+// watch surfaces on the console and the plane retries it with backoff.
+// There is no polling fallback to hide the fault.
 //
 // The shutdown sequence runs the dependency stack in reverse order.
 // First, it signals every process. (k3s was already stopped
@@ -49,17 +52,16 @@ import (
 // The watch comes before the first scan, so an intent that lands
 // between the scan and the watch cannot slip past unseen.
 //
-// If the watch cannot start, the function falls back to a 2-second
-// poll, so PID 1 keeps working even when inotify is unavailable. A
-// returned nil tells the machine plane that a reboot intent was
-// delivered and this component's work is complete.
+// A watch that cannot start returns the error to the machine plane,
+// which reports it and restarts this component. A returned nil tells
+// the plane that a reboot intent was delivered and this component's
+// work is complete.
 func watchForOperatorIntents(ctx context.Context, dir string,
 	reboots chan<- machine.RebootIntent, restarts chan<- machine.RestartIntent,
 	loads chan<- machine.ModulesIntent) error {
 	wake, err := machine.WatchDir(ctx, dir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "liken: watching %s: %v; falling back to a poll\n", dir, err)
-		wake = pollWake(ctx, 2*time.Second)
+		return fmt.Errorf("watching %s: %w", dir, err)
 	}
 	if scanIntents(dir, reboots, restarts, loads) {
 		return nil
@@ -148,31 +150,6 @@ func scanIntents(dir string, reboots chan<- machine.RebootIntent,
 	}
 	loads <- *load
 	return false
-}
-
-// pollWake adapts a ticker to a wake channel, so watchForOperatorIntents
-// can drive its scan loop the same way whether an inotify watch or a
-// timer wakes it. Each tick sends one non-blocking wake, so a slow scan
-// coalesces ticks the way it coalesces events. This is the degraded
-// mode for a machine where inotify cannot start.
-func pollWake(ctx context.Context, interval time.Duration) <-chan struct{} {
-	wake := make(chan struct{}, 1)
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				select {
-				case wake <- struct{}{}:
-				default:
-				}
-			}
-		}
-	}()
-	return wake
 }
 
 // rebootMachine runs init's shutdown sequence: the dependency stack

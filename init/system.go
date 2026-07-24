@@ -41,8 +41,39 @@ import (
 // balanced against the benefit above. A gap of two percent, twice
 // this value, kept kswapd visibly busy even on a well-filled
 // machine, reclaiming pages that nothing needed yet.
+//
+// The two inotify limits raise the kernel's defaults so that init and
+// the operator always have watches to spend. inotify limits are
+// per-uid, and every inotify user on the machine runs as root and
+// draws from the one root quota: kubelet's watches on config and
+// secrets, containerd's watches, k3s's own watches, init's watch on
+// the operator's intent directory, and the operator's watch on the
+// facts tree. max_user_instances raises the ceiling on inotify
+// instances from the kernel's 128 to 8192, the value a Kubernetes node
+// commonly runs with, because kubelet and containerd alone can open
+// dozens of instances and the machine plane wants two more that never
+// contend with them. max_user_watches raises the ceiling on watched
+// inodes to 524288 for the same reason.
+//
+// These numbers are caps, not allocations. An unused cap costs no
+// memory. A single watch costs about a kilobyte of unswappable kernel
+// memory, but only once something registers it, so raising the ceiling
+// on a machine that watches little changes nothing about its memory
+// use. The cap's job is to never be the thing that fails when a
+// legitimate watcher asks for a watch, while it still stands as a
+// backstop against a runaway watcher that would otherwise consume
+// kernel memory without bound.
+//
+// The consequence matters more than the numbers. With this headroom
+// guaranteed at boot, a watch that fails to start is a real fault, not
+// an expected shortage to paper over. This is why init has no polling
+// fallback for its intent watch: a failed watch surfaces on the
+// console and the component plane retries it, rather than degrading to
+// a poll that hides the fault.
 var osSysctls = map[string]string{
-	"vm.watermark_scale_factor": "100",
+	"vm.watermark_scale_factor":     "100",
+	"fs.inotify.max_user_instances": "8192",
+	"fs.inotify.max_user_watches":   "524288",
 }
 
 // applySysctls applies spec.sysctls at boot. If a sysctl fails,

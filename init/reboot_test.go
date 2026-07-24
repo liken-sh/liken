@@ -28,11 +28,36 @@ func watchIntents(t *testing.T) (string, chan machine.RebootIntent, chan machine
 	return dir, reboots, restarts, loads
 }
 
+func TestWatchReturnsAnErrorWhenTheDirectoryIsMissing(t *testing.T) {
+	// The machine guarantees its inotify headroom at boot, so a watch
+	// that cannot start is a real fault. The function surfaces it as an
+	// error for the machine plane to report and retry, rather than
+	// degrading to a poll. A directory that does not exist is the
+	// simplest way to make the watch fail.
+	dir := filepath.Join(t.TempDir(), "does-not-exist")
+	reboots := make(chan machine.RebootIntent, 1)
+	restarts := make(chan machine.RestartIntent, 1)
+	loads := make(chan machine.ModulesIntent, 1)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- watchForOperatorIntents(t.Context(), dir, reboots, restarts, loads)
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a watch on a missing directory must return an error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the watcher must fail promptly, not block")
+	}
+}
+
 func TestWatchDeliversARebootIntent(t *testing.T) {
 	dir, reboots, _, _ := watchIntents(t)
 
-	// A few empty polls happen first: no file exists yet, so nothing
-	// is delivered.
+	// The initial scan of the empty directory delivers nothing, so the
+	// watcher stays idle until a file lands.
 	select {
 	case got := <-reboots:
 		t.Fatalf("nothing was requested yet: %+v", got)
@@ -118,8 +143,8 @@ func TestWatchConsumesARestartIntentAndKeepsWatching(t *testing.T) {
 		t.Fatal("the watcher never delivered the restart intent")
 	}
 
-	// The function consumed the intent: the file is gone, so a poll
-	// cannot deliver it twice.
+	// The function consumed the intent: the file is gone, so a later
+	// scan cannot deliver it twice.
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		if intent, _ := machine.ReadRestartIntent(dir); intent == nil {
