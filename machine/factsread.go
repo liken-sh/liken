@@ -38,9 +38,6 @@ func (t FactsTree) Read() (*MachineStatus, error) {
 	if s.Role, err = t.readRole(); err != nil {
 		return nil, err
 	}
-	if s.BootedAt, err = t.readTime("bootedAt"); err != nil {
-		return nil, err
-	}
 	if s.LastCrash, err = t.readLastCrash(); err != nil {
 		return nil, err
 	}

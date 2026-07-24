@@ -100,7 +100,6 @@ func publishBootFacts(tree machine.FactsTree, in bootFacts) {
 	memoryBytes, bootedAt := machineUptimeFacts(now)
 
 	logFactsError(tree.WriteRole(in.role))
-	logFactsError(tree.WriteBootedAt(bootedAt))
 	// The crash stub arrives settled rather than being re-read here,
 	// because settling it has side effects (preserving and clearing the
 	// platform store) that belong to one moment early in boot.
@@ -125,6 +124,7 @@ func publishBootFacts(tree machine.FactsTree, in bootFacts) {
 	// The boot record: what this boot ran under. The four manifest
 	// records seed here at boot; the module loader and the restart path
 	// own the ones they rewrite afterward.
+	logFactsError(tree.WriteBootTime(bootedAt))
 	logFactsError(tree.WriteBootSlot(in.boot.Slot))
 	logFactsError(tree.WriteBootStorage(in.boot.Storage))
 	logFactsError(tree.WriteBootModules(in.boot.Modules))

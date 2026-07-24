@@ -139,7 +139,7 @@ func TestPublishBootFactsPublishesTheBootStory(t *testing.T) {
 	if facts.Time.State != machine.TimeFreeRunning {
 		t.Errorf("no sources and no sync reads as free-running: %+v", facts.Time)
 	}
-	if facts.Version.Kernel == "" || facts.Hardware.CPUs == 0 || facts.BootedAt == nil {
+	if facts.Version.Kernel == "" || facts.Hardware.CPUs == 0 || facts.Boot.Time == nil {
 		t.Errorf("the machine's own answers are asked, not pinned: %+v", facts)
 	}
 	// cat parity: role is one file, the API word plus one newline.

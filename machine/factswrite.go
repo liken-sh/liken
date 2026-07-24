@@ -39,10 +39,12 @@ func (t FactsTree) WriteRole(role api.Role) error {
 	return t.writeFact("role", string(role))
 }
 
-// WriteBootedAt publishes the moment the machine booted, derived from
-// the kernel's uptime counter.
-func (t FactsTree) WriteBootedAt(bootedAt *time.Time) error {
-	return t.writeFact("bootedAt", formatTime(bootedAt))
+// WriteBootTime publishes the moment the machine booted, derived from
+// the kernel's uptime counter. It belongs to the boot record because it
+// shares the record's lifetime: a reboot moves it, an in-place k3s
+// restart does not.
+func (t FactsTree) WriteBootTime(bootedAt *time.Time) error {
+	return t.writeFact("boot/time", formatTime(bootedAt))
 }
 
 // WriteLastCrash publishes the newest kernel crash the machine still

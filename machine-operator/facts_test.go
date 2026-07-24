@@ -29,7 +29,6 @@ func writeFacts(t *testing.T, s *machine.MachineStatus) machine.FactsTree {
 		}
 	}
 	must(tree.WriteRole(s.Role))
-	must(tree.WriteBootedAt(s.BootedAt))
 	must(tree.WriteLastCrash(s.LastCrash))
 	must(tree.WriteVersion(s.Version))
 	must(tree.WriteNetwork(s.Network))
@@ -42,6 +41,7 @@ func writeFacts(t *testing.T, s *machine.MachineStatus) machine.FactsTree {
 	must(tree.WriteModules(s.Modules))
 	must(tree.WriteFeatures(s.Features))
 	must(tree.WriteRegistries(s.Registries))
+	must(tree.WriteBootTime(s.Boot.Time))
 	must(tree.WriteBootSlot(s.Boot.Slot))
 	must(tree.WriteBootStorage(s.Boot.Storage))
 	must(tree.WriteBootModules(s.Boot.Modules))
@@ -66,13 +66,13 @@ func TestOperatorReadsFactsFromTheTree(t *testing.T) {
 	}
 	want := &machine.MachineStatus{
 		Role:     api.RoleLeader,
-		BootedAt: &booted,
 		Version:  machine.VersionStatus{Liken: "0.1.0", Kernel: "6.15.4"},
 		Network:  machine.NetworkStatus{Interface: "eth0", Addresses: []string{"10.0.2.15/24"}},
 		Hardware: machine.HardwareStatus{CPUs: 4, MemoryBytes: 4_294_967_296},
 		Storage:  storage,
 		Modules:  []machine.ModuleStatus{{Name: "overlay", State: machine.ModuleLoaded}},
 		Boot: machine.BootStatus{
+			Time: &booted,
 			Slot: "A", ManifestSource: machine.ManifestSourceProven, ManifestHash: "abc123",
 		},
 	}
@@ -90,8 +90,8 @@ func TestOperatorReadsFactsFromTheTree(t *testing.T) {
 	if got.Role != want.Role || got.Boot.ManifestSource != machine.ManifestSourceProven || got.Boot.ManifestHash != "abc123" {
 		t.Errorf("the boot identity must round-trip: %+v", got.Boot)
 	}
-	if got.BootedAt == nil || !got.BootedAt.Equal(booted) {
-		t.Errorf("bootedAt must round-trip: %v", got.BootedAt)
+	if got.Boot.Time == nil || !got.Boot.Time.Equal(booted) {
+		t.Errorf("the boot time must round-trip: %v", got.Boot.Time)
 	}
 	if got.Hardware.CPUs != 4 || got.Storage.ClusterState.Backing != machine.BackingPartition {
 		t.Errorf("the hardware and storage facts must round-trip: %+v", got)

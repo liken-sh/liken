@@ -16,6 +16,11 @@ import (
 func (t FactsTree) readBoot() (BootStatus, error) {
 	b := BootStatus{}
 
+	var err error
+	if b.Time, err = t.readTime("boot/time"); err != nil {
+		return BootStatus{}, err
+	}
+
 	manifest, err := t.readRecordFact("boot/manifest")
 	if err != nil {
 		return BootStatus{}, err

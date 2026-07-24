@@ -63,13 +63,13 @@ spec:
           jsonPath: .status.phase
         # kubectl computes Uptime at read time, in the same way it
         # computes the Age column: a date-typed column renders as the
-        # time elapsed since its timestamp. Deriving this from
-        # bootedAt keeps the value always current. A literal uptime
-        # figure written into status would go stale the moment the
-        # operator wrote it.
+        # time elapsed since its timestamp. Deriving this from the
+        # boot record's time keeps the value always current. A literal
+        # uptime figure written into status would go stale the moment
+        # the operator wrote it.
         - name: Uptime
           type: date
-          jsonPath: .status.bootedAt
+          jsonPath: .status.boot.time
         - name: Address
           type: string
           jsonPath: .status.network.addresses[0]
@@ -1023,6 +1023,17 @@ spec:
                     and was quarantined. It stands until a different
                     edit proves out.
                   properties:
+                    time:
+                      type: string
+                      format: date-time
+                      description: >-
+                        The moment this machine booted, derived by
+                        init from the kernel's uptime counter. It
+                        belongs to the boot record because it shares
+                        the record's lifetime: a reboot moves it, an
+                        in-place k3s restart does not. The Uptime
+                        printer column is this timestamp rendered as an
+                        elapsed time.
                     manifestSource:
                       type: string
                       enum: [Staged, Proven, Seed]
@@ -1085,10 +1096,9 @@ spec:
                         (feature toggles, registry configuration).
                         This field shares the boot record's lifetime
                         on purpose. A change that arrived by restart
-                        increments this field without moving
-                        bootedAt. A change that arrived by reboot
-                        moves bootedAt and returns this field to
-                        zero.
+                        increments this field without moving the boot
+                        record's time. A change that arrived by reboot
+                        moves the time and returns this field to zero.
                     slot:
                       type: string
                       enum: [A, B]
@@ -1369,14 +1379,6 @@ spec:
                         full kernel log tail: a directory in the crash
                         store under machineState, or /sys/fs/pstore on
                         a machine whose machineState runs in memory.
-                bootedAt:
-                  type: string
-                  format: date-time
-                  description: >-
-                    The moment this machine booted, derived by init
-                    from the kernel's uptime counter. The Uptime
-                    printer column is this timestamp rendered as an
-                    elapsed time.
                 conditions:
                   type: array
                   # A conditions array is really a map with one entry

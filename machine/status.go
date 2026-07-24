@@ -127,21 +127,6 @@ type MachineStatus struct {
 	// only when the records themselves leave the retention window.
 	LastCrash *CrashStatus `json:"lastCrash,omitempty"`
 
-	// BootedAt is the moment the machine booted, derived by init from
-	// the kernel's uptime counter. It is a timestamp rather than a
-	// duration, because a timestamp never goes out of date in the
-	// cluster. `kubectl get machines` renders it as a live elapsed
-	// time in the Uptime column.
-	//
-	// This status deliberately has no heartbeat. The machine's
-	// liveness signal is a Lease in the liken-system namespace, not a
-	// status field, because a heartbeat must renew forever, and every
-	// status write rewrites this whole object and wakes every
-	// watcher. This is the same reason kube-node-lease exists (see the
-	// kubernetes package). The cluster operator reads the leases and
-	// marks a silent machine Lost.
-	BootedAt *time.Time `json:"bootedAt,omitempty"`
-
 	// Conditions follow the standard Kubernetes pattern: a set of
 	// typed, timestamped observations, such as "Ready" and
 	// "SysctlsApplied", that controllers maintain and that humans and
@@ -527,6 +512,23 @@ const (
 // detection that only init can supply. The operator compares it
 // against the cluster's copies.
 type BootStatus struct {
+	// Time is the moment the machine booted, derived by init from the
+	// kernel's uptime counter. It is a timestamp rather than a
+	// duration, because a timestamp never goes out of date in the
+	// cluster. `kubectl get machines` renders it as a live elapsed
+	// time in the Uptime column. It belongs to the boot record because
+	// it shares the record's lifetime: a reboot moves it, an in-place
+	// k3s restart does not.
+	//
+	// This status deliberately has no heartbeat. The machine's
+	// liveness signal is a Lease in the liken-system namespace, not a
+	// status field, because a heartbeat must renew forever, and every
+	// status write rewrites this whole object and wakes every
+	// watcher. This is the same reason kube-node-lease exists (see the
+	// kubernetes package). The cluster operator reads the leases and
+	// marks a silent machine Lost.
+	Time *time.Time `json:"time,omitempty"`
+
 	// The Machine manifest this boot ran under.
 	ManifestSource ManifestSource `json:"manifestSource,omitempty"`
 	ManifestHash   string         `json:"manifestHash,omitempty"`
@@ -585,8 +587,9 @@ type BootStatus struct {
 	// It lives in the boot record because it shares the boot's
 	// lifetime: a reboot re-makes the record, and the count returns
 	// to zero. That reset is itself a signal. A change that arrived
-	// by restart increments this count without moving bootedAt, and a
-	// change that arrived by reboot does the opposite.
+	// by restart increments this count without moving the boot
+	// record's time, and a change that arrived by reboot does the
+	// opposite.
 	Restarts int `json:"restarts,omitempty"`
 
 	// Rejection is the standing quarantine record for the Machine

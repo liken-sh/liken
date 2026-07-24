@@ -27,7 +27,6 @@ func writeAll(t *testing.T, tree FactsTree, s *MachineStatus) {
 		}
 	}
 	must(tree.WriteRole(s.Role))
-	must(tree.WriteBootedAt(s.BootedAt))
 	must(tree.WriteLastCrash(s.LastCrash))
 	must(tree.WriteVersion(s.Version))
 	must(tree.WriteNetwork(s.Network))
@@ -40,6 +39,7 @@ func writeAll(t *testing.T, tree FactsTree, s *MachineStatus) {
 	must(tree.WriteModules(s.Modules))
 	must(tree.WriteFeatures(s.Features))
 	must(tree.WriteRegistries(s.Registries))
+	must(tree.WriteBootTime(s.Boot.Time))
 	must(tree.WriteBootManifest(s.Boot.ManifestSource, s.Boot.ManifestHash))
 	must(tree.WriteBootClusterManifest(s.Boot.ClusterManifestSource, s.Boot.ClusterManifestHash))
 	must(tree.WriteBootCredentials(s.Boot.CredentialsSource, s.Boot.CredentialsHash))
@@ -97,8 +97,7 @@ func everythingSet() *MachineStatus {
 		Partition: "liken:clusterState", CapacityBytes: 2_146_435_072,
 	}
 	return &MachineStatus{
-		Role:     api.RoleLeader,
-		BootedAt: &booted,
+		Role: api.RoleLeader,
 		LastCrash: &CrashStatus{
 			Time: &crashed, Reason: CrashPanic,
 			Message: "Kernel panic - not syncing: test",
@@ -161,6 +160,7 @@ func everythingSet() *MachineStatus {
 			Mirrors: []string{"docker.io", "*"}, CredentialedHosts: []string{"ghcr.io"}, Embedded: true,
 		},
 		Boot: BootStatus{
+			Time:           &booted,
 			ManifestSource: ManifestSourceProven, ManifestHash: "aaa",
 			ClusterManifestSource: ManifestSourceStaged, ClusterManifestHash: "bbb",
 			CredentialsSource: ManifestSourceProven, CredentialsHash: "ccc",
@@ -183,9 +183,8 @@ func sparseFacts() *MachineStatus {
 	booted := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
 	lease := booted.Add(time.Hour)
 	return &MachineStatus{
-		Role:     api.RoleFollower,
-		BootedAt: &booted,
-		Version:  VersionStatus{Liken: "0.1.0", Kernel: "6.15.4"},
+		Role:    api.RoleFollower,
+		Version: VersionStatus{Liken: "0.1.0", Kernel: "6.15.4"},
 		Network: NetworkStatus{
 			Interface: "eth0", MAC: "52:54:00:12:34:56",
 			Addresses: []string{"10.0.2.15/24"}, Gateway: "10.0.2.2",
@@ -199,7 +198,7 @@ func sparseFacts() *MachineStatus {
 			},
 		},
 		Storage: AllRolesInMemory(),
-		Boot:    BootStatus{ManifestSource: ManifestSourceSeed, ManifestHash: "seed", Slot: "A"},
+		Boot:    BootStatus{Time: &booted, ManifestSource: ManifestSourceSeed, ManifestHash: "seed", Slot: "A"},
 	}
 }
 

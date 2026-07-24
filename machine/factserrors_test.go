@@ -36,7 +36,7 @@ func TestReadReportsUnparseableValues(t *testing.T) {
 	}{
 		"cpus":                   {"hardware/cpus", "three"},
 		"memoryBytes":            {"hardware/memoryBytes", "lots"},
-		"bootedAt":               {"bootedAt", "soon"},
+		"boot time":              {"boot/time", "soon"},
 		"time lastSync":          {"time/lastSync", "never"},
 		"time stratum":           {"time/stratum", "high"},
 		"lastCrash time":         {"lastCrash/time", "yesterday"},
