@@ -68,34 +68,49 @@ shutdown paths get this, because they share one function.
 
 ## What the lab proved
 
-Both firmware drills passed. `make smoke-uefi` took node-1 from blank
-disks to Ready in 21 seconds, and `make smoke-bios` in 16 seconds. Each
-console reported the bind before k3s started.
+Both firmware drills passed, and each console reported the bind before
+k3s started. The bind then held on a cluster of three machines and on
+both hardware shapes, the virtio disks of the ordinary lab and the
+AHCI disks of the metal drill. Init's own mount table showed one
+partition at both `/var/lib/kubelet` and `/var/log/pods` on every
+node, and every pod on each machine had its log directory on that
+disk: coredns, metrics-server, local-path-provisioner, both liken
+operators, and the log relay.
 
-A hand drill on the same guest proved the rest. Init's own mount table
-showed `/dev/vdb3` at both `/var/lib/kubelet` and `/var/log/pods`, and
-every pod on the machine had its log directory on that disk: coredns,
-metrics-server, local-path-provisioner, both liken operators, the log
-relay, and the drill's own logging pod. `kubectl logs` read that
-pod's output through the canonical path, which is the check that
-matters most, because that is the path every other reader uses. A pod
-with a hostPath mount of `/var/log` saw the same disk under
-`pods/`, which is the shape a log collector uses, and every symlink in
-`/var/log/containers` resolved into it.
+The readers that depend on the path all still work. `kubectl logs`
+read a pod's output through the canonical path, which is the check
+that matters most, because that is the path every other reader uses.
+Every symlink in `/var/log/containers` resolved into the disk, with
+none dangling on any node. A pod with a hostPath mount of `/var/log`
+saw the same disk under `pods/`, which is the shape a log collector
+uses, so the bind propagates into a container that asks for it.
 
-The reboot was the other half. A reboot intent written from a pod took
-the machine down, and the console showed `/var/log/pods` unmounted
+The volume is the point, and the numbers make it. Under a load of
+several containers logging hard, one machine put 139 MiB of logs on
+podEphemeral and another 157 MiB. Each is more than the whole 128 MiB
+overlay could ever have held. The overlay itself moved by 96 KiB on
+both.
+
+The reboot was the other half, drilled on all three machines while the
+cluster stayed up. Every console showed `/var/log/pods` unmounted
 first, then `/var/lib/kubelet`, with the kernel's own
-`EXT4-fs (vdb3): unmounting filesystem` line between them. The disk
-released. The machine came back Ready and bound the logs again.
+`EXT4-fs: unmounting filesystem` line between them. The disk released
+every time, no unmount reported a busy target, and each machine came
+back Ready and bound the logs again in under a minute.
 
 The drill also showed what changes now that these logs outlive their
-boot. coredns came back with `0.log` from the boot before and `1.log`
-from this one, which is the ordinary container-restart numbering, kept
-across a reboot instead of erased with a tmpfs. The
-directories of the two drill pods that did not survive the reboot were
-removed by kubelet's own garbage collection once their Pod objects
-were deleted. Nothing here needs liken to clean up after it.
+boot. A container came back with `0.log` from the boot before and
+`1.log` from this one, which is the ordinary restart numbering, kept
+across a reboot instead of erased with a tmpfs. Once the drill's Pod
+objects were deleted, kubelet's own garbage collection took one node
+from 161 MiB of logs back to 1.3 MiB. Nothing here needs liken to
+clean up after it.
+
+One kubelet behaviour is worth recording, because it strengthens the
+reason for this milestone. A container that writes in bursts overshoots
+`containerLogMaxSize` before the rotation catches it, so the cap is
+looser under a burst than its number suggests. The bound that matters
+is the filesystem the bytes land on.
 
 The machine that skips the bind is the one case the lab did not run.
 Every machine in the dev fleet declares podEphemeral, and the skip is

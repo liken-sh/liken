@@ -97,26 +97,54 @@ comments, next to the driver that made them ambiguous.
 
 ## What the lab proved
 
-The lab drilled resolution end to end. node-1's manifest now declares
-its uplink by name and its cluster segment by MAC address, so one
-install exercises both ways of saying which port. `make smoke-uefi`
-installed the guest from blank disks and it was Ready in ten seconds,
-with `liken: MAC 52:54:00:4c:4c:01 is eth1 on this machine` on its
-console, followed by the static address applied to eth1.
+The lab drilled resolution on a cluster of three machines. node-1
+declares its uplink by name and its cluster segment by MAC address, so
+one install exercises both ways of saying which port, and it was Ready
+from blank disks with `liken: MAC 52:54:00:4c:4c:01 is eth1 on this
+machine` on its console. node-2 and node-3 declare both interfaces by
+name and neither changed: a machine that describes a position pays
+nothing for the field it does not use.
 
-The failure was drilled the same way. A manifest with an address no
-port carries produced exactly the sentence above, naming both of the
-guest's ports and their addresses, and the machine went on to come up
-on its remaining interface.
+The failure was drilled the same way. An address no port carries
+produced the sentence this milestone was written for, naming both of
+the guest's ports and their addresses, and the machine came up on its
+remaining interface.
 
-Two things stay unproven. The lab's guests have one port per segment
-on distinct drivers, so nothing here has exercised the report's
-same-driver rule against real hardware; the unit tests drive it from
-fabricated ports, and the two-port Realtek board that prompted this
-milestone is the machine that will settle it. And an enumeration order
-that actually changes between boots is not something the lab can
-stage, so the claim that an address survives one rests on the kernel's
-contract, not on a measurement.
+That an address survives a change of enumeration order is a
+measurement now, and not an argument from the kernel's contract. The
+lab stages the change by reversing the two cards QEMU attaches, so the
+cluster card enumerates first and the two kernel names exchange
+places. One boot put both behaviours on one console. The entry that
+gave an address followed the card: the address it named was eth0 this
+time, the static address landed on the port that carries it, and the
+machine rejoined the running cluster. The entry that gave a name
+followed the name onto the other card, sent its DHCP discovery from
+the cluster port, waited its thirty seconds for an offer that no
+server on that wire would send, and left the real uplink dark. That is
+the whole difference between the two fields, in one boot.
+
+The report's same-driver rule ran against real ports rather than
+fabricated ones. Both of a guest's cards are one model on one driver,
+virtio-net in the ordinary shape and e1000 in the metal shape, which
+is exactly the ambiguous machine the rule is written for. The report
+declared both ports by address and kept each kernel name in the
+comment beside it.
+
+The list of interfaces is atomic now, and server-side apply treats it
+as one field. Applying the list, editing one entry, and removing one
+entry each stored what was applied, and the whole list has a single
+owner. The API server refuses an entry that declares neither field,
+and the schema's pattern refuses an address that is not one.
+
+Two findings are worth recording, because neither is created by this
+milestone and both are now easier to meet. The operator's half of the
+validation cannot run today: convergence measures drift in storage and
+modules only, so an edit to `spec.network` alone reports itself
+converged, stages nothing, and does not survive the next boot, while
+the schema tells the reader the opposite. And nothing notices when a
+name and an address in one manifest resolve to the same port. This
+milestone made `spec.network` a field that people are told to edit,
+which is what brought both into view.
 
 ## The manual
 

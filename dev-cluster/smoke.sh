@@ -301,7 +301,14 @@ if [[ -n "$REPORT_STICK" ]]; then
         }
     }
     proposal_carries "): e1000"      # the NIC evidence names the driver
-    proposal_carries "MAC 52:54:00:" # the interface evidence carries real MACs
+    # Both of this guest's ports are e1000 cards, so a kernel name
+    # cannot say which is which and the report declares them by
+    # address. The declaration itself is the marker, which is stronger
+    # evidence than the comment beside it: it proves the report read
+    # the real addresses and wrote a manifest that names these exact
+    # ports. A single-port machine would declare a name here instead.
+    proposal_carries "- mac: 52:54:00:"
+    proposal_carries "# eth0 on e1000" # each port's aside names its driver
     proposal_carries "#   /dev/sda"  # the disk evidence lists the AHCI disks
     proposal_carries "(/dev/sdd is the installation stick" # named in evidence, not proposed
     for stickism in "): usb-storage" "- usb-storage" "): uas" "- uas" "device: /dev/sdd"; do
