@@ -100,8 +100,9 @@ func renderCluster(name string, spec cluster.ClusterSpec) ([]byte, string, error
 //
 // The classifier in cluster/changes.go decides the kind of
 // disruption. When every differing domain is read only when k3s
-// starts its process (features, registries), a k3s restart applies
-// the document, and the machine and its pods stay up. Any other
+// starts its process (features, registries, the runtime
+// environment), a k3s restart applies the document, and the machine
+// and its pods stay up. Any other
 // difference requires a reboot. An unreadable boot document also
 // requires a reboot, because a reboot is the one action that always
 // works.

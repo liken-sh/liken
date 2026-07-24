@@ -228,6 +228,14 @@ type ClusterSpec struct {
 	// changes and granted reboots.
 	Features map[string]*FeatureConfig `json:"features,omitempty"`
 
+	// Runtime is the Go runtime discipline the cluster imposes on the
+	// k3s process init launches (runtime.go). It shapes only that
+	// environment: containerd and the shims inherit it, and no other
+	// process reads it. Like features and registries, k3s reads these
+	// values only when its process starts, so an edit converges by
+	// restarting k3s in place, not by rebooting.
+	Runtime ClusterRuntimeSpec `json:"runtime,omitzero"`
+
 	// Registries is how container images arrive on the fleet's
 	// machines: mirror endpoints that containerd pulls through, and
 	// k3s's embedded peer-to-peer registry. It lives on the Cluster
@@ -433,7 +441,20 @@ func ParseCluster(raw []byte) (*Cluster, error) {
 	if err := validateRegistries(c.Spec.Registries); err != nil {
 		return nil, err
 	}
+	if err := c.Spec.Runtime.Validate(); err != nil {
+		return nil, fmt.Errorf("spec.runtime.k3s: %w", err)
+	}
 	return c, nil
+}
+
+// RuntimeSpec is the k3s runtime section, safe on a nil Cluster. A
+// machine on its own, with no cluster document, gets the zero section,
+// which resolves to the same defaults as an unset section.
+func (c *Cluster) RuntimeSpec() K3sRuntimeSpec {
+	if c == nil {
+		return K3sRuntimeSpec{}
+	}
+	return c.Spec.Runtime.K3s
 }
 
 // LoadCluster reads the Cluster manifest from a file. A machine with

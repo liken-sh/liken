@@ -29,6 +29,7 @@ package machine
 //	boot/credentials               the restart path
 //	boot/restarts                  the restart path
 //	features/, registries/         the restart path
+//	runtime/                       the restart path
 //	everything else                the boot step that discovers it
 //
 // A boot step writes its subtree once, at the point where it discovers

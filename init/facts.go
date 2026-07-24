@@ -119,6 +119,7 @@ func publishBootFacts(tree machine.FactsTree, in bootFacts) {
 	tree.WriteModules(in.modules)
 	tree.WriteFeatures(in.features)
 	tree.WriteRegistries(in.registries)
+	tree.WriteRuntime(runtimeFacts(in.clusterDoc, memoryBytes))
 
 	// The boot record: what this boot ran under. The four manifest
 	// records seed here at boot; the module loader and the restart path
@@ -135,6 +136,36 @@ func publishBootFacts(tree machine.FactsTree, in bootFacts) {
 	tree.WriteRejection(machine.RejectCluster, in.boot.ClusterRejection)
 	tree.WriteRejection(machine.RejectSystem, in.boot.SystemRejection)
 	tree.WriteRejection(machine.RejectCredentials, in.boot.CredentialsRejection)
+}
+
+// runtimeFacts resolves the Go runtime environment init handed the
+// k3s process, so the facts carry the same values init printed to the
+// console. It reports the resolved ceiling, not the spec string: an
+// absolute quantity in MiB, or no ceiling at all when the cluster
+// turned the limit off. It reads the same section, memory, and helm
+// feature that k3sRuntimeEnv reads, so the facts and the process
+// environment can never disagree.
+func runtimeFacts(clusterDoc *cluster.Cluster, memoryBytes uint64) machine.RuntimeStatus {
+	spec := clusterDoc.RuntimeSpec()
+	st := machine.RuntimeStatus{}
+	st.K3s.GoGC = spec.GoGCPercent()
+	limit, off, err := spec.GoMemoryLimitBytes(memoryBytes, clusterDoc.FeatureEnabled("helm"))
+	if err == nil && !off && limit > 0 {
+		st.K3s.GoMemoryLimit = fmt.Sprintf("%dMi", limit/(1<<20))
+	}
+	return st
+}
+
+// machineMemoryBytes reports the machine's total memory in bytes from
+// one syscall. The restart path uses it to resolve the runtime facts
+// again, because a restart re-derives the k3s environment the same way
+// a boot does.
+func machineMemoryBytes() uint64 {
+	var si unix.Sysinfo_t
+	if err := unix.Sysinfo(&si); err != nil {
+		return 0
+	}
+	return uint64(si.Totalram) * uint64(si.Unit)
 }
 
 // machineUptimeFacts answers two questions from one syscall: how much

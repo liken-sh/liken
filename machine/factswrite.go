@@ -285,6 +285,18 @@ func (t FactsTree) WriteRegistries(r RegistriesStatus) error {
 	))
 }
 
+// WriteRuntime publishes the Go runtime environment init handed the
+// k3s process this boot: the resolved values, not the spec's strings.
+// The restart path owns this subtree, because a k3s restart can change
+// the environment without a reboot. An off ceiling writes no
+// goMemoryLimit file, so its absence reads as "no ceiling".
+func (t FactsTree) WriteRuntime(r RuntimeStatus) error {
+	return t.report(firstError(
+		t.writeFact("runtime/k3s/goMemoryLimit", r.K3s.GoMemoryLimit),
+		t.writeFact("runtime/k3s/goGC", formatInt(r.K3s.GoGC)),
+	))
+}
+
 // WriteBootSlot publishes the system slot this boot came from, A or B.
 // It is empty when the boot did not come from a slot, as in a
 // direct-kernel boot.

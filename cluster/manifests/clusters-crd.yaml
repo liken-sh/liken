@@ -598,6 +598,78 @@ spec:
                         registry's images (the wildcard mirror entry
                         in registries.yaml). The declared mirrors
                         above keep their own entries either way.
+                runtime:
+                  type: object
+                  description: >-
+                    The Go runtime discipline the cluster imposes on
+                    the k3s process. These settings shape only the
+                    environment init hands the k3s process it launches.
+                    containerd and the shims k3s starts inherit that
+                    environment, because k3s is their parent. No other
+                    process reads it: not init, not the operators, and
+                    not the workloads, which get their environment from
+                    their own pod specs. k3s reads these values only
+                    when its process starts, so an edit here converges
+                    by restarting k3s in place on each machine,
+                    sequenced through the same one-leader-at-a-time
+                    turns as a reboot, with the machine and its pods up.
+                  properties:
+                    k3s:
+                      type: object
+                      description: >-
+                        The Go runtime environment for the k3s process.
+                      properties:
+                        goMemoryLimit:
+                          type: string
+                          maxLength: 32
+                          # The Go-side validation in cluster/runtime.go
+                          # is the real check: it parses the quantity,
+                          # bounds the percent to (0, 100], and rejects
+                          # a zero ceiling with a message. This pattern
+                          # only catches gross shape errors early, so a
+                          # bad value never reaches the fleet as staged
+                          # bytes. The three alternatives are "off", a
+                          # 1-3 digit percent, and a byte count with an
+                          # optional Ki/Mi/Gi/Ti suffix.
+                          pattern: ^(off|[0-9]{1,3}%|[0-9]+(Ki|Mi|Gi|Ti)?)$
+                          description: >-
+                            The soft ceiling on everything the k3s Go
+                            runtime manages: heap, stacks, and its own
+                            metadata (Go's GOMEMLIMIT). As memory use
+                            nears the ceiling, the collector works
+                            harder instead of letting the heap grow;
+                            past it, the runtime caps collection at half
+                            the CPU and lets the heap grow, so a spike
+                            becomes slowness, not a crash. Three forms
+                            are accepted. "off" removes the ceiling,
+                            which leaves the kernel's OOM killer as the
+                            only backstop. A percent like "25%" is that
+                            share of each machine's memory, so one
+                            setting scales across a fleet of different
+                            sizes. An absolute quantity like "448Mi" is
+                            a fixed ceiling on every machine. Unset, the
+                            ceiling is a quarter of the machine's memory,
+                            or seven sixteenths when the helm feature is
+                            on, because the chart renderer and its CRDs
+                            enlarge the k3s heap. Set too tight, the
+                            collector runs against a wall it cannot
+                            clear and burns CPU on collection; the
+                            symptom is high pure-user CPU on k3s with no
+                            matching workload.
+                        goGC:
+                          type: integer
+                          minimum: 1
+                          description: >-
+                            The collector's everyday pace, as a percent
+                            of heap growth between collections (Go's
+                            GOGC). Unset, it is 50: k3s collects at
+                            fifty percent heap growth instead of Go's
+                            own hundred, trading a little CPU all the
+                            time to keep the process resting near its
+                            live data size. A higher value collects less
+                            often and rests larger; a value below 1 is
+                            refused, because it would make the collector
+                            run without pause.
             status:
               type: object
               description: >-

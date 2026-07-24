@@ -108,6 +108,14 @@ type MachineStatus struct {
 	// gives console parity, like Features above.
 	Registries RegistriesStatus `json:"registries,omitzero"`
 
+	// Runtime reports the Go runtime environment init actually handed
+	// the k3s process this boot: the resolved values, not the spec's
+	// strings. It gives console parity for spec.runtime.k3s, so an
+	// operator who edits the ceiling can read back what each machine
+	// runs. This is what makes the values visible while an experiment
+	// runs across a fleet of different sizes.
+	Runtime RuntimeStatus `json:"runtime,omitzero"`
+
 	// Boot is what this boot ran under: which documents, and the
 	// storage as actuated. Each boot re-derives it, and it is the
 	// record the operator compares against the spec. Lifetime is what
@@ -492,6 +500,24 @@ type FeatureStatus struct {
 	Name    string       `json:"name"`
 	State   FeatureState `json:"state"`
 	Message string       `json:"message,omitempty"`
+}
+
+// RuntimeStatus reports the runtime discipline each supervised
+// process actually runs under. It mirrors spec.runtime, with one
+// subsection per process, and holds the resolved values rather than
+// the spec's strings.
+type RuntimeStatus struct {
+	K3s K3sRuntimeStatus `json:"k3s,omitzero"`
+}
+
+// K3sRuntimeStatus is the Go runtime environment init handed the k3s
+// process this boot. GoMemoryLimit is the resolved ceiling as an
+// absolute quantity in MiB, for example "256Mi"; it is empty when the
+// cluster turned the ceiling off, so the field's absence reads as "no
+// ceiling". GoGC is the resolved collector pace.
+type K3sRuntimeStatus struct {
+	GoMemoryLimit string `json:"goMemoryLimit,omitempty"`
+	GoGC          int    `json:"goGC,omitempty"`
 }
 
 // ManifestSource is which copy of a document a boot ran under, in

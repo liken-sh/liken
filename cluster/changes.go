@@ -6,8 +6,9 @@ package cluster
 // liken has three tiers of convergence, decided by where a setting
 // is read. Settings the kernel reads live (/proc/sys) reconcile in
 // place. Settings k3s reads at process start (the boot drop-in,
-// registries.yaml, the feature manifests) apply by restarting the
-// k3s child process. Everything read earlier in a boot (the address
+// registries.yaml, the feature manifests, and the Go runtime
+// environment init hands the process) apply by restarting the k3s
+// child process. Everything read earlier in a boot (the address
 // plan, storage, the time hierarchy) applies by rebooting the
 // machine. The reboot tier always works in place of the other two,
 // because a reboot is a k3s restart plus more. Classification must
@@ -50,6 +51,7 @@ func RestartApplies(current, desired ClusterSpec) bool {
 	}
 	current.Features, desired.Features = nil, nil
 	current.Registries, desired.Registries = RegistriesSpec{}, RegistriesSpec{}
+	current.Runtime, desired.Runtime = ClusterRuntimeSpec{}, ClusterRuntimeSpec{}
 	return jsonEqual(current, desired)
 }
 

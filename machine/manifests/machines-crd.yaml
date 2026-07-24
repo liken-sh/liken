@@ -1332,6 +1332,33 @@ spec:
                         maxLength: 256
                     embedded:
                       type: boolean
+                runtime:
+                  type: object
+                  description: >-
+                    The Go runtime environment init handed the k3s
+                    process this boot: the resolved values, not the
+                    strings from spec.runtime.k3s. This gives console
+                    parity for the runtime discipline, so an operator
+                    who tunes the ceiling can read back what each
+                    machine actually runs. containerd and the shims
+                    inherit the same environment.
+                  properties:
+                    k3s:
+                      type: object
+                      properties:
+                        goMemoryLimit:
+                          type: string
+                          maxLength: 32
+                          description: >-
+                            The resolved memory ceiling, as an absolute
+                            quantity in MiB, for example "256Mi". It is
+                            empty when the cluster turned the ceiling
+                            off, so an absent value means no ceiling.
+                        goGC:
+                          type: integer
+                          description: >-
+                            The resolved collector pace (Go's GOGC), 50
+                            by default.
                 lastCrash:
                   type: object
                   description: >-

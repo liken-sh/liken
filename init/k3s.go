@@ -484,7 +484,7 @@ func writeK3sBootConfig(clusterDoc *cluster.Cluster, m *machine.Machine, conns [
 	// memory problem is hard to find.
 	var si unix.Sysinfo_t
 	if err := unix.Sysinfo(&si); err == nil {
-		k3sMemoryDiscipline = k3sRuntimeEnv(uint64(si.Totalram)*uint64(si.Unit), clusterDoc.FeatureEnabled("helm"))
+		k3sMemoryDiscipline = k3sRuntimeEnv(clusterDoc.RuntimeSpec(), uint64(si.Totalram)*uint64(si.Unit), clusterDoc.FeatureEnabled("helm"))
 		fmt.Printf("liken: k3s env: %s\n", strings.Join(k3sMemoryDiscipline, " "))
 	}
 	return role, nil

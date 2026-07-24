@@ -13,20 +13,38 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/liken-sh/liken/cluster"
 )
 
-// The runtime discipline scales with the machine's memory and with
+// The default discipline scales with the machine's memory and with
 // what the cluster asks k3s to hold: a quarter of memory for the
 // minimum viable control plane, and seven sixteenths once the helm
-// feature brings the chart renderer and its CRDs into the process.
+// feature brings the chart renderer and its CRDs into the process. An
+// unset spec.runtime.k3s must produce exactly that, byte for byte.
 func TestK3sRuntimeEnv(t *testing.T) {
-	lean := k3sRuntimeEnv(1024*1024*1024, false)
-	if want := []string{"GOMEMLIMIT=256MiB", "GOGC=50"}; !slices.Equal(lean, want) {
-		t.Errorf("lean: got %v, want %v", lean, want)
+	gib := uint64(1024 * 1024 * 1024)
+	gogc := func(n int) *int { return &n }
+	cases := map[string]struct {
+		spec cluster.K3sRuntimeSpec
+		mem  uint64
+		helm bool
+		want []string
+	}{
+		"absentLean":     {cluster.K3sRuntimeSpec{}, gib, false, []string{"GOMEMLIMIT=256MiB", "GOGC=50"}},
+		"absentHelm":     {cluster.K3sRuntimeSpec{}, gib, true, []string{"GOMEMLIMIT=448MiB", "GOGC=50"}},
+		"percent":        {cluster.K3sRuntimeSpec{GoMemoryLimit: "25%"}, gib, false, []string{"GOMEMLIMIT=256MiB", "GOGC=50"}},
+		"percentIgnores": {cluster.K3sRuntimeSpec{GoMemoryLimit: "50%"}, gib, true, []string{"GOMEMLIMIT=512MiB", "GOGC=50"}},
+		"absolute":       {cluster.K3sRuntimeSpec{GoMemoryLimit: "448Mi"}, gib, false, []string{"GOMEMLIMIT=448MiB", "GOGC=50"}},
+		"off":            {cluster.K3sRuntimeSpec{GoMemoryLimit: "off"}, gib, true, []string{"GOGC=50"}},
+		"customGoGC":     {cluster.K3sRuntimeSpec{GoGC: gogc(80)}, gib, false, []string{"GOMEMLIMIT=256MiB", "GOGC=80"}},
 	}
-	helm := k3sRuntimeEnv(1024*1024*1024, true)
-	if want := []string{"GOMEMLIMIT=448MiB", "GOGC=50"}; !slices.Equal(helm, want) {
-		t.Errorf("helm: got %v, want %v", helm, want)
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := k3sRuntimeEnv(tc.spec, tc.mem, tc.helm); !slices.Equal(got, tc.want) {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

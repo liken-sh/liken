@@ -39,6 +39,7 @@ func writeAll(t *testing.T, tree FactsTree, s *MachineStatus) {
 	must(tree.WriteModules(s.Modules))
 	must(tree.WriteFeatures(s.Features))
 	must(tree.WriteRegistries(s.Registries))
+	must(tree.WriteRuntime(s.Runtime))
 	must(tree.WriteBootTime(s.Boot.Time))
 	must(tree.WriteBootManifest(s.Boot.ManifestSource, s.Boot.ManifestHash))
 	must(tree.WriteBootClusterManifest(s.Boot.ClusterManifestSource, s.Boot.ClusterManifestHash))
@@ -159,6 +160,7 @@ func everythingSet() *MachineStatus {
 		Registries: RegistriesStatus{
 			Mirrors: []string{"docker.io", "*"}, CredentialedHosts: []string{"ghcr.io"}, Embedded: true,
 		},
+		Runtime: RuntimeStatus{K3s: K3sRuntimeStatus{GoMemoryLimit: "448Mi", GoGC: 50}},
 		Boot: BootStatus{
 			Time:           &booted,
 			ManifestSource: ManifestSourceProven, ManifestHash: "aaa",
@@ -231,6 +233,23 @@ func TestFactsTreeRoundTrip(t *testing.T) {
 				t.Errorf("round trip changed the facts:\nwant %s\ngot  %s", wantJSON, gotJSON)
 			}
 		})
+	}
+}
+
+// A goGC file that does not hold an integer is a corrupt fact, and
+// Read reports it as an error that names the path, rather than reading
+// a silent zero. This is the same contract every integer fact holds.
+func TestReadRejectsACorruptRuntimeGoGC(t *testing.T) {
+	tree := FactsTree{Dir: t.TempDir()}
+	writeAll(t, tree, sparseFacts())
+	if err := os.MkdirAll(filepath.Join(tree.Dir, "runtime", "k3s"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tree.Dir, "runtime", "k3s", "goGC"), []byte("banana\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tree.Read(); err == nil {
+		t.Error("a non-integer goGC must be an error, not a silent zero")
 	}
 }
 

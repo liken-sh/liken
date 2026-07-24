@@ -68,10 +68,25 @@ func (t FactsTree) Read() (*MachineStatus, error) {
 	if s.Registries, err = t.readRegistries(); err != nil {
 		return nil, err
 	}
+	if s.Runtime, err = t.readRuntime(); err != nil {
+		return nil, err
+	}
 	if s.Boot, err = t.readBoot(); err != nil {
 		return nil, err
 	}
 	return s, nil
+}
+
+func (t FactsTree) readRuntime() (RuntimeStatus, error) {
+	r := RuntimeStatus{}
+	var err error
+	if r.K3s.GoMemoryLimit, err = t.readFact("runtime/k3s/goMemoryLimit"); err != nil {
+		return RuntimeStatus{}, err
+	}
+	if r.K3s.GoGC, err = t.readInt("runtime/k3s/goGC"); err != nil {
+		return RuntimeStatus{}, err
+	}
+	return r, nil
 }
 
 func (t FactsTree) readRole() (api.Role, error) {

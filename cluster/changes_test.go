@@ -23,6 +23,7 @@ func specWith(mutate func(*ClusterSpec)) ClusterSpec {
 			Mirrors:  map[string][]string{"docker.io": {"https://mirror.example:5000"}},
 			Embedded: true,
 		},
+		Runtime: ClusterRuntimeSpec{K3s: K3sRuntimeSpec{GoMemoryLimit: "25%"}},
 	}
 	if mutate != nil {
 		mutate(&spec)
@@ -38,14 +39,21 @@ func TestRestartAppliesByDomain(t *testing.T) {
 		"a feature toggle":        {func(s *ClusterSpec) { s.Features["traefik"] = &FeatureConfig{} }, true},
 		"a feature retraction":    {func(s *ClusterSpec) { s.Features = nil }, true},
 		"a mirror edit":           {func(s *ClusterSpec) { s.Registries.Embedded = false }, true},
+		"a runtime tuning":        {func(s *ClusterSpec) { s.Runtime.K3s.GoMemoryLimit = "off" }, true},
+		"a runtime GoGC edit":     {func(s *ClusterSpec) { n := 80; s.Runtime.K3s.GoGC = &n }, true},
+		"runtime and a feature":   {func(s *ClusterSpec) { s.Runtime.K3s.GoMemoryLimit = "off"; s.Features["traefik"] = &FeatureConfig{} }, true},
 		"features and registries": {func(s *ClusterSpec) { s.Features = nil; s.Registries.Embedded = false }, true},
-		"the origin":              {func(s *ClusterSpec) { s.Origin = OriginAdopted }, false},
-		"the leaders":             {func(s *ClusterSpec) { s.Leaders = []string{"node-1"} }, false},
-		"the endpoint":            {func(s *ClusterSpec) { s.Endpoint = "https://10.10.0.2:6443" }, false},
-		"the network plan":        {func(s *ClusterSpec) { s.Network.ClusterCIDR = "10.44.0.0/16" }, false},
-		"the time hierarchy":      {func(s *ClusterSpec) { s.Time.Upstreams = nil }, false},
-		"the disruption budget":   {func(s *ClusterSpec) { s.Disruption.MaxUnavailable = 2 }, false},
-		"a mixed edit":            {func(s *ClusterSpec) { s.Features = nil; s.Endpoint = "https://10.10.0.2:6443" }, false},
+		"runtime with a reboot field": {func(s *ClusterSpec) {
+			s.Runtime.K3s.GoMemoryLimit = "off"
+			s.Endpoint = "https://10.10.0.2:6443"
+		}, false},
+		"the origin":            {func(s *ClusterSpec) { s.Origin = OriginAdopted }, false},
+		"the leaders":           {func(s *ClusterSpec) { s.Leaders = []string{"node-1"} }, false},
+		"the endpoint":          {func(s *ClusterSpec) { s.Endpoint = "https://10.10.0.2:6443" }, false},
+		"the network plan":      {func(s *ClusterSpec) { s.Network.ClusterCIDR = "10.44.0.0/16" }, false},
+		"the time hierarchy":    {func(s *ClusterSpec) { s.Time.Upstreams = nil }, false},
+		"the disruption budget": {func(s *ClusterSpec) { s.Disruption.MaxUnavailable = 2 }, false},
+		"a mixed edit":          {func(s *ClusterSpec) { s.Features = nil; s.Endpoint = "https://10.10.0.2:6443" }, false},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -90,7 +98,7 @@ func TestRestartAppliesTreatsAnUnknownFieldAsRebootClass(t *testing.T) {
 	// simulate this by round-tripping a spec through JSON with an
 	// extra field, because the strict parser refuses it. Instead,
 	// this test pins the mechanism directly. The subtraction zeroes
-	// only the two restart-class fields. Anything else that differs
+	// only the restart-class fields. Anything else that differs
 	// survives the subtraction and answers reboot. Here, the endpoint
 	// field stands in for a future field.
 	changed := specWith(func(s *ClusterSpec) {
