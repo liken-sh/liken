@@ -12,11 +12,18 @@ package main
 // disks this machine's manifest declares, so the claim that follows
 // finds them blank.
 //
-// A person turns an install into a reinstall by editing the install
-// entry's options (systemd-boot's "e" key) and writing liken.reinstall
-// in place of liken.install. That edit is the confirmation. Naming the
-// reinstall word, over a manifest that declares these exact disks, is
-// as explicit as a person can be at a console with no other tools.
+// A person asks for this by picking the stick's "wipe and reinstall
+// as <name>" entry, over a manifest that declares these exact disks.
+// Picking it is the confirmation, and it is as explicit as a person
+// can be at a console with no other tools.
+//
+// Blanking a disk's table is not the whole erasure, and on its own it
+// would not be one. Partitions start a megabyte in, so their file
+// systems survive the wipe, and a claim that writes the same layout
+// back puts them at the same offsets again. The erasure is completed
+// by the rule in storage.go: a partition this boot created always
+// gets a new file system. Nothing of the previous install survives a
+// reinstall, on any disk the manifest declares.
 //
 // The reclaim runs after loadModules (so a real controller's driver
 // has created the device nodes) and before settleStorage (so nothing

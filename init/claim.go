@@ -31,6 +31,10 @@ package main
 // So a boot that dies between partitioning and mkfs leaves partitions
 // that the next boot recognizes by name and finishes formatting
 // (mountRole's half of the task, in storage.go).
+//
+// A claim reports which roles it created, because a partition created
+// this boot always gets a new filesystem. The bytes under a new
+// partition belong to whatever held the disk before liken claimed it.
 
 import (
 	"fmt"
@@ -78,7 +82,7 @@ type claimPlan struct {
 	device       string
 	totalSectors uint64
 	parts        []disks.Partition
-	roleCount    int
+	roles        []machine.DeclaredRole
 }
 
 // planClaim validates that a disk may be claimed for every declared
@@ -119,14 +123,14 @@ func planClaim(device string, roles []machine.DeclaredRole, found map[machine.St
 	if err != nil {
 		return claimPlan{}, err
 	}
-	return claimPlan{device: device, totalSectors: totalSectors, parts: parts, roleCount: len(mine)}, nil
+	return claimPlan{device: device, totalSectors: totalSectors, parts: parts, roles: mine}, nil
 }
 
 // applyClaim writes one planned table and waits for the kernel to
 // show its partitions.
 func applyClaim(plan claimPlan) error {
 	fmt.Printf("liken: storage: claiming %s (%s) for %d role(s)\n",
-		plan.device, gib(plan.totalSectors*disks.SectorSize), plan.roleCount)
+		plan.device, gib(plan.totalSectors*disks.SectorSize), len(plan.roles))
 	if err := disks.Write(plan.device, plan.totalSectors, plan.parts); err != nil {
 		return fmt.Errorf("partitioning %s: %w", plan.device, err)
 	}

@@ -394,11 +394,42 @@ func TestWaitForPartitionsReportsStaleSizes(t *testing.T) {
 	}
 }
 
+func TestNeedsFilesystemKeepsAFilesystemItRecognizes(t *testing.T) {
+	ext4 := signedDevice(t, func(b []byte) { b[1080], b[1081] = 0x53, 0xEF })
+	if needsFilesystem(ext4, "", false) {
+		t.Error("a recognized partition keeps the filesystem it carries")
+	}
+	if !needsFilesystem(signedDevice(t, nil), "", false) {
+		t.Error("a partition with no filesystem is one a claim did not finish")
+	}
+}
+
+func TestNeedsFilesystemRemakesAPartitionThisBootCreated(t *testing.T) {
+	// A reinstall blanks the partition table and writes the same
+	// layout back, so the old filesystems are still at the same
+	// offsets. Neither the ext4 signature nor the FAT32 one may keep
+	// the previous install's data alive.
+	ext4 := signedDevice(t, func(b []byte) { b[1080], b[1081] = 0x53, 0xEF })
+	if !needsFilesystem(ext4, "", true) {
+		t.Error("a partition this boot created is always made fresh")
+	}
+	fat := signedDevice(t, func(b []byte) {
+		b[510], b[511] = 0x55, 0xAA
+		copy(b[82:90], "FAT32   ")
+	})
+	if needsFilesystem(fat, "vfat", false) {
+		t.Error("a recognized slot keeps its FAT32 filesystem")
+	}
+	if !needsFilesystem(fat, "vfat", true) {
+		t.Error("a slot this boot created is always made fresh")
+	}
+}
+
 func TestMountRoleRejectsUnknownRoleVocabulary(t *testing.T) {
 	// The process checks the mount translation before anything
 	// touches the partition, so it refuses an unknown role without
 	// this test needing a device to exist.
-	err := mountRole(declared("archive", "/dev/vda", ""), partition{name: "vda9"})
+	err := mountRole(declared("archive", "/dev/vda", ""), partition{name: "vda9"}, false)
 	if err == nil || !strings.Contains(err.Error(), "no mount translation") {
 		t.Errorf("expected a vocabulary error: %v", err)
 	}
@@ -431,7 +462,7 @@ func TestPlanClaimLaysOutABlankDisk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.device != device || plan.roleCount != 2 || len(plan.parts) != 2 {
+	if plan.device != device || len(plan.roles) != 2 || len(plan.parts) != 2 {
 		t.Errorf("both roles land in one plan: %+v", plan)
 	}
 	if plan.totalSectors != (2<<30)/disks.SectorSize {

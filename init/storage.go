@@ -322,10 +322,16 @@ func reconcileStorage(spec machine.StorageSpec) (machine.StorageStatus, error) {
 	}
 
 	// Apply the plans. The process has already validated every plan,
-	// so any failure from this point on is a real I/O problem.
+	// so any failure from this point on is a real I/O problem. The
+	// roles a claim creates are remembered, because a partition this
+	// boot created always gets a new filesystem.
+	created := map[machine.StorageRoleName]bool{}
 	for _, plan := range claims {
 		if err := applyClaim(plan); err != nil {
 			return status, err
+		}
+		for _, role := range plan.roles {
+			created[role.Name] = true
 		}
 	}
 	for _, plan := range grows {
@@ -355,7 +361,7 @@ func reconcileStorage(spec machine.StorageSpec) (machine.StorageStatus, error) {
 		if isRawRole(role.Name) {
 			fmt.Printf("liken: storage: %s is %s/%s (%s), raw\n",
 				role.Name, devRoot, p.name, p.partName)
-		} else if err := mountRole(role, p); err != nil {
+		} else if err := mountRole(role, p, created[role.Name]); err != nil {
 			return status, err
 		}
 		*status.Role(role.Name) = machine.StorageRoleStatus{
@@ -459,12 +465,36 @@ func awaitStorageDevices(roles []machine.DeclaredRole) {
 	fmt.Fprintf(os.Stderr, "liken: storage: the declared disks did not all attach within %s\n", deadline)
 }
 
-// mountRole mounts a role's file system at the role's path. It makes
-// the file system first if the partition is fresh from a claim.
-// (Recognizing liken's own name on a partition with no file system
-// also covers a boot that died between partitioning and mkfs.
-// Claiming is resumable because the process writes the name first.)
-func mountRole(role machine.DeclaredRole, p partition) error {
+// needsFilesystem decides whether a partition gets a new file system
+// before it is mounted. Two conditions call for one, and they are
+// different questions.
+//
+// A partition this boot created is always made fresh. Blanking a
+// disk's partition table does not touch the partitions, and a
+// reinstall writes the same layout back at the same offsets, so the
+// old file systems are still there, superblock and all. Keeping them
+// would carry the previous install's etcd database, its proven
+// manifest, and its node password into the install that was meant to
+// replace them. A partition liken created seconds ago holds nothing
+// worth keeping, whatever the bytes under it say.
+//
+// A partition liken recognized, carrying no file system, is the other
+// condition: a boot that died between partitioning and mkfs. Claiming
+// writes the role's name first, so the next boot finishes the job.
+func needsFilesystem(dev, fstype string, created bool) bool {
+	if created {
+		return true
+	}
+	if fstype == "vfat" {
+		return !disks.HasFAT32(dev)
+	}
+	return !hasExt4(dev)
+}
+
+// mountRole mounts a role's file system at the role's path, and makes
+// the file system first when the partition needs one. The created
+// argument says whether this boot claimed the partition.
+func mountRole(role machine.DeclaredRole, p partition, created bool) error {
 	// The process looks up the role's translation to a mount before
 	// anything touches the partition. It must refuse a role that liken
 	// does not know how to mount, before mke2fs writes a file system
@@ -479,21 +509,18 @@ func mountRole(role machine.DeclaredRole, p partition) error {
 	// FAT32 from liken's own formatter (fat32.go), because the
 	// firmware reads them and FAT is the only file system it reads.
 	// Every other role gets ext4 from the vendored static mke2fs.
-	// Either way, recognizing liken's own name on a partition with no
-	// file system covers a boot that died between partitioning and
-	// mkfs.
 	dev := devRoot + "/" + p.name
-	if rm.fstype == "vfat" {
-		if !disks.HasFAT32(dev) {
+	if needsFilesystem(dev, rm.fstype, created) {
+		if rm.fstype == "vfat" {
 			fmt.Printf("liken: storage: making a FAT32 filesystem on %s for %s\n", dev, role.Name)
 			if err := formatSlot(dev, p.sizeBytes, role.Name); err != nil {
 				return fmt.Errorf("formatting %s for %s: %w", dev, role.Name, err)
 			}
-		}
-	} else if !hasExt4(dev) {
-		fmt.Printf("liken: storage: making an ext4 filesystem on %s for %s\n", dev, role.Name)
-		if !runNarrated("mke2fs | ", "/sbin/mke2fs", "-t", "ext4", dev) {
-			return fmt.Errorf("mke2fs on %s for %s failed", dev, role.Name)
+		} else {
+			fmt.Printf("liken: storage: making an ext4 filesystem on %s for %s\n", dev, role.Name)
+			if !runNarrated("mke2fs | ", "/sbin/mke2fs", "-t", "ext4", dev) {
+				return fmt.Errorf("mke2fs on %s for %s failed", dev, role.Name)
+			}
 		}
 	}
 

@@ -158,6 +158,16 @@ numbered before this arc existed; it belongs second in this order:
     publishes the one-line summary as status.lastCrash. The full
     trace stays on the machine; the watchdog for silent hangs is
     deferred.
+36. [x] [The installer speaks, and the hardware reports](36-the-hardware-report.md)
+    — the stick's menu gives each machine an install entry and a
+    wipe-and-reinstall entry, and ends with a report boot that
+    changes no disk and writes a proposed manifest to the stick.
+    The installer holds its console for the person standing at it.
+37. [ ] [A reinstall means what it says](37-a-reinstall-means-what-it-says.md)
+    — a partition this boot created is always formatted, so a
+    reinstall erases what it claims instead of remounting the
+    previous install's state. The proposed layout scales
+    clusterState with the disk, because that size is permanent.
 
 Deferred until the fundamentals above are proven, the hardening
 tier: UKIs, dm-verity, secure boot, TPM-sealed secrets, and signed
