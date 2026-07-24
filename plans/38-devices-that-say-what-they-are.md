@@ -1,6 +1,6 @@
 # Devices that say what they are
 
-Milestone 38 — In progress
+Milestone 38 — Done
 
 Milestone 11 gave liken a DRA driver, and the machine that finally
 exercised it asked for three things the published devices could not
@@ -117,6 +117,28 @@ The same pass fixes a blind spot the keyboard found. `usbhid` binds by
 modalias, and `hid_generic` binds over the HID bus, so the alias table
 can never name it. A driver that binds to a bus needs a companion
 entry, because `modules.alias` cannot describe it.
+
+## What the lab proved
+
+The drill gave a guest a `virtio-gpu` and declared `virtio_gpu` in the
+Machine's `spec.modules`. The module loaded without a reboot, and the
+node published the device with `renderNode` and
+`allowMultipleAllocations`. Two independent `ResourceClaim` objects,
+in the same DeviceClass, both allocated it, and both pods started with
+`/dev/dri/card1` and `/dev/dri/renderD128` inside. That is the case
+that left the second pod pending before this milestone. A claim on a
+device that is not shareable still allocates once: the second claim on
+the guest's IDE controller stayed `pending`, and its pod stayed
+`Pending`.
+
+The guest also showed a limit of the report's reach that is worth
+recording. A virtio GPU's PCI function is driven by `virtio-pci`, and
+`virtio_gpu` binds the virtio device that driver creates, on a bus the
+walk does not cover. So the device is not undriven, and no
+recommendation names the module that would make it claimable. Real
+hardware does not have this shape, because the GPU's own PCI function
+is the device. If a virtio guest ever needs the advice, the walk has
+to reach the virtio bus.
 
 ## The manual
 

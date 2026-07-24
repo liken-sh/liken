@@ -163,12 +163,12 @@ numbered before this arc existed; it belongs second in this order:
     wipe-and-reinstall entry, and ends with a report boot that
     changes no disk and writes a proposed manifest to the stick.
     The installer holds its console for the person standing at it.
-37. [ ] [A reinstall means what it says](37-a-reinstall-means-what-it-says.md)
+37. [x] [A reinstall means what it says](37-a-reinstall-means-what-it-says.md)
     — a partition this boot created is always formatted, so a
     reinstall erases what it claims instead of remounting the
     previous install's state. The proposed layout scales
     clusterState with the disk, because that size is permanent.
-38. [ ] [Devices that say what they are](38-devices-that-say-what-they-are.md)
+38. [x] [Devices that say what they are](38-devices-that-say-what-they-are.md)
     — a published device says whether it may be shared, what kind of
     node it delivers, and its whole class code, so a DeviceClass can
     ask a real question. The hardware report names claimable

@@ -1,6 +1,6 @@
 # A reinstall means what it says
 
-Milestone 37 — In progress
+Milestone 37 — Done
 
 Milestone 36 put liken on real hardware and gave the installer a voice.
 The machine that ran it then reported what the lab could not: a
@@ -86,6 +86,17 @@ role, the declared size, the size the disk actually carries, and the
 remedy, so the person reading it has no diagnosis left to do. The
 install guide carries the order the edit needs: the machine publishes
 its new layout in status first, and the spec is edited to match after.
+
+## What the lab proved
+
+A filesystem carries a UUID that `mke2fs` writes once, so the UUID is
+the evidence. The drill installed node-1, read every partition's UUID
+from the guest's disk images, booted `liken.reinstall`, and read them
+again. Every one changed: `machineState`, `clusterState`,
+`machineEphemeral`, `podStorage`, and `podEphemeral`. The console
+showed the three claims and the eight new filesystems. The node then
+booted and founded a cluster in half a minute, with no trace of the
+one before it.
 
 ## The manual
 
