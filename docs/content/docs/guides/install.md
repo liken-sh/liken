@@ -16,6 +16,13 @@ You need:
   disks it claims.
 * A USB stick. The install image overwrites it.
 * A Linux workstation with `kubectl`.
+* A keyboard and a screen on each machine, for the install itself. A
+  person picks the boot entry and answers the message at the end. A
+  machine with no screen needs a serial console instead: build the
+  stick with `-console`, as step 4 shows.
+
+After the install, a machine needs nothing attached. It boots, joins
+the cluster, and takes its orders from the cluster.
 
 ## 1. Download a release
 
@@ -89,6 +96,16 @@ manifests and your identity.
 [`liken stick`](/docs/reference/cli/#liken-stick) joins the release
 with your layer into one bootable disk image.
 
+For a machine with no screen, name its serial port when you build the
+stick:
+
+    ./liken stick -console ttyS0 channel/<version> mycluster/deployment.cpio mycluster/install.img
+
+The boot menu and every message then reach that port, so you can
+install the machine over a serial cable or a remote console. The
+machines keep the setting, so their consoles stay reachable after the
+install.
+
 Check the device name of your USB stick before the next command. The
 command overwrites the device.
 
@@ -112,14 +129,26 @@ The menu never times out. You must pick an entry.
 ### First, run the hardware report
 
 Pick `liken hardware report`. This boot changes nothing on the
-machine's disks. It loads the drivers the hardware wants, watches
-which disks and network interfaces appear, and writes a proposed
-manifest to the stick as `hardware-report.yaml`. It prints the whole
-proposal, then holds:
+machine's disks. It loads the drivers for the disks and the network
+ports, watches what appears, and writes a proposed manifest to the
+stick as `hardware-report.yaml`. It prints the whole proposal, then
+holds:
 
     liken: this report was written to the stick as hardware-report.yaml; press Enter to reboot.
 
-Press Enter to reboot the machine. Take the stick to your
+The report loads storage and network drivers, and no others. A
+machine needs those two to install itself and to join a cluster, and
+a driver for anything else would change the machine while a person
+stands in front of it. A display driver, for example, takes over the
+screen the report is printing to. Hardware beyond disks and network
+ports appears in the node's status once it runs, under the unclaimed
+hardware the machine reports.
+
+Press Enter to reboot the machine. The report changes no disk, so you
+can run it as often as you like: after you attach a disk, after you
+connect a cable, or to check a change before you install.
+
+Take the stick to your
 workstation. Read `hardware-report.yaml`. It is a valid Machine
 manifest with the evidence for each line beside it as a comment: the
 drivers each device wants, in load order; each disk's size, model, and
@@ -135,7 +164,9 @@ The storage sizes fit the disks the report measured, so you can
 install from them as they are. Two roles still deserve a look.
 `clusterState` holds k3s's database, its TLS material, and
 containerd's image store, so what the node runs decides its size.
-Raise it if this machine runs many images, or large ones. Set
+Raise it if this machine runs many images, or large ones. Choose this
+number carefully: `podStorage` sits behind `clusterState` on the
+disk, so `clusterState` cannot grow after the install. Set
 `podStorage` to the size your workloads' volumes need. The report says
 so in the file when it had to reduce either one.
 
@@ -185,6 +216,30 @@ liken itself made. To do that, pick `wipe and reinstall as <name>`. It
 blanks the disks this machine's manifest declares, then installs, in
 one boot. Picking the entry at the keyboard is your confirmation. It
 ends at the same held messages as a plain install.
+
+A reinstall erases everything it claims, on every disk the manifest
+declares. The cluster's state goes: this node's copy of the k3s
+database, its certificates, and the images it unpacked. The volumes
+your workloads claimed on this node go with them. The machine comes
+back as a new member with the same name, not as the member it was.
+
+Replacing a disk is a different act. If you fit a new blank system
+disk and pick the plain `install as <name>`, the install claims the
+blank disk and recognizes the data disk it already wrote, so the
+cluster's state on that disk survives. Only `wipe and reinstall`
+erases a disk liken already claimed.
+
+If you reinstall with a different layout, the machine's document in
+the cluster still describes the old one, and the two disagree.
+Storage roles are grow-only, so the machine reports
+`SpecConverged: False` with the reason `StagingRejected` and names the
+size the disk now carries. Fix it in this order: let the machine boot
+and publish its status, then edit the Machine resource in the cluster
+to the layout it now carries. The rule compares your spec against the
+sizes the machine last booted, so the edit is only accepted after the
+machine has reported them. Change the machine's manifest in
+`mycluster/` to match, because that copy is what the next stick, and
+the next reinstall, starts from.
 
 Use the same stick for every machine. Start with the first leader.
 The machines find each other at the addresses you declared. The

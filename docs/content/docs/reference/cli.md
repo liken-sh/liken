@@ -86,11 +86,28 @@ for direct-kernel boots, such as QEMU or PXE.
     liken stick [-console ttyS0] <release-dir> <deployment.cpio> <output.img>
 
 Builds the USB install stick's disk image: one stick for the whole
-deployment. Its boot menu gives each machine an install entry and a
-wipe-and-reinstall entry, and ends with a hardware report entry that
-describes the machine and changes nothing on its disks. Boot it, pick
-an entry, and follow the console. `-console` is repeatable, and adds a
-`console=` argument that the machines keep permanently.
+deployment. Boot it, pick an entry, and follow the console.
+
+The menu holds two entries for each machine in the deployment, in the
+order the manifests name them, and one entry for the stick itself:
+
+    install as big
+    wipe and reinstall as big
+    install as little
+    wipe and reinstall as little
+    liken hardware report
+
+`install as <name>` claims blank disks only. `wipe and reinstall as
+<name>` erases every disk that machine's manifest declares, then
+installs. The report entry runs last in the list because it belongs to
+no machine: it describes the hardware in front of it and changes no
+disk. The menu never times out, because every entry writes to a disk
+or asks for a person, so a machine left at the menu waits instead of
+guessing.
+
+`-console` is repeatable, and adds a `console=` argument that the
+machines keep permanently. Use it to install a machine that has no
+screen: the menu and every message reach that port too.
 
 ## liken bundle
 
