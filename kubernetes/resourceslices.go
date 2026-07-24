@@ -99,9 +99,23 @@ type ResourcePool struct {
 // DeviceClass CEL selectors match against. An attribute name left
 // unqualified belongs to the publishing driver's domain. A selector
 // reads these as device.attributes["liken.sh"].driver, and so on.
+// AllowMultipleAllocations lets more than one claim allocate the same
+// device. Without it the API allocates a device once, which is the
+// safe default and the right one for a device that one process must
+// hold. Only the driver that publishes a device can set this: a
+// DeviceClass or a claim can select a device, but neither can say
+// that the hardware divides. The field is a pointer so that a device
+// that does not divide publishes nothing at all, rather than an
+// explicit false that reads as a claim about the hardware.
+//
+// The API server honors the field when its DRAConsumableCapacity
+// feature is on, which is the default in the k3s that liken ships. An
+// API server with the feature off drops the field on write, and every
+// device allocates once, which is the safe direction to fail in.
 type SliceDevice struct {
-	Name       string                     `json:"name"`
-	Attributes map[string]DeviceAttribute `json:"attributes,omitempty"`
+	Name                     string                     `json:"name"`
+	Attributes               map[string]DeviceAttribute `json:"attributes,omitempty"`
+	AllowMultipleAllocations *bool                      `json:"allowMultipleAllocations,omitempty"`
 }
 
 // DeviceAttribute holds exactly one of four typed values. The API
@@ -199,3 +213,8 @@ func EnsureResourceSlice(c *Client, nodeName string, owner OwnerReference, devic
 // AttrString builds a string-typed attribute value without repeating
 // pointer syntax at every call site.
 func AttrString(s string) DeviceAttribute { return DeviceAttribute{String: &s} }
+
+// AttrBool builds a boolean attribute value. A selector reads it as a
+// boolean, so a DeviceClass asks device.attributes["liken.sh"].x
+// rather than comparing it against the string "true".
+func AttrBool(b bool) DeviceAttribute { return DeviceAttribute{Bool: &b} }

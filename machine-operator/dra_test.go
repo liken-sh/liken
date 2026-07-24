@@ -55,6 +55,81 @@ func TestInventoryPublishesDrivenDeliverableDevices(t *testing.T) {
 	}
 }
 
+// gpu is the lab's virtio GPU and the testbed's integrated one: a
+// driven display device whose subtree delivers both DRM nodes.
+func gpu() ([]hardware.Device, func(hardware.Device) hardware.Delivery) {
+	return []hardware.Device{{
+			Bus: "pci", Address: "0000:00:02.0", Driver: "i915", Class: "display",
+			ClassCode: "030000", Name: "Alder Lake-N [UHD Graphics]", Vendor: "8086", Product: "46d1",
+		}}, delivering(hardware.Delivery{
+			DevNodes:   []string{"/dev/dri/card0", "/dev/dri/renderD128"},
+			Subsystems: []string{"drm"},
+		})
+}
+
+func TestInventorySharesADeviceThatMultiplexes(t *testing.T) {
+	discovered, inspect := gpu()
+	devices := inventoryDevices(discovered, inspect, nil)
+
+	if len(devices) != 1 {
+		t.Fatalf("devices = %+v, want 1", devices)
+	}
+	d := devices[0]
+	if d.AllowMultipleAllocations == nil || !*d.AllowMultipleAllocations {
+		t.Error("a device that delivers only DRM nodes may be allocated more than once")
+	}
+	if d.Attributes["renderNode"].Bool == nil || !*d.Attributes["renderNode"].Bool {
+		t.Error("a render node is the fact a transcoding workload selects on")
+	}
+	if got := d.Attributes["subsystem"].String; got == nil || *got != "drm" {
+		t.Errorf("subsystem = %v, want drm", got)
+	}
+	if got := d.Attributes["classCode"].String; got == nil || *got != "030000" {
+		t.Errorf("classCode = %v, want the whole code", got)
+	}
+}
+
+func TestInventoryKeepsEveryOtherDeviceExclusive(t *testing.T) {
+	// A USB serial adapter. One process opens the port, so the API
+	// must allocate it once, and the device says nothing rather than
+	// claiming to be exclusive.
+	devices := inventoryDevices([]hardware.Device{
+		{Bus: "usb", Address: "3-1:1.0", Driver: "cp210x", Class: "vendor-specific", ClassCode: "ff"},
+	}, delivering(hardware.Delivery{
+		DevNodes:   []string{"/dev/ttyUSB0"},
+		Subsystems: []string{"tty"},
+	}), nil)
+
+	if len(devices) != 1 {
+		t.Fatalf("devices = %+v, want 1", devices)
+	}
+	if devices[0].AllowMultipleAllocations != nil {
+		t.Error("a device that does not divide publishes nothing about sharing")
+	}
+	if _, ok := devices[0].Attributes["renderNode"]; ok {
+		t.Error("a serial port has no render node")
+	}
+}
+
+func TestInventoryNamesNoSubsystemForAMixedDelivery(t *testing.T) {
+	// A device that hands over two kinds of node at once has no
+	// single answer, and it is not shareable on the strength of one
+	// of them.
+	devices := inventoryDevices([]hardware.Device{
+		{Bus: "pci", Address: "0000:00:1f.3", Driver: "snd_hda_intel", Class: "multimedia"},
+	}, delivering(hardware.Delivery{
+		DevNodes:   []string{"/dev/snd/pcmC0D0p", "/dev/dri/renderD129"},
+		Subsystems: []string{"drm", "sound"},
+	}), nil)
+
+	if _, ok := devices[0].Attributes["subsystem"]; ok {
+		t.Error("a mixed delivery names no one subsystem")
+	}
+	if devices[0].AllowMultipleAllocations != nil {
+		t.Error("only a delivery that is entirely DRM may be shared")
+	}
+}
+
 func TestInventorySkipsUndrivenDevices(t *testing.T) {
 	devices := inventoryDevices([]hardware.Device{
 		{Bus: "pci", Address: "0000:00:02.0", Driver: "", Modalias: "pci:v...", Name: "QEMU Standard VGA"},

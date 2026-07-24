@@ -163,23 +163,37 @@ func inventoryDevices(discovered []hardware.Device,
 		// `has(device.attributes["liken.sh"].serial)` means what it
 		// says.
 		for name, value := range map[string]string{
-			"bus":      d.Bus,
-			"driver":   d.Driver,
-			"class":    d.Class,
-			"name":     attributeString(d.Name),
-			"modalias": d.Modalias,
-			"serial":   attributeString(d.Serial),
-			"vendor":   d.Vendor,
-			"product":  d.Product,
+			"bus":       d.Bus,
+			"driver":    d.Driver,
+			"class":     d.Class,
+			"classCode": d.ClassCode,
+			"subsystem": soleSubsystem(delivery),
+			"name":      attributeString(d.Name),
+			"modalias":  d.Modalias,
+			"serial":    attributeString(d.Serial),
+			"vendor":    d.Vendor,
+			"product":   d.Product,
 		} {
 			if value != "" {
 				attrs[name] = kubernetes.AttrString(value)
 			}
 		}
-		out = append(out, kubernetes.SliceDevice{
+		// A render node is the fact a workload actually selects on. A
+		// deployment that transcodes wants any GPU that can encode,
+		// and asking for a vendor and a product ID instead names one
+		// machine's hardware in a document meant for a fleet.
+		if hasRenderNode(delivery) {
+			attrs["renderNode"] = kubernetes.AttrBool(true)
+		}
+		device := kubernetes.SliceDevice{
 			Name:       deviceName(d),
 			Attributes: attrs,
-		})
+		}
+		if shareable(delivery) {
+			shared := true
+			device.AllowMultipleAllocations = &shared
+		}
+		out = append(out, device)
 	}
 	// The list is sorted, so the same hardware always publishes the
 	// same slice. This lets the change detection in
@@ -189,6 +203,49 @@ func inventoryDevices(discovered []hardware.Device,
 		return strings.Compare(a.Name, b.Name)
 	})
 	return out
+}
+
+// soleSubsystem is the kind of device node a claim on this device
+// delivers, when every node it delivers is the same kind. A device
+// that hands over a tty and a misc node at once has no single answer,
+// and an attribute that names one of them would be a selector trap.
+func soleSubsystem(delivery hardware.Delivery) string {
+	if len(delivery.Subsystems) != 1 {
+		return ""
+	}
+	return delivery.Subsystems[0]
+}
+
+// hasRenderNode reports whether the device delivers a DRM render
+// node. The kernel names these /dev/dri/renderD<n>, and they are the
+// nodes that do GPU work without display authority: a container that
+// holds one can encode, decode, and compute.
+func hasRenderNode(delivery hardware.Delivery) bool {
+	return slices.ContainsFunc(delivery.DevNodes, func(node string) bool {
+		return strings.HasPrefix(node, "/dev/dri/renderD")
+	})
+}
+
+// shareable decides whether the API may allocate this device to more
+// than one claim.
+//
+// The rule is one entry wide, and it is meant to stay narrow. A DRM
+// device is shareable because the kernel's own contract says so: the
+// driver arbitrates concurrent clients on a render node, and the lab
+// measured this holding, with twelve encoders on one integrated GPU
+// dividing it evenly between them. Nothing else on these buses has
+// that contract. A tty has one writer. A dongle's control endpoint
+// has one owner.
+//
+// The asymmetry decides the default. A device wrongly published as
+// shareable hands the same hardware to two workloads that each
+// believe they hold it, and no DeviceClass, claim, or workload can
+// take that back, because only the driver writes a slice. A device
+// wrongly published as exclusive costs a claim that waits, and a
+// person can see it waiting. So a device is exclusive unless every
+// node it delivers is a DRM node.
+func shareable(delivery hardware.Delivery) bool {
+	return len(delivery.Subsystems) == 1 && delivery.Subsystems[0] == "drm"
 }
 
 // deviceName turns a sysfs address into the DNS label the API
