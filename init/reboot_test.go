@@ -16,15 +16,15 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// watchIntents starts the watcher over a temporary directory with
-// fast polls, and it returns all three channels.
+// watchIntents starts the watcher over a temporary directory, and it
+// returns all three channels.
 func watchIntents(t *testing.T) (string, chan machine.RebootIntent, chan machine.RestartIntent, chan machine.ModulesIntent) {
 	t.Helper()
 	dir := t.TempDir()
 	reboots := make(chan machine.RebootIntent, 1)
 	restarts := make(chan machine.RestartIntent, 1)
 	loads := make(chan machine.ModulesIntent, 1)
-	go watchForOperatorIntents(t.Context(), dir, time.Millisecond, reboots, restarts, loads)
+	go watchForOperatorIntents(t.Context(), dir, reboots, restarts, loads)
 	return dir, reboots, restarts, loads
 }
 
@@ -53,6 +53,34 @@ func TestWatchDeliversARebootIntent(t *testing.T) {
 	}
 }
 
+func TestWatchDeliversAnIntentOnTheEventPath(t *testing.T) {
+	// The watcher wakes on the write event itself, not on a poll
+	// interval. A restart intent written after the watch starts arrives
+	// promptly, with no interval to wait out.
+	dir, _, restarts, _ := watchIntents(t)
+
+	// The initial scan of the empty directory delivers nothing. A quiet
+	// window confirms the watcher is idle before any file exists.
+	select {
+	case got := <-restarts:
+		t.Fatalf("nothing was requested yet: %+v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	want := machine.RestartIntent{Reason: "applying the staged cluster document"}
+	if err := machine.WriteRestartIntent(dir, &want); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-restarts:
+		if got.Reason != want.Reason {
+			t.Errorf("got %+v, want %+v", got, want)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the watcher never delivered the intent on the event path")
+	}
+}
+
 func TestWatchHonorsAnUnreadableRebootIntent(t *testing.T) {
 	// The file's presence is the trigger. Its content only improves
 	// the message. Even a garbled intent must still reboot the
@@ -65,7 +93,7 @@ func TestWatchHonorsAnUnreadableRebootIntent(t *testing.T) {
 	restarts := make(chan machine.RestartIntent, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := watchForOperatorIntents(ctx, dir, time.Millisecond, reboots, restarts, make(chan machine.ModulesIntent, 1)); err != nil {
+	if err := watchForOperatorIntents(ctx, dir, reboots, restarts, make(chan machine.ModulesIntent, 1)); err != nil {
 		t.Fatal(err)
 	}
 	intent := <-reboots
@@ -176,7 +204,7 @@ func TestWatchPrefersARebootWhenBothIntentsStand(t *testing.T) {
 	restarts := make(chan machine.RestartIntent, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := watchForOperatorIntents(ctx, dir, time.Millisecond, reboots, restarts, make(chan machine.ModulesIntent, 1)); err != nil {
+	if err := watchForOperatorIntents(ctx, dir, reboots, restarts, make(chan machine.ModulesIntent, 1)); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -205,7 +233,7 @@ func TestWatchHonorsAnUnreadableRestartIntent(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- watchForOperatorIntents(ctx, dir, time.Millisecond, reboots, restarts, make(chan machine.ModulesIntent, 1))
+		done <- watchForOperatorIntents(ctx, dir, reboots, restarts, make(chan machine.ModulesIntent, 1))
 	}()
 	intent := <-restarts
 	cancel()

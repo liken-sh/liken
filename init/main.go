@@ -412,7 +412,7 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	restartRequests := make(chan machine.RestartIntent, 1)
 	loadRequests := make(chan machine.ModulesIntent, 1)
 	plane.start("the intent watch", func(ctx context.Context) error {
-		return watchForOperatorIntents(ctx, machine.OperatorRunDir, 2*time.Second, rebootRequests, restartRequests, loadRequests)
+		return watchForOperatorIntents(ctx, machine.OperatorRunDir, rebootRequests, restartRequests, loadRequests)
 	})
 	// The module loader handles the lightest intent: an additive
 	// spec.modules edit that applies to the running kernel, with

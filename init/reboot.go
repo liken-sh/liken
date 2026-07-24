@@ -5,10 +5,22 @@ package main
 // Only PID 1 can shut a machine down correctly. For this reason, the
 // operator never reboots the machine itself. Instead, the operator
 // writes an intent file (machine/reboot.go describes the channel),
-// and init does the rest. Init checks for this file with a 2-second
-// poll. This method is deliberate: it uses a few lines that anyone
-// can read, instead of inotify. A 2-second delay is small compared
-// to the reboot that follows it.
+// and init does the rest. Init watches the intent directory with
+// inotify: it establishes the watch, scans the directory once, and
+// then scans again on every event. The watch-then-scan order closes a
+// window. An intent that lands between a scan and the watch would
+// otherwise wait for the next event.
+//
+// An event is only a trigger. The scan decides everything: which
+// intent stands, and what it carries. A woken watcher reads the
+// directory as it is now, not what an event claimed a moment ago.
+// writeAtomic renames a finished file into the directory, so
+// IN_MOVED_TO is the event that every intent write produces, and the
+// watch asks for it.
+//
+// If inotify cannot start, init falls back to a 2-second poll. PID 1
+// must keep working, so a watch that fails to start must not stop the
+// machine. The poll is a degraded mode. It adds latency, never error.
 //
 // The shutdown sequence runs the dependency stack in reverse order.
 // First, it signals every process. (k3s was already stopped
@@ -31,88 +43,136 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// watchForOperatorIntents polls the operator's channel for two kinds
-// of disruption: a reboot and a restart.
+// watchForOperatorIntents watches the operator's channel and delivers
+// each intent that lands there. It establishes an inotify watch on the
+// directory, runs an initial scan, and then scans again on every wake.
+// The watch comes before the first scan, so an intent that lands
+// between the scan and the watch cannot slip past unseen.
 //
-// The function checks for a reboot intent first on every tick. This
-// order is deliberate. A reboot re-renders everything that a restart
-// would also render. So when both files exist at the same time, the
-// reboot takes priority. The restart file is not needed anymore: it
-// disappears with the boot's tmpfs, like every reboot intent does.
-//
-// Delivering a reboot intent ends the watch. A reboot always follows
-// it, so there is nothing left to watch for. When the function
-// returns nil, it tells the machine plane that this component's work
-// is complete.
-//
-// A restart intent works differently, because the machine keeps
-// running after a restart. The function consumes the restart intent
-// and keeps watching for the rest of the boot. The function clears
-// the restart intent file before it delivers the intent to the
-// caller. If a crash happens between these two steps, the machine
-// loses one restart request. The operator's next pass sends the
-// request again. If the function cleared the intent file after
-// delivering it instead, a crash between the two steps could cause
-// the machine to restart k3s again and again.
-//
-// The presence of a file is the trigger. The content of a file only
-// improves the console message. For this reason, the function honors
-// an intent file that it cannot read, instead of ignoring it. (Atomic
-// writes make an unreadable file a bug, not a race condition, but a
-// bug must not stop the machine from working.) The directory and the
-// poll interval are parameters, so tests can watch a temporary
-// directory with fast polls. The boot passes the real channel.
-func watchForOperatorIntents(ctx context.Context, dir string, interval time.Duration,
+// If the watch cannot start, the function falls back to a 2-second
+// poll, so PID 1 keeps working even when inotify is unavailable. A
+// returned nil tells the machine plane that a reboot intent was
+// delivered and this component's work is complete.
+func watchForOperatorIntents(ctx context.Context, dir string,
 	reboots chan<- machine.RebootIntent, restarts chan<- machine.RestartIntent,
 	loads chan<- machine.ModulesIntent) error {
+	wake, err := machine.WatchDir(ctx, dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "liken: watching %s: %v; falling back to a poll\n", dir, err)
+		wake = pollWake(ctx, 2*time.Second)
+	}
+	if scanIntents(dir, reboots, restarts, loads) {
+		return nil
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-time.After(interval):
+		case <-wake:
 		}
-		intent, err := machine.ReadRebootIntent(dir)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "liken: reading the reboot intent: %v\n", err)
-			intent = &machine.RebootIntent{Reason: "an unreadable reboot intent"}
-		}
-		if intent != nil {
-			reboots <- *intent
+		if scanIntents(dir, reboots, restarts, loads) {
 			return nil
 		}
-
-		restart, err := machine.ReadRestartIntent(dir)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "liken: reading the restart intent: %v\n", err)
-			restart = &machine.RestartIntent{Reason: "an unreadable restart intent"}
-		}
-		if restart != nil {
-			if err := machine.ClearRestartIntent(dir); err != nil {
-				fmt.Fprintf(os.Stderr, "liken: consuming the restart intent: %v\n", err)
-			}
-			restarts <- *restart
-		}
-
-		// The modules intent behaves like the restart intent: the
-		// function consumes it before delivery, and the machine keeps
-		// running. Loading modules is the lightest disruption of all:
-		// none. The function still honors this intent file even when it
-		// cannot read it, because the staged store, not the intent
-		// file, holds the truth about what to load. The apply step
-		// re-derives everything from the staged store.
-		load, err := machine.ReadModulesIntent(dir)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "liken: reading the modules intent: %v\n", err)
-			load = &machine.ModulesIntent{Reason: "an unreadable modules intent"}
-		}
-		if load == nil {
-			continue
-		}
-		if err := machine.ClearModulesIntent(dir); err != nil {
-			fmt.Fprintf(os.Stderr, "liken: consuming the modules intent: %v\n", err)
-		}
-		loads <- *load
 	}
+}
+
+// scanIntents reads the intent directory once and delivers what it
+// finds. It returns true only when it delivered a reboot intent, which
+// ends the watch.
+//
+// The function checks for a reboot intent first. This order is
+// deliberate. A reboot re-renders everything that a restart would also
+// render. So when both files exist at the same time, the reboot takes
+// priority. The restart file is not needed anymore: it disappears with
+// the boot's tmpfs, like every reboot intent does.
+//
+// Delivering a reboot intent ends the watch. A reboot always follows
+// it, so there is nothing left to watch for.
+//
+// A restart intent works differently, because the machine keeps
+// running after a restart. The function consumes the restart intent,
+// and the watch continues for the rest of the boot. The function
+// clears the restart intent file before it delivers the intent to the
+// caller. If a crash happens between these two steps, the machine loses
+// one restart request. The operator's next pass sends the request
+// again. If the function cleared the intent file after delivering it
+// instead, a crash between the two steps could cause the machine to
+// restart k3s again and again.
+//
+// The presence of a file is the trigger. The content of a file only
+// improves the console message. For this reason, the function honors an
+// intent file that it cannot read, instead of ignoring it. (Atomic
+// writes make an unreadable file a bug, not a race condition, but a bug
+// must not stop the machine from working.)
+func scanIntents(dir string, reboots chan<- machine.RebootIntent,
+	restarts chan<- machine.RestartIntent, loads chan<- machine.ModulesIntent) bool {
+	intent, err := machine.ReadRebootIntent(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "liken: reading the reboot intent: %v\n", err)
+		intent = &machine.RebootIntent{Reason: "an unreadable reboot intent"}
+	}
+	if intent != nil {
+		reboots <- *intent
+		return true
+	}
+
+	restart, err := machine.ReadRestartIntent(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "liken: reading the restart intent: %v\n", err)
+		restart = &machine.RestartIntent{Reason: "an unreadable restart intent"}
+	}
+	if restart != nil {
+		if err := machine.ClearRestartIntent(dir); err != nil {
+			fmt.Fprintf(os.Stderr, "liken: consuming the restart intent: %v\n", err)
+		}
+		restarts <- *restart
+	}
+
+	// The modules intent behaves like the restart intent: the function
+	// consumes it before delivery, and the machine keeps running.
+	// Loading modules is the lightest disruption of all: none. The
+	// function still honors this intent file even when it cannot read
+	// it, because the staged store, not the intent file, holds the
+	// truth about what to load. The apply step re-derives everything
+	// from the staged store.
+	load, err := machine.ReadModulesIntent(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "liken: reading the modules intent: %v\n", err)
+		load = &machine.ModulesIntent{Reason: "an unreadable modules intent"}
+	}
+	if load == nil {
+		return false
+	}
+	if err := machine.ClearModulesIntent(dir); err != nil {
+		fmt.Fprintf(os.Stderr, "liken: consuming the modules intent: %v\n", err)
+	}
+	loads <- *load
+	return false
+}
+
+// pollWake adapts a ticker to a wake channel, so watchForOperatorIntents
+// can drive its scan loop the same way whether an inotify watch or a
+// timer wakes it. Each tick sends one non-blocking wake, so a slow scan
+// coalesces ticks the way it coalesces events. This is the degraded
+// mode for a machine where inotify cannot start.
+func pollWake(ctx context.Context, interval time.Duration) <-chan struct{} {
+	wake := make(chan struct{}, 1)
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				select {
+				case wake <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}()
+	return wake
 }
 
 // rebootMachine runs init's shutdown sequence: the dependency stack
