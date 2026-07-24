@@ -80,7 +80,9 @@ const (
 	// takes from a roomy disk. podEphemeral is last in the canonical
 	// order, so it is the role that takes the rest, and on a large disk
 	// that leaves the volumes a workload claims with almost nothing.
-	// Above this size, the space goes to podStorage instead.
+	// Above this size, the space goes to podStorage instead. This role
+	// also carries the pod logs (podlogs.go), which is one more reason
+	// a proposal names it whenever the disk can hold it.
 	podEphemeralCeilingBytes = 64 << 30
 
 	// podStorageBytes is what podStorage asks for. This role is the

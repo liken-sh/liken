@@ -553,7 +553,12 @@ spec:
                       description: >-
                         kubelet's working space: emptyDir volumes and
                         per-pod scratch, the pool that pods meter with
-                        ephemeral-storage requests and limits.
+                        ephemeral-storage requests and limits. The pod
+                        logs are also written here, and they stay
+                        visible at /var/log/pods. Size this role for
+                        the logs as well as the volumes. A machine
+                        that does not declare this role keeps all of
+                        this data in memory.
                       required: [device]
                       properties:
                         device:

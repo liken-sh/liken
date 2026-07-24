@@ -366,6 +366,13 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 		writeRTC()
 	}
 	prepareForK3s()
+	// Pod logs land on podEphemeral, and still appear at the path
+	// Kubernetes uses, /var/log/pods. This call comes after
+	// prepareForK3s, which creates /var/log and sets the mount
+	// propagation that the bind inherits, and before k3s starts, so the
+	// mount is in place before kubelet opens its first log file
+	// (podlogs.go).
+	bindPodLogs(storage)
 	// The previous boot's k3s and containerd logs move aside
 	// before k3s starts to write this boot's logs. This is a
 	// plain function call rather than a machine-plane component,

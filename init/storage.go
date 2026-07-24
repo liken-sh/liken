@@ -80,7 +80,9 @@ import (
 //	                 The same path also appears in the image's
 //	                 k3s config.yaml.
 //	podEphemeral     kubelet's root directory: emptyDirs and pod
-//	                 scratch space.
+//	                 scratch space. The pod logs live here too, bound
+//	                 onto /var/log/pods so that readers still find
+//	                 them at the path Kubernetes uses (podlogs.go).
 type roleMount struct {
 	path   string
 	flags  uintptr
@@ -168,30 +170,42 @@ func teardownStorage() {
 }
 
 // unmountRoleMounts detaches every role file system in reverse
-// canonical order. Two different shutdown paths share this function.
-// Boot-time teardown unmounts each file system directly and reports
-// any failure, because nothing else runs this early in boot, and a
-// failed unmount here is useful information. The reboot path
-// (reboot.go) passes MNT_DETACH and ignores errors: a container that
-// was just killed can still hold its mount namespace open for a
-// moment, which can pin a file system in place, and lazy detachment
-// lets the kernel finish the unmount as those references clear, after
-// the sync has already made the data safe. When a path is not a mount
-// point, unmounting it returns EINVAL, which only means there was
-// nothing to unmount.
+// canonical order, and anything stacked on one of them first. Two
+// different shutdown paths share this function. Boot-time teardown
+// unmounts each file system directly and reports any failure, because
+// nothing else runs this early in boot, and a failed unmount here is
+// useful information. The reboot path (reboot.go) passes MNT_DETACH
+// and ignores errors: a container that was just killed can still hold
+// its mount namespace open for a moment, which can pin a file system
+// in place, and lazy detachment lets the kernel finish the unmount as
+// those references clear, after the sync has already made the data
+// safe. When a path is not a mount point, unmounting it returns
+// EINVAL, which only means there was nothing to unmount.
 func unmountRoleMounts(flags int, reportErrors bool) {
+	// The pod-log bind is the one mount that is not a role and still
+	// holds a role's file system open (podlogs.go). It comes off first,
+	// so that podEphemeral's own unmount below releases the disk rather
+	// than detaching a mount point that something still references.
+	unmountPodLogs(flags, reportErrors)
 	for _, name := range slices.Backward(machine.StorageRoleNames) {
 		target := roleMounts[name].path
 		if target == "" {
 			continue // raw roles are never mounted
 		}
-		err := unix.Unmount(target, flags)
-		switch {
-		case err == nil:
-			fmt.Printf("liken: storage: unmounted %s\n", target)
-		case reportErrors && !errors.Is(err, unix.EINVAL) && !errors.Is(err, fs.ErrNotExist):
-			fmt.Fprintf(os.Stderr, "liken: storage: unmounting %s: %v\n", target, err)
-		}
+		detachMount(target, flags, reportErrors)
+	}
+}
+
+// detachMount unmounts one path and reports the outcome the way the
+// caller asked for. Every unmount on the way down goes through this
+// function, so the console tells one story about what came apart.
+func detachMount(target string, flags int, reportErrors bool) {
+	err := unix.Unmount(target, flags)
+	switch {
+	case err == nil:
+		fmt.Printf("liken: storage: unmounted %s\n", target)
+	case reportErrors && !errors.Is(err, unix.EINVAL) && !errors.Is(err, fs.ErrNotExist):
+		fmt.Fprintf(os.Stderr, "liken: storage: unmounting %s: %v\n", target, err)
 	}
 }
 

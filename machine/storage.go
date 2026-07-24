@@ -139,7 +139,10 @@ type StorageSpec struct {
 
 	// PodEphemeral is kubelet's working space: emptyDir volumes and
 	// per-pod scratch space. It is the pool that pods measure with
-	// ephemeral-storage requests and limits.
+	// ephemeral-storage requests and limits. The pod logs live here
+	// too, bound onto /var/log/pods, because a log that appends for
+	// as long as its pod runs must not be written to the root
+	// filesystem's small write budget.
 	PodEphemeral *StorageRole `json:"podEphemeral,omitempty"`
 }
 
