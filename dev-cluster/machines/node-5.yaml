@@ -53,4 +53,4 @@ spec:
     podEphemeral:
       device: /dev/vdb
   sysctls:
-    fs.inotify.max_user_instances: "8192"
+    vm.max_map_count: "262144"

@@ -43,7 +43,7 @@ spec:
     podEphemeral:
       device: /dev/vdb
   sysctls:
-    fs.inotify.max_user_instances: "8192"
+    vm.max_map_count: "262144"
   # The declared-modules drill (milestone 18): dummy is the kernel's
   # placeholder network driver. It is harmless everywhere, so this
   # machine stands as the lab's proof that a deployment can ask for a

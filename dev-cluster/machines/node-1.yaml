@@ -116,9 +116,11 @@ spec:
   # setting holds before k3s starts) and by the liken operator from
   # then on (so editing the Machine resource in-cluster takes effect
   # without a reboot, and the operator corrects any drift). The
-  # kernel's default of 128 inotify instances per user runs out
-  # quickly on a node where every log-follower and config-watcher
-  # holds one instance. Raising this limit is one of the most common
-  # node tunings.
+  # kernel caps how many memory-mapped areas one process may hold, and
+  # its default of 65530 is too low for search and database engines,
+  # which map their index files in many small pieces. Raising this cap
+  # is the tuning those engines ask for in their install guides, so it
+  # makes a good demonstration: a workload need, declared next to the
+  # machine that serves it.
   sysctls:
-    fs.inotify.max_user_instances: "8192"
+    vm.max_map_count: "262144"
