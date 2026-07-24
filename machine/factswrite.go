@@ -36,7 +36,7 @@ const (
 // WriteRole publishes the machine's role in its cluster: leader or
 // follower. Boot derives it from the Cluster manifest's leaders list.
 func (t FactsTree) WriteRole(role api.Role) error {
-	return t.writeFact("role", string(role))
+	return t.report(t.writeFact("role", string(role)))
 }
 
 // WriteBootTime publishes the moment the machine booted, derived from
@@ -44,7 +44,7 @@ func (t FactsTree) WriteRole(role api.Role) error {
 // shares the record's lifetime: a reboot moves it, an in-place k3s
 // restart does not.
 func (t FactsTree) WriteBootTime(bootedAt *time.Time) error {
-	return t.writeFact("boot/time", formatTime(bootedAt))
+	return t.report(t.writeFact("boot/time", formatTime(bootedAt)))
 }
 
 // WriteLastCrash publishes the newest kernel crash the machine still
@@ -52,20 +52,20 @@ func (t FactsTree) WriteBootTime(bootedAt *time.Time) error {
 // record, so the whole subtree is removed.
 func (t FactsTree) WriteLastCrash(c *CrashStatus) error {
 	if c == nil {
-		return os.RemoveAll(filepath.Join(t.Dir, "lastCrash"))
+		return t.report(os.RemoveAll(filepath.Join(t.Dir, "lastCrash")))
 	}
-	return firstError(
+	return t.report(firstError(
 		t.writeFact("lastCrash/time", formatTime(c.Time)),
 		t.writeFact("lastCrash/reason", string(c.Reason)),
 		t.writeFact("lastCrash/message", c.Message),
 		t.writeFact("lastCrash/records", c.Records),
-	)
+	))
 }
 
 // WriteVersion publishes the machine's version inventory: liken's own
 // version, and every outside component the image carries.
 func (t FactsTree) WriteVersion(v VersionStatus) error {
-	return firstError(
+	return t.report(firstError(
 		t.writeFact("version/liken", v.Liken),
 		t.writeFact("version/kernel", v.Kernel),
 		t.writeFact("version/xtables", v.Xtables),
@@ -80,7 +80,7 @@ func (t FactsTree) WriteVersion(v VersionStatus) error {
 		t.writeFact("version/linuxFirmware", v.LinuxFirmware),
 		t.writeFact("version/microcode", v.Microcode),
 		t.writeFact("version/microcodeRevision", v.MicrocodeRevision),
-	)
+	))
 }
 
 // WriteNetwork publishes the outcome of the boot's networking. The
@@ -95,17 +95,17 @@ func (t FactsTree) WriteNetwork(n NetworkStatus) error {
 		t.writeListFact("network/addresses", n.Addresses),
 		t.writeListFact("network/nameservers", n.Nameservers),
 	); err != nil {
-		return err
+		return t.report(err)
 	}
 	want := map[string]bool{}
 	for _, iface := range n.Interfaces {
 		if err := assertKey("interface", iface.Name); err != nil {
-			return err
+			return t.report(err)
 		}
 		want[iface.Name] = true
 		base := filepath.Join("network", "interfaces", iface.Name)
 		if err := os.MkdirAll(filepath.Join(t.Dir, base), 0o755); err != nil {
-			return err
+			return t.report(err)
 		}
 		if err := firstError(
 			t.writeFact(filepath.Join(base, "mac"), iface.MAC),
@@ -115,32 +115,32 @@ func (t FactsTree) WriteNetwork(n NetworkStatus) error {
 			t.writeFact(filepath.Join(base, "leaseExpires"), formatTime(iface.LeaseExpires)),
 			t.writeListFact(filepath.Join(base, "nameservers"), iface.Nameservers),
 		); err != nil {
-			return err
+			return t.report(err)
 		}
 	}
-	return syncEntryDirs(filepath.Join(t.Dir, "network", "interfaces"), want)
+	return t.report(syncEntryDirs(filepath.Join(t.Dir, "network", "interfaces"), want))
 }
 
 // WriteTime publishes the state of the machine's clock. The clock loop
 // owns this subtree and rewrites it as it disciplines the clock.
 func (t FactsTree) WriteTime(ts TimeStatus) error {
-	return firstError(
+	return t.report(firstError(
 		t.writeFact("time/state", string(ts.State)),
 		t.writeFact("time/source", ts.Source),
 		t.writeFact("time/stratum", formatInt(ts.Stratum)),
 		t.writeFact("time/offset", ts.Offset),
 		t.writeFact("time/lastSync", formatTime(ts.LastSync)),
-	)
+	))
 }
 
 // WriteHardwareBasics publishes the machine's processor count and total
 // memory. The disks and the unclaimed devices have their own writers,
 // because the hardware watch keeps them current after boot.
 func (t FactsTree) WriteHardwareBasics(cpus int, memoryBytes uint64) error {
-	return firstError(
+	return t.report(firstError(
 		t.writeFact("hardware/cpus", formatInt(cpus)),
 		t.writeFact("hardware/memoryBytes", formatUint(memoryBytes)),
-	)
+	))
 }
 
 // WriteBlockDevices publishes the machine's storage inventory: every
@@ -150,22 +150,22 @@ func (t FactsTree) WriteBlockDevices(devices []BlockDevice) error {
 	want := map[string]bool{}
 	for _, d := range devices {
 		if err := assertKey("blockDevice", d.Name); err != nil {
-			return err
+			return t.report(err)
 		}
 		want[d.Name] = true
 		base := filepath.Join("hardware", "blockDevices", d.Name)
 		if err := os.MkdirAll(filepath.Join(t.Dir, base), 0o755); err != nil {
-			return err
+			return t.report(err)
 		}
 		if err := firstError(
 			t.writeFact(filepath.Join(base, "sizeBytes"), formatUint(d.SizeBytes)),
 			t.writeFact(filepath.Join(base, "model"), d.Model),
 			t.writeFact(filepath.Join(base, "serial"), d.Serial),
 		); err != nil {
-			return err
+			return t.report(err)
 		}
 	}
-	return syncEntryDirs(filepath.Join(t.Dir, "hardware", "blockDevices"), want)
+	return t.report(syncEntryDirs(filepath.Join(t.Dir, "hardware", "blockDevices"), want))
 }
 
 // WriteUnclaimed publishes every device the kernel enumerated but that
@@ -179,7 +179,7 @@ func (t FactsTree) WriteUnclaimed(devices []UnclaimedDevice) error {
 		want[key] = true
 		base := filepath.Join("hardware", "unclaimed", key)
 		if err := os.MkdirAll(filepath.Join(t.Dir, base), 0o755); err != nil {
-			return err
+			return t.report(err)
 		}
 		if err := firstError(
 			t.writeFact(filepath.Join(base, "modalias"), d.Modalias),
@@ -189,21 +189,21 @@ func (t FactsTree) WriteUnclaimed(devices []UnclaimedDevice) error {
 			t.writeFact(filepath.Join(base, "message"), d.Message),
 			t.writeListFact(filepath.Join(base, "candidates"), d.Candidates),
 		); err != nil {
-			return err
+			return t.report(err)
 		}
 	}
-	return syncEntryDirs(filepath.Join(t.Dir, "hardware", "unclaimed"), want)
+	return t.report(syncEntryDirs(filepath.Join(t.Dir, "hardware", "unclaimed"), want))
 }
 
 // WriteFirmware publishes the machine's standing firmware state: the
 // mode it boots in, and the boot menu from its non-volatile store.
 func (t FactsTree) WriteFirmware(f FirmwareStatus) error {
-	return firstError(
+	return t.report(firstError(
 		t.writeFact("firmware/mode", string(f.Mode)),
 		t.writeFact("firmware/bootCurrent", f.BootCurrent),
 		t.writeFact("firmware/bootNext", f.BootNext),
 		t.writeListFact("firmware/bootOrder", f.BootOrder),
-	)
+	))
 }
 
 // WriteStorage publishes where each storage role is actually backed
@@ -220,7 +220,7 @@ func (t FactsTree) WriteStorage(s StorageStatus) error {
 			t.writeFact(filepath.Join(base, "partition"), role.Partition),
 			t.writeFact(filepath.Join(base, "capacityBytes"), formatUint(role.CapacityBytes)),
 		); err != nil {
-			return err
+			return t.report(err)
 		}
 	}
 	return nil
@@ -232,21 +232,21 @@ func (t FactsTree) WriteModules(modules []ModuleStatus) error {
 	want := map[string]bool{}
 	for _, m := range modules {
 		if err := assertKey("module", m.Name); err != nil {
-			return err
+			return t.report(err)
 		}
 		want[m.Name] = true
 		base := filepath.Join("modules", m.Name)
 		if err := os.MkdirAll(filepath.Join(t.Dir, base), 0o755); err != nil {
-			return err
+			return t.report(err)
 		}
 		if err := firstError(
 			t.writeFact(filepath.Join(base, "state"), string(m.State)),
 			t.writeFact(filepath.Join(base, "message"), m.Message),
 		); err != nil {
-			return err
+			return t.report(err)
 		}
 	}
-	return syncEntryDirs(filepath.Join(t.Dir, "modules"), want)
+	return t.report(syncEntryDirs(filepath.Join(t.Dir, "modules"), want))
 }
 
 // WriteFeatures publishes this machine's standing on every feature the
@@ -256,21 +256,21 @@ func (t FactsTree) WriteFeatures(features []FeatureStatus) error {
 	want := map[string]bool{}
 	for _, f := range features {
 		if err := assertKey("feature", f.Name); err != nil {
-			return err
+			return t.report(err)
 		}
 		want[f.Name] = true
 		base := filepath.Join("features", f.Name)
 		if err := os.MkdirAll(filepath.Join(t.Dir, base), 0o755); err != nil {
-			return err
+			return t.report(err)
 		}
 		if err := firstError(
 			t.writeFact(filepath.Join(base, "state"), string(f.State)),
 			t.writeFact(filepath.Join(base, "message"), f.Message),
 		); err != nil {
-			return err
+			return t.report(err)
 		}
 	}
-	return syncEntryDirs(filepath.Join(t.Dir, "features"), want)
+	return t.report(syncEntryDirs(filepath.Join(t.Dir, "features"), want))
 }
 
 // WriteRegistries publishes what this boot rendered into k3s's
@@ -278,59 +278,59 @@ func (t FactsTree) WriteFeatures(features []FeatureStatus) error {
 // whether the embedded registry is on. It never carries credential
 // material.
 func (t FactsTree) WriteRegistries(r RegistriesStatus) error {
-	return firstError(
+	return t.report(firstError(
 		t.writeListFact("registries/mirrors", r.Mirrors),
 		t.writeListFact("registries/credentialedHosts", r.CredentialedHosts),
 		t.writeFact("registries/embedded", formatBool(r.Embedded)),
-	)
+	))
 }
 
 // WriteBootSlot publishes the system slot this boot came from, A or B.
 // It is empty when the boot did not come from a slot, as in a
 // direct-kernel boot.
 func (t FactsTree) WriteBootSlot(slot string) error {
-	return t.writeFact("boot/slot", slot)
+	return t.report(t.writeFact("boot/slot", slot))
 }
 
 // WriteBootRestarts publishes the count of in-place k3s restarts this
 // boot has performed. The restart path owns it, and it returns to zero
 // on the next reboot.
 func (t FactsTree) WriteBootRestarts(n int) error {
-	return t.writeFact("boot/restarts", formatInt(n))
+	return t.report(t.writeFact("boot/restarts", formatInt(n)))
 }
 
 // WriteBootModules publishes the module list the winning manifest
 // declared, recorded as actuated regardless of each load's outcome.
 func (t FactsTree) WriteBootModules(modules []string) error {
-	return t.writeListFact("boot/modules", modules)
+	return t.report(t.writeListFact("boot/modules", modules))
 }
 
 // WriteBootManifest publishes the Machine manifest this boot ran under.
 // The module loader writes it last, because it is the commit point the
 // operator's convergence judges.
 func (t FactsTree) WriteBootManifest(src ManifestSource, hash string) error {
-	return t.writeRecordFact("boot/manifest", [][2]string{
+	return t.report(t.writeRecordFact("boot/manifest", [][2]string{
 		{"source", string(src)},
 		{"hash", hash},
-	})
+	}))
 }
 
 // WriteBootClusterManifest publishes the Cluster manifest this boot ran
 // under. The restart path writes it last, because promotion keys on it.
 func (t FactsTree) WriteBootClusterManifest(src ManifestSource, hash string) error {
-	return t.writeRecordFact("boot/clusterManifest", [][2]string{
+	return t.report(t.writeRecordFact("boot/clusterManifest", [][2]string{
 		{"source", string(src)},
 		{"hash", hash},
-	})
+	}))
 }
 
 // WriteBootCredentials publishes the registry-credentials document this
 // boot, or the latest k3s restart, rendered into registries.yaml.
 func (t FactsTree) WriteBootCredentials(src ManifestSource, hash string) error {
-	return t.writeRecordFact("boot/credentials", [][2]string{
+	return t.report(t.writeRecordFact("boot/credentials", [][2]string{
 		{"source", string(src)},
 		{"hash", hash},
-	})
+	}))
 }
 
 // WriteBootImports publishes the imported-images record this boot ran
@@ -338,11 +338,11 @@ func (t FactsTree) WriteBootCredentials(src ManifestSource, hash string) error {
 // standing from a boot that died unproven, and threw the container
 // store away.
 func (t FactsTree) WriteBootImports(src ManifestSource, hash string, discarded bool) error {
-	return t.writeRecordFact("boot/imports", [][2]string{
+	return t.report(t.writeRecordFact("boot/imports", [][2]string{
 		{"source", string(src)},
 		{"hash", hash},
 		{"discarded", formatBool(discarded)},
-	})
+	}))
 }
 
 // WriteBootStorage publishes the storage the boot actuated, one
@@ -355,16 +355,16 @@ func (t FactsTree) WriteBootStorage(spec StorageSpec) error {
 		want[name] = true
 		base := filepath.Join("boot", "storage", name)
 		if err := os.MkdirAll(filepath.Join(t.Dir, base), 0o755); err != nil {
-			return err
+			return t.report(err)
 		}
 		if err := firstError(
 			t.writeFact(filepath.Join(base, "device"), role.Device),
 			t.writeFact(filepath.Join(base, "size"), role.Size),
 		); err != nil {
-			return err
+			return t.report(err)
 		}
 	}
-	return syncEntryDirs(filepath.Join(t.Dir, "boot", "storage"), want)
+	return t.report(syncEntryDirs(filepath.Join(t.Dir, "boot", "storage"), want))
 }
 
 // WriteRejection publishes one of the four standing quarantine records.
@@ -373,17 +373,17 @@ func (t FactsTree) WriteBootStorage(spec StorageSpec) error {
 func (t FactsTree) WriteRejection(kind RejectionKind, r *Rejection) error {
 	base := filepath.Join("boot", string(kind))
 	if r == nil {
-		return os.RemoveAll(filepath.Join(t.Dir, base))
+		return t.report(os.RemoveAll(filepath.Join(t.Dir, base)))
 	}
 	if err := os.MkdirAll(filepath.Join(t.Dir, base), 0o755); err != nil {
-		return err
+		return t.report(err)
 	}
 	rejectedAt := r.RejectedAt
-	return firstError(
+	return t.report(firstError(
 		t.writeFact(filepath.Join(base, "hash"), r.Hash),
 		t.writeFact(filepath.Join(base, "reason"), r.Reason),
 		t.writeFact(filepath.Join(base, "rejectedAt"), formatTime(&rejectedAt)),
-	)
+	))
 }
 
 // firstError returns the first non-nil error of a sequence of writes,

@@ -89,7 +89,29 @@ const FactsDir = "/run/liken/facts"
 // FactsTree is one facts tree, rooted at Dir. Production code roots it
 // at FactsDir. Tests root it at a temporary directory, so a test never
 // touches the machine's real /run.
-type FactsTree struct{ Dir string }
+//
+// A fact write must never stop the machine: a lost fact is a reporting
+// gap the operator fills with a zero value, not a reason to halt PID 1.
+// The program that owns the tree states that policy once, in Report,
+// rather than at every call site. Each writer routes its result through
+// report, which hands a failure to Report and returns the error
+// unchanged. The reporter is additive: the error still reaches the
+// caller, so a test with a nil Report asserts it directly.
+type FactsTree struct {
+	Dir string
+	// Report receives each failed write. A nil Report leaves the error
+	// with the caller.
+	Report func(err error)
+}
+
+// report hands a failed write to the tree's reporter and returns the
+// error unchanged, so the caller still sees it.
+func (t FactsTree) report(err error) error {
+	if err != nil && t.Report != nil {
+		t.Report(err)
+	}
+	return err
+}
 
 // keyPattern is the set of characters that a collection key may use
 // directly, for interfaces, disks, modules, and features. These keys

@@ -114,9 +114,9 @@ func (l *moduleLoader) apply(intent machine.ModulesIntent, store machine.Manifes
 	// record is the commit point the operator's convergence judges
 	// (machine-operator/converge.go). The operator must never read a
 	// promoted manifest hash before the module facts that explain it.
-	logFactsError(l.tree.WriteBootModules(l.bootModules))
-	logFactsError(l.tree.WriteModules(l.statuses))
-	logFactsError(l.tree.WriteBootManifest(machine.ManifestSourceProven, hash))
+	l.tree.WriteBootModules(l.bootModules)
+	l.tree.WriteModules(l.statuses)
+	l.tree.WriteBootManifest(machine.ManifestSourceProven, hash)
 	fmt.Printf("liken: spec %.12s applied in place: %s loaded without a reboot\n",
 		hash, strings.Join(added, ", "))
 }

@@ -149,14 +149,14 @@ func (s *restartState) apply(intent machine.RestartIntent) bool {
 	// (machine-operator/cluster.go). The boot cluster manifest
 	// publication carries the exact bytes the operator compares against.
 	s.restarts++
-	logFactsError(s.tree.WriteFeatures(featureStatuses))
-	logFactsError(s.tree.WriteRegistries(registries))
+	s.tree.WriteFeatures(featureStatuses)
+	s.tree.WriteRegistries(registries)
 	if stagedCreds != nil {
-		logFactsError(s.tree.WriteBootCredentials(machine.ManifestSourceStaged, machine.ManifestHash(stagedCredsRaw)))
+		s.tree.WriteBootCredentials(machine.ManifestSourceStaged, machine.ManifestHash(stagedCredsRaw))
 	}
-	logFactsError(s.tree.WriteBootRestarts(s.restarts))
+	s.tree.WriteBootRestarts(s.restarts)
 	if applyingCluster {
-		logFactsError(s.tree.WriteBootClusterManifest(machine.ManifestSourceStaged, clusterHash))
+		s.tree.WriteBootClusterManifest(machine.ManifestSourceStaged, clusterHash)
 		publishBootClusterManifest(clusterRaw)
 	}
 

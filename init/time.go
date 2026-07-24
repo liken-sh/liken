@@ -436,7 +436,7 @@ func disciplineClock(clk *clock, tree machine.FactsTree, initial machine.TimeSta
 					fmt.Fprintf(os.Stderr, "liken: time: lost every source (%v); the clock is on its own\n", err)
 					current.State = machine.TimeUnsynchronized
 					current.Stratum = stratumUnsynchronized
-					logFactsError(tree.WriteTime(current))
+					tree.WriteTime(current)
 					published, publishedAt = current, time.Now()
 				}
 				continue
@@ -464,7 +464,7 @@ func disciplineClock(clk *clock, tree machine.FactsTree, initial machine.TimeSta
 			// way, instead of resetting every 64 seconds.
 			current = timeStatus(sync, clk.sources)
 			if worthRepublishing(published, current, sync.offset-publishedOffset, time.Since(publishedAt)) {
-				logFactsError(tree.WriteTime(current))
+				tree.WriteTime(current)
 				published, publishedOffset, publishedAt = current, sync.offset, time.Now()
 			}
 		}

@@ -107,3 +107,26 @@ func TestWritersRejectUnsafeKeys(t *testing.T) {
 		})
 	}
 }
+
+// TestReportRunsOncePerFailure proves the tree's error policy. A writer
+// routes its failure through Report, so the owner reports it once, and
+// still returns the error, so a caller that wants it has it. The
+// reporter is additive: it never hides the fault.
+func TestReportRunsOncePerFailure(t *testing.T) {
+	var reported []error
+	tree := FactsTree{
+		Dir:    t.TempDir(),
+		Report: func(err error) { reported = append(reported, err) },
+	}
+
+	err := tree.WriteBlockDevices([]BlockDevice{{Name: "bad disk"}})
+	if err == nil {
+		t.Fatal("the writer should reject the unsafe key")
+	}
+	if len(reported) != 1 {
+		t.Fatalf("Report should run once, ran %d times", len(reported))
+	}
+	if reported[0] != err {
+		t.Errorf("Report should get the returned error, got %v", reported[0])
+	}
+}

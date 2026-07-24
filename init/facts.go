@@ -46,7 +46,7 @@ import (
 // variables rather than constants, so tests can publish into a
 // tempdir. A real boot never points them anywhere but /run.
 var (
-	factsTree        = machine.FactsTree{Dir: machine.FactsDir}
+	factsTree        = machine.FactsTree{Dir: machine.FactsDir, Report: reportFactsError}
 	bootManifestPath = machine.BootManifestPath
 
 	// xtablesProbe is the command that reports the netfilter
@@ -55,15 +55,14 @@ var (
 	xtablesProbe = "iptables"
 )
 
-// logFactsError reports a failed facts write to stderr and returns.
-// A write failure must never stop the boot: the machine keeps running
-// and the operator falls back to a partial tree, which reads a missing
-// fact as its zero value. Losing a fact is a reporting gap, not a
-// reason to halt PID 1.
-func logFactsError(err error) {
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "liken: writing facts: %v\n", err)
-	}
+// reportFactsError reports a failed facts write to stderr. The facts
+// tree calls it for each failed write, so a boot step calls the writers
+// bare. A write failure must never stop the boot: the machine keeps
+// running and the operator falls back to a partial tree, which reads a
+// missing fact as its zero value. Losing a fact is a reporting gap, not
+// a reason to halt PID 1.
+func reportFactsError(err error) {
+	fmt.Fprintf(os.Stderr, "liken: writing facts: %v\n", err)
 }
 
 // bootFacts gathers the write-once facts that the boot discovered. It
@@ -99,43 +98,43 @@ func publishBootFacts(tree machine.FactsTree, in bootFacts) {
 	now := time.Now()
 	memoryBytes, bootedAt := machineUptimeFacts(now)
 
-	logFactsError(tree.WriteRole(in.role))
+	tree.WriteRole(in.role)
 	// The crash stub arrives settled rather than being re-read here,
 	// because settling it has side effects (preserving and clearing the
 	// platform store) that belong to one moment early in boot.
-	logFactsError(tree.WriteLastCrash(in.lastCrash))
-	logFactsError(tree.WriteVersion(versionFacts()))
+	tree.WriteLastCrash(in.lastCrash)
+	tree.WriteVersion(versionFacts())
 	// Network facts exist only for interfaces that came up; a machine
 	// that failed DHCP still publishes the facts it has.
-	logFactsError(tree.WriteNetwork(networkFacts(in.clusterDoc, in.conns, now)))
+	tree.WriteNetwork(networkFacts(in.clusterDoc, in.conns, now))
 	// The clock's state so far: the boot-time measurement, if one
 	// succeeded, or an accurate unsynchronized or free-running report.
 	// The clock loop owns time/ after this seed.
-	logFactsError(tree.WriteTime(in.time))
-	logFactsError(tree.WriteHardwareBasics(runtime.NumCPU(), memoryBytes))
-	logFactsError(tree.WriteBlockDevices(in.blockDevices))
-	logFactsError(tree.WriteUnclaimed(in.unclaimed))
-	logFactsError(tree.WriteFirmware(firmwareFacts(efiVarsDir)))
-	logFactsError(tree.WriteStorage(in.storage))
-	logFactsError(tree.WriteModules(in.modules))
-	logFactsError(tree.WriteFeatures(in.features))
-	logFactsError(tree.WriteRegistries(in.registries))
+	tree.WriteTime(in.time)
+	tree.WriteHardwareBasics(runtime.NumCPU(), memoryBytes)
+	tree.WriteBlockDevices(in.blockDevices)
+	tree.WriteUnclaimed(in.unclaimed)
+	tree.WriteFirmware(firmwareFacts(efiVarsDir))
+	tree.WriteStorage(in.storage)
+	tree.WriteModules(in.modules)
+	tree.WriteFeatures(in.features)
+	tree.WriteRegistries(in.registries)
 
 	// The boot record: what this boot ran under. The four manifest
 	// records seed here at boot; the module loader and the restart path
 	// own the ones they rewrite afterward.
-	logFactsError(tree.WriteBootTime(bootedAt))
-	logFactsError(tree.WriteBootSlot(in.boot.Slot))
-	logFactsError(tree.WriteBootStorage(in.boot.Storage))
-	logFactsError(tree.WriteBootModules(in.boot.Modules))
-	logFactsError(tree.WriteBootManifest(in.boot.ManifestSource, in.boot.ManifestHash))
-	logFactsError(tree.WriteBootClusterManifest(in.boot.ClusterManifestSource, in.boot.ClusterManifestHash))
-	logFactsError(tree.WriteBootCredentials(in.boot.CredentialsSource, in.boot.CredentialsHash))
-	logFactsError(tree.WriteBootImports(in.boot.ImportsSource, in.boot.ImportsHash, in.boot.ImportsDiscarded))
-	logFactsError(tree.WriteRejection(machine.RejectMachine, in.boot.Rejection))
-	logFactsError(tree.WriteRejection(machine.RejectCluster, in.boot.ClusterRejection))
-	logFactsError(tree.WriteRejection(machine.RejectSystem, in.boot.SystemRejection))
-	logFactsError(tree.WriteRejection(machine.RejectCredentials, in.boot.CredentialsRejection))
+	tree.WriteBootTime(bootedAt)
+	tree.WriteBootSlot(in.boot.Slot)
+	tree.WriteBootStorage(in.boot.Storage)
+	tree.WriteBootModules(in.boot.Modules)
+	tree.WriteBootManifest(in.boot.ManifestSource, in.boot.ManifestHash)
+	tree.WriteBootClusterManifest(in.boot.ClusterManifestSource, in.boot.ClusterManifestHash)
+	tree.WriteBootCredentials(in.boot.CredentialsSource, in.boot.CredentialsHash)
+	tree.WriteBootImports(in.boot.ImportsSource, in.boot.ImportsHash, in.boot.ImportsDiscarded)
+	tree.WriteRejection(machine.RejectMachine, in.boot.Rejection)
+	tree.WriteRejection(machine.RejectCluster, in.boot.ClusterRejection)
+	tree.WriteRejection(machine.RejectSystem, in.boot.SystemRejection)
+	tree.WriteRejection(machine.RejectCredentials, in.boot.CredentialsRejection)
 }
 
 // machineUptimeFacts answers two questions from one syscall: how much

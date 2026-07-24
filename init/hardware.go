@@ -97,8 +97,8 @@ func watchHardware(catalog *hardware.Catalog, tree machine.FactsTree, last []mac
 				fmt.Println(line)
 			}
 			if !slices.EqualFunc(last, unclaimed, unclaimedEqual) || !slices.Equal(lastDisks, disks) {
-				logFactsError(tree.WriteUnclaimed(unclaimed))
-				logFactsError(tree.WriteBlockDevices(disks))
+				tree.WriteUnclaimed(unclaimed)
+				tree.WriteBlockDevices(disks)
 			}
 			last, lastDisks = unclaimed, disks
 		}
