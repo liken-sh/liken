@@ -308,6 +308,16 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 	if facts.Storage.MachineState.Backing != machine.BackingPartition {
 		return machineStateEphemeral("SpecConverged", "a manifest")
 	}
+	// The network spec is checked here as well as at boot. A spec
+	// that init would refuse is a spec that costs a reboot to find
+	// out about, and the machine would come back on its proven
+	// manifest with a rejection record instead of the network the
+	// person asked for. The check is the manifest's own consistency
+	// only: whether a declared MAC address belongs to a port of this
+	// machine is a question only the boot can settle.
+	if err := m.Spec.Network.Validate(); err != nil {
+		return convergence{condition: notConverged("SpecConverged", "StagingRejected", err.Error())}
+	}
 	if err := validateStaging(m.Spec.Storage, facts); err != nil {
 		return convergence{condition: notConverged("SpecConverged", "StagingRejected", err.Error())}
 	}

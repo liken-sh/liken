@@ -99,6 +99,9 @@ func New(dir string, in io.Reader, out io.Writer) error {
 		if err := parsed.Spec.Storage.Validate(); err != nil {
 			return fmt.Errorf("this is a scaffold bug: %s's storage does not validate: %w", m.Name, err)
 		}
+		if err := parsed.Spec.Network.Validate(); err != nil {
+			return fmt.Errorf("this is a scaffold bug: %s's network does not validate: %w", m.Name, err)
+		}
 		machines[m.Name] = doc
 	}
 

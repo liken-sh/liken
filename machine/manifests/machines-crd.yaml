@@ -225,26 +225,70 @@ spec:
                       type: array
                       description: >-
                         Configures the machine's interfaces
-                        explicitly, each by its kernel name. A
-                        clustered machine typically declares two
-                        interfaces: a DHCP uplink, and the
+                        explicitly. Each entry says which port it
+                        means by kernel name, by MAC address, or by
+                        both. A clustered machine typically declares
+                        two interfaces: a DHCP uplink, and the
                         cluster-facing interface with the static
                         address its peers were told to find it at.
-                      # This is one entry per interface: a map keyed
-                      # by name. The API server can now enforce this
-                      # instead of trusting the caller.
-                      x-kubernetes-list-type: map
-                      x-kubernetes-list-map-keys: [name]
+                      # This list is atomic, and it has to be. A map
+                      # list needs one field that identifies an
+                      # entry, and an entry here identifies its port
+                      # by either name or mac, so no such field
+                      # exists. Atomic also matches how a person
+                      # edits this list: the set of ports a machine
+                      # uses is one decision, replaced whole.
+                      x-kubernetes-list-type: atomic
                       items:
                         type: object
-                        required: [name]
+                        # An entry that says nothing about which port
+                        # it means would configure no port at all.
+                        # The API server refuses it here, so the
+                        # mistake never reaches a machine that has no
+                        # shell to debug it from.
+                        x-kubernetes-validations:
+                          - rule: (has(self.name) && self.name != '') || (has(self.mac) && self.mac != '')
+                            message: an interface must declare name, mac, or both, so the machine knows which port it means
                         properties:
                           name:
                             type: string
+                            maxLength: 15
                             description: >-
                               The interface to configure, named as
                               the kernel names it (for example,
-                              eth1).
+                              eth1). liken runs no udev, so kernel
+                              names follow the hardware enumeration
+                              order. A name is positional: it means
+                              whichever port enumerates in that
+                              place. This is what a fleet of
+                              identical machines wants, because one
+                              manifest describes them all, and a
+                              replacement network card inherits the
+                              declaration. A name cannot tell two
+                              ports of the same kind apart. Declare
+                              mac for those.
+                          mac:
+                            type: string
+                            maxLength: 17
+                            pattern: ^(([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}|([0-9a-fA-F]{4}\.){2}[0-9a-fA-F]{4})$
+                            description: >-
+                              The hardware address of the interface
+                              to configure (for example,
+                              e0:51:d8:aa:bb:01). A MAC address is
+                              identity: it means one exact port, and
+                              it stays correct when the enumeration
+                              order changes. Declare it on a machine
+                              with more than one port, where a name
+                              cannot say which port carries the
+                              cable. The cost is that this manifest
+                              is now about one physical machine: a
+                              new network card has a new address, and
+                              the manifest needs the edit. The
+                              hardware report reads the new address
+                              with no network, so the machine can
+                              still tell you. Declare name and mac
+                              together only to make the boot refuse
+                              when the two name different ports.
                           address:
                             type: string
                             maxLength: 64

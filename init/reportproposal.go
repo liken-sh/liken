@@ -56,10 +56,16 @@ type reportDisk struct {
 // eth0 does not exist until its driver registers it. Link is the
 // kernel's own word for the carrier, which a person reads to tell a
 // connected port from a dark one.
+//
+// Driver is the module bound to the card. The proposal uses it to
+// decide whether a name can identify a port at all: two ports on one
+// driver are two ports of the same model, and only the order the
+// kernel probed them puts one before the other.
 type reportInterface struct {
-	Name string
-	MAC  string
-	Link string
+	Name   string
+	MAC    string
+	Link   string
+	Driver string
 }
 
 // moduleRecommendation pairs one unclaimed device with the ordered
@@ -258,6 +264,8 @@ func composeNetwork(b *strings.Builder, ifaces []reportInterface) {
 		return
 	}
 
+	byMAC := namesAreAmbiguous(ifaces)
+
 	var connected, dark []reportInterface
 	for _, ifc := range ifaces {
 		// The kernel says "down" only when it knows the carrier is
@@ -273,36 +281,105 @@ func composeNetwork(b *strings.Builder, ifaces []reportInterface) {
 
 	if len(connected) == 0 {
 		writeComment(b, "  ", "No port had a carrier when this report ran. This proposal declares no interface, so liken configures the first port it finds. Connect the cable you will use and run the report again, or declare the port yourself from the names below.")
-		writeDarkInterfaces(b, dark)
+		writeDarkInterfaces(b, dark, byMAC)
 		b.WriteString("  network: {}\n")
 		return
 	}
 
+	if byMAC {
+		writeComment(b, "  ", "This machine has more than one port on the same driver, so a kernel name cannot say which port is which: eth0 and eth1 are two cards of one model, in the order the kernel probed them. These ports are declared by MAC address instead, which belongs to the card and does not move. That ties this manifest to this machine, so a replacement card needs an edit here; run the report again and it reads the new address.")
+	}
 	if len(dark) > 0 {
 		writeComment(b, "  ", "Only the ports with a carrier are declared here. liken waits up to thirty seconds for a DHCP lease on each declared interface, one after another, so a declared port with no cable delays every boot by that much. The dark ports follow the declared ones as comments; uncomment a port after you connect its cable.")
 	}
 	b.WriteString("  network:\n")
 	b.WriteString("    interfaces:\n")
 	for i, ifc := range connected {
-		fmt.Fprintf(b, "      # MAC %s, link %s\n", ifc.MAC, ifc.Link)
+		writeInterfaceEvidence(b, "      ", ifc, byMAC)
 		if i == 0 {
 			b.WriteString("      # This first interface uses DHCP. For a cluster segment\n")
 			b.WriteString("      # with a fixed address, add an \"address: 10.0.0.N/24\" line.\n")
 		}
-		fmt.Fprintf(b, "      - name: %s\n", ifc.Name)
+		fmt.Fprintf(b, "      - %s\n", declareInterface(ifc, byMAC))
 	}
 	for _, ifc := range dark {
-		fmt.Fprintf(b, "      # MAC %s, link %s\n", ifc.MAC, ifc.Link)
-		fmt.Fprintf(b, "      #- name: %s\n", ifc.Name)
+		writeInterfaceEvidence(b, "      ", ifc, byMAC)
+		fmt.Fprintf(b, "      #- %s\n", declareInterface(ifc, byMAC))
 	}
+}
+
+// namesAreAmbiguous reports whether this machine's kernel names can
+// identify its ports. They cannot as soon as two ports share a
+// driver: the driver is the card model, so two ports on one driver
+// are interchangeable to everything except their addresses, and which
+// of them the kernel calls eth0 follows the bus probe. Add a card,
+// move a card, or update the firmware, and the two names can trade
+// places with nothing in the manifest to notice.
+//
+// A port whose driver the report could not read counts for nothing
+// here. Two unreadable drivers are not evidence of one shared driver.
+func namesAreAmbiguous(ifaces []reportInterface) bool {
+	seen := map[string]bool{}
+	for _, ifc := range ifaces {
+		if ifc.Driver == "" || ifc.MAC == "" {
+			continue
+		}
+		if seen[ifc.Driver] {
+			return true
+		}
+		seen[ifc.Driver] = true
+	}
+	return false
+}
+
+// usesMAC decides how one entry names its port. It follows the
+// machine-wide verdict, except for a port whose address the report
+// could not read: no address means no entry to write, so that port
+// keeps its name whatever the rest of the machine does.
+func usesMAC(ifc reportInterface, byMAC bool) bool {
+	return byMAC && ifc.MAC != ""
+}
+
+// declareInterface writes the one field that says which port an entry
+// means. A machine whose names are unambiguous keeps the name, so its
+// manifest still describes any machine built the same way. A machine
+// whose names are a guess gets the address instead.
+func declareInterface(ifc reportInterface, byMAC bool) string {
+	if usesMAC(ifc, byMAC) {
+		return "mac: " + ifc.MAC
+	}
+	return "name: " + ifc.Name
+}
+
+// writeInterfaceEvidence writes the comment above one entry: the
+// facts about the port that the declaration itself leaves out.
+func writeInterfaceEvidence(b *strings.Builder, indent string, ifc reportInterface, byMAC bool) {
+	fmt.Fprintf(b, "%s# %s, link %s\n", indent, interfaceAside(ifc, byMAC), ifc.Link)
+}
+
+func driverOrUnknown(ifc reportInterface) string {
+	if ifc.Driver == "" {
+		return "an unnamed driver"
+	}
+	return ifc.Driver
 }
 
 // writeDarkInterfaces lists the ports a person could declare, as
 // comments, for the machine where no port had a carrier at all.
-func writeDarkInterfaces(b *strings.Builder, dark []reportInterface) {
+func writeDarkInterfaces(b *strings.Builder, dark []reportInterface, byMAC bool) {
 	for _, ifc := range dark {
-		fmt.Fprintf(b, "  #   - name: %s   # MAC %s, link %s\n", ifc.Name, ifc.MAC, ifc.Link)
+		fmt.Fprintf(b, "  #   - %s   # %s, link %s\n", declareInterface(ifc, byMAC), interfaceAside(ifc, byMAC), ifc.Link)
 	}
+}
+
+// interfaceAside names the facts the declaration left out, so that
+// every port in the proposal carries both its name and its address,
+// whichever one the entry itself uses.
+func interfaceAside(ifc reportInterface, byMAC bool) string {
+	if usesMAC(ifc, byMAC) {
+		return fmt.Sprintf("%s on %s", ifc.Name, driverOrUnknown(ifc))
+	}
+	return "MAC " + ifc.MAC
 }
 
 // composeStorage writes the spec.storage section. It first lists every

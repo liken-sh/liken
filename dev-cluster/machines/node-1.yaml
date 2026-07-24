@@ -35,9 +35,18 @@ spec:
     # could assign it. (In the lab, the segment is a plain wire
     # between QEMU guests, with no DHCP server on it anyway; see
     # dev-cluster/Makefile.)
+    #
+    # The two entries say which port they mean in the two ways a
+    # manifest can. The uplink gives a name, which is a position: the
+    # port the kernel numbered first. The cluster segment gives a MAC
+    # address, which is identity: that exact port, whatever the kernel
+    # numbers it. dev-cluster/Makefile derives both of this guest's
+    # addresses from its node number. Naming both ways here means one
+    # boot of this node exercises both, which is why node-1 differs
+    # from the nodes that follow it.
     interfaces:
       - name: eth0
-      - name: eth1
+      - mac: 52:54:00:4c:4c:01
         address: 10.10.0.1/24
   # Storage is declared by purpose, not by mount path; the paths are
   # liken's implementation details. Each role names the device it

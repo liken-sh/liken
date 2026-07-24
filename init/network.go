@@ -26,6 +26,7 @@ package main
 // segment that joins the QEMU guests has no DHCP server on it.
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
@@ -72,20 +73,39 @@ func bringUpNetwork(spec machine.NetworkSpec) ([]*connection, error) {
 		}
 	}
 
+	// A spec that cannot be right is refused before any link changes.
+	// The same check runs in the cluster, where the operator refuses
+	// to stage such a spec, but the boot cannot rely on that: init
+	// also reads manifests that were written by hand and carried in
+	// on a stick, which no API server ever saw.
+	if err := spec.Validate(); err != nil {
+		return nil, err
+	}
+
+	// The kernel's link list is read once and used for every
+	// resolution below. Reading it once also means that every error
+	// message can list the same set of ports, which is the list a
+	// person needs to correct the manifest.
+	links, err := netlink.LinkList()
+	if err != nil {
+		return nil, fmt.Errorf("listing interfaces: %w", err)
+	}
+	present := presentInterfaces(links)
+
 	interfaces := spec.Interfaces
 	if len(interfaces) == 0 {
-		link, err := pickInterface()
+		name, err := pickInterface(present)
 		if err != nil {
 			return nil, err
 		}
-		interfaces = []machine.InterfaceSpec{{Name: link.Attrs().Name}}
+		interfaces = []machine.InterfaceSpec{{Name: name}}
 	}
 
 	var conns []*connection
 	for _, ifc := range interfaces {
-		conn, err := bringUpInterface(ifc)
+		conn, err := bringUpInterface(ifc, present)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "liken: network: %s: %v\n", ifc.Name, err)
+			fmt.Fprintf(os.Stderr, "liken: network: %s: %v\n", ifc.Identity(), err)
 			continue
 		}
 		conns = append(conns, conn)
@@ -142,47 +162,140 @@ func resolvConf(conns []*connection) string {
 
 // bringUpInterface raises one link and gives it an address, using
 // the method that the interface spec chose.
-func bringUpInterface(ifc machine.InterfaceSpec) (*connection, error) {
-	link, err := netlink.LinkByName(ifc.Name)
+func bringUpInterface(ifc machine.InterfaceSpec, present []interfaceIdentity) (*connection, error) {
+	ifname, err := resolveInterface(ifc, present)
 	if err != nil {
-		return nil, fmt.Errorf("manifest names interface %q: %w", ifc.Name, err)
+		return nil, err
 	}
-	fmt.Printf("liken: bringing up %s\n", ifc.Name)
+	// The rest of the boot log, and the status the operator
+	// publishes, speak in kernel names. A manifest that asked for a
+	// MAC address gets the translation printed once, so a reader can
+	// follow the rest.
+	if ifc.MAC != "" {
+		fmt.Printf("liken: MAC %s is %s on this machine\n", ifc.MAC, ifname)
+	}
+	link, err := netlink.LinkByName(ifname)
+	if err != nil {
+		return nil, fmt.Errorf("opening interface %q: %w", ifname, err)
+	}
+	fmt.Printf("liken: bringing up %s\n", ifname)
 	if err := netlink.LinkSetUp(link); err != nil {
-		return nil, fmt.Errorf("raising %s: %w", ifc.Name, err)
+		return nil, fmt.Errorf("raising %s: %w", ifname, err)
 	}
 
 	if ifc.Address != "" {
 		return applyStatic(link, ifc)
 	}
 
-	fmt.Printf("liken: negotiating DHCP on %s\n", ifc.Name)
-	lease, err := acquireLease(ifc.Name)
+	fmt.Printf("liken: negotiating DHCP on %s\n", ifname)
+	lease, err := acquireLease(ifname)
 	if err != nil {
 		return nil, err
 	}
 	return applyLease(link, lease, ifc)
 }
 
-// pickInterface finds the hardware to configure when the manifest
-// names no interface. The rule is simple: the code picks the first
-// link that is not loopback and that has a MAC address. Such a link
-// looks like a real network card. On the hardware that this default
-// serves, one machine with one port, there is nothing to choose
-// between. When there is more than one interface, the manifest must
-// name each interface explicitly.
-func pickInterface() (netlink.Link, error) {
-	links, err := netlink.LinkList()
-	if err != nil {
-		return nil, fmt.Errorf("listing interfaces: %w", err)
-	}
+// interfaceIdentity is one link reduced to the two facts that decide
+// which link a spec means: the name the kernel gave it, and the
+// address burned into the card. Resolution takes these instead of
+// netlink links, so the rule that chooses a port is a pure function
+// that a test can drive on any machine.
+type interfaceIdentity struct {
+	name string
+	mac  net.HardwareAddr
+}
+
+// presentInterfaces reduces the kernel's link list to the ports a
+// manifest can configure. Loopback is dropped: it is not hardware,
+// the boot has already raised it, and leaving it out keeps it out of
+// the error messages that list what a machine has.
+func presentInterfaces(links []netlink.Link) []interfaceIdentity {
+	var present []interfaceIdentity
 	for _, link := range links {
 		attrs := link.Attrs()
-		if attrs.Flags&net.FlagLoopback == 0 && len(attrs.HardwareAddr) > 0 {
-			return link, nil
+		if attrs.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		present = append(present, interfaceIdentity{name: attrs.Name, mac: attrs.HardwareAddr})
+	}
+	return present
+}
+
+// resolveInterface decides which port one interface spec means, and
+// returns the kernel name of that port.
+//
+// A spec identifies its port by name, by MAC address, or by both. A
+// name is what the kernel called the port on this boot. A MAC address
+// is what the card carries, and it is compared through net.ParseMAC
+// on both sides, so a manifest may spell an address in any of the
+// forms a person copies: colons, hyphens, or the dotted quads that
+// switch consoles print.
+//
+// When a spec carries both, the two must agree. Guessing which one
+// was meant would put the machine's whole network on a coin toss, and
+// the person who would have to correct it cannot reach the machine
+// except by walking to it.
+func resolveInterface(ifc machine.InterfaceSpec, present []interfaceIdentity) (string, error) {
+	if ifc.MAC == "" {
+		for _, port := range present {
+			if port.name == ifc.Name {
+				return port.name, nil
+			}
+		}
+		return "", fmt.Errorf("no interface is named %s; this machine has %s", ifc.Name, describePorts(present))
+	}
+
+	want, err := net.ParseMAC(ifc.MAC)
+	if err != nil {
+		return "", fmt.Errorf("mac %q is not a MAC address", ifc.MAC)
+	}
+	for _, port := range present {
+		if !bytes.Equal(port.mac, want) {
+			continue
+		}
+		if ifc.Name != "" && ifc.Name != port.name {
+			return "", fmt.Errorf("this interface declares both name %s and MAC %s, and they are different ports: that MAC is %s; remove whichever one is wrong",
+				ifc.Name, ifc.MAC, port.name)
+		}
+		return port.name, nil
+	}
+	return "", fmt.Errorf("no interface has MAC %s; this machine has %s", ifc.MAC, describePorts(present))
+}
+
+// describePorts lists every port with its name and its address, for
+// the errors that report a spec no port satisfies. The whole value of
+// this listing is that a person cannot see the machine: nothing here
+// has a shell or an SSH daemon, so the console message is all they
+// get. A message that names the addresses the machine really carries
+// turns a drive to the site into an edit of the manifest.
+func describePorts(present []interfaceIdentity) string {
+	if len(present) == 0 {
+		return "no network interface at all"
+	}
+	described := make([]string, len(present))
+	for i, port := range present {
+		if len(port.mac) == 0 {
+			described[i] = port.name
+			continue
+		}
+		described[i] = fmt.Sprintf("%s %s", port.name, port.mac)
+	}
+	return strings.Join(described, ", ")
+}
+
+// pickInterface finds the hardware to configure when the manifest
+// names no interface. The rule is simple: the code picks the first
+// port that has a MAC address. Such a link looks like a real network
+// card. On the hardware that this default serves, one machine with
+// one port, there is nothing to choose between. When there is more
+// than one interface, the manifest must say which ports to configure.
+func pickInterface(present []interfaceIdentity) (string, error) {
+	for _, port := range present {
+		if len(port.mac) > 0 {
+			return port.name, nil
 		}
 	}
-	return nil, fmt.Errorf("no network interface found among %d links", len(links))
+	return "", fmt.Errorf("no network interface found: none of the %d links outside loopback carries a hardware address", len(present))
 }
 
 // applyStatic sets a declared address in the kernel. This produces
