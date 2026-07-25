@@ -62,6 +62,26 @@ func TestReadReportsUnparseableValues(t *testing.T) {
 	}
 }
 
+// A fact that cannot be read at all is an error that names its path,
+// exactly like a fact that does not parse. The boot's network carries
+// no numbers or timestamps to spell wrongly, so a directory standing
+// where one of its files belongs is what an unreadable fact looks
+// like in that subtree.
+func TestReadReportsAnUnreadableFact(t *testing.T) {
+	tree := FactsTree{Dir: t.TempDir()}
+	rel := filepath.Join("boot", "network", "interfaces", "0", "address")
+	if err := os.MkdirAll(filepath.Join(tree.Dir, rel), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := tree.Read()
+	if err == nil {
+		t.Fatal("a fact that cannot be read must be an error, not a silent zero")
+	}
+	if !strings.Contains(err.Error(), rel) {
+		t.Errorf("the error should name %s, got %v", rel, err)
+	}
+}
+
 func TestWritersRejectUnsafeKeys(t *testing.T) {
 	cases := map[string]struct {
 		key   string

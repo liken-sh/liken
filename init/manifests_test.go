@@ -228,6 +228,27 @@ func TestSettleStorageFirstBootRunsTheSeed(t *testing.T) {
 	}
 }
 
+func TestSettleStorageRecordsTheBootsNetworkEvenWhenItIsEmpty(t *testing.T) {
+	// The emptiest possible first boot declares no interface and takes
+	// the zero-configuration default. It still records that it made
+	// that choice, because the operator reads an absent record as a
+	// boot it cannot judge, and an empty one as a machine that asked
+	// for nothing.
+	fakeMachine(t)
+	fakeCmdline(t, "console=ttyS0\n")
+
+	_, _, boot, err := settleStorage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if boot.Network == nil {
+		t.Fatal("the boot record must carry the network the manifest declared")
+	}
+	if len(boot.Network.Interfaces) != 0 {
+		t.Errorf("this manifest declares no interface: %+v", boot.Network)
+	}
+}
+
 func TestSettleManifestsPromotesTheStagedWinner(t *testing.T) {
 	store := machine.MachineManifests(t.TempDir())
 	raw := []byte("kind: Machine\n")

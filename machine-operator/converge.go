@@ -4,11 +4,15 @@ package main
 // agreement.
 //
 // Sysctls reconcile live. Storage cannot, because the system cannot
-// swap a filesystem under a running cluster. The declared module list
-// cannot reconcile live either, because loading a module is one-way:
-// the kernel offers no safe way to remove a driver while something is
-// using it. Both storage and modules therefore converge through a
-// reboot. The operator stages the desired manifest onto the
+// swap a filesystem under a running cluster. The network cannot
+// either, because the cluster reaches this machine over the very
+// addresses an edit changes: re-addressing a running machine would
+// cut the connection that carries the next instruction, on the one
+// kind of machine that has no shell to repair it from. The declared
+// module list cannot reconcile live either, because loading a module
+// is one-way: the kernel offers no safe way to remove a driver while
+// something is using it. Storage, network, and modules therefore
+// converge through a reboot. The operator stages the desired manifest onto the
 // machineState filesystem, where the next boot finds it, tries it,
 // and promotes or rejects it (machine/staging.go covers that side).
 // This file covers the operator's half of that work: notice drift,
@@ -24,6 +28,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -101,9 +106,9 @@ func deviceNames(disks []machine.BlockDevice) string {
 
 // renderManifest produces the canonical bytes to stage: a complete
 // Machine document with no status. The document carries the whole
-// spec, including sysctls and network settings, so the reboot
-// converges everything, even though only storage triggers the
-// reboot. The rendering is deterministic: sigs.k8s.io/yaml marshals
+// spec, including the sysctls that need no reboot at all, so the
+// reboot converges everything at once. The rendering is
+// deterministic: sigs.k8s.io/yaml marshals
 // through JSON with sorted keys, so the same spec always produces
 // the same bytes. The hash of those bytes is the spec's identity
 // everywhere: in staging idempotence, in rejections, and in the
@@ -284,7 +289,9 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 	}
 
 	storageDiffs := machine.StorageDrift(m.Spec.Storage, facts.Boot.Storage)
-	drift := append(storageDiffs, machine.ModulesDrift(m.Spec.Modules, facts.Boot.Modules)...)
+	networkDiffs := machine.NetworkDrift(m.Spec.Network, facts.Boot.Network)
+	drift := slices.Concat(storageDiffs, networkDiffs,
+		machine.ModulesDrift(m.Spec.Modules, facts.Boot.Modules))
 	if len(drift) == 0 {
 		return convergedWithCleanup(
 			converged("SpecConverged", "Converged", "this boot actuated the current spec"),
@@ -331,9 +338,9 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 	// Adding modules is the one machine-spec change that needs no
 	// disruption. Loading can happen while the system runs: the
 	// kernel binds a resident driver to hardware that is already
-	// plugged in, on its own. So when the storage is unchanged and
-	// no module is being removed, the manifest stages for
-	// durability, and init loads the additions into the running
+	// plugged in, on its own. So when the storage and the network are
+	// unchanged and no module is being removed, the manifest stages
+	// for durability, and init loads the additions into the running
 	// kernel. This case needs no policy gate and no reboot turn, the
 	// same as the sysctls the operator reconciles live: the gates
 	// exist for disruptions, and this is not one. (Removing a module
@@ -341,7 +348,7 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 	// offers no safe way to remove a driver while something is using
 	// it.)
 	_, retracted := machine.ModuleSetDiff(m.Spec.Modules, facts.Boot.Modules)
-	if len(storageDiffs) == 0 && len(retracted) == 0 {
+	if len(storageDiffs) == 0 && len(networkDiffs) == 0 && len(retracted) == 0 {
 		c.requestLoad = true
 		c.condition = notConverged("SpecConverged", "LoadRequested",
 			fmt.Sprintf("module load requested to apply the staged spec (%.12s) in place: %s", hash, diffs))

@@ -1,16 +1,17 @@
 package machine
 
 // The read side of the boot subtree. Boot holds the configuration this
-// boot ran under: the four manifest records, the actuated storage, and
-// the four standing rejections. It is the half of drift detection that
-// only init can supply, so the operator reads it here and compares it
-// against the cluster's copies.
+// boot ran under: the four manifest records, the actuated storage and
+// network, and the four standing rejections. It is the half of drift
+// detection that only init can supply, so the operator reads it here
+// and compares it against the cluster's copies.
 
 import (
 	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 func (t FactsTree) readBoot() (BootStatus, error) {
@@ -60,6 +61,9 @@ func (t FactsTree) readBoot() (BootStatus, error) {
 		return BootStatus{}, err
 	}
 	if b.Storage, err = t.readBootStorage(); err != nil {
+		return BootStatus{}, err
+	}
+	if b.Network, err = t.readBootNetwork(); err != nil {
 		return BootStatus{}, err
 	}
 	if b.Rejection, err = t.readRejection(RejectMachine); err != nil {
@@ -112,6 +116,54 @@ func (t FactsTree) readBootStorage() (StorageSpec, error) {
 		*roleFields[name] = role
 	}
 	return spec, nil
+}
+
+// readBootNetwork reads the network spec the boot actuated. The
+// boot/network directory is the record's presence, so a tree without
+// it comes from a boot that reported nothing about its network, and
+// the pointer stays nil. A record that holds no interface directory
+// is a spec that declared no interface, which is a different fact.
+//
+// The interfaces are read by position, in order, until a position is
+// absent. Reading them this way keeps the declared order, which
+// sorted directory names would lose as soon as a machine declared ten
+// of them.
+func (t FactsTree) readBootNetwork() (*NetworkSpec, error) {
+	base := filepath.Join("boot", "network")
+	if _, err := os.Stat(filepath.Join(t.Dir, base)); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	spec := &NetworkSpec{}
+	for i := 0; ; i++ {
+		dir := filepath.Join(base, "interfaces", strconv.Itoa(i))
+		if _, err := os.Stat(filepath.Join(t.Dir, dir)); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return spec, nil
+			}
+			return nil, err
+		}
+		ifc := InterfaceSpec{}
+		var err error
+		if ifc.Name, err = t.readFact(filepath.Join(dir, "name")); err != nil {
+			return nil, err
+		}
+		if ifc.MAC, err = t.readFact(filepath.Join(dir, "mac")); err != nil {
+			return nil, err
+		}
+		if ifc.Address, err = t.readFact(filepath.Join(dir, "address")); err != nil {
+			return nil, err
+		}
+		if ifc.Gateway, err = t.readFact(filepath.Join(dir, "gateway")); err != nil {
+			return nil, err
+		}
+		if ifc.Nameservers, err = t.readListFact(filepath.Join(dir, "nameservers")); err != nil {
+			return nil, err
+		}
+		spec.Interfaces = append(spec.Interfaces, ifc)
+	}
 }
 
 // readRejection reads one standing quarantine record. A record

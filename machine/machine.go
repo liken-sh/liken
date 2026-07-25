@@ -106,9 +106,13 @@ type Machine struct {
 // state can be reconciled live.
 type MachineSpec struct {
 	// Network is applied by init at boot. The cluster cannot reconcile
-	// this field from inside the cluster, because reaching the cluster
-	// depends on the network settings. Changes to this field take
-	// effect at the next boot.
+	// this field live, because the cluster reaches this machine over
+	// the addresses that an edit changes: re-addressing a running
+	// machine would cut the connection that carries the next
+	// instruction. So an edit converges the same way a storage edit
+	// does. The operator stages it to the machineState filesystem, and
+	// the next boot applies it. RebootPolicy says who starts that
+	// boot.
 	Network NetworkSpec `json:"network,omitzero"`
 
 	// Sysctls is kernel tuning: it maps a parameter name to its
@@ -158,8 +162,9 @@ type MachineSpec struct {
 	Storage StorageSpec `json:"storage,omitzero"`
 
 	// RebootPolicy states what the operator may do when applying the
-	// spec requires a reboot. Today, only a storage change requires a
-	// reboot. Manual, the default, stages the change and reports it;
+	// spec requires a reboot. A storage change requires one, a network
+	// change requires one, and so does retracting a module. Manual,
+	// the default, stages the change and reports it;
 	// the next boot, whenever it happens, applies the change. Auto
 	// lets the operator reboot the machine itself. Manual is the
 	// default because a reboot on a single-node cluster is a total

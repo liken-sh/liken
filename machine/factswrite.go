@@ -15,6 +15,7 @@ package machine
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/liken-sh/liken/api"
@@ -377,6 +378,52 @@ func (t FactsTree) WriteBootStorage(spec StorageSpec) error {
 		}
 	}
 	return t.report(syncEntryDirs(filepath.Join(t.Dir, "boot", "storage"), want))
+}
+
+// WriteBootNetwork publishes the network the boot actuated, one
+// directory for each declared interface. A nil spec means this boot
+// recorded nothing about its network, so the whole subtree goes away.
+//
+// The boot/network directory is the record itself, and it exists even
+// when the spec declares no interface at all. This is the one place
+// in the tree where an empty directory carries meaning, and it has
+// to: a machine that declares no interface and a machine that
+// recorded nothing are different facts, and only the second one is
+// beyond judging (machine/drift.go explains what each one decides).
+//
+// Each interface's key is its position in the declared list, counted
+// from zero. Position is the only key every entry has, because an
+// entry names its port by a kernel name, by a MAC address, or by
+// both. Position is also what the comparison uses, since the order of
+// this list is part of what it asks for.
+func (t FactsTree) WriteBootNetwork(spec *NetworkSpec) error {
+	base := filepath.Join("boot", "network")
+	if spec == nil {
+		return t.report(os.RemoveAll(filepath.Join(t.Dir, base)))
+	}
+	interfaces := filepath.Join(base, "interfaces")
+	if err := os.MkdirAll(filepath.Join(t.Dir, interfaces), 0o755); err != nil {
+		return t.report(err)
+	}
+	want := map[string]bool{}
+	for i, ifc := range spec.Interfaces {
+		key := strconv.Itoa(i)
+		want[key] = true
+		dir := filepath.Join(interfaces, key)
+		if err := os.MkdirAll(filepath.Join(t.Dir, dir), 0o755); err != nil {
+			return t.report(err)
+		}
+		if err := firstError(
+			t.writeFact(filepath.Join(dir, "name"), ifc.Name),
+			t.writeFact(filepath.Join(dir, "mac"), ifc.MAC),
+			t.writeFact(filepath.Join(dir, "address"), ifc.Address),
+			t.writeFact(filepath.Join(dir, "gateway"), ifc.Gateway),
+			t.writeListFact(filepath.Join(dir, "nameservers"), ifc.Nameservers),
+		); err != nil {
+			return t.report(err)
+		}
+	}
+	return t.report(syncEntryDirs(filepath.Join(t.Dir, interfaces), want))
 }
 
 // WriteRejection publishes one of the four standing quarantine records.

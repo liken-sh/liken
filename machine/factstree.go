@@ -63,6 +63,13 @@ package machine
 // replaces. The rest of the tree writes once at boot, before the
 // operator exists, so those facts cannot tear and stay one file each.
 //
+// Rule 2 has one exception, boot/network, and the exception is what
+// the fact is for. A machine that declared no interface and a machine
+// whose boot recorded no network are different facts, and the
+// operator must act differently on each, so the boot/network
+// directory exists whenever the boot recorded anything, even with no
+// file under it. Nowhere else does an empty directory mean anything.
+//
 // The tree lives on tmpfs, so a write needs no fsync. Every write goes
 // through writeAtomic: a temp file in the same directory, then a
 // rename. A reader that polls or wakes on its own schedule sees either

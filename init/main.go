@@ -457,6 +457,7 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	loader := &moduleLoader{
 		tree:        factsTree,
 		bootStorage: boot.Storage,
+		bootNetwork: m.Spec.Network,
 		bootModules: boot.Modules,
 		statuses:    moduleStatuses,
 	}

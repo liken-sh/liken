@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 )
 
 // StorageDrift compares the declared storage against what the boot
@@ -42,6 +43,72 @@ func StorageDrift(desired, actuated StorageSpec) []string {
 				diffs = append(diffs, fmt.Sprintf("%s: size %s declared, %s actuated", name, orRemainder(d.Size), orRemainder(a.Size)))
 			}
 		}
+	}
+	return diffs
+}
+
+// NetworkDrift compares the declared network against what the boot
+// actuated. Unlike storage, a network spec has no grow-only rule and
+// no shape a machine must keep: any spec may replace any other, and
+// the only question is whether the running machine matches the one
+// the cluster asks for now.
+//
+// A nil actuated spec means the boot recorded no network. There is
+// nothing to compare against, so there is no drift to report. The
+// alternative would be to read every declared interface as drift, and
+// stage a manifest and ask for a reboot on every machine whose facts
+// happen to lack this record.
+//
+// The comparison walks both lists by position, because this list is
+// atomic and its order carries meaning: interface order is the order
+// that each interface's nameservers reach resolv.conf in. Two specs
+// that name the same ports in a different order are two different
+// requests, and a position also gives a name to an entry that a
+// person wrote as a MAC address alone.
+func NetworkDrift(desired NetworkSpec, actuated *NetworkSpec) []string {
+	if actuated == nil {
+		return nil
+	}
+	var diffs []string
+	for i := range max(len(desired.Interfaces), len(actuated.Interfaces)) {
+		switch {
+		case i >= len(actuated.Interfaces):
+			diffs = append(diffs, fmt.Sprintf("network: %s declared but not actuated", desired.Interfaces[i].Identity()))
+		case i >= len(desired.Interfaces):
+			diffs = append(diffs, fmt.Sprintf("network: %s actuated but no longer declared", actuated.Interfaces[i].Identity()))
+		default:
+			diffs = append(diffs, interfaceDrift(i, desired.Interfaces[i], actuated.Interfaces[i])...)
+		}
+	}
+	return diffs
+}
+
+// interfaceDrift compares one position of the two lists. When the two
+// entries name different ports, that one difference is the whole
+// report: the addressing under it belongs to another port, so
+// reporting each field as well would say the same thing several times
+// over. MAC addresses are compared as addresses rather than as text,
+// so the spelling a person copied from a firmware screen and the
+// spelling a Linux tool prints are one port.
+func interfaceDrift(position int, desired, actuated InterfaceSpec) []string {
+	if desired.Name != actuated.Name || normalizeMAC(desired.MAC) != normalizeMAC(actuated.MAC) {
+		return []string{fmt.Sprintf("network: interface %d: %s declared, %s actuated",
+			position+1, desired.Identity(), actuated.Identity())}
+	}
+	var diffs []string
+	if desired.Address != actuated.Address {
+		diffs = append(diffs, fmt.Sprintf("network: %s: address %s declared, %s actuated",
+			desired.Identity(), orDHCP(desired.Address), orDHCP(actuated.Address)))
+	}
+	if desired.Gateway != actuated.Gateway {
+		diffs = append(diffs, fmt.Sprintf("network: %s: gateway %s declared, %s actuated",
+			desired.Identity(), orNone(desired.Gateway), orNone(actuated.Gateway)))
+	}
+	if !slices.Equal(desired.Nameservers, actuated.Nameservers) {
+		diffs = append(diffs, fmt.Sprintf("network: %s: nameservers %s declared, %s actuated",
+			desired.Identity(),
+			orNone(strings.Join(desired.Nameservers, ", ")),
+			orNone(strings.Join(actuated.Nameservers, ", "))))
 	}
 	return diffs
 }
@@ -124,4 +191,23 @@ func orRemainder(size string) string {
 		return "(remainder)"
 	}
 	return size
+}
+
+// orDHCP names the empty address for a reader. An interface with no
+// declared address asks for DHCP, so the diff says so rather than
+// leaving a gap where a value should be.
+func orDHCP(address string) string {
+	if address == "" {
+		return "(DHCP)"
+	}
+	return address
+}
+
+// orNone names an empty optional field for a reader, for the same
+// reason orDHCP does.
+func orNone(value string) string {
+	if value == "" {
+		return "(none)"
+	}
+	return value
 }

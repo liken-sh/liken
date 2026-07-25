@@ -206,11 +206,10 @@ spec:
               type: object
               description: >-
                 The declared state of this machine. Fields differ in
-                when they take effect. Init reads network at boot.
-                The liken operator applies sysctls and nodeLabels at
-                boot and also reconciles them live. Storage and
-                modules are staged, and they take effect at the next
-                boot.
+                when they take effect. The liken operator applies
+                sysctls and nodeLabels at boot and also reconciles
+                them live. Network, storage, and modules are staged,
+                and they take effect at the next boot.
               properties:
                 network:
                   type: object
@@ -218,8 +217,13 @@ spec:
                     The machine's network configuration. When empty,
                     it means the default: DHCP on the first interface
                     that looks like real hardware. Init applies this
-                    at boot; a change made in-cluster takes effect at
-                    the next boot.
+                    at boot. The cluster cannot apply it live, because
+                    it reaches the machine over the addresses an edit
+                    changes. So an edit is staged, like a storage
+                    edit, and the next boot applies it. rebootPolicy
+                    says who starts that boot, and status.boot.network
+                    reports the network the running boot came up
+                    under.
                   properties:
                     interfaces:
                       type: array
@@ -1063,8 +1067,9 @@ spec:
                     separately for the Machine manifest and the
                     Cluster document, because the two stage and prove
                     independently.
-                    The hashes identify exact bytes, and the storage
-                    and modules blocks show the spec as actuated.
+                    The hashes identify exact bytes, and the storage,
+                    network, and modules blocks show the spec as
+                    actuated.
                     Together they are the reference point for
                     detecting drift between what the cluster asks
                     for and what the machine did.
@@ -1226,6 +1231,52 @@ spec:
                               type: string
                             size:
                               type: string
+                    network:
+                      type: object
+                      description: >-
+                        The network that the winning manifest
+                        declared, recorded as actuated whatever the
+                        outcome of each interface was. Booting again
+                        under this manifest would ask for the same
+                        network, so this field is the drift
+                        reference, and status.network reports what
+                        each interface actually got. An edit to
+                        spec.network is converged when the two agree.
+                        This field is absent, rather than empty, on a
+                        boot that reported no network at all; an
+                        empty field means the machine declared no
+                        interface and took the zero-configuration
+                        default.
+                      properties:
+                        interfaces:
+                          type: array
+                          # Atomic, and by position, for the same
+                          # reason the spec's list is: an entry names
+                          # its port by either of two fields, so no
+                          # field identifies an entry, and the order
+                          # of the list is part of what it asks for.
+                          x-kubernetes-list-type: atomic
+                          items:
+                            type: object
+                            properties:
+                              name:
+                                type: string
+                                maxLength: 15
+                              mac:
+                                type: string
+                                maxLength: 17
+                              address:
+                                type: string
+                                maxLength: 64
+                              gateway:
+                                type: string
+                                maxLength: 64
+                              nameservers:
+                                type: array
+                                x-kubernetes-list-type: atomic
+                                items:
+                                  type: string
+                                  maxLength: 253
                     modules:
                       type: array
                       description: >-

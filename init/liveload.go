@@ -15,8 +15,9 @@ package main
 // The intent is only a signal. The staged store is the truth about
 // what to apply, and init re-derives the manifest's live-applicability
 // for itself, with the same shared drift functions that the operator
-// used: identical storage, and no module retracted. This re-derivation
-// is what makes a stale, duplicate, or malicious intent harmless.
+// used: identical storage, identical network, and no module
+// retracted. This re-derivation is what makes a stale, duplicate, or
+// malicious intent harmless.
 // Anything that would need a boot is refused and left staged for a
 // boot.
 //
@@ -49,6 +50,7 @@ import (
 type moduleLoader struct {
 	tree        machine.FactsTree
 	bootStorage machine.StorageSpec
+	bootNetwork machine.NetworkSpec
 	bootModules []string
 	statuses    []machine.ModuleStatus
 }
@@ -86,6 +88,11 @@ func (l *moduleLoader) apply(intent machine.ModulesIntent, store machine.Manifes
 
 	if diffs := machine.StorageDrift(doc.Spec.Storage, l.bootStorage); len(diffs) != 0 {
 		fmt.Printf("liken: modules: the staged spec (%.12s) changes storage (%s); it needs a boot, not a load\n",
+			hash, strings.Join(diffs, "; "))
+		return
+	}
+	if diffs := machine.NetworkDrift(doc.Spec.Network, &l.bootNetwork); len(diffs) != 0 {
+		fmt.Printf("liken: modules: the staged spec (%.12s) changes the network (%s); it needs a boot, not a load\n",
 			hash, strings.Join(diffs, "; "))
 		return
 	}

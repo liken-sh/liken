@@ -49,6 +49,7 @@ func writeAll(t *testing.T, tree FactsTree, s *MachineStatus) {
 	must(tree.WriteBootRestarts(s.Boot.Restarts))
 	must(tree.WriteBootModules(s.Boot.Modules))
 	must(tree.WriteBootStorage(s.Boot.Storage))
+	must(tree.WriteBootNetwork(s.Boot.Network))
 	must(tree.WriteRejection(RejectMachine, s.Boot.Rejection))
 	must(tree.WriteRejection(RejectCluster, s.Boot.ClusterRejection))
 	must(tree.WriteRejection(RejectSystem, s.Boot.SystemRejection))
@@ -173,6 +174,14 @@ func everythingSet() *MachineStatus {
 				ClusterState: &StorageRole{Device: "/dev/vda", Size: "2Gi"},
 				PodStorage:   &StorageRole{Device: "/dev/vdb"},
 			},
+			Network: &NetworkSpec{Interfaces: []InterfaceSpec{
+				{Name: "eth0"},
+				{
+					Name: "eth1", MAC: "52:54:00:ab:cd:ef",
+					Address: "192.168.1.10/24", Gateway: "192.168.1.1",
+					Nameservers: []string{"192.168.1.1", "10.0.2.3"},
+				},
+			}},
 			Rejection:            &Rejection{Hash: "r1", Reason: "bad spec", RejectedAt: rejected},
 			ClusterRejection:     &Rejection{Hash: "r2", Reason: "bad cluster", RejectedAt: rejected},
 			SystemRejection:      &Rejection{Hash: "r3", Reason: "fell back", RejectedAt: rejected},
@@ -200,7 +209,13 @@ func sparseFacts() *MachineStatus {
 			},
 		},
 		Storage: AllRolesInMemory(),
-		Boot:    BootStatus{Time: &booted, ManifestSource: ManifestSourceSeed, ManifestHash: "seed", Slot: "A"},
+		Boot: BootStatus{
+			Time: &booted, ManifestSource: ManifestSourceSeed, ManifestHash: "seed", Slot: "A",
+			// A machine that declares no interface and takes the
+			// zero-configuration default still records that it made
+			// that choice.
+			Network: &NetworkSpec{},
+		},
 	}
 }
 
@@ -233,6 +248,37 @@ func TestFactsTreeRoundTrip(t *testing.T) {
 				t.Errorf("round trip changed the facts:\nwant %s\ngot  %s", wantJSON, gotJSON)
 			}
 		})
+	}
+}
+
+// The boot's network record must tell two states apart that every
+// other fact in the tree is allowed to blur: a boot that declared no
+// interface, and a boot that reported no network at all. The operator
+// converges the first one and refuses to judge the second, so the
+// tree has to carry the difference.
+func TestBootNetworkTellsAnEmptySpecFromAnAbsentRecord(t *testing.T) {
+	declaredNothing := FactsTree{Dir: t.TempDir()}
+	if err := declaredNothing.WriteBootNetwork(&NetworkSpec{}); err != nil {
+		t.Fatal(err)
+	}
+	facts, err := declaredNothing.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if facts.Boot.Network == nil {
+		t.Error("a boot that declared no interface still recorded a network")
+	}
+
+	recordedNothing := FactsTree{Dir: t.TempDir()}
+	if err := recordedNothing.WriteBootNetwork(nil); err != nil {
+		t.Fatal(err)
+	}
+	facts, err = recordedNothing.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if facts.Boot.Network != nil {
+		t.Errorf("a boot that recorded nothing must read as nothing: %+v", facts.Boot.Network)
 	}
 }
 
@@ -285,11 +331,16 @@ func TestFactsTreeGoldenLayout(t *testing.T) {
 		Role:    api.RoleLeader,
 		Version: VersionStatus{Liken: "0.1.0"},
 		Network: NetworkStatus{Interface: "eth0", Addresses: []string{"10.0.2.15/24"}},
-		Boot:    BootStatus{ManifestSource: ManifestSourceProven, ManifestHash: "abc"},
+		Boot: BootStatus{
+			ManifestSource: ManifestSourceProven, ManifestHash: "abc",
+			Network: &NetworkSpec{Interfaces: []InterfaceSpec{{Name: "eth1", Address: "10.10.0.1/24"}}},
+		},
 	})
 
 	want := []string{
 		"boot/manifest",
+		"boot/network/interfaces/0/address",
+		"boot/network/interfaces/0/name",
 		"network/addresses",
 		"network/interface",
 		"role",
@@ -300,9 +351,13 @@ func TestFactsTreeGoldenLayout(t *testing.T) {
 	}
 
 	contents := map[string]string{
-		"boot/manifest":     "source=Proven\nhash=abc\n",
-		"role":              "leader\n",
-		"network/addresses": "10.0.2.15/24\n",
+		"boot/manifest": "source=Proven\nhash=abc\n",
+		"role":          "leader\n",
+		// The boot's interfaces are keyed by position, counted from
+		// zero, because an entry may name its port by a kernel name,
+		// by a MAC address, or by both.
+		"boot/network/interfaces/0/name": "eth1\n",
+		"network/addresses":              "10.0.2.15/24\n",
 	}
 	for rel, expected := range contents {
 		raw, err := os.ReadFile(filepath.Join(tree.Dir, rel))

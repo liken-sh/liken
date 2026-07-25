@@ -362,6 +362,14 @@ func settleStorage() (*manifestChoice, machine.StorageStatus, machine.BootStatus
 			boot.ManifestSource = choice.source
 			boot.ManifestHash = choice.hash
 			boot.Storage = choice.m.Spec.Storage
+			// The network is recorded here, where the manifest wins,
+			// and not later, where the links come up. The record says
+			// what this boot ran under, which is the question the
+			// operator's drift detection asks. What each interface
+			// actually got is a different question, and status.network
+			// answers that one.
+			network := choice.m.Spec.Network
+			boot.Network = &network
 			settleManifests(machine.MachineManifests(machine.MachineStateDir), choice, status, &boot)
 			return choice, status, boot, nil
 		}

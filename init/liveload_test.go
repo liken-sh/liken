@@ -12,13 +12,16 @@ import (
 )
 
 // liveLoadFixture builds everything that a live load touches: a
-// manifest store with a staged Machine document, a fabricated module
-// tree where "loop" is builtin (so outcomes need no real kernel), and a
-// module loader that publishes into a temporary facts tree. The tree is
+// manifest store holding the given spec as its staged Machine
+// document, a fabricated module tree where "loop" is builtin (so
+// outcomes need no real kernel), and a module loader that publishes
+// into a temporary facts tree. The loader's boot values are the ones
+// bootStorageSpec and bootNetworkSpec describe, so a staged spec
+// drifts from the boot only where a test makes it drift. The tree is
 // seeded with boot/manifest = Proven/before, so a refused load leaves a
 // record to prove the boot state stayed untouched. It returns the
 // store, the module tree, the loader, and the staged document's hash.
-func liveLoadFixture(t *testing.T, stagedModules []string, bootModules []string, stagedStorage machine.StorageSpec) (machine.ManifestStore, string, *moduleLoader, string) {
+func liveLoadFixture(t *testing.T, staged machine.MachineSpec, bootModules []string) (machine.ManifestStore, string, *moduleLoader, string) {
 	t.Helper()
 
 	base := t.TempDir()
@@ -29,14 +32,11 @@ func liveLoadFixture(t *testing.T, stagedModules []string, bootModules []string,
 		t.Fatal(err)
 	}
 
-	bootStorage := machine.StorageSpec{
-		MachineState: &machine.StorageRole{Device: "/dev/vda", Size: "64Mi"},
-	}
 	doc := machine.Machine{
 		APIVersion: api.APIVersion,
 		Kind:       "Machine",
 		Metadata:   api.ObjectMeta{Name: "lab"},
-		Spec:       machine.MachineSpec{Modules: stagedModules, Storage: stagedStorage},
+		Spec:       staged,
 	}
 	raw, err := yaml.Marshal(&doc)
 	if err != nil {
@@ -53,10 +53,21 @@ func liveLoadFixture(t *testing.T, stagedModules []string, bootModules []string,
 	}
 	loader := &moduleLoader{
 		tree:        tree,
-		bootStorage: bootStorage,
+		bootStorage: bootStorageSpec(),
+		bootNetwork: bootNetworkSpec(),
 		bootModules: bootModules,
 	}
 	return store, base, loader, machine.ManifestHash(raw)
+}
+
+// liveLoadable is the spec a live load accepts: the boot's own storage
+// and network, plus one module to add.
+func liveLoadable() machine.MachineSpec {
+	return machine.MachineSpec{
+		Modules: []string{"loop"},
+		Storage: bootStorageSpec(),
+		Network: bootNetworkSpec(),
+	}
 }
 
 // bootManifestRecord reads the loader's boot/manifest record back as a
@@ -70,16 +81,26 @@ func bootManifestRecord(t *testing.T, loader *moduleLoader) machine.BootStatus {
 	return facts.Boot
 }
 
-// bootStorageSpec is the storage that the fixture's boot record
-// actuated. Staging the same spec means no storage drift.
+// bootStorageSpec is the storage that the fixture's boot actuated.
+// Staging the same spec means no storage drift.
 func bootStorageSpec() machine.StorageSpec {
 	return machine.StorageSpec{
 		MachineState: &machine.StorageRole{Device: "/dev/vda", Size: "64Mi"},
 	}
 }
 
+// bootNetworkSpec is the network that the fixture's boot actuated: a
+// DHCP uplink and a static cluster segment, the shape a lab machine
+// has.
+func bootNetworkSpec() machine.NetworkSpec {
+	return machine.NetworkSpec{Interfaces: []machine.InterfaceSpec{
+		{Name: "eth0"},
+		{Name: "eth1", Address: "10.10.0.1/24"},
+	}}
+}
+
 func TestLiveLoadAppliesAnAdditiveSpec(t *testing.T) {
-	store, base, loader, hash := liveLoadFixture(t, []string{"loop"}, nil, bootStorageSpec())
+	store, base, loader, hash := liveLoadFixture(t, liveLoadable(), nil)
 
 	loader.apply(machine.ModulesIntent{ManifestHash: hash}, store, base)
 
@@ -110,9 +131,9 @@ func TestLiveLoadAppliesAnAdditiveSpec(t *testing.T) {
 }
 
 func TestLiveLoadRefusesAStorageChange(t *testing.T) {
-	changed := bootStorageSpec()
-	changed.MachineState.Size = "128Mi"
-	store, base, loader, hash := liveLoadFixture(t, []string{"loop"}, nil, changed)
+	staged := liveLoadable()
+	staged.Storage.MachineState.Size = "128Mi"
+	store, base, loader, hash := liveLoadFixture(t, staged, nil)
 
 	loader.apply(machine.ModulesIntent{ManifestHash: hash}, store, base)
 
@@ -124,8 +145,28 @@ func TestLiveLoadRefusesAStorageChange(t *testing.T) {
 	}
 }
 
+func TestLiveLoadRefusesANetworkChange(t *testing.T) {
+	// Nothing in the running kernel re-addresses an interface, and the
+	// operator refuses the same combination for the same reason. If
+	// this load went ahead, it would promote a manifest whose network
+	// the machine never applied, and the boot record would then claim
+	// a spec the machine is not running.
+	staged := liveLoadable()
+	staged.Network.Interfaces[1].Address = "10.10.0.9/24"
+	store, base, loader, hash := liveLoadFixture(t, staged, nil)
+
+	loader.apply(machine.ModulesIntent{ManifestHash: hash}, store, base)
+
+	if staged, _ := store.LoadStaged(); staged == nil {
+		t.Error("a network-changing manifest must stay staged for its boot")
+	}
+	if boot := bootManifestRecord(t, loader); boot.ManifestHash != "before" {
+		t.Errorf("the boot record must be untouched: %+v", boot)
+	}
+}
+
 func TestLiveLoadRefusesARetraction(t *testing.T) {
-	store, base, loader, hash := liveLoadFixture(t, []string{"loop"}, []string{"loop", "zram"}, bootStorageSpec())
+	store, base, loader, hash := liveLoadFixture(t, liveLoadable(), []string{"loop", "zram"})
 
 	loader.apply(machine.ModulesIntent{ManifestHash: hash}, store, base)
 
@@ -138,7 +179,7 @@ func TestLiveLoadRefusesARetraction(t *testing.T) {
 }
 
 func TestLiveLoadToleratesAStaleIntent(t *testing.T) {
-	store, base, loader, _ := liveLoadFixture(t, []string{"loop"}, nil, bootStorageSpec())
+	store, base, loader, _ := liveLoadFixture(t, liveLoadable(), nil)
 	if err := store.WithdrawStaged(); err != nil {
 		t.Fatal(err)
 	}

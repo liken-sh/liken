@@ -14,7 +14,17 @@ import (
 )
 
 func specWith(storage machine.StorageSpec) machine.MachineSpec {
-	return machine.MachineSpec{Storage: storage}
+	return machine.MachineSpec{Storage: storage, Network: labNetwork()}
+}
+
+// labNetwork is the lab machine's network: a DHCP uplink named by
+// kernel name, and a cluster segment named by MAC address with the
+// static address its peers were told to find it at.
+func labNetwork() machine.NetworkSpec {
+	return machine.NetworkSpec{Interfaces: []machine.InterfaceSpec{
+		{Name: "eth0"},
+		{MAC: "52:54:00:4c:4c:01", Address: "10.10.0.1/24"},
+	}}
 }
 
 // labStorage is the lab machine's shape: five roles across two disks.
@@ -26,6 +36,14 @@ func labStorage() machine.StorageSpec {
 		PodStorage:       &machine.StorageRole{Device: "/dev/vdb", Size: "2Gi"},
 		PodEphemeral:     &machine.StorageRole{Device: "/dev/vdb"},
 	}
+}
+
+// bootNetwork is the same network as a boot record. The pointer is
+// the record's presence: this boot reported the network it came up
+// under, which is what makes a network edit judgeable at all.
+func bootNetwork() *machine.NetworkSpec {
+	spec := labNetwork()
+	return &spec
 }
 
 // labFacts builds the facts a healthy boot of the lab machine
@@ -49,6 +67,7 @@ func labFacts() *machine.MachineStatus {
 			ManifestSource: machine.ManifestSourceProven,
 			ManifestHash:   "abc123",
 			Storage:        labStorage(),
+			Network:        bootNetwork(),
 		},
 	}
 	return facts
@@ -130,6 +149,90 @@ func TestDecideConvergenceStagesOnModulesDrift(t *testing.T) {
 	}
 	if !strings.Contains(conv.condition.Message, "nvidia") {
 		t.Errorf("the message should carry the diff: %q", conv.condition.Message)
+	}
+}
+
+func TestDecideConvergenceStagesANetworkEdit(t *testing.T) {
+	// The whole point of this milestone: a nameserver added to an
+	// interface is a change the machine can only make at boot, so the
+	// operator has to notice it, stage it, and report that a reboot is
+	// waiting. Reporting Converged here would tell the person their
+	// edit landed while the machine went on running the old network.
+	m := labMachine()
+	m.Spec.Network.Interfaces[0].Nameservers = []string{"10.10.0.1"}
+	conv := decideConvergence(m, labFacts(), nil, "", turnStandalone)
+	if conv.condition.Reason != "RebootPending" {
+		t.Fatalf("got %+v", conv.condition)
+	}
+	if !conv.stage || conv.requestReboot || conv.requestLoad {
+		t.Errorf("Manual policy stages the network edit and waits: %+v", conv)
+	}
+	if !strings.Contains(conv.condition.Message, "nameservers 10.10.0.1") {
+		t.Errorf("the message should carry the diff: %q", conv.condition.Message)
+	}
+}
+
+func TestNetworkEditFollowsTheSameRebootPolicyAsStorage(t *testing.T) {
+	// A network change is a disruption like any other, so it takes the
+	// same two gates: the machine's policy, and the cluster's grant.
+	m := labMachine()
+	m.Spec.RebootPolicy = machine.RebootAuto
+	m.Spec.Network.Interfaces[1].Address = "10.10.0.9/24"
+	if conv := decideConvergence(m, labFacts(), nil, "", turnAwaiting); conv.condition.Reason != "AwaitingTurn" {
+		t.Errorf("an ungranted member waits: %+v", conv.condition)
+	}
+	conv := decideConvergence(m, labFacts(), nil, "", turnGranted)
+	if conv.condition.Reason != "RebootRequested" || !conv.requestReboot {
+		t.Errorf("a granted turn is taken: %+v", conv.condition)
+	}
+}
+
+func TestANetworkEditIsNeverLoadedInPlace(t *testing.T) {
+	// Adding a module is live-loadable, and a manifest that also
+	// changes the network must not ride along on that path. Nothing in
+	// the running kernel re-addresses an interface, and init refuses
+	// the same combination for the same reason.
+	m := labMachine()
+	m.Spec.Modules = []string{"nvidia"}
+	m.Spec.Network.Interfaces[0].Nameservers = []string{"10.10.0.1"}
+	conv := decideConvergence(m, labFacts(), nil, "", turnStandalone)
+	if conv.condition.Reason != "RebootPending" || conv.requestLoad {
+		t.Errorf("a network change forces the reboot tier: %+v", conv.condition)
+	}
+}
+
+func TestDecideConvergenceRefusesTwoInterfacesForOnePort(t *testing.T) {
+	// Milestone 39's validation guard, which no edit could reach while
+	// convergence measured storage and modules only. A spec that init
+	// would refuse at boot must be refused here instead, because
+	// finding out at boot costs a reboot and returns the machine on
+	// its old manifest with a rejection record.
+	m := labMachine()
+	m.Spec.Network.Interfaces = append(m.Spec.Network.Interfaces, machine.InterfaceSpec{Name: "eth0"})
+	conv := decideConvergence(m, labFacts(), nil, "", turnStandalone)
+	if conv.condition.Reason != "StagingRejected" {
+		t.Fatalf("got %+v", conv.condition)
+	}
+	if conv.stage || conv.requestReboot {
+		t.Error("an invalid network must not stage")
+	}
+	if !strings.Contains(conv.condition.Message, "declare each port once") {
+		t.Errorf("the message should name the fix: %q", conv.condition.Message)
+	}
+}
+
+func TestDecideConvergenceIgnoresANetworkTheBootNeverRecorded(t *testing.T) {
+	// A boot that reported no network cannot be judged against the
+	// spec. Reading the missing record as an empty network would put
+	// every machine that declares an interface into a staged reboot at
+	// once, on the strength of a file that is not there.
+	facts := labFacts()
+	facts.Boot.Network = nil
+	m := labMachine()
+	m.Spec.Network.Interfaces[0].Nameservers = []string{"10.10.0.1"}
+	conv := decideConvergence(m, facts, nil, "", turnStandalone)
+	if conv.condition.Reason != "Converged" {
+		t.Errorf("an unrecorded network is not drift: %+v", conv.condition)
 	}
 }
 

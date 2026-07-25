@@ -562,6 +562,21 @@ type BootStatus struct {
 	ManifestHash   string         `json:"manifestHash,omitempty"`
 	Storage        StorageSpec    `json:"storage,omitzero"`
 
+	// Network is the network spec the winning manifest declared,
+	// recorded as actuated whatever each interface's outcome was. It
+	// is the drift reference, like Storage above: booting again under
+	// this manifest would ask for the same network, and status.network
+	// reports what each interface actually got.
+	//
+	// The field is a pointer because absence and emptiness say
+	// different things here. An empty spec is a machine that declares
+	// no interface and takes the zero-configuration default. An absent
+	// record is a boot that reported nothing about its network at all,
+	// which the operator cannot judge: comparing a real spec against
+	// nothing would read as drift on every machine at once and ask a
+	// whole fleet to reboot on the strength of a missing file.
+	Network *NetworkSpec `json:"network,omitempty"`
+
 	// Modules is the module list the winning manifest declared,
 	// recorded as actuated regardless of each load's outcome. It is
 	// the drift reference, like Storage above. Outcomes are a health
