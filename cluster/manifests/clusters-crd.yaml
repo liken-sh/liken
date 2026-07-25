@@ -891,12 +891,14 @@ spec:
                   properties:
                     ready:
                       type: integer
+                      minimum: 0
                       description: >-
                         How many machines are fully healthy: in phase
                         Ready, with a heartbeat recent enough to count
                         as current.
                     total:
                       type: integer
+                      minimum: 0
                       description: >-
                         How many Machine resources the sweep found. A
                         machine counts here from the moment its Machine

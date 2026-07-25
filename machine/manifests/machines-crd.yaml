@@ -2050,6 +2050,7 @@ spec:
                         boot writes this record again until a
                         promotion clears it, so the record stays
                         through a power cycle.
+                      required: [reason, rejectedAt]
                       properties:
                         hash:
                           type: string
@@ -2077,6 +2078,7 @@ spec:
                         The standing quarantine record for the
                         Cluster document. It is the same record as
                         rejection, for the other document.
+                      required: [reason, rejectedAt]
                       properties:
                         hash:
                           type: string
@@ -2107,6 +2109,7 @@ spec:
                         firmware returned the machine to the proven
                         slot. This verdict stands until the catalog
                         names a different release.
+                      required: [reason, rejectedAt]
                       properties:
                         hash:
                           type: string
@@ -2135,6 +2138,7 @@ spec:
                         This verdict stands until a different
                         rendering, which an edit to the Secret makes,
                         replaces it.
+                      required: [reason, rejectedAt]
                       properties:
                         hash:
                           type: string

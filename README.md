@@ -54,6 +54,28 @@ runs in a container.
   [plans/completed/14-gitops-from-first-boot.md](plans/completed/14-gitops-from-first-boot.md)
   records the design.
 
+## How this repository is written
+
+liken is written to be read. The comments in the shell scripts, the
+manifests, and the Go code do more than say what a line does. They
+teach the domain: why the kernel does not mount `/proc` on its own, why
+`k3s` needs cgroups, and why an initramfs is a cpio archive. A person
+who reads the repository from top to bottom learns how a Linux system
+boots, and how Kubernetes takes control after that.
+
+This is why a file here carries far more commentary than the same file
+would carry in another project. The commentary is deliberate, and it is
+the documentation. The idea is
+[literate programming](https://en.wikipedia.org/wiki/Literate_programming),
+which Donald Knuth described in 1984. His original form builds the
+program and the document from one source, through a tool. liken does
+not do that. It keeps the goal, which is a repository that explains
+itself, and it uses ordinary files that run as they are.
+
+An explanation that is too big for a comment goes in a markdown
+document beside the thing it describes. [`plans/`](plans/) holds the
+design overview and one document for each milestone.
+
 ## Prior art
 
 These projects explore similar ground:
