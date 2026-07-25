@@ -14,7 +14,7 @@ spec:
   # The release every machine here runs. It must name an entry in the
   # catalog below. Each machine fetches, verifies, and proves this
   # version itself, and the rollout moves one machine at a time.
-  version: 2026.07.25-001
+  version: 2026.07.25-002
 
   # One leader is a complete cluster: k3s keeps its state in sqlite
   # until this list grows to three, and growing it is an ordinary
@@ -80,10 +80,10 @@ spec:
     # rollback to name it, and two slots is all a machine has. An
     # older entry names a release no machine could return to.
     catalog:
-      - version: 2026.07.24-004
-        digest: sha256:588125db5d45f410807e69da2e5dab2ef81043e0d6927276d92cc113f23bf929
       - version: 2026.07.25-001
         digest: sha256:8f654d3f2f193c71a2373a645804da50d0b1749dfae71ad4e7df6c0c60e10863
+      - version: 2026.07.25-002
+        digest: sha256:f5a46b8b08405d6b79c4792c896089e6b3cbbb4ce1951e84a6a36656520cd616
 
   runtime:
     # The Go runtime environment for the k3s process. k3s uses the
