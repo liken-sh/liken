@@ -11,6 +11,11 @@ kind: Cluster
 metadata:
   name: liken-sh
 spec:
+  # The release every machine here runs. It must name an entry in the
+  # catalog below. Each machine fetches, verifies, and proves this
+  # version itself, and the rollout moves one machine at a time.
+  version: 2026.07.24-004
+
   # One leader is a complete cluster: k3s keeps its state in sqlite
   # until this list grows to three, and growing it is an ordinary
   # edit. The name refers to machines/node-1.yaml.
@@ -59,10 +64,26 @@ spec:
     # (terraform.tf), and not on this cluster, on purpose: machines
     # upgrade themselves from the channel, so the channel must
     # outlive any machine it feeds. A cluster that served its own
-    # updates could never be rescued by one of its own machines. The
-    # catalog and a target version arrive as live Cluster edits when
-    # someone adopts a release; nothing is fetched before then.
+    # updates could never be rescued by one of its own machines.
+    # Adopting a release is an edit here — add its catalog entry and
+    # set spec.version — and never an image rebuild.
     source: https://releases.liken.sh
+
+    # The releases machines may be asked to run. The digest is the
+    # sha256 of that release's release.yaml, and it roots the trust
+    # chain: this names the document, the document names every
+    # artifact, and each downloaded byte is checked against one or
+    # the other. Publishing a release prints its entry.
+    #
+    # The list holds the release the fleet runs and the one before
+    # it. A slot the machine can still boot needs an entry here for a
+    # rollback to name it, and two slots is all a machine has. An
+    # older entry names a release no machine could return to.
+    catalog:
+      - version: 2026.07.24-003
+        digest: sha256:0b19d0a9117b81c292ccdb991b3e028c44ee6608e6d006b24fdb1ace3ffc3ca7
+      - version: 2026.07.24-004
+        digest: sha256:588125db5d45f410807e69da2e5dab2ef81043e0d6927276d92cc113f23bf929
 
   runtime:
     # The Go runtime environment for the k3s process. k3s uses the
