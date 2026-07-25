@@ -49,7 +49,7 @@ LINUXFIRMWARE_DIST := linux-firmware/dist/$(LINUXFIRMWARE_VERSION)
 MICROCODE_VERSION := $(strip $(file <microcode/VERSION))
 MICROCODE_DIST := microcode/dist/$(MICROCODE_VERSION)
 
-all: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata linux-firmware microcode licensing init machine-operator cluster-operator logs cli identity image
+all: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity image
 
 # The version is part of the artifact's name. So a pin bump changes
 # the target path itself, and Make rebuilds the artifact with no
@@ -173,16 +173,37 @@ licensing/dist/LICENSES.md: licensing/NOTICES.md licensing/Makefile LICENSE $(wi
 
 licensing: licensing/dist/LICENSES.md
 
+# The rules that follow build liken's own programs. Each one names
+# the shared packages that its binary reads, so a change to a shared
+# package rebuilds every binary that reads it. A missing name is a
+# stale binary that Make believes is current, and the program then
+# runs against a version of the API it was never compiled with.
+# `go list -deps ./init` is the authority on the real set; check a
+# rule against it when the imports change. Each domain's own Makefile
+# carries the same list from its side of the directory boundary, so
+# change the two together.
+
 # This is liken itself, the Go program that boots as PID 1. See
-# init/main.go's header comment. It shares the machine package (the
-# Machine API as Go types) with the operator, so both rebuild when
-# that package changes.
+# init/main.go's header comment. It reads the two document packages
+# and the hardware and disk packages, so a change to any of them
+# rebuilds it.
 init/dist/liken: $(wildcard init/*.go) go.mod go.sum \
+		$(wildcard api/*.go) $(wildcard cluster/*.go) \
 		$(wildcard machine/*.go) $(wildcard disks/*.go) \
 		$(wildcard hardware/*.go) $(LIKEN_VERSION_STAMP)
 	$(MAKE) -C init
 
 init: init/dist/liken
+
+# This is mount(8), the one program here that exists because another
+# program calls it by name. The kubelet mounts a pod's volumes by
+# running `mount`, so the OS has to have one, and mount/main.go's
+# header comment explains what the command really does. It shares no
+# package with anything else, so its only inputs are its own sources.
+mount/dist/mount: $(wildcard mount/*.go) go.mod go.sum
+	$(MAKE) -C mount
+
+mount: mount/dist/mount
 
 # The machine operator is the node-local half of operating the OS
 # through the cluster's API. The cluster operator is the fleet-level
@@ -193,6 +214,7 @@ init: init/dist/liken
 # the raw API client, so both rebuild when that package changes.
 machine-operator/dist/liken-machine-operator-image.tar: $(wildcard machine-operator/*.go) \
 		go.mod go.sum image/oci.sh \
+		$(wildcard api/*.go) $(wildcard cluster/*.go) \
 		$(wildcard machine/*.go) $(wildcard kubernetes/*.go) $(wildcard hardware/*.go) \
 		$(HWDATA_DIST)/pci.ids $(LIKEN_VERSION_STAMP)
 	$(MAKE) -C machine-operator
@@ -202,6 +224,7 @@ machine-operator: machine-operator/dist/liken-machine-operator-image.tar
 cluster-operator/dist/liken-cluster-operator-image.tar: flux/VERSION flux/fetch.sh \
 		$(wildcard cluster-operator/*.go) \
 		go.mod go.sum image/oci.sh \
+		$(wildcard api/*.go) $(wildcard cluster/*.go) \
 		$(wildcard machine/*.go) $(wildcard kubernetes/*.go) $(LIKEN_VERSION_STAMP)
 	$(MAKE) -C cluster-operator
 
@@ -214,7 +237,7 @@ cluster-operator: cluster-operator/dist/liken-cluster-operator-image.tar
 # image/oci.sh.
 logs/dist/liken-logs-image.tar: $(wildcard logs/*.go) \
 		go.mod go.sum image/oci.sh \
-		$(wildcard machine/*.go) $(LIKEN_VERSION_STAMP)
+		$(wildcard api/*.go) $(wildcard machine/*.go) $(LIKEN_VERSION_STAMP)
 	$(MAKE) -C logs
 
 logs: logs/dist/liken-logs-image.tar
@@ -224,6 +247,7 @@ logs: logs/dist/liken-logs-image.tar
 # a machine, and public releases ship it. In this repo, the build
 # also uses the CLI to mint the dev cluster's identity, below.
 cli/dist/liken: $(wildcard cli/*.go) go.mod go.sum \
+		$(wildcard api/*.go) $(wildcard cluster/*.go) \
 		$(wildcard identity/*.go) $(wildcard machine/*.go) \
 		$(wildcard image/*.go) $(wildcard releases/*.go) \
 		$(wildcard disks/*.go) $(wildcard scaffold/*.go) \
@@ -281,7 +305,8 @@ IMAGE_DIR := dev-cluster/image
 # The prerequisites here match the prerequisites that image/Makefile's
 # own rule declares, from its side of the directory boundary. When
 # you change either list, change the other list to match.
-$(SYSTEM_IMAGE) $(BOOT_ARCHIVE) &: init/dist/liken $(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s \
+$(SYSTEM_IMAGE) $(BOOT_ARCHIVE) &: init/dist/liken mount/dist/mount \
+		$(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s \
 		$(XTABLES_DIST)/bin/xtables-legacy-multi \
 		$(TRUST_DIST)/cacert.pem \
 		$(E2FSPROGS_DIST)/mke2fs \
@@ -581,6 +606,7 @@ clean:
 	$(MAKE) -C grub clean
 	$(MAKE) -C licensing clean
 	$(MAKE) -C init clean
+	$(MAKE) -C mount clean
 	$(MAKE) -C machine-operator clean
 	$(MAKE) -C cluster-operator clean
 	$(MAKE) -C logs clean
@@ -590,4 +616,4 @@ clean:
 	rm -rf $(IMAGE_DIR)
 	rm -rf $(HW_IMAGE_DIR)
 
-.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata linux-firmware microcode licensing init machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware install install-stick install-gitops storage release serve docs clean
+.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware install install-stick install-gitops storage release serve docs clean

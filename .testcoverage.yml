@@ -64,6 +64,13 @@ override:
   # it are tested here against fakes.
   - path: ^init$
     threshold: 66
+  # mount(8): the option parser, the command-line parser, and the
+  # helper lookup are pure, and the tests cover them against the
+  # command lines the kubelet really builds. What stays untested is
+  # the mount syscall itself and the exec of a helper, both of which
+  # need a real machine.
+  - path: ^mount$
+    threshold: 69
   # The disks package: GPT and FAT32 are pure byte layout, and the
   # tests check them by round-tripping against the package's own
   # readers. What stays untested is the ioctl that only a real block

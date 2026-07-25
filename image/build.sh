@@ -74,6 +74,17 @@
 #                                 the bundled iptables is a
 #                                 #!/bin/sh script, and this system
 #                                 has no shell to run it
+#   /sbin/mount                   mount(8), liken's own (see
+#                                 mount/main.go). The kubelet mounts a
+#                                 pod's volumes by running a program
+#                                 named mount, so the OS must have
+#                                 one. It sorts an option list into
+#                                 what mount(2) takes, and it runs a
+#                                 filesystem's mount helper when one
+#                                 is installed. It lands in /sbin for
+#                                 the same PATH reason as iptables
+#                                 above: k3s bundles a busybox mount
+#                                 that never runs a helper
 #   /sbin/mke2fs                  makes ext4 filesystems on the disks
 #                                 init claims. Static, vendored from
 #                                 gokrazy's reproducible e2fsprogs
@@ -92,9 +103,12 @@
 #                                 the contract
 #   /sbin/mount.nfs (and its      the NFSv4 client, the whole host
 #     mount.nfs4 alias)           half of the nfs feature. Static,
-#                                 built by nfs-utils/fetch.sh. The
-#                                 kernel's mount path runs it as the
-#                                 nfs filesystem's mount helper
+#                                 built by nfs-utils/fetch.sh. It is
+#                                 the nfs filesystem's mount helper:
+#                                 the program mount(8) runs to
+#                                 negotiate a protocol version with
+#                                 the server before the kernel mounts
+#                                 the export
 #   /etc/mtab                     the compatibility symlink mount
 #                                 helpers require. It points at the
 #                                 kernel's own mount table
@@ -162,6 +176,7 @@ release="$(cat "$kdist/release")"
 liken_version="${LIKEN_VERSION:?LIKEN_VERSION must be set; the Makefile passes it via version.mk}"
 dist="${DIST:-$here/dist}"
 init_dist="${INIT_DIST:-$here/../init/dist}"
+mount_dist="${MOUNT_DIST:-$here/../mount/dist}"
 machine_operator_dist="${MACHINE_OPERATOR_DIST:-$here/../machine-operator/dist}"
 cluster_operator_dist="${CLUSTER_OPERATOR_DIST:-$here/../cluster-operator/dist}"
 logs_dist="${LOGS_DIST:-$here/../logs/dist}"
@@ -225,14 +240,26 @@ cp "$openiscsi_dist/iscsid" "$root/sbin/iscsid"
 mkdir -p "$root/etc/iscsi"
 cp "$here/../open-iscsi/iscsid.conf" "$root/etc/iscsi/iscsid.conf"
 
+# This is mount(8), the program the kubelet runs to mount a pod's
+# volumes (mount/main.go explains what the command does and why an OS
+# this small has to ship one). It sits at /sbin because k3s puts
+# /sbin ahead of its own bundled tools, so this program wins over the
+# busybox mount applet inside k3s. That applet performs every mount
+# with the raw syscall, and a mount helper never runs under it.
+cp "$mount_dist/mount" "$root/sbin/mount"
+
 # This is the NFS client, the host half of the nfs feature
 # (nfs-utils/fetch.sh explains the static build). Every image ships
 # it, whether or not the deployment declares the feature. Inert
 # bytes cost little, and shipping them unconditionally keeps
-# enabling a feature a runtime act, not an image rebuild. The
-# kernel's mount syscall path runs /sbin/mount.<fstype> as a
-# filesystem's mount helper, so the one binary answers under both of
-# its names: mount -t nfs and mount -t nfs4 both reach it.
+# enabling a feature a runtime act, not an image rebuild.
+#
+# /sbin/mount.<fstype> is the name mount(8) looks for when a
+# filesystem needs userspace work before the kernel can mount it. For
+# NFS that work is the version negotiation with the server. The one
+# binary answers under both of its names, because a helper reads its
+# own name to learn which type it was asked for: mount -t nfs and
+# mount -t nfs4 both reach it.
 nfsutils_version="$(cat "$here/../nfs-utils/VERSION")"
 cp "$here/../nfs-utils/dist/$nfsutils_version/mount.nfs" "$root/sbin/mount.nfs"
 ln -s mount.nfs "$root/sbin/mount.nfs4"

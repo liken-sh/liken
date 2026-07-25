@@ -25,6 +25,7 @@ seed/gotk-components.yaml: ../flux/dist/$(FLUX_VERSION)/gotk-components.yaml
 	$(MAKE) -C ../flux
 
 $(DIST)/liken-cluster-operator: ../go.mod ../go.sum $(wildcard *.go) \
+		$(wildcard ../api/*.go) $(wildcard ../cluster/*.go) \
 		$(wildcard ../machine/*.go) $(wildcard ../kubernetes/*.go) \
 		seed/gotk-components.yaml $(LIKEN_VERSION_STAMP)
 	CGO_ENABLED=0 go build -trimpath \

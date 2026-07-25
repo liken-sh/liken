@@ -19,6 +19,7 @@ DIST ?= dist
 all: $(DIST)/liken-machine-operator-image.tar
 
 $(DIST)/liken-machine-operator: ../go.mod ../go.sum $(wildcard *.go) \
+		$(wildcard ../api/*.go) $(wildcard ../cluster/*.go) \
 		$(wildcard ../machine/*.go) $(wildcard ../kubernetes/*.go) \
 		$(wildcard ../hardware/*.go) $(LIKEN_VERSION_STAMP)
 	CGO_ENABLED=0 go build -trimpath \

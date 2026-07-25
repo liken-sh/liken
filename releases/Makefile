@@ -110,6 +110,7 @@ build:
 	@echo "$(VERSION)" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3}$$' \
 		|| { echo "VERSION must be yyyy.mm.dd-nnn (for example 2026.07.11-001)"; exit 1; }
 	$(MAKE) -C ../init LIKEN_VERSION=$(VERSION) LIKEN_FAULT=$(FAULT) DIST=$(abspath $(BUILD)/init)
+	$(MAKE) -C ../mount DIST=$(abspath $(BUILD)/mount)
 	$(MAKE) -C ../machine-operator LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/machine-operator)
 	$(MAKE) -C ../cluster-operator LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/cluster-operator)
 	$(MAKE) -C ../logs LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/logs)
@@ -117,6 +118,7 @@ build:
 	$(MAKE) -C ../cli LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/cli)
 	$(MAKE) -C ../image LIKEN_VERSION=$(VERSION) DIST=$(abspath $(BUILD)/generic) \
 		INIT_DIST=$(abspath $(BUILD)/init) \
+		MOUNT_DIST=$(abspath $(BUILD)/mount) \
 		MACHINE_OPERATOR_DIST=$(abspath $(BUILD)/machine-operator) \
 		CLUSTER_OPERATOR_DIST=$(abspath $(BUILD)/cluster-operator) \
 		LOGS_DIST=$(abspath $(BUILD)/logs) \

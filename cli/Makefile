@@ -17,6 +17,7 @@ DIST ?= dist
 # -trimpath keeps this machine's filesystem layout out of the
 # binary.
 $(DIST)/liken: ../go.mod ../go.sum $(wildcard *.go) \
+		$(wildcard ../api/*.go) $(wildcard ../cluster/*.go) \
 		$(wildcard ../identity/*.go) $(wildcard ../machine/*.go) \
 		$(wildcard ../image/*.go) $(wildcard ../releases/*.go) \
 		$(wildcard ../disks/*.go) $(wildcard ../scaffold/*.go) $(wildcard ../scaffold/*.tmpl) $(LIKEN_VERSION_STAMP)

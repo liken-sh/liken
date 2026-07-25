@@ -19,6 +19,7 @@
 include ../version.mk
 DIST ?= dist
 INIT_DIST ?= ../init/dist
+MOUNT_DIST ?= ../mount/dist
 MACHINE_OPERATOR_DIST ?= ../machine-operator/dist
 CLUSTER_OPERATOR_DIST ?= ../cluster-operator/dist
 LOGS_DIST ?= ../logs/dist
@@ -39,6 +40,7 @@ LINUXFIRMWARE_VERSION := $(strip $(file <../linux-firmware/VERSION))
 $(DIST)/liken.sqfs $(DIST)/boot.cpio &: build.sh boot-modules.conf \
 		$(shell find etc -type f) \
 		$(INIT_DIST)/liken \
+		$(MOUNT_DIST)/mount \
 		../kernel/dist/$(KERNEL_VERSION)/vmlinuz \
 		../k3s/dist/$(K3S_VERSION)/k3s \
 		../xtables/dist/$(XTABLES_VERSION)/bin/xtables-legacy-multi \
@@ -64,6 +66,7 @@ $(DIST)/liken.sqfs $(DIST)/boot.cpio &: build.sh boot-modules.conf \
 		$(LIKEN_VERSION_STAMP)
 	LIKEN_VERSION=$(LIKEN_VERSION) DIST=$(abspath $(DIST)) \
 		INIT_DIST=$(abspath $(INIT_DIST)) \
+		MOUNT_DIST=$(abspath $(MOUNT_DIST)) \
 		MACHINE_OPERATOR_DIST=$(abspath $(MACHINE_OPERATOR_DIST)) \
 		CLUSTER_OPERATOR_DIST=$(abspath $(CLUSTER_OPERATOR_DIST)) \
 		LOGS_DIST=$(abspath $(LOGS_DIST)) \

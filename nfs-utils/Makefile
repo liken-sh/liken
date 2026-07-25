@@ -2,12 +2,14 @@
 # feature (plans/17-network-storage-clients.md).
 #
 # One artifact: the static mount.nfs that fetch.sh builds from pinned
-# source inside a pinned container. The kernel's mount path runs it as
-# the nfs filesystem's mount helper, so it ships at /sbin in every
-# image, under both of its names (mount -t nfs4 looks for
-# mount.nfs4). There is no daemon, no manifest, and no OCI image.
-# NFSv4 needs none of them, which is most of why the feature is v4
-# only.
+# source inside a pinned container. It is the nfs filesystem's mount
+# helper: mount(8) looks for /sbin/mount.<fstype> and runs it, so
+# this binary ships at /sbin in every image, under both of its names
+# (mount -t nfs4 looks for mount.nfs4). What it does before the
+# kernel ever sees the mount is negotiate a protocol version with the
+# server, which is why an NFS volume needs no version written by
+# hand. There is no daemon, no manifest, and no OCI image. NFSv4
+# needs none of them, which is most of why the feature is v4 only.
 # override keeps this pin authoritative even under a release build.
 # `make release VERSION=<stamp>` passes VERSION on the command line,
 # and command-line variables silently replace plain assignments in

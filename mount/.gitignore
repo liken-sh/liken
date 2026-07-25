@@ -1,0 +1,5 @@
+# The built binary; `make` recreates it from the sources here.
+# `make` writes into dist/. A bare `go build` in this directory
+# writes ./mount, named after the directory.
+dist/
+/mount
