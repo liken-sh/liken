@@ -303,6 +303,69 @@ func TestFeatureEnabled(t *testing.T) {
 	}
 }
 
+func features(slugs ...string) *Cluster {
+	spec := ClusterSpec{Features: map[string]*FeatureConfig{}}
+	for _, slug := range slugs {
+		spec.Features[slug] = &FeatureConfig{}
+	}
+	return &Cluster{Spec: spec}
+}
+
+func TestRetractedFeatures(t *testing.T) {
+	cases := map[string]struct {
+		current, desired *Cluster
+		want             []string
+	}{
+		"nothing changes":  {features("iscsi"), features("iscsi"), nil},
+		"one is dropped":   {features("iscsi", "nfs"), features("nfs"), []string{"iscsi"}},
+		"one is added":     {features("nfs"), features("iscsi", "nfs"), nil},
+		"from nothing":     {features(), features("nfs"), nil},
+		"to nothing":       {features("nfs"), features(), []string{"nfs"}},
+		"a nil cluster":    {nil, features("nfs"), nil},
+		"to a nil cluster": {features("nfs"), nil, []string{"nfs"}},
+		// The case the whole barrier exists for. Nobody named helm,
+		// and helm stops anyway, because nothing but traefik required
+		// it.
+		"an implied requirement goes too": {
+			features("traefik"), features(), []string{"helm", "traefik"},
+		},
+		// Declaring helm on its own keeps it through traefik's
+		// retraction, so only traefik stops.
+		"an explicit requirement stays": {
+			features("traefik", "helm"), features("helm"), []string{"traefik"},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := RetractedFeatures(tc.current, tc.desired); !slices.Equal(got, tc.want) {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRetractionLeavesHostState(t *testing.T) {
+	cases := map[string]struct {
+		current, desired *Cluster
+		want             bool
+	}{
+		"no retraction":              {features("iscsi"), features("iscsi"), false},
+		"a plain feature":            {features("metrics-server"), features(), false},
+		"a host-state feature":       {features("iscsi"), features(), true},
+		"network policy":             {features("network-policy"), features(), true},
+		"nfs":                        {features("nfs"), features(), true},
+		"one of each":                {features("iscsi", "metrics-server"), features(), true},
+		"a host-state feature added": {features(), features("iscsi"), false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := RetractionLeavesHostState(tc.current, tc.desired); got != tc.want {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestDisabledComponents(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

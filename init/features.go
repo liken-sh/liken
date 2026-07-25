@@ -39,8 +39,19 @@ import (
 // These are package variables rather than constants, so tests can
 // point the actuation at trees of their own making.
 var (
-	featuresDir     = "/etc/liken/features"
-	k3sManifestsDir = "/var/lib/rancher/k3s/server/manifests"
+	featuresDir = "/etc/liken/features"
+	// Every manifest liken writes for k3s to apply goes here, in the
+	// subdirectory of k3s's auto-deploy directory that belongs to
+	// liken alone. k3s stages the manifests of its own bundled
+	// components at the top of that directory, and the teardown of a
+	// component that a boot disables reads that component's file at
+	// startup, so those files must stay where k3s put them: liken
+	// writes and removes nothing outside this subdirectory
+	// (init/k3s.go seeds it). k3s walks the whole tree, and an addon
+	// takes its name from the file name and not from the directory
+	// that holds it, so a manifest here reaches the cluster under the
+	// same name it would have at the top.
+	k3sManifestsDir = "/var/lib/rancher/" + likenManifestsRel
 	iscsiDir        = "/etc/iscsi"
 )
 
@@ -157,8 +168,8 @@ func actuateVendoredFeature(moduleBase, slug, machineName string) machine.Featur
 	}
 
 	// The feature's workload, if it has one, joins the manifests k3s
-	// applies at startup. seedClusterState already reset the
-	// auto-deploy directory to exactly the image's own manifests when
+	// applies at startup. seedClusterState already reset liken's
+	// subdirectory to exactly the image's own manifests when
 	// clusterState mounted, so this pass adds only what this boot's
 	// cluster document declares, and a retracted feature's manifest
 	// simply never reappears. The code copies the manifests on every

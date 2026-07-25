@@ -63,6 +63,16 @@ var (
 	seedSourceDir = "/var/lib/rancher"
 )
 
+// k3s's auto-deploy directory and liken's own subdirectory of it,
+// both spelled relative to the root that holds them: the image's
+// /var/lib/rancher on one side, the clusterState filesystem on the
+// other. features.go builds the absolute path from the second of
+// these, and explains why liken keeps to a subdirectory.
+const (
+	k3sManifestsRel   = "k3s/server/manifests"
+	likenManifestsRel = k3sManifestsRel + "/liken"
+)
+
 // leaderJoinConfig decides a leader's datastore keys, based on leader
 // count. One leader is exactly the cluster that liken has always
 // run: sqlite (via kine), no etcd, nothing to join. Keeping
@@ -636,13 +646,21 @@ func sweepTornK3sFiles(root string) {
 // operator image refresh on every boot, because they are pinned to
 // the liken version of the running image, and an upgraded image must
 // deliver its upgraded operator.
+//
+// The refresh of the manifests is a wipe and a copy, and that is why
+// it reaches only liken's own subdirectory. k3s stages the manifests
+// of its bundled components at the top of the auto-deploy directory,
+// and the teardown of a component that a boot disables reads that
+// component's file at startup. A wipe of the whole directory takes
+// that file away first, and the component then keeps running with no
+// file left to retract it.
 func seedClusterState(root string) error {
 	for _, seed := range []struct {
 		rel     string
 		refresh bool
 	}{
 		{"k3s/server/tls", false},
-		{"k3s/server/manifests", true},
+		{likenManifestsRel, true},
 		{"k3s/agent/images", true},
 	} {
 		src := filepath.Join(seedSourceDir, seed.rel)
@@ -664,5 +682,49 @@ func seedClusterState(root string) error {
 			return err
 		}
 	}
+	sweepLikenManifestsFromTheTop(root)
 	return nil
+}
+
+// likenManifestNames lists every file name that liken puts in k3s's
+// auto-deploy directory, from the three places such a name can come
+// from: the manifests the image bakes into the seed, the workload
+// manifests each opt-in feature ships, and the manifests a feature's
+// actuation renders on the machine. The names come off the image
+// rather than out of a list written here, so a release that adds or
+// drops a manifest has one place to change and not two.
+func likenManifestNames() []string {
+	names := map[string]bool{}
+	seeded, _ := os.ReadDir(filepath.Join(seedSourceDir, likenManifestsRel))
+	for _, entry := range seeded {
+		names[entry.Name()] = true
+	}
+	staged, _ := filepath.Glob(filepath.Join(featuresDir, "*", "manifests", "*.yaml"))
+	for _, manifest := range staged {
+		names[filepath.Base(manifest)] = true
+	}
+	for _, rendered := range renderedFeatureManifests {
+		for _, name := range rendered {
+			names[name] = true
+		}
+	}
+	return slices.Sorted(maps.Keys(names))
+}
+
+// sweepLikenManifestsFromTheTop removes liken's manifests from the
+// top of k3s's auto-deploy directory, where a machine that upgrades
+// from a release that wrote them there still carries them. Those
+// files declare the same objects as the copies in liken's
+// subdirectory, so leaving them in place declares every one of those
+// objects in two addons, and k3s removes an addon only when its own
+// file names a disabled component. The sweep names only liken's own
+// files, so a k3s file that sits beside them stays.
+func sweepLikenManifestsFromTheTop(root string) {
+	for _, name := range likenManifestNames() {
+		path := filepath.Join(root, k3sManifestsRel, name)
+		if err := os.Remove(path); err == nil {
+			fmt.Printf("liken: swept %s from the top of k3s's auto-deploy directory; liken's copy is under %s\n",
+				name, likenManifestsRel)
+		}
+	}
 }

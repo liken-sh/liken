@@ -9,11 +9,15 @@
 # `kubectl explain machine.spec`, so an operator can read the API
 # documentation at the terminal.
 #
-# This file goes in /var/lib/rancher/k3s/server/manifests, the
-# auto-deploy directory for k3s. k3s applies every file in this
-# directory to the cluster at startup, and it applies a file again
-# each time the file changes. This is a small GitOps loop inside k3s,
-# and it is the reason that liken needs no `kubectl apply` step.
+# This file goes in /var/lib/rancher/k3s/server/manifests/liken. The
+# directory above it is the auto-deploy directory for k3s: k3s applies
+# every file under it to the cluster at startup, and it applies a file
+# again each time the file changes. This is a small GitOps loop inside
+# k3s, and it is the reason that liken needs no `kubectl apply` step.
+# The liken subdirectory holds the manifests that liken writes, apart
+# from the ones k3s stages for its own components, so that init can
+# refresh liken's manifests on every boot and write nothing outside
+# that subdirectory (init/k3s.go).
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:

@@ -74,11 +74,12 @@ func TestActuateFeaturesReportsBundledFeaturesActive(t *testing.T) {
 func featureFixture(t *testing.T) string {
 	t.Helper()
 	featuresDir = t.TempDir()
-	k3sManifestsDir = filepath.Join(t.TempDir(), "manifests")
+	originalManifests := k3sManifestsDir
+	k3sManifestsDir = filepath.Join(t.TempDir(), "manifests", "liken")
 	iscsiDir = filepath.Join(t.TempDir(), "iscsi")
 	t.Cleanup(func() {
 		featuresDir = "/etc/liken/features"
-		k3sManifestsDir = "/var/lib/rancher/k3s/server/manifests"
+		k3sManifestsDir = originalManifests
 		iscsiDir = "/etc/iscsi"
 	})
 

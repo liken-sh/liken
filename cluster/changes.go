@@ -49,6 +49,17 @@ func RestartApplies(current, desired ClusterSpec) bool {
 	if jsonEqual(current, desired) {
 		return false
 	}
+	// A feature that leaves host state behind is the one exception to
+	// the rule that features are restart-class. Netfilter chains,
+	// mounts, live storage sessions, and loaded modules outlive the
+	// k3s process, so a restart stops the controller and leaves its
+	// programming in force with nothing maintaining it. A boot
+	// discards all of it. The machine also runs the controller right
+	// up to that boot, so there is no interval where the programming
+	// stands without the controller that maintains it.
+	if RetractionLeavesHostState(&Cluster{Spec: current}, &Cluster{Spec: desired}) {
+		return false
+	}
 	current.Features, desired.Features = nil, nil
 	current.Registries, desired.Registries = RegistriesSpec{}, RegistriesSpec{}
 	current.Runtime, desired.Runtime = ClusterRuntimeSpec{}, ClusterRuntimeSpec{}

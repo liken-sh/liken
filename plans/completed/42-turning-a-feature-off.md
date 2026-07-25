@@ -1,6 +1,6 @@
 # Turning a feature off turns it off
 
-Milestone 42 — Planned. Retraction becomes an ordered act with an
+Milestone 42 — Completed. Retraction becomes an ordered act with an
 owner, so a feature that leaves `spec.features` stops running instead
 of losing its controller and keeping its effects.
 
@@ -89,7 +89,7 @@ watcher cycles later both the object and the Addon were still present.
 The janitor still does its job, and it is the only thing that does.
 Those comments are wrong and go with this change.
 
-## Retraction drains before it stops
+## Retraction waits until the cluster is ready for it
 
 The second fault is ordering, and the escape hatch found in the lab is
 the proof. Re-declaring helm alone, after the traefik retraction had
@@ -99,23 +99,34 @@ liken knew nothing about traefik and did not need to. The teardown
 worked because it ran through the component that owned the objects,
 while that component was alive.
 
-So retraction becomes two phases. The cluster operator drains first,
-in the cluster, while the owning controller still runs. Only when the
-drain is complete may machines stage the retraction and take their
-turns. Retracting traefik means deleting its HelmCharts while helm
-still runs, letting helm uninstall the release, and stopping both
-afterwards. The automatic dependency stays exactly as it is, and the
-trap disappears because the order is right.
+liken does not have to perform that teardown, then. It has to order
+it. So each pass, the machine operator derives the document it stages:
+the desired document, with every feature added back whose retraction
+the cluster is not ready for. That reduced document is what it hashes,
+stages, and boots under. A machine that reboots in the middle of a
+retraction therefore comes back running the held feature, which is
+what the hold is for.
+
+The order then falls out of the preconditions alone, with no rule
+about the dependency graph anywhere. Retracting traefik leaves its
+HelmCharts in place for a moment, so helm's precondition fails and
+helm is held back while traefik stops. k3s deletes the charts, the
+Helm controller uninstalls the release, the precondition passes, and
+the next pass retracts helm. The automatic dependency stays as it is,
+and the stranded release does not happen, because the order is right.
 
 This is not a new idea in liken. `TeardownJanitor` already does it for
 flux, where the objects had to go in a deliberate order with the
 controllers killed first. It was written as the exception. It is the
 general case, found early.
 
-The barrier is the cost. Draining happens in the cluster and stopping
-happens on each machine, so no machine may apply a retraction until
-the drain is done. The rollout conductor already sequences fleet
-disruption and is where the barrier belongs.
+The barrier costs less than it first looked. An earlier sketch had the
+cluster operator publish what was held and the machine operator honour
+it, which needs a handshake between two programs, a new status field,
+and a guard against acting on a stale answer. None of that is
+necessary. The machine operator already talks to the API and already
+decides what to stage, so it evaluates the preconditions itself and
+the handshake disappears.
 
 ## The vocabulary states each feature's retraction contract
 
@@ -124,14 +135,14 @@ learn what a traefik release contains or what a klipper-lb pod does,
 because a list like that goes stale the first time k3s renames
 something, and it goes stale silently.
 
-Each feature answers two questions instead. What must be true in the
-cluster before this feature may stop, and who performs the drain.
-`FeatureTeardown` is that field in embryo, with two values.
+Each feature answers one question instead: what must be true in the
+cluster before this feature may stop. `FeatureTeardown` is that field
+in embryo, with two values.
 
-* `traefik` drains by deleting its HelmCharts. helm decides what that
-  means.
-* `helm` requires that no HelmChart remains. traefik's drain is what
-  satisfies it.
+* `traefik` states nothing. Stopping it is what clears helm's
+  precondition, because k3s deletes the HelmCharts when the component
+  leaves the disable list.
+* `helm` requires that no HelmChart remains.
 * `servicelb` requires that no LoadBalancer Service remains. liken
   cannot drain it, because those Services belong to the deployment.
 * `metrics-server` needs nothing once the manifests directory has one
@@ -140,15 +151,19 @@ cluster before this feature may stop, and who performs the drain.
   reboot class, below.
 * `flux` keeps the ordered teardown it already has.
 
-Where liken cannot drain, it refuses and explains. A precondition that
-is not met holds the retraction as `Blocked`, with a reason that names
-what the deployment must remove. This is a much better outcome than an
-undeletable Service and a DaemonSet that outlives it.
+Where liken cannot clear a precondition, it refuses and explains. A
+precondition that is not met holds the retraction as `Blocked`, with a
+reason that names what the deployment must remove. This is a much
+better outcome than an undeletable Service and a DaemonSet that
+outlives it.
 
-Invariants that the document proves about itself stay at admission,
-where they can be truly unrepresentable. Retracting helm while traefik
-is declared is visible in the object, so CEL refuses it and there is
-no state to reconcile.
+Every precondition here needs cluster state, so none of them can live
+at admission. A CRD judges only what the object itself says, and no
+feature's readiness to stop is visible in the document. There is also
+nothing left for a schema rule to refuse: a requirement cannot be
+retracted out from under the feature that needs it, because
+`EnabledFeatures` keeps it enabled for as long as its dependent is
+declared.
 
 ## Kernel state takes the reboot class
 
@@ -169,7 +184,7 @@ runs the controller, waits for its turn, and boots without it. The
 window in which stale rules enforce a dead policy does not get
 shortened. It stops existing.
 
-## What the lab measured
+## What the lab measured before the work
 
 One leader, 1 GB, release `v2026.07.24-004-2-g1bc9684-dirty`, k3s
 `v1.36.2+k3s1`, with the lab storage fixture for the mount and session
@@ -206,6 +221,41 @@ Unknown`. nfs retracted left the mount working, and a new pod mounted
 the same export afterwards, because the module stays loaded and
 `mount.nfs` always ships in the image.
 
+## What the lab measured after it
+
+The same drills, on a machine that upgraded from the release that
+produced the numbers above, so the clusterState disk still carried the
+old layout.
+
+The upgrade itself swept liken's six manifests off the top of the
+auto-deploy directory on the first boot, and `coredns.yaml` came
+through byte for byte.
+
+metrics-server retracted across a reboot left no Deployment, no
+APIService, and no addons, and `kubectl top node` answered "Metrics API
+not available". k3s emptied its own `metrics-server` directory, which is
+the teardown that the old wipe used to prevent.
+
+Retracting traefik stopped traefik and held helm, naming both
+HelmCharts. k3s deleted the charts, `helm-delete-traefik-crd` ran, and
+helm stopped on a later pass. No object stayed in Terminating, and the
+cluster ended with no traefik CRDs and no release secrets.
+
+Retracting servicelb with a LoadBalancer Service present reported
+`Blocked` with reason `RetractionBlocked`, naming `default/lbserver`.
+The DaemonSet stayed healthy, the address kept answering, and the
+Service deleted in under a second. The retraction then finished with no
+further edit.
+
+Retracting network-policy drained the node and rebooted it. Afterwards
+the node had no kube-router rules, chains, or ipsets, and the
+NetworkPolicy that remained declared was not enforced, which is
+flannel's own behaviour without the controller.
+
+Retracting iscsi and nfs also rebooted. Afterwards no iscsi or nfs
+module was loaded, no iSCSI session remained, and no NFS mount
+remained, against a live session and a live mount before the edit.
+
 ## The manual
 
 Retraction is an operational flow, so the feature guide states what
@@ -215,9 +265,14 @@ preconditions, and the flux paragraph's existing statement that
 retraction stops the sync without undeploying becomes one case of a
 general rule rather than a special note.
 
-## Open question
+## The barrier is per-feature
 
-Whether the barrier is per-feature or per-edit. Per-feature looks
-right, with an edit converging when all of its retractions have. An
-edit that retracts two features whose drains interact is the case that
-decides it, and it is better found now than in the rollout code.
+The open question was whether a hold covers one feature or one edit.
+Per-feature is what the work settled on, and the traefik case is what
+decides it. That edit retracts two features whose readiness differs:
+traefik may stop at once, and helm may not stop until traefik's charts
+are gone. A per-edit hold would keep both running until the whole edit
+was ready, and nothing would ever make it ready, because stopping
+traefik is what clears helm's precondition. Per-feature holds let the
+edit converge one feature at a time, and the edit is done when its last
+hold clears.

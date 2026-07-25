@@ -60,9 +60,12 @@ func conditionPhase(c api.Condition) api.Phase {
 		return api.PhaseBooting
 	case "RejectedLastBoot", "StagingRejected", "BootMismatch", "MachineStateEphemeral",
 		"NoSystemSlots", "NotInstalled", "NoReleaseSource", "VersionNotInCatalog", "DigestMismatch",
-		"CredentialsInvalid":
+		"CredentialsInvalid", "RetractionBlocked":
 		// Drift exists, but liken refuses to stage it, or cannot.
-		// Time will not fix these; a different edit will. The
+		// Time will not fix these; a different edit will. A blocked
+		// retraction takes an edit to the cluster's objects rather
+		// than to a document: a feature stays enabled while objects
+		// only its controller can remove still exist. The
 		// version target can get stuck in several ways: no slots to
 		// hold a release, a boot that did not come from a slot (so
 		// no boot entry could ever run the download), a catalog with

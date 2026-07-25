@@ -113,14 +113,82 @@ const (
 // have none, and their configuration is exactly {}. The CRD holds a
 // parameterized feature to these names at admission, the parity
 // test holds the CRD to this table, and ValidateParams is the same
-// judgment at the file doors.
+// judgment at the file doors. Retraction states what must be true
+// before the feature may stop.
 type FeatureDefinition struct {
-	Slug     string
-	Kind     FeatureKind
-	Requires []string
-	Params   []string
-	Teardown FeatureTeardown
+	Slug       string
+	Kind       FeatureKind
+	Requires   []string
+	Params     []string
+	Teardown   FeatureTeardown
+	Retraction FeatureRetraction
 }
+
+// FeatureRetraction is what must be true before a feature may stop.
+//
+// A feature's controller programs things outside the cluster's own
+// records: netfilter chains, host ports, mounts, and the objects that
+// other controllers hold finalizers on. Stopping the controller does
+// not undo any of it. These fields are what hold a retraction until
+// the cluster is ready for it.
+//
+// They state conditions, never a list of objects to delete. A list of
+// another project's object names goes stale the first time that
+// project renames one, and it goes stale silently. Each component
+// already carries its own teardown, and the ordering here is what
+// lets that teardown run: the component that owns the objects stays
+// up until they are gone.
+type FeatureRetraction struct {
+	// Precondition is what the cluster must no longer hold before
+	// this feature may stop. Until it holds, the machine operator
+	// keeps the feature enabled and reports what stands in the way,
+	// so the retraction waits whole instead of applying halfway
+	// (machine-operator/retraction.go).
+	Precondition Precondition
+
+	// HostState says that stopping this feature leaves state that
+	// only a boot clears: netfilter chains and ipsets, mounts, live
+	// storage sessions, loaded kernel modules. Such a retraction is
+	// reboot-class (changes.go). That is not only how the state gets
+	// cleared. It is how the machine avoids ever running without the
+	// controller while the controller's programming is still in
+	// force.
+	HostState bool
+}
+
+// Precondition names a fact about the cluster that must be false
+// before a feature may stop. The machine operator evaluates these
+// against live objects, because none of them can be seen in the
+// document alone. This is why the refusal is a status condition and
+// not a schema rule: a CRD can only judge what the object itself
+// says.
+type Precondition string
+
+const (
+	// PreconditionNone is the ordinary case. Most features leave
+	// nothing behind that another object depends on.
+	PreconditionNone Precondition = ""
+
+	// NoHelmCharts holds when no HelmChart resource remains. The
+	// Helm controller puts a removal finalizer on every HelmChart it
+	// manages, so a HelmChart deleted after its controller stops
+	// waits on a finalizer that nothing will ever clear, and the
+	// release it installed keeps running. Retracting traefik is what
+	// ordinarily clears this: once the disable list names traefik,
+	// k3s deletes the HelmChart, and the Helm controller, still
+	// running, uninstalls the release.
+	NoHelmCharts Precondition = "NoHelmCharts"
+
+	// NoLoadBalancerServices holds when no Service of type
+	// LoadBalancer remains. The cloud controller that servicelb runs
+	// inside owns the DaemonSets behind those Services and the
+	// cleanup finalizer on the Services themselves. Stopping it
+	// stops the only thing that can finish deleting them. liken
+	// cannot clear this precondition itself, because those Services
+	// belong to the deployment, so this retraction waits for a
+	// person.
+	NoLoadBalancerServices Precondition = "NoLoadBalancerServices"
+)
 
 // FeatureTeardown is who removes a retracted feature's objects from
 // the cluster.
@@ -152,13 +220,34 @@ const (
 // implements it (open-iscsi), because an implementation can change
 // and an API should not have to change with it.
 var Features = []FeatureDefinition{
+	// traefik states no precondition of its own. Stopping it is what
+	// deletes its HelmCharts, through k3s's disable path, and that
+	// deletion is what clears helm's precondition below. So an edit
+	// that drops both stops traefik first and helm one convergence
+	// later.
 	{Slug: "traefik", Kind: FeatureBundled, Requires: []string{"helm"}},
-	{Slug: "servicelb", Kind: FeatureBundled},
+	{Slug: "servicelb", Kind: FeatureBundled,
+		Retraction: FeatureRetraction{Precondition: NoLoadBalancerServices}},
 	{Slug: "metrics-server", Kind: FeatureBundled},
-	{Slug: "helm", Kind: FeatureEmbedded},
-	{Slug: "network-policy", Kind: FeatureEmbedded},
-	{Slug: "iscsi", Kind: FeatureVendored},
-	{Slug: "nfs", Kind: FeatureVendored},
+	{Slug: "helm", Kind: FeatureEmbedded,
+		Retraction: FeatureRetraction{Precondition: NoHelmCharts}},
+	// The network policy controller programs the host's netfilter
+	// tables. Its chains are keyed on pod addresses, and an address
+	// outlives the pod that held it, so a chain left behind does not
+	// fail safe. It enforces a policy nobody declared against
+	// whatever workload receives that address next.
+	{Slug: "network-policy", Kind: FeatureEmbedded,
+		Retraction: FeatureRetraction{HostState: true}},
+	// A live iSCSI session lives in the kernel, and iscsid recovers
+	// it. Stopping the feature takes the daemon away and leaves the
+	// session logged in with nothing to reconnect it.
+	{Slug: "iscsi", Kind: FeatureVendored,
+		Retraction: FeatureRetraction{HostState: true}},
+	// The nfs feature is the loaded module. Nothing else gates an
+	// NFS mount, because mount.nfs ships in every image, so a
+	// retraction that does not reach a boot changes nothing at all.
+	{Slug: "nfs", Kind: FeatureVendored,
+		Retraction: FeatureRetraction{HostState: true}},
 	// flux names the project, not the capability, and this is a
 	// deliberate exception to the naming rule above. The rule exists
 	// so an implementation can change behind a stable name, and for
@@ -346,6 +435,40 @@ func (c *Cluster) EnabledFeatures() []string {
 // declared or required by a declared one.
 func (c *Cluster) FeatureEnabled(slug string) bool {
 	return slices.Contains(c.EnabledFeatures(), slug)
+}
+
+// RetractedFeatures returns the features that stop between two
+// declarations, sorted. It compares enabled sets rather than declared
+// ones, because a feature can leave without anyone naming it. Nothing
+// but traefik requires helm, so an edit that removes traefik stops
+// helm as well, and that unnamed stop is the one with the sharpest
+// consequences: it is what strands a Helm release.
+//
+// The classifier calls this to pick a change's tier (changes.go), and
+// the machine operator calls it to work out which preconditions an
+// edit must satisfy before a machine may act on it.
+func RetractedFeatures(current, desired *Cluster) []string {
+	running := map[string]bool{}
+	for _, slug := range current.EnabledFeatures() {
+		running[slug] = true
+	}
+	for _, slug := range desired.EnabledFeatures() {
+		delete(running, slug)
+	}
+	return slices.Sorted(maps.Keys(running))
+}
+
+// RetractionLeavesHostState reports whether any feature stopping here
+// leaves state that only a boot clears. Such a change takes the
+// reboot tier, so the machine never runs without the controller while
+// the controller's programming is still in force.
+func RetractionLeavesHostState(current, desired *Cluster) bool {
+	for _, slug := range RetractedFeatures(current, desired) {
+		if def := FeatureBySlug(slug); def != nil && def.Retraction.HostState {
+			return true
+		}
+	}
+	return false
 }
 
 // DisabledComponents computes the k3s disable list: every bundled

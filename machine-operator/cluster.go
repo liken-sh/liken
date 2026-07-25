@@ -114,7 +114,17 @@ func renderCluster(name string, spec cluster.ClusterSpec) ([]byte, string, error
 // rendering of the same spec produce different bytes with the same
 // meaning. Drift is a difference in meaning. A difference in
 // formatting alone must never disrupt a fleet.
-func decideClusterConvergence(clusterDoc *cluster.Cluster, m *machine.Machine, facts *machine.MachineStatus, rejection *machine.Rejection, bootDoc *cluster.Cluster, bootHash, stagedHash string, t turn) convergence {
+//
+// reduced is the document this machine stages, which is not always
+// the document the deployment wrote: the retraction barrier
+// (retraction.go) puts back every feature whose precondition the
+// cluster does not satisfy, and held names those features. The whole
+// decision below runs on the reduced document, so a held feature
+// keeps running through the disruption this pass asks for. When the
+// reduction produces exactly the document this boot ran, no
+// disruption can advance the edit, and the verdict names the feature
+// that stays and the objects that keep it.
+func decideClusterConvergence(reduced *cluster.Cluster, held []featureHold, m *machine.Machine, facts *machine.MachineStatus, rejection *machine.Rejection, bootDoc *cluster.Cluster, bootHash, stagedHash string, t turn) convergence {
 	if facts == nil || facts.Boot.ManifestSource == "" {
 		return factsIncomplete("ClusterConverged")
 	}
@@ -123,12 +133,25 @@ func decideClusterConvergence(clusterDoc *cluster.Cluster, m *machine.Machine, f
 			"the boot ran a cluster document but its publication is unreadable")}
 	}
 
-	manifest, hash, err := renderCluster(clusterDoc.Metadata.Name, clusterDoc.Spec)
+	manifest, hash, err := renderCluster(reduced.Metadata.Name, reduced.Spec)
 	if err != nil {
 		return convergence{condition: notConverged("ClusterConverged", "StagingFailed", err.Error())}
 	}
 
 	if hash == bootHash {
+		// This boot already runs the reduced document, so no staging
+		// and no disruption moves the machine closer to the
+		// deployment's document. Only a change to the cluster's
+		// objects satisfies the precondition, and until that happens
+		// every pass reaches this same verdict. A stale staged copy
+		// still goes, because those bytes are not the document the
+		// next boot must run.
+		if len(held) > 0 {
+			return convergence{
+				condition: notConverged("ClusterConverged", "RetractionBlocked", holdMessage(held)),
+				withdraw:  stagedHash != "",
+			}
+		}
 		return convergedWithCleanup(
 			converged("ClusterConverged", "Converged", "this boot ran the current cluster document"),
 			stagedHash, rejection)
@@ -146,7 +169,7 @@ func decideClusterConvergence(clusterDoc *cluster.Cluster, m *machine.Machine, f
 		return machineStateEphemeral("ClusterConverged", "the cluster document")
 	}
 
-	restart := bootDoc != nil && cluster.RestartApplies(bootDoc.Spec, clusterDoc.Spec)
+	restart := bootDoc != nil && cluster.RestartApplies(bootDoc.Spec, reduced.Spec)
 
 	c := convergence{
 		manifest: manifest,
@@ -184,6 +207,13 @@ func decideClusterConvergence(clusterDoc *cluster.Cluster, m *machine.Machine, f
 // version convergence (release.go) reads its release feed live. A
 // nil Cluster means the read failed, and the verdict already
 // reports that.
+//
+// This is also where the retraction barrier reaches the live cluster.
+// A precondition is a statement about objects that no document
+// describes, such as the HelmCharts that still exist, so the
+// reduction needs the API client that this function holds. It reads
+// nothing unless the edit stops a feature, which keeps the ordinary
+// pass to its one read of the Cluster.
 func convergeClusterDocument(c *kubernetes.Client, store machine.ManifestStore, clusterName string, m *machine.Machine, facts *machine.MachineStatus, t turn) (convergence, *cluster.Cluster) {
 	liveCluster, err := kubernetes.GetCluster(c, clusterName)
 	if err != nil {
@@ -192,7 +222,10 @@ func convergeClusterDocument(c *kubernetes.Client, store machine.ManifestStore, 
 	}
 	rejection, _ := store.LoadRejection()
 	bootDoc, bootHash := bootClusterDocument(cluster.BootClusterManifestPath)
-	return decideClusterConvergence(liveCluster, m, facts, rejection,
+	reduced, held := reduceRetraction(bootDoc, liveCluster, func(p cluster.Precondition) (bool, string, error) {
+		return evaluatePrecondition(c, p)
+	})
+	return decideClusterConvergence(reduced, held, m, facts, rejection,
 		bootDoc, bootHash, readStagedHash(store), t), liveCluster
 }
 

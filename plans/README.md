@@ -115,6 +115,9 @@ milestone is 43.
 * **41.** [Editing the network spec](completed/41-editing-the-network-spec.md)
   — the boot records the network it came up under, so an edit to
   `spec.network` drifts, stages, and applies.
+* **42.** [Turning a feature off turns it off](completed/42-turning-a-feature-off.md)
+  — a retraction waits for the cluster, reboots when it leaves kernel
+  state, and stops leaving a controller's work behind.
 
 ## Rejected
 
@@ -131,10 +134,6 @@ milestone is 43.
 * **34.** [GPU add-ons](34-gpu-add-ons.md) — a machine that needs a GPU
   compute stack declares an add-on: a second read-only image on its
   boot slot. The first add-on would be NVIDIA compute.
-* **42.** [Turning a feature off turns it off](42-turning-a-feature-off.md)
-  — retraction drains through the owning controller before it stops
-  it, refuses when the cluster still depends on the feature, and takes
-  the reboot class where the feature leaves kernel state.
 
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.

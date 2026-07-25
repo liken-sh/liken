@@ -110,6 +110,22 @@ rules:
   - apiGroups: [""]
     resources: [pods/eviction]
     verbs: [create]
+  # The retraction barrier (machine-operator/retraction.go): before
+  # a feature may stop, the operator counts the objects that only
+  # that feature's controller can finish removing. Services answer
+  # for servicelb, whose cloud controller owns the cleanup finalizer
+  # on every LoadBalancer Service, and HelmCharts answer for helm,
+  # whose controller owns the removal finalizer on every chart. Both
+  # rules cover the whole cluster, because either kind of object can
+  # be created in any namespace. The verb is list and nothing else:
+  # the operator counts these objects and names them in a status
+  # message, and never deletes a deployment's own objects for it.
+  - apiGroups: [""]
+    resources: [services]
+    verbs: [list]
+  - apiGroups: [helm.cattle.io]
+    resources: [helmcharts]
+    verbs: [list]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

@@ -141,11 +141,14 @@
 #                                 the sub-ID ranges to map container
 #                                 users into namespaces
 #   /var/lib/rancher/k3s/         the liken CRDs and the operators'
-#     server/manifests/           deployments. k3s applies everything
-#                                 in this directory to the cluster at
-#                                 startup, so the OS's own resources
-#                                 arrive without a separate kubectl
-#                                 step
+#     server/manifests/liken/     deployments. k3s applies everything
+#                                 under its manifests directory to the
+#                                 cluster at startup, so the OS's own
+#                                 resources arrive without a separate
+#                                 kubectl step. The liken subdirectory
+#                                 holds liken's manifests, apart from
+#                                 the ones k3s stages for its own
+#                                 components
 #   /var/lib/rancher/k3s/         the liken operators' container images
 #     agent/images/               as OCI tarballs (built by hand in
 #                                 image/oci.sh). k3s imports every
@@ -314,7 +317,17 @@ ln -s ../run "$root/var/run"
 # substitution stamps each manifest with the release it shipped in.
 # The pod steward compares this stamp against a machine's running
 # version.
-mkdir -p "$root/var/lib/rancher/k3s/server/manifests"
+#
+# Two writers put files in the auto-deploy directory. k3s stages the
+# manifests of its own bundled components at the top of it, and the
+# teardown of a component that a boot disables reads that component's
+# file at startup. So liken's manifests go one level down, in a
+# subdirectory that belongs to liken alone: init wipes and refreshes
+# that subdirectory on every boot and writes nothing outside it
+# (init/k3s.go). A manifest one level down applies the same as one at
+# the top, because k3s walks the whole tree, and an addon takes its
+# name from the file name and not from the directory that holds it.
+mkdir -p "$root/var/lib/rancher/k3s/server/manifests/liken"
 for manifest in "$here"/../machine/manifests/*.yaml \
         "$here"/../cluster/manifests/*.yaml \
         "$here"/../kubernetes/manifests/*.yaml \
@@ -322,7 +335,7 @@ for manifest in "$here"/../machine/manifests/*.yaml \
         "$here"/../cluster-operator/manifests/*.yaml \
         "$here"/../logs/manifests/*.yaml; do
     sed "s/LIKEN_VERSION/$liken_version/g" "$manifest" \
-        >"$root/var/lib/rancher/k3s/server/manifests/$(basename "$manifest")"
+        >"$root/var/lib/rancher/k3s/server/manifests/liken/$(basename "$manifest")"
 done
 mkdir -p "$root/var/lib/rancher/k3s/agent/images"
 cp "$machine_operator_dist/liken-machine-operator-image.tar" \
@@ -335,10 +348,12 @@ cp "$logs_dist/liken-logs-image.tar" \
 # This section stages each opt-in feature's per-boot inputs under
 # /etc/liken/features, organized by slug: the feature's kernel module
 # list and, for a feature with a workload, its manifests. These stay
-# out of the auto-deploy directory above on purpose: everything in
-# that directory applies on every boot, but a feature's workload
-# applies only when the cluster document declares it, and init is the
-# gate (init/features.go). The iscsid container image does go in
+# out of the auto-deploy directory above on purpose: everything under
+# it applies on every boot, but a feature's workload applies only when
+# the cluster document declares it, and init is the gate
+# (init/features.go). A feature that a document declares lands in
+# liken's subdirectory, beside the manifests above, because it is
+# liken's file too. The iscsid container image does go in
 # agent/images with the others, because an imported but unused image
 # stays inert, and importing an image is not the same as deploying it.
 mkdir -p "$root/etc/liken/features/iscsi/manifests"

@@ -5,28 +5,32 @@ package main
 //
 // A feature's workload manifests ride in the image. init seeds them
 // into k3s's auto-deploy directory only while the cluster document
-// declares the feature (see init/features.go). Retraction, though,
-// leaves a gap that k3s cannot close by itself. k3s deletes an
-// addon's resources when it detects that the manifest file was
-// removed while k3s is running. But retraction removes the file at
-// boot, before k3s starts, so k3s never detects a deletion. The
-// retracted feature stops functioning, because init stops writing
-// its boot files and the workload cannot run. But the feature's
-// objects would stay in the cluster, with their pods failing.
+// declares the feature (see init/features.go). Retraction removes the
+// file, and that removal deletes nothing on its own.
 //
-// This janitor closes the gap declaratively. Every feature-seeded
-// workload carries a liken.sh/feature annotation that names the
-// feature it belongs to. Each sweep deletes any liken-system workload
-// whose annotation names a feature that the cluster document no
-// longer declares. Whether the feature is declared is the only
-// question the janitor asks. The janitor does not wait for the
-// retraction to roll through the fleet, because k3s's own live
-// behavior, deleting when the manifest file disappears while k3s
-// runs, also deletes immediately. Once the document no longer claims
-// a workload's feature, the fleet does not need that workload to keep
-// running anywhere. The janitor does not act on objects that carry no
-// annotation. The operator and log-relay DaemonSets live in the same
-// namespace, and no feature owns them.
+// State that plainly, because the opposite is easy to assume: k3s
+// never deletes an addon's objects because its manifest file went
+// away. The deploy controller walks the files that exist, and applies
+// them.
+// Nothing reconciles an Addon against a source file that is no longer
+// there, so a deleted manifest leaves both the Addon and everything
+// it created in place. k3s does delete an addon's objects when the
+// component is on its disable list, because then it still has the
+// file to read and can act on what the file declares. A liken feature
+// is not a k3s component and is never on that list.
+//
+// So the janitor is not a fallback for one boot path. It is the only
+// thing that removes a retracted feature's workloads, on every path.
+// Every feature-seeded workload carries a liken.sh/feature annotation
+// that names the feature it belongs to. Each sweep deletes any
+// liken-system workload whose annotation names a feature that the
+// cluster document no longer declares. Whether the feature is
+// declared is the only question the janitor asks. It does not wait
+// for the retraction to roll through the fleet: once the document no
+// longer claims a workload's feature, the fleet does not need that
+// workload running anywhere. The janitor does not act on objects that
+// carry no annotation. The operator and log-relay DaemonSets live in
+// the same namespace, and no feature owns them.
 
 import (
 	"errors"

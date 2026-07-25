@@ -52,11 +52,16 @@ func TestALeaderKeepsItsDatastore(t *testing.T) {
 	}
 }
 
+// seedRelPaths are the three trees the image seeds onto clusterState.
+// The manifests one is liken's subdirectory of k3s's auto-deploy
+// directory, never the directory itself.
+var seedRelPaths = []string{"k3s/server/tls", likenManifestsRel, "k3s/agent/images"}
+
 // fakeSeedSource substitutes for the image's /var/lib/rancher tree.
 func fakeSeedSource(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	for _, rel := range []string{"k3s/server/tls", "k3s/server/manifests", "k3s/agent/images"} {
+	for _, rel := range seedRelPaths {
 		if err := os.MkdirAll(filepath.Join(dir, rel), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -76,7 +81,7 @@ func TestSeedClusterStateCopiesTheSeeds(t *testing.T) {
 	if err := seedClusterState(root); err != nil {
 		t.Fatal(err)
 	}
-	for _, rel := range []string{"k3s/server/tls", "k3s/server/manifests", "k3s/agent/images"} {
+	for _, rel := range seedRelPaths {
 		if _, err := os.Stat(filepath.Join(root, rel, "seeded")); err != nil {
 			t.Errorf("%s should be seeded: %v", rel, err)
 		}
@@ -87,7 +92,7 @@ func TestSeedClusterStateKeepsIdentityAndRefreshesManifests(t *testing.T) {
 	fakeSeedSource(t)
 	root := t.TempDir()
 	// The disk already carries an identity and an old manifest tree.
-	for _, rel := range []string{"k3s/server/tls", "k3s/server/manifests"} {
+	for _, rel := range []string{"k3s/server/tls", likenManifestsRel} {
 		if err := os.MkdirAll(filepath.Join(root, rel), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -106,11 +111,104 @@ func TestSeedClusterStateKeepsIdentityAndRefreshesManifests(t *testing.T) {
 		t.Error("the seed must not overwrite existing TLS material")
 	}
 	// Manifests belong to the running image: they refresh completely.
-	if _, err := os.Stat(filepath.Join(root, "k3s/server/manifests", "existing")); err == nil {
+	if _, err := os.Stat(filepath.Join(root, likenManifestsRel, "existing")); err == nil {
 		t.Error("old manifests are replaced by the image's")
 	}
-	if _, err := os.Stat(filepath.Join(root, "k3s/server/manifests", "seeded")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, likenManifestsRel, "seeded")); err != nil {
 		t.Error("the image's manifests land on every boot")
+	}
+}
+
+// k3s stages its own components' manifests at the top of the
+// auto-deploy directory, and the teardown of a component that a boot
+// disables reads that component's file at startup. So each file must
+// still be there when k3s starts, and the refresh must reach liken's
+// subdirectory and stop.
+func TestSeedClusterStateLeavesK3sFilesWhereK3sPutThem(t *testing.T) {
+	fakeSeedSource(t)
+	root := t.TempDir()
+	top := filepath.Join(root, k3sManifestsRel)
+	if err := os.MkdirAll(top, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	k3sFiles := map[string]string{
+		"traefik.yaml":             "kind: HelmChart\n",
+		"metrics-server.yaml.skip": "",
+		"ccm.yaml":                 "kind: DaemonSet\n",
+	}
+	for name, content := range k3sFiles {
+		if err := os.WriteFile(filepath.Join(top, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := seedClusterState(root); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, content := range k3sFiles {
+		raw, err := os.ReadFile(filepath.Join(top, name))
+		if err != nil {
+			t.Errorf("k3s's %s must survive the seed: %v", name, err)
+			continue
+		}
+		if string(raw) != content {
+			t.Errorf("k3s's %s was rewritten: %q", name, raw)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, likenManifestsRel, "seeded")); err != nil {
+		t.Errorf("liken's own subdirectory still refreshes: %v", err)
+	}
+}
+
+// fakeFeatureManifests substitutes for the image's staged features,
+// so that the sweep can name a feature's workload manifest.
+func fakeFeatureManifests(t *testing.T, slug, name string) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, slug, "manifests"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, slug, "manifests", name), []byte("kind: DaemonSet\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := featuresDir
+	featuresDir = dir
+	t.Cleanup(func() { featuresDir = old })
+}
+
+// A machine that upgrades from a release that wrote liken's manifests
+// at the top of the auto-deploy directory still carries those files.
+// Each one declares the same objects as the copy in liken's
+// subdirectory, so seeding must take them away, and take nothing else.
+func TestSeedClusterStateSweepsLikenManifestsFromTheTop(t *testing.T) {
+	fakeSeedSource(t)
+	fakeFeatureManifests(t, "iscsi", "iscsid.yaml")
+	root := t.TempDir()
+	top := filepath.Join(root, k3sManifestsRel)
+	if err := os.MkdirAll(top, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// liken's three kinds of file: a manifest the image seeds, a
+	// feature's workload, and a manifest a feature's actuation
+	// renders. Beside them, a file that belongs to k3s.
+	for _, name := range []string{"seeded", "iscsid.yaml", "flux-sync.yaml", "traefik.yaml"} {
+		if err := os.WriteFile(filepath.Join(top, name), []byte("kind: Namespace\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := seedClusterState(root); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"seeded", "iscsid.yaml", "flux-sync.yaml"} {
+		if _, err := os.Stat(filepath.Join(top, name)); !os.IsNotExist(err) {
+			t.Errorf("%s belongs to liken and must not stay at the top: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(top, "traefik.yaml")); err != nil {
+		t.Errorf("the sweep must name only liken's files: %v", err)
 	}
 }
 
@@ -276,7 +374,7 @@ func TestSweepTornK3sFilesOnAFreshDiskDoesNothing(t *testing.T) {
 
 func TestSeedClusterStateReportsAnUnreadableSeed(t *testing.T) {
 	dir := fakeSeedSource(t)
-	sealed := filepath.Join(dir, "k3s/server/manifests/seeded")
+	sealed := filepath.Join(dir, likenManifestsRel, "seeded")
 	if err := os.Chmod(sealed, 0o000); err != nil {
 		t.Fatal(err)
 	}

@@ -18,7 +18,9 @@ func specWith(mutate func(*ClusterSpec)) ClusterSpec {
 		Disruption: ClusterDisruptionSpec{
 			MaxUnavailable: 1,
 		},
-		Features: map[string]*FeatureConfig{"iscsi": {}},
+		// One feature that leaves host state and one that does not,
+		// so the cases below can retract either kind.
+		Features: map[string]*FeatureConfig{"iscsi": {}, "metrics-server": {}},
 		Registries: RegistriesSpec{
 			Mirrors:  map[string][]string{"docker.io": {"https://mirror.example:5000"}},
 			Embedded: true,
@@ -36,13 +38,26 @@ func TestRestartAppliesByDomain(t *testing.T) {
 		mutate func(*ClusterSpec)
 		want   bool
 	}{
-		"a feature toggle":        {func(s *ClusterSpec) { s.Features["traefik"] = &FeatureConfig{} }, true},
-		"a feature retraction":    {func(s *ClusterSpec) { s.Features = nil }, true},
-		"a mirror edit":           {func(s *ClusterSpec) { s.Registries.Embedded = false }, true},
-		"a runtime tuning":        {func(s *ClusterSpec) { s.Runtime.K3s.GoMemoryLimit = "off" }, true},
-		"a runtime GoGC edit":     {func(s *ClusterSpec) { n := 80; s.Runtime.K3s.GoGC = &n }, true},
-		"runtime and a feature":   {func(s *ClusterSpec) { s.Runtime.K3s.GoMemoryLimit = "off"; s.Features["traefik"] = &FeatureConfig{} }, true},
-		"features and registries": {func(s *ClusterSpec) { s.Features = nil; s.Registries.Embedded = false }, true},
+		"a feature toggle": {func(s *ClusterSpec) { s.Features["traefik"] = &FeatureConfig{} }, true},
+		// metrics-server leaves nothing on the host, so retracting it
+		// still converges by a restart. iscsi leaves a loaded module
+		// and any live session, so retracting it needs a boot, and it
+		// carries anything else in the same edit to the boot tier.
+		"a plain retraction":      {func(s *ClusterSpec) { delete(s.Features, "metrics-server") }, true},
+		"a host-state retraction": {func(s *ClusterSpec) { delete(s.Features, "iscsi") }, false},
+		"every feature retracted": {func(s *ClusterSpec) { s.Features = nil }, false},
+		"a host-state retraction beside a mirror edit": {func(s *ClusterSpec) {
+			delete(s.Features, "iscsi")
+			s.Registries.Embedded = false
+		}, false},
+		"a mirror edit":         {func(s *ClusterSpec) { s.Registries.Embedded = false }, true},
+		"a runtime tuning":      {func(s *ClusterSpec) { s.Runtime.K3s.GoMemoryLimit = "off" }, true},
+		"a runtime GoGC edit":   {func(s *ClusterSpec) { n := 80; s.Runtime.K3s.GoGC = &n }, true},
+		"runtime and a feature": {func(s *ClusterSpec) { s.Runtime.K3s.GoMemoryLimit = "off"; s.Features["traefik"] = &FeatureConfig{} }, true},
+		"features and registries": {func(s *ClusterSpec) {
+			s.Features["traefik"] = &FeatureConfig{}
+			s.Registries.Embedded = false
+		}, true},
 		"runtime with a reboot field": {func(s *ClusterSpec) {
 			s.Runtime.K3s.GoMemoryLimit = "off"
 			s.Endpoint = "https://10.10.0.2:6443"

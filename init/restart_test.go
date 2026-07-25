@@ -240,39 +240,54 @@ func TestRestartRejectsAGarbageStagedDocument(t *testing.T) {
 	}
 }
 
-func TestRestartRetractsADroppedFeaturesManifests(t *testing.T) {
-	f := newRestartFixture(t)
-
-	// The image includes a manifest for the iscsi feature, and a
-	// previous boot seeded it into k3s's auto-deploy directory.
-	features := t.TempDir()
-	seeded := t.TempDir()
+// retractionFixture stages one feature the way a machine carries it
+// after a boot that declared it: the image's copy under
+// /etc/liken/features, and the seeded copy in liken's subdirectory of
+// k3s's auto-deploy directory. It returns both directories, so a test
+// can add the rendered files that no image ships. The names are the
+// files the image would carry for the slug.
+func retractionFixture(t *testing.T, slug string, names ...string) (features, seeded string) {
+	t.Helper()
+	features = t.TempDir()
+	seeded = filepath.Join(t.TempDir(), "manifests", "liken")
 	originalFeatures, originalManifests := featuresDir, k3sManifestsDir
 	featuresDir, k3sManifestsDir = features, seeded
 	t.Cleanup(func() { featuresDir, k3sManifestsDir = originalFeatures, originalManifests })
-	if err := os.MkdirAll(filepath.Join(features, "iscsi", "manifests"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(features, slug, "manifests"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{
-		filepath.Join(features, "iscsi", "manifests", "iscsid.yaml"),
-		filepath.Join(seeded, "iscsid.yaml"),
-	} {
-		if err := os.WriteFile(path, []byte("kind: DaemonSet\n"), 0o644); err != nil {
-			t.Fatal(err)
+	if err := os.MkdirAll(seeded, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range names {
+		for _, dir := range []string{filepath.Join(features, slug, "manifests"), seeded} {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte("kind: DaemonSet\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
+	return features, seeded
+}
 
-	// This boot ran with iscsi declared. The staged document drops it.
-	f.state.clusterDoc.Spec.Features = map[string]*cluster.FeatureConfig{"iscsi": {}}
-	f.stageCluster(t, func(s *cluster.ClusterSpec) {
-		s.Features = nil
-	})
+// The retraction itself, called directly. Whether a given retraction
+// reaches this path or waits for a boot is the classifier's decision
+// (cluster/changes.go). This test covers what happens to the files,
+// not that decision.
+func TestRetractionRemovesADroppedFeaturesManifests(t *testing.T) {
+	f := newRestartFixture(t)
+	_, seeded := retractionFixture(t, "iscsi", "iscsid.yaml")
 
-	if !f.state.apply(machine.RestartIntent{Reason: "retraction"}) {
-		t.Fatal("a feature retraction is restart work")
-	}
+	// This boot ran with iscsi declared. The new document drops it.
+	declared := &cluster.Cluster{Spec: cluster.ClusterSpec{
+		Features: map[string]*cluster.FeatureConfig{"iscsi": {}},
+	}}
+	f.state.retractFeatureManifests(declared, f.state.clusterDoc)
+
 	if _, err := os.Stat(filepath.Join(seeded, "iscsid.yaml")); !os.IsNotExist(err) {
-		t.Error("the retracted feature's manifest must leave the auto-deploy directory while k3s watches")
+		t.Error("the retracted feature's manifest must leave the auto-deploy directory")
+	}
+	if len(f.state.offlineRetractions) != 0 {
+		t.Errorf("a default teardown removes its files here: %v", f.state.offlineRetractions)
 	}
 }
 
@@ -283,25 +298,11 @@ func TestRestartRetractsADroppedFeaturesManifests(t *testing.T) {
 // would prune everything the repository ever applied.
 func TestRestartRetractsFluxOnlyAfterTheStop(t *testing.T) {
 	f := newRestartFixture(t)
-
-	features := t.TempDir()
-	seeded := t.TempDir()
-	originalFeatures, originalManifests := featuresDir, k3sManifestsDir
-	featuresDir, k3sManifestsDir = features, seeded
-	t.Cleanup(func() { featuresDir, k3sManifestsDir = originalFeatures, originalManifests })
-	if err := os.MkdirAll(filepath.Join(features, "flux", "manifests"), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	// The feature's ground rides the image; the sync objects are
 	// rendered, so retraction must know both.
-	for _, path := range []string{
-		filepath.Join(features, "flux", "manifests", "flux-system.yaml"),
-		filepath.Join(seeded, "flux-system.yaml"),
-		filepath.Join(seeded, "flux-sync.yaml"),
-	} {
-		if err := os.WriteFile(path, []byte("kind: Namespace\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
+	_, seeded := retractionFixture(t, "flux", "flux-system.yaml")
+	if err := os.WriteFile(filepath.Join(seeded, "flux-sync.yaml"), []byte("kind: GitRepository\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
 	f.state.clusterDoc.Spec.Features = map[string]*cluster.FeatureConfig{
