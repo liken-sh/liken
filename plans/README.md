@@ -186,6 +186,12 @@ numbered before this arc existed; it belongs second in this order:
     still finds them where Kubernetes puts them. Anything that
     appends for as long as the machine runs belongs on a role, not
     on the root's small write budget.
+41. [x] [An edit nobody applied](41-an-edit-nobody-applied.md)
+    — the boot records the network it came up under, so an edit to
+    spec.network drifts, stages, and reaches the machine the way the
+    schema always said it would. A field the cluster can edit needs a
+    record of what the boot did with it, or every verdict the
+    operator gives is a guess.
 
 Deferred until the fundamentals above are proven, the hardening
 tier: UKIs, dm-verity, secure boot, TPM-sealed secrets, and signed
