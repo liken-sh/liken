@@ -14,7 +14,7 @@ A document's directory states its status:
   built yet.
 
 The numbers run in one sequence across all three directories. The next
-milestone is 42.
+milestone is 43.
 
 ## Completed
 
@@ -131,6 +131,10 @@ milestone is 42.
 * **34.** [GPU add-ons](34-gpu-add-ons.md) — a machine that needs a GPU
   compute stack declares an add-on: a second read-only image on its
   boot slot. The first add-on would be NVIDIA compute.
+* **42.** [Turning a feature off turns it off](42-turning-a-feature-off.md)
+  — retraction drains through the owning controller before it stops
+  it, refuses when the cluster still depends on the feature, and takes
+  the reboot class where the feature leaves kernel state.
 
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.
