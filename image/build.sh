@@ -98,6 +98,12 @@
 #   /etc/mtab                     the compatibility symlink mount
 #                                 helpers require. It points at the
 #                                 kernel's own mount table
+#   /run and /var/run             the machine's runtime state, and the
+#                                 old name for it. The directory is
+#                                 where init mounts the runtime tmpfs;
+#                                 the symlink beside it is what keeps
+#                                 the two names one filesystem, the way
+#                                 every other Linux does
 #   /etc/liken/features/          each opt-in feature's per-boot
 #                                 inputs, by slug: its kernel module
 #                                 list and, for a feature with a
@@ -242,6 +248,29 @@ ln -s mount.nfs "$root/sbin/mount.nfs4"
 # mount itself succeeds in milliseconds, but the helper never exits,
 # so the machine looks like it has stopped responding.
 ln -s /proc/self/mounts "$root/etc/mtab"
+
+# /var/run is the old name for the machine's runtime state, from
+# before /run existed. Every mainstream distribution has shipped it as
+# a symlink since about 2011, and programs still write both names: the
+# CNI plugins and iproute2 put network namespaces in /var/run/netns,
+# and containerd looks for CDI specs in /var/run/cdi. The symlink is
+# what makes those two names one place.
+#
+# Without it, they are two places. A directory at /var/run is a
+# directory on the root overlay, whose write budget is small and fixed
+# by design (init/switchroot.go), while /run is the tmpfs that holds
+# runtime state. Nothing announces the split: a program writes the
+# name it has always written, and its bytes land in the wrong budget.
+# A reader that mounts /run/cdi by hostPath finds an empty directory,
+# because the writer wrote /var/run/cdi. One name for one filesystem
+# is the whole point of the migration this symlink completes.
+#
+# The image carries /run as a real directory too, so the symlink
+# always has somewhere to land. Init mounts the runtime tmpfs over it
+# before k3s starts (init/system.go), and a writer that arrives
+# earlier still finds a directory rather than a dangling link.
+mkdir -p "$root/run" "$root/var"
+ln -s ../run "$root/var/run"
 
 # The cluster's certificate authorities and join token deliberately
 # do not appear here. The deployment layer carries them instead

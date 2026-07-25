@@ -20,9 +20,11 @@ package main
 // namespace and name. This is deliberate. When a claim is deleted and
 // recreated under the same name, it is a different grant, and its
 // file must not collide with a stale one. The specs live under
-// /var/run. The kubelet re-prepares every claim after a reboot, so
-// each file only needs to last one boot, and a tmpfs directory
-// removes the files automatically at that point.
+// /var/run, which is the machine's runtime tmpfs at /run under its
+// older name (the image build explains the symlink). The kubelet
+// re-prepares every claim after a reboot, so each file only needs to
+// last one boot, and a tmpfs directory removes the files
+// automatically at that point.
 
 import (
 	"encoding/json"
