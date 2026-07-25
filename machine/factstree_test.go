@@ -177,7 +177,7 @@ func everythingSet() *MachineStatus {
 			Network: &NetworkSpec{Interfaces: []InterfaceSpec{
 				{Name: "eth0"},
 				{
-					Name: "eth1", MAC: "52:54:00:ab:cd:ef",
+					Name:    "eth1",
 					Address: "192.168.1.10/24", Gateway: "192.168.1.1",
 					Nameservers: []string{"192.168.1.1", "10.0.2.3"},
 				},
@@ -354,8 +354,8 @@ func TestFactsTreeGoldenLayout(t *testing.T) {
 		"boot/manifest": "source=Proven\nhash=abc\n",
 		"role":          "leader\n",
 		// The boot's interfaces are keyed by position, counted from
-		// zero, because an entry may name its port by a kernel name,
-		// by a MAC address, or by both.
+		// zero, because the order of the declared list is part of
+		// what the spec asks for.
 		"boot/network/interfaces/0/name": "eth1\n",
 		"network/addresses":              "10.0.2.15/24\n",
 	}

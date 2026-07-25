@@ -1,160 +1,131 @@
 # The port with the cable in it
 
-Milestone 39 — Done
+Milestone 39 — Reverted
+
+This milestone was designed, built, measured in the lab, and then
+taken back out. What it built worked. The problem it was written for
+had already been solved by milestone 36, and the cost of the field was
+larger than the benefit that remained. The request is issue #1, closed
+as won't do. This document stays because the reasoning is worth more
+to a reader than a gap in the numbering.
+
+## What it argued
 
 A machine being prepared for a cluster rotation has two Realtek
-RTL8111/8168 ports on one driver, one wired and one not. Ubuntu called
-them `enp1s0` at PCI 01:00.0 with a carrier and `enp3s0` at 03:00.0
-without one. liken calls them `eth0` and `eth1`, in the order the
-kernel probed them, and no field in the Machine document could say
-which of the two had the cable in it. Naming the wrong one gives a
-machine with no network, and a liken machine with no network has no
-shell and no SSH: the recovery is a person walking to it with a stick.
+RTL8111/8168 ports on one driver, one wired and one not. liken calls
+them `eth0` and `eth1`, in the order the kernel probed them. The
+argument was that no field in the Machine document could say which of
+the two had the cable in it, that naming the wrong one gives a machine
+with no network, and that a liken machine with no network has no shell
+and no SSH, so the recovery is a person walking to it with a stick.
 
-`InterfaceSpec.Name` rested on an argument that was true and not
-enough. liken runs no udev, so kernel names follow hardware
-enumeration order, and that order holds while the hardware does. It
-holds for one port. It says nothing about two ports of one model, and
-it can be reassigned between them by a card added, a card moved, or a
-firmware update that changes the probe.
+The milestone conceded the counter-argument in its own opening and
+then argued around it. liken runs no udev, so kernel names follow
+hardware enumeration order, and that order holds while the hardware
+does. `InterfaceSpec.Name` said so, and it was right. The milestone
+answered that the order can be reassigned by a card added, a card
+moved, or a firmware update that changes the probe. Every one of those
+is a change a person makes to the machine.
 
-The line this milestone works from: **position and identity are
-different questions about a port, and a manifest must be able to ask
-either one.** A name is a position: whichever port enumerates in that
-place. A MAC address is an identity: that exact port. Neither answer
-replaces the other, so the field that asks for a name stays, and a
-field that asks for an address joins it.
+## What it built
 
-## A manifest names a port by name, by address, or by both
+`mac` sat beside `name`, and `name` became optional. An entry could
+carry either or both, and an entry with both asked the boot to refuse
+the interface when the two identified different ports. Addresses were
+compared through `net.ParseMAC` on both sides, so a manifest could
+spell one with colons, with hyphens, or as the dotted quads a switch
+console prints.
 
-`mac` sits beside `name`, and `name` is now optional. An entry with
-both asks the boot to check a fact rather than to rank a preference,
-and the boot refuses the interface when the two identify different
-ports. Guessing a winner there would put the machine's whole network
-on a coin toss, settled by a person who cannot reach the machine
-except on foot.
+The list of interfaces became `x-kubernetes-list-type: atomic`,
+because a map list needs one field that identifies an entry and an
+entry now had two. A CEL rule on each item refused an entry that
+declared neither field. `NetworkSpec.Validate` arrived to refuse two
+entries for one port, which the API server could no longer refuse on
+its own.
 
-Addresses are compared through `net.ParseMAC` on both sides, so a
-manifest may spell one in any form a person copies: a Linux tool's
-colons, a firmware screen's hyphens, or a switch console's dotted
-quads. Two spellings of one address are one port, and the validator
-knows it.
+Resolution moved to a pure function over a plain list of names and
+addresses, rather than over netlink links, and it gained an error that
+lists every port the machine has. The hardware report wrote `mac:` as
+a real field on a machine with more than one port on the same driver,
+which meant reading each port's driver from its sysfs symlink.
 
-`NetworkSpec` gains a `Validate`, modelled on the storage one, and it
-runs at the same three places: init before it touches a link, the
-operator before it stages a spec, and the scaffold before it writes a
-manifest it generated. It refuses an entry that names no port at all
-and an address that is not an address. Whether an address belongs to a
-port of this machine is not a question the manifest can answer, so
-resolution answers it, against the links that exist.
+## What the lab measured
 
-## The list of interfaces is atomic
+The lab installed a three-machine cluster from blank disks. node-1
+declared its uplink by name and its cluster segment by address, and
+came up with `liken: MAC 52:54:00:4c:4c:01 is eth1 on this machine` on
+its console. An address no port carried produced the listing of the
+guest's real ports, and the machine came up on its remaining
+interface. The report's same-driver rule ran on real cards rather than
+fabricated ones and declared both ports by address.
 
-A map list needs one field that identifies an entry, and an entry now
-identifies its port by either of two fields, so the merge key had to
-go. Atomic is also what this list means: the set of ports a machine
-uses is one decision, replaced whole, the same as the nameservers list
-beside it.
+The lab also staged a change of enumeration order, by reversing the
+two cards QEMU attaches to a guest. The entry that gave an address
+followed its card and the machine rejoined the cluster. The entry that
+gave a name followed the name onto the other card, sent its DHCP
+discovery from the cluster port, and left the real uplink dark.
 
-The API server no longer refuses a repeated key, so `Validate` refuses
-two entries for one port instead. A CEL rule on each item refuses an
-entry that declares neither field, which keeps that mistake from ever
-reaching a machine.
+That measurement is the one to read carefully. Reversing the order in
+which QEMU attaches two cards is a hardware change, made by a person,
+to a machine that person is holding. It proved that the mechanism
+worked. It did not prove that the mechanism was needed, because
+nothing in the lab or on any liken machine has ever reordered its
+ports on its own.
 
-## A refusal names every port the machine has
+## Why it was backed out
 
-Nobody can see the machine. The console message is the whole
-diagnosis, so it carries the evidence the person is missing:
+Enumeration order is stable for fixed hardware. That is what the
+original doc comment on `Name` said, and nothing since has contradicted
+it. The failure mode the milestone described needs an operator to
+change the hardware, and an operator who changes the hardware can
+re-survey the machine.
 
-    no interface has MAC e0:51:d8:aa:bb:99; this machine has
-    eth0 e0:51:d8:aa:bb:01, eth1 e0:51:d8:aa:bb:02
+The authoring problem was already solved. Milestone 36 boots the
+machine, raises every link, reads each carrier, and writes a proposed
+manifest that declares the connected ports by kernel name and leaves
+the dark ones commented out beside them. The question "which port has
+the cable in it" is answered by the machine itself, in the file it
+writes to the stick, before anybody types a name. The milestone was
+written as though a person had to guess.
 
-That is a drive to the site turned into an edit of the manifest. A
-name that matches nothing gets the same listing, and for the same
-reason: the addresses in it are what the person should have written.
+The cost was real and it fell on every machine, not only on the
+ambiguous ones. An optional `name` cannot be a merge key, so
+`spec.network.interfaces` became an atomic list. Server-side apply
+then owns the whole list as one field, so two appliers conflict over
+every entry rather than over the entry they both write. Flux and a
+person editing one interface collide on the list. That is a real
+regression in how a fleet is managed, paid for a field that one
+machine shape would have used.
 
-Resolution takes a plain list of names and addresses rather than
-netlink links, because the decision is where the mistakes are, and a
-pure function is tested on every machine instead of only in the lab.
-Once a port is resolved, the boot prints the translation once and
-speaks in kernel names from there, so the rest of the log and the
-machine's published status still agree with each other.
+## What survives
 
-## The report writes the address when a name would be a guess
+Two things from this milestone are independent of the field and stay.
 
-The hardware report already read every port's address and printed it
-as a comment. It now writes `mac:` as a real field when the machine
-has more than one port on the same driver, which is the case where a
-name cannot identify a port: two ports on one driver are two cards of
-one model, ordered by a probe. A machine whose names are unambiguous
-keeps `name:`, because that manifest still describes every machine
-built to the same recipe.
+The refusal that names the machine's real ports stays. A manifest that
+names a port the machine does not have produces `no interface is named
+eth2; this machine has eth0, eth1`. Nobody can see these machines, so
+the console message is the whole diagnosis, and a message that names
+what is really there turns a site visit into an edit of the manifest.
 
-Reading the driver needed one more fact carried from the boot: the
-report walks each port's driver symlink in sysfs, the same way it
-reads a disk's transport. The kernel names stay in the proposal as
-comments, next to the driver that made them ambiguous.
+`NetworkSpec.Validate` stays, reduced to the two rules that still
+apply: an interface with no name, and two entries naming one port.
+With the list keyed on name again, the API server enforces both for
+anything applied through it. Init also reads manifests written by hand
+and carried in on a stick, which no API server ever saw, so the
+validator still earns its place. It runs where the storage validator
+runs: init before it touches a link, the operator before it stages a
+spec, and the scaffold before it writes a manifest it generated.
 
-## What the lab proved
+The shape those two need also stays. The boot reads the kernel's link
+list once and reduces it to a plain list of ports, so the rules a
+manifest meets are pure functions with tests that run on any machine
+rather than only under QEMU.
 
-The lab drilled resolution on a cluster of three machines. node-1
-declares its uplink by name and its cluster segment by MAC address, so
-one install exercises both ways of saying which port, and it was Ready
-from blank disks with `liken: MAC 52:54:00:4c:4c:01 is eth1 on this
-machine` on its console. node-2 and node-3 declare both interfaces by
-name and neither changed: a machine that describes a position pays
-nothing for the field it does not use.
+## What would bring it back
 
-The failure was drilled the same way. An address no port carries
-produced the sentence this milestone was written for, naming both of
-the guest's ports and their addresses, and the machine came up on its
-remaining interface.
-
-That an address survives a change of enumeration order is a
-measurement now, and not an argument from the kernel's contract. The
-lab stages the change by reversing the two cards QEMU attaches, so the
-cluster card enumerates first and the two kernel names exchange
-places. One boot put both behaviours on one console. The entry that
-gave an address followed the card: the address it named was eth0 this
-time, the static address landed on the port that carries it, and the
-machine rejoined the running cluster. The entry that gave a name
-followed the name onto the other card, sent its DHCP discovery from
-the cluster port, waited its thirty seconds for an offer that no
-server on that wire would send, and left the real uplink dark. That is
-the whole difference between the two fields, in one boot.
-
-The report's same-driver rule ran against real ports rather than
-fabricated ones. Both of a guest's cards are one model on one driver,
-virtio-net in the ordinary shape and e1000 in the metal shape, which
-is exactly the ambiguous machine the rule is written for. The report
-declared both ports by address and kept each kernel name in the
-comment beside it.
-
-The list of interfaces is atomic now, and server-side apply treats it
-as one field. Applying the list, editing one entry, and removing one
-entry each stored what was applied, and the whole list has a single
-owner. The API server refuses an entry that declares neither field,
-and the schema's pattern refuses an address that is not one.
-
-Two findings are worth recording, because neither is created by this
-milestone and both are now easier to meet. The operator's half of the
-validation cannot run today: convergence measures drift in storage and
-modules only, so an edit to `spec.network` alone reports itself
-converged, stages nothing, and does not survive the next boot, while
-the schema tells the reader the opposite. And nothing notices when a
-name and an address in one manifest resolve to the same port. This
-milestone made `spec.network` a field that people are told to edit,
-which is what brought both into view.
-
-## The manual
-
-The Machine reference regenerates from the schema, so both fields
-teach their own trade-off there. The install guide gains the choice
-itself: what a name means, what an address means, which one the report
-writes and why, and the cost of an address. That cost is worth stating
-plainly, because it lands at the worst moment. A MAC address ties a
-manifest to one physical machine, so a replacement card or motherboard
-needs an edit, and that is exactly when the machine cannot get on the
-network to tell you its new address. The hardware report covers it: it
-runs offline and writes to the stick. Name matching stays for anyone
-who would rather describe a position than an identity.
+One machine, with ports that are genuinely reassigned by a hardware
+change the operator cannot re-survey. A blind swap in a remote rack
+where nobody can run the hardware report, or a firmware update that
+reorders the probe on a machine already in service, would be the case.
+Until such a machine exists, the report answers the question and the
+merge key is worth more than the field.

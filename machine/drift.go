@@ -59,12 +59,11 @@ func StorageDrift(desired, actuated StorageSpec) []string {
 // stage a manifest and ask for a reboot on every machine whose facts
 // happen to lack this record.
 //
-// The comparison walks both lists by position, because this list is
-// atomic and its order carries meaning: interface order is the order
-// that each interface's nameservers reach resolv.conf in. Two specs
-// that name the same ports in a different order are two different
-// requests, and a position also gives a name to an entry that a
-// person wrote as a MAC address alone.
+// The comparison walks both lists by position, because the order of
+// this list carries meaning: interface order is the order that each
+// interface's nameservers reach resolv.conf in. Two specs that name
+// the same ports in a different order are two different requests. The
+// name at each position says which port that position asks for.
 func NetworkDrift(desired NetworkSpec, actuated *NetworkSpec) []string {
 	if actuated == nil {
 		return nil
@@ -73,9 +72,9 @@ func NetworkDrift(desired NetworkSpec, actuated *NetworkSpec) []string {
 	for i := range max(len(desired.Interfaces), len(actuated.Interfaces)) {
 		switch {
 		case i >= len(actuated.Interfaces):
-			diffs = append(diffs, fmt.Sprintf("network: %s declared but not actuated", desired.Interfaces[i].Identity()))
+			diffs = append(diffs, fmt.Sprintf("network: %s declared but not actuated", desired.Interfaces[i].Name))
 		case i >= len(desired.Interfaces):
-			diffs = append(diffs, fmt.Sprintf("network: %s actuated but no longer declared", actuated.Interfaces[i].Identity()))
+			diffs = append(diffs, fmt.Sprintf("network: %s actuated but no longer declared", actuated.Interfaces[i].Name))
 		default:
 			diffs = append(diffs, interfaceDrift(i, desired.Interfaces[i], actuated.Interfaces[i])...)
 		}
@@ -87,26 +86,24 @@ func NetworkDrift(desired NetworkSpec, actuated *NetworkSpec) []string {
 // entries name different ports, that one difference is the whole
 // report: the addressing under it belongs to another port, so
 // reporting each field as well would say the same thing several times
-// over. MAC addresses are compared as addresses rather than as text,
-// so the spelling a person copied from a firmware screen and the
-// spelling a Linux tool prints are one port.
+// over.
 func interfaceDrift(position int, desired, actuated InterfaceSpec) []string {
-	if desired.Name != actuated.Name || normalizeMAC(desired.MAC) != normalizeMAC(actuated.MAC) {
+	if desired.Name != actuated.Name {
 		return []string{fmt.Sprintf("network: interface %d: %s declared, %s actuated",
-			position+1, desired.Identity(), actuated.Identity())}
+			position+1, desired.Name, actuated.Name)}
 	}
 	var diffs []string
 	if desired.Address != actuated.Address {
 		diffs = append(diffs, fmt.Sprintf("network: %s: address %s declared, %s actuated",
-			desired.Identity(), orDHCP(desired.Address), orDHCP(actuated.Address)))
+			desired.Name, orDHCP(desired.Address), orDHCP(actuated.Address)))
 	}
 	if desired.Gateway != actuated.Gateway {
 		diffs = append(diffs, fmt.Sprintf("network: %s: gateway %s declared, %s actuated",
-			desired.Identity(), orNone(desired.Gateway), orNone(actuated.Gateway)))
+			desired.Name, orNone(desired.Gateway), orNone(actuated.Gateway)))
 	}
 	if !slices.Equal(desired.Nameservers, actuated.Nameservers) {
 		diffs = append(diffs, fmt.Sprintf("network: %s: nameservers %s declared, %s actuated",
-			desired.Identity(),
+			desired.Name,
 			orNone(strings.Join(desired.Nameservers, ", ")),
 			orNone(strings.Join(actuated.Nameservers, ", "))))
 	}

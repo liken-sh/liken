@@ -96,13 +96,13 @@ func TestStorageDriftNamesTheRemainder(t *testing.T) {
 }
 
 // driftLabNetwork returns the lab machine's network shape: a DHCP
-// uplink named by kernel name, and a cluster segment named by MAC
-// address with a static address on it. Tests reuse this fixture the
-// way the storage tests reuse driftLabStorage.
+// uplink, and a cluster segment with a static address on it. Tests
+// reuse this fixture the way the storage tests reuse
+// driftLabStorage.
 func driftLabNetwork() NetworkSpec {
 	return NetworkSpec{Interfaces: []InterfaceSpec{
 		{Name: "eth0"},
-		{MAC: "52:54:00:4c:4c:01", Address: "10.10.0.1/24"},
+		{Name: "eth1", Address: "10.10.0.1/24"},
 	}}
 }
 
@@ -136,7 +136,7 @@ func TestNetworkDriftReportsNothingWithoutABootRecord(t *testing.T) {
 func TestNetworkDriftSeesAnAddedInterface(t *testing.T) {
 	actuated := NetworkSpec{Interfaces: driftLabNetwork().Interfaces[:1]}
 	diffs := NetworkDrift(driftLabNetwork(), &actuated)
-	if len(diffs) != 1 || !strings.Contains(diffs[0], "MAC 52:54:00:4c:4c:01 declared but not actuated") {
+	if len(diffs) != 1 || !strings.Contains(diffs[0], "eth1 declared but not actuated") {
 		t.Errorf("expected an added-interface diff: %v", diffs)
 	}
 }
@@ -196,28 +196,15 @@ func TestNetworkDriftSeesAChangedGateway(t *testing.T) {
 	}
 }
 
-func TestNetworkDriftIgnoresTheSpellingOfAMACAddress(t *testing.T) {
-	// A person may copy an address from a firmware screen, which
-	// writes hyphens, or from a Linux tool, which writes colons. Two
-	// spellings of one address are one port, exactly as the validator
-	// reads them.
-	actuated := driftLabNetwork()
-	desired := driftLabNetwork()
-	desired.Interfaces[1].MAC = "52-54-00-4C-4C-01"
-	if diffs := NetworkDrift(desired, &actuated); len(diffs) != 0 {
-		t.Errorf("one address in two spellings is one port: %v", diffs)
-	}
-}
-
 func TestNetworkDriftReportsAPortSwapOnce(t *testing.T) {
 	// When a position names a different port, the addressing under it
 	// belongs to that other port. Reporting each field as well would
 	// say the same difference several times over.
 	actuated := driftLabNetwork()
 	desired := driftLabNetwork()
-	desired.Interfaces[1] = InterfaceSpec{Name: "eth1", Address: "10.10.0.9/24"}
+	desired.Interfaces[1] = InterfaceSpec{Name: "eth2", Address: "10.10.0.9/24"}
 	diffs := NetworkDrift(desired, &actuated)
-	if len(diffs) != 1 || !strings.Contains(diffs[0], "interface 2: eth1 declared, MAC 52:54:00:4c:4c:01 actuated") {
+	if len(diffs) != 1 || !strings.Contains(diffs[0], "interface 2: eth2 declared, eth1 actuated") {
 		t.Errorf("expected one identity diff: %v", diffs)
 	}
 }

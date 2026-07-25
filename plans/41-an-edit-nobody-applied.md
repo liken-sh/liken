@@ -2,20 +2,19 @@
 
 Milestone 41 — Done
 
-Milestone 39 made `spec.network` a field that people are told to
-edit. The schema said so: init applies it at boot, and a change made
-in-cluster takes effect at the next boot. The drill that closed that
-milestone found the sentence untrue. A valid edit was force-applied to
-a running node, the operator reported `SpecConverged True Converged`
-at the edited generation, nothing was staged, and the node rebooted
-under the same proven manifest it had before. The field accepted
-edits and did nothing with them.
+The Machine schema told people to edit `spec.network`: init applies
+it at boot, and a change made in-cluster takes effect at the next
+boot. A lab drill found the sentence untrue. A valid edit was
+force-applied to a running node, the operator reported `SpecConverged
+True Converged` at the edited generation, nothing was staged, and the
+node rebooted under the same proven manifest it had before. The field
+accepted edits and did nothing with them.
 
 Convergence measured drift in storage and in the module list, and a
 network-only edit produces neither. It stopped at the first case of
 the decision table and reported the machine converged. Everything
-after that case was unreachable for such an edit, including milestone
-39's own operator-side validation, so a manifest that declared one
+after that case was unreachable for such an edit, including the
+operator's own network validation, so a manifest that declared one
 port twice also read as converged instead of refused.
 
 Storage does not have this problem because the boot records the
@@ -42,9 +41,10 @@ do, and rebooting would ask for it again.
 
 The fact travels the same path storage does: one directory per
 interface under `boot/network/` in the facts tree, keyed by position
-in the declared list. Position is the only key every entry has, since
-an entry names its port by a kernel name, a MAC address, or both, and
-the order of the list is part of what it asks for.
+in the declared list rather than by the name of the port. The order of
+the list is part of what it asks for, because it is the order in which
+each interface's nameservers reach `resolv.conf`, and sorted directory
+names would lose that order as soon as a machine declared ten of them.
 
 ## Absent and empty are different facts
 
@@ -78,9 +78,10 @@ Two rules the storage drift carries do not travel with it. Storage
 roles are grow-only, and a network has no such rule: any spec may
 replace any other, and the only question is whether the machine
 matches the one the cluster asks for now. And storage compares role
-by role, by name, while the network compares by position, because
-that list is atomic and its order is the order each interface's
-nameservers reach `resolv.conf`.
+by role, by name, while the network compares by position, because the
+order of that list is the order each interface's nameservers reach
+`resolv.conf`, so the same two ports in the other order are a
+different request.
 
 The live-load path refuses a network change on both sides. Adding a
 module needs no disruption, and a manifest that also changes the
@@ -92,7 +93,7 @@ refusal from the same shared function before it acts on any intent.
 
 ## The validation gate is reachable now
 
-Milestone 39 wired `NetworkSpec.Validate` into the operator, ahead of
+`NetworkSpec.Validate` was already wired into the operator, ahead of
 staging, so that a spec init would refuse at boot is refused in the
 cluster instead. Finding out at boot costs a reboot and returns the
 machine on its old manifest with a rejection record. The gate sat
@@ -102,40 +103,33 @@ drift measured, it does its job.
 ## What the lab proved
 
 The drill that found the bug was run again on a two-machine cluster
-installed from blank disks, and it now behaves the way the schema
-says. Adding a nameserver to node-4's uplink was staged, not
-declared converged. On `rebootPolicy: Auto` the operator staged the
-manifest, cordoned the node, drained it, and rebooted it inside a
-minute; the console showed the next boot running under the staged
-manifest, and `status.network` carried the new nameserver on the
-interface that asked for it.
+installed from blank disks, and the edit now behaves the way the
+schema says. Both machines came up with a boot network recorded that
+matched the manifest they booted under, which is the record the whole
+milestone rests on.
 
-The Manual case is the one that matters more, because Manual is the
-default. With the policy set to Manual, the same edit reported
-`RebootPending` with the diff in the message: `network: eth1:
-nameservers 10.10.0.1 declared, (none) actuated`. The machine held
-that verdict for as long as it was watched, with its boot time
-unmoved, and the fleet listing read UpdatePending rather than
-Degraded. Nothing rebooted until a person changed the policy.
+The Manual case is the one that matters most, because Manual is the
+default. Adding a nameserver to node-4's uplink under that policy
+reported `RebootPending`, and the message carried the diff:
+`network: eth0: nameservers 10.10.0.1 declared, (none) actuated`. The
+machine held that verdict with its boot time unmoved, and the fleet
+listing read UpdatePending rather than Degraded. Nothing rebooted
+until the policy changed.
 
-The invalid spec is refused where it costs nothing. A manifest with
-three interfaces, two of them naming `eth1`, produced
-`StagingRejected: interfaces 1 and 2 both declare eth1; declare each
-port once`, and the machine read Blocked. Nothing was staged, and the
-running machine kept the network it booted with.
+Setting the policy to Auto finished the job. The node rebooted, its
+new boot record carried the declared nameserver, and its live network
+status listed that nameserver beside the one its DHCP lease supplied.
+The machine returned to Converged, and the leader stayed Converged
+throughout without rebooting at all: a machine with no network edit
+sees nothing happen.
 
-The diffs speak in the words the manifest used. node-1 names its
-cluster port by MAC address, and its staged edit reported `network:
-MAC 52:54:00:4c:4c:01: nameservers 10.10.0.4 declared, (none)
-actuated`, not a kernel name the person never wrote. Reverting that
-edit withdrew the staged manifest on the next pass, with the operator
-reporting that the cluster's copy matches this boot again, and the
-leader never rebooted at all.
-
-The passes are quiet when nothing changed. A machine with no network
-edit stayed Converged for the whole drill, and re-applying a spec
-that was already staged wrote nothing: the operator logged one
-staging line per distinct set of bytes, and none for the repeats.
+The invalid spec is refused earlier than the operator. Because the
+list of interfaces is keyed by name, the API server itself rejects a
+manifest that declares one port twice, naming the duplicate entry, so
+no such spec is ever staged or seen by a machine. The validator that
+milestone 39 left behind still earns its place for the manifests that
+arrive another way: init also reads a manifest written by hand and
+carried in on a stick, which no API server ever saw.
 
 ## The manual
 

@@ -320,8 +320,8 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 	// out about, and the machine would come back on its proven
 	// manifest with a rejection record instead of the network the
 	// person asked for. The check is the manifest's own consistency
-	// only: whether a declared MAC address belongs to a port of this
-	// machine is a question only the boot can settle.
+	// only: whether this machine really has a port with a declared
+	// name is a question only the boot can settle.
 	if err := m.Spec.Network.Validate(); err != nil {
 		return convergence{condition: notConverged("SpecConverged", "StagingRejected", err.Error())}
 	}

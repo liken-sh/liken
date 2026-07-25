@@ -17,13 +17,13 @@ func specWith(storage machine.StorageSpec) machine.MachineSpec {
 	return machine.MachineSpec{Storage: storage, Network: labNetwork()}
 }
 
-// labNetwork is the lab machine's network: a DHCP uplink named by
-// kernel name, and a cluster segment named by MAC address with the
-// static address its peers were told to find it at.
+// labNetwork is the lab machine's network: a DHCP uplink, and a
+// cluster segment with the static address its peers were told to
+// find it at.
 func labNetwork() machine.NetworkSpec {
 	return machine.NetworkSpec{Interfaces: []machine.InterfaceSpec{
 		{Name: "eth0"},
-		{MAC: "52:54:00:4c:4c:01", Address: "10.10.0.1/24"},
+		{Name: "eth1", Address: "10.10.0.1/24"},
 	}}
 }
 
@@ -202,11 +202,9 @@ func TestANetworkEditIsNeverLoadedInPlace(t *testing.T) {
 }
 
 func TestDecideConvergenceRefusesTwoInterfacesForOnePort(t *testing.T) {
-	// Milestone 39's validation guard, which no edit could reach while
-	// convergence measured storage and modules only. A spec that init
-	// would refuse at boot must be refused here instead, because
-	// finding out at boot costs a reboot and returns the machine on
-	// its old manifest with a rejection record.
+	// A spec that init would refuse at boot is refused here instead,
+	// because finding out at boot costs a reboot and returns the
+	// machine on its old manifest with a rejection record.
 	m := labMachine()
 	m.Spec.Network.Interfaces = append(m.Spec.Network.Interfaces, machine.InterfaceSpec{Name: "eth0"})
 	conv := decideConvergence(m, labFacts(), nil, "", turnStandalone)

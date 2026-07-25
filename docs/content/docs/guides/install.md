@@ -176,44 +176,6 @@ their names and MAC addresses. Uncomment a port after you connect its
 cable. A declared port with no cable delays every boot, because the
 machine waits up to thirty seconds for its DHCP lease.
 
-The proposal names each port in one of two ways, and you can change
-which one it uses.
-
-    interfaces:
-      - name: eth0
-
-A `name` is a position. It means the port that the kernel numbered
-that way, and the kernel numbers ports in the order it finds the
-hardware. This is the correct choice for a machine with one port, and
-for a fleet of machines built to the same recipe: one manifest
-describes them all, and a replacement network card keeps the
-declaration correct.
-
-    interfaces:
-      - mac: e0:51:d8:aa:bb:01
-
-A `mac` is an identity. It means one exact port, and it stays correct
-when the enumeration order changes. Use it on a machine with more than
-one port. Two ports of the same model are `eth0` and `eth1` in the
-order the kernel probed them, and nothing about that order says which
-port has the cable in it. A wrong guess gives you a machine with no
-network, which you can only correct at the machine.
-
-The report chooses for you. It writes `mac` when the machine has more
-than one port on the same driver, because a name cannot identify a
-port there. It writes `name` in every other case.
-
-A `mac` has one cost: the manifest is now about one physical machine.
-Replace the network card or the motherboard, and the manifest needs an
-edit, at the moment when the machine cannot get on the network to tell
-you its new address. Run the hardware report on that machine to read
-the new address. The report needs no network and writes its findings
-to the stick.
-
-You can also declare `name` and `mac` together. The machine then
-refuses that interface when the two identify different ports, and says
-so on its console.
-
 The report may warn that a disk needs a driver that this image does
 not carry on its boot path. Such a driver cannot go in `spec.modules`,
 because the machine reads that list only after it has already found
@@ -222,8 +184,7 @@ boot modules. The proposal says which driver, and leaves that disk
 out of the layout.
 
 Run the report on each new machine. Its answers are the disks, the
-network ports and their addresses, and the drivers you cannot know
-from a datasheet.
+interface names, and the drivers you cannot know from a datasheet.
 
 ### Then install the machine
 

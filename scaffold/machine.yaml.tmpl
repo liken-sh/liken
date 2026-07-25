@@ -27,12 +27,6 @@ spec:
     # {{ .ClusterNIC }} is the cluster segment. Its address is fixed,
     # because the cluster's endpoint depends on machines finding each
     # other before anything could negotiate.
-    #
-    # A name says which port by position, in the order the kernel
-    # found the hardware. Two ports of the same model cannot be told
-    # apart that way. Replace a name with "mac: e0:51:d8:aa:bb:01" to
-    # say which exact port you mean. The hardware report reads each
-    # port's address, and chooses the form for you.
     interfaces:
       - name: {{ .UplinkNIC }}
       - name: {{ .ClusterNIC }}

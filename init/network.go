@@ -26,7 +26,6 @@ package main
 // segment that joins the QEMU guests has no DHCP server on it.
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"net"
@@ -83,7 +82,7 @@ func bringUpNetwork(spec machine.NetworkSpec) ([]*connection, error) {
 	}
 
 	// The kernel's link list is read once and used for every
-	// resolution below. Reading it once also means that every error
+	// interface below. Reading it once also means that every error
 	// message can list the same set of ports, which is the list a
 	// person needs to correct the manifest.
 	links, err := netlink.LinkList()
@@ -105,7 +104,7 @@ func bringUpNetwork(spec machine.NetworkSpec) ([]*connection, error) {
 	for _, ifc := range interfaces {
 		conn, err := bringUpInterface(ifc, present)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "liken: network: %s: %v\n", ifc.Identity(), err)
+			fmt.Fprintf(os.Stderr, "liken: network: %s: %v\n", ifc.Name, err)
 			continue
 		}
 		conns = append(conns, conn)
@@ -163,43 +162,36 @@ func resolvConf(conns []*connection) string {
 // bringUpInterface raises one link and gives it an address, using
 // the method that the interface spec chose.
 func bringUpInterface(ifc machine.InterfaceSpec, present []interfaceIdentity) (*connection, error) {
-	ifname, err := resolveInterface(ifc, present)
-	if err != nil {
+	if err := requirePort(ifc.Name, present); err != nil {
 		return nil, err
 	}
-	// The rest of the boot log, and the status the operator
-	// publishes, speak in kernel names. A manifest that asked for a
-	// MAC address gets the translation printed once, so a reader can
-	// follow the rest.
-	if ifc.MAC != "" {
-		fmt.Printf("liken: MAC %s is %s on this machine\n", ifc.MAC, ifname)
-	}
-	link, err := netlink.LinkByName(ifname)
+	link, err := netlink.LinkByName(ifc.Name)
 	if err != nil {
-		return nil, fmt.Errorf("opening interface %q: %w", ifname, err)
+		return nil, fmt.Errorf("opening interface %q: %w", ifc.Name, err)
 	}
-	fmt.Printf("liken: bringing up %s\n", ifname)
+	fmt.Printf("liken: bringing up %s\n", ifc.Name)
 	if err := netlink.LinkSetUp(link); err != nil {
-		return nil, fmt.Errorf("raising %s: %w", ifname, err)
+		return nil, fmt.Errorf("raising %s: %w", ifc.Name, err)
 	}
 
 	if ifc.Address != "" {
 		return applyStatic(link, ifc)
 	}
 
-	fmt.Printf("liken: negotiating DHCP on %s\n", ifname)
-	lease, err := acquireLease(ifname)
+	fmt.Printf("liken: negotiating DHCP on %s\n", ifc.Name)
+	lease, err := acquireLease(ifc.Name)
 	if err != nil {
 		return nil, err
 	}
 	return applyLease(link, lease, ifc)
 }
 
-// interfaceIdentity is one link reduced to the two facts that decide
-// which link a spec means: the name the kernel gave it, and the
-// address burned into the card. Resolution takes these instead of
-// netlink links, so the rule that chooses a port is a pure function
-// that a test can drive on any machine.
+// interfaceIdentity is one link reduced to the two facts the boot
+// needs about it: the name the kernel gave it, and whether the link
+// carries a hardware address, which is how a real card is told from a
+// virtual device. The functions below take these instead of netlink
+// links, so the rules a manifest meets are pure functions that a test
+// can drive on any machine.
 type interfaceIdentity struct {
 	name string
 	mac  net.HardwareAddr
@@ -221,64 +213,34 @@ func presentInterfaces(links []netlink.Link) []interfaceIdentity {
 	return present
 }
 
-// resolveInterface decides which port one interface spec means, and
-// returns the kernel name of that port.
+// requirePort checks that the machine has the port a manifest names,
+// and reports what the machine does have when it does not.
 //
-// A spec identifies its port by name, by MAC address, or by both. A
-// name is what the kernel called the port on this boot. A MAC address
-// is what the card carries, and it is compared through net.ParseMAC
-// on both sides, so a manifest may spell an address in any of the
-// forms a person copies: colons, hyphens, or the dotted quads that
-// switch consoles print.
-//
-// When a spec carries both, the two must agree. Guessing which one
-// was meant would put the machine's whole network on a coin toss, and
-// the person who would have to correct it cannot reach the machine
-// except by walking to it.
-func resolveInterface(ifc machine.InterfaceSpec, present []interfaceIdentity) (string, error) {
-	if ifc.MAC == "" {
-		for _, port := range present {
-			if port.name == ifc.Name {
-				return port.name, nil
-			}
-		}
-		return "", fmt.Errorf("no interface is named %s; this machine has %s", ifc.Name, describePorts(present))
-	}
-
-	want, err := net.ParseMAC(ifc.MAC)
-	if err != nil {
-		return "", fmt.Errorf("mac %q is not a MAC address", ifc.MAC)
-	}
+// netlink would refuse the name on its own, with the kernel's own
+// words. Those words say that a link is missing and stop there, and
+// the whole value of this check is the sentence after that: nobody
+// can see this machine, which has no shell and no SSH daemon, so the
+// console message is the entire diagnosis. A message that names the
+// ports the machine really has turns a drive to the site into an edit
+// of the manifest.
+func requirePort(name string, present []interfaceIdentity) error {
 	for _, port := range present {
-		if !bytes.Equal(port.mac, want) {
-			continue
+		if port.name == name {
+			return nil
 		}
-		if ifc.Name != "" && ifc.Name != port.name {
-			return "", fmt.Errorf("this interface declares both name %s and MAC %s, and they are different ports: that MAC is %s; remove whichever one is wrong",
-				ifc.Name, ifc.MAC, port.name)
-		}
-		return port.name, nil
 	}
-	return "", fmt.Errorf("no interface has MAC %s; this machine has %s", ifc.MAC, describePorts(present))
+	return fmt.Errorf("no interface is named %s; this machine has %s", name, describePorts(present))
 }
 
-// describePorts lists every port with its name and its address, for
-// the errors that report a spec no port satisfies. The whole value of
-// this listing is that a person cannot see the machine: nothing here
-// has a shell or an SSH daemon, so the console message is all they
-// get. A message that names the addresses the machine really carries
-// turns a drive to the site into an edit of the manifest.
+// describePorts lists the ports a person could have named, for the
+// errors that report a name no port answers to.
 func describePorts(present []interfaceIdentity) string {
 	if len(present) == 0 {
 		return "no network interface at all"
 	}
 	described := make([]string, len(present))
 	for i, port := range present {
-		if len(port.mac) == 0 {
-			described[i] = port.name
-			continue
-		}
-		described[i] = fmt.Sprintf("%s %s", port.name, port.mac)
+		described[i] = port.name
 	}
 	return strings.Join(described, ", ")
 }

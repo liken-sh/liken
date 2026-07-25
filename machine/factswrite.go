@@ -392,10 +392,10 @@ func (t FactsTree) WriteBootStorage(spec StorageSpec) error {
 // beyond judging (machine/drift.go explains what each one decides).
 //
 // Each interface's key is its position in the declared list, counted
-// from zero. Position is the only key every entry has, because an
-// entry names its port by a kernel name, by a MAC address, or by
-// both. Position is also what the comparison uses, since the order of
-// this list is part of what it asks for.
+// from zero, and not the name of its port. The order of this list is
+// part of what it asks for, since it is the order in which each
+// interface's nameservers reach resolv.conf, and position is also
+// what the comparison uses.
 func (t FactsTree) WriteBootNetwork(spec *NetworkSpec) error {
 	base := filepath.Join("boot", "network")
 	if spec == nil {
@@ -415,7 +415,6 @@ func (t FactsTree) WriteBootNetwork(spec *NetworkSpec) error {
 		}
 		if err := firstError(
 			t.writeFact(filepath.Join(dir, "name"), ifc.Name),
-			t.writeFact(filepath.Join(dir, "mac"), ifc.MAC),
 			t.writeFact(filepath.Join(dir, "address"), ifc.Address),
 			t.writeFact(filepath.Join(dir, "gateway"), ifc.Gateway),
 			t.writeListFact(filepath.Join(dir, "nameservers"), ifc.Nameservers),

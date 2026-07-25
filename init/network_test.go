@@ -4,10 +4,10 @@ package main
 // output for the same input. Raising links, DHCP exchanges, and
 // routing tables need a kernel, and their tests run under QEMU.
 //
-// Deciding which port a manifest means is the reason resolution takes
-// a plain list of names and addresses instead of netlink links: the
-// decision is where the mistakes are, so it is tested here, on every
-// machine, with no kernel in the way.
+// Checking a manifest's names against the ports a machine has is the
+// reason those functions take a plain list of ports instead of
+// netlink links: the check is where the mistakes are, so it is tested
+// here, on every machine, with no kernel in the way.
 
 import (
 	"net"
@@ -20,8 +20,8 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// twoPorts is the machine this milestone exists for: two ports of one
-// model, which the kernel numbered in the order it probed them.
+// twoPorts is a machine with two ports, which the kernel numbered in
+// the order it probed them.
 func twoPorts() []interfaceIdentity {
 	return []interfaceIdentity{
 		{name: "eth0", mac: net.HardwareAddr{0xe0, 0x51, 0xd8, 0xaa, 0xbb, 0x01}},
@@ -29,103 +29,32 @@ func twoPorts() []interfaceIdentity {
 	}
 }
 
-func TestResolveByNameFindsThePortWithThatName(t *testing.T) {
-	got, err := resolveInterface(machine.InterfaceSpec{Name: "eth1"}, twoPorts())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "eth1" {
-		t.Errorf("got %q", got)
+func TestRequirePortAcceptsAPortTheMachineHas(t *testing.T) {
+	if err := requirePort("eth1", twoPorts()); err != nil {
+		t.Error(err)
 	}
 }
 
-func TestResolveByMACReturnsTheKernelName(t *testing.T) {
-	// Everything downstream of resolution speaks kernel names: the
-	// DHCP client opens its socket on one, and the status publishes
-	// one. So resolution's answer is a name, not a link.
-	got, err := resolveInterface(machine.InterfaceSpec{MAC: "e0:51:d8:aa:bb:02"}, twoPorts())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "eth1" {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestResolveByMACReadsEverySpellingOfAnAddress(t *testing.T) {
-	// A person copies an address from whatever showed it to them: a
-	// Linux tool, a firmware screen, or a switch console. All three
-	// spellings name the same port.
-	for _, mac := range []string{"E0:51:D8:AA:BB:01", "e0-51-d8-aa-bb-01", "e051.d8aa.bb01"} {
-		got, err := resolveInterface(machine.InterfaceSpec{MAC: mac}, twoPorts())
-		if err != nil {
-			t.Fatalf("%s: %v", mac, err)
-		}
-		if got != "eth0" {
-			t.Errorf("%s: got %q", mac, got)
-		}
-	}
-}
-
-func TestResolveByMACListsThePortsTheMachineHasWhenNoneMatches(t *testing.T) {
+func TestRequirePortListsThePortsTheMachineHasWhenNoneMatches(t *testing.T) {
 	// Nobody can see this machine. It has no shell and no SSH, so
 	// the console message is the whole diagnosis. A message that
-	// carries the addresses the machine really has turns a drive to
-	// the site into an edit of the manifest.
-	_, err := resolveInterface(machine.InterfaceSpec{MAC: "e0:51:d8:aa:bb:99"}, twoPorts())
+	// names the ports the machine really has turns a drive to the
+	// site into an edit of the manifest.
+	err := requirePort("enp3s0", twoPorts())
 	if err == nil {
-		t.Fatal("expected an error for an address no port carries")
+		t.Fatal("expected an error for a name no port answers to")
 	}
-	for _, want := range []string{"e0:51:d8:aa:bb:99", "eth0 e0:51:d8:aa:bb:01", "eth1 e0:51:d8:aa:bb:02"} {
+	for _, want := range []string{"enp3s0", "eth0, eth1"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the error must carry %q: %v", want, err)
 		}
 	}
 }
 
-func TestResolveByNameListsThePortsTheMachineHasWhenNoneMatches(t *testing.T) {
-	// A wrong name deserves the same courtesy as a wrong address,
-	// and the listing is also how a person learns the addresses they
-	// should have written instead.
-	_, err := resolveInterface(machine.InterfaceSpec{Name: "enp3s0"}, twoPorts())
-	if err == nil {
-		t.Fatal("expected an error for a name no port carries")
-	}
-	for _, want := range []string{"enp3s0", "eth0 e0:51:d8:aa:bb:01", "eth1 e0:51:d8:aa:bb:02"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("the error must carry %q: %v", want, err)
-		}
-	}
-}
-
-func TestResolveRefusesANameAndAnAddressThatDisagree(t *testing.T) {
-	// Both fields set is a fact the boot must check, not a
-	// preference to rank. Choosing a winner would put the machine's
-	// whole network on a guess, and the person who would correct it
-	// cannot reach the machine except on foot.
-	_, err := resolveInterface(machine.InterfaceSpec{Name: "eth0", MAC: "e0:51:d8:aa:bb:02"}, twoPorts())
-	if err == nil {
-		t.Fatal("expected an error for a name and an address that name different ports")
-	}
-	if !strings.Contains(err.Error(), "eth1") {
-		t.Errorf("the error must say which port the address really is: %v", err)
-	}
-}
-
-func TestResolveAcceptsANameAndAnAddressThatAgree(t *testing.T) {
-	got, err := resolveInterface(machine.InterfaceSpec{Name: "eth0", MAC: "e0:51:d8:aa:bb:01"}, twoPorts())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "eth0" {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestResolveOnAMachineWithNoPortsSaysSo(t *testing.T) {
+func TestRequirePortOnAMachineWithNoPortsSaysSo(t *testing.T) {
 	// An empty listing must still read as a sentence, because it is
 	// the answer to "which ports does this machine have".
-	_, err := resolveInterface(machine.InterfaceSpec{MAC: "e0:51:d8:aa:bb:01"}, nil)
+	err := requirePort("eth0", nil)
 	if err == nil {
 		t.Fatal("expected an error on a machine with no ports")
 	}

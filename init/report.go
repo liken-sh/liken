@@ -365,10 +365,9 @@ func observeInterfaces() []reportInterface {
 	for _, link := range raised {
 		attrs := link.Attrs()
 		interfaces = append(interfaces, reportInterface{
-			Name:   attrs.Name,
-			MAC:    attrs.HardwareAddr.String(),
-			Link:   linkState(attrs.Name),
-			Driver: interfaceDriver(attrs.Name),
+			Name: attrs.Name,
+			MAC:  attrs.HardwareAddr.String(),
+			Link: linkState(attrs.Name),
 		})
 	}
 	return interfaces
@@ -382,19 +381,6 @@ func linkState(name string) string {
 		return state
 	}
 	return "unknown"
-}
-
-// interfaceDriver names the module bound to an interface's card. The
-// kernel keeps a driver symlink beside each device, pointing into the
-// driver's own directory, so the link's last element is the driver's
-// name. A virtual device has no such link, and reads as no driver at
-// all.
-func interfaceDriver(name string) string {
-	real, err := filepath.EvalSymlinks(filepath.Join("/sys/class/net", name, "device", "driver"))
-	if err != nil {
-		return ""
-	}
-	return filepath.Base(real)
 }
 
 // quiesceHardware waits for the bus probe to go quiet, so a walk of

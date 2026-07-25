@@ -39,7 +39,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"net"
 	"os"
 
 	"github.com/liken-sh/liken/api"
@@ -196,12 +195,12 @@ func (s MachineSpec) RebootPolicyOrDefault() RebootPolicy {
 // only for machines that need to differ from this default.
 type NetworkSpec struct {
 	// Interfaces configures the machine's interfaces explicitly, each
-	// by name, by MAC address, or by both. An empty value means the
-	// zero-configuration default described above. A machine in a
-	// cluster typically declares two interfaces. One is an uplink
-	// that still uses DHCP. The other is the cluster-facing
-	// interface, which uses the static address that other machines
-	// were configured to use when they contact it.
+	// by name. An empty value means the zero-configuration default
+	// described above. A machine in a cluster typically declares two
+	// interfaces. One is an uplink that still uses DHCP. The other is
+	// the cluster-facing interface, which uses the static address
+	// that other machines were configured to use when they contact
+	// it.
 	Interfaces []InterfaceSpec `json:"interfaces,omitempty"`
 }
 
@@ -209,89 +208,41 @@ type NetworkSpec struct {
 // errors that a person can fix in the manifest, before the code
 // touches any link.
 //
-// It cannot catch every error here. Whether a declared MAC address
-// belongs to a port of this machine is a question only the machine
-// can answer, and init answers it when it resolves each spec against
-// the live links.
+// The API server enforces both of these rules on any spec applied
+// through it, because the list of interfaces is keyed by name. This
+// check exists for the specs that reach a machine another way: init
+// also reads manifests that a person wrote by hand and carried in on
+// a stick, and no API server ever saw those.
+//
+// Whether the machine really has a port with a declared name is a
+// question only the machine can answer, so init answers that one
+// against the links that exist.
 func (s NetworkSpec) Validate() error {
 	claimed := map[string]int{}
 	for i, ifc := range s.Interfaces {
-		if ifc.Name == "" && ifc.MAC == "" {
-			return fmt.Errorf("interface %d declares neither a name nor a mac; one of them must say which port this is", i)
-		}
-		if ifc.MAC != "" {
-			if _, err := net.ParseMAC(ifc.MAC); err != nil {
-				return fmt.Errorf("interface %d declares mac %q, which is not a MAC address", i, ifc.MAC)
-			}
+		if ifc.Name == "" {
+			return fmt.Errorf("interface %d declares no name; the name is how an entry says which port it means", i)
 		}
 		// Two entries that name the same port are a manifest bug,
 		// because the second entry's addressing would land on a link
-		// the first already configured. Names and MAC addresses are
-		// counted in one namespace, which is safe: no MAC address
-		// can spell a kernel interface name.
-		for _, key := range []string{ifc.Name, normalizeMAC(ifc.MAC)} {
-			if key == "" {
-				continue
-			}
-			if first, seen := claimed[key]; seen {
-				return fmt.Errorf("interfaces %d and %d both declare %s; declare each port once", first, i, key)
-			}
-			claimed[key] = i
+		// the first already configured.
+		if first, seen := claimed[ifc.Name]; seen {
+			return fmt.Errorf("interfaces %d and %d both declare %s; declare each port once", first, i, ifc.Name)
 		}
+		claimed[ifc.Name] = i
 	}
 	return nil
 }
 
-// normalizeMAC renders a MAC address in one canonical spelling, so
-// that two entries that write the same address differently still
-// compare equal. An address that does not parse normalizes to itself,
-// because Validate reports that separately and with a better message.
-func normalizeMAC(raw string) string {
-	if raw == "" {
-		return ""
-	}
-	if hw, err := net.ParseMAC(raw); err == nil {
-		return hw.String()
-	}
-	return raw
-}
-
-// InterfaceSpec configures one interface. Beyond the fields that say
-// which interface it is, the zero value means DHCP. Static addressing
-// is the deviation from the default, so a person must spell it out
-// explicitly.
-//
-// Name and MAC answer different questions, and both are worth having.
-// A name is positional: it means whichever port enumerates in that
-// place. One manifest can then describe a fleet of identical
-// machines, and a replacement network card inherits the declaration.
-// A MAC address is identity: it means one exact port on one machine.
-// A machine with two ports of the same kind needs identity, because
-// nothing about position says which port has the cable in it, and a
-// wrong guess leaves a machine with no network and no way in.
+// InterfaceSpec configures one interface. Beyond Name, the zero value
+// means DHCP. Static addressing is the deviation from the default, so
+// a person must spell it out explicitly.
 type InterfaceSpec struct {
 	// Name is the interface to configure (for example, "eth1"), using
 	// the name that the kernel gives it. Because no udev process
-	// renames interfaces, kernel names follow the hardware
-	// enumeration order. That order stays the same while the hardware
-	// does, and it says nothing about which of two identical ports
-	// carries the cable. Declare MAC instead when the machine has
-	// more than one port and the order is a guess.
-	Name string `json:"name,omitempty"`
-
-	// MAC is the hardware address of the interface to configure (for
-	// example, "e0:51:d8:aa:bb:01"). It survives a change of
-	// enumeration order, because it belongs to the port and not to
-	// the machine's probe sequence. The cost is that it pins this
-	// manifest to this machine: a new network card carries a new
-	// address, and the manifest needs the edit. The hardware report
-	// reads that address without a network, so the edit needs no
-	// working machine.
-	//
-	// Declare Name and MAC together only to state a fact the boot
-	// must check. When the two resolve to different links, init
-	// refuses the interface rather than guess which one was meant.
-	MAC string `json:"mac,omitempty"`
+	// renames interfaces, kernel names follow the hardware enumeration
+	// order, which stays stable for fixed hardware.
+	Name string `json:"name"`
 
 	// Address is a static address in CIDR form (for example,
 	// "10.10.0.1/24"). The prefix length tells the kernel the subnet,
@@ -308,21 +259,6 @@ type InterfaceSpec struct {
 	// Nameservers lists nameservers to use in addition to any that
 	// DHCP leases supply.
 	Nameservers []string `json:"nameservers,omitempty"`
-}
-
-// Identity names this interface the way the manifest named it. Every
-// message about an interface uses it, so that a person reading a
-// console error finds the same words they wrote, and not a kernel
-// name they never chose.
-func (i InterfaceSpec) Identity() string {
-	switch {
-	case i.Name != "" && i.MAC != "":
-		return fmt.Sprintf("%s (MAC %s)", i.Name, i.MAC)
-	case i.MAC != "":
-		return "MAC " + i.MAC
-	default:
-		return i.Name
-	}
 }
 
 // Parse reads a Machine manifest from its bytes. Parsing is strict,

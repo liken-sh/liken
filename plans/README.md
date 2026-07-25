@@ -173,13 +173,12 @@ numbered before this arc existed; it belongs second in this order:
     node it delivers, and its whole class code, so a DeviceClass can
     ask a real question. The hardware report names claimable
     hardware it will not load. The manual gains the device story.
-39. [x] [The port with the cable in it](39-the-port-with-the-cable-in-it.md)
-    — a manifest names an interface by MAC address as well as by
-    kernel name, because a machine with two ports of the same kind
-    cannot say which one has the cable in it. A name is a position
-    and an address is an identity, and both are worth having. The
-    hardware report writes the address form on the machines where a
-    name is ambiguous.
+39. [ ] [The port with the cable in it](39-the-port-with-the-cable-in-it.md)
+    — built and backed out: a manifest could name an interface by
+    MAC address as well as by kernel name. The hardware report
+    already reports the cabled port by name, so the machine answers
+    the question before anybody writes a manifest, and an optional
+    name cost the interfaces list its merge key.
 40. [x] [Pod logs belong on a disk](40-pod-logs-belong-on-a-disk.md)
     — a bind mount puts pod logs on podEphemeral and leaves them at
     /var/log/pods, so the bytes reach a disk while every reader

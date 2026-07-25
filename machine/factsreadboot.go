@@ -150,9 +150,6 @@ func (t FactsTree) readBootNetwork() (*NetworkSpec, error) {
 		if ifc.Name, err = t.readFact(filepath.Join(dir, "name")); err != nil {
 			return nil, err
 		}
-		if ifc.MAC, err = t.readFact(filepath.Join(dir, "mac")); err != nil {
-			return nil, err
-		}
 		if ifc.Address, err = t.readFact(filepath.Join(dir, "address")); err != nil {
 			return nil, err
 		}
