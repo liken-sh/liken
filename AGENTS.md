@@ -36,6 +36,74 @@ decision that spans several files, or a survey of alternatives. Put
 these explanations in a markdown document next to the thing they
 describe, organized by domain.
 
+## Commit messages
+
+A comment says what the system is now. A commit message says what one
+change does and why. Write it in ASD-STE100, like the rest of the prose
+here. Keep it plain and keep it short. The message is a record for a
+person who reads it during review or a bisect, not an essay.
+
+Use this form:
+
+```
+Add a mount(8) so the kubelet can run mount helpers
+
+The kubelet runs a program named mount to mount a volume. The image had
+none, so the name fell through to busybox, which mounts with the raw
+syscall and never runs a helper. An inline nfs volume failed.
+
+/sbin/mount sorts an option list into the flag word and the data string,
+then runs /sbin/mount.<fstype> when one exists. A mount with no helper
+takes the same path it took before.
+
+The lab mounted an NFS export with no version in its options and got
+vers=4.2. Both smoke drills stayed green.
+
+Closes #123
+```
+
+Follow these rules for the subject line:
+
+* **Write it in the imperative.** It must complete the sentence "This
+  commit will ...". Write "Add nodePortCIDRs to the cluster network
+  spec". Do not write "A cluster names the networks its NodePorts
+  answer on".
+* **Name the change.** A reader of `git log --oneline` must learn what
+  the commit does without opening it. A subject that only a person who
+  read the diff can decode is wrong.
+* **Keep it to 72 characters,** on one line, with no period at the end.
+
+Follow these rules for the body:
+
+* **Give the problem, then the change, then the evidence.** Say what was
+  wrong or missing, say what this change does about it, and say what the
+  lab measured when a drill ran. Three paragraphs is the target and five
+  is the limit. Wrap at 72 columns.
+* **Do not personify a program.** Software has no intentions and makes
+  no discoveries. A program reads, writes, starts, refuses, and fails.
+  It does not find, want, believe, learn, or concede.
+* **Do not be clever.** Cut aphorisms, metaphors, and any sentence that
+  is there because it sounds good. Cut a sentence that survives only as
+  a flourish.
+* **Do not narrate the session.** The message describes the change. It
+  does not describe the order in which you found things, and it does not
+  report how the work felt.
+* **Do not restate the diff.** No file lists, no checklists, and no test
+  plan. Name a measurement, not the tests you ran.
+* **Name the issue** when there is one, with "Closes #1234".
+* **Do not call the work "comprehensive"** and do not claim a "root
+  cause".
+
+A small change gets a subject line and nothing else. Do not write a body
+to make a one-line change look larger.
+
+The commits before 2026-07-25 do not follow these rules. They use
+declarative subject lines that read as riddles, they give programs
+intentions, and their bodies run long. That style is not the model. Do
+not copy a message out of the log, and do not match the tone of the
+commit you are building on. The history stays as it is, because a
+rewrite would break every link and hash that names it.
+
 ## Organization
 
 Organize the repository by domain, not by kind. Name each directory for
