@@ -12,9 +12,10 @@ package main
 // module list cannot reconcile live either, because loading a module
 // is one-way: the kernel offers no safe way to remove a driver while
 // something is using it. Storage, network, and modules therefore
-// converge through a reboot. The operator stages the desired manifest onto the
-// machineState filesystem, where the next boot finds it, tries it,
-// and promotes or rejects it (machine/staging.go covers that side).
+// converge through a reboot. The operator stages the desired
+// manifest onto the machineState filesystem, where the next boot
+// finds it, tries it, and promotes or rejects it (machine/staging.go
+// covers that side).
 // This file covers the operator's half of that work: notice drift,
 // refuse what the machine cannot satisfy, stage what it can, and
 // either request the reboot (rebootPolicy: Auto) or report that a
@@ -108,11 +109,10 @@ func deviceNames(disks []machine.BlockDevice) string {
 // Machine document with no status. The document carries the whole
 // spec, including the sysctls that need no reboot at all, so the
 // reboot converges everything at once. The rendering is
-// deterministic: sigs.k8s.io/yaml marshals
-// through JSON with sorted keys, so the same spec always produces
-// the same bytes. The hash of those bytes is the spec's identity
-// everywhere: in staging idempotence, in rejections, and in the
-// facts.
+// deterministic: sigs.k8s.io/yaml marshals through JSON with sorted
+// keys, so the same spec always produces the same bytes. The hash of
+// those bytes is the spec's identity everywhere: in staging
+// idempotence, in rejections, and in the facts.
 func renderManifest(name string, spec machine.MachineSpec) ([]byte, string, error) {
 	doc := machine.Machine{
 		APIVersion: api.APIVersion,
