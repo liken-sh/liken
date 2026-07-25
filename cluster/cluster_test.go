@@ -3,6 +3,7 @@ package cluster
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -270,5 +271,54 @@ func TestNewestVersion(t *testing.T) {
 	}
 	if got := NewestVersion(nil); got != "" {
 		t.Errorf("an empty catalog has no newest; got %q", got)
+	}
+}
+
+// A cluster that names no NodePort networks answers on the node IP
+// alone, which is kube-proxy's own "primary" keyword.
+func TestNodePortAddressesDefaultsToTheNodeIP(t *testing.T) {
+	if got := (&Cluster{}).NodePortAddresses(); !slices.Equal(got, []string{"primary"}) {
+		t.Errorf("an unset list: got %q", got)
+	}
+	var absent *Cluster
+	if got := absent.NodePortAddresses(); !slices.Equal(got, []string{"primary"}) {
+		t.Errorf("a machine on its own: got %q", got)
+	}
+}
+
+// A cluster that names networks gets exactly those, because the list
+// replaces the default rather than adding to it.
+func TestNodePortAddressesUsesTheDocumentsList(t *testing.T) {
+	c := &Cluster{}
+	c.Spec.Network.NodePortCIDRs = []string{"10.0.0.0/24", "10.10.10.0/24"}
+	want := []string{"10.0.0.0/24", "10.10.10.0/24"}
+	if got := c.NodePortAddresses(); !slices.Equal(got, want) {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestNetworkValidateRefusesWhatIsNotASubnet(t *testing.T) {
+	cases := map[string]string{
+		"a bare address": "10.10.10.11",
+		"nonsense":       "the tunnel",
+		"a missing size": "10.10.10.0/",
+	}
+	for name, entry := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := ClusterNetworkSpec{NodePortCIDRs: []string{entry}}.Validate()
+			if err == nil {
+				t.Fatalf("%q is not a subnet, but it parsed", entry)
+			}
+			if !strings.Contains(err.Error(), "nodePortCIDRs[0]") {
+				t.Errorf("the error should name the entry: %v", err)
+			}
+		})
+	}
+}
+
+func TestNetworkValidateAcceptsSubnets(t *testing.T) {
+	spec := ClusterNetworkSpec{NodePortCIDRs: []string{"10.0.0.0/24", "10.10.10.11/32", "fd00::/64"}}
+	if err := spec.Validate(); err != nil {
+		t.Errorf("got %v", err)
 	}
 }

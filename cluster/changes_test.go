@@ -50,7 +50,12 @@ func TestRestartAppliesByDomain(t *testing.T) {
 		"the origin":            {func(s *ClusterSpec) { s.Origin = OriginAdopted }, false},
 		"the leaders":           {func(s *ClusterSpec) { s.Leaders = []string{"node-1"} }, false},
 		"the endpoint":          {func(s *ClusterSpec) { s.Endpoint = "https://10.10.0.2:6443" }, false},
+		"the NodePort networks": {func(s *ClusterSpec) { s.Network.NodePortCIDRs = []string{"10.10.0.0/24"} }, true},
 		"the network plan":      {func(s *ClusterSpec) { s.Network.ClusterCIDR = "10.44.0.0/16" }, false},
+		"NodePorts with a reboot field": {func(s *ClusterSpec) {
+			s.Network.NodePortCIDRs = []string{"10.10.0.0/24"}
+			s.Network.ClusterCIDR = "10.44.0.0/16"
+		}, false},
 		"the time hierarchy":    {func(s *ClusterSpec) { s.Time.Upstreams = nil }, false},
 		"the disruption budget": {func(s *ClusterSpec) { s.Disruption.MaxUnavailable = 2 }, false},
 		"a mixed edit":          {func(s *ClusterSpec) { s.Features = nil; s.Endpoint = "https://10.10.0.2:6443" }, false},

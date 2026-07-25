@@ -32,6 +32,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"slices"
 
@@ -410,6 +411,67 @@ type ClusterNetworkSpec struct {
 	// ClusterDomain is the DNS suffix cluster-internal names live
 	// under (k3s default cluster.local).
 	ClusterDomain string `json:"clusterDomain,omitempty"`
+
+	// NodePortCIDRs are the networks a NodePort service answers on.
+	// A NodePort is a port opened on the machines themselves, and
+	// which of a machine's addresses it answers on is a choice.
+	//
+	// Left unset, a NodePort answers on the node IP alone: the
+	// address on NodeCIDR, where the rest of the cluster expects to
+	// find this machine. That is the narrow, correct default for a
+	// cluster whose traffic arrives on the node network.
+	//
+	// A deployment sets this when its traffic arrives somewhere
+	// else, which is the ordinary case for a cluster reached over a
+	// tunnel or a second segment. Each entry is a subnet, and a
+	// NodePort answers on every local address inside any of them.
+	// The list replaces the default rather than adding to it, so the
+	// document states the whole answer: a list that omits NodeCIDR
+	// closes NodePorts on the node network, including for the other
+	// machines in the cluster.
+	//
+	// Every other field here is immutable, because changing one
+	// renumbers the cluster. This field is not. It only widens or
+	// narrows which local addresses answer, it reverses, and k3s
+	// reads it when its process starts, so an edit converges by
+	// restarting k3s in place.
+	NodePortCIDRs []string `json:"nodePortCIDRs,omitempty"`
+}
+
+// Validate checks the address plan for the errors a person can fix
+// in the manifest. The API server enforces the same rules on any
+// document applied through it. This check exists for the documents
+// that reach a machine another way: init also reads a cluster
+// document that a person wrote by hand and carried in on a stick,
+// and no API server ever saw that one.
+//
+// Only the NodePort list is checked here. The other fields are
+// addresses that k3s itself refuses when they are malformed, and it
+// refuses them before it serves anything.
+func (n ClusterNetworkSpec) Validate() error {
+	for i, entry := range n.NodePortCIDRs {
+		if _, _, err := net.ParseCIDR(entry); err != nil {
+			return fmt.Errorf("nodePortCIDRs[%d] %q is not a subnet; write each entry as an address and a prefix length, such as 10.0.0.0/24", i, entry)
+		}
+	}
+	return nil
+}
+
+// NodePortAddresses resolves what kube-proxy should be told about
+// which addresses a NodePort answers on. It reports the cluster's
+// list when the document names one, and kube-proxy's "primary"
+// keyword otherwise, which is that program's own name for the node
+// IP alone.
+//
+// Naming the default rather than leaving the setting out is
+// deliberate. kube-proxy's real default is every local address,
+// which would include the uplink and whatever interfaces the CNI
+// creates later, and it warns about that default at startup.
+func (n ClusterNetworkSpec) NodePortAddresses() []string {
+	if len(n.NodePortCIDRs) == 0 {
+		return []string{"primary"}
+	}
+	return slices.Clone(n.NodePortCIDRs)
 }
 
 // Role is what a machine should be in this cluster. A nil Cluster
@@ -444,6 +506,9 @@ func ParseCluster(raw []byte) (*Cluster, error) {
 	if err := c.Spec.Runtime.Validate(); err != nil {
 		return nil, fmt.Errorf("spec.runtime.k3s: %w", err)
 	}
+	if err := c.Spec.Network.Validate(); err != nil {
+		return nil, fmt.Errorf("spec.network: %w", err)
+	}
 	return c, nil
 }
 
@@ -455,6 +520,16 @@ func (c *Cluster) RuntimeSpec() K3sRuntimeSpec {
 		return K3sRuntimeSpec{}
 	}
 	return c.Spec.Runtime.K3s
+}
+
+// NodePortAddresses is the address plan's NodePort resolution, safe
+// on a nil Cluster. A machine on its own answers NodePorts on its
+// node IP, the same narrow default a document leaves unset.
+func (c *Cluster) NodePortAddresses() []string {
+	if c == nil {
+		return ClusterNetworkSpec{}.NodePortAddresses()
+	}
+	return c.Spec.Network.NodePortAddresses()
 }
 
 // LoadCluster reads the Cluster manifest from a file. A machine with

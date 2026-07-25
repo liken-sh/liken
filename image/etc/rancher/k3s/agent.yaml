@@ -10,13 +10,10 @@
 # directory that k3s reads alongside this file. Init writes the
 # drop-in fresh every boot (see init/k3s.go).
 
-# NodePort services listen only on the node IP's interface: the
-# cluster segment, where the rest of the cluster expects to find this
-# node. The default (every local IP, including the uplink and
-# whatever CNI interfaces appear later) is broad enough that
-# kube-proxy logs a warning about it at startup.
-kube-proxy-arg:
-  - nodeport-addresses=primary
+# The networks a NodePort service answers on are not here either.
+# kube-proxy runs on both roles, so both roles need the setting, and
+# init renders it into the boot drop-in from the cluster document.
+# See the fuller story in config.yaml.
 
 # The kubelet applies this label to every liken machine's Node when
 # the node registers, and the OS DaemonSets select on it. See the

@@ -49,6 +49,17 @@ spec:
     clusterDNS: 10.43.0.10
     clusterDomain: cluster.local
 
+    # A NodePort service answers on the node IP alone, the address on
+    # nodeCIDR. If your traffic reaches the cluster on some other
+    # address, such as a tunnel, name those networks here and a
+    # NodePort answers on them too. The list replaces the default
+    # rather than adding to it, so name nodeCIDR here as well when
+    # you want to keep it.
+    #
+    # nodePortCIDRs:
+    #   - 10.10.0.0/24
+    #   - 10.10.10.0/24
+
   time:
     # This is where the leaders get their time. Followers sync their
     # time from the leaders themselves. Declaring an upstream is your

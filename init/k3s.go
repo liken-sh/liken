@@ -289,6 +289,26 @@ func k3sBootConfig(in k3sBootInputs) string {
 		fmt.Fprintf(&b, "flannel-iface: %s\n", in.nodeInterface)
 	}
 
+	// Which of this machine's addresses a NodePort answers on. Both
+	// roles render it, because a NodePort is opened by kube-proxy on
+	// every node that runs one, leader and follower alike.
+	//
+	// The value is computed rather than written in the static file,
+	// even though it is usually the same "primary" on every machine
+	// in every cluster. A setting with two authors, a default in one
+	// file and an override in another, cannot be read off either
+	// one. Rendering the whole list here means the drop-in states
+	// what kube-proxy will be told, and the console line below
+	// prints it.
+	//
+	// kube-proxy takes this as a command-line flag, which k3s
+	// exposes as kube-proxy-arg. A plain kube-proxy-arg key in a
+	// drop-in replaces the list from the file it sits beside, which
+	// is what makes one author possible here: nothing needs the +
+	// suffix that appends.
+	fmt.Fprintf(&b, "kube-proxy-arg:\n  - nodeport-addresses=%s\n",
+		strings.Join(clusterDoc.NodePortAddresses(), ","))
+
 	// The spec's node labels, so the node registers with its
 	// scheduling identity already set. A freshly reinstalled machine
 	// must not spend its first minutes as a blank node that workloads
@@ -407,6 +427,30 @@ func mintNodePassword(dir string) error {
 	return machine.WriteDurable(path, []byte(hex.EncodeToString(secret)+"\n"))
 }
 
+// unreachableNodePortsWarning is the console line for a cluster
+// whose NodePort networks leave out the one every other machine uses
+// to reach this one, and the empty string when there is nothing to
+// say. The list replaces the default rather than adding to it, which
+// is what lets a document state the whole answer, and it is also
+// what makes this mistake possible: a deployment that names only its
+// tunnel closes NodePorts on the node network. Nothing else in the
+// system would report that. The machine still boots, because the
+// deployment may have meant exactly this.
+func unreachableNodePortsWarning(clusterDoc *cluster.Cluster, nodeIP string) string {
+	if clusterDoc == nil || len(clusterDoc.Spec.Network.NodePortCIDRs) == 0 || nodeIP == "" {
+		return ""
+	}
+	address := net.ParseIP(nodeIP)
+	for _, entry := range clusterDoc.Spec.Network.NodePortCIDRs {
+		_, subnet, err := net.ParseCIDR(entry)
+		if err == nil && subnet.Contains(address) {
+			return ""
+		}
+	}
+	return fmt.Sprintf("liken: nodePortCIDRs (%s) does not include this machine's node IP %s; NodePort services will not answer on the node network",
+		strings.Join(clusterDoc.Spec.Network.NodePortCIDRs, ","), nodeIP)
+}
+
 // writeK3sBootConfig derives this machine's role and k3s
 // configuration and writes the drop-in beside the role's static
 // config file. It returns the role so the supervisor knows which k3s
@@ -439,6 +483,10 @@ func writeK3sBootConfig(clusterDoc *cluster.Cluster, m *machine.Machine, conns [
 		fmt.Printf("liken: node IP is %s on %s\n", nodeIP, nodeInterface)
 	} else if role == api.RoleFollower {
 		fmt.Fprintf(os.Stderr, "liken: no address falls inside the cluster's nodeCIDR; k3s will guess a node IP\n")
+	}
+
+	if warning := unreachableNodePortsWarning(clusterDoc, nodeIP); warning != "" {
+		fmt.Fprintln(os.Stderr, warning)
 	}
 
 	clusterInit, joinURL := leaderJoinConfig(clusterDoc, name, machine.MachineManifestDir)

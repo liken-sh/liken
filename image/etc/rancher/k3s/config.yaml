@@ -34,13 +34,13 @@ default-local-storage-path: /var/lib/liken/pod-storage
 # root.
 write-kubeconfig-mode: "0644"
 
-# NodePort services listen only on the node IP's interface: the
-# cluster segment, where the rest of the cluster expects to find this
-# node. The default (every local IP, including the uplink and
-# whatever CNI interfaces appear later) is broad enough that
-# kube-proxy logs a warning about it at startup.
-kube-proxy-arg:
-  - nodeport-addresses=primary
+# One key a reader might also expect here is kube-proxy-arg, which
+# carries the networks a NodePort service answers on. It is computed
+# too, for the same reason the disable list is: the Cluster's
+# spec.network.nodePortCIDRs can name them, and a setting written
+# half here and half there could not be read off either file. Init
+# renders the whole list into the boot drop-in. A cluster that names
+# nothing gets the node IP alone, which is the narrow default.
 
 # The kubelet applies this label to every liken machine's Node when
 # the node registers. The OS DaemonSets (the operator, the log

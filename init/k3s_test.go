@@ -227,6 +227,77 @@ func TestK3sBootConfigRendersNodeLabels(t *testing.T) {
 	}
 }
 
+// kube-proxy runs on every node, so both roles carry the setting,
+// and the drop-in always states it whole. The static config files
+// name it nowhere, so this drop-in is its only author.
+func TestK3sBootConfigRendersTheNodePortNetworks(t *testing.T) {
+	cases := map[string]struct {
+		cidrs []string
+		want  string
+	}{
+		"unset means the node IP alone": {nil, "kube-proxy-arg:\n  - nodeport-addresses=primary\n"},
+		"a declared list replaces it": {
+			[]string{"10.10.0.0/24", "10.10.10.0/24"},
+			"kube-proxy-arg:\n  - nodeport-addresses=10.10.0.0/24,10.10.10.0/24\n",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			for _, role := range []api.Role{api.RoleLeader, api.RoleFollower} {
+				clusterDoc := labCluster()
+				clusterDoc.Spec.Network.NodePortCIDRs = tc.cidrs
+				got := k3sBootConfig(k3sBootInputs{role: role, clusterDoc: clusterDoc, haveToken: true})
+				if !strings.Contains(got, tc.want) {
+					t.Errorf("%s config should carry %q:\n%s", role, tc.want, got)
+				}
+			}
+		})
+	}
+}
+
+// A machine with no cluster document is a leader of one, and it
+// still states the setting rather than leaving kube-proxy on its own
+// broad default.
+func TestK3sBootConfigWithNoClusterStillNamesTheNodePortNetworks(t *testing.T) {
+	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, haveToken: true})
+	if !strings.Contains(got, "nodeport-addresses=primary") {
+		t.Errorf("a machine alone answers NodePorts on its node IP:\n%s", got)
+	}
+}
+
+// A declared list that omits the node network is legal and may even
+// be deliberate, so the boot says so and carries on.
+func TestUnreachableNodePortsWarning(t *testing.T) {
+	cases := map[string]struct {
+		cidrs  []string
+		nodeIP string
+		warns  bool
+	}{
+		"the node network is named":     {[]string{"10.10.0.0/24"}, "10.10.0.1", false},
+		"one of several names it":       {[]string{"10.10.10.0/24", "10.10.0.0/24"}, "10.10.0.1", false},
+		"only the tunnel is named":      {[]string{"10.10.10.0/24"}, "10.10.0.1", true},
+		"nothing is named":              {nil, "10.10.0.1", false},
+		"no node IP was derived":        {[]string{"10.10.10.0/24"}, "", false},
+		"a single address names itself": {[]string{"10.10.0.1/32"}, "10.10.0.1", false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			clusterDoc := labCluster()
+			clusterDoc.Spec.Network.NodePortCIDRs = tc.cidrs
+			got := unreachableNodePortsWarning(clusterDoc, tc.nodeIP)
+			if (got != "") != tc.warns {
+				t.Errorf("warning %q, want warns=%v", got, tc.warns)
+			}
+		})
+	}
+}
+
+func TestUnreachableNodePortsWarningWithNoCluster(t *testing.T) {
+	if got := unreachableNodePortsWarning(nil, "10.10.0.1"); got != "" {
+		t.Errorf("a machine alone declares no list: %q", got)
+	}
+}
+
 func TestK3sBootConfigWithoutNodeLabelsRendersNone(t *testing.T) {
 	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, clusterDoc: labCluster(), haveToken: true})
 	if strings.Contains(got, "node-label") {
