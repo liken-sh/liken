@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Vendor the NFS client: a static mount.nfs, the whole host half of
-# the nfs feature (see plans/17-network-storage-clients.md).
+# the nfs feature (see plans/completed/17-network-storage-clients.md).
 #
 # The kernel does everything else. An NFSv4 mount is one TCP
 # connection to port 2049, with locking carried by the protocol's own

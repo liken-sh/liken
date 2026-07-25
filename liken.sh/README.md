@@ -99,7 +99,7 @@ liken will meet: old servers, cheap virtual machines, and other
 clouds' legacy tiers. An OS that can only upgrade itself where UEFI
 firmware exists would be narrower than liken means to be. This
 deployment forced the project to build the missing capability:
-[milestone 30](../plans/30-bios-upgrades.md) taught liken to actuate
+[milestone 30](../plans/completed/30-bios-upgrades.md) taught liken to actuate
 upgrades by rewriting what GRUB reads, instead of by changing
 firmware variables.
 

@@ -1,5 +1,5 @@
 # The nfs-utils domain: the NFS client, the host half of the nfs
-# feature (plans/17-network-storage-clients.md).
+# feature (plans/completed/17-network-storage-clients.md).
 #
 # One artifact: the static mount.nfs that fetch.sh builds from pinned
 # source inside a pinned container. It is the nfs filesystem's mount

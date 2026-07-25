@@ -6,7 +6,7 @@ manual is grouped.
 */ -}}
 # {{ .Site.Title }}
 
-> `liken` is a small operating system that boots a machine straight
+> `liken` is a small operating system that boots a machine directly
 > into Kubernetes. This site is its manual.
 
 Every page of this site is also served as Markdown: append index.md

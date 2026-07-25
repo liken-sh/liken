@@ -2,7 +2,7 @@
 #
 # Vendor the iSCSI initiator userspace: static iscsid and iscsiadm,
 # the host half of the iscsi feature (see
-# plans/17-network-storage-clients.md).
+# plans/completed/17-network-storage-clients.md).
 #
 # CSI drivers that attach iSCSI volumes carry no initiator of their
 # own. synology-csi, for example, mounts the host's root filesystem

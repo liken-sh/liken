@@ -87,12 +87,14 @@ usage:
       Build the USB install stick's disk image from a downloaded
       release and your deployment layer: one stick for the whole
       deployment, with a boot menu listing every machine by name.
-      Boot it, pick the machine you're standing at, and it installs
-      itself and powers off. -console (repeatable) adds a console=
-      argument to every entry; the machines keep it permanently.
+      Boot it, pick the machine you're standing at, and follow the
+      console: the install holds until you remove the stick and press
+      Enter, then powers the machine off. -console (repeatable) adds a
+      console= argument to every entry; the machines keep it
+      permanently.
 
   liken bundle [-slot-size 1Gi] <vmlinuz> <liken.sqfs> <boot.cpio> <microcode.cpio> <liken-cli> <systemd-boot.efi> <grub-boot.img> <grub-core.img> <licenses.md> <channel-dir> <version> [component=version ...]
-      Lay out a release: copy the eight files into the channel and
+      Lay out a release: copy the nine files into the channel and
       write the release.yaml that names each one by its digest. The
       version is a calendar date and serial (2026.07.11-001); the
       component=version pairs record which upstreams shipped inside,

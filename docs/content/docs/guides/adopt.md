@@ -6,20 +6,20 @@ weight: 20
 # Adopt an existing k3s cluster
 
 Adoption joins `liken` machines to a k3s cluster that `liken` did not
-create. It lets you replace the cluster's machines one at a time,
-while the cluster keeps serving. The process never exports or
-restores cluster state. Each new member receives the data through
-ordinary replication.
+create. You can replace the cluster's machines one at a time while the
+cluster continues to serve. The procedure does not export or restore
+cluster state. Each new member receives the data through usual
+replication.
 
-Adoption works with any k3s cluster that uses embedded etcd,
-whatever operating system it runs on today.
+Adoption works with any k3s cluster that uses embedded etcd, on any
+operating system.
 
-Know one behavior before you start. A `liken` server disables k3s's
-bundled components (traefik, servicelb, metrics-server) unless your
-`cluster.yaml` declares them as features. The disable acts on the
-whole cluster the moment the first `liken` server joins. If your
-workloads depend on a bundled component, declare its feature in your
-`cluster.yaml`, or run a replacement before that first join.
+Read this behavior before you start. A `liken` server disables the
+bundled k3s components (traefik, servicelb, metrics-server), unless
+your `cluster.yaml` declares them as features. The change applies to
+the whole cluster when the first `liken` server joins. If your
+workloads need a bundled component, declare its feature in your
+`cluster.yaml`, or start a replacement before that first join.
 
 ## 1. Harvest the identity
 
@@ -35,21 +35,22 @@ On any server of the existing cluster, as root:
         tls/etcd/peer-ca.{crt,key}
 
 Copy the archive to your workstation and unpack it into a private
-directory, for example `harvest/`. Only the certificate authorities
-and the join token come over. The server's leaf certificates stay
-behind, because every server signs its own from the shared roots.
+directory, for example `harvest/`. The archive contains only the
+certificate authorities and the join token. It does not contain the
+server's leaf certificates, because each server signs its own
+certificates with the shared roots.
 
 ## 2. Arrange the identity
 
     ./liken new mycluster
     ./liken adopt harvest mycluster/identity
 
-[`liken adopt`](/docs/reference/cli/#liken-adopt) places the
-harvested files into the identity directory exactly as
-[`liken mint`](/docs/reference/cli/#liken-mint) would have. It refuses a partial harvest, and it
-checks that the token matches the harvested certificate authority.
-After this step, nothing downstream cares where the identity came
-from.
+[`liken adopt`](/docs/reference/cli/#liken-adopt) puts the harvested
+files into the identity directory in the same arrangement as
+[`liken mint`](/docs/reference/cli/#liken-mint). It refuses an
+incomplete harvest, and it makes sure that the token agrees with the
+harvested certificate authority. After this step, the later steps are
+the same for a minted identity and an adopted identity.
 
 ## 3. Declare the adoption
 
@@ -58,21 +59,21 @@ Edit `mycluster/cluster.yaml`:
 * Set [`spec.origin`](/docs/reference/cluster/#spec) to `Adopted`.
 * Set `spec.endpoint` to the existing cluster's join URL.
 
-An adopted cluster's datastore already exists. Every `liken` leader
-joins it through the endpoint, and no `liken` machine initializes a
-new one. Initializing a second datastore beside a live one would
-split the cluster into two.
+The datastore of an adopted cluster already exists. Each `liken` leader
+joins it through the endpoint, and no `liken` machine initializes a new
+datastore. A second datastore next to a live one divides the cluster
+into two clusters.
 
 ## 4. Install the liken machines
 
 Build the stick and install each machine as in
-[Install a cluster](/docs/guides/install/), starting with the first
-leader. Each machine joins the existing cluster directly. The
-existing machines keep serving throughout.
+[Install a cluster](/docs/guides/install/). Start with the first
+leader. Each machine joins the existing cluster directly. The existing
+machines continue to serve during the procedure.
 
-`liken` machines carry a `liken.sh/machine=true` node label, and the
-OS workloads schedule only onto labeled nodes. The foreign nodes stay
-untouched.
+`liken` machines have a `liken.sh/machine=true` node label, and the OS
+workloads schedule only onto nodes with that label. Thus the foreign
+nodes get no changes.
 
 ## 5. Rotate the old servers out
 
@@ -80,19 +81,20 @@ Remove the foreign servers one at a time:
 
     kubectl delete node <old-server>
 
-For a k3s server, deleting the node is also the etcd member removal.
-Wait for the cluster to settle before you remove the next one, so
-that quorum holds. If `spec.endpoint` points at a foreign server,
-edit it to a `liken` leader's address before you remove that server.
+For a k3s server, the deletion of the node also removes the etcd
+member. Wait for the cluster to become stable before you remove the
+next server, to keep the quorum. If `spec.endpoint` gives a foreign
+server, change it to a `liken` leader's address before you remove that
+server.
 
 ## 6. Promote the cluster
 
-After the last foreign member is gone, edit the Cluster resource and
+After you remove the last foreign member, edit the Cluster resource and
 set `spec.origin` to `Founded`:
 
     kubectl edit cluster
 
-This is the field's one legal edit. Promotion changes nothing on the
-running fleet. It matters if you ever rebuild the cluster from
-scratch: a founded cluster's founding leader may create the datastore
-again.
+This is the only permitted edit to the field. The promotion makes no
+change to the running fleet. It has an effect only if you build the
+cluster again: the founding leader of a founded cluster can create the
+datastore again.

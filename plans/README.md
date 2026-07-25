@@ -1,213 +1,152 @@
-# The rough path
+# The plans
 
-The full story of each milestone, the design, the reasoning, and what
-the lab taught when it ran, lives beside this file. There is one
-numbered document for each milestone, with
-[00-design.md](00-design.md) as the overview. This file is the index,
-and the scratch space for what remains ahead.
+This directory holds one document for each milestone. Each document
+gives the problem, the design, the reasons for each decision, and what
+the lab measured when the work ran. [00-design.md](00-design.md) is the
+design overview for the whole project.
 
-1. [x] [Boot to a hello world](01-boot-to-hello-world.md) —
-   a vendored kernel, a Go init, an initramfs, and QEMU.
-2. [x] [Init starts k3s and nothing else](02-init-starts-k3s.md) —
-   network, identity, the Machine CRD, and the operator.
-3. [x] [Unwinding the known hacks](03-unwinding-the-hacks.md) —
-   settle the couplings to k3s internals before building on them.
-4. [x] [Storage, declared by purpose](04-storage-by-purpose.md) —
-   roles, GPT claiming, and refusing ambiguity.
-5. [x] [The spec becomes editable](05-the-spec-becomes-editable.md) —
-   staged manifests, proven fallback, convergence by reboot.
-6. [x] [Growing the cluster past one node](06-growing-past-one-node.md) —
-   the Cluster CRD, the join token, static addressing, one image
-   boots the fleet.
-7. [x] [Cluster time](07-cluster-time.md) — leaders sync from
-   declared upstreams and serve everyone else; the two-planes rule
-   written down.
-8. [x] [The Cluster converges](08-the-cluster-converges.md) —
-   the cluster document uses the same staging machinery, promoted
-   by the join itself.
-9. [x] [Multiple leaders: quorum](09-multiple-leaders.md) —
-   sqlite grows into embedded etcd by one Cluster edit; promotion
-   and demotion both automated.
-10. [x] [Fleet visibility](10-fleet-visibility.md) — phases,
-    heartbeat leases, the sweep, and a status vocabulary that says
-    what would fix it.
-11. [x] [Device management](11-device-management.md) — hotplug,
-    GPUs, and how workloads reach hardware. The OS half: declared
-    drivers serve hotplug in-kernel, and the unclaimed-hardware
-    report (a sysfs walk plus a uevent watcher in init) names the
-    missing module in status and on the console. The Kubernetes
-    half: the machine operator is the DRA driver, publishing each
-    node's deliverable, non-platform devices as a ResourceSlice and
-    answering the kubelet's prepare calls with CDI device nodes —
-    an unprivileged pod claims a disk by DeviceClass and finds
-    /dev/sda inside. Real GPU stacks wait for milestone 32's images.
-12. [x] [Declarative upgrades](12-declarative-upgrades.md) —
-    A/B slots, the digest chain, firmware fallback, and one field
-    that moves the fleet.
-13. [x] [Rolling reboots](13-rolling-reboots.md) — the rollout
-    conductor: budgets, drains, and one leader at a time.
-14. [ ] [GitOps from first boot](14-gitops-from-first-boot.md) —
-    flux as an opt-in feature with parameters (repository, path,
-    branch): the vocabulary's first parameterized feature, built on
-    the machinery that milestone 17 built.
-15. [x] [Observability below Kubernetes](15-observability-below-kubernetes.md) —
-    every host log stream becomes a pod's stdout.
-16. [x] [Adopting an existing cluster](16-adopting-a-cluster.md) —
-    import an existing cluster's identity instead of minting one,
-    join its etcd, rotate the old members out, promote.
+A document's directory states its status:
 
-Surveying a real deployment's workloads (part of milestone 16) turned
-up capabilities that the OS still needs before it can host a working
-cluster's workloads. Each is written as the general capability, not
-the specific workload that revealed it:
+* [`completed/`](completed/) holds the milestones that are built.
+* [`rejected/`](rejected/) holds the milestones that were built and then
+  removed. The document stays as the record of what came out and why.
+* The markdown files in this directory are the milestones that are not
+  built yet.
 
-17. [x] [Opt-in features](17-network-storage-clients.md) — one
-    Cluster vocabulary for optional capabilities: iSCSI and NFS host
-    clients, and the k3s bundled components (absorbing 19). Drilled
-    end to end against the lab's storage server, retraction janitor
-    included; a CSI driver's own proof belongs to the deployment
-    that runs one.
-18. [x] [Requestable kernel modules](18-requestable-kernel-modules.md) —
-    machines declare the drivers their hardware needs; the image
-    ships them, init loads them, status reports them. Ran ahead of
-    17, which builds on it.
-19. [x] [Choosing the bundled components](19-choosing-bundled-components.md) —
-    folded into 17's feature vocabulary.
-20. [x] [Private registries](20-private-registries.md) —
-    spec.registries (mirrors and Spegel), credentials by Secret, and
-    the k3s restart tier: changes that k3s reads only at process
-    start converge by restarting k3s in place, with pods surviving,
-    and the feature toggles moved onto it.
-21. [x] [Node labels on the Machine](21-node-labels.md) —
-    scheduling identity declared on the Machine spec: registered at
-    boot, reconciled live, and retractions actually retract.
+The numbers run in one sequence across all three directories. The next
+milestone is 42.
 
-One thing the milestone-17 lab work demanded:
+## Completed
 
-23. [x] [Crash-safe image imports](23-crash-safe-image-imports.md) —
-    a machine killed mid-unpack is no longer left permanently unable
-    to run its own operator: image imports use the staged/proven
-    lifecycle, an unproven trial discards the container store, and
-    the operator proves the unpacks before anything trusts them.
+* **01.** [Boot to a hello world](completed/01-boot-to-hello-world.md) — a
+  vendored kernel, a Go init, an initramfs, and QEMU.
+* **02.** [Init starts k3s and nothing else](completed/02-init-starts-k3s.md)
+  — the network, the machine identity, the Machine CRD, and the
+  operator.
+* **03.** [Remove the known hacks](completed/03-removing-the-hacks.md) — the
+  boot path drops the fixes that depend on k3s internals.
+* **04.** [Storage, declared by purpose](completed/04-storage-by-purpose.md) —
+  storage roles, GPT claiming, and a refusal when a disk is ambiguous.
+* **05.** [The spec becomes editable](completed/05-the-spec-becomes-editable.md)
+  — staged manifests, a proven fallback, and convergence by reboot.
+* **06.** [Growing the cluster past one node](completed/06-growing-past-one-node.md)
+  — the Cluster CRD, the join token, static addressing, and one image
+  for the whole fleet.
+* **07.** [Cluster time](completed/07-cluster-time.md) — the leaders sync from
+  declared upstreams and serve time to everyone else.
+* **08.** [The Cluster converges](completed/08-the-cluster-converges.md) — the
+  Cluster document uses the same staging machinery, promoted by the
+  join.
+* **09.** [Multiple leaders: quorum](completed/09-multiple-leaders.md) —
+  sqlite grows into embedded etcd through one Cluster edit.
+* **10.** [Fleet visibility](completed/10-fleet-visibility.md) — phases,
+  heartbeat leases, the sweep, and a status vocabulary that says what
+  would fix the machine.
+* **11.** [Device management](completed/11-device-management.md) — the OS
+  reports hardware that no driver claims, and a DRA driver delivers
+  devices to unprivileged pods.
+* **12.** [Declarative upgrades](completed/12-declarative-upgrades.md) — A/B
+  slots, the digest chain, firmware fallback, and one field that moves
+  the fleet.
+* **13.** [Rolling reboots at the cluster level](completed/13-rolling-reboots.md)
+  — the rollout conductor: budgets, drains, and one leader at a time.
+* **14.** [GitOps from first boot](completed/14-gitops-from-first-boot.md) —
+  the `flux` feature, the seed-once engine, the minted deploy key, and
+  retraction.
+* **15.** [Observability below Kubernetes](completed/15-observability-below-kubernetes.md)
+  — each host log stream becomes a pod's stdout.
+* **16.** [Adopting an existing cluster](completed/16-adopting-a-cluster.md) —
+  import an existing cluster's identity, join its etcd, rotate the old
+  members out, and promote.
+* **17.** [Optional features: network storage clients and bundled components](completed/17-network-storage-clients.md)
+  — one Cluster vocabulary for optional capabilities, with the iSCSI
+  and NFS host clients as its first entries.
+* **18.** [Requestable kernel modules](completed/18-requestable-kernel-modules.md)
+  — a machine declares the drivers its hardware needs, the image ships
+  them, init loads them, and status reports them.
+* **19.** [Choosing the bundled components](completed/19-choosing-bundled-components.md)
+  — absorbed by milestone 17's feature vocabulary.
+* **20.** [Private registries and the k3s restart tier](completed/20-private-registries.md)
+  — registry mirrors and credentials, and the changes that converge by
+  restarting k3s in place.
+* **21.** [Node labels on the Machine](completed/21-node-labels.md) —
+  scheduling identity declared on the spec, registered at boot, and
+  reconciled live.
+* **22.** [Public releases](completed/22-public-releases.md) — releases of
+  liken itself, with no deployment baked in.
+* **23.** [Crash-safe image imports](completed/23-crash-safe-image-imports.md)
+  — a machine killed during an unpack heals itself on the next boot.
+* **24.** [A real repository and CI builds](completed/24-repo-and-ci.md) — a
+  public home for the code, and CI that builds every commit and boots
+  the result.
+* **25.** [The liken.sh website](completed/25-liken-sh-website.md) — the
+  project's domain serves a web page from the project's own cluster.
+* **26.** [The public release channel](completed/26-the-public-release-channel.md)
+  — digest-verified downloads from object storage, published by CI on
+  every version tag.
+* **27.** [Documentation on the website](completed/27-documentation-on-the-website.md)
+  — a user manual at liken.sh/docs/, with a CRD reference generated
+  from the schemas.
+* **28.** [Internet updates](completed/28-internet-updates.md) — every update
+  after the first boot comes from liken's public release channel.
+* **29.** [Root on disk](completed/29-root-on-disk.md) — the machine runs from
+  a read-only system image on its own disk instead of from RAM.
+* **30.** [Upgrades under BIOS](completed/30-bios-upgrades.md) — the upgrade
+  path's second actuator, with the same one-shot trial and fallback.
+* **31.** [TLS for the website](completed/31-website-tls.md) — liken.sh
+  answers over HTTPS with a certificate from Let's Encrypt.
+* **32.** [Hardware support in the image](completed/32-hardware-support-in-the-image.md)
+  — the whole kernel module tree, the firmware those modules request,
+  and CPU microcode.
+* **35.** [The machine reports its last crash](completed/35-crash-capture.md)
+  — the next boot preserves the kernel's pstore records and publishes
+  a summary as `status.lastCrash`.
+* **36.** [The hardware report](completed/36-the-hardware-report.md) — a
+  report boot that changes no disk and writes a proposed manifest to
+  the stick.
+* **37.** [A reinstall formats every partition](completed/37-a-reinstall-formats-every-partition.md)
+  — a reinstall erases every role it claims, and the proposed layout
+  scales with the disk.
+* **38.** [Device attributes and shared devices](completed/38-device-attributes-and-sharing.md)
+  — a published device says whether it may be shared and what kind of
+  node it delivers.
+* **40.** [Pod logs belong on a disk](completed/40-pod-logs-belong-on-a-disk.md)
+  — a bind mount puts the pod log directory on the podEphemeral role.
+* **41.** [Editing the network spec](completed/41-editing-the-network-spec.md)
+  — the boot records the network it came up under, so an edit to
+  `spec.network` drifts, stages, and applies.
 
-And the arc that looks past any single deployment, where liken stops
-being this checkout and becomes a public project. Milestone 22 was
-numbered before this arc existed; it belongs second in this order:
+## Rejected
 
-24. [x] [A real repository and CI builds](24-repo-and-ci.md) — a
-    public home for the code, and CI that fetches every pin, builds
-    every domain, runs the tests, assembles an image, and boots it.
-22. [x] [Public releases](22-public-releases.md) — releases of liken
-    itself, with no deployment baked in, and the utilities someone
-    needs to produce a cluster of their own from one.
-28. [x] [Internet updates](28-internet-updates.md) — the deployment
-    layer becomes a separate file on the boot slot, machines carry it
-    forward themselves, and every update after the first boot comes
-    straight from liken's public releases: nothing composed, nothing
-    hosted, per deployment.
-25. [x] [A website on liken.sh](25-liken-sh-website.md) — the
-    project's domain answers for people the way it already does for
-    CRDs: one page served by the project's own cluster, published by
-    push, never by rebuild or reboot.
-26. [x] [The public release channel](26-releases-on-the-website.md) —
-    the release channel gets its public home at releases.liken.sh:
-    digest-verified downloads from object storage, published by CI on
-    every version tag; release pages wait for the website.
-27. [x] [Documentation on the website](27-documentation-on-the-website.md) —
-    a user manual on liken.sh: hand-written guides in plain
-    technical English, a CRD reference generated from the schemas,
-    every page served as HTML and as Markdown, shipped as a
-    container image on every push.
-29. [x] [Root on disk](29-root-on-disk.md) — the OS stops living in
-    RAM: the system artifact becomes a read-only filesystem image
-    mounted from the boot slot, and a 1 GB machine becomes the lab's
-    standing proof that liken stays light.
-30. [x] [Upgrades under BIOS](30-bios-upgrades.md) — the upgrade
-    path's second actuator: where UEFI machines flip firmware
-    variables, BIOS machines rewrite what GRUB reads, with the same
-    one-shot trial and fallback, plus boot sectors that heal
-    themselves. What the liken.sh node needed before it could
-    upgrade itself.
-31. [x] [TLS for the website](31-website-tls.md) — liken.sh answers
-    over HTTPS via Let's Encrypt, sized for a 1 GB node: Traefik's
-    built-in ACME rather than cert-manager's three always-on
-    controllers, staged first, and a hard lesson in the node's
-    memory envelope.
-32. [x] [Batteries included](32-batteries-included.md) — one
-    milestone for everything the image carries so real hardware
-    works without extra configuration: the whole module tree, driver
-    firmware derived from it (nvidia excepted, for now), and
-    microcode as an early initrd, with the slot budget that carries
-    them. The published image becomes the one that boots bare metal.
-33. [ ] [Updating the machine's own firmware](33-firmware-updates.md) —
-    fwupd as an eventual feature slug: firmware updates using the
-    rolling-reboot orchestration that liken already has. Not inert
-    payload, but an agent, so it waits for bare-metal experience
-    rather than landing together with 32.
-34. [ ] [GPU add-ons](34-gpu-add-ons.md) — the stock image ships no
-    GPU compute stack; a machine that needs one declares an add-on:
-    a second squashfs on its boot slot, digest-pinned and fetched
-    like everything else there, overlay-mounted at boot. The first
-    add-on is NVIDIA compute (open modules built against the kernel
-    pin, GSP firmware, the userspace driver, the container toolkit;
-    CUDA stays in pods). Console firmware for motherboard graphics,
-    amdgpu included, stays stock.
-35. [x] [The machine reports its last crash](35-crash-capture.md) —
-    a kernel panic leaves its story in pstore, the firmware's own
-    store; the next boot preserves the records on machineState and
-    publishes the one-line summary as status.lastCrash. The full
-    trace stays on the machine; the watchdog for silent hangs is
-    deferred.
-36. [x] [The installer speaks, and the hardware reports](36-the-hardware-report.md)
-    — the stick's menu gives each machine an install entry and a
-    wipe-and-reinstall entry, and ends with a report boot that
-    changes no disk and writes a proposed manifest to the stick.
-    The installer holds its console for the person standing at it.
-37. [x] [A reinstall means what it says](37-a-reinstall-means-what-it-says.md)
-    — a partition this boot created is always formatted, so a
-    reinstall erases what it claims instead of remounting the
-    previous install's state. The proposed layout scales
-    clusterState with the disk, because that size is permanent.
-38. [x] [Devices that say what they are](38-devices-that-say-what-they-are.md)
-    — a published device says whether it may be shared, what kind of
-    node it delivers, and its whole class code, so a DeviceClass can
-    ask a real question. The hardware report names claimable
-    hardware it will not load. The manual gains the device story.
-39. [ ] [The port with the cable in it](39-the-port-with-the-cable-in-it.md)
-    — built and backed out: a manifest could name an interface by
-    MAC address as well as by kernel name. The hardware report
-    already reports the cabled port by name, so the machine answers
-    the question before anybody writes a manifest, and an optional
-    name cost the interfaces list its merge key.
-40. [x] [Pod logs belong on a disk](40-pod-logs-belong-on-a-disk.md)
-    — a bind mount puts pod logs on podEphemeral and leaves them at
-    /var/log/pods, so the bytes reach a disk while every reader
-    still finds them where Kubernetes puts them. Anything that
-    appends for as long as the machine runs belongs on a role, not
-    on the root's small write budget.
-41. [x] [An edit nobody applied](41-an-edit-nobody-applied.md)
-    — the boot records the network it came up under, so an edit to
-    spec.network drifts, stages, and reaches the machine the way the
-    schema always said it would. A field the cluster can edit needs a
-    record of what the boot did with it, or every verdict the
-    operator gives is a guess.
+* **39.** [Naming an interface by MAC address](rejected/39-naming-an-interface-by-mac-address.md)
+  — built, drilled, and removed. The hardware report already names the
+  cabled port, and an optional name cost the interfaces list its merge
+  key.
 
-Deferred until the fundamentals above are proven, the hardening
-tier: UKIs, dm-verity, secure boot, TPM-sealed secrets, and signed
-releases.
+## Not built yet
 
-# Open problems
+* **33.** [Updating the machine's own firmware](33-firmware-updates.md) —
+  fwupd as a feature slug, using the rolling-reboot orchestration that
+  liken already has. It waits for experience with bare metal.
+* **34.** [GPU add-ons](34-gpu-add-ons.md) — a machine that needs a GPU
+  compute stack declares an add-on: a second read-only image on its
+  boot slot. The first add-on would be NVIDIA compute.
 
-Questions we know we owe answers to, without pretending to have them
-yet:
+The hardening tier waits until the milestones above are proven: UKIs,
+dm-verity, secure boot, TPM-sealed secrets, and signed releases.
 
-* **Claiming unknown machines.** `liken.machine=` identifies machines
-  that someone declared ahead of time. The deferred half is the
-  machine that nobody declared: a Machine template carried on the
-  Cluster that an unknown node claims on first boot. It would be
-  named from a hardware fact (probably its MAC address, the one
-  identity that the network already forces to be unique) and
-  addressed from a pool (probably by ARP-probe claiming, in the same
-  spirit as storage claiming: probe reality, take what is free,
-  refuse ambiguity). This waits until the declared-machine flow is
-  proven.
+## Open problems
+
+These are the questions that liken owes an answer to. It does not have
+one yet.
+
+**Claiming unknown machines.** `liken.machine=` identifies a machine
+that somebody declared before it booted. The other half is the machine
+that nobody declared. A Machine template on the Cluster would let an
+unknown node claim an identity on its first boot. The node would take
+its name from a hardware fact, probably its MAC address, because the
+network already forces that address to be unique. It would take its
+address from a pool, probably by ARP-probe claiming, in the same way
+that storage claiming works: probe reality, take what is free, and
+refuse an ambiguous case. This waits until the declared-machine flow is
+proven.

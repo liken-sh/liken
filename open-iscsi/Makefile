@@ -1,5 +1,5 @@
 # The open-iscsi domain: the iSCSI initiator userspace, the host half
-# of the iscsi feature (plans/17-network-storage-clients.md).
+# of the iscsi feature (plans/completed/17-network-storage-clients.md).
 #
 # Two artifacts. The static binaries (iscsid and iscsiadm) come from
 # fetch.sh, which builds them from pinned source inside a pinned

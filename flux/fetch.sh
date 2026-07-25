@@ -4,7 +4,7 @@
 # floor components, the source and kustomize controllers.
 #
 # The flux feature follows liken's seed pattern (the plan document
-# plans/14-gitops-from-first-boot.md tells the whole story). The
+# plans/completed/14-gitops-from-first-boot.md tells the whole story). The
 # image plants the engine exactly once, and the git repository owns
 # it from then on: the repository carries its own copy of these
 # manifests inside the synced path, so the first sync upgrades the

@@ -137,7 +137,7 @@ jobs:
               --retry-all-errors "$@"
           }
           echo "checking the front page"
-          fetch https://liken.sh/ | grep -q "boots a machine straight"
+          fetch https://liken.sh/ | grep -q "boots a machine"
           echo "checking a manual page"
           fetch https://liken.sh/docs/guides/install/ \
             | grep -q "<title>Install a cluster"

@@ -1,19 +1,20 @@
 # The Cluster API, declared to Kubernetes.
 #
-# The second of liken's two resource kinds: a Machine describes one
-# computer, and a Cluster describes what the machines form together.
-# The split follows who must agree on what. Every fact here is one
-# of two kinds. Either the whole fleet holds the fact identically
-# (which machines run control planes, the address ranges pods and
-# services live in), or the fact belongs to the group and no single
-# machine owns it (the endpoint followers join through).
+# This is the second of liken's two resource kinds. A Machine
+# describes one computer, and a Cluster describes what the machines
+# form together. The split follows who must agree on what. Every
+# fact here is one of two kinds. Either the whole fleet holds the
+# fact identically (which machines run control planes, the address
+# ranges that pods and services live in), or the fact belongs to the
+# group and no single machine owns it (the endpoint that followers
+# join through).
 #
-# Like the Machine CRD, this file lands in k3s's auto-deploy
-# manifests directory and applies at every startup. The liken
-# operator seeds the in-cluster Cluster object from the image's
-# /etc/liken/cluster.yaml (every machine's operator tries; the first
-# one succeeds, and an already-seeded cluster is left exactly as it
-# stands, kubectl edits and all).
+# Like the Machine CRD, this file goes in k3s's auto-deploy manifests
+# directory and applies at every startup. The liken operator seeds
+# the in-cluster Cluster object from the image's
+# /etc/liken/cluster.yaml. Every machine's operator tries to seed it,
+# the first one succeeds, and an already-seeded cluster stays exactly
+# as it stands, including kubectl edits.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -36,10 +37,10 @@ spec:
       served: true
       storage: true
       # The status subresource splits the object the same way the
-      # Machine's does. A person, or one day a git repository,
-      # declares the spec. The leaders' fleet sweep observes the
-      # status. The API server enforces that neither write path can
-      # touch the other's half.
+      # Machine's does. A person, or a git repository, declares the
+      # spec. The leaders' fleet sweep observes the status. The API
+      # server enforces that neither write path can touch the other's
+      # half.
       subresources:
         status: {}
       # What `kubectl get clusters` prints, without -o yaml.
@@ -47,21 +48,21 @@ spec:
         - name: Status
           type: string
           jsonPath: .status.phase
-        # The headcount: how many machines are fully healthy out of
-        # how many exist, as the leaders last observed it.
+        # How many machines are fully healthy, out of how many exist,
+        # as the leaders last observed.
         - name: Machines
           type: string
           jsonPath: .status.machines.summary
-        # The upgrade at a glance, in three columns. VERSION is the
-        # version the fleet is being moved toward (declared, one
-        # edit). NEWEST is the newest version the catalog offers
-        # (observed by the sweep). AVAILABLE is the latest version
-        # the channel itself announces (polled from its
-        # channel.yaml). VERSION behind NEWEST means a cataloged
-        # release that nobody has asked for yet. NEWEST behind
-        # AVAILABLE means the channel holds something this cluster
-        # has not yet cataloged. The Machine listing's LIKEN column
-        # shows the rollout moving machines onto the target.
+        # The upgrade in three columns. VERSION is the version that
+        # the fleet moves toward, declared in one edit. NEWEST is the
+        # newest version in the catalog, observed by the sweep.
+        # AVAILABLE is the latest version that the channel itself
+        # announces, polled from its channel.yaml. VERSION behind
+        # NEWEST means a cataloged release that nobody has asked for
+        # yet. NEWEST behind AVAILABLE means that the channel holds a
+        # release that this cluster has not cataloged yet. The
+        # Machine listing's LIKEN column shows the rollout as it
+        # moves machines onto the target.
         - name: Version
           type: string
           jsonPath: .spec.version
@@ -84,22 +85,31 @@ spec:
         openAPIV3Schema:
           type: object
           description: >-
-            A Cluster is what liken machines form together: the
-            topology (which machines run control planes) and the
-            network facts every node must agree on.
+            A Cluster is the group that liken machines form together.
+            It holds the topology, which is the set of machines that
+            run control planes, and the network facts that every node
+            must agree on.
           properties:
             spec:
               type: object
-              # The one cross-field rule the Cluster carries: a target
-              # version must name a release that the catalog actually
-              # lists. Both fields live on this same object, so the
-              # system can fully check the rule at admission. This
-              # refuses a mistyped target while the kubectl edit is
-              # still open, instead of letting it surface minutes
-              # later as a condition on every machine. (Contrast the
-              # Machine's storage rules, which compare aspiration
-              # against observed status, because the truth lives off
-              # the object.)
+              description: >-
+                The declared state of this cluster: the release the
+                fleet runs, which machines lead it, the network and the
+                time sources that every node agrees on, the limits a
+                rollout keeps to, the optional features, the registries,
+                and the k3s runtime settings. One document serves every
+                machine, so each field here states a fact that the whole
+                fleet shares. A fact about one machine belongs on that
+                Machine instead.
+              # The Cluster's one cross-field rule: a target version
+              # must name a release that the catalog lists. Both
+              # fields are on this same object, so the API server can
+              # check the rule at admission. This refuses a mistyped
+              # target while the kubectl edit is still open, instead
+              # of letting it appear minutes later as a condition on
+              # every machine. The Machine's storage rules work
+              # differently. They compare the declaration against the
+              # observed status, because the truth is off the object.
               x-kubernetes-validations:
                 - rule: >-
                     !has(self.version) || (has(self.releases) &&
@@ -107,78 +117,78 @@ spec:
                     self.releases.catalog.exists(entry, entry.version == self.version))
                   message: >-
                     spec.version must name a release listed in
-                    spec.releases.catalog; publish the release and add
+                    spec.releases.catalog. Publish the release and add
                     its catalog entry first
-                # Origin's one legal transition. The rule is checked
-                # here at the spec level, because it needs to see
-                # absence. A deployment declares adoption at the
-                # document's birth, in the seed cluster.yaml baked
-                # into an adopted image. A cluster that has ever been
-                # founded can only stay founded. Referencing oldSelf
+                # The one legal transition for origin. The rule is at
+                # the spec level, because it must see the absence of
+                # the field. A deployment declares adoption when the
+                # document is created, in the seed cluster.yaml that
+                # an adopted image carries. A cluster that was ever
+                # founded stays founded. The reference to oldSelf
                 # makes this a transition rule, so creation stays
-                # unconstrained. This is exactly how a document born
-                # adopted gets in.
+                # unconstrained, and a document that is created as
+                # adopted is admitted.
                 - rule: >-
                     !has(self.origin) || self.origin == 'Founded' ||
                     (has(oldSelf.origin) && oldSelf.origin == 'Adopted')
                   message: >-
-                    origin: Adopted is declared when the cluster
-                    document is born, never by editing a founded
-                    cluster; the only legal edit is the promotion,
+                    declare origin: Adopted when the cluster document
+                    is created; you cannot set it by editing a founded
+                    cluster. The only legal edit is the promotion from
                     Adopted to Founded
               properties:
                 version:
                   type: string
                   maxLength: 64
-                  # liken versions are a calendar date and a serial,
+                  # A liken version is a calendar date and a serial,
                   # yyyy.mm.dd-nnn. The date says when the release
-                  # was cut, and deliberately nothing else (the
-                  # release document's components record what
-                  # shipped). The pattern catches a typo at
-                  # admission, the way the digest pattern below does,
-                  # instead of leaving a machine unable to find the
-                  # release it was asked to run.
+                  # was cut, and says nothing else. The release
+                  # document's components record what shipped. The
+                  # pattern catches a typo at admission, as the
+                  # digest pattern below does, instead of leaving a
+                  # machine unable to find the release it was asked
+                  # to run.
                   pattern: ^\d{4}\.\d{2}\.\d{2}-\d{3}$
                   description: >-
-                    The fleet's target liken release: the one field an
-                    upgrade edits. Machines carry no version in their
-                    specs. Each machine's operator compares its
-                    running version (status.version.liken) against
-                    this target, and moves toward it through the same
-                    staged-change-and-granted-reboot machinery every
-                    other change uses. Must name an entry in
-                    releases.catalog.
+                    The liken release that the fleet moves toward. An
+                    upgrade edits this one field. A Machine spec holds
+                    no version of its own. Each machine's operator
+                    compares its running version
+                    (status.version.liken) with this target, and moves
+                    toward the target with the same staged change and
+                    granted reboot that every other change uses. This
+                    value must name an entry in releases.catalog.
                 releases:
                   type: object
                   description: >-
                     Where release artifacts come from, and which
-                    releases exist. Like version, the operator reads
-                    this live on every pass, and deliberately excludes
-                    it from the cluster document that machines stage
-                    and reboot into. Publishing a release must move
-                    machines through downloads and sequenced reboots.
-                    It must never stage a fleet-wide configuration
-                    reboot of its own. The fleet observer polls the
-                    channel's root document on a lazy interval; to
-                    request an immediate poll, set the Cluster's
-                    liken.sh/check-releases annotation to any new
-                    value, such as a timestamp. The content itself
-                    means nothing: the edit is the request. This is
-                    an annotation rather than a spec field, because
-                    it asks for one action instead of declaring a
-                    standing state, the same shape kubectl uses to
-                    request a Deployment rollout.
+                    releases exist. The operator reads this section
+                    live on every pass, as it reads version. The
+                    cluster document that machines stage and reboot
+                    into does not include it. A published release must
+                    move machines through downloads and sequenced
+                    reboots. It must never stage a configuration
+                    reboot of the whole fleet by itself. The fleet
+                    observer polls the channel's root document at a
+                    slow interval. To request an immediate poll, set
+                    the Cluster's liken.sh/check-releases annotation
+                    to any new value, for example a timestamp. The
+                    value itself means nothing: the edit is the
+                    request. This is an annotation and not a spec
+                    field, because it asks for one action and does not
+                    declare a standing state. kubectl uses the same
+                    shape to request a Deployment rollout.
                   properties:
                     source:
                       type: string
                       maxLength: 2048
                       pattern: ^https?://.+$
                       description: >-
-                        The base URL releases are served under. A
-                        release's artifacts live at
-                        `<source>/<version>/`, starting with
+                        The base URL that serves the releases. A
+                        release's artifacts are at
+                        `<source>/<version>/`. The first of them is
                         release.yaml, the document that names every
-                        artifact by digest.
+                        artifact by its digest.
                     catalog:
                       type: array
                       # A map keyed by version: one entry per release.
@@ -187,13 +197,13 @@ spec:
                       x-kubernetes-list-map-keys: [version]
                       maxItems: 256
                       description: >-
-                        The releases machines may be asked to run.
-                        Each entry's digest is the sha256 of that
-                        release's release.yaml bytes, and it is the
-                        root of the trust chain: this API names the
-                        document, the document names the artifacts,
-                        and the system checks every downloaded byte
-                        against one or the other.
+                        The releases that machines can be asked to
+                        run. Each entry's digest is the sha256 of the
+                        bytes of that release's release.yaml, and it
+                        is the start of the trust chain. This API
+                        names the document, the document names the
+                        artifacts, and the system compares every
+                        downloaded byte with one of the two.
                       items:
                         type: object
                         required: [version, digest]
@@ -201,8 +211,8 @@ spec:
                           version:
                             type: string
                             maxLength: 64
-                            # The same grammar spec.version enforces:
-                            # a calendar date and serial.
+                            # The same grammar that spec.version
+                            # enforces: a calendar date and a serial.
                             pattern: ^\d{4}\.\d{2}\.\d{2}-\d{3}$
                           digest:
                             type: string
@@ -215,37 +225,40 @@ spec:
                   enum: [Founded, Adopted]
                   description: >-
                     How the cluster's datastore came to exist.
-                    Founded (the default when unset) means liken
-                    created it, through the founding leader's
-                    cluster-init. Adopted means the datastore already
-                    exists in a cluster liken did not create. Machines
-                    built with that cluster's identity join it as
-                    members, including the founding leader, and none
-                    may initialize a new one. A deployment declares
-                    adoption when the document is born. The one legal
-                    edit is the promotion, Adopted to Founded, made
-                    after the last foreign member is gone. Promotion
-                    changes nothing on a running fleet, because k3s
-                    ignores cluster-init when the datastore already
-                    exists. It matters when the cluster is rebuilt
-                    from scratch: a founded cluster's founder may
-                    create the datastore again.
+                    Founded, the default when the field is unset,
+                    means that liken created the datastore, through
+                    the founding leader's cluster-init. Adopted means
+                    that the datastore is already in a cluster that
+                    liken did not create. Machines built with that
+                    cluster's identity join it as members, and this
+                    includes the founding leader. No machine
+                    initializes a new datastore. A deployment declares
+                    adoption when the document is created. The only
+                    legal edit is the promotion from Adopted to
+                    Founded, made after the last foreign member is
+                    gone. Promotion changes nothing on a running
+                    fleet, because k3s ignores cluster-init when the
+                    datastore already exists. Promotion is important
+                    when the cluster is built again from nothing: the
+                    founder of a founded cluster can create the
+                    datastore again.
                 leaders:
                   type: array
-                  # Atomic, not a set: order carries meaning. The
+                  # Atomic, not a set: the order carries meaning. The
                   # first entry is the founding leader, the machine
                   # that renders cluster-init and creates the
-                  # embedded etcd datastore (or, on the migration
-                  # boot, converts to it). (In an adopted cluster
-                  # nobody creates a datastore. The founder joins
-                  # through the endpoint like every other machine.)
+                  # embedded etcd datastore, or converts to it on the
+                  # migration boot. In an adopted cluster, no machine
+                  # creates a datastore. The founder joins through
+                  # the endpoint like every other machine.
                   x-kubernetes-list-type: atomic
                   description: >-
                     The machines that run control planes, by Machine
-                    name. A machine derives its role from this list:
-                    named here means leader, and absent means
-                    follower. The first entry is the founding leader,
-                    whose address the other leaders join through.
+                    name. A machine gets its role from this list. A
+                    machine that is named here is a leader, and a
+                    machine that is absent is a follower. The first
+                    entry is the founding leader, and the other
+                    leaders join through its address.
                   items:
                     type: string
                     maxLength: 253
@@ -254,87 +267,87 @@ spec:
                   maxLength: 2048
                   pattern: ^https://.+$
                   description: >-
-                    The URL followers join the cluster through, for
-                    example https://10.10.0.1:6443. With one leader
-                    this is that leader's address on the node
-                    network.
+                    The URL that followers join the cluster through,
+                    for example https://10.10.0.1:6443. If the cluster
+                    has one leader, this is that leader's address on
+                    the node network.
                 network:
                   type: object
                   description: >-
-                    The cluster's address plan: facts k3s requires
-                    every node to agree on, declared once here rather
-                    than repeated per machine. Unset fields fall back
-                    to k3s's defaults. Every field is immutable once
-                    set. k3s cannot change any of them on a live
-                    cluster, so an edit here would change nothing
-                    while claiming otherwise, and the mismatch would
-                    only surface at the next reboot. The CEL
-                    transition rules (self == oldSelf) evaluate only
-                    when the old value exists, which is exactly what
-                    "immutable once set" means: a cluster born
-                    without a field may still gain it, and from then
-                    on the field holds. (oldSelf is the right
-                    comparison here. The Machine's grow-only storage
-                    rules compare against status instead, precisely
-                    so that a declared size the machine could not
-                    satisfy can be edited back down to reality. These
-                    fields need no such escape, because their real
-                    values never change, so there is never a failed
-                    declaration to walk back.)
+                    The cluster's address plan: the facts that k3s
+                    requires every node to agree on, declared once
+                    here and not repeated on each machine. An unset
+                    field keeps k3s's own default. Every field here is
+                    immutable after it is set, except nodePortCIDRs.
+                    k3s cannot change these values on a live cluster,
+                    so an edit would change nothing, and the
+                    difference would appear only at the next reboot.
+                    The CEL transition rules (self == oldSelf) run
+                    only when the old value exists, which is what
+                    "immutable after it is set" means: a cluster that
+                    starts without a field can still get the field,
+                    and from then on the field holds. These rules
+                    compare with oldSelf. The Machine's grow-only
+                    storage rules compare with status instead, so that
+                    a declared size the machine cannot satisfy can be
+                    edited back down to the real size. These fields
+                    need no such escape, because their real values
+                    never change, so there is never a failed
+                    declaration to reverse.
                   properties:
                     nodeCIDR:
                       type: string
                       maxLength: 64
                       pattern: ^[0-9a-fA-F:.]+/[0-9]{1,3}$
                       description: >-
-                        The subnet the nodes address each other on.
-                        The machine's interface whose address falls
-                        inside this subnet carries cluster traffic,
-                        and that address becomes the machine's node
-                        IP.
+                        The subnet that the nodes use to address each
+                        other. On each machine, the interface with an
+                        address inside this subnet carries the cluster
+                        traffic, and that address becomes the
+                        machine's node IP.
                       x-kubernetes-validations:
                         - rule: self == oldSelf
-                          message: nodeCIDR is immutable once set; re-addressing the node network means new Machine manifests, not a Cluster edit
+                          message: nodeCIDR is immutable after it is set; a new address plan for the node network needs new Machine manifests, not a Cluster edit
                     clusterCIDR:
                       type: string
                       maxLength: 64
                       pattern: ^[0-9a-fA-F:.]+/[0-9]{1,3}$
                       description: >-
-                        The range pod addresses are drawn from
-                        (k3s default 10.42.0.0/16).
+                        The range that pod addresses come from. The
+                        k3s default is 10.42.0.0/16.
                       x-kubernetes-validations:
                         - rule: self == oldSelf
-                          message: clusterCIDR is immutable once set; k3s cannot renumber pod addresses on a live cluster
+                          message: clusterCIDR is immutable after it is set; k3s cannot renumber pod addresses on a live cluster
                     serviceCIDR:
                       type: string
                       maxLength: 64
                       pattern: ^[0-9a-fA-F:.]+/[0-9]{1,3}$
                       description: >-
-                        The range service addresses are drawn from
-                        (k3s default 10.43.0.0/16).
+                        The range that service addresses come from.
+                        The k3s default is 10.43.0.0/16.
                       x-kubernetes-validations:
                         - rule: self == oldSelf
-                          message: serviceCIDR is immutable once set; k3s cannot renumber service addresses on a live cluster
+                          message: serviceCIDR is immutable after it is set; k3s cannot renumber service addresses on a live cluster
                     clusterDNS:
                       type: string
                       maxLength: 64
                       pattern: ^[0-9a-fA-F:.]+$
                       description: >-
                         The service address of the cluster's DNS
-                        resolver, inside serviceCIDR (k3s default
-                        10.43.0.10).
+                        resolver. The address is inside serviceCIDR.
+                        The k3s default is 10.43.0.10.
                       x-kubernetes-validations:
                         - rule: self == oldSelf
-                          message: clusterDNS is immutable once set; every pod's resolv.conf already points at it
+                          message: clusterDNS is immutable after it is set; every pod's resolv.conf already points at it
                     clusterDomain:
                       type: string
                       maxLength: 253
                       description: >-
-                        The DNS suffix cluster-internal names live
-                        under (k3s default cluster.local).
+                        The DNS suffix for the names inside the
+                        cluster. The k3s default is cluster.local.
                       x-kubernetes-validations:
                         - rule: self == oldSelf
-                          message: clusterDomain is immutable once set; certificates and service names throughout the cluster embed it
+                          message: clusterDomain is immutable after it is set; certificates and service names throughout the cluster contain it
                     nodePortCIDRs:
                       type: array
                       maxItems: 16
@@ -343,194 +356,194 @@ spec:
                         maxLength: 64
                         pattern: ^[0-9a-fA-F:.]+/[0-9]{1,3}$
                       description: >-
-                        The networks a NodePort service answers on. A
-                        NodePort is a port opened on the machines
-                        themselves, and which of a machine's addresses
-                        it answers on is a choice. Left unset, a
-                        NodePort answers on the node IP alone: the
-                        address on nodeCIDR, where the rest of the
+                        The networks that a NodePort service answers
+                        on. A NodePort is a port that the machines
+                        themselves open, and the machine addresses it
+                        answers on are a choice. If this list is
+                        unset, a NodePort answers on the node IP only:
+                        the address on nodeCIDR, where the rest of the
                         cluster expects to find this machine. Set this
-                        when the traffic arrives somewhere else, which
-                        is the ordinary case for a cluster reached
-                        over a tunnel or a second segment. Each entry
-                        is a subnet, and a NodePort answers on every
-                        local address inside any of them. The list
-                        replaces the default rather than adding to it,
-                        so the document states the whole answer: a
-                        list that omits nodeCIDR closes NodePorts on
-                        the node network, including for the other
-                        machines in the cluster. Every other field
-                        here is immutable, because changing one
-                        renumbers the cluster. This one is not. It
-                        only widens or narrows which local addresses
-                        answer, it reverses, and k3s reads it when its
-                        process starts, so an edit converges by
-                        restarting k3s in place on each machine
-                        without rebooting it.
+                        list when the traffic arrives at a different
+                        address, which is the usual case for a cluster
+                        that is reached over a tunnel or a second
+                        segment. Each entry is a subnet, and a
+                        NodePort answers on every local address inside
+                        any of them. The list replaces the default and
+                        does not add to it, so the document states the
+                        whole answer: a list without nodeCIDR closes
+                        the NodePorts on the node network, also for
+                        the other machines in the cluster. The other
+                        fields here are immutable, because a change to
+                        one of them renumbers the cluster. This field
+                        is not immutable. It only increases or
+                        decreases the set of local addresses that
+                        answer, and the change reverses. k3s reads
+                        this list when its process starts, so an edit
+                        converges when k3s restarts in place on each
+                        machine, with no reboot.
                 time:
                   type: object
                   description: >-
                     The cluster's time hierarchy: where the leaders
-                    get their time. Only the leaders consult it.
-                    Followers sync from the leaders themselves, so
-                    time flows upstreams, then leaders, then everyone
-                    else.
+                    get their time. Only the leaders read this
+                    section. The followers sync from the leaders
+                    themselves, so time moves from the upstreams to
+                    the leaders, and then to every other machine.
                   properties:
                     upstreams:
                       type: array
                       # Atomic: source order is preference order.
                       x-kubernetes-list-type: atomic
                       description: >-
-                        The NTP servers the cluster's servers sync
-                        from, as hostnames or addresses. There is no
-                        default, on purpose: volunteering a
-                        deployment's machines to a public pool is the
-                        deployment's choice to make. Empty means the
-                        fleet free-runs. The machines stay consistent
-                        with each other, but they are correct only if
-                        the hardware clocks happen to be correct too.
+                        The NTP servers that the leaders sync from, as
+                        hostnames or addresses. There is no default,
+                        and that is deliberate: a deployment decides
+                        whether to give its machines to a public pool.
+                        An empty list makes the fleet free-run. The
+                        machines stay consistent with each other, but
+                        they are correct only if the hardware clocks
+                        are also correct.
                       items:
                         type: string
                         maxLength: 253
                 disruption:
                   type: object
                   description: >-
-                    How much of the fleet may be down at once when the
-                    cluster sequences reboots: the machine-level
-                    equivalent of a workload's PodDisruptionBudget,
-                    reduced to one number. Staged changes that need a
-                    reboot wait for the cluster to grant each machine
-                    a turn (a RebootApproved condition written onto
-                    the Machine), and this budget is how many turns
-                    may be outstanding. The count includes machines
-                    that are down for any other reason, so a fleet
-                    that already has machines down pauses its own
-                    rollout.
+                    How much of the fleet can be down at the same time
+                    when the cluster sequences reboots. This is the
+                    machine-level equivalent of a workload's
+                    PodDisruptionBudget, as one number. A staged
+                    change that needs a reboot waits for the cluster
+                    to grant the machine a turn, which is a
+                    RebootApproved condition written onto the Machine.
+                    This budget sets how many turns can be open at
+                    once. The count includes the machines that are
+                    down for any other reason, so a fleet that already
+                    has machines down pauses its own rollout.
                   properties:
                     maxUnavailable:
                       type: integer
                       minimum: 1
                       default: 1
                       description: >-
-                        How many machines may be unavailable at once,
-                        planned and unplanned together. Defaults to
-                        one, the safest rollout. The leaders keep a
-                        stricter automatic floor that this number
-                        cannot raise: only one leader is ever down at
-                        a time, because the datastore keeps quorum
-                        only while a majority of leaders is up, and
-                        no policy setting can change that arithmetic.
+                        How many machines can be unavailable at the
+                        same time, planned and unplanned together. The
+                        default is one, the safest rollout. The
+                        leaders keep a stricter automatic floor that
+                        this number cannot raise: only one leader is
+                        down at a time. The datastore keeps quorum
+                        only while a majority of the leaders is up,
+                        and no policy setting changes that arithmetic.
                 features:
                   type: object
                   description: >-
-                    The cluster's opt-ins from liken's curated feature
+                    The cluster's opt-ins from liken's feature
                     vocabulary: optional capabilities that the fleet
-                    as a whole offers, beyond the minimum viable
-                    cluster. Keyed by feature slug. The key's presence
-                    is the opt-in, and a feature's zero configuration
-                    is {}.
+                    as a whole offers, beyond the minimum cluster. The
+                    map is keyed by feature slug. The presence of a
+                    key is the opt-in, and a feature that takes no
+                    parameters has the configuration {}.
                     traefik is k3s's bundled ingress controller.
-                    servicelb is klipper-lb, which realizes Services
-                    of type LoadBalancer on the nodes' own addresses.
+                    servicelb is klipper-lb, which serves Services of
+                    type LoadBalancer on the nodes' own addresses.
                     metrics-server is the aggregated API behind
-                    `kubectl top`. helm is the Helm controller
-                    embedded in the k3s server process, which renders
-                    HelmChart resources into workloads. Declaring
-                    traefik enables helm automatically, because k3s
-                    deploys Traefik through exactly such a resource.
-                    network-policy is the controller that turns
-                    NetworkPolicy resources into packet filtering.
-                    Without it, the API accepts those resources, but
-                    nothing enforces them, which is the flannel CNI's
-                    own behavior. iscsi is the host-side iSCSI
-                    initiator: static open-iscsi binaries, the
-                    iscsi_tcp kernel module, an initiator name
-                    derived from each machine's name, and an iscsid
-                    DaemonSet. This is the host contract that CSI
-                    drivers like synology-csi depend on. nfs is the
-                    NFSv4 client: a static mount.nfs and the nfsv4
-                    kernel module, with no daemons, and v4 only.
-                    flux is GitOps sync through Flux: the fleet's
-                    declared state lives in a git repository, and
+                    `kubectl top`. helm is the Helm controller inside
+                    the k3s server process, which turns HelmChart
+                    resources into workloads. A declared traefik
+                    enables helm automatically, because k3s deploys
+                    Traefik through such a resource. network-policy is
+                    the controller that turns NetworkPolicy resources
+                    into packet filtering. Without it, the API accepts
+                    those resources, but nothing enforces them, which
+                    is the behavior of the flannel CNI itself. iscsi
+                    is the host-side iSCSI initiator: static
+                    open-iscsi binaries, the iscsi_tcp kernel module,
+                    an initiator name made from each machine's name,
+                    and an iscsid DaemonSet. This is the host contract
+                    that CSI drivers such as synology-csi need. nfs is
+                    the NFSv4 client: a static mount.nfs and the nfsv4
+                    kernel module, with no daemons, and version 4
+                    only. flux is GitOps sync through Flux: the
+                    fleet's declared state is in a git repository, and
                     the cluster applies what the repository holds.
-                    flux is the vocabulary's first parameterized
-                    feature. Its repository parameter is required:
-                    the git URL the fleet syncs from, for example
-                    ssh://git@forge.example/fleet.git. Its path
-                    (default ".") and branch (default "main")
-                    parameters choose which part of the repository
-                    this cluster syncs. Its knownHosts parameter is
-                    the forge's SSH host keys in known_hosts form,
-                    one line per key: public material that lets the
-                    first clone verify the forge, so it rides the
-                    spec rather than a Secret. The repository is expected
-                    to be private, and the cluster mints its own
-                    SSH deploy key: the private half never leaves
-                    the cluster, and status.flux.publicKey carries
-                    the half to register at the forge. Removing
-                    flux from this object retracts the feature
-                    whole: the sync
-                    stops, the engine and its namespace go, and the
-                    deploy key goes with them, so re-enabling mints
-                    a fresh key to register. What the repository
-                    deployed stays running; retraction stops the
-                    sync, it does not undeploy. The first
-                    three features (traefik, servicelb,
-                    metrics-server) are components the k3s binary
-                    already bundles, and liken disables them by
-                    default on principle: anything beyond the
-                    control plane should be a declared, visible
-                    workload, and declaring it here is that
-                    declaration. k3s reads the features only when
-                    its process starts, so a features-only edit
-                    converges by restarting k3s in place on each
-                    machine. The restart is sequenced through the
-                    same one-leader-at-a-time turns as a reboot,
-                    but the machine, and its pods, stay up.
-                  # The schema is a map with validation rules, rather
-                  # than named per-slug properties, and this choice
-                  # matters. Named properties look natural, but the
-                  # API server prunes unknown fields before
-                  # validation ever runs. A misspelled slug in a
-                  # patch would then vanish silently, the exact
-                  # failure a declared document exists to prevent,
-                  # and a CEL rule could never see it. Map keys are
-                  # never pruned, so the rules below run against
-                  # exactly what was sent, and refuse the two
+                    flux is the first feature in the vocabulary that
+                    takes parameters. Its repository parameter is
+                    required: the git URL the fleet syncs from, for
+                    example ssh://git@forge.example/fleet.git. Its
+                    path parameter (default ".") and its branch
+                    parameter (default "main") select the part of the
+                    repository that this cluster syncs. Its knownHosts
+                    parameter holds the forge's SSH host keys in
+                    known_hosts form, one line for each key. These
+                    keys are public material that lets the first clone
+                    verify the forge, so they go in the spec and not
+                    in a Secret. The repository is expected to be
+                    private, and the cluster makes its own SSH deploy
+                    key. The private half never leaves the cluster,
+                    and status.flux.publicKey carries the half to
+                    register at the forge. If you remove flux from
+                    this object, the cluster retracts the whole
+                    feature: the sync stops, the engine and its
+                    namespace go, and the deploy key goes with them,
+                    so a new opt-in makes a new key to register. What
+                    the repository deployed stays in operation.
+                    Retraction stops the sync; it does not remove the
+                    workloads. The first three features (traefik,
+                    servicelb, and metrics-server) are components that
+                    the k3s binary already includes, and liken
+                    disables them by default: anything more than the
+                    control plane must be a declared, visible
+                    workload, and this field is that declaration. k3s
+                    reads the features only when its process starts,
+                    so an edit to the features alone converges when
+                    k3s restarts in place on each machine. The restart
+                    is sequenced through the same turns as a reboot,
+                    one leader at a time, but the machine, and its
+                    pods, stay up.
+                  # The schema is a map with validation rules, and not
+                  # named properties for each slug. Named properties
+                  # look natural, but the API server prunes unknown
+                  # fields before validation runs. A misspelled slug
+                  # in a patch would then disappear without a message,
+                  # the exact failure that a declared document
+                  # prevents, and a CEL rule could never see it. Map
+                  # keys are never pruned, so the rules below run
+                  # against exactly what was sent, and refuse the two
                   # mistakes by name. The parity test in
-                  # machine/features_test.go holds the first rule's
+                  # cluster/features_test.go holds the first rule's
                   # vocabulary to the table in cluster/features.go.
                   x-kubernetes-validations:
                     - rule: "self.all(slug, slug in ['traefik', 'servicelb', 'metrics-server', 'helm', 'network-policy', 'iscsi', 'nfs', 'flux'])"
                       message: >-
-                        unknown feature; the vocabulary is
+                        unknown feature. The vocabulary is
                         traefik, servicelb, metrics-server, helm,
                         network-policy, iscsi, nfs, flux
                     # The dyn() casts in the rules below are the same
-                    # arrangement the registries mirror schema uses:
-                    # CEL types these values as map(string, string),
-                    # a type it refuses to compare with null at
-                    # compile time, and the cast is what lets the
+                    # arrangement that the registries mirror schema
+                    # uses. CEL types these values as map(string,
+                    # string), a type it refuses to compare with null
+                    # at compile time, and the cast is what lets the
                     # null checks compile.
                     - rule: "self.all(slug, dyn(self[slug]) != null)"
                       message: >-
                         a null feature is neither enabled nor
-                        disabled; presence is the opt-in, so write
-                        {} to enable a feature or remove its key
+                        disabled. Presence is the opt-in, so write
+                        {} to enable a feature, or remove its key
                         entirely
-                    # A parameterless feature's configuration must
-                    # stay exactly {}. Without this rule, a patch
-                    # guessing at {replicas: 2} would count as an
-                    # opt-in, with the guess quietly ignored. The
-                    # null guard keeps this rule from evaluating a
-                    # null value; the rule above already refuses it
-                    # with the better message.
+                    # The configuration of a feature that takes no
+                    # parameters must stay exactly {}. Without this
+                    # rule, a patch that guesses at {replicas: 2}
+                    # would count as an opt-in, and the guess would be
+                    # ignored. The null guard keeps this rule from
+                    # evaluating a null value; the rule above already
+                    # refuses that value with a better message.
                     - rule: "self.all(slug, dyn(self[slug]) == null || slug in ['flux'] || self[slug].size() == 0)"
                       message: >-
-                        only flux takes parameters; every other
+                        only flux takes parameters. Every other
                         feature's configuration is exactly {}
-                    # flux's shape: repository is required, and every
-                    # parameter must be one the vocabulary defines.
+                    # The shape of flux: repository is required, and
+                    # every parameter must be one that the vocabulary
+                    # defines.
                     - rule: "!('flux' in self) || dyn(self['flux']) == null || ('repository' in self['flux'] && self['flux'].all(param, param in ['repository', 'path', 'branch', 'knownHosts']))"
                       message: >-
                         flux requires the repository parameter (the
@@ -541,78 +554,78 @@ spec:
                     type: object
                     # Nullable, so that an explicit null survives
                     # decoding long enough for the rule above to
-                    # refuse it with a message. A non-nullable value
-                    # here would be dropped by the decoder as if
-                    # unset, before validation ever saw it, and a
-                    # bare `traefik:` in hand-written YAML would
-                    # quietly mean nothing.
+                    # refuse it with a message. A value that is not
+                    # nullable here is dropped by the decoder as if it
+                    # were unset, before validation runs, and a bare
+                    # `traefik:` in hand-written YAML would mean
+                    # nothing.
                     nullable: true
                     # A feature's configuration is a map of string
-                    # parameters, never a schema of named properties,
-                    # for the same reason the features object itself
-                    # is a map: the API server prunes unknown named
-                    # properties before validation runs, so a
-                    # misspelled parameter would vanish silently.
-                    # Map keys are never pruned. Every parameter
-                    # survives to the rules above, which refuse the
-                    # mistakes by name. The parity test in
-                    # cluster/features_test.go holds those rules to
-                    # the vocabulary table in cluster/features.go.
+                    # parameters, and never a schema of named
+                    # properties, for the same reason that the
+                    # features object itself is a map: the API server
+                    # prunes unknown named properties before
+                    # validation runs, so a misspelled parameter would
+                    # disappear without a message. Map keys are never
+                    # pruned. Every parameter reaches the rules above,
+                    # which refuse the mistakes by name. The parity
+                    # test in cluster/features_test.go holds those
+                    # rules to the vocabulary table in
+                    # cluster/features.go.
                     additionalProperties:
                       type: string
                 registries:
                   type: object
                   description: >-
                     How container images arrive on the fleet's
-                    machines: mirror endpoints that containerd pulls
-                    through, and k3s's embedded peer-to-peer registry
-                    (Spegel). These are cluster facts, because any
-                    node may be asked to pull any image. Credentials
-                    are deliberately not here. A spec is public, so
-                    credentials enter through the registry-credentials
-                    Secret in liken-system (the shape `kubectl create
-                    secret docker-registry` produces), which the
-                    machine operator reads and delivers to each
-                    machine. Like the features above, the system
-                    reads registries only when the k3s process
-                    starts, so an edit here converges by restarting
-                    k3s in place on each machine. This restart is
-                    sequenced through the same one-leader-at-a-time
-                    turns as a reboot, but the machine, and its pods,
-                    stay up.
+                    machines: the mirror endpoints that containerd
+                    pulls through, and k3s's embedded peer-to-peer
+                    registry (Spegel). These are cluster facts,
+                    because any node can be asked to pull any image.
+                    Credentials are deliberately not here. A spec is
+                    public, so credentials enter through the
+                    registry-credentials Secret in liken-system, which
+                    is the shape that `kubectl create secret
+                    docker-registry` produces. The machine operator
+                    reads that Secret and delivers it to each machine.
+                    As with the features above, the system reads the
+                    registries only when the k3s process starts, so an
+                    edit here converges when k3s restarts in place on
+                    each machine. The restart is sequenced through the
+                    same turns as a reboot, one leader at a time, but
+                    the machine, and its pods, stay up.
                   properties:
                     mirrors:
                       type: object
                       maxProperties: 64
                       description: >-
-                        Registry host, mapped to the endpoint URLs
-                        containerd tries, in preference order, before
-                        it falls back to the registry itself. The key
-                        is the host as an image reference names it
-                        (docker.io, registry.example:5000).
+                        A registry host, mapped to the endpoint URLs
+                        that containerd tries, in order of preference,
+                        before it falls back to the registry itself.
+                        The key is the host as an image reference
+                        names it (docker.io, registry.example:5000).
                       # The same nullable-plus-rule defense that the
                       # features map uses. The decoder drops a null
-                      # value for a non-nullable field before
-                      # validation ever runs, so without this
-                      # defense, a bare `docker.io:` in hand-written
-                      # YAML would quietly declare nothing. This
-                      # map's values are arrays, which CEL types as
-                      # list(string) and refuses to compare with null
-                      # at compile time. (The features map's values
-                      # type as dyn, so its rule compiles without
-                      # help.) The dyn() cast is what lets the null
-                      # check compile here.
+                      # value for a field that is not nullable, before
+                      # validation runs, so without this defense a
+                      # bare `docker.io:` in hand-written YAML would
+                      # declare nothing. This map's values are arrays,
+                      # which CEL types as list(string) and refuses to
+                      # compare with null at compile time. The
+                      # features map's values type as dyn, so its rule
+                      # compiles without help. The dyn() cast is what
+                      # lets the null check compile here.
                       x-kubernetes-validations:
                         - rule: "self.all(host, dyn(self[host]) != null && self[host].size() > 0)"
                           message: >-
                             a mirror must list at least one endpoint
-                            URL; write the endpoints, or remove the
+                            URL. Write the endpoints, or remove the
                             host entirely
                       additionalProperties:
                         type: array
                         nullable: true
-                        # Order is preference order, whole-list
-                        # replacement on apply.
+                        # Order is preference order, and an apply
+                        # replaces the whole list.
                         x-kubernetes-list-type: atomic
                         maxItems: 16
                         items:
@@ -623,137 +636,146 @@ spec:
                       type: boolean
                       description: >-
                         Turns on k3s's embedded registry mirror
-                        (Spegel). Every node serves the images it
-                        already holds to its peers, so a fleet pulls
-                        each image over the uplink once, instead of
-                        once per machine. Enabling it shares every
-                        registry's images (the wildcard mirror entry
-                        in registries.yaml). The declared mirrors
-                        above keep their own entries either way.
+                        (Spegel). Each node serves the images it
+                        already holds to its peers, so the fleet pulls
+                        each image over the uplink one time, and not
+                        one time for each machine. This setting shares
+                        the images of every registry, through the
+                        wildcard mirror entry in registries.yaml. The
+                        mirrors declared above keep their own entries
+                        in both cases.
                 runtime:
                   type: object
                   description: >-
-                    The Go runtime discipline the cluster imposes on the
-                    k3s process. This section is an opt-in. An unset
-                    section imposes nothing, so k3s runs on Go's own
-                    runtime defaults: no memory ceiling, and a heap that
-                    grows to twice its live data before the collector
-                    runs. Set a field to tune that trade on a small
-                    machine, where k3s is the dominant resident process.
-                    These settings shape only the environment init hands
-                    the k3s process it launches. containerd and the
-                    shims k3s starts inherit that environment, because
-                    k3s is their parent. No other process reads it: not
-                    init, not the operators, and not the workloads,
-                    which get their environment from their own pod
-                    specs. k3s reads these values only when its process
-                    starts, so an edit here converges by restarting k3s
-                    in place on each machine, sequenced through the same
-                    one-leader-at-a-time turns as a reboot, with the
+                    The Go runtime discipline that the cluster applies
+                    to the k3s process. This section is an opt-in. An
+                    unset section applies nothing, so k3s runs on Go's
+                    own runtime defaults: no memory ceiling, and a
+                    heap that grows to twice its live data before the
+                    collector runs. Set a field to change that trade
+                    on a small machine, where k3s is the largest
+                    resident process. These settings shape only the
+                    environment that init gives to the k3s process it
+                    starts. containerd and the shims that k3s starts
+                    inherit that environment, because k3s is their
+                    parent. No other process reads it: not init, not
+                    the operators, and not the workloads, which get
+                    their environment from their own pod specs. k3s
+                    reads these values only when its process starts,
+                    so an edit here converges when k3s restarts in
+                    place on each machine, sequenced through the same
+                    turns as a reboot, one leader at a time, with the
                     machine and its pods up.
                   properties:
                     k3s:
                       type: object
                       description: >-
-                        The Go runtime environment for the k3s process.
-                        An unset field imposes nothing, so k3s keeps
-                        Go's own default for it.
+                        The Go runtime environment for the k3s
+                        process. An unset field applies nothing, so
+                        k3s keeps Go's own default for it.
                       properties:
                         goMemoryLimit:
                           type: string
                           maxLength: 32
                           # The Go-side validation in cluster/runtime.go
-                          # is the real check: it parses the quantity,
-                          # bounds the percent to (0, 100], and rejects
-                          # a zero ceiling with a message. This pattern
-                          # only catches gross shape errors early, so a
-                          # bad value never reaches the fleet as staged
-                          # bytes. The three alternatives are "off", a
-                          # 1-3 digit percent, and a byte count with an
-                          # optional Ki/Mi/Gi/Ti suffix.
+                          # is the real check. It parses the quantity,
+                          # bounds the percent to (0, 100], and
+                          # refuses a zero ceiling with a message.
+                          # This pattern catches only gross shape
+                          # errors early, so a bad value never reaches
+                          # the fleet as staged bytes. The three
+                          # alternatives are "off", a 1-3 digit
+                          # percent, and a byte count with an optional
+                          # Ki/Mi/Gi/Ti suffix.
                           pattern: ^(off|[0-9]{1,3}%|[0-9]+(Ki|Mi|Gi|Ti)?)$
                           description: >-
-                            The soft ceiling on everything the k3s Go
-                            runtime manages: heap, stacks, and its own
-                            metadata (Go's GOMEMLIMIT). As memory use
-                            nears the ceiling, the collector works
-                            harder instead of letting the heap grow;
-                            past it, the runtime caps collection at half
-                            the CPU and lets the heap grow, so a spike
-                            becomes slowness, not a crash. Three forms
-                            are accepted. "off" removes the ceiling. A
-                            percent like "25%" is that share of each
-                            machine's memory, so one setting scales
-                            across a fleet of different sizes. An
-                            absolute quantity like "448Mi" is a fixed
-                            ceiling on every machine. Unset, k3s runs
-                            with no ceiling, the same as "off". The two
-                            wrong directions read differently. No
-                            ceiling leaves the kernel's OOM killer as the
-                            only backstop, so the process dies under a
-                            spike. A ceiling set too tight makes the
-                            collector run against a wall it cannot clear
-                            and burns CPU on collection; the symptom is
-                            high pure-user CPU on k3s with no matching
-                            workload. To find a good value, run k3s with
-                            no ceiling, read its resting size, then set
-                            the ceiling above that size with headroom for
-                            the node.
+                            The soft ceiling on everything that the
+                            k3s Go runtime manages: the heap, the
+                            stacks, and its own metadata (Go's
+                            GOMEMLIMIT). As the memory in use gets
+                            near the ceiling, the collector works
+                            harder instead of letting the heap grow.
+                            Above the ceiling, the runtime limits
+                            collection to half of the CPU and lets the
+                            heap grow, so a spike becomes slowness and
+                            not a crash. The field accepts three
+                            forms. "off" removes the ceiling. A
+                            percent such as "25%" is that share of
+                            each machine's memory, so one setting
+                            applies across a fleet of different sizes.
+                            An absolute quantity such as "448Mi" is
+                            the same ceiling on every machine. If the
+                            field is unset, k3s runs with no ceiling,
+                            the same as "off". The two wrong
+                            directions have different symptoms. With
+                            no ceiling, the kernel's OOM killer is the
+                            only protection, so the process dies under
+                            a spike. With a ceiling that is too tight,
+                            the collector runs against a limit it
+                            cannot clear and burns CPU on collection;
+                            the symptom is high user-time CPU on k3s
+                            with no matching workload. To find a good
+                            value, run k3s with no ceiling, read its
+                            resting size, then set the ceiling above
+                            that size with headroom for the node.
                         goGC:
                           type: integer
                           minimum: 1
                           description: >-
-                            The collector's everyday pace, as a percent
-                            of heap growth between collections (Go's
-                            GOGC). Unset, init sets no GOGC, so k3s keeps
-                            Go's own pace of one hundred percent: the
-                            heap grows to twice its live data before the
-                            collector runs. A value like 50 collects at
-                            fifty percent heap growth, trading a little
-                            CPU all the time to keep the process resting
-                            near its live data size. A higher value
-                            collects less often and rests larger; a value
-                            below 1 is refused, because it would make the
-                            collector run without pause.
+                            The everyday pace of the collector, as a
+                            percent of heap growth between collections
+                            (Go's GOGC). If the field is unset, init
+                            sets no GOGC, so k3s keeps Go's own pace
+                            of one hundred percent: the heap grows to
+                            twice its live data before the collector
+                            runs. A value of 50 collects at fifty
+                            percent heap growth, and trades a little
+                            CPU all the time to keep the process
+                            resting near the size of its live data. A
+                            higher value collects less often and rests
+                            larger. A value below 1 is refused,
+                            because it would make the collector run
+                            without pause.
             status:
               type: object
               description: >-
                 What a reader can observe about the cluster as a
-                whole. The leaders write it: each leader's operator
-                sweeps the Machine list every pass and publishes what
-                it found. Only the leaders can do this. A follower
-                that can reach the API is, by definition, reaching a
-                leader.
+                whole. The leaders write it. Each leader's operator
+                sweeps the Machine list on every pass and publishes
+                what it found. Only the leaders can do this, because a
+                follower that reaches the API is reaching a leader.
               properties:
                 phase:
                   type: string
                   enum: [Ready, Updating, Degraded]
                   description: >-
-                    The conditions below, rolled up into one word.
-                    The system derives this value on every sweep, and
-                    never stores it as truth of its own. Ready means
-                    every machine is Ready. Updating means the only
-                    machines not Ready are mid-transition: rebooting
-                    into a change, waiting on one, or booting. This
-                    is the expected shape of a Cluster edit rolling
-                    through the fleet. Degraded means at least one
-                    machine is Lost, Blocked, or otherwise unhealthy.
-                    This field can never truthfully show one state:
-                    quorum lost. Losing a majority of leaders takes
-                    the API server down with it, so nobody is left to
-                    write here. When quorum is lost, the signal is
-                    that this status stops updating.
+                    The conditions below, as one word. The system
+                    derives this value on every sweep, and never
+                    stores it as a truth of its own. Ready means that
+                    every machine is Ready. Updating means that the
+                    machines which are not Ready are all in a
+                    transition: rebooting into a change, waiting for
+                    one, or booting. This is the expected shape of a
+                    Cluster edit as it moves through the fleet.
+                    Degraded means that at least one machine is Lost,
+                    Blocked, or unhealthy in another way. This field
+                    can never truthfully show one state: lost quorum.
+                    The loss of a majority of the leaders takes the
+                    API server down with it, so no writer is left.
+                    When quorum is lost, the signal is that this
+                    status does not change any more.
                 observedGeneration:
                   type: integer
                   format: int64
                   minimum: 0
                   description: >-
-                    The metadata.generation of the spec this status
-                    judged, stamped by the sweep on every write. Each
-                    condition carries the same stamp, but a client
-                    that only asks "has the sweep seen my edit yet"
-                    reads it here, at the top of status, where
-                    Kubernetes controllers conventionally publish it.
+                    The metadata.generation of the spec that this
+                    status judged. The sweep stamps it on every write.
+                    Each condition carries the same stamp, but a
+                    client that only asks whether the sweep has seen
+                    its edit reads the stamp here, at the top of
+                    status, where Kubernetes controllers
+                    conventionally publish it.
                 conditions:
                   type: array
                   # The same metav1.Condition schema that the
@@ -761,9 +783,9 @@ spec:
                   # validated like the conditions on Pods and Nodes.
                   # The sweep maintains MachinesReady, which reports
                   # the headcount, and Progressing, which reports the
-                  # rollout using the Deployment vocabulary (False
-                  # means a rollout has stalled). Quorum margin and
-                  # clock spread are candidates for later.
+                  # rollout in the Deployment vocabulary, where False
+                  # means that a rollout has stalled. Quorum margin
+                  # and clock spread are candidates for later.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:
@@ -795,13 +817,13 @@ spec:
                 machines:
                   type: object
                   description: >-
-                    The headcount: how many machines are fully
-                    healthy (phase Ready, with a heartbeat recent
-                    enough to count as current) out of how many
-                    exist. The summary holds the same two numbers as
-                    "4/5". The status stores this because a printer
-                    column can read one field, but cannot combine
-                    two.
+                    How many machines are fully healthy, out of how
+                    many exist. A fully healthy machine is in phase
+                    Ready, with a heartbeat recent enough to count as
+                    current. The summary field holds the same two
+                    numbers in the form 4/5. The status stores the
+                    summary because a printer column can read one
+                    field, but cannot combine two.
                   properties:
                     ready:
                       type: integer
@@ -812,19 +834,18 @@ spec:
                 flux:
                   type: object
                   description: >-
-                    The flux feature's observable half. publicKey is
-                    the fleet's deploy key: the public half, in the
-                    authorized_keys form a forge accepts. The private
-                    half never appears anywhere a person can read. The
-                    cluster operator mints the pair into the
+                    The observable half of the flux feature. publicKey
+                    is the fleet's deploy key: the public half, in the
+                    authorized_keys form that a forge accepts. The
+                    private half never appears where a person can read
+                    it. The cluster operator makes the pair in the
                     flux-system Secret when the feature is declared,
-                    and publishes the public half here. Register it
-                    at the forge as a deploy key with write access,
-                    and the fleet syncs from then on. To rotate the
-                    key, delete the flux-system Secret in the
-                    flux-system namespace; the next sweep mints a
-                    fresh pair, and this field shows the new half to
-                    register.
+                    and publishes the public half here. Register it at
+                    the forge as a deploy key with write access, and
+                    the fleet syncs from then on. To rotate the key,
+                    delete the flux-system Secret in the flux-system
+                    namespace. The next sweep makes a new pair, and
+                    this field shows the new half to register.
                   properties:
                     publicKey:
                       type: string
@@ -832,26 +853,27 @@ spec:
                 releases:
                   type: object
                   description: >-
-                    What the sweep observes about releases: the
+                    What the sweep observes about the releases: the
                     catalog it was given, and the channel it polls.
                   properties:
                     newest:
                       type: string
                       maxLength: 64
                       description: >-
-                        The catalog's highest version, derived by the
-                        sweep so the NEWEST printer column can sit
-                        next to VERSION without anyone doing version
-                        arithmetic at the terminal.
+                        The highest version in the catalog. The sweep
+                        derives it, so the NEWEST printer column can
+                        sit next to VERSION and nobody compares
+                        versions at the terminal.
                     available:
                       type: string
                       maxLength: 64
                       description: >-
-                        The latest version the release channel itself
-                        announces: the channel.yaml document at
-                        spec.releases.source, polled lazily by the
-                        fleet observer (the liken.sh/check-releases
-                        annotation forces the next poll). Advisory
-                        only. It may name a version the catalog does
-                        not hold yet, and adopting it still means
-                        committing a digest-pinned catalog entry.
+                        The latest version that the release channel
+                        itself announces: the channel.yaml document at
+                        spec.releases.source, which the fleet observer
+                        polls at a slow interval. The
+                        liken.sh/check-releases annotation forces the
+                        next poll. This value is advisory. It can name
+                        a version that the catalog does not hold yet,
+                        and to adopt that version you still commit a
+                        catalog entry with its digest.

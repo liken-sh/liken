@@ -2,7 +2,7 @@
 # features and the registry mirror are drilled against.
 #
 # liken is a client of network storage
-# (plans/17-network-storage-clients.md), and a client needs a
+# (plans/completed/17-network-storage-clients.md), and a client needs a
 # server. This guest is that server, and it is not a liken machine,
 # on purpose. It runs stock Debian, because the point of the drill is
 # liken's side of the wire, and the server side should be the plain

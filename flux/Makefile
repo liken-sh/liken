@@ -5,7 +5,7 @@
 # Cluster document declares the feature. fetch.sh renders the engine
 # seed, gotk-components.yaml, which the cluster operator embeds and
 # plants once (cluster-operator/flux.go); the git repository owns the
-# engine after that. plans/14-gitops-from-first-boot.md tells the
+# engine after that. plans/completed/14-gitops-from-first-boot.md tells the
 # whole story.
 override VERSION := $(strip $(file <VERSION))
 

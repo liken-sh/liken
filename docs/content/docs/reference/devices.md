@@ -6,176 +6,184 @@ toc: true
 
 # Devices
 
-liken hands hardware to workloads through dynamic resource
-allocation, the Kubernetes API for devices. A pod asks for a device
-by its properties, the scheduler picks a node that has one, and the
-node gives that pod the device's `/dev` entries. The pod needs no
-privilege, no host mounts, and no knowledge of which machine it
-landed on.
+liken gives hardware to workloads with dynamic resource allocation,
+the Kubernetes API for devices. A pod asks for a device by its
+properties. The scheduler selects a node that has such a device, and
+the node gives that pod the device's `/dev` entries. The pod needs no
+privilege, no host mounts, and no knowledge of the machine it runs
+on.
 
-[Give a workload a device](/docs/guides/devices/) has the steps. This
-page describes what liken publishes and why.
+[Give a workload a device](/docs/guides/devices/) gives the steps.
+This page describes what liken publishes, and why.
 
 ## The driver
 
-The driver's name is `liken.sh`. It is not a separate program: it is
-two jobs inside the machine operator, which already runs on every
-node. One walks sysfs and publishes what it finds. The other answers
-the kubelet when a pod's claim lands on the node.
+The driver's name is `liken.sh`. It is not a separate program. It is
+two jobs in the machine operator, which runs on every node. One job
+reads sysfs and publishes what it finds. The other job answers the
+kubelet when a pod's claim comes to the node.
 
-A DRA driver is normally a DaemonSet a cluster administrator
-installs. liken's is part of the operating system, because the OS is
-the only thing that knows what the hardware is before anything else
-runs.
+Usually a cluster administrator installs a DRA driver as a DaemonSet.
+liken's driver is part of the operating system, because the operating
+system is the only thing that identifies the hardware before other
+software starts.
 
 ## What a node publishes
 
-Each node publishes one `ResourceSlice`, named `<node>-liken.sh`. It
-lists the node's claimable devices:
+Each node publishes one `ResourceSlice`, with the name
+`<node>-liken.sh`. The slice lists the node's claimable devices:
 
     kubectl get resourceslices
     kubectl get resourceslice <node>-liken.sh -o yaml
 
-A device from the PCI or USB bus appears there when all three of
-these are true:
+A device on the PCI bus or the USB bus appears in the slice when
+these three conditions are true:
 
-1. **A driver is bound to it.** Undriven hardware cannot deliver
-   anything, so it belongs in the machine's unclaimed report instead.
-   Declaring a module in the Machine's `spec.modules` is what moves a
-   device from one report to the other.
-2. **Claiming it would deliver something.** The device's sysfs
-   subtree must carry device nodes. A network card is real hardware
-   with nothing to hand a pod, so it never appears.
-3. **The machine does not depend on it.** A device whose subtree
-   backs a storage role is the machine's own, and never a workload's.
-   A disk belongs either to the machine, through a storage role, or
-   to the workloads, through a claim, and never to both.
+1. **A driver is bound to it.** Hardware with no driver can supply
+   nothing, so it goes in the machine's unclaimed report instead. To
+   move a device from one report to the other, declare its module in
+   the Machine's `spec.modules`.
+2. **A claim on it supplies something.** The device's sysfs subtree
+   must contain device nodes. A network card is hardware, but it has
+   nothing to give a pod, so it never appears.
+3. **The machine does not depend on it.** A device whose subtree holds a
+   storage role belongs to the machine, and never to a workload. A
+   disk belongs to the machine, through a storage role, or to the
+   workloads, through a claim, but never to both.
 
-The slice is an offer, not a census. The scheduler can only allocate
-what a slice lists, so publishing is itself the enforcement.
+The slice is an offer, and not a full record of the machine's
+hardware. The
+scheduler can allocate only what a slice lists, so the contents of
+the slice are the control.
 
-The bus plumbing is left out: hubs, PCIe ports, and the USB core's
-own devices are the structure that peripherals attach to, not
-peripherals.
+The slice does not list the bus structure. Hubs, PCIe ports, and the
+USB core's own devices are the structure that peripherals attach to,
+not peripherals.
 
 ## Device names
 
-A device's name is its bus and its address, with the punctuation
-turned into dashes: `pci-0000-00-02-0`, `usb-2-1-1-0`.
+A device's name is its bus and its address, with dashes in place of
+the punctuation: `pci-0000-00-02-0`, `usb-2-1-1-0`.
 
-The address names the slot, not the unit. A dongle replaced with an
-identical one in the same port keeps the same device name, which is
-what a claim on "the adapter on that port" needs. To pin one physical
-unit instead, select on its `serial` attribute.
+The address gives the slot, not the unit. If you replace a dongle
+with an identical dongle in the same port, the device name does not
+change, which is what a claim on the adapter on that port needs. To
+select one physical unit instead, select on its `serial` attribute.
 
 ## Attributes
 
 Every attribute belongs to the driver's domain, so a selector reads
-it as `device.attributes["liken.sh"].<name>`. An attribute the
-hardware does not have is absent rather than empty, so
-`has(device.attributes["liken.sh"].serial)` means what it says.
+it as `device.attributes["liken.sh"].<name>`. If the hardware does
+not have an attribute, the attribute is absent, not empty. Thus
+`has(device.attributes["liken.sh"].serial)` gives a correct result.
 
 | Attribute | Type | What it is |
 |---|---|---|
 | `bus` | string | `pci` or `usb` |
-| `driver` | string | the bound driver's name, such as `i915` |
-| `class` | string | the kind, in one word: `display`, `multimedia`, `serial-bus` |
-| `classCode` | string | the whole class code the bus published: six hex digits on PCI, two on USB |
-| `subsystem` | string | the kind of node a claim delivers, when they all agree: `drm`, `tty` |
-| `renderNode` | bool | the device delivers a DRM render node |
-| `name` | string | the device in words, from its own strings or the PCI database |
-| `modalias` | string | the fingerprint the kernel matches drivers against |
-| `serial` | string | the serial number the hardware carries, when it carries one |
-| `vendor` | string | the vendor ID, bare lowercase hex |
-| `product` | string | the product ID, bare lowercase hex |
+| `driver` | string | the name of the bound driver, such as `i915` |
+| `class` | string | the type of device, in one word: `display`, `multimedia`, `serial-bus` |
+| `classCode` | string | the full class code that the bus published: six hex digits on PCI, two on USB |
+| `subsystem` | string | the type of node that a claim supplies, when all the nodes agree: `drm`, `tty` |
+| `renderNode` | bool | the device supplies a DRM render node |
+| `name` | string | the name of the device in words, from its own strings or from the PCI database |
+| `modalias` | string | the identifier that the kernel uses to match drivers |
+| `serial` | string | the serial number of the hardware, when it has one |
+| `vendor` | string | the vendor ID, lowercase hex with no prefix |
+| `product` | string | the product ID, lowercase hex with no prefix |
 
-Prefer the attribute that describes what you need. `renderNode` and
-`classCode` describe the hardware's capability, and hold across a
-fleet of different machines. `vendor` and `product` name one model,
-and a DeviceClass written with them stops working on the next machine
-you buy.
+Use the attribute that describes what you need. `renderNode` and
+`classCode` describe a capability of the hardware, and they stay
+correct across a fleet of different machines. `vendor` and `product`
+give one model, and a DeviceClass that uses them stops working on the
+next machine that you buy.
 
 liken publishes no capability facts that need a driver stack to
-measure, such as which codecs a GPU can encode. Reading those means
-running libva and a vendor driver, which the image does not carry. A
-pod that holds a claim on the render node can measure them for
-itself, so they are not the operating system's to publish.
+measure, for example the codecs that a GPU can encode. To read those
+facts, you must run libva and a vendor driver, which the image does
+not contain. A pod that holds a claim on the render node can measure
+them for itself, so the operating system does not publish them.
 
 ## Sharing
 
-A device is allocated to one claim, unless liken publishes
-`allowMultipleAllocations` for it. liken publishes it for a graphics
-device, and for nothing else: the device must deliver a DRM render
-node, and every node it delivers must belong to the graphics stack,
-which is the DRM nodes and the legacy framebuffer beside them.
+liken allocates a device to one claim, unless liken publishes
+`allowMultipleAllocations` for that device. liken publishes
+`allowMultipleAllocations` for a graphics device only. The device
+must supply a DRM render node, and every node that it supplies must
+belong to the graphics stack, which is the DRM nodes and the legacy
+framebuffer with them.
 
-A DRM render node multiplexes by the kernel's own contract: the
-driver arbitrates concurrent clients. The lab measured this on an
-integrated GPU, where twelve concurrent encoders divided it evenly
-and two pods each reached about half the throughput one pod reached
-alone. A serial port has no such contract, and neither does a
-dongle's control endpoint.
+A DRM render node has a multiplexing contract in the kernel: the
+driver arbitrates between concurrent clients. A drill measured this
+on an integrated GPU. Twelve concurrent encoders divided the GPU
+equally, and two pods each got approximately half of the throughput
+that one pod got alone. A serial port has no such contract, and a
+dongle's control endpoint has none.
 
 Only the driver can state this, because only the driver writes a
-`ResourceSlice`. That is why the rule is narrow. A device wrongly
-marked shareable hands the same hardware to two workloads that each
-believe they hold it, and no DeviceClass, claim, or workload can take
-it back. A device wrongly marked exclusive costs a claim that waits,
-where a person can see it waiting.
+`ResourceSlice`. Thus the rule is narrow. If a device is incorrectly
+marked as shareable, two workloads get the same hardware while each
+one operates as the only user, and no DeviceClass, claim, or workload
+can correct it. If a device is incorrectly marked as exclusive, a
+claim waits, and a person can see that it waits.
 
 ### Sharing a claim is not the same thing
 
-`allowMultipleAllocations` governs how many **claims** may allocate a
-device. It does not govern how many **pods** may use one claim.
+`allowMultipleAllocations` controls how many **claims** can allocate
+a device. It does not control how many **pods** can use one claim.
 
-A `ResourceClaim` is shared by every pod that names it, and all of
-them receive the device. That is deliberate in Kubernetes: it is how
-two pods share one allocation. liken does not refuse the second pod.
-Refusing would be a race with no owner, and delivering a device node
-was never what granted exclusive access in the first place — the
-kernel enforces that, through `O_EXCL` and the driver's own open
-path.
+Every pod that names a `ResourceClaim` shares that claim, and all of
+these pods receive the device. Kubernetes does this on purpose: it is
+how two pods share one allocation. liken does not refuse the second
+pod. A refusal would be a race with no owner. Also, the delivery of a
+device node was never the mechanism that gave exclusive access. The
+kernel gives exclusive access, through `O_EXCL` and the driver's own
+open path.
 
-To give one pod a device by itself, use a `ResourceClaimTemplate`,
-which mints a separate claim for each pod. A shared `ResourceClaim`
-is a deliberate act of sharing.
+To give a device to one pod only, use a `ResourceClaimTemplate`,
+which makes a separate claim for each pod. If you use one
+`ResourceClaim` for more than one pod, you share the device on
+purpose.
 
 ## What a claim delivers
 
-Device nodes, and nothing else. The node writes a CDI specification
-naming the `/dev` entries for that claim, and the container runtime
-injects them into the containers that requested it. No privilege is
-granted, no host path is mounted, and no kernel module is loaded on
-the pod's behalf.
+A claim delivers device nodes only. The node writes a CDI
+specification that names the `/dev` entries for that claim, and the
+container runtime injects them into the containers that requested the
+claim. The claim grants no privilege, mounts no host path, and loads
+no kernel module for the pod.
 
-Everything else the workload needs is the workload's: the userspace
-library that talks to the device, and the group membership its image
-gives its user.
+The workload supplies everything else that it needs: the userspace
+library that communicates with the device, and the group membership
+that its image gives its user.
 
 ## Limits
 
-* One slice per node, holding up to 128 devices. A node with more
-  reports the overflow on its console rather than splitting the pool.
-* liken ships no DeviceClasses. A DeviceClass states what a
-  deployment cares about, so a deployment writes its own. The
+* One slice for each node, with a maximum of 128 devices. If a node
+  has more devices, it prints the count of the devices it dropped on
+  its console, and no claim can reach those devices. It does not
+  divide the pool.
+* liken supplies no DeviceClasses. A DeviceClass states what a
+  deployment needs, so each deployment writes its own. The
   [guide](/docs/guides/devices/) has examples to start from.
-* Devices carry no capacity and no taints yet. A device that fails
-  disappears from the slice at the next pass, which stops new
-  allocations but does not disturb an allocation in flight.
-* A claim is not remembered across a reboot. The claim is a
-  Kubernetes object, and the pod that holds it is rescheduled with
-  it.
+* Devices have no capacity and no taints at this time. If a device
+  fails, it disappears from the slice at the next pass. This stops
+  new allocations, but it does not change an allocation that is in
+  use.
+* liken does not keep a claim across a reboot. The claim is a
+  Kubernetes object, and Kubernetes reschedules the pod that holds it
+  together with the claim.
 
 ## Hardware that is not published
 
-Hardware with no driver bound cannot be claimed. It appears in two
-places instead:
+You cannot claim hardware that has no driver bound to it. liken shows
+this hardware in two other places:
 
 * The Machine's status lists it as unclaimed hardware, with the
-  modules that would drive it.
+  modules that can drive it.
 * The [hardware report](/docs/guides/install/#first-run-the-hardware-report)
-  names it before the first install, as commented lines under
+  lists it before the first install, as commented lines under
   `spec.modules`.
 
-Declaring the module in `spec.modules` is the whole step. The device
-appears in the node's slice within one reconcile pass.
+To publish the device, declare the module in `spec.modules`. This is
+the only necessary step. The device appears in the node's slice at
+the next reconcile pass.
