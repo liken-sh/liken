@@ -214,10 +214,27 @@ spec:
                             # The same grammar that spec.version
                             # enforces: a calendar date and a serial.
                             pattern: ^\d{4}\.\d{2}\.\d{2}-\d{3}$
+                            description: >-
+                              The release that this entry catalogs, as
+                              a calendar date and a serial. This is the
+                              name of the directory under
+                              releases.source that holds the release,
+                              and the value that spec.version names to
+                              move the fleet onto the release.
                           digest:
                             type: string
                             maxLength: 71
                             pattern: ^sha256:[0-9a-f]{64}$
+                            description: >-
+                              The sha256 of the bytes of this release's
+                              release.yaml, as sha256: and 64 hex
+                              digits. A machine compares the document
+                              it downloads with this digest. If the two
+                              do not agree, the machine stays on the
+                              release it runs and reports the phase
+                              Blocked with the reason DigestMismatch.
+                              Read the digest from the release channel
+                              when you add the entry.
                 origin:
                   type: string
                   # CamelCase values, because Kubernetes API constants
@@ -778,6 +795,13 @@ spec:
                     conventionally publish it.
                 conditions:
                   type: array
+                  description: >-
+                    The sweep's observations about the fleet, one entry
+                    for each type. The sweep maintains two types.
+                    MachinesReady reports the headcount and names each
+                    machine that is not Ready. Progressing reports the
+                    reboot rollout, and is False when the rollout stops.
+                    The phase above is these conditions in one word.
                   # The same metav1.Condition schema that the
                   # Machine's conditions use: a map keyed by type,
                   # validated like the conditions on Pods and Nodes.
@@ -796,24 +820,64 @@ spec:
                         type: string
                         maxLength: 316
                         pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                        description: >-
+                          The name of the observation, and the key of
+                          this entry in the list. The sweep writes
+                          MachinesReady, the fleet headcount, and
+                          Progressing, the state of the reboot rollout.
                       status:
                         type: string
                         enum: ["True", "False", "Unknown"]
+                        description: >-
+                          The verdict for this observation: True,
+                          False, or Unknown. A True MachinesReady means
+                          that every machine is Ready. A False
+                          Progressing means that the rollout no longer
+                          makes progress. Unknown means that the sweep
+                          cannot tell.
                       observedGeneration:
                         type: integer
                         format: int64
                         minimum: 0
+                        description: >-
+                          The metadata.generation of the Cluster spec
+                          that this condition judged. The generation
+                          counts spec edits, so this field lets a
+                          client tell a verdict on the current spec
+                          from a verdict on an earlier spec. That
+                          difference is important here, because an edit
+                          can wait for a reboot.
                       reason:
                         type: string
                         minLength: 1
                         maxLength: 1024
                         pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                        description: >-
+                          One CamelCase word for the cause of the
+                          current status, for a program to match on.
+                          MachinesReady uses AllMachinesReady,
+                          MachinesUpdating, and MachinesDegraded.
+                          Progressing uses RolloutComplete, RollingOut,
+                          and RolloutStalled.
                       message:
                         type: string
                         maxLength: 32768
+                        description: >-
+                          The detail behind the reason, for a person to
+                          read. The MachinesReady message gives the
+                          tally and names each machine that is not
+                          Ready. The Progressing message names each
+                          machine that holds a reboot turn, and each
+                          machine that waits for one.
                       lastTransitionTime:
                         type: string
                         format: date-time
+                        description: >-
+                          When the status field last changed value. The
+                          sweep writes this condition on every pass,
+                          but moves this time only when the status
+                          changes, so the value gives the age of the
+                          current verdict.
                 machines:
                   type: object
                   description: >-
@@ -827,10 +891,23 @@ spec:
                   properties:
                     ready:
                       type: integer
+                      description: >-
+                        How many machines are fully healthy: in phase
+                        Ready, with a heartbeat recent enough to count
+                        as current.
                     total:
                       type: integer
+                      description: >-
+                        How many Machine resources the sweep found. A
+                        machine counts here from the moment its Machine
+                        resource exists, whether or not the machine is
+                        up.
                     summary:
                       type: string
+                      description: >-
+                        The two counts above in the form 4/5, ready
+                        first. The MACHINES column of `kubectl get
+                        clusters` reads this field.
                 flux:
                   type: object
                   description: >-
@@ -850,6 +927,14 @@ spec:
                     publicKey:
                       type: string
                       maxLength: 4096
+                      description: >-
+                        The public half of the fleet's deploy key, on
+                        one line, in the authorized_keys form that a
+                        forge accepts. Register this value at the forge
+                        as a deploy key with write access. An empty
+                        value means that the spec does not declare the
+                        flux feature, or that the cluster operator has
+                        not made the key pair yet.
                 releases:
                   type: object
                   description: >-

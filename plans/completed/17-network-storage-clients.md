@@ -140,8 +140,8 @@ A feature too large to ship in every image, a GPU toolkit for example,
 is the point to introduce build-time conditioning. Until then, the
 design does not need it.
 
-On the liken side, the vocabulary lives in one table, in the machine
-package at machine/features.go. The table lists a slug and a kind for
+On the liken side, the vocabulary lives in one table, in the cluster
+package at cluster/features.go. The table lists a slug and a kind for
 each feature. Everything that must agree on the vocabulary reads this
 table. init validates the cluster document against the table and
 renders the disable list from it. The operator judges each machine's
@@ -212,9 +212,9 @@ daemon can start.
 The DaemonSet image is built from the same vendored binaries as the
 host's, so iscsid and the iscsiadm that talks to it over its socket are
 always the same build. There is no version skew to manage. The
-deployment that this repo serves runs synology-csi, which execs the
-host's iscsiadm and expects a running iscsid. So the host binaries are
-load-bearing, not a convenience.
+author's homelab runs synology-csi, which execs the host's iscsiadm
+and expects a running iscsid. That deployment is why the host binaries
+are necessary, and not a convenience.
 
 A pure-Go initiator login exists: u-root's iscsinl, which speaks the
 kernel's netlink interface directly. It could matter one day for
@@ -241,7 +241,7 @@ wrote to it, and survived unmount and remount cycles.
 The milestone deliberately stops at that contract. It does not stand up
 a CSI driver in the lab, because a driver exercises its own code on top
 of the same calls. The proof against a real filer with synology-csi
-belongs to the deployment that runs one.
+belongs to a deployment that runs one.
 
 The retraction drill ran the full round trip through the janitor,
 described below. The vocabulary-skew failure mode was drilled directly:

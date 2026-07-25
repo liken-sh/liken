@@ -276,6 +276,13 @@ spec:
                               interface can supply the route.
                           nameservers:
                             type: array
+                            description: >-
+                              The nameservers for this interface, in
+                              preference order. The machine uses them in
+                              addition to the nameservers from a DHCP
+                              lease. The machine writes at most three
+                              nameservers to resolv.conf, in interface
+                              order.
                             # This list is atomic: nameserver order is
                             # preference order, so the list replaces
                             # as a whole.
@@ -388,12 +395,14 @@ spec:
                   default: Manual
                   description: >-
                     What the operator can do when the spec needs a
-                    reboot to take effect. A storage change is the
-                    only change of this kind. Manual, the default,
-                    stages the change to the machineState filesystem
-                    and reports RebootPending, and the next boot
-                    applies the change. Auto permits the operator to
-                    reboot the machine.
+                    reboot to take effect. A change to storage,
+                    network, or modules is a change of this kind,
+                    because the operator measures drift in those three
+                    sections and the boot is what applies them.
+                    Manual, the default, stages the change to the
+                    machineState filesystem and reports RebootPending,
+                    and the next boot applies the change. Auto permits
+                    the operator to reboot the machine.
                 storage:
                   type: object
                   description: >-
@@ -435,10 +444,24 @@ spec:
                           type: string
                           maxLength: 128
                           pattern: ^/dev/[a-zA-Z0-9/_-]+$
+                          description: >-
+                            The disk that this role is on, as a device
+                            path (/dev/vda). The system reads this field
+                            only on the boot that claims a blank disk.
+                            After that, the system finds the role's
+                            partition by the GPT partition name written
+                            on it.
                         size:
                           type: string
                           maxLength: 32
                           pattern: ^[0-9]+(Ki|Mi|Gi|Ti)?$
+                          description: >-
+                            How much of the disk this role takes, as a
+                            binary quantity (2Gi). This is an exact
+                            allocation, not a request. An empty value
+                            means that the role takes the rest of its
+                            disk, and only one role per disk can omit
+                            it.
                     bootHome:
                       type: object
                       description: >-
@@ -458,10 +481,24 @@ spec:
                           type: string
                           maxLength: 128
                           pattern: ^/dev/[a-zA-Z0-9/_-]+$
+                          description: >-
+                            The disk that this role is on, as a device
+                            path (/dev/vda). The system reads this field
+                            only on the boot that claims a blank disk.
+                            After that, the system finds the role's
+                            partition by the GPT partition name written
+                            on it.
                         size:
                           type: string
                           maxLength: 32
                           pattern: ^[0-9]+(Ki|Mi|Gi|Ti)?$
+                          description: >-
+                            How much of the disk this role takes, as a
+                            binary quantity (2Gi). This is an exact
+                            allocation, not a request. An empty value
+                            means that the role takes the rest of its
+                            disk, and only one role per disk can omit
+                            it.
                     systemA:
                       type: object
                       description: >-
@@ -480,10 +517,24 @@ spec:
                           type: string
                           maxLength: 128
                           pattern: ^/dev/[a-zA-Z0-9/_-]+$
+                          description: >-
+                            The disk that this role is on, as a device
+                            path (/dev/vda). The system reads this field
+                            only on the boot that claims a blank disk.
+                            After that, the system finds the role's
+                            partition by the GPT partition name written
+                            on it.
                         size:
                           type: string
                           maxLength: 32
                           pattern: ^[0-9]+(Ki|Mi|Gi|Ti)?$
+                          description: >-
+                            How much of the disk this role takes, as a
+                            binary quantity (2Gi). This is an exact
+                            allocation, not a request. An empty value
+                            means that the role takes the rest of its
+                            disk, and only one role per disk can omit
+                            it.
                     systemB:
                       type: object
                       description: >-
@@ -495,10 +546,24 @@ spec:
                           type: string
                           maxLength: 128
                           pattern: ^/dev/[a-zA-Z0-9/_-]+$
+                          description: >-
+                            The disk that this role is on, as a device
+                            path (/dev/vda). The system reads this field
+                            only on the boot that claims a blank disk.
+                            After that, the system finds the role's
+                            partition by the GPT partition name written
+                            on it.
                         size:
                           type: string
                           maxLength: 32
                           pattern: ^[0-9]+(Ki|Mi|Gi|Ti)?$
+                          description: >-
+                            How much of the disk this role takes, as a
+                            binary quantity (2Gi). This is an exact
+                            allocation, not a request. An empty value
+                            means that the role takes the rest of its
+                            disk, and only one role per disk can omit
+                            it.
                     machineState:
                       type: object
                       description: >-
@@ -515,10 +580,24 @@ spec:
                           type: string
                           maxLength: 128
                           pattern: ^/dev/[a-zA-Z0-9/_-]+$
+                          description: >-
+                            The disk that this role is on, as a device
+                            path (/dev/vda). The system reads this field
+                            only on the boot that claims a blank disk.
+                            After that, the system finds the role's
+                            partition by the GPT partition name written
+                            on it.
                         size:
                           type: string
                           maxLength: 32
                           pattern: ^[0-9]+(Ki|Mi|Gi|Ti)?$
+                          description: >-
+                            How much of the disk this role takes, as a
+                            binary quantity (2Gi). This is an exact
+                            allocation, not a request. An empty value
+                            means that the role takes the rest of its
+                            disk, and only one role per disk can omit
+                            it.
                     machineEphemeral:
                       type: object
                       description: >-
@@ -529,10 +608,24 @@ spec:
                           type: string
                           maxLength: 128
                           pattern: ^/dev/[a-zA-Z0-9/_-]+$
+                          description: >-
+                            The disk that this role is on, as a device
+                            path (/dev/vda). The system reads this field
+                            only on the boot that claims a blank disk.
+                            After that, the system finds the role's
+                            partition by the GPT partition name written
+                            on it.
                         size:
                           type: string
                           maxLength: 32
                           pattern: ^[0-9]+(Ki|Mi|Gi|Ti)?$
+                          description: >-
+                            How much of the disk this role takes, as a
+                            binary quantity (2Gi). This is an exact
+                            allocation, not a request. An empty value
+                            means that the role takes the rest of its
+                            disk, and only one role per disk can omit
+                            it.
                     clusterState:
                       type: object
                       description: >-
@@ -546,10 +639,24 @@ spec:
                           type: string
                           maxLength: 128
                           pattern: ^/dev/[a-zA-Z0-9/_-]+$
+                          description: >-
+                            The disk that this role is on, as a device
+                            path (/dev/vda). The system reads this field
+                            only on the boot that claims a blank disk.
+                            After that, the system finds the role's
+                            partition by the GPT partition name written
+                            on it.
                         size:
                           type: string
                           maxLength: 32
                           pattern: ^[0-9]+(Ki|Mi|Gi|Ti)?$
+                          description: >-
+                            How much of the disk this role takes, as a
+                            binary quantity (2Gi). This is an exact
+                            allocation, not a request. An empty value
+                            means that the role takes the rest of its
+                            disk, and only one role per disk can omit
+                            it.
                     podStorage:
                       type: object
                       description: >-
@@ -562,10 +669,24 @@ spec:
                           type: string
                           maxLength: 128
                           pattern: ^/dev/[a-zA-Z0-9/_-]+$
+                          description: >-
+                            The disk that this role is on, as a device
+                            path (/dev/vda). The system reads this field
+                            only on the boot that claims a blank disk.
+                            After that, the system finds the role's
+                            partition by the GPT partition name written
+                            on it.
                         size:
                           type: string
                           maxLength: 32
                           pattern: ^[0-9]+(Ki|Mi|Gi|Ti)?$
+                          description: >-
+                            How much of the disk this role takes, as a
+                            binary quantity (2Gi). This is an exact
+                            allocation, not a request. An empty value
+                            means that the role takes the rest of its
+                            disk, and only one role per disk can omit
+                            it.
                     podEphemeral:
                       type: object
                       description: >-
@@ -583,10 +704,24 @@ spec:
                           type: string
                           maxLength: 128
                           pattern: ^/dev/[a-zA-Z0-9/_-]+$
+                          description: >-
+                            The disk that this role is on, as a device
+                            path (/dev/vda). The system reads this field
+                            only on the boot that claims a blank disk.
+                            After that, the system finds the role's
+                            partition by the GPT partition name written
+                            on it.
                         size:
                           type: string
                           maxLength: 32
                           pattern: ^[0-9]+(Ki|Mi|Gi|Ti)?$
+                          description: >-
+                            How much of the disk this role takes, as a
+                            binary quantity (2Gi). This is an exact
+                            allocation, not a request. An empty value
+                            means that the role takes the rest of its
+                            disk, and only one role per disk can omit
+                            it.
             status:
               type: object
               description: >-
@@ -656,8 +791,19 @@ spec:
                   properties:
                     liken:
                       type: string
+                      description: >-
+                        The liken version that this machine runs.
+                        The build stamps this value into the binary:
+                        a release build stamps the release name, and
+                        a development build stamps the git-described
+                        commit. The operator compares this value
+                        with the Cluster's spec.version to decide
+                        whether this machine needs an upgrade.
                     kernel:
                       type: string
+                      description: >-
+                        The kernel release, as uname reports it on
+                        the running machine.
                     xtables:
                       type: string
                       description: >-
@@ -666,6 +812,10 @@ spec:
                         (legacy or nft).
                     k3s:
                       type: string
+                      description: >-
+                        The k3s release that this operating system
+                        image carries. liken vendors one pinned k3s
+                        binary for each release.
                     trust:
                       type: string
                       description: >-
@@ -674,14 +824,33 @@ spec:
                         trusts.
                     e2fsprogs:
                       type: string
+                      description: >-
+                        The e2fsprogs release that supplied mke2fs,
+                        the program that makes the ext4 filesystem
+                        on each storage role's partition.
                     openIscsi:
                       type: string
+                      description: >-
+                        The open-iscsi release that supplied
+                        iscsiadm and iscsid, the iSCSI initiator
+                        that the iscsi feature uses.
                     nfsUtils:
                       type: string
+                      description: >-
+                        The nfs-utils release that supplied
+                        mount.nfs, the mount helper that the nfs
+                        feature uses.
                     systemdBoot:
                       type: string
+                      description: >-
+                        The systemd-boot release that supplied the
+                        boot menu on liken's install media.
                     grub:
                       type: string
+                      description: >-
+                        The GRUB release that supplied the boot
+                        program that liken writes into a BIOS
+                        machine's biosBoot partition.
                     hwdata:
                       type: string
                       description: >-
@@ -717,25 +886,54 @@ spec:
                   properties:
                     interface:
                       type: string
+                      description: >-
+                        The primary interface, as the kernel names
+                        it (for example, eth0).
                     mac:
                       type: string
+                      description: >-
+                        The hardware address of the primary
+                        interface.
                     addresses:
                       type: array
+                      description: >-
+                        The addresses of the primary interface, each
+                        in CIDR form (10.10.0.5/24).
                       x-kubernetes-list-type: atomic
                       items:
                         type: string
                     gateway:
                       type: string
+                      description: >-
+                        The default gateway of the primary
+                        interface. This field is empty when the
+                        interface has no default route.
                     nameservers:
                       type: array
+                      description: >-
+                        The nameservers of the primary interface, in
+                        preference order: the nameservers from its
+                        DHCP lease, and the nameservers that the
+                        manifest declares for it.
                       x-kubernetes-list-type: atomic
                       items:
                         type: string
                     leaseExpires:
                       type: string
                       format: date-time
+                      description: >-
+                        The time when the DHCP lease of the primary
+                        interface expires. This field is empty when
+                        the interface has a static address.
                     interfaces:
                       type: array
+                      description: >-
+                        Every interface that this boot configured,
+                        with the detail for each one. The fields
+                        above repeat the values of the primary
+                        interface, which is the one that the
+                        Cluster's nodeCIDR identifies, or the first
+                        interface that came up.
                       x-kubernetes-list-type: map
                       x-kubernetes-list-map-keys: [name]
                       items:
@@ -744,10 +942,20 @@ spec:
                         properties:
                           name:
                             type: string
+                            description: >-
+                              This interface, as the kernel names it
+                              (for example, eth0). It is the key of
+                              this list.
                           mac:
                             type: string
+                            description: >-
+                              The hardware address of this
+                              interface.
                           address:
                             type: string
+                            description: >-
+                              The address of this interface, in CIDR
+                              form (10.10.0.5/24).
                           method:
                             type: string
                             description: >-
@@ -755,14 +963,28 @@ spec:
                               or Static.
                           gateway:
                             type: string
+                            description: >-
+                              The default gateway of this interface.
+                              This field is empty when the interface
+                              has no default route.
                           nameservers:
                             type: array
+                            description: >-
+                              The nameservers of this interface, in
+                              preference order: the nameservers from
+                              its DHCP lease, and the nameservers
+                              that the manifest declares for it.
                             x-kubernetes-list-type: atomic
                             items:
                               type: string
                           leaseExpires:
                             type: string
                             format: date-time
+                            description: >-
+                              The time when the DHCP lease of this
+                              interface expires. This field is empty
+                              when the interface has a static
+                              address.
                 time:
                   type: object
                   description: >-
@@ -819,11 +1041,28 @@ spec:
                         source.
                 hardware:
                   type: object
+                  description: >-
+                    What this machine is made of, as the machine
+                    observed itself. The processor count and the
+                    memory come from the boot. The disks and the
+                    unclaimed devices stay current while the machine
+                    runs, because init watches the kernel's uevents
+                    and writes both lists again on every change.
                   properties:
                     cpus:
                       type: integer
+                      description: >-
+                        The number of logical processors that the
+                        kernel makes available. Hardware that has
+                        threads counts each thread as one processor.
                     memoryBytes:
                       type: integer
+                      description: >-
+                        The machine's total usable memory, in bytes,
+                        as the kernel reports it. This value is less
+                        than the memory that the machine holds,
+                        because the firmware and the kernel reserve
+                        some of it.
                     blockDevices:
                       type: array
                       description: >-
@@ -843,12 +1082,26 @@ spec:
                         properties:
                           name:
                             type: string
+                            description: >-
+                              This disk, as the kernel names it this
+                              boot (vda, nvme0n1). It is the key of
+                              this list.
                           sizeBytes:
                             type: integer
+                            description: >-
+                              The capacity of this disk, in bytes.
                           model:
                             type: string
+                            description: >-
+                              The model name that the device
+                              reports. This field is empty when the
+                              device reports none.
                           serial:
                             type: string
+                            description: >-
+                              The serial number that the device
+                              reports. This field is empty when the
+                              device reports none.
                     unclaimed:
                       type: array
                       description: >-
@@ -872,18 +1125,54 @@ spec:
                         properties:
                           modalias:
                             type: string
+                            description: >-
+                              The kernel's identifier for this
+                              device: the string that it announces
+                              in a uevent and matches driver alias
+                              patterns against. It is the key of
+                              this list, and it names the device
+                              exactly when the words below do not.
                           bus:
                             type: string
+                            description: >-
+                              The bus that the device is on: pci or
+                              usb.
                           name:
                             type: string
+                            description: >-
+                              The device in words: the manufacturer
+                              and product strings of a USB device,
+                              or the names from the pci.ids database
+                              for a PCI device. When no better name
+                              exists, this field gives the numeric
+                              vendor and device IDs.
                           class:
                             type: string
+                            description: >-
+                              The coarse kind of the device, decoded
+                              from the bus's class code: for
+                              example, mass-storage, display, or
+                              network.
                           candidates:
                             type: array
+                            description: >-
+                              The loadable modules whose alias
+                              patterns match this device, in the
+                              kernel build's order of preference.
+                              More than one candidate is usual: USB
+                              storage matches both uas and
+                              usb_storage. The choice belongs to the
+                              person who edits spec.modules.
                             items:
                               type: string
                           message:
                             type: string
+                            description: >-
+                              The correction, in words: declare one
+                              of the candidate modules in
+                              spec.modules when the image carries
+                              it, or upgrade to a release whose
+                              image carries one.
                 firmware:
                   type: object
                   description: >-
@@ -904,12 +1193,42 @@ spec:
                     mode:
                       type: string
                       enum: [UEFI, BIOS]
+                      description: >-
+                        The kind of firmware that started this
+                        machine. UEFI means that the machine keeps
+                        boot variables that liken reads and writes.
+                        BIOS covers every environment that keeps no
+                        such variables, for example a legacy server
+                        or a direct-kernel boot under a hypervisor.
                     bootCurrent:
                       type: string
+                      description: >-
+                        The entry that this boot came from. In UEFI
+                        mode, the value is the firmware's BootCurrent
+                        variable. In BIOS mode, it is the liken.slot=
+                        parameter on the kernel command line. This
+                        field is empty when neither source names an
+                        entry, as in a direct-kernel boot.
                     bootNext:
                       type: string
+                      description: >-
+                        The one-shot entry that is armed for the
+                        next boot: the firmware's BootNext variable
+                        in UEFI mode, or try_slot in GRUB's
+                        environment block in BIOS mode. The boot
+                        uses this entry one time and then clears it.
+                        A value here means that a proving boot waits
+                        and has not yet happened. This field is
+                        empty at every other time.
                     bootOrder:
                       type: array
+                      description: >-
+                        The standing list of preferences, with the
+                        first choice first: the firmware's BootOrder
+                        variable in UEFI mode, where each entry is a
+                        menu entry, or default_slot in GRUB's
+                        environment block in BIOS mode, which gives
+                        one entry.
                       # This list is atomic: the order has meaning,
                       # so the entries replace as a whole list.
                       x-kubernetes-list-type: atomic
@@ -931,103 +1250,373 @@ spec:
                   properties:
                     biosBoot:
                       type: object
+                      description: >-
+                        What backs the biosBoot role now.
+                        spec.storage.biosBoot describes what the role
+                        holds.
                       properties:
                         backing:
                           type: string
+                          description: >-
+                            What holds this role's data. Partition means
+                            that the machine found the role's partition.
+                            Memory means that the role's directory stays
+                            on the machine's RAM root. A role that the
+                            spec does not declare has this backing.
                         device:
                           type: string
+                          description: >-
+                            The device node of this role's partition, as
+                            the machine found it this boot (vda1). The
+                            kernel assigns this name in probe order, so
+                            the name identifies the partition for this
+                            boot only. This field is empty for a
+                            memory-backed role.
                         partition:
                           type: string
+                          description: >-
+                            The on-disk name of this role's partition.
+                            The name is the liken: prefix and the role's
+                            name. The claim writes this name, and every
+                            boot after that finds the partition by it,
+                            wherever the kernel enumerates the disk.
+                            This field is empty for a memory-backed
+                            role.
                         capacityBytes:
                           type: integer
+                          description: >-
+                            The size of this role's partition, in bytes.
+                            A memory-backed role reports no capacity,
+                            because all memory-backed roles share the
+                            one RAM root.
                     bootHome:
                       type: object
+                      description: >-
+                        What backs the bootHome role now.
+                        spec.storage.bootHome describes what the role
+                        holds.
                       properties:
                         backing:
                           type: string
+                          description: >-
+                            What holds this role's data. Partition means
+                            that the machine found the role's partition.
+                            Memory means that the role's directory stays
+                            on the machine's RAM root. A role that the
+                            spec does not declare has this backing.
                         device:
                           type: string
+                          description: >-
+                            The device node of this role's partition, as
+                            the machine found it this boot (vda1). The
+                            kernel assigns this name in probe order, so
+                            the name identifies the partition for this
+                            boot only. This field is empty for a
+                            memory-backed role.
                         partition:
                           type: string
+                          description: >-
+                            The on-disk name of this role's partition.
+                            The name is the liken: prefix and the role's
+                            name. The claim writes this name, and every
+                            boot after that finds the partition by it,
+                            wherever the kernel enumerates the disk.
+                            This field is empty for a memory-backed
+                            role.
                         capacityBytes:
                           type: integer
+                          description: >-
+                            The size of this role's partition, in bytes.
+                            A memory-backed role reports no capacity,
+                            because all memory-backed roles share the
+                            one RAM root.
                     systemA:
                       type: object
+                      description: >-
+                        What backs the systemA role now.
+                        spec.storage.systemA describes what the role
+                        holds.
                       properties:
                         backing:
                           type: string
+                          description: >-
+                            What holds this role's data. Partition means
+                            that the machine found the role's partition.
+                            Memory means that the role's directory stays
+                            on the machine's RAM root. A role that the
+                            spec does not declare has this backing.
                         device:
                           type: string
+                          description: >-
+                            The device node of this role's partition, as
+                            the machine found it this boot (vda1). The
+                            kernel assigns this name in probe order, so
+                            the name identifies the partition for this
+                            boot only. This field is empty for a
+                            memory-backed role.
                         partition:
                           type: string
+                          description: >-
+                            The on-disk name of this role's partition.
+                            The name is the liken: prefix and the role's
+                            name. The claim writes this name, and every
+                            boot after that finds the partition by it,
+                            wherever the kernel enumerates the disk.
+                            This field is empty for a memory-backed
+                            role.
                         capacityBytes:
                           type: integer
+                          description: >-
+                            The size of this role's partition, in bytes.
+                            A memory-backed role reports no capacity,
+                            because all memory-backed roles share the
+                            one RAM root.
                     systemB:
                       type: object
+                      description: >-
+                        What backs the systemB role now.
+                        spec.storage.systemB describes what the role
+                        holds.
                       properties:
                         backing:
                           type: string
+                          description: >-
+                            What holds this role's data. Partition means
+                            that the machine found the role's partition.
+                            Memory means that the role's directory stays
+                            on the machine's RAM root. A role that the
+                            spec does not declare has this backing.
                         device:
                           type: string
+                          description: >-
+                            The device node of this role's partition, as
+                            the machine found it this boot (vda1). The
+                            kernel assigns this name in probe order, so
+                            the name identifies the partition for this
+                            boot only. This field is empty for a
+                            memory-backed role.
                         partition:
                           type: string
+                          description: >-
+                            The on-disk name of this role's partition.
+                            The name is the liken: prefix and the role's
+                            name. The claim writes this name, and every
+                            boot after that finds the partition by it,
+                            wherever the kernel enumerates the disk.
+                            This field is empty for a memory-backed
+                            role.
                         capacityBytes:
                           type: integer
+                          description: >-
+                            The size of this role's partition, in bytes.
+                            A memory-backed role reports no capacity,
+                            because all memory-backed roles share the
+                            one RAM root.
                     machineState:
                       type: object
+                      description: >-
+                        What backs the machineState role now.
+                        spec.storage.machineState describes what the
+                        role holds.
                       properties:
                         backing:
                           type: string
+                          description: >-
+                            What holds this role's data. Partition means
+                            that the machine found the role's partition.
+                            Memory means that the role's directory stays
+                            on the machine's RAM root. A role that the
+                            spec does not declare has this backing.
                         device:
                           type: string
+                          description: >-
+                            The device node of this role's partition, as
+                            the machine found it this boot (vda1). The
+                            kernel assigns this name in probe order, so
+                            the name identifies the partition for this
+                            boot only. This field is empty for a
+                            memory-backed role.
                         partition:
                           type: string
+                          description: >-
+                            The on-disk name of this role's partition.
+                            The name is the liken: prefix and the role's
+                            name. The claim writes this name, and every
+                            boot after that finds the partition by it,
+                            wherever the kernel enumerates the disk.
+                            This field is empty for a memory-backed
+                            role.
                         capacityBytes:
                           type: integer
+                          description: >-
+                            The size of this role's partition, in bytes.
+                            A memory-backed role reports no capacity,
+                            because all memory-backed roles share the
+                            one RAM root.
                     machineEphemeral:
                       type: object
+                      description: >-
+                        What backs the machineEphemeral role now.
+                        spec.storage.machineEphemeral describes what the
+                        role holds.
                       properties:
                         backing:
                           type: string
+                          description: >-
+                            What holds this role's data. Partition means
+                            that the machine found the role's partition.
+                            Memory means that the role's directory stays
+                            on the machine's RAM root. A role that the
+                            spec does not declare has this backing.
                         device:
                           type: string
+                          description: >-
+                            The device node of this role's partition, as
+                            the machine found it this boot (vda1). The
+                            kernel assigns this name in probe order, so
+                            the name identifies the partition for this
+                            boot only. This field is empty for a
+                            memory-backed role.
                         partition:
                           type: string
+                          description: >-
+                            The on-disk name of this role's partition.
+                            The name is the liken: prefix and the role's
+                            name. The claim writes this name, and every
+                            boot after that finds the partition by it,
+                            wherever the kernel enumerates the disk.
+                            This field is empty for a memory-backed
+                            role.
                         capacityBytes:
                           type: integer
+                          description: >-
+                            The size of this role's partition, in bytes.
+                            A memory-backed role reports no capacity,
+                            because all memory-backed roles share the
+                            one RAM root.
                     clusterState:
                       type: object
+                      description: >-
+                        What backs the clusterState role now.
+                        spec.storage.clusterState describes what the
+                        role holds.
                       properties:
                         backing:
                           type: string
+                          description: >-
+                            What holds this role's data. Partition means
+                            that the machine found the role's partition.
+                            Memory means that the role's directory stays
+                            on the machine's RAM root. A role that the
+                            spec does not declare has this backing.
                         device:
                           type: string
+                          description: >-
+                            The device node of this role's partition, as
+                            the machine found it this boot (vda1). The
+                            kernel assigns this name in probe order, so
+                            the name identifies the partition for this
+                            boot only. This field is empty for a
+                            memory-backed role.
                         partition:
                           type: string
+                          description: >-
+                            The on-disk name of this role's partition.
+                            The name is the liken: prefix and the role's
+                            name. The claim writes this name, and every
+                            boot after that finds the partition by it,
+                            wherever the kernel enumerates the disk.
+                            This field is empty for a memory-backed
+                            role.
                         capacityBytes:
                           type: integer
+                          description: >-
+                            The size of this role's partition, in bytes.
+                            A memory-backed role reports no capacity,
+                            because all memory-backed roles share the
+                            one RAM root.
                     podStorage:
                       type: object
+                      description: >-
+                        What backs the podStorage role now.
+                        spec.storage.podStorage describes what the role
+                        holds.
                       properties:
                         backing:
                           type: string
+                          description: >-
+                            What holds this role's data. Partition means
+                            that the machine found the role's partition.
+                            Memory means that the role's directory stays
+                            on the machine's RAM root. A role that the
+                            spec does not declare has this backing.
                         device:
                           type: string
+                          description: >-
+                            The device node of this role's partition, as
+                            the machine found it this boot (vda1). The
+                            kernel assigns this name in probe order, so
+                            the name identifies the partition for this
+                            boot only. This field is empty for a
+                            memory-backed role.
                         partition:
                           type: string
+                          description: >-
+                            The on-disk name of this role's partition.
+                            The name is the liken: prefix and the role's
+                            name. The claim writes this name, and every
+                            boot after that finds the partition by it,
+                            wherever the kernel enumerates the disk.
+                            This field is empty for a memory-backed
+                            role.
                         capacityBytes:
                           type: integer
+                          description: >-
+                            The size of this role's partition, in bytes.
+                            A memory-backed role reports no capacity,
+                            because all memory-backed roles share the
+                            one RAM root.
                     podEphemeral:
                       type: object
+                      description: >-
+                        What backs the podEphemeral role now.
+                        spec.storage.podEphemeral describes what the
+                        role holds.
                       properties:
                         backing:
                           type: string
+                          description: >-
+                            What holds this role's data. Partition means
+                            that the machine found the role's partition.
+                            Memory means that the role's directory stays
+                            on the machine's RAM root. A role that the
+                            spec does not declare has this backing.
                         device:
                           type: string
+                          description: >-
+                            The device node of this role's partition, as
+                            the machine found it this boot (vda1). The
+                            kernel assigns this name in probe order, so
+                            the name identifies the partition for this
+                            boot only. This field is empty for a
+                            memory-backed role.
                         partition:
                           type: string
+                          description: >-
+                            The on-disk name of this role's partition.
+                            The name is the liken: prefix and the role's
+                            name. The claim writes this name, and every
+                            boot after that finds the partition by it,
+                            wherever the kernel enumerates the disk.
+                            This field is empty for a memory-backed
+                            role.
                         capacityBytes:
                           type: integer
+                          description: >-
+                            The size of this role's partition, in bytes.
+                            A memory-backed role reports no capacity,
+                            because all memory-backed roles share the
+                            one RAM root.
                 boot:
                   type: object
                   description: >-
@@ -1066,13 +1655,35 @@ spec:
                     manifestSource:
                       type: string
                       enum: [Staged, Proven, Seed]
+                      description: >-
+                        The copy of the Machine manifest that this
+                        boot used. Staged is a copy that waits for
+                        its proving boot. Proven is the
+                        last-known-good copy. Seed is the manifest
+                        in the image, and only a first boot uses it.
                     manifestHash:
                       type: string
+                      description: >-
+                        The sha256 hash of the exact bytes of the
+                        Machine manifest that this boot used. The
+                        operator compares this hash with the hash of
+                        the manifest in the cluster to find drift.
                     clusterManifestSource:
                       type: string
                       enum: [Staged, Proven, Seed]
+                      description: >-
+                        The copy of the Cluster document that this
+                        boot used, with the same values as
+                        manifestSource. The system records the two
+                        documents separately, because each one
+                        stages and proves on its own. A machine can
+                        be current on one document and drifted on
+                        the other.
                     clusterManifestHash:
                       type: string
+                      description: >-
+                        The sha256 hash of the exact bytes of the
+                        Cluster document that this boot used.
                     credentialsSource:
                       type: string
                       # This field has no Seed value on purpose: the
@@ -1089,6 +1700,12 @@ spec:
                         machine pulls images anonymously.
                     credentialsHash:
                       type: string
+                      description: >-
+                        The sha256 hash of the exact bytes of the
+                        registry-credentials document that this
+                        boot, or the most recent k3s restart, wrote
+                        into registries.yaml. This field is absent
+                        on a machine that never had credentials.
                     importsSource:
                       type: string
                       # This field has no Seed value: the record
@@ -1107,6 +1724,11 @@ spec:
                         container store).
                     importsHash:
                       type: string
+                      description: >-
+                        The sha256 hash of the exact bytes of the
+                        imported-images record that this boot used.
+                        This field is absent when the import
+                        lifecycle does not run.
                     importsDiscarded:
                       type: boolean
                       description: >-
@@ -1143,70 +1765,197 @@ spec:
                         purpose of the two slots.
                     storage:
                       type: object
+                      description: >-
+                        The storage that the manifest of this boot
+                        declared. The system records it as actuated,
+                        whatever the result for each role was. A
+                        boot with the same manifest claims the same
+                        disks, so this field is the drift reference,
+                        and status.storage reports what backs each
+                        role now. An edit to spec.storage is
+                        converged when the two agree.
                       properties:
                         biosBoot:
                           type: object
+                          description: >-
+                            The biosBoot role, as this boot actuated
+                            it. spec.storage.biosBoot describes what
+                            the role holds.
                           properties:
                             device:
                               type: string
+                              description: >-
+                                The disk that this role is on, as a
+                                device path (/dev/vda), as the
+                                manifest of this boot declared it.
                             size:
                               type: string
+                              description: >-
+                                How much of the disk this role
+                                takes, as a binary quantity (2Gi).
+                                An empty value means that the role
+                                takes the rest of its disk.
                         bootHome:
                           type: object
+                          description: >-
+                            The bootHome role, as this boot actuated
+                            it. spec.storage.bootHome describes what
+                            the role holds.
                           properties:
                             device:
                               type: string
+                              description: >-
+                                The disk that this role is on, as a
+                                device path (/dev/vda), as the
+                                manifest of this boot declared it.
                             size:
                               type: string
+                              description: >-
+                                How much of the disk this role
+                                takes, as a binary quantity (2Gi).
+                                An empty value means that the role
+                                takes the rest of its disk.
                         systemA:
                           type: object
+                          description: >-
+                            The systemA role, as this boot actuated
+                            it. spec.storage.systemA describes what
+                            the role holds.
                           properties:
                             device:
                               type: string
+                              description: >-
+                                The disk that this role is on, as a
+                                device path (/dev/vda), as the
+                                manifest of this boot declared it.
                             size:
                               type: string
+                              description: >-
+                                How much of the disk this role
+                                takes, as a binary quantity (2Gi).
+                                An empty value means that the role
+                                takes the rest of its disk.
                         systemB:
                           type: object
+                          description: >-
+                            The systemB role, as this boot actuated
+                            it. spec.storage.systemB describes what
+                            the role holds.
                           properties:
                             device:
                               type: string
+                              description: >-
+                                The disk that this role is on, as a
+                                device path (/dev/vda), as the
+                                manifest of this boot declared it.
                             size:
                               type: string
+                              description: >-
+                                How much of the disk this role
+                                takes, as a binary quantity (2Gi).
+                                An empty value means that the role
+                                takes the rest of its disk.
                         machineState:
                           type: object
+                          description: >-
+                            The machineState role, as this boot
+                            actuated it. spec.storage.machineState
+                            describes what the role holds.
                           properties:
                             device:
                               type: string
+                              description: >-
+                                The disk that this role is on, as a
+                                device path (/dev/vda), as the
+                                manifest of this boot declared it.
                             size:
                               type: string
+                              description: >-
+                                How much of the disk this role
+                                takes, as a binary quantity (2Gi).
+                                An empty value means that the role
+                                takes the rest of its disk.
                         machineEphemeral:
                           type: object
+                          description: >-
+                            The machineEphemeral role, as this boot
+                            actuated it.
+                            spec.storage.machineEphemeral describes
+                            what the role holds.
                           properties:
                             device:
                               type: string
+                              description: >-
+                                The disk that this role is on, as a
+                                device path (/dev/vda), as the
+                                manifest of this boot declared it.
                             size:
                               type: string
+                              description: >-
+                                How much of the disk this role
+                                takes, as a binary quantity (2Gi).
+                                An empty value means that the role
+                                takes the rest of its disk.
                         clusterState:
                           type: object
+                          description: >-
+                            The clusterState role, as this boot
+                            actuated it. spec.storage.clusterState
+                            describes what the role holds.
                           properties:
                             device:
                               type: string
+                              description: >-
+                                The disk that this role is on, as a
+                                device path (/dev/vda), as the
+                                manifest of this boot declared it.
                             size:
                               type: string
+                              description: >-
+                                How much of the disk this role
+                                takes, as a binary quantity (2Gi).
+                                An empty value means that the role
+                                takes the rest of its disk.
                         podStorage:
                           type: object
+                          description: >-
+                            The podStorage role, as this boot
+                            actuated it. spec.storage.podStorage
+                            describes what the role holds.
                           properties:
                             device:
                               type: string
+                              description: >-
+                                The disk that this role is on, as a
+                                device path (/dev/vda), as the
+                                manifest of this boot declared it.
                             size:
                               type: string
+                              description: >-
+                                How much of the disk this role
+                                takes, as a binary quantity (2Gi).
+                                An empty value means that the role
+                                takes the rest of its disk.
                         podEphemeral:
                           type: object
+                          description: >-
+                            The podEphemeral role, as this boot
+                            actuated it. spec.storage.podEphemeral
+                            describes what the role holds.
                           properties:
                             device:
                               type: string
+                              description: >-
+                                The disk that this role is on, as a
+                                device path (/dev/vda), as the
+                                manifest of this boot declared it.
                             size:
                               type: string
+                              description: >-
+                                How much of the disk this role
+                                takes, as a binary quantity (2Gi).
+                                An empty value means that the role
+                                takes the rest of its disk.
                     network:
                       type: object
                       description: >-
@@ -1226,6 +1975,13 @@ spec:
                       properties:
                         interfaces:
                           type: array
+                          description: >-
+                            The interfaces that the manifest of this
+                            boot declared. The system records them
+                            as actuated, whatever the result for
+                            each interface was.
+                            status.network.interfaces reports what
+                            each interface received.
                           # Atomic, and compared by position. The
                           # order of the list is part of what the
                           # spec asks for, because it sets the order
@@ -1238,14 +1994,35 @@ spec:
                               name:
                                 type: string
                                 maxLength: 15
+                                description: >-
+                                  The interface that the manifest
+                                  named, as the kernel names it (for
+                                  example, eth1).
                               address:
                                 type: string
                                 maxLength: 64
+                                description: >-
+                                  The static address in CIDR form
+                                  that the manifest declared, for
+                                  example 10.10.0.1/24. An empty
+                                  field means DHCP on this
+                                  interface.
                               gateway:
                                 type: string
                                 maxLength: 64
+                                description: >-
+                                  The gateway address that the
+                                  manifest declared. An empty field
+                                  means that the manifest gave this
+                                  interface no default route.
                               nameservers:
                                 type: array
+                                description: >-
+                                  The nameservers that the manifest
+                                  declared for this interface, in
+                                  preference order. The machine uses
+                                  them in addition to the
+                                  nameservers from a DHCP lease.
                                 x-kubernetes-list-type: atomic
                                 items:
                                   type: string
@@ -1266,24 +2043,61 @@ spec:
                         maxLength: 64
                     rejection:
                       type: object
+                      description: >-
+                        The standing quarantine record for the
+                        Machine manifest: the staged manifest that
+                        the machine refused, and the reason. Every
+                        boot writes this record again until a
+                        promotion clears it, so the record stays
+                        through a power cycle.
                       properties:
                         hash:
                           type: string
+                          description: >-
+                            The sha256 hash of the exact bytes that
+                            the machine refused. The operator
+                            refuses to stage the same bytes again,
+                            so only a different edit clears the
+                            rejection.
                         reason:
                           type: string
+                          description: >-
+                            Why the machine refused the document, in
+                            the same words that the boot prints on
+                            the console.
                         rejectedAt:
                           type: string
                           format: date-time
+                          description: >-
+                            The time when the machine refused the
+                            document.
                     clusterRejection:
                       type: object
+                      description: >-
+                        The standing quarantine record for the
+                        Cluster document. It is the same record as
+                        rejection, for the other document.
                       properties:
                         hash:
                           type: string
+                          description: >-
+                            The sha256 hash of the exact bytes that
+                            the machine refused. The operator
+                            refuses to stage the same bytes again,
+                            so only a different edit clears the
+                            rejection.
                         reason:
                           type: string
+                          description: >-
+                            Why the machine refused the document, in
+                            the same words that the boot prints on
+                            the console.
                         rejectedAt:
                           type: string
                           format: date-time
+                          description: >-
+                            The time when the machine refused the
+                            document.
                     systemRejection:
                       type: object
                       description: >-
@@ -1296,11 +2110,23 @@ spec:
                       properties:
                         hash:
                           type: string
+                          description: >-
+                            The sha256 hash of the exact bytes of
+                            the staged release record that the
+                            machine refused. No later boot arms the
+                            same trial again.
                         reason:
                           type: string
+                          description: >-
+                            Why the machine refused the release, in
+                            the same words that the boot prints on
+                            the console.
                         rejectedAt:
                           type: string
                           format: date-time
+                          description: >-
+                            The time when the machine refused the
+                            release.
                     credentialsRejection:
                       type: object
                       description: >-
@@ -1312,11 +2138,24 @@ spec:
                       properties:
                         hash:
                           type: string
+                          description: >-
+                            The sha256 hash of the exact bytes of
+                            the credentials document that the
+                            machine refused. Only a different
+                            rendering, which an edit to the Secret
+                            makes, clears the rejection.
                         reason:
                           type: string
+                          description: >-
+                            Why the machine refused the document, in
+                            the same words that the boot prints on
+                            the console.
                         rejectedAt:
                           type: string
                           format: date-time
+                          description: >-
+                            The time when the machine refused the
+                            document.
                 sysctls:
                   type: object
                   description: >-
@@ -1346,12 +2185,34 @@ spec:
                       name:
                         type: string
                         maxLength: 64
+                        description: >-
+                          The module, by the name that spec.modules
+                          declares (for example, e1000e). It is the
+                          key of this list.
                       state:
                         type: string
                         enum: [Loaded, Builtin, Missing, Failed]
+                        description: >-
+                          The result for this module on this boot.
+                          Loaded means that the kernel took the
+                          module, or already held it. Builtin means
+                          that the kernel has the module compiled
+                          in, so there was nothing to load. Missing
+                          means that the booted image does not carry
+                          the module, and a new image corrects it,
+                          not a retry. Failed means that the image
+                          carries the module and the kernel refused
+                          it, which usually points to a fault in the
+                          hardware.
                       message:
                         type: string
                         maxLength: 1024
+                        description: >-
+                          The detail for a Missing or a Failed
+                          module, in the same words that the boot
+                          prints on the console, and named as a
+                          correction. This field is empty when the
+                          state is Loaded or Builtin.
                 features:
                   type: array
                   description: >-
@@ -1377,12 +2238,35 @@ spec:
                       name:
                         type: string
                         maxLength: 64
+                        description: >-
+                          The feature, by the name that the
+                          Cluster's spec.features enables (for
+                          example, iscsi). It is the key of this
+                          list.
                       state:
                         type: string
                         enum: [Active, Missing, Failed]
+                        description: >-
+                          The state of this feature on this machine,
+                          on this boot. Active means that the boot
+                          applied everything that the feature asks
+                          of this machine. Missing means that the
+                          booted image carries no payload for the
+                          feature, and the correction is a release
+                          whose image carries one. Failed means that
+                          the image carries the payload and the
+                          machine could not apply it, for example a
+                          module that the kernel refused, or a boot
+                          hook that returned an error.
                       message:
                         type: string
                         maxLength: 1024
+                        description: >-
+                          The detail for a Missing or a Failed
+                          feature, in the same words that the boot
+                          prints on the console, and named as a
+                          correction. This field is empty when the
+                          state is Active.
                 registries:
                   type: object
                   description: >-
@@ -1395,18 +2279,38 @@ spec:
                   properties:
                     mirrors:
                       type: array
+                      description: >-
+                        The registry hosts that registries.yaml
+                        carries a mirror entry for, sorted by name.
+                        The list holds "*" as well when the
+                        embedded registry is on, because the
+                        wildcard entry is how it shares the images
+                        of every registry. This field is empty when
+                        the machine mirrors nothing.
                       x-kubernetes-list-type: atomic
                       items:
                         type: string
                         maxLength: 256
                     credentialedHosts:
                       type: array
+                      description: >-
+                        The registry hosts that registries.yaml
+                        carries a credential for, sorted by name.
+                        This field names the hosts only. The
+                        usernames and the passwords stay in the
+                        registry-credentials Secret and never reach
+                        status. This field is empty when the machine
+                        pulls every image anonymously.
                       x-kubernetes-list-type: atomic
                       items:
                         type: string
                         maxLength: 256
                     embedded:
                       type: boolean
+                      description: >-
+                        True when this boot turned k3s's embedded
+                        registry mirror (Spegel) on, which the
+                        Cluster's spec.registries.embedded asks for.
                 runtime:
                   type: object
                   description: >-
@@ -1419,6 +2323,11 @@ spec:
                   properties:
                     k3s:
                       type: object
+                      description: >-
+                        The Go runtime environment of the k3s
+                        process on this machine. This field is
+                        absent when init set neither variable, so
+                        k3s runs on Go's own defaults.
                       properties:
                         goMemoryLimit:
                           type: string
@@ -1485,6 +2394,28 @@ spec:
                         machineState runs in memory.
                 conditions:
                   type: array
+                  description: >-
+                    The typed observations that the operators keep
+                    on this machine, in the standard Kubernetes
+                    form. Each pass writes every condition again.
+                    Ready is the roll-up, and it is True only when
+                    every other condition is True. The other
+                    conditions each report one check: FactsPublished
+                    for the facts that init writes, SysctlsApplied,
+                    StorageReady, ModulesLoaded, FeaturesReady, and
+                    NodeLabelsApplied for the parts of the spec that
+                    the operator applies, NodeHealthy for the Node's
+                    own Ready condition, NodeCurrent for the cleanup
+                    after a demotion, and SpecConverged,
+                    ClusterConverged, VersionConverged,
+                    CredentialsConverged, and ImportsConverged for
+                    the documents and the release that this boot ran
+                    under. RebootApproved is the one condition that
+                    another program writes: the cluster operator
+                    adds it to grant this machine a reboot turn, and
+                    removes it to take the grant back. Its absence
+                    carries the meaning, so it has no False state,
+                    and Ready does not count it.
                   # A conditions array is a map with one entry per
                   # type. This declaration (list-type map, keyed by
                   # type) lets the API server refuse duplicate types.
@@ -1504,9 +2435,22 @@ spec:
                         type: string
                         maxLength: 316
                         pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                        description: >-
+                          The check that this entry reports, in
+                          CamelCase. It is the key of this list, so
+                          a machine carries one entry for each type.
+                          The description of the conditions field
+                          lists the types that liken publishes.
                       status:
                         type: string
                         enum: ["True", "False", "Unknown"]
+                        description: >-
+                          The verdict. Every condition type on a
+                          Machine states a healthy fact, so True is
+                          the good verdict for all of them. Unknown
+                          means that the operator cannot tell yet,
+                          for example when the machine's facts carry
+                          no boot record.
                       observedGeneration:
                         type: integer
                         format: int64
@@ -1524,9 +2468,34 @@ spec:
                         minLength: 1
                         maxLength: 1024
                         pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                        description: >-
+                          Why the condition holds this status, in
+                          one CamelCase word. Programs read this
+                          field, so it changes less than the message
+                          does. Ready reports Reconciled or
+                          Degraded. NothingDeclared is the reason
+                          that a check with nothing to do reports.
+                          The convergence conditions share one set
+                          of reasons: Converged, FactsIncomplete,
+                          MachineStateEphemeral, StagingRejected,
+                          RejectedLastBoot, AwaitingTurn,
+                          RebootPending, RebootRequested,
+                          RestartPending, and RestartRequested.
                       message:
                         type: string
                         maxLength: 32768
+                        description: >-
+                          The detail, for a person to read. A
+                          message names the correction where one
+                          exists, for example the roles that memory
+                          still backs, or the exact difference
+                          between the spec and this boot.
                       lastTransitionTime:
                         type: string
                         format: date-time
+                        description: >-
+                          The time when the status of this condition
+                          last changed. A pass that writes the same
+                          status again does not move this time, so
+                          the field gives the length of time that
+                          this verdict has held.

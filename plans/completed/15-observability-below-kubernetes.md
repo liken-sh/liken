@@ -152,7 +152,10 @@ efi-pstore for kernel panics.
    described above. Release 0.3.1 carried the fix. The whole fleet went
    through the rollout, and all twenty-five OS pods, which are the
    operator plus four relays on five nodes, refreshed through the
-   steward and settled at zero restarts.
+   steward and settled at zero restarts. That count belongs to the
+   four-DaemonSet layout that these two releases carried. Commit
+   030900b folded the four relays into one four-container pod, so a
+   fleet of this size runs fewer pods now.
 
    `kernel-logs` ships the boot from sequence 0 ("Linux version ...").
    `liken-logs` opens with exactly the console-only boundary marker.
