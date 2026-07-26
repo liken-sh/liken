@@ -133,8 +133,8 @@ func installToDisk(machineName string) (string, error) {
 	// it permanent.
 	actuators := 0
 	if firmwareIsUEFI() {
-		if err := installBootEntries(slotA, slotB, machineName); err != nil {
-			return "", err
+		if err := registerSlotEntries(slotA, slotB, machineName); err != nil {
+			return "", fmt.Errorf("install: %w", err)
 		}
 		actuators++
 	}
@@ -167,41 +167,6 @@ func installToDisk(machineName string) (string, error) {
 		return "", fmt.Errorf("install: flushing the slot's directory to the disk: %w", err)
 	}
 	return installSlot, nil
-}
-
-// installBootEntries registers both slots with UEFI firmware. Slot
-// B's entry points at files that do not exist yet, because its slot
-// stays empty until the first upgrade fills it. This is fine: a
-// firmware that cannot load an entry's file moves on to the next
-// entry in BootOrder.
-func installBootEntries(slotA, slotB *slotPartition, machineName string) error {
-	entryA, err := writeSlotBootEntry(efiVarsDir, "liken slot A", "A", slotA, machineName)
-	if err != nil {
-		return err
-	}
-	entryB, err := writeSlotBootEntry(efiVarsDir, "liken slot B", "B", slotB, machineName)
-	if err != nil {
-		return err
-	}
-
-	// BootOrder: this machine's own slots come first, A then B (B
-	// matters only when a proving boot armed it via BootNext, or when
-	// A is broken). After them comes whatever the firmware already
-	// had, in its previous order. The firmware's own entries (setup
-	// menus, shells) stay reachable; they are just never preferred.
-	order := []uint16{entryA, entryB}
-	for _, n := range readBootOrder(efiVarsDir) {
-		if n != entryA && n != entryB {
-			order = append(order, n)
-		}
-	}
-	if err := writeBootOrder(efiVarsDir, order); err != nil {
-		return fmt.Errorf("install: writing BootOrder: %w", err)
-	}
-
-	fmt.Printf("liken: install: boot entries %s and %s written; BootOrder prefers slot A\n",
-		bootEntryID(entryA), bootEntryID(entryB))
-	return nil
 }
 
 // installGRUB writes the bootloader for a machine that boots
@@ -416,81 +381,4 @@ func partitionNumber(p partition) (uint32, error) {
 		return 0, fmt.Errorf("install: cannot read a partition number from %q on disk %s", p.name, p.disk)
 	}
 	return uint32(n), nil
-}
-
-// writeSlotBootEntry writes one slot's firmware entry: it boots
-// \vmlinuz from this partition, with a command line assembled from
-// scratch so that every argument is deliberate and none is inherited
-// by accident:
-//
-//	console=...      copied from this boot, so the installed system
-//	                 keeps using whatever console its operator wired
-//	rdinit=/liken    run our program as PID 1
-//	initrd=          appears three times: \microcode.cpio first (the
-//	                 CPU microcode early cpio, which must lead
-//	                 because the kernel scans the very start of its
-//	                 initrd for microcode before it decompresses
-//	                 anything), then \boot.cpio (init and the early
-//	                 boot's modules), then \deployment.cpio (this
-//	                 deployment's layer), all next to the kernel. The
-//	                 EFI stub loads every initrd= file, in order, from
-//	                 the same filesystem that it loaded the kernel
-//	                 from. The system itself (liken.sqfs) is
-//	                 deliberately not among them: init mounts it
-//	                 straight from this slot, so the loader stages
-//	                 megabytes instead of the whole OS. Composition at
-//	                 load time is what lets an upgrade replace the
-//	                 generic half without ever touching the layer
-//	liken.machine=   the machine's identity, carried from the
-//	                 installer boot into this entry
-//	liken.slot=      which slot this entry boots, so a running system
-//	                 knows which half of the blue-green pair it is on
-//	panic=10         reboot ten seconds after a kernel panic, instead
-//	                 of hanging forever. Upgrades depend on this: a
-//	                 panicking trial slot must reset, so the
-//	                 firmware's consumed BootNext can fall back to the
-//	                 proven slot
-func writeSlotBootEntry(dir, description, slot string, part *slotPartition, machineName string) (uint16, error) {
-	args := consoleArgs()
-	args = append(args,
-		"rdinit=/liken",
-		`initrd=\microcode.cpio`,
-		`initrd=\boot.cpio`,
-		`initrd=\`+machine.LayerName,
-		"liken.machine="+machineName,
-		"liken.slot="+slot,
-		"panic=10",
-	)
-	option := loadOption{
-		attributes:  loadOptionActive,
-		description: description,
-		hardDrive: &hardDriveNode{
-			partitionNumber: part.number,
-			firstLBA:        part.firstLBA,
-			sectors:         part.lastLBA - part.firstLBA + 1,
-			partitionGUID:   part.guid,
-		},
-		filePath: `\vmlinuz`,
-		// The EFI stub reads its command line as UTF-16, the
-		// firmware's native string type.
-		optionalData: encodeUTF16Z(strings.Join(args, " ")),
-	}
-	number, err := setBootEntry(dir, option)
-	if err != nil {
-		return 0, fmt.Errorf("install: writing the %s entry: %w", description, err)
-	}
-	return number, nil
-}
-
-// consoleArgs copies every console= argument from the running
-// command line. The installer was told where this machine's console
-// is, and the installed system should keep using the same console.
-func consoleArgs() []string {
-	var consoles []string
-	for _, field := range cmdlineFields() {
-		if strings.HasPrefix(field, "console=") {
-			consoles = append(consoles, field)
-		}
-	}
-	return consoles
 }

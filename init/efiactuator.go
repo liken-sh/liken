@@ -84,15 +84,3 @@ func (a efiActuator) assertProven(slot string) {
 	fmt.Printf("liken: system: BootOrder now leads with %s (slot %s is proven)\n",
 		bootEntryID(leader), slot)
 }
-
-// findSlotEntry locates a slot's firmware entry the same way
-// everything in liken finds things: by the name written on it at
-// install time.
-func findSlotEntry(efiDir, slot string) (uint16, bool) {
-	for number, option := range listBootEntries(efiDir) {
-		if option.description == "liken slot "+slot {
-			return number, true
-		}
-	}
-	return 0, false
-}
