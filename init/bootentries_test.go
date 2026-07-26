@@ -200,3 +200,34 @@ func TestSlotOrder(t *testing.T) {
 		}
 	}
 }
+
+// Some firmware clones a boot option it did not write, so two entries
+// can answer to one slot. Every reader must pick the same one, because
+// fallbackLeads compares its number against the head of BootOrder and
+// armProvingBoot refuses a trial when they disagree.
+func TestFindSlotEntryTakesTheLowestOfTwoEntriesForOneSlot(t *testing.T) {
+	fakeCmdline(t, "console=ttyS0 liken.machine=node-1\n")
+	ours := encodeLoadOption(loadOption{
+		attributes:  loadOptionActive,
+		description: "liken slot B",
+		filePath:    `\vmlinuz`,
+	})
+	clone := encodeLoadOption(loadOption{
+		attributes:  loadOptionActive,
+		description: "liken slot B",
+		filePath:    `\vmlinuz`,
+		// The firmware's copy differs only in the device path, which
+		// the decoder reports through hardDrive.
+		hardDrive: &hardDriveNode{partitionNumber: 2, firstLBA: 4096, sectors: 2048},
+	})
+	dir := fakeEFIVars(t, map[string][]byte{"Boot0003": ours, "Boot0004": clone})
+
+	// Map iteration is randomized, so a wrong implementation passes
+	// sometimes. Ask enough times that it cannot.
+	for range 20 {
+		number, ok := findSlotEntry(dir, "B")
+		if !ok || number != 3 {
+			t.Fatalf("the lowest matching entry wins every time: got %d, %v", number, ok)
+		}
+	}
+}

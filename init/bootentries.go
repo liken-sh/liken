@@ -279,11 +279,30 @@ func slotStorageRole(slot string) machine.StorageRoleName {
 
 // findSlotEntry locates a slot's firmware entry the same way
 // everything in liken finds things: by the name written on it.
+//
+// Two entries can answer to one slot, because some firmware clones a
+// boot option it did not write. The testbed's mini PC keeps liken's
+// slot B entry and a copy of its own beside it, with the same
+// description and the same command line, differing only in the device
+// path: liken names the partition by its GPT GUID alone, and the
+// firmware's copy carries the full PCI and SATA path ahead of it, the
+// same shape it writes for its own Windows and Ubuntu entries.
+//
+// So this returns the lowest matching number, and never an arbitrary
+// one. setBootEntry writes the lowest match too, so the two agree, and
+// every reader that compares a number against BootOrder agrees with
+// them. An arbitrary choice would make fallbackLeads compare the wrong
+// entry against the head of BootOrder, and armProvingBoot would then
+// refuse to arm a trial on a machine whose fallback is in fact real.
 func findSlotEntry(efiDir, slot string) (uint16, bool) {
+	found, ok := uint16(0), false
 	for number, option := range listBootEntries(efiDir) {
-		if option.description == slotEntryDescription(slot) {
-			return number, true
+		if option.description != slotEntryDescription(slot) {
+			continue
+		}
+		if !ok || number < found {
+			found, ok = number, true
 		}
 	}
-	return 0, false
+	return found, ok
 }
