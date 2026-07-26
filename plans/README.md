@@ -133,7 +133,9 @@ milestone is 44.
 
 * **33.** [Updating the machine's own firmware](33-firmware-updates.md) —
   fwupd as a feature slug, using the rolling-reboot orchestration that
-  liken already has. It waits for experience with bare metal.
+  liken already has. A shim variable store turns fwupd's firmware
+  writes into requests that init decides on. It waits for experience
+  with bare metal.
 * **34.** [GPU add-ons](34-gpu-add-ons.md) — a machine that needs a GPU
   compute stack declares an add-on: a second read-only image on its
   boot slot. The first add-on would be NVIDIA compute.
