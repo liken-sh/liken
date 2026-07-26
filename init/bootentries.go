@@ -19,7 +19,9 @@ package main
 // machine that cannot boot at all because the entry is already gone.
 
 import (
+	"bytes"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 
@@ -160,6 +162,114 @@ func consoleArgs() []string {
 		}
 	}
 	return consoles
+}
+
+// healBootEntries brings the firmware's boot menu into agreement with
+// this machine's slots. It renders each slot's entry from the GPT facts
+// on the disk, writes back only what drifted, and puts both slots at
+// the head of BootOrder with the preferred slot first.
+//
+// This runs on every boot and again on the way down before every
+// reboot, so a machine that boots at all repairs its own boot menu.
+// That covers every way a firmware loses an entry: an update that
+// resets its variables, a dead NVRAM battery, a setup menu's "load
+// defaults", and a variable store that filled up. It cannot cover a
+// machine with no entry left to boot, because such a machine never runs
+// this. slotloader.go covers that one.
+//
+// Every comparison happens before any write. NVRAM accepts a limited
+// number of writes, and a healthy machine must spend none of them. A
+// healthy machine's console also stays silent, so a line from here
+// always means something drifted.
+func healBootEntries(dir, machineName, preferred string) {
+	if machineName == "" {
+		fmt.Fprintln(os.Stderr, "liken: system: this boot carries no liken.machine=, so there is nothing correct to write into a boot entry")
+		return
+	}
+	parts := discoverPartitions()
+	numbers := map[string]uint16{}
+	for _, slot := range slotOrder(preferred) {
+		part, err := findSlotPartition(parts, slotStorageRole(slot))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "liken: system: %v; the boot entries cannot be checked\n", err)
+			return
+		}
+		number, ok := healOneSlotEntry(dir, slot, part, machineName)
+		if !ok {
+			return
+		}
+		numbers[slot] = number
+	}
+
+	var leaders []uint16
+	for _, slot := range slotOrder(preferred) {
+		leaders = append(leaders, numbers[slot])
+	}
+	assertBootOrder(dir, leaders, preferred)
+}
+
+// healOneSlotEntry writes one slot's entry when the store's copy
+// differs from what this machine's disk says it should be. It returns
+// the entry's number, and false when the entry could not be written at
+// all. A machine that cannot register one slot has no fallback, so the
+// caller stops rather than leave half a boot menu behind.
+func healOneSlotEntry(dir, slot string, part *slotPartition, machineName string) (uint16, bool) {
+	want := slotBootOption(slot, part, machineName)
+	if number, ok := findSlotEntry(dir, slot); ok {
+		current, err := readEFIVar(dir, bootEntryID(number))
+		if err == nil && bytes.Equal(current, encodeLoadOption(want)) {
+			return number, true
+		}
+	}
+	number, err := setBootEntry(dir, want)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "liken: system: writing the %s entry: %v\n", slotEntryDescription(slot), err)
+		return 0, false
+	}
+	fmt.Printf("liken: system: %s disagreed with this machine's disk; wrote it as %s\n",
+		slotEntryDescription(slot), bootEntryID(number))
+	return number, true
+}
+
+// assertBootOrder makes the standing preference lead with the given
+// entries. It trusts the readback, not the write. Some firmware accepts
+// a write and then fails to hold it, and every later report would be
+// wrong if this code took the write result at face value.
+func assertBootOrder(dir string, leaders []uint16, preferred string) {
+	want := bootOrderWith(dir, leaders)
+	if slices.Equal(want, readBootOrder(dir)) {
+		return // the firmware already agrees
+	}
+	if err := writeBootOrder(dir, want); err != nil {
+		fmt.Fprintf(os.Stderr, "liken: system: repairing BootOrder: %v\n", err)
+		return
+	}
+	if readback := readBootOrder(dir); !slices.Equal(readback, want) {
+		fmt.Fprintln(os.Stderr, "liken: system: BootOrder was written but does not read back; the firmware is not holding it")
+		return
+	}
+	fmt.Printf("liken: system: BootOrder now leads with %s (slot %s is proven)\n",
+		bootEntryID(leaders[0]), preferred)
+}
+
+// slotOrder puts the preferred slot first and the other slot second.
+// Both slots lead the boot order, so a firmware that cannot load the
+// preferred slot's kernel tries the other half of the pair before it
+// falls back to its own setup menu. A machine with no proven record yet
+// takes the installer's order.
+func slotOrder(preferred string) []string {
+	if preferred == "B" {
+		return []string{"B", "A"}
+	}
+	return []string{"A", "B"}
+}
+
+// slotStorageRole names the storage role that holds a slot.
+func slotStorageRole(slot string) machine.StorageRoleName {
+	if slot == "B" {
+		return machine.SystemBRole
+	}
+	return machine.SystemARole
 }
 
 // findSlotEntry locates a slot's firmware entry the same way
