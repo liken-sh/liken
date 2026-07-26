@@ -19,8 +19,10 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -103,6 +105,16 @@ usage:
   liken serve <channel-dir> [address]
       Share a release channel over plain HTTP so machines can
       download from it. The address defaults to :8017.
+
+  liken index -source <url> <output-dir> < keys
+      Render a channel's index: a front page listing every release, a
+      page per release giving its catalog entry and its artifacts, a
+      page for the source mirror, and the versions.yaml document that
+      lists every release for a script. Read the channel's object keys
+      from standard input, one per line, and read each release's
+      document from the channel itself. The index is derived, so
+      rendering it again over the same channel repairs whatever is
+      stale.
 
   liken version
       Print this toolkit's version.
@@ -207,6 +219,20 @@ func run(args []string) error {
 			components = append(components, machine.ReleaseComponent{Name: name, Version: version})
 		}
 		return releases.Bundle(fs.Arg(0), fs.Arg(1), fs.Arg(2), fs.Arg(3), fs.Arg(4), fs.Arg(5), fs.Arg(6), fs.Arg(7), fs.Arg(8), fs.Arg(9), fs.Arg(10), *slotSize, components, os.Stdout)
+	case "index":
+		fs := flag.NewFlagSet("index", flag.ContinueOnError)
+		source := fs.String("source", "", "the channel's base URL, where the pages will be served")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 || *source == "" {
+			return fmt.Errorf("usage: liken index -source <url> <output-dir> < keys")
+		}
+		keys, err := readLines(os.Stdin)
+		if err != nil {
+			return err
+		}
+		return releases.Index(*source, keys, fs.Arg(0), os.Stdout)
 	case "serve":
 		addr := ":8017"
 		switch len(args) {
@@ -224,4 +250,19 @@ func run(args []string) error {
 		fmt.Fprint(os.Stderr, usage)
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+// readLines collects a list given on standard input, one entry per
+// line, and drops blank lines. The index command takes a channel's
+// object keys this way, because the command that lists a bucket holds
+// a credential and this program holds none.
+func readLines(r io.Reader) ([]string, error) {
+	var lines []string
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		if line := strings.TrimSpace(scanner.Text()); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines, scanner.Err()
 }

@@ -162,10 +162,6 @@ jobs:
           s3cmd put --acl-public --no-progress --mime-type=image/x-icon \
             ../../../brand/favicon.ico \
             "s3://releases.liken.sh/favicon.ico"
-          s3cmd put --acl-public --no-progress \
-            --mime-type="text/html; charset=utf-8" \
-            ../../index.html \
-            "s3://releases.liken.sh/index.html"
 
       # This step proves the release the way a consumer meets it: it
       # fetches the document over the public URL, compares it byte for
@@ -198,6 +194,39 @@ jobs:
             echo "    digest: sha256:$DIGEST"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # The index comes after the release is published and proven,
+      # because it is how a person finds a release and not what makes
+      # one exist. A machine reads channel.yaml and release.yaml and
+      # never reads a page or the versions document, so a run that
+      # fails here leaves a complete, adoptable release behind a stale
+      # index.
+      #
+      # Listing the bucket is the one part of this that needs the
+      # channel's key, and s3cmd already holds it. The renderer takes
+      # the key list and reads everything else from the public
+      # channel, so the pages describe what the channel serves rather
+      # than what this run built. Every page is rewritten on every
+      # release, which is what makes a rerun repair a page instead of
+      # only adding one: the pages are derived, and no digest names
+      # them.
+      - name: index the channel
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          s3cmd ls --recursive s3://releases.liken.sh/ \
+            | awk '{print $4}' \
+            | sed 's|^s3://releases.liken.sh/||' > keys.txt
+          releases/build/$VERSION/cli/liken index \
+            -source https://releases.liken.sh pages < keys.txt
+          cd pages
+          find . -type f | sort | while read -r file; do
+            case "$file" in
+              *.html) type="text/html; charset=utf-8" ;;
+              *)      type="text/plain; charset=utf-8" ;;
+            esac
+            s3cmd put --acl-public --no-progress --mime-type="$type" \
+              "$file" "s3://releases.liken.sh/${file#./}"
+          done
 
       # The GitHub release is the announcement, not the distribution:
       # a page that people can watch, and an RSS feed that clusters'

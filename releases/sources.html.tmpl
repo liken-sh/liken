@@ -1,0 +1,39 @@
+{{/*
+The source mirror's page.
+
+This page is a license obligation, not a convenience. Several
+artifacts carry GPL- and LGPL-licensed components, and those licenses
+require the corresponding source to be offered from the same place
+that offers the binaries. An offer nobody can browse is an offer a
+reader has to take on trust, so the files are listed here by name.
+
+The mirror is keyed by each component's own upstream version, not by a
+liken release version, because one component version usually serves
+many releases.
+*/}}
+{{template "head" .}}
+<nav><a href="/">← every release</a></nav>
+
+<h1>{{.Mark}} <span>Corresponding source</span></h1>
+
+<p>These are the sources for the GPL- and LGPL-licensed components
+that liken redistributes in its releases. Each release's
+<code>LICENSES.md</code> names which license applies to what.</p>
+
+<p>A component appears under its own upstream version, because one
+version of a component usually ships in many releases. The release
+document of any release names the component versions it carries.</p>
+
+{{range .Sources}}
+<h2>{{.Name}}</h2>
+{{range .Versions}}
+<p><code>{{.Version}}</code></p>
+<ul>
+{{range .Files}}
+<li><a href="/sources/{{.Path}}"><code>{{.Name}}</code></a></li>
+{{end}}
+</ul>
+{{end}}
+{{end}}
+
+{{template "foot" .}}

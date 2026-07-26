@@ -127,6 +127,26 @@ not need it.
 Shares a release channel over plain HTTP, and records each request in
 a log. The address defaults to `:8017`.
 
+## liken index
+
+    liken index -source <url> <output-dir> < keys
+
+Renders the index of a channel: a front page that lists every release,
+a page for each release, a page for the source mirror, and the
+`versions.yaml` document. Give the channel's object keys on standard
+input, one key per line.
+The command reads each release document from the channel at `-source`,
+and writes the pages into the output directory. The contents of that
+directory belong at the root of the channel, because the pages link
+from the root.
+
+The project's own release workflow runs this command. A deployment
+does not need it.
+
+The pages hold no information of their own. Each one is a view of a
+document that the channel already serves, and no machine reads a page.
+To repair a page, run the command again over the same channel.
+
 ## liken version
 
     liken version

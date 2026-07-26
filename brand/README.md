@@ -65,6 +65,26 @@ light and dark surfaces. Every tile uses a flat color with no
 gradients or effects. Because of this, the mark stays legible when
 shrunk to a favicon, and it would print cleanly in one ink.
 
+## The stylesheet
+
+`liken.css` is the presentation that liken.sh and releases.liken.sh
+share: the colors, the type, and the few elements that prose and
+reference tables need. It carries both a light and a dark scheme,
+chosen by the reader's system setting, and it takes its accent from
+the greens above. Anything about the shape of one site, the manual's
+sidebar or the channel's digest columns, stays with that site.
+
+Neither site links the file over the network. Each one inlines it into
+every page. The channel needs this: it lives in object storage, apart
+from any cluster, because machines upgrade themselves from it and it
+has to answer when the cluster does not. A stylesheet fetched from
+liken.sh would put the website back in that path.
+
+Two consumers take copies. The website's Makefile copies the file into
+its own tree, and the release channel's pages read it through the
+`brand` Go package, because a Go program cannot embed a file outside
+its own directory. The file here is the only original.
+
 ## The files
 
 `liken.svg` is the original file; every other file in this list comes

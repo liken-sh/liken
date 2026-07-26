@@ -1,0 +1,55 @@
+{{/*
+The chrome every index page shares: the document head, the styles, and
+the footer. Each page template calls "head" and "foot" around its own
+content.
+
+The stylesheet is the project's shared one, from the brand domain, so
+these pages and liken.sh are the same document in two places. It is
+inlined and not linked, and brand/liken.css gives the reason: the
+channel has to answer when the cluster that serves liken.sh does not.
+The rules after it are the ones only a channel page needs.
+*/}}
+{{define "head"}}<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}}</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<style>
+{{.Stylesheet}}
+  /* The channel's tables carry a sha256 in a column, which is 64
+     characters that must not squeeze the columns beside it. So these
+     pages take a wider measure than the manual, the digest wraps
+     where nothing else does, and a size reads against the right edge
+     where the eye compares numbers. */
+  :root { --measure: 52rem; }
+  td.digest { font-family: ui-monospace, monospace; font-size: 0.8rem;
+              color: var(--ink-muted); word-break: break-all; }
+  td.size { text-align: right; }
+  td.latest { white-space: nowrap; }
+  td.latest::after { content: "latest"; font-size: 0.75rem;
+                     background: var(--ink); color: var(--page);
+                     padding: 0.05rem 0.4rem; margin-left: 0.5rem; }
+  /* The mark rides beside every page's title. It is inlined as SVG,
+     so it needs a size given here: the file carries a viewBox and no
+     width, which is what lets one file serve a favicon and a heading.
+     The mark is transparent, so it sits on either scheme with no
+     plate behind it. */
+  h1 { display: flex; align-items: center; gap: 0.6rem; }
+  h1 svg { width: 2.25rem; height: 2.25rem; flex: none; }
+  h2 { margin-top: 2.5rem; }
+  nav { margin-bottom: 2rem; font-size: 0.9rem; }
+</style>
+<body>
+{{end}}
+
+{{define "foot"}}
+<footer>
+<a href="/">The channel</a> ·
+<a href="https://liken.sh/">liken.sh</a> ·
+<a href="https://liken.sh/docs/guides/">The guides</a> ·
+<a href="https://github.com/liken-sh/liken">The repository</a>
+</footer>
+</body>
+</html>
+{{end}}

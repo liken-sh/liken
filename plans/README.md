@@ -14,7 +14,7 @@ A document's directory states its status:
   built yet.
 
 The numbers run in one sequence across all three directories. The next
-milestone is 43.
+milestone is 44.
 
 ## Completed
 
@@ -118,6 +118,9 @@ milestone is 43.
 * **42.** [Turning a feature off turns it off](completed/42-turning-a-feature-off.md)
   — a retraction waits for the cluster, reboots when it leaves kernel
   state, and stops leaving a controller's work behind.
+* **43.** [A browsable release channel](completed/43-a-browsable-release-channel.md)
+  — an index page for the channel and one for each release, rendered
+  from the documents that the channel already serves.
 
 ## Rejected
 

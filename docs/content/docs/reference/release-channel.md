@@ -14,6 +14,7 @@ releases from it to your workstation.
 ## Layout
 
     channel.yaml               the channel document: names the latest version
+    versions.yaml              the versions document: every release, by digest
     <version>/                 one directory per release
       release.yaml             the release document: every artifact, by digest
       vmlinuz                  the Linux kernel
@@ -29,6 +30,8 @@ releases from it to your workstation.
       LICENSES.md              third-party license notices
     sources/                   source mirrors for GPL and LGPL components,
       <component>/<version>/   keyed by the component's own version
+    index.html                 the index pages, one at the root, one in
+                               each release, and one in sources/
 
 ## Versions
 
@@ -63,6 +66,50 @@ newest published version. The cluster polls this document to fill the
 AVAILABLE column of `kubectl get clusters`, and `liken fetch
 ... latest ...` reads it to resolve `latest`.
 
+## The versions document
+
+`versions.yaml` is a `Versions` document. It lists every release that
+the channel holds, newest first, each with the digest of its release
+document:
+
+```yaml
+apiVersion: liken.sh/v1alpha1
+kind: Versions
+metadata:
+  name: liken
+latest: 2026.07.25-002
+releases:
+  - version: 2026.07.25-002
+    digest: sha256:f5a46b8b08405d6b79c4792c896089e6b3cbbb4ce1951e84a6a36656520cd616
+```
+
+Each entry has the shape of a catalog entry, so you can copy one
+straight into your cluster's `spec.releases.catalog`.
+
+Read this document when you want the whole list in one request. The
+storage refuses to list itself, so this file is the only way to learn
+which versions exist without opening the front page.
+
+No machine reads this document. A cluster polls `channel.yaml`, which
+stays one small file however many releases exist. The digests here are
+a convenience, not an authority: a digest that the channel served
+vouches for nothing by itself, which is why you pin the digest in your
+own Cluster.
+
+## The index pages
+
+Open [releases.liken.sh](https://releases.liken.sh/) in a browser to
+read the channel. The front page lists every release, newest first,
+and marks the one that `channel.yaml` names. Each release has a page
+at `https://releases.liken.sh/<version>/`. It gives the catalog entry
+to copy, every artifact with its digest and its size, and the
+component versions in the release. The mirror at
+[sources/](https://releases.liken.sh/sources/) has a page too.
+
+These pages carry no information of their own. Each page is a view of
+the documents above, and no machine reads a page. A machine reads
+`channel.yaml` and `release.yaml`, and it verifies both.
+
 ## The release page
 
 Every release also has a page on GitHub, under
@@ -79,8 +126,8 @@ feed.
 The chain has three links:
 
 1. The Cluster's catalog entry pins the sha256 of the exact bytes of
-   `release.yaml`. The release's page on GitHub publishes the same
-   digest.
+   `release.yaml`. The release's own page on the channel, and its page
+   on GitHub, publish the same digest.
 2. `release.yaml` pins the sha256 of every artifact.
 3. Each machine, and `liken fetch`, verifies every downloaded byte
    against these digests before it uses the bytes.

@@ -23,7 +23,7 @@ HUGO := dist/hugo/$(VERSION)/hugo
 # server enforces.
 GENERATED := content/docs/reference/machine.md content/docs/reference/cluster.md
 
-BRAND := static/icon.svg static/favicon.ico static/brand/liken.svg static/brand/liken.png
+BRAND := static/icon.svg static/favicon.ico static/brand/liken.svg static/brand/liken.png assets/liken.css
 
 .PHONY: all build generate serve image test clean
 
@@ -52,6 +52,15 @@ static/brand/liken.svg: ../brand/liken.svg
 
 static/brand/liken.png: ../brand/liken.png
 	mkdir -p static/brand
+	cp $< $@
+
+# The stylesheet is a copy for the same reason the icons are: the
+# brand domain owns it, and the release channel's pages inline the
+# same file. It lands in assets/ rather than static/ because the site
+# inlines it into every page instead of serving it as a file, and
+# assets/ is the tree Hugo reads for that.
+assets/liken.css: ../brand/liken.css
+	mkdir -p assets
 	cp $< $@
 
 content/docs/reference/machine.md: ../machine/manifests/machines-crd.yaml $(wildcard crdref/*.go)
@@ -96,4 +105,4 @@ test:
 # Hugo tarball redownloads identically, and cleaning scratch files
 # should not cost the network anything.
 clean:
-	rm -rf dist static $(GENERATED)
+	rm -rf dist static assets $(GENERATED)

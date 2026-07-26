@@ -481,13 +481,21 @@ resource "linode_object_storage_bucket" "releases" {
   }
 }
 
-# The channel's front page. With a website configuration on the
+# The channel's index pages. With a website configuration on the
 # bucket, the website hostname class (the class that the CNAME above
-# targets) serves index.html when a request asks for /, the one
-# thing the plain S3 class cannot do, and the same page answers for
-# any path that does not exist. The page itself is
-# releases/index.html in this repository. The release workflow keeps
-# the object fresh.
+# targets) serves index.html when a request asks for a prefix, the one
+# thing the plain S3 class cannot do. This applies to every prefix,
+# not only the root, so a page inside a release's directory makes
+# https://releases.liken.sh/<version>/ answer. `liken index` renders
+# the pages from the channel's own documents and the release workflow
+# uploads them (releases/index.go).
+#
+# The error document is the front page, so a mistyped path lands on
+# the list of every release. A dedicated 404 page would not read as
+# one anyway: this bucket's ACL is private, so a request for a key
+# that does not exist is answered 403 rather than 404, because
+# reporting the difference would tell an anonymous reader which keys
+# exist.
 
 resource "aws_s3_bucket_website_configuration" "releases" {
   provider = aws.linode_object_storage

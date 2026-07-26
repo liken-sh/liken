@@ -6,6 +6,8 @@ package main
 // test here is only the routing table.
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,6 +43,8 @@ func TestRunChecksArgumentCounts(t *testing.T) {
 		{"stick without its inputs", []string{"stick", "-console", "ttyS0", "release-dir"}},
 		{"bundle without its artifacts", []string{"bundle", "vmlinuz"}},
 		{"serve with too many arguments", []string{"serve", "channel", "addr", "extra"}},
+		{"index without a source", []string{"index", "out"}},
+		{"index without an output directory", []string{"index", "-source", "https://example.com"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -81,10 +85,11 @@ func TestRunPacksADeploymentLayer(t *testing.T) {
 	}
 }
 
-func TestRunAssemblesInstallMedia(t *testing.T) {
-	// This is a small release round-trip: bundle a release, pack a
-	// layer for an empty deployment, and turn the two into install
-	// media.
+// bundledChannel sends one small release through the bundle command
+// and returns the channel directory. The artifacts only need to
+// exist, so their contents are their own names.
+func bundledChannel(t *testing.T, version string, components ...string) string {
+	t.Helper()
 	src := t.TempDir()
 	for _, name := range []string{"vmlinuz", "liken.sqfs", "boot.cpio", "microcode.cpio", "liken", "systemd-bootx64.efi", "grub-boot.img", "grub-core.img", "LICENSES.md"} {
 		if err := os.WriteFile(filepath.Join(src, name), []byte(name+" bytes"), 0o644); err != nil {
@@ -92,14 +97,42 @@ func TestRunAssemblesInstallMedia(t *testing.T) {
 		}
 	}
 	channel := t.TempDir()
-	err := run([]string{"bundle", filepath.Join(src, "vmlinuz"), filepath.Join(src, "liken.sqfs"),
+	args := []string{"bundle", filepath.Join(src, "vmlinuz"), filepath.Join(src, "liken.sqfs"),
 		filepath.Join(src, "boot.cpio"), filepath.Join(src, "microcode.cpio"),
 		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"),
 		filepath.Join(src, "grub-boot.img"), filepath.Join(src, "grub-core.img"),
-		filepath.Join(src, "LICENSES.md"), channel, "2026.07.11-001"})
+		filepath.Join(src, "LICENSES.md"), channel, version}
+	if err := run(append(args, components...)); err != nil {
+		t.Fatal(err)
+	}
+	return channel
+}
+
+// withStdin points standard input at the given text for one test. The
+// index command reads its key list from there.
+func withStdin(t *testing.T, text string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "stdin")
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	saved := os.Stdin
+	os.Stdin = f
+	t.Cleanup(func() {
+		os.Stdin = saved
+		f.Close()
+	})
+}
+
+func TestRunAssemblesInstallMedia(t *testing.T) {
+	// This is a small release round-trip: bundle a release, pack a
+	// layer for an empty deployment, and turn the two into install
+	// media.
+	channel := bundledChannel(t, "2026.07.11-001")
 
 	identityDir := filepath.Join(t.TempDir(), "identity")
 	if err := run([]string{"mint", identityDir}); err != nil {
@@ -120,27 +153,31 @@ func TestRunAssemblesInstallMedia(t *testing.T) {
 }
 
 func TestRunBundlesARelease(t *testing.T) {
-	// This sends one small release through the bundle command. The
-	// artifacts only need to exist.
-	src := t.TempDir()
-	for _, name := range []string{"vmlinuz", "liken.sqfs", "boot.cpio", "microcode.cpio", "liken", "systemd-bootx64.efi", "grub-boot.img", "grub-core.img", "LICENSES.md"} {
-		if err := os.WriteFile(filepath.Join(src, name), []byte(name+" bytes"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	channel := t.TempDir()
+	channel := bundledChannel(t, "2026.07.11-001", "kernel=7.1.2", "k3s=v1.36.2+k3s1")
 
-	err := run([]string{"bundle", filepath.Join(src, "vmlinuz"), filepath.Join(src, "liken.sqfs"),
-		filepath.Join(src, "boot.cpio"), filepath.Join(src, "microcode.cpio"),
-		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"),
-		filepath.Join(src, "grub-boot.img"), filepath.Join(src, "grub-core.img"),
-		filepath.Join(src, "LICENSES.md"), channel, "2026.07.11-001",
-		"kernel=7.1.2", "k3s=v1.36.2+k3s1"})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := os.Stat(filepath.Join(channel, "2026.07.11-001", "release.yaml")); err != nil {
 		t.Error("no release document was written")
+	}
+}
+
+func TestRunIndexesAChannel(t *testing.T) {
+	// The index command reads the channel over HTTP, the way it reads
+	// the public one, so the test serves a bundled channel and points
+	// the command at it.
+	channel := bundledChannel(t, "2026.07.11-001", "kernel=7.1.2")
+	server := httptest.NewServer(http.FileServer(http.Dir(channel)))
+	t.Cleanup(server.Close)
+	withStdin(t, "2026.07.11-001/release.yaml\n2026.07.11-001/vmlinuz\n\n")
+
+	pages := t.TempDir()
+	if err := run([]string{"index", "-source", server.URL, pages}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, page := range [][]string{{"index.html"}, {"2026.07.11-001", "index.html"}} {
+		if _, err := os.Stat(filepath.Join(append([]string{pages}, page...)...)); err != nil {
+			t.Errorf("no page at %v", page)
+		}
 	}
 }
 

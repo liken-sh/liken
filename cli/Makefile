@@ -20,7 +20,9 @@ $(DIST)/liken: ../go.mod ../go.sum $(wildcard *.go) \
 		$(wildcard ../api/*.go) $(wildcard ../cluster/*.go) \
 		$(wildcard ../identity/*.go) $(wildcard ../machine/*.go) \
 		$(wildcard ../image/*.go) $(wildcard ../releases/*.go) \
-		$(wildcard ../disks/*.go) $(wildcard ../scaffold/*.go) $(wildcard ../scaffold/*.tmpl) $(LIKEN_VERSION_STAMP)
+		$(wildcard ../disks/*.go) $(wildcard ../scaffold/*.go) $(wildcard ../scaffold/*.tmpl) \
+		$(wildcard ../releases/*.tmpl) $(wildcard ../brand/*.go) \
+		../brand/liken.css ../brand/liken.svg $(LIKEN_VERSION_STAMP)
 	CGO_ENABLED=0 go build -trimpath \
 		-ldflags "-X github.com/liken-sh/liken/machine.Version=$(LIKEN_VERSION)" \
 		-o $(DIST)/liken .

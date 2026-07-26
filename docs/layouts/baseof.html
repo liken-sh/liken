@@ -1,10 +1,11 @@
 <!--
 The shared shell around every HTML page. There is no theme: these
-few templates are the whole presentation, and the stylesheet below is
-the whole stylesheet. It extends the front page's original look (a
-narrow measure, the system font) with just enough for a manual: a
-one-line nav, readable tables, and code blocks that scroll instead of
-overflowing. No JavaScript anywhere.
+few templates are the whole presentation. The colors, the type, and
+the common elements come from the project's shared stylesheet, which
+the brand domain owns and the release channel's pages inline too, so
+liken.sh and releases.liken.sh read as one place. The rules after it
+are the ones only a manual needs: a one-line nav, breadcrumbs, a
+table of contents, and a sidebar. No JavaScript anywhere.
 
 Two things orient the reader. Every page below the front page
 carries a breadcrumb trail, built from the page's ancestors. Pages
@@ -25,18 +26,11 @@ navigation and all chrome excluded.
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <style>
-  body { max-width: 44rem; margin: 2rem auto 4rem; padding: 0 1rem;
-         font-family: system-ui, sans-serif; line-height: 1.6; }
+{{ with resources.Get "liken.css" }}{{ .Content | safeCSS }}{{ end }}
   nav.site { margin-bottom: 2rem; }
   nav.site a { margin-right: 1rem; }
   nav.crumbs { font-size: 0.9em; margin-bottom: 1.5rem; }
-  nav.crumbs span[aria-current] { color: #555; }
-  table { border-collapse: collapse; display: block; overflow-x: auto; }
-  th, td { border: 1px solid #ccc; padding: 0.3rem 0.6rem;
-           text-align: left; vertical-align: top; }
-  pre { overflow-x: auto; padding: 0.6rem; background: #f6f6f6; }
-  code { font-size: 0.95em; }
-  footer { margin-top: 3rem; font-size: 0.9em; }
+  nav.crumbs span[aria-current] { color: var(--ink-muted); }
   /* A figure is a floated aside: the image rides the right margin
      with its caption under it, and the text wraps beside it. The
      width matches the mark on the repository's README, small enough
@@ -44,9 +38,9 @@ navigation and all chrome excluded.
   figure { float: right; width: 8rem; margin: 0 0 1rem 1.5rem; }
   figure img { width: 100%; height: auto; }
   figcaption { font-size: 0.75em; font-style: italic; line-height: 1.4;
-               color: #555; text-align: center; }
-  nav.toc { font-size: 0.9em; background: #f6f6f6; padding: 0.6rem 1rem;
-            margin: 1.5rem 0; }
+               color: var(--ink-muted); text-align: center; }
+  nav.toc { font-size: 0.9em; background: var(--panel);
+            padding: 0.6rem 1rem; margin: 1.5rem 0; }
   nav.toc ul { list-style: none; margin: 0; padding-left: 0; }
   nav.toc ul ul { padding-left: 1rem; }
   /* The sidebar appears only when the viewport can hold it beside
