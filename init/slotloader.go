@@ -35,6 +35,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
 // bootMenuName is the boot menu program as a release names it. Both an
@@ -89,17 +91,38 @@ func writeSlotLoader(mount, slot, machineName string) error {
 		if err := writeFileDurably(path, want); err != nil {
 			return fmt.Errorf("writing %s: %w", path, err)
 		}
-		// Each file landed through a rename, and a rename is a directory
-		// update. On FAT that update sits in the page cache until
-		// something flushes it, and a fallback that exists only in a
-		// cache is not a fallback.
-		if err := syncDirectory(filepath.Dir(path)); err != nil {
-			return fmt.Errorf("flushing %s: %w", filepath.Dir(path), err)
-		}
 		wrote = true
 	}
 	if wrote {
+		if err := flushSlot(mount); err != nil {
+			return err
+		}
 		fmt.Printf("liken: system: slot %s now answers the firmware's default boot path\n", slot)
+	}
+	return nil
+}
+
+// flushSlot forces a slot's directory updates all the way out to the
+// disk. Two calls, because they do different halves of the job, and the
+// installer's power-off path needs the same pair for the same reason.
+//
+// Each file above became durable through a rename, and on FAT a rename
+// is the only record of a file's name, size, and first cluster. The
+// per-file fsync inside writeFileDurably covers the file's own bytes.
+// It does not cover the directory entry that the rename wrote, and an
+// fsync of the directory does not reach it either: a FAT directory's
+// entries live in buffers attached to the block device, not in the
+// directory's own pages. A machine cut off in that state holds a loader
+// entry with the right name, no size, and no data, which is a fallback
+// that a firmware will start and then fail to boot from.
+//
+// unix.Sync walks every mounted filesystem and writes its dirty state
+// back to the drivers. syncDirectory then asks this slot's drive to
+// empty its own write cache.
+func flushSlot(mount string) error {
+	unix.Sync()
+	if err := syncDirectory(mount); err != nil {
+		return fmt.Errorf("flushing slot %s to the disk: %w", mount, err)
 	}
 	return nil
 }
@@ -117,8 +140,8 @@ func removeSlotLoader(mount string) {
 		fmt.Fprintf(os.Stderr, "liken: system: removing the fallback loader at %s: %v\n", path, err)
 		return
 	}
-	if err := syncDirectory(filepath.Dir(path)); err != nil {
-		fmt.Fprintf(os.Stderr, "liken: system: flushing %s: %v\n", filepath.Dir(path), err)
+	if err := flushSlot(mount); err != nil {
+		fmt.Fprintf(os.Stderr, "liken: system: %v\n", err)
 	}
 	fmt.Printf("liken: system: %s no longer answers the firmware's default boot path\n", path)
 }

@@ -529,6 +529,18 @@ storage:
 grow-pods:
 	qemu-img resize guests/$(NODE)/pods.qcow2 +4G
 
+# Reset a node's firmware variables to the vendor defaults. This is
+# what a firmware update does when it resets NVRAM, and what a dead
+# coin-cell battery does to a real board. The guest then holds no boot
+# entries and no boot order, so its next boot has to come through the
+# fallback loader on the proven slot (init/slotloader.go), and that
+# boot has to write the entries again (init/bootentries.go). Run this
+# only while the machine is off. QEMU holds the varstore open while a
+# guest runs, and writes the file back when the guest exits.
+reset-nvram:
+	cp /usr/share/OVMF/OVMF_VARS_4M.fd guests/$(NODE)/OVMF_VARS.fd
+	@echo "node $(NODE) now has vendor-default firmware variables"
+
 # The unattended smoke drills. Each drill takes node-1 from blank
 # disks to a Ready node: the machine installs itself, then boots the
 # installed disk under real firmware. The verdict comes from the
@@ -557,7 +569,7 @@ smoke-hardware:
 		REPORT_STICK=hardware/image/stick.img \
 		./smoke.sh uefi hardware
 
-.PHONY: run run-once install install-stick storage grow-pods smoke-uefi smoke-bios smoke-hardware clean
+.PHONY: run run-once install install-stick storage grow-pods reset-nvram smoke-uefi smoke-bios smoke-hardware clean
 
 clean:
 	rm -rf guests

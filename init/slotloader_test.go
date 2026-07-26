@@ -155,3 +155,32 @@ func TestOtherSlot(t *testing.T) {
 		t.Error("the pair has two halves")
 	}
 }
+
+// A slot whose loader files lost their contents gets them back. This is
+// the state a machine reaches when a power cut lands between the write
+// and the flush: the entry keeps its name and holds nothing. A firmware
+// starts such a loader and then has nothing to boot, so every boot
+// compares the contents and not just the names.
+func TestWriteSlotLoaderRepairsAnEmptyEntry(t *testing.T) {
+	fakeCmdline(t, "console=ttyS0\n")
+	mount := slotWithMenu(t)
+	if err := writeSlotLoader(mount, "A", "node-1"); err != nil {
+		t.Fatal(err)
+	}
+	entry := filepath.Join(mount, "loader", "entries", "liken-A.conf")
+	if err := os.WriteFile(entry, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeSlotLoader(mount, "A", "node-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	body, err := os.ReadFile(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "linux    /vmlinuz\n") {
+		t.Errorf("the entry is whole again: %q", body)
+	}
+}
