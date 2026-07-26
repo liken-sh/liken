@@ -135,7 +135,10 @@ milestone is 44.
   fwupd as a feature slug, using the rolling-reboot orchestration that
   liken already has. A shim variable store turns fwupd's firmware
   writes into requests that init decides on. It waits for experience
-  with bare metal.
+  with bare metal. Its boot-path prerequisite is built: a UEFI machine
+  writes its boot entries again on every boot, and its proven slot
+  carries a loader that a firmware at its defaults finds, so NVRAM loss
+  no longer needs an install stick.
 * **34.** [GPU add-ons](34-gpu-add-ons.md) — a machine that needs a GPU
   compute stack declares an add-on: a second read-only image on its
   boot slot. The first add-on would be NVIDIA compute.

@@ -1,8 +1,9 @@
 # Updating the machine's own firmware
 
-Milestone 33 — Proposed. It would add fwupd as a feature slug, so a
-firmware update would use the rolling-reboot orchestration that liken
-already has, and init would stay the only writer of the boot chain.
+Milestone 33 — Proposed, except for the boot-path work below, which is
+built. It would add fwupd as a feature slug, so a firmware update would
+use the rolling-reboot orchestration that liken already has, and init
+would stay the only writer of the boot chain.
 
 The firmware that milestone 32 ships is payload that the kernel
 consumes: modules, driver blobs, and microcode, all inert bytes. This
@@ -25,45 +26,97 @@ it, rather than by asking fwupd to take turns.
 
 ## The fallback that a firmware update can erase
 
-This is the prerequisite, and it is not really about fwupd.
+This part is built. It is not really about fwupd, and it stands on its
+own merit, so it landed ahead of the rest of this milestone.
 
 A UEFI machine's boot entry loads `\vmlinuz` from the slot through the
 kernel's EFI stub, and the kernel command line lives in the boot
-option's optional data (init/install.go). Nothing else on a UEFI
-machine holds that command line. No installed slot carries
-`\EFI\BOOT\BOOTX64.EFI`, because systemd-boot ships for the install
-stick alone. `installBootEntries` runs only from the installer, so no
-ordinary boot rewrites an entry. `assertProven` repairs BootOrder, but
-it gives up when no entry answers to the slot (init/efiactuator.go).
-
-Some firmware resets NVRAM to defaults as part of an update. On a
-liken machine that erases every boot entry and every command line at
-once. The firmware then has nothing to boot, and recovery needs an
-install stick and a person.
+option's optional data. Nothing else on a UEFI machine holds that
+command line. Some firmware resets NVRAM to defaults as part of an
+update, a dead NVRAM battery does the same, and so does the setup
+menu's own "load defaults". Any of those erases every boot entry and
+every command line at once, and leaves a complete installed disk that
+no firmware can start.
 
 This is the outcome `armProvingBoot` refuses to risk for a release. A
 release trial's fallback is a boot entry in NVRAM, and a firmware
-update can erase NVRAM, so liken's existing guarantee does not reach
-this case. No amount of BootNext discipline fixes it. Two changes
-close it, and both stand on their own merit.
+update can erase NVRAM, so no amount of BootNext discipline reaches
+this case. Two changes close it.
 
-First, re-register the slots' boot entries on every boot. A boot that
-finds its entries missing rewrites them from the storage reconcile's
-partition facts. This also finishes the dead-NVRAM-battery case that
-init/efiactuator.go already names, where today liken can repair a boot
-order but cannot recreate a boot entry.
+First, every boot writes the slots' boot entries again
+(init/bootentries.go). `assertProven` renders each entry from the GPT
+facts on the disk and writes back only what drifted, so a machine that
+boots at all repairs its own boot menu. Both slots lead BootOrder with
+the proven slot first, so a firmware that cannot load one slot's kernel
+tries the other half of the pair before it reaches its own setup menu.
+The comparison runs before every write, because NVRAM accepts a limited
+number of writes and this now runs on every boot and before every
+reboot. This also finishes the dead-battery case that the UEFI dialect
+could only half repair: it could fix a boot order and could not
+recreate a boot entry. The UEFI dialect now carries the same healing
+duty the GRUB dialect has carried since milestone 30.
 
-Second, write a default-path loader on each slot:
-`\EFI\BOOT\BOOTX64.EFI` and the loader entries that carry the command
-line. A firmware at defaults then finds something to boot. liken
-already builds systemd-bootx64.efi and already writes loader entries
-for the install stick, so this is reuse. The firmware picks whichever
-slot it enumerates first, so a machine proven on slot B costs one boot
-of the older release before the re-registration repairs NVRAM and the
-next boot lands correctly. `provingWatch` already accepts that same
-trade. The real cost is duplication: the command line would live in
-two places that must agree, which is the burden init/grubcfg.go
-already carries for BIOS machines.
+Second, the proven slot carries a default-path loader
+(init/slotloader.go): `\EFI\BOOT\BOOTX64.EFI`, a `loader.conf` that
+never waits, and one loader entry holding the same command line the
+firmware entry holds. A firmware at defaults searches each device for
+that one path, which is how an installation stick boots a machine that
+has never seen it, so such a firmware finds this and boots. That boot
+then repairs NVRAM, and the boot after it is ordinary. The loader
+program is a copy of the `systemd-bootx64.efi` that every slot already
+carries as a release artifact, so this costs no new artifact and no
+slot budget worth counting.
+
+The loader lives on the proven slot alone, and the other slot's copy is
+removed only after the proven slot has taken one, so a machine is never
+left with neither. Putting one on each slot was the first design, and
+it is worse twice over. A firmware at defaults takes the first answer
+it finds, which would be an older release or, at install time, an empty
+slot whose loader would stop at a menu with no kernel to load. One
+answer means such a firmware cannot boot the wrong half of the pair.
+
+The command line now lives in two places that must agree, which is the
+burden init/grubcfg.go already carries for BIOS machines. One function
+renders both, so they cannot disagree. The loader entry names only the
+archives its own slot carries, because a proven slot can hold an older
+release than the code writing the loader, and systemd-boot refuses an
+entry whose initrd is missing.
+
+One durability rule came out of the lab. A rename on FAT is the only
+record of a file's name, size, and first cluster, and neither the
+per-file fsync nor an fsync of the directory reaches that record: a FAT
+directory's entries live in buffers attached to the block device rather
+than in the directory's own pages. The first promotion drill left slot
+B holding a loader entry with the right name, no size, and no data. The
+firmware started that loader and stopped at its menu with nothing to
+boot. `unix.Sync` after a changed write is what the installer already
+does before it announces success, and the loader writer does it too.
+
+## What the lab measured
+
+Every drill ran on node-1 under OVMF, at the 1 GB disk-boot size.
+`make -C dev-cluster reset-nvram` copies the vendor-default variable
+store over a guest's, which is what an update that resets NVRAM does to
+a real board.
+
+* A machine proven on slot A, with vendor-default variables, reached
+  Ready in 9 seconds. It booted through `\EFI\BOOT\BOOTX64.EFI`, and
+  that boot wrote both entries and put slot A at the head of BootOrder.
+  The next boot came through its own entry and printed nothing.
+* An upgrade to 2026.07.26-901 moved the proven slot from A to B in 46
+  seconds. At the promotion, BootOrder moved to slot B, slot B took the
+  loader, and slot A's copy went, in that order.
+* That machine, proven on slot B, with vendor-default variables,
+  reached Ready in 10 seconds on release 2026.07.26-901 from slot B. It
+  did not boot the older release on slot A. This is the drill that
+  failed before the flush rule above, and it is why the rule exists.
+* Reading both slots offline confirmed the placement: slot B holds
+  `EFI/BOOT/BOOTX64.EFI` at 135168 bytes with a 253-byte `loader.conf`
+  and a 191-byte entry, and slot A keeps its own entry with no loader
+  program beside it.
+* `make smoke-uefi` and `make smoke-bios` both stayed green, which is
+  what proves a BIOS machine's boot chain still reads the same command
+  line.
 
 ## Requests, not writes
 
@@ -173,11 +226,9 @@ risk plainly.
 ## What the lab can measure
 
 Almost all of this runs under QEMU, because every decision above is a
-boot-order or filesystem question rather than a hardware one. Three
+boot-order or filesystem question rather than a hardware one. Two
 drills need no fwupd, no capsule, and no ESRT:
 
-* Delete the OVMF variable store and boot. This drills NVRAM loss and
-  both repairs.
 * Write a capsule directory and a competing BootNext by hand. This
   drills the serialization rule, the false-rejection path through
   `settleSystemRelease`, and the sweep.
@@ -199,7 +250,11 @@ that its host owns.
 A deployment can run fwupd as a privileged workload today, but not
 without consequence for liken. Such a pod writes BootNext, so it can
 overwrite a staged release trial, and it can lose its own update to
-liken's arming. It can also arm a firmware update on a machine that
-has no fallback loader. A deployment that runs fwupd now should do it
-with no release staged, and should expect to recover a machine with an
-install stick.
+liken's arming. A deployment that runs fwupd now should do it with no
+release staged.
+
+An update that resets NVRAM no longer strands the machine, because the
+proven slot carries a loader that a firmware at its defaults finds. An
+update that turns Secure Boot on still strands it, because liken's
+vmlinuz and that loader are both unsigned. The answer to this one is
+the hardening tier's signed releases and UKIs.

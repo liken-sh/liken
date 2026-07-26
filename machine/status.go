@@ -586,12 +586,11 @@ type BootStatus struct {
 	Modules []string `json:"modules,omitempty"`
 
 	// Slot is the system slot this boot came from, "A" or "B", read
-	// from the liken.slot= parameter that the installer baked into
-	// each boot entry's command line. It is empty when the boot did
-	// not come from a slot at all, as in a direct-kernel boot or
-	// install media. This is how a machine knows which side of the
-	// blue-green pair it runs from: releases download to the other
-	// slot.
+	// from the liken.slot= parameter in each boot entry's command
+	// line. It is empty when the boot did not come from a slot at
+	// all, as in a direct-kernel boot or install media. This is how a
+	// machine reports which side of the blue-green pair it runs from:
+	// releases download to the other slot.
 	Slot string `json:"slot,omitempty"`
 
 	// The Cluster manifest this boot ran under: the same lifecycle,

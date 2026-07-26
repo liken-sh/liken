@@ -1760,8 +1760,8 @@ spec:
                       enum: [A, B]
                       description: >-
                         The system slot that this boot came from,
-                        read from the liken.slot= parameter that the
-                        installer wrote into each boot entry. This
+                        read from the liken.slot= parameter in the
+                        boot entry that started it. This
                         field is absent when the boot did not come
                         from a slot (a direct-kernel boot or install
                         media). A release downloads to the slot that
