@@ -58,7 +58,7 @@ func registerSlotEntries(slotA, slotB *slotPartition, machineName string) error 
 // them, in its previous order. The firmware's own entries (setup
 // menus, shells) stay reachable. They are just never preferred.
 func bootOrderWith(dir string, leaders []uint16) []uint16 {
-	order := append([]uint16(nil), leaders...)
+	order := slices.Clone(leaders)
 	for _, n := range readBootOrder(dir) {
 		if !slices.Contains(order, n) {
 			order = append(order, n)

@@ -133,6 +133,12 @@ func installToDisk(machineName string) (string, error) {
 	// it permanent.
 	actuators := 0
 	if firmwareIsUEFI() {
+		// The fallback comes first, because it is the half that still
+		// works when the firmware holds no variables at all
+		// (slotloader.go).
+		if err := writeSlotLoader(slotMount, installSlot, machineName); err != nil {
+			return "", fmt.Errorf("install: %w", err)
+		}
 		if err := registerSlotEntries(slotA, slotB, machineName); err != nil {
 			return "", fmt.Errorf("install: %w", err)
 		}

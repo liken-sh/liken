@@ -208,25 +208,19 @@ func fakePayload(t *testing.T) string {
 	binary.LittleEndian.PutUint16(coreImgBytes[grubBlocklistSegment:], grubLoadSegment)
 	bootImg := artifactFor(t, dir, "grub-boot.img", bootImgBytes)
 	coreImg := artifactFor(t, dir, "grub-core.img", coreImgBytes)
-	release := fmt.Sprintf(`apiVersion: liken.sh/v1alpha1
+	// The boot menu program, which the installer copies to the slot's
+	// default boot path (slotloader.go). Its bytes mean nothing here;
+	// only its presence does.
+	bootMenu := artifactFor(t, dir, bootMenuName, []byte("the boot menu"))
+	release := `apiVersion: liken.sh/v1alpha1
 kind: Release
 metadata:
   name: 0.9.9
 artifacts:
-- name: %s
-  sha256: %s
-  size: %d
-- name: %s
-  sha256: %s
-  size: %d
-- name: %s
-  sha256: %s
-  size: %d
-- name: %s
-  sha256: %s
-  size: %d
-`, kernel.Name, kernel.SHA256, kernel.Size, cpio.Name, cpio.SHA256, cpio.Size,
-		bootImg.Name, bootImg.SHA256, bootImg.Size, coreImg.Name, coreImg.SHA256, coreImg.Size)
+`
+	for _, a := range []machine.ReleaseArtifact{kernel, cpio, bootImg, coreImg, bootMenu} {
+		release += fmt.Sprintf("- name: %s\n  sha256: %s\n  size: %d\n", a.Name, a.SHA256, a.Size)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "release.yaml"), []byte(release), 0o644); err != nil {
 		t.Fatal(err)
 	}
