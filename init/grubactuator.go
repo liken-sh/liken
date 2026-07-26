@@ -12,18 +12,18 @@ package main
 // standing preference, and it corresponds to the first entry in
 // BootOrder.
 //
-// This dialect has one duty that UEFI never needed: healing. A UEFI
-// machine's boot path lives in NVRAM, and nothing but the firmware
-// touches NVRAM. A BIOS machine's boot path lives on the disk itself:
-// the MBR's boot code, GRUB's core image, and the config on the boot
-// home. Cloud hosts are known to rewrite MBRs under running machines
-// (Linode's boot-mode changes do exactly that). So, when this dialect
-// asserts the proven slot, it also re-derives every byte of the boot
-// chain from the proven slot's own artifacts, and it puts back
-// whatever disagrees. This healing runs on every boot and on the way
-// down before every reboot, because a boot path that is zeroed while
-// the machine runs must be healed before the reboot. Otherwise, the
-// machine would never come back.
+// Both dialects heal, for the same reason and by different means. A
+// BIOS machine's boot path lives on the disk itself: the MBR's boot
+// code, GRUB's core image, and the config on the boot home. Cloud hosts
+// are known to rewrite MBRs under running machines (Linode's boot-mode
+// changes do exactly that). A UEFI machine's boot path lives in NVRAM,
+// which a firmware update or a dead battery resets to defaults
+// (efiactuator.go). So, when this dialect asserts the proven slot, it
+// also re-derives every byte of the boot chain from the proven slot's
+// own artifacts, and it puts back whatever disagrees. This healing runs
+// on every boot and on the way down before every reboot, because a boot
+// path that is zeroed while the machine runs must be healed before the
+// reboot. Otherwise, the machine would never come back.
 
 import (
 	"bytes"

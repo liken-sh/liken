@@ -181,54 +181,59 @@ func consoleArgs() []string {
 // number of writes, and a healthy machine must spend none of them. A
 // healthy machine's console also stays silent, so a line from here
 // always means something drifted.
+//
+// The two halves are separate because a boot that cannot write an entry
+// can still order the entries that exist. Without a name there is
+// nothing correct to render, because an entry carries identity, and a
+// boot from external media or a direct-kernel lab boot has no name to
+// render. The ordering still runs, so such a boot leaves the machine's
+// fallback exactly as strong as it found it.
 func healBootEntries(dir, machineName, preferred string) {
-	if machineName == "" {
-		fmt.Fprintln(os.Stderr, "liken: system: this boot carries no liken.machine=, so there is nothing correct to write into a boot entry")
-		return
+	if machineName != "" {
+		writeSlotEntries(dir, machineName, preferred)
 	}
-	parts := discoverPartitions()
-	numbers := map[string]uint16{}
-	for _, slot := range slotOrder(preferred) {
-		part, err := findSlotPartition(parts, slotStorageRole(slot))
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "liken: system: %v; the boot entries cannot be checked\n", err)
-			return
-		}
-		number, ok := healOneSlotEntry(dir, slot, part, machineName)
-		if !ok {
-			return
-		}
-		numbers[slot] = number
-	}
-
 	var leaders []uint16
 	for _, slot := range slotOrder(preferred) {
-		leaders = append(leaders, numbers[slot])
+		if number, ok := findSlotEntry(dir, slot); ok {
+			leaders = append(leaders, number)
+		}
+	}
+	if len(leaders) == 0 {
+		fmt.Fprintf(os.Stderr, "liken: system: no boot entry answers to either slot and this boot cannot write one; leaving BootOrder alone\n")
+		return
 	}
 	assertBootOrder(dir, leaders, preferred)
 }
 
-// healOneSlotEntry writes one slot's entry when the store's copy
-// differs from what this machine's disk says it should be. It returns
-// the entry's number, and false when the entry could not be written at
-// all. A machine that cannot register one slot has no fallback, so the
-// caller stops rather than leave half a boot menu behind.
-func healOneSlotEntry(dir, slot string, part *slotPartition, machineName string) (uint16, bool) {
-	want := slotBootOption(slot, part, machineName)
-	if number, ok := findSlotEntry(dir, slot); ok {
-		current, err := readEFIVar(dir, bootEntryID(number))
-		if err == nil && bytes.Equal(current, encodeLoadOption(want)) {
-			return number, true
+// writeSlotEntries renders each slot's entry from the GPT facts on its
+// disk and writes back only the ones that drifted. A slot whose
+// partition cannot be read is skipped rather than guessed at, and the
+// other slot still gets its entry: half a boot menu is worth more than
+// none.
+func writeSlotEntries(dir, machineName, preferred string) {
+	parts := discoverPartitions()
+	for _, slot := range slotOrder(preferred) {
+		part, err := findSlotPartition(parts, slotStorageRole(slot))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "liken: system: %v; the %s entry cannot be checked\n",
+				err, slotEntryDescription(slot))
+			continue
 		}
+		want := slotBootOption(slot, part, machineName)
+		if number, ok := findSlotEntry(dir, slot); ok {
+			current, err := readEFIVar(dir, bootEntryID(number))
+			if err == nil && bytes.Equal(current, encodeLoadOption(want)) {
+				continue // the firmware already holds this exact entry
+			}
+		}
+		number, err := setBootEntry(dir, want)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "liken: system: writing the %s entry: %v\n", slotEntryDescription(slot), err)
+			continue
+		}
+		fmt.Printf("liken: system: %s disagreed with this machine's disk; wrote it as %s\n",
+			slotEntryDescription(slot), bootEntryID(number))
 	}
-	number, err := setBootEntry(dir, want)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "liken: system: writing the %s entry: %v\n", slotEntryDescription(slot), err)
-		return 0, false
-	}
-	fmt.Printf("liken: system: %s disagreed with this machine's disk; wrote it as %s\n",
-		slotEntryDescription(slot), bootEntryID(number))
-	return number, true
 }
 
 // assertBootOrder makes the standing preference lead with the given

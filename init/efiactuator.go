@@ -19,6 +19,11 @@ import (
 type efiActuator struct {
 	// dir is the efivarfs mount, or a test's stand-in for one.
 	dir string
+	// machineName is rendered into every boot entry this dialect
+	// writes. An entry carries identity, so an anonymous entry would be
+	// wrong on every later boot. This value comes from the kernel
+	// command line, where an earlier boot's entry put it.
+	machineName string
 }
 
 func (a efiActuator) canArmTrial(slot string) error {
@@ -48,39 +53,43 @@ func (a efiActuator) fallbackLeads(slot string) bool {
 	return len(order) > 0 && order[0] == leader
 }
 
-// assertProven puts the slot's entry at the head of BootOrder and
-// keeps everything else in its relative order. This method corrects
-// a lost or corrupted BootOrder, for example from a dead NVRAM
-// battery or someone editing the setup menu, the next time it runs.
+// assertProven brings this machine's whole boot path into agreement
+// with the store: NVRAM holds an entry for each slot with the proven
+// slot at the head of BootOrder (bootentries.go), and the proven slot
+// alone answers the firmware's default boot path (slotloader.go).
+//
+// Both halves are needed, and they answer different failures. The
+// entries are what an ordinary boot reads. The default path is what a
+// firmware falls back on when it has no entries left to read.
+//
+// The two assertions run separately on purpose. A slot that cannot
+// carry a loader must not stop the entries from healing, and a variable
+// store that refuses a write must not stop the loader from landing.
 func (a efiActuator) assertProven(slot string) {
-	leader, ok := findSlotEntry(a.dir, slot)
-	if !ok {
-		fmt.Fprintf(os.Stderr, "liken: system: the store says slot %s is proven, but no boot entry answers to it; leaving BootOrder alone\n", slot)
-		return
-	}
+	healBootEntries(a.dir, a.machineName, slot)
+	a.healSlotLoader(slot)
+}
 
-	order := readBootOrder(a.dir)
-	if len(order) > 0 && order[0] == leader {
-		return // the firmware already agrees
-	}
-
-	repaired := []uint16{leader}
-	for _, n := range order {
-		if n != leader {
-			repaired = append(repaired, n)
-		}
-	}
-	if err := writeBootOrder(a.dir, repaired); err != nil {
-		fmt.Fprintf(os.Stderr, "liken: system: repairing BootOrder: %v\n", err)
+// healSlotLoader keeps the fallback loader on the proven slot and
+// nowhere else. A firmware at its defaults takes the first answer it
+// finds, and the other slot holds an older release or nothing at all.
+//
+// The order of these two steps is the whole guarantee. The proven slot
+// takes the loader first, and only a slot that took it lets the other
+// slot lose its own. A machine is never left with neither.
+func (a efiActuator) healSlotLoader(slot string) {
+	mount := slotMountPath(slot)
+	if mount == "" || a.machineName == "" {
+		// A slot that is not mounted cannot take a loader, and a boot
+		// with no name has nothing correct to write in the loader's
+		// entry. Both cases leave the loader that is already there.
 		return
 	}
-	// Trust the readback, not the write. Some firmware accepts a
-	// write and then fails to hold it, and every later report would
-	// be wrong if the code took the write result at face value.
-	if readback := readBootOrder(a.dir); len(readback) == 0 || readback[0] != leader {
-		fmt.Fprintf(os.Stderr, "liken: system: BootOrder was written but reads back unchanged; the firmware is not holding it\n")
+	if err := writeSlotLoader(mount, slot, a.machineName); err != nil {
+		fmt.Fprintf(os.Stderr, "liken: system: %v; this machine has no fallback for a firmware that loses its boot entries\n", err)
 		return
 	}
-	fmt.Printf("liken: system: BootOrder now leads with %s (slot %s is proven)\n",
-		bootEntryID(leader), slot)
+	if other := slotMountPath(otherSlot(slot)); other != "" {
+		removeSlotLoader(other)
+	}
 }

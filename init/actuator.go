@@ -66,7 +66,10 @@ type bootActuator interface {
 	// assertProven makes the standing boot preference lead with the
 	// given slot, and corrects any drift. It runs on every boot and
 	// after every promotion. This keeps the store on disk as the
-	// authority; the firmware only ever holds a copy of it.
+	// authority; the firmware only ever holds a copy of it. Each
+	// dialect also repairs whatever part of its boot path can be lost
+	// while a machine runs, because a boot path that is damaged now
+	// would stop the next reboot from coming back.
 	assertProven(slot string)
 }
 
@@ -79,7 +82,7 @@ type bootActuator interface {
 // interface is available.
 func chooseBootActuator() bootActuator {
 	if firmwareIsUEFI() {
-		return efiActuator{dir: efiVarsDir}
+		return efiActuator{dir: efiVarsDir, machineName: bootParamValue("liken.machine")}
 	}
 	grubDir := filepath.Join(roleMounts[machine.BootHomeRole].path, "grub")
 	if _, err := os.Stat(filepath.Join(grubDir, "grubenv")); err == nil {
