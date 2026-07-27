@@ -17,6 +17,11 @@ package main
 // Machine status as lastStopUnclean, so an operator sees that a
 // machine did not stop cleanly without reading a serial console.
 //
+// "Before it mounts the volume" is earlier than it sounds for one of
+// the volumes. The initramfs mounts the slot it boots from to reach
+// the system image, so that slot's answer has to be read there and
+// carried forward, rather than read where the other roles are read.
+//
 // The machine clears it, where it can say honestly that the volume is
 // good. This is necessary rather than tidy: the driver will not clear
 // a bit it found set, so one unclean stop marks a volume for the rest
@@ -56,6 +61,67 @@ import (
 // mark, so the check leaves nothing behind to clean up.
 const fatCheckMount = "/run/liken/fat-check"
 
+// bootedSlotStopEnv carries one fact from the initramfs to the rest of
+// the boot: what the slot this machine booted said about its last stop.
+// The initramfs mounts that slot for writing to reach the system image,
+// long before storage reconciles, and the mount sets the mark. So by
+// the time reconciliation asks, the device only says that the volume is
+// in use now, which is true of every boot and worth reporting on none.
+//
+// The fact travels in the environment because init re-executes itself
+// from the new root at the end of switch_root (switchroot.go), which
+// ends the process that read it. The environment survives that exec.
+const bootedSlotStopEnv = "LIKEN_BOOTED_SLOT_STOP"
+
+const (
+	stopMarkClean   = "clean"
+	stopMarkUnclean = "unclean"
+)
+
+// recordBootedSlotStop reads a slot's mark and keeps the answer for the
+// rest of the boot. Call it before mounting the slot for writing, which
+// is the act that destroys the answer.
+//
+// A read that fails records nothing. The fallback is a read of the
+// device later, which reports a mark this boot set, and that is wrong
+// in the safe direction: a machine whose boot sector cannot be read is
+// about to fail its storage reconciliation for the same reason.
+func recordBootedSlotStop(dev string) {
+	unclean, err := disks.FAT32Dirty(dev)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "liken: storage: reading the booted slot's stop mark: %v\n", err)
+		return
+	}
+	mark := stopMarkClean
+	if unclean {
+		mark = stopMarkUnclean
+	}
+	if err := os.Setenv(bootedSlotStopEnv, mark); err != nil {
+		fmt.Fprintf(os.Stderr, "liken: storage: keeping the booted slot's stop mark: %v\n", err)
+	}
+}
+
+// fatStopMark answers whether a FAT role's volume already carried its
+// mark when this boot found it.
+//
+// Every role but one still holds the answer on the device, because
+// nothing has mounted it yet. The exception is the slot this machine
+// booted, whose answer the initramfs read and recorded.
+func fatStopMark(name machine.StorageRoleName, dev string) (bool, error) {
+	if isSystemSlot(name) && string(name) == bootedSlotRole() {
+		switch os.Getenv(bootedSlotStopEnv) {
+		case stopMarkUnclean:
+			return true, nil
+		case stopMarkClean:
+			return false, nil
+		}
+		// Nothing was recorded, so the initramfs mounted no slot. A boot
+		// that takes the system image from RAM does this, and then the
+		// device is still the place to ask.
+	}
+	return disks.FAT32Dirty(dev)
+}
+
 // readFATStop reports whether a FAT role's volume still carries the
 // mark from an earlier stop, and heals the volume when it can. It
 // returns what belongs in status: whether the previous stop left this
@@ -71,7 +137,7 @@ func readFATStop(name machine.StorageRoleName, dev string, created bool) bool {
 	if created {
 		return false
 	}
-	unclean, err := disks.FAT32Dirty(dev)
+	unclean, err := fatStopMark(name, dev)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "liken: storage: reading %s's stop mark: %v\n", name, err)
 		return false

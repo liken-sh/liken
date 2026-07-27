@@ -83,7 +83,11 @@ const newRoot = "/newroot"
 const stagingDir = "/liken-boot"
 
 // bootMountsDir is the staging tree's location inside the new root.
-const bootMountsDir = "/var/lib/liken/boot"
+// It is deliberately not /var/lib/liken/boot, which is where the
+// bootHome role mounts on a BIOS machine. A mount there would cover
+// this tree and leave the running system unable to name the slot it
+// booted from or the image it is running.
+const bootMountsDir = "/var/lib/liken/boot-mounts"
 
 // writesSize bounds the overlay's upper layer, which is the root
 // filesystem's entire write budget. The runtime's writes under / are

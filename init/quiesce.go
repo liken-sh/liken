@@ -156,12 +156,13 @@ func quiesceDisks() {
 		case err == nil:
 			fmt.Printf("liken: storage: %s is read-only\n", m.target)
 		case errors.Is(err, fs.ErrNotExist):
-			// A mount that another mount covers has no path left to
-			// name it by, and a remount reaches a filesystem through
-			// its path. The booting slot is the case that matters, and
-			// it is also mounted at its role's path, which is not
-			// covered. Either path reaches the one superblock, so the
-			// filesystem is already finished by the time this happens.
+			// A remount reaches a filesystem through its path, and a
+			// mount that another mount covers has no path left to name
+			// it by. No liken mount covers another, so this is a
+			// filesystem that something outside liken stacked on. It is
+			// skipped rather than reported: there is no path to remount
+			// it by, and the mount underneath may well be one of the
+			// entries this loop has already finished.
 		default:
 			fmt.Fprintf(os.Stderr, "liken: storage: %s stays writable: %v\n", m.target, err)
 		}

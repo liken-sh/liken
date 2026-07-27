@@ -94,7 +94,9 @@ const slotMountFlags = unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC
 
 // bootHomeDir is the mount point for the bootHome role. It holds
 // GRUB's config and environment block. init writes to this block
-// when it arms or settles a slot trial on a BIOS machine.
+// when it arms or settles a slot trial on a BIOS machine. No role may
+// mount on bootMountsDir or above it, because that tree holds the
+// mounts this boot came from (switchroot.go).
 const bootHomeDir = "/var/lib/liken/boot"
 
 var roleMounts = map[machine.StorageRoleName]roleMount{

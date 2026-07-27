@@ -111,6 +111,11 @@ func findSystemImage(slotParam, slotMount string) (imagePath string, err error) 
 	// be read-only in one mount and read-write in the other. The slot
 	// must stay writable, because the fetcher writes downloaded
 	// releases into slots.
+	//
+	// Mounting for writing is also what sets the volume's mark, so this
+	// is the last moment at which the device can be asked what the
+	// previous stop left behind (fatstate.go).
+	recordBootedSlotStop(device)
 	if err := unix.Mount(device, slotMount, "vfat", 0, ""); err != nil {
 		return "", fmt.Errorf("mounting slot %s (%s): %w", slotParam, device, err)
 	}

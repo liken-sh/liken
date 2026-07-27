@@ -11,9 +11,9 @@ import (
 // judge: the staging tmpfs, the booting slot under two mounts, the
 // read-only squashfs that is the running root, the role filesystems,
 // the kernel's own filesystems, and containerd's leftover overlays.
-const shutdownMountTable = `tmpfs /var/lib/liken/boot tmpfs rw,nosuid,relatime,size=131072k,mode=755,inode64 0 0
-/dev/vdc3 /var/lib/liken/boot/slot vfat rw,relatime,fmask=0022,dmask=0022 0 0
-/dev/loop0 /var/lib/liken/boot/system squashfs ro,relatime,errors=continue 0 0
+const shutdownMountTable = `tmpfs /var/lib/liken/boot-mounts tmpfs rw,nosuid,relatime,size=131072k,mode=755,inode64 0 0
+/dev/vdc3 /var/lib/liken/boot-mounts/slot vfat rw,relatime,fmask=0022,dmask=0022 0 0
+/dev/loop0 /var/lib/liken/boot-mounts/system squashfs ro,relatime,errors=continue 0 0
 overlay / overlay rw,relatime,lowerdir=/liken-boot/system 0 0
 proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0
 sysfs /sys sysfs rw,nosuid,nodev,noexec,relatime 0 0
@@ -43,7 +43,7 @@ func TestWritableDiskMountsPicksOnlyWritableDisks(t *testing.T) {
 		"/var/lib/rancher",
 		"/var/lib/liken/system/a",
 		"/var/lib/liken/boot",
-		"/var/lib/liken/boot/slot",
+		"/var/lib/liken/boot-mounts/slot",
 	}
 	if len(targets) != len(want) {
 		t.Fatalf("got %v, want %v", targets, want)
@@ -59,7 +59,7 @@ func TestWritableDiskMountsSkipsTheReadOnlyRootImage(t *testing.T) {
 	// The squashfs that carries the running system is already
 	// read-only, so it has no clean record to write.
 	for _, m := range writableDiskMounts(shutdownMountTable) {
-		if m.target == "/var/lib/liken/boot/system" {
+		if m.target == "/var/lib/liken/boot-mounts/system" {
 			t.Fatal("the read-only root image must not be remounted")
 		}
 	}
@@ -71,7 +71,7 @@ func TestWritableDiskMountsCoversBothMountsOfTheBootingSlot(t *testing.T) {
 	// keeps the slot busy, so the list must not drop either.
 	var count int
 	for _, m := range writableDiskMounts(shutdownMountTable) {
-		if m.target == "/var/lib/liken/system/a" || m.target == "/var/lib/liken/boot/slot" {
+		if m.target == "/var/lib/liken/system/a" || m.target == "/var/lib/liken/boot-mounts/slot" {
 			count++
 		}
 	}

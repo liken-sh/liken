@@ -8,10 +8,23 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/unix"
 )
+
+func TestNoRoleMountsOverTheBootMounts(t *testing.T) {
+	// The staging tree carries the slot this boot came from and the
+	// image it is running. A role that mounts on it, or on any parent
+	// of it, hides both from the running system and from anything that
+	// walks the mount table by path.
+	for name, role := range roleMounts {
+		if role.path == bootMountsDir || strings.HasPrefix(bootMountsDir, role.path+"/") {
+			t.Errorf("role %s mounts at %s, which covers %s", name, role.path, bootMountsDir)
+		}
+	}
+}
 
 func TestCarryTreeReplicatesDirsFilesAndSymlinks(t *testing.T) {
 	src, dst := t.TempDir(), t.TempDir()
