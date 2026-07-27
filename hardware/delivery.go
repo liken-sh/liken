@@ -37,8 +37,8 @@ import (
 // Subsystems is the answer to "what kind of thing is a claim handing
 // over": drm for a GPU's nodes, tty for a serial port, hidraw for an
 // input device. The kernel already sorted every node into one, and
-// the subsystem is what decides how a node behaves when two
-// processes open it. Nothing else in the system knows this, so the
+// the subsystem is what determines how a node behaves when two
+// processes open it. No other part of the system records this, so the
 // walk keeps it rather than reading it and dropping it.
 type Delivery struct {
 	DevNodes   []string

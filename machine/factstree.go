@@ -3,7 +3,7 @@ package machine
 // The facts tree carries what init observed to the operator, as a
 // directory of small files under /run/liken/facts.
 //
-// Init learns facts that no program inside the cluster can observe
+// Init gathers facts that no program inside the cluster can observe
 // directly: the DHCP exchange, the moment of boot, the hardware as the
 // kernel first showed it. The operator reads these facts, adds what it
 // observes itself, and publishes the result to the Machine's status.
@@ -277,8 +277,8 @@ func (t FactsTree) readListFact(rel string) ([]string, error) {
 
 // readRecordFact reads one record file into a map of its key=value
 // lines. A missing file is an empty record. It reads each key on its
-// own, so it accepts a record that carries a key it does not know, and
-// a caller reads only the keys it wants.
+// own, so it accepts a record that carries an unknown key, and a
+// caller reads only the keys it needs.
 func (t FactsTree) readRecordFact(rel string) (map[string]string, error) {
 	raw, err := os.ReadFile(filepath.Join(t.Dir, rel))
 	if errors.Is(err, fs.ErrNotExist) {

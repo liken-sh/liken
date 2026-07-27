@@ -236,7 +236,7 @@ func blockDeviceUnder(diskName, deviceDir string) bool {
 
 // withoutStickRecommendations drops the recommendations that exist
 // only to reach the installation stick. The stick's own controller
-// wants a driver like any unclaimed device, and the report rightly
+// requires a driver like any unclaimed device, and the report rightly
 // loaded it, because without it there is no stick to write the
 // proposal to. But the stick leaves the machine with the person, so
 // its driver does not belong in the machine's manifest. A device

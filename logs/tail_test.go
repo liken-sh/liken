@@ -42,7 +42,7 @@ func (b *syncBuffer) String() string {
 // fastBackstop shortens the tailer's backstop timer and makes every
 // checkpoint immediate, so a timing test measures behavior instead of
 // waiting. It lets the backstop, not an event, drive the tailer, which
-// is what a behavior test wants: the outcome must hold whichever wakes
+// is what a behavior test needs: the outcome must hold whichever wakes
 // the tailer. The backstop is a package variable, which is why tests in
 // this package must not run in parallel.
 func fastBackstop(t *testing.T) {

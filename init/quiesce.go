@@ -24,8 +24,8 @@ package main
 // the clean record while the mount stays where it is. So the shutdown
 // remounts every writable disk read-only first, and unmounts
 // afterwards. After the remount, a disk is correct on its own, and
-// whether its unmount can finish no longer decides what the next boot
-// reads.
+// whether its unmount can finish no longer determines what the next
+// boot reads.
 //
 // This runs after the last write. On the reboot path that means after
 // the boot actuator has asserted the proven slot and armed any trial,

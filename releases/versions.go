@@ -4,8 +4,9 @@ package releases
 // holds, in one file that a script can read.
 //
 // The channel document (machine/channel.go) names one version, the
-// newest, and that is all a polling cluster needs. A person or a
-// script often wants the other question answered: what else is here?
+// newest, and that is all a polling cluster needs. A person often
+// wants the other question answered: what else is here? A script
+// that lists releases needs the same answer.
 // Object storage will not answer it, because the bucket refuses to
 // list itself, so the answer has to be published like anything else.
 // This document is the machine-readable twin of the front page, and

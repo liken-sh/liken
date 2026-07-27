@@ -4,7 +4,7 @@ package main
 //
 // The kernel cannot use a driver that was built as a module until
 // something feeds that module back to it, and the kernel itself does
-// not know where modules live; that is userspace's job. The usual
+// not locate modules on disk; that is userspace's job. The usual
 // program for this is modprobe, from the kmod project. liken ships
 // no modprobe, so init does the two things that modprobe would have
 // done:
@@ -27,14 +27,14 @@ package main
 //
 // Which modules to load comes from two lists, loaded in two passes.
 // The first list is /etc/liken/modules.conf, a plain list baked into
-// the image, the same list that the image build used to decide which
+// the image, the same list that the image build used to select which
 // module files to ship: the OS's own needs, loaded up front because
 // the alternative (on-demand autoloading) works by the kernel
 // exec'ing /sbin/modprobe itself, and a fixed, reviewable list is
 // better than a hidden runtime dependency. The second list is the
 // Machine spec's declared extras (spec.modules), the drivers for
 // whatever hardware this machine's workloads use, which cannot load
-// until the boot knows which manifest won. loadDeclaredModules below
+// until the boot settles which manifest won. loadDeclaredModules below
 // explains what each outcome means.
 
 import (
@@ -92,8 +92,8 @@ func loadModules() {
 
 // loadDeclaredModules loads the extra modules that the winning
 // Machine manifest declared, and reports each name's outcome. Unlike
-// the fixed list, whose failures are printed and forgotten (the OS
-// knows its own list is shippable), a declared module is a
+// the fixed list, whose failures are printed and forgotten (the image
+// build ships every module on that list), a declared module is a
 // deployment's request, and the answer must reach the cluster.
 // These outcomes travel through the facts tree into status.modules.
 // Nothing here can stop the boot. A machine missing a workload's
@@ -297,12 +297,12 @@ func kernelRelease() string {
 // A hard dependency is a symbol one module needs from another, and
 // depmod records every one of them in modules.dep, ordered so that
 // loading right-to-left satisfies them. A soft dependency is a weaker
-// thing: a hint that one module wants another loaded first so that a
-// device probes to the right driver. The lab's Realtek NIC is the case
-// that taught this. The r8169 driver asks, through a "pre" soft
-// dependency, for the realtek PHY library to load ahead of it. Without
-// realtek the NIC still binds, but to a generic PHY, and the link does
-// not come up the same way.
+// thing: a hint that one module names another to load before it, so
+// that a device probes to the right driver. The lab's Realtek NIC is
+// the case that taught this. The r8169 driver asks, through a "pre"
+// soft dependency, for the realtek PHY library to load ahead of it.
+// Without realtek the NIC still binds, but to a generic PHY, and the
+// link does not come up the same way.
 //
 // depmod does not index soft dependencies. modules.dep, modules.alias,
 // and the rest say nothing about them. Each module carries its own
@@ -472,7 +472,7 @@ func zstdDecode(data []byte) ([]byte, error) {
 // string, and drops the "post:" names for the reason stated above.
 func parseSoftdepPre(modinfo []byte) []string {
 	var pre []string
-	for _, entry := range bytes.Split(modinfo, []byte{0}) {
+	for entry := range bytes.SplitSeq(modinfo, []byte{0}) {
 		key, value, ok := bytes.Cut(entry, []byte{'='})
 		if !ok || string(key) != "softdep" {
 			continue

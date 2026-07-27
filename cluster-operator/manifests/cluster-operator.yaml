@@ -69,7 +69,7 @@ rules:
   - apiGroups: [""]
     resources: [pods/eviction]
     verbs: [create]
-  # The steward reads each stewarded DaemonSet to learn which
+  # The steward reads each stewarded DaemonSet to determine which
   # release's manifests are actually applied, from the
   # liken.sh/os-version annotation. This is the release that its pod
   # refreshes aim to match. The feature janitor (janitor.go) lists

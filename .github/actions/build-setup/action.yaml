@@ -108,7 +108,7 @@ runs:
         path: microcode/dist
         key: microcode-${{ hashFiles('microcode/VERSION', 'microcode/fetch.sh', 'linux-firmware/VERSION') }}
 
-    # Make decides staleness by timestamps, and the two halves of
+    # Make determines staleness by timestamps, and the two halves of
     # this working tree carry different timestamps: checkout stamps
     # the sources with the time of the run, while the cache restores
     # its artifacts with the older times they were archived with. Left

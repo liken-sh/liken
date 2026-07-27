@@ -43,9 +43,10 @@ type RegistriesSpec struct {
 // genuinely mean "no registries configuration", unlike
 // spec.features, where a null could be mistaken for an opt-in. But
 // the function refuses a mirror host with a null or empty endpoint
-// list loudly. A mirror with nowhere to point is neither a mirror
-// nor nothing, and `docker.io:` in hand-written YAML is a mistake to
-// name, not to guess about.
+// list. A host with no endpoints mirrors nothing, and it is not the
+// same as declaring no mirror at all. A bare `docker.io:` in
+// hand-written YAML is a mistake, so the function names it rather
+// than guess what the author meant.
 func validateRegistries(r RegistriesSpec) error {
 	for _, host := range slices.Sorted(maps.Keys(r.Mirrors)) {
 		if host == "" {

@@ -157,7 +157,7 @@ func convergeRegistryCredentials(c *kubernetes.Client, store machine.ManifestSto
 //
 //  1. No facts, or facts with no boot record: Unknown.
 //  2. The Secret is unreadable, an API failure rather than absence:
-//     Unknown, the same posture ClusterUnavailable takes.
+//     Unknown, the same verdict the ClusterUnavailable case gets.
 //  3. The Secret is malformed: CredentialsInvalid, and nothing is
 //     staged. The last good rendering keeps running, and the
 //     message names the Secret to fix. This reports the problem

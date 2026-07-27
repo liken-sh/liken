@@ -63,8 +63,8 @@ type podLogBind struct {
 	target string
 }
 
-// planPodLogBind decides whether this machine binds its pod logs onto
-// a disk, and says which directory it binds.
+// planPodLogBind determines whether this machine binds its pod logs
+// onto a disk, and says which directory it binds.
 //
 // A machine that does not declare podEphemeral gets no bind. Its
 // /var/lib/kubelet is on the root overlay as well, so a bind would

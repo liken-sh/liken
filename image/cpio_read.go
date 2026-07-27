@@ -3,10 +3,9 @@ package image
 // This file reads newc archives: the inverse of cpio.go's writer,
 // for the few places the build tools need to look inside an archive
 // they did not just write. The stick builder reads a deployment
-// layer to learn which machines it carries. The layer is what
-// actually boots, so the layer, not some manifests directory that
-// might have drifted out of step, is the authority on what the
-// install menu should offer.
+// layer to list the machines in it. The layer is what actually
+// boots, so the install menu comes from the layer, not from a
+// manifests directory whose content can differ from the layer.
 //
 // The reader is as strict as the writer is simple. A truncated or
 // malformed archive is always an error, never a partial result,
@@ -33,7 +32,7 @@ type cpioEntry struct {
 // trailer, and returns whatever bytes follow it. A composed image is
 // several archives concatenated, so "the rest" is often the next
 // archive. The data slices alias raw. A caller that keeps them also
-// keeps the archive alive, which every current caller wants anyway.
+// keeps the archive alive, which every current caller does anyway.
 func readCPIO(raw []byte) ([]cpioEntry, []byte, error) {
 	var entries []cpioEntry
 	off := 0

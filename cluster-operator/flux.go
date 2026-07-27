@@ -70,7 +70,7 @@ func ensureFluxDeployKey(c *kubernetes.Client, clusterDoc *cluster.Cluster) stri
 	if !clusterDoc.FeatureEnabled(cluster.FeatureFlux) {
 		return ""
 	}
-	// The declared configuration rides along for known_hosts. A
+	// The declared configuration supplies known_hosts. A
 	// malformed declaration does not block the mint: the key is
 	// per-cluster and parameter-independent, and init's feature pass
 	// already reports the configuration problem.

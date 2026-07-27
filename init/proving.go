@@ -21,7 +21,7 @@ package main
 //     slot.
 //
 //   - After the reboot (settleSystemRelease), init reads the files
-//     and decides what happened. If this boot came from the staged
+//     and determines what happened. If this boot came from the staged
 //     slot, this boot is the trial. The operator's first reconcile
 //     shows that the new kernel, init, k3s, and the cluster join all
 //     work, and this is what promotes the release. If this boot came
@@ -50,13 +50,13 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// settleSystemRelease reads the system store at boot and decides the
-// verdict that only init can decide: is this boot a trial, or is it
-// the fallback from a trial? When this boot proves a staged release,
-// the function returns that release's record. This record is what
-// arms the proving watch. Every other verdict returns nil. This
+// settleSystemRelease reads the system store at boot and determines
+// the verdict that only init can determine: is this boot a trial, or
+// is it the fallback from a trial? When this boot proves a staged
+// release, the function returns that release's record. This record is
+// what arms the proving watch. Every other verdict returns nil. This
 // function runs after storage settles (the store lives on
-// machineState) and after the code knows the boot's slot.
+// machineState) and after main resolves the boot's slot.
 func settleSystemRelease(act bootActuator, stateRoot, bootSlot string, durable bool, boot *machine.BootStatus) *machine.SystemRelease {
 	if !durable {
 		return nil
@@ -97,7 +97,7 @@ func settleSystemRelease(act bootActuator, stateRoot, bootSlot string, durable b
 		// This boot is the trial. The previous boot armed BootNext at
 		// this slot, and this boot runs the staged release's own
 		// kernel and init. The code writes nothing here, because the
-		// attempted marker already stands. init also does not decide
+		// attempted marker already stands. init also does not judge
 		// the proof. The operator's first reconcile is what shows
 		// that the machine actually serves its cluster on the new
 		// release.

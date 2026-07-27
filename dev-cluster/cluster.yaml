@@ -37,10 +37,11 @@ spec:
   # conventional port, and k3s's join protocol uses the same
   # listener. This endpoint matters only for first contact. After a
   # follower joins, k3s agents keep a client-side load balancer that
-  # learns every leader, so a dead endpoint strands only brand-new
-  # followers. A deployment that wants the endpoint to survive the
-  # loss of its first leader can point a DNS name or a virtual IP
-  # here instead. That choice belongs to the deployment, not the OS.
+  # holds the address of every leader, so a dead endpoint strands
+  # only brand-new followers. An operator who needs the endpoint to
+  # survive the loss of its first leader can point a DNS name or a
+  # virtual IP here instead. That choice belongs to the deployment,
+  # not the OS.
   endpoint: https://10.10.0.1:6443
 
   network:
@@ -74,7 +75,7 @@ spec:
 
   # The fleet's opt-ins from liken's feature vocabulary. liken
   # disables k3s's bundled components by default. Naming a component
-  # here declares that the fleet wants it back ({} is a feature's
+  # here declares that the fleet runs it again ({} is a feature's
   # zero configuration). The lab keeps metrics-server enabled at all
   # times, the same way node-4 keeps the dummy module enabled: this
   # exercises the computed disable list on every boot, and `kubectl

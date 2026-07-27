@@ -79,8 +79,8 @@ func (l *moduleLoader) apply(intent machine.ModulesIntent, store machine.Manifes
 	hash := machine.ManifestHash(raw)
 	if intent.ManifestHash != "" && intent.ManifestHash != hash {
 		// The store moved on since the intent was written. The newer
-		// staged bytes are what the operator wants now, so this code
-		// judges those bytes. The hash difference is only worth
+		// staged bytes are what the operator requests now, so this
+		// code judges those bytes. The hash difference is only worth
 		// reporting.
 		fmt.Printf("liken: modules: the staged spec (%.12s) is newer than the intent (%.12s); applying the store's copy\n",
 			hash, intent.ManifestHash)

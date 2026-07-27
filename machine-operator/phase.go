@@ -52,7 +52,7 @@ func conditionPhase(c api.Condition) api.Phase {
 	switch c.Reason {
 	case "FactsUnreadable":
 		// The operator is running but cannot read the facts, so it
-		// knows nothing about the machine it runs on.
+		// has no information about the machine it runs on.
 		return api.PhaseUnknown
 	case "FactsIncomplete":
 		// Facts exist but carry no boot record yet. init is still
@@ -96,7 +96,7 @@ func conditionPhase(c api.Condition) api.Phase {
 		return api.PhaseUpdatePending
 	}
 	// Anything unrecognized reads as Degraded, deliberately. A
-	// reason this table does not know fails visibly in the fleet
+	// reason missing from this table fails visibly in the fleet
 	// listing, instead of passing silently as Ready.
 	return api.PhaseDegraded
 }

@@ -6,7 +6,7 @@
 # entries and loads the kernel's own EFI stub. BIOS firmware offers
 # nothing like that: it loads one sector, the MBR's 440 bytes of boot
 # code, and jumps into it. Those bytes cannot hold a program, so GRUB
-# splits itself in two: the MBR stage knows only the disk address of
+# splits itself in two: the MBR stage holds only the disk address of
 # the *core image*, a compressed program (in liken's layout, sitting
 # in the raw biosBoot partition) that carries real filesystem drivers
 # and a script interpreter. liken ships both halves as release
@@ -29,7 +29,7 @@
 # exists to prevent. The binary is dynamically linked, which sets an
 # opposite requirement: the pinned series must be old enough that its
 # library demands are met everywhere builds run. The 2.14 series
-# showed this problem (its grub-mkimage wants a libdevmapper newer
+# showed this problem (its grub-mkimage needs a libdevmapper newer
 # than CI has), which is why the pin sits on 2.12, the current LTS
 # series. The pin should follow the oldest platform liken builds on.
 #

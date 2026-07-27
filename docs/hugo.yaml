@@ -14,7 +14,7 @@ disableKinds: [taxonomy, term, rss]
 
 outputFormats:
   markdown:
-    # text/markdown is a media type Hugo already knows, with the md
+    # text/markdown is a media type Hugo already has, with the md
     # suffix. baseName index makes the output index.md, beside
     # index.html in the same pretty-URL directory.
     mediaType: text/markdown

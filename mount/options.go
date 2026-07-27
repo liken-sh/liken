@@ -113,9 +113,9 @@ var userspaceOptions = map[string]bool{
 
 // splitOptions sorts a comma list into the flag word and the data
 // string that mount(2) takes. Anything this file does not recognize
-// is data, which is the correct default: an option this program has
-// never heard of is one the filesystem driver defines, and the
-// driver is the one that must judge it.
+// is data, which is the correct default: an option missing from the
+// table above is one the filesystem driver defines, and the driver
+// is the one that must judge it.
 func splitOptions(options string) (uintptr, string) {
 	var flags uintptr
 	var data []string

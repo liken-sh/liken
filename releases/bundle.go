@@ -25,7 +25,7 @@ package releases
 // the artifacts carry other projects' GPL- and LGPL-licensed
 // binaries, and the license terms of those projects require the
 // notices to travel with the bytes. So the notices are an artifact
-// like any other, and ride the same channel, sticks, and slots the
+// like any other, and use the same channel, sticks, and slots the
 // binaries do. Because nothing here embeds a deployment, every digest
 // stays stable for a given source tree. This makes it publishable on
 // a release page, and the same for everyone.

@@ -20,7 +20,7 @@ package main
 //     tree. The install medium carries the whole OS as liken.sqfs, and
 //     that image holds every driver, the alias table, and the softdep
 //     information. The report reads all three from there.
-//  2. It loads the drivers this hardware wants, from that tree, for
+//  2. It loads the drivers this hardware names, from that tree, for
 //     the storage and network devices only. Loading a module changes
 //     only RAM, so the report keeps its promise to change nothing on
 //     any disk. The names it needs are real only after the drivers
@@ -139,7 +139,7 @@ func runHardwareReport() {
 }
 
 // gatherHardwareReport does the observation: it mounts the module tree,
-// loads the drivers this hardware wants, and reads back the disks and
+// loads the drivers this hardware names, and reads back the disks and
 // interfaces that appeared. It returns the stick it resolved along
 // with the report, because the write of the proposal must go to that
 // same stick and no other.
@@ -200,7 +200,7 @@ func gatherHardwareReport() (hardwareReport, installStick) {
 
 	// Which disks the loads above brought into existence is knowable
 	// only here, with the recommendations and the disks in hand
-	// together. It is the fact that decides whether this machine can
+	// together. It is the fact that determines whether this machine can
 	// install from a stock image at all.
 	disks := markDisksBehindDrivers(readReportDisks(stick), recommendations)
 
@@ -260,8 +260,8 @@ func recommendClaimable(catalog *hardware.Catalog, base string) []moduleRecommen
 	return recommendFor(catalog, base, claimableClass)
 }
 
-// recommendFor turns the undriven devices of the kinds a caller wants
-// into ordered driver recommendations.
+// recommendFor turns the undriven devices of the kinds a caller
+// selects into ordered driver recommendations.
 func recommendFor(catalog *hardware.Catalog, base string, want func(string) bool) []moduleRecommendation {
 	devices := hardware.DiscoverDevices(sysfsRoot, catalog.PCI)
 	seen := map[string]bool{}
@@ -287,7 +287,7 @@ func recommendFor(catalog *hardware.Catalog, base string, want func(string) bool
 	return recommendations
 }
 
-// reportableClass decides which undriven devices the report loads a
+// reportableClass selects which undriven devices the report loads a
 // driver for. The answer is storage and network, and nothing else:
 // PCI base class 01 and 02, and the USB mass-storage class, which is
 // how the report reaches the installation stick it writes to. These
@@ -312,7 +312,7 @@ func reportableClass(class string) bool {
 	return false
 }
 
-// claimableClass decides which undriven devices the report names as
+// claimableClass selects which undriven devices the report names as
 // hardware a workload could claim. This list loads nothing, so it can
 // be generous where reportableClass cannot.
 //
@@ -332,7 +332,7 @@ func claimableClass(class string) bool {
 
 // observeInterfaces brings every real interface admin-up and reads back
 // its link state. Admin-up is required before the kernel trains the link
-// and learns the carrier, and it changes only kernel state in RAM, so
+// and detects the carrier, and it changes only kernel state in RAM, so
 // the report keeps its promise here too. The report waits a few seconds
 // after raising the links, because copper autonegotiation takes that
 // long, and a carrier read before the link trains would report every

@@ -47,7 +47,7 @@ type growth struct {
 }
 
 // planGrowth compares each declared role recognized on this disk
-// against its table entry, and decides what must grow. It is pure;
+// against its table entry, and determines what must grow. It is pure;
 // the device name appears only in error messages. rewrite reports
 // whether the table needs rewriting even when no extent changes,
 // which is how a grown disk gets its backup table moved to the new

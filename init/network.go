@@ -20,7 +20,7 @@ package main
 // A static address is the simplest case: it uses no protocol, only
 // the netlink calls that apply an address someone already chose.
 // Static addressing exists because clustering needs it. A machine's
-// peers must know its address before it boots, so the manifest must
+// peers must have its address before it boots, so the manifest must
 // declare the address instead of negotiating it on the wire. The lab
 // also needs static addressing, for a different reason: the network
 // segment that joins the QEMU guests has no DHCP server on it.
@@ -39,7 +39,7 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// connection holds the facts that the code learns while it brings up
+// connection holds the facts that the code gathers while it brings up
 // one interface. These facts are enough to print a report of how the
 // machine connects to the network, and to publish the same facts to
 // the Machine's status.

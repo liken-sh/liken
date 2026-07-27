@@ -20,7 +20,7 @@ package disks
 //
 // A partition table is not an artifact of some tool. It is a few
 // hundred bytes at well-known offsets that the kernel, firmware, and
-// every OS know how to read. GPT, the modern format, is simple
+// every OS can read. GPT, the modern format, is simple
 // enough to handle directly, and doing so shows exactly what it is:
 //
 //	LBA 0        a "protective MBR": a legacy MBR whose single
@@ -229,7 +229,7 @@ func RandomGUID() [16]byte {
 // SerializeGPT is the pure half of writing. It takes a table in, and
 // produces the five on-disk chunks out: protective MBR, primary
 // header, entries, backup entries, and backup header, with both
-// CRCs computed. totalSectors decides where the backup lands and
+// CRCs computed. totalSectors sets where the backup lands and
 // what lastUsable becomes. Because of this, serializing a table that
 // was read from a smaller disk relocates its backup to the new end.
 func SerializeGPT(t *Table, totalSectors uint64) ([]Chunk, error) {
@@ -469,8 +469,8 @@ func WriteTableInPlace(devPath string, totalSectors uint64, t *Table) error {
 }
 
 // writeTableBytes serializes and writes a table's chunks, and
-// returns the still-open device for whatever the caller wants to do
-// with it.
+// returns the still-open device, so the caller can do more work on
+// it before it closes the device.
 func writeTableBytes(devPath string, totalSectors uint64, t *Table) (*os.File, error) {
 	chunks, err := SerializeGPT(t, totalSectors)
 	if err != nil {

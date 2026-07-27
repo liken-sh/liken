@@ -13,8 +13,8 @@ package main
 // and the conductor hands out reboot turns one budget slot at a
 // time.
 //
-// The coordination happens through conditions. A machine that wants
-// to reboot sets reason AwaitingTurn on its convergence condition and
+// The coordination happens through conditions. A machine that needs
+// a reboot sets reason AwaitingTurn on its convergence condition and
 // waits. This program responds by writing a RebootApproved condition
 // onto that Machine. That condition is a grant: it is present while
 // the turn is extended, it is removed when the turn is spent, and it

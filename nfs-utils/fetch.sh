@@ -90,7 +90,7 @@ fetch "https://downloads.sourceforge.net/project/libtirpc/libtirpc/$libtirpc_ver
 [[ -z "$sources_only" ]] || exit 0
 
 # The build runs inside the pinned container. nfs-utils is one source
-# tree carrying a dozen programs, and this build wants exactly one of
+# tree carrying a dozen programs, and this build needs exactly one of
 # them, so configure here mostly disables things: no GSS/Kerberos, no
 # NFSv4 server-side tooling (idmapd and related tools serve nfsd, not
 # the client), no udev readahead helper, no systemd units. The

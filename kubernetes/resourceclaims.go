@@ -9,7 +9,7 @@ package kubernetes
 // designed it this way on purpose: the claim object is the one
 // source of truth for what a pod was granted, so a stale or replayed
 // prepare call can never deliver anything except what the scheduler
-// actually decided.
+// actually allocated.
 //
 // This file covers only the read path: liken never writes claims.
 // Workloads create claims, and the scheduler allocates them. Because

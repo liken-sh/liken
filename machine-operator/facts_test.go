@@ -86,7 +86,7 @@ func TestOperatorReadsFactsFromTheTree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The facts ride through the seam unchanged.
+	// The facts pass through the seam unchanged.
 	if got.Role != want.Role || got.Boot.ManifestSource != machine.ManifestSourceProven || got.Boot.ManifestHash != "abc123" {
 		t.Errorf("the boot identity must round-trip: %+v", got.Boot)
 	}

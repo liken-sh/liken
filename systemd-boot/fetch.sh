@@ -7,22 +7,22 @@
 # the whole command line. Install media cannot do that: when firmware
 # boots a removable disk, it runs one well-known file
 # (\EFI\BOOT\BOOTX64.EFI) with no arguments, and a kernel started with
-# no arguments does not even know its initramfs exists. Something on
-# the stick must supply the command line, and on liken's stick that
-# something is also the install menu: one entry per machine in the
-# deployment. The operator picks the machine they are standing at, and
-# that entry's options carry liken.machine=<name>.
+# no arguments gets no initrd= parameter, so it loads no initramfs.
+# Something on the stick must supply the command line, and on liken's
+# stick that something is also the install menu: one entry per
+# machine in the deployment. The operator picks the machine they are
+# standing at, and that entry's options carry liken.machine=<name>.
 #
 # systemd-boot is the smallest program that does exactly this. It is
 # a single ~130KB EFI application, not a bootloader in the GRUB sense:
 # it has no modules, no scripting language, and no filesystem drivers
-# of its own. It can be this small because the firmware already knows
-# how to read FAT and load EFI binaries. systemd-boot only draws a
+# of its own. It can be this small because the firmware already
+# reads FAT and loads EFI binaries. systemd-boot only draws a
 # menu from the plain-text entry files in /loader/entries on the disk
 # it booted from, and chain-loads the chosen kernel's own EFI stub
 # with the options that entry names. An entry can list several
 # `initrd` lines, which systemd-boot concatenates in order; installed
-# machines get the same composition from their two initrd=
+# machines get the same composition from their three initrd=
 # parameters.
 #
 # This script vendors the binary the same way as the kernel: prebuilt
@@ -78,7 +78,7 @@ if ! sha256sum --check --status <<<"$digest  $cache/$deb" >/dev/null 2>&1; then
 fi
 
 # A .deb file is an `ar` archive wrapping a compressed tarball of the
-# files. The EFI binary is the only file liken wants from it.
+# files. liken extracts only the EFI binary from it.
 staging="$(mktemp -d)"
 trap 'rm -rf "$staging"' EXIT
 ar p "$cache/$deb" data.tar.zst | tar --zstd -x -C "$staging" \

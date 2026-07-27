@@ -2,18 +2,18 @@ package main
 
 // Composing the hardware report's proposal.
 //
-// The report boot answers the question a new machine asks before its
-// first install: what does this hardware need in its manifest? It
-// answers with a whole Machine manifest, ready to edit, with the
-// evidence for every line written beside it as a comment. This file
-// turns the facts the boot gathered into that document.
+// The report boot answers the question that comes before a new
+// machine's first install: what does this hardware need in its
+// manifest? It answers with a whole Machine manifest, ready to edit,
+// with the evidence for every line written beside it as a comment.
+// This file turns the facts the boot gathered into that document.
 //
 // The proposal makes a promise: a person renames the machine, checks
 // the sizes, and installs. Everything here serves that promise. A
-// driver that the install cannot load in time is not declared, but
-// named loudly instead. A size that a disk cannot hold is not written
-// at all (reportlayout.go does that arithmetic). A port with no cable
-// is evidence, not a declaration.
+// driver that the install cannot load in time is not declared. The
+// proposal names it in a warning instead. A size that a disk cannot
+// hold is not written at all (reportlayout.go does that arithmetic).
+// A port with no cable is evidence, not a declaration.
 //
 // The composition is a pure function. It takes the enumerated hardware
 // as a plain value and returns the proposal text. Nothing here touches
@@ -67,7 +67,7 @@ type reportInterface struct {
 // in load order, so a NIC that needs its PHY library first reads as
 // [realtek, r8169], not r8169 alone. Device names the hardware in
 // words, so the proposal's comment can say which device each driver
-// claims. Class is the device's kind, which decides whether the chain
+// claims. Class is the device's kind, which determines whether the chain
 // can be declared at all: a network driver loads in time to serve the
 // machine, and a storage driver does not. SysfsDirs is where the
 // devices behind this fingerprint sit in sysfs; the composition
@@ -123,7 +123,7 @@ type hardwareReport struct {
 const reportHeader = `# A proposed Machine manifest, written by the liken hardware report.
 #
 # This machine booted the report entry from the installation stick. The
-# report loaded the drivers this hardware wants, watched which disks and
+# report loaded the drivers this hardware names, watched which disks and
 # interfaces appeared, and wrote its findings here. It changed nothing
 # on the machine.
 #
@@ -162,7 +162,7 @@ func composeHardwareReport(r hardwareReport) string {
 // from the list and stated as a warning instead, for the reason
 // storageClass explains.
 func composeModules(b *strings.Builder, recs, claimable []moduleRecommendation) {
-	b.WriteString("  # Extra kernel modules this machine's hardware wants, beyond\n")
+	b.WriteString("  # Extra kernel modules this machine's hardware requires, beyond\n")
 	b.WriteString("  # the drivers the OS already loads. Each comment names a device\n")
 	b.WriteString("  # with no driver bound and the modules that would bind it, in\n")
 	b.WriteString("  # the order to load them. The report looks at storage and\n")
@@ -260,10 +260,10 @@ func composeNetwork(b *strings.Builder, ifaces []reportInterface) {
 
 	var connected, dark []reportInterface
 	for _, ifc := range ifaces {
-		// The kernel says "down" only when it knows the carrier is
-		// absent. A driver that does not track the carrier reports
-		// "unknown", and a port the report cannot judge is declared
-		// rather than hidden.
+		// The kernel reports "down" only when a driver tracks the
+		// carrier and the carrier is absent. A driver that does not
+		// track the carrier reports "unknown", and a port the report
+		// cannot judge is declared rather than hidden.
 		if ifc.Link == "down" || ifc.Link == "lowerlayerdown" {
 			dark = append(dark, ifc)
 			continue
@@ -351,8 +351,8 @@ func composeStorage(b *strings.Builder, r hardwareReport) {
 	}
 }
 
-// diskCaveat is the short note that rides on a disk's evidence line
-// when the disk is not an ordinary target for a role.
+// diskCaveat is the short note that the report appends to a disk's
+// evidence line when the disk is not an ordinary target for a role.
 func diskCaveat(d reportDisk) string {
 	switch {
 	case d.MaybeStick:
@@ -416,8 +416,8 @@ func reportWarnings(r hardwareReport) []string {
 
 // writeRole renders one storage role. An empty size means the role
 // takes the rest of its disk, which the spec allows for one role per
-// disk. A comment, when present, rides on the value line so a person
-// reads the reason beside the number.
+// disk. A comment, when present, follows the value on the same line,
+// so a person reads the reason beside the number.
 func writeRole(b *strings.Builder, name, device, size, comment string) {
 	fmt.Fprintf(b, "    %s:\n", name)
 	fmt.Fprintf(b, "      device: %s\n", device)

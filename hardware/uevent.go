@@ -121,7 +121,7 @@ func readUevents(fd, cancelR int, notify chan<- struct{}) {
 	}
 }
 
-// hardwareChanged decides whether one uevent datagram requires a
+// hardwareChanged reports whether one uevent datagram requires a
 // re-walk. Add and remove events change what exists. Bind and unbind
 // events change which driver is bound. Every other event, such as
 // change, move, or the online and offline events for memory blocks,

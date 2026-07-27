@@ -30,7 +30,7 @@ func TestDecidePhase(t *testing.T) {
 		{"everything true is ready", allTrue, api.PhaseReady},
 		{"no conditions at all is ready", nil, api.PhaseReady},
 		{
-			"unreadable facts leave the operator blind",
+			"unreadable facts give the operator nothing to judge",
 			[]api.Condition{condition("FactsPublished", "False", "FactsUnreadable")},
 			api.PhaseUnknown,
 		},

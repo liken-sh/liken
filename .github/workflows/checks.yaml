@@ -42,12 +42,12 @@ jobs:
           go-version-file: go.mod
 
       # prek runs the hooks. Its version is pinned here, because the
-      # workflow is the only place CI learns it. The action caches the
-      # environments of the remote hooks (shellcheck and the hygiene
-      # hooks) between runs. By default, it runs
+      # workflow is the only place CI reads it from. The action caches
+      # the environments of the remote hooks (shellcheck and the
+      # hygiene hooks) between runs. By default, it runs
       # `prek run --all-files --show-diff-on-failure`, so a
-      # file-modifying hook like gofmt fails with the diff it wanted
-      # to make, instead of a bare exit code.
+      # file-modifying hook like gofmt fails with the diff it would
+      # make, instead of a bare exit code.
       - uses: j178/prek-action@v2
         with:
           prek-version: 0.4.8

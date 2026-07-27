@@ -144,14 +144,14 @@ const (
 
 // A convergence is one reconcile pass's decision: the condition to
 // publish and which side effects to perform. decideConvergence
-// decides; reconcile() acts.
+// makes the decision; reconcile() acts.
 type convergence struct {
 	condition      api.Condition
 	stage          bool   // write the manifest to the machineState filesystem
 	requestReboot  bool   // write the reboot intent for init
 	requestRestart bool   // write the restart intent; a k3s restart applies it
 	requestLoad    bool   // write the modules intent; init loads the staged additions while the system runs
-	withdraw       bool   // remove the staged manifest; the spec no longer wants it
+	withdraw       bool   // remove the staged manifest; the spec no longer names it
 	clearRejection bool   // remove the rejection record; the spec it blocks is gone
 	manifest       []byte // the bytes to stage
 	hash           string // the bytes' identity
@@ -202,7 +202,7 @@ func machineStateEphemeral(condType, what string) convergence {
 
 // convergedWithCleanup wraps a True verdict with the cleanup that
 // every document performs on convergence. When a manifest is still
-// staged for a spec the cluster no longer wants, this function
+// staged for a spec the cluster no longer requests, this function
 // withdraws it, because the next boot would otherwise apply it. This
 // function also clears a standing rejection for the same reason: the
 // spec it blocks is no longer requested, so the record no longer
@@ -258,7 +258,7 @@ func gateDisruption(c *convergence, condType string, policy machine.RebootPolicy
 //     Guessing here could reboot a machine because of a misreading.
 //  2. No drift: the verdict is converged. This case also cleans up
 //     after an edit that was reverted. When a manifest is still
-//     staged for a spec the cluster no longer wants, this case
+//     staged for a spec the cluster no longer requests, this case
 //     withdraws it, because the next boot would otherwise apply it.
 //     This case also clears a standing rejection for the same
 //     reason: the spec it blocks is no longer requested, so the

@@ -64,7 +64,7 @@ func TestSysctlsConditionKeepsAFailingDefaultOutOfTheHealthVerdict(t *testing.T)
 	}
 }
 
-// When both halves fail, the spec's verdict decides the status, and
+// When both halves fail, the spec's verdict sets the status, and
 // the message still carries both, so one look explains the whole pass.
 func TestSysctlsConditionPrefersTheSpecVerdictAndNamesBoth(t *testing.T) {
 	c := sysctlsCondition(errors.New("sysctl net.core.default_qdisc: no such file"),

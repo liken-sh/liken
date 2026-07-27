@@ -23,9 +23,9 @@ package machine
 // tarballs' digests are staged before k3s first sees them, and
 // proven once the operator observes the images actually serving
 // containers. If a boot finds a staged record still present, the
-// boot knows the store took writes that were never proven. The boot
-// discards the record completely, instead of trusting it. init's
-// imports.go carries that half of the work.
+// store took writes that were never proven. The boot discards the
+// record completely, instead of trusting it. init's imports.go
+// carries that half of the work.
 
 import (
 	"crypto/sha256"
@@ -71,7 +71,7 @@ func ImportedImagesStore(root string) ManifestStore {
 
 // RenderImportedImages produces the record's canonical bytes and
 // their hash. A boot compares this hash against the proven record's
-// hash, to decide whether the boot is bringing different tarballs to
+// hash, to determine whether the boot brings different tarballs to
 // import.
 func RenderImportedImages(images map[string]string) ([]byte, string, error) {
 	return renderDocument(ImportedImages{

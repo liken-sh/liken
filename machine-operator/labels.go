@@ -105,7 +105,7 @@ func decideNodeLabels(desired map[string]string, node *nodeObject) labelStep {
 
 // carryOutNodeLabels applies the step's patch. It downgrades the
 // condition when the API server refuses the patch. The next pass
-// reads the Node again, decides again, and tries again.
+// reads the Node again, builds the step again, and patches again.
 func carryOutNodeLabels(c *kubernetes.Client, name string, step labelStep) api.Condition {
 	if step.patch == nil {
 		return step.condition

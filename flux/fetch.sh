@@ -68,10 +68,9 @@ fi
 tar -xzf "$cache/$tarball" -C "$cache" flux
 
 # Render the seed. --export writes manifests to stdout and touches no
-# cluster. The floor components only; the repository decides
+# cluster. The floor components only; the repository supplies
 # everything past the floor. The network policies stay in, because
-# the engine should hold its default posture until a repository
-# decides otherwise.
+# flux keeps its defaults until a repository replaces them.
 rm -rf "$out"
 mkdir -p "$out"
 "$cache/flux" install \

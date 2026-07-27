@@ -109,7 +109,7 @@ type timeSync struct {
 
 // clock holds the machine's timekeeping state. Two components share
 // it: the discipline loop records each measurement, and, on a
-// leader, the responder reads the latest measurement to know what to
+// leader, the responder reads the latest measurement for what to
 // advertise. Running the machine plane in one process makes this
 // possible with a mutex. Two separate daemons would need a socket
 // between them; two goroutines only need a mutex.
@@ -319,19 +319,19 @@ func slewClock(offset time.Duration) error {
 // synchronized at that point.
 const syncStaleAfter = 3 * timePollInterval
 
-// worthRepublishing decides whether a fresh measurement changes what
-// the published time facts report. A change in state, source, or
-// stratum must always be reported. The offset must be reported only
-// when it has moved past offsetPublishThreshold since the last
-// publish. SNTP measurements wobble by microseconds on every poll,
-// and each republished fact has a cost: the machine publishes a
-// status update whenever the facts change, and each such write
-// causes a raft round and an fsync on every one of the cluster's
-// leaders. A fleet whose clocks are working correctly should cost
-// etcd nothing extra. The freshness floor limits the one case where
-// suppressing updates could mislead: lastSync must not go so stale
-// that the status reports a silent sync loop, while init is actually
-// still receiving answers from its sources.
+// worthRepublishing reports whether a fresh measurement changes the
+// published time facts. A change in state, source, or stratum must
+// always be reported. The offset must be reported only when it has
+// moved past offsetPublishThreshold since the last publish. SNTP
+// measurements wobble by microseconds on every poll, and each
+// republished fact has a cost: the machine publishes a status update
+// whenever the facts change, and each such write causes a raft round
+// and an fsync on every one of the cluster's leaders. A fleet whose
+// clocks are working correctly should cost etcd nothing extra. The
+// freshness floor limits the one case where suppressing updates could
+// mislead: lastSync must not go so stale that the status reports a
+// silent sync loop, while init is actually still receiving answers
+// from its sources.
 const (
 	offsetPublishThreshold = 25 * time.Millisecond
 	timePublishFloor       = 10 * time.Minute
@@ -412,7 +412,7 @@ func disciplineClock(clk *clock, tree machine.FactsTree, initial machine.TimeSta
 		published := current
 		publishedOffset, _ := time.ParseDuration(current.Offset)
 		publishedAt := time.Now()
-		// The boot step, or the lack of one, decided whether the RTC
+		// The boot step, or the lack of one, determined whether the RTC
 		// has been written yet. If the boot came up on a wrong
 		// hardware clock, this loop corrects the RTC at the first
 		// sync it achieves.

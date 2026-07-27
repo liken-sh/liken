@@ -190,7 +190,7 @@ func TestRestartRefusesWithNothingStaged(t *testing.T) {
 
 func TestRestartRefusesAnAlreadyAttemptedDocument(t *testing.T) {
 	// The intent only signals that work might exist; the stores
-	// decide what to apply. A document that this restart, or a
+	// determine what to apply. A document that this restart, or a
 	// previous boot, already tried waits for the operator's promotion
 	// or the next boot's decision.
 	f := newRestartFixture(t)
@@ -298,8 +298,8 @@ func TestRetractionRemovesADroppedFeaturesManifests(t *testing.T) {
 // would prune everything the repository ever applied.
 func TestRestartRetractsFluxOnlyAfterTheStop(t *testing.T) {
 	f := newRestartFixture(t)
-	// The feature's ground rides the image; the sync objects are
-	// rendered, so retraction must know both.
+	// The feature's ground ships in the image; the sync objects are
+	// rendered, so retraction needs both names.
 	_, seeded := retractionFixture(t, "flux", "flux-system.yaml")
 	if err := os.WriteFile(filepath.Join(seeded, "flux-sync.yaml"), []byte("kind: GitRepository\n"), 0o644); err != nil {
 		t.Fatal(err)

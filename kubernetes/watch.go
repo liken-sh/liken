@@ -1,7 +1,7 @@
 package kubernetes
 
-// This file implements the watch protocol: how a controller learns
-// about changes the moment they happen, and how it recovers when the
+// This file implements the watch protocol: how a controller receives
+// changes the moment they happen, and how it recovers when the
 // stream drops.
 
 import (

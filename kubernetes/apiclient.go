@@ -164,7 +164,7 @@ func InClusterClientAt(base string) (*Client, error) {
 			// most likely to be silently dead. The server may have
 			// closed it, or the network path may have reset it
 			// without notice. Go writes the next request onto that
-			// connection anyway, and only learns the truth when no
+			// connection anyway, and detects the failure only when no
 			// answer comes back: the server then receives an orphaned
 			// request from a client that already gave up, and logs it
 			// as an aborted request. Discarding idle connections

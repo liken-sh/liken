@@ -54,8 +54,8 @@ func TestRuntimeGoGCResolves(t *testing.T) {
 	}
 }
 
-// Validation refuses garbage loudly, so a bad value never reaches the
-// fleet as staged bytes. Each error names the offending field.
+// Validation refuses a malformed value, so it never reaches the fleet
+// as staged bytes. Each error names the offending field.
 func TestRuntimeValidationRejectsGarbage(t *testing.T) {
 	cases := map[string]struct {
 		spec K3sRuntimeSpec

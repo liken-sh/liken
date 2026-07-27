@@ -136,7 +136,7 @@ func autoMachine() *machine.Machine {
 	return &machine.Machine{Spec: machine.MachineSpec{RebootPolicy: machine.RebootAuto}}
 }
 
-func TestAVerifiedDownloadStagesAndRidesTheRebootChain(t *testing.T) {
+func TestAVerifiedDownloadStagesAndFollowsTheRebootPolicy(t *testing.T) {
 	ask := fetchAsk{version: "0.2.0", digest: "sha256:" + strings.Repeat("bb", 32), slot: "B"}
 	_, hash, err := machine.RenderSystemRelease(ask.version, ask.slot, ask.digest)
 	if err != nil {

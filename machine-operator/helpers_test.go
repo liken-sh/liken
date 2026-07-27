@@ -31,7 +31,7 @@ func testClient(t *testing.T, handler http.Handler) *kubernetes.Client {
 }
 
 // TestMain silences the retry pause for the whole test binary: the
-// seeding loops retry forever by design, and no test wants the real
+// seeding loops retry forever by design, and no test needs the real
 // five-second wait.
 func TestMain(m *testing.M) {
 	kubernetes.RetryPause = func() {}

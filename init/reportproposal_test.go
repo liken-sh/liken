@@ -19,7 +19,7 @@ import (
 )
 
 // sampleReport is a two-disk BIOS machine with one Realtek NIC that
-// wants its PHY library loaded first. It exercises every branch that
+// names its PHY library to load first. It exercises every branch that
 // matters: a softdep-expanded chain, a durable disk distinct from the
 // system disk, and the BIOS boot roles.
 func sampleReport() hardwareReport {

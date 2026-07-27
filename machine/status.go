@@ -28,7 +28,7 @@ type MachineStatus struct {
 	// this status judged, stamped by the operator on every pass. The
 	// conditions each carry the same stamp, but a client that only
 	// asks "has the operator seen my edit yet" should not have to
-	// parse conditions to learn it. Kubernetes controllers publish
+	// parse conditions for the answer. Kubernetes controllers publish
 	// this field at the top of status for exactly that question.
 	// Init leaves this field empty in the facts, because init runs
 	// before the cluster exists and a generation is the API server's
@@ -391,7 +391,7 @@ type FirmwareStatus struct {
 	BootOrder []string `json:"bootOrder,omitempty"`
 }
 
-// StorageStatus lists every role liken knows, whether declared or
+// StorageStatus lists every role liken defines, whether declared or
 // not. An absent role must be visible in one kubectl get, not merely
 // implied. The fields mirror the spec's keys exactly, so spec and
 // status line up name for name.
@@ -472,7 +472,7 @@ func AllRolesInMemory() StorageStatus {
 // module by that name at all. The image carries the kernel's whole
 // module tree, so the usual cause is a misspelling, and the fix is
 // the name rather than a new image. A name that is spelled right and
-// still missing wants a release whose kernel builds it. Failed means
+// still missing needs a release whose kernel builds it. Failed means
 // the kernel has the module and refused it, which usually points to a
 // problem in the hardware.
 type ModuleState string

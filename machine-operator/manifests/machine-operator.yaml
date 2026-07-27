@@ -229,7 +229,7 @@ metadata:
     app.kubernetes.io/part-of: liken
   # The release these manifests shipped with. The pod steward
   # (cluster-operator/steward.go) compares this value against each
-  # machine's running version, to know when a machine is ready for a
+  # machine's running version, to determine when a machine is ready for a
   # pod from this template. This annotation is the source of truth.
   # The pods below inherit it, and a pod is stale exactly when its
   # inherited copy differs from the DaemonSet's.

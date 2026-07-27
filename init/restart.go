@@ -12,7 +12,7 @@ package main
 // graceful stop and start, and every container stays running under
 // its shim.
 //
-// The staged stores decide what to apply. The intent file only
+// The staged stores determine what to apply. The intent file only
 // signals that new work exists. So a duplicate intent is harmless:
 // if a pass finds nothing new to apply, it returns false and does
 // not disturb k3s. Both the boot path and the restart path use the
@@ -142,7 +142,7 @@ func (s *restartState) apply(intent machine.RestartIntent) bool {
 	registries := s.renderRegistries(clusterDoc, creds, machine.RegistryCredentialsStore(s.root), credsSource)
 
 	// The facts update before the restart. They name the staged
-	// documents, so the operator knows what this restart applied. The
+	// documents, so the operator reads what this restart applied. The
 	// write order is a commit protocol: features/ and registries/ land
 	// first, then the restart counter, and boot/clusterManifest lands
 	// last, because the operator's promotion keys on that record

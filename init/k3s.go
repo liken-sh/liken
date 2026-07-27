@@ -20,7 +20,7 @@ package main
 // as drop-ins. So the split is this: what a person decided lives in
 // the image's static files (/etc/rancher/k3s/config.yaml for
 // leaders, agent.yaml for followers, both reviewable in the repo),
-// and what only the boot can know (this machine's node IP, the
+// and what only the boot can observe (this machine's node IP, the
 // cluster's address plan, where the join token sits) lands in a
 // drop-in that this file writes. Init never rewrites a file that a
 // person wrote.
@@ -73,7 +73,7 @@ const (
 	likenManifestsRel = k3sManifestsRel + "/liken"
 )
 
-// leaderJoinConfig decides a leader's datastore keys, based on leader
+// leaderJoinConfig selects a leader's datastore keys, based on leader
 // count. One leader is exactly the cluster that liken has always
 // run: sqlite (via kine), no etcd, nothing to join. Keeping
 // single-node cheap is deliberate. More than one leader means
@@ -131,10 +131,10 @@ func leaderJoinConfig(clusterDoc *cluster.Cluster, name, manifestDir string) (cl
 
 // nodeAddress picks which of the machine's addresses is its node IP:
 // the address that Kubernetes traffic uses, and the one that other
-// nodes are told to reach it at. The Cluster's nodeCIDR decides
+// nodes are told to reach it at. The Cluster's nodeCIDR determines
 // this. The interface whose address falls inside nodeCIDR is the
 // cluster-facing one. A machine with several interfaces needs this
-// choice to be explicit. If left to decide on its own, k3s picks the
+// choice to be explicit. Left unconfigured, k3s selects the
 // interface that holds the default route, which on a machine with an
 // internet uplink is exactly the wrong interface.
 func nodeAddress(clusterDoc *cluster.Cluster, conns []*connection) (ip, ifname string) {
@@ -155,7 +155,7 @@ func nodeAddress(clusterDoc *cluster.Cluster, conns []*connection) (ip, ifname s
 }
 
 // k3sBootInputs gathers everything that the drop-in needs and that
-// only this boot could decide. writeK3sBootConfig fills it in, and
+// only this boot could determine. writeK3sBootConfig fills it in, and
 // k3sBootConfig renders it. This is a struct rather than a parameter
 // list, because seven positional arguments with adjacent strings and
 // bools invite mistakes. Named fields read correctly at the call
@@ -172,7 +172,7 @@ type k3sBootInputs struct {
 }
 
 // k3sBootConfig renders the drop-in: everything that k3s must be
-// told and that only this boot could decide. It renders plain
+// told and that only this boot could determine. It renders plain
 // key: value lines, because every value here is a string that k3s
 // maps onto one of its flags.
 func k3sBootConfig(in k3sBootInputs) string {
@@ -184,8 +184,8 @@ func k3sBootConfig(in k3sBootInputs) string {
 	// The join token applies to both roles: the leader requires
 	// exactly this token from anyone joining, and a follower presents
 	// it. Because the token embeds a hash of the cluster CA, a
-	// follower also uses it to verify that it is joining the cluster
-	// it thinks it is.
+	// follower also uses it to verify that it joins the cluster its
+	// configuration names.
 	if in.haveToken {
 		fmt.Fprintf(&b, "token-file: %s\n", tokenPath)
 	}
@@ -244,7 +244,7 @@ func k3sBootConfig(in k3sBootInputs) string {
 		// The network policy controller is likewise embedded. It
 		// turns NetworkPolicy resources into per-node packet
 		// filtering, which the flannel CNI cannot do alone. A cluster
-		// that wants that enforcement declares it. On a cluster that
+		// that requires that enforcement declares it. On a cluster that
 		// does not, the controller would spend its memory watching
 		// for resources that never come. Without this controller,
 		// Kubernetes accepts NetworkPolicy documents and enforces
@@ -255,7 +255,7 @@ func k3sBootConfig(in k3sBootInputs) string {
 			b.WriteString("disable-network-policy: true\n")
 		}
 		if clusterDoc != nil {
-			// The datastore keys, decided by leaderJoinConfig: the
+			// The datastore keys, selected by leaderJoinConfig: the
 			// founding leader of a multi-leader cluster runs embedded
 			// etcd (and creates it, on the migration boot), and the
 			// other leaders join it. A single leader renders neither
@@ -273,7 +273,7 @@ func k3sBootConfig(in k3sBootInputs) string {
 				b.WriteString("embedded-registry: true\n")
 			}
 			// The cluster's address plan is leader configuration.
-			// Followers learn it from the control plane that they
+			// Followers receive it from the control plane that they
 			// join.
 			net := clusterDoc.Spec.Network
 			for _, entry := range []struct{ key, value string }{
@@ -463,8 +463,8 @@ func unreachableNodePortsWarning(clusterDoc *cluster.Cluster, nodeIP string) str
 
 // writeK3sBootConfig derives this machine's role and k3s
 // configuration and writes the drop-in beside the role's static
-// config file. It returns the role so the supervisor knows which k3s
-// to start.
+// config file. It returns the role, which tells the supervisor which
+// k3s to start.
 func writeK3sBootConfig(clusterDoc *cluster.Cluster, m *machine.Machine, conns []*connection) (api.Role, error) {
 	name := m.Metadata.Name
 	// Role is safe to call with a nil cluster document by design: a
@@ -564,7 +564,7 @@ const clusterStateStaging = "/.liken-claim"
 // filesystem to the side, seeds it from the image's copies, and only
 // then moves it into place. MS_MOVE re-attaches a live mount
 // atomically. This function lives here rather than with the
-// partition machinery, because everything it knows, the seed paths,
+// partition machinery, because everything it encodes, the seed paths,
 // what refreshes, and what persists, belongs to k3s's on-disk
 // layout.
 func mountAndSeedClusterState(dev, target string) error {

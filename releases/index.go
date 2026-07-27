@@ -64,7 +64,7 @@ func Index(source string, keys []string, outDir string, out io.Writer) error {
 		return fmt.Errorf("the key list names no release")
 	}
 
-	// The channel document decides which release is marked latest,
+	// The channel document names which release is marked latest,
 	// rather than the highest version in the list. The document is what
 	// a polling cluster reads, so a page that disagreed with it would
 	// be telling an operator something no machine acts on.
@@ -214,7 +214,7 @@ func readKeys(keys []string) ([]string, []*sourceComponent) {
 	}
 
 	// Newest first: the release an operator wants is nearly always one
-	// of the last few, and a rollback wants the one below the top.
+	// of the last few, and a rollback needs the one below the top.
 	ordered := slices.Collect(maps.Keys(versions))
 	slices.SortFunc(ordered, func(a, b string) int { return api.CompareVersions(b, a) })
 

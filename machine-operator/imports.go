@@ -68,7 +68,7 @@ func decideImportsPromotion(in importsInputs, facts *machine.MachineStatus) impo
 	condType := "ImportsConverged"
 	if facts == nil {
 		return importsVerdict{condition: convergenceUnknown(condType, "FactsIncomplete",
-			"no facts published yet; the boot record's imports entry decides what to prove")}
+			"no facts published yet; the boot record's imports entry names what to prove")}
 	}
 	switch facts.Boot.ImportsSource {
 	case "":
@@ -77,7 +77,7 @@ func decideImportsPromotion(in importsInputs, facts *machine.MachineStatus) impo
 		// store resets with every boot and cannot get stuck. An
 		// image from before the record existed reports the same way.
 		return importsVerdict{condition: converged(condType, "NotTracked",
-			"this boot tracks no imports; ephemeral state cannot wedge and needs no proof")}
+			"this boot tracks no imports; ephemeral state cannot get stuck and needs no proof")}
 	case machine.ManifestSourceProven:
 		return importsVerdict{condition: converged(condType, "Converged",
 			fmt.Sprintf("the container store serves the proven imports (%.12s)", facts.Boot.ImportsHash))}
@@ -139,7 +139,7 @@ func decideImportsPromotion(in importsInputs, facts *machine.MachineStatus) impo
 		fmt.Sprintf("%d OS containers serve the trialed imports (%.12s); proven", observed, facts.Boot.ImportsHash))}
 }
 
-// settleImportsLifecycle observes, decides, and promotes when the
+// settleImportsLifecycle observes, judges, and promotes when the
 // proof succeeds. The syncfs barrier runs before the promotion
 // write. If the promotion write ran first, a badly-timed power cut
 // could prove a store whose latent unpacks are still dirty, which is

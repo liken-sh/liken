@@ -59,7 +59,7 @@ import (
 // USB (the interface class). The full code is what tells a VGA
 // controller from a 3D one, and neither the kernel nor a database is
 // needed to read it, so liken publishes it rather than growing a
-// table of its own for every distinction a selector might want.
+// table of its own for every distinction a selector might need.
 type Device struct {
 	Bus       string
 	Address   string

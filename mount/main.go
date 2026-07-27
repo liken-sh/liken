@@ -9,7 +9,7 @@
 // So the OS has to supply one, and the OS may as well supply one
 // that it can explain.
 //
-// mount(8) is two small jobs, and neither is the mounting.
+// mount(8) does two small jobs. Neither of them is the mount itself.
 //
 // The first job is translation, and options.go does it. mount(2)
 // takes a flag word and an opaque data string, and the kernel's
@@ -22,7 +22,7 @@
 // NFS is the one that matters here: before the kernel can mount an
 // export, something in userspace has to reach the server, agree on a
 // protocol version, and turn the result into the options the kernel
-// wants. That work lives in a helper program named
+// needs. That work lives in a helper program named
 // /sbin/mount.<type>, and running it is mount(8)'s job. The kernel
 // never runs a helper, and nothing else will do it either.
 //
@@ -142,7 +142,7 @@ func (r *request) helper(flags uintptr) string {
 // kernel, and which names it rewrites on the way, and none of that
 // is this program's business. There is no -t argument, because the
 // helper is always named for the type it was chosen for, and a
-// helper reads its own name to learn which type it was asked for:
+// helper reads its own name to get the filesystem type:
 // this is how one binary answers as both mount.nfs and mount.nfs4.
 func (r *request) helperArgs(helper string) []string {
 	argv := []string{helper, r.source, r.target}

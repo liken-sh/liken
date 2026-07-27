@@ -55,8 +55,8 @@
 # cannot run on one core. k3s runs the whole control plane in one
 # process, and etcd runs inside that process too, with near-real-time
 # needs. The raft leader must send heartbeats every 500ms and write
-# its log to disk promptly. If it does not, the other members decide
-# that it has failed. On one core, those deadlines compete with the
+# its log to disk promptly. If it does not, the other members treat
+# it as failed. On one core, those deadlines compete with the
 # apiserver, the scheduler, the kubelet, and every workload on the
 # machine. Any burst of work (a compaction, a garbage collection, a
 # flood of log writes) can occupy the core for seconds. When this
@@ -96,7 +96,7 @@ CLUSTER_MAC := 52:54:00:4c:4c:0$(NODE_NUM)
 # at boot, the same way it would have to on hardware that no build
 # system ever touched. The file names below are for the people who
 # run the lab; the machine itself sees two disks with no names, and
-# learns their purpose only from its manifest. One disk is small and
+# takes their purpose only from its manifest. One disk is small and
 # holds the cluster's state. The other disk is larger, for the
 # machine to divide up for pod storage. qcow2 is QEMU's copy-on-write
 # format. QEMU allocates a qcow2 file sparsely, so a disk costs the
@@ -419,7 +419,7 @@ QEMU_NICS = $(QEMU_NICS_$(HARDWARE))
 # carries; the SCSI layer surfaces a SATA disk's serial differently
 # from virtio's, but liken matches a disk to its role by device path at
 # claim time, not by serial, so the boot does not depend on where the
-# serial appears. QEMU_BOOTINDEX rides on the boot disk under BIOS, the
+# serial appears. QEMU_BOOTINDEX goes on the boot disk under BIOS, the
 # same way it does for virtio.
 QEMU_DISKS_virtio = \
 	-device virtio-blk-pci,drive=state,serial=liken-$(NODE)-state \

@@ -15,7 +15,7 @@ import (
 )
 
 // A Section is a bounded window into a file, at an offset. The
-// formats in this package can use a Section anywhere they want a
+// formats in this package accept a Section wherever they accept a
 // Device or a reader.
 type Section struct {
 	f      *os.File

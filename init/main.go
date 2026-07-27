@@ -116,7 +116,7 @@ func main() {
 	loadModules()
 
 	// A report boot changes nothing on the machine. It mounts the
-	// payload's module tree, loads the drivers this hardware wants,
+	// payload's module tree, loads the drivers this hardware names,
 	// observes which disks and interfaces appear, writes a proposed
 	// manifest to the installation stick, and reboots. It runs here,
 	// before storage settles, because it must never claim, format, or
@@ -153,8 +153,8 @@ func main() {
 	m := choice.m
 
 	// The installer sets liken.slot= into each boot entry's command
-	// line. A from-disk boot always knows which half of the blue-green
-	// pair it runs from because of this parameter. The boot record
+	// line. This parameter names which half of the blue-green pair the
+	// boot runs from, and every from-disk boot has it. The boot record
 	// carries this fact to the cluster. The operator uses the fact to
 	// direct downloads to the other slot.
 	if slot := bootParamValue("liken.slot"); slot != "" {
@@ -193,10 +193,11 @@ func main() {
 	// store. This step reads it, preserves it under machineState, and
 	// derives the one-line summary that becomes status.lastCrash
 	// (crash.go). It sits here because it needs settled storage: the
-	// machineState mount to preserve into, and the backing verdict to
-	// know whether preserving is possible at all. An install boot
-	// never reaches this line, which is correct: the store belongs to
-	// the installed machine's history, not to the install medium's.
+	// machineState mount to preserve into, and the backing verdict,
+	// which reports whether preserving is possible at all. An install
+	// boot never reaches this line, which is correct: the store
+	// belongs to the installed machine's history, not to the install
+	// medium's.
 	mountPstore()
 	lastCrash := settleCrashRecords(machine.MachineStateDir,
 		storage.MachineState.Backing == machine.BackingPartition)
@@ -219,7 +220,7 @@ func main() {
 	// document goes through the same staged, proven, and seed
 	// lifecycle as the Machine manifest (cluster.go). Reading the
 	// cluster document can stop the boot: if a machine's only cluster
-	// document does not parse, the machine cannot know its role, and a
+	// document does not parse, the machine cannot determine its role, and a
 	// machine that cannot tell its role must not guess.
 	clusterDoc, clusterRaw, err := chooseCluster(machine.MachineStateDir, cluster.ClusterManifestPath,
 		storage.MachineState.Backing == machine.BackingPartition, &boot)
@@ -237,7 +238,7 @@ func main() {
 		storage.MachineState.Backing == machine.BackingPartition, &boot)
 
 	// The declared modules load in the second of the two module
-	// passes. This pass is possible only now that main knows the
+	// passes. This pass is possible only now that main has the
 	// chosen manifest. The boot record keeps the request (the drift
 	// reference: rebooting with the same image would request the same
 	// modules). The statuses keep the results, bound for
@@ -318,7 +319,7 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	lastCrash *machine.CrashStatus) {
 	m := choice.m
 
-	// Before k3s can touch its container store, this call decides
+	// Before k3s can touch its container store, this call determines
 	// whether this boot can trust that store. If a store's last
 	// imports were never proven, main discards the store rather
 	// than trust it (imports.go). The tarballs that this boot
@@ -328,8 +329,8 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 		storage.ClusterState.Backing == machine.BackingPartition, &boot)
 	// The machine's role and k3s's boot-derived configuration
 	// come from the cluster manifest (k3s.go). A failure here is
-	// also an identity problem. A follower that cannot say where
-	// its cluster is must not start up as if it can.
+	// also an identity problem. A follower with no address for
+	// its cluster must not start up as if it had one.
 	role, err := writeK3sBootConfig(clusterDoc, m, conns)
 	if err != nil {
 		failBoot(fmt.Errorf("%w: %v", errIdentity, err))
@@ -528,7 +529,7 @@ func powerOff() {
 // the problem warrants a power-off, then it powers the machine off.
 // failBoot lives here rather than in storage.go or manifests.go
 // because it is boot policy, not domain logic. Each domain reports
-// what it could not do, and main decides which failures a machine
+// what it could not do, and main determines which failures a machine
 // must not run through. There are two such failures:
 //
 //   - identity: the machine cannot tell which manifest, or which

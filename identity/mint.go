@@ -17,10 +17,10 @@
 // computed offline (see kubeconfig.go).
 //
 // An identity belongs to a deployment, not to the OS. This package
-// knows how to produce an identity, and the caller decides which
-// deployment it belongs to. The files are private keys and must
-// never enter version-control history. Deployment directories list
-// them in .gitignore.
+// produces an identity, and the caller names the deployment it
+// belongs to. The files are private keys and must never enter
+// version-control history. Deployment directories list them in
+// .gitignore.
 package identity
 
 import (

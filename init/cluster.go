@@ -18,10 +18,10 @@ package main
 // way. So the code rejects it without trying it, and the boot falls
 // back to proven, then to seed. Init cannot prove a staged cluster
 // document, because its failure modes appear downstream: a bad
-// endpoint means the follower never joins, and init discovers this
-// only when k3s never starts. Promotion therefore belongs to the
-// operator. The operator's own existence as a pod is the proof that
-// the join worked. The operator's half of the lifecycle, and the
+// endpoint means the follower never joins, and that failure reaches
+// init only as a k3s that never starts. Promotion therefore belongs
+// to the operator. The operator's own existence as a pod is the proof
+// that the join worked. The operator's half of the lifecycle, and the
 // attempted marker, are described in cluster.go on the operator
 // side.
 

@@ -4,7 +4,7 @@ package main
 // never blocks the reconcile loop.
 //
 // Reconcile passes never download anything themselves. They ask the
-// fetcher instead. Ensure records what the machine currently wants
+// fetcher instead. Ensure records what the machine currently needs
 // (an ask: version, digest, source, and destination slot), starts
 // the download on its own goroutine if one is not already running,
 // and returns immediately with the current state. The pass that
@@ -150,7 +150,7 @@ func (f *fetcher) Ensure(ask fetchAsk) fetchSnapshot {
 
 // run is the goroutine. It runs the fetch, then records the
 // verdict. If the ask changed while the fetch ran, the verdict
-// describes a release the machine no longer wants, so the function
+// describes a release the machine no longer needs, so the function
 // discards it.
 func (f *fetcher) run(ask fetchAsk) {
 	fetched, err := fetchRelease(ask)

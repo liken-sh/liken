@@ -414,12 +414,12 @@ spec:
                       description: >-
                         The NTP servers that the leaders sync from, as
                         hostnames or addresses. There is no default,
-                        and that is deliberate: a deployment decides
-                        whether to give its machines to a public pool.
-                        An empty list makes the fleet free-run. The
-                        machines stay consistent with each other, but
-                        they are correct only if the hardware clocks
-                        are also correct.
+                        and that is deliberate: the person who runs the
+                        deployment chooses whether to give the machines
+                        to a public pool. An empty list makes the fleet
+                        free-run. The machines stay consistent with
+                        each other, but they are correct only if the
+                        hardware clocks are also correct.
                       items:
                         type: string
                         maxLength: 253
@@ -548,10 +548,10 @@ spec:
                     # null checks compile.
                     - rule: "self.all(slug, dyn(self[slug]) != null)"
                       message: >-
-                        a null feature is neither enabled nor
-                        disabled. Presence is the opt-in, so write
-                        {} to enable a feature, or remove its key
-                        entirely
+                        a null value does not enable this feature,
+                        and it does not disable it. Presence is the
+                        opt-in, so write {} to enable a feature, or
+                        remove its key entirely
                     # The configuration of a feature that takes no
                     # parameters must stay exactly {}. Without this
                     # rule, a patch that guesses at {replicas: 2}

@@ -3,7 +3,7 @@ package main
 // The feature janitor deletes the workloads that belong to retracted
 // features.
 //
-// A feature's workload manifests ride in the image. init seeds them
+// A feature's workload manifests ship in the image. init seeds them
 // into k3s's auto-deploy directory only while the cluster document
 // declares the feature (see init/features.go). Retraction removes the
 // file, and that removal deletes nothing on its own.
@@ -87,7 +87,7 @@ func decideRetractions(features map[string]*cluster.FeatureConfig, workloads []f
 }
 
 // janitorFeatureWorkloads carries out the janitor's work, once per
-// sweep: it lists each swept kind, decides which workloads to
+// sweep: it lists each swept kind, selects which workloads to
 // retract, and deletes them. Deletion is by name with background
 // propagation, so the workload's pods are deleted along with it.
 func janitorFeatureWorkloads(c *kubernetes.Client, clusterDoc *cluster.Cluster) {

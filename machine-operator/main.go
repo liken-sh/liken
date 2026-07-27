@@ -63,7 +63,7 @@ func main() {
 	}
 
 	// This reads the cluster document that this boot ran, before
-	// building the client, because the document decides which API
+	// building the client, because the document names which API
 	// endpoint this machine should use (localAPIEndpoint,
 	// endpoint.go).
 	clusterDoc, err := cluster.LoadCluster(cluster.ClusterManifestPath)
@@ -203,7 +203,7 @@ func main() {
 			// burst. That is what level-triggered means, and it is
 			// the same combining an informer's work queue does.
 			// Skipping intermediate copies also keeps this pass from
-			// publishing against a version it already knows is stale.
+			// publishing against a version that is already stale.
 			current = drainEvents(events, m)
 		case <-factsWake(factsWatch):
 			// A fact changed on disk. The next pass rereads the tree;

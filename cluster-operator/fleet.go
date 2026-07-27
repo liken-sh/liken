@@ -105,7 +105,7 @@ func decideFleetSweep(machines []machine.Machine, renewals map[string]time.Time,
 }
 
 // sweepFleet carries out the sweep. It lists the fleet and its
-// heartbeats, decides the verdict, marks the silent machines Lost,
+// heartbeats, determines the verdict, marks the silent machines Lost,
 // and publishes the verdict on the Cluster. The available parameter
 // is the channel poller's last answer. The caller passes it in as a
 // plain value, so the sweep itself stays a function of its

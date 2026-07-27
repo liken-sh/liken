@@ -56,6 +56,6 @@ func TestGetResourceClaimToleratesAnUnallocatedClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	if claim.Status.Allocation != nil {
-		t.Errorf("allocation = %+v, want nil before the scheduler decides", claim.Status.Allocation)
+		t.Errorf("allocation = %+v, want nil before the scheduler allocates", claim.Status.Allocation)
 	}
 }

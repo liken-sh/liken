@@ -69,11 +69,11 @@ func notHex(r rune) bool {
 }
 
 // Name renders a vendor:device pair in words. It returns both names
-// when the database knows the device. It returns the vendor name
-// plus the numeric device ID when the database knows only the
-// vendor. It returns nothing for an unknown vendor, because the
-// caller's numeric fallback reads better than a bare hex device ID
-// with no vendor name.
+// when the database has an entry for the device. It returns the
+// vendor name plus the numeric device ID when the database has an
+// entry for the vendor only. It returns nothing for an unknown
+// vendor, because the caller's numeric fallback reads better than a
+// bare hex device ID with no vendor name.
 func (p *PCIIDs) Name(vendor, device string) string {
 	vendor, device = strings.ToLower(vendor), strings.ToLower(device)
 	vendorName, ok := p.vendors[vendor]

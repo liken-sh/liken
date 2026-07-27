@@ -11,8 +11,7 @@
 // that names releases. The machine package and the cluster package
 // each own one document, and both build on this package. Neither
 // package imports the other. Kubernetes uses the same layering:
-// metav1 sits underneath, and the typed APIs sit beside each other
-// on top.
+// every typed API embeds metav1, and no typed API imports another.
 //
 // This package covers a narrow scope, chosen on purpose: only facts
 // that every document shares belong here. Nothing behavioral belongs
@@ -43,10 +42,11 @@ const APIVersion = "liken.sh/v1alpha1"
 // ObjectMeta is the slice of Kubernetes object metadata that liken
 // uses. Name identifies the object. ResourceVersion is the cluster's
 // optimistic-concurrency counter. The operator sends it back when it
-// watches, so the server knows where to resume. Generation counts
-// changes to the spec. The API server increases generation on spec
-// writes and leaves it unchanged on status writes. This lets a
-// condition record which version of the spec it judged.
+// watches, and the server resumes the stream from that point.
+// Generation counts changes to the spec. The API server increases
+// generation on spec writes and leaves it unchanged on status
+// writes. This lets a condition record which version of the spec it
+// judged.
 //
 // Annotations carry the signals that are not desired state. A spec
 // declares what should hold, and a controller works until it holds.
@@ -78,17 +78,17 @@ type Phase string
 // to least severe. Each phase summarizes the conditions; it is not a
 // fact on its own. The operator derives the phase from the
 // conditions on every pass. The table that does this work,
-// machine-operator/phase.go, decides which condition puts a machine
-// in which phase. Lost is the exception to this rule. A machine
-// cannot report its own death, so the cluster operator writes Lost
-// on the machine's behalf when the machine's heartbeat goes silent.
+// machine-operator/phase.go, maps each condition to the phase it
+// produces. Lost is the exception to this rule. A machine that is
+// Lost cannot write its own status, so the cluster operator writes
+// Lost on the machine's behalf when the machine's heartbeat stops.
 // The Cluster's status reuses this same vocabulary (Ready, Updating,
 // Degraded), so a fleet and its machines use the same words to
 // describe their state.
 const (
 	PhaseUnknown       Phase = "Unknown"       // the facts are unreadable, so the operator cannot judge the machine's state
 	PhaseBooting       Phase = "Booting"       // init has not yet finished publishing this boot's record
-	PhaseLost          Phase = "Lost"          // the heartbeat went silent, and the cluster operator wrote this, not the machine
+	PhaseLost          Phase = "Lost"          // the heartbeat stopped, and the cluster operator wrote this, not the machine
 	PhaseBlocked       Phase = "Blocked"       // drift exists but the system cannot stage it; it needs a different edit, not more time
 	PhaseUpdating      Phase = "Updating"      // a reboot is under way to apply a staged change
 	PhaseUpdatePending Phase = "UpdatePending" // a change is staged and waits for a Manual reboot

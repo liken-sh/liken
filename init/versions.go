@@ -4,14 +4,14 @@ package main
 //
 // A release document lists every outside component, and the
 // upstream version of it that shipped (see machine/release.go). This
-// document lives on the channel, and a running machine should not
-// have to contact the channel to know what it is made of. So the
+// document lives on the channel, and a running machine should
+// report its own composition with no request to the channel. So the
 // image build writes the same record, from the same VERSION pins,
 // into the image itself. This file folds that record into the
 // version facts that the Machine publishes.
 //
 // The fold works in one direction only, and it does not override
-// values the machine already knows. For a component that the
+// a value the machine observed itself. For a component that the
 // running machine already has an observed value for, such as the
 // kernel via uname, the netfilter userspace via iptables, or liken
 // via its own build stamp, this fold keeps that observed value, in

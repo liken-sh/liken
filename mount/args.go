@@ -14,7 +14,7 @@ package main
 // One form is deliberately refused. `mount -a` mounts everything in
 // /etc/fstab, and a liken machine has no fstab: every filesystem it
 // mounts is either init's work or a pod's volume, and both name what
-// they want. Refusing with a message is better than reading a file
+// they need. Refusing with a message is better than reading a file
 // that will never exist and reporting success.
 
 import (
@@ -38,7 +38,7 @@ type request struct {
 	fstype string
 
 	// options are the -o lists, in the order given. They stay
-	// unsplit until the last moment, because a mount helper wants
+	// unsplit until the last moment, because a mount helper needs
 	// them exactly as they arrived.
 	options []string
 

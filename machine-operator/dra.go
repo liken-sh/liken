@@ -63,7 +63,7 @@ var draNaming = sync.OnceValue(func() *hardware.PCIIDs {
 // ResourceSlice. One slice per node is enough for whole PCI and USB
 // devices: a busy server has dozens of devices, and the limit is
 // 128. If a machine ever exceeds this limit, the operator drops the
-// overflow and reports it loudly, rather than splitting devices
+// overflow and reports it, rather than splitting devices
 // across slices. This will change if real hardware needs the
 // multi-slice pool protocol.
 const maxSliceDevices = 128
@@ -179,9 +179,9 @@ func inventoryDevices(discovered []hardware.Device,
 			}
 		}
 		// A render node is the fact a workload actually selects on. A
-		// deployment that transcodes wants any GPU that can encode,
-		// and asking for a vendor and a product ID instead names one
-		// machine's hardware in a document meant for a fleet.
+		// person who deploys a transcoder asks for any GPU that can
+		// encode, and asking for a vendor and a product ID instead
+		// names one machine's hardware in a document meant for a fleet.
 		if hasRenderNode(delivery) {
 			attrs["renderNode"] = kubernetes.AttrBool(true)
 		}
@@ -233,7 +233,7 @@ func hasRenderNode(delivery hardware.Delivery) bool {
 // alone would never fire on a real machine.
 var graphicsSubsystems = map[string]bool{"drm": true, "graphics": true}
 
-// shareable decides whether the API may allocate this device to more
+// shareable reports whether the API may allocate this device to more
 // than one claim.
 //
 // The rule is narrow, and it is meant to stay narrow. A GPU is
@@ -249,12 +249,12 @@ var graphicsSubsystems = map[string]bool{"drm": true, "graphics": true}
 // subsystem is hardware liken has not met, and it stays exclusive
 // until somebody looks at it.
 //
-// The asymmetry decides that default. A device wrongly published as
-// shareable hands the same hardware to two workloads that each believe
-// they hold it, and no DeviceClass, claim, or workload can take that
-// back, because only the driver writes a slice. A device wrongly
-// published as exclusive costs a claim that waits, where a person can
-// see it waiting.
+// The asymmetry sets that default. A device wrongly published as
+// shareable hands the same hardware to two workloads that each treat
+// it as theirs alone, and no DeviceClass, claim, or workload can
+// take that back, because only the driver writes a slice. A device
+// wrongly published as exclusive costs a claim that waits, where a
+// person can see it waiting.
 func shareable(delivery hardware.Delivery) bool {
 	if !hasRenderNode(delivery) {
 		return false

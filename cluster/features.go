@@ -27,9 +27,9 @@ package cluster
 //   - Kernel modules: the domain's modules.conf, staged into the
 //     image at /etc/liken/features/<slug>/modules.conf and loaded by
 //     init only when the feature is declared. That file's presence
-//     is also how init knows the booted image carries the payload,
-//     so no feature-to-modules mapping lives in Go.
-//   - Workload manifests and OCI images: these ride the image, and
+//     is also how init detects that the booted image carries the
+//     payload, so no feature-to-modules mapping lives in Go.
+//   - Workload manifests and OCI images: these ship in the image, and
 //     init seeds them into k3s's auto-deploy directory only when the
 //     feature is declared.
 //   - An init boot hook: per-slug code gated on declaration, for the
@@ -53,8 +53,8 @@ import (
 )
 
 // FeatureKind is how a feature is delivered. Deployments never see
-// this distinction. The machinery needs it, to know what enabling a
-// feature actually does.
+// this distinction. The machinery needs it, because the kind
+// determines what enabling a feature actually does.
 type FeatureKind string
 
 const (
@@ -93,12 +93,12 @@ const (
 	FeatureVendored FeatureKind = "Vendored"
 
 	// FeatureWorkload is a capability that runs entirely as cluster
-	// workloads: manifests that ride the image and seed into k3s's
+	// workloads: manifests that ship in the image and seed into k3s's
 	// auto-deploy directory when the feature is declared, with no
 	// vendored host binaries and no kernel modules. The workload's
 	// container images are ordinary registry pulls, not baked
 	// payloads, so the feature needs no image-side presence check:
-	// an image whose vocabulary knows the slug also carries its
+	// an image whose vocabulary contains the slug also carries its
 	// manifests, because one build produces both. flux takes this
 	// shape.
 	FeatureWorkload FeatureKind = "Workload"
@@ -107,14 +107,14 @@ const (
 // FeatureDefinition names one feature: its slug, which is the key
 // deployments write in spec.features, and its kind. Requires names
 // the features this one cannot work without. Enabling a feature
-// enables everything it requires, so a deployment declares what it
-// wants and never has to know the dependency exists. Params names
-// the parameters the feature's configuration accepts; most features
-// have none, and their configuration is exactly {}. The CRD holds a
-// parameterized feature to these names at admission, the parity
-// test holds the CRD to this table, and ValidateParams is the same
-// judgment at the file doors. Retraction states what must be true
-// before the feature may stop.
+// enables everything it requires, so a deployment declares only the
+// feature it needs and never has to name the dependency. Params
+// names the parameters the feature's configuration accepts; most
+// features have none, and their configuration is exactly {}. The CRD
+// holds a parameterized feature to these names at admission, the
+// parity test holds the CRD to this table, and ValidateParams is the
+// same judgment at the file doors. Retraction states what must be
+// true before the feature may stop.
 type FeatureDefinition struct {
 	Slug       string
 	Kind       FeatureKind
@@ -266,14 +266,14 @@ var Features = []FeatureDefinition{
 // slug in spec.features. {} is every feature's zero configuration,
 // and a parameterized feature's parameters are its keys. The type is
 // a plain map on purpose, never a struct of named fields. Each
-// machine's binary knows only the parameter vocabulary its image was
-// built with, and a fleet mid-upgrade holds several of those
+// machine's binary carries only the parameter vocabulary its image
+// was built with, and a fleet mid-upgrade holds several of those
 // vocabularies at once. A struct parsed strictly would refuse a
 // document from a newer vocabulary, and then a downgraded machine
 // could not read its own proven document, could not derive its role,
 // and would sit Blocked. So the file doors accept any parameters,
 // and the judgment happens where a verdict can be reported: the CRD
-// refuses a parameter its vocabulary does not know at admission, and
+// refuses a parameter its vocabulary does not list at admission, and
 // init's feature pass reports a parameter this image cannot honor
 // (ValidateParams below), leaving the machine degraded rather than
 // down.
@@ -324,7 +324,7 @@ const (
 // FluxConfig is the flux feature's configuration, typed: where the
 // fleet's declared state lives, and which part of it this cluster
 // syncs. KnownHosts is the forge's SSH host keys in known_hosts
-// form, one line per key. It rides the spec because a host key is
+// form, one line per key. It belongs in the spec because a host key is
 // public material: it is the forge's identity, not a secret, and
 // declaring it here is what lets the first clone verify the forge
 // without anyone answering a trust prompt. The cluster operator
@@ -502,20 +502,20 @@ func (c *Cluster) DisabledComponents() []string {
 // carries a message that says what to write instead.
 //
 // An unknown slug is deliberately not an error here, though the CRD
-// refuses one at admission. The difference is what each door knows.
-// A fleet has exactly one vocabulary at its API, the newest image's
-// CRD. But each machine's parser knows only the vocabulary its own
-// image was built with, and a fleet mid-upgrade holds several of
-// those vocabularies at once. A document that declares a feature
-// this binary predates must still parse. Otherwise the machine could
-// not read its own proven document after a downgrade, could not
-// derive its role, and would sit Blocked on a document the rest of
-// the fleet is running without trouble. The feature pass reports the
-// unknown slug instead: FeaturesReady goes False, naming the slug
-// and this image's vocabulary. This message covers both real causes,
-// an image that predates the feature and a misspelling in a
-// hand-written seed, and it leaves the machine degraded rather than
-// down.
+// refuses one at admission. The difference is the vocabulary each
+// door holds. A fleet has exactly one vocabulary at its API, the
+// newest image's CRD. But each machine's parser carries only the
+// vocabulary its own image was built with, and a fleet mid-upgrade
+// holds several of those vocabularies at once. A document that
+// declares a feature this binary predates must still parse.
+// Otherwise the machine could not read its own proven document after
+// a downgrade, could not derive its role, and would sit Blocked on a
+// document the rest of the fleet is running without trouble. The
+// feature pass reports the unknown slug instead: FeaturesReady goes
+// False, naming the slug and this image's vocabulary. This message
+// covers both real causes, an image that predates the feature and a
+// misspelling in a hand-written seed, and it leaves the machine
+// degraded rather than down.
 func validateFeatures(features map[string]*FeatureConfig) error {
 	for _, slug := range slices.Sorted(maps.Keys(features)) {
 		if features[slug] == nil {

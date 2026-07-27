@@ -41,7 +41,7 @@ import (
 )
 
 // ClusterManifestPath is where the image carries the cluster's
-// manifest. Init reads it to learn this machine's role. The operator
+// manifest. Init reads it for this machine's role. The operator
 // reads the same file through a hostPath mount, to seed the
 // in-cluster Cluster resource.
 const ClusterManifestPath = "/etc/liken/cluster.yaml"
@@ -109,7 +109,7 @@ type ClusterStatus struct {
 	// this status judged, stamped by the sweep on every write. The
 	// conditions each carry the same stamp, but a client that only
 	// asks "has any controller seen my edit yet" should not have to
-	// parse conditions to learn it. Kubernetes controllers publish
+	// parse conditions for the answer. Kubernetes controllers publish
 	// this field at the top of status for exactly that question, and
 	// `kubectl rollout status` and the common wait libraries read it
 	// there.
@@ -184,11 +184,11 @@ type ClusterSpec struct {
 	// Endpoint is the URL followers join the cluster through, for
 	// example https://10.10.0.1:6443. The system uses it for first
 	// contact only. After a follower joins, k3s agents keep a
-	// client-side load balancer that learns every leader's address,
-	// so a dead endpoint strands only brand-new followers, never
-	// running ones. (Followers' time queries ask each leader by its
-	// own address and bypass the endpoint entirely.) Endpoint is a
-	// single, explicit input, on purpose. An endpoint that should
+	// client-side load balancer that holds the address of every
+	// leader, so a dead endpoint strands only brand-new followers,
+	// never running ones. (Followers' time queries ask each leader by
+	// its own address and bypass the endpoint entirely.) Endpoint is
+	// a single, explicit input, on purpose. An endpoint that should
 	// outlive any single leader, such as a DNS name or a virtual IP,
 	// is a choice for the deployment to make, never the OS.
 	Endpoint string `json:"endpoint,omitempty"`
@@ -219,7 +219,7 @@ type ClusterSpec struct {
 	// grow parameters without breaking the schema. The key's
 	// presence is the opt-in, and a feature's zero configuration is
 	// {}. The value is a pointer, so an explicit null arrives as
-	// present-but-nil, and validateFeatures refuses it loudly.
+	// present-but-nil, and validateFeatures refuses it.
 	// Everywhere else in Kubernetes, null means unset, so a bare
 	// `traefik:` in a hand-written manifest must be an error. It
 	// must never become a quiet enable, or an even quieter no-op.

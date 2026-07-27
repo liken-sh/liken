@@ -11,7 +11,7 @@ DIST ?= dist
 
 all: $(DIST)/liken-cluster-operator-image.tar
 
-# The engine seed rides inside the binary (flux.go embeds seed/),
+# The engine seed ships inside the binary (flux.go embeds seed/),
 # because this operator deliberately has no hostPath mounts to read
 # the image's files through. The flux domain renders the seed at its
 # pinned version, and this rule copies it to where go:embed can see
@@ -34,7 +34,7 @@ $(DIST)/liken-cluster-operator: ../go.mod ../go.sum $(wildcard *.go) \
 
 # The operator polls release channels over HTTPS. Its image has no
 # base layer to supply root certificates, so the machine's own
-# vendored trust bundle rides in the image. oci.sh explains where the
+# vendored trust bundle ships in the image. oci.sh explains where the
 # bundle lands.
 CA_BUNDLE := ../trust/dist/$(strip $(file <../trust/VERSION))/cacert.pem
 

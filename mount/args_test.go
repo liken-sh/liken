@@ -138,7 +138,7 @@ func TestParseArgsRefusesCommandLinesItCannotAct(t *testing.T) {
 }
 
 // A helper takes the options exactly as they arrived, because the
-// helper is what decides which of them the kernel ever sees.
+// helper is what determines which of them the kernel ever sees.
 func TestHelperArgsFollowTheHelperContract(t *testing.T) {
 	req, err := parseArgs([]string{"-t", "nfs", "-o", "ro,vers=4.1", "-v", "filer:/export", "/mnt"})
 	if err != nil {

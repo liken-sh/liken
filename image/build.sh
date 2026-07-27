@@ -196,12 +196,12 @@ cp "$here/../k3s/dist/$k3s_version/k3s" "$root/bin/k3s"
 
 # /etc/os-release is where a Linux distribution names itself. The
 # freedesktop specification defines the file, and tools across the
-# ecosystem read it to learn what system they run on. The kubelet is
+# ecosystem read it to identify the system they run on. The kubelet is
 # one of them: it reads PRETTY_NAME and reports it as the node's
 # nodeInfo.osImage, the OS-IMAGE column of `kubectl get nodes -o
 # wide`. Without the file, that column reads "Unknown". The build
 # writes the file here instead of shipping it in image/etc, because
-# the identity includes the version, and only the build knows it.
+# the identity includes the version, and only the build has it.
 cat > "$root/etc/os-release" <<EOF
 NAME=liken
 ID=liken
@@ -213,7 +213,7 @@ EOF
 
 # This is the netfilter userspace: one real static binary, then a
 # symlink for each tool name. The multi-call binary reads argv[0] to
-# decide which tool to act as. The build ships only the legacy
+# select which tool to act as. The build ships only the legacy
 # variant, matching the iptable_* kernel modules in modules.conf.
 cp "$here/../xtables/dist/$xtables_version/bin/xtables-legacy-multi" "$root/sbin/"
 for tool in iptables iptables-save iptables-restore \
@@ -261,8 +261,8 @@ cp "$mount_dist/mount" "$root/sbin/mount"
 # filesystem needs userspace work before the kernel can mount it. For
 # NFS that work is the version negotiation with the server. The one
 # binary answers under both of its names, because a helper reads its
-# own name to learn which type it was asked for: mount -t nfs and
-# mount -t nfs4 both reach it.
+# own name to get the filesystem type: mount -t nfs and mount -t nfs4
+# both reach it.
 nfsutils_version="$(cat "$here/../nfs-utils/VERSION")"
 cp "$here/../nfs-utils/dist/$nfsutils_version/mount.nfs" "$root/sbin/mount.nfs"
 ln -s mount.nfs "$root/sbin/mount.nfs4"
@@ -394,13 +394,12 @@ cp "$here/../hwdata/dist/$hwdata_version/pci.ids" \
 # This is the components record: the upstream version of every
 # outside component this image carries. The build reads these
 # versions from the same VERSION pins that the release document
-# publishes (releases/Makefile), so the two can never disagree. It
-# rides in the image because a running machine reports its own
-# composition in Machine status (init/versions.go), and it should not
-# need to contact the channel to learn what it is made of. It sits
-# under /usr/share, deliberately outside /etc/liken, because it
-# states a fact about the image, not about any deployment of the
-# image.
+# publishes (releases/Makefile), so the two can never disagree. The
+# file ships in the image so that a running machine reports its own
+# composition in Machine status (init/versions.go) with no request to
+# the channel. It sits under /usr/share, deliberately outside
+# /etc/liken, because it states a fact about the image, not about any
+# deployment of the image.
 mkdir -p "$root/usr/share/liken"
 {
     echo "components:"

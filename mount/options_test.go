@@ -47,7 +47,7 @@ func TestSplitOptions(t *testing.T) {
 	}
 }
 
-// An option name this program has never seen belongs to the
+// An option name that this program does not list belongs to the
 // filesystem driver, which is the only thing that can judge it. It
 // must reach the kernel unchanged rather than fail here.
 func TestSplitOptionsPassesUnknownNamesThrough(t *testing.T) {

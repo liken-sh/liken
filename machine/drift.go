@@ -3,7 +3,7 @@ package machine
 // Drift compares what a Machine spec declares against what a boot
 // actuated. This package holds shared logic, not logic specific to
 // the operator, because two programs must agree on the comparison
-// exactly. The operator uses the comparison to decide whether to
+// exactly. The operator uses the comparison to determine whether to
 // converge, and how. init uses the comparison to check that a staged
 // manifest is really applicable without a reboot, before init
 // applies the manifest live. If the operator and init used two

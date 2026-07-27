@@ -37,7 +37,7 @@ const efiGlobalVariable = "8be4df61-93ca-11d2-aa0d-00e098032b8c"
 
 // efiSysDir is where the kernel exposes UEFI runtime services. Its
 // existence is the whole test for which firmware kind is present. It
-// is a variable rather than a constant, so tests can decide which
+// is a variable rather than a constant, so tests can set which
 // firmware kind they run under, regardless of the machine running
 // them.
 var efiSysDir = "/sys/firmware/efi"
@@ -219,7 +219,7 @@ func writeBootOrder(dir string, order []uint16) error {
 // console parity principle holds here as everywhere: reportFirmware
 // prints these same facts at boot.
 //
-// The variable store's presence decides the mode: efivarfs exists
+// The variable store's presence determines the mode: efivarfs exists
 // only when UEFI booted this kernel. Everything else counts as
 // "BIOS", and a BIOS machine's boot facts live on disk instead, in
 // GRUB's environment block (biosFirmwareFacts).

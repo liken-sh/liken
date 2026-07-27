@@ -144,13 +144,13 @@ func TestLoadModuleSetReadsBuiltinLists(t *testing.T) {
 	}
 }
 
-func TestLoadShippedModulesBelievesFilesNotTheIndex(t *testing.T) {
+func TestLoadShippedModulesUsesFilesNotTheIndex(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "kernel/drivers/usb/storage"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	aboard := filepath.Join(dir, "kernel/drivers/usb/storage/usb-storage.ko.zst")
-	if err := os.WriteFile(aboard, []byte("elf, allegedly"), 0o644); err != nil {
+	if err := os.WriteFile(aboard, []byte("not a real module"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	dep := filepath.Join(dir, "modules.dep")

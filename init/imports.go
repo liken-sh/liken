@@ -13,9 +13,10 @@ package main
 //
 // The rule rests on one bit of state. A staged imports record stands
 // from the moment a trial boots until the operator proves it, so a
-// boot that finds one standing knows the previous boot died unproven
-// and the store may be lying. The only safe move that depends on no
-// other component's internals is to discard the store completely.
+// record still standing at the next boot means the previous boot died
+// unproven and the store may be lying. The only safe move that
+// depends on no other component's internals is to discard the store
+// completely.
 // Every OS image unpacks fresh from the tarballs that this boot
 // carries. Workload images re-pull from their registries (cheaply,
 // when the embedded registry shares them between peers). The agent's
@@ -49,11 +50,11 @@ var (
 	k3sImagesDir = filepath.Join(machine.K3sAgentDir, "images")
 )
 
-// settleImageImports decides whether this boot's container store can
-// be trusted, before k3s ever starts. It runs only when both sides
+// settleImageImports determines whether this boot's container store
+// can be trusted, before k3s ever starts. It runs only when both sides
 // of the question are durable. Without machineState, there is nowhere
 // to remember a trial. Without durable clusterState, the store resets
-// with every boot and cannot wedge in the first place.
+// with every boot and cannot get stuck in the first place.
 func settleImageImports(stateRoot string, durable, clusterDurable bool, boot *machine.BootStatus) {
 	if !durable || !clusterDurable {
 		return
@@ -115,7 +116,7 @@ func settleImageImports(stateRoot string, durable, clusterDurable bool, boot *ma
 // that k3s re-creates from the join token and the cluster: the
 // containerd store, the kubelet's credentials, and its caches. The
 // same crash window can tear the kubelet's credentials too: a zeroed
-// serving key wedges the agent just as surely as a torn snapshot.
+// serving key stops the agent just as surely as a torn snapshot.
 func discardContainerStore() {
 	entries, err := os.ReadDir(k3sAgentDir)
 	if errors.Is(err, fs.ErrNotExist) {

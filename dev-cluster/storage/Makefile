@@ -112,7 +112,7 @@ guest/luns.qcow2:
 # The NICs come before the disks, so PCI slot order keeps the uplink
 # and cluster segment stable. The disks carry serial numbers, so the
 # seed can name them by identity (/dev/disk/by-id/virtio-storage-*)
-# instead of by probe order. The seed rides an IDE CD drive, which
+# instead of by probe order. The seed attaches as an IDE CD drive, which
 # keeps it out of the virtio disk namespace entirely.
 #
 # The uplink's hostfwd is the operator's way in: host port 2210,

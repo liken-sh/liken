@@ -30,7 +30,7 @@ package machine
 // A store deals in bytes, never in parsed documents. The lifecycle's
 // whole job is to make the right bytes survive reboots and power
 // loss. Which kind of document those bytes hold, a Machine or a
-// Cluster, is for the caller to know. This is also why rejections
+// Cluster, is the caller's business. This is also why rejections
 // hash the raw bytes: a document that will not even parse must still
 // be identifiable as exactly the bytes that init refused.
 //
@@ -243,9 +243,9 @@ func (s ManifestStore) Reject(r Rejection) error {
 // it boots the document, and the component that can observe the
 // proof promotes the document and clears the marker. For the cluster
 // document, that component is the operator, and the operator's
-// existence as a pod demonstrates the join. A boot that finds the
-// marker still matching the staged document knows the last try was
-// never proven, so it rejects the document and falls back. Each
+// existence as a pod demonstrates the join. When a boot finds the
+// marker still matching the staged document, the last try was never
+// proven, so the boot rejects the document and falls back. Each
 // staged document gets exactly one proving boot. No retry counters
 // are needed, and a crash at any point leaves a state that the next
 // boot reads correctly.

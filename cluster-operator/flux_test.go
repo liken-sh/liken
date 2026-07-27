@@ -204,7 +204,7 @@ func TestSeedCollectionPaths(t *testing.T) {
 // one of its documents must parse and map in the planter's table,
 // and the probe object must be among them. This is the test that
 // fails when a Flux version bump introduces a kind the table does
-// not know. A checkout that has not fetched the flux domain skips,
+// not map. A checkout that has not fetched the flux domain skips,
 // because the embed then holds only the README.
 func TestTheRealSeedParsesAndMapsWhole(t *testing.T) {
 	seed, err := engineSeed()
@@ -247,8 +247,8 @@ func TestEnsureFluxEnginePlantsWhenAbsent(t *testing.T) {
 			http.NotFound(w, r)
 		case http.MethodPost:
 			created = append(created, r.URL.Path)
-			// The namespace already exists (liken owns it); the
-			// planter must shrug and continue.
+			// The namespace already exists (liken owns it), so
+			// ensureFluxEngine must accept the conflict and continue.
 			if r.URL.Path == "/api/v1/namespaces" {
 				w.WriteHeader(http.StatusConflict)
 				return

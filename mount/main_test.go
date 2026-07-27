@@ -10,7 +10,7 @@ import (
 
 // helpers points the lookup at a directory of this test's making and
 // installs the helper names it asks for, so a test can describe the
-// system it wants in one line.
+// system it needs in one line.
 func helpers(t *testing.T, names ...string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -33,8 +33,8 @@ func TestHelperChosenForAFilesystemThatHasOne(t *testing.T) {
 	}
 }
 
-// The name a helper is called by decides which type it mounts, which
-// is how one binary answers as both mount.nfs and mount.nfs4.
+// The name a helper is called by determines which type it mounts,
+// which is how one binary answers as both mount.nfs and mount.nfs4.
 func TestHelperFollowsTheTypeName(t *testing.T) {
 	dir := helpers(t, "mount.nfs", "mount.nfs4")
 	req := &request{fstype: "nfs4", target: "/mnt"}

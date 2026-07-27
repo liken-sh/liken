@@ -9,9 +9,9 @@ import (
 )
 
 // The golden test is the contract: one small CRD that exercises every
-// shape the walker knows (required fields, enums, defaults, patterns,
-// arrays of scalars and of objects, maps, and a pipe that must be
-// escaped), and the exact page it must produce.
+// shape the walker supports (required fields, enums, defaults,
+// patterns, arrays of scalars and of objects, maps, and a pipe that
+// must be escaped), and the exact page it must produce.
 func TestGenerateMatchesGolden(t *testing.T) {
 	crd, err := os.ReadFile("testdata/sample-crd.yaml")
 	if err != nil {

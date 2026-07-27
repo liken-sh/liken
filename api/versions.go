@@ -11,10 +11,10 @@ package api
 // invite readings like "liken 2.0 must mean kubernetes 2". There is
 // also no compatibility boundary for a major version to mark. Every
 // release is expected to take over from the release before it, and
-// to carry the machine's layer and on-disk state forward, so
-// compatibility is the code's job, not the number's. What shipped
-// inside a release is recorded where it belongs, in the release
-// document's components.
+// to carry the machine's layer and on-disk state forward, so the
+// code keeps compatibility, and the version number does not report
+// it. What shipped inside a release is recorded where it belongs, in
+// the release document's components.
 //
 // Versions are immutable: a new serial supersedes a bad release; the
 // system never rebuilds a release under the same name. The catalog
@@ -39,7 +39,7 @@ var versionShape = regexp.MustCompile(`^\d{4}\.\d{2}\.\d{2}-\d{3}$`)
 // time. This lets the system refuse a malformed version when it
 // bundles a release, rather than let it be discovered when a machine
 // fails to fetch it. Beyond the shape, the date must be a real
-// calendar date: the CRD's pattern cannot know that 2026.02.30 never
+// calendar date: the CRD's pattern cannot check that 2026.02.30 never
 // happened, but this function can.
 func ValidVersion(v string) error {
 	if !versionShape.MatchString(v) {

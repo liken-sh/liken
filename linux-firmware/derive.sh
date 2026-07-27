@@ -23,9 +23,9 @@
 # One exception is named, not derived: the nvidia/ directory. Those
 # GSP blobs serve display and compute paths that a headless OS does
 # not use, and they are large. liken has no GPU-compute design yet;
-# when it grows one, that milestone re-decides this. The composable
-# release design is the option for anyone who needs them sooner: an
-# nvidia-inclusive image is a rebuild with one more directory.
+# whoever adds one decides this again. The composable release design
+# is the option for anyone who needs them sooner: an nvidia-inclusive
+# image is a rebuild with one more directory.
 #
 # A name that resolves no way at all is recorded in the manifest.
 # These are drivers whose firmware upstream never shipped (some

@@ -37,8 +37,8 @@ var essentials = []mount{
 	{"sysfs", "/sys", "sysfs", unix.MS_NOSUID | unix.MS_NOEXEC | unix.MS_NODEV},
 
 	// devtmpfs is the kernel's own device catalog. When this mount
-	// happens, a device node appears for every device the kernel
-	// knows about, and the kernel maintains these nodes itself. On a
+	// happens, a device node appears for every device the kernel has
+	// registered, and the kernel maintains these nodes itself. On a
 	// machine with known hardware, devtmpfs replaces the entire udev
 	// system.
 	{"devtmpfs", "/dev", "devtmpfs", unix.MS_NOSUID},
@@ -84,7 +84,7 @@ func worldReport() {
 
 	// The kernel command line is how the outside world sets
 	// parameters for a boot. It is where rdinit= points at init, and
-	// it is the way to pass any fact a machine must know before it
+	// it is the way to pass any fact a machine needs before it
 	// has a filesystem.
 	if cmdline, err := os.ReadFile(cmdlinePath); err == nil {
 		fmt.Printf("liken: cmdline: %s\n", strings.TrimSpace(string(cmdline)))

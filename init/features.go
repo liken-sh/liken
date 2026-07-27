@@ -187,7 +187,7 @@ func actuateVendoredFeature(moduleBase, slug, machineName string) machine.Featur
 
 // actuateWorkloadFeature makes one workload feature real. There is
 // no payload gate like the vendored features' modules.conf check: an
-// image whose vocabulary knows the slug also carries its manifests,
+// image whose vocabulary contains the slug also carries its manifests,
 // because one build produces both. The flux feature also proves its
 // configuration first, so a declaration that cannot sync reports the
 // missing parameter instead of seeding workloads that would only
@@ -298,7 +298,7 @@ func writeInitiatorName(machineName string) error {
 
 // renderedFeatureManifests names the files a feature's actuation
 // renders into the auto-deploy directory, beyond the manifests
-// copied verbatim from the image. Retraction must know these names,
+// copied verbatim from the image. Retraction needs these names,
 // because a glob over the image's manifests cannot see a rendered
 // file.
 var renderedFeatureManifests = map[string][]string{

@@ -98,7 +98,7 @@ func renderCluster(name string, spec cluster.ClusterSpec) ([]byte, string, error
 // machine at once, which is the case the conductor is built to
 // sequence.
 //
-// The classifier in cluster/changes.go decides the kind of
+// The classifier in cluster/changes.go determines the kind of
 // disruption. When every differing domain is read only when k3s
 // starts its process (features, registries, the runtime
 // environment), a k3s restart applies the document, and the machine

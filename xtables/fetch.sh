@@ -56,7 +56,7 @@ out="$here/dist/$version"
 mkdir -p "$cache"
 
 # One sha256 manifest per architecture covers all of the release's
-# artifacts. This script wants the line for the xtables tarball.
+# artifacts. This script reads the line for the xtables tarball.
 digest="$(curl -fsSL "$base/sha256sum-$arch.txt" | awk -v t="$tarball" '$2 == t { print $1 }')"
 if [[ -z "$digest" ]]; then
     echo "fetch.sh: no $tarball listed in $base/sha256sum-$arch.txt" >&2

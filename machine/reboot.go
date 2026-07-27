@@ -114,7 +114,7 @@ const restartIntentFile = "restart-intent.yaml"
 // the reboot intent, the presence of the restart-intent file is the
 // trigger. The staged stores on machineState hold the truth about
 // what to apply. This means a duplicate intent is harmless: init
-// checks the stores, not the intent, to decide what to apply.
+// checks the stores, not the intent, to determine what to apply.
 type RestartIntent struct {
 	Reason      string    `json:"reason"`
 	RequestedAt time.Time `json:"requestedAt"`

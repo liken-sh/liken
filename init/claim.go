@@ -157,7 +157,7 @@ func planPartitions(device string, mine []machine.DeclaredRole, totalSectors uin
 		p := disks.Partition{Name: role.PartitionName(), FirstLBA: next, LastLBA: next + sectors - 1,
 			TypeGUID: partitionTypeFor(role.Name)}
 		if p.LastLBA > lastUsable {
-			return nil, fmt.Errorf("disk %s is too small: %s wants %s at sector %d but the disk's usable space ends at %d",
+			return nil, fmt.Errorf("disk %s is too small: %s requires %s at sector %d but the disk's usable space ends at %d",
 				device, role.Name, role.Size, p.FirstLBA, lastUsable)
 		}
 		parts = append(parts, p)

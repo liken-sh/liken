@@ -24,13 +24,14 @@ import (
 // These are the sizes the layout starts from. The boot and system
 // roles are fixed, because their contents are fixed: a slot holds one
 // whole OS image, and the GRUB roles hold structures whose sizes the
-// firmware and GRUB decide.
+// firmware and GRUB set.
 //
-// The three data roles are not equal, and the difference decides which
-// one gives up space on a small disk. clusterState is the operating
-// system's own working set: containerd unpacks every image the node
-// runs underneath it. podStorage and podEphemeral are the workloads'
-// space, and a workload that runs out of it fails one workload.
+// The three data roles are not equal, and the difference determines
+// which one gives up space on a small disk. clusterState is the
+// operating system's own working set: containerd unpacks every image
+// the node runs underneath it. podStorage and podEphemeral are the
+// workloads' space, and a workload that runs out of it fails one
+// workload.
 //
 // Every size here is a whole number of mebibytes, which is also the
 // alignment the installer gives each partition, so a role never
@@ -310,7 +311,7 @@ func dataRoles(device string, available uint64) ([]plannedRole, []string) {
 	if share := spareAfter(available, clusterStateBytes+dataRoleFloor); share >= dataRoleFloor {
 		cluster.Size, pods.Size = machine.SizeText(clusterStateBytes), machine.SizeText(share)
 		return []plannedRole{cluster, pods, ephemeral}, []string{roleNote, fmt.Sprintf(
-			"%s cannot hold the conventional %s of podStorage beside clusterState, so podStorage takes %s. clusterState keeps its %s, because a node that cannot unpack an image cannot run the pod that wants it.",
+			"%s cannot hold the conventional %s of podStorage beside clusterState, so podStorage takes %s. clusterState keeps its %s, because a node that cannot unpack an image cannot run the pod that requires it.",
 			device, machine.SizeText(podStorageBytes), machine.SizeText(share), machine.SizeText(clusterStateBytes))}
 	}
 	if available >= clusterStateBytes+dataRoleFloor {

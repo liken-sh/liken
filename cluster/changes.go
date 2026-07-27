@@ -3,7 +3,7 @@ package cluster
 // This file classifies a cluster-document edit by how the system
 // must apply it.
 //
-// liken has three tiers of convergence, decided by where a setting
+// liken has three tiers of convergence, determined by where a setting
 // is read. Settings the kernel reads live (/proc/sys) reconcile in
 // place. Settings k3s reads at process start (the boot drop-in,
 // registries.yaml, the feature manifests, and the Go runtime
@@ -15,7 +15,7 @@ package cluster
 // therefore always err toward the heavier tier.
 //
 // This file is the classifier for the middle tier. The operator
-// consults it to decide whether a staged cluster document calls for
+// consults it to determine whether a staged cluster document calls for
 // a restart intent or a reboot intent. Init consults the same
 // function before it acts on a restart intent, so the two programs
 // can never disagree about what a restart may apply.
@@ -64,7 +64,7 @@ func RestartApplies(current, desired ClusterSpec) bool {
 	current.Registries, desired.Registries = RegistriesSpec{}, RegistriesSpec{}
 	current.Runtime, desired.Runtime = ClusterRuntimeSpec{}, ClusterRuntimeSpec{}
 	// The rest of the address plan is reboot-class, because those
-	// fields decide a machine's node IP and the ranges k3s hands out,
+	// fields set a machine's node IP and the ranges k3s hands out,
 	// both of which a boot has already acted on by the time k3s
 	// starts. The NodePort list is the exception: nothing reads it
 	// before k3s does, so it is zeroed here with the other

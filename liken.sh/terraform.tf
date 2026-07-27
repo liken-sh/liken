@@ -1,5 +1,5 @@
 # The liken.sh domain: the project's public presence, as
-# infrastructure. This one file declares what Linode has to know for
+# infrastructure. This one file declares everything Linode needs for
 # the name to answer: the DNS zone, the machine that runs the cluster
 # and serves the website, the firewall in front of it, and the
 # release channel. The release channel is the object storage bucket
@@ -380,7 +380,7 @@ resource "linode_instance_config" "boot" {
 # TF_VAR_operator_cidr (it lives on in the Terraform state, which is
 # already private, like every other secret here). The firewall
 # leaves the VLAN untouched: Cloud Firewalls filter the public
-# interface, and cluster traffic rides the private segment.
+# interface, and cluster traffic uses the private segment.
 
 variable "operator_cidr" {
   description = "The address allowed to reach rescue-mode ssh, as a CIDR"
@@ -532,7 +532,7 @@ resource "linode_object_storage_key" "github_releases" {
 }
 
 # The bucket name and endpoint are not secrets, so the workflow that
-# uploads releases states them in plain sight. Only the key rides in
+# uploads releases states them in plain sight. Only the key goes in
 # the secret store.
 
 resource "github_actions_secret" "releases_access_key" {

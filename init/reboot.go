@@ -11,7 +11,7 @@ package main
 // window. An intent that lands between a scan and the watch would
 // otherwise wait for the next event.
 //
-// An event is only a trigger. The scan decides everything: which
+// An event is only a trigger. The scan determines everything: which
 // intent stands, and what it carries. A woken watcher reads the
 // directory as it is now, not what an event claimed a moment ago.
 // writeAtomic renames a finished file into the directory, so

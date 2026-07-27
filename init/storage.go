@@ -490,7 +490,7 @@ func awaitStorageDevices(roles []machine.DeclaredRole) {
 	fmt.Fprintf(os.Stderr, "liken: storage: the declared disks did not all attach within %s\n", deadline)
 }
 
-// needsFilesystem decides whether a partition gets a new file system
+// needsFilesystem reports whether a partition gets a new file system
 // before it is mounted. Two conditions call for one, and they are
 // different questions.
 //
@@ -521,8 +521,8 @@ func needsFilesystem(dev, fstype string, created bool) bool {
 // argument says whether this boot claimed the partition.
 func mountRole(role machine.DeclaredRole, p partition, created bool) error {
 	// The process looks up the role's translation to a mount before
-	// anything touches the partition. It must refuse a role that liken
-	// does not know how to mount, before mke2fs writes a file system
+	// anything touches the partition. It must refuse a role with no
+	// mount translation, before mke2fs writes a file system
 	// onto it.
 	rm, ok := roleMounts[role.Name]
 	if !ok {

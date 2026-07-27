@@ -1,5 +1,4 @@
-# This file describes how every liken binary learns which version it
-# is.
+# This file describes how every liken binary gets its version.
 #
 # The person who cuts a release names it, in the calendar grammar
 # that releases/versioning.md defines, and the releases domain passes

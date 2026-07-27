@@ -29,7 +29,7 @@ func fakeBus(t *testing.T) string {
 
 // addPCIDevice writes the four attributes the walk reads for a PCI
 // function: its fingerprint, its class code, and its numeric identity.
-// The class code is what decides whether the report will touch the
+// The class code is what determines whether the report will touch the
 // device at all: 0x02 is a network controller, 0x01 is storage, and
 // 0x03 is a display.
 func addPCIDevice(t *testing.T, root, address, class, modalias string) {
@@ -69,7 +69,7 @@ const (
 )
 
 func TestRecommendationsCoverStorageAndNetworkOnly(t *testing.T) {
-	// A display controller wants a driver as much as the NIC does, and
+	// A display controller names a driver just as the NIC does, and
 	// loading it would switch the framebuffer console the person is
 	// reading the report on. The report leaves it alone.
 	root := fakeBus(t)

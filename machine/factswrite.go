@@ -397,7 +397,8 @@ func (t FactsTree) WriteBootStorage(spec StorageSpec) error {
 // in the tree where an empty directory carries meaning, and it has
 // to: a machine that declares no interface and a machine that
 // recorded nothing are different facts, and only the second one is
-// beyond judging (machine/drift.go explains what each one decides).
+// beyond judging (machine/drift.go explains what each one means for
+// drift).
 //
 // Each interface's key is its position in the declared list, counted
 // from zero, and not the name of its port. The order of this list is
@@ -456,7 +457,7 @@ func (t FactsTree) WriteRejection(kind RejectionKind, r *Rejection) error {
 // or nil when all succeed. Go evaluates the arguments before the call,
 // so every write in the sequence runs even when an early one fails.
 // The writes are independent files, so the later writes stay correct,
-// and the caller learns about the first failure.
+// and the caller receives the first failure.
 func firstError(errs ...error) error {
 	for _, err := range errs {
 		if err != nil {

@@ -120,7 +120,7 @@ func TestClearRestartIntentToleratesAbsence(t *testing.T) {
 func TestRestartIntentIsItsOwnFile(t *testing.T) {
 	// A restart intent must be invisible to the reboot reader, and a
 	// reboot intent must be invisible to the restart reader. An older
-	// init that knows only about reboots must see nothing at all when
+	// init that reads only reboot intents must see nothing at all when
 	// a restart is requested. It must not see an unreadable reboot
 	// intent, because it would honor an unreadable reboot intent by
 	// rebooting the machine.
@@ -178,7 +178,7 @@ func TestClearModulesIntentConsumesTheFileAndToleratesAbsence(t *testing.T) {
 
 func TestModulesIntentIsItsOwnFile(t *testing.T) {
 	// Like the restart intent, a modules intent is invisible to the
-	// reboot reader. So an older init that knows only about reboots
+	// reboot reader. So an older init that reads only reboot intents
 	// sees nothing at all.
 	dir := t.TempDir()
 	if err := WriteModulesIntent(dir, &ModulesIntent{Reason: "testing"}); err != nil {

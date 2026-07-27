@@ -1,7 +1,7 @@
 # The grub domain: the bootloader liken ships for BIOS machines,
 # vendored prebuilt from Ubuntu's archive (fetch.sh documents why
 # BIOS machines need a bootloader when UEFI machines do not, and why
-# grub-mkimage rides along with the modules it links).
+# grub-mkimage comes in the same package as the modules it links).
 #
 # The one artifact built here is the core image: grub-mkimage links
 # the pinned modules into a single compressed program with early.cfg

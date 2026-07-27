@@ -193,12 +193,12 @@ func moduleBase() string {
 // unclaimedAdvice states the fix for one unclaimed device, and
 // improves the stock advice with the soft dependencies the loader does
 // not read. The catalog already named the candidate drivers and said
-// to declare them in spec.modules. A candidate can want another module
-// loaded first (r8169 wants realtek), which modules.dep never records,
-// so the plain advice would send a person to declare a driver that
-// then binds to the wrong thing. This walks each candidate's soft
-// dependency chain and names the full ordered list, so the advice
-// reads "declare realtek, then r8169 in spec.modules".
+// to declare them in spec.modules. A candidate can name another
+// module to load before it (r8169 names realtek), which modules.dep
+// never records, so the plain advice would send a person to declare a
+// driver that then binds to the wrong thing. This walks each
+// candidate's soft dependency chain and names the full ordered list,
+// so the advice reads "declare realtek, then r8169 in spec.modules".
 //
 // When no candidate gains a soft dependency, the catalog's own message
 // stands unchanged. That keeps the wording for the case the catalog

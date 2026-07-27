@@ -59,8 +59,8 @@ const (
 	// that this boot actually ran under. This manifest is the staged
 	// or proven copy from machineState, or, on a first boot, the
 	// image's seed manifest. The operator reads this file through a
-	// hostPath mount. The operator uses the file to know which Machine
-	// it manages, and to seed the in-cluster Machine on the first
+	// hostPath mount. The operator uses the file to identify the
+	// Machine it manages, and to seed the in-cluster Machine on the first
 	// boot. Like the facts tree, this file lives under /run because it
 	// describes only the current boot. It stays one whole file, so the
 	// operator reads the manifest's exact bytes, not a rendering.
@@ -79,7 +79,7 @@ const (
 // a development build, the value is the git-described commit
 // (version.mk at the repo root explains this mechanism). This value
 // reaches the cluster as status.version.liken. The operator compares
-// this value against the Cluster's spec.version target to decide
+// this value against the Cluster's spec.version target to determine
 // whether this machine needs an upgrade.
 var Version = "dev"
 
@@ -126,7 +126,7 @@ type MachineSpec struct {
 	// boot, beyond the fixed list that the OS itself needs (the
 	// image's modules.conf). These extra modules are the drivers for
 	// whatever hardware this machine's workloads use. Init loads them
-	// only after it knows the boot's manifest, so these modules cannot
+	// only after it reads the boot's manifest, so these modules cannot
 	// serve the boot path itself. A driver that the boot depends on
 	// must belong in the fixed list instead.
 	//

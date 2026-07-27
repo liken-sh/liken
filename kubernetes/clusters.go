@@ -2,9 +2,9 @@ package kubernetes
 
 // This file reads and reports on Clusters. The machine operator reads
 // the one Cluster that its manifest names. The cluster operator lists
-// all Clusters, because the list is how it learns which Cluster it
-// operates. The cluster operator needs no configuration at all: a
-// fleet has exactly one Cluster to find.
+// all Clusters, because the list names the Cluster it operates. The
+// cluster operator needs no configuration at all: a fleet has
+// exactly one Cluster to find.
 
 import (
 	"encoding/json"

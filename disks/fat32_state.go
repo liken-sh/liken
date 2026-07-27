@@ -9,7 +9,7 @@ package disks
 // never released, so its directory entries and its allocation table
 // may disagree with each other.
 //
-// Reading that bit is how a machine learns it did not stop cleanly.
+// A machine reads that bit to detect a stop that was not clean.
 // Clearing it is how a machine says the volume has been dealt with.
 // Both belong here, next to the formatter that lays the boot sector
 // out, because both depend on the same field offsets.
@@ -77,9 +77,10 @@ func FAT32Dirty(devPath string) (bool, error) {
 // on its own schedule, so a write underneath it is either lost or
 // wins by accident. Neither outcome is a fix.
 //
-// The caller decides whether clearing the mark is honest. This
-// function only performs it, and it refuses a volume that is not
-// FAT32, because on any other layout this byte means something else.
+// The caller is responsible for whether clearing the mark is honest.
+// This function only performs it, and it refuses a volume that is
+// not FAT32, because on any other layout this byte means something
+// else.
 func ClearFAT32Dirty(devPath string) error {
 	sector, err := readBootSector(devPath)
 	if err != nil {
@@ -96,7 +97,7 @@ func ClearFAT32Dirty(devPath string) error {
 	sector[fat32StateOffset] &^= fatStateDirty
 	// One byte carries the change, and writing only that byte leaves
 	// every other field exactly as it was found. A volume this machine
-	// did not format may hold fields liken does not know about.
+	// did not format may hold fields liken does not recognize.
 	if _, err := f.WriteAt(sector[fat32StateOffset:fat32StateOffset+1], fat32StateOffset); err != nil {
 		return fmt.Errorf("clearing the mark on %s: %w", devPath, err)
 	}

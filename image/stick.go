@@ -284,13 +284,13 @@ timeout menu-force
 // entries the way it orders kernels, newest first, which would scatter
 // the pairs.
 //
-// The character between the name and the action decides whether that
-// grouping survives names that are prefixes of other names.
+// The character between the name and the action determines whether
+// that grouping survives names that are prefixes of other names.
 // systemd-boot compares sort keys as plain UTF-16 code units
 // (strcmp16), and a machine name is an RFC-1123 label, so the lowest
 // character a name can contain is "-" at 0x2D. sortKeySeparator sits
 // one below it. That inequality is the whole mechanism: comparing
-// "node+install" against "node-old+install" decides at "+" against "-",
+// "node+install" against "node-old+install" ends at "+" against "-",
 // so both of node's keys land before both of node-old's. A separator at
 // or above "-" would interleave the two machines instead, and a menu
 // that shows "wipe and reinstall as node-old" directly above "wipe and

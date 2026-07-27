@@ -31,7 +31,7 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
-// versionAsk decides whether this machine should be downloading a
+// versionAsk reports whether this machine should be downloading a
 // release, and which one. The ask is the request that the fetcher
 // carries out. When the answer is no (converged, no target, or a
 // machine that cannot take a release), the returned condition is
@@ -144,10 +144,10 @@ func versionConvergence(cond api.Condition, stagedHash string, rejection *machin
 // through its own machinery: a download aimed at the inactive slot.
 // The download runs on the fetcher's goroutine, so that no
 // reconcile pass, and no heartbeat, ever waits on a socket
-// (versionAsk decides, fetch.go moves the bytes). Once the download
-// verifies, the rest works like the other documents: a staged
-// SystemRelease record, the reboot chain, the drain gate, and the
-// same carryOutConvergence.
+// (versionAsk forms the ask, fetch.go moves the bytes). Once the
+// download verifies, the rest works like the other documents: a
+// staged SystemRelease record, the reboot chain, the drain gate, and
+// the same carryOutConvergence.
 func convergeSystemRelease(store machine.ManifestStore, liveCluster *cluster.Cluster, m *machine.Machine, facts *machine.MachineStatus, f *fetcher, t turn) convergence {
 	rejection, _ := store.LoadRejection()
 	stagedHash := readStagedHash(store)

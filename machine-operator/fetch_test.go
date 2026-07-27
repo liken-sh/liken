@@ -407,7 +407,7 @@ func TestServerFailuresAreTransientAndRetried(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		hits.Add(1)
 		if broken.Load() {
-			http.Error(w, "the server is having a day", http.StatusInternalServerError)
+			http.Error(w, "the server is broken", http.StatusInternalServerError)
 			return
 		}
 		if req.URL.Path == "/releases/0.2.0/release.yaml" {

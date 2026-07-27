@@ -77,7 +77,7 @@ drill="smoke-${2:-$FIRMWARE}"
 # cluster's own install image. The hardware-parity drill overrides them
 # from dev-cluster/Makefile (HARDWARE=metal and the hardware
 # deployment's install image) so the same script drives the metal
-# shape. HARDWARE rides on every make invocation below; INSTALL_CPIO
+# shape. HARDWARE passes to every make invocation below; INSTALL_CPIO
 # matters only to the install boot, which is the boot that carries an
 # initramfs.
 #
@@ -113,7 +113,7 @@ REPORT_QEMU_LOG="guests/node-1/report-qemu.log"
 # under half a minute. Two minutes covers a CI runner's slower disks
 # and shared CPUs. The install boot gets its own larger bound below;
 # this deadline covers only the disk boot. The script catches a guest
-# that dies outright immediately, so this deadline decides only how
+# that dies outright immediately, so this deadline sets only how
 # long a hung boot can hold up the run. Override this value for
 # experiments: SMOKE_DEADLINE=10 gives a quick way to rehearse the
 # failure path.

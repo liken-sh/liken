@@ -121,8 +121,8 @@ func decideDrainStep(node *nodeObject, pods []kubernetes.Pod, now time.Time) dra
 	return step
 }
 
-// gateThroughDrain intercepts a convergence that wants a reboot and
-// releases it only once this machine's node is clear. It cordons
+// gateThroughDrain intercepts a convergence that requires a reboot
+// and releases it only once this machine's node is clear. It cordons
 // the node and evicts pods. Until nothing evictable remains, or the
 // deadline passes, it holds the reboot and reports the drain's
 // progress on the same condition.

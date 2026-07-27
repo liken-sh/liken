@@ -192,7 +192,7 @@ func TestInventoryWithholdsThePlatformsOwnDisks(t *testing.T) {
 	}), platform)
 
 	if len(devices) != 0 {
-		t.Errorf("devices = %+v, want none: the machine stands on this disk", devices)
+		t.Errorf("devices = %+v, want none: a platform role holds this disk", devices)
 	}
 }
 
@@ -207,7 +207,7 @@ func TestInventoryPublishesAnUnroledDisk(t *testing.T) {
 	}), platform)
 
 	if len(devices) != 1 {
-		t.Errorf("devices = %+v, want the stick: no role stands on it", devices)
+		t.Errorf("devices = %+v, want the stick: no platform role holds it", devices)
 	}
 }
 

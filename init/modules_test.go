@@ -321,7 +321,7 @@ func TestParseSoftdepPreReadsPreNamesInOrder(t *testing.T) {
 }
 
 func TestParseSoftdepPreDropsPostNames(t *testing.T) {
-	// A module can want one module before it and another after it. Only
+	// A module can name one module before it and another after it. Only
 	// the "pre" names change the probe outcome, so only they survive.
 	modinfo := modinfoBytes("softdep=pre: a b post: c")
 	if got := parseSoftdepPre(modinfo); !slices.Equal(got, []string{"a", "b"}) {

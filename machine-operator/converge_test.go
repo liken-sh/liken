@@ -189,9 +189,9 @@ func TestNetworkEditFollowsTheSameRebootPolicyAsStorage(t *testing.T) {
 
 func TestANetworkEditIsNeverLoadedInPlace(t *testing.T) {
 	// Adding a module is live-loadable, and a manifest that also
-	// changes the network must not ride along on that path. Nothing in
-	// the running kernel re-addresses an interface, and init refuses
-	// the same combination for the same reason.
+	// changes the network must not take that path. Nothing in the
+	// running kernel re-addresses an interface, and init refuses the
+	// same combination for the same reason.
 	m := labMachine()
 	m.Spec.Modules = []string{"nvidia"}
 	m.Spec.Network.Interfaces[0].Nameservers = []string{"10.10.0.1"}
@@ -476,7 +476,7 @@ func TestDecideConvergenceRefusesToLoopOnAContradiction(t *testing.T) {
 		t.Fatalf("got %+v", conv.condition)
 	}
 	if conv.stage || conv.requestReboot {
-		t.Error("a contradiction must wedge, not reboot-loop")
+		t.Error("a contradiction must stay Blocked, not reboot-loop")
 	}
 }
 

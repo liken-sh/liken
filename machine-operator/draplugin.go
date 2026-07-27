@@ -7,7 +7,7 @@ package main
 // suggests. The driver runs two gRPC servers, and the kubelet is
 // the only client of both. The first service is registration: the
 // kubelet watches a well-known directory for sockets, dials each
-// one, and calls GetInfo to learn what is there. The second service
+// one, and calls GetInfo to read what is there. The second service
 // is the DRA plugin API itself, on a socket of the driver's own,
 // whose path GetInfo announces. Both sockets live under the
 // kubelet's own state directory. Unix sockets are the entire

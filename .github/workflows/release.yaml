@@ -144,7 +144,7 @@ jobs:
       # public by design, while the bucket itself refuses to list its
       # contents, so only named paths answer. channel.yaml goes last
       # of all, and it is the channel's one mutable object: the
-      # advisory pointer that clusters poll to learn the latest
+      # advisory pointer that clusters poll to get the latest
       # version (the immutability guard above stops a re-run of an old
       # tag from ever moving that pointer backwards).
       - name: publish

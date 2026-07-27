@@ -1,7 +1,7 @@
 package main
 
 // This poller checks the release channel. It shows how a cluster
-// learns that a new version exists.
+// detects that a new version exists.
 //
 // The channel's root document, channel.yaml, names the latest
 // published version. This poller fetches that document so the sweep
@@ -23,9 +23,9 @@ package main
 // The fetch runs on its own goroutine. The machine operator's release
 // fetcher uses the same method. The sweep must keep judging the fleet
 // at its own speed, and a slow or dead release server must never
-// delay a Lost verdict. The Observe function decides what to do and
-// returns immediately; the goroutine reports its result back through
-// the mutex.
+// delay a Lost verdict. The Observe function determines what to do
+// and returns immediately; the goroutine reports its result back
+// through the mutex.
 
 import (
 	"fmt"
@@ -68,7 +68,7 @@ func newChannelPoller() *channelPoller {
 
 // Observe runs once per sweep. It receives the spec's current
 // releases section and the Cluster's check-releases annotation. It
-// decides whether a poll is due: the source or the annotation
+// determines whether a poll is due: the source or the annotation
 // changed, or the last answer is too old. If a poll is due, Observe
 // starts it in the background. Observe never blocks.
 func (p *channelPoller) Observe(releases cluster.ClusterReleasesSpec, check string, now time.Time) {

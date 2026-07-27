@@ -37,7 +37,7 @@ package main
 // every append. A burst of appends coalesces into one wake, which is
 // harmless, because the tailer reads to EOF on any wake and ships
 // everything the burst wrote. An event is only a trigger. On a wake the
-// tailer re-reads the file and re-stats the path to learn the current
+// tailer re-reads the file and re-stats the path to get the current
 // state, and never trusts what the event claimed. A slow backstop timer
 // bounds the damage if an event is ever lost.
 
@@ -118,7 +118,7 @@ func awaitFile(ctx context.Context, path string, wake <-chan struct{}) (*os.File
 // tailFile follows one log file forever, until the context ends. It
 // sends an envelope for each line, using the line's starting byte
 // offset as its sequence number. Each pass of the loop handles one
-// generation of the file: open it, decide where to start reading,
+// generation of the file: open it, determine where to start reading,
 // and follow it until a rotation replaces it.
 func tailFile(ctx context.Context, path string, out *envelopeWriter, curDir string, now func() time.Time) error {
 	var cur tailCursor

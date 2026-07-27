@@ -28,7 +28,7 @@ major version needs a boundary to mark, and liken has none. Without
 that boundary, a semver major number would only invite a false
 reading, such as "liken 2.0 must mean kubernetes 2", when liken's
 number says nothing about the kernel or Kubernetes version inside.
-The date states the one fact the version actually knows: when the
+The date states the one fact the version actually records: when the
 release was cut. What shipped inside a release is recorded where it
 belongs: in the release document's `components` section.
 

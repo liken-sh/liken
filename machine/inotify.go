@@ -1,7 +1,7 @@
 package machine
 
 // The facts tree carries state between init and the operator, and both
-// sides want to learn of a change the moment it lands, not on the next
+// sides must see a change the moment it lands, not on the next
 // tick of a timer. inotify is how the kernel tells a program that a
 // directory changed. These helpers wrap it for one use only: a wake.
 //

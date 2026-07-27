@@ -87,7 +87,7 @@ all: image/disk.img.gz
 # never looks finished to Make. Rerunning the fetch verifies what
 # landed and fetches only what is missing. The toolkit is an
 # order-only prerequisite for the usual reason: a rebuilt CLI must
-# never make Make think that a verified download is stale.
+# never let Make treat a verified download as stale.
 channel/$(RELEASE)/release.yaml: | $(CLI)
 	@test -n "$(RELEASE)" || { echo "name a release: make RELEASE=<version>, or make latest"; exit 1; }
 	$(CLI) fetch $(if $(DIGEST),-digest $(DIGEST)) $(CHANNEL) $(RELEASE) channel
@@ -102,7 +102,7 @@ latest:
 # The cluster's identity: certificate authorities and the join
 # token, minted before any machine boots. The CLI is an order-only
 # prerequisite for the same reason as above: a rebuilt toolkit must
-# never make Make think that this cluster's identity is stale.
+# never let Make treat this cluster's identity as stale.
 identity/tls/server-ca.crt identity/token &: | $(CLI)
 	$(CLI) mint identity
 

@@ -54,9 +54,9 @@ type fatFile struct {
 }
 
 // A fatDir accumulates a directory's children until Close writes
-// the records. Directories get their clusters at Close, after this
-// code knows every file's chain, because a record needs its child's
-// first cluster.
+// the records. Directories get their clusters at Close, after every
+// file has its chain, because a record needs its child's first
+// cluster.
 type fatDir struct {
 	name         string
 	parent       *fatDir

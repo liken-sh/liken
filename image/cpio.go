@@ -1,6 +1,6 @@
 // Package image assembles the pieces of liken into the archives a
 // machine boots. build.sh produces the generic operating system.
-// This package produces the deployment layer that rides on top of
+// This package produces the deployment layer that stacks on top of
 // it (layer.go explains the split and why concatenation joins them).
 package image
 

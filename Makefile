@@ -175,8 +175,8 @@ licensing: licensing/dist/LICENSES.md
 
 # The rules that follow build liken's own programs. Each one names
 # the shared packages that its binary reads, so a change to a shared
-# package rebuilds every binary that reads it. A missing name is a
-# stale binary that Make believes is current, and the program then
+# package rebuilds every binary that reads it. A missing name leaves
+# a stale binary that Make treats as current, and the program then
 # runs against a version of the API it was never compiled with.
 # `go list -deps ./init` is the authority on the real set; check a
 # rule against it when the imports change. Each domain's own Makefile

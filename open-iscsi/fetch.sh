@@ -21,7 +21,7 @@
 # container (nfs-utils does the same) needs a container runtime on the
 # build host: docker or podman, whichever is present.
 #
-# Two more pinned sources ride along, because a fully static link
+# Two more pinned sources come along, because a fully static link
 # needs static libraries that alpine does not package:
 #
 #   kmod      iscsid links libkmod (it checks that iscsi_tcp is

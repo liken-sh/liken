@@ -154,7 +154,7 @@ func TestPublishOwnStatusResolvesAConflictWithAFreshRead(t *testing.T) {
 	}
 	if c := api.FindCondition(fake.published.Status.Conditions, machine.RebootApprovedCondition); c == nil ||
 		!c.LastTransitionTime.Equal(testNow) {
-		t.Errorf("the conductor's grant rides in from the fresh copy untouched: %+v", c)
+		t.Errorf("the conductor's grant comes from the fresh copy unchanged: %+v", c)
 	}
 	if c := api.FindCondition(fake.published.Status.Conditions, "Ready"); c == nil || c.Status != api.ConditionTrue {
 		t.Errorf("this pass's own observations still win: %+v", c)

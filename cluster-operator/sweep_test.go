@@ -241,7 +241,7 @@ func TestSweepFleetToleratesAClusterStatusWriteFailure(t *testing.T) {
 	}
 }
 
-func TestMarkLostConcedesWhenTheMachineWritesFirst(t *testing.T) {
+func TestMarkLostContinuesWhenTheMachineWritesFirst(t *testing.T) {
 	// A conflict on the Lost write means the machine came back and
 	// wrote its own status first. That is exactly the outcome this
 	// write exists to allow, so the sweep moves on to the next
@@ -388,7 +388,7 @@ func TestDrainEventsEmptiesTheQueue(t *testing.T) {
 }
 
 // TestMain silences the retry pause. awaitCluster loops on this
-// pause while the CRD is not served, and no test wants the real
+// pause while the CRD is not served, and no test needs the real
 // five-second wait.
 func TestMain(m *testing.M) {
 	kubernetes.RetryPause = func() {}

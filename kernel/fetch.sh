@@ -21,7 +21,7 @@
 # the entire extraction toolchain, and this script works the same way
 # on any Linux machine.
 #
-# Each mainline build publishes several packages. This script wants
+# Each mainline build publishes several packages. This script extracts
 # exactly two of them:
 #
 #   linux-image-unsigned-*   the kernel itself: one self-decompressing

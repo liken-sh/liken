@@ -112,7 +112,7 @@ func TestComponentFactsTolerateAMissingRecord(t *testing.T) {
 }
 
 func TestComponentFactsIgnoreUnknownComponents(t *testing.T) {
-	// This record comes from a build that knows about a component
+	// This record comes from a build that names a component
 	// this init does not recognize. The known fields still fill in,
 	// and the unrecognized component is simply not reported.
 	componentsFile(t, `

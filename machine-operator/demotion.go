@@ -15,7 +15,7 @@ package main
 // The demoted machine's own operator holds everything needed to
 // finish this job. The facts state what this machine is (a
 // follower), and the Node object states what the cluster still
-// thinks it is. When these disagree, the operator requests a reboot
+// records it as. When these disagree, the operator requests a reboot
 // through the intent channel it already owns, then deletes its own
 // Node object. Deleting the Node triggers k3s's etcd
 // member-removal controller. The operator writes the intent first,

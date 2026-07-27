@@ -79,7 +79,7 @@ var OSSysctls = map[string]string{
 	// watch on the facts tree. The ceiling on instances rises from the
 	// kernel's 128 to the value a Kubernetes node commonly runs with,
 	// because kubelet and containerd alone can open dozens and the
-	// machine plane wants two more that never contend with them. The
+	// machine plane needs two more that never contend with them. The
 	// ceiling on watched inodes rises for the same reason.
 	//
 	// These numbers are caps, not allocations. An unused cap costs no
