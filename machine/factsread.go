@@ -337,6 +337,11 @@ func (t FactsTree) readStorage() (StorageStatus, error) {
 		if role.CapacityBytes, err = t.readUint(filepath.Join(base, "capacityBytes")); err != nil {
 			return StorageStatus{}, err
 		}
+		unclean, err := t.readFact(filepath.Join(base, "lastStopUnclean"))
+		if err != nil {
+			return StorageStatus{}, err
+		}
+		role.LastStopUnclean = unclean == "true"
 	}
 	return s, nil
 }

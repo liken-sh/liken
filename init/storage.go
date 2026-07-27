@@ -367,6 +367,14 @@ func reconcileStorage(spec machine.StorageSpec) (machine.StorageStatus, error) {
 
 	for _, role := range roles {
 		p := found[role.Name]
+		// A FAT role is asked about its last stop before it is
+		// mounted. Mounting a FAT volume for writing sets the mark
+		// that answers the question, so after the mount there is
+		// nothing left to read (fatstate.go).
+		var unclean bool
+		if roleMounts[role.Name].fstype == "vfat" {
+			unclean = readFATStop(role.Name, devRoot+"/"+p.name, created[role.Name])
+		}
 		// A raw role needs nothing more once it is recognized: there
 		// is no file system to make and no mount point to serve. The
 		// status still records where the partition landed, because a
@@ -379,10 +387,11 @@ func reconcileStorage(spec machine.StorageSpec) (machine.StorageStatus, error) {
 			return status, err
 		}
 		*status.Role(role.Name) = machine.StorageRoleStatus{
-			Backing:       machine.BackingPartition,
-			Device:        p.name,
-			Partition:     p.partName,
-			CapacityBytes: p.sizeBytes,
+			Backing:         machine.BackingPartition,
+			Device:          p.name,
+			Partition:       p.partName,
+			CapacityBytes:   p.sizeBytes,
+			LastStopUnclean: unclean,
 		}
 	}
 	return status, nil

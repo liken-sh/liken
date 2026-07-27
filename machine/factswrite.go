@@ -220,6 +220,7 @@ func (t FactsTree) WriteStorage(s StorageStatus) error {
 			t.writeFact(filepath.Join(base, "device"), role.Device),
 			t.writeFact(filepath.Join(base, "partition"), role.Partition),
 			t.writeFact(filepath.Join(base, "capacityBytes"), formatUint(role.CapacityBytes)),
+			t.writeFact(filepath.Join(base, "lastStopUnclean"), formatBool(role.LastStopUnclean)),
 		); err != nil {
 			return t.report(err)
 		}

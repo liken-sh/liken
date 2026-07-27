@@ -409,6 +409,15 @@ type StorageRoleStatus struct {
 	Device        string  `json:"device,omitempty"`    // the partition's node this boot: vda1
 	Partition     string  `json:"partition,omitempty"` // its on-disk name: liken:clusterState
 	CapacityBytes uint64  `json:"capacityBytes,omitempty"`
+
+	// LastStopUnclean says this boot found the role's filesystem
+	// still marked as mounted, which means the machine's previous
+	// stop did not release it. Only the FAT32 roles report it: the
+	// system slots and the boot home carry a mark for exactly this,
+	// and the ext4 roles replay a journal instead and need no
+	// warning. The field describes the stop before this boot, so it
+	// keeps its value for the life of the boot.
+	LastStopUnclean bool `json:"lastStopUnclean,omitempty"`
 }
 
 // Role addresses one role's status by its spec name. It returns nil

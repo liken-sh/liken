@@ -505,12 +505,16 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 		restarter.removeOfflineRetractions) // never returns
 }
 
-// powerOff shuts the machine down cleanly. sync flushes dirty pages to
-// disk. This is a no-op on a machine with no writable disk, but it is
-// essential the moment the machine has one. Then the reboot syscall
-// powers the machine off. PID 1 must not simply exit. This is the only
+// powerOff shuts the machine down cleanly. It makes every disk
+// read-only, which is what records that the machine stopped properly
+// (quiesce.go), then sync flushes what is left, and the reboot syscall
+// powers the machine off. Both steps are no-ops on a machine with no
+// writable disk, and both are essential the moment the machine has
+// one: the installer reaches this function with the slots it just
+// wrote still mounted. PID 1 must not simply exit. This is the only
 // correct way for init to stop.
 func powerOff() {
+	quiesceDisks()
 	syncLogs()
 	unix.Sync()
 	if err := unix.Reboot(unix.LINUX_REBOOT_CMD_POWER_OFF); err != nil {

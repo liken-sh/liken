@@ -98,6 +98,13 @@ func everythingSet() *MachineStatus {
 		Backing: BackingPartition, Device: "vda1",
 		Partition: "liken:clusterState", CapacityBytes: 2_146_435_072,
 	}
+	// A FAT role that the last stop did not release, so the round trip
+	// covers the one storage fact that is a boolean.
+	storage.SystemB = StorageRoleStatus{
+		Backing: BackingPartition, Device: "vdc4",
+		Partition: "liken:systemB", CapacityBytes: 1_073_741_824,
+		LastStopUnclean: true,
+	}
 	return &MachineStatus{
 		Role: api.RoleLeader,
 		LastCrash: &CrashStatus{

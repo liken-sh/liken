@@ -1293,6 +1293,19 @@ spec:
                             A memory-backed role reports no capacity,
                             because all memory-backed roles share the
                             one RAM root.
+                        lastStopUnclean:
+                          type: boolean
+                          description: >-
+                            Whether this boot found the role's
+                            filesystem still marked as mounted, which
+                            means the machine's previous stop did not
+                            release it. Only the FAT32 roles report
+                            this: the system slots and the boot home
+                            carry a mark for exactly this purpose, and
+                            the ext4 roles replay a journal instead.
+                            The field describes the stop before this
+                            boot, so it keeps its value until the
+                            machine boots again.
                     bootHome:
                       type: object
                       description: >-
@@ -1334,6 +1347,19 @@ spec:
                             A memory-backed role reports no capacity,
                             because all memory-backed roles share the
                             one RAM root.
+                        lastStopUnclean:
+                          type: boolean
+                          description: >-
+                            Whether this boot found the role's
+                            filesystem still marked as mounted, which
+                            means the machine's previous stop did not
+                            release it. Only the FAT32 roles report
+                            this: the system slots and the boot home
+                            carry a mark for exactly this purpose, and
+                            the ext4 roles replay a journal instead.
+                            The field describes the stop before this
+                            boot, so it keeps its value until the
+                            machine boots again.
                     systemA:
                       type: object
                       description: >-
@@ -1375,6 +1401,19 @@ spec:
                             A memory-backed role reports no capacity,
                             because all memory-backed roles share the
                             one RAM root.
+                        lastStopUnclean:
+                          type: boolean
+                          description: >-
+                            Whether this boot found the role's
+                            filesystem still marked as mounted, which
+                            means the machine's previous stop did not
+                            release it. Only the FAT32 roles report
+                            this: the system slots and the boot home
+                            carry a mark for exactly this purpose, and
+                            the ext4 roles replay a journal instead.
+                            The field describes the stop before this
+                            boot, so it keeps its value until the
+                            machine boots again.
                     systemB:
                       type: object
                       description: >-
@@ -1416,6 +1455,19 @@ spec:
                             A memory-backed role reports no capacity,
                             because all memory-backed roles share the
                             one RAM root.
+                        lastStopUnclean:
+                          type: boolean
+                          description: >-
+                            Whether this boot found the role's
+                            filesystem still marked as mounted, which
+                            means the machine's previous stop did not
+                            release it. Only the FAT32 roles report
+                            this: the system slots and the boot home
+                            carry a mark for exactly this purpose, and
+                            the ext4 roles replay a journal instead.
+                            The field describes the stop before this
+                            boot, so it keeps its value until the
+                            machine boots again.
                     machineState:
                       type: object
                       description: >-
@@ -1457,6 +1509,19 @@ spec:
                             A memory-backed role reports no capacity,
                             because all memory-backed roles share the
                             one RAM root.
+                        lastStopUnclean:
+                          type: boolean
+                          description: >-
+                            Whether this boot found the role's
+                            filesystem still marked as mounted, which
+                            means the machine's previous stop did not
+                            release it. Only the FAT32 roles report
+                            this: the system slots and the boot home
+                            carry a mark for exactly this purpose, and
+                            the ext4 roles replay a journal instead.
+                            The field describes the stop before this
+                            boot, so it keeps its value until the
+                            machine boots again.
                     machineEphemeral:
                       type: object
                       description: >-
@@ -1498,6 +1563,19 @@ spec:
                             A memory-backed role reports no capacity,
                             because all memory-backed roles share the
                             one RAM root.
+                        lastStopUnclean:
+                          type: boolean
+                          description: >-
+                            Whether this boot found the role's
+                            filesystem still marked as mounted, which
+                            means the machine's previous stop did not
+                            release it. Only the FAT32 roles report
+                            this: the system slots and the boot home
+                            carry a mark for exactly this purpose, and
+                            the ext4 roles replay a journal instead.
+                            The field describes the stop before this
+                            boot, so it keeps its value until the
+                            machine boots again.
                     clusterState:
                       type: object
                       description: >-
@@ -1539,6 +1617,19 @@ spec:
                             A memory-backed role reports no capacity,
                             because all memory-backed roles share the
                             one RAM root.
+                        lastStopUnclean:
+                          type: boolean
+                          description: >-
+                            Whether this boot found the role's
+                            filesystem still marked as mounted, which
+                            means the machine's previous stop did not
+                            release it. Only the FAT32 roles report
+                            this: the system slots and the boot home
+                            carry a mark for exactly this purpose, and
+                            the ext4 roles replay a journal instead.
+                            The field describes the stop before this
+                            boot, so it keeps its value until the
+                            machine boots again.
                     podStorage:
                       type: object
                       description: >-
@@ -1580,6 +1671,19 @@ spec:
                             A memory-backed role reports no capacity,
                             because all memory-backed roles share the
                             one RAM root.
+                        lastStopUnclean:
+                          type: boolean
+                          description: >-
+                            Whether this boot found the role's
+                            filesystem still marked as mounted, which
+                            means the machine's previous stop did not
+                            release it. Only the FAT32 roles report
+                            this: the system slots and the boot home
+                            carry a mark for exactly this purpose, and
+                            the ext4 roles replay a journal instead.
+                            The field describes the stop before this
+                            boot, so it keeps its value until the
+                            machine boots again.
                     podEphemeral:
                       type: object
                       description: >-
@@ -1621,6 +1725,19 @@ spec:
                             A memory-backed role reports no capacity,
                             because all memory-backed roles share the
                             one RAM root.
+                        lastStopUnclean:
+                          type: boolean
+                          description: >-
+                            Whether this boot found the role's
+                            filesystem still marked as mounted, which
+                            means the machine's previous stop did not
+                            release it. Only the FAT32 roles report
+                            this: the system slots and the boot home
+                            carry a mark for exactly this purpose, and
+                            the ext4 roles replay a journal instead.
+                            The field describes the stop before this
+                            boot, so it keeps its value until the
+                            machine boots again.
                 boot:
                   type: object
                   description: >-

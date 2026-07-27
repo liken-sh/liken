@@ -123,6 +123,17 @@ func installToDisk(machineName string) (string, error) {
 		return "", err
 	}
 
+	// The release document lands after the artifacts it describes, so
+	// that the slot records which release it holds without asking the
+	// network. The fetcher writes the same file for the same reason
+	// when it fills the other slot. A slot that cannot name its own
+	// release is a slot nothing can later check, and a later boot has
+	// to take its contents on trust (fatstate.go).
+	if err := copyDurably(filepath.Join(releasePayloadDir, "release.yaml"),
+		filepath.Join(slotMount, "release.yaml")); err != nil {
+		return "", fmt.Errorf("install: writing the release document to the slot: %w", err)
+	}
+
 	// The actuator half: register the slots with whatever will hold
 	// this machine's boot choices. A UEFI machine gets firmware boot
 	// entries. A machine whose spec declares the GRUB roles gets its

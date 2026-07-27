@@ -183,6 +183,12 @@ func rebootMachine(intent machine.RebootIntent) {
 	// reaper is one of its components, and it must collect exited
 	// processes until the very end.
 	plane.shutdown(10 * time.Second)
+	// Nothing writes to a disk after this point, so every disk can go
+	// read-only and record that it was shut down properly. The
+	// unmounts below cannot do that for a filesystem that stays busy,
+	// and two of them always do (quiesce.go explains which), so the
+	// disks are finished here rather than by the unmount.
+	quiesceDisks()
 	unmountRoleMounts(unix.MNT_DETACH, false)
 	syncLogs()
 	unix.Sync()
