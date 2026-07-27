@@ -162,8 +162,15 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	status.Conditions = api.SetCondition(status.Conditions,
 		settleImportsLifecycle(c, machine.MachineStateDir, m.Metadata.Name, facts), now)
 
-	status.Sysctls, err = applySysctls(machine.SysctlDir, m.Spec.Sysctls)
-	status.Conditions = api.SetCondition(status.Conditions, sysctlsCondition(err), now)
+	// Both sets of kernel parameters, on every pass. Applying the
+	// settings every liken machine holds is what returns a parameter
+	// that something else on the machine changed, within one pass and
+	// without a reboot. status.sysctls reports the two together, so an
+	// operator sees every parameter liken sets and its actual value in
+	// one place.
+	sysctls, defaultsErr, specErr := applySysctls(machine.SysctlDir, machine.OSSysctls, m.Spec.Sysctls)
+	status.Sysctls = sysctls
+	status.Conditions = api.SetCondition(status.Conditions, sysctlsCondition(defaultsErr, specErr), now)
 
 	// Modules judge what the boot reported, not what the spec asks
 	// for now. A freshly declared module has no outcome yet; it

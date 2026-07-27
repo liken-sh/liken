@@ -306,6 +306,13 @@ func (t FactsTree) WriteBootSlot(slot string) error {
 	return t.report(t.writeFact("boot/slot", slot))
 }
 
+// WriteBootCommandLine publishes the kernel command line this boot ran
+// with, whole. init prints the same line to the console, and this is
+// what carries it to a reader who has no console.
+func (t FactsTree) WriteBootCommandLine(cmdline string) error {
+	return t.report(t.writeFact("boot/commandLine", cmdline))
+}
+
 // WriteBootRestarts publishes the count of in-place k3s restarts this
 // boot has performed. The restart path owns it, and it returns to zero
 // on the next reboot.

@@ -38,6 +38,27 @@ func TestBootParamValue(t *testing.T) {
 	}
 }
 
+// The whole line, kept as one string for Machine status. The kernel
+// ends the file with a newline that must not reach the status field,
+// and the spaces inside the line have to survive, because a reader
+// compares this against what the bootloader wrote.
+func TestCmdlineRawKeepsTheWholeLine(t *testing.T) {
+	const line = "console=ttyS0 rdinit=/liken liken.machine=node-3 liken.slot=B panic=10"
+	fakeCmdline(t, line+"\n")
+	if got := cmdlineRaw(); got != line {
+		t.Errorf("got %q, want %q", got, line)
+	}
+}
+
+func TestCmdlineRawWithNoCmdline(t *testing.T) {
+	old := cmdlinePath
+	cmdlinePath = filepath.Join(t.TempDir(), "missing")
+	t.Cleanup(func() { cmdlinePath = old })
+	if got := cmdlineRaw(); got != "" {
+		t.Errorf("an unreadable command line reads empty: got %q", got)
+	}
+}
+
 func TestBootParamValueWithNoCmdline(t *testing.T) {
 	old := cmdlinePath
 	cmdlinePath = filepath.Join(t.TempDir(), "missing")

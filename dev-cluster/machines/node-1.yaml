@@ -115,12 +115,16 @@ spec:
   # parameter is applied twice on purpose: by init at boot (so the
   # setting holds before k3s starts) and by the liken operator from
   # then on (so editing the Machine resource in-cluster takes effect
-  # without a reboot, and the operator corrects any drift). The
-  # kernel caps how many memory-mapped areas one process may hold, and
-  # its default of 65530 is too low for search and database engines,
-  # which map their index files in many small pieces. Raising this cap
-  # is the tuning those engines ask for in their install guides, so it
-  # makes a good demonstration: a workload need, declared next to the
-  # machine that serves it.
+  # without a reboot, and the operator corrects any drift).
+  #
+  # This one is an override. liken already raises max_map_count to
+  # 262144 on every machine, because the kernel's 65530 memory-mapped
+  # areas per process runs out under a container runtime. A search or
+  # database engine that maps its index in many small pieces asks for
+  # more still, so this machine declares more. That is what a
+  # workload's own tuning looks like: a number next to the machine
+  # that serves the workload, overriding the number liken sets for
+  # every machine. The reference manual's Kernel settings page lists
+  # the values liken sets.
   sysctls:
-    vm.max_map_count: "262144"
+    vm.max_map_count: "524288"

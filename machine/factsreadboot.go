@@ -54,6 +54,9 @@ func (t FactsTree) readBoot() (BootStatus, error) {
 	if b.Slot, err = t.readFact("boot/slot"); err != nil {
 		return BootStatus{}, err
 	}
+	if b.CommandLine, err = t.readFact("boot/commandLine"); err != nil {
+		return BootStatus{}, err
+	}
 	if b.Restarts, err = t.readInt("boot/restarts"); err != nil {
 		return BootStatus{}, err
 	}

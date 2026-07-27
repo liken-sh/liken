@@ -123,6 +123,14 @@ func TestDecidePhase(t *testing.T) {
 			api.PhaseDegraded,
 		},
 		{
+			// A default that will not apply ships with the release, so
+			// every machine reports it at once. Degrading the fleet on
+			// it would bury whichever machine has a real fault.
+			"a default liken could not apply is not degradation",
+			[]api.Condition{condition("SysctlsApplied", "True", "DefaultsIncomplete")},
+			api.PhaseReady,
+		},
+		{
 			"an unreachable cluster is plain degradation",
 			[]api.Condition{condition("ClusterConverged", "Unknown", "ClusterUnavailable")},
 			api.PhaseDegraded,

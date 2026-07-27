@@ -114,6 +114,13 @@ func TestPublishBootFactsPublishesTheBootStory(t *testing.T) {
 	tree, manifestDest := fakeFactsMachine(t)
 	raw := []byte("kind: Machine\nmetadata:\n  name: node-1\n")
 
+	// publishBootFacts reads the command line from the kernel rather
+	// than taking it as an argument, so the test supplies one. Without
+	// this the tree would carry whatever booted the machine running
+	// the tests.
+	const cmdline = "console=ttyS0 rdinit=/liken liken.machine=node-1 liken.slot=A panic=10"
+	fakeCmdline(t, cmdline+"\n")
+
 	publishBootFacts(tree, bootFacts{
 		clusterDoc: labCluster(),
 		role:       api.RoleLeader,
@@ -132,6 +139,11 @@ func TestPublishBootFactsPublishesTheBootStory(t *testing.T) {
 	}
 	if facts.Role != api.RoleLeader || facts.Boot.Slot != "A" {
 		t.Errorf("the tree carries the boot's identity: %+v", facts)
+	}
+	// Console parity: init prints this line to the console, so a
+	// reader with no console has to find it here.
+	if facts.Boot.CommandLine != cmdline {
+		t.Errorf("the tree carries the whole command line: %q", facts.Boot.CommandLine)
 	}
 	if facts.Network.Interface != "eth1" {
 		t.Errorf("the network summary names the cluster-facing interface: %+v", facts.Network)

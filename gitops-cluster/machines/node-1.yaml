@@ -40,5 +40,3 @@ spec:
       size: 2Gi
     podEphemeral:
       device: /dev/vdb
-  sysctls:
-    fs.inotify.max_user_instances: "8192"

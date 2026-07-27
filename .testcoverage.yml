@@ -52,7 +52,7 @@ override:
   # real facts files and the live API, is exercised by the QEMU
   # harness, not unit tests.
   - path: ^machine-operator$
-    threshold: 61
+    threshold: 74
   # The cluster operator: the sweep and rollout decisions are pure
   # and tested, and the acting halves run against a miniature API
   # server. What stays untested is main's loop.
@@ -63,7 +63,7 @@ override:
   # parsers, planners, derivations, and file-shaped actuators around
   # it are tested here against fakes.
   - path: ^init$
-    threshold: 66
+    threshold: 69
   # mount(8): the option parser, the command-line parser, and the
   # helper lookup are pure, and the tests cover them against the
   # command lines the kubelet really builds. What stays untested is

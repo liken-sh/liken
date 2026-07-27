@@ -26,29 +26,76 @@ func factsCondition(err error) api.Condition {
 	return api.Condition{Type: "FactsPublished", Status: api.ConditionTrue, Reason: "FactsRead"}
 }
 
-func sysctlsCondition(err error) api.Condition {
-	if err != nil {
+// sysctlsCondition reports both halves of the sysctl pass, and only
+// the spec's half can make the condition False.
+//
+// The reason is who wrote the failing parameter. A value from
+// spec.sysctls belongs to this machine: a person asked for it here,
+// nowhere else, and a machine that cannot honour its own spec is
+// degraded. A value from machine.OSSysctls ships with the release, so
+// every machine running that release applies the same table. A single
+// bad entry there would take an entire fleet to Degraded in the same
+// pass, which is the moment a per-machine health signal stops carrying
+// any information and starts hiding the one machine with a real
+// problem. So a failing default reports DefaultsIncomplete and leaves
+// the machine Ready.
+//
+// A failing default is still visible twice. It names itself in this
+// message, and its parameter is missing from status.sysctls, because
+// applySysctls never reads back a value it could not write. That
+// absence is what makes status.sysctls a list of the parameters that
+// currently hold rather than the parameters somebody wanted.
+func sysctlsCondition(defaultsErr, specErr error) api.Condition {
+	if specErr != nil {
+		message := specErr.Error()
+		if defaultsErr != nil {
+			message += "; " + defaultsErr.Error()
+		}
 		return api.Condition{
 			Type: "SysctlsApplied", Status: api.ConditionFalse,
-			Reason: "ApplyFailed", Message: err.Error(),
+			Reason: "ApplyFailed", Message: message,
+		}
+	}
+	if defaultsErr != nil {
+		return api.Condition{
+			Type: "SysctlsApplied", Status: api.ConditionTrue,
+			Reason: "DefaultsIncomplete", Message: defaultsErr.Error(),
 		}
 	}
 	return api.Condition{Type: "SysctlsApplied", Status: api.ConditionTrue, Reason: "Applied"}
 }
 
-// applySysctls writes spec.sysctls to the host's /proc/sys (dir).
-// The pod runs privileged in the host's namespaces, so it reaches
-// /proc/sys directly. After writing, the function reads every
-// parameter back. The returned map holds what the kernel now
-// reports, not what the function wrote. If another process resets a
-// value, the next pass writes it again and reports what the pass
-// actually observed. One failure never stops the function from
-// applying the rest of the parameters. The function joins every
-// failure into the returned error, because the condition built from
-// it is the operator's whole report on this check. A message that
-// names one bad parameter, when three parameters are failing, would
-// send a person through this loop three times.
-func applySysctls(dir string, desired map[string]string) (map[string]string, error) {
+// applySysctls writes both sets of kernel parameters to the host's
+// /proc/sys (dir): the settings every liken machine holds, and then
+// the Machine spec's own. The pod runs privileged in the host's
+// namespaces, so it reaches /proc/sys directly.
+//
+// The order is the same order init uses at boot, and it is what makes
+// spec.sysctls an override: a name in both sets is written twice, and
+// the second write is the one that holds.
+//
+// The returned map merges the two observations with the spec's on top,
+// for the same reason. A name in both sets was read back once before
+// the spec wrote it and once after, and only the second reading
+// describes the kernel as it now stands.
+//
+// One failure never stops the function from applying the rest of the
+// parameters. The two errors stay apart because the condition treats
+// them differently, and each joins every failure in its own set,
+// because a message that names one bad parameter, when three are
+// failing, would send a person through this loop three times.
+func applySysctls(dir string, defaults, desired map[string]string) (map[string]string, error, error) {
+	observed, defaultsErr := applySysctlSet(dir, defaults)
+	fromSpec, specErr := applySysctlSet(dir, desired)
+	maps.Copy(observed, fromSpec)
+	return observed, defaultsErr, specErr
+}
+
+// applySysctlSet writes one set of parameters and reads each one back.
+// The returned map holds what the kernel now reports, not what the
+// function wrote. If another process resets a value, the next pass
+// writes it again and reports what the pass actually observed.
+func applySysctlSet(dir string, desired map[string]string) (map[string]string, error) {
 	var errs []error
 	observed := map[string]string{}
 	for _, name := range slices.Sorted(maps.Keys(desired)) {

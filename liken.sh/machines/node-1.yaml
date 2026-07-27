@@ -91,8 +91,3 @@ spec:
     # unsized role on its disk, so it takes the remainder.
     podEphemeral:
       device: /dev/sdb
-  # The kernel's default of 128 inotify instances per user runs out
-  # quickly on a node where every log-follower and config-watcher
-  # holds one.
-  sysctls:
-    fs.inotify.max_user_instances: "8192"

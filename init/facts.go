@@ -126,6 +126,10 @@ func publishBootFacts(tree machine.FactsTree, in bootFacts) {
 	// own the ones they rewrite afterward.
 	tree.WriteBootTime(bootedAt)
 	tree.WriteBootSlot(in.boot.Slot)
+	// The command line is read here rather than passed in, like the
+	// hardware and firmware blocks above, because the kernel holds it
+	// and no earlier boot step has to remember it.
+	tree.WriteBootCommandLine(cmdlineRaw())
 	tree.WriteBootStorage(in.boot.Storage)
 	tree.WriteBootNetwork(in.boot.Network)
 	tree.WriteBootModules(in.boot.Modules)

@@ -55,5 +55,3 @@ spec:
       size: 2Gi
     podEphemeral:
       device: /dev/vdb
-  sysctls:
-    vm.max_map_count: "262144"

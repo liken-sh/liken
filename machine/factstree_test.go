@@ -46,6 +46,7 @@ func writeAll(t *testing.T, tree FactsTree, s *MachineStatus) {
 	must(tree.WriteBootCredentials(s.Boot.CredentialsSource, s.Boot.CredentialsHash))
 	must(tree.WriteBootImports(s.Boot.ImportsSource, s.Boot.ImportsHash, s.Boot.ImportsDiscarded))
 	must(tree.WriteBootSlot(s.Boot.Slot))
+	must(tree.WriteBootCommandLine(s.Boot.CommandLine))
 	must(tree.WriteBootRestarts(s.Boot.Restarts))
 	must(tree.WriteBootModules(s.Boot.Modules))
 	must(tree.WriteBootStorage(s.Boot.Storage))
@@ -176,7 +177,10 @@ func everythingSet() *MachineStatus {
 			CredentialsSource: ManifestSourceProven, CredentialsHash: "ccc",
 			ImportsSource: ManifestSourceStaged, ImportsHash: "ddd", ImportsDiscarded: true,
 			Slot: "A", Restarts: 2,
-			Modules: []string{"nvme", "e1000e"},
+			// A real command line, spaces and all, because it goes into
+			// a scalar fact and a space is not a separator there.
+			CommandLine: "console=ttyS0 rdinit=/liken liken.machine=node-1 liken.slot=A panic=10",
+			Modules:     []string{"nvme", "e1000e"},
 			Storage: StorageSpec{
 				ClusterState: &StorageRole{Device: "/dev/vda", Size: "2Gi"},
 				PodStorage:   &StorageRole{Device: "/dev/vdb"},

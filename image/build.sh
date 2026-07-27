@@ -430,6 +430,15 @@ mkdir -p "$root/usr/share/liken"
 mkdir -p "$root/lib/modules"
 cp -a "$kdist/lib/modules/$release" "$root/lib/modules/"
 
+# The configuration that kernel was built from, beside the modules it
+# produced. This is the file that answers "is that feature built in, a
+# module, or absent?", which is the question behind every report that a
+# kernel setting will not take. liken vendors a pre-built kernel and
+# changes none of these choices, so the file is here to be read, not to
+# be acted on. It costs a few tens of kilobytes once squashfs
+# compresses it, against a module tree of about 170 MiB.
+cp "$kdist/config" "$root/lib/modules/$release/config"
+
 # The module lists that init reads at boot still get checked here:
 # the OS's own fixed needs (etc/liken/modules.conf) and each
 # feature's kernel half (staged above under /etc/liken/features).

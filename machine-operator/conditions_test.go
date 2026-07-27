@@ -34,19 +34,48 @@ func TestFactsConditionCarriesTheReadError(t *testing.T) {
 }
 
 func TestSysctlsConditionApplied(t *testing.T) {
-	c := sysctlsCondition(nil)
+	c := sysctlsCondition(nil, nil)
 	if c.Type != "SysctlsApplied" || c.Status != api.ConditionTrue || c.Reason != "Applied" {
 		t.Errorf("got %+v", c)
 	}
 }
 
 func TestSysctlsConditionCarriesTheApplyError(t *testing.T) {
-	c := sysctlsCondition(errors.New("sysctl vm.nope: not there"))
+	c := sysctlsCondition(nil, errors.New("sysctl vm.nope: not there"))
 	if c.Status != api.ConditionFalse || c.Reason != "ApplyFailed" {
 		t.Errorf("got %+v", c)
 	}
 	if !strings.Contains(c.Message, "vm.nope") {
 		t.Errorf("the message should name the parameter: %q", c.Message)
+	}
+}
+
+// A default that will not apply is a defect in the release, not in
+// this machine. Every machine running the release would report it in
+// the same pass, so degrading them all would say nothing about which
+// machine needs attention.
+func TestSysctlsConditionKeepsAFailingDefaultOutOfTheHealthVerdict(t *testing.T) {
+	c := sysctlsCondition(errors.New("sysctl net.core.default_qdisc: no such file"), nil)
+	if c.Status != api.ConditionTrue || c.Reason != "DefaultsIncomplete" {
+		t.Errorf("got %+v", c)
+	}
+	if !strings.Contains(c.Message, "default_qdisc") {
+		t.Errorf("the message should name the parameter: %q", c.Message)
+	}
+}
+
+// When both halves fail, the spec's verdict decides the status, and
+// the message still carries both, so one look explains the whole pass.
+func TestSysctlsConditionPrefersTheSpecVerdictAndNamesBoth(t *testing.T) {
+	c := sysctlsCondition(errors.New("sysctl net.core.default_qdisc: no such file"),
+		errors.New("sysctl vm.nope: not there"))
+	if c.Status != api.ConditionFalse || c.Reason != "ApplyFailed" {
+		t.Errorf("got %+v", c)
+	}
+	for _, name := range []string{"default_qdisc", "vm.nope"} {
+		if !strings.Contains(c.Message, name) {
+			t.Errorf("both halves surface: %q", c.Message)
+		}
 	}
 }
 
@@ -68,9 +97,9 @@ func sysctlDir(t *testing.T, names ...string) string {
 	return dir
 }
 
-func TestApplySysctlsAppliesAndReadsBack(t *testing.T) {
+func TestApplySysctlSetAppliesAndReadsBack(t *testing.T) {
 	dir := sysctlDir(t, "vm.swappiness", "vm.overcommit_memory")
-	observed, err := applySysctls(dir, map[string]string{
+	observed, err := applySysctlSet(dir, map[string]string{
 		"vm.swappiness":        "10",
 		"vm.overcommit_memory": "1",
 	})
@@ -82,12 +111,12 @@ func TestApplySysctlsAppliesAndReadsBack(t *testing.T) {
 	}
 }
 
-func TestApplySysctlsReportsEveryFailure(t *testing.T) {
+func TestApplySysctlSetReportsEveryFailure(t *testing.T) {
 	// The condition built from this error is the operator's whole
 	// report, so one bad parameter must not hide another. A person
 	// fixing the spec should see the full list in one pass.
 	dir := sysctlDir(t, "vm.swappiness")
-	observed, err := applySysctls(dir, map[string]string{
+	observed, err := applySysctlSet(dir, map[string]string{
 		"vm.swappiness": "10",
 		"vm.missing":    "1",
 		"kernel.absent": "1",
@@ -102,6 +131,58 @@ func TestApplySysctlsReportsEveryFailure(t *testing.T) {
 	}
 	if observed["vm.swappiness"] != "10" {
 		t.Errorf("failures must not stop the rest from applying: %+v", observed)
+	}
+}
+
+func TestApplySysctlsObservesBothSets(t *testing.T) {
+	dir := sysctlDir(t, "vm.watermark_scale_factor", "vm.swappiness")
+	observed, defaultsErr, specErr := applySysctls(dir,
+		map[string]string{"vm.watermark_scale_factor": "100"},
+		map[string]string{"vm.swappiness": "10"})
+	if defaultsErr != nil || specErr != nil {
+		t.Fatalf("defaults=%v spec=%v", defaultsErr, specErr)
+	}
+	if observed["vm.watermark_scale_factor"] != "100" || observed["vm.swappiness"] != "10" {
+		t.Errorf("status reports every parameter liken sets: %+v", observed)
+	}
+}
+
+// The observed value for a name in both sets has to be the one the
+// kernel holds after the pass, which is the spec's. Reading the
+// default back happens before the spec writes over it, so merging the
+// two the other way round would publish a value that no longer exists.
+func TestApplySysctlsReportsTheSpecValueForAnOverriddenName(t *testing.T) {
+	const name = "vm.max_map_count"
+	dir := sysctlDir(t, name)
+	observed, defaultsErr, specErr := applySysctls(dir,
+		map[string]string{name: "262144"},
+		map[string]string{name: "524288"})
+	if defaultsErr != nil || specErr != nil {
+		t.Fatalf("defaults=%v spec=%v", defaultsErr, specErr)
+	}
+	if observed[name] != "524288" {
+		t.Errorf("got %q, want the value the kernel holds after the pass", observed[name])
+	}
+}
+
+func TestApplySysctlsKeepsTheTwoFailuresApart(t *testing.T) {
+	dir := sysctlDir(t, "vm.swappiness")
+	observed, defaultsErr, specErr := applySysctls(dir,
+		map[string]string{"vm.absent_default": "1"},
+		map[string]string{"vm.swappiness": "10", "vm.absent_spec": "1"})
+	if defaultsErr == nil || !strings.Contains(defaultsErr.Error(), "vm.absent_default") {
+		t.Fatalf("the defaults error names its own parameter: %v", defaultsErr)
+	}
+	if strings.Contains(defaultsErr.Error(), "vm.absent_spec") {
+		t.Errorf("the spec's failure must not leak into the defaults error: %v", defaultsErr)
+	}
+	if specErr == nil || !strings.Contains(specErr.Error(), "vm.absent_spec") {
+		t.Errorf("the spec error names its own parameter: %v", specErr)
+	}
+	// A parameter that could not be written is never read back, which
+	// is what makes this map the list of values that actually hold.
+	if _, ok := observed["vm.absent_default"]; ok {
+		t.Errorf("a failed write must not appear in status: %+v", observed)
 	}
 }
 

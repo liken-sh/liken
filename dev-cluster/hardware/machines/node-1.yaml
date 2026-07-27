@@ -89,6 +89,3 @@ spec:
   # network up, so eth0 and eth1 exist by the time the interfaces
   # above are configured.
   modules: [e1000]
-  # The dev cluster's node-1.yaml explains this sysctl.
-  sysctls:
-    vm.max_map_count: "262144"

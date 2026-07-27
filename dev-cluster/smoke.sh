@@ -175,6 +175,49 @@ guest=""
 # keeps the write locks on node-1's qcow2 disks, and it stays on the
 # multicast segment that carries the cluster's wire, so it breaks both
 # the next boot of this drill and the next run of the whole drill.
+# A Ready node proves the boot chain. These two fields prove what the
+# machine reports about itself once it is up, which nothing else in
+# this drill covers.
+#
+# status.sysctls has to carry both halves of the sysctl pass: a
+# parameter from the table every liken machine holds, and, on the
+# virtio machine whose manifest declares one, that machine's own
+# override of a parameter in the same table. A drill that checked only
+# the second half would still pass if liken stopped applying its own
+# table entirely.
+#
+# status.boot.commandLine is the console-parity check. init prints the
+# command line to the serial console, and this drill reads that console
+# throughout, so the only new claim is that the same line reaches a
+# reader who has none.
+#
+# Both come from the operator, which publishes a pass after the node
+# goes Ready, so this waits rather than reading once.
+assert_machine_reports() {
+    local deadline=$(( $(date +%s) + 90 )) sysctls cmdline
+    while (( $(date +%s) < deadline )); do
+        sysctls="$("$K3S" kubectl --kubeconfig "$KUBECONFIG_FILE" \
+            --request-timeout=5s get machine node-1 \
+            -o jsonpath='{.status.sysctls}' 2>/dev/null || true)"
+        cmdline="$("$K3S" kubectl --kubeconfig "$KUBECONFIG_FILE" \
+            --request-timeout=5s get machine node-1 \
+            -o jsonpath='{.status.boot.commandLine}' 2>/dev/null || true)"
+        if [[ "$sysctls" == *'"kernel.pid_max":"4194304"'* &&
+              "$cmdline" == *"rdinit=/liken"* &&
+              ( "$HARDWARE" != virtio || "$sysctls" == *'"vm.max_map_count":"524288"'* ) ]]; then
+            echo "$drill: status carries liken's kernel settings and the boot command line"
+            return 0
+        fi
+        sleep 5
+    done
+    teardown
+    echo "$drill: the machine did not report what it should" >&2
+    echo "$drill: status.sysctls: $sysctls" >&2
+    echo "$drill: status.boot.commandLine: $cmdline" >&2
+    evidence
+    exit 1
+}
+
 teardown() {
     [[ -n "$guest" ]] || return 0
     local leader="$guest"
@@ -353,6 +396,7 @@ while true; do
             | awk '$2 == "Ready" { found = 1 } END { exit !found }'; then
         elapsed=$(( $(date +%s) - started ))
         echo "$drill: node-1 is Ready after ${elapsed}s, booted from disk under $FIRMWARE"
+        assert_machine_reports
         exit 0
     fi
 

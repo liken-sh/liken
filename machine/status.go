@@ -80,9 +80,16 @@ type MachineStatus struct {
 	// Storage connects the two.
 	Storage StorageStatus `json:"storage,omitzero"`
 
-	// Sysctls echoes the observed value of every parameter named in
-	// spec.sysctls, read back from /proc/sys. This puts the spec and
-	// reality side by side in one kubectl get.
+	// Sysctls echoes the observed value of every parameter liken sets,
+	// read back from /proc/sys: the settings every liken machine holds
+	// (machine.OSSysctls) and the ones spec.sysctls declares. This
+	// puts what was asked for and what the kernel holds side by side
+	// in one kubectl get.
+	//
+	// A parameter liken could not write is absent here, because a
+	// failed write is never read back. That is what makes this map the
+	// list of parameters that currently hold, rather than the list
+	// somebody wanted.
 	Sysctls map[string]string `json:"sysctls,omitempty"`
 
 	// Modules reports the outcome of every module named in
@@ -461,11 +468,13 @@ func AllRolesInMemory() StorageStatus {
 // in this API, it is a closed vocabulary. Two of the four values are
 // healthy. Loaded means the kernel took the module, or already had
 // it. Builtin means the kernel compiles the name in, so there was
-// nothing to load and nothing wrong. Missing means the booted image
-// never shipped the module. This happens when someone edits a spec
-// after its image was built; the fix is a new image, not a retry.
-// Failed means the module shipped but the kernel refused it, which
-// usually points to a problem in the hardware.
+// nothing to load and nothing wrong. Missing means this kernel has no
+// module by that name at all. The image carries the kernel's whole
+// module tree, so the usual cause is a misspelling, and the fix is
+// the name rather than a new image. A name that is spelled right and
+// still missing wants a release whose kernel builds it. Failed means
+// the kernel has the module and refused it, which usually points to a
+// problem in the hardware.
 type ModuleState string
 
 const (
@@ -475,7 +484,8 @@ const (
 	ModuleFailed  ModuleState = "Failed"
 )
 
-// ModuleStatus is one declared module's outcome this boot. Message
+// ModuleStatus is one declared module's outcome, from the boot that
+// loaded it or from the load that followed a later edit. Message
 // carries the detail for the unhealthy states, phrased to name the
 // fix. A status that names the repair is more useful than one that
 // only names the problem.
@@ -601,6 +611,20 @@ type BootStatus struct {
 	// machine reports which side of the blue-green pair it runs from:
 	// releases download to the other slot.
 	Slot string `json:"slot,omitempty"`
+
+	// CommandLine is the kernel command line this boot ran with, whole
+	// and unparsed. Slot above is one parameter out of it, and init
+	// reads a handful of others, but the line as a whole is the only
+	// input a machine has before it reads a single file, and every
+	// other field here describes what happened after that point.
+	//
+	// It is reported and not declared. No spec field sets it: the boot
+	// entries liken writes name the console, the machine, and the
+	// slot, and nothing else. So this field answers the question a
+	// person asks when a machine behaves unlike its siblings, which is
+	// what the firmware actually handed the kernel. Reading it needed
+	// a serial console before it was here.
+	CommandLine string `json:"commandLine,omitempty"`
 
 	// The Cluster manifest this boot ran under: the same lifecycle,
 	// recorded separately, because the two documents stage and prove

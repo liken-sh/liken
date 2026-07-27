@@ -31,6 +31,19 @@ func cmdlineFields() []string {
 	return strings.Fields(string(raw))
 }
 
+// cmdlineRaw returns the whole command line as one line, with the
+// trailing newline the kernel appends removed. The parsers above take
+// the line apart; this is for reporting it whole, so that an operator
+// reading Machine status sees exactly what the bootloader passed,
+// including any parameter liken itself does not look for.
+func cmdlineRaw() string {
+	raw, err := os.ReadFile(cmdlinePath)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
+}
+
 // bootParamValue returns the value of a name=value parameter on the
 // kernel command line ("" when absent). Examples are which machine
 // this is (liken.machine=) and which system slot booted it

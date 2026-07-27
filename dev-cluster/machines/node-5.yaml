@@ -9,16 +9,19 @@ metadata:
 spec:
   # node-1.yaml explains why the lab's machines choose Auto.
   rebootPolicy: Auto
-  # The unclaimed-hardware drill (milestone 11): declaring the USB
-  # mass-storage drivers here puts them aboard the deployment layer.
-  # The layer ships the union of every machine's declared modules, so
-  # this declaration does not load these drivers anywhere else. A
-  # stick plugged into a different node then shows the whole story:
-  # its interface stays unclaimed (status names these modules as the
-  # candidates), the operator declares one module on that machine's
-  # spec, and the reboot binds it. Both drivers ship so the report
-  # shows a match with more than one candidate, which is the normal
-  # condition for USB mass storage.
+  # The unclaimed-hardware drill (milestone 11). Every machine carries
+  # these drivers, because the image carries the kernel's whole module
+  # tree, but only a machine that declares one loads it. That split is
+  # what the drill needs: this machine binds a USB stick, and every
+  # other machine leaves one unclaimed.
+  #
+  # A stick plugged into one of those machines then shows the whole
+  # story. Its interface stays unclaimed, and status names these two
+  # modules as the candidates, because the report reads the same
+  # module index the image ships. An operator declares one of them on
+  # that machine's spec, and init loads it in place, with no reboot.
+  # Two candidates rather than one is the normal condition for USB
+  # mass storage, so the drill covers the case a person really meets.
   modules: [usb-storage, uas]
   network:
     interfaces:

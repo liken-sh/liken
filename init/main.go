@@ -264,14 +264,16 @@ func main() {
 		}
 	}
 
-	// The OS's own default sysctl values apply first. The Machine
+	// The settings every liken machine holds apply first. The Machine
 	// spec's sysctls apply after them, so a deployment that disagrees
-	// with a default overwrites that default. Both sets apply before
-	// k3s starts, so every value is set by the time k3s reads it. The
-	// operator re-applies the spec's values once the cluster is up.
+	// with one of them overwrites it. Both sets apply before k3s
+	// starts, so every value is set by the time k3s reads it, and both
+	// apply before the network comes up below, which is what puts the
+	// default queueing discipline on this machine's own interfaces.
+	// The operator applies both sets again once the cluster is up.
 	// This is what makes a live kubectl edit take effect without a
-	// reboot.
-	applySysctls(osSysctls)
+	// reboot, and what returns a parameter something else changed.
+	applySysctls(machine.OSSysctls)
 	applySysctls(m.Spec.Sysctls)
 
 	worldReport()

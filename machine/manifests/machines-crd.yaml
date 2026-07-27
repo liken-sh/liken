@@ -297,12 +297,18 @@ spec:
                 sysctls:
                   type: object
                   description: >-
-                    Kernel tuning values, from a parameter name to
-                    its declared value, for example
-                    vm.overcommit_memory: "1". Init applies these
-                    values at boot, and the liken operator applies
-                    them again continuously, so an edit here takes
-                    effect without a reboot.
+                    Kernel tuning values, from a parameter name to its
+                    declared value, for example vm.overcommit_memory:
+                    "1". Init applies these values at boot, and the
+                    liken operator applies them again on every pass,
+                    so an edit here takes effect without a reboot.
+                    liken sets its own values for about twenty
+                    parameters before it applies this field, so a name
+                    here also overrides liken's value for that
+                    parameter. The manual's Kernel settings page lists
+                    every one of them and why liken sets it.
+                    status.sysctls reports both sets together, read
+                    back from the kernel.
                   additionalProperties:
                     type: string
                 modules:
@@ -312,15 +318,17 @@ spec:
                     boot, in addition to the fixed list that the
                     operating system needs. These are the drivers for
                     the hardware that this machine's workloads use.
-                    The image build ships the union of the modules
-                    that all machines declare. A module declared here
-                    loads only if the build of the booted image
-                    included manifests that declared it.
-                    status.modules reports the result for each name
-                    in both cases. Admission checks the shape of the
-                    name only, because only the build (for baked
-                    manifests) and the boot (for later edits) can
-                    determine whether a name exists.
+                    The image carries the kernel build's whole module
+                    tree, so any name that kernel has is loadable
+                    here, whatever manifests existed when the image
+                    was built. status.modules reports the result for
+                    each name, including a name this kernel has no
+                    module for. Adding a name takes effect without a
+                    reboot, because loading a driver is live-capable.
+                    Removing one needs a reboot. Admission checks the
+                    shape of the name only, because only the boot, or
+                    the load that follows a later edit, can determine
+                    whether the name exists.
                   # This is a set: the order carries no meaning, and
                   # the API server refuses duplicates instead of
                   # trusting the caller.
@@ -1884,6 +1892,20 @@ spec:
                         media). A release downloads to the slot that
                         the machine does not run from, which is the
                         purpose of the two slots.
+                    commandLine:
+                      type: string
+                      maxLength: 4096
+                      description: >-
+                        The kernel command line that this boot ran
+                        with, whole and unparsed. The slot above is
+                        one parameter out of it. No field sets this
+                        line: liken writes each machine's boot
+                        entries itself, naming the console, the
+                        machine, and the slot. The line is reported
+                        because it is the only input a machine reads
+                        before it reads a file, so it is the first
+                        thing to check when one machine behaves
+                        unlike the others that share its release.
                     storage:
                       type: object
                       description: >-
@@ -2284,23 +2306,32 @@ spec:
                 sysctls:
                   type: object
                   description: >-
-                    The observed value of every parameter named in
-                    spec.sysctls, read back from the kernel, so a
-                    reader can compare the declared value and the
-                    actual value in one place.
+                    The observed value of every parameter liken sets,
+                    read back from the kernel: the values liken sets
+                    on every machine, and the values spec.sysctls
+                    declares. This puts what was asked for and what
+                    the kernel holds side by side in one place. A
+                    parameter liken could not write is absent, because
+                    a failed write is never read back, so this field
+                    lists the parameters that currently hold rather
+                    than the parameters somebody wanted.
                   additionalProperties:
                     type: string
                 modules:
                   type: array
                   description: >-
                     The result for every module named in
-                    spec.modules, as this boot resolved them. Loaded
+                    spec.modules, as the machine resolved it: at boot,
+                    or at the load that followed a later edit. Loaded
                     and Builtin are good states. Missing means that
-                    the booted image does not contain the module, and
-                    only a new image build or a newer release
-                    corrects it. Failed means that the kernel refused
-                    a module that the image does contain. The message
-                    field gives the detail and names the correction.
+                    this kernel has no module by that name, which is
+                    usually a misspelling, because the image carries
+                    the kernel's whole module tree. Rebuilding the
+                    image changes nothing; correct the name, or take a
+                    release whose kernel has the module. Failed means
+                    that the kernel refused a module it does have. The
+                    message field gives the detail and names the
+                    correction.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [name]
                   items:

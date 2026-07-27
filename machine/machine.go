@@ -128,13 +128,18 @@ type MachineSpec struct {
 	// whatever hardware this machine's workloads use. Init loads them
 	// only after it knows the boot's manifest, so these modules cannot
 	// serve the boot path itself. A driver that the boot depends on
-	// must belong in the fixed list instead. The image build ships the
-	// union of every machine's declared modules, because it reads the
-	// same manifests that it bakes into the image. This means a module
-	// declared here is only loadable if the booted image was built
-	// from manifests that also declared it. status.modules reports the
-	// outcome for each module name, either way. Edits to this field
-	// are staged and take effect at the next boot, like storage.
+	// must belong in the fixed list instead.
+	//
+	// The image carries the kernel build's whole module tree, so any
+	// name that kernel has is loadable here, whatever manifests
+	// existed when the image was built. status.modules reports the
+	// outcome for each name, including the name this kernel has no
+	// module for.
+	//
+	// A name added here converges without a reboot: loading a driver
+	// is live-capable, and the kernel binds a resident driver to
+	// hardware that is already plugged in. Removing a name needs a
+	// boot, because unloading is not part of that path.
 	Modules []string `json:"modules,omitempty"`
 
 	// NodeLabels is this machine's scheduling identity: the labels
