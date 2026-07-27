@@ -476,17 +476,22 @@ spec:
                     is the host-side iSCSI initiator: static
                     open-iscsi binaries, the iscsi_tcp kernel module,
                     an initiator name made from each machine's name,
-                    and an iscsid DaemonSet. This is the host contract
-                    that CSI drivers such as synology-csi need. nfs is
-                    the NFSv4 client: a static mount.nfs and the nfsv4
-                    kernel module, with no daemons, and version 4
-                    only. flux is GitOps sync through Flux: the
-                    fleet's declared state is in a git repository, and
-                    the cluster applies what the repository holds.
-                    flux is the first feature in the vocabulary that
-                    takes parameters. Its repository parameter is
-                    required: the git URL the fleet syncs from, for
-                    example ssh://git@forge.example/fleet.git. Its
+                    and an iscsid DaemonSet. Every machine also
+                    publishes the stable name of each LUN it reaches
+                    under /dev/disk/by-path, in the form
+                    ip-address:port-iscsi-target-lun-number, which is
+                    the name a driver resolves a volume through. This
+                    is the host contract that CSI drivers such as
+                    synology-csi need. nfs is the NFSv4 client: a
+                    static mount.nfs and the nfsv4 kernel module, with
+                    no daemons, and version 4 only. flux is GitOps
+                    sync through Flux: the fleet's declared state is
+                    in a git repository, and the cluster applies what
+                    the repository holds. flux is the first feature in
+                    the vocabulary that takes parameters. Its
+                    repository parameter is required: the git URL the
+                    fleet syncs from, for example
+                    ssh://git@forge.example/fleet.git. Its
                     path parameter (default ".") and its branch
                     parameter (default "main") select the part of the
                     repository that this cluster syncs. Its knownHosts
