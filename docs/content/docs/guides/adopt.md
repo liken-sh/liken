@@ -76,11 +76,11 @@ the cluster already runs Flux, and your `cluster.yaml` does not
 declare `flux`, that omission reads as a retraction.
 
 `liken` does not delete that Flux. It removes a Flux installation only
-when it planted the installation itself, which it records by writing a
-`liken.sh/feature=flux` annotation on the `flux-system` namespace it
-creates. An installation that `liken` did not plant carries no
-annotation, so the teardown deletes nothing and the Cluster reports
-the refusal:
+when the `flux-system` namespace carries a `liken.sh/feature=flux`
+annotation, and that annotation arrives only when the document
+declares the feature. A document that never declared `flux` never put
+it there, so the teardown deletes nothing and the Cluster reports the
+refusal:
 
     kubectl describe cluster
 

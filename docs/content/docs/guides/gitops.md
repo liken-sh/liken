@@ -167,30 +167,31 @@ repository.
 
 ## What liken owns
 
-When `liken` installs the engine, it writes this annotation on the
-`flux-system` namespace it creates:
+Declaring the feature puts this annotation on the `flux-system`
+namespace:
 
     liken.sh/feature: flux
 
-The annotation records that `liken` planted this installation. The
-teardown reads it before it deletes anything.
+The annotation is the record that this installation is `liken`'s. The
+teardown reads it before it deletes anything, and removes only what
+carries it.
 
-`liken` installs the engine with plain creates, and it never changes
-an object that already exists. So a `liken` that starts beside a Flux
-somebody else installed never writes the annotation. Without the
-annotation, retracting the feature deletes nothing, and the Cluster
-reports a `FluxTeardown` condition instead:
+A cluster that never declares the feature never gets the annotation.
+`liken` seeds nothing there, so a Flux that was running before `liken`
+arrived keeps running, and retracting a feature the document never
+declared deletes nothing. The Cluster says so:
 
     kubectl describe cluster
 
-A cluster that `liken` founded before this record existed is in the
-same position. Its `flux-system` namespace carries no annotation, so
-its first retraction also declines and reports.
+The `FluxTeardown` condition names what the teardown declined. A
+cluster that `liken` founded before this record existed reports the
+same thing until its namespace carries the annotation.
 
-To give an existing installation to `liken`, write the annotation
-yourself:
+Declaring the feature is how you hand an existing installation to
+`liken`. The namespace does not have to be new: `liken` applies its
+own copy over whatever is there, and the annotation lands with it.
+From that point retraction removes the engine, its namespace, and the
+deploy key, exactly as it does for an installation `liken` made.
+Writing the annotation by hand does the same thing:
 
     kubectl annotate namespace flux-system liken.sh/feature=flux
-
-Retraction then removes the engine, its namespace, and the deploy key,
-as it does for an installation `liken` made.

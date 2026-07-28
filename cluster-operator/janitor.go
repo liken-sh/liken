@@ -166,9 +166,12 @@ func janitorFeatureWorkloads(c *kubernetes.Client, clusterDoc *cluster.Cluster) 
 // or read anything.
 
 // The engine's namespace, by name and by path. The Namespace is also
-// the ownership record: liken's planter stamps the feature annotation
-// on it (see stampOwnership in flux.go), and this janitor reads that
-// annotation before it deletes anything.
+// the ownership record: liken's own feature manifest declares it with
+// the feature annotation (flux/manifests/flux-system.yaml), and this
+// janitor reads that annotation before it deletes anything. k3s
+// applies that manifest as an addon the moment the document declares
+// the feature, so the mark lands with the namespace itself, ahead of
+// anything the cluster operator does.
 const (
 	fluxNamespace     = "flux-system"
 	fluxNamespacePath = "/api/v1/namespaces/" + fluxNamespace

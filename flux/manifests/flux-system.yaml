@@ -13,16 +13,30 @@
 # sync credential, flux-system, so the sync engine finds the key
 # without any configuration.
 #
-# None of these objects carries the liken.sh/feature annotation that
-# the retraction janitor acts on, and that is deliberate. Retracting
-# the feature must keep this namespace, because the namespace holds
-# the deploy key, and the key's public half is registered at the
-# forge. A re-enabled feature then returns with its identity intact,
-# instead of asking for a new registration.
+# The namespace carries the ownership mark, and it is the only object
+# here that does. The flux janitor reads the mark before it deletes
+# anything, and removes only an installation that carries it
+# (cluster-operator/janitor.go).
+#
+# The mark belongs on this object because this object is what puts the
+# namespace there. k3s applies these manifests as an addon the moment
+# the document declares the feature, and it applies them over whatever
+# it finds, so declaring the feature is what claims the namespace,
+# whether the namespace is new or already held a Flux somebody else
+# installed. That is the whole gate: a document that never declares
+# flux seeds nothing, so the mark never appears, and the teardown
+# never runs.
+#
+# The generic feature janitor does not act on this annotation here.
+# It sweeps DaemonSets in liken-system and nothing else
+# (featureWorkloadKinds), so the mark means one thing on this object:
+# the flux teardown may proceed.
 apiVersion: v1
 kind: Namespace
 metadata:
   name: flux-system
+  annotations:
+    liken.sh/feature: flux
 ---
 # get, patch, and create, never delete: the operator mints the key
 # once and reads it forever after, and patch keeps the Secret's

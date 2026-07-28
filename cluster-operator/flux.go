@@ -262,44 +262,6 @@ func collectionPath(o seedObject) (string, error) {
 	return base + "/" + kind.resource, nil
 }
 
-// stampOwnership marks the one object that records liken as the
-// planter of this Flux installation: the flux-system Namespace.
-// Creating that Namespace is the act that proves liken put Flux here,
-// so the mark rides on the create and on nothing else.
-//
-// The mark is the same liken.sh/feature annotation the feature
-// janitor reads, carrying the same slug, so the ownership record can
-// never drift from the feature vocabulary.
-//
-// A planter that fills in around a Flux somebody else installed never
-// writes the mark. The create of an object that already exists
-// returns 409, and the planter leaves that object exactly as it found
-// it, annotations included. The teardown depends on that: it reads
-// the mark before it deletes anything, so an installation liken did
-// not plant is one liken never removes.
-func stampOwnership(o seedObject) ([]byte, error) {
-	if o.Kind != "Namespace" || o.Name != fluxNamespace {
-		return o.body, nil
-	}
-	// The whole document goes back out, so the stamp adds a key and
-	// changes nothing else. Flux's Namespace already carries labels,
-	// and a later version may add annotations of its own.
-	var doc map[string]any
-	if err := json.Unmarshal(o.body, &doc); err != nil {
-		return nil, err
-	}
-	// metadata is here, because parseSeed read this object's name out
-	// of it, and that name is what matched above.
-	metadata, _ := doc["metadata"].(map[string]any)
-	annotations, _ := metadata["annotations"].(map[string]any)
-	if annotations == nil {
-		annotations = map[string]any{}
-		metadata["annotations"] = annotations
-	}
-	annotations[featureAnnotation] = cluster.FeatureFlux
-	return json.Marshal(doc)
-}
-
 // ensureFluxEngine plants the engine seed when the engine is gone.
 // The probe runs on every sweep, so a deleted engine heals in
 // seconds, not at the next boot. Each object is a plain create, and
@@ -331,12 +293,7 @@ func ensureFluxEngine(c *kubernetes.Client, clusterDoc *cluster.Cluster, seed []
 			fmt.Printf("planting the engine seed: %v\n", err)
 			continue
 		}
-		body, err := stampOwnership(o)
-		if err != nil {
-			fmt.Printf("stamping the ownership mark on %s %s: %v\n", o.Kind, o.Name, err)
-			continue
-		}
-		err = c.RequestJSON(http.MethodPost, path, body, nil)
+		err = c.RequestJSON(http.MethodPost, path, o.body, nil)
 		if errors.Is(err, kubernetes.ErrConflict) {
 			continue // it already exists; whatever is there stays
 		}

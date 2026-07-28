@@ -3,9 +3,12 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"testing"
+
+	"sigs.k8s.io/yaml"
 
 	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
@@ -246,4 +249,36 @@ func TestJanitorFluxStopsWhenTheOwnershipReadFails(t *testing.T) {
 	if got := janitorFlux(c, retractedCluster()); got != nil {
 		t.Errorf("an unreadable namespace is not a refusal: %+v", got)
 	}
+}
+
+// The ownership mark is a contract between two domains: the flux
+// feature's own manifest declares it, and this janitor refuses to
+// delete anything without it. Nothing else ties the two together, and
+// a mark quietly dropped from that manifest would leave every
+// retraction declining forever, which is the failure this test exists
+// to catch.
+func TestTheFluxNamespaceCarriesTheOwnershipMark(t *testing.T) {
+	raw, err := os.ReadFile("../flux/manifests/flux-system.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var namespace struct {
+		Kind     string `json:"kind"`
+		Metadata struct {
+			Name        string            `json:"name"`
+			Annotations map[string]string `json:"annotations"`
+		} `json:"metadata"`
+	}
+	for _, doc := range strings.Split(string(raw), "\n---\n") {
+		if err := yaml.Unmarshal([]byte(doc), &namespace); err != nil {
+			t.Fatalf("the feature's manifest does not parse: %v", err)
+		}
+		if namespace.Kind == "Namespace" && namespace.Metadata.Name == fluxNamespace {
+			if got := namespace.Metadata.Annotations[featureAnnotation]; got != cluster.FeatureFlux {
+				t.Errorf("%s must carry %s: %s, got %q", fluxNamespace, featureAnnotation, cluster.FeatureFlux, got)
+			}
+			return
+		}
+	}
+	t.Fatalf("the flux feature's manifest declares no %s Namespace", fluxNamespace)
 }
