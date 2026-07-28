@@ -81,6 +81,24 @@ func TestReadFailStopSeparatesAbsentFromUnreadable(t *testing.T) {
 	}
 }
 
+func TestReadFailStopTreatsAReasonlessRecordAsNoRefusal(t *testing.T) {
+	// An empty file unmarshals into an empty struct and reports no
+	// error, so this is the shape a lost write leaves behind. Reporting
+	// it would put a refusal with no reason, dated to the year one, on
+	// the console and in the machine's status.
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, failStopRecord), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadFailStop(root)
+	if err != nil {
+		t.Fatalf("an empty record is not an error to report: %v", err)
+	}
+	if got != nil {
+		t.Errorf("a record with no reason must read as no refusal: %+v", got)
+	}
+}
+
 func TestReadFailStopReportsATornRecord(t *testing.T) {
 	// The record is written durably to survive the power-off that
 	// follows it, and a torn write is still possible on hardware that

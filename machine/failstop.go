@@ -84,5 +84,16 @@ func ReadFailStop(root string) (*FailStop, error) {
 	if err := yaml.UnmarshalStrict(raw, f); err != nil {
 		return nil, err
 	}
+	// A record with no reason is not a refusal. An empty file
+	// unmarshals into an empty struct and reports no error, so without
+	// this test a truncated record would read back as a refusal that
+	// happened in the year one and gave no reason. The write is durable
+	// precisely so this does not happen, and a machine can still lose
+	// the file's contents to hardware that acknowledges a flush it did
+	// not make. Nothing beats no news here, because the field's whole
+	// job is to say something a person can act on.
+	if f.Reason == "" {
+		return nil, nil
+	}
 	return f, nil
 }

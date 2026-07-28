@@ -17,11 +17,21 @@ package main
 // and into status.lastFailStop for everyone else. machine/failstop.go
 // owns the record itself.
 //
-// One limit remains, and it follows from where the record lives. A
-// boot that cannot satisfy the machineState role has nowhere to write,
-// and records nothing. The same is true of a boot that stops over a
-// role which mounts before machineState does. Every other refusal,
-// including all of the identity failures, lands on the disk.
+// What a refusal can record follows from where the record lives, and
+// the two fail-stops differ. An identity refusal always records,
+// because storage has settled by the time the boot reads a cluster
+// document. A storage refusal records only when it happens after
+// machineState mounts.
+//
+// That excludes the most likely storage failure of all. settleStorage
+// waits for every declared disk to attach before it mounts anything,
+// so a disk that never appears stops the boot while the record still
+// has nowhere to go. A machine whose state disk is fine and whose pod
+// disk is dead therefore powers off with nothing written down, even
+// though the partition that would hold the record is right there.
+// Closing that gap means mounting machineState on the way out of a
+// failed wait, which is a change to the settling order and not to this
+// file.
 
 import (
 	"fmt"
