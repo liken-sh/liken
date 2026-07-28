@@ -43,6 +43,7 @@ func writeAll(t *testing.T, tree FactsTree, s *MachineStatus) {
 	must(tree.WriteFeatures(s.Features))
 	must(tree.WriteRegistries(s.Registries))
 	must(tree.WriteRuntime(s.Runtime))
+	must(tree.WriteRlimits(s.Rlimits))
 	must(tree.WriteBootTime(s.Boot.Time))
 	must(tree.WriteBootManifest(s.Boot.ManifestSource, s.Boot.ManifestHash))
 	must(tree.WriteBootClusterManifest(s.Boot.ClusterManifestSource, s.Boot.ClusterManifestHash))
@@ -52,6 +53,7 @@ func writeAll(t *testing.T, tree FactsTree, s *MachineStatus) {
 	must(tree.WriteBootCommandLine(s.Boot.CommandLine))
 	must(tree.WriteBootRestarts(s.Boot.Restarts))
 	must(tree.WriteBootModules(s.Boot.Modules))
+	must(tree.WriteBootRlimits(s.Boot.Rlimits))
 	must(tree.WriteBootStorage(s.Boot.Storage))
 	must(tree.WriteBootNetwork(s.Boot.Network))
 	must(tree.WriteRejection(RejectMachine, s.Boot.Rejection))
@@ -190,6 +192,13 @@ func everythingSet() *MachineStatus {
 			// a scalar fact and a space is not a separator there.
 			CommandLine: "console=ttyS0 rdinit=/liken liken.machine=node-1 liken.slot=A panic=10",
 			Modules:     []string{"nvme", "e1000e"},
+			// One limit in each of the spec's three forms, so the round
+			// trip covers a bare number, the word, and a pair.
+			Rlimits: map[string]string{
+				"nofile": "1048576",
+				"core":   "infinity",
+				"nproc":  "1024:infinity",
+			},
 			Storage: StorageSpec{
 				ClusterState: &StorageRole{Device: "/dev/vda", Size: "2Gi"},
 				PodStorage:   &StorageRole{Device: "/dev/vdb"},
@@ -216,6 +225,10 @@ func sparseFacts() *MachineStatus {
 	return &MachineStatus{
 		Role:    api.RoleFollower,
 		Version: VersionStatus{Liken: "0.1.0", Kernel: "6.15.4"},
+		// A machine that declares no limits still holds the ones that
+		// ship with the release, so status.rlimits is populated on a
+		// machine whose boot record carries none.
+		Rlimits: map[string]string{"nofile": "1048576", "nproc": "infinity"},
 		Network: NetworkStatus{
 			Interface: "eth0", MAC: "52:54:00:12:34:56",
 			Addresses: []string{"10.0.2.15/24"}, Gateway: "10.0.2.2",

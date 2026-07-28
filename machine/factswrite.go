@@ -265,6 +265,46 @@ func (t FactsTree) WriteModules(modules []ModuleStatus) error {
 	return t.report(syncEntryDirs(filepath.Join(t.Dir, "modules"), want))
 }
 
+// WriteRlimits publishes the resource limits init holds, read back
+// from the kernel. Each resource is one file holding the limit in the
+// spec's syntax, because a limit is a scalar and rule 4's directory
+// per element would wrap each one around a single value.
+func (t FactsTree) WriteRlimits(rlimits map[string]string) error {
+	return t.report(t.writeKeyedScalars("rlimits", rlimits))
+}
+
+// WriteBootRlimits publishes the resource limits the winning manifest
+// declared. This is the drift reference, so it carries the request
+// rather than the outcome, the way boot/modules and boot/storage do.
+func (t FactsTree) WriteBootRlimits(rlimits map[string]string) error {
+	return t.report(t.writeKeyedScalars("boot/rlimits", rlimits))
+}
+
+// writeKeyedScalars publishes a map of scalars as a directory of
+// files, one for each key. A key that disappears takes its file with
+// it, and an empty map leaves no directory at all, which is rule 2's
+// omitempty semantics.
+func (t FactsTree) writeKeyedScalars(dir string, values map[string]string) error {
+	want := map[string]bool{}
+	for key := range values {
+		if err := assertKey(dir, key); err != nil {
+			return err
+		}
+		want[key] = true
+	}
+	if len(want) > 0 {
+		if err := os.MkdirAll(filepath.Join(t.Dir, dir), 0o755); err != nil {
+			return err
+		}
+	}
+	for key, value := range values {
+		if err := t.writeFact(filepath.Join(dir, key), value); err != nil {
+			return err
+		}
+	}
+	return syncEntryFiles(filepath.Join(t.Dir, dir), want)
+}
+
 // WriteFeatures publishes this machine's standing on every feature the
 // cluster document enables. The restart path owns this subtree, because
 // a k3s restart can change a feature's outcome without a reboot.

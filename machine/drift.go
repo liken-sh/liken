@@ -110,6 +110,48 @@ func interfaceDrift(position int, desired, actuated InterfaceSpec) []string {
 	return diffs
 }
 
+// RlimitDrift compares the declared resource limits against what the
+// boot actuated. Both sides are the spec's own map, so this is a
+// straight comparison of two requests, the way ModulesDrift compares
+// two module lists.
+//
+// The limits every liken machine holds take no part in this. They ship
+// with the release rather than with the spec, so a change to the table
+// arrives with a new system image and the reboot that installs it.
+// Comparing them here would read as drift on every machine in a fleet
+// the moment the table changed.
+//
+// A value is compared as written, not as parsed. "1048576" and
+// "1048576:1048576" set the same pair of numbers, and this reports
+// them as drift. That costs one reboot on a machine whose operator
+// rewrote a value without changing it, and the alternative costs a
+// parse in the one comparison that decides whether to reboot a
+// machine. A drift that reboots once too often is a smaller fault than
+// one that never reboots at all.
+func RlimitDrift(desired, actuated map[string]string) []string {
+	var diffs []string
+	names := map[string]bool{}
+	for name := range desired {
+		names[name] = true
+	}
+	for name := range actuated {
+		names[name] = true
+	}
+	for _, name := range slices.Sorted(maps.Keys(names)) {
+		d, dok := desired[name]
+		a, aok := actuated[name]
+		switch {
+		case dok && !aok:
+			diffs = append(diffs, fmt.Sprintf("rlimit %s: %s declared but not actuated", name, d))
+		case !dok && aok:
+			diffs = append(diffs, fmt.Sprintf("rlimit %s: %s actuated but no longer declared", name, a))
+		case d != a:
+			diffs = append(diffs, fmt.Sprintf("rlimit %s: %s declared, %s actuated", name, d, a))
+		}
+	}
+	return diffs
+}
+
 // ModuleSetDiff compares two module lists as sets. Order and
 // repetition carry no meaning in these lists. ModuleSetDiff reports
 // both directions separately, because the two directions converge in

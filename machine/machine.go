@@ -122,6 +122,19 @@ type MachineSpec struct {
 	// reboot.
 	Sysctls map[string]string `json:"sysctls,omitempty"`
 
+	// Rlimits is per-process resource tuning: it maps a resource to
+	// its desired limit, for example "nofile": "1048576". Init applies
+	// the limits every liken machine holds (machine.OSRlimits) and
+	// then these, to itself, before it starts k3s. Every process on
+	// the machine inherits the result.
+	//
+	// Unlike sysctls, these cannot reconcile live. The kernel fixes a
+	// process's limits when it forks, so no edit can reach a k3s that
+	// is already running. An edit stages to the machineState
+	// filesystem and applies at the next boot, the way storage and
+	// network do. RebootPolicy says who starts that boot.
+	Rlimits map[string]string `json:"rlimits,omitempty"`
+
 	// Modules names extra kernel modules that this machine loads at
 	// boot, beyond the fixed list that the OS itself needs (the
 	// image's modules.conf). These extra modules are the drivers for

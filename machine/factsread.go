@@ -60,6 +60,13 @@ func (t FactsTree) Read() (*MachineStatus, error) {
 	if s.Firmware, err = t.readFirmware(); err != nil {
 		return nil, err
 	}
+	// Rlimits comes from the tree, unlike sysctls above. The operator
+	// can read a sysctl back itself at any time, but a resource limit
+	// belongs to a process, and the process that matters is init. Only
+	// init can report it.
+	if s.Rlimits, err = t.readKeyedScalars("rlimits"); err != nil {
+		return nil, err
+	}
 	if s.Storage, err = t.readStorage(); err != nil {
 		return nil, err
 	}
@@ -79,6 +86,34 @@ func (t FactsTree) Read() (*MachineStatus, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// readKeyedScalars reads a directory of scalar files back into a map,
+// the reader for what writeKeyedScalars publishes. An absent directory
+// reads as no map at all, which is rule 2's omitempty semantics.
+func (t FactsTree) readKeyedScalars(rel string) (map[string]string, error) {
+	entries, err := os.ReadDir(filepath.Join(t.Dir, rel))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	values := map[string]string{}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		value, err := t.readFact(filepath.Join(rel, entry.Name()))
+		if err != nil {
+			return nil, err
+		}
+		values[entry.Name()] = value
+	}
+	if len(values) == 0 {
+		return nil, nil
+	}
+	return values, nil
 }
 
 func (t FactsTree) readRuntime() (RuntimeStatus, error) {

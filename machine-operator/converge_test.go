@@ -125,6 +125,56 @@ func TestModuleRetractionStillConvergesByReboot(t *testing.T) {
 	}
 }
 
+// A resource limit is fixed when a process forks, so nothing can
+// raise the ceiling of a k3s that is already running. The live load
+// promotes the staged manifest to proven whether or not it applied
+// anything, so an rlimit edit that reached that path would leave the
+// machine reporting itself converged on limits it never actuated.
+func TestRlimitDriftConvergesByReboot(t *testing.T) {
+	m := labMachine()
+	m.Spec.Rlimits = map[string]string{"nofile": "524288"}
+	conv := decideConvergence(m, labFacts(), nil, "", turnStandalone)
+	if conv.condition.Reason != "RebootPending" || conv.requestLoad {
+		t.Errorf("an rlimit edit needs the reboot: %+v", conv.condition)
+	}
+}
+
+// An added module alone loads live. The same edit with an rlimit
+// beside it must not, because the load would prove the whole manifest.
+func TestAnAddedModuleBesideARlimitEditConvergesByReboot(t *testing.T) {
+	m := labMachine()
+	m.Spec.Modules = []string{"nvidia"}
+	m.Spec.Rlimits = map[string]string{"nofile": "524288"}
+	conv := decideConvergence(m, labFacts(), nil, "", turnStandalone)
+	if conv.condition.Reason != "RebootPending" || conv.requestLoad {
+		t.Errorf("an rlimit beside an added module forces the reboot tier: %+v", conv.condition)
+	}
+}
+
+// The live-load test counts diffs rather than naming the fields that
+// must be unchanged, so that a spec field added later is reboot-class
+// on the day it is added. This test states that property directly: a
+// drift line the guard has never heard of must not reach the live
+// path. If someone replaces the count with a list of field checks,
+// this fails.
+func TestAnUnrecognizedDiffNeverReachesTheLivePath(t *testing.T) {
+	m := labMachine()
+	m.Spec.Modules = []string{"nvidia"}
+	facts := labFacts()
+	// Network drift stands in for any future reboot-class field: one
+	// extra diff beside the added module.
+	facts.Boot.Network = &machine.NetworkSpec{
+		Interfaces: []machine.InterfaceSpec{{Name: "eth9"}},
+	}
+	m.Spec.Network = machine.NetworkSpec{
+		Interfaces: []machine.InterfaceSpec{{Name: "eth0"}},
+	}
+	conv := decideConvergence(m, facts, nil, "", turnStandalone)
+	if conv.requestLoad {
+		t.Errorf("a diff beside the added module reached the live path: %+v", conv.condition)
+	}
+}
+
 func TestMixedModuleAndStorageDriftConvergesByReboot(t *testing.T) {
 	m := labMachine()
 	m.Spec.Modules = []string{"nvidia"}

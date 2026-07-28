@@ -92,6 +92,24 @@ type MachineStatus struct {
 	// somebody wanted.
 	Sysctls map[string]string `json:"sysctls,omitempty"`
 
+	// Rlimits echoes the resource limits init holds, read back from
+	// the kernel: the limits every liken machine holds
+	// (machine.OSRlimits) and the ones spec.rlimits declares. Init is
+	// PID 1, so these are the limits every process on the machine
+	// inherits, k3s and containerd and the containers below them.
+	// Reading /proc/1/limits on the machine gives the same answer in
+	// the kernel's own layout.
+	//
+	// Each value is in the spec's syntax: a number when both halves
+	// agree, "infinity" for no limit, and "soft:hard" when the halves
+	// differ. So this map and spec.rlimits can be compared without
+	// translating either.
+	//
+	// A limit liken could not set is absent here, because a failed
+	// write is never read back. That is what makes this map the list
+	// of limits that hold, rather than the list somebody wanted.
+	Rlimits map[string]string `json:"rlimits,omitempty"`
+
 	// Modules reports the outcome of every module named in
 	// spec.modules. It makes queryable the same verdicts that init
 	// prints to the console. Only the declared extras appear here.
@@ -614,6 +632,19 @@ type BootStatus struct {
 	// lacked still counts as actuated here, because rebooting again
 	// with the same image would not change anything.
 	Modules []string `json:"modules,omitempty"`
+
+	// Rlimits is the resource limit map the winning manifest declared,
+	// recorded as actuated whatever each limit's outcome was. It is
+	// the drift reference, like Storage and Modules above: booting
+	// again under this manifest would ask for the same limits, and
+	// status.rlimits reports what the kernel actually holds.
+	//
+	// The limits every liken machine holds are deliberately not part
+	// of this record. They ship with the release rather than with the
+	// spec, so a change to them arrives with a new system image and a
+	// reboot of its own. Comparing them here would read as drift on
+	// every machine at once the moment the table changed.
+	Rlimits map[string]string `json:"rlimits,omitempty"`
 
 	// Slot is the system slot this boot came from, "A" or "B", read
 	// from the liken.slot= parameter in each boot entry's command

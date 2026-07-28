@@ -311,6 +311,49 @@ spec:
                     back from the kernel.
                   additionalProperties:
                     type: string
+                rlimits:
+                  type: object
+                  description: >-
+                    Resource limits, from a resource name to its
+                    declared limit, for example nofile: "1048576".
+                    These are the per-process ceilings that a
+                    systemd distribution sets in each service's
+                    Limit directives. liken has no systemd, so init
+                    applies them to itself before it starts k3s, and
+                    every process on the machine inherits them:
+                    k3s, containerd, and the containers below them.
+                    liken sets its own limits before it applies this
+                    field, so a name here overrides liken's limit for
+                    that resource. status.rlimits reports what the
+                    kernel holds, read back after both passes.
+                    Unlike sysctls, an edit here needs a reboot. The
+                    kernel fixes a process's limits when it forks, so
+                    nothing can raise the ceiling of a k3s that is
+                    already running. rebootPolicy says who starts
+                    that reboot.
+                  additionalProperties:
+                    type: string
+                    description: >-
+                      A limit in the same form a systemd unit file
+                      uses. A bare number sets both the soft and the
+                      hard limit, the word infinity means no limit,
+                      and a soft:hard pair sets the two halves
+                      separately. The soft limit is the one in force,
+                      and a process may raise its own soft limit up
+                      to its hard limit but never above it.
+                    pattern: ^(infinity|[0-9]{1,20})(:(infinity|[0-9]{1,20}))?$
+                    maxLength: 41
+                  # The kernel has one limit for each of these names
+                  # and no others, so a misspelling is refused here
+                  # rather than skipped at boot with only a console
+                  # line to say why.
+                  x-kubernetes-validations:
+                    - rule: >-
+                        self.all(r, r in ['nofile', 'nproc', 'core',
+                        'memlock', 'stack', 'fsize', 'nice'])
+                      message: >-
+                        a resource must be one of nofile, nproc, core,
+                        memlock, stack, fsize, or nice
                 modules:
                   type: array
                   description: >-
@@ -2193,6 +2236,22 @@ spec:
                       items:
                         type: string
                         maxLength: 64
+                    rlimits:
+                      type: object
+                      description: >-
+                        The resource limits that the manifest of this
+                        boot declared. The system records them as
+                        actuated, whatever the result of each one was.
+                        A boot under the same manifest asks for the
+                        same limits, so this field is the drift
+                        reference, and status.rlimits gives what the
+                        kernel actually holds. The limits liken sets
+                        on every machine are not part of this record,
+                        because they ship with the release rather than
+                        with the spec.
+                      additionalProperties:
+                        type: string
+                        maxLength: 41
                     rejection:
                       type: object
                       description: >-
@@ -2324,6 +2383,22 @@ spec:
                     a failed write is never read back, so this field
                     lists the parameters that currently hold rather
                     than the parameters somebody wanted.
+                  additionalProperties:
+                    type: string
+                rlimits:
+                  type: object
+                  description: >-
+                    The resource limits init holds, read back from the
+                    kernel: the limits liken sets on every machine,
+                    and the limits spec.rlimits declares. Init is the
+                    first process, so these are the limits that every
+                    process on the machine inherits, including every
+                    container. Reading /proc/1/limits on the machine
+                    gives the same answer in the kernel's own layout.
+                    Each value is in the same form spec.rlimits uses,
+                    so the two can be compared without translating
+                    either. A limit liken could not set is absent,
+                    because a failed write is never read back.
                   additionalProperties:
                     type: string
                 modules:

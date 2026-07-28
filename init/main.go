@@ -306,6 +306,23 @@ func main() {
 	applySysctls(machine.OSSysctls)
 	applySysctls(m.Spec.Sysctls)
 
+	// Resource limits follow the same defaults-then-spec order, and
+	// they differ from sysctls in one way that decides where they can
+	// run. A sysctl is a file the kernel re-reads, so the operator
+	// reconciles one live. A limit is fixed when a process forks, so
+	// the only way to give k3s a limit is to hold it here, before
+	// starting k3s, and let inheritance carry it down. Nothing can
+	// raise the ceiling of a running process, which is why an edit to
+	// spec.rlimits waits for a reboot.
+	applyRlimits(machine.OSRlimits)
+	applyRlimits(m.Spec.Rlimits)
+	// The boot record keeps the request, not the outcome, exactly as
+	// it does for modules above. It is the drift reference: booting
+	// again under this manifest would ask for these same limits. What
+	// the kernel actually holds goes to status.rlimits, read back in
+	// publishBootFacts.
+	boot.Rlimits = m.Spec.Rlimits
+
 	worldReport()
 
 	conns, err := bringUpNetwork(m.Spec.Network)

@@ -419,3 +419,27 @@ func syncEntryDirs(parent string, want map[string]bool) error {
 	}
 	return nil
 }
+
+// syncEntryFiles is syncEntryDirs for a collection whose elements are
+// scalars rather than records: it removes the file of every key the
+// writer no longer names. A collection of scalars is a directory of
+// files, not a directory of directories, so the two cannot share one
+// walk.
+func syncEntryFiles(parent string, want map[string]bool) error {
+	entries, err := os.ReadDir(parent)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || want[entry.Name()] {
+			continue
+		}
+		if err := removeFile(filepath.Join(parent, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
+}

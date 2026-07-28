@@ -291,7 +291,8 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 	storageDiffs := machine.StorageDrift(m.Spec.Storage, facts.Boot.Storage)
 	networkDiffs := machine.NetworkDrift(m.Spec.Network, facts.Boot.Network)
 	drift := slices.Concat(storageDiffs, networkDiffs,
-		machine.ModulesDrift(m.Spec.Modules, facts.Boot.Modules))
+		machine.ModulesDrift(m.Spec.Modules, facts.Boot.Modules),
+		machine.RlimitDrift(m.Spec.Rlimits, facts.Boot.Rlimits))
 	if len(drift) == 0 {
 		return convergedWithCleanup(
 			converged("SpecConverged", "Converged", "this boot actuated the current spec"),
@@ -325,6 +326,14 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 	if err := m.Spec.Network.Validate(); err != nil {
 		return convergence{condition: notConverged("SpecConverged", "StagingRejected", err.Error())}
 	}
+	// Resource limits are checked for the same reason. Init would skip
+	// a limit it cannot apply rather than refuse the boot, so a typo
+	// here costs a reboot and then applies nothing at all, with only a
+	// console line to say why. Refusing to stage it says so in a
+	// condition instead.
+	if err := machine.ValidateRlimits(m.Spec.Rlimits); err != nil {
+		return convergence{condition: notConverged("SpecConverged", "StagingRejected", err.Error())}
+	}
 	if err := validateStaging(m.Spec.Storage, facts); err != nil {
 		return convergence{condition: notConverged("SpecConverged", "StagingRejected", err.Error())}
 	}
@@ -338,17 +347,28 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 	// Adding modules is the one machine-spec change that needs no
 	// disruption. Loading can happen while the system runs: the
 	// kernel binds a resident driver to hardware that is already
-	// plugged in, on its own. So when the storage and the network are
-	// unchanged and no module is being removed, the manifest stages
-	// for durability, and init loads the additions into the running
-	// kernel. This case needs no policy gate and no reboot turn, the
-	// same as the sysctls the operator reconciles live: the gates
-	// exist for disruptions, and this is not one. (Removing a module
-	// still needs a reboot, because loading is one-way. The kernel
-	// offers no safe way to remove a driver while something is using
-	// it.)
-	_, retracted := machine.ModuleSetDiff(m.Spec.Modules, facts.Boot.Modules)
-	if len(storageDiffs) == 0 && len(networkDiffs) == 0 && len(retracted) == 0 {
+	// plugged in, on its own. So when every difference is an added
+	// module, the manifest stages for durability, and init loads the
+	// additions into the running kernel. This case needs no policy
+	// gate and no reboot turn, the same as the sysctls the operator
+	// reconciles live: the gates exist for disruptions, and this is
+	// not one. (Removing a module still needs a reboot, because
+	// loading is one-way. The kernel offers no safe way to remove a
+	// driver while something is using it.)
+	//
+	// The test counts rather than naming the fields that must be
+	// unchanged. ModulesDrift writes exactly one line for each added
+	// module, so the counts match only when the added modules are the
+	// whole of the drift. This makes the safety property structural,
+	// the same way RestartApplies does it for the cluster document: a
+	// new spec field is reboot-class from the day it is added,
+	// because its diffs land in drift and never in added. Naming the
+	// fields instead would make a forgotten field silently live-class,
+	// and init's live loader promotes the staged manifest to proven
+	// whether or not it applied anything. A machine would then report
+	// itself converged on a spec it never actuated.
+	added, retracted := machine.ModuleSetDiff(m.Spec.Modules, facts.Boot.Modules)
+	if len(retracted) == 0 && len(drift) == len(added) {
 		c.requestLoad = true
 		c.condition = notConverged("SpecConverged", "LoadRequested",
 			fmt.Sprintf("module load requested to apply the staged spec (%.12s) in place: %s", hash, diffs))

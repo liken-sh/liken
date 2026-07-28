@@ -125,6 +125,13 @@ func publishBootFacts(tree machine.FactsTree, in bootFacts) {
 	tree.WriteFeatures(in.features)
 	tree.WriteRegistries(in.registries)
 	tree.WriteRuntime(runtimeFacts(in.clusterDoc, memoryBytes))
+	// The limits are read back from init itself rather than passed in,
+	// like the hardware and firmware blocks above. Init is PID 1, so
+	// its limits are the ones every process on the machine inherits,
+	// and one Getrlimit here needs no earlier boot step to remember
+	// anything. The names to read are the union of the table and the
+	// spec, and the boot record carries the spec.
+	tree.WriteRlimits(readRlimits(machine.OSRlimits, in.boot.Rlimits))
 
 	// The boot record: what this boot ran under. The four manifest
 	// records seed here at boot; the module loader and the restart path
@@ -138,6 +145,7 @@ func publishBootFacts(tree machine.FactsTree, in bootFacts) {
 	tree.WriteBootStorage(in.boot.Storage)
 	tree.WriteBootNetwork(in.boot.Network)
 	tree.WriteBootModules(in.boot.Modules)
+	tree.WriteBootRlimits(in.boot.Rlimits)
 	tree.WriteBootManifest(in.boot.ManifestSource, in.boot.ManifestHash)
 	tree.WriteBootClusterManifest(in.boot.ClusterManifestSource, in.boot.ClusterManifestHash)
 	tree.WriteBootCredentials(in.boot.CredentialsSource, in.boot.CredentialsHash)
