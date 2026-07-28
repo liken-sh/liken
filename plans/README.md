@@ -14,7 +14,7 @@ A document's directory states its status:
   built yet.
 
 The numbers run in one sequence across all three directories. The next
-milestone is 44.
+milestone is 46.
 
 ## Completed
 
@@ -142,6 +142,13 @@ milestone is 44.
 * **34.** [GPU add-ons](34-gpu-add-ons.md) — a machine that needs a GPU
   compute stack declares an add-on: a second read-only image on its
   boot slot. The first add-on would be NVIDIA compute.
+* **44.** [Naming a disk by identity](44-naming-a-disk-by-identity.md) —
+  a Machine declares its storage by a name that belongs to the disk,
+  and `/dev/disk` grows the `by-id` and `by-uuid` trees beside the
+  `by-path` tree that iSCSI needed.
+* **45.** [The CLI reaches the cluster](45-the-cli-reaches-the-cluster.md)
+  — one command grants a machine the reboot its policy withholds, and
+  three run `kubectl`, `stern`, and `flux` against the right cluster.
 
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.
