@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
 )
 
@@ -92,11 +93,61 @@ func TestJanitorDeletesRetractedWorkloadsThroughTheAPI(t *testing.T) {
 	}
 }
 
+// retractedCluster is a cluster that declares no features at all, so
+// every flux slug is retracted and the janitor has work to consider.
+func retractedCluster() *cluster.Cluster {
+	c := &cluster.Cluster{}
+	c.Metadata.Name = "lab"
+	return c
+}
+
+// plantedNamespace is the flux-system Namespace as liken's planter
+// creates it: stamped with the feature it belongs to. An installation
+// somebody else made carries no such annotation.
+const plantedNamespace = `{"metadata": {"name": "flux-system",
+	"annotations": {"liken.sh/feature": "flux"}}}`
+
 func TestJanitorFluxLeavesADeclaredFeatureAlone(t *testing.T) {
 	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("no API call should happen: %s %s", r.Method, r.URL.Path)
 	}))
-	janitorFlux(c, fluxCluster())
+	if got := janitorFlux(c, fluxCluster()); got != nil {
+		t.Errorf("a declared feature has nothing to report: %+v", got)
+	}
+}
+
+// The finding this gate exists for: an adopted cluster already ran
+// its own Flux, and the adopting document never named the slug. liken
+// did not plant that installation, so liken deletes none of it.
+func TestJanitorFluxDeletesNothingItDidNotPlant(t *testing.T) {
+	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != fluxNamespacePath {
+			t.Errorf("only the ownership read may happen: %s %s", r.Method, r.URL.Path)
+		}
+		w.Write([]byte(`{"metadata": {"name": "flux-system"}}`))
+	}))
+	got := janitorFlux(c, retractedCluster())
+	if got == nil {
+		t.Fatal("a declined teardown must report itself on the Cluster")
+	}
+	if got.Type != fluxTeardownCondition || got.Status != api.ConditionFalse {
+		t.Errorf("got %+v", got)
+	}
+	if !strings.Contains(got.Message, "kubectl annotate namespace flux-system liken.sh/feature=flux") {
+		t.Errorf("the message must name the remedy: %q", got.Message)
+	}
+}
+
+func TestJanitorFluxDoesNothingWhenTheNamespaceIsAbsent(t *testing.T) {
+	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != fluxNamespacePath {
+			t.Errorf("nothing exists to tear down: %s %s", r.Method, r.URL.Path)
+		}
+		http.NotFound(w, r)
+	}))
+	if got := janitorFlux(c, retractedCluster()); got != nil {
+		t.Errorf("an absent installation is not a refusal: %+v", got)
+	}
 }
 
 // Stage 1: the controllers die first, and nothing else is touched on
@@ -106,10 +157,12 @@ func TestJanitorFluxLeavesADeclaredFeatureAlone(t *testing.T) {
 func TestJanitorFluxKillsTheControllersFirst(t *testing.T) {
 	var deleted []string
 	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == fluxNamespacePath:
+			w.Write([]byte(plantedNamespace))
+		case r.Method == http.MethodGet:
 			w.Write([]byte(`{"metadata": {"name": "x"}}`))
-		case http.MethodDelete:
+		case r.Method == http.MethodDelete:
 			deleted = append(deleted, r.URL.Path)
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{}`))
@@ -117,9 +170,7 @@ func TestJanitorFluxKillsTheControllersFirst(t *testing.T) {
 			t.Errorf("unexpected call: %s %s", r.Method, r.URL.Path)
 		}
 	}))
-	plain := &cluster.Cluster{}
-	plain.Metadata.Name = "lab"
-	janitorFlux(c, plain)
+	janitorFlux(c, retractedCluster())
 	want := []string{
 		"/apis/apps/v1/namespaces/flux-system/deployments/source-controller",
 		"/apis/apps/v1/namespaces/flux-system/deployments/kustomize-controller",
@@ -134,6 +185,8 @@ func TestJanitorFluxKillsTheControllersFirst(t *testing.T) {
 func TestJanitorFluxWaitsOutTerminatingControllers(t *testing.T) {
 	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == fluxNamespacePath:
+			w.Write([]byte(plantedNamespace))
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/deployments/"):
 			http.NotFound(w, r)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/pods"):
@@ -142,9 +195,9 @@ func TestJanitorFluxWaitsOutTerminatingControllers(t *testing.T) {
 			t.Errorf("unexpected call: %s %s", r.Method, r.URL.Path)
 		}
 	}))
-	plain := &cluster.Cluster{}
-	plain.Metadata.Name = "lab"
-	janitorFlux(c, plain)
+	if got := janitorFlux(c, retractedCluster()); got != nil {
+		t.Errorf("a teardown in progress is not a refusal: %+v", got)
+	}
 }
 
 // Stage 3: with the controllers provably gone, the sync objects lose
@@ -154,6 +207,8 @@ func TestJanitorFluxTearsDownOnceControllersAreGone(t *testing.T) {
 	var patched, deleted []string
 	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == fluxNamespacePath:
+			w.Write([]byte(plantedNamespace))
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/deployments/"):
 			http.NotFound(w, r)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/pods"):
@@ -168,13 +223,27 @@ func TestJanitorFluxTearsDownOnceControllersAreGone(t *testing.T) {
 			t.Errorf("unexpected call: %s %s", r.Method, r.URL.Path)
 		}
 	}))
-	plain := &cluster.Cluster{}
-	plain.Metadata.Name = "lab"
-	janitorFlux(c, plain)
+	if got := janitorFlux(c, retractedCluster()); got != nil {
+		t.Errorf("a teardown that ran has nothing to refuse: %+v", got)
+	}
 	if len(patched) != 2 {
 		t.Errorf("both sync objects lose their finalizers, got %v", patched)
 	}
 	if !slices.Equal(deleted, fluxTeardownPaths) {
 		t.Errorf("the teardown must cover every path, in order:\n got %v\nwant %v", deleted, fluxTeardownPaths)
+	}
+}
+
+// A read that fails outright says nothing about who planted the
+// installation, so the pass stops with no verdict either way.
+func TestJanitorFluxStopsWhenTheOwnershipReadFails(t *testing.T) {
+	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != fluxNamespacePath {
+			t.Errorf("an unreadable namespace stops the pass: %s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	if got := janitorFlux(c, retractedCluster()); got != nil {
+		t.Errorf("an unreadable namespace is not a refusal: %+v", got)
 	}
 }

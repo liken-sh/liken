@@ -158,6 +158,39 @@ run. Retraction stops the sync. It does not remove the workloads. To
 turn the feature on again, declare it again and register the new key
 it creates.
 
+Retraction removes only the Flux that `liken` installed. The next
+section says how `liken` separates the two cases.
+
 If someone deletes the engine by accident, the cluster installs it
 again in seconds, and the next sync restores the copy from the
 repository.
+
+## What liken owns
+
+When `liken` installs the engine, it writes this annotation on the
+`flux-system` namespace it creates:
+
+    liken.sh/feature: flux
+
+The annotation records that `liken` planted this installation. The
+teardown reads it before it deletes anything.
+
+`liken` installs the engine with plain creates, and it never changes
+an object that already exists. So a `liken` that starts beside a Flux
+somebody else installed never writes the annotation. Without the
+annotation, retracting the feature deletes nothing, and the Cluster
+reports a `FluxTeardown` condition instead:
+
+    kubectl describe cluster
+
+A cluster that `liken` founded before this record existed is in the
+same position. Its `flux-system` namespace carries no annotation, so
+its first retraction also declines and reports.
+
+To give an existing installation to `liken`, write the annotation
+yourself:
+
+    kubectl annotate namespace flux-system liken.sh/feature=flux
+
+Retraction then removes the engine, its namespace, and the deploy key,
+as it does for an installation `liken` made.

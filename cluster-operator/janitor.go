@@ -38,6 +38,7 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/liken-sh/liken/api"
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/kubernetes"
 )
@@ -112,20 +113,32 @@ func janitorFeatureWorkloads(c *kubernetes.Client, clusterDoc *cluster.Cluster) 
 
 // The flux janitor: the teardown half of the seed-once engine.
 //
-// The generic janitor above deletes annotated workloads, but the
-// flux feature cannot use that shape, because its objects are not
-// inert. Deleting the Kustomization while its controller still runs
-// triggers the engine's own deletion finalizer, and with prune on,
-// that finalizer garbage-collects everything the repository ever
-// applied: the workloads, the Machine documents, and the Cluster
-// document itself. So flux's retraction is ordered, and the order
-// is the whole design: kill the controllers first, so the finalizer
-// can never fire, then remove the finalizers by hand, and only then
-// delete the objects.
+// The generic janitor above deletes only a workload that carries the
+// feature annotation, and the flux janitor makes that same ownership
+// test first, because here the answer is not always yes. An adopted
+// cluster may already run a Flux that somebody else installed, long
+// before liken arrived. The document an operator writes during
+// adoption describes machines, but spec.features is an opt-in list,
+// so the same document is also a claim over everything else in the
+// cluster, and a slug left out of it is a retraction. So the janitor
+// reads the ownership mark first, and tears down only the
+// installation liken planted.
+//
+// The rest of the teardown cannot use the generic janitor's shape,
+// because these objects are not inert. Deleting the Kustomization
+// while its controller still runs triggers the engine's own deletion
+// finalizer, and with prune on, that finalizer garbage-collects
+// everything the repository ever applied: the workloads, the Machine
+// documents, and the Cluster document itself. So flux's retraction is
+// ordered, and the order is the whole design: kill the controllers
+// first, so the finalizer can never fire, then remove the finalizers
+// by hand, and only then delete the objects.
 //
 // Each sweep advances one stage and returns, so the stages are
 // separated by real observations, never by in-process waits:
 //
+//  0. The flux-system Namespace carries no liken.sh/feature mark:
+//     delete nothing, and report the refusal on the Cluster.
 //  1. Engine Deployments still exist: delete them.
 //  2. Controller pods still exist: wait. A Deployment's deletion is
 //     asynchronous, and a controller that is still terminating could
@@ -152,6 +165,21 @@ func janitorFeatureWorkloads(c *kubernetes.Client, clusterDoc *cluster.Cluster) 
 // standing rights are deletes on exact names, powerless to create
 // or read anything.
 
+// The engine's namespace, by name and by path. The Namespace is also
+// the ownership record: liken's planter stamps the feature annotation
+// on it (see stampOwnership in flux.go), and this janitor reads that
+// annotation before it deletes anything.
+const (
+	fluxNamespace     = "flux-system"
+	fluxNamespacePath = "/api/v1/namespaces/" + fluxNamespace
+)
+
+// fluxTeardownCondition is the type of the Cluster condition that
+// reports a declined teardown. It is present only while there is a
+// refusal to report, so the sweep removes it whenever the janitor
+// returns nothing (see publishClusterStatus in fleet.go).
+const fluxTeardownCondition = "FluxTeardown"
+
 // fluxTeardownPaths are the delete targets of the final stage, in
 // order. The sync objects come first, finalizers already stripped;
 // the namespace's own deletion then sweeps everything namespaced
@@ -161,7 +189,7 @@ func janitorFeatureWorkloads(c *kubernetes.Client, clusterDoc *cluster.Cluster) 
 var fluxTeardownPaths = []string{
 	"/apis/kustomize.toolkit.fluxcd.io/v1/namespaces/flux-system/kustomizations/flux-system",
 	"/apis/source.toolkit.fluxcd.io/v1/namespaces/flux-system/gitrepositories/flux-system",
-	"/api/v1/namespaces/flux-system",
+	fluxNamespacePath,
 	"/apis/apiextensions.k8s.io/v1/customresourcedefinitions/buckets.source.toolkit.fluxcd.io",
 	"/apis/apiextensions.k8s.io/v1/customresourcedefinitions/externalartifacts.source.toolkit.fluxcd.io",
 	"/apis/apiextensions.k8s.io/v1/customresourcedefinitions/gitrepositories.source.toolkit.fluxcd.io",
@@ -183,13 +211,61 @@ var fluxTeardownPaths = []string{
 var fluxControllerPodsPath = "/api/v1/namespaces/flux-system/pods?labelSelector=" +
 	url.QueryEscape("app in (source-controller,kustomize-controller)")
 
+// declinedFluxTeardown is the report the janitor returns when it
+// refuses to tear down a Flux that liken did not plant. The message
+// carries the remedy, because an operator who really does want liken
+// to own this installation needs one command and should not have to
+// find it.
+func declinedFluxTeardown() *api.Condition {
+	mark := featureAnnotation + "=" + cluster.FeatureFlux
+	return &api.Condition{
+		Type:   fluxTeardownCondition,
+		Status: api.ConditionFalse,
+		Reason: "NotPlantedByLiken",
+		Message: "the cluster no longer declares flux, and the " + fluxNamespace +
+			" Namespace carries no " + mark + " annotation, so liken did not plant this" +
+			" installation and deleted nothing. To give liken this installation, run:" +
+			" kubectl annotate namespace " + fluxNamespace + " " + mark,
+	}
+}
+
 // janitorFlux tears the flux feature down when the cluster document
-// no longer declares it. Every call is one stage at most; the sweep
-// calls it again ten seconds later, and silence is the converged
-// state.
-func janitorFlux(c *kubernetes.Client, clusterDoc *cluster.Cluster) {
+// no longer declares it, and only when liken planted it. Every call
+// is one stage at most; the sweep calls it again ten seconds later,
+// and silence is the converged state. The returned condition reports
+// a refusal, and nil means there is nothing to report.
+func janitorFlux(c *kubernetes.Client, clusterDoc *cluster.Cluster) *api.Condition {
 	if clusterDoc.FeatureEnabled(cluster.FeatureFlux) {
-		return
+		return nil
+	}
+
+	// Stage 0: ownership, before a single delete. An installation
+	// liken did not plant is not one liken removes, so the Namespace's
+	// mark gates everything below. An absent Namespace means there is
+	// no installation to tear down, and a read that fails outright
+	// says nothing about ownership, so both answers stop the pass
+	// without a verdict.
+	//
+	// This gate has one real cost, and it falls on a cluster that
+	// liken founded before the mark existed: that cluster's
+	// flux-system Namespace carries no annotation, so retracting the
+	// feature now deletes nothing and raises the condition instead.
+	// The operator annotates the Namespace and the teardown proceeds
+	// on the next sweep. Failing closed is the correct direction here,
+	// because the failure in the other direction deletes somebody
+	// else's GitOps installation, and the condition names the one
+	// command that clears this one.
+	namespace := &featureWorkload{}
+	err := c.RequestJSON(http.MethodGet, fluxNamespacePath, nil, namespace)
+	if errors.Is(err, kubernetes.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		fmt.Printf("reading the %s namespace for the flux teardown: %v\n", fluxNamespace, err)
+		return nil
+	}
+	if namespace.Metadata.Annotations[featureAnnotation] != cluster.FeatureFlux {
+		return declinedFluxTeardown()
 	}
 
 	// Stage 1: the controllers must die before anything else is
@@ -202,12 +278,12 @@ func janitorFlux(c *kubernetes.Client, clusterDoc *cluster.Cluster) {
 			continue
 		}
 		if err := c.RequestJSON(http.MethodDelete, path+"?propagationPolicy=Background", nil, nil); err == nil {
-			fmt.Printf("the cluster no longer declares flux; deleted the %s Deployment\n", name)
+			fmt.Printf("liken planted this flux and the cluster no longer declares it; deleted the %s Deployment\n", name)
 			deleted = true
 		}
 	}
 	if deleted {
-		return
+		return nil
 	}
 
 	// Stage 2: wait out terminating controller pods. This gate is
@@ -215,7 +291,7 @@ func janitorFlux(c *kubernetes.Client, clusterDoc *cluster.Cluster) {
 	// exists past it.
 	pods, err := kubernetes.List[featureWorkload](c, fluxControllerPodsPath)
 	if err != nil || len(pods) > 0 {
-		return
+		return nil
 	}
 
 	// Stage 3: nothing can react anymore. Strip the sync objects'
@@ -227,12 +303,17 @@ func janitorFlux(c *kubernetes.Client, clusterDoc *cluster.Cluster) {
 	for _, path := range fluxTeardownPaths[:2] {
 		_ = c.PatchJSON(path, []byte(`{"metadata": {"finalizers": null}}`))
 	}
+	// Each line states why the delete was safe to make, because a
+	// reader who meets these lines in a log is asking exactly that:
+	// liken planted this installation, so it is liken's to remove, and
+	// no controller survives to run a prune finalizer over it.
 	for _, path := range fluxTeardownPaths {
 		err := c.RequestJSON(http.MethodDelete, path, nil, nil)
 		if err == nil {
-			fmt.Printf("the cluster no longer declares flux; deleted %s\n", path)
+			fmt.Printf("liken planted this flux and the cluster no longer declares it; the controllers are gone, so no prune can fire; deleted %s\n", path)
 		} else if !errors.Is(err, kubernetes.ErrNotFound) && !errors.Is(err, kubernetes.ErrConflict) {
 			fmt.Printf("flux teardown, deleting %s: %v\n", path, err)
 		}
 	}
+	return nil
 }

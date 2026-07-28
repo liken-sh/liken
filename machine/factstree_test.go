@@ -28,6 +28,7 @@ func writeAll(t *testing.T, tree FactsTree, s *MachineStatus) {
 	}
 	must(tree.WriteRole(s.Role))
 	must(tree.WriteLastCrash(s.LastCrash))
+	must(tree.WriteLastFailStop(s.LastFailStop))
 	must(tree.WriteVersion(s.Version))
 	must(tree.WriteNetwork(s.Network))
 	must(tree.WriteTime(s.Time))
@@ -93,6 +94,7 @@ func everythingSet() *MachineStatus {
 	lease := booted.Add(time.Hour)
 	synced := booted.Add(30 * time.Second)
 	crashed := booted.Add(-5 * time.Minute)
+	refused := booted.Add(-2 * time.Hour)
 	rejected := booted.Add(-time.Hour)
 	storage := AllRolesInMemory()
 	storage.ClusterState = StorageRoleStatus{
@@ -112,6 +114,10 @@ func everythingSet() *MachineStatus {
 			Time: &crashed, Reason: CrashPanic,
 			Message: "Kernel panic - not syncing: test",
 			Records: "/var/lib/liken/machine/crash/0001",
+		},
+		LastFailStop: &FailStop{
+			Reason: "machine identity: /etc/liken/cluster.yaml: spec.registries.mirrors: registry.example lists no endpoints",
+			Time:   refused,
 		},
 		Version: VersionStatus{
 			Liken: "0.1.0", Kernel: "6.15.4", Xtables: "v1.8.11 (legacy)",

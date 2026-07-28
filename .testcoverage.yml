@@ -57,7 +57,7 @@ override:
   # and tested, and the acting halves run against a miniature API
   # server. What stays untested is main's loop.
   - path: ^cluster-operator$
-    threshold: 82
+    threshold: 87
   # Init: the boot machinery itself (mounting, DHCP, the reboot
   # syscall) is exercised by the QEMU harness, not unit tests. The
   # parsers, planners, derivations, and file-shaped actuators around
@@ -81,7 +81,7 @@ override:
   # the tests exercise them end to end against fixture trees. What
   # stays untested is a scattering of I/O error returns.
   - path: ^image$
-    threshold: 83
+    threshold: 84
   # The log relays: parsing and tailing are pure, or run against real
   # temp files. What stays untested is the real /dev/kmsg device and
   # the clock syscalls.

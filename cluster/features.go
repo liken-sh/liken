@@ -49,6 +49,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -259,7 +260,7 @@ var Features = []FeatureDefinition{
 	// swappability the design could never honor. A deployment that
 	// needs a different engine needs a different feature.
 	{Slug: "flux", Kind: FeatureWorkload, Teardown: TeardownJanitor,
-		Params: []string{"repository", "path", "branch", "knownHosts"}},
+		Params: []string{"repository", "path", "branch", "knownHosts", "prune"}},
 }
 
 // FeatureConfig is one feature's configuration: the object under its
@@ -314,11 +315,18 @@ func (def *FeatureDefinition) ValidateParams(cfg *FeatureConfig) error {
 const FeatureFlux = "flux"
 
 // The sync defaults: the repository's root, on the branch most
-// forges create by default. A deployment that keeps several clusters
-// in one repository sets path to its cluster's directory instead.
+// forges create by default, with pruning on. A deployment that keeps
+// several clusters in one repository sets path to its cluster's
+// directory instead.
+//
+// Pruning defaults to on because a cluster liken founds starts empty.
+// Every object in it came from the repository, so an object the
+// repository no longer produces has no other author, and deleting it
+// keeps the cluster equal to the repository.
 const (
 	FluxDefaultPath   = "."
 	FluxDefaultBranch = "main"
+	FluxDefaultPrune  = true
 )
 
 // FluxConfig is the flux feature's configuration, typed: where the
@@ -330,11 +338,23 @@ const (
 // without anyone answering a trust prompt. The cluster operator
 // keeps the flux-system Secret's known_hosts entry synchronized
 // with it.
+//
+// Prune says whether the sync deletes an object that the repository
+// no longer produces. It belongs in the document because init cannot
+// work the answer out: seedFluxSync renders a file and holds no API
+// client, so it can never read what the repository contains. Only the
+// person who wrote the repository knows whether it carries its own
+// copy of the flux-system Kustomization. If it does, that
+// Kustomization appears in its own inventory, a build that stops
+// producing it marks it for deletion, and the deletion's finalizer
+// then removes everything the repository ever applied. Such a
+// repository declares prune: "false".
 type FluxConfig struct {
 	Repository string
 	Path       string
 	Branch     string
 	KnownHosts string
+	Prune      bool
 }
 
 // FluxConfig reads the flux feature's declaration, applies the sync
@@ -355,7 +375,11 @@ func (c *Cluster) FluxConfig() (*FluxConfig, error) {
 	if err := def.ValidateParams(cfg); err != nil {
 		return nil, err
 	}
-	out := &FluxConfig{Path: FluxDefaultPath, Branch: FluxDefaultBranch}
+	out := &FluxConfig{
+		Path:   FluxDefaultPath,
+		Branch: FluxDefaultBranch,
+		Prune:  FluxDefaultPrune,
+	}
 	if cfg != nil {
 		if s, _ := (*cfg)["repository"].(string); s != "" {
 			out.Repository = s
@@ -368,6 +392,17 @@ func (c *Cluster) FluxConfig() (*FluxConfig, error) {
 		}
 		if s, _ := (*cfg)["knownHosts"].(string); s != "" {
 			out.KnownHosts = s
+		}
+		// Every parameter's value is a string, so a boolean arrives
+		// spelled out and this is where it becomes one.
+		if s, _ := (*cfg)["prune"].(string); s != "" {
+			prune, err := strconv.ParseBool(s)
+			if err != nil {
+				return nil, fmt.Errorf(
+					"flux: prune must be \"true\" or \"false\", not %q: write prune: \"false\" when the repository carries its own flux-system Kustomization",
+					s)
+			}
+			out.Prune = prune
 		}
 	}
 	if out.Repository == "" {

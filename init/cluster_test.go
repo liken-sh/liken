@@ -5,8 +5,10 @@ package main
 // accurately recording which copy the boot used.
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/liken-sh/liken/machine"
@@ -33,6 +35,43 @@ func writeSeed(t *testing.T, content string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// The install boot's check runs before the reinstall blanks a disk and
+// before storage claims one, so these three answers decide whether a
+// machine keeps its data.
+func TestCheckSeedClusterAcceptsAGoodDocument(t *testing.T) {
+	if err := checkSeedCluster(writeSeed(t, sampleCluster)); err != nil {
+		t.Errorf("a document that parses must not stop the install: %v", err)
+	}
+}
+
+func TestCheckSeedClusterAcceptsAMachineAlone(t *testing.T) {
+	// A deployment with no cluster document installs a machine that is
+	// its own cluster, so absence is an answer and not a fault.
+	if err := checkSeedCluster(filepath.Join(t.TempDir(), "absent.yaml")); err != nil {
+		t.Errorf("an absent document is legal: %v", err)
+	}
+}
+
+func TestCheckSeedClusterRefusesTheDocumentAMachineWouldRefuse(t *testing.T) {
+	// The motivating document: mirrors that name no endpoint. It
+	// installs and then stops every boot from the disk, so the refusal
+	// belongs here, while a person is still at the machine.
+	seed := writeSeed(t, sampleCluster+`  registries:
+    mirrors:
+      docker.io: []
+`)
+	err := checkSeedCluster(seed)
+	if err == nil {
+		t.Fatal("a document a machine would refuse must stop the install")
+	}
+	if !errors.Is(err, errIdentity) {
+		t.Errorf("the refusal must be an identity fail-stop, got %v", err)
+	}
+	if !strings.Contains(err.Error(), seed) {
+		t.Errorf("the refusal must name the document, got %v", err)
+	}
 }
 
 func TestChooseClusterFromTheSeed(t *testing.T) {

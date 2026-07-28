@@ -99,6 +99,17 @@ const slotMountFlags = unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC
 // mounts this boot came from (switchroot.go).
 const bootHomeDir = "/var/lib/liken/boot"
 
+// machineStateWritable says whether machineState is mounted for
+// writing at this moment in the boot. failBoot consults it before it
+// writes the fail-stop record, because a record written to the RAM
+// root would go out with the power (failstop.go).
+//
+// The mount sets it, rather than a successful return from
+// settleStorage, so that a boot which stops over some other role still
+// records why. Roles mount in the canonical order, so a failure after
+// machineState lands on disk and a failure before it does not.
+var machineStateWritable bool
+
 var roleMounts = map[machine.StorageRoleName]roleMount{
 	machine.BootHomeRole:         {path: bootHomeDir, flags: slotMountFlags, fstype: "vfat"},
 	machine.SystemARole:          {path: machine.SystemSlotDir("A"), flags: slotMountFlags, fstype: "vfat"},
@@ -169,6 +180,10 @@ func teardownStorage() {
 	// mounted there.
 	_ = unix.Unmount(clusterStateStaging, 0)
 	unmountRoleMounts(0, true)
+	// machineState is among the file systems that just came off, so
+	// there is nowhere durable to write again until a later attempt
+	// mounts it.
+	machineStateWritable = false
 }
 
 // unmountRoleMounts detaches every role file system in reverse
@@ -588,6 +603,9 @@ func mountRole(role machine.DeclaredRole, p partition, created bool) error {
 		if err := os.Chmod(target, rm.mode); err != nil {
 			fmt.Fprintf(os.Stderr, "liken: storage: chmod %s: %v\n", target, err)
 		}
+	}
+	if role.Name == machine.MachineStateRole {
+		machineStateWritable = true
 	}
 	fmt.Printf("liken: storage: %s is %s (%s) on %s\n",
 		role.Name, dev, p.partName, target)

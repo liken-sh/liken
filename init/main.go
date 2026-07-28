@@ -125,6 +125,26 @@ func main() {
 		runHardwareReport() // never returns; it reboots
 	}
 
+	// An install boot reads its cluster document here, before it
+	// touches a disk, and refuses the whole install if the document
+	// does not parse. The install bakes that document into both slots,
+	// and a machine cannot derive its role without it, so a document
+	// that fails here fails every boot from the disk afterward. That is
+	// the one boot nobody is watching: it powers off a few seconds in,
+	// and the reason goes to a console that nothing records.
+	//
+	// The check sits above the two steps below, and the order is the
+	// point. A reinstall blanks the machine's disks, and settleStorage
+	// claims and formats them. A document typo must not cost a machine
+	// its data before anybody reads the complaint. failBoot holds the
+	// console on an install boot, so the person who picked the entry
+	// gets the reason while every disk is still as they left it.
+	if installing() {
+		if err := checkSeedCluster(cluster.ClusterManifestPath); err != nil {
+			failBoot(err)
+		}
+	}
+
 	// A reinstall boot blanks the disks its manifest declares before
 	// storage settles, so a machine that already carries a liken
 	// install can be installed over with no external tool. It runs
@@ -201,6 +221,15 @@ func main() {
 	mountPstore()
 	lastCrash := settleCrashRecords(machine.MachineStateDir,
 		storage.MachineState.Backing == machine.BackingPartition)
+
+	// A crash is one way an earlier boot ended badly. A refusal is the
+	// other, and it is the quieter one, because init powered the
+	// machine off on purpose and the reason went to a console that
+	// nothing recorded. This step reads that reason back off
+	// machineState and reports it (failstop.go). It sits beside the
+	// crash step because both need settled storage, and, like the crash
+	// step, it never clears what it reads.
+	lastFailStop := reportFailStop(machine.MachineStateDir)
 
 	// This block settles where this boot sits in the system release
 	// lifecycle. This boot may be the trial of a staged release, in
@@ -294,7 +323,7 @@ func main() {
 	// boot, then powers off.
 	if _, err := os.Stat(k3sBinary); err == nil {
 		clusterLife(choice, storage, boot, clusterDoc, clusterRaw, creds,
-			conns, moduleStatuses, featureStatuses, actuator, trial, lastCrash) // never returns
+			conns, moduleStatuses, featureStatuses, actuator, trial, lastCrash, lastFailStop) // never returns
 	}
 
 	// With no k3s to supervise, a boot is complete once the report is
@@ -316,7 +345,7 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	clusterDoc *cluster.Cluster, clusterRaw []byte, creds *machine.RegistryCredentials,
 	conns []*connection, moduleStatuses []machine.ModuleStatus,
 	featureStatuses []machine.FeatureStatus, actuator bootActuator, trial *machine.SystemRelease,
-	lastCrash *machine.CrashStatus) {
+	lastCrash *machine.CrashStatus, lastFailStop *machine.FailStop) {
 	m := choice.m
 
 	// Before k3s can touch its container store, this call determines
@@ -409,6 +438,7 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 		blockDevices: blockDevices,
 		unclaimed:    unclaimed,
 		lastCrash:    lastCrash,
+		lastFailStop: lastFailStop,
 	})
 	publishBootManifest(choice)
 	publishBootClusterManifest(clusterRaw)
@@ -556,6 +586,11 @@ func failBoot(err error) {
 	}
 	fmt.Fprintf(os.Stderr, "liken: %v\n", err)
 	fmt.Fprintf(os.Stderr, "liken: %s\n", rationale)
+	// The two lines above reach a console that nothing records.
+	// syncLogs is a 50 ms sleep, and no log relay runs on a boot that
+	// never starts k3s, so the reason goes onto machineState here for
+	// the next boot to report (failstop.go).
+	recordFailStop(machine.MachineStateDir, err.Error(), time.Now().UTC())
 	// An install boot's refusal is one of the install menu's terminal
 	// states, so it reports the disk inventory as its evidence and, if a
 	// person picked this boot, holds for them (attended.go). A boot from

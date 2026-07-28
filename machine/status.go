@@ -142,6 +142,16 @@ type MachineStatus struct {
 	// only when the records themselves leave the retention window.
 	LastCrash *CrashStatus `json:"lastCrash,omitempty"`
 
+	// LastFailStop is the last boot this machine refused to run, and
+	// the reason init gave for the refusal (failstop.go). It is not
+	// necessarily the previous boot: a machine that refuses once,
+	// gets repaired, and then runs for months keeps reporting the
+	// refusal, and the timestamp is what says how old the news is.
+	// Every boot re-derives this field from the record on
+	// machineState, so an erased status rebuilds it. Nothing clears
+	// it; the next refusal overwrites it.
+	LastFailStop *FailStop `json:"lastFailStop,omitempty"`
+
 	// Conditions follow the standard Kubernetes pattern: a set of
 	// typed, timestamped observations, such as "Ready" and
 	// "SysctlsApplied", that controllers maintain and that humans and

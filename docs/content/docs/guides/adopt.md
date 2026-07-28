@@ -64,6 +64,37 @@ joins it through the endpoint, and no `liken` machine initializes a new
 datastore. A second datastore next to a live one divides the cluster
 into two clusters.
 
+### The document claims the whole cluster
+
+`spec.features` is an opt-in list, and `liken` reads it as a statement
+about the cluster, not only about the machines you install. A feature
+that the document does not name is a feature that the cluster
+retracts, and a retracted feature is one `liken` tears down.
+
+The `flux` feature shows what this means for an adopted cluster. If
+the cluster already runs Flux, and your `cluster.yaml` does not
+declare `flux`, that omission reads as a retraction.
+
+`liken` does not delete that Flux. It removes a Flux installation only
+when it planted the installation itself, which it records by writing a
+`liken.sh/feature=flux` annotation on the `flux-system` namespace it
+creates. An installation that `liken` did not plant carries no
+annotation, so the teardown deletes nothing and the Cluster reports
+the refusal:
+
+    kubectl describe cluster
+
+The `FluxTeardown` condition names what the teardown declined, and the
+one command that gives the installation to `liken`. Decide before you
+install the first machine:
+
+* To keep the existing Flux and run it yourself, leave `flux` out of
+  `spec.features`. The sync keeps running. The condition stays, and it
+  is the report that `liken` manages none of it.
+* To run the fleet from git with `liken`, declare the `flux` feature.
+  [Run the fleet from git](/docs/guides/gitops/) has the steps, and
+  its last section covers an installation that already exists.
+
 ## 4. Install the liken machines
 
 Build the stick and install each machine as in

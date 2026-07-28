@@ -40,6 +40,7 @@ func TestReadReportsUnparseableValues(t *testing.T) {
 		"time lastSync":          {"time/lastSync", "never"},
 		"time stratum":           {"time/stratum", "high"},
 		"lastCrash time":         {"lastCrash/time", "yesterday"},
+		"lastFailStop time":      {"lastFailStop/time", "the other day"},
 		"network leaseExpires":   {"network/leaseExpires", "soon"},
 		"interface leaseExpires": {"network/interfaces/eth0/leaseExpires", "soon"},
 		"blockDevice sizeBytes":  {"hardware/blockDevices/vda/sizeBytes", "big"},

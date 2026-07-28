@@ -35,6 +35,31 @@ import (
 	"github.com/liken-sh/liken/machine"
 )
 
+// checkSeedCluster parses the image's cluster document and reports why
+// it cannot be used. An install boot calls this before it touches a
+// disk, because the install copies these exact bytes into both slots,
+// and chooseCluster below treats a seed that will not parse as fatal
+// on every boot that follows. Catching it here turns a machine that
+// powers off forever into a sentence on the installer's console.
+//
+// Finding no document is a valid answer, the same as it is below: a
+// machine alone is its own cluster. A document that exists and cannot
+// be read is not, because the install would copy an unreadable file
+// and the next boot would fail on it.
+func checkSeedCluster(seedPath string) error {
+	raw, err := os.ReadFile(seedPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("%w: %s: %v", errIdentity, seedPath, err)
+	}
+	if _, err := cluster.ParseCluster(raw); err != nil {
+		return fmt.Errorf("%w: %s: %v", errIdentity, seedPath, err)
+	}
+	return nil
+}
+
 // chooseCluster returns the cluster document this boot runs under,
 // both parsed and as its exact bytes, and records the choice in the
 // boot record. The code publishes the exact bytes to /run for the

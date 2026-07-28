@@ -499,34 +499,45 @@ spec:
                     known_hosts form, one line for each key. These
                     keys are public material that lets the first clone
                     verify the forge, so they go in the spec and not
-                    in a Secret. The repository is expected to be
-                    private, and the cluster makes its own SSH deploy
-                    key. The private half never leaves the cluster,
-                    and status.flux.publicKey carries the half to
-                    register at the forge. If you remove flux from
-                    this object, the cluster retracts the whole
-                    feature: the sync stops, the engine and its
-                    namespace go, and the deploy key goes with them,
-                    so a new opt-in makes a new key to register. What
-                    the repository deployed stays in operation.
-                    Retraction stops the sync; it does not remove the
-                    workloads. The first three features (traefik,
-                    servicelb, and metrics-server) are components that
-                    the k3s binary already includes, and liken
-                    disables them by default: anything more than the
-                    control plane must be a declared, visible
-                    workload, and this field is that declaration.
-                    Adding a feature converges when k3s restarts in
-                    place, one leader at a time; the machine and its
-                    pods stay up. Removing network-policy, iscsi, or
-                    nfs reboots the machine instead, because each
-                    leaves kernel state that only a boot clears.
-                    Removing helm waits until no HelmChart remains,
-                    and removing servicelb waits until no LoadBalancer
-                    Service remains; until then the feature keeps
-                    running and the machine reports RetractionBlocked
-                    with the objects to remove. Removing traefik
-                    removes helm with it, in that order.
+                    in a Secret. Its prune parameter (default "true")
+                    says whether the sync deletes an object that the
+                    repository no longer produces. Pruning is right
+                    for a cluster that liken founds, because every
+                    object in it came from the repository. A
+                    repository that carries its own copy of the
+                    flux-system Kustomization must declare prune:
+                    "false". That Kustomization appears in its own
+                    inventory, so the first build that stops producing
+                    it marks it for deletion, and the deletion removes
+                    everything the repository ever applied. The
+                    repository is expected to be private, and the
+                    cluster makes its own SSH deploy key. The private
+                    half never leaves the cluster, and
+                    status.flux.publicKey carries the half to register
+                    at the forge. If you remove flux from this object,
+                    the cluster retracts the whole feature: the sync
+                    stops, the engine and its namespace go, and the
+                    deploy key goes with them, so a new opt-in makes a
+                    new key to register. What the repository deployed
+                    stays in operation. Retraction stops the sync; it
+                    does not remove the workloads. The first three
+                    features (traefik, servicelb, and metrics-server)
+                    are components that the k3s binary already
+                    includes, and liken disables them by default:
+                    anything more than the control plane must be a
+                    declared, visible workload, and this field is that
+                    declaration. Adding a feature converges when k3s
+                    restarts in place, one leader at a time; the
+                    machine and its pods stay up. Removing
+                    network-policy, iscsi, or nfs reboots the machine
+                    instead, because each leaves kernel state that
+                    only a boot clears. Removing helm waits until no
+                    HelmChart remains, and removing servicelb waits
+                    until no LoadBalancer Service remains; until then
+                    the feature keeps running and the machine reports
+                    RetractionBlocked with the objects to remove.
+                    Removing traefik removes helm with it, in that
+                    order.
                   # The schema is a map with validation rules, and not
                   # named properties for each slug. Named properties
                   # look natural, but the API server prunes unknown
@@ -571,12 +582,12 @@ spec:
                     # The shape of flux: repository is required, and
                     # every parameter must be one that the vocabulary
                     # defines.
-                    - rule: "!('flux' in self) || dyn(self['flux']) == null || ('repository' in self['flux'] && self['flux'].all(param, param in ['repository', 'path', 'branch', 'knownHosts']))"
+                    - rule: "!('flux' in self) || dyn(self['flux']) == null || ('repository' in self['flux'] && self['flux'].all(param, param in ['repository', 'path', 'branch', 'knownHosts', 'prune']))"
                       message: >-
                         flux requires the repository parameter (the
                         git URL the fleet syncs from), and its only
-                        parameters are repository, path, branch, and
-                        knownHosts
+                        parameters are repository, path, branch,
+                        knownHosts, and prune
                   additionalProperties:
                     type: object
                     # Nullable, so that an explicit null survives

@@ -141,9 +141,11 @@ func sweepFleet(c *kubernetes.Client, clusterDoc *cluster.Cluster, available str
 	// deletes an addon when it sees the addon's manifest disappear
 	// while k3s is running, but retraction removes the manifest while
 	// k3s is down (see janitor.go). The flux feature's teardown is
-	// always the janitor's, in a deliberate order (janitorFlux).
+	// always the janitor's, in a deliberate order (janitorFlux). That
+	// teardown can also decline, when liken did not plant the Flux it
+	// found, and it reports the refusal on the Cluster.
 	janitorFeatureWorkloads(c, clusterDoc)
-	janitorFlux(c, clusterDoc)
+	fluxTeardown := janitorFlux(c, clusterDoc)
 
 	// The flux feature's deploy key is fleet state too: minted once,
 	// then read on every pass so the status always carries the
@@ -159,7 +161,7 @@ func sweepFleet(c *kubernetes.Client, clusterDoc *cluster.Cluster, available str
 	}
 
 	markLost(c, machines, s.lost, now)
-	publishClusterStatus(c, clusterDoc, s, r, available, publicKey, now)
+	publishClusterStatus(c, clusterDoc, s, r, fluxTeardown, available, publicKey, now)
 }
 
 // markLost writes the Lost verdict onto each machine that the sweep
@@ -202,19 +204,32 @@ func markLost(c *kubernetes.Client, machines []machine.Machine, lost []string, n
 // publishClusterStatus publishes the sweep's verdict on the Cluster.
 // The MachinesReady condition carries the observation, stamped with
 // the generation of the spec it judged. The Progressing condition
-// reports the rollout. The phase summarizes both conditions, and the
-// tally is the headcount that the printer shows. This function also
+// reports the rollout, and the FluxTeardown condition appears only
+// while the flux janitor has a refusal to report. The phase
+// summarizes the first two conditions, and the tally is the headcount
+// that the printer shows. This function also
 // derives the release fields: the catalog's newest version, and the
 // channel's last polled version. The sweep is the only writer of the
 // Cluster's status, so deriving every field is its job. The function
 // writes the status only when something actually changed, so a
 // settled fleet causes no write.
-func publishClusterStatus(c *kubernetes.Client, clusterDoc *cluster.Cluster, s fleetSweep, r rollout, available, publicKey string, now time.Time) {
+func publishClusterStatus(c *kubernetes.Client, clusterDoc *cluster.Cluster, s fleetSweep, r rollout, fluxTeardown *api.Condition, available, publicKey string, now time.Time) {
 	newest := cluster.NewestVersion(clusterDoc.Spec.Releases.Catalog)
 	s.condition.ObservedGeneration = clusterDoc.Metadata.Generation
 	r.progressing.ObservedGeneration = clusterDoc.Metadata.Generation
 	conditions := api.SetCondition(slices.Clone(clusterDoc.Status.Conditions), s.condition, now)
 	conditions = api.SetCondition(conditions, r.progressing, now)
+	// The flux janitor reports only a refusal, so this condition is
+	// present exactly while there is a refusal to report. Removing it
+	// when the janitor returns nothing keeps the list steady, which is
+	// what the comparison below needs to leave a settled cluster
+	// unwritten.
+	if fluxTeardown != nil {
+		fluxTeardown.ObservedGeneration = clusterDoc.Metadata.Generation
+		conditions = api.SetCondition(conditions, *fluxTeardown, now)
+	} else {
+		conditions = api.RemoveCondition(conditions, fluxTeardownCondition)
+	}
 	// The deploy key's public half. A declared feature with an empty
 	// answer means this pass could not read the Secret (a permission
 	// still being seeded, a lost mint race); the last published

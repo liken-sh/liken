@@ -63,6 +63,19 @@ func (t FactsTree) WriteLastCrash(c *CrashStatus) error {
 	))
 }
 
+// WriteLastFailStop publishes the last boot this machine refused to
+// run. A nil record means no boot has ever been refused, so the whole
+// subtree is removed.
+func (t FactsTree) WriteLastFailStop(f *FailStop) error {
+	if f == nil {
+		return t.report(os.RemoveAll(filepath.Join(t.Dir, "lastFailStop")))
+	}
+	return t.report(firstError(
+		t.writeFact("lastFailStop/time", formatTime(&f.Time)),
+		t.writeFact("lastFailStop/reason", f.Reason),
+	))
+}
+
 // WriteVersion publishes the machine's version inventory: liken's own
 // version, and every outside component the image carries.
 func (t FactsTree) WriteVersion(v VersionStatus) error {

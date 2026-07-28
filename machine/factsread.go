@@ -42,6 +42,9 @@ func (t FactsTree) Read() (*MachineStatus, error) {
 	if s.LastCrash, err = t.readLastCrash(); err != nil {
 		return nil, err
 	}
+	if s.LastFailStop, err = t.readLastFailStop(); err != nil {
+		return nil, err
+	}
 	if s.Version, err = t.readVersion(); err != nil {
 		return nil, err
 	}
@@ -119,6 +122,27 @@ func (t FactsTree) readLastCrash() (*CrashStatus, error) {
 		return nil, err
 	}
 	return c, nil
+}
+
+func (t FactsTree) readLastFailStop() (*FailStop, error) {
+	if _, err := os.Stat(filepath.Join(t.Dir, "lastFailStop")); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	f := &FailStop{}
+	when, err := t.readTime("lastFailStop/time")
+	if err != nil {
+		return nil, err
+	}
+	if when != nil {
+		f.Time = *when
+	}
+	if f.Reason, err = t.readFact("lastFailStop/reason"); err != nil {
+		return nil, err
+	}
+	return f, nil
 }
 
 func (t FactsTree) readVersion() (VersionStatus, error) {

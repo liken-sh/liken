@@ -168,6 +168,45 @@ func TestSweepFleetWritesNothingOnASettledFleet(t *testing.T) {
 	}
 }
 
+// The flux janitor's refusal reaches the operator through the
+// Cluster's conditions, beside the two the sweep always writes.
+func TestPublishClusterStatusCarriesTheFluxRefusal(t *testing.T) {
+	clusterDoc := &cluster.Cluster{Kind: "Cluster", Metadata: api.ObjectMeta{Name: "lab"}}
+	fake := &fleetAPI{clusterDoc: clusterDoc}
+	client := testClient(t, fake.handler())
+
+	publishClusterStatus(client, clusterDoc, fleetSweep{}, rollout{}, declinedFluxTeardown(), "", "", sweepNow)
+
+	if fake.clusterStatus == nil {
+		t.Fatal("a refusal is news, so the status is written")
+	}
+	c := api.FindCondition(fake.clusterStatus.Status.Conditions, fluxTeardownCondition)
+	if c == nil || c.Reason != "NotPlantedByLiken" {
+		t.Fatalf("got %+v", fake.clusterStatus.Status.Conditions)
+	}
+	if !strings.Contains(c.Message, "kubectl annotate namespace flux-system") {
+		t.Errorf("the message must name the remedy: %q", c.Message)
+	}
+}
+
+// The condition is a report of a refusal, not a standing
+// observation, so it disappears once there is no refusal to make.
+func TestPublishClusterStatusDropsTheFluxRefusalWhenItEnds(t *testing.T) {
+	clusterDoc := &cluster.Cluster{Kind: "Cluster", Metadata: api.ObjectMeta{Name: "lab"}}
+	clusterDoc.Status.Conditions = api.SetCondition(nil, *declinedFluxTeardown(), sweepNow.Add(-time.Hour))
+	fake := &fleetAPI{clusterDoc: clusterDoc}
+	client := testClient(t, fake.handler())
+
+	publishClusterStatus(client, clusterDoc, fleetSweep{}, rollout{}, nil, "", "", sweepNow)
+
+	if fake.clusterStatus == nil {
+		t.Fatal("dropping the condition is a change worth writing")
+	}
+	if c := api.FindCondition(fake.clusterStatus.Status.Conditions, fluxTeardownCondition); c != nil {
+		t.Errorf("the refusal must be gone: %+v", c)
+	}
+}
+
 // refusing wraps a handler so that requests matching one method and
 // path fragment are refused with the given status, and everything
 // else passes through. This models a sweep that meets one failing

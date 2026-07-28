@@ -92,7 +92,10 @@ rules:
   # The CRD and RBAC names must match the engine seed; the parity
   # test in flux_test.go holds them to it. The sync objects also
   # need patch, to strip their finalizers once no controller exists
-  # to honor them.
+  # to honor them. The namespace needs get as well as delete: it
+  # carries the liken.sh/feature annotation that records liken as the
+  # planter of this Flux, and the janitor reads that annotation before
+  # it deletes anything.
   - apiGroups: [apps]
     resources: [deployments]
     resourceNames: [source-controller, kustomize-controller]
@@ -100,7 +103,7 @@ rules:
   - apiGroups: [""]
     resources: [namespaces]
     resourceNames: [flux-system]
-    verbs: [delete]
+    verbs: [get, delete]
   - apiGroups: [source.toolkit.fluxcd.io]
     resources: [gitrepositories]
     resourceNames: [flux-system]

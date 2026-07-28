@@ -218,10 +218,14 @@ func actuateWorkloadFeature(clusterDoc *cluster.Cluster, slug string) machine.Fe
 // These are the objects `flux bootstrap` would otherwise commit to
 // the repository. Here they stay liken's forever: they re-render on
 // every boot from the Cluster document, so editing the declaration
-// is a real act, and the repository must never carry its own copies,
-// or git and liken would fight over them. The engine itself takes
-// the opposite arrangement, planted once by the cluster operator and
-// owned by the repository from then on (cluster-operator/flux.go).
+// is a real act, and the repository should not carry its own copies,
+// or git and liken would fight over them. A repository that already
+// carries them, such as one liken adopts, declares prune: "false",
+// because the Kustomization would otherwise appear in its own
+// inventory and delete everything the repository applied on the first
+// build that stops producing it. The engine itself takes the opposite
+// arrangement, planted once by the cluster operator and owned by the
+// repository from then on (cluster-operator/flux.go).
 func seedFluxSync(cfg *cluster.FluxConfig) error {
 	// Flux spells sync paths relative to the repository root. The
 	// default "." becomes "./", and a declared path gains the "./"
@@ -233,10 +237,12 @@ func seedFluxSync(cfg *cluster.FluxConfig) error {
 	// The rendered values are quoted with %q, which is JSON string
 	// quoting, and JSON strings are valid YAML scalars. This keeps a
 	// hostile-looking branch name or path from becoming YAML
-	// structure.
+	// structure. prune is the exception: it is a YAML boolean, and %t
+	// renders it as true or false.
 	rendered := fmt.Sprintf(`# Rendered by liken from the Cluster document's flux declaration.
-# The repository must not carry these two objects; liken re-renders
-# them on every boot, and a copy in git would fight this one.
+# liken re-renders these two objects on every boot, so a copy in git
+# would fight this one. A repository that carries its own copies must
+# declare prune: "false" in the Cluster document.
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: GitRepository
 metadata:
@@ -258,11 +264,11 @@ metadata:
 spec:
   interval: 10m0s
   path: %q
-  prune: true
+  prune: %t
   sourceRef:
     kind: GitRepository
     name: flux-system
-`, cfg.Repository, cfg.Branch, path)
+`, cfg.Repository, cfg.Branch, path, cfg.Prune)
 	if err := os.MkdirAll(k3sManifestsDir, 0o755); err != nil {
 		return err
 	}

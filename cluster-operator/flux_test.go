@@ -267,6 +267,84 @@ func TestEnsureFluxEnginePlantsWhenAbsent(t *testing.T) {
 	}
 }
 
+// The ownership record: liken stamps the feature annotation on the
+// Namespace it creates, and the teardown reads that stamp before it
+// deletes anything. The value must be the feature's own slug, so the
+// two halves cannot drift apart.
+func TestEnsureFluxEnginePlantsTheOwnershipMark(t *testing.T) {
+	planted := map[string]map[string]any{}
+	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			http.NotFound(w, r)
+		case http.MethodPost:
+			var doc map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+				t.Fatal(err)
+			}
+			planted[r.URL.Path] = doc
+			w.WriteHeader(http.StatusCreated)
+		}
+	}))
+	ensureFluxEngine(c, fluxCluster(), []byte(testSeed))
+
+	namespace, ok := planted["/api/v1/namespaces"]
+	if !ok {
+		t.Fatalf("the planter must create the Namespace: %v", planted)
+	}
+	metadata, _ := namespace["metadata"].(map[string]any)
+	annotations, _ := metadata["annotations"].(map[string]any)
+	if annotations[featureAnnotation] != cluster.FeatureFlux {
+		t.Errorf("the Namespace must carry %s=%s, got %v", featureAnnotation, cluster.FeatureFlux, annotations)
+	}
+	// Every other object stays exactly as the seed wrote it. The
+	// Namespace alone is the ownership record, because creating it is
+	// what proves liken planted this installation.
+	crd := planted["/apis/apiextensions.k8s.io/v1/customresourcedefinitions"]
+	crdMetadata, _ := crd["metadata"].(map[string]any)
+	if _, marked := crdMetadata["annotations"]; marked {
+		t.Errorf("only the Namespace carries the mark, got %v", crdMetadata)
+	}
+}
+
+// The stamp adds a key and changes nothing else, so a Namespace that
+// already carries annotations keeps them.
+func TestStampOwnershipKeepsTheSeedsOwnAnnotations(t *testing.T) {
+	o := seedObject{
+		Kind: "Namespace", Name: "flux-system",
+		body: []byte(`{"metadata": {"name": "flux-system", "annotations": {"kubectl.kubernetes.io/last-applied": "x"}}}`),
+	}
+	body, err := stampOwnership(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Metadata struct {
+			Annotations map[string]string `json:"annotations"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(body, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Metadata.Annotations[featureAnnotation] != cluster.FeatureFlux {
+		t.Errorf("the mark must land: %v", doc.Metadata.Annotations)
+	}
+	if doc.Metadata.Annotations["kubectl.kubernetes.io/last-applied"] != "x" {
+		t.Errorf("the seed's own annotations must survive: %v", doc.Metadata.Annotations)
+	}
+}
+
+// A body the stamp cannot read is an error, never a silent plant of
+// an unmarked Namespace. An unmarked Namespace is one the teardown
+// refuses to remove, so a quiet failure here would strand the
+// feature's retraction.
+func TestStampOwnershipRefusesAnUnreadableBody(t *testing.T) {
+	o := seedObject{Kind: "Namespace", Name: "flux-system", body: []byte(`["not an object"]`)}
+	if _, err := stampOwnership(o); err == nil {
+		t.Error("an unreadable body must be an error")
+	}
+}
+
 func TestEnsureFluxEngineDoesNothingWithoutTheFeature(t *testing.T) {
 	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("no API call should happen: %s %s", r.Method, r.URL.Path)

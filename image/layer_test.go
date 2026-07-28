@@ -6,7 +6,9 @@ package image
 // the real thing, so the tests need no real deployment.
 
 import (
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,6 +144,102 @@ func TestLayerNeedsACompleteIdentity(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "deployment.cpio")
 	if err := Layer(fixtureManifests(t), identityDir, out); err == nil {
 		t.Error("an incomplete identity was not refused")
+	}
+}
+
+// TestLayerRefusesADocumentAMachineWouldRefuse covers the reason the
+// layer parses at all. Each of these documents packs and installs
+// without complaint if nobody reads it, and then stops every boot from
+// the disk afterward. The build is the last moment a person is reading
+// output, so this is where the refusal has to happen.
+func TestLayerRefusesADocumentAMachineWouldRefuse(t *testing.T) {
+	cases := map[string]struct {
+		file string
+		doc  string
+	}{
+		"a mirror with no endpoints": {
+			file: "cluster.yaml",
+			doc: `apiVersion: liken.sh/v1alpha1
+kind: Cluster
+metadata:
+  name: fixture
+spec:
+  registries:
+    mirrors:
+      registry.example: []
+`,
+		},
+		"a cluster document that is not a Cluster": {
+			file: "cluster.yaml",
+			doc: `apiVersion: liken.sh/v1alpha1
+kind: Machine
+metadata:
+  name: fixture
+`,
+		},
+		"a machine manifest with an unknown field": {
+			file: "machines/node-1.yaml",
+			doc: `apiVersion: liken.sh/v1alpha1
+kind: Machine
+metadata:
+  name: node-1
+spec:
+  storgae: {}
+`,
+		},
+		"a storage role with no device": {
+			file: "machines/node-1.yaml",
+			doc: `apiVersion: liken.sh/v1alpha1
+kind: Machine
+metadata:
+  name: node-1
+spec:
+  storage:
+    clusterState:
+      size: 2Gi
+`,
+		},
+		"one port declared twice": {
+			file: "machines/node-1.yaml",
+			doc: `apiVersion: liken.sh/v1alpha1
+kind: Machine
+metadata:
+  name: node-1
+spec:
+  network:
+    interfaces:
+      - name: eth1
+        address: 10.10.0.1/24
+      - name: eth1
+        address: 10.10.0.2/24
+`,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			manifests := fixtureManifests(t)
+			if err := os.WriteFile(filepath.Join(manifests, tc.file), []byte(tc.doc), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			identityDir := t.TempDir()
+			if err := identity.Mint(identityDir, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			out := filepath.Join(t.TempDir(), "deployment.cpio")
+			err := Layer(manifests, identityDir, out)
+			if err == nil {
+				t.Fatal("the layer packed a document a machine would refuse")
+			}
+			if !strings.Contains(err.Error(), tc.file) {
+				t.Errorf("the error should name %s, got %v", tc.file, err)
+			}
+			// Nothing is written until everything validates, so a
+			// refusal leaves no half-built archive for a later step to
+			// pack into an image.
+			if _, err := os.Stat(out); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("a refused build left %s behind: %v", out, err)
+			}
+		})
 	}
 }
 

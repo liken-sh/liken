@@ -175,6 +175,40 @@ func TestWorkloadFeatureRendersTheFluxSyncObjects(t *testing.T) {
 	}
 }
 
+// The Kustomization's prune field comes from the declaration, not
+// from a constant. A repository that carries its own copy of the
+// flux-system Kustomization declares prune: "false", so the rendered
+// object never deletes what that repository applied.
+func TestWorkloadFeatureRendersTheDeclaredPrune(t *testing.T) {
+	for declared, want := range map[string]string{
+		"":      "prune: true",
+		"true":  "prune: true",
+		"false": "prune: false",
+	} {
+		t.Run(declared, func(t *testing.T) {
+			featureFixture(t)
+			c := labCluster()
+			c.Spec.Features = map[string]*cluster.FeatureConfig{
+				"flux": {
+					"repository": "ssh://git@forge.example/fleet.git",
+					"prune":      declared,
+				},
+			}
+			got := actuateFeatures(c, "node-1")
+			if len(got) != 1 || got[0].State != machine.FeatureActive {
+				t.Fatalf("expected Active, got %+v", got)
+			}
+			raw, err := os.ReadFile(filepath.Join(k3sManifestsDir, "flux-sync.yaml"))
+			if err != nil {
+				t.Fatalf("the sync objects should be rendered for k3s: %v", err)
+			}
+			if !strings.Contains(string(raw), want) {
+				t.Errorf("the rendering should contain %q:\n%s", want, raw)
+			}
+		})
+	}
+}
+
 func TestWorkloadFeatureFailsOnABadConfiguration(t *testing.T) {
 	featureFixture(t)
 	c := labCluster()

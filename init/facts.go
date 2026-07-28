@@ -83,6 +83,7 @@ type bootFacts struct {
 	blockDevices []machine.BlockDevice
 	unclaimed    []machine.UnclaimedDevice
 	lastCrash    *machine.CrashStatus
+	lastFailStop *machine.FailStop
 }
 
 // publishBootFacts writes every fact the boot discovered once and never
@@ -103,6 +104,10 @@ func publishBootFacts(tree machine.FactsTree, in bootFacts) {
 	// because settling it has side effects (preserving and clearing the
 	// platform store) that belong to one moment early in boot.
 	tree.WriteLastCrash(in.lastCrash)
+	// The fail-stop record arrives read rather than being re-read here,
+	// so that the console line and this fact come from one reading of
+	// one file.
+	tree.WriteLastFailStop(in.lastFailStop)
 	tree.WriteVersion(versionFacts())
 	// Network facts exist only for interfaces that came up; a machine
 	// that failed DHCP still publishes the facts it has.

@@ -2548,6 +2548,39 @@ spec:
                         the crash store under machineState, or
                         /sys/fs/pstore on a machine whose
                         machineState runs in memory.
+                lastFailStop:
+                  type: object
+                  description: >-
+                    The last boot that this machine refused to run.
+                    Init stops a boot for two failures: it cannot tell
+                    which configuration is its own, or it cannot
+                    satisfy a declared storage role. A machine that
+                    runs with the wrong configuration can do damage
+                    that a reboot does not undo, so init powers the
+                    machine off instead. The refusal writes its reason
+                    to the machine's own disk, and the next boot
+                    reports it here. The refusal is not always the
+                    previous boot, and the time field gives the age of
+                    the news. Nothing clears this field. The next
+                    refusal replaces it. An empty field means that
+                    this machine has never refused a boot, or that the
+                    role it could not satisfy was the one that holds
+                    the record.
+                  properties:
+                    time:
+                      type: string
+                      format: date-time
+                      description: >-
+                        The machine's own clock at the refusal. A boot
+                        stops before its first clock synchronization,
+                        so this time comes from the hardware clock.
+                    reason:
+                      type: string
+                      maxLength: 1024
+                      description: >-
+                        Init's own words for the refusal, the same
+                        text that the console printed before the
+                        machine powered off.
                 conditions:
                   type: array
                   description: >-

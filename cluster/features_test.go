@@ -215,6 +215,46 @@ func TestFluxConfigReadsEveryParameter(t *testing.T) {
 	}
 }
 
+// prune says whether the sync deletes an object that the repository
+// no longer produces. It defaults to on, because a cluster liken
+// founds holds nothing that the repository did not apply. The empty
+// string is the unset case, the same convention every other parameter
+// follows.
+func TestFluxConfigResolvesPrune(t *testing.T) {
+	for declared, want := range map[string]bool{
+		"":      true,
+		"true":  true,
+		"false": false,
+	} {
+		c := &Cluster{Spec: ClusterSpec{Features: map[string]*FeatureConfig{
+			"flux": {
+				"repository": "ssh://git@forge.example/fleet.git",
+				"prune":      declared,
+			},
+		}}}
+		cfg, err := c.FluxConfig()
+		if err != nil {
+			t.Fatalf("prune %q: %v", declared, err)
+		}
+		if cfg.Prune != want {
+			t.Errorf("prune %q: got %v, want %v", declared, cfg.Prune, want)
+		}
+	}
+}
+
+func TestFluxConfigRefusesAPruneThatIsNotABoolean(t *testing.T) {
+	c := &Cluster{Spec: ClusterSpec{Features: map[string]*FeatureConfig{
+		"flux": {
+			"repository": "ssh://git@forge.example/fleet.git",
+			"prune":      "sometimes",
+		},
+	}}}
+	if _, err := c.FluxConfig(); err == nil ||
+		!strings.Contains(err.Error(), "prune") {
+		t.Errorf("the error must name the parameter, got %v", err)
+	}
+}
+
 func TestFluxConfigRequiresARepository(t *testing.T) {
 	for name, features := range map[string]map[string]*FeatureConfig{
 		"empty configuration": {"flux": {}},

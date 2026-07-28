@@ -36,16 +36,27 @@ package image
 // access to anyone who reads the disk.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/identity"
+	"github.com/liken-sh/liken/machine"
 )
 
 // Layer packs a deployment's archive from its manifests and identity.
 func Layer(manifests, identityDir, out string) error {
+	// The documents are read and validated before the output file
+	// exists, so a refusal leaves no truncated cpio behind for a later
+	// step to pack into an image.
+	d, err := readDeployment(manifests)
+	if err != nil {
+		return err
+	}
+
 	f, err := os.Create(out)
 	if err != nil {
 		return err
@@ -72,32 +83,31 @@ func Layer(manifests, identityDir, out string) error {
 		}
 		return nil
 	}
+	place := func(dst string, data []byte, perm int) error {
+		if err := ensure(dst); err != nil {
+			return err
+		}
+		return a.file(dst, data, perm)
+	}
 	ship := func(src, dst string, perm int) error {
 		data, err := os.ReadFile(src)
 		if err != nil {
 			return err
 		}
-		if err := ensure(dst); err != nil {
-			return err
-		}
-		return a.file(dst, data, perm)
+		return place(dst, data, perm)
 	}
 
 	// This stages the manifests at the paths init reads. It copies
 	// them file by file rather than as a tree, so what the layer can
 	// carry stays explicit: one cluster document, one manifest per
 	// machine.
-	if cluster := filepath.Join(manifests, "cluster.yaml"); fileExists(cluster) {
-		if err := ship(cluster, "etc/liken/cluster.yaml", 0o644); err != nil {
+	if d.cluster != nil {
+		if err := place("etc/liken/cluster.yaml", d.cluster, 0o644); err != nil {
 			return err
 		}
 	}
-	machines, err := filepath.Glob(filepath.Join(manifests, "machines", "*.yaml"))
-	if err != nil {
-		return err
-	}
-	for _, m := range machines {
-		if err := ship(m, filepath.Join("etc/liken/machines", filepath.Base(m)), 0o644); err != nil {
+	for _, m := range d.machines {
+		if err := place(filepath.Join("etc/liken/machines", m.name), m.raw, 0o644); err != nil {
 			return err
 		}
 	}
@@ -123,6 +133,67 @@ func Layer(manifests, identityDir, out string) error {
 	}
 
 	return a.close()
+}
+
+// deployment is the manifests directory read into memory: the cluster
+// document, when the directory has one, and each machine manifest
+// under the file name the layer keeps for it.
+type deployment struct {
+	cluster  []byte
+	machines []deploymentMachine
+}
+
+type deploymentMachine struct {
+	name string
+	raw  []byte
+}
+
+// readDeployment reads every document the layer will pack and runs the
+// same parsers a machine runs at boot. This is where the refusal
+// scales: it happens where the media is built, and a person is already
+// reading the output there. A document that reaches a machine unread
+// installs without complaint, and then stops every boot from the disk
+// a few seconds in, with the reason on a console nobody is watching.
+//
+// The checks are the set that scaffold/scaffold.go runs over the
+// documents it generates. An absent cluster.yaml is legal, because a
+// machine alone is its own cluster.
+func readDeployment(manifests string) (*deployment, error) {
+	d := &deployment{}
+
+	if path := filepath.Join(manifests, "cluster.yaml"); fileExists(path) {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := cluster.ParseCluster(raw); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		d.cluster = raw
+	}
+
+	paths, err := filepath.Glob(filepath.Join(manifests, "machines", "*.yaml"))
+	if err != nil {
+		return nil, err
+	}
+	for _, path := range paths {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		parsed, err := machine.Parse(raw)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		if err := parsed.Spec.Storage.Validate(); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		if err := parsed.Spec.Network.Validate(); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		d.machines = append(d.machines, deploymentMachine{name: filepath.Base(path), raw: raw})
+	}
+	return d, nil
 }
 
 func fileExists(path string) bool {
