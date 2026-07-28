@@ -134,7 +134,12 @@ machine's own network card appears before these values are applied. So
 
 ## Settings that are not sysctls
 
-Not every kernel setting is a sysctl. Three other kinds matter.
+Not every kernel setting is a sysctl. Four other kinds matter.
+
+**Resource limits** are ceilings the kernel puts on one process, such
+as how many files it may hold open. They are not files under
+`/proc/sys`, and no sysctl changes one. liken sets its own, and
+`spec.rlimits` overrides them. See the Resource limits page.
 
 **The kernel command line** is read once, at boot. It carries the
 settings the kernel needs before any program runs. liken builds this

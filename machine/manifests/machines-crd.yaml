@@ -215,8 +215,9 @@ spec:
                 effect at different times. The liken operator applies
                 sysctls and nodeLabels at boot, and it also
                 reconciles them while the machine runs. The operator
-                stages a change to network, storage, or modules, and
-                the change takes effect at the next boot.
+                stages a change to network, storage, modules, or
+                rlimits, and the change takes effect at the next
+                boot.
               properties:
                 network:
                   type: object
