@@ -87,15 +87,25 @@ func discoverBlockDevices() []machine.BlockDevice {
 	return disks
 }
 
-// sysfsString reads the first of the named attributes that exists,
-// as a trimmed string. The trimming matters: sysfs values end in a
-// newline, and SCSI model strings carry padding spaces out to their
-// on-wire field width. Both are artifacts of the transport, not part
-// of the value.
+// sysfsString reads the first of the named attributes that exists, as
+// a trimmed string. The trimming matters, because padding reaches a
+// value from more than one place and none of it belongs to the value.
+// sysfs ends every attribute with a newline. SCSI model strings carry
+// spaces out to their on-wire field width. A target that reports a
+// serial from a fixed-width buffer fills the rest of the buffer with
+// NUL bytes.
+//
+// The NUL needs its own place in the cutset, because a NUL is a
+// control character rather than whitespace, and strings.TrimSpace
+// leaves it where it is. A NUL that survives here causes two faults.
+// It reaches the Machine status, where a serial ends in a byte no
+// reader of the API expects. It also reaches the by-path link names,
+// and the kernel refuses a path that holds a NUL, so the link for that
+// disk never appears.
 func sysfsString(dir string, names ...string) string {
 	for _, name := range names {
 		if raw, err := os.ReadFile(filepath.Join(dir, name)); err == nil {
-			return strings.TrimSpace(string(raw))
+			return strings.Trim(string(raw), "\x00 \t\n\r\v\f")
 		}
 	}
 	return ""

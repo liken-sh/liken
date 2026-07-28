@@ -152,6 +152,25 @@ func TestDiscoverBlockDevicesReadsSCSIModels(t *testing.T) {
 	reportBlockDevices()
 }
 
+func TestDiscoverBlockDevicesTrimsNULPaddedSerials(t *testing.T) {
+	// An iSCSI LUN reports its serial from a fixed-width buffer and
+	// pads the remainder with NUL. The padding is the transport's, not
+	// the disk's, and a NUL that reaches the Machine status is a byte
+	// no reader of the API expects.
+	sys, dev := fakeMachine(t)
+	addDisk(t, sys, dev, "sda", 8<<30, nil)
+	writeSysfs(t, filepath.Join(sys, "sda", "device"), "serial",
+		"64117ed8-bf4f-4164-8bd4-cd6d70d854e5\x00\n")
+
+	found := discoverBlockDevices()
+	if len(found) != 1 {
+		t.Fatalf("discovered %d disks, want 1: %v", len(found), found)
+	}
+	if found[0].Serial != "64117ed8-bf4f-4164-8bd4-cd6d70d854e5" {
+		t.Errorf("the NUL padding trims: %q", found[0].Serial)
+	}
+}
+
 func TestDiscoverBlockDevicesWithNoSysfsReportsNothing(t *testing.T) {
 	fakeMachine(t)
 	sysBlock = filepath.Join(t.TempDir(), "no-sys-block")

@@ -133,6 +133,23 @@ func TestOneSessionNamesItsLUNTheWayUdevWould(t *testing.T) {
 	}
 }
 
+func TestNULPaddedSysfsValuesStillNameTheirLUN(t *testing.T) {
+	// A target that reports these values from fixed-width buffers pads
+	// the remainder with NUL. The kernel refuses a path holding a NUL,
+	// so padding that reached the name would cost this disk its link.
+	links := fakeInitiator(t)
+	scsiTarget := addSession(t, "1", "iqn.2000-01.com.synology:syn.pvc-5a35461e\x00", "10.0.0.18\x00", "3260\x00")
+	addLUN(t, scsiTarget, "2", "1", "sdb")
+
+	if err := reconcileLinks(links, iscsiPaths()); err != nil {
+		t.Fatal(err)
+	}
+	name := "ip-10.0.0.18:3260-iscsi-iqn.2000-01.com.synology:syn.pvc-5a35461e-lun-1"
+	if target := linkTarget(t, links, name); target != "../../sdb" {
+		t.Errorf("link points at %q, want ../../sdb", target)
+	}
+}
+
 func TestAPartitionTakesThePartSuffix(t *testing.T) {
 	links := fakeInitiator(t)
 	scsiTarget := addSession(t, "1", "iqn.2026-07.sh.liken.lab:storage", "10.10.0.100", "3260")
