@@ -1,12 +1,13 @@
 # liken third-party notices
 
-liken's own code — the init, the operators, the log relays, the
-toolkit, and everything else in [its repository](https://github.com/liken-sh/liken)
-— is MIT-licensed, copyright Chris Guidry. A liken release is an
-aggregate. Alongside liken's own programs, it redistributes other
-people's work, unmodified, under their own licenses. This document
-names each of those components, its license, and where to get its
-source. The full text of every license appears in the appendix.
+liken's own code is MIT-licensed, copyright Chris Guidry. That covers
+the init, the operators, the log relays, the toolkit, and everything
+else in [its repository](https://github.com/liken-sh/liken). A liken
+release is an aggregate. Alongside liken's own programs, it
+redistributes other people's work, unmodified, under their own
+licenses. This document names each of those components, its license,
+and where to get its source. The full text of every license appears
+in the appendix.
 
 The copyleft licenses here, GPL and LGPL, apply to the components
 they cover, and never to the aggregate. liken's programs invoke these
@@ -36,8 +37,8 @@ License: Apache-2.0. Copyright k3s contributors and SUSE LLC.
 
 This binary is vendored, prebuilt from the project's releases,
 unmodified. The source is published from the same release page. The
-k3s binary embeds a small userland — busybox, iptables, and similar
-programs, several under GPL-2.0 — that it unpacks at runtime. The
+k3s binary embeds a small userland that it unpacks at runtime:
+busybox, iptables, and similar programs, several under GPL-2.0. The
 k3s-root recipe builds that userland, and its sources are mirrored
 under `sources/xtables/`. This is the same recipe, at the same
 version, that builds the xtables binaries described below.
@@ -102,8 +103,8 @@ and `sources/toolchain/`.
 License: LGPL-2.1 or later. Copyright the systemd contributors.
 
 This binary is vendored, prebuilt from Ubuntu's archive, unmodified.
-The Ubuntu source package — the upstream tarball, the packaging, and
-the .dsc file — is mirrored under `sources/systemd-boot/`.
+The Ubuntu source package is mirrored under `sources/systemd-boot/`:
+the upstream tarball, the packaging, and the .dsc file.
 
 ## GRUB (`grub-boot.img`, `grub-core.img`)
 
@@ -193,46 +194,46 @@ is a build tool, like Hugo: a release never redistributes its bytes.
 
 ## liken's programs and their Go dependencies
 
-liken's binaries — `/liken`, the operators, the log relays, and the
-`liken` toolkit — are MIT-licensed. They statically compile in the Go
+liken's binaries are MIT-licensed: `/liken`, the operators, the log
+relays, and the `liken` toolkit. They statically compile in the Go
 standard library and runtime (BSD-3, copyright 2009 The Go Authors)
 and these modules:
 
 Under the MIT license:
 
-* github.com/josharian/native — copyright 2020 Josh Bleecher Snyder
-* github.com/mdlayher/packet — copyright 2022 Matt Layher
-* github.com/mdlayher/socket — copyright 2021 Matt Layher
-* sigs.k8s.io/yaml — copyright 2014 Sam Ghods; portions copyright
+* github.com/josharian/native: copyright 2020 Josh Bleecher Snyder
+* github.com/mdlayher/packet: copyright 2022 Matt Layher
+* github.com/mdlayher/socket: copyright 2021 Matt Layher
+* sigs.k8s.io/yaml: copyright 2014 Sam Ghods; portions copyright
   2012 The Go Authors (BSD-3)
 
 Under the BSD 2-Clause license:
 
-* github.com/beevik/ntp — copyright 2015–2023 Brett Vickers
+* github.com/beevik/ntp: copyright 2015–2023 Brett Vickers
 
 Under the BSD 3-Clause license:
 
-* github.com/insomniacslk/dhcp — copyright 2018 Andrea Barberio
-* github.com/klauspost/compress — copyright 2012 The Go Authors,
+* github.com/insomniacslk/dhcp: copyright 2018 Andrea Barberio
+* github.com/klauspost/compress: copyright 2012 The Go Authors,
   2019 Klaus Post; portions BSD-3 (copyright 2011 The Snappy-Go
   Authors, 2016 The filepathx Authors), Apache 2.0 (copyright
   2016–2017 The New York Times Company), and MIT (copyright 2015
   Klaus Post)
-* github.com/pierrec/lz4/v4 — copyright 2015 Pierre Curto
-* github.com/u-root/uio — copyright 2012–2021 u-root Authors
+* github.com/pierrec/lz4/v4: copyright 2015 Pierre Curto
+* github.com/u-root/uio: copyright 2012–2021 u-root Authors
 * golang.org/x/crypto, golang.org/x/net, golang.org/x/sync,
-  golang.org/x/sys, golang.org/x/text — copyright 2009 The Go
+  golang.org/x/sys, golang.org/x/text: copyright 2009 The Go
   Authors
-* google.golang.org/protobuf — copyright 2018 The Go Authors
+* google.golang.org/protobuf: copyright 2018 The Go Authors
 
 Under the Apache License 2.0:
 
-* github.com/vishvananda/netlink — copyright 2014 Vishvananda Ishaya
-* github.com/vishvananda/netns — copyright 2014 Vishvananda Ishaya
-* go.yaml.in/yaml/v2 — copyright 2011–2016 Canonical Ltd.
-* google.golang.org/genproto — copyright Google LLC
-* google.golang.org/grpc — copyright 2014 gRPC authors
-* k8s.io/kubelet — copyright The Kubernetes Authors
+* github.com/vishvananda/netlink: copyright 2014 Vishvananda Ishaya
+* github.com/vishvananda/netns: copyright 2014 Vishvananda Ishaya
+* go.yaml.in/yaml/v2: copyright 2011–2016 Canonical Ltd.
+* google.golang.org/genproto: copyright Google LLC
+* google.golang.org/grpc: copyright 2014 gRPC authors
+* k8s.io/kubelet: copyright The Kubernetes Authors
 
 The appendix reproduces the MIT, BSD, and Apache license texts that
 these modules are offered under, once each. The copyright lines
