@@ -191,6 +191,7 @@ type VersionStatus struct {
 	SystemdBoot   string `json:"systemdBoot,omitempty"`
 	Grub          string `json:"grub,omitempty"`
 	Hwdata        string `json:"hwdata,omitempty"`
+	Tzdata        string `json:"tzdata,omitempty"`
 	LinuxFirmware string `json:"linuxFirmware,omitempty"`
 
 	// Microcode is the pin: which early cpio the release carries.

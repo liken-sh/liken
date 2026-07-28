@@ -76,6 +76,7 @@ nfsutils_version="$(cat "$here/../nfs-utils/VERSION")"
 systemdboot_version="$(cat "$here/../systemd-boot/VERSION")"
 grub_version="$(cat "$here/../grub/VERSION")"
 hwdata_version="$(cat "$here/../hwdata/VERSION")"
+tzdata_version="$(cat "$here/../tzdata/VERSION")"
 linuxfirmware_version="$(cat "$here/../linux-firmware/VERSION")"
 
 cache="$here/cache"
@@ -256,6 +257,17 @@ place "trust/$trust_version" "cacert-$trust_version.pem" \
 # release carries, the channel can give you the source.
 place "hwdata/$hwdata_version" "pci.ids" \
     "$here/../hwdata/dist/$hwdata_version/pci.ids"
+
+# The timezone database: IANA's code and data tarballs, already
+# fetched and verified by the tzdata domain. The tz project puts its
+# files in the public domain, so no license requires this mirror.
+# liken ships compiled zone files, and these tarballs plus the zic
+# flags in tzdata/fetch.sh are what reproduces them. The detached
+# signatures come along so a downloader can run the same check.
+"$here/../tzdata/fetch.sh" --sources-only
+for source in "$here/../tzdata/cache/$tzdata_version"/*.tar.gz*; do
+    place "tzdata/$tzdata_version" "$(basename "$source")" "$source"
+done
 
 # The driver firmware: the upstream release tarball, already fetched
 # and verified by the linux-firmware domain. Most blobs are

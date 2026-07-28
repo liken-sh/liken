@@ -91,6 +91,7 @@ NFSUTILS_VERSION := $(strip $(file <../nfs-utils/VERSION))
 SYSTEMDBOOT_VERSION := $(strip $(file <../systemd-boot/VERSION))
 GRUB_VERSION := $(strip $(file <../grub/VERSION))
 HWDATA_VERSION := $(strip $(file <../hwdata/VERSION))
+TZDATA_VERSION := $(strip $(file <../tzdata/VERSION))
 LINUXFIRMWARE_VERSION := $(strip $(file <../linux-firmware/VERSION))
 MICROCODE_VERSION := $(strip $(file <../microcode/VERSION))
 FLUX_VERSION := $(strip $(file <../flux/VERSION))
@@ -154,6 +155,7 @@ release: build
 		systemd-boot=$(SYSTEMDBOOT_VERSION) \
 		grub=$(GRUB_VERSION) \
 		hwdata=$(HWDATA_VERSION) \
+		tzdata=$(TZDATA_VERSION) \
 		linux-firmware=$(LINUXFIRMWARE_VERSION) \
 		microcode=$(MICROCODE_VERSION) \
 		flux=$(FLUX_VERSION)

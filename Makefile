@@ -44,12 +44,14 @@ GRUB_VERSION := $(strip $(file <grub/VERSION))
 GRUB_DIST := grub/dist/$(GRUB_VERSION)
 HWDATA_VERSION := $(strip $(file <hwdata/VERSION))
 HWDATA_DIST := hwdata/dist/$(HWDATA_VERSION)
+TZDATA_VERSION := $(strip $(file <tzdata/VERSION))
+TZDATA_DIST := tzdata/dist/$(TZDATA_VERSION)
 LINUXFIRMWARE_VERSION := $(strip $(file <linux-firmware/VERSION))
 LINUXFIRMWARE_DIST := linux-firmware/dist/$(LINUXFIRMWARE_VERSION)
 MICROCODE_VERSION := $(strip $(file <microcode/VERSION))
 MICROCODE_DIST := microcode/dist/$(MICROCODE_VERSION)
 
-all: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity image
+all: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata tzdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity image
 
 # The version is part of the artifact's name. So a pin bump changes
 # the target path itself, and Make rebuilds the artifact with no
@@ -87,6 +89,14 @@ $(HWDATA_DIST)/pci.ids: hwdata/VERSION hwdata/fetch.sh
 	$(MAKE) -C hwdata
 
 hwdata: $(HWDATA_DIST)/pci.ids
+
+# The timezone database, compiled from IANA's rules so that a CronJob
+# can name the zone its schedule means. See tzdata/fetch.sh.
+$(TZDATA_DIST)/zoneinfo/UTC: tzdata/VERSION tzdata/DIGESTS tzdata/tz.asc \
+		tzdata/fetch.sh
+	$(MAKE) -C tzdata
+
+tzdata: $(TZDATA_DIST)/zoneinfo/UTC
 
 # The driver firmware blobs, derived from the kernel's own module
 # tree rather than curated. The vmlinuz prerequisite is load-bearing
@@ -327,6 +337,7 @@ $(SYSTEM_IMAGE) $(BOOT_ARCHIVE) &: init/dist/liken mount/dist/mount \
 		$(wildcard logs/manifests/*.yaml) \
 		image/build.sh image/boot-modules.conf \
 		$(HWDATA_DIST)/pci.ids \
+		$(TZDATA_DIST)/zoneinfo/UTC \
 		$(LINUXFIRMWARE_DIST)/derived.txt \
 		$(shell find image/etc -type f) image/Makefile
 	$(MAKE) -C image
@@ -568,7 +579,7 @@ install-gitops: $(GITOPS_IMAGE_DIR)/install.cpio
 # no per-deployment channel. The lab's machines upgrade from this
 # bundle directly, and they carry their own deployment layer between
 # slots.
-release: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils hwdata linux-firmware microcode
+release: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils hwdata tzdata linux-firmware microcode
 	$(MAKE) -C releases release
 
 # This target serves the release channel to the lab over HTTP. The
@@ -616,4 +627,4 @@ clean:
 	rm -rf $(IMAGE_DIR)
 	rm -rf $(HW_IMAGE_DIR)
 
-.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware install install-stick install-gitops storage release serve docs clean
+.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata tzdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware install install-stick install-gitops storage release serve docs clean

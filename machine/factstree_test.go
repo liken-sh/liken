@@ -2,9 +2,11 @@ package machine
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -123,8 +125,9 @@ func everythingSet() *MachineStatus {
 			Liken: "0.1.0", Kernel: "6.15.4", Xtables: "v1.8.11 (legacy)",
 			K3s: "v1.31.0+k3s1", Trust: "1.0", E2fsprogs: "1.47",
 			OpenISCSI: "2.1", NFSUtils: "2.6", SystemdBoot: "256",
-			Grub: "2.12", Hwdata: "0.380", LinuxFirmware: "20260101",
-			Microcode: "20260101", MicrocodeRevision: "0xf0",
+			Grub: "2.12", Hwdata: "0.380", Tzdata: "2026c",
+			LinuxFirmware: "20260101",
+			Microcode:     "20260101", MicrocodeRevision: "0xf0",
 		},
 		Network: NetworkStatus{
 			Interface: "eth0", MAC: "52:54:00:12:34:56",
@@ -265,6 +268,33 @@ func TestFactsTreeRoundTrip(t *testing.T) {
 				t.Errorf("round trip changed the facts:\nwant %s\ngot  %s", wantJSON, gotJSON)
 			}
 		})
+	}
+}
+
+// WriteVersion and readVersion each name their fields by hand, so a
+// new component reaches the Machine only when both lists grow. A
+// field that one list forgot fails quietly: init reads the pin from
+// the components record, the tree drops it, and the operator
+// publishes a status that is missing a component with no error
+// anywhere. This fills every field with a distinct value and demands
+// all of them back.
+func TestEveryVersionFieldSurvivesTheFactsTree(t *testing.T) {
+	var want VersionStatus
+	fields := reflect.ValueOf(&want).Elem()
+	for i := range fields.NumField() {
+		fields.Field(i).SetString(fmt.Sprintf("value-%d", i))
+	}
+
+	tree := FactsTree{Dir: t.TempDir()}
+	if err := tree.WriteVersion(want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := tree.readVersion()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Errorf("round trip changed the version:\nwant %+v\ngot  %+v", want, got)
 	}
 }
 

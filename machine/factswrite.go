@@ -91,6 +91,7 @@ func (t FactsTree) WriteVersion(v VersionStatus) error {
 		t.writeFact("version/systemdBoot", v.SystemdBoot),
 		t.writeFact("version/grub", v.Grub),
 		t.writeFact("version/hwdata", v.Hwdata),
+		t.writeFact("version/tzdata", v.Tzdata),
 		t.writeFact("version/linuxFirmware", v.LinuxFirmware),
 		t.writeFact("version/microcode", v.Microcode),
 		t.writeFact("version/microcodeRevision", v.MicrocodeRevision),

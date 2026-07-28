@@ -868,6 +868,15 @@ spec:
                       description: >-
                         The PCI database that gives names to vendor
                         and device IDs.
+                    tzdata:
+                      type: string
+                      description: >-
+                        The IANA timezone database release, for
+                        example 2026c. This is the database that
+                        resolves a CronJob's spec.timeZone on this
+                        machine. Read it when a job fires at an
+                        unexpected hour. A machine keeps the release
+                        its image carried until it upgrades.
                     linuxFirmware:
                       type: string
                       description: >-

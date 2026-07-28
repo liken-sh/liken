@@ -44,6 +44,8 @@ components:
     version: 2.12-1ubuntu7.3
   - name: hwdata
     version: v0.409
+  - name: tzdata
+    version: 2026c
 `)
 
 	v := machine.VersionStatus{Liken: "2026.07.18-002"}
@@ -59,6 +61,7 @@ components:
 		SystemdBoot: "259.5-0ubuntu3",
 		Grub:        "2.12-1ubuntu7.3",
 		Hwdata:      "v0.409",
+		Tzdata:      "2026c",
 	}
 	if v != want {
 		t.Errorf("version = %+v, want %+v", v, want)

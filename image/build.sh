@@ -391,6 +391,22 @@ mkdir -p "$root/usr/share/hwdata"
 cp "$here/../hwdata/dist/$hwdata_version/pci.ids" \
    "$root/usr/share/hwdata/pci.ids"
 
+# This is the timezone database (see tzdata/fetch.sh). A CronJob names
+# its zone in spec.timeZone, and both halves of that feature resolve
+# the name through Go's time.LoadLocation inside the k3s process: the
+# apiserver, which validates the CronJob at admission, and the
+# controller, which schedules it. LoadLocation searches a
+# fixed list of paths, and this is the first one that any system
+# uses, so staging the tree here is the whole configuration. Nothing
+# sets ZONEINFO.
+#
+# This dependency is not soft. Without the tree, the apiserver
+# rejects every zoned CronJob at admission, so the object never
+# reaches etcd and GitOps cannot apply one at all.
+tzdata_version="$(cat "$here/../tzdata/VERSION")"
+cp -a "$here/../tzdata/dist/$tzdata_version/zoneinfo" \
+   "$root/usr/share/zoneinfo"
+
 # This is the components record: the upstream version of every
 # outside component this image carries. The build reads these
 # versions from the same VERSION pins that the release document
@@ -403,7 +419,7 @@ cp "$here/../hwdata/dist/$hwdata_version/pci.ids" \
 mkdir -p "$root/usr/share/liken"
 {
     echo "components:"
-    for component in kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata linux-firmware microcode; do
+    for component in kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata tzdata linux-firmware microcode; do
         echo "  - name: $component"
         echo "    version: $(cat "$here/../$component/VERSION")"
     done

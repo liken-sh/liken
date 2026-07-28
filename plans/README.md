@@ -14,7 +14,7 @@ A document's directory states its status:
   built yet.
 
 The numbers run in one sequence across all three directories. The next
-milestone is 46.
+milestone is 48.
 
 ## Completed
 
@@ -121,6 +121,10 @@ milestone is 46.
 * **43.** [A browsable release channel](completed/43-a-browsable-release-channel.md)
   — an index page for the channel and one for each release, rendered
   from the documents that the channel already serves.
+* **47.** [The timezone database](completed/47-the-timezone-database.md)
+  — the image carries IANA's zone files, so a CronJob can name the
+  zone its schedule means, and a weekly job in CI opens the pull
+  request that moves the pin.
 
 ## Rejected
 
@@ -149,6 +153,9 @@ milestone is 46.
 * **45.** [The CLI reaches the cluster](45-the-cli-reaches-the-cluster.md)
   — one command grants a machine the reboot its policy withholds, and
   three run `kubectl`, `stern`, and `flux` against the right cluster.
+* **46.** [Configuring etcd snapshots](46-configuring-etcd-snapshots.md)
+  — `spec.datastore.snapshots` gives a schedule, a retention, and an
+  S3 destination to the snapshots every leader already takes.
 
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.

@@ -1,0 +1,140 @@
+# This moves the timezone database pin. IANA ships four to six tzdata
+# releases a year, and some of them follow a government's decision by
+# two weeks. A pin that only moves when somebody notices is a pin that
+# schedules CronJobs on last year's offsets, so this job watches for a
+# new release and writes the bump.
+#
+# The job opens a pull request rather than pushing to main. A tz
+# release sometimes changes more than an offset: it renames a zone, or
+# moves one into `backward` as a link. A person should see that.
+#
+# GitHub does not start a workflow for a pull request that GITHUB_TOKEN
+# opened, so the checks and build workflows stay quiet on this pull
+# request until somebody pushes to the branch. That is why this job
+# runs tzdata/fetch.sh itself: the pull request arrives only after the
+# signatures verified and zic compiled the new data on this runner.
+# Merging to main is what runs the full build, which is liken's gate
+# either way.
+name: tzdata
+
+on:
+  schedule:
+    - cron: "23 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: tzdata
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      # IANA serves the current release name, and nothing else, at
+      # this path. Comparing two short strings costs one request a
+      # week and needs no API token.
+      - name: read the current release
+        id: upstream
+        run: |
+          set -euo pipefail
+          latest="$(curl --fail --silent --show-error \
+            https://data.iana.org/time-zones/tzdb/version | tr -d '[:space:]')"
+          pinned="$(cat tzdata/VERSION)"
+          echo "latest=$latest" >>"$GITHUB_OUTPUT"
+          echo "branch=tzdata-$latest" >>"$GITHUB_OUTPUT"
+          if [ "$latest" = "$pinned" ]; then
+            echo "tzdata $pinned is current"
+            echo "bump=no" >>"$GITHUB_OUTPUT"
+          else
+            echo "tzdata $pinned is behind $latest"
+            echo "bump=yes" >>"$GITHUB_OUTPUT"
+          fi
+
+      # A run that finds an open pull request for this version has
+      # nothing to add. Without this check, every Monday between a
+      # release and its merge would fail on a branch that already
+      # exists.
+      - name: check for an open pull request
+        id: existing
+        if: steps.upstream.outputs.bump == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          open="$(gh pr list --head "${{ steps.upstream.outputs.branch }}" \
+            --state open --json number --jq 'length')"
+          echo "open=$open" >>"$GITHUB_OUTPUT"
+          [ "$open" = "0" ] || echo "a pull request for this version is already open"
+
+      # The digests are written from bytes whose signature verified in
+      # this step. That ordering is the whole reason this domain pins a
+      # signing key: a digest that a robot computed from its own
+      # download proves nothing on its own, and IANA's signature is
+      # what stands behind these bytes. tzdata/fetch.sh checks both
+      # again in the next step, from the files this step wrote.
+      - name: verify and pin the new release
+        if: steps.upstream.outputs.bump == 'yes' && steps.existing.outputs.open == '0'
+        env:
+          VERSION: ${{ steps.upstream.outputs.latest }}
+        run: |
+          set -euo pipefail
+          cache="tzdata/cache/$VERSION"
+          mkdir -p "$cache"
+          gpg --dearmor <tzdata/tz.asc >"$cache/tz.gpg"
+          for name in "tzcode$VERSION.tar.gz" "tzdata$VERSION.tar.gz"; do
+            for file in "$name" "$name.asc"; do
+              curl --fail --silent --show-error --location \
+                -o "$cache/$file" \
+                "https://data.iana.org/time-zones/releases/$file"
+            done
+            gpgv --keyring "$cache/tz.gpg" "$cache/$name.asc" "$cache/$name"
+          done
+          echo "$VERSION" >tzdata/VERSION
+          (cd "$cache" && sha256sum "tzcode$VERSION.tar.gz" "tzdata$VERSION.tar.gz") \
+            >tzdata/DIGESTS
+          cat tzdata/VERSION tzdata/DIGESTS
+
+      # The runner has docker, so the domain builds here exactly as it
+      # builds on a workstation. A tz release that zic refuses, or one
+      # that drops a zone this build names, fails the job and opens no
+      # pull request.
+      - name: build the new release
+        if: steps.upstream.outputs.bump == 'yes' && steps.existing.outputs.open == '0'
+        run: make -C tzdata
+
+      - name: open the pull request
+        if: steps.upstream.outputs.bump == 'yes' && steps.existing.outputs.open == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.upstream.outputs.latest }}
+          BRANCH: ${{ steps.upstream.outputs.branch }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git add tzdata/VERSION tzdata/DIGESTS
+          git commit --file - <<COMMIT
+          Move the timezone database pin to $VERSION
+
+          IANA published tzdata $VERSION. liken's zone files resolve a
+          CronJob's spec.timeZone, and a machine keeps the release its
+          image carried, so a stale pin schedules jobs on offsets that
+          a government has already replaced.
+
+          The bump job verified IANA's detached signatures for both
+          tarballs against the key in tzdata/tz.asc, wrote the digests
+          from those bytes, and built the zone tree with zic on the
+          runner.
+          COMMIT
+          git push origin "$BRANCH"
+          gh pr create --base main --head "$BRANCH" \
+            --title "Move the timezone database pin to $VERSION" \
+            --body "Opened by the tzdata workflow. The signatures verified and zic built the tree on the runner. GitHub starts no workflow for a pull request that GITHUB_TOKEN opened, so push to this branch to run the checks and build before merging."

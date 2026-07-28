@@ -132,6 +132,16 @@ It is the database that names PCI vendors and devices in the
 Machine's unclaimed-hardware report. The file is its own source form,
 and it is mirrored under `sources/hwdata/`.
 
+## The timezone database (`/usr/share/zoneinfo`)
+
+License: public domain. The tz project places its code and its data in
+the public domain.
+
+These are the compiled zone files that resolve a CronJob's
+`spec.timeZone`. liken builds them with `zic` from IANA's `tzcode` and
+`tzdata` release tarballs. Those tarballs are mirrored under
+`sources/tzdata/`, with the detached PGP signatures IANA publishes.
+
 ## Driver firmware (`/lib/firmware`)
 
 License: per family, as the WHENCE manifest records. Most families

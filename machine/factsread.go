@@ -162,6 +162,7 @@ func (t FactsTree) readVersion() (VersionStatus, error) {
 		{"version/systemdBoot", &v.SystemdBoot},
 		{"version/grub", &v.Grub},
 		{"version/hwdata", &v.Hwdata},
+		{"version/tzdata", &v.Tzdata},
 		{"version/linuxFirmware", &v.LinuxFirmware},
 		{"version/microcode", &v.Microcode},
 		{"version/microcodeRevision", &v.MicrocodeRevision},
