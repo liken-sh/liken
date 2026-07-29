@@ -56,6 +56,7 @@ version="${1:-$(cat "$here/VERSION")}"
 # Release indexes, not beside the files, so this file holds the pin.
 # A version bump must update it deliberately.
 declare -A deb_sha256=(
+    ["259.5-0ubuntu3.3"]="0776d7f1bd2d80caf5882024b3d4b979a9ca8fe799f9828992b0959e0c19fa47"
     ["259.5-0ubuntu3"]="068d9c2f0c450c47869669367738057a604e5b8bab3b194ec7808c6e6e712ca6"
 )
 digest="${deb_sha256[$version]:-}"

@@ -77,11 +77,11 @@ version="$(cat "$here/VERSION")"
 # reviewable diff on this file. The open-iscsi pin matches the version
 # in open-iscsi/VERSION. To build any other version, update both.
 builder="docker.io/library/alpine@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce" # 3.22
-openiscsi_sha256="f288d1823b15782432608e5f53723159562e2c44e9a72b40fe15a5ca064ac86a"
+openiscsi_sha256="e2441b61e4b05cd5f0f94b35dcdf460e8d542e40d71b480882628170d6462d9a"
 kmod_version="34"
 kmod_sha256="12e7884484151fbd432b6a520170ea185c159f4393c7a2c2a886ab820313149a"
-libeconf_version="0.7.9"
-libeconf_sha256="0605f8d8a2f4668cb16e279ebcad8002cc83f44610633157e9c4b8fc183a479b"
+libeconf_version="0.8.4"
+libeconf_sha256="7c311d55237f1fc6ac437caca194d170c9cae314235d60a9fbf11e980114e25e"
 
 cache="$here/cache/$version"
 out="$here/dist/$version"

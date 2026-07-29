@@ -217,7 +217,7 @@ place() {
 # module package.
 # Tracks kernel/VERSION.
 mirror "kernel/$kernel_version" "linux-$kernel_version.tar.xz" \
-    "37198c93727be247c9fb5309bb86cd5e496c61e5322cd8c4eca9476bb0b5883f" \
+    "22a0196b3cbcdf34dc27b77561f4d040585fd3447edc9ab3531a1ac79e3041e7" \
     "https://cdn.kernel.org/pub/linux/kernel/v${kernel_version%%.*}.x/linux-$kernel_version.tar.xz"
 place "kernel/$kernel_version" "config" "$here/../kernel/dist/$kernel_version/config"
 
@@ -293,10 +293,10 @@ mirror "systemd-boot/$systemdboot_version" "systemd_259.5.orig.tar.gz" \
     "80ed55a8a69c4bd1fb12a36659303372b37baf9ee224ef4f032db4b748be0f76" \
     "$launchpad/systemd/$systemdboot_version/systemd_259.5.orig.tar.gz"
 mirror "systemd-boot/$systemdboot_version" "systemd_$systemdboot_version.debian.tar.xz" \
-    "a3a1d6e6bd1edf972badef67c85425206a727329f42070db3f469b149df2619c" \
+    "3ddc123b649a25f40e7580e973b6603685d8c603e8e93606f633e01b24dffd03" \
     "$launchpad/systemd/$systemdboot_version/systemd_$systemdboot_version.debian.tar.xz"
 mirror "systemd-boot/$systemdboot_version" "systemd_$systemdboot_version.dsc" \
-    "b8168448fa8307117663ce6a7aeee8ccddf5f736b1de70eabaefff04779bf731" \
+    "dd8109a73f4ee052a180ed666083d2f3c207cf20415d2cf283412e6ae837a097" \
     "$launchpad/systemd/$systemdboot_version/systemd_$systemdboot_version.dsc"
 mirror "grub/$grub_version" "grub2_2.12.orig.tar.xz" \
     "f3c97391f7c4eaa677a78e090c7e97e6dc47b16f655f04683ebd37bef7fe0faa" \
