@@ -46,16 +46,36 @@
 # obligation (licensing/NOTICES.md carries them).
 #
 # Usage:
-#   licensing/sources.sh    mirror the sources for the pinned versions
+#   licensing/sources.sh            mirror the sources for the pinned
+#                                   versions
+#   licensing/sources.sh --repin    write the digests that a domain's
+#                                   version bump moved
 #
 # Results land in licensing/dist/sources/<component>/<version>/, laid
 # out exactly as the channel serves them at
 # https://releases.liken.sh/sources/. Downloads are cached in
 # licensing/cache/.
+#
+# The --repin mode exists because the pins above track other domains,
+# and a domain that bumps its VERSION moves the source that belongs to
+# it. That mode fetches each pinned URL, and where the bytes no longer
+# match, it writes the new digest into this file. A sha256 string
+# appears once here, so the rewrite is exact.
+#
+# It refuses one case on purpose. Several URLs carry a version inside
+# the filename, so a bump changes the name and not only the bytes, and
+# the fetch returns a 404 error. The mode reports that URL and stops.
+# The mirror path is what the source offer depends on, and a guess
+# there ships a release whose sources cannot be downloaded.
 
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+repin=0
+if [[ "${1:-}" == "--repin" ]]; then
+    repin=1
+fi
 
 for tool in curl sha256sum; do
     command -v "$tool" >/dev/null || {
@@ -99,6 +119,40 @@ published() {
     curl -fsI --retry 3 "$channel/sources/$1/$2" >/dev/null 2>&1
 }
 
+# repin_one <component>/<version> <filename> <sha256> <url>: what
+# mirror does in --repin mode. It ignores the channel, because a file
+# the channel already serves is a file whose pin is already right, and
+# the point here is the one that is not. The cache is keyed by
+# version, so a bumped version is always a fresh download and an
+# unchanged one costs a local hash.
+repins=()
+repin_one() {
+    local dir="$1" file="$2" sha="$3" url="$4" bytes
+    mkdir -p "$cache/$dir"
+    if [[ ! -f "$cache/$dir/$file" ]]; then
+        echo "fetching $dir/$file"
+        curl -fsSL --retry 5 --retry-delay 5 "$url" -o "$cache/$dir/$file.partial" || {
+            echo "sources.sh: $url does not resolve" >&2
+            echo "sources.sh: this URL carries a version in its name, so the" >&2
+            echo "bump changed the name; edit the entry in this file by hand" >&2
+            exit 1
+        }
+        mv "$cache/$dir/$file.partial" "$cache/$dir/$file"
+    fi
+    bytes="$(sha256sum "$cache/$dir/$file" | cut -d' ' -f1)"
+    if [[ "$bytes" != "$sha" ]]; then
+        repins+=(-e "s|$sha|$bytes|")
+        echo "re-pinned $dir/$file"
+    fi
+}
+
+# In --repin mode this script does one job: bring its own digests up
+# to the bytes that the pinned URLs serve now. So the domains that
+# mirror from their own cache are not fetched, and place() returns
+# without doing anything. Nothing here needs a built domain, and
+# nothing here writes into dist.
+prefetch() { ((repin)) || "$@"; }
+
 # mirror <component>/<version> <filename> <sha256> <url>: download
 # the file once into the cache, verify it against the pin every time,
 # and place it in the tree the channel serves. Hardlinks keep the big
@@ -109,6 +163,10 @@ published() {
 # would fail a release.
 mirror() {
     local dir="$1" file="$2" sha="$3" url="$4"
+    if ((repin)); then
+        repin_one "$dir" "$file" "$sha" "$url"
+        return
+    fi
     if published "$dir" "$file"; then
         echo "$dir/$file is already on the channel"
         return
@@ -134,6 +192,11 @@ mirror() {
 # and not even that when the channel already serves it.
 place() {
     local dir="$1" file="$2" src="$3"
+    # A placed file carries no digest here, so --repin has nothing to
+    # write for it.
+    if ((repin)); then
+        return
+    fi
     if published "$dir" "$file"; then
         echo "$dir/$file is already on the channel"
         return
@@ -195,11 +258,11 @@ mirror "e2fsprogs/$e2fsprogs_version" "glibc-2.31.tar.xz" \
 # domains, so their tarballs are already fetched and verified against
 # those domains' pins. The --sources-only flag downloads the sources
 # without running the container builds.
-"$here/../open-iscsi/fetch.sh" --sources-only
+prefetch "$here/../open-iscsi/fetch.sh" --sources-only
 for tarball in "$here/../open-iscsi/cache/$openiscsi_version"/*.tar.*; do
     place "open-iscsi/$openiscsi_version" "$(basename "$tarball")" "$tarball"
 done
-"$here/../nfs-utils/fetch.sh" --sources-only
+prefetch "$here/../nfs-utils/fetch.sh" --sources-only
 for tarball in "$here/../nfs-utils/cache/$nfsutils_version"/*.tar.*; do
     place "nfs-utils/$nfsutils_version" "$(basename "$tarball")" "$tarball"
 done
@@ -264,7 +327,7 @@ place "hwdata/$hwdata_version" "pci.ids" \
 # liken ships compiled zone files, and these tarballs plus the zic
 # flags in tzdata/fetch.sh are what reproduces them. The detached
 # signatures come along so a downloader can run the same check.
-"$here/../tzdata/fetch.sh" --sources-only
+prefetch "$here/../tzdata/fetch.sh" --sources-only
 for source in "$here/../tzdata/cache/$tzdata_version"/*.tar.gz*; do
     place "tzdata/$tzdata_version" "$(basename "$source")" "$source"
 done
@@ -280,7 +343,8 @@ done
 # domain's own verifying fetch when the tarball is absent and the
 # channel does not already serve it.
 linuxfirmware_tarball="linux-firmware-$linuxfirmware_version.tar.xz"
-if ! published "linux-firmware/$linuxfirmware_version" "$linuxfirmware_tarball" &&
+if ! ((repin)) &&
+    ! published "linux-firmware/$linuxfirmware_version" "$linuxfirmware_tarball" &&
     [[ ! -f "$here/../linux-firmware/cache/$linuxfirmware_tarball" ]]; then
     "$here/../linux-firmware/fetch.sh"
 fi
@@ -288,7 +352,23 @@ place "linux-firmware/$linuxfirmware_version" "$linuxfirmware_tarball" \
     "$here/../linux-firmware/cache/$linuxfirmware_tarball"
 
 echo
-if [[ -d "$out" ]]; then
+if ((repin)); then
+    # The edits are applied in one pass at the end, and not as each
+    # one is found, so a run that stops on an unresolvable URL leaves
+    # this file exactly as it was.
+    if ((${#repins[@]})); then
+        sed -i "${repins[@]}" "$here/sources.sh"
+        # Each edit is two array elements, the -e and its expression.
+        moved=$((${#repins[@]} / 2))
+        if ((moved == 1)); then
+            echo "1 source digest moved in licensing/sources.sh"
+        else
+            echo "$moved source digests moved in licensing/sources.sh"
+        fi
+    else
+        echo "every source pin already matches its bytes"
+    fi
+elif [[ -d "$out" ]]; then
     echo "sources to publish:"
     (cd "$out" && find . -type f | sort | sed 's|^\./|  |')
 else

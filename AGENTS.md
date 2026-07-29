@@ -154,3 +154,20 @@ artifact, and the release workflow publishes its source mirror to
 When a vendored pin changes, update `licensing/` at the same time: the
 source pins in `licensing/sources.sh` and the notices in
 `licensing/NOTICES.md`. Those files explain the reasoning.
+`licensing/sources.sh --repin` writes the digests that a bump moved,
+and refuses the case it must not guess at: a URL whose filename
+carries the version.
+
+## Version pins
+
+Every domain that vendors something pins it by version, and by digest
+when its upstream publishes no checksum of its own. `make versions`
+asks every upstream what it has now and prints the answer beside each
+pin.
+
+Each pin belongs to a domain, so the knowledge of where its upstream
+lives is a `latest.sh` beside that domain's `fetch.sh`. Run it alone
+and it reports its own pins. Run it with `--bump` and it writes the
+new version, the new digest, and the matching source pin.
+`plans/completed/48-watching-the-pins.md` gives the reasons, and each
+script explains what its own upstream calls a release.

@@ -597,6 +597,31 @@ serve:
 docs:
 	$(MAKE) -C docs
 
+# Every domain that vendors something says what it pins and what its
+# upstream has now. The domains are listed in build order, so the
+# table reads in the order a release is assembled, and the last two
+# are the pins that belong to no build: the source mirror's own, and
+# the lab's storage guest.
+#
+# Each latest.sh prints tab-separated rows and no formatting, so the
+# rule adds the verdict and the alignment here, once, instead of
+# seventeen times. A domain that pins more than one thing prints a row
+# for each, and indents the name of a pin that hangs off another,
+# because which pin owns which is the domain's own knowledge.
+#
+# This target reaches the network, so it is not part of any build.
+VERSION_DOMAINS := kernel k3s xtables trust e2fsprogs open-iscsi \
+	nfs-utils systemd-boot grub hwdata tzdata linux-firmware \
+	microcode flux docs licensing dev-cluster/storage
+
+versions:
+	@{ printf 'COMPONENT\tPINNED\tLATEST\tSTATE\tNOTE\n'; \
+	   for domain in $(VERSION_DOMAINS); do \
+	       $$domain/latest.sh | awk -F'\t' -v OFS='\t' \
+	           '{ state = ($$3 == "?") ? "unknown" : ($$2 == $$3 ? "current" : "behind"); \
+	              print $$1, $$2, $$3, state, $$4 }'; \
+	   done; } | column -t -s "$$(printf '\t')"
+
 # Cleaning includes the dev cluster's disks. If the build removed
 # every domain's artifacts but left the machine state behind, the
 # next boot would still carry the old cluster's state. That would not
@@ -627,4 +652,4 @@ clean:
 	rm -rf $(IMAGE_DIR)
 	rm -rf $(HW_IMAGE_DIR)
 
-.PHONY: all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata tzdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware install install-stick install-gitops storage release serve docs clean
+.PHONY: versions all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata tzdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware install install-stick install-gitops storage release serve docs clean

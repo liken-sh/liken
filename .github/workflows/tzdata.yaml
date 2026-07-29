@@ -36,16 +36,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # IANA serves the current release name, and nothing else, at
-      # this path. Comparing two short strings costs one request a
-      # week and needs no API token.
+      # The domain's own latest.sh knows where IANA publishes the
+      # current release name, and every other domain has a script like
+      # it. Its first row is the database: the pinned version, then
+      # that name. Reading it here keeps one rule in one place, and
+      # costs one request a week with no API token.
       - name: read the current release
         id: upstream
         run: |
           set -euo pipefail
-          latest="$(curl --fail --silent --show-error \
-            https://data.iana.org/time-zones/tzdb/version | tr -d '[:space:]')"
-          pinned="$(cat tzdata/VERSION)"
+          row="$(tzdata/latest.sh | head -1)"
+          pinned="$(cut -f2 <<<"$row")"
+          latest="$(cut -f3 <<<"$row")"
           echo "latest=$latest" >>"$GITHUB_OUTPUT"
           echo "branch=tzdata-$latest" >>"$GITHUB_OUTPUT"
           if [ "$latest" = "$pinned" ]; then
@@ -72,32 +74,17 @@ jobs:
           echo "open=$open" >>"$GITHUB_OUTPUT"
           [ "$open" = "0" ] || echo "a pull request for this version is already open"
 
-      # The digests are written from bytes whose signature verified in
-      # this step. That ordering is the whole reason this domain pins a
+      # The bump verifies IANA's detached signatures before it writes
+      # a digest. That ordering is the whole reason this domain pins a
       # signing key: a digest that a robot computed from its own
       # download proves nothing on its own, and IANA's signature is
       # what stands behind these bytes. tzdata/fetch.sh checks both
       # again in the next step, from the files this step wrote.
       - name: verify and pin the new release
         if: steps.upstream.outputs.bump == 'yes' && steps.existing.outputs.open == '0'
-        env:
-          VERSION: ${{ steps.upstream.outputs.latest }}
         run: |
           set -euo pipefail
-          cache="tzdata/cache/$VERSION"
-          mkdir -p "$cache"
-          gpg --dearmor <tzdata/tz.asc >"$cache/tz.gpg"
-          for name in "tzcode$VERSION.tar.gz" "tzdata$VERSION.tar.gz"; do
-            for file in "$name" "$name.asc"; do
-              curl --fail --silent --show-error --location \
-                -o "$cache/$file" \
-                "https://data.iana.org/time-zones/releases/$file"
-            done
-            gpgv --keyring "$cache/tz.gpg" "$cache/$name.asc" "$cache/$name"
-          done
-          echo "$VERSION" >tzdata/VERSION
-          (cd "$cache" && sha256sum "tzcode$VERSION.tar.gz" "tzdata$VERSION.tar.gz") \
-            >tzdata/DIGESTS
+          tzdata/latest.sh --bump
           cat tzdata/VERSION tzdata/DIGESTS
 
       # The runner has docker, so the domain builds here exactly as it

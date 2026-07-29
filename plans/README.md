@@ -14,7 +14,7 @@ A document's directory states its status:
   built yet.
 
 The numbers run in one sequence across all three directories. The next
-milestone is 48.
+milestone is 49.
 
 ## Completed
 
@@ -125,6 +125,10 @@ milestone is 48.
   — the image carries IANA's zone files, so a CronJob can name the
   zone its schedule means, and a weekly job in CI opens the pull
   request that moves the pin.
+* **48.** [Watching the pins](completed/48-watching-the-pins.md) —
+  every domain that vendors something reports what it pins and what
+  its upstream has now, and moves the pin when asked. One `latest.sh`
+  beside each `fetch.sh`, and `make versions` for the whole table.
 
 ## Rejected
 
@@ -156,7 +160,6 @@ milestone is 48.
 * **46.** [Configuring etcd snapshots](46-configuring-etcd-snapshots.md)
   — `spec.datastore.snapshots` gives a schedule, a retention, and an
   S3 destination to the snapshots every leader already takes.
-
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.
 
