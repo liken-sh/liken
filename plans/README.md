@@ -186,19 +186,20 @@ proven.
 
 **The apiservers abort requests that liken's operators send.** On a
 five-machine fleet, the apiservers logged "Timeout or abort while
-handling" for 13% of the cluster operator's engine-probe GETs, and for
-a few of each machine's status PUTs every hour. The aborts include
-requests to `127.0.0.1:6443`, so the network between machines is not
-the cause. Neither operator reports an error, so from liken's side
-every request succeeds, and the noise lands in the apiserver's log at
-ERROR, near 2,800 lines a day. The log pair matches a request whose
-client closed the connection while the handler still ran, and
-`ResponseHeaderTimeout` in `kubernetes/apiclient.go` is the client's
-only ten-second deadline. What stalls a response for ten seconds is
-the open question, and the loopback case reproduces on one machine.
-Whatever the answer, the engine probe could ask every 60 seconds
-instead of every 10, or hold a watch, and a deleted engine would still
-heal in seconds.
+handling" for a few of each machine's status PUTs every hour, and for
+13% of the cluster operator's engine-probe GETs. The engine probe asks
+once every 60 seconds (`engineProbeInterval` in
+`cluster-operator/flux.go`), and the stall behind the log pair stays
+unexplained. The aborts include requests to `127.0.0.1:6443`, so the
+network between machines is not the cause. Neither operator reports an
+error, so from liken's side every request succeeds, and the noise
+lands in the apiserver's log at ERROR: near 2,800 lines a day, as
+measured while the probe still asked every 10 seconds, and unmeasured
+since. The log pair matches a request whose client closed the
+connection while the handler still ran, and `ResponseHeaderTimeout` in
+`kubernetes/apiclient.go` is the client's only ten-second deadline.
+What stalls a response for ten seconds is the open question, and the
+loopback case reproduces on one machine.
 
 **An edit that no machine reads still reboots the fleet.**
 `RestartApplies` in `cluster/changes.go` names the restart-class

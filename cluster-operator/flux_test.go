@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/liken-sh/liken/cluster"
 	"golang.org/x/crypto/ssh"
@@ -236,7 +237,7 @@ func TestEnsureFluxEngineLeavesAPresentEngineAlone(t *testing.T) {
 		}
 		w.Write([]byte(`{"metadata": {"name": "kustomize-controller"}}`))
 	}))
-	ensureFluxEngine(c, fluxCluster(), []byte(testSeed))
+	ensureFluxEngine(c, fluxCluster(), []byte(testSeed), &engineProbe{}, sweepNow)
 }
 
 func TestEnsureFluxEnginePlantsWhenAbsent(t *testing.T) {
@@ -256,7 +257,7 @@ func TestEnsureFluxEnginePlantsWhenAbsent(t *testing.T) {
 			w.WriteHeader(http.StatusCreated)
 		}
 	}))
-	ensureFluxEngine(c, fluxCluster(), []byte(testSeed))
+	ensureFluxEngine(c, fluxCluster(), []byte(testSeed), &engineProbe{}, sweepNow)
 	want := []string{
 		"/api/v1/namespaces",
 		"/apis/apiextensions.k8s.io/v1/customresourcedefinitions",
@@ -267,13 +268,76 @@ func TestEnsureFluxEnginePlantsWhenAbsent(t *testing.T) {
 	}
 }
 
+// The probe is the fleet's most frequent request, so it asks on its
+// own interval, not on every ten-second sweep. One probe carries the
+// three answers in order: the first sweep asks, a sweep inside the
+// interval does not, and a sweep at the interval asks again.
+func TestEnsureFluxEngineProbesOnceAnInterval(t *testing.T) {
+	probes := 0
+	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		probes++
+		w.Write([]byte(`{"metadata": {"name": "kustomize-controller"}}`))
+	}))
+	probe := &engineProbe{}
+
+	ensureFluxEngine(c, fluxCluster(), []byte(testSeed), probe, sweepNow)
+	if probes != 1 {
+		t.Fatalf("the first sweep probes: %d", probes)
+	}
+	ensureFluxEngine(c, fluxCluster(), []byte(testSeed), probe, sweepNow.Add(50*time.Second))
+	if probes != 1 {
+		t.Errorf("a sweep inside the interval asks nothing: %d", probes)
+	}
+	ensureFluxEngine(c, fluxCluster(), []byte(testSeed), probe, sweepNow.Add(engineProbeInterval))
+	if probes != 2 {
+		t.Errorf("a sweep at the interval asks again: %d", probes)
+	}
+}
+
+// Planting counts as an ask, because the probe records the ask before
+// it reads the answer. The sweep that planted asks nothing again
+// until the interval passes.
+func TestEnsureFluxEngineCountsAPlantAsAnAsk(t *testing.T) {
+	probes, creates := 0, 0
+	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			probes++
+			http.NotFound(w, r)
+		case http.MethodPost:
+			creates++
+			w.WriteHeader(http.StatusCreated)
+		}
+	}))
+	probe := &engineProbe{}
+
+	ensureFluxEngine(c, fluxCluster(), []byte(testSeed), probe, sweepNow)
+	ensureFluxEngine(c, fluxCluster(), []byte(testSeed), probe, sweepNow.Add(10*time.Second))
+	if probes != 1 {
+		t.Errorf("probes: %d, want 1", probes)
+	}
+	if creates != 3 {
+		t.Errorf("the one plant creates the whole seed: %d, want 3", creates)
+	}
+}
+
+// The feature gate comes before the probe's interval, so a cluster
+// that never declares flux asks nothing and uses up no interval. The
+// untouched asked time is what makes the first sweep after an opt-in
+// probe at once.
 func TestEnsureFluxEngineDoesNothingWithoutTheFeature(t *testing.T) {
 	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("no API call should happen: %s %s", r.Method, r.URL.Path)
 	}))
 	plain := &cluster.Cluster{}
 	plain.Metadata.Name = "lab"
-	ensureFluxEngine(c, plain, []byte(testSeed))
+	probe := &engineProbe{}
+
+	ensureFluxEngine(c, plain, []byte(testSeed), probe, sweepNow)
+
+	if !probe.asked.IsZero() {
+		t.Errorf("an undeclared feature must not spend the interval: %v", probe.asked)
+	}
 }
 
 // A conflicting create means another leader's operator minted first.

@@ -162,7 +162,7 @@ Retraction removes only the Flux that `liken` installed. The next
 section says how `liken` separates the two cases.
 
 If someone deletes the engine by accident, the cluster installs it
-again in seconds, and the next sync restores the copy from the
+again in about a minute, and the next sync restores the copy from the
 repository.
 
 ## What liken owns

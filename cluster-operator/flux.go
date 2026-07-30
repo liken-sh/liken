@@ -39,6 +39,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/kubernetes"
@@ -262,15 +263,55 @@ func collectionPath(o seedObject) (string, error) {
 	return base + "/" + kind.resource, nil
 }
 
+// engineProbeInterval sets how long the sweep waits between engine
+// probes. The sweep runs every ten seconds, which makes this GET the
+// most frequent request liken sends, and the apiservers log a
+// "Timeout or abort while handling" pair for a noticeable share of
+// them. The engine goes missing only when someone deletes it, and an
+// engine that heals within a minute is still far faster than the only
+// other repair, which is this program's next start.
+const engineProbeInterval = 60 * time.Second
+
+// engineProbe holds the one fact the engine's care must remember
+// across passes: when the sweep last asked whether the engine is
+// there. The channel poller (channel.go) keeps its state the same
+// way, and for the same reason. The sweep stays level-triggered and
+// keeps nothing itself, so what must outlive a pass lives in a value
+// the caller threads through. This one needs no mutex, because the
+// probe runs inline on the sweep's goroutine and one pass runs at a
+// time, while the channel poller's fetch runs on its own goroutine.
+type engineProbe struct {
+	asked time.Time
+}
+
+// TryAsk reports whether this sweep may probe, and records the ask
+// when it may. The zero value probes on the first sweep. A feature
+// that is off does not use up an interval, because the caller returns
+// before it calls this. Planting the seed counts as an ask, because
+// the probe records the ask before it reads the answer. That keeps
+// the state at one timestamp, and the interval then holds with no
+// exception. A plant that only partly landed waits for the next
+// probe, inside the same minute this interval promises.
+func (p *engineProbe) TryAsk(now time.Time) bool {
+	if now.Sub(p.asked) < engineProbeInterval {
+		return false
+	}
+	p.asked = now
+	return true
+}
+
 // ensureFluxEngine plants the engine seed when the engine is gone.
-// The probe runs on every sweep, so a deleted engine heals in
-// seconds, not at the next boot. Each object is a plain create, and
-// a conflict means the object already exists, which the planter
-// leaves exactly as it found it: the seed only ever fills absence.
-// Present but broken stays the repository's problem on purpose;
-// liken answers only for gone.
-func ensureFluxEngine(c *kubernetes.Client, clusterDoc *cluster.Cluster, seed []byte) {
+// The probe asks once an interval, so a deleted engine heals within
+// about a minute, not at the next boot. Each object is a plain
+// create, and a conflict means the object already exists, which the
+// planter leaves exactly as it found it: the seed only ever fills
+// absence. Present but broken stays the repository's problem on
+// purpose; liken answers only for gone.
+func ensureFluxEngine(c *kubernetes.Client, clusterDoc *cluster.Cluster, seed []byte, probe *engineProbe, now time.Time) {
 	if !clusterDoc.FeatureEnabled(cluster.FeatureFlux) {
+		return
+	}
+	if !probe.TryAsk(now) {
 		return
 	}
 	err := c.RequestJSON(http.MethodGet, engineProbePath, nil, nil)

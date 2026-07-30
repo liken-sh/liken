@@ -81,12 +81,14 @@ func main() {
 	events := make(chan *machine.Machine, 32)
 	go kubernetes.WatchMachines(client, "", "", events)
 
-	// The channel poller is the one piece of state that outlives a
-	// pass, the same way the machine operator's release fetcher does.
-	// The sweep stays level-triggered and stateless, and the poller
-	// remembers only what it needs to avoid asking too often: when it
-	// last asked, and the channel's last answer.
+	// Two values outlive a pass, the same way the machine operator's
+	// release fetcher does. The sweep stays level-triggered and
+	// stateless, and each of these remembers only what it needs to
+	// avoid asking too often. The channel poller keeps when it last
+	// asked and the channel's last answer. The flux engine probe keeps
+	// when it last asked whether the engine is still there.
 	poller := newChannelPoller()
+	probe := &engineProbe{}
 
 	// The ticker catches the changes that no Machine event announces:
 	// a heartbeat aging past the staleness limit (a Lease renewal is
@@ -95,7 +97,7 @@ func main() {
 	// same window that the machine operators work on.
 	ticker := time.NewTicker(10 * time.Second)
 	for {
-		sweep(client, name, poller)
+		sweep(client, name, poller, probe)
 		select {
 		case <-events:
 			drainEvents(events)
@@ -108,8 +110,9 @@ func main() {
 // starting from the cluster's current state. It reads the Cluster
 // fresh, because its spec drives the rollout. It gives the channel
 // poller its look at the spec. Then it lets the fleet sweep list the
-// fleet, judge it, and write the result.
-func sweep(c *kubernetes.Client, name string, poller *channelPoller) {
+// fleet, judge it, and write the result, carrying the engine probe
+// along so the flux engine's care keeps its own cadence.
+func sweep(c *kubernetes.Client, name string, poller *channelPoller, probe *engineProbe) {
 	clusterDoc, err := kubernetes.GetCluster(c, name)
 	if err != nil {
 		fmt.Printf("reading cluster %s: %v\n", name, err)
@@ -117,7 +120,7 @@ func sweep(c *kubernetes.Client, name string, poller *channelPoller) {
 	}
 	poller.Observe(clusterDoc.Spec.Releases,
 		clusterDoc.Metadata.Annotations[cluster.CheckReleasesAnnotation], time.Now())
-	sweepFleet(c, clusterDoc, poller.Available(), time.Now())
+	sweepFleet(c, clusterDoc, poller.Available(), probe, time.Now())
 }
 
 // awaitCluster lists Cluster objects until one exists. A 404

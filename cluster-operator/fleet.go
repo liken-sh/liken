@@ -107,10 +107,10 @@ func decideFleetSweep(machines []machine.Machine, renewals map[string]time.Time,
 // sweepFleet carries out the sweep. It lists the fleet and its
 // heartbeats, determines the verdict, marks the silent machines Lost,
 // and publishes the verdict on the Cluster. The available parameter
-// is the channel poller's last answer. The caller passes it in as a
-// plain value, so the sweep itself stays a function of its
-// arguments.
-func sweepFleet(c *kubernetes.Client, clusterDoc *cluster.Cluster, available string, now time.Time) {
+// is the channel poller's last answer, and probe holds when the flux
+// engine probe last asked. The caller passes both in as plain values,
+// so the sweep itself stays a function of its arguments.
+func sweepFleet(c *kubernetes.Client, clusterDoc *cluster.Cluster, available string, probe *engineProbe, now time.Time) {
 	machines, err := kubernetes.ListMachines(c)
 	if err != nil {
 		fmt.Printf("listing machines for the fleet sweep: %v\n", err)
@@ -150,14 +150,15 @@ func sweepFleet(c *kubernetes.Client, clusterDoc *cluster.Cluster, available str
 	// The flux feature's deploy key is fleet state too: minted once,
 	// then read on every pass so the status always carries the
 	// public half (see flux.go). The engine gets the same standing
-	// care: gone means re-planted, on this same pass.
+	// care on a slower cadence: the probe asks once a minute, and gone
+	// means re-planted on the pass that asked.
 	publicKey := ensureFluxDeployKey(c, clusterDoc)
 	if seed, err := engineSeed(); err != nil {
 		if clusterDoc.FeatureEnabled(cluster.FeatureFlux) {
 			fmt.Printf("this build carries no engine seed (a plain go build outside make): %v\n", err)
 		}
 	} else {
-		ensureFluxEngine(c, clusterDoc, seed)
+		ensureFluxEngine(c, clusterDoc, seed, probe, now)
 	}
 
 	markLost(c, machines, s.lost, now)
