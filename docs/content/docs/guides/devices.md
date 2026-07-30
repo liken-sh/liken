@@ -87,7 +87,9 @@ machine you buy.
 ## 4. Claim the GPU for a deployment
 
 The deployment writes a claim against the class, and the claim
-allocates the GPU.
+allocates the GPU. The claim is also what places the pod: the
+scheduler picks a machine whose `ResourceSlice` offers a matching
+device.
 
     apiVersion: resource.k8s.io/v1
     kind: ResourceClaim
@@ -118,9 +120,9 @@ names the pod's entry:
                   - name: gpu
 
 The container receives every node the device delivers. For the GPU
-above, that is `/dev/dri/card0`, `/dev/dri/renderD128`, and the i2c
-monitor-control nodes that i915 registers beside them. Nothing else
-changes: no privilege, and no host mount. Your image supplies the
+above, that is `/dev/dri/card0`, `/dev/dri/renderD128`, and the
+`/dev/i2c-*` monitor-control nodes that i915 registers beside them.
+Nothing else changes: no privilege, and no host mount. Your image supplies the
 userspace driver, and the image's user must be able to open the node.
 Check what the container received:
 
@@ -131,6 +133,12 @@ than one claim: a second deployment writes its own `ResourceClaim`
 against the same `DeviceClass`, and both deployments run. The
 integrated GPU above does not carry it, so a second claim waits until
 the first deployment releases the device.
+
+Give a deployment that holds a claim like this the `Recreate`
+strategy. A rolling update runs the old pod and the new pod at once,
+both name the same claim, and Kubernetes gives a claim's device to
+every pod that names the claim. `Recreate` stops the old pod first,
+so one pod holds the device at a time.
 
 ## 5. Give one pod a device alone
 
