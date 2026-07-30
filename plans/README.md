@@ -211,4 +211,7 @@ containerd's pod lifecycle at info was 171,000 of them. containerd logs
 that line alone is a third of containerd's volume, so it may mark a
 missing subscriber rather than verbosity. And a reboot is followed by
 about a day of elevated logging, while the kubelet's garbage collector
-removes the sandboxes the reboot orphaned.
+removes the sandboxes the reboot orphaned. A floor also stays under
+any level: the CNI plugin writes about three lines per pod on its own
+stderr, which no log level reaches. The lab measured it at 30 lines
+across a ten-pod churn that wrote 211 before the level was set.

@@ -479,11 +479,13 @@ func kubeletBootConfig(settings []string) string {
 // merge: k3s's own template writes no [debug] table at all, so the
 // rendered configuration names no level for this file to overwrite.
 //
-// The version line states containerd's configuration version. The
-// version of an imported file may not exceed the version of the file
-// that imports it, and a file that names a lower version is migrated
-// forward, which prints a warning on every start. Naming the same
-// version that k3s renders avoids both.
+// The version line names version 3, the same version k3s renders,
+// and that is the ceiling: containerd refuses an imported file whose
+// version exceeds the importing file's. containerd's current version
+// is higher than 3, so at each start it migrates the drop-in forward
+// and prints one "Configuration migrated" line for it, beside the
+// line it already prints for the file k3s renders. The cost is one
+// log line per containerd start.
 //
 // The level goes here rather than on containerd's command line,
 // because k3s builds that command line itself and passes no log level
