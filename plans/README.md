@@ -200,7 +200,11 @@ since. The log pair matches a request whose client closed the
 connection while the handler still ran, and `ResponseHeaderTimeout` in
 `kubernetes/apiclient.go` is the client's only ten-second deadline.
 What stalls a response for ten seconds is the open question, and the
-loopback case reproduces on one machine.
+loopback case reproduces on one machine. On a four-machine lab fleet,
+no abort landed on the engine probe's path at all; every abort landed
+on a machine operator's node and machine status writes. So the probe
+share may be a property of the five-machine fleet's load, and the
+next measurement should start from the status writers.
 
 **containerd and the kubelet write lines that no log level explains.**
 `spec.runtime.containerd.logLevel` and `spec.runtime.k3s.debug` set the
