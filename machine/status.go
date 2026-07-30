@@ -554,20 +554,33 @@ type FeatureStatus struct {
 // runs under. It mirrors spec.runtime subsection for subsection, and
 // holds the resolved values rather than the spec's strings.
 type RuntimeStatus struct {
-	K3s     K3sRuntimeStatus     `json:"k3s,omitzero"`
-	Kubelet KubeletRuntimeStatus `json:"kubelet,omitzero"`
+	K3s        K3sRuntimeStatus        `json:"k3s,omitzero"`
+	Kubelet    KubeletRuntimeStatus    `json:"kubelet,omitzero"`
+	Containerd ContainerdRuntimeStatus `json:"containerd,omitzero"`
 }
 
-// K3sRuntimeStatus is the Go runtime environment init handed the k3s
-// process this boot. GoMemoryLimit is the resolved ceiling as an
-// absolute quantity in MiB, for example "256Mi"; it is empty when the
-// cluster left the ceiling unset or turned it off, so the field's
-// absence reads as "no ceiling, Go's own default". GoGC is the resolved
-// collector pace; it is empty when the cluster set none, so its absence
-// reads as "Go's own pace".
+// K3sRuntimeStatus is the discipline init imposed on the k3s process
+// this boot. GoMemoryLimit is the resolved ceiling as an absolute
+// quantity in MiB, for example "256Mi"; it is empty when the cluster
+// left the ceiling unset or turned it off, so the field's absence reads
+// as "no ceiling, Go's own default". GoGC is the resolved collector
+// pace; it is empty when the cluster set none, so its absence reads as
+// "Go's own pace". Debug is true when init rendered k3s's debug key,
+// so its absence reads as "k3s logs at info".
 type K3sRuntimeStatus struct {
 	GoMemoryLimit string `json:"goMemoryLimit,omitempty"`
 	GoGC          int    `json:"goGC,omitempty"`
+	Debug         bool   `json:"debug,omitempty"`
+}
+
+// ContainerdRuntimeStatus is the containerd configuration init wrote on
+// this machine's boot. LogLevel is the level the drop-in gives
+// containerd; it is empty when the cluster named none, which reads as
+// containerd's own default of info. This is the console parity for
+// spec.runtime.containerd, so an operator who turns a fleet down can
+// read back which machines carry the change.
+type ContainerdRuntimeStatus struct {
+	LogLevel string `json:"logLevel,omitempty"`
 }
 
 // KubeletRuntimeStatus is the kubelet configuration init rendered on

@@ -63,6 +63,36 @@ func TestRuntimeFactsWithoutAPolicyReportNone(t *testing.T) {
 	}
 }
 
+// The facts carry both log levels, so the Machine's status says the
+// same thing the console printed, the k3s drop-in holds, and the
+// containerd drop-in gives containerd.
+func TestRuntimeFactsCarryTheLogLevels(t *testing.T) {
+	got := runtimeFacts(debugCluster(), 1<<30)
+	if !got.K3s.Debug {
+		t.Error("the k3s debug flag should reach the facts")
+	}
+	if got.Containerd.LogLevel != "warn" {
+		t.Errorf("got containerd level %q, want warn", got.Containerd.LogLevel)
+	}
+}
+
+// A cluster that names no level reports none, so an absent field in
+// status reads as the default that each reader supplies for itself.
+func TestRuntimeFactsWithoutLevelsReportNone(t *testing.T) {
+	for name, clusterDoc := range map[string]*cluster.Cluster{
+		"no cluster": nil,
+		"no level":   labCluster(),
+	} {
+		got := runtimeFacts(clusterDoc, 1<<30)
+		if got.K3s.Debug {
+			t.Errorf("%s: an unset field is not debug logging", name)
+		}
+		if got.Containerd != (machine.ContainerdRuntimeStatus{}) {
+			t.Errorf("%s: got %+v, want an empty block", name, got.Containerd)
+		}
+	}
+}
+
 func TestNetworkFactsWithNoConnections(t *testing.T) {
 	status := networkFacts(nil, nil, factsNow)
 	if status.Interface != "" || len(status.Interfaces) != 0 {

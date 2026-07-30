@@ -67,6 +67,41 @@ var (
 	// removes the copy with it.
 	k3sKubeletConfigCopy = "/var/lib/rancher/k3s/agent/etc/kubelet.conf.d/10-cli-config.conf"
 
+	// k3sContainerdDropIn is where init writes containerd's log level,
+	// when the cluster names one.
+	//
+	// containerd reads its level from its own configuration file, and
+	// init cannot write that file: k3s renders it from a template each
+	// time it starts containerd, so anything init wrote there would
+	// last until the next start. But the file k3s renders imports
+	// config-v3.toml.d/*.toml from the directory beside it, and
+	// containerd merges each imported file over what it has already
+	// read. So a drop-in in that directory sets the level, and k3s
+	// keeps rendering its own configuration untouched.
+	//
+	// A drop-in rather than the other supported path, a
+	// config-v3.toml.tmpl that overrides k3s's template. An override
+	// carries the whole base template's fate: it is a Go template that
+	// must still parse and still render every key containerd needs, so
+	// an override that breaks stops containerd on a machine that
+	// serves no shell to repair it. A drop-in carries only the level.
+	// If a future k3s stops importing the directory, the level returns
+	// to containerd's own default and containerd still starts. The
+	// drop-in also depends on no template name, and it leaves the
+	// override path free for the operator, who has only that one path
+	// and would otherwise have to merge liken's needs into their own
+	// template.
+	//
+	// The name carries containerd's configuration version, because
+	// that is the directory k3s imports: containerd 2.x reads version
+	// 3, and k3s renders config-v3.toml for it. The number orders the
+	// file within the directory, which containerd reads in glob order.
+	//
+	// The directory sits on clusterState, so a drop-in that nothing
+	// removes survives every restart and reboot. The boot that stops
+	// naming a level removes it.
+	k3sContainerdDropIn = "/var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.d/10-liken-log-level.toml"
+
 	// tokenPath is where the image carries the cluster's join token,
 	// minted offline like the CAs it hashes (see the identity
 	// package). This code hands the token to k3s as a token-file, so
@@ -174,7 +209,7 @@ func nodeAddress(clusterDoc *cluster.Cluster, conns []*connection) (ip, ifname s
 // k3sBootInputs gathers everything that the drop-in needs and that
 // only this boot could determine. writeK3sBootConfig fills it in, and
 // k3sBootConfig renders it. This is a struct rather than a parameter
-// list, because nine positional arguments with adjacent strings and
+// list, because ten positional arguments with adjacent strings and
 // bools invite mistakes. Named fields read correctly at the call
 // site.
 type k3sBootInputs struct {
@@ -187,6 +222,7 @@ type k3sBootInputs struct {
 	joinURL       string
 	nodeLabels    map[string]string
 	kubeletConfig string
+	debug         bool
 }
 
 // k3sBootConfig renders the drop-in: everything that k3s must be
@@ -351,6 +387,17 @@ func k3sBootConfig(in k3sBootInputs) string {
 		fmt.Fprintf(&b, "kubelet-arg:\n  - config=%s\n", in.kubeletConfig)
 	}
 
+	// k3s's own log level. debug is k3s's configuration key for the
+	// --debug flag, and it raises every Kubernetes component compiled
+	// into the process. Both roles render it, because a follower runs
+	// a kubelet and a kube-proxy that are as loud as a leader's. False
+	// renders nothing, so a cluster that leaves the field unset gets
+	// the same bytes it got before the field existed, and does not
+	// restart k3s on the upgrade that added it.
+	if in.debug {
+		b.WriteString("debug: true\n")
+	}
+
 	// The spec's node labels, so the node registers with its
 	// scheduling identity already set. A freshly reinstalled machine
 	// must not spend its first minutes as a blank node that workloads
@@ -419,6 +466,40 @@ func kubeletBootConfig(settings []string) string {
 	for _, setting := range settings {
 		b.WriteString(setting + "\n")
 	}
+	return b.String()
+}
+
+// containerdLogLevelDropIn renders the drop-in that gives containerd
+// the cluster's log level, and returns the empty string when the
+// cluster names none, so a cluster that tunes nothing gets no file.
+//
+// The drop-in carries one table and nothing else. containerd merges
+// each imported file over what it has already read, so this level wins
+// over the rendered configuration's. There is nothing to lose in that
+// merge: k3s's own template writes no [debug] table at all, so the
+// rendered configuration names no level for this file to overwrite.
+//
+// The version line states containerd's configuration version. The
+// version of an imported file may not exceed the version of the file
+// that imports it, and a file that names a lower version is migrated
+// forward, which prints a warning on every start. Naming the same
+// version that k3s renders avoids both.
+//
+// The level goes here rather than on containerd's command line,
+// because k3s builds that command line itself and passes no log level
+// on it. The one thing that would beat this file is a
+// CONTAINERD_LOG_LEVEL variable in k3s's environment, which k3s turns
+// into a --log-level flag, and init sets no such variable.
+func containerdLogLevelDropIn(level string) string {
+	if level == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("# Written by liken at boot: the containerd log level that the\n")
+	b.WriteString("# cluster's spec.runtime.containerd section names.\n")
+	b.WriteString("version = 3\n")
+	b.WriteString("\n[debug]\n")
+	fmt.Fprintf(&b, "  level = %q\n", level)
 	return b.String()
 }
 
@@ -629,6 +710,31 @@ func writeK3sBootConfig(clusterDoc *cluster.Cluster, m *machine.Machine, conns [
 		_ = os.Remove(k3sKubeletConfigCopy)
 	}
 
+	// containerd's log level, written as a drop-in beside the
+	// configuration that k3s renders, because k3s renders that
+	// configuration itself on every start (k3sContainerdDropIn
+	// explains). The directory is k3s's to create, and on a first boot
+	// k3s has not created it yet, so init makes it here.
+	containerdLevel := clusterDoc.ContainerdSpec().LogLevel
+	if document := containerdLogLevelDropIn(containerdLevel); document != "" {
+		if err := os.MkdirAll(filepath.Dir(k3sContainerdDropIn), 0o755); err != nil {
+			return role, err
+		}
+		if err := os.WriteFile(k3sContainerdDropIn, []byte(document), 0o644); err != nil {
+			return role, err
+		}
+	} else {
+		// The drop-in sits on clusterState, and containerd imports
+		// whatever the directory holds on every start. A cluster that
+		// stops naming a level must therefore have the drop-in removed,
+		// or containerd would keep the retracted level on every start
+		// after this one. This removes one named file, which liken
+		// wrote and nothing else writes, so it needs no check of who
+		// owns it. Every other file in the directory is the operator's
+		// and stays.
+		_ = os.Remove(k3sContainerdDropIn)
+	}
+
 	content := k3sBootConfig(k3sBootInputs{
 		role:          role,
 		clusterDoc:    clusterDoc,
@@ -639,6 +745,7 @@ func writeK3sBootConfig(clusterDoc *cluster.Cluster, m *machine.Machine, conns [
 		joinURL:       joinURL,
 		nodeLabels:    m.Spec.NodeLabels,
 		kubeletConfig: kubeletConfig,
+		debug:         clusterDoc.RuntimeSpec().Debug,
 	})
 	if err := os.WriteFile(filepath.Join(dropInDir, "boot.yaml"), []byte(content), 0o644); err != nil {
 		return role, err
@@ -657,6 +764,15 @@ func writeK3sBootConfig(clusterDoc *cluster.Cluster, m *machine.Machine, conns [
 	// are the document's envelope and carry no decision.
 	for _, setting := range settings {
 		fmt.Printf("liken: kubelet config: %s\n", setting)
+	}
+
+	// containerd's level echoes for the same reason, and it names the
+	// level rather than the drop-in, because the level is the
+	// decision and the drop-in is only where it lands. A cluster that
+	// names no level prints nothing, so the console does not claim a
+	// setting that no file carries.
+	if containerdLevel != "" {
+		fmt.Printf("liken: containerd config: log level %s\n", containerdLevel)
 	}
 
 	// The Go runtime discipline is set alongside the configuration. It

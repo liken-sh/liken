@@ -201,15 +201,13 @@ connection while the handler still ran, and `ResponseHeaderTimeout` in
 What stalls a response for ten seconds is the open question, and the
 loopback case reproduces on one machine.
 
-**No log level for containerd or k3s.** containerd takes a level in
-its own configuration and k3s takes `--debug`, but no field in either
-CRD reaches them, and a machine serves no shell. On a five-machine
-fleet, the machines' own streams wrote 295,000 lines a day, and
-containerd's pod lifecycle at info was 171,000 of them. A field could
-set the level the way `rebootPolicy` sets a policy, with info as the
-default. Two of the measurements need their own answer. containerd
-logs `container event discarded` when nothing consumes its event
-stream, and that line alone is a third of containerd's volume, so it
-may mark a missing subscriber rather than verbosity. And a reboot is
-followed by about a day of elevated logging, while the kubelet's
-garbage collector removes the sandboxes the reboot orphaned.
+**containerd and the kubelet write lines that no log level explains.**
+`spec.runtime.containerd.logLevel` and `spec.runtime.k3s.debug` set the
+levels, so what stays open is two measurements from the five-machine
+fleet. The machines' own streams wrote 295,000 lines a day, and
+containerd's pod lifecycle at info was 171,000 of them. containerd logs
+`container event discarded` when nothing consumes its event stream, and
+that line alone is a third of containerd's volume, so it may mark a
+missing subscriber rather than verbosity. And a reboot is followed by
+about a day of elevated logging, while the kubelet's garbage collector
+removes the sandboxes the reboot orphaned.

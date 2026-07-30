@@ -2557,21 +2557,23 @@ spec:
                   type: object
                   description: >-
                     The runtime discipline that init imposed on this
-                    boot: the Go environment it gave the k3s process,
-                    and the configuration it wrote for the kubelet
-                    inside it. These are the resolved values, not the
-                    strings from the Cluster's spec.runtime. An
-                    operator who changes a setting reads back here
-                    what each machine actually runs.
+                    boot: the Go environment and log level it gave the
+                    k3s process, the configuration it wrote for the
+                    kubelet inside it, and the level it gave
+                    containerd beside it. These are the resolved
+                    values, not the strings from the Cluster's
+                    spec.runtime. An operator who changes a setting
+                    reads back here what each machine actually runs.
                   properties:
                     k3s:
                       type: object
                       description: >-
-                        The Go runtime environment of the k3s
-                        process on this machine. containerd and the
-                        shims get the same environment. This field is
-                        absent when init set neither variable, so
-                        k3s runs on Go's own defaults.
+                        The runtime discipline of the k3s process on
+                        this machine. containerd and the shims get the
+                        same Go environment. This field is absent when
+                        init set no variable and rendered no log
+                        level, so k3s runs on Go's own defaults and
+                        logs at info.
                       properties:
                         goMemoryLimit:
                           type: string
@@ -2588,6 +2590,14 @@ spec:
                             The resolved collector rate (Go's GOGC). It
                             is absent when the cluster sets no value, so
                             k3s keeps Go's own rate.
+                        debug:
+                          type: boolean
+                          description: >-
+                            True when init told k3s to log at debug,
+                            which reaches every Kubernetes component
+                            inside the process. It is absent when the
+                            cluster sets no value, so k3s logs at
+                            info.
                     kubelet:
                       type: object
                       description: >-
@@ -2642,6 +2652,24 @@ spec:
                                 is absent when the cluster names no
                                 value, so the kubelet uses two
                                 minutes.
+                    containerd:
+                      type: object
+                      description: >-
+                        The containerd configuration that init wrote
+                        on this machine, from the Cluster's
+                        spec.runtime.containerd. This field is absent
+                        when the cluster names no setting, so init
+                        wrote no drop-in and containerd runs on its
+                        own defaults.
+                      properties:
+                        logLevel:
+                          type: string
+                          maxLength: 16
+                          description: >-
+                            The log level that this machine's
+                            containerd runs at. It is absent when the
+                            cluster names no level, so containerd uses
+                            info.
                 lastCrash:
                   type: object
                   description: >-

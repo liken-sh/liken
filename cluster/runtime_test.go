@@ -187,6 +187,31 @@ func TestImageGCValidationAcceptsGoodValues(t *testing.T) {
 	}
 }
 
+// containerd exits when it reads a level it does not know, and k3s
+// does not start without containerd, so the door here refuses
+// everything that containerd's own reader would.
+func TestContainerdValidationRejectsUnknownLevels(t *testing.T) {
+	for _, level := range []string{"verbose", "DEBUG", "warning", "trace", "fatal", "panic", "0", " info"} {
+		t.Run(level, func(t *testing.T) {
+			err := ContainerdRuntimeSpec{LogLevel: level}.Validate()
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if !strings.Contains(err.Error(), "logLevel") {
+				t.Errorf("the error should name the field, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestContainerdValidationAcceptsTheLevelsLikenOffers(t *testing.T) {
+	for _, level := range []string{"", "debug", "info", "warn", "error"} {
+		if err := (ContainerdRuntimeSpec{LogLevel: level}).Validate(); err != nil {
+			t.Errorf("level %q should validate, got %v", level, err)
+		}
+	}
+}
+
 // A bad runtime section fails the whole parse, at the same door that
 // refuses a null feature, so init and the operator reject it alike.
 func TestParseClusterRejectsBadRuntime(t *testing.T) {
@@ -262,6 +287,56 @@ func TestKubeletSpecOnANilCluster(t *testing.T) {
 	var c *Cluster
 	if c.KubeletSpec().ImageGC != (ImageGCSpec{}) {
 		t.Error("a machine alone names no image collection policy")
+	}
+}
+
+func TestContainerdSpecOnANilCluster(t *testing.T) {
+	var c *Cluster
+	if c.ContainerdSpec() != (ContainerdRuntimeSpec{}) {
+		t.Error("a machine alone names no containerd log level")
+	}
+}
+
+func TestParseClusterRejectsAnUnknownContainerdLevel(t *testing.T) {
+	_, err := ParseCluster([]byte(`
+apiVersion: liken.sh/v1alpha1
+kind: Cluster
+metadata:
+  name: lab
+spec:
+  runtime:
+    containerd:
+      logLevel: verbose
+`))
+	if err == nil {
+		t.Fatal("expected an error for a level containerd does not know")
+	}
+	if !strings.Contains(err.Error(), "spec.runtime") || !strings.Contains(err.Error(), "containerd") {
+		t.Errorf("the error should name the field, got: %v", err)
+	}
+}
+
+func TestParseClusterAcceptsTheLogLevels(t *testing.T) {
+	c, err := ParseCluster([]byte(`
+apiVersion: liken.sh/v1alpha1
+kind: Cluster
+metadata:
+  name: lab
+spec:
+  runtime:
+    k3s:
+      debug: true
+    containerd:
+      logLevel: warn
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.RuntimeSpec().Debug {
+		t.Error("the k3s debug flag did not parse")
+	}
+	if got := c.ContainerdSpec().LogLevel; got != "warn" {
+		t.Errorf("containerd's level did not parse: %q", got)
 	}
 }
 

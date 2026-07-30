@@ -357,6 +357,64 @@ func TestK3sBootConfigWithoutAKubeletConfigNamesNone(t *testing.T) {
 	}
 }
 
+// debugCluster is the lab cluster with both log level knobs turned
+// away from their defaults, so a test can watch each one reach the
+// file that carries it.
+func debugCluster() *cluster.Cluster {
+	c := labCluster()
+	c.Spec.Runtime.K3s.Debug = true
+	c.Spec.Runtime.Containerd.LogLevel = "warn"
+	return c
+}
+
+// A follower's components are as loud as a leader's, so both roles
+// render the key.
+func TestK3sBootConfigRendersTheDebugKey(t *testing.T) {
+	for _, role := range []api.Role{api.RoleLeader, api.RoleFollower} {
+		got := k3sBootConfig(k3sBootInputs{role: role, clusterDoc: labCluster(), haveToken: true, debug: true})
+		if !strings.Contains(got, "debug: true\n") {
+			t.Errorf("%s config should carry the debug key:\n%s", role, got)
+		}
+	}
+}
+
+// A cluster that leaves debug unset renders the bytes it rendered
+// before the field existed, so the upgrade that added it restarts no
+// machine.
+func TestK3sBootConfigWithoutDebugNamesNone(t *testing.T) {
+	for _, role := range []api.Role{api.RoleLeader, api.RoleFollower} {
+		got := k3sBootConfig(k3sBootInputs{role: role, clusterDoc: labCluster(), haveToken: true})
+		if strings.Contains(got, "debug:") {
+			t.Errorf("%s: an unset field means no debug key:\n%s", role, got)
+		}
+	}
+}
+
+// The drop-in carries one table and the version that k3s renders. It
+// restates nothing else from k3s's configuration, and it is not a
+// template, so nothing here can break the file that starts containerd.
+func TestContainerdLogLevelDropInCarriesOnlyTheLevel(t *testing.T) {
+	got := containerdLogLevelDropIn("warn")
+	for _, want := range []string{
+		"version = 3\n",
+		"[debug]\n",
+		`level = "warn"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the drop-in should carry %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "{{") {
+		t.Errorf("the drop-in is TOML, not a template:\n%s", got)
+	}
+}
+
+func TestContainerdLogLevelDropInIsEmptyWhenNoLevelIsNamed(t *testing.T) {
+	if got := containerdLogLevelDropIn(""); got != "" {
+		t.Errorf("no named level means no drop-in:\n%s", got)
+	}
+}
+
 // A machine with no cluster document is a leader of one, and it
 // still states the setting rather than leaving kube-proxy on its own
 // broad default.
@@ -570,14 +628,17 @@ func TestK3sBootConfigWithoutAToken(t *testing.T) {
 func fakeK3sConfigs(t *testing.T, withToken bool) (serverDropIns, agentDropIns string) {
 	t.Helper()
 	dir := t.TempDir()
-	oldServer, oldAgent, oldKubelet, oldCopy, oldToken := k3sServerConfig, k3sAgentConfig, k3sKubeletConfig, k3sKubeletConfigCopy, tokenPath
+	oldServer, oldAgent, oldKubelet, oldCopy := k3sServerConfig, k3sAgentConfig, k3sKubeletConfig, k3sKubeletConfigCopy
+	oldDropIn, oldToken := k3sContainerdDropIn, tokenPath
 	k3sServerConfig = filepath.Join(dir, "config.yaml")
 	k3sAgentConfig = filepath.Join(dir, "agent.yaml")
 	k3sKubeletConfig = filepath.Join(dir, "kubelet.yaml")
 	k3sKubeletConfigCopy = filepath.Join(dir, "kubelet.conf.d", "10-cli-config.conf")
+	k3sContainerdDropIn = filepath.Join(dir, "containerd", "config-v3.toml.d", "10-liken-log-level.toml")
 	tokenPath = filepath.Join(dir, "token")
 	t.Cleanup(func() {
-		k3sServerConfig, k3sAgentConfig, k3sKubeletConfig, k3sKubeletConfigCopy, tokenPath = oldServer, oldAgent, oldKubelet, oldCopy, oldToken
+		k3sServerConfig, k3sAgentConfig, k3sKubeletConfig, k3sKubeletConfigCopy = oldServer, oldAgent, oldKubelet, oldCopy
+		k3sContainerdDropIn, tokenPath = oldDropIn, oldToken
 	})
 	if withToken {
 		if err := os.WriteFile(tokenPath, []byte("K10abc::server:secret\n"), 0o600); err != nil {
@@ -771,6 +832,104 @@ func TestWriteK3sBootConfigRetractsTheKubeletConfig(t *testing.T) {
 	}
 	if _, err := os.Stat(k3sKubeletConfigCopy); err == nil {
 		t.Error("a retracted section takes k3s's copy away too; k3s refreshes the copy only when the argument is present, so a stale copy would keep the policy running forever")
+	}
+}
+
+// containerd runs on every node, so both roles write the drop-in, and
+// the k3s drop-in carries k3s's own debug key beside it.
+func TestWriteK3sBootConfigWritesTheLogLevels(t *testing.T) {
+	cases := map[string]struct {
+		name string
+		role api.Role
+	}{
+		"a leader":   {"node-1", api.RoleLeader},
+		"a follower": {"node-2", api.RoleFollower},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			fakeK3sConfigs(t, true)
+			conns := []*connection{conn(t, "eth1", "10.10.0.1/24")}
+
+			role, err := writeK3sBootConfig(debugCluster(), bootMachine(tc.name, nil), conns)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if role != tc.role {
+				t.Fatalf("got role %s, want %s", role, tc.role)
+			}
+			base := k3sServerConfig
+			if role == api.RoleFollower {
+				base = k3sAgentConfig
+			}
+			bootDropIn, err := os.ReadFile(filepath.Join(base+".d", "boot.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(bootDropIn), "debug: true\n") {
+				t.Errorf("the k3s drop-in should carry k3s's debug key:\n%s", bootDropIn)
+			}
+			written, err := os.ReadFile(k3sContainerdDropIn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(written), `level = "warn"`) {
+				t.Errorf("the containerd drop-in should carry the cluster's level:\n%s", written)
+			}
+		})
+	}
+}
+
+// A cluster that names neither knob renders what it rendered before
+// the fields existed: no debug key, and no containerd drop-in.
+func TestWriteK3sBootConfigWithoutLevelsWritesNeither(t *testing.T) {
+	serverDropIns, _ := fakeK3sConfigs(t, true)
+	conns := []*connection{conn(t, "eth1", "10.10.0.1/24")}
+
+	if _, err := writeK3sBootConfig(labCluster(), bootMachine("node-1", nil), conns); err != nil {
+		t.Fatal(err)
+	}
+	bootDropIn, err := os.ReadFile(filepath.Join(serverDropIns, "boot.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(bootDropIn), "debug:") {
+		t.Errorf("an unset field means no debug key:\n%s", bootDropIn)
+	}
+	if _, err := os.Stat(k3sContainerdDropIn); err == nil {
+		t.Error("no named level means no containerd drop-in")
+	}
+}
+
+// The drop-in sits on clusterState, and containerd imports whatever the
+// directory holds on every start. A cluster that stops naming a level
+// must have the drop-in removed, or containerd would keep the retracted
+// level. The retraction takes liken's own file and leaves the
+// operator's, because the directory is a place both of them write.
+func TestWriteK3sBootConfigRetractsTheContainerdDropIn(t *testing.T) {
+	fakeK3sConfigs(t, true)
+	conns := []*connection{conn(t, "eth1", "10.10.0.1/24")}
+	machineDoc := bootMachine("node-1", nil)
+
+	if _, err := writeK3sBootConfig(debugCluster(), machineDoc, conns); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(k3sContainerdDropIn); err != nil {
+		t.Fatalf("the first boot writes the drop-in: %v", err)
+	}
+
+	operators := filepath.Join(filepath.Dir(k3sContainerdDropIn), "20-operator.toml")
+	if err := os.WriteFile(operators, []byte("version = 3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := writeK3sBootConfig(labCluster(), machineDoc, conns); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(k3sContainerdDropIn); err == nil {
+		t.Error("a retracted level takes liken's drop-in away")
+	}
+	if _, err := os.Stat(operators); err != nil {
+		t.Errorf("a retraction must leave every other file in the directory: %v", err)
 	}
 }
 

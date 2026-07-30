@@ -181,11 +181,12 @@ func everythingSet() *MachineStatus {
 			Mirrors: []string{"docker.io", "*"}, CredentialedHosts: []string{"ghcr.io"}, Embedded: true,
 		},
 		Runtime: RuntimeStatus{
-			K3s: K3sRuntimeStatus{GoMemoryLimit: "448Mi", GoGC: 50},
+			K3s: K3sRuntimeStatus{GoMemoryLimit: "448Mi", GoGC: 50, Debug: true},
 			Kubelet: KubeletRuntimeStatus{ImageGC: ImageGCStatus{
 				HighThresholdPercent: 70, LowThresholdPercent: 60,
 				MinimumAge: "5m", MaximumAge: "168h",
 			}},
+			Containerd: ContainerdRuntimeStatus{LogLevel: "warn"},
 		},
 		Boot: BootStatus{
 			Time:           &booted,

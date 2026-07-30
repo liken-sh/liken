@@ -1,33 +1,40 @@
 package cluster
 
-// The runtime discipline the cluster imposes on the k3s process and on
-// the components inside it.
+// The runtime discipline the cluster imposes on the k3s process, on
+// the components inside it, and on the container runtime beside it.
 //
 // liken supervises one long-lived process: k3s. This section is the
 // operator's control over how that process runs, and it has one
 // subsection per thing that reads a setting. The k3s subsection is the
-// Go runtime environment init hands the process. The kubelet
-// subsection is the configuration of the kubelet, which is a component
-// compiled into that same process rather than a program of its own.
-// The split follows the reader, so a path names the thing that acts on
-// the value: spec.runtime.k3s.goMemoryLimit reads as "the runtime
-// memory limit of the k3s process", and
-// spec.runtime.kubelet.imageGC.maximumAge reads as "the age ceiling of
-// the kubelet's image collector".
+// discipline of the process itself. The kubelet subsection is the
+// configuration of the kubelet, which is a component compiled into
+// that same process rather than a program of its own. The containerd
+// subsection is the configuration of containerd, which is a separate
+// program that k3s starts. The split follows the reader, so a path
+// names the thing that acts on the value:
+// spec.runtime.k3s.goMemoryLimit reads as "the runtime memory limit of
+// the k3s process", spec.runtime.kubelet.imageGC.maximumAge reads as
+// "the age ceiling of the kubelet's image collector", and
+// spec.runtime.containerd.logLevel reads as "the log level of
+// containerd".
 //
 // Every setting here is an opt-in. An unset field imposes nothing, so
 // the reader keeps its own default: Go's runtime defaults for the k3s
-// subsection, and the kubelet's own image collection policy for the
-// kubelet subsection. This matters for an upgrade. A cluster that
-// names nothing renders the same bytes it rendered before, so no
-// machine restarts k3s to gain a section it never asked for.
+// subsection, the kubelet's own image collection policy for the
+// kubelet subsection, and containerd's own level for the containerd
+// subsection. This matters for an upgrade. A cluster that names
+// nothing renders the same bytes it rendered before, so no machine
+// restarts k3s to gain a section it never asked for.
 //
 // Every setting here is also read only when the k3s process starts, so
 // an edit converges by restarting k3s in place, the same tier as a
 // features edit. changes.go classifies the whole section that way.
+// containerd is included in that rule, because k3s starts containerd
+// and stops it again, so a k3s restart is also a containerd restart.
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -35,32 +42,43 @@ import (
 
 // ClusterRuntimeSpec is the runtime discipline section of a
 // ClusterSpec. It holds one subsection per thing that reads a
-// setting: the k3s process, and the kubelet inside it.
+// setting: the k3s process, the kubelet inside it, and containerd
+// beside it.
 type ClusterRuntimeSpec struct {
-	// K3s is the Go runtime environment for the k3s process init
-	// launches, inherited by containerd and the shims.
+	// K3s is the runtime discipline of the k3s process init launches:
+	// the Go environment it runs under, and how much it prints.
 	K3s K3sRuntimeSpec `json:"k3s,omitzero"`
 
 	// Kubelet is the configuration of the kubelet component that runs
 	// inside the k3s process, on every machine of the cluster.
 	Kubelet KubeletRuntimeSpec `json:"kubelet,omitzero"`
+
+	// Containerd is the configuration of containerd, the container
+	// runtime that k3s starts on every machine of the cluster.
+	Containerd ContainerdRuntimeSpec `json:"containerd,omitzero"`
 }
 
-// K3sRuntimeSpec is the Go runtime environment for the k3s process.
-// Both fields are read only when k3s starts, so an edit converges by
+// K3sRuntimeSpec is the runtime discipline of the k3s process itself:
+// the Go environment it runs under, and how much it prints. Every
+// field is read only when k3s starts, so an edit converges by
 // restarting k3s in place, the same tier as a features edit. An unset
-// field imposes nothing, so k3s keeps Go's own default for it: no
-// memory ceiling, and a heap that grows to twice its live data before
-// the collector runs. That trade is right on a machine with memory to
-// spare. It is worth tuning on the small machines liken targets, where
-// k3s is the dominant resident process, and every uncollected megabyte
-// takes memory from the workloads.
+// field imposes nothing, so k3s keeps its own default for it.
 //
-// These two values shape only the environment init hands the k3s
-// process. containerd and the shims k3s starts inherit it, because k3s
-// is their parent. No other process reads it: not init, not the
-// operators, not the workloads, which get their environment from their
-// own pod specs.
+// The two Go values shape only the environment init hands the k3s
+// process, where k3s keeps Go's own defaults: no memory ceiling, and a
+// heap that grows to twice its live data before the collector runs.
+// That trade is right on a machine with memory to spare. It is worth
+// tuning on the small machines liken targets, where k3s is the
+// dominant resident process, and every uncollected megabyte takes
+// memory from the workloads. containerd and the shims k3s starts
+// inherit that environment, because k3s is their parent. No other
+// process reads it: not init, not the operators, not the workloads,
+// which get their environment from their own pod specs.
+//
+// Debug is not part of that environment. It is a k3s setting of its
+// own, and it reaches only the components compiled into the k3s
+// process. containerd has a level of its own, in the containerd
+// subsection.
 type K3sRuntimeSpec struct {
 	// GoMemoryLimit is the soft ceiling on everything the k3s
 	// runtime manages: heap, stacks, and its own metadata (Go's
@@ -77,6 +95,16 @@ type K3sRuntimeSpec struct {
 	// pointer so an explicit value is told apart from unset, and the
 	// file doors refuse a value below 1.
 	GoGC *int `json:"goGC,omitempty"`
+
+	// Debug raises the k3s process to debug logging, the same thing
+	// k3s's own --debug flag does. It reaches every Kubernetes
+	// component compiled into the process: the API server, the
+	// scheduler, the controllers, and the kubelet. Left unset, k3s
+	// logs at info. Turn it on to read a decision that the info lines
+	// do not explain, and turn it off again, because debug multiplies
+	// the volume of a stream that a small machine has to store and
+	// ship off itself.
+	Debug bool `json:"debug,omitempty"`
 }
 
 // GoGCPercent resolves the collector pace. It reports the set value and
@@ -320,6 +348,43 @@ func (k KubeletRuntimeSpec) Validate() error {
 	return nil
 }
 
+// ContainerdRuntimeSpec is the configuration of containerd, the
+// container runtime that runs beside the k3s process. containerd is a
+// program of its own that k3s starts, not a component compiled into
+// k3s, so it keeps its own configuration file and its own log level.
+// Nothing in the k3s subsection reaches it.
+//
+// containerd is the loudest writer on a liken machine. At info it
+// prints a line for each step of every pod's life, on every node, for
+// as long as the node runs. That detail is worth having while a
+// cluster is new and worth turning down once it is not, and a machine
+// serves no shell in which to turn it down by hand.
+type ContainerdRuntimeSpec struct {
+	// LogLevel is how much containerd prints. Left unset, containerd
+	// keeps its own default of info. Set "warn" to keep the failures
+	// and drop the pod lifecycle lines.
+	LogLevel string `json:"logLevel,omitempty"`
+}
+
+// containerdLogLevels are the levels a cluster may name, from loudest
+// to quietest. containerd itself takes three more (trace above debug,
+// and fatal and panic below error), which liken does not offer. trace
+// is a volume no machine should write to the disk it also runs on, and
+// fatal and panic drop the error lines that explain what a crash
+// followed.
+var containerdLogLevels = []string{"debug", "info", "warn", "error"}
+
+// Validate holds the containerd section to the levels above. containerd
+// exits when it reads a level it does not know, and k3s does not start
+// without containerd, so a machine that boots a rejected level runs no
+// workloads and serves no shell to repair it.
+func (c ContainerdRuntimeSpec) Validate() error {
+	if c.LogLevel == "" || slices.Contains(containerdLogLevels, c.LogLevel) {
+		return nil
+	}
+	return fmt.Errorf("logLevel %q: expected one of %s", c.LogLevel, strings.Join(containerdLogLevels, ", "))
+}
+
 // Validate holds the runtime section to its shape, so every file door
 // refuses garbage the same way the CRD refuses it at admission. Each
 // subsection names itself in the error, so a message reads as the path
@@ -330,6 +395,9 @@ func (r ClusterRuntimeSpec) Validate() error {
 	}
 	if err := r.Kubelet.Validate(); err != nil {
 		return fmt.Errorf("kubelet: %w", err)
+	}
+	if err := r.Containerd.Validate(); err != nil {
+		return fmt.Errorf("containerd: %w", err)
 	}
 	return nil
 }

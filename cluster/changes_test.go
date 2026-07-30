@@ -58,6 +58,10 @@ func TestRestartAppliesByDomain(t *testing.T) {
 			s.Runtime.Kubelet.ImageGC.HighThresholdPercent = &n
 			s.Runtime.Kubelet.ImageGC.MaximumAge = "168h"
 		}, true},
+		"a log level edit": {func(s *ClusterSpec) {
+			s.Runtime.K3s.Debug = true
+			s.Runtime.Containerd.LogLevel = "warn"
+		}, true},
 		"runtime and a feature": {func(s *ClusterSpec) { s.Runtime.K3s.GoMemoryLimit = "off"; s.Features["traefik"] = &FeatureConfig{} }, true},
 		"features and registries": {func(s *ClusterSpec) {
 			s.Features["traefik"] = &FeatureConfig{}

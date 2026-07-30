@@ -156,9 +156,9 @@ func publishBootFacts(tree machine.FactsTree, in bootFacts) {
 	tree.WriteRejection(machine.RejectCredentials, in.boot.CredentialsRejection)
 }
 
-// runtimeFacts resolves the runtime discipline init imposed on k3s and
-// on the kubelet inside it, so the facts carry the same values init
-// printed to the console.
+// runtimeFacts resolves the runtime discipline init imposed on k3s, on
+// the kubelet inside it, and on containerd beside it, so the facts
+// carry the same values init printed to the console.
 //
 // The Go environment reports the resolved ceiling, not the spec string:
 // an absolute quantity in MiB, or no ceiling at all when the cluster
@@ -166,11 +166,13 @@ func publishBootFacts(tree machine.FactsTree, in bootFacts) {
 // memory that k3sRuntimeEnv reads, so the facts and the process
 // environment can never disagree.
 //
-// The image collection policy needs no resolving, because the spec's
-// values are already the kubelet's own grammar, so these facts are the
-// lines that kubeletImageGCSettings wrote into the kubelet's file. An
-// unset field reports nothing, and an unset section yields a zero
-// status, so WriteRuntime writes no files and status.runtime is absent.
+// The other values need no resolving, because each is already in the
+// grammar of the file it lands in. The image collection policy is the
+// lines that kubeletImageGCSettings wrote into the kubelet's file, the
+// debug flag is the drop-in key, and the containerd level is the one
+// the drop-in gives containerd. An unset field reports nothing, and an
+// unset section yields a zero status, so WriteRuntime writes no files
+// and status.runtime is absent.
 func runtimeFacts(clusterDoc *cluster.Cluster, memoryBytes uint64) machine.RuntimeStatus {
 	spec := clusterDoc.RuntimeSpec()
 	st := machine.RuntimeStatus{}
@@ -181,6 +183,8 @@ func runtimeFacts(clusterDoc *cluster.Cluster, memoryBytes uint64) machine.Runti
 	if err == nil && !off && limit > 0 {
 		st.K3s.GoMemoryLimit = fmt.Sprintf("%dMi", limit/(1<<20))
 	}
+	st.K3s.Debug = spec.Debug
+	st.Containerd.LogLevel = clusterDoc.ContainerdSpec().LogLevel
 	imageGC := clusterDoc.KubeletSpec().ImageGC
 	if imageGC.HighThresholdPercent != nil {
 		st.Kubelet.ImageGC.HighThresholdPercent = *imageGC.HighThresholdPercent
