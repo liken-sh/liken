@@ -50,9 +50,14 @@ func TestRestartAppliesByDomain(t *testing.T) {
 			delete(s.Features, "iscsi")
 			s.Registries.Embedded = false
 		}, false},
-		"a mirror edit":         {func(s *ClusterSpec) { s.Registries.Embedded = false }, true},
-		"a runtime tuning":      {func(s *ClusterSpec) { s.Runtime.K3s.GoMemoryLimit = "off" }, true},
-		"a runtime GoGC edit":   {func(s *ClusterSpec) { n := 80; s.Runtime.K3s.GoGC = &n }, true},
+		"a mirror edit":       {func(s *ClusterSpec) { s.Registries.Embedded = false }, true},
+		"a runtime tuning":    {func(s *ClusterSpec) { s.Runtime.K3s.GoMemoryLimit = "off" }, true},
+		"a runtime GoGC edit": {func(s *ClusterSpec) { n := 80; s.Runtime.K3s.GoGC = &n }, true},
+		"an image GC policy": {func(s *ClusterSpec) {
+			n := 70
+			s.Runtime.Kubelet.ImageGC.HighThresholdPercent = &n
+			s.Runtime.Kubelet.ImageGC.MaximumAge = "168h"
+		}, true},
 		"runtime and a feature": {func(s *ClusterSpec) { s.Runtime.K3s.GoMemoryLimit = "off"; s.Features["traefik"] = &FeatureConfig{} }, true},
 		"features and registries": {func(s *ClusterSpec) {
 			s.Features["traefik"] = &FeatureConfig{}

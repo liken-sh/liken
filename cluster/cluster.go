@@ -229,12 +229,14 @@ type ClusterSpec struct {
 	// changes and granted reboots.
 	Features map[string]*FeatureConfig `json:"features,omitempty"`
 
-	// Runtime is the Go runtime discipline the cluster imposes on the
-	// k3s process init launches (runtime.go). It shapes only that
+	// Runtime is the discipline the cluster imposes on the k3s process
+	// init launches, and on the kubelet component inside it
+	// (runtime.go). The k3s subsection shapes only that process's Go
 	// environment: containerd and the shims inherit it, and no other
-	// process reads it. Like features and registries, k3s reads these
-	// values only when its process starts, so an edit converges by
-	// restarting k3s in place, not by rebooting.
+	// process reads it. The kubelet subsection is a configuration file
+	// that init names on the k3s command line. Like features and
+	// registries, both are read only when the k3s process starts, so an
+	// edit converges by restarting k3s in place, not by rebooting.
 	Runtime ClusterRuntimeSpec `json:"runtime,omitzero"`
 
 	// Registries is how container images arrive on the fleet's
@@ -504,7 +506,7 @@ func ParseCluster(raw []byte) (*Cluster, error) {
 		return nil, err
 	}
 	if err := c.Spec.Runtime.Validate(); err != nil {
-		return nil, fmt.Errorf("spec.runtime.k3s: %w", err)
+		return nil, fmt.Errorf("spec.runtime: %w", err)
 	}
 	if err := c.Spec.Network.Validate(); err != nil {
 		return nil, fmt.Errorf("spec.network: %w", err)
@@ -520,6 +522,16 @@ func (c *Cluster) RuntimeSpec() K3sRuntimeSpec {
 		return K3sRuntimeSpec{}
 	}
 	return c.Spec.Runtime.K3s
+}
+
+// KubeletSpec is the kubelet section, safe on a nil Cluster, like
+// RuntimeSpec above. A machine on its own gets the zero section, which
+// names nothing, so the kubelet keeps its own policy.
+func (c *Cluster) KubeletSpec() KubeletRuntimeSpec {
+	if c == nil {
+		return KubeletRuntimeSpec{}
+	}
+	return c.Spec.Runtime.Kubelet
 }
 
 // NodePortAddresses is the address plan's NodePort resolution, safe

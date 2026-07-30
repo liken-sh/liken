@@ -685,32 +685,41 @@ spec:
                 runtime:
                   type: object
                   description: >-
-                    The Go runtime discipline that the cluster applies
-                    to the k3s process. This section is an opt-in. An
-                    unset section applies nothing, so k3s runs on Go's
-                    own runtime defaults: no memory ceiling, and a
-                    heap that grows to twice its live data before the
-                    collector runs. Set a field to change that trade
-                    on a small machine, where k3s is the largest
-                    resident process. These settings shape only the
-                    environment that init gives to the k3s process it
-                    starts. containerd and the shims that k3s starts
-                    inherit that environment, because k3s is their
-                    parent. No other process reads it: not init, not
-                    the operators, and not the workloads, which get
-                    their environment from their own pod specs. k3s
-                    reads these values only when its process starts,
-                    so an edit here converges when k3s restarts in
-                    place on each machine, sequenced through the same
-                    turns as a reboot, one leader at a time, with the
-                    machine and its pods up.
+                    The discipline that the cluster applies to the k3s
+                    process, and to the components inside it. The
+                    section has one subsection for each thing that
+                    reads a setting: k3s for the Go runtime
+                    environment that init gives the process, and
+                    kubelet for the configuration of the kubelet
+                    component that runs inside it. The whole section
+                    is an opt-in. An unset field applies nothing, so
+                    the reader keeps its own default, and a cluster
+                    that names nothing here renders the same
+                    configuration it rendered before. Every value here
+                    is read only when the k3s process starts, so an
+                    edit converges when k3s restarts in place on each
+                    machine, sequenced through the same turns as a
+                    reboot, one leader at a time, with the machine and
+                    its pods up.
                   properties:
                     k3s:
                       type: object
                       description: >-
                         The Go runtime environment for the k3s
                         process. An unset field applies nothing, so
-                        k3s keeps Go's own default for it.
+                        k3s keeps Go's own default for it: no memory
+                        ceiling, and a heap that grows to twice its
+                        live data before the collector runs. Set a
+                        field to change that trade on a small machine,
+                        where k3s is the largest resident process.
+                        These settings shape only the environment that
+                        init gives to the k3s process it starts.
+                        containerd and the shims that k3s starts
+                        inherit that environment, because k3s is their
+                        parent. No other process reads it: not init,
+                        not the operators, and not the workloads,
+                        which get their environment from their own pod
+                        specs.
                       properties:
                         goMemoryLimit:
                           type: string
@@ -774,6 +783,119 @@ spec:
                             larger. A value below 1 is refused,
                             because it would make the collector run
                             without pause.
+                    kubelet:
+                      type: object
+                      description: >-
+                        The configuration of the kubelet. The kubelet
+                        is a component inside the k3s process, not a
+                        program of its own, and it runs on every
+                        machine of the cluster. An unset field applies
+                        nothing, so the kubelet keeps its own default
+                        for it.
+                      properties:
+                        imageGC:
+                          type: object
+                          description: >-
+                            The policy for the kubelet's image
+                            collector. containerd's image store grows
+                            with every image that a node pulls, and
+                            nothing leaves the store while a container
+                            uses it. The kubelet is the only thing
+                            that prunes the store, and it prunes on
+                            two triggers: how full the disk is, and
+                            how long an image has gone unused. Use
+                            this section when the clusterState
+                            filesystem grows more than you want, or
+                            when a node keeps images that no workload
+                            names any more.
+                          properties:
+                            highThresholdPercent:
+                              type: integer
+                              minimum: 1
+                              maximum: 100
+                              description: >-
+                                The disk usage that starts collection,
+                                as a percent of the filesystem that
+                                holds containerd's image store. On
+                                liken that filesystem is
+                                clusterState. The kubelet measures the
+                                filesystem every five minutes. When
+                                usage passes this threshold, the
+                                kubelet removes unused images, the
+                                least recently used first, until usage
+                                falls under lowThresholdPercent. If
+                                the field is unset, the threshold is
+                                85. A percent rather than a byte count
+                                is what lets one setting serve
+                                machines with different disk sizes.
+                            lowThresholdPercent:
+                              type: integer
+                              minimum: 1
+                              maximum: 100
+                              description: >-
+                                The disk usage that stops collection,
+                                as a percent of the same filesystem.
+                                It must be below
+                                highThresholdPercent, so collection
+                                has a range to work in. If the field
+                                is unset, the threshold is 80. The
+                                distance between the two thresholds
+                                sets how much each round of
+                                collection removes: a narrow gap
+                                collects a little, often, and a wide
+                                gap collects a lot, rarely.
+                            maximumAge:
+                              type: string
+                              maxLength: 32
+                              # The Go-side validation in
+                              # cluster/runtime.go is the real check.
+                              # It parses the duration and refuses an
+                              # age that is zero, negative, or at or
+                              # below the effective minimum. This
+                              # pattern catches only gross shape
+                              # errors early, so a bad value never
+                              # reaches the fleet as staged bytes.
+                              pattern: ^[0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h)([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))*$
+                              description: >-
+                                How long an unused image may stay in
+                                the store before the kubelet removes
+                                it, whatever the disk usage is, as a
+                                Go duration such as "168h". This is
+                                the trigger that keeps a store from
+                                carrying years of tags that no
+                                workload names any more. If the field
+                                is unset, the kubelet does no age
+                                check at all, and only the disk
+                                thresholds prune the store. The value
+                                must be greater than minimumAge.
+                            minimumAge:
+                              type: string
+                              maxLength: 32
+                              # The same reasoning as maximumAge
+                              # above: the pattern is a shape check,
+                              # and cluster/runtime.go parses the
+                              # duration and refuses a value that is
+                              # zero or negative.
+                              pattern: ^[0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h)([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))*$
+                              description: >-
+                                How long an unused image is kept
+                                before the kubelet may remove it, as a
+                                Go duration such as "5m". This is what
+                                stops a node from removing an image it
+                                just stopped using and pulling the
+                                same image again minutes later. If the
+                                field is unset, the age is two
+                                minutes. Raise it on a node that
+                                cycles through a few large images.
+                          x-kubernetes-validations:
+                            - rule: >-
+                                !has(self.lowThresholdPercent) ||
+                                !has(self.highThresholdPercent) ||
+                                self.lowThresholdPercent < self.highThresholdPercent
+                              message: >-
+                                lowThresholdPercent must be below
+                                highThresholdPercent, so image
+                                collection has a range to work in
             status:
               type: object
               description: >-

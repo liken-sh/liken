@@ -341,15 +341,22 @@ func (t FactsTree) WriteRegistries(r RegistriesStatus) error {
 	))
 }
 
-// WriteRuntime publishes the Go runtime environment init handed the
-// k3s process this boot: the resolved values, not the spec's strings.
-// The restart path owns this subtree, because a k3s restart can change
-// the environment without a reboot. An off ceiling writes no
-// goMemoryLimit file, so its absence reads as "no ceiling".
+// WriteRuntime publishes the runtime discipline init imposed this
+// boot: the Go environment it handed the k3s process, and the
+// configuration it wrote for the kubelet inside it. These are the
+// resolved values, not the spec's strings. The restart path owns this
+// subtree, because a k3s restart can change both without a reboot. A
+// setting the cluster left unset writes no file, so its absence reads
+// as the default that the reader supplies for itself.
 func (t FactsTree) WriteRuntime(r RuntimeStatus) error {
+	gc := r.Kubelet.ImageGC
 	return t.report(firstError(
 		t.writeFact("runtime/k3s/goMemoryLimit", r.K3s.GoMemoryLimit),
 		t.writeFact("runtime/k3s/goGC", formatInt(r.K3s.GoGC)),
+		t.writeFact("runtime/kubelet/imageGC/highThresholdPercent", formatInt(gc.HighThresholdPercent)),
+		t.writeFact("runtime/kubelet/imageGC/lowThresholdPercent", formatInt(gc.LowThresholdPercent)),
+		t.writeFact("runtime/kubelet/imageGC/maximumAge", gc.MaximumAge),
+		t.writeFact("runtime/kubelet/imageGC/minimumAge", gc.MinimumAge),
 	))
 }
 

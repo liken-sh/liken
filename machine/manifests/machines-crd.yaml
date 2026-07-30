@@ -2555,18 +2555,20 @@ spec:
                 runtime:
                   type: object
                   description: >-
-                    The Go runtime environment that init gave the k3s
-                    process on this boot: the resolved values, not
-                    the strings from spec.runtime.k3s. An operator
-                    who changes the memory ceiling reads back here
-                    what each machine actually runs. containerd and
-                    the shims get the same environment.
+                    The runtime discipline that init imposed on this
+                    boot: the Go environment it gave the k3s process,
+                    and the configuration it wrote for the kubelet
+                    inside it. These are the resolved values, not the
+                    strings from the Cluster's spec.runtime. An
+                    operator who changes a setting reads back here
+                    what each machine actually runs.
                   properties:
                     k3s:
                       type: object
                       description: >-
                         The Go runtime environment of the k3s
-                        process on this machine. This field is
+                        process on this machine. containerd and the
+                        shims get the same environment. This field is
                         absent when init set neither variable, so
                         k3s runs on Go's own defaults.
                       properties:
@@ -2585,6 +2587,60 @@ spec:
                             The resolved collector rate (Go's GOGC). It
                             is absent when the cluster sets no value, so
                             k3s keeps Go's own rate.
+                    kubelet:
+                      type: object
+                      description: >-
+                        The kubelet configuration that init wrote on
+                        this machine, from the Cluster's
+                        spec.runtime.kubelet. This field is absent
+                        when the cluster names no setting, so init
+                        wrote no configuration file and the kubelet
+                        runs on its own defaults.
+                      properties:
+                        imageGC:
+                          type: object
+                          description: >-
+                            The image collection policy that this
+                            machine's kubelet runs. Each field is
+                            present only when the cluster names it,
+                            so an absent field means the kubelet's
+                            own default for that field.
+                          properties:
+                            highThresholdPercent:
+                              type: integer
+                              description: >-
+                                The disk usage that starts collection,
+                                as a percent of the filesystem that
+                                holds containerd's image store. It is
+                                absent when the cluster names no
+                                value, so the kubelet uses 85.
+                            lowThresholdPercent:
+                              type: integer
+                              description: >-
+                                The disk usage that stops collection,
+                                as a percent of the same filesystem.
+                                It is absent when the cluster names no
+                                value, so the kubelet uses 80.
+                            maximumAge:
+                              type: string
+                              maxLength: 32
+                              description: >-
+                                How long an unused image may stay in
+                                the store before the kubelet removes
+                                it, whatever the disk usage is. It is
+                                absent when the cluster names no
+                                value, so the kubelet does no age
+                                check and only the thresholds prune
+                                the store.
+                            minimumAge:
+                              type: string
+                              maxLength: 32
+                              description: >-
+                                How long an unused image is kept
+                                before the kubelet may remove it. It
+                                is absent when the cluster names no
+                                value, so the kubelet uses two
+                                minutes.
                 lastCrash:
                   type: object
                   description: >-

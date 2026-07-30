@@ -50,6 +50,23 @@ var (
 	k3sServerConfig = "/etc/rancher/k3s/config.yaml"
 	k3sAgentConfig  = "/etc/rancher/k3s/agent.yaml"
 
+	// k3sKubeletConfig is where init writes the kubelet's own
+	// configuration file, when the cluster names a setting that only
+	// that file carries. It sits beside k3s's two config files rather
+	// than in a drop-in directory, because k3s does not treat it as
+	// k3s configuration: the drop-in only names its path.
+	k3sKubeletConfig = "/etc/rancher/k3s/kubelet.yaml"
+
+	// k3sKubeletConfigCopy is the copy of that file that k3s makes
+	// when it starts with the config argument. k3s hands the kubelet
+	// one drop-in directory holding its own defaults and this copy,
+	// and it refreshes the copy only when the argument is present. The
+	// directory sits on clusterState, so a copy that nothing removes
+	// survives every restart and reboot, and the kubelet would run a
+	// retracted policy forever. The boot that stops naming the file
+	// removes the copy with it.
+	k3sKubeletConfigCopy = "/var/lib/rancher/k3s/agent/etc/kubelet.conf.d/10-cli-config.conf"
+
 	// tokenPath is where the image carries the cluster's join token,
 	// minted offline like the CAs it hashes (see the identity
 	// package). This code hands the token to k3s as a token-file, so
@@ -157,7 +174,7 @@ func nodeAddress(clusterDoc *cluster.Cluster, conns []*connection) (ip, ifname s
 // k3sBootInputs gathers everything that the drop-in needs and that
 // only this boot could determine. writeK3sBootConfig fills it in, and
 // k3sBootConfig renders it. This is a struct rather than a parameter
-// list, because seven positional arguments with adjacent strings and
+// list, because nine positional arguments with adjacent strings and
 // bools invite mistakes. Named fields read correctly at the call
 // site.
 type k3sBootInputs struct {
@@ -169,6 +186,7 @@ type k3sBootInputs struct {
 	clusterInit   bool
 	joinURL       string
 	nodeLabels    map[string]string
+	kubeletConfig string
 }
 
 // k3sBootConfig renders the drop-in: everything that k3s must be
@@ -319,6 +337,20 @@ func k3sBootConfig(in k3sBootInputs) string {
 	fmt.Fprintf(&b, "kube-proxy-arg:\n  - nodeport-addresses=%s\n",
 		strings.Join(clusterDoc.NodePortAddresses(), ","))
 
+	// The kubelet's own configuration file, when the cluster named a
+	// setting that goes in one (kubeletBootConfig below). Both roles
+	// render this key, because the kubelet runs on every node, leader
+	// and follower alike.
+	//
+	// kubelet-arg is k3s's pass-through to the kubelet's command line,
+	// and it follows the same replace-or-append rule as kube-proxy-arg
+	// above: a plain key in a drop-in replaces the list from the file
+	// it sits beside. The static files name no kubelet-arg, so this
+	// drop-in is the whole list, and nothing needs the + suffix.
+	if in.kubeletConfig != "" {
+		fmt.Fprintf(&b, "kubelet-arg:\n  - config=%s\n", in.kubeletConfig)
+	}
+
 	// The spec's node labels, so the node registers with its
 	// scheduling identity already set. A freshly reinstalled machine
 	// must not spend its first minutes as a blank node that workloads
@@ -332,6 +364,60 @@ func k3sBootConfig(in k3sBootInputs) string {
 		for _, name := range slices.Sorted(maps.Keys(in.nodeLabels)) {
 			fmt.Fprintf(&b, "  - %s=%s\n", name, in.nodeLabels[name])
 		}
+	}
+	return b.String()
+}
+
+// kubeletImageGCSettings renders the cluster's image collection policy
+// as the lines of a KubeletConfiguration document, under the kubelet's
+// own field names. It returns nothing when the cluster named nothing.
+//
+// The values pass through unresolved, because every one of them is
+// already in the kubelet's own grammar: a whole percent, and a Go
+// duration, which is what the kubelet's metav1.Duration parses. The
+// file doors in cluster/runtime.go have already refused anything the
+// kubelet would refuse, so this renders bytes rather than deciding
+// anything.
+func kubeletImageGCSettings(g cluster.ImageGCSpec) []string {
+	var settings []string
+	if g.HighThresholdPercent != nil {
+		settings = append(settings, fmt.Sprintf("imageGCHighThresholdPercent: %d", *g.HighThresholdPercent))
+	}
+	if g.LowThresholdPercent != nil {
+		settings = append(settings, fmt.Sprintf("imageGCLowThresholdPercent: %d", *g.LowThresholdPercent))
+	}
+	if g.MinimumAge != "" {
+		settings = append(settings, fmt.Sprintf("imageMinimumGCAge: %s", g.MinimumAge))
+	}
+	if g.MaximumAge != "" {
+		settings = append(settings, fmt.Sprintf("imageMaximumGCAge: %s", g.MaximumAge))
+	}
+	return settings
+}
+
+// kubeletBootConfig wraps those settings in the KubeletConfiguration
+// document that the kubelet reads, and returns the empty string when
+// there are none, so a cluster that named no policy gets no file.
+//
+// A configuration file rather than flags, for two reasons. The age
+// ceiling has no kubelet flag at all: imageMaximumGCAge exists only in
+// this file, so a policy that names it has no other path. And a
+// setting with one author is readable, so the three settings that do
+// have flags travel with it rather than splitting the policy across
+// two grammars. Mixing the two is safe here: a kubelet flag beats the
+// file, and k3s passes no image collection flag of its own, so nothing
+// this file says is overridden.
+func kubeletBootConfig(settings []string) string {
+	if len(settings) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("# Written by liken at boot: the kubelet settings that the\n")
+	b.WriteString("# cluster's spec.runtime.kubelet section names.\n")
+	b.WriteString("apiVersion: kubelet.config.k8s.io/v1beta1\n")
+	b.WriteString("kind: KubeletConfiguration\n")
+	for _, setting := range settings {
+		b.WriteString(setting + "\n")
 	}
 	return b.String()
 }
@@ -514,6 +600,35 @@ func writeK3sBootConfig(clusterDoc *cluster.Cluster, m *machine.Machine, conns [
 	if err := os.MkdirAll(dropInDir, 0o755); err != nil {
 		return role, err
 	}
+
+	// The kubelet's configuration file and the drop-in key that names
+	// it are written together, in one function, because a drop-in that
+	// names a file which is not there stops the kubelet from starting.
+	// A cluster that names no policy writes no file and gets no key, so
+	// its drop-in is the same bytes it was before the section existed.
+	kubeletConfig := ""
+	settings := kubeletImageGCSettings(clusterDoc.KubeletSpec().ImageGC)
+	if document := kubeletBootConfig(settings); document != "" {
+		if err := os.WriteFile(k3sKubeletConfig, []byte(document), 0o644); err != nil {
+			return role, err
+		}
+		kubeletConfig = k3sKubeletConfig
+	} else {
+		// A cluster that retracts the whole section leaves the file this
+		// machine wrote earlier in the same boot, because the restart
+		// path runs this function again without a reboot to clear the
+		// root. The drop-in no longer names the file, so the kubelet
+		// would not read it, but a file that no longer describes the
+		// machine misleads the next person who reads it.
+		_ = os.Remove(k3sKubeletConfig)
+		// The copy k3s made of it must go too, and this one is
+		// load-bearing: the kubelet reads the whole drop-in directory
+		// the copy sits in, and k3s refreshes the copy only when the
+		// argument is present. Left in place, it would keep the
+		// retracted policy running on every start after this one.
+		_ = os.Remove(k3sKubeletConfigCopy)
+	}
+
 	content := k3sBootConfig(k3sBootInputs{
 		role:          role,
 		clusterDoc:    clusterDoc,
@@ -523,6 +638,7 @@ func writeK3sBootConfig(clusterDoc *cluster.Cluster, m *machine.Machine, conns [
 		clusterInit:   clusterInit,
 		joinURL:       joinURL,
 		nodeLabels:    m.Spec.NodeLabels,
+		kubeletConfig: kubeletConfig,
 	})
 	if err := os.WriteFile(filepath.Join(dropInDir, "boot.yaml"), []byte(content), 0o644); err != nil {
 		return role, err
@@ -531,6 +647,16 @@ func writeK3sBootConfig(clusterDoc *cluster.Cluster, m *machine.Machine, conns [
 		if !strings.HasPrefix(line, "#") {
 			fmt.Printf("liken: k3s config: %s\n", line)
 		}
+	}
+
+	// The kubelet's settings echo like the drop-in's lines, one per
+	// line, and the facts tree carries the same values to
+	// status.runtime.kubelet. A policy that only the serial port
+	// reports is invisible to anyone operating the machine remotely.
+	// The apiVersion and kind lines stay out of the echo, because they
+	// are the document's envelope and carry no decision.
+	for _, setting := range settings {
+		fmt.Printf("liken: kubelet config: %s\n", setting)
 	}
 
 	// The Go runtime discipline is set alongside the configuration. It

@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -255,6 +256,107 @@ func TestK3sBootConfigRendersTheNodePortNetworks(t *testing.T) {
 	}
 }
 
+// imageGCCluster is the lab cluster with an image collection policy
+// that names every field, so a test can watch all four reach the
+// kubelet's configuration file.
+func imageGCCluster() *cluster.Cluster {
+	c := labCluster()
+	high, low := 70, 60
+	c.Spec.Runtime.Kubelet.ImageGC = cluster.ImageGCSpec{
+		HighThresholdPercent: &high,
+		LowThresholdPercent:  &low,
+		MinimumAge:           "5m",
+		MaximumAge:           "168h",
+	}
+	return c
+}
+
+// The configuration file carries only the fields the document names,
+// under the kubelet's own field names, so nothing the cluster left
+// unset gets an author here.
+func TestKubeletImageGCSettingsRenderOnlyWhatIsNamed(t *testing.T) {
+	high := 70
+	cases := map[string]struct {
+		spec cluster.ImageGCSpec
+		want []string
+	}{
+		"nothing named": {cluster.ImageGCSpec{}, nil},
+		"one threshold": {
+			cluster.ImageGCSpec{HighThresholdPercent: &high},
+			[]string{"imageGCHighThresholdPercent: 70"},
+		},
+		"the age ceiling alone": {
+			cluster.ImageGCSpec{MaximumAge: "168h"},
+			[]string{"imageMaximumGCAge: 168h"},
+		},
+		"every field": {
+			imageGCCluster().Spec.Runtime.Kubelet.ImageGC,
+			[]string{
+				"imageGCHighThresholdPercent: 70",
+				"imageGCLowThresholdPercent: 60",
+				"imageMinimumGCAge: 5m",
+				"imageMaximumGCAge: 168h",
+			},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := kubeletImageGCSettings(tc.spec); !slices.Equal(got, tc.want) {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// The file is a KubeletConfiguration document, because the age
+// ceiling has no kubelet flag and exists only in this file.
+func TestKubeletBootConfigIsAKubeletConfiguration(t *testing.T) {
+	got := kubeletBootConfig([]string{"imageMaximumGCAge: 168h"})
+	for _, want := range []string{
+		"apiVersion: kubelet.config.k8s.io/v1beta1\n",
+		"kind: KubeletConfiguration\n",
+		"imageMaximumGCAge: 168h\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the kubelet configuration should carry %q:\n%s", want, got)
+		}
+	}
+}
+
+// A cluster that names no policy gets no file at all, so the kubelet
+// keeps its whole default policy.
+func TestKubeletBootConfigIsEmptyWhenNothingIsNamed(t *testing.T) {
+	if got := kubeletBootConfig(nil); got != "" {
+		t.Errorf("no named setting means no file:\n%s", got)
+	}
+}
+
+// The kubelet runs on every node, so both roles name the file. k3s
+// passes no image collection flag of its own, and a kubelet flag would
+// beat the file, so the drop-in and the file have one author between
+// them.
+func TestK3sBootConfigNamesTheKubeletConfig(t *testing.T) {
+	for _, role := range []api.Role{api.RoleLeader, api.RoleFollower} {
+		got := k3sBootConfig(k3sBootInputs{
+			role: role, clusterDoc: imageGCCluster(), haveToken: true,
+			kubeletConfig: "/etc/rancher/k3s/kubelet.yaml",
+		})
+		want := "kubelet-arg:\n  - config=/etc/rancher/k3s/kubelet.yaml\n"
+		if !strings.Contains(got, want) {
+			t.Errorf("%s config should carry %q:\n%s", role, want, got)
+		}
+	}
+}
+
+func TestK3sBootConfigWithoutAKubeletConfigNamesNone(t *testing.T) {
+	for _, role := range []api.Role{api.RoleLeader, api.RoleFollower} {
+		got := k3sBootConfig(k3sBootInputs{role: role, clusterDoc: labCluster(), haveToken: true})
+		if strings.Contains(got, "kubelet-arg") {
+			t.Errorf("%s: no policy means no kubelet-arg key:\n%s", role, got)
+		}
+	}
+}
+
 // A machine with no cluster document is a leader of one, and it
 // still states the setting rather than leaving kube-proxy on its own
 // broad default.
@@ -468,11 +570,15 @@ func TestK3sBootConfigWithoutAToken(t *testing.T) {
 func fakeK3sConfigs(t *testing.T, withToken bool) (serverDropIns, agentDropIns string) {
 	t.Helper()
 	dir := t.TempDir()
-	oldServer, oldAgent, oldToken := k3sServerConfig, k3sAgentConfig, tokenPath
+	oldServer, oldAgent, oldKubelet, oldCopy, oldToken := k3sServerConfig, k3sAgentConfig, k3sKubeletConfig, k3sKubeletConfigCopy, tokenPath
 	k3sServerConfig = filepath.Join(dir, "config.yaml")
 	k3sAgentConfig = filepath.Join(dir, "agent.yaml")
+	k3sKubeletConfig = filepath.Join(dir, "kubelet.yaml")
+	k3sKubeletConfigCopy = filepath.Join(dir, "kubelet.conf.d", "10-cli-config.conf")
 	tokenPath = filepath.Join(dir, "token")
-	t.Cleanup(func() { k3sServerConfig, k3sAgentConfig, tokenPath = oldServer, oldAgent, oldToken })
+	t.Cleanup(func() {
+		k3sServerConfig, k3sAgentConfig, k3sKubeletConfig, k3sKubeletConfigCopy, tokenPath = oldServer, oldAgent, oldKubelet, oldCopy, oldToken
+	})
 	if withToken {
 		if err := os.WriteFile(tokenPath, []byte("K10abc::server:secret\n"), 0o600); err != nil {
 			t.Fatal(err)
@@ -547,6 +653,124 @@ func TestWriteK3sBootConfigRefusesAFollowerWithoutAToken(t *testing.T) {
 	fakeK3sConfigs(t, false)
 	if _, err := writeK3sBootConfig(labCluster(), bootMachine("node-2", nil), nil); err == nil {
 		t.Error("a follower with no join token can never register")
+	}
+}
+
+// Both roles write the same file and name it the same way, because
+// the kubelet runs on every node of the cluster.
+func TestWriteK3sBootConfigWritesTheKubeletConfig(t *testing.T) {
+	cases := map[string]struct {
+		name string
+		role api.Role
+	}{
+		"a leader":   {"node-1", api.RoleLeader},
+		"a follower": {"node-2", api.RoleFollower},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			fakeK3sConfigs(t, true)
+			conns := []*connection{conn(t, "eth1", "10.10.0.1/24")}
+
+			role, err := writeK3sBootConfig(imageGCCluster(), bootMachine(tc.name, nil), conns)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if role != tc.role {
+				t.Fatalf("got role %s, want %s", role, tc.role)
+			}
+			base := k3sServerConfig
+			if role == api.RoleFollower {
+				base = k3sAgentConfig
+			}
+			dropIn, err := os.ReadFile(filepath.Join(base+".d", "boot.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "kubelet-arg:\n  - config=" + k3sKubeletConfig + "\n"
+			if !strings.Contains(string(dropIn), want) {
+				t.Errorf("the drop-in should name the kubelet's file:\n%s", dropIn)
+			}
+			written, err := os.ReadFile(k3sKubeletConfig)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, line := range []string{
+				"kind: KubeletConfiguration\n",
+				"imageGCHighThresholdPercent: 70\n",
+				"imageGCLowThresholdPercent: 60\n",
+				"imageMinimumGCAge: 5m\n",
+				"imageMaximumGCAge: 168h\n",
+			} {
+				if !strings.Contains(string(written), line) {
+					t.Errorf("the kubelet configuration should carry %q:\n%s", line, written)
+				}
+			}
+		})
+	}
+}
+
+// A cluster that names no policy renders exactly what it rendered
+// before the section existed: no file, and no key in the drop-in. This
+// is what keeps an upgrade from restarting k3s on every machine of
+// every cluster that never asked for a policy.
+func TestWriteK3sBootConfigWithoutAPolicyWritesNoKubeletConfig(t *testing.T) {
+	serverDropIns, _ := fakeK3sConfigs(t, true)
+	conns := []*connection{conn(t, "eth1", "10.10.0.1/24")}
+
+	if _, err := writeK3sBootConfig(labCluster(), bootMachine("node-1", nil), conns); err != nil {
+		t.Fatal(err)
+	}
+	dropIn, err := os.ReadFile(filepath.Join(serverDropIns, "boot.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(dropIn), "kubelet-arg") {
+		t.Errorf("no policy means no kubelet-arg key:\n%s", dropIn)
+	}
+	if _, err := os.Stat(k3sKubeletConfig); err == nil {
+		t.Error("no policy means no kubelet configuration file")
+	}
+}
+
+// The restart path runs writeK3sBootConfig again without a reboot, so
+// a cluster that retracts the section has to take its file away too.
+// A file left on disk would describe a policy the kubelet no longer
+// runs.
+func TestWriteK3sBootConfigRetractsTheKubeletConfig(t *testing.T) {
+	fakeK3sConfigs(t, true)
+	conns := []*connection{conn(t, "eth1", "10.10.0.1/24")}
+	machineDoc := bootMachine("node-1", nil)
+
+	if _, err := writeK3sBootConfig(imageGCCluster(), machineDoc, conns); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(k3sKubeletConfig); err != nil {
+		t.Fatalf("the first boot writes the file: %v", err)
+	}
+
+	// When k3s starts with the config argument, it copies the named
+	// file into the drop-in directory it hands the kubelet, and that
+	// directory persists on clusterState. The test plants that copy the
+	// way k3s leaves it.
+	if err := os.MkdirAll(filepath.Dir(k3sKubeletConfigCopy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(k3sKubeletConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(k3sKubeletConfigCopy, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := writeK3sBootConfig(labCluster(), machineDoc, conns); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(k3sKubeletConfig); err == nil {
+		t.Error("a retracted section takes its file away")
+	}
+	if _, err := os.Stat(k3sKubeletConfigCopy); err == nil {
+		t.Error("a retracted section takes k3s's copy away too; k3s refreshes the copy only when the argument is present, so a stale copy would keep the policy running forever")
 	}
 }
 

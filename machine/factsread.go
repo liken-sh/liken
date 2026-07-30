@@ -125,6 +125,19 @@ func (t FactsTree) readRuntime() (RuntimeStatus, error) {
 	if r.K3s.GoGC, err = t.readInt("runtime/k3s/goGC"); err != nil {
 		return RuntimeStatus{}, err
 	}
+	gc := &r.Kubelet.ImageGC
+	if gc.HighThresholdPercent, err = t.readInt("runtime/kubelet/imageGC/highThresholdPercent"); err != nil {
+		return RuntimeStatus{}, err
+	}
+	if gc.LowThresholdPercent, err = t.readInt("runtime/kubelet/imageGC/lowThresholdPercent"); err != nil {
+		return RuntimeStatus{}, err
+	}
+	if gc.MaximumAge, err = t.readFact("runtime/kubelet/imageGC/maximumAge"); err != nil {
+		return RuntimeStatus{}, err
+	}
+	if gc.MinimumAge, err = t.readFact("runtime/kubelet/imageGC/minimumAge"); err != nil {
+		return RuntimeStatus{}, err
+	}
 	return r, nil
 }
 

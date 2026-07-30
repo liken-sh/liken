@@ -156,13 +156,20 @@ func publishBootFacts(tree machine.FactsTree, in bootFacts) {
 	tree.WriteRejection(machine.RejectCredentials, in.boot.CredentialsRejection)
 }
 
-// runtimeFacts resolves the Go runtime environment init handed the
-// k3s process, so the facts carry the same values init printed to the
-// console. It reports the resolved ceiling, not the spec string: an
-// absolute quantity in MiB, or no ceiling at all when the cluster left
-// the limit unset or turned it off. It reads the same section and
+// runtimeFacts resolves the runtime discipline init imposed on k3s and
+// on the kubelet inside it, so the facts carry the same values init
+// printed to the console.
+//
+// The Go environment reports the resolved ceiling, not the spec string:
+// an absolute quantity in MiB, or no ceiling at all when the cluster
+// left the limit unset or turned it off. It reads the same section and
 // memory that k3sRuntimeEnv reads, so the facts and the process
-// environment can never disagree. An unset section yields a zero
+// environment can never disagree.
+//
+// The image collection policy needs no resolving, because the spec's
+// values are already the kubelet's own grammar, so these facts are the
+// lines that kubeletImageGCSettings wrote into the kubelet's file. An
+// unset field reports nothing, and an unset section yields a zero
 // status, so WriteRuntime writes no files and status.runtime is absent.
 func runtimeFacts(clusterDoc *cluster.Cluster, memoryBytes uint64) machine.RuntimeStatus {
 	spec := clusterDoc.RuntimeSpec()
@@ -174,6 +181,15 @@ func runtimeFacts(clusterDoc *cluster.Cluster, memoryBytes uint64) machine.Runti
 	if err == nil && !off && limit > 0 {
 		st.K3s.GoMemoryLimit = fmt.Sprintf("%dMi", limit/(1<<20))
 	}
+	imageGC := clusterDoc.KubeletSpec().ImageGC
+	if imageGC.HighThresholdPercent != nil {
+		st.Kubelet.ImageGC.HighThresholdPercent = *imageGC.HighThresholdPercent
+	}
+	if imageGC.LowThresholdPercent != nil {
+		st.Kubelet.ImageGC.LowThresholdPercent = *imageGC.LowThresholdPercent
+	}
+	st.Kubelet.ImageGC.MaximumAge = imageGC.MaximumAge
+	st.Kubelet.ImageGC.MinimumAge = imageGC.MinimumAge
 	return st
 }
 

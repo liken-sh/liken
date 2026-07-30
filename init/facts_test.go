@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/api"
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -33,6 +34,33 @@ func fullConn(t *testing.T, ifname, cidr string, method machine.AddressMethod) *
 		c.leaseTime = time.Hour
 	}
 	return c
+}
+
+// The facts carry the image collection policy init rendered, so the
+// Machine's status says the same thing the console printed and the
+// kubelet's configuration file holds.
+func TestRuntimeFactsCarryTheImageGCPolicy(t *testing.T) {
+	got := runtimeFacts(imageGCCluster(), 1<<30).Kubelet.ImageGC
+	want := machine.ImageGCStatus{
+		HighThresholdPercent: 70, LowThresholdPercent: 60,
+		MinimumAge: "5m", MaximumAge: "168h",
+	}
+	if got != want {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+}
+
+// A cluster that names no policy reports none, so an absent field in
+// status reads as the kubelet's own default.
+func TestRuntimeFactsWithoutAPolicyReportNone(t *testing.T) {
+	for name, clusterDoc := range map[string]*cluster.Cluster{
+		"no cluster": nil,
+		"no policy":  labCluster(),
+	} {
+		if got := runtimeFacts(clusterDoc, 1<<30).Kubelet; got != (machine.KubeletRuntimeStatus{}) {
+			t.Errorf("%s: got %+v, want an empty block", name, got)
+		}
+	}
 }
 
 func TestNetworkFactsWithNoConnections(t *testing.T) {

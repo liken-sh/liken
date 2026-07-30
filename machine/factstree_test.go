@@ -180,7 +180,13 @@ func everythingSet() *MachineStatus {
 		Registries: RegistriesStatus{
 			Mirrors: []string{"docker.io", "*"}, CredentialedHosts: []string{"ghcr.io"}, Embedded: true,
 		},
-		Runtime: RuntimeStatus{K3s: K3sRuntimeStatus{GoMemoryLimit: "448Mi", GoGC: 50}},
+		Runtime: RuntimeStatus{
+			K3s: K3sRuntimeStatus{GoMemoryLimit: "448Mi", GoGC: 50},
+			Kubelet: KubeletRuntimeStatus{ImageGC: ImageGCStatus{
+				HighThresholdPercent: 70, LowThresholdPercent: 60,
+				MinimumAge: "5m", MaximumAge: "168h",
+			}},
+		},
 		Boot: BootStatus{
 			Time:           &booted,
 			ManifestSource: ManifestSourceProven, ManifestHash: "aaa",
@@ -356,6 +362,24 @@ func TestReadRejectsACorruptRuntimeGoGC(t *testing.T) {
 	}
 	if _, err := tree.Read(); err == nil {
 		t.Error("a non-integer goGC must be an error, not a silent zero")
+	}
+}
+
+// The image collection policy holds the same contract: a threshold
+// file that does not hold an integer is corrupt, and Read reports it
+// rather than reading a percent of zero.
+func TestReadRejectsACorruptImageGCThreshold(t *testing.T) {
+	tree := FactsTree{Dir: t.TempDir()}
+	writeAll(t, tree, sparseFacts())
+	dir := filepath.Join(tree.Dir, "runtime", "kubelet", "imageGC")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "highThresholdPercent"), []byte("most\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tree.Read(); err == nil {
+		t.Error("a non-integer threshold must be an error, not a silent zero")
 	}
 }
 

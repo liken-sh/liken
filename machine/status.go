@@ -550,12 +550,12 @@ type FeatureStatus struct {
 	Message string       `json:"message,omitempty"`
 }
 
-// RuntimeStatus reports the runtime discipline each supervised
-// process actually runs under. It mirrors spec.runtime, with one
-// subsection per process, and holds the resolved values rather than
-// the spec's strings.
+// RuntimeStatus reports the runtime discipline this machine actually
+// runs under. It mirrors spec.runtime subsection for subsection, and
+// holds the resolved values rather than the spec's strings.
 type RuntimeStatus struct {
-	K3s K3sRuntimeStatus `json:"k3s,omitzero"`
+	K3s     K3sRuntimeStatus     `json:"k3s,omitzero"`
+	Kubelet KubeletRuntimeStatus `json:"kubelet,omitzero"`
 }
 
 // K3sRuntimeStatus is the Go runtime environment init handed the k3s
@@ -568,6 +568,27 @@ type RuntimeStatus struct {
 type K3sRuntimeStatus struct {
 	GoMemoryLimit string `json:"goMemoryLimit,omitempty"`
 	GoGC          int    `json:"goGC,omitempty"`
+}
+
+// KubeletRuntimeStatus is the kubelet configuration init rendered on
+// this machine's boot. It is absent when the cluster named none, which
+// reads as "the kubelet's own defaults".
+type KubeletRuntimeStatus struct {
+	ImageGC ImageGCStatus `json:"imageGC,omitzero"`
+}
+
+// ImageGCStatus is the image collection policy init wrote into the
+// kubelet's configuration file. Each field is present only when the
+// cluster named it, so an absent field reads as the kubelet's own
+// default for that field: 85 percent, 80 percent, two minutes, and no
+// age ceiling at all. This is the console parity for
+// spec.runtime.kubelet.imageGC, so an operator who tunes the policy
+// can read back which machines carry it.
+type ImageGCStatus struct {
+	HighThresholdPercent int    `json:"highThresholdPercent,omitempty"`
+	LowThresholdPercent  int    `json:"lowThresholdPercent,omitempty"`
+	MaximumAge           string `json:"maximumAge,omitempty"`
+	MinimumAge           string `json:"minimumAge,omitempty"`
 }
 
 // ManifestSource is which copy of a document a boot ran under, in

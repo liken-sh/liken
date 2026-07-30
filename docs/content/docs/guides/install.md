@@ -163,8 +163,11 @@ can install with them unchanged. Two roles still need your attention.
 `clusterState` contains the k3s database, the TLS files, and the
 containerd image store. Thus the workloads on the node set its size.
 Increase it if this machine runs many images, or large images. Select
-this number carefully. `podStorage` comes after `clusterState` on the
-disk, so `clusterState` cannot become larger after the installation.
+this number carefully. The Cluster's
+`spec.runtime.kubelet.imageGC` section controls how much of this
+filesystem the image store keeps. `podStorage` comes after
+`clusterState` on the disk, so `clusterState` cannot become larger
+after the installation.
 Set `podStorage` to the size that your workloads' volumes need. If the
 report had to decrease either size, it says so in the file.
 

@@ -7,6 +7,8 @@ import (
 
 func gogcPtr(n int) *int { return &n }
 
+func percentPtr(n int) *int { return &n }
+
 // An unset section imposes nothing: the memory limit resolves to off,
 // and the collector pace reports itself unset. So init hands k3s no
 // GOMEMLIMIT and no GOGC, and k3s runs on Go's own runtime defaults.
@@ -101,6 +103,90 @@ func TestRuntimeValidationAcceptsGoodValues(t *testing.T) {
 	}
 }
 
+// The file doors refuse every section the kubelet would refuse when it
+// starts. A machine that boots a rejected configuration serves no
+// shell, so the refusal has to happen before the bytes reach the fleet.
+func TestImageGCValidationRejectsGarbage(t *testing.T) {
+	cases := map[string]struct {
+		spec ImageGCSpec
+		want string
+	}{
+		"high above 100": {
+			ImageGCSpec{HighThresholdPercent: percentPtr(101)}, "between 1 and 100",
+		},
+		"high below 1": {
+			ImageGCSpec{HighThresholdPercent: percentPtr(0)}, "between 1 and 100",
+		},
+		"low above 100": {
+			ImageGCSpec{LowThresholdPercent: percentPtr(120)}, "between 1 and 100",
+		},
+		"low below 1": {
+			ImageGCSpec{LowThresholdPercent: percentPtr(-5)}, "between 1 and 100",
+		},
+		"low equal to high": {
+			ImageGCSpec{HighThresholdPercent: percentPtr(70), LowThresholdPercent: percentPtr(70)},
+			"lowThresholdPercent",
+		},
+		"low above high": {
+			ImageGCSpec{HighThresholdPercent: percentPtr(70), LowThresholdPercent: percentPtr(80)},
+			"lowThresholdPercent",
+		},
+		"lone low above the default high": {
+			ImageGCSpec{LowThresholdPercent: percentPtr(90)}, "lowThresholdPercent",
+		},
+		"lone high below the default low": {
+			ImageGCSpec{HighThresholdPercent: percentPtr(70)}, "lowThresholdPercent",
+		},
+		"unparseable minimum": {
+			ImageGCSpec{MinimumAge: "soon"}, "minimumAge",
+		},
+		"unparseable maximum": {
+			ImageGCSpec{MaximumAge: "7 days"}, "maximumAge",
+		},
+		"zero minimum": {
+			ImageGCSpec{MinimumAge: "0s"}, "greater than zero",
+		},
+		"negative maximum": {
+			ImageGCSpec{MaximumAge: "-1h"}, "greater than zero",
+		},
+		"maximum at the default minimum": {
+			ImageGCSpec{MaximumAge: "2m"}, "maximumAge",
+		},
+		"maximum below the set minimum": {
+			ImageGCSpec{MinimumAge: "1h", MaximumAge: "30m"}, "maximumAge",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := tc.spec.Validate()
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q should mention %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestImageGCValidationAcceptsGoodValues(t *testing.T) {
+	good := []ImageGCSpec{
+		{},
+		{HighThresholdPercent: percentPtr(70), LowThresholdPercent: percentPtr(60)},
+		{HighThresholdPercent: percentPtr(100), LowThresholdPercent: percentPtr(1)},
+		{HighThresholdPercent: percentPtr(90)},
+		{LowThresholdPercent: percentPtr(50)},
+		{MaximumAge: "168h"},
+		{MinimumAge: "1h", MaximumAge: "168h"},
+		{MinimumAge: "30s"},
+	}
+	for _, spec := range good {
+		if err := spec.Validate(); err != nil {
+			t.Errorf("%+v should validate, got %v", spec, err)
+		}
+	}
+}
+
 // A bad runtime section fails the whole parse, at the same door that
 // refuses a null feature, so init and the operator reject it alike.
 func TestParseClusterRejectsBadRuntime(t *testing.T) {
@@ -117,8 +203,65 @@ spec:
 	if err == nil {
 		t.Fatal("expected an error for an out-of-range percent")
 	}
-	if !strings.Contains(err.Error(), "spec.runtime.k3s") {
+	if !strings.Contains(err.Error(), "spec.runtime") || !strings.Contains(err.Error(), "k3s") {
 		t.Errorf("the error should name the field, got: %v", err)
+	}
+}
+
+func TestParseClusterRejectsBadImageGC(t *testing.T) {
+	_, err := ParseCluster([]byte(`
+apiVersion: liken.sh/v1alpha1
+kind: Cluster
+metadata:
+  name: lab
+spec:
+  runtime:
+    kubelet:
+      imageGC:
+        highThresholdPercent: 60
+        lowThresholdPercent: 70
+`))
+	if err == nil {
+		t.Fatal("expected an error for a low threshold above the high one")
+	}
+	if !strings.Contains(err.Error(), "spec.runtime") || !strings.Contains(err.Error(), "kubelet") {
+		t.Errorf("the error should name the field, got: %v", err)
+	}
+}
+
+func TestParseClusterAcceptsImageGC(t *testing.T) {
+	c, err := ParseCluster([]byte(`
+apiVersion: liken.sh/v1alpha1
+kind: Cluster
+metadata:
+  name: lab
+spec:
+  runtime:
+    kubelet:
+      imageGC:
+        highThresholdPercent: 70
+        lowThresholdPercent: 60
+        minimumAge: 5m
+        maximumAge: 168h
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gc := c.KubeletSpec().ImageGC
+	if *gc.HighThresholdPercent != 70 || *gc.LowThresholdPercent != 60 {
+		t.Errorf("thresholds not parsed: %+v", gc)
+	}
+	if gc.MinimumAge != "5m" || gc.MaximumAge != "168h" {
+		t.Errorf("ages not parsed: %+v", gc)
+	}
+}
+
+// A machine with no cluster document gets the zero section, so the
+// kubelet keeps its own policy rather than crashing the boot.
+func TestKubeletSpecOnANilCluster(t *testing.T) {
+	var c *Cluster
+	if c.KubeletSpec().ImageGC != (ImageGCSpec{}) {
+		t.Error("a machine alone names no image collection policy")
 	}
 }
 
