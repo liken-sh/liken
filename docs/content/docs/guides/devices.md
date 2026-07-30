@@ -5,9 +5,9 @@ weight: 70
 
 # Give a workload a device
 
-This guide gives a pod a piece of hardware: a GPU that more than one
-deployment uses, and a USB adapter that one pod holds alone. No step
-here needs a privileged pod or a host path.
+This guide gives a pod a piece of hardware: a GPU for a transcoder,
+and a USB adapter that one pod holds alone. No step here needs a
+privileged pod or a host path.
 
 [Devices](/docs/reference/devices/) describes what liken publishes and
 why.
@@ -20,7 +20,6 @@ why.
 Each entry is one device you can claim:
 
     - name: pci-0000-00-02-0
-      allowMultipleAllocations: true
       attributes:
         bus: {string: pci}
         class: {string: display}
@@ -30,8 +29,15 @@ Each entry is one device you can claim:
         name: {string: Alder Lake-N [UHD Graphics]}
         product: {string: 46d1}
         renderNode: {bool: true}
-        subsystem: {string: drm}
         vendor: {string: "8086"}
+
+A device that liken can share also carries
+`allowMultipleAllocations: true`. A device carries it only when it
+delivers a render node and every node it delivers comes from a
+graphics subsystem. The integrated GPU above does not carry it,
+because i915 also registers an i2c monitor-control node for each
+display output, and those nodes are not graphics nodes. Such a device
+allocates to one claim at a time.
 
 If the hardware you expect is not in the list, no driver is bound to
 it. Look at the hardware the machine reports that it cannot drive:
@@ -78,11 +84,10 @@ node, on any machine in the fleet. A selector that asks for a vendor
 and a product ID names one model, and it stops matching on the next
 machine you buy.
 
-## 4. Share a GPU between deployments
+## 4. Claim the GPU for a deployment
 
-More than one claim can allocate a GPU with a render node. Each
-deployment writes its own claim, and the deployments do not know about
-each other.
+The deployment writes a claim against the class, and the claim
+allocates the GPU.
 
     apiVersion: resource.k8s.io/v1
     kind: ResourceClaim
@@ -112,16 +117,20 @@ names the pod's entry:
                 claims:
                   - name: gpu
 
-The container receives `/dev/dri/card0` and `/dev/dri/renderD128`.
-Nothing else changes: no privilege, and no host mount. Your image
-supplies the userspace driver, and the image's user must be able to
-open the node. Check what the container received:
+The container receives every node the device delivers. For the GPU
+above, that is `/dev/dri/card0`, `/dev/dri/renderD128`, and the i2c
+monitor-control nodes that i915 registers beside them. Nothing else
+changes: no privilege, and no host mount. Your image supplies the
+userspace driver, and the image's user must be able to open the node.
+Check what the container received:
 
     kubectl exec deploy/transcoder -- ls -l /dev/dri
 
-A second deployment in another namespace writes its own
-`ResourceClaim` against the same `DeviceClass`, and both deployments
-run. The GPU serves both.
+A device that carries `allowMultipleAllocations: true` serves more
+than one claim: a second deployment writes its own `ResourceClaim`
+against the same `DeviceClass`, and both deployments run. The
+integrated GPU above does not carry it, so a second claim waits until
+the first deployment releases the device.
 
 ## 5. Give one pod a device alone
 
