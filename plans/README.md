@@ -201,18 +201,6 @@ connection while the handler still ran, and `ResponseHeaderTimeout` in
 What stalls a response for ten seconds is the open question, and the
 loopback case reproduces on one machine.
 
-**An edit that no machine reads still reboots the fleet.**
-`RestartApplies` in `cluster/changes.go` names the restart-class
-fields, and every other difference is reboot-class. `spec.origin`
-renders only k3s's `cluster-init` flag, which k3s applies only when no
-datastore exists yet, and no machine reads `spec.endpoint` on a fleet
-of leaders that declare their own addresses. Editing either on a
-running fleet changes nothing on any machine, and still costs one
-reboot per machine, in turn. The status could report which tier a
-proposed edit lands in, because `RestartApplies` already computes
-that. A tier below restart could also exist: stage the document, adopt
-it at the machine's next boot, and request no turn.
-
 **No log level for containerd or k3s.** containerd takes a level in
 its own configuration and k3s takes `--debug`, but no field in either
 CRD reaches them, and a machine serves no shell. On a five-machine

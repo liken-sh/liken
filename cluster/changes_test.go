@@ -65,13 +65,18 @@ func TestRestartAppliesByDomain(t *testing.T) {
 		}, true},
 		"runtime with a reboot field": {func(s *ClusterSpec) {
 			s.Runtime.K3s.GoMemoryLimit = "off"
-			s.Endpoint = "https://10.10.0.2:6443"
+			s.Network.ClusterCIDR = "10.44.0.0/16"
 		}, false},
-		"the origin":            {func(s *ClusterSpec) { s.Origin = OriginAdopted }, false},
-		"the leaders":           {func(s *ClusterSpec) { s.Leaders = []string{"node-1"} }, false},
-		"the endpoint":          {func(s *ClusterSpec) { s.Endpoint = "https://10.10.0.2:6443" }, false},
-		"the NodePort networks": {func(s *ClusterSpec) { s.Network.NodePortCIDRs = []string{"10.10.0.0/24"} }, true},
-		"the network plan":      {func(s *ClusterSpec) { s.Network.ClusterCIDR = "10.44.0.0/16" }, false},
+		// The origin and the endpoint are next-boot-class, which is
+		// lighter than a restart, so they never drag an edit up to the
+		// reboot tier. Alone they answer true here as well, and the
+		// operator asks NextBootApplies first.
+		"the origin":               {func(s *ClusterSpec) { s.Origin = OriginAdopted }, true},
+		"the endpoint":             {func(s *ClusterSpec) { s.Endpoint = "https://10.10.0.2:6443" }, true},
+		"runtime with an endpoint": {func(s *ClusterSpec) { s.Runtime.K3s.GoMemoryLimit = "off"; s.Endpoint = "https://10.10.0.2:6443" }, true},
+		"the leaders":              {func(s *ClusterSpec) { s.Leaders = []string{"node-1"} }, false},
+		"the NodePort networks":    {func(s *ClusterSpec) { s.Network.NodePortCIDRs = []string{"10.10.0.0/24"} }, true},
+		"the network plan":         {func(s *ClusterSpec) { s.Network.ClusterCIDR = "10.44.0.0/16" }, false},
 		"NodePorts with a reboot field": {func(s *ClusterSpec) {
 			s.Network.NodePortCIDRs = []string{"10.10.0.0/24"}
 			s.Network.ClusterCIDR = "10.44.0.0/16"
@@ -86,6 +91,65 @@ func TestRestartAppliesByDomain(t *testing.T) {
 				t.Errorf("RestartApplies = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestNextBootAppliesByDomain(t *testing.T) {
+	cases := map[string]struct {
+		mutate func(*ClusterSpec)
+		want   bool
+	}{
+		"the origin":   {func(s *ClusterSpec) { s.Origin = OriginAdopted }, true},
+		"the endpoint": {func(s *ClusterSpec) { s.Endpoint = "https://10.10.0.2:6443" }, true},
+		"both": {func(s *ClusterSpec) {
+			s.Origin = OriginAdopted
+			s.Endpoint = "https://10.10.0.2:6443"
+		}, true},
+		// A restart-class field beside the origin takes the restart
+		// tier, and a reboot-class field beside it takes the reboot
+		// tier. Either way this classifier answers false, and the
+		// operator falls through to the heavier gate.
+		"the origin with a feature": {func(s *ClusterSpec) {
+			s.Origin = OriginAdopted
+			s.Features["traefik"] = &FeatureConfig{}
+		}, false},
+		"the origin with the network plan": {func(s *ClusterSpec) {
+			s.Origin = OriginAdopted
+			s.Network.ClusterCIDR = "10.44.0.0/16"
+		}, false},
+		"the leaders": {func(s *ClusterSpec) { s.Leaders = []string{"node-1"} }, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := NextBootApplies(specWith(nil), specWith(tc.mutate)); got != tc.want {
+				t.Errorf("NextBootApplies = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNextBootAppliesIdenticalSpecsNeedNoStaging(t *testing.T) {
+	if NextBootApplies(specWith(nil), specWith(nil)) {
+		t.Error("no drift needs no staging at all")
+	}
+	// The release feed is not part of the canonical document, so it is
+	// no drift for this classifier either.
+	releasesOnly := specWith(func(s *ClusterSpec) {
+		s.Version = "0.3.0"
+		s.Releases = ClusterReleasesSpec{Source: "https://releases.example"}
+	})
+	if NextBootApplies(specWith(nil), releasesOnly) {
+		t.Error("a release-feed edit alone is no drift at all")
+	}
+}
+
+func TestNextBootAppliesDoesNotMutateItsArguments(t *testing.T) {
+	old, new := specWith(nil), specWith(func(s *ClusterSpec) { s.Endpoint = "https://10.10.0.2:6443" })
+	before, _ := json.Marshal(old)
+	NextBootApplies(old, new)
+	after, _ := json.Marshal(old)
+	if string(before) != string(after) {
+		t.Error("the caller's spec must not be mutated")
 	}
 }
 
@@ -123,15 +187,18 @@ func TestRestartAppliesTreatsAnUnknownFieldAsRebootClass(t *testing.T) {
 	// simulate this by round-tripping a spec through JSON with an
 	// extra field, because the strict parser refuses it. Instead,
 	// this test pins the mechanism directly. The subtraction zeroes
-	// only the restart-class fields. Anything else that differs
-	// survives the subtraction and answers reboot. Here, the endpoint
-	// field stands in for a future field.
+	// only the restart-class and next-boot-class fields. Anything else
+	// that differs survives the subtraction and answers reboot. Here,
+	// the cluster CIDR stands in for a future field.
 	changed := specWith(func(s *ClusterSpec) {
-		s.Endpoint = "https://10.10.0.9:6443"
+		s.Network.ClusterCIDR = "10.44.0.0/16"
 		s.Features["traefik"] = &FeatureConfig{}
 	})
 	if RestartApplies(specWith(nil), changed) {
 		t.Error("any residual difference beyond the restart-class fields must fall to reboot")
+	}
+	if NextBootApplies(specWith(nil), changed) {
+		t.Error("any residual difference beyond the origin and the endpoint must fall to a heavier tier")
 	}
 }
 

@@ -9,6 +9,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/liken-sh/liken/api"
@@ -287,16 +288,16 @@ func TestClusterRegistriesDriftConvergesByRestart(t *testing.T) {
 }
 
 func TestClusterRebootClassDriftStillReboots(t *testing.T) {
-	// The endpoint is used at join time, not when k3s starts. The
-	// reboot tier handles it.
+	// The address plan sets the node IP, which the boot has already
+	// acted on by the time k3s starts. The reboot tier handles it.
 	desired := decisionCluster()
-	desired.Spec.Endpoint = "https://10.10.0.2:6443"
+	desired.Spec.Network.ClusterCIDR = "10.44.0.0/16"
 	bootDoc := decisionCluster()
 	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-hash")
 
 	conv := decideClusterConvergence(desired, nil, machineWithPolicy(machine.RebootAuto), facts, nil, bootDoc, "some-old-hash", "", turnGranted)
 	if conv.condition.Reason != "RebootRequested" || !conv.requestReboot || conv.requestRestart {
-		t.Errorf("an endpoint edit needs the reboot tier: %+v", conv)
+		t.Errorf("an address plan edit needs the reboot tier: %+v", conv)
 	}
 }
 
@@ -306,13 +307,109 @@ func TestClusterMixedDriftFallsToReboot(t *testing.T) {
 	// everything a restart does, and more.
 	desired := decisionCluster()
 	desired.Spec.Features = map[string]*cluster.FeatureConfig{"traefik": {}}
-	desired.Spec.Endpoint = "https://10.10.0.2:6443"
+	desired.Spec.Network.ClusterCIDR = "10.44.0.0/16"
 	bootDoc := decisionCluster()
 	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-hash")
 
 	conv := decideClusterConvergence(desired, nil, machineWithPolicy(machine.RebootAuto), facts, nil, bootDoc, "some-old-hash", "", turnGranted)
 	if conv.condition.Reason != "RebootRequested" || !conv.requestReboot {
 		t.Errorf("mixed drift falls to the reboot tier: %+v", conv)
+	}
+}
+
+// nextBootDrift builds the desired document for an edit confined to
+// the fields only a boot reads, so each case below states just the
+// mutation it exercises.
+func nextBootDrift(mutate func(*cluster.Cluster)) *cluster.Cluster {
+	desired := decisionCluster()
+	mutate(desired)
+	return desired
+}
+
+func TestClusterNextBootDriftStagesWithoutADisruption(t *testing.T) {
+	// The origin and the endpoint are read only during a boot, so a
+	// machine adopts either edit at its next boot. Neither policy
+	// changes that, because there is no disruption to gate. Each case
+	// names its own boot document, so each one differs from its boot
+	// in exactly the fields its name gives.
+	adopted := nextBootDrift(func(c *cluster.Cluster) { c.Spec.Origin = cluster.OriginAdopted })
+	promoted := nextBootDrift(func(c *cluster.Cluster) { c.Spec.Origin = cluster.OriginFounded })
+	movedEndpoint := nextBootDrift(func(c *cluster.Cluster) { c.Spec.Endpoint = "https://10.10.0.2:6443" })
+	promotedAndMoved := nextBootDrift(func(c *cluster.Cluster) {
+		c.Spec.Origin = cluster.OriginFounded
+		c.Spec.Endpoint = "https://10.10.0.2:6443"
+	})
+	cases := map[string]struct {
+		boot    *cluster.Cluster
+		desired *cluster.Cluster
+		policy  machine.RebootPolicy
+		t       turn
+	}{
+		"the origin alone under Auto":       {adopted, promoted, machine.RebootAuto, turnGranted},
+		"the endpoint alone under Auto":     {decisionCluster(), movedEndpoint, machine.RebootAuto, turnGranted},
+		"the endpoint alone under Manual":   {decisionCluster(), movedEndpoint, "", turnGranted},
+		"both fields, with no turn granted": {adopted, promotedAndMoved, machine.RebootAuto, turnAwaiting},
+	}
+	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-hash")
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			conv := decideClusterConvergence(tc.desired, nil, machineWithPolicy(tc.policy), facts, nil, tc.boot, "some-old-hash", "", tc.t)
+			if conv.condition.Status != "False" || conv.condition.Reason != "StagedForNextBoot" {
+				t.Errorf("got %+v", conv.condition)
+			}
+			if !conv.stage {
+				t.Error("the next boot reads the staged copy, so the document must be staged")
+			}
+			if conv.requestReboot || conv.requestRestart {
+				t.Errorf("this tier asks for no disruption: %+v", conv)
+			}
+		})
+	}
+}
+
+func TestClusterNextBootDriftExplainsItselfInTheMessage(t *testing.T) {
+	// The message is what an operator reads when the condition stays
+	// False for hours. It must say that the document is staged, when
+	// the machine applies it, and that no turn is coming.
+	desired := nextBootDrift(func(c *cluster.Cluster) { c.Spec.Endpoint = "https://10.10.0.2:6443" })
+	bootDoc := decisionCluster()
+	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-hash")
+
+	conv := decideClusterConvergence(desired, nil, machineWithPolicy(machine.RebootAuto), facts, nil, bootDoc, "some-old-hash", "", turnGranted)
+	for _, want := range []string{"staged", "next boot", "no turn"} {
+		if !strings.Contains(conv.condition.Message, want) {
+			t.Errorf("message %q does not say %q", conv.condition.Message, want)
+		}
+	}
+}
+
+func TestClusterEndpointBesideARestartFieldTakesTheRestartTier(t *testing.T) {
+	// The tier boundary, at the branch rather than at the classifier:
+	// an endpoint edit alone stages and waits, but the same edit
+	// beside a runtime change converges by a restart. The restart
+	// re-renders the drop-in, so it carries the new endpoint with it.
+	desired := decisionCluster()
+	desired.Spec.Endpoint = "https://10.10.0.2:6443"
+	desired.Spec.Runtime.K3s.GoMemoryLimit = "25%"
+	bootDoc := decisionCluster()
+	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-hash")
+
+	conv := decideClusterConvergence(desired, nil, machineWithPolicy(machine.RebootAuto), facts, nil, bootDoc, "some-old-hash", "", turnGranted)
+	if conv.condition.Reason != "RestartRequested" || !conv.requestRestart || conv.requestReboot {
+		t.Errorf("a restart-class field beside the endpoint takes the restart tier: %+v", conv)
+	}
+}
+
+func TestClusterNextBootDriftDoesNotRestageTheSameBytes(t *testing.T) {
+	desired := nextBootDrift(func(c *cluster.Cluster) { c.Spec.Endpoint = "https://10.10.0.2:6443" })
+	_, hash, _ := renderCluster(desired.Metadata.Name, desired.Spec)
+	bootDoc := decisionCluster()
+	facts := partitionBackedFacts(machine.ManifestSourceProven, "some-old-hash")
+
+	conv := decideClusterConvergence(desired, nil, machineWithPolicy(machine.RebootAuto), facts, nil, bootDoc, "some-old-hash", hash, turnGranted)
+	if conv.stage {
+		t.Error("the exact bytes already wait; staging again is disk churn")
 	}
 }
 

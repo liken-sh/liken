@@ -129,3 +129,9 @@ This is the only permitted edit to the field. The promotion makes no
 change to the running fleet. It has an effect only if you build the
 cluster again: the founding leader of a founded cluster can create the
 datastore again.
+
+Only a boot reads `spec.origin`, so the promotion reboots nothing. Each
+machine stages the new document and reports `StagedForNextBoot` on its
+`ClusterConverged` condition. The machine applies the document at its
+next boot, whatever causes that boot. The same holds for an edit to
+`spec.endpoint`.

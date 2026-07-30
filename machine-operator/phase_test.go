@@ -113,6 +113,15 @@ func TestDecidePhase(t *testing.T) {
 			api.PhaseUpdatePending,
 		},
 		{
+			// The change needs no disruption of its own, but the
+			// machine still does not run the deployment's document
+			// yet, so the listing shows it as pending rather than
+			// Ready.
+			"a document staged for the next boot is pending",
+			[]api.Condition{condition("ClusterConverged", "False", "StagedForNextBoot")},
+			api.PhaseUpdatePending,
+		},
+		{
 			"a pending demotion waits the same way",
 			[]api.Condition{condition("NodeCurrent", "False", "DemotionPending")},
 			api.PhaseUpdatePending,

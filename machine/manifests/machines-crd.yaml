@@ -796,8 +796,9 @@ spec:
                     reconcile pass, so the phase always agrees with
                     them. Ready means that every condition holds.
                     UpdatePending and Updating mean that a staged
-                    change waits for a reboot (Manual) or is in
-                    progress (Auto). Blocked means that drift exists
+                    change waits for a reboot (Manual), waits for
+                    this machine's next boot, or is in progress
+                    (Auto). Blocked means that drift exists
                     which liken refuses to stage or cannot stage.
                     This state needs a different edit, and time does
                     not clear it. Degraded covers all other faults.
@@ -2810,7 +2811,12 @@ spec:
                           MachineStateEphemeral, StagingRejected,
                           RejectedLastBoot, AwaitingTurn,
                           RebootPending, RebootRequested,
-                          RestartPending, and RestartRequested.
+                          RestartPending, RestartRequested, and
+                          StagedForNextBoot. The last one means that
+                          the machine holds the change and applies it
+                          at its next boot. Only a boot reads the
+                          fields that changed, so no reboot and no
+                          restart is scheduled.
                       message:
                         type: string
                         maxLength: 32768

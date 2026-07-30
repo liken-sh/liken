@@ -31,7 +31,8 @@ package main
 // ClusterConverged condition shows this disagreement when it
 // happens. This file contains no fleet orchestration by design. A
 // Cluster edit causes drift on every machine at once, and this code
-// only stages the change and asks for a reboot. On a cluster member
+// only stages the change and asks for whatever disruption the change
+// needs, which for some edits is none at all. On a cluster member
 // with rebootPolicy Auto, asking means waiting for a turn from the
 // cluster operator's rollout conductor. The conductor grants
 // reboots to one machine at a time, so a fleet-wide edit rolls
@@ -99,13 +100,15 @@ func renderCluster(name string, spec cluster.ClusterSpec) ([]byte, string, error
 // sequence.
 //
 // The classifier in cluster/changes.go determines the kind of
-// disruption. When every differing domain is read only when k3s
+// disruption, and whether the document needs one at all. When the
+// only difference is the origin or the endpoint, nothing running
+// reads the change, so the document is staged and the next boot
+// applies it. When every differing domain is read only when k3s
 // starts its process (features, registries, the runtime
 // environment), a k3s restart applies the document, and the machine
-// and its pods stay up. Any other
-// difference requires a reboot. An unreadable boot document also
-// requires a reboot, because a reboot is the one action that always
-// works.
+// and its pods stay up. Any other difference requires a reboot. An
+// unreadable boot document also requires a reboot, because a reboot
+// is the one action that always works.
 //
 // bootDoc and bootHash describe the document this boot ran (see
 // bootClusterDocument below). The hash is always the canonical
@@ -167,6 +170,26 @@ func decideClusterConvergence(reduced *cluster.Cluster, held []featureHold, m *m
 	}
 	if facts.Storage.MachineState.Backing != machine.BackingPartition {
 		return machineStateEphemeral("ClusterConverged", "the cluster document")
+	}
+
+	// The next-boot tier comes before the restart and reboot gate,
+	// because it is the lightest answer the classifier can give. Only
+	// a boot reads the fields this edit touches, so staging the
+	// document is the whole of the work, and the machine adopts it at
+	// its next boot. No turn is requested, so a fleet-wide edit of
+	// these fields never enters the rollout conductor's queue.
+	// cluster/changes.go carries the reasoning, down to the one value
+	// a running follower still holds: the endpoint's host, in its time
+	// sources. The message states what happens, and leaves that
+	// argument to the classifier and to the CRD's field descriptions.
+	if bootDoc != nil && cluster.NextBootApplies(bootDoc.Spec, reduced.Spec) {
+		return convergence{
+			manifest: manifest,
+			hash:     hash,
+			stage:    stagedHash != hash,
+			condition: notConverged("ClusterConverged", "StagedForNextBoot",
+				fmt.Sprintf("cluster document staged (%.12s); this machine applies it at its next boot, and asks for no turn", hash)),
+		}
 	}
 
 	restart := bootDoc != nil && cluster.RestartApplies(bootDoc.Spec, reduced.Spec)

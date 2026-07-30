@@ -258,7 +258,11 @@ spec:
                     datastore already exists. Promotion is important
                     when the cluster is built again from nothing: the
                     founder of a founded cluster can create the
-                    datastore again.
+                    datastore again. Only a boot reads this field, so
+                    the edit costs no reboot and no restart. Each
+                    machine holds the new document and applies it at
+                    its next boot, and reports StagedForNextBoot on
+                    its ClusterConverged condition until then.
                 leaders:
                   type: array
                   # Atomic, not a set: the order carries meaning. The
@@ -287,7 +291,20 @@ spec:
                     The URL that followers join the cluster through,
                     for example https://10.10.0.1:6443. If the cluster
                     has one leader, this is that leader's address on
-                    the node network.
+                    the node network. Only a boot reads this field: a
+                    machine that has joined keeps the address of every
+                    leader and never asks the endpoint again. So an
+                    edit costs no reboot and no restart. Each machine
+                    holds the new document and applies it at its next
+                    boot, and reports StagedForNextBoot on its
+                    ClusterConverged condition until then. Two things
+                    still hold the old address until a machine boots. A
+                    follower keeps the endpoint's host in its time
+                    sources, as the last resort behind each leader's
+                    own address. And a machine that was down during the
+                    edit has not staged the new document, so it boots
+                    with the old endpoint. Keep the old address
+                    reachable until every machine reports Converged.
                 network:
                   type: object
                   description: >-

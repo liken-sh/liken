@@ -3,22 +3,43 @@ package cluster
 // This file classifies a cluster-document edit by how the system
 // must apply it.
 //
-// liken has three tiers of convergence, determined by where a setting
-// is read. Settings the kernel reads live (/proc/sys) reconcile in
-// place. Settings k3s reads at process start (the boot drop-in,
+// liken has four tiers of convergence, determined by where a setting
+// is read and by what still acts on it once the boot that read it is
+// over.
+//
+// Settings the kernel reads live (/proc/sys) reconcile in place.
+//
+// Settings k3s reads at process start (the boot drop-in,
 // registries.yaml, the feature manifests, and the Go runtime
 // environment init hands the process) apply by restarting the k3s
-// child process. Everything read earlier in a boot (the address
-// plan, storage, the time hierarchy) applies by rebooting the
-// machine. The reboot tier always works in place of the other two,
-// because a reboot is a k3s restart plus more. Classification must
-// therefore always err toward the heavier tier.
+// child process.
 //
-// This file is the classifier for the middle tier. The operator
-// consults it to determine whether a staged cluster document calls for
-// a restart intent or a reboot intent. Init consults the same
-// function before it acts on a restart intent, so the two programs
-// can never disagree about what a restart may apply.
+// Settings a boot reads to reach a decision it never revisits apply
+// by staging the document and waiting. The two are which datastore to
+// join, and the URL to join through. The machine's next boot reads the
+// staged copy, whenever that boot comes and for whatever reason. This
+// tier asks for no disruption at all. NextBootApplies below names
+// these fields and every reader of them. It also states the one value
+// a running machine still holds after such an edit.
+//
+// Everything else a boot acted on applies by rebooting the machine.
+// The running system carries the old value's effects, and only a boot
+// undoes them. The address plan is in the node's addresses and routes.
+// Storage is in the mounts. The time upstreams are the servers a
+// leader's discipline loop queries for the life of the boot.
+//
+// A reboot works in place of every other tier, because a reboot is a
+// k3s restart plus more, and it is also a next boot. So an edit that
+// spans tiers is safe at the reboot tier, and classification must
+// always err toward it. The one pair that needs its own argument is a
+// restart-class field beside a next-boot-class one, which
+// RestartApplies below sends to the restart tier.
+//
+// This file is the classifier for the two middle tiers. The operator
+// consults it to determine whether a staged cluster document calls
+// for a restart intent, a reboot intent, or no intent at all. Init
+// consults RestartApplies before it acts on a restart intent, so the
+// two programs can never disagree about what a restart may apply.
 
 import "encoding/json"
 
@@ -26,7 +47,8 @@ import "encoding/json"
 // machine from the current spec to the desired one. The two specs
 // must differ (no drift needs no disruption at all), and the
 // difference must be confined to the restart-class fields, the ones
-// k3s reads only at process start.
+// k3s reads only at process start, and to the next-boot-class fields
+// below them.
 //
 // The comparison works by subtraction rather than by a list of
 // changed domains: it zeroes the restart-class fields on copies of
@@ -70,6 +92,71 @@ func RestartApplies(current, desired ClusterSpec) bool {
 	// before k3s does, so it is zeroed here with the other
 	// restart-class fields rather than with its own section.
 	current.Network.NodePortCIDRs, desired.Network.NodePortCIDRs = nil, nil
+	// Origin and Endpoint belong to the next-boot tier
+	// (NextBootApplies below), so they zero here too. An edit that
+	// changes one of them beside a restart-class field converges by a
+	// restart, not by a reboot. The restart re-renders the k3s drop-in
+	// from the staged document (init/restart.go). That render writes
+	// exactly the join keys a boot would write from the same document.
+	// A restart re-runs every reader but one, the follower's time
+	// source list, and leaving that list to the next boot is what the
+	// next-boot tier promises anyway.
+	current.Origin, desired.Origin = "", ""
+	current.Endpoint, desired.Endpoint = "", ""
+	return jsonEqual(current, desired)
+}
+
+// NextBootApplies reports whether a machine can adopt the desired
+// spec by staging it and waiting for its next boot, with no reboot
+// and no k3s restart. The two specs must differ, and the difference
+// must be confined to Origin and Endpoint.
+//
+// These two fields have three readers, and all three run during a
+// boot. leaderJoinConfig (init/k3s.go) reads Origin to decide whether
+// the founding leader renders cluster-init or joins a datastore that
+// already exists, and it reads Endpoint for the URL a joining leader
+// points at. k3sBootConfig (init/k3s.go) writes Endpoint into a
+// follower's server: key. timeSources (init/time.go) puts the
+// endpoint's host at the end of a follower's time sources, as the
+// fallback for a leader that declares no address.
+//
+// Nothing re-reads either field after that. A joined member keeps a
+// client-side load balancer that holds every leader's address, so it
+// never asks the endpoint for anything again. A running k3s never
+// reads the drop-in again.
+//
+// One value does outlive the boot that read it: the endpoint's host
+// stays in a follower's time source list until the next boot. That
+// entry is the last resort, behind every leader that declares an
+// address inside nodeCIDR. It costs nothing on a fleet whose leaders
+// declare their addresses. On a fleet whose leaders declare none, the
+// endpoint's host is a follower's only time source, and the follower
+// asks the old host until it boots. So keep the old address answering
+// until every machine has adopted the edit. This is the one cost of
+// the tier, and it is a slow clock rather than a lost cluster.
+//
+// The tier is the same for every machine, whatever its role. A
+// follower, a founding leader, and an ordinary leader all read these
+// fields only during a boot. No role needs a heavier tier than
+// another.
+//
+// The staged document therefore costs little to hold. The machine
+// keeps serving under the document it booted. The next boot, for an
+// upgrade or for any other change, reads the staged copy and proves
+// it.
+//
+// The comparison uses the same subtraction over JSON that
+// RestartApplies uses, for the same reason. A field this function does
+// not name stays in the comparison. So a future ClusterSpec field can
+// never fall into this tier by accident.
+func NextBootApplies(current, desired ClusterSpec) bool {
+	current.Version, desired.Version = "", ""
+	current.Releases, desired.Releases = ClusterReleasesSpec{}, ClusterReleasesSpec{}
+	if jsonEqual(current, desired) {
+		return false
+	}
+	current.Origin, desired.Origin = "", ""
+	current.Endpoint, desired.Endpoint = "", ""
 	return jsonEqual(current, desired)
 }
 

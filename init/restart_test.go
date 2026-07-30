@@ -178,6 +178,30 @@ func TestRestartAppliesStagedCredentialsAlone(t *testing.T) {
 	}
 }
 
+func TestRestartCarriesANextBootDocumentWhenItRunsAnyway(t *testing.T) {
+	// An endpoint edit alone never asks for a restart: the operator
+	// stages it and waits for the machine's next boot
+	// (machine-operator/cluster.go). Some other document can still
+	// raise a restart intent while that copy waits, and then this path
+	// applies it, because the drop-in it renders from the staged
+	// document is the same drop-in a boot would render.
+	f := newRestartFixture(t)
+	hash := f.stageCluster(t, func(s *cluster.ClusterSpec) {
+		s.Endpoint = "https://10.10.0.9:6443"
+	})
+	f.stageCredentials(t)
+
+	if !f.state.apply(machine.RestartIntent{Reason: "credentials"}) {
+		t.Fatal("staged credentials are restart work")
+	}
+	if len(f.bootConfigs) != 1 || f.bootConfigs[0].Spec.Endpoint != "https://10.10.0.9:6443" {
+		t.Error("the drop-in must re-render with the staged endpoint")
+	}
+	if attempted, _ := machine.ClusterManifests(f.root).LoadAttempted(); attempted != hash {
+		t.Errorf("the applied document takes its trial: %q", attempted)
+	}
+}
+
 func TestRestartRefusesWithNothingStaged(t *testing.T) {
 	f := newRestartFixture(t)
 	if f.state.apply(machine.RestartIntent{Reason: "duplicate"}) {
@@ -208,7 +232,7 @@ func TestRestartRefusesAnAlreadyAttemptedDocument(t *testing.T) {
 func TestRestartLeavesARebootClassDocumentStanding(t *testing.T) {
 	f := newRestartFixture(t)
 	f.stageCluster(t, func(s *cluster.ClusterSpec) {
-		s.Endpoint = "https://10.10.0.9:6443"
+		s.Network.ClusterCIDR = "10.44.0.0/16"
 	})
 
 	if f.state.apply(machine.RestartIntent{Reason: "racing intent"}) {

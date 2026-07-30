@@ -88,11 +88,17 @@ func conditionPhase(c api.Condition) api.Phase {
 		// boot's imports stay on trial until the OS pods prove them,
 		// which ordinarily takes seconds.
 		return api.PhaseUpdating
-	case "RebootPending", "RestartPending", "DemotionPending", "AwaitingTurn":
+	case "RebootPending", "RestartPending", "DemotionPending", "AwaitingTurn",
+		"StagedForNextBoot":
 		// A change is staged and waiting, either on a Manual reboot
 		// or on the cluster granting this machine its turn. A
 		// verified release waiting for its proving reboot reads the
 		// same way, because it is waiting on exactly the same things.
+		// A change staged for the next boot needs no disruption of its
+		// own, so nothing is scheduled to apply it and any later boot
+		// does. The listing still shows the machine as pending,
+		// because it does not yet run the document the deployment
+		// wrote.
 		return api.PhaseUpdatePending
 	}
 	// Anything unrecognized reads as Degraded, deliberately. A
