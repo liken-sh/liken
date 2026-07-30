@@ -14,7 +14,7 @@ A document's directory states its status:
   built yet.
 
 The numbers run in one sequence across all three directories. The next
-milestone is 49.
+milestone is 50.
 
 ## Completed
 
@@ -160,6 +160,11 @@ milestone is 49.
 * **46.** [Configuring etcd snapshots](46-configuring-etcd-snapshots.md)
   — `spec.datastore.snapshots` gives a schedule, a retention, and an
   S3 destination to the snapshots every leader already takes.
+* **49.** [Sharing integrated graphics](49-sharing-integrated-graphics.md)
+  — the sharing rule tests every node a device delivers, so the i2c
+  nodes an integrated GPU registers for its display outputs keep it
+  exclusive.
+
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.
 
@@ -194,19 +199,6 @@ the open question, and the loopback case reproduces on one machine.
 Whatever the answer, the engine probe could ask every 60 seconds
 instead of every 10, or hold a watch, and a deleted engine would still
 heal in seconds.
-
-**Integrated graphics never publishes as shareable.** The sharing rule
-in `machine-operator/dra.go` requires every node a device delivers to
-come from a graphics subsystem. i915 also registers an `i2c-dev` node
-for each display output's DDC and AUX channels, nine of them on the
-Alder Lake-N hardware the DRA guide describes. Those nodes fail the
-rule, so a real integrated GPU publishes with no
-`allowMultipleAllocations` and no `subsystem` attribute, the second
-claim waits against hardware the lab measured serving twelve encoders,
-and nothing reports the wait. A claim that does allocate delivers the
-i2c monitor-control nodes to a workload that asked for a GPU. The fix
-could widen `graphicsSubsystems`, test only the render node, or
-deliver only the nodes the claim selected.
 
 **An edit that no machine reads still reboots the fleet.**
 `RestartApplies` in `cluster/changes.go` names the restart-class
