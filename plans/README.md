@@ -178,3 +178,57 @@ address from a pool, probably by ARP-probe claiming, in the same way
 that storage claiming works: probe reality, take what is free, and
 refuse an ambiguous case. This waits until the declared-machine flow is
 proven.
+
+**The apiservers abort requests that liken's operators send.** On a
+five-machine fleet, the apiservers logged "Timeout or abort while
+handling" for 13% of the cluster operator's engine-probe GETs, and for
+a few of each machine's status PUTs every hour. The aborts include
+requests to `127.0.0.1:6443`, so the network between machines is not
+the cause. Neither operator reports an error, so from liken's side
+every request succeeds, and the noise lands in the apiserver's log at
+ERROR, near 2,800 lines a day. The log pair matches a request whose
+client closed the connection while the handler still ran, and
+`ResponseHeaderTimeout` in `kubernetes/apiclient.go` is the client's
+only ten-second deadline. What stalls a response for ten seconds is
+the open question, and the loopback case reproduces on one machine.
+Whatever the answer, the engine probe could ask every 60 seconds
+instead of every 10, or hold a watch, and a deleted engine would still
+heal in seconds.
+
+**Integrated graphics never publishes as shareable.** The sharing rule
+in `machine-operator/dra.go` requires every node a device delivers to
+come from a graphics subsystem. i915 also registers an `i2c-dev` node
+for each display output's DDC and AUX channels, nine of them on the
+Alder Lake-N hardware the DRA guide describes. Those nodes fail the
+rule, so a real integrated GPU publishes with no
+`allowMultipleAllocations` and no `subsystem` attribute, the second
+claim waits against hardware the lab measured serving twelve encoders,
+and nothing reports the wait. A claim that does allocate delivers the
+i2c monitor-control nodes to a workload that asked for a GPU. The fix
+could widen `graphicsSubsystems`, test only the render node, or
+deliver only the nodes the claim selected.
+
+**An edit that no machine reads still reboots the fleet.**
+`RestartApplies` in `cluster/changes.go` names the restart-class
+fields, and every other difference is reboot-class. `spec.origin`
+renders only k3s's `cluster-init` flag, which k3s applies only when no
+datastore exists yet, and no machine reads `spec.endpoint` on a fleet
+of leaders that declare their own addresses. Editing either on a
+running fleet changes nothing on any machine, and still costs one
+reboot per machine, in turn. The status could report which tier a
+proposed edit lands in, because `RestartApplies` already computes
+that. A tier below restart could also exist: stage the document, adopt
+it at the machine's next boot, and request no turn.
+
+**No log level for containerd or k3s.** containerd takes a level in
+its own configuration and k3s takes `--debug`, but no field in either
+CRD reaches them, and a machine serves no shell. On a five-machine
+fleet, the machines' own streams wrote 295,000 lines a day, and
+containerd's pod lifecycle at info was 171,000 of them. A field could
+set the level the way `rebootPolicy` sets a policy, with info as the
+default. Two of the measurements need their own answer. containerd
+logs `container event discarded` when nothing consumes its event
+stream, and that line alone is a third of containerd's volume, so it
+may mark a missing subscriber rather than verbosity. And a reboot is
+followed by about a day of elevated logging, while the kubelet's
+garbage collector removes the sandboxes the reboot orphaned.
