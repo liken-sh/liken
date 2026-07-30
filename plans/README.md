@@ -187,7 +187,8 @@ proven.
 **The apiservers abort requests that liken's operators send.** On a
 five-machine fleet, the apiservers logged "Timeout or abort while
 handling" for a few of each machine's status PUTs every hour, and for
-13% of the cluster operator's engine-probe GETs. The engine probe asks
+13% of the cluster operator's engine-probe GETs, measured while the
+probe still asked every 10 seconds. The engine probe asks
 once every 60 seconds (`engineProbeInterval` in
 `cluster-operator/flux.go`), and the stall behind the log pair stays
 unexplained. The aborts include requests to `127.0.0.1:6443`, so the

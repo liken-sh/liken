@@ -370,8 +370,8 @@ type ContainerdRuntimeSpec struct {
 // to quietest. containerd itself takes three more (trace above debug,
 // and fatal and panic below error), which liken does not offer. trace
 // is a volume no machine should write to the disk it also runs on, and
-// fatal and panic drop the error lines that explain what a crash
-// followed.
+// fatal and panic drop the error lines written before a crash, the
+// lines that explain it.
 var containerdLogLevels = []string{"debug", "info", "warn", "error"}
 
 // Validate holds the containerd section to the levels above. containerd

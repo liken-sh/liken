@@ -79,12 +79,12 @@ var (
 	// read. So a drop-in in that directory sets the level, and k3s
 	// keeps rendering its own configuration untouched.
 	//
-	// A drop-in rather than the other supported path, a
+	// liken writes a drop-in instead of the other supported path, a
 	// config-v3.toml.tmpl that overrides k3s's template. An override
-	// carries the whole base template's fate: it is a Go template that
-	// must still parse and still render every key containerd needs, so
-	// an override that breaks stops containerd on a machine that
-	// serves no shell to repair it. A drop-in carries only the level.
+	// is a Go template that must still parse and still render every
+	// key containerd needs, so an override that breaks stops
+	// containerd on a machine that serves no shell to repair it. A
+	// drop-in carries only the level.
 	// If a future k3s stops importing the directory, the level returns
 	// to containerd's own default and containerd still starts. The
 	// drop-in also depends on no template name, and it leaves the

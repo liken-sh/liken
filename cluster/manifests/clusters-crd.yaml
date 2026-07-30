@@ -971,8 +971,9 @@ spec:
                             does not offer: trace above debug, which
                             is a volume that no machine should write
                             to the disk it also runs on, and fatal and
-                            panic below error, which drop the lines
-                            that explain what a crash followed.
+                            panic below error, which drop the error
+                            lines written before a crash, the lines
+                            that explain it.
             status:
               type: object
               description: >-

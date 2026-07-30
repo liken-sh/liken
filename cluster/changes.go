@@ -133,7 +133,8 @@ func RestartApplies(current, desired ClusterSpec) bool {
 // endpoint's host is a follower's only time source, and the follower
 // asks the old host until it boots. So keep the old address answering
 // until every machine has adopted the edit. This is the one cost of
-// the tier, and it is a slow clock rather than a lost cluster.
+// the tier. The failure it risks is clock drift on that follower,
+// not a lost cluster.
 //
 // The tier is the same for every machine, whatever its role. A
 // follower, a founding leader, and an ordinary leader all read these
