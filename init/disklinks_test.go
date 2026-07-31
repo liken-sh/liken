@@ -334,7 +334,8 @@ func TestALocalDiskSharesByPathWithAnISCSISession(t *testing.T) {
 	scsiTarget := addSession(t, "1", "iqn.2026-07.sh.liken.lab:storage", "10.10.0.100", "3260")
 	addLUN(t, scsiTarget, "2", "1", "sdb")
 
-	if err := reconcileLinks(links, localPaths()); err != nil {
+	want, _ := localPaths()
+	if err := reconcileLinks(links, want); err != nil {
 		t.Fatal(err)
 	}
 	if target := linkTarget(t, links, "pci-0000:00:1f.2-ata-3"); target != "../../sda" {
@@ -354,7 +355,8 @@ func TestByIDLinksCarryTheirPartitions(t *testing.T) {
 	writeSysfs(t, filepath.Join(dir, "device"), "wwid", "naa.5002538d40a45c88\n")
 	addLUNPartition(t, dir, "sda1", "1")
 
-	if err := reconcileLinks(diskIDsDir, idPaths()); err != nil {
+	want, _ := idPaths()
+	if err := reconcileLinks(diskIDsDir, want); err != nil {
 		t.Fatal(err)
 	}
 	if target := linkTarget(t, diskIDsDir, "wwn-0x5002538d40a45c88-part1"); target != "../../sda1" {
@@ -372,7 +374,8 @@ func TestByUUIDLinksAPartitionsFilesystem(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := reconcileLinks(diskUUIDsDir, uuidPaths()); err != nil {
+	links, _ := uuidPaths()
+	if err := reconcileLinks(diskUUIDsDir, links); err != nil {
 		t.Fatal(err)
 	}
 	want := "01020304-0506-0708-090a-0b0c0d0e0f10"
@@ -391,14 +394,16 @@ func TestTwoDisksWithOneWWIDPublishNoWWNButKeepBothByPathNames(t *testing.T) {
 		"target3:0:0", "3:0:0:0", "block", "sdb")
 	writeSysfs(t, filepath.Join(dirB, "device"), "wwid", "naa.5002538d40a45c88\n")
 
-	if err := reconcileLinks(diskIDsDir, idPaths()); err != nil {
+	idLinks, _ := idPaths()
+	if err := reconcileLinks(diskIDsDir, idLinks); err != nil {
 		t.Fatal(err)
 	}
 	if names := publishedNames(t, diskIDsDir); len(names) != 0 {
 		t.Errorf("two disks sharing a wwid published %v, want no by-id names for either", names)
 	}
 
-	if err := reconcileLinks(diskLinksDir, localPaths()); err != nil {
+	pathLinks, _ := localPaths()
+	if err := reconcileLinks(diskLinksDir, pathLinks); err != nil {
 		t.Fatal(err)
 	}
 	if target := linkTarget(t, diskLinksDir, "pci-0000:00:1f.2-ata-3"); target != "../../sda" {
@@ -409,34 +414,104 @@ func TestTwoDisksWithOneWWIDPublishNoWWNButKeepBothByPathNames(t *testing.T) {
 	}
 }
 
-func TestTwoClonedPartitionsPublishNoByUUIDLinkForEither(t *testing.T) {
-	// Cloning a disk, or restoring the same image onto two disks,
-	// copies the filesystem's UUID along with its bytes. Two
-	// partitions then carry the same identity, and the by-uuid tree
-	// cannot say which one a mount by that UUID means.
+// twoClonedPartitions builds the fixture every test below shares: two
+// disks, each with one partition, cloned so both partitions carry the
+// same filesystem UUID. It returns the device root, so a test can
+// change one partition's UUID to clear the collision.
+func twoClonedPartitions(t *testing.T) (dev string, uuid []byte) {
+	t.Helper()
 	sys, dev := fakeMachine(t)
 	fakeInitiator(t)
-	logs := fakeLogStream(t)
 	addDisk(t, sys, dev, "vda", 2<<30, nil)
 	addPartition(t, sys, "vda", "vda1", "", 1<<20)
 	addDisk(t, sys, dev, "vdb", 2<<30, nil)
 	addPartition(t, sys, "vdb", "vdb1", "", 1<<20)
-	uuid := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10}
+	uuid = []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10}
 	if err := os.WriteFile(filepath.Join(dev, "vda1"), ext4DeviceWithUUID(uuid), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dev, "vdb1"), ext4DeviceWithUUID(uuid), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	return dev, uuid
+}
 
-	if err := reconcileLinks(diskUUIDsDir, uuidPaths()); err != nil {
+func TestTwoClonedPartitionsPublishNoByUUIDLinkForEither(t *testing.T) {
+	// Cloning a disk, or restoring the same image onto two disks,
+	// copies the filesystem's UUID along with its bytes. Two
+	// partitions then carry the same identity, and the by-uuid tree
+	// cannot say which one a mount by that UUID means.
+	twoClonedPartitions(t)
+
+	links, collisions := uuidPaths()
+	if err := reconcileLinks(diskUUIDsDir, links); err != nil {
 		t.Fatal(err)
 	}
 	if names := publishedNames(t, diskUUIDsDir); len(names) != 0 {
 		t.Errorf("two partitions sharing a UUID published %v, want no by-uuid link for either", names)
 	}
-	if got := logs(); !strings.Contains(got, "vda1") || !strings.Contains(got, "vdb1") {
-		t.Errorf("stderr %q does not name both partitions", got)
+	if len(collisions) != 1 {
+		t.Fatalf("the walk reported %d collisions, want 1", len(collisions))
+	}
+	got := collisions[0]
+	if !((got.first == "vda1" && got.second == "vdb1") || (got.first == "vdb1" && got.second == "vda1")) {
+		t.Errorf("the collision names %q and %q, want vda1 and vdb1", got.first, got.second)
+	}
+}
+
+func TestAPersistentCollisionPrintsOnce(t *testing.T) {
+	// Two walks over a fixture whose collision never changes describe
+	// the same fact twice. reportNewCollisions is what a real boot
+	// runs on every uevent, so this drives it directly rather than the
+	// full watchDiskLinks loop, which needs a live uevent source.
+	twoClonedPartitions(t)
+	logs := fakeLogStream(t)
+
+	_, first := uuidPaths()
+	seen := reportNewCollisions(first, nil)
+	if got := strings.Count(logs(), "names both"); got != 1 {
+		t.Fatalf("the first walk printed %d lines, want 1", got)
+	}
+
+	_, second := uuidPaths()
+	reportNewCollisions(second, seen)
+	if got := strings.Count(logs(), "names both"); got != 1 {
+		t.Errorf("a walk that repeats the same collision printed %d lines total, want still 1", got)
+	}
+}
+
+func TestACollisionThatClearsAndReturnsPrintsAgain(t *testing.T) {
+	dev, _ := twoClonedPartitions(t)
+	logs := fakeLogStream(t)
+
+	_, first := uuidPaths()
+	seen := reportNewCollisions(first, nil)
+	if got := strings.Count(logs(), "names both"); got != 1 {
+		t.Fatalf("the first walk printed %d lines, want 1", got)
+	}
+
+	// Give vdb1 a UUID of its own. The collision is gone, and the walk
+	// that finds it gone must stay quiet.
+	clear := []byte{0x02, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10}
+	if err := os.WriteFile(filepath.Join(dev, "vdb1"), ext4DeviceWithUUID(clear), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, second := uuidPaths()
+	seen = reportNewCollisions(second, seen)
+	if got := strings.Count(logs(), "names both"); got != 1 {
+		t.Fatalf("the walk that cleared the collision printed %d lines total, want still 1", got)
+	}
+
+	// Put the shared UUID back. The collision returns as a fresh fact,
+	// because the previous walk's set held none of it.
+	shared := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10}
+	if err := os.WriteFile(filepath.Join(dev, "vdb1"), ext4DeviceWithUUID(shared), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, third := uuidPaths()
+	reportNewCollisions(third, seen)
+	if got := strings.Count(logs(), "names both"); got != 2 {
+		t.Errorf("the walk that reintroduced the collision printed %d lines total, want 2", got)
 	}
 }
 
@@ -446,7 +521,7 @@ func TestAStaleLinkInEachNewTreeIsPruned(t *testing.T) {
 	cases := []struct {
 		name  string
 		dir   *string
-		build func() map[string]string
+		build func() (map[string]string, []diskLinkCollision)
 	}{
 		{"by-path", &diskLinksDir, localPaths},
 		{"by-id", &diskIDsDir, idPaths},
@@ -458,7 +533,8 @@ func TestAStaleLinkInEachNewTreeIsPruned(t *testing.T) {
 			if err := os.Symlink("../../sdz", stale); err != nil {
 				t.Fatal(err)
 			}
-			if err := reconcileLinks(*c.dir, c.build()); err != nil {
+			want, _ := c.build()
+			if err := reconcileLinks(*c.dir, want); err != nil {
 				t.Fatal(err)
 			}
 			if names := publishedNames(t, *c.dir); len(names) != 0 {

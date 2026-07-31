@@ -6,8 +6,9 @@ package main
 // identity field a machine creates at format time.
 
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"os"
-	"time"
 
 	"github.com/liken-sh/liken/disks"
 	"github.com/liken-sh/liken/machine"
@@ -18,8 +19,11 @@ import (
 // in any directory listing. For these roles, the label also lets
 // GRUB find the partition, because the label is what GRUB's search
 // command uses. The volume ID is FAT's only identity field; FAT32
-// has no UUIDs. formatSlot derives the volume ID from a timestamp,
-// which is the traditional choice.
+// has no UUIDs. formatSlot draws the volume ID from crypto/rand,
+// the same source a claim already uses for each partition's GPT
+// unique GUID, because a claim formats bootHome and both system
+// slots inside one second, and volumes formatted in the same second
+// must still carry ids that tell them apart.
 func formatSlot(devPath string, sizeBytes uint64, role machine.StorageRoleName) error {
 	f, err := os.OpenFile(devPath, os.O_RDWR, 0)
 	if err != nil {
@@ -33,5 +37,18 @@ func formatSlot(devPath string, sizeBytes uint64, role machine.StorageRoleName) 
 	case machine.BootHomeRole:
 		label = "LIKEN-BOOT"
 	}
-	return disks.FormatFAT32(f, sizeBytes, label, uint32(time.Now().Unix()))
+	return disks.FormatFAT32(f, sizeBytes, label, randomVolumeID())
+}
+
+// randomVolumeID draws a 32-bit FAT volume id from crypto/rand. A
+// failure here means the kernel has no randomness source at all, the
+// same fault that RandomGUID treats as fatal for a partition's GPT
+// unique GUID, so formatSlot stops rather than mint an id two slots
+// might end up sharing.
+func randomVolumeID() uint32 {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic(err)
+	}
+	return binary.LittleEndian.Uint32(b[:])
 }

@@ -49,8 +49,14 @@ package main
 //
 // A name two disks produce in the same tree is a collision.
 // mergeDiskLinks, where every builder's pairs land, publishes such a
-// name for neither disk, and prints one line to stderr naming both,
-// rather than pointing the name at whichever disk it read last.
+// name for neither disk, rather than pointing it at whichever disk it
+// read last. A walk re-reads the whole truth on every uevent, so a
+// collision that persists would otherwise report itself again on
+// every one of those walks, forever. watchDiskLinks is the one place
+// that remembers what the previous walk already reported, so a
+// persistent collision prints one line to stderr naming both disks,
+// once, and a collision that clears and later returns is a fresh
+// fact and prints again.
 //
 // Nothing here is specific to iSCSI except iscsiPaths itself.
 
@@ -101,10 +107,21 @@ func watchDiskLinks(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Each tree keeps its own memory of what it already reported, so a
+	// name that collides in two trees at once, unlikely as that is,
+	// still gets one line per tree rather than being folded into one
+	// or dropped.
+	var seenPathCollisions, seenIDCollisions, seenUUIDCollisions map[diskLinkCollision]bool
 	for {
-		reconcileDiskLinks(diskLinksDir, localPaths())
-		reconcileDiskLinks(diskIDsDir, idPaths())
-		reconcileDiskLinks(diskUUIDsDir, uuidPaths())
+		pathLinks, pathCollisions := localPaths()
+		idLinks, idCollisions := idPaths()
+		uuidLinks, uuidCollisions := uuidPaths()
+		reconcileDiskLinks(diskLinksDir, pathLinks)
+		reconcileDiskLinks(diskIDsDir, idLinks)
+		reconcileDiskLinks(diskUUIDsDir, uuidLinks)
+		seenPathCollisions = reportNewCollisions(pathCollisions, seenPathCollisions)
+		seenIDCollisions = reportNewCollisions(idCollisions, seenIDCollisions)
+		seenUUIDCollisions = reportNewCollisions(uuidCollisions, seenUUIDCollisions)
 		select {
 		case <-ctx.Done():
 			return nil
@@ -130,6 +147,35 @@ func reconcileDiskLinks(dir string, want map[string]string) {
 	if err := reconcileLinks(dir, want); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: disk links: %v\n", err)
 	}
+}
+
+// diskLinkCollision names one link two claimants both produced in a
+// single walk, and the two claimants that produced it, with their
+// "../../" prefix trimmed off. It is comparable, so a set of these
+// can say whether a walk's collision is one an earlier walk already
+// reported.
+type diskLinkCollision struct {
+	name          string
+	first, second string
+}
+
+// reportNewCollisions prints the collisions in current that are not
+// in seen, and returns current as the set the next walk should
+// compare against. A collision two consecutive walks both find is the
+// same fact reported twice, so only the first walk to find it prints;
+// one that dropped out of current since the last walk and later comes
+// back is a fresh fact, and prints again.
+func reportNewCollisions(current []diskLinkCollision, seen map[diskLinkCollision]bool) map[diskLinkCollision]bool {
+	next := make(map[diskLinkCollision]bool, len(current))
+	for _, c := range current {
+		next[c] = true
+		if seen[c] {
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "liken: disk links: %s names both %s and %s; publishing neither\n",
+			c.name, c.first, c.second)
+	}
+	return next
 }
 
 // iscsiPaths returns the by-path links this machine's iSCSI sessions
@@ -266,9 +312,10 @@ func addDiskLinks(links map[string]string, name, deviceDir string) {
 // tree comes from one map and one reconcileLinks call: a local disk's
 // port and an iSCSI LUN's address answer the same question, and
 // belong in the same directory.
-func localPaths() map[string]string {
+func localPaths() (map[string]string, []diskLinkCollision) {
 	links := map[string]string{}
 	blocked := map[string]bool{}
+	var collisions []diskLinkCollision
 	for _, disk := range discoverBlockDevices() {
 		path := diskPathName(disk.Name)
 		if path == "" {
@@ -276,28 +323,29 @@ func localPaths() map[string]string {
 		}
 		one := map[string]string{}
 		addDiskLinks(one, path, filepath.Join(sysBlock, disk.Name))
-		mergeDiskLinks(links, blocked, one)
+		collisions = mergeDiskLinks(links, blocked, collisions, one)
 	}
-	mergeDiskLinks(links, blocked, iscsiPaths())
-	return links
+	collisions = mergeDiskLinks(links, blocked, collisions, iscsiPaths())
+	return links, collisions
 }
 
 // idPaths returns the by-id links this machine's local disks imply:
 // every name diskIDNames computes for a disk, plus that disk's
 // partitions under each of those names. A disk with no by-id name,
 // for example a SATA disk with no WWN, contributes nothing.
-func idPaths() map[string]string {
+func idPaths() (map[string]string, []diskLinkCollision) {
 	links := map[string]string{}
 	blocked := map[string]bool{}
+	var collisions []diskLinkCollision
 	for _, disk := range discoverBlockDevices() {
 		dir := filepath.Join(sysBlock, disk.Name)
 		one := map[string]string{}
 		for _, id := range diskIDNames(disk.Name) {
 			addDiskLinks(one, id, dir)
 		}
-		mergeDiskLinks(links, blocked, one)
+		collisions = mergeDiskLinks(links, blocked, collisions, one)
 	}
-	return links
+	return links, collisions
 }
 
 // uuidPaths returns the by-uuid links this machine's partitions
@@ -313,32 +361,37 @@ func idPaths() map[string]string {
 // device's contents; iscsiPaths, localPaths, and idPaths read only
 // sysfs, which is why they run safely against a disk whose partitions
 // carry no filesystem yet.
-func uuidPaths() map[string]string {
+func uuidPaths() (map[string]string, []diskLinkCollision) {
 	links := map[string]string{}
 	blocked := map[string]bool{}
+	var collisions []diskLinkCollision
 	for _, p := range discoverPartitions() {
 		uuid := filesystemUUID(filepath.Join(devRoot, p.name))
 		if uuid == "" {
 			continue
 		}
-		mergeDiskLinks(links, blocked, map[string]string{uuid: "../../" + p.name})
+		collisions = mergeDiskLinks(links, blocked, collisions, map[string]string{uuid: "../../" + p.name})
 	}
-	return links
+	return links, collisions
 }
 
 // mergeDiskLinks folds one claimant's pairs into a tree's link map,
 // enforcing the rule every tree in this file shares: a name two
-// claimants produce is published for neither, and the reason goes to
-// stderr rather than into a guess about which claimant is right. A
-// silent overwrite would point the name at whichever claimant this
-// pass happened to read last.
+// claimants produce is published for neither, and the reason is
+// recorded as a fact for the caller rather than turned into a guess
+// about which claimant is right. A silent overwrite would point the
+// name at whichever claimant this pass happened to read last.
 //
 // links and blocked carry the state across every call for one tree,
 // so the rule holds however many claimants contribute to it and
 // whichever builder they came from: a local disk and an iSCSI LUN
 // competing for the same by-path name lose it exactly as two local
-// disks competing for the same by-id name do.
-func mergeDiskLinks(links map[string]string, blocked map[string]bool, claim map[string]string) {
+// disks competing for the same by-id name do. collisions accumulates
+// the same way, and mergeDiskLinks returns the extended slice because
+// a fresh walk of a tree starts with no collisions of its own; a walk
+// stays stateless, so nothing here remembers what an earlier walk
+// already reported. reportNewCollisions is where that memory lives.
+func mergeDiskLinks(links map[string]string, blocked map[string]bool, collisions []diskLinkCollision, claim map[string]string) []diskLinkCollision {
 	for name, target := range claim {
 		if blocked[name] {
 			continue
@@ -351,11 +404,15 @@ func mergeDiskLinks(links map[string]string, blocked map[string]bool, claim map[
 		if current == target {
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "liken: disk links: %s names both %s and %s; publishing neither\n",
-			name, strings.TrimPrefix(current, "../../"), strings.TrimPrefix(target, "../../"))
+		collisions = append(collisions, diskLinkCollision{
+			name:   name,
+			first:  strings.TrimPrefix(current, "../../"),
+			second: strings.TrimPrefix(target, "../../"),
+		})
 		delete(links, name)
 		blocked[name] = true
 	}
+	return collisions
 }
 
 // reconcileLinks makes dir hold exactly the links in want, and
