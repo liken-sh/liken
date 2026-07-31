@@ -199,11 +199,12 @@ func decideClusterConvergence(reduced *cluster.Cluster, held []featureHold, m *m
 		hash:     hash,
 		stage:    stagedHash != hash,
 	}
-	// On Manual, a person can only apply the change with a reboot:
-	// the boot path applies staged documents too, and nobody can
-	// restart k3s by hand on a machine with no shell. So this
-	// message only mentions the lighter tier as an option. The
-	// messages used after a grant name what init will actually do.
+	// On Manual, a person applies the change with a reboot or with
+	// the approve-disruption grant. The boot path applies staged
+	// documents too, and nobody can restart k3s by hand on a machine
+	// with no shell, but an approved restart-class change converges
+	// through a granted k3s restart in place. The messages used
+	// after a grant name what init will actually do.
 	pending := fmt.Sprintf("cluster document staged (%.12s); rebootPolicy is Manual, so reboot the machine to apply (or set rebootPolicy: Auto)", hash)
 	if restart {
 		pending = fmt.Sprintf("cluster document staged (%.12s); rebootPolicy is Manual, so reboot the machine to apply (or set rebootPolicy: Auto, which would apply it with just a k3s restart)", hash)
@@ -213,6 +214,8 @@ func decideClusterConvergence(reduced *cluster.Cluster, held []featureHold, m *m
 		apply = "a k3s restart"
 	}
 	gateDisruption(&c, "ClusterConverged", m.Spec.RebootPolicyOrDefault(), t, restart,
+		m.Metadata.Annotations[machine.ApproveDisruptionAnnotation],
+		"the cluster document",
 		pending,
 		fmt.Sprintf("cluster document staged (%.12s); waiting for the cluster to grant a turn to apply it by %s", hash, apply),
 		fmt.Sprintf("%s requested to apply the staged cluster document (%.12s)", apply, hash))

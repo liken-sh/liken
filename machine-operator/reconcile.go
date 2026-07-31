@@ -273,6 +273,13 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 		decideConvergence(m, facts, machineRejection, readStagedHash(machineStore), t))
 	status.Conditions = api.SetCondition(status.Conditions,
 		carryOutConvergence(conv, machineStore, "spec", now), now)
+	// Each gated document also reports itself in status.pending, so
+	// a client that needs the staged hash has a field instead of a
+	// condition message to read. The list rebuilds on every pass,
+	// like the rest of status.
+	if conv.pending != nil {
+		status.Pending = append(status.Pending, *conv.pending)
+	}
 
 	// The cluster document converges through the same machinery, per
 	// machine. This machine stages its own copy and reboots on its
@@ -289,6 +296,9 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 		cconv = disr.gate(c, node, nodeErr, t, now, cconv)
 		status.Conditions = api.SetCondition(status.Conditions,
 			carryOutConvergence(cconv, clusterStore, "cluster document", now), now)
+		if cconv.pending != nil {
+			status.Pending = append(status.Pending, *cconv.pending)
+		}
 
 		// The version target reads the live Cluster's release feed,
 		// so it can converge only on a pass that read the Cluster.
@@ -298,6 +308,9 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 				convergeSystemRelease(systemStore, liveCluster, m, facts, f, t))
 			status.Conditions = api.SetCondition(status.Conditions,
 				carryOutConvergence(vconv, systemStore, "system release", now), now)
+			if vconv.pending != nil {
+				status.Pending = append(status.Pending, *vconv.pending)
+			}
 		}
 
 		credentialsStore := machine.RegistryCredentialsStore(machine.MachineStateDir)
@@ -305,6 +318,9 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 			convergeRegistryCredentials(c, credentialsStore, m, facts, t))
 		status.Conditions = api.SetCondition(status.Conditions,
 			carryOutConvergence(rconv, credentialsStore, "registry credentials", now), now)
+		if rconv.pending != nil {
+			status.Pending = append(status.Pending, *rconv.pending)
+		}
 	}
 
 	if nodeErr == nil {

@@ -224,6 +224,8 @@ func decideRegistriesConvergence(in registriesInputs, m *machine.Machine, facts 
 		what = "the retraction of the registry credentials"
 	}
 	gateDisruption(&c, "CredentialsConverged", m.Spec.RebootPolicyOrDefault(), t, true,
+		m.Metadata.Annotations[machine.ApproveDisruptionAnnotation],
+		what,
 		fmt.Sprintf("%s staged (%.12s); rebootPolicy is Manual, so reboot the machine to apply (or set rebootPolicy: Auto, which would apply them with just a k3s restart)", what, hash),
 		fmt.Sprintf("%s staged (%.12s); waiting for the cluster to grant a turn to apply them by k3s restart", what, hash),
 		fmt.Sprintf("k3s restart requested to apply %s (%.12s)", what, hash))

@@ -131,9 +131,10 @@ func renderManifest(name string, spec machine.MachineSpec) ([]byte, string, erro
 // (rollout.go): whether the machine may reboot right now. A machine
 // with no cluster document has no conductor, so it reboots whenever
 // it needs to. A cluster member waits until the conductor writes a
-// RebootApproved condition onto it. Only rebootPolicy: Auto ever
-// checks this. A Manual machine waits for a person regardless of its
-// turn.
+// RebootApproved condition onto it.
+// rebootPolicy: Auto checks this, and so does a Manual machine that
+// a person has approved through the approve-disruption annotation:
+// the approval moves the machine onto the same turn-taking path.
 type turn int
 
 const (
@@ -147,14 +148,15 @@ const (
 // makes the decision; reconcile() acts.
 type convergence struct {
 	condition      api.Condition
-	stage          bool   // write the manifest to the machineState filesystem
-	requestReboot  bool   // write the reboot intent for init
-	requestRestart bool   // write the restart intent; a k3s restart applies it
-	requestLoad    bool   // write the modules intent; init loads the staged additions while the system runs
-	withdraw       bool   // remove the staged manifest; the spec no longer names it
-	clearRejection bool   // remove the rejection record; the spec it blocks is gone
-	manifest       []byte // the bytes to stage
-	hash           string // the bytes' identity
+	stage          bool                       // write the manifest to the machineState filesystem
+	requestReboot  bool                       // write the reboot intent for init
+	requestRestart bool                       // write the restart intent; a k3s restart applies it
+	requestLoad    bool                       // write the modules intent; init loads the staged additions while the system runs
+	withdraw       bool                       // remove the staged manifest; the spec no longer names it
+	clearRejection bool                       // remove the rejection record; the spec it blocks is gone
+	manifest       []byte                     // the bytes to stage
+	hash           string                     // the bytes' identity
+	pending        *machine.PendingDisruption // the status.pending entry for this document, when one waits
 }
 
 // The condition constructors for every convergence verdict. Three
@@ -220,26 +222,48 @@ func convergedWithCleanup(cond api.Condition, stagedHash string, rejection *mach
 // whether this machine may take its disruption right now. The
 // decision table is the same for every staged document, and it is
 // the safety core of the rollout design, so this function holds it
-// in one place. Manual policy always waits for a person. A cluster
-// member on Auto waits for the conductor's turn (AwaitingTurn is the
-// same reason for both kinds of disruption, which lets the conductor
-// sequence them without knowing the difference between them). Only a
-// standalone machine, or a machine that has been granted a turn,
-// asks init to act. The restart flag picks the kind of disruption: a
-// k3s restart for changes that k3s reads only when its process
-// starts, and a machine reboot for everything else. A leader's
-// restart still restarts the embedded datastore. This is the same
-// exposure to a lost quorum that a reboot has, so restarts wait for
-// the same turns as reboots do. The messages differ for each
-// document, but the reasons and their order of precedence must not.
-func gateDisruption(c *convergence, condType string, policy machine.RebootPolicy, t turn, restart bool, pending, awaiting, requested string) {
+// in one place. Manual policy waits for a person, and the
+// approve-disruption annotation is how the person answers: an
+// approval naming the staged hash moves the machine onto the same
+// path Auto takes, through the conductor's turn and the drain,
+// which is safer than the state it replaces, where an operator
+// following the machine's own advice cuts power and no budget
+// applies at all. An approval naming some other hash is reported,
+// not ignored: the pending message carries both values, so a wrong
+// paste is visible where the person is already looking. A cluster
+// member on Auto (or approved Manual) waits for the conductor's
+// turn (AwaitingTurn is the same reason for both kinds of
+// disruption, which lets the conductor sequence them without
+// knowing the difference between them). Only a standalone machine,
+// or a machine that has been granted a turn, asks init to act. The
+// restart flag picks the kind of disruption: a k3s restart for
+// changes that k3s reads only when its process starts, and a
+// machine reboot for everything else. A leader's restart still
+// restarts the embedded datastore. This is the same exposure to a
+// lost quorum that a reboot has, so restarts wait for the same
+// turns as reboots do. Every branch also records the document in
+// status.pending, because a staged document waits for its
+// disruption until the disruption runs, whatever it waits on. The
+// messages differ for each document, but the reasons and their
+// order of precedence must not.
+func gateDisruption(c *convergence, condType string, policy machine.RebootPolicy, t turn, restart bool, approval, summary, pending, awaiting, requested string) {
+	kind := machine.DisruptionReboot
 	pendingReason, requestedReason := "RebootPending", "RebootRequested"
 	if restart {
+		kind = machine.DisruptionRestart
 		pendingReason, requestedReason = "RestartPending", "RestartRequested"
 	}
+	c.pending = &machine.PendingDisruption{
+		Condition: condType, Kind: kind, Hash: c.hash, Summary: summary,
+	}
 	switch {
-	case policy != machine.RebootAuto:
-		c.condition = notConverged(condType, pendingReason, pending)
+	case policy != machine.RebootAuto && !machine.ApprovalGrants(approval, c.hash):
+		message := pending
+		if approval != "" {
+			message = fmt.Sprintf("%s; the %s annotation names %s, and the staged document is %.12s",
+				pending, machine.ApproveDisruptionAnnotation, approval, c.hash)
+		}
+		c.condition = notConverged(condType, pendingReason, message)
 	case t == turnAwaiting:
 		c.condition = notConverged(condType, "AwaitingTurn", awaiting)
 	default:
@@ -376,6 +400,8 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 	}
 
 	gateDisruption(&c, "SpecConverged", m.Spec.RebootPolicyOrDefault(), t, false,
+		m.Metadata.Annotations[machine.ApproveDisruptionAnnotation],
+		"the machine spec: "+diffs,
 		fmt.Sprintf("spec staged for the next boot (%.12s); rebootPolicy is Manual, so reboot the machine (or set rebootPolicy: Auto) to apply: %s", hash, diffs),
 		fmt.Sprintf("spec staged for the next boot (%.12s); waiting for the cluster to grant a reboot turn: %s", hash, diffs),
 		fmt.Sprintf("reboot requested to apply the staged spec (%.12s): %s", hash, diffs))

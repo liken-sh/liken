@@ -586,3 +586,85 @@ func TestDecideConvergenceManualPolicyIgnoresTheGrant(t *testing.T) {
 		t.Fatalf("Manual means the human decides, grant or not: %+v", conv.condition)
 	}
 }
+
+// gateForTest builds the smallest convergence a gate test needs: a
+// staged document with a known hash.
+func gateForTest() convergence {
+	return convergence{hash: "3943abfa6adf0123456789abcdef0123456789abcdef0123456789abcdef0123"}
+}
+
+func TestManualWithAMatchingApprovalTakesTheAutoPath(t *testing.T) {
+	c := gateForTest()
+	gateDisruption(&c, "SpecConverged", machine.RebootManual, turnAwaiting, false,
+		"3943abfa6adf", "a summary", "pending msg", "awaiting msg", "requested msg")
+	if c.condition.Reason != "AwaitingTurn" {
+		t.Fatalf("an approved Manual cluster member must await its turn, got %s", c.condition.Reason)
+	}
+	if c.requestReboot {
+		t.Fatal("no reboot before the conductor grants a turn")
+	}
+}
+
+func TestManualApprovedAndGrantedRequestsTheDisruption(t *testing.T) {
+	c := gateForTest()
+	gateDisruption(&c, "SpecConverged", machine.RebootManual, turnGranted, false,
+		"3943abfa6adf", "a summary", "pending msg", "awaiting msg", "requested msg")
+	if c.condition.Reason != "RebootRequested" || !c.requestReboot {
+		t.Fatalf("an approved, granted Manual machine must request the reboot, got %s", c.condition.Reason)
+	}
+}
+
+func TestManualWithAMismatchedApprovalStaysPendingAndNamesBothHashes(t *testing.T) {
+	c := gateForTest()
+	gateDisruption(&c, "SpecConverged", machine.RebootManual, turnAwaiting, false,
+		"deadbeefdead", "a summary", "pending msg", "awaiting msg", "requested msg")
+	if c.condition.Reason != "RebootPending" {
+		t.Fatalf("a mismatched approval must not grant, got %s", c.condition.Reason)
+	}
+	if !strings.Contains(c.condition.Message, "deadbeefdead") ||
+		!strings.Contains(c.condition.Message, "3943abfa6adf") {
+		t.Fatalf("the message must carry both hashes: %s", c.condition.Message)
+	}
+}
+
+func TestManualWithNoApprovalIsUnchanged(t *testing.T) {
+	c := gateForTest()
+	gateDisruption(&c, "SpecConverged", machine.RebootManual, turnAwaiting, false,
+		"", "a summary", "pending msg", "awaiting msg", "requested msg")
+	if c.condition.Reason != "RebootPending" || c.condition.Message != "pending msg" {
+		t.Fatalf("got %s: %s", c.condition.Reason, c.condition.Message)
+	}
+}
+
+func TestAutoIsUnchangedByTheApprovalMachinery(t *testing.T) {
+	c := gateForTest()
+	gateDisruption(&c, "SpecConverged", machine.RebootAuto, turnAwaiting, false,
+		"", "a summary", "pending msg", "awaiting msg", "requested msg")
+	if c.condition.Reason != "AwaitingTurn" {
+		t.Fatalf("got %s", c.condition.Reason)
+	}
+}
+
+func TestEveryGateRecordsAPendingEntry(t *testing.T) {
+	for _, tc := range []struct {
+		policy machine.RebootPolicy
+		t      turn
+	}{
+		{machine.RebootManual, turnAwaiting},
+		{machine.RebootAuto, turnAwaiting},
+		{machine.RebootAuto, turnGranted},
+	} {
+		c := gateForTest()
+		gateDisruption(&c, "CredentialsConverged", tc.policy, tc.t, true,
+			"", "registry credentials for 2 hosts", "p", "a", "r")
+		if c.pending == nil {
+			t.Fatalf("policy %s turn %d: no pending entry", tc.policy, tc.t)
+		}
+		if c.pending.Kind != machine.DisruptionRestart ||
+			c.pending.Condition != "CredentialsConverged" ||
+			c.pending.Hash != c.hash ||
+			c.pending.Summary != "registry credentials for 2 hosts" {
+			t.Fatalf("wrong entry: %+v", *c.pending)
+		}
+	}
+}
