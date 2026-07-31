@@ -226,13 +226,6 @@ func hasRenderNode(delivery hardware.Delivery) bool {
 	})
 }
 
-// graphicsSubsystems are the kernel subsystems a graphics device
-// delivers nodes through. drm is the modern interface, and graphics is
-// the legacy framebuffer that the kernel's fbdev emulation creates for
-// the same hardware. A GPU delivers both, so a rule that accepted drm
-// alone would never fire on a real machine.
-var graphicsSubsystems = map[string]bool{"drm": true, "graphics": true}
-
 // shareable reports whether the API may allocate this device to more
 // than one claim.
 //
