@@ -122,3 +122,32 @@ func TestPublishOrdersThePrimaryFirst(t *testing.T) {
 		t.Errorf("published = %+v, want the primary first", published)
 	}
 }
+
+func TestPublishRoutesAnUnknownNodeToTheUnknownBranch(t *testing.T) {
+	// A node the kernel did not categorize (sysfs's subsystem readlink
+	// failed) is hardware nobody has examined. Even if it is a render
+	// node beside a real subsystem, the delivery publishes whole,
+	// exclusive, with no sole subsystem, applying the milestone 38
+	// default to any hardware liken has not met.
+	published := publishDevices(hardware.Delivery{Nodes: []hardware.DeliveredNode{
+		{Path: "/dev/dri/renderD128", Subsystem: ""},
+		{Path: "/dev/i2c-0", Subsystem: "i2c-dev"},
+	}})
+
+	if len(published) != 1 {
+		t.Fatalf("published = %+v, want one device", published)
+	}
+	p := published[0]
+	if p.Suffix != "" || p.Subsystem != "" || p.Shareable {
+		t.Errorf("p = %+v, want empty suffix and subsystem, exclusive", p)
+	}
+	if !p.RenderNode {
+		t.Error("the render node is still a fact about the hardware")
+	}
+	if len(p.Nodes) != 2 {
+		t.Errorf("nodes = %v, want both nodes", p.Nodes)
+	}
+	if !slices.Contains(p.Nodes, "/dev/dri/renderD128") || !slices.Contains(p.Nodes, "/dev/i2c-0") {
+		t.Errorf("nodes = %v, want both /dev/dri/renderD128 and /dev/i2c-0", p.Nodes)
+	}
+}

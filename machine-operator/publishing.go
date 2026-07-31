@@ -44,7 +44,8 @@ type publishedDevice struct {
 // graphicsSubsystems are the kernel subsystems a graphics device
 // delivers nodes through. drm is the modern interface, and graphics
 // is the legacy framebuffer that the kernel's fbdev emulation creates
-// for the same hardware.
+// for the same hardware. A GPU delivers both, so a rule that accepted
+// drm alone would never fire on a real machine.
 var graphicsSubsystems = map[string]bool{"drm": true, "graphics": true}
 
 // companionSubsystems are the non-graphics kinds a graphics device is
@@ -67,6 +68,20 @@ func publishDevices(delivery hardware.Delivery) []publishedDevice {
 	}
 	kinds := delivery.Subsystems()
 	render := hasRenderNode(delivery)
+
+	// A node the kernel did not categorize (sysfs's subsystem readlink
+	// failed) is hardware nobody has examined. Route the whole delivery
+	// to the unknown branch, which publishes it whole and exclusive,
+	// applying the milestone 38 default to any hardware liken has not
+	// met.
+	if slices.ContainsFunc(delivery.Nodes, func(n hardware.DeliveredNode) bool {
+		return n.Subsystem == ""
+	}) {
+		return []publishedDevice{{
+			Nodes:      delivery.DevNodes(),
+			RenderNode: render,
+		}}
+	}
 
 	if len(kinds) == 1 {
 		return []publishedDevice{{
