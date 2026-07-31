@@ -1,10 +1,12 @@
 # Sharing integrated graphics
 
-Milestone 49 — Accepted 2026-07-31. It lets a real integrated GPU
-publish as shareable, so a second claim allocates hardware that the
-lab measured serving twelve encoders at once. The design below groups
-a device's delivery by kernel subsystem and publishes each group as
-its own slice device.
+Milestone 49 — Completed. It lets a real integrated GPU publish as
+shareable, so a second claim allocates hardware that the lab measured
+serving twelve encoders at once. The design below groups a device's
+delivery by kernel subsystem and publishes each group as its own
+slice device. Releases 2026.07.31-003 and -004 carry it; the second
+adds the DisplayPort AUX channel, the companion kind that only a
+machine with a connected DP display delivers.
 
 ## What already runs
 
@@ -142,6 +144,17 @@ The guest drill from milestone 38 cannot decide this milestone. A
 old rule and the new one. It still serves as the regression check: the
 guest's GPU must keep publishing as shareable, now without its
 framebuffer node in the delivery.
+
+The drill ran on 2026-07-31 against the measured hardware and passed
+every check. The display on the machine's DP-1 first disproved the
+-003 table: a `drm_dp_aux_dev` node routed the whole GPU to the
+unknown-mix default, the third time real hardware showed a delivery
+wider than the rule. With the AUX channel in the companion table, the
+iGPU published as three devices. Two independent claims allocated the
+graphics device at once, and both pods encoded 1080p30 at about 4.0x
+realtime each through `h264_vaapi`. The GPU claim received the two
+dri nodes alone. The companion claims received the ten monitor buses
+and the AUX node, each without a dri node.
 
 ## The manual
 
