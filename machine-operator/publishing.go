@@ -51,8 +51,14 @@ var graphicsSubsystems = map[string]bool{"drm": true, "graphics": true}
 // companionSubsystems are the non-graphics kinds a graphics device is
 // known to deliver, each published as its own exclusive device. i2c-dev
 // is the monitor-control bus i915 registers per display output: raw
-// wire access, one writer, no arbitration contract.
-var companionSubsystems = map[string]bool{"i2c-dev": true}
+// wire access, one writer, no arbitration contract. drm_dp_aux_dev is
+// the DisplayPort AUX channel, the wire that carries DPCD register
+// access and EDID reads to a monitor over a DisplayPort output. The
+// kernel registers it only while a display is connected, and like the
+// i2c buses it is raw wire access with one writer, so it publishes as
+// its own exclusive companion, never shared, and never delivered with
+// the GPU's own claim.
+var companionSubsystems = map[string]bool{"i2c-dev": true, "drm_dp_aux_dev": true}
 
 // publishDevices applies the policy to one delivery. The primary
 // device is always first, and the companions follow in sorted

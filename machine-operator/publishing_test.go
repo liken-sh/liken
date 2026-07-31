@@ -40,6 +40,45 @@ func TestPublishSplitsAGraphicsDeviceFromItsMonitorBuses(t *testing.T) {
 	}
 }
 
+func TestPublishSplitsTheDPAuxChannelAsItsOwnCompanion(t *testing.T) {
+	// An Alder Lake-N iGPU with a display on a DisplayPort output
+	// registers a drm_dp_aux_dev node beside its i2c monitor buses. The
+	// AUX channel carries DPCD register access and EDID reads, and like
+	// an i2c bus it is raw wire access with one writer. It publishes as
+	// its own exclusive companion, separate from the i2c-dev companion.
+	published := publishDevices(hardware.Delivery{Nodes: []hardware.DeliveredNode{
+		{Path: "/dev/dri/card0", Subsystem: "drm"},
+		{Path: "/dev/dri/renderD128", Subsystem: "drm"},
+		{Path: "/dev/fb0", Subsystem: "graphics"},
+		{Path: "/dev/i2c-0", Subsystem: "i2c-dev"},
+		{Path: "/dev/i2c-9", Subsystem: "i2c-dev"},
+		{Path: "/dev/drm_dp_aux0", Subsystem: "drm_dp_aux_dev"},
+	}})
+
+	if len(published) != 3 {
+		t.Fatalf("published = %+v, want the graphics device and two companions", published)
+	}
+	gpu, aux, i2c := published[0], published[1], published[2]
+	if gpu.Suffix != "" || gpu.Subsystem != "drm" || !gpu.RenderNode || !gpu.Shareable {
+		t.Errorf("gpu = %+v", gpu)
+	}
+	if !slices.Equal(gpu.Nodes, []string{"/dev/dri/card0", "/dev/dri/renderD128"}) {
+		t.Errorf("gpu nodes = %v, want the dri nodes and nothing else", gpu.Nodes)
+	}
+	if aux.Suffix != "-drm-dp-aux-dev" || aux.Subsystem != "drm_dp_aux_dev" || aux.RenderNode || aux.Shareable {
+		t.Errorf("aux = %+v", aux)
+	}
+	if !slices.Equal(aux.Nodes, []string{"/dev/drm_dp_aux0"}) {
+		t.Errorf("aux nodes = %v, want only the AUX node", aux.Nodes)
+	}
+	if i2c.Suffix != "-i2c-dev" || i2c.Subsystem != "i2c-dev" || i2c.RenderNode || i2c.Shareable {
+		t.Errorf("i2c = %+v", i2c)
+	}
+	if !slices.Equal(i2c.Nodes, []string{"/dev/i2c-0", "/dev/i2c-9"}) {
+		t.Errorf("i2c nodes = %v", i2c.Nodes)
+	}
+}
+
 func TestPublishDropsTheFramebufferFromAGraphicsDevice(t *testing.T) {
 	// The fbdev node is the kernel's legacy console interface. Holding
 	// it grants display takeover, and no workload claims a bare

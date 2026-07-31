@@ -119,9 +119,12 @@ published graphics device delivers only the `/dev/dri` nodes. A GPU
 driver registers i2c monitor-control buses. These publish as their
 own device, with `subsystem: i2c-dev`. That device stays exclusive.
 An i2c node passes raw transfers to every device on its wire, and two
-writers on one wire have no arbitration contract. The legacy
-framebuffer node is not delivered at all: holding it grants display
-takeover, and no workload claims a bare framebuffer.
+writers on one wire have no arbitration contract. A DisplayPort output
+also registers a DisplayPort AUX channel, with `subsystem:
+drm_dp_aux_dev`. This node publishes the same way, as its own
+exclusive device, and it exists only while a display is connected. The
+legacy framebuffer node is not delivered at all: holding it grants
+display takeover, and no workload claims a bare framebuffer.
 
 A device that delivers one kind of node publishes as one device. A
 device that delivers a mix that liken does not know publishes whole
