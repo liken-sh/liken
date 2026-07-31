@@ -191,11 +191,11 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 			return fail("allocated device %s is not present", result.Device)
 		}
 		delivery := hardware.InspectDelivery(draSysfsRoot, device)
-		if len(delivery.DevNodes) == 0 {
+		if len(delivery.DevNodes()) == 0 {
 			return fail("allocated device %s has no device nodes to deliver", result.Device)
 		}
-		nodes := make([]cdiDeviceNode, 0, len(delivery.DevNodes))
-		for _, path := range delivery.DevNodes {
+		nodes := make([]cdiDeviceNode, 0, len(delivery.DevNodes()))
+		for _, path := range delivery.DevNodes() {
 			nodes = append(nodes, cdiDeviceNode{Path: path})
 		}
 		name := claim.Uid + "-" + result.Device

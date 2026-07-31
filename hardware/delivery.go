@@ -28,22 +28,58 @@ import (
 	"strings"
 )
 
-// Delivery is the report that the walk produces. It lists the device
-// nodes that a claim on this device would inject, the block-device
-// names among them, and the kernel subsystems they belong to. The
-// platform test checks the block-device names against the storage
-// roles' partitions.
-//
-// Subsystems is the answer to "what kind of thing is a claim handing
-// over": drm for a GPU's nodes, tty for a serial port, hidraw for an
-// input device. The kernel already sorted every node into one, and
-// the subsystem is what determines how a node behaves when two
-// processes open it. No other part of the system records this, so the
-// walk keeps it rather than reading it and dropping it.
+// DeliveredNode is one /dev entry a claim on a device would inject.
+// The subsystem is the kernel's category for the node, and the
+// category decides how the node behaves when two processes open it.
+// Block carries the sysfs base name when the node is a block device,
+// because the platform test matches storage roles by that name.
+type DeliveredNode struct {
+	Path      string
+	Subsystem string
+	Block     string
+}
+
+// Delivery is the report that the walk produces: every device node
+// that a claim on this device would inject, each paired with its
+// kernel subsystem. The publish policy groups these nodes by
+// subsystem, so the pairing is the record, and the flat views below
+// derive from it.
 type Delivery struct {
-	DevNodes   []string
-	Blocks     []string
-	Subsystems []string
+	Nodes []DeliveredNode
+}
+
+// DevNodes lists the /dev paths in walk order.
+func (d Delivery) DevNodes() []string {
+	var paths []string
+	for _, n := range d.Nodes {
+		paths = append(paths, n.Path)
+	}
+	return paths
+}
+
+// Blocks lists the block-device base names among the nodes. The
+// platform test checks these against the storage roles' partitions.
+func (d Delivery) Blocks() []string {
+	var blocks []string
+	for _, n := range d.Nodes {
+		if n.Block != "" {
+			blocks = append(blocks, n.Block)
+		}
+	}
+	return blocks
+}
+
+// Subsystems names each kind of node the delivery holds, once,
+// sorted, so the same hardware always reports the same list.
+func (d Delivery) Subsystems() []string {
+	var kinds []string
+	for _, n := range d.Nodes {
+		if n.Subsystem != "" && !slices.Contains(kinds, n.Subsystem) {
+			kinds = append(kinds, n.Subsystem)
+		}
+	}
+	slices.Sort(kinds)
+	return kinds
 }
 
 // InspectDelivery walks one device's sysfs subtree and finds its
@@ -75,17 +111,13 @@ func InspectDelivery(sysRoot string, d Device) Delivery {
 		if devname == "" {
 			return nil
 		}
-		delivery.DevNodes = append(delivery.DevNodes, "/dev/"+devname)
-		subsystem := subsystemName(path)
-		if subsystem == "block" {
-			delivery.Blocks = append(delivery.Blocks, filepath.Base(path))
+		node := DeliveredNode{Path: "/dev/" + devname, Subsystem: subsystemName(path)}
+		if node.Subsystem == "block" {
+			node.Block = filepath.Base(path)
 		}
-		if subsystem != "" && !slices.Contains(delivery.Subsystems, subsystem) {
-			delivery.Subsystems = append(delivery.Subsystems, subsystem)
-		}
+		delivery.Nodes = append(delivery.Nodes, node)
 		return nil
 	})
-	slices.Sort(delivery.Subsystems)
 	return delivery
 }
 

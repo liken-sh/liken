@@ -148,10 +148,10 @@ func inventoryDevices(discovered []hardware.Device,
 			continue
 		}
 		delivery := inspect(d)
-		if len(delivery.DevNodes) == 0 {
+		if len(delivery.DevNodes()) == 0 {
 			continue
 		}
-		if slices.ContainsFunc(delivery.Blocks, func(b string) bool { return platform[b] }) {
+		if slices.ContainsFunc(delivery.Blocks(), func(b string) bool { return platform[b] }) {
 			continue
 		}
 		attrs := map[string]kubernetes.DeviceAttribute{}
@@ -210,10 +210,10 @@ func inventoryDevices(discovered []hardware.Device,
 // that hands over a tty and a misc node at once has no single answer,
 // and an attribute that names one of them would be a selector trap.
 func soleSubsystem(delivery hardware.Delivery) string {
-	if len(delivery.Subsystems) != 1 {
+	if len(delivery.Subsystems()) != 1 {
 		return ""
 	}
-	return delivery.Subsystems[0]
+	return delivery.Subsystems()[0]
 }
 
 // hasRenderNode reports whether the device delivers a DRM render
@@ -221,7 +221,7 @@ func soleSubsystem(delivery hardware.Delivery) string {
 // nodes that do GPU work without display authority: a container that
 // holds one can encode, decode, and compute.
 func hasRenderNode(delivery hardware.Delivery) bool {
-	return slices.ContainsFunc(delivery.DevNodes, func(node string) bool {
+	return slices.ContainsFunc(delivery.DevNodes(), func(node string) bool {
 		return strings.HasPrefix(node, "/dev/dri/renderD")
 	})
 }
@@ -259,7 +259,7 @@ func shareable(delivery hardware.Delivery) bool {
 	if !hasRenderNode(delivery) {
 		return false
 	}
-	for _, subsystem := range delivery.Subsystems {
+	for _, subsystem := range delivery.Subsystems() {
 		if !graphicsSubsystems[subsystem] {
 			return false
 		}

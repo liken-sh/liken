@@ -49,11 +49,11 @@ func TestDeliveryFindsBlockNodesUnderAUSBInterface(t *testing.T) {
 
 	delivery := InspectDelivery(sysfs.root, Device{Bus: "usb", Address: "2-1:1.0"})
 
-	if !slices.Equal(delivery.DevNodes, []string{"/dev/sda", "/dev/sda1"}) {
-		t.Errorf("DevNodes = %v", delivery.DevNodes)
+	if !slices.Equal(delivery.DevNodes(), []string{"/dev/sda", "/dev/sda1"}) {
+		t.Errorf("DevNodes = %v", delivery.DevNodes())
 	}
-	if !slices.Equal(delivery.Blocks, []string{"sda", "sda1"}) {
-		t.Errorf("Blocks = %v", delivery.Blocks)
+	if !slices.Equal(delivery.Blocks(), []string{"sda", "sda1"}) {
+		t.Errorf("Blocks = %v", delivery.Blocks())
 	}
 }
 
@@ -69,14 +69,14 @@ func TestDeliveryFindsCharNodesAndReportsNoBlocks(t *testing.T) {
 
 	delivery := InspectDelivery(sysfs.root, Device{Bus: "pci", Address: "0000:00:02.0"})
 
-	if !slices.Equal(delivery.DevNodes, []string{"/dev/dri/card0", "/dev/dri/renderD128"}) {
-		t.Errorf("DevNodes = %v", delivery.DevNodes)
+	if !slices.Equal(delivery.DevNodes(), []string{"/dev/dri/card0", "/dev/dri/renderD128"}) {
+		t.Errorf("DevNodes = %v", delivery.DevNodes())
 	}
-	if len(delivery.Blocks) != 0 {
-		t.Errorf("Blocks = %v, want none for character devices", delivery.Blocks)
+	if len(delivery.Blocks()) != 0 {
+		t.Errorf("Blocks = %v, want none for character devices", delivery.Blocks())
 	}
-	if !slices.Equal(delivery.Subsystems, []string{"drm"}) {
-		t.Errorf("Subsystems = %v, want the one kind these nodes are", delivery.Subsystems)
+	if !slices.Equal(delivery.Subsystems(), []string{"drm"}) {
+		t.Errorf("Subsystems = %v, want the one kind these nodes are", delivery.Subsystems())
 	}
 }
 
@@ -94,8 +94,8 @@ func TestDeliveryReportsEachSubsystemOnce(t *testing.T) {
 
 	delivery := InspectDelivery(sysfs.root, Device{Bus: "usb", Address: "3-1:1.0"})
 
-	if !slices.Equal(delivery.Subsystems, []string{"tty", "usbmisc"}) {
-		t.Errorf("Subsystems = %v", delivery.Subsystems)
+	if !slices.Equal(delivery.Subsystems(), []string{"tty", "usbmisc"}) {
+		t.Errorf("Subsystems = %v", delivery.Subsystems())
 	}
 }
 
@@ -108,7 +108,7 @@ func TestDeliveryIsEmptyForADeviceWithNoNodes(t *testing.T) {
 
 	delivery := InspectDelivery(sysfs.root, Device{Bus: "pci", Address: "0000:00:04.0"})
 
-	if len(delivery.DevNodes) != 0 || len(delivery.Blocks) != 0 {
+	if len(delivery.DevNodes()) != 0 || len(delivery.Blocks()) != 0 {
 		t.Errorf("delivery = %+v, want empty: a NIC has nothing to hand a pod", delivery)
 	}
 }
@@ -129,14 +129,37 @@ func TestDeliveryPrunesAtNestedBusDevices(t *testing.T) {
 
 	delivery := InspectDelivery(sysfs.root, Device{Bus: "pci", Address: "0000:00:03.0"})
 
-	if len(delivery.DevNodes) != 0 {
-		t.Errorf("DevNodes = %v, want none: the stick's nodes are the stick's, not the controller's", delivery.DevNodes)
+	if len(delivery.DevNodes()) != 0 {
+		t.Errorf("DevNodes = %v, want none: the stick's nodes are the stick's, not the controller's", delivery.DevNodes())
 	}
 }
 
 func TestDeliveryToleratesAMissingDevice(t *testing.T) {
 	delivery := InspectDelivery(t.TempDir(), Device{Bus: "usb", Address: "9-9"})
-	if len(delivery.DevNodes) != 0 {
+	if len(delivery.DevNodes()) != 0 {
 		t.Errorf("delivery = %+v, want empty", delivery)
+	}
+}
+
+func TestDeliveryRecordsEachNodesSubsystem(t *testing.T) {
+	// The publish policy groups a delivery by subsystem, so the walk
+	// must keep the pairing of node and kind, not two flat lists.
+	sysfs := newFakeSysfs(t)
+	sysfs.device("pci", "0000:00:02.0", "i915", map[string]string{
+		"modalias": "pci:v00008086d000046D2sv00000301sd000002F3bc03sc00i00",
+	})
+	sysfs.child("pci", "0000:00:02.0", "drm/card0", "drm", "dri/card0")
+	sysfs.child("pci", "0000:00:02.0", "i2c-0/i2c-dev/i2c-0", "i2c-dev", "i2c-0")
+
+	delivery := InspectDelivery(sysfs.root, Device{Bus: "pci", Address: "0000:00:02.0"})
+
+	want := map[string]string{"/dev/dri/card0": "drm", "/dev/i2c-0": "i2c-dev"}
+	if len(delivery.Nodes) != 2 {
+		t.Fatalf("Nodes = %+v, want 2", delivery.Nodes)
+	}
+	for _, node := range delivery.Nodes {
+		if want[node.Path] != node.Subsystem {
+			t.Errorf("node %s has subsystem %q, want %q", node.Path, node.Subsystem, want[node.Path])
+		}
 	}
 }
