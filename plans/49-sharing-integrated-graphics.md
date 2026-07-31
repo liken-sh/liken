@@ -1,8 +1,10 @@
 # Sharing integrated graphics
 
-Milestone 49 — Proposed. It would let a real integrated GPU publish as
-shareable, so a second claim allocates hardware that the lab measured
-serving twelve encoders at once.
+Milestone 49 — Accepted 2026-07-31. It lets a real integrated GPU
+publish as shareable, so a second claim allocates hardware that the
+lab measured serving twelve encoders at once. The design below groups
+a device's delivery by kernel subsystem and publishes each group as
+its own slice device.
 
 ## What already runs
 
@@ -61,71 +63,94 @@ the lab guest disproved it within the hour, because fbdev emulation
 adds a `graphics` node to the same device. `graphicsSubsystems` is the
 answer to that finding, and the i2c nodes are the next one.
 
-## The candidate fixes
+## The design
 
-### Widen `graphicsSubsystems`
+### Group a delivery by subsystem
 
-Add `i2c-dev` to the map. This is the smallest change, and it publishes
-the flag on the measured hardware immediately.
+`InspectDelivery` keeps its walk, but the result gains structure: the
+device nodes group by the kernel subsystem they belong to. One grouping
+function turns one physical device into one or more published devices,
+and each published device carries exactly one subsystem's nodes. The
+inventory half and the prepare half both call this function, so the
+slice and the CDI spec can never disagree about what a name delivers.
 
-The trade is what the map then means. `i2c-dev` is a general bus
-interface, not part of the graphics stack, so the map stops naming a
-stack and starts naming what one GPU happens to deliver. A non-graphics
-device that delivers a render node beside an i2c bus would pass the
-rule as well. The next node kind that a GPU driver registers needs
-another entry, and nothing marks when that entry is missing except a
-claim that waits. This fix also leaves the `subsystem` attribute
-absent and leaves the i2c nodes in the container.
+The plan considered three narrower fixes: widening
+`graphicsSubsystems` with `i2c-dev`, testing only the render node, and
+deriving the wanted node kind from the DeviceClass selectors that
+matched a claim. The first leaves the monitor buses in the container
+and the `subsystem` attribute absent. The second gives up the guard
+against hardware liken has not met. The third founders on the API: a
+request selects a device and names no node kind, so nothing in a claim
+can carry the answer. Publishing one slice device per subsystem
+dissolves that problem, because the allocated device's own name states
+which nodes the claim receives.
 
-### Test only the render node
+### The policy table
 
-Drop the loop, so `shareable` returns what `hasRenderNode` returns. The
-render node is the kernel interface that makes sharing safe.
+The mechanism is generic; the policy stays explicit. A device whose
+delivery holds a render node is a graphics device. Its primary
+published device carries only the `drm` nodes, and its `i2c-dev` nodes
+publish as a secondary device. A device whose delivery is all one
+subsystem publishes exactly as before. A mixed delivery the table does
+not know publishes as before: whole, exclusive, and with no
+`subsystem` attribute, which keeps the milestone 38 default for
+hardware nobody has examined.
 
-The trade is the guard that milestone 38 bought with the loop. A device
-that delivers a render node beside a node from hardware liken has not
-met would publish as shareable, and no later layer can take that back.
-The trade is smaller when the delivery is selective, because then the
-unexamined node never reaches a workload. That makes this fix and the
-next one a single design rather than two.
+A graphics device's framebuffer node stops being delivered. The fbdev
+node is the kernel's legacy console interface, holding it grants
+display takeover, and no workload claims a bare framebuffer.
 
-### Deliver only the nodes the claim selected
+### Names and attributes
 
-Change the prepare half instead of the rule. `prepareClaim` writes a
-CDI device node for each path in the delivery. It could write only the
-nodes of the kind the claim asked for, for example the `/dev/dri`
-nodes for a request that selected on `renderNode`. `shareable` then
-tests the nodes liken would deliver, not the nodes the subtree
-contains, and both the flag and the `subsystem` attribute describe the
-same set.
+The primary device keeps its bare name, so an existing allocation
+against `pci-0000-00-02-0` stays valid. A secondary device appends its
+subsystem to that name: `pci-0000-00-02-0-i2c-dev`. Every published
+device carries the parent's identifying attributes plus its own
+`subsystem`, which now always publishes, because each published device
+holds one kind by construction. Only the primary graphics device
+carries `renderNode` and `allowMultipleAllocations`. The i2c device
+stays exclusive: two raw writers on one wire have no arbitration
+contract.
 
-The trade is that DRA has no such field. A request selects a device,
-and nothing in it names a node kind, so liken must derive the set: from
-the DeviceClass selectors that matched, or from a table that maps a
-device kind to the subsystems it delivers. This change touches the
-rule, the prepare half, and the derivation between them, so it is the
-largest of the three. It is also the only one that keeps the monitor-control
-buses out of a container that asked for a GPU.
+The split forces one migration. A deployed DeviceClass that selects
+only on `driver == "i915"` now matches both published devices, so a
+fresh claim could allocate the monitor buses instead of the GPU.
+Tighten such a class to `renderNode` or to `subsystem == "drm"` before
+the fleet upgrades. An allocation that already exists is sticky, so a
+running workload keeps its device either way.
+
+### The prepare half
+
+`prepareClaim` maps an allocated name back mechanically: the bare name
+delivers the primary set, and a name with a subsystem suffix delivers
+that subsystem's set. No selector inspection exists anywhere. A name
+that maps to nothing fails the claim, the same as a missing device.
 
 ## What a drill must show
 
-A drill runs against the measured integrated GPU. Two independent `ResourceClaim`
-objects in one DeviceClass must both allocate the integrated GPU, and
-both pods must encode at the same time. `ls /dev/dri` and `ls
-/dev/i2c-*` inside a pod state what the chosen fix delivers, and the
-answer must match what the milestone says it delivers.
+A drill runs against the measured integrated GPU. First the deployed
+DeviceClass tightens to select the render node. Then two independent
+`ResourceClaim` objects in that DeviceClass must both allocate the
+integrated GPU, and both pods must encode at the same time. `ls
+/dev/dri` and `ls /dev/i2c-*` inside a pod must show the dri nodes and
+nothing else. A third claim, through a DeviceClass that selects
+`subsystem == "i2c-dev"`, must receive the nine monitor buses and no
+dri node.
 
-The guest drill from milestone 38 cannot show this. A `virtio-gpu`
-delivers `drm` nodes and no i2c nodes, so it passes the current rule
-and would pass every candidate above.
+The guest drill from milestone 38 cannot decide this milestone. A
+`virtio-gpu` delivers `drm` nodes and no i2c nodes, so it passes the
+old rule and the new one. It still serves as the regression check: the
+guest's GPU must keep publishing as shareable, now without its
+framebuffer node in the delivery.
 
 ## The manual
 
 The rule is written down in two pages, and both name this hardware.
 `docs/content/docs/reference/devices.md` states that liken publishes
-`allowMultipleAllocations` for a graphics device only.
-`docs/content/docs/guides/devices.md` shows a slice entry for
-`Alder Lake-N [UHD Graphics]` with `allowMultipleAllocations: true` and
-`subsystem: drm`, and the worked example shares an iGPU between two
-deployments. That entry is not what the measured hardware publishes
-today, so the fix changes the pages and the code together.
+`allowMultipleAllocations` for a graphics device only, and defines the
+graphics stack as the DRM nodes and the legacy framebuffer with them.
+`docs/content/docs/guides/devices.md` explains that the measured iGPU
+does not share, because of its i2c monitor-control nodes. The fix
+rewrites both: the reference describes the per-subsystem split and the
+delivery each published device makes, and the guide's example shows
+the two published devices, the tightened selector, and a shared iGPU.
