@@ -1,9 +1,15 @@
 # The CLI reaches the cluster
 
-Milestone 45 — Proposed. It would give `liken` a cluster client: one
-command that grants a machine the reboot its policy withholds, and
-three that run the tools an operator already uses against the right
-cluster.
+Milestone 45 — Completed. `liken` has a cluster client: one command
+that grants a machine the reboot its policy withholds, and three that
+run the tools an operator already uses against the right cluster.
+
+One detail settled differently than the sketch below. `gateDisruption`
+takes the annotation's value, not an `approved bool`, so the mismatch
+report lives in the gate once instead of in four callers. The matching
+rule accepts the full hash or a prefix of at least 12 characters,
+because every condition message shows the hash in its short form and a
+person pastes what they can see.
 
 `liken` builds media, mints identity, and serves releases. Every one of
 those runs offline. Nothing in the CLI talks to a running cluster, and
@@ -153,6 +159,32 @@ reports `RestartPending` and `status.pending` names the hash. Run
 `liken approve-reboot`, and confirm k3s restarts in place, the machine
 never reboots, and the condition converges. Annotate a stale hash and
 confirm the message reports the mismatch.
+
+## What the lab measured
+
+The lab ran the drill above on 2026-07-31, on the four-guest dev
+cluster, after `liken kubectl` itself watched the fleet roll to the
+drill build: all four machines moved in 3 minutes 30 seconds, the
+worker first and one leader at a time.
+
+With `rebootPolicy: Manual` on node-4 and a two-host Secret created,
+`CredentialsConverged` reported `RestartPending` and `status.pending`
+carried one entry: `CredentialsConverged`, kind `Restart`, the full
+hash, and the summary `registry credentials for 2 hosts`. A hand-pasted
+annotation naming `deadbeefdead` put both values in the condition
+message within one reconcile pass.
+
+`liken approve-reboot` printed the report this document sketches, word
+for word, and wrote the short hash. The condition read `Converged`
+about 25 seconds after the grant. The machine's uptime ran from 3m33s
+to 3m47s across that window, so k3s restarted in place and the machine
+never rebooted. A second run printed `node-4 is converged; nothing is
+waiting` and wrote nothing, and the spent annotation stayed on the
+Machine approving nothing.
+
+`liken stern` tailed both machine-operator pods, and `liken flux`
+ran its prerequisite checks, each through an exec of the tool already
+on `PATH`, against the kubeconfig the command had just rewritten.
 
 ## The manual
 

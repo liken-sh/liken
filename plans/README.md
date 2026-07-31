@@ -121,6 +121,10 @@ milestone is 50.
 * **43.** [A browsable release channel](completed/43-a-browsable-release-channel.md)
   — an index page for the channel and one for each release, rendered
   from the documents that the channel already serves.
+* **45.** [The CLI reaches the cluster](completed/45-the-cli-reaches-the-cluster.md)
+  — `approve-reboot` grants a Manual machine the one disruption it
+  waits for, and `kubectl`, `stern`, and `flux` run against the right
+  cluster with a credential the CLI resolves itself.
 * **47.** [The timezone database](completed/47-the-timezone-database.md)
   — the image carries IANA's zone files, so a CronJob can name the
   zone its schedule means, and a weekly job in CI opens the pull
@@ -154,9 +158,6 @@ milestone is 50.
   a Machine declares its storage by a name that belongs to the disk,
   and `/dev/disk` grows the `by-id` and `by-uuid` trees beside the
   `by-path` tree that iSCSI needed.
-* **45.** [The CLI reaches the cluster](45-the-cli-reaches-the-cluster.md)
-  — one command grants a machine the reboot its policy withholds, and
-  three run `kubectl`, `stern`, and `flux` against the right cluster.
 * **46.** [Configuring etcd snapshots](46-configuring-etcd-snapshots.md)
   — `spec.datastore.snapshots` gives a schedule, a retention, and an
   S3 destination to the snapshots every leader already takes.
