@@ -21,16 +21,17 @@ package main
 // model, and serial attributes, in the sysfs directories this file
 // reads.
 //
-// One udev by-id name is missing on purpose: ata-<model>_<serial>.
-// The model string sysfs publishes for a SATA disk is the 16-byte
-// SCSI INQUIRY string that libata's SCSI translation reports, not the
-// 40-byte ATA IDENTIFY string udev's ata_id helper decodes straight
-// from the drive. The two differ, so a name built from the shorter
-// string would not match the name udev would have given the same
-// disk, and a name that looks stable but points at the wrong string
-// misleads more than an absent name does. wwn- already names every
-// SATA disk that publishes a WWN. A SATA disk with no WWN gets only
-// the by-path names diskpaths.go computes.
+// The ata-<model>_<serial> name a SATA disk answers to does not come
+// from the model attribute sysfs publishes for it. That attribute
+// holds the 16-byte SCSI INQUIRY string libata's SCSI translation
+// layer reports, truncated to fit a field SCSI defines, not the
+// 40-byte model string udev's ata_id helper decodes straight from the
+// drive's own ATA IDENTIFY DEVICE data. A name built from the shorter
+// string would not match the name udev gives the same disk. libata
+// answers SCSI vital product data page 0x89, "ATA Information", by
+// embedding the entire 512-byte IDENTIFY block in the response, so
+// this file reads that page instead. The bytes are the same IDENTIFY
+// data udev's helper asks the drive for with an ioctl.
 
 import (
 	"fmt"
@@ -64,6 +65,10 @@ func diskIDNames(name string) []string {
 	}
 
 	switch diskTransport(name) {
+	case "sata":
+		if model, serial := scsiVPD89ATAIdentity(dir); model != "" && serial != "" {
+			names = append(names, "ata-"+sanitizeIDPart(model)+"_"+sanitizeIDPart(serial))
+		}
 	case "nvme":
 		model := sysfsString(dir, "device/model")
 		serial := sysfsString(dir, "serial", "device/serial")
@@ -171,6 +176,40 @@ func scsiVPD80Serial(dir string) string {
 		return ""
 	}
 	return strings.Trim(string(raw[4:4+length]), "\x00 \t\n\r\v\f")
+}
+
+// scsiVPD89ATAIdentity reads a SATA disk's model and serial out of
+// vital product data page 0x89, "ATA Information", which libata
+// answers by embedding the drive's full 512-byte ATA IDENTIFY DEVICE
+// block after a 60-byte header. A page shorter than 572 bytes carries
+// no complete IDENTIFY block, so this function reports neither field.
+//
+// IDENTIFY packs each string byte-swapped within its 16-bit words: a
+// drive that reports "QEMU HARDDISK" stores it as "EQUMH RADDSI K".
+// The serial sits at words 10-19 of the block, the model at words
+// 27-46; both are ASCII, space-padded to their field width, so this
+// function swaps each field's bytes back and trims the padding.
+func scsiVPD89ATAIdentity(dir string) (model, serial string) {
+	raw, err := os.ReadFile(filepath.Join(dir, "device", "vpd_pg89"))
+	if err != nil || len(raw) < 572 {
+		return "", ""
+	}
+	identify := raw[60:572]
+	serial = ataIdentifyString(identify[20:40])
+	model = ataIdentifyString(identify[54:94])
+	return model, serial
+}
+
+// ataIdentifyString decodes one fixed-width string out of an ATA
+// IDENTIFY DEVICE block: it swaps every adjacent byte pair back into
+// reading order, then trims the spaces and NUL bytes the drive pads
+// the field with.
+func ataIdentifyString(field []byte) string {
+	swapped := make([]byte, len(field))
+	for i := 0; i+1 < len(field); i += 2 {
+		swapped[i], swapped[i+1] = field[i+1], field[i]
+	}
+	return strings.Trim(string(swapped), "\x00 \t\n\r\v\f")
 }
 
 // idCharset is every byte udev leaves alone when it builds a by-id
