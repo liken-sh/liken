@@ -179,16 +179,9 @@ func InClusterClientAt(base string) (*Client, error) {
 	}, serviceAccountDir), nil
 }
 
-// Do sends one authenticated request. It reads the token from disk
-// every time it runs. ServiceAccount tokens are now short-lived:
-// kubelet refreshes the mounted file as each token nears its expiry.
-// A client that stores a token in memory eventually gets 401
-// responses.
+// Do sends one request, authenticated when the client has a
+// credentials directory.
 func (c *Client) Do(method, path, contentType string, body []byte) (*http.Response, error) {
-	token, err := os.ReadFile(c.credentials + "/token")
-	if err != nil {
-		return nil, fmt.Errorf("reading service account token: %w", err)
-	}
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
@@ -197,7 +190,20 @@ func (c *Client) Do(method, path, contentType string, body []byte) (*http.Respon
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+string(token))
+	// A workstation client (kubeconfig.go) authenticates in the TLS
+	// handshake with its client certificate, so it has no
+	// credentials directory and sends no Authorization header. The
+	// in-cluster client reads its token from disk every time: the
+	// tokens are short-lived, and kubelet refreshes the mounted file
+	// as each one nears its expiry, so a client that stores a token
+	// in memory eventually gets 401 responses.
+	if c.credentials != "" {
+		token, err := os.ReadFile(c.credentials + "/token")
+		if err != nil {
+			return nil, fmt.Errorf("reading service account token: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+string(token))
+	}
 	req.Header.Set("Accept", "application/json")
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
