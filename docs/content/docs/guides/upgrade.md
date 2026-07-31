@@ -78,9 +78,15 @@ time, whatever the budget says, because the datastore needs a majority
 of the leaders.
 
 If a machine's [`rebootPolicy`](/docs/reference/machine/#spec) is
-`Manual` (the default), the machine stages the change and then waits
-for you. Set `rebootPolicy: Auto` on machines that must take their
-reboot turn without an operator.
+`Manual` (the default), the machine stages the change, reports
+`RebootPending`, and waits for you. Grant the reboot with:
+
+    liken approve-reboot mycluster <machine>
+
+The machine then takes its turn under the same disruption budget as
+an `Auto` machine: it drains first, and only one leader is ever down
+at a time. Set `rebootPolicy: Auto` on machines that must take their
+turn without an operator.
 
 ## 4. Watch the rollout
 

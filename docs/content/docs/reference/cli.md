@@ -59,6 +59,27 @@ uses to administer the cluster. The server address comes from the
 `endpoint:` in the deployment's `cluster.yaml`. Pass `-server` when
 your machine reaches the cluster at a different address.
 
+## liken approve-reboot
+
+    liken approve-reboot [-server URL] <deployment-dir> <machine>
+
+Reports what a machine waits for, and grants it one disruption. A
+machine whose [`rebootPolicy`](/docs/reference/machine/#spec) is
+`Manual` stages each change and waits. This command reads the
+machine's `status.pending`, prints each waiting change, and writes
+the `liken.sh/approve-disruption` annotation with the staged
+change's hash. The machine then takes the same path an `Auto`
+machine takes: it waits for the cluster's turn, drains, and applies
+the change with the smallest disruption it needs, which for a
+credentials change is a k3s restart, not a reboot.
+
+The grant is one-shot. Once the change applies, its hash is no
+longer pending, and the next change hashes differently, so a stale
+annotation approves nothing. Running the command twice writes the
+same annotation. When two changes are pending, the command approves
+the reboot-class one, because a reboot applies every staged change.
+When nothing is pending, it reports that and writes nothing.
+
 ## liken kubectl
 
     liken kubectl [-server URL] <deployment-dir> [args...]

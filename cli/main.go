@@ -69,6 +69,13 @@ usage:
       deployment's cluster.yaml; -server overrides it, for when
       that address is not reachable from this machine.
 
+  liken approve-reboot [-server URL] <deployment-dir> <machine>
+      Report what a machine waits for, and grant it the one
+      disruption its rebootPolicy withholds. The grant is an
+      annotation naming the staged change's hash, so it spends
+      itself when the change applies, and running this twice is
+      the same grant. When nothing waits, this writes nothing.
+
   liken kubectl [-server URL] <deployment-dir> [args...]
   liken stern   [-server URL] <deployment-dir> [args...]
   liken flux    [-server URL] <deployment-dir> [args...]
@@ -185,6 +192,8 @@ func run(args []string) error {
 		return err
 	case "kubectl", "stern", "flux":
 		return passthrough(args[0], args[1:])
+	case "approve-reboot":
+		return approveReboot(args[1:], os.Stdout)
 	case "layer":
 		if len(args) != 4 {
 			return fmt.Errorf("usage: liken layer <manifests-dir> <identity-dir> <output.cpio>")
