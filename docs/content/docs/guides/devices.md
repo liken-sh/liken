@@ -20,6 +20,7 @@ why.
 Each entry is one device you can claim:
 
     - name: pci-0000-00-02-0
+      allowMultipleAllocations: true
       attributes:
         bus: {string: pci}
         class: {string: display}
@@ -29,15 +30,27 @@ Each entry is one device you can claim:
         name: {string: Alder Lake-N [UHD Graphics]}
         product: {string: 46d1}
         renderNode: {bool: true}
+        subsystem: {string: drm}
+        vendor: {string: "8086"}
+    - name: pci-0000-00-02-0-i2c-dev
+      attributes:
+        bus: {string: pci}
+        class: {string: display}
+        classCode: {string: "030000"}
+        driver: {string: i915}
+        modalias: {string: "pci:v00008086d000046D1..."}
+        name: {string: Alder Lake-N [UHD Graphics]}
+        product: {string: 46d1}
+        subsystem: {string: i2c-dev}
         vendor: {string: "8086"}
 
-A device that liken can share also carries
-`allowMultipleAllocations: true`. A device carries it only when it
-delivers a render node and every node it delivers comes from a
-graphics subsystem. The integrated GPU above does not carry it,
-because i915 also registers an i2c monitor-control node for each
-display output, and those nodes are not graphics nodes. Such a device
-allocates to one claim at a time.
+This machine publishes two devices for one GPU. i915 registers an
+i2c monitor-control bus for each display output, and those buses are
+not graphics nodes, so liken publishes them as their own device. A
+claim on `pci-0000-00-02-0` delivers the `/dev/dri` nodes only, and
+more than one claim can allocate it. A claim on
+`pci-0000-00-02-0-i2c-dev` delivers the monitor buses, to one claim
+at a time.
 
 If the hardware you expect is not in the list, no driver is bound to
 it. Look at the hardware the machine reports that it cannot drive:
@@ -76,13 +89,15 @@ for each kind of device that your deployments ask for.
         - cel:
             expression: |
               device.driver == "liken.sh" &&
-              has(device.attributes["liken.sh"].renderNode)
+              device.attributes["liken.sh"].subsystem == "drm"
 
-liken publishes an attribute only when it is true of the hardware, so
-`has()` is the complete test. This class matches any GPU with a render
-node, on any machine in the fleet. A selector that asks for a vendor
-and a product ID names one model, and it stops matching on the next
-machine you buy.
+Select on `subsystem` or on `renderNode`, not on `driver` alone. The
+i2c companion device carries the same `driver` attribute, and a class
+that matches both can allocate the monitor buses to your transcoder.
+
+This class matches any GPU with a DRM render node, on any machine in
+the fleet. A selector that asks for a vendor and a product ID names
+one model, and it stops matching on the next machine you buy.
 
 ## 4. Claim the GPU for a deployment
 
@@ -119,9 +134,10 @@ names the pod's entry:
                 claims:
                   - name: gpu
 
-The container receives every node the device delivers. For the GPU
-above, that is `/dev/dri/card0`, `/dev/dri/renderD128`, and the
-`/dev/i2c-*` monitor-control nodes that i915 registers beside them.
+The container receives every node the published device delivers. For
+the GPU above, that is `/dev/dri/card0` and `/dev/dri/renderD128`
+only. The `/dev/i2c-*` monitor-control nodes belong to the companion
+device, `pci-0000-00-02-0-i2c-dev`, which needs its own claim.
 Nothing else changes: no privilege, and no host mount. Your image supplies the
 userspace driver, and the image's user must be able to open the node.
 Check what the container received:
@@ -131,8 +147,8 @@ Check what the container received:
 A device that carries `allowMultipleAllocations: true` serves more
 than one claim: a second deployment writes its own `ResourceClaim`
 against the same `DeviceClass`, and both deployments run. The
-integrated GPU above does not carry it, so a second claim waits until
-the first deployment releases the device.
+integrated GPU above carries it, so more than one transcoder can
+allocate the render node at once.
 
 Give a deployment that holds a claim like this the `Recreate`
 strategy. A rolling update runs the old pod and the new pod at once,
