@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -31,12 +32,15 @@ import (
 // seams (draSysfsRoot, cdiDir) point at the fixture, and the test
 // restores them afterward.
 type draFixture struct {
-	plugin *draPlugin
-	cdi    string
+	plugin    *draPlugin
+	cdi       string
+	allocated string
 }
 
 func newDRAFixture(t *testing.T) *draFixture {
 	t.Helper()
+
+	fixture := &draFixture{allocated: "usb-2-1-1-0"}
 
 	sysfs := t.TempDir()
 	stick := filepath.Join(sysfs, "bus", "usb", "devices", "2-1:1.0")
@@ -87,7 +91,7 @@ func newDRAFixture(t *testing.T) *draFixture {
 							"request": "disk",
 							"driver":  "liken.sh",
 							"pool":    "node-1",
-							"device":  "usb-2-1-1-0",
+							"device":  fixture.allocated,
 						}},
 					},
 				},
@@ -105,9 +109,131 @@ func newDRAFixture(t *testing.T) *draFixture {
 	draSysfsRoot, cdiDir = sysfs, cdi
 	t.Cleanup(func() { draSysfsRoot, cdiDir = origSysfs, origCDI })
 
-	return &draFixture{
-		plugin: &draPlugin{client: kubernetes.NewClient(server.URL, server.Client(), credentials)},
-		cdi:    cdi,
+	fixture.plugin = &draPlugin{client: kubernetes.NewClient(server.URL, server.Client(), credentials)}
+	fixture.cdi = cdi
+	return fixture
+}
+
+// addGPU plants an integrated GPU beside the stick: two drm nodes and
+// one i2c monitor bus under one PCI device, the shape i915 gives a
+// real machine.
+func (f *draFixture) addGPU(t *testing.T) {
+	t.Helper()
+	gpu := filepath.Join(draSysfsRoot, "bus", "pci", "devices", "0000:00:02.0")
+	children := map[string][2]string{
+		"drm/card0":           {"drm", "dri/card0"},
+		"drm/renderD128":      {"drm", "dri/renderD128"},
+		"i2c-0/i2c-dev/i2c-0": {"i2c-dev", "i2c-0"},
+	}
+	driver := filepath.Join(draSysfsRoot, "bus", "pci", "drivers", "i915")
+	if err := os.MkdirAll(driver, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(gpu, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gpu, "modalias"), []byte("pci:v00008086d000046D2sv00000301sd000002F3bc03sc00i00\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(driver, filepath.Join(gpu, "driver")); err != nil {
+		t.Fatal(err)
+	}
+	for rel, node := range children {
+		dir := filepath.Join(gpu, rel)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "dev"), []byte("226:0\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "uevent"), []byte("DEVNAME="+node[1]+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		class := filepath.Join(draSysfsRoot, "class", node[0])
+		if err := os.MkdirAll(class, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(class, filepath.Join(dir, "subsystem")); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestPrepareDeliversOnlyTheGraphicsHalfOfAGPU(t *testing.T) {
+	fixture := newDRAFixture(t)
+	fixture.addGPU(t)
+	fixture.allocated = "pci-0000-00-02-0"
+
+	resp, err := fixture.plugin.NodePrepareResources(t.Context(), &drav1.NodePrepareResourcesRequest{
+		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if answer := resp.Claims["claim-1"]; answer == nil || answer.Error != "" {
+		t.Fatalf("answer = %+v", answer)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(fixture.cdi, "liken.sh-claim-1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec cdiSpec
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		t.Fatal(err)
+	}
+	var paths []string
+	for _, n := range spec.Devices[0].ContainerEdits.DeviceNodes {
+		paths = append(paths, n.Path)
+	}
+	slices.Sort(paths)
+	if !slices.Equal(paths, []string{"/dev/dri/card0", "/dev/dri/renderD128"}) {
+		t.Errorf("paths = %v, want the dri nodes and no monitor bus", paths)
+	}
+}
+
+func TestPrepareDeliversTheMonitorBusesForTheCompanionName(t *testing.T) {
+	fixture := newDRAFixture(t)
+	fixture.addGPU(t)
+	fixture.allocated = "pci-0000-00-02-0-i2c-dev"
+
+	resp, err := fixture.plugin.NodePrepareResources(t.Context(), &drav1.NodePrepareResourcesRequest{
+		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if answer := resp.Claims["claim-1"]; answer == nil || answer.Error != "" {
+		t.Fatalf("answer = %+v", answer)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(fixture.cdi, "liken.sh-claim-1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec cdiSpec
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		t.Fatal(err)
+	}
+	nodes := spec.Devices[0].ContainerEdits.DeviceNodes
+	if len(nodes) != 1 || nodes[0].Path != "/dev/i2c-0" {
+		t.Errorf("nodes = %+v, want the monitor bus alone", nodes)
+	}
+}
+
+func TestPrepareFailsANameNoDevicePublishes(t *testing.T) {
+	fixture := newDRAFixture(t)
+	fixture.addGPU(t)
+	fixture.allocated = "pci-0000-00-02-0-sound"
+
+	resp, err := fixture.plugin.NodePrepareResources(t.Context(), &drav1.NodePrepareResourcesRequest{
+		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Claims["claim-1"].Error == "" {
+		t.Error("a name the hardware no longer publishes must fail the claim")
 	}
 }
 

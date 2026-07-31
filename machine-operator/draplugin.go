@@ -16,12 +16,12 @@ package main
 //
 // The prepare protocol deliberately tells the driver almost
 // nothing: a claim's namespace, name, and UID. What was allocated
-// lives on the claim's status in the API server, so the driver
-// reads that back (kubernetes/resourceclaims.go) and works out the
-// delivery again from its own inventory walk. This follows the same
-// rule liken applies everywhere: a call only signals that something
-// happened, and the driver acts on the shared, durable record, not
-// on data carried in the call itself.
+// lives on the claim's status in the API server, so the driver reads
+// that back (kubernetes/resourceclaims.go), walks its own inventory
+// again, and hands the claim the published device's nodes. This
+// follows the same rule liken applies everywhere: a call only
+// signals that something happened, and the driver acts on the
+// shared, durable record, not on data carried in the call itself.
 //
 // Failures are per-claim strings inside the response, not gRPC
 // errors. The kubelet holds the affected pod in ContainerCreating
@@ -38,6 +38,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"google.golang.org/grpc"
 	healthv1alpha1 "k8s.io/kubelet/pkg/apis/dra-health/v1alpha1"
@@ -148,6 +149,35 @@ func (p *draPlugin) NodePrepareResources(ctx context.Context, req *drav1.NodePre
 	return resp, nil
 }
 
+// resolveAllocated maps an allocated device name to the published set
+// that the name denotes. A bare name is the primary. Any other name
+// must equal a bare name plus a published suffix, which the policy
+// recomputes here from a fresh walk, so the answer is always what
+// this claim would receive now. The bare names are tried first,
+// exactly: one device's bare name can begin with another's, so a
+// prefix alone identifies nothing.
+func resolveAllocated(name string, sysRoot string, byName map[string]hardware.Device) (publishedDevice, bool) {
+	if device, ok := byName[name]; ok {
+		for _, p := range publishDevices(hardware.InspectDelivery(sysRoot, device)) {
+			if p.Suffix == "" {
+				return p, true
+			}
+		}
+		return publishedDevice{}, false
+	}
+	for bare, device := range byName {
+		if !strings.HasPrefix(name, bare+"-") {
+			continue
+		}
+		for _, p := range publishDevices(hardware.InspectDelivery(sysRoot, device)) {
+			if bare+p.Suffix == name {
+				return p, true
+			}
+		}
+	}
+	return publishedDevice{}, false
+}
+
 func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceResponse {
 	fail := func(format string, args ...any) *drav1.NodePrepareResourceResponse {
 		message := fmt.Sprintf(format, args...)
@@ -186,16 +216,12 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 			// That driver's own plugin prepares it.
 			continue
 		}
-		device, ok := byName[result.Device]
+		published, ok := resolveAllocated(result.Device, draSysfsRoot, byName)
 		if !ok {
 			return fail("allocated device %s is not present", result.Device)
 		}
-		delivery := hardware.InspectDelivery(draSysfsRoot, device)
-		if len(delivery.DevNodes()) == 0 {
-			return fail("allocated device %s has no device nodes to deliver", result.Device)
-		}
-		nodes := make([]cdiDeviceNode, 0, len(delivery.DevNodes()))
-		for _, path := range delivery.DevNodes() {
+		nodes := make([]cdiDeviceNode, 0, len(published.Nodes))
+		for _, path := range published.Nodes {
 			nodes = append(nodes, cdiDeviceNode{Path: path})
 		}
 		name := claim.Uid + "-" + result.Device
