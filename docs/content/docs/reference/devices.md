@@ -106,26 +106,26 @@ them for itself, so the operating system does not publish them.
 ## Sharing
 
 liken allocates a device to one claim, unless liken publishes
-`allowMultipleAllocations` for that device. When a device's subtree
-delivers nodes of more than one kernel subsystem, liken can publish
-more than one device for it: one device for each kind of node, and
-the name of each extra device is the primary device's name plus the
+`allowMultipleAllocations` for that device. A device's subtree can
+deliver nodes of more than one kernel subsystem. When it does, liken
+can publish more than one device for it, one for each kind of node.
+The name of each extra device is the primary device's name plus the
 subsystem. A claim receives the nodes of the one published device it
 allocated, and no others.
 
 liken publishes `allowMultipleAllocations` on a graphics device only.
 A graphics device is one that delivers a DRM render node, and the
-published graphics device delivers only the `/dev/dri` nodes. The
-i2c monitor-control buses that a GPU driver registers publish as
-their own device, with `subsystem: i2c-dev`, and that device stays
-exclusive: an i2c node passes raw transfers to every device on its
-wire, and two writers on one wire have no arbitration contract. The
-legacy framebuffer node is not delivered at all: holding it grants
-display takeover, and no workload claims a bare framebuffer.
+published graphics device delivers only the `/dev/dri` nodes. A GPU
+driver registers i2c monitor-control buses. These publish as their
+own device, with `subsystem: i2c-dev`. That device stays exclusive.
+An i2c node passes raw transfers to every device on its wire, and two
+writers on one wire have no arbitration contract. The legacy
+framebuffer node is not delivered at all: holding it grants display
+takeover, and no workload claims a bare framebuffer.
 
-A device that delivers one kind of node publishes as one device,
-unchanged. A device that delivers a mix that liken does not know
-publishes whole and exclusive, and names no `subsystem`.
+A device that delivers one kind of node publishes as one device. A
+device that delivers a mix that liken does not know publishes whole
+and exclusive, and names no `subsystem`.
 
 A DRM render node has a multiplexing contract in the kernel: the
 driver arbitrates between concurrent clients. A drill measured this
