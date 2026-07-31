@@ -470,12 +470,13 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 		}
 		plane.start("the hardware watch", watchHardware(catalog, factsTree, unclaimed, blockDevices))
 	}
-	// The disk links watch publishes /dev/disk/by-path, the stable
-	// names a CSI driver resolves a network disk through
-	// (disklinks.go). It runs on every machine, and outside the
-	// catalog's gate above: naming a disk needs no device database,
-	// and a machine gains its first iSCSI session long after this
-	// boot, whenever a workload asks for a volume.
+	// The disk links watch publishes /dev/disk/by-path, /dev/disk/by-id,
+	// and /dev/disk/by-uuid, the stable names a CSI driver, mount
+	// tooling, and an operator reading the console all resolve a disk
+	// or a filesystem through (disklinks.go). It runs on every machine,
+	// and outside the catalog's gate above: naming a disk needs no
+	// device database, and a machine gains its first iSCSI session long
+	// after this boot, whenever a workload asks for a volume.
 	plane.start("the disk links", watchDiskLinks)
 	// A machine with time sources keeps disciplining its clock for
 	// as long as it runs. A free-running machine has no source to
