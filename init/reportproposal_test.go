@@ -171,6 +171,31 @@ func TestProposalCarriesTheDiskEvidence(t *testing.T) {
 	}
 }
 
+func TestProposalDiskEvidenceListsTheStableNameBesideTheModel(t *testing.T) {
+	r := sampleReport()
+	r.Disks[0].StableName = "/dev/disk/by-id/wwn-0x5002538d40a45c88"
+	text := composeHardwareReport(r)
+	if !strings.Contains(text, "QEMU HARDDISK  (sata)  /dev/disk/by-id/wwn-0x5002538d40a45c88") {
+		t.Errorf("a disk's stable name must sit beside its model, so a person can match the two:\n%s", text)
+	}
+}
+
+func TestProposalWritesTheStableNameAsTheDevice(t *testing.T) {
+	r := sampleReport()
+	r.Disks[0].StableName = "/dev/disk/by-id/wwn-0x5002538d40a45c88"
+	m := parseProposal(t, r)
+	if m.Spec.Storage.SystemA.Device != "/dev/disk/by-id/wwn-0x5002538d40a45c88" {
+		t.Errorf("a disk with a stable name must be declared by it: %q", m.Spec.Storage.SystemA.Device)
+	}
+}
+
+func TestProposalWritesTheKernelPathWhenNoStableNameExists(t *testing.T) {
+	m := parseProposal(t, sampleReport())
+	if m.Spec.Storage.SystemA.Device != "/dev/sda" {
+		t.Errorf("a disk with no stable name must be declared by its kernel path: %q", m.Spec.Storage.SystemA.Device)
+	}
+}
+
 func TestProposalNamesTheExcludedStick(t *testing.T) {
 	r := sampleReport()
 	r.StickPath = "/dev/sdc"

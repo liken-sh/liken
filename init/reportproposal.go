@@ -31,8 +31,11 @@ import (
 // and device path this boot, its size, its model when the bus
 // publishes one, and the transport that carries it (sata, nvme, usb,
 // virtio). The transport is evidence a person reads to recognize the
-// disk; the device path is only a hint that matters on the boot that
-// claims the disk.
+// disk. StableName is the disk's own by-id name, when it has one; the
+// proposal declares a role by this name in preference to the device
+// path, because the path is only a hint that matters on the boot that
+// claims the disk, and the next boot can hand that same path to a
+// different disk.
 //
 // The last two fields carry what the report learned about the disk's
 // place in an install, rather than about the disk itself.
@@ -46,8 +49,21 @@ type reportDisk struct {
 	SizeBytes     uint64
 	Model         string
 	Transport     string
+	StableName    string
 	BehindModules []string
 	MaybeStick    bool
+}
+
+// deviceName is the value a proposal declares for this disk: its
+// stable name when it has one, its kernel device path otherwise. Only
+// a by-id name qualifies as a stable name here; a by-path name
+// belongs to the disk's port, not the disk, so it is never proposed
+// as the disk's identity.
+func (d reportDisk) deviceName() string {
+	if d.StableName != "" {
+		return d.StableName
+	}
+	return d.Path
 }
 
 // reportInterface is one network interface as the report observed it,
@@ -314,12 +330,17 @@ func writeDarkInterfaces(b *strings.Builder, dark []reportInterface) {
 // which role is the operator's to choose, and what the planner had to
 // give up on a small disk.
 func composeStorage(b *strings.Builder, r hardwareReport) {
-	b.WriteString("  # The disks this report saw. The device path is only a hint\n")
-	b.WriteString("  # that matters on the boot that claims the disk; after that,\n")
-	b.WriteString("  # liken finds each role by the name it writes into the GPT.\n")
+	b.WriteString("  # The disks this report saw. A role below names a disk by its\n")
+	b.WriteString("  # stable name when it has one, because that name belongs to\n")
+	b.WriteString("  # the disk itself and survives a port move; the kernel path\n")
+	b.WriteString("  # appears only when the disk offers no such identity, and the\n")
+	b.WriteString("  # next boot can hand that same path to a different disk.\n")
+	b.WriteString("  # Either way, the value matters only on the boot that claims\n")
+	b.WriteString("  # the disk; after that, liken finds each role by the name it\n")
+	b.WriteString("  # writes into the GPT.\n")
 	for _, d := range r.Disks {
-		fmt.Fprintf(b, "  #   %s  %s  %s  (%s)%s\n",
-			d.Path, gib(d.SizeBytes), orUnknown(d.Model), orUnknown(d.Transport), diskCaveat(d))
+		fmt.Fprintf(b, "  #   %s  %s  %s  (%s)%s%s\n",
+			d.Path, gib(d.SizeBytes), orUnknown(d.Model), orUnknown(d.Transport), stableNameField(d), diskCaveat(d))
 	}
 	if r.StickPath != "" {
 		fmt.Fprintf(b, "  #   (%s is the installation stick; it leaves with you,\n", r.StickPath)
@@ -349,6 +370,17 @@ func composeStorage(b *strings.Builder, r hardwareReport) {
 	for _, role := range layout.Roles {
 		writeRole(b, string(role.Name), role.Device, role.Size, role.Comment)
 	}
+}
+
+// stableNameField is the fragment a disk's evidence line adds when
+// the disk offers a stable name: the same name a role's device: value
+// uses, placed beside the model so a person can match the name in the
+// roles below to the disk they are holding.
+func stableNameField(d reportDisk) string {
+	if d.StableName == "" {
+		return ""
+	}
+	return "  " + d.StableName
 }
 
 // diskCaveat is the short note that the report appends to a disk's

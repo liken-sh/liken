@@ -121,10 +121,27 @@ func readReportDisks(stick installStick) []reportDisk {
 			SizeBytes:  d.SizeBytes,
 			Model:      d.Model,
 			Transport:  diskTransport(d.Name),
+			StableName: firstByIDName(d.StableNames),
 			MaybeStick: stick.ambiguous() && slices.Contains(stick.Candidates, d.Name),
 		})
 	}
 	return disks
+}
+
+// firstByIDName returns the first by-id name among a disk's stable
+// names, or "" when the disk offers none. stableNames orders by-id
+// names before the by-path name, so the first entry under
+// stableDiskByID is the disk's own identity: a by-path name that
+// might precede it in some other order would name the disk's port
+// instead, a different fact that the proposal must not present as the
+// same thing.
+func firstByIDName(names []string) string {
+	for _, name := range names {
+		if strings.HasPrefix(name, stableDiskByID) {
+			return name
+		}
+	}
+	return ""
 }
 
 // canHoldARole rejects the block devices that a storage role cannot

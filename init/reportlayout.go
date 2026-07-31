@@ -160,7 +160,7 @@ func planStorageLayout(measured []reportDisk, uefi bool) storageLayout {
 			machine.SizeText(machineEphemeralBytes), grubRoles, gib(largestDisk(candidates).SizeBytes))}}
 	}
 
-	layout := storageLayout{Roles: systemRoles(system.Path, uefi)}
+	layout := storageLayout{Roles: systemRoles(system.deviceName(), uefi)}
 	data, available := pickDataDisk(candidates, system, uefi)
 	if data.Path == system.Path {
 		layout.Notes = append(layout.Notes, fmt.Sprintf(
@@ -170,7 +170,7 @@ func planStorageLayout(measured []reportDisk, uefi bool) storageLayout {
 			"The durable roles live on %s, so the cluster's state and its volumes survive an install onto a replaced system disk. A wipe and reinstall is the other case: it erases every disk this manifest declares, including this one.", data.Path))
 	}
 
-	roles, notes := dataRoles(data.Path, available)
+	roles, notes := dataRoles(data.deviceName(), available)
 	layout.Roles = append(layout.Roles, roles...)
 	layout.Notes = append(layout.Notes, notes...)
 	return layout

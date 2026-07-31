@@ -147,6 +147,34 @@ func TestReadReportDisksSkipsDevicesThatCannotHoldARole(t *testing.T) {
 	}
 }
 
+func TestReadReportDisksCarriesTheFirstByIDName(t *testing.T) {
+	sys, _ := fakeMachine(t)
+	dir := fakeDisk(t, sys, "sda", "pci0000:00", "0000:00:1f.2", "ata3", "host2",
+		"target2:0:0", "2:0:0:0", "block", "sda")
+	writeSysfs(t, dir, "size", "16777216\n")
+	writeSysfs(t, filepath.Join(dir, "device"), "wwid", "naa.5002538d40a45c88\n")
+
+	disks := readReportDisks(installStick{})
+	if len(disks) != 1 || disks[0].StableName != "/dev/disk/by-id/wwn-0x5002538d40a45c88" {
+		t.Errorf("a disk with a wwn must carry its by-id name as the stable name: %+v", disks)
+	}
+}
+
+func TestReadReportDisksWithOnlyAByPathNameHasNoStableName(t *testing.T) {
+	sys, _ := fakeMachine(t)
+	dir := fakeDisk(t, sys, "sda", "pci0000:00", "0000:00:1f.2", "ata3", "host2",
+		"target2:0:0", "2:0:0:0", "block", "sda")
+	writeSysfs(t, dir, "size", "16777216\n")
+
+	// This disk offers no wwid, so its only stable name is a by-path
+	// name, which names the port and not the disk. The report must not
+	// propose it as the disk's identity.
+	disks := readReportDisks(installStick{})
+	if len(disks) != 1 || disks[0].StableName != "" {
+		t.Errorf("a by-path name is not an identity, and must not become the stable name: %+v", disks)
+	}
+}
+
 func TestDiskTransportReadsTheBusFromTheDeviceTree(t *testing.T) {
 	sys, _ := fakeMachine(t)
 	// A SATA disk's sysfs entry is a symlink whose target path passes
