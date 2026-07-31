@@ -17,6 +17,13 @@ package main
 // Picking it is the confirmation, and it is as explicit as a person
 // can be at a console with no other tools.
 //
+// A declared disk may name a stable identity under /dev/disk/by-id/
+// or /dev/disk/by-path/ instead of a kernel path, so the wipe
+// resolves it through resolveDeclaredDisk, the same computation the
+// claim uses. A name that matches two disks wipes neither: guessing
+// which one the manifest meant risks the disk the manifest did not
+// mean.
+//
 // Blanking a disk's table is not the whole erasure, and on its own it
 // would not be one. Partitions start a megabyte in, so their file
 // systems survive the wipe, and a claim that writes the same layout
@@ -92,11 +99,12 @@ func reclaimManifestDisks() {
 	}
 
 	for _, device := range devices {
-		if err := awaitDevice(device); err != nil {
+		node, err := awaitDevice(device)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "liken: reinstall: %v\n", err)
 			continue
 		}
-		if err := blankDisk(device); err != nil {
+		if err := blankDisk(node); err != nil {
 			fmt.Fprintf(os.Stderr, "liken: reinstall: %s: %v\n", device, err)
 			continue
 		}
@@ -104,28 +112,48 @@ func reclaimManifestDisks() {
 	}
 }
 
-// awaitDevice waits, boundedly, for a named device to attach. A
-// reinstall hits the same probe race an install does: the
-// controller's driver has loaded, but a SATA link or a USB device
-// finishes negotiating a moment later. A device the manifest names is
-// expected to exist, so its continued absence at the deadline is an
-// error, not a silent skip.
-func awaitDevice(device string) error {
-	const (
-		poll     = 500 * time.Millisecond
-		deadline = 30 * time.Second
-	)
-	if diskByPath(device) != nil {
-		return nil
+// awaitDevice waits, boundedly, for a declared device to attach, and
+// resolves it to the kernel node that a wipe can open. A reinstall
+// hits the same probe race an install does: the controller's driver
+// has loaded, but a SATA link or a USB device finishes negotiating a
+// moment later. A device the manifest names is expected to exist, so
+// its continued absence at the deadline is an error, not a silent
+// skip.
+func awaitDevice(declared string) (string, error) {
+	return awaitDeviceDeadline(declared, 30*time.Second)
+}
+
+// awaitDeviceDeadline is awaitDevice with its deadline exposed as an
+// argument, so a test can prove the timeout behavior in well under a
+// second instead of waiting out the real 30.
+func awaitDeviceDeadline(declared string, deadline time.Duration) (string, error) {
+	const poll = 500 * time.Millisecond
+
+	// resolve re-runs resolveDeclaredDisk on every poll, the same
+	// computation the claim path uses, rather than opening the
+	// declared string directly: a stable name is not a device node a
+	// wipe can open, and a name that matches two disks must refuse at
+	// once rather than wait out the deadline over an ambiguity that
+	// waiting cannot fix.
+	resolve := func() (string, error) {
+		disk, err := resolveDeclaredDisk(declared)
+		if err != nil || disk == nil {
+			return "", err
+		}
+		return devicePath(*disk), nil
 	}
-	fmt.Printf("liken: reinstall: waiting for %s to attach\n", device)
+
+	if node, err := resolve(); err != nil || node != "" {
+		return node, err
+	}
+	fmt.Printf("liken: reinstall: waiting for %s to attach\n", declared)
 	for begin := time.Now(); time.Since(begin) < deadline; {
 		time.Sleep(poll)
-		if diskByPath(device) != nil {
-			return nil
+		if node, err := resolve(); err != nil || node != "" {
+			return node, err
 		}
 	}
-	return fmt.Errorf("%s did not attach within %s", device, deadline)
+	return "", fmt.Errorf("%s did not attach within %s", declared, deadline)
 }
 
 // blankDisk makes a disk blank in the two ways that matter: on the
@@ -141,6 +169,9 @@ func awaitDevice(device string) error {
 // table, the disk has no partitions, and the claim that follows sees
 // a blank disk. A disk shorter than two wipe regions is blanked in
 // one pass from the front, which still covers every signature.
+// blankDisk takes the resolved kernel node, never the declared
+// string: a stable name under /dev/disk/ is not a node this function
+// can open.
 func blankDisk(device string) error {
 	f, err := os.OpenFile(device, os.O_RDWR, 0)
 	if err != nil {
