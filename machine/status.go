@@ -9,6 +9,7 @@ package machine
 // re-derives every value from the current observation.
 
 import (
+	"strings"
 	"time"
 
 	"github.com/liken-sh/liken/api"
@@ -175,6 +176,15 @@ type MachineStatus struct {
 	// "SysctlsApplied", that controllers maintain and that humans and
 	// tooling read.
 	Conditions []api.Condition `json:"conditions,omitempty"`
+
+	// Pending lists what this machine waits to apply: each staged
+	// document that needs a disruption, with the hash a person
+	// approves. The conditions carry the same facts in their
+	// messages, but a message is prose. This field exists so that
+	// nothing has to parse a condition message to find a hash, and
+	// so the question "what is this machine waiting for me to
+	// allow" has a field that answers it.
+	Pending []PendingDisruption `json:"pending,omitempty"`
 }
 
 // VersionStatus is the complete inventory of what this machine
@@ -808,3 +818,59 @@ type CrashStatus struct {
 // vocabulary, in the same way that PodScheduled is a condition the
 // scheduler writes onto Pods that the kubelet owns.
 const RebootApprovedCondition = "RebootApproved"
+
+// ApproveDisruptionAnnotation grants a Manual machine one
+// disruption. A person (or the liken CLI's approve-reboot command)
+// sets it on the Machine, valued with the hash of the staged
+// document it approves. The hash makes the grant one-shot by
+// construction: once the change applies, that hash is no longer
+// pending, and the next change hashes differently, so a stale
+// annotation approves nothing. Nobody has to consume the grant, and
+// that matters for RBAC: clearing an annotation would need patch on
+// machines, which would let a per-node operator edit any machine's
+// spec. A grant that expires on its own needs no new verb.
+const ApproveDisruptionAnnotation = "liken.sh/approve-disruption"
+
+// ApprovalGrants reports whether an approve-disruption annotation
+// approves the staged document with this hash. The annotation may
+// carry the full hash or a prefix of it, because every condition
+// message shows the hash in its 12-character short form and a
+// person pastes what they can see. A prefix shorter than 12
+// characters never grants: below that length a paste error could
+// match by accident.
+func ApprovalGrants(annotation, hash string) bool {
+	return len(annotation) >= 12 && strings.HasPrefix(hash, annotation)
+}
+
+// A DisruptionKind names what applies a staged document: a machine
+// reboot, or a k3s restart in place.
+type DisruptionKind string
+
+const (
+	DisruptionReboot  DisruptionKind = "Reboot"
+	DisruptionRestart DisruptionKind = "Restart"
+)
+
+// A PendingDisruption is one staged document waiting for its
+// disruption. The machine operator publishes one entry per gated
+// document on every pass and stores nothing between passes, like
+// the rest of status.
+type PendingDisruption struct {
+	// Condition names the convergence condition that reported this
+	// entry: SpecConverged, ClusterConverged, VersionConverged, or
+	// CredentialsConverged.
+	Condition string `json:"condition"`
+
+	// Kind says what applies the staged document. A reboot applies
+	// every staged document at once; a restart applies only the
+	// documents k3s reads when its process starts.
+	Kind DisruptionKind `json:"kind"`
+
+	// Hash is the staged document's identity, the value an
+	// approve-disruption annotation names to grant this change its
+	// disruption.
+	Hash string `json:"hash"`
+
+	// Summary says in one line what the document changes.
+	Summary string `json:"summary"`
+}

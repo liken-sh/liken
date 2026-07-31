@@ -2863,3 +2863,48 @@ spec:
                           status again does not move this time, so
                           the field gives the length of time that
                           this verdict has held.
+                pending:
+                  type: array
+                  description: >-
+                    What this machine waits to apply: one entry for
+                    each staged document that needs a disruption.
+                    Each entry names the convergence condition that
+                    reported it, the kind of disruption that applies
+                    it, the staged document's hash, and a one-line
+                    summary. To grant one change its disruption on a
+                    machine whose rebootPolicy is Manual, annotate
+                    the machine with liken.sh/approve-disruption set
+                    to the entry's hash (the liken CLI's
+                    approve-reboot command does this). The grant is
+                    one-shot: once the change applies, its hash is no
+                    longer pending, and the next change hashes
+                    differently, so a stale annotation approves
+                    nothing.
+                  items:
+                    type: object
+                    required: [condition, kind, hash, summary]
+                    properties:
+                      condition:
+                        type: string
+                        description: >-
+                          The convergence condition that reported
+                          this entry, for example CredentialsConverged.
+                      kind:
+                        type: string
+                        enum: [Reboot, Restart]
+                        description: >-
+                          What applies the staged document. A reboot
+                          applies every staged document at once. A
+                          restart applies only the documents that k3s
+                          reads when its process starts, and the
+                          machine does not reboot.
+                      hash:
+                        type: string
+                        description: >-
+                          The staged document's identity: the value
+                          that an approve-disruption annotation names
+                          to grant this change its disruption.
+                      summary:
+                        type: string
+                        description: >-
+                          One line saying what the document changes.
