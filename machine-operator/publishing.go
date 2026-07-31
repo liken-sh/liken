@@ -121,6 +121,19 @@ func publishDevices(delivery hardware.Delivery) []publishedDevice {
 	return published
 }
 
+// hasRenderNode reports whether the device delivers a DRM render
+// node. The kernel names these /dev/dri/renderD<n>, and they are the
+// nodes that do GPU work without display authority: a container that
+// holds one can encode, decode, and compute. The render node is also
+// what makes sharing safe: the driver arbitrates concurrent clients
+// on it, and the lab measured twelve encoders dividing one integrated
+// GPU evenly.
+func hasRenderNode(delivery hardware.Delivery) bool {
+	return slices.ContainsFunc(delivery.DevNodes(), func(node string) bool {
+		return strings.HasPrefix(node, "/dev/dri/renderD")
+	})
+}
+
 // allGraphics reports whether every kind is part of the graphics
 // stack.
 func allGraphics(kinds []string) bool {

@@ -154,46 +154,57 @@ func inventoryDevices(discovered []hardware.Device,
 		if slices.ContainsFunc(delivery.Blocks(), func(b string) bool { return platform[b] }) {
 			continue
 		}
-		attrs := map[string]kubernetes.DeviceAttribute{}
-		// Attribute names are unqualified, so the Kubernetes API
-		// places them under the driver's own domain: a DeviceClass
-		// selector reads them as device.attributes["liken.sh"].driver
-		// and similar names. The code omits absent facts instead of
-		// publishing them empty, so a selector like
-		// `has(device.attributes["liken.sh"].serial)` means what it
-		// says.
-		for name, value := range map[string]string{
-			"bus":       d.Bus,
-			"driver":    d.Driver,
-			"class":     d.Class,
-			"classCode": d.ClassCode,
-			"subsystem": soleSubsystem(delivery),
-			"name":      attributeString(d.Name),
-			"modalias":  d.Modalias,
-			"serial":    attributeString(d.Serial),
-			"vendor":    d.Vendor,
-			"product":   d.Product,
-		} {
-			if value != "" {
-				attrs[name] = kubernetes.AttrString(value)
+		// One physical device can publish more than one slice
+		// device: p walks the devices the policy derived from this
+		// delivery. Its suffix names the slice device, joined to the
+		// physical device's own name, so the primary keeps the bare
+		// name and an allocation made before a split stays valid.
+		for _, p := range publishDevices(delivery) {
+			attrs := map[string]kubernetes.DeviceAttribute{}
+			// Attribute names are unqualified, so the Kubernetes API
+			// places them under the driver's own domain: a DeviceClass
+			// selector reads them as device.attributes["liken.sh"].driver
+			// and similar names. The code omits absent facts instead of
+			// publishing them empty, so a selector like
+			// `has(device.attributes["liken.sh"].serial)` means what it
+			// says. Every published device carries its physical parent's
+			// identifying attributes: the companion is the same silicon,
+			// the same driver, and the same address as its primary.
+			for name, value := range map[string]string{
+				"bus":       d.Bus,
+				"driver":    d.Driver,
+				"class":     d.Class,
+				"classCode": d.ClassCode,
+				"subsystem": p.Subsystem,
+				"name":      attributeString(d.Name),
+				"modalias":  d.Modalias,
+				"serial":    attributeString(d.Serial),
+				"vendor":    d.Vendor,
+				"product":   d.Product,
+			} {
+				if value != "" {
+					attrs[name] = kubernetes.AttrString(value)
+				}
 			}
+			// A render node is the fact a workload actually selects on. A
+			// person who deploys a transcoder asks for any GPU that can
+			// encode, and asking for a vendor and a product ID instead
+			// names one machine's hardware in a document meant for a
+			// fleet. A DeviceClass that selects on it can never allocate
+			// the monitor buses by mistake.
+			if p.RenderNode {
+				attrs["renderNode"] = kubernetes.AttrBool(true)
+			}
+			device := kubernetes.SliceDevice{
+				Name:       deviceName(d) + p.Suffix,
+				Attributes: attrs,
+			}
+			if p.Shareable {
+				shared := true
+				device.AllowMultipleAllocations = &shared
+			}
+			out = append(out, device)
 		}
-		// A render node is the fact a workload actually selects on. A
-		// person who deploys a transcoder asks for any GPU that can
-		// encode, and asking for a vendor and a product ID instead
-		// names one machine's hardware in a document meant for a fleet.
-		if hasRenderNode(delivery) {
-			attrs["renderNode"] = kubernetes.AttrBool(true)
-		}
-		device := kubernetes.SliceDevice{
-			Name:       deviceName(d),
-			Attributes: attrs,
-		}
-		if shareable(delivery) {
-			shared := true
-			device.AllowMultipleAllocations = &shared
-		}
-		out = append(out, device)
 	}
 	// The list is sorted, so the same hardware always publishes the
 	// same slice. This lets the change detection in
@@ -203,61 +214,6 @@ func inventoryDevices(discovered []hardware.Device,
 		return strings.Compare(a.Name, b.Name)
 	})
 	return out
-}
-
-// soleSubsystem is the kind of device node a claim on this device
-// delivers, when every node it delivers is the same kind. A device
-// that hands over a tty and a misc node at once has no single answer,
-// and an attribute that names one of them would be a selector trap.
-func soleSubsystem(delivery hardware.Delivery) string {
-	if len(delivery.Subsystems()) != 1 {
-		return ""
-	}
-	return delivery.Subsystems()[0]
-}
-
-// hasRenderNode reports whether the device delivers a DRM render
-// node. The kernel names these /dev/dri/renderD<n>, and they are the
-// nodes that do GPU work without display authority: a container that
-// holds one can encode, decode, and compute.
-func hasRenderNode(delivery hardware.Delivery) bool {
-	return slices.ContainsFunc(delivery.DevNodes(), func(node string) bool {
-		return strings.HasPrefix(node, "/dev/dri/renderD")
-	})
-}
-
-// shareable reports whether the API may allocate this device to more
-// than one claim.
-//
-// The rule is narrow, and it is meant to stay narrow. A GPU is
-// shareable because the kernel's own contract says so: the driver
-// arbitrates concurrent clients on a render node, and the lab measured
-// this holding, with twelve encoders on one integrated GPU dividing it
-// evenly between them. Nothing else on these buses has that contract.
-// A tty has one writer. A dongle's control endpoint has one owner.
-//
-// So the test is the render node, and then the other nodes the device
-// hands over. A render node beside a card node and a framebuffer is a
-// graphics device, whole. A render node beside a node from any other
-// subsystem is hardware liken has not met, and it stays exclusive
-// until somebody looks at it.
-//
-// The asymmetry sets that default. A device wrongly published as
-// shareable hands the same hardware to two workloads that each treat
-// it as theirs alone, and no DeviceClass, claim, or workload can
-// take that back, because only the driver writes a slice. A device
-// wrongly published as exclusive costs a claim that waits, where a
-// person can see it waiting.
-func shareable(delivery hardware.Delivery) bool {
-	if !hasRenderNode(delivery) {
-		return false
-	}
-	for _, subsystem := range delivery.Subsystems() {
-		if !graphicsSubsystems[subsystem] {
-			return false
-		}
-	}
-	return true
 }
 
 // deviceName turns a sysfs address into the DNS label the API

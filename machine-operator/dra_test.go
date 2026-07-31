@@ -55,39 +55,61 @@ func TestInventoryPublishesDrivenDeliverableDevices(t *testing.T) {
 	}
 }
 
-// gpu is the lab's virtio GPU and the testbed's integrated one: a
-// driven display device that delivers its two DRM nodes and the
-// legacy framebuffer the kernel's fbdev emulation creates beside
-// them. The lab guest showed the framebuffer, and a rule written
-// against the DRM nodes alone would have passed its tests and then
-// shared nothing on a real machine.
+// gpu is the testbed's integrated GPU: a driven display device whose
+// subtree delivers its two DRM nodes, the legacy framebuffer that
+// fbdev emulation creates beside them, and the i2c monitor-control
+// buses i915 registers for its display outputs. The lab guest showed
+// the framebuffer, and the testbed showed the i2c buses; each one
+// disproved a narrower rule.
 func gpu() ([]hardware.Device, func(hardware.Device) hardware.Delivery) {
 	return []hardware.Device{{
 			Bus: "pci", Address: "0000:00:02.0", Driver: "i915", Class: "display",
-			ClassCode: "030000", Name: "Alder Lake-N [UHD Graphics]", Vendor: "8086", Product: "46d1",
+			ClassCode: "030000", Name: "Alder Lake-N [UHD Graphics]", Vendor: "8086", Product: "46d2",
 		}}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{
 			{Path: "/dev/dri/card0", Subsystem: "drm"},
 			{Path: "/dev/dri/renderD128", Subsystem: "drm"},
 			{Path: "/dev/fb0", Subsystem: "graphics"},
+			{Path: "/dev/i2c-0", Subsystem: "i2c-dev"},
+			{Path: "/dev/i2c-1", Subsystem: "i2c-dev"},
 		}})
 }
 
-func TestInventorySharesADeviceThatMultiplexes(t *testing.T) {
+func TestInventorySplitsTheGPUAndSharesTheGraphicsHalf(t *testing.T) {
 	discovered, inspect := gpu()
 	devices := inventoryDevices(discovered, inspect, nil)
 
-	if len(devices) != 1 {
-		t.Fatalf("devices = %+v, want 1", devices)
+	if len(devices) != 2 {
+		t.Fatalf("devices = %+v, want the graphics device and its i2c companion", devices)
 	}
-	d := devices[0]
-	if d.AllowMultipleAllocations == nil || !*d.AllowMultipleAllocations {
+	graphics, i2c := devices[0], devices[1]
+
+	if graphics.Name != "pci-0000-00-02-0" {
+		t.Errorf("name = %q, want the bare name, so an existing allocation stays valid", graphics.Name)
+	}
+	if graphics.AllowMultipleAllocations == nil || !*graphics.AllowMultipleAllocations {
 		t.Error("a device that delivers only DRM nodes may be allocated more than once")
 	}
-	if d.Attributes["renderNode"].Bool == nil || !*d.Attributes["renderNode"].Bool {
+	if graphics.Attributes["renderNode"].Bool == nil || !*graphics.Attributes["renderNode"].Bool {
 		t.Error("a render node is the fact a transcoding workload selects on")
 	}
-	if got := d.Attributes["classCode"].String; got == nil || *got != "030000" {
-		t.Errorf("classCode = %v, want the whole code", got)
+	if got := graphics.Attributes["subsystem"].String; got == nil || *got != "drm" {
+		t.Errorf("subsystem = %v, want drm now that the delivery is one kind", got)
+	}
+
+	if i2c.Name != "pci-0000-00-02-0-i2c-dev" {
+		t.Errorf("name = %q, want the bare name plus the subsystem", i2c.Name)
+	}
+	if i2c.AllowMultipleAllocations != nil {
+		t.Error("two raw writers on one i2c wire have no arbitration contract")
+	}
+	if _, ok := i2c.Attributes["renderNode"]; ok {
+		t.Error("the i2c companion has no render node")
+	}
+	if got := i2c.Attributes["subsystem"].String; got == nil || *got != "i2c-dev" {
+		t.Errorf("subsystem = %v", got)
+	}
+	if got := i2c.Attributes["driver"].String; got == nil || *got != "i915" {
+		t.Errorf("driver = %v, want the parent's identifying attributes", got)
 	}
 }
 
