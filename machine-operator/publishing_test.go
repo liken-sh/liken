@@ -110,9 +110,9 @@ func TestPublishReturnsNothingForAnEmptyDelivery(t *testing.T) {
 }
 
 func TestPublishOrdersThePrimaryFirst(t *testing.T) {
-	// The primary carries the bare name, and Task 4 resolves an
-	// allocated name by taking the first published entry whose full
-	// name matches, so the order must be deterministic.
+	// The primary carries the bare name, and resolveAllocated finds
+	// it as the published entry whose Suffix is empty. A deterministic
+	// order means the same hardware always publishes the same devices.
 	published := publishDevices(hardware.Delivery{Nodes: []hardware.DeliveredNode{
 		{Path: "/dev/i2c-0", Subsystem: "i2c-dev"},
 		{Path: "/dev/dri/renderD128", Subsystem: "drm"},

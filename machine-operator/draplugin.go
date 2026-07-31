@@ -218,7 +218,7 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 		}
 		published, ok := resolveAllocated(result.Device, draSysfsRoot, byName)
 		if !ok {
-			return fail("allocated device %s is not present", result.Device)
+			return fail("allocated device %s is not in this machine's inventory now", result.Device)
 		}
 		nodes := make([]cdiDeviceNode, 0, len(published.Nodes))
 		for _, path := range published.Nodes {

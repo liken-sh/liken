@@ -26,9 +26,9 @@ Each entry is one device you can claim:
         class: {string: display}
         classCode: {string: "030000"}
         driver: {string: i915}
-        modalias: {string: "pci:v00008086d000046D1..."}
+        modalias: {string: "pci:v00008086d000046D2..."}
         name: {string: Alder Lake-N [UHD Graphics]}
-        product: {string: 46d1}
+        product: {string: 46d2}
         renderNode: {bool: true}
         subsystem: {string: drm}
         vendor: {string: "8086"}
@@ -38,9 +38,9 @@ Each entry is one device you can claim:
         class: {string: display}
         classCode: {string: "030000"}
         driver: {string: i915}
-        modalias: {string: "pci:v00008086d000046D1..."}
+        modalias: {string: "pci:v00008086d000046D2..."}
         name: {string: Alder Lake-N [UHD Graphics]}
-        product: {string: 46d1}
+        product: {string: 46d2}
         subsystem: {string: i2c-dev}
         vendor: {string: "8086"}
 
@@ -48,9 +48,9 @@ This machine publishes two devices for one GPU. i915 registers an
 i2c monitor-control bus for each display output, and those buses are
 not graphics nodes, so liken publishes them as their own device. A
 claim on `pci-0000-00-02-0` delivers the `/dev/dri` nodes only, and
-more than one claim can allocate it. A claim on
-`pci-0000-00-02-0-i2c-dev` delivers the monitor buses, to one claim
-at a time.
+more than one claim can allocate it. The device
+`pci-0000-00-02-0-i2c-dev` allocates to one claim at a time, and that
+claim receives the monitor buses.
 
 If the hardware you expect is not in the list, no driver is bound to
 it. Look at the hardware the machine reports that it cannot drive:
@@ -89,11 +89,17 @@ for each kind of device that your deployments ask for.
         - cel:
             expression: |
               device.driver == "liken.sh" &&
-              device.attributes["liken.sh"].subsystem == "drm"
+              has(device.attributes["liken.sh"].renderNode)
 
-Select on `subsystem` or on `renderNode`, not on `driver` alone. The
-i2c companion device carries the same `driver` attribute, and a class
-that matches both can allocate the monitor buses to your transcoder.
+liken publishes an attribute only when it is true of the hardware, so
+`has()` is the complete test. Guard an attribute a device may lack
+with `has()` before you read it. The Kubernetes API treats an
+unguarded read of a missing attribute as an evaluation error, and an
+evaluation error aborts the whole allocation.
+
+Do not select on `driver` alone. The i2c companion device carries the
+same `driver` attribute. It carries no `renderNode`, and a class that
+matches both can allocate the monitor buses to your transcoder.
 
 This class matches any GPU with a DRM render node, on any machine in
 the fleet. A selector that asks for a vendor and a product ID names
@@ -220,7 +226,9 @@ usually no device matched the claim. Do these checks in this order:
    published. If the device is not there, no driver is bound to it:
    go back to step 2.
 2. Compare your selector with the device's attributes. A selector that
-   names an attribute the device does not have matches nothing.
+   reads an attribute the device does not have errors on that device
+   and aborts the allocation, so it never matches. Guard the reference
+   with `has()` so an absent attribute means "does not match" instead.
 3. If the device is published and it matches, another claim can
    already hold it. Find the holder:
 

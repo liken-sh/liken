@@ -60,12 +60,13 @@ var draNaming = sync.OnceValue(func() *hardware.PCIIDs {
 })
 
 // maxSliceDevices is the API's limit on devices in one
-// ResourceSlice. One slice per node is enough for whole PCI and USB
-// devices: a busy server has dozens of devices, and the limit is
-// 128. If a machine ever exceeds this limit, the operator drops the
-// overflow and reports it, rather than splitting devices
-// across slices. This will change if real hardware needs the
-// multi-slice pool protocol.
+// ResourceSlice. One slice per node is enough: a physical device
+// publishes at most a primary and one companion, so a busy server's
+// dozens of physical devices become at most twice as many published
+// devices, still far under the limit of 128. If a machine ever
+// exceeds this limit, the operator drops the overflow and reports
+// it, rather than splitting devices across slices. This will change
+// if real hardware needs the multi-slice pool protocol.
 const maxSliceDevices = 128
 
 // publishDeviceInventory converges this node's ResourceSlice with
@@ -155,10 +156,11 @@ func inventoryDevices(discovered []hardware.Device,
 			continue
 		}
 		// One physical device can publish more than one slice
-		// device: p walks the devices the policy derived from this
-		// delivery. Its suffix names the slice device, joined to the
-		// physical device's own name, so the primary keeps the bare
-		// name and an allocation made before a split stays valid.
+		// device: the loop publishes one slice device for each device
+		// the policy derived from this delivery. Its suffix names the
+		// slice device, joined to the physical device's own name, so
+		// the primary keeps the bare name and an allocation made
+		// before a split stays valid.
 		for _, p := range publishDevices(delivery) {
 			attrs := map[string]kubernetes.DeviceAttribute{}
 			// Attribute names are unqualified, so the Kubernetes API
