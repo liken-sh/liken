@@ -81,10 +81,52 @@ func discoverBlockDevices() []machine.BlockDevice {
 		// is normal.
 		d.Model = sysfsString(dir, "device/model")
 		d.Serial = sysfsString(dir, "serial", "device/serial")
+		if d.Serial == "" {
+			// Some drivers, and some virtualized controllers, answer
+			// SCSI inquiries but mirror no serial into a plain sysfs
+			// attribute. Vital product data page 0x80 is the
+			// fallback: every SCSI target, and every SATA disk
+			// through libata's SCSI translation, answers it.
+			d.Serial = scsiVPD80Serial(dir)
+		}
+
+		d.StableNames = stableNames(name)
 
 		disks = append(disks, d)
 	}
 	return disks
+}
+
+// stableDiskByID and stableDiskByPath are the directories udev's own
+// rules populate under /dev/disk, and the ones this file's own link
+// trees (disklinks.go and its siblings) populate in the same shape.
+// discoverBlockDevices renders StableNames as paths under these
+// directories so that a name in status is the exact path a spec can
+// paste back in, whether or not the link that path names has been
+// built yet: discovery computes a disk's identity from sysfs
+// directly, the same way the link trees do, rather than reading the
+// trees back.
+const (
+	stableDiskByID   = "/dev/disk/by-id/"
+	stableDiskByPath = "/dev/disk/by-path/"
+)
+
+// stableNames renders the full paths of every name that identifies
+// one disk across boots: every by-id name first, because a by-id
+// name follows the disk's own firmware, then the by-path name, when
+// the disk's port resolves to one, because a by-path name follows
+// the port instead. A disk with neither, for example a SATA disk
+// with no WWN behind a bus diskPathName does not recognize, gets no
+// stable names at all.
+func stableNames(name string) []string {
+	var names []string
+	for _, id := range diskIDNames(name) {
+		names = append(names, stableDiskByID+id)
+	}
+	if path := diskPathName(name); path != "" {
+		names = append(names, stableDiskByPath+path)
+	}
+	return names
 }
 
 // sysfsString reads the first of the named attributes that exists, as
@@ -126,6 +168,9 @@ func reportBlockDevices() {
 		}
 		if d.Serial != "" {
 			details = append(details, "serial "+d.Serial)
+		}
+		if len(d.StableNames) > 0 {
+			details = append(details, d.StableNames[0])
 		}
 		fmt.Printf("liken: disk %s: %s\n", devicePath(d), strings.Join(details, ", "))
 	}

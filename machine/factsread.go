@@ -344,6 +344,9 @@ func (t FactsTree) readBlockDevices() ([]BlockDevice, error) {
 		if d.Serial, err = t.readFact(filepath.Join(base, "serial")); err != nil {
 			return nil, err
 		}
+		if d.StableNames, err = t.readListFact(filepath.Join(base, "stableNames")); err != nil {
+			return nil, err
+		}
 		devices = append(devices, d)
 	}
 	return devices, nil

@@ -171,6 +171,51 @@ func TestDiscoverBlockDevicesTrimsNULPaddedSerials(t *testing.T) {
 	}
 }
 
+func TestDiscoverBlockDevicesFillsStableNames(t *testing.T) {
+	sys, _ := fakeMachine(t)
+	dir := fakeDisk(t, sys, "sda", "pci0000:00", "0000:00:1f.2", "ata3", "host2",
+		"target2:0:0", "2:0:0:0", "block", "sda")
+	writeSysfs(t, filepath.Join(dir, "device"), "wwid", "naa.5002538d40a45c88\n")
+
+	disks := discoverBlockDevices()
+	if len(disks) != 1 {
+		t.Fatalf("discovered %d disks, want 1: %v", len(disks), disks)
+	}
+	want := []string{
+		"/dev/disk/by-id/wwn-0x5002538d40a45c88",
+		"/dev/disk/by-id/scsi-35002538d40a45c88",
+		"/dev/disk/by-path/pci-0000:00:1f.2-ata-3",
+	}
+	if !equalNames(disks[0].StableNames, want) {
+		t.Errorf("got %v, want %v", disks[0].StableNames, want)
+	}
+	reportBlockDevices()
+}
+
+func TestDiscoverBlockDevicesWithNoIdentityHasNoStableNames(t *testing.T) {
+	sys, dev := fakeMachine(t)
+	addDisk(t, sys, dev, "vda", 2<<30, nil)
+
+	disks := discoverBlockDevices()
+	if len(disks) != 1 || disks[0].StableNames != nil {
+		t.Errorf("a disk with no identifying attributes got %v, want no stable names", disks[0].StableNames)
+	}
+}
+
+func TestDiscoverBlockDevicesFillsSerialFromVPD80(t *testing.T) {
+	sys, dev := fakeMachine(t)
+	addDisk(t, sys, dev, "sda", 8<<30, nil)
+	page := []byte{0x00, 0x80, 0x00, 0x08, 'S', '3', 'Z', '1', ' ', ' ', ' ', ' '}
+	if err := os.WriteFile(filepath.Join(sys, "sda", "device", "vpd_pg80"), page, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	disks := discoverBlockDevices()
+	if len(disks) != 1 || disks[0].Serial != "S3Z1" {
+		t.Errorf("a SATA disk with no plain serial attribute got %+v, want serial S3Z1", disks)
+	}
+}
+
 func TestDiscoverBlockDevicesWithNoSysfsReportsNothing(t *testing.T) {
 	fakeMachine(t)
 	sysBlock = filepath.Join(t.TempDir(), "no-sys-block")

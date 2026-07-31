@@ -380,12 +380,23 @@ type UnclaimedDevice struct {
 // sysfs. Name is the kernel's name for this boot, such as vda or
 // nvme0n1, assigned in driver probe order. It addresses the device
 // within this boot, but it does not identify the device across
-// boots. Model and serial come from the device itself.
+// boots. StableNames carries the names that do. Model and serial
+// come from the device itself.
 type BlockDevice struct {
 	Name      string `json:"name"`
 	SizeBytes uint64 `json:"sizeBytes,omitempty"`
 	Model     string `json:"model,omitempty"`
 	Serial    string `json:"serial,omitempty"`
+
+	// StableNames is every name this disk answers to across boots:
+	// each by-id name, built from a value the disk's own controller
+	// reports, then the by-path name, built from the port the disk
+	// sits on, when the disk has one. spec.storage.<role>.device
+	// accepts any name in this list. The first entry is the one to
+	// prefer, because a by-id name follows the disk itself, while a
+	// by-path name follows the port and stops naming the disk the
+	// moment it moves to a different bay.
+	StableNames []string `json:"stableNames,omitempty"`
 }
 
 // Backing is where a storage role's data actually lives. There are

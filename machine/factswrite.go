@@ -176,6 +176,7 @@ func (t FactsTree) WriteBlockDevices(devices []BlockDevice) error {
 			t.writeFact(filepath.Join(base, "sizeBytes"), formatUint(d.SizeBytes)),
 			t.writeFact(filepath.Join(base, "model"), d.Model),
 			t.writeFact(filepath.Join(base, "serial"), d.Serial),
+			t.writeListFact(filepath.Join(base, "stableNames"), d.StableNames),
 		); err != nil {
 			return t.report(err)
 		}

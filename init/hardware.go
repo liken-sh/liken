@@ -97,7 +97,7 @@ func watchHardware(catalog *hardware.Catalog, tree machine.FactsTree, last []mac
 			for _, line := range hardwareTransitions(last, unclaimed, devices) {
 				fmt.Println(line)
 			}
-			if !slices.EqualFunc(last, unclaimed, unclaimedEqual) || !slices.Equal(lastDisks, disks) {
+			if !slices.EqualFunc(last, unclaimed, unclaimedEqual) || !slices.EqualFunc(lastDisks, disks, blockDeviceEqual) {
 				tree.WriteUnclaimed(unclaimed)
 				tree.WriteBlockDevices(disks)
 			}
@@ -234,4 +234,14 @@ func unclaimedEqual(a, b machine.UnclaimedDevice) bool {
 	return a.Modalias == b.Modalias && a.Bus == b.Bus && a.Name == b.Name &&
 		a.Class == b.Class && a.Message == b.Message &&
 		slices.Equal(a.Candidates, b.Candidates)
+}
+
+// blockDeviceEqual compares two disk inventory entries field for
+// field. StableNames is a slice, so BlockDevice cannot use slices.Equal
+// directly; this function is its stand-in, the same role
+// unclaimedEqual plays for UnclaimedDevice above.
+func blockDeviceEqual(a, b machine.BlockDevice) bool {
+	return a.Name == b.Name && a.SizeBytes == b.SizeBytes &&
+		a.Model == b.Model && a.Serial == b.Serial &&
+		slices.Equal(a.StableNames, b.StableNames)
 }

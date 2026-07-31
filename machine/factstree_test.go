@@ -152,7 +152,14 @@ func everythingSet() *MachineStatus {
 			CPUs: 4, MemoryBytes: 4_294_967_296,
 			BlockDevices: []BlockDevice{
 				{Name: "vda", SizeBytes: 2_147_483_648, Serial: "liken-lab-state"},
-				{Name: "sda", SizeBytes: 4_294_967_296, Model: "QEMU HARDDISK"},
+				{
+					Name: "sda", SizeBytes: 4_294_967_296, Model: "QEMU HARDDISK",
+					StableNames: []string{
+						"/dev/disk/by-id/wwn-0x5002538d40a45c88",
+						"/dev/disk/by-id/scsi-35002538d40a45c88",
+						"/dev/disk/by-path/pci-0000:00:1f.2-ata-3",
+					},
+				},
 			},
 			Unclaimed: []UnclaimedDevice{
 				{

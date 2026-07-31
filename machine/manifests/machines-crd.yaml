@@ -1138,8 +1138,9 @@ spec:
                         kernel's name for this boot. The kernel
                         assigns the name in probe order, so the name
                         identifies the device for this boot only and
-                        not permanently. The model and the serial
-                        come from the device itself.
+                        not permanently. The stable names identify
+                        the device across boots. The model and the
+                        serial come from the device itself.
                       x-kubernetes-list-type: map
                       x-kubernetes-list-map-keys: [name]
                       items:
@@ -1168,6 +1169,21 @@ spec:
                               The serial number that the device
                               reports. This field is empty when the
                               device reports none.
+                          stableNames:
+                            type: array
+                            description: >-
+                              Every name that identifies this disk
+                              across boots. spec.storage.<role>.device
+                              accepts any name in this list. The
+                              first by-id entry is the one to prefer.
+                              A by-id name follows the disk itself,
+                              so it survives a swap into a different
+                              bay. A by-path name follows the port
+                              instead, and stops naming the disk
+                              after that swap.
+                            x-kubernetes-list-type: atomic
+                            items:
+                              type: string
                     unclaimed:
                       type: array
                       description: >-
