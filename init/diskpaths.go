@@ -58,9 +58,16 @@ var usbPortSegmentPattern = regexp.MustCompile(`^\d+-[0-9.]+$`)
 var iscsiSessionPattern = regexp.MustCompile(`^session\d+$`)
 
 // nvmeNsidPattern reads the namespace ID off the end of an NVMe block
-// device's own name, for example the 1 in nvme0n1. The controller
-// number ahead of it names the card, not the namespace, so it plays
-// no part in the disk's by-path name.
+// device's own name, for example the 1 in nvme0n1. diskPathName only
+// falls back to this parse when the kernel's own nsid attribute is
+// absent, because the two numbers agree only when a controller's
+// namespaces are created in order starting at 1: the block name's
+// trailing digit is the Nth namespace this controller probed, while
+// the nsid attribute is the namespace's own number as the controller
+// reports it. A controller that lost namespace 1 and kept only
+// namespace 2 still names its sole block device nvme0n1, because the
+// kernel numbers by probe order, so a name built from that digit
+// would claim namespace 1 while the disk is actually namespace 2.
 var nvmeNsidPattern = regexp.MustCompile(`n(\d+)$`)
 
 // diskPathName computes the local by-path name for one disk: the port
@@ -98,6 +105,13 @@ func diskPathName(name string) string {
 	}
 	for _, seg := range segments {
 		if seg == "nvme" {
+			// udev's path_id builtin reads the namespace's own nsid
+			// attribute rather than parsing the block name, so this
+			// does the same and only parses the name on an old kernel
+			// that predates the attribute.
+			if nsid := sysfsString(filepath.Join(sysBlock, name), "nsid"); nsid != "" {
+				return "pci-" + pciSlot + "-nvme-" + nsid
+			}
 			if nsid := nvmeNsidPattern.FindStringSubmatch(name); nsid != nil {
 				return "pci-" + pciSlot + "-nvme-" + nsid[1]
 			}

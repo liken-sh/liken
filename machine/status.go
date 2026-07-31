@@ -392,10 +392,12 @@ type BlockDevice struct {
 	// each by-id name, built from a value the disk's own controller
 	// reports, then the by-path name, built from the port the disk
 	// sits on, when the disk has one. spec.storage.<role>.device
-	// accepts any name in this list. The first entry is the one to
-	// prefer, because a by-id name follows the disk itself, while a
-	// by-path name follows the port and stops naming the disk the
-	// moment it moves to a different bay.
+	// accepts any name in this list. The first by-id entry is the one
+	// to prefer, because a by-id name follows the disk itself, while
+	// a by-path name follows the port and stops naming the disk the
+	// moment it moves to a different bay. A disk with no by-id name
+	// carries only a by-path name, so the first entry overall is not
+	// always the one to prefer.
 	StableNames []string `json:"stableNames,omitempty"`
 }
 

@@ -108,10 +108,11 @@ type claimPlan struct {
 // never by the device the spec declares, so a stale or ambiguous
 // device on an already-satisfied role changes nothing that is about
 // to be written; this function only resolves it on the chance that it
-// names a disk some other, still-missing role also wants. A
-// still-missing role is different: its device is the only way to find
-// the disk it names, so a device that resolves to no disk, or to two,
-// fails reconciliation at once, before any group forms.
+// names a disk that another, still-missing role also names, one that
+// recognition has not yet found. A still-missing role is different:
+// its device is the only way to find the disk it names, so a device
+// that resolves to no disk, or to two, fails reconciliation at once,
+// before any group forms.
 func planAllClaims(roles []machine.DeclaredRole, found map[machine.StorageRoleName]partition) ([]claimPlan, error) {
 	type group struct {
 		disk  *machine.BlockDevice
@@ -194,7 +195,7 @@ func oneSizelessRole(disk string, roles []machine.DeclaredRole) error {
 			continue
 		}
 		if remainder != nil {
-			return fmt.Errorf("storage roles %s and %s both want the rest of %s; only one role per disk may omit its size",
+			return fmt.Errorf("storage roles %s and %s both omit their size on %s; only one role per disk may omit its size",
 				remainder.Name, role.Name, disk)
 		}
 		remainder = &role

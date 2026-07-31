@@ -296,7 +296,7 @@ func (s StorageSpec) Validate() error {
 		if role.Size == "" {
 			if other, ok := remainders[role.Device]; ok {
 				return fmt.Errorf(
-					"storage roles %s and %s both want the rest of %s; only one role per disk may omit its size",
+					"storage roles %s and %s both omit their size on %s; only one role per disk may omit its size",
 					other, role.Name, role.Device)
 			}
 			remainders[role.Device] = role.Name

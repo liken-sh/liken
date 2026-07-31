@@ -288,7 +288,7 @@ func TestPlanAllClaimsRefusesADiskThatAlreadyCarriesARole(t *testing.T) {
 	// the same disk, is still missing. The table is liken's, and
 	// something changed since. This must run through planAllClaims
 	// itself: it is the function that groups roles by resolved disk
-	// and decides whether a group is safe to claim, not planClaim,
+	// and reports whether a group is safe to claim, not planClaim,
 	// which only lays out a table it is handed.
 	sys, dev := fakeMachine(t)
 	addDisk(t, sys, dev, "vda", 2<<30, make([]byte, 2_048))

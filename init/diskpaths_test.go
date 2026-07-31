@@ -21,12 +21,31 @@ func TestDiskPathNameSATA(t *testing.T) {
 	}
 }
 
+// TestDiskPathNameNVME covers a kernel old enough to publish no nsid
+// attribute: diskPathName falls back to the instance number parsed off
+// the block name, which for a controller's first namespace equals the
+// nsid anyway.
 func TestDiskPathNameNVME(t *testing.T) {
 	sys, _ := fakeMachine(t)
 	fakeDisk(t, sys, "nvme0n1", "pci0000:00", "0000:00:1c.0", "0000:03:00.0",
 		"nvme", "nvme0", "nvme0n1")
 
 	if got, want := diskPathName("nvme0n1"), "pci-0000:03:00.0-nvme-1"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// TestDiskPathNameNVMEReadsNsidAttribute covers a controller whose
+// namespaces are not contiguous from 1: the block name's trailing
+// digit counts probe order, not the namespace's own number, so a disk
+// named nvme0n2 can still be namespace 5.
+func TestDiskPathNameNVMEReadsNsidAttribute(t *testing.T) {
+	sys, _ := fakeMachine(t)
+	fakeDisk(t, sys, "nvme0n2", "pci0000:00", "0000:00:1c.0", "0000:03:00.0",
+		"nvme", "nvme0", "nvme0n2")
+	writeSysfs(t, filepath.Join(sys, "nvme0n2"), "nsid", "5\n")
+
+	if got, want := diskPathName("nvme0n2"), "pci-0000:03:00.0-nvme-5"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
