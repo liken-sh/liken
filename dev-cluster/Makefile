@@ -185,11 +185,11 @@ QEMU_BOOTINDEX_bios = ,bootindex=1
 QEMU_BOOTINDEX = $(QEMU_BOOTINDEX_$(FIRMWARE))
 
 # Only the leader node forwards the API port to the host. kubectl on
-# the host reaches the cluster through the control plane, and the
-# cluster has exactly one control plane (see
-# ../identity/kubeconfig.go). Forwarding the same host port from
-# every node would also collide. This forward reaches the cluster as
-# a whole, not any particular machine.
+# the host reaches the cluster through this one forwarded port (see
+# ../cli/cluster.go, on why the CLI's -server flag exists at all).
+# Forwarding the same host port from every node would also collide.
+# This forward reaches the cluster as a whole, not any particular
+# machine.
 ifeq ($(NODE),node-1)
 API_FORWARD := ,hostfwd=tcp:127.0.0.1:16443-:6443
 else

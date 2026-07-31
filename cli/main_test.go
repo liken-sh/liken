@@ -57,14 +57,15 @@ func TestRunChecksArgumentCounts(t *testing.T) {
 }
 
 func TestRunMintsAndComputesAKubeconfig(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "identity")
-	if err := run([]string{"mint", dir}); err != nil {
+	deploymentDir := t.TempDir()
+	identityDir := filepath.Join(deploymentDir, "identity")
+	if err := run([]string{"mint", identityDir}); err != nil {
 		t.Fatal(err)
 	}
-	if err := run([]string{"kubeconfig", dir}); err != nil {
+	if err := run([]string{"kubeconfig", "-server", "https://127.0.0.1:16443", deploymentDir}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "kubeconfig")); err != nil {
+	if _, err := os.Stat(filepath.Join(identityDir, "kubeconfig")); err != nil {
 		t.Error("no kubeconfig was written")
 	}
 }

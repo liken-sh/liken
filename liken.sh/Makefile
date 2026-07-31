@@ -113,7 +113,7 @@ identity: identity/tls/server-ca.crt identity/token
 # from outside means overriding the server, and the drills do this
 # with kubectl's --server and --tls-server-name flags.
 kubeconfig: identity/tls/server-ca.crt $(CLI)
-	$(CLI) kubeconfig identity
+	$(CLI) kubeconfig .
 
 # The deployment layer: this cluster's manifests and identity,
 # packed as a cpio archive that every boot loads over the generic

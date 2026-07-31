@@ -63,9 +63,11 @@ usage:
       have to be a liken cluster: any k3s cluster's identity can be
       adopted, so liken machines can join a cluster you already run.
 
-  liken kubeconfig <identity-dir>
+  liken kubeconfig [-server URL] <deployment-dir>
       Write an admin kubeconfig: the credential kubectl uses to
-      administer the cluster.
+      administer the cluster. The endpoint comes from the
+      deployment's cluster.yaml; -server overrides it, for when
+      that address is not reachable from this machine.
 
   liken layer <manifests-dir> <identity-dir> <output.cpio>
       Pack your cluster's half of the operating system into one small
@@ -163,10 +165,16 @@ func run(args []string) error {
 		}
 		return identity.Adopt(args[1], args[2], os.Stdout)
 	case "kubeconfig":
-		if len(args) != 2 {
-			return fmt.Errorf("usage: liken kubeconfig <identity-dir>")
+		fs := flag.NewFlagSet("kubeconfig", flag.ContinueOnError)
+		server := fs.String("server", "", "the API server address, when cluster.yaml's endpoint is not reachable from here")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
 		}
-		return identity.Kubeconfig(args[1], os.Stdout)
+		if fs.NArg() != 1 {
+			return fmt.Errorf("usage: liken kubeconfig [-server URL] <deployment-dir>")
+		}
+		_, err := writeKubeconfig(fs.Arg(0), *server, os.Stdout)
+		return err
 	case "layer":
 		if len(args) != 4 {
 			return fmt.Errorf("usage: liken layer <manifests-dir> <identity-dir> <output.cpio>")

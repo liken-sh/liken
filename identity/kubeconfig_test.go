@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"sigs.k8s.io/yaml"
@@ -36,12 +37,12 @@ type kubeconfigDocument struct {
 	} `json:"users"`
 }
 
-// computedKubeconfig mints an identity, computes its kubeconfig, and
-// parses the result.
+// computedKubeconfig mints an identity, computes its kubeconfig
+// against the forwarded dev-lab address, and parses the result.
 func computedKubeconfig(t *testing.T) (string, kubeconfigDocument) {
 	t.Helper()
 	dir := mintedIdentity(t)
-	if err := Kubeconfig(dir, io.Discard); err != nil {
+	if err := Kubeconfig(dir, "https://127.0.0.1:16443", io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "kubeconfig"))
@@ -114,7 +115,7 @@ func TestKubeconfigEmbedsAWorkingKeypair(t *testing.T) {
 
 func TestKubeconfigMintsAFreshCredentialEachRun(t *testing.T) {
 	dir, doc := computedKubeconfig(t)
-	if err := Kubeconfig(dir, io.Discard); err != nil {
+	if err := Kubeconfig(dir, "https://127.0.0.1:16443", io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "kubeconfig"))
@@ -127,5 +128,19 @@ func TestKubeconfigMintsAFreshCredentialEachRun(t *testing.T) {
 	}
 	if bytes.Equal(doc.Users[0].User.ClientCertificateData, again.Users[0].User.ClientCertificateData) {
 		t.Error("a second run reused the admin certificate")
+	}
+}
+
+func TestKubeconfigCarriesTheServerItWasGiven(t *testing.T) {
+	dir := mintedIdentity(t)
+	if err := Kubeconfig(dir, "https://198.51.100.7:6443", io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "kubeconfig"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "server: https://198.51.100.7:6443") {
+		t.Fatal("the kubeconfig must carry the resolved endpoint")
 	}
 }

@@ -251,12 +251,16 @@ leaders make the control plane, and the followers join it.
 
 ## 6. Talk to your cluster
 
-    ./liken kubeconfig mycluster/identity
+    ./liken kubeconfig mycluster
 
 [`liken kubeconfig`](/docs/reference/cli/#liken-kubeconfig) writes
-`mycluster/identity/kubeconfig`, an administrator credential. Change
-its `server:` line to your cluster's endpoint: the `endpoint:` value in
-your `cluster.yaml`. Then:
+`mycluster/identity/kubeconfig`, an administrator credential. It points
+at the `endpoint:` in your `cluster.yaml`. If your workstation reaches
+the cluster at a different address, pass `-server`:
+
+    ./liken kubeconfig -server https://203.0.113.5:6443 mycluster
+
+Then:
 
     kubectl --kubeconfig mycluster/identity/kubeconfig get nodes
 

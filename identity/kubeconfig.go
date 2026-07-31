@@ -37,25 +37,21 @@ import (
 	"time"
 )
 
-// server is where the cluster is. QEMU forwards this host port to
-// the guest's API server. The dev-cluster Makefile's run target
-// defines that mapping. The serving certificate that k3s mints
-// covers 127.0.0.1 by default, so the forwarded connection verifies
-// without any extra SANs.
-const server = "https://127.0.0.1:16443"
-
 // Kubeconfig computes an admin credential from the identity in dir,
-// and writes dir/kubeconfig. Kubeconfig writes the result into the
-// identity directory and nowhere else. liken never changes
-// ~/.kube/config or any other kubeconfig that the operator already
-// has. Point kubectl at the file explicitly:
+// and writes dir/kubeconfig, pointed at server. The caller resolves
+// server: the CLI reads it from the deployment's cluster.yaml, or
+// takes it from the operator's -server flag when that document's
+// endpoint is not reachable from the workstation. Kubeconfig writes
+// the result into the identity directory and nowhere else. liken
+// never changes ~/.kube/config or any other kubeconfig that the
+// operator already has. Point kubectl at the file explicitly:
 //
 //	kubectl --kubeconfig dev-cluster/identity/kubeconfig get nodes
 //
 // Each run mints a fresh keypair and certificate. The certificate
 // lasts one year, which is generous for a development credential.
 // Running Kubeconfig again replaces it in seconds.
-func Kubeconfig(dir string, out io.Writer) error {
+func Kubeconfig(dir, server string, out io.Writer) error {
 	tls := filepath.Join(dir, "tls")
 
 	caCert, caKey, err := readCA(tls, "client-ca")

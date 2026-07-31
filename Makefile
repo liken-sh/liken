@@ -291,13 +291,17 @@ $(IDENTITY_DIR)/tls/server-ca.crt $(IDENTITY_DIR)/token &: | cli/dist/liken
 identity: $(IDENTITY_DIR)/tls/server-ca.crt $(IDENTITY_DIR)/token
 
 # This is an operator's admin credential, computed offline from the
-# client CA. The machine never has to provide it. See
-# identity/kubeconfig.go. Name this kubeconfig file explicitly in
-# commands, so you never touch a kubeconfig you already have:
+# client CA. The machine never has to provide it. The command reads
+# the endpoint from dev-cluster/cluster.yaml by default, but that
+# endpoint is the lab's own segment, 10.10.0.1:6443, which the host
+# cannot reach. -server points the kubeconfig at 16443 instead, the
+# port dev-cluster/Makefile forwards from the founding leader. Name
+# this kubeconfig file explicitly in commands, so you never touch a
+# kubeconfig you already have:
 #
 #   kubectl --kubeconfig dev-cluster/identity/kubeconfig get nodes
 kubeconfig: $(IDENTITY_DIR)/tls/server-ca.crt cli/dist/liken
-	cli/dist/liken kubeconfig $(IDENTITY_DIR)
+	cli/dist/liken kubeconfig -server https://127.0.0.1:16443 dev-cluster
 
 # This is where the OS build meets this repo's own deployment. The
 # dev cluster's composed artifacts land beside its manifests and
@@ -538,13 +542,12 @@ GITOPS_IMAGE_DIR := gitops-cluster/image
 $(GITOPS_IDENTITY_DIR)/tls/server-ca.crt $(GITOPS_IDENTITY_DIR)/token &: | cli/dist/liken
 	cli/dist/liken mint $(GITOPS_IDENTITY_DIR)
 
-# The computed kubeconfig points at the dev cluster's forwarded port
-# (identity/kubeconfig.go). This lab's leader forwards 17443, so
-# this rule edits the server line, the same edit the manual has a
-# real deployment make toward its own endpoint.
+# Same caveat as the dev cluster's kubeconfig target above: the
+# endpoint in gitops-cluster/cluster.yaml is the lab's own segment,
+# unreachable from the host. This lab's leader forwards 17443, one
+# above the dev cluster's 16443, so -server points there instead.
 kubeconfig-gitops: $(GITOPS_IDENTITY_DIR)/tls/server-ca.crt cli/dist/liken
-	cli/dist/liken kubeconfig $(GITOPS_IDENTITY_DIR)
-	sed -i 's|https://127.0.0.1:16443|https://127.0.0.1:17443|' $(GITOPS_IDENTITY_DIR)/kubeconfig
+	cli/dist/liken kubeconfig -server https://127.0.0.1:17443 gitops-cluster
 
 $(GITOPS_IMAGE_DIR)/deployment.cpio: cli/dist/liken \
 		gitops-cluster/cluster.yaml $(wildcard gitops-cluster/machines/*.yaml) \

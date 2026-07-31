@@ -101,7 +101,7 @@ func TestLayerLeavesTheKubeconfigBehind(t *testing.T) {
 	if err := identity.Mint(identityDir, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if err := identity.Kubeconfig(identityDir, io.Discard); err != nil {
+	if err := identity.Kubeconfig(identityDir, "https://127.0.0.1:16443", io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	out := filepath.Join(t.TempDir(), "deployment.cpio")

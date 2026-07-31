@@ -51,10 +51,13 @@ cluster](/docs/guides/adopt/) gives the steps.
 
 ## liken kubeconfig
 
-    liken kubeconfig <identity-dir>
+    liken kubeconfig [-server URL] <deployment-dir>
 
-Writes an administrator kubeconfig: the credential that `kubectl`
-uses to administer the cluster.
+Writes an administrator kubeconfig to
+`<deployment-dir>/identity/kubeconfig`: the credential that `kubectl`
+uses to administer the cluster. The server address comes from the
+`endpoint:` in the deployment's `cluster.yaml`. Pass `-server` when
+your machine reaches the cluster at a different address.
 
 ## liken layer
 
