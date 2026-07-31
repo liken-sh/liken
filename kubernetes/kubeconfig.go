@@ -60,8 +60,13 @@ func KubeconfigClient(path string) (*Client, error) {
 	if err := yaml.Unmarshal(raw, &kc); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
-	if len(kc.Clusters) == 0 || len(kc.Users) == 0 {
-		return nil, fmt.Errorf("%s names no cluster and user", path)
+	switch {
+	case len(kc.Clusters) == 0 && len(kc.Users) == 0:
+		return nil, fmt.Errorf("%s names no cluster and no user", path)
+	case len(kc.Clusters) == 0:
+		return nil, fmt.Errorf("%s names no cluster", path)
+	case len(kc.Users) == 0:
+		return nil, fmt.Errorf("%s names no user", path)
 	}
 	clusterEntry, userEntry := kc.Clusters[0].Cluster, kc.Users[0].User
 

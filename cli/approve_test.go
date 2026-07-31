@@ -86,6 +86,46 @@ func TestRenderPendingShowsEachChangeWithItsReason(t *testing.T) {
 	}
 }
 
+func TestRenderPendingOmitsTheReasonWhenTheConditionIsMissing(t *testing.T) {
+	m := &machine.Machine{
+		Metadata: api.ObjectMeta{Name: "nuc5"},
+		Status: machine.MachineStatus{
+			Pending: []machine.PendingDisruption{
+				{Condition: "CredentialsConverged", Kind: machine.DisruptionRestart,
+					Hash:    "3943abfa6adf0123456789abcdef0123456789abcdef0123456789abcdef0123",
+					Summary: "registry credentials for 2 hosts"},
+			},
+		},
+	}
+	got := renderPending(m)
+	if strings.Contains(got, "CredentialsConverged  \n") || strings.Contains(got, "CredentialsConverged \n") {
+		t.Fatalf("a missing reason left trailing spaces on the line:\n%s", got)
+	}
+	if !strings.Contains(got, "CredentialsConverged\n") {
+		t.Fatalf("missing a clean condition line in:\n%s", got)
+	}
+}
+
+func TestRenderPendingSaysARebootAppliesEveryStagedChange(t *testing.T) {
+	m := &machine.Machine{
+		Metadata: api.ObjectMeta{Name: "nuc5"},
+		Status: machine.MachineStatus{
+			Conditions: []api.Condition{
+				{Type: "VersionConverged", Status: api.ConditionFalse, Reason: "RebootPending"},
+			},
+			Pending: []machine.PendingDisruption{
+				{Condition: "VersionConverged", Kind: machine.DisruptionReboot,
+					Hash:    "aaaabbbbcccc0123456789abcdef0123456789abcdef0123456789abcdef0123",
+					Summary: "release 2026.07.31-001 on slot systemB"},
+			},
+		},
+	}
+	got := renderPending(m)
+	if !strings.Contains(got, "a reboot applies this, and every other staged change with it") {
+		t.Fatalf("missing the reboot-kind wording in:\n%s", got)
+	}
+}
+
 func TestRenderPendingSaysConverged(t *testing.T) {
 	m := &machine.Machine{Metadata: api.ObjectMeta{Name: "nuc5"}}
 	if got := renderPending(m); !strings.Contains(got, "nuc5 is converged; nothing is waiting") {

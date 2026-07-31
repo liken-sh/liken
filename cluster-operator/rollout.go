@@ -70,8 +70,11 @@ type rollout struct {
 
 // wantsTurn reports whether any of the machine's conditions carry
 // the AwaitingTurn reason. This reason means the machine has a
-// staged change, its rebootPolicy is Auto, and it is waiting only
-// for the cluster to approve its turn.
+// staged change and may take its disruption as soon as the cluster
+// grants a turn. That readiness comes from either of two paths: the
+// machine's rebootPolicy is Auto, or a person approved the change on
+// a Manual machine through the liken.sh/approve-disruption
+// annotation.
 func wantsTurn(m *machine.Machine) bool {
 	for _, c := range m.Status.Conditions {
 		if c.Reason == "AwaitingTurn" {

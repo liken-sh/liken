@@ -56,15 +56,15 @@ func renderPending(m *machine.Machine) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s is waiting on %s:\n", name, count)
 	for _, p := range pending {
-		reason := ""
+		condition := p.Condition
 		if c := api.FindCondition(m.Status.Conditions, p.Condition); c != nil {
-			reason = c.Reason
+			condition = fmt.Sprintf("%s  %s", p.Condition, c.Reason)
 		}
 		applies := "a reboot applies this, and every other staged change with it"
 		if p.Kind == machine.DisruptionRestart {
 			applies = "a k3s restart applies this; the machine does not reboot"
 		}
-		fmt.Fprintf(&b, "  %s  %s\n  %s (%.12s)\n  %s\n", p.Condition, reason, p.Summary, p.Hash, applies)
+		fmt.Fprintf(&b, "  %s\n  %s (%.12s)\n  %s\n", condition, p.Summary, p.Hash, applies)
 	}
 	return b.String()
 }

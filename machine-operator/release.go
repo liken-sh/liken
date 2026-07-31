@@ -161,13 +161,15 @@ func convergeSystemRelease(store machine.ManifestStore, liveCluster *cluster.Clu
 // decideSystemStaging finishes version convergence. A verified
 // download becomes a staged SystemRelease record, and that record
 // goes through exactly the reboot machinery every other staged
-// document uses. Manual policy reports RebootPending. A cluster
-// member waits for its turn from the rollout conductor. A granted
-// turn requests the reboot, gated through the drain like all the
-// rest. The proving boot is the reboot itself: init sets the
-// firmware's BootNext to the staged slot on the way down, and the
-// operator that comes up running the new release is the proof that
-// promotes the record.
+// document uses. Manual policy reports RebootPending until a person
+// approves the staged release through the approve-disruption
+// annotation. Once approved, or when the policy is Auto from the
+// start, a cluster member waits for its turn from the rollout
+// conductor. A granted turn requests the reboot, gated through the
+// drain like all the rest. The proving boot is the reboot itself:
+// init sets the firmware's BootNext to the staged slot on the way
+// down, and the operator that comes up running the new release is
+// the proof that promotes the record.
 func decideSystemStaging(ask fetchAsk, snap fetchSnapshot, m *machine.Machine, rejection *machine.Rejection, stagedHash string, t turn) convergence {
 	if snap.state != fetchVerified {
 		return convergence{condition: versionCondition(ask, snap)}
