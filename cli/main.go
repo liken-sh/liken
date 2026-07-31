@@ -69,6 +69,14 @@ usage:
       deployment's cluster.yaml; -server overrides it, for when
       that address is not reachable from this machine.
 
+  liken kubectl [-server URL] <deployment-dir> [args...]
+  liken stern   [-server URL] <deployment-dir> [args...]
+  liken flux    [-server URL] <deployment-dir> [args...]
+      Run the named tool from your PATH against the deployment's
+      cluster: resolve the credential, set KUBECONFIG, and hand the
+      terminal to the tool. Give liken's -server before the
+      directory; everything after the directory goes to the tool.
+
   liken layer <manifests-dir> <identity-dir> <output.cpio>
       Pack your cluster's half of the operating system into one small
       archive: your cluster and machine manifests, and your identity.
@@ -175,6 +183,8 @@ func run(args []string) error {
 		}
 		_, err := writeKubeconfig(fs.Arg(0), *server, os.Stdout)
 		return err
+	case "kubectl", "stern", "flux":
+		return passthrough(args[0], args[1:])
 	case "layer":
 		if len(args) != 4 {
 			return fmt.Errorf("usage: liken layer <manifests-dir> <identity-dir> <output.cpio>")

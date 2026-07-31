@@ -22,12 +22,17 @@ package main
 // with the tool (exec), so no deferred cleanup ever runs.
 
 import (
+	"flag"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/identity"
+	"golang.org/x/sys/unix"
 )
 
 // resolveEndpoint decides where the cluster is: the -server flag
@@ -62,4 +67,53 @@ func writeKubeconfig(dir, server string, out io.Writer) (string, error) {
 		return "", err
 	}
 	return filepath.Join(identityDir, "kubeconfig"), nil
+}
+
+// execTool is exec(2): it replaces this process with the tool, so
+// the tool owns the terminal and its exit code is liken's. It is a
+// variable so tests can observe the call instead of vanishing into
+// the exec.
+var execTool = unix.Exec
+
+// envWith returns the environment with one variable bound to one
+// value, whether or not it was set before. Appending a duplicate
+// would not do: when a variable appears twice in an environment,
+// which copy a program reads is the program's own accident.
+func envWith(environ []string, key, value string) []string {
+	kept := make([]string, 0, len(environ)+1)
+	for _, entry := range environ {
+		if !strings.HasPrefix(entry, key+"=") {
+			kept = append(kept, entry)
+		}
+	}
+	return append(kept, key+"="+value)
+}
+
+// passthrough runs one of the tools an operator already uses,
+// against the right cluster: it resolves the credential, sets
+// KUBECONFIG, and replaces this process with the tool from PATH.
+// liken does not reimplement kubectl, and it does not vendor these
+// binaries either: every command here is a credential and an
+// endpoint handed to a program the operator already chose to
+// install.
+func passthrough(tool string, args []string) error {
+	fs := flag.NewFlagSet(tool, flag.ContinueOnError)
+	server := fs.String("server", "", "the API server address, when cluster.yaml's endpoint is not reachable from here")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() < 1 {
+		return fmt.Errorf("usage: liken %s [-server URL] <deployment-dir> [args...]", tool)
+	}
+	kubeconfigPath, err := writeKubeconfig(fs.Arg(0), *server, io.Discard)
+	if err != nil {
+		return err
+	}
+	path, err := exec.LookPath(tool)
+	if err != nil {
+		return fmt.Errorf("%s is not on PATH; install it and run this again", tool)
+	}
+	return execTool(path,
+		append([]string{tool}, fs.Args()[1:]...),
+		envWith(os.Environ(), "KUBECONFIG", kubeconfigPath))
 }

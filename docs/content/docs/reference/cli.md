@@ -59,6 +59,33 @@ uses to administer the cluster. The server address comes from the
 `endpoint:` in the deployment's `cluster.yaml`. Pass `-server` when
 your machine reaches the cluster at a different address.
 
+## liken kubectl
+
+    liken kubectl [-server URL] <deployment-dir> [args...]
+
+Runs the `kubectl` from your `PATH` against the deployment's
+cluster. The command writes the admin kubeconfig (see
+[`liken kubeconfig`](#liken-kubeconfig)), sets `KUBECONFIG`, and
+hands the terminal to `kubectl`. Everything after the deployment
+directory goes to `kubectl` unchanged.
+
+## liken stern
+
+    liken stern [-server URL] <deployment-dir> [args...]
+
+Runs the `stern` from your `PATH` against the deployment's cluster,
+the same way `liken kubectl` runs `kubectl`. `stern` tails the logs
+of many pods at once.
+
+## liken flux
+
+    liken flux [-server URL] <deployment-dir> [args...]
+
+Runs the `flux` from your `PATH` against the deployment's cluster,
+the same way `liken kubectl` runs `kubectl`. liken plants the Flux
+engine when the cluster declares the `flux` feature, so this is the
+command that inspects it.
+
 ## liken layer
 
     liken layer <manifests-dir> <identity-dir> <output.cpio>
