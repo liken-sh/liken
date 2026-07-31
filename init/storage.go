@@ -328,20 +328,12 @@ func reconcileStorage(spec machine.StorageSpec) (machine.StorageStatus, error) {
 	}
 
 	// Plan the claims. Any role that is still missing must point at a
-	// blank disk. Group the roles by device, because roles that share
-	// a disk are claimed together in one partition table.
-	var claims []claimPlan
-	planned := map[string]bool{}
-	for _, role := range roles {
-		if _, ok := found[role.Name]; ok || planned[role.Device] {
-			continue
-		}
-		plan, err := planClaim(role.Device, roles, found)
-		if err != nil {
-			return status, err
-		}
-		claims = append(claims, plan)
-		planned[role.Device] = true
+	// blank disk. A role that is already found still matters here: if
+	// its device names a disk some other role still needs, that disk
+	// is not blank, and planAllClaims refuses it.
+	claims, err := planAllClaims(roles, found)
+	if err != nil {
+		return status, err
 	}
 
 	// Plan the growth. A recognized partition may be smaller than the
@@ -451,53 +443,75 @@ func diskByPath(device string) *machine.BlockDevice {
 	return nil
 }
 
-// awaitStorageDevices waits, boundedly, for the disks the spec
-// names to finish attaching. The wait ends the moment the spec is
-// satisfiable, through either of the two doors reconciliation can
-// take: every declared device is attached (a claim can proceed), or
-// every declared role is recognized on some attached disk (a disk
-// that moved controllers since its claim still carries its roles'
-// names, and recognition never consults the device path). A spec
-// that is still unsatisfiable at the deadline proceeds to judgment,
-// and the ordinary errors report what is missing. Polling, rather
-// than uevents, keeps this simple: the window is short, boots are
-// rare, and a walk of /sys/block costs nothing.
+// awaitStorageDevices waits, boundedly, for the spec to become
+// satisfiable. Recognition finds a role by the name written on its
+// partition, never by the device the spec declares, so this only has
+// to resolve the device of a role recognition has not already
+// satisfied. An already-recognized role's own device can be stale, or
+// even ambiguous, without meaning anything, because nothing is about
+// to be claimed for it. With a stable name, the wait is for the named
+// disk itself to attach, not for a kernel letter to appear: the
+// letter a disk happens to get this boot plays no part in resolving
+// the name.
+//
+// An error from either recognition or resolution ends the wait at
+// once, rather than running out the deadline: waiting cannot fix an
+// ambiguity, and more disks attaching can only make one worse. Two
+// partitions already carrying one role's name stay two partitions
+// carrying that name however long the code waits, the same as a
+// declared name that already matches two disks stays matching two
+// disks: a third disk attaching cannot un-match the two that already
+// do. Either error names a role that recognition has not yet
+// satisfied; reconcileStorage's own call to recognizeRoles, or
+// planAllClaims's own call to resolveDeclaredDisk, meets the same
+// ambiguity moments later, so this function only has to stop waiting
+// and say why, not resolve the ambiguity itself. A spec that is still
+// unsatisfiable at the deadline proceeds to judgment, and the
+// ordinary errors report what is missing. Polling, rather than
+// uevents, keeps this simple: the window is short, boots are rare,
+// and a walk of /sys/block costs nothing.
 func awaitStorageDevices(roles []machine.DeclaredRole) {
 	const (
 		poll     = 500 * time.Millisecond
 		deadline = 30 * time.Second
 	)
-	devices := map[string]bool{}
-	for _, role := range roles {
-		devices[role.Device] = true
-	}
-	attached := func() bool {
-		for device := range devices {
-			if diskByPath(device) == nil {
-				return false
-			}
-		}
-		return true
-	}
-	recognized := func() bool {
+	ready := func() (bool, error) {
 		found, err := recognizeRoles(roles)
 		if err != nil {
-			return false
+			return false, err
 		}
 		for _, role := range roles {
-			if _, ok := found[role.Name]; !ok {
-				return false
+			if _, ok := found[role.Name]; ok {
+				continue
+			}
+			disk, err := resolveDeclaredDisk(role.Device)
+			if err != nil {
+				return false, err
+			}
+			if disk == nil {
+				return false, nil
 			}
 		}
-		return true
+		return true, nil
 	}
-	if attached() || recognized() {
+
+	ok, err := ready()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "liken: storage: %v\n", err)
+		return
+	}
+	if ok {
 		return
 	}
 	fmt.Println("liken: storage: waiting for the declared disks to attach")
 	for begin := time.Now(); time.Since(begin) < deadline; {
 		time.Sleep(poll)
-		if attached() || recognized() {
+		ok, err := ready()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "liken: storage: %v\n", err)
+			return
+		}
+		if ok {
 			fmt.Println("liken: storage: the declared disks attached")
 			return
 		}

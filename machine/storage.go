@@ -26,6 +26,13 @@ package machine
 // name, wherever the disk enumerates. A /dev/disk/by-uuid/ name is
 // never legal here: that tree names a filesystem, and the disk a
 // role claims is blank.
+//
+// init resolves a stable name to a disk by recomputing every attached
+// disk's own by-id and by-path names from sysfs, the same computation
+// that publishes the /dev/disk link trees, rather than by reading
+// those trees back. The component that publishes the trees starts
+// once storage has already settled, so the very first boot that
+// claims a disk under a stable name has no tree there yet to read.
 
 import (
 	"fmt"

@@ -35,6 +35,14 @@ package main
 // A claim reports which roles it created, because a partition created
 // this boot always gets a new filesystem. The bytes under a new
 // partition belong to whatever held the disk before liken claimed it.
+//
+// A role's spec names its disk by the declared device string, not by
+// a device path guaranteed to work here directly: it may hold a
+// stable name under /dev/disk/by-id/ or /dev/disk/by-path/ as well as
+// a kernel name. reconcileStorage resolves the declared string to a
+// disk before it ever reaches planClaim (resolve.go), by identity,
+// through the same sysfs computation the by-id and by-path link trees
+// use, rather than by reading /dev/disk/ itself.
 
 import (
 	"fmt"
@@ -85,31 +93,129 @@ type claimPlan struct {
 	roles        []machine.DeclaredRole
 }
 
-// planClaim validates that a disk may be claimed for every declared
-// role that names it, and lays out its table. Sized roles come first,
-// at their exact sizes, in canonical order. The remainder role, if
-// any, takes whatever space is left. planClaim writes nothing.
-func planClaim(device string, roles []machine.DeclaredRole, found map[machine.StorageRoleName]partition) (claimPlan, error) {
-	var mine []machine.DeclaredRole
+// planAllClaims lays out a claim for every disk that a still-missing
+// role points at. It groups every declared role, found or not, by the
+// disk its device resolves to (its kernel device path, from
+// resolve.go), not by the declared string, because one disk can be
+// declared two ways at once: its kernel name for one role, and its
+// stable name for another. A found role joins this grouping too,
+// because a disk that already carries one declared role's partition
+// is not a blank disk, whichever other role's device also names it;
+// only a group with no found role in it is a candidate to claim.
+//
+// A found role's own device does not have to resolve at all.
+// Recognition finds a role's partition by the name written on it,
+// never by the device the spec declares, so a stale or ambiguous
+// device on an already-satisfied role changes nothing that is about
+// to be written; this function only resolves it on the chance that it
+// names a disk some other, still-missing role also wants. A
+// still-missing role is different: its device is the only way to find
+// the disk it names, so a device that resolves to no disk, or to two,
+// fails reconciliation at once, before any group forms.
+func planAllClaims(roles []machine.DeclaredRole, found map[machine.StorageRoleName]partition) ([]claimPlan, error) {
+	type group struct {
+		disk  *machine.BlockDevice
+		roles []machine.DeclaredRole // the still-missing roles that declare this disk
+		found *machine.DeclaredRole  // set when a found role also declares this disk
+	}
+	groups := map[string]*group{}
+	var order []string
+
 	for _, role := range roles {
-		if role.Device == device {
-			// A disk where the code recognizes some roles but others
-			// still need claiming is a disk whose table liken wrote,
-			// and something later changed. It is not blank, so the
-			// code cannot claim it, and it is not safe to repair
-			// automatically.
-			if _, ok := found[role.Name]; ok {
-				return claimPlan{}, fmt.Errorf("disk %s already carries %s but is missing other declared roles; refusing to modify it",
-					device, role.PartitionName())
+		_, isFound := found[role.Name]
+		disk, err := resolveDeclaredDisk(role.Device)
+		switch {
+		case isFound:
+			if err != nil || disk == nil {
+				continue
 			}
-			mine = append(mine, role)
+		case err != nil:
+			return nil, err
+		case disk == nil:
+			return nil, fmt.Errorf("declared device %s is not attached", role.Device)
 		}
+
+		key := devicePath(*disk)
+		g, ok := groups[key]
+		if !ok {
+			g = &group{disk: disk}
+			groups[key] = g
+			order = append(order, key)
+		}
+		if isFound {
+			if g.found == nil {
+				g.found = &role
+			}
+			continue
+		}
+		g.roles = append(g.roles, role)
 	}
 
-	disk := diskByPath(device)
-	if disk == nil {
-		return claimPlan{}, fmt.Errorf("declared device %s is not attached", device)
+	var claims []claimPlan
+	for _, key := range order {
+		g := groups[key]
+		if len(g.roles) == 0 {
+			continue // every role naming this disk is already recognized
+		}
+		// A disk where the code recognizes one role but others still
+		// need claiming is a disk whose table liken wrote, and
+		// something later changed. It is not blank, so the code
+		// cannot claim it, and it is not safe to repair automatically.
+		if g.found != nil {
+			return nil, fmt.Errorf("disk %s already carries %s but is missing other declared roles; refusing to modify it",
+				key, g.found.PartitionName())
+		}
+		if err := oneSizelessRole(key, g.roles); err != nil {
+			return nil, err
+		}
+		plan, err := planClaim(g.roles[0].Device, g.disk, g.roles)
+		if err != nil {
+			return nil, err
+		}
+		claims = append(claims, plan)
 	}
+	return claims, nil
+}
+
+// oneSizelessRole enforces, within one disk's group of still-missing
+// roles, the rule Validate already enforces on the literal spelling:
+// only one role may take the rest of a disk. Validate cannot see this
+// same violation when two roles spell one disk two different ways,
+// because it groups by the declared string, and each spelling looks
+// like a different disk to that check. This check runs against the
+// resolved group instead, so a disk declared two ways still gets only
+// one remainder. Without it, planPartitions would silently keep only
+// the last sizeless role it saw and drop the other from the table
+// entirely, and a disk would be claimed for a spec it cannot satisfy.
+func oneSizelessRole(disk string, roles []machine.DeclaredRole) error {
+	var remainder *machine.DeclaredRole
+	for _, role := range roles {
+		if role.Size != "" {
+			continue
+		}
+		if remainder != nil {
+			return fmt.Errorf("storage roles %s and %s both want the rest of %s; only one role per disk may omit its size",
+				remainder.Name, role.Name, disk)
+		}
+		remainder = &role
+	}
+	return nil
+}
+
+// planClaim validates that a resolved, blank disk may be claimed for
+// the still-missing roles that name it, and lays out its table.
+// planAllClaims is the only caller: it has already resolved the
+// declared device string to the disk it names, checked that no other
+// declared role already carries a recognized partition on this disk,
+// and confirmed that at most one of these roles is sizeless. Sized
+// roles come first, at their exact sizes, in canonical order. The
+// remainder role, if any, takes whatever space is left. planClaim
+// writes nothing.
+func planClaim(declared string, disk *machine.BlockDevice, mine []machine.DeclaredRole) (claimPlan, error) {
+	if disk == nil {
+		return claimPlan{}, fmt.Errorf("declared device %s is not attached", declared)
+	}
+	device := devicePath(*disk)
 	blank, err := isBlank(device)
 	if err != nil {
 		return claimPlan{}, fmt.Errorf("examining %s: %w", device, err)

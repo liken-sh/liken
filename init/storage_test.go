@@ -12,6 +12,7 @@ package main
 // refusal messages that these tests pin.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -282,18 +283,24 @@ func TestReconcileStorageRejectsInvalidSpec(t *testing.T) {
 	}
 }
 
-func TestPlanClaimRefusesPartialClaim(t *testing.T) {
-	// The process recognized one of this disk's roles, but another
-	// role is missing. The table was liken's, and then something
-	// changed. This is not safe to repair automatically.
+func TestPlanAllClaimsRefusesADiskThatAlreadyCarriesARole(t *testing.T) {
+	// clusterState is already recognized, but podStorage, declared for
+	// the same disk, is still missing. The table is liken's, and
+	// something changed since. This must run through planAllClaims
+	// itself: it is the function that groups roles by resolved disk
+	// and decides whether a group is safe to claim, not planClaim,
+	// which only lays out a table it is handed.
+	sys, dev := fakeMachine(t)
+	addDisk(t, sys, dev, "vda", 2<<30, make([]byte, 2_048))
+	device := filepath.Join(dev, "vda")
 	roles := []machine.DeclaredRole{
-		declared("clusterState", "/dev/vda", "1Mi"),
-		declared("podStorage", "/dev/vda", ""),
+		declared("clusterState", device, "1Mi"),
+		declared("podStorage", device, ""),
 	}
 	found := map[machine.StorageRoleName]partition{
-		"clusterState": {name: "vda1", partName: "liken:clusterState"},
+		"clusterState": {name: "vda1", disk: "vda", partName: "liken:clusterState"},
 	}
-	_, err := planClaim("/dev/vda", roles, found)
+	_, err := planAllClaims(roles, found)
 	if err == nil {
 		t.Fatal("expected an error for a partially-claimed disk")
 	}
@@ -304,12 +311,129 @@ func TestPlanClaimRefusesPartialClaim(t *testing.T) {
 	}
 }
 
+func TestPlanAllClaimsSkipsADiskWhoseRolesAreAllRecognized(t *testing.T) {
+	// Nothing is missing on this disk, so there is nothing to claim,
+	// and no reason to refuse it either.
+	sys, dev := fakeMachine(t)
+	addDisk(t, sys, dev, "vda", 2<<30, nil)
+	device := filepath.Join(dev, "vda")
+	roles := []machine.DeclaredRole{declared("clusterState", device, "")}
+	found := map[machine.StorageRoleName]partition{
+		"clusterState": {name: "vda1", disk: "vda", partName: "liken:clusterState"},
+	}
+	claims, err := planAllClaims(roles, found)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(claims) != 0 {
+		t.Errorf("a fully recognized disk needs no claim: %+v", claims)
+	}
+}
+
+func TestPlanAllClaimsRefusesTwoSizelessRolesOnOneDiskDeclaredTwoWays(t *testing.T) {
+	// Validate's one-remainder rule keys on the literal declared
+	// string, so it cannot see that clusterState and podStorage name
+	// the same disk here: one by its kernel path, the other by its
+	// by-id name. Without this check, planPartitions would silently
+	// keep only the last sizeless role and drop the other from the
+	// table.
+	sys, dev := fakeMachine(t)
+	dir := fakeDisk(t, sys, "vda", "pci0000:00", "0000:00:05.0", "virtio2", "block", "vda")
+	writeSysfs(t, dir, "serial", "liken-a\n")
+	writeSysfs(t, dir, "size", fmt.Sprintf("%d\n", (2<<30)/disks.SectorSize))
+	if err := os.WriteFile(filepath.Join(dev, "vda"), make([]byte, 2_048), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	roles := []machine.DeclaredRole{
+		declared("clusterState", filepath.Join(dev, "vda"), ""),
+		declared("podStorage", "/dev/disk/by-id/virtio-liken-a", ""),
+	}
+	_, err := planAllClaims(roles, nil)
+	if err == nil {
+		t.Fatal("expected an error for two sizeless roles on one disk")
+	}
+	for _, want := range []string{"clusterState", "podStorage", "only one role per disk may omit its size"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q: %v", want, err)
+		}
+	}
+}
+
+func TestPlanAllClaimsRefusesWhenARecognizedRolesDeclaredDiskIsAnUnfoundSiblingsTarget(t *testing.T) {
+	// clusterState already carries its partition on vda, wherever that
+	// actually is, but its spec still names vdb: the same blank disk
+	// podStorage is missing. Claiming vdb for podStorage would modify a
+	// disk that a satisfied role also lays claim to, by its own
+	// declaration; that is not a decision this code makes on its own,
+	// even though the two roles' declared devices happen to differ
+	// from where clusterState was actually found.
+	sys, dev := fakeMachine(t)
+	addDisk(t, sys, dev, "vdb", 2<<30, make([]byte, 2_048)) // blank
+	deviceB := filepath.Join(dev, "vdb")
+	roles := []machine.DeclaredRole{
+		declared("clusterState", deviceB, "1Mi"),
+		declared("podStorage", deviceB, ""),
+	}
+	found := map[machine.StorageRoleName]partition{
+		"clusterState": {name: "vda1", disk: "vda", partName: "liken:clusterState"},
+	}
+	claims, err := planAllClaims(roles, found)
+	if err == nil {
+		t.Fatal("expected a refusal")
+	}
+	if !strings.Contains(err.Error(), "refusing to modify") {
+		t.Errorf("expected the already-carries refusal: %v", err)
+	}
+	if len(claims) != 0 {
+		t.Errorf("a refused plan must produce no claims: %+v", claims)
+	}
+}
+
+func TestPlanAllClaimsPropagatesAResolverError(t *testing.T) {
+	// Two disks answer to the same WWN. planAllClaims must not guess
+	// which one a declared by-id name means, the same way matchRoles
+	// never guesses between two identically-named partitions.
+	sys, _ := fakeMachine(t)
+	for _, name := range []string{"sda", "sdb"} {
+		dir := fakeDisk(t, sys, name, "pci0000:00", "0000:00:1f.2", "ata3", "host2",
+			"target2:0:0", "2:0:0:0", "block", name)
+		writeSysfs(t, filepath.Join(dir, "device"), "wwid", "naa.5002538d40a45c88\n")
+	}
+	roles := []machine.DeclaredRole{declared("clusterState", "/dev/disk/by-id/wwn-0x5002538d40a45c88", "")}
+	_, err := planAllClaims(roles, nil)
+	if err == nil || !strings.Contains(err.Error(), "refusing to guess") {
+		t.Errorf("expected the ambiguity to surface: %v", err)
+	}
+}
+
+func TestReconcileStorageRefusesAnAmbiguousDeclaredDisk(t *testing.T) {
+	// The same ambiguity, exercised through the whole reconcile path:
+	// the wait ends early over it, and the claim step reports it as
+	// the reconcile's own error.
+	sys, _ := fakeMachine(t)
+	for _, name := range []string{"sda", "sdb"} {
+		dir := fakeDisk(t, sys, name, "pci0000:00", "0000:00:1f.2", "ata3", "host2",
+			"target2:0:0", "2:0:0:0", "block", name)
+		writeSysfs(t, filepath.Join(dir, "device"), "wwid", "naa.5002538d40a45c88\n")
+	}
+	spec := machine.StorageSpec{ClusterState: &machine.StorageRole{Device: "/dev/disk/by-id/wwn-0x5002538d40a45c88"}}
+
+	_, err := reconcileStorage(spec)
+	if err == nil || !strings.Contains(err.Error(), "refusing to guess") {
+		t.Errorf("expected the ambiguity to surface: %v", err)
+	}
+}
+
 func TestPlanClaimRefusesUnattachedDevices(t *testing.T) {
-	fakeMachine(t) // a machine with no disks at all
-	roles := []machine.DeclaredRole{declared("clusterState", "/dev/vda", "")}
-	_, err := planClaim("/dev/vda", roles, nil)
-	if err == nil || !strings.Contains(err.Error(), "not attached") {
-		t.Errorf("expected a not-attached error: %v", err)
+	// The caller resolves the declared device before planClaim runs;
+	// an unattached device resolves to a nil disk. The error must still
+	// name the declared string, since that is the only thing a person
+	// reading the console can act on.
+	mine := []machine.DeclaredRole{declared("clusterState", "/dev/vda", "")}
+	_, err := planClaim("/dev/vda", nil, mine)
+	if err == nil || !strings.Contains(err.Error(), "/dev/vda") || !strings.Contains(err.Error(), "not attached") {
+		t.Errorf("expected a not-attached error naming /dev/vda: %v", err)
 	}
 }
 
@@ -329,8 +453,8 @@ func TestPlanClaimRefusesForeignDisks(t *testing.T) {
 			c.stamp(contents)
 			addDisk(t, sys, dev, "vda", 1<<30, contents)
 			device := filepath.Join(dev, "vda")
-			roles := []machine.DeclaredRole{declared("clusterState", device, "")}
-			_, err := planClaim(device, roles, nil)
+			mine := []machine.DeclaredRole{declared("clusterState", device, "")}
+			_, err := planClaim(device, diskByPath(device), mine)
 			if err == nil || !strings.Contains(err.Error(), "refusing to touch") {
 				t.Errorf("expected a refusal for a foreign disk: %v", err)
 			}
@@ -345,8 +469,8 @@ func TestPlanClaimReportsUnreadableDevices(t *testing.T) {
 	sys, dev := fakeMachine(t)
 	addDisk(t, sys, dev, "vda", 1<<30, make([]byte, 100))
 	device := filepath.Join(dev, "vda")
-	roles := []machine.DeclaredRole{declared("clusterState", device, "")}
-	_, err := planClaim(device, roles, nil)
+	mine := []machine.DeclaredRole{declared("clusterState", device, "")}
+	_, err := planClaim(device, diskByPath(device), mine)
 	if err == nil || !strings.Contains(err.Error(), "examining") {
 		t.Errorf("expected an examination error: %v", err)
 	}
@@ -453,12 +577,12 @@ func TestPlanClaimLaysOutABlankDisk(t *testing.T) {
 	sys, dev := fakeMachine(t)
 	addDisk(t, sys, dev, "vdb", 2<<30, make([]byte, 2_048)) // all zeros: blank
 	device := filepath.Join(dev, "vdb")
-	roles := []machine.DeclaredRole{
+	mine := []machine.DeclaredRole{
 		declared("machineState", device, "512Mi"),
 		declared("clusterState", device, ""),
 	}
 
-	plan, err := planClaim(device, roles, nil)
+	plan, err := planClaim(device, diskByPath(device), mine)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,5 +640,47 @@ func TestWaitForPartitionsSucceedsWhenEverythingIsVisible(t *testing.T) {
 	}
 	if err := waitForPartitions(parts, 50*time.Millisecond); err != nil {
 		t.Errorf("every partition is already visible at size: %v", err)
+	}
+}
+
+func TestAwaitStorageDevicesEndsImmediatelyOnAnAmbiguousName(t *testing.T) {
+	// Two disks answer to the same WWN, so the declared by-id name can
+	// never resolve to one disk, however long the code waits: a third
+	// disk attaching cannot un-match the two that already do. The wait
+	// must give up at once instead of running out its 30-second
+	// deadline.
+	sys, _ := fakeMachine(t)
+	for _, name := range []string{"sda", "sdb"} {
+		dir := fakeDisk(t, sys, name, "pci0000:00", "0000:00:1f.2", "ata3", "host2",
+			"target2:0:0", "2:0:0:0", "block", name)
+		writeSysfs(t, filepath.Join(dir, "device"), "wwid", "naa.5002538d40a45c88\n")
+	}
+	roles := []machine.DeclaredRole{declared("clusterState", "/dev/disk/by-id/wwn-0x5002538d40a45c88", "")}
+
+	start := time.Now()
+	awaitStorageDevices(roles)
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("an ambiguous name should end the wait at once, took %s", elapsed)
+	}
+}
+
+func TestAwaitStorageDevicesEndsImmediatelyOnTwoPartitionsClaimingOneRole(t *testing.T) {
+	// Two partitions carry the same role's partition name, the way a
+	// cloned or moved disk would. recognizeRoles refuses to guess
+	// between them, and that refusal is no more fixable by waiting than
+	// a resolver's ambiguity is: another disk attaching cannot un-match
+	// two partitions that already share a name. The wait must give up
+	// at once instead of running out its 30-second deadline.
+	sys, dev := fakeMachine(t)
+	addDisk(t, sys, dev, "vda", 1<<30, nil)
+	addPartition(t, sys, "vda", "vda1", "liken:clusterState", 1<<20)
+	addDisk(t, sys, dev, "vdb", 1<<30, nil)
+	addPartition(t, sys, "vdb", "vdb1", "liken:clusterState", 1<<20)
+	roles := []machine.DeclaredRole{declared("clusterState", filepath.Join(dev, "vda"), "")}
+
+	start := time.Now()
+	awaitStorageDevices(roles)
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("two partitions claiming one role should end the wait at once, took %s", elapsed)
 	}
 }
