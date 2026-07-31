@@ -121,6 +121,10 @@ milestone is 50.
 * **43.** [A browsable release channel](completed/43-a-browsable-release-channel.md)
   — an index page for the channel and one for each release, rendered
   from the documents that the channel already serves.
+* **44.** [Naming a disk by identity](completed/44-naming-a-disk-by-identity.md)
+  — a Machine declares its storage by a name that belongs to the disk,
+  and `/dev/disk` grows the `by-id` and `by-uuid` trees beside the
+  `by-path` tree that iSCSI needed.
 * **45.** [The CLI reaches the cluster](completed/45-the-cli-reaches-the-cluster.md)
   — `approve-reboot` grants a Manual machine the one disruption it
   waits for, and `kubectl`, `stern`, and `flux` run against the right
@@ -154,10 +158,6 @@ milestone is 50.
 * **34.** [GPU add-ons](34-gpu-add-ons.md) — a machine that needs a GPU
   compute stack declares an add-on: a second read-only image on its
   boot slot. The first add-on would be NVIDIA compute.
-* **44.** [Naming a disk by identity](44-naming-a-disk-by-identity.md) —
-  a Machine declares its storage by a name that belongs to the disk,
-  and `/dev/disk` grows the `by-id` and `by-uuid` trees beside the
-  `by-path` tree that iSCSI needed.
 * **46.** [Configuring etcd snapshots](46-configuring-etcd-snapshots.md)
   — `spec.datastore.snapshots` gives a schedule, a retention, and an
   S3 destination to the snapshots every leader already takes.
