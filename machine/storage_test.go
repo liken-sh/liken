@@ -148,6 +148,59 @@ func TestValidateRequiresADevice(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsByUUIDDevices(t *testing.T) {
+	spec := StorageSpec{ClusterState: &StorageRole{Device: "/dev/disk/by-uuid/1234-5678", Size: "1Gi"}}
+	err := spec.Validate()
+	if err == nil {
+		t.Fatal("expected an error for a by-uuid device")
+	}
+	if !strings.Contains(err.Error(), "clusterState") || !strings.Contains(err.Error(), "/dev/disk/by-uuid/1234-5678") {
+		t.Errorf("error should name the role and the device: %v", err)
+	}
+}
+
+func TestValidateRejectsUnsupportedDiskTrees(t *testing.T) {
+	spec := StorageSpec{ClusterState: &StorageRole{Device: "/dev/disk/by-partlabel/x", Size: "1Gi"}}
+	err := spec.Validate()
+	if err == nil {
+		t.Fatal("expected an error for a by-partlabel device")
+	}
+	if !strings.Contains(err.Error(), "clusterState") || !strings.Contains(err.Error(), "/dev/disk/by-partlabel/x") {
+		t.Errorf("error should name the role and the device: %v", err)
+	}
+}
+
+func TestValidateRejectsATreeWithNoDiskName(t *testing.T) {
+	for _, device := range []string{"/dev/disk/by-id", "/dev/disk/by-path"} {
+		t.Run(device, func(t *testing.T) {
+			spec := StorageSpec{ClusterState: &StorageRole{Device: device, Size: "1Gi"}}
+			err := spec.Validate()
+			if err == nil {
+				t.Fatal("expected an error for a tree with no disk name")
+			}
+			if !strings.Contains(err.Error(), "clusterState") || !strings.Contains(err.Error(), device) {
+				t.Errorf("error should name the role and the device: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateAcceptsStableDiskNames(t *testing.T) {
+	cases := []string{
+		"/dev/sda",
+		"/dev/disk/by-id/wwn-0x5002538d40a45c88",
+		"/dev/disk/by-path/pci-0000:00:1f.2-ata-1",
+	}
+	for _, device := range cases {
+		t.Run(device, func(t *testing.T) {
+			spec := StorageSpec{ClusterState: &StorageRole{Device: device, Size: "1Gi"}}
+			if err := spec.Validate(); err != nil {
+				t.Errorf("Validate(%q) = %v, want nil", device, err)
+			}
+		})
+	}
+}
+
 func TestValidateRejectsUnparseableSizes(t *testing.T) {
 	spec := StorageSpec{ClusterState: &StorageRole{Device: "/dev/vda", Size: "lots"}}
 	if err := spec.Validate(); err == nil {

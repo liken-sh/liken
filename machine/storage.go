@@ -13,12 +13,19 @@ package machine
 // API.
 //
 // The device path in each role matters only on the boot that claims
-// the disk. The kernel assigns device names in driver probe order,
-// so a name addresses a disk within one boot, but the name does not
-// identify the disk across boots. Claiming a disk writes the role's
-// name onto the partition itself, as its GPT partition name. Every
-// boot after that finds the partition by that name, wherever the
-// disk enumerates.
+// the disk. A manifest can name the disk by its kernel name
+// (/dev/vda), or by a stable name under /dev/disk/by-id/ or
+// /dev/disk/by-path/. The kernel assigns its own device names in
+// driver probe order, so a kernel name addresses a disk within one
+// boot, but does not identify the disk across boots. A stable name
+// survives longer: a by-id name belongs to the disk itself, and a
+// by-path name belongs to the port the disk is plugged into. None of
+// these names has to survive past the claim, because claiming a disk
+// writes the role's name onto the partition itself, as its GPT
+// partition name. Every boot after that finds the partition by that
+// name, wherever the disk enumerates. A /dev/disk/by-uuid/ name is
+// never legal here: that tree names a filesystem, and the disk a
+// role claims is blank.
 
 import (
 	"fmt"
@@ -150,9 +157,14 @@ type StorageSpec struct {
 // from the spec is not an error. That role's directory simply stays
 // on the machine's RAM root.
 type StorageRole struct {
-	// Device is the disk that this role lives on, as a device path
-	// (/dev/vda). The code consults this field only when it claims a
-	// blank disk.
+	// Device is the disk that this role lives on: a device path
+	// (/dev/vda), or a stable name under /dev/disk/by-id/ or
+	// /dev/disk/by-path/. The code reads this field only when it
+	// claims a blank disk. A by-id name belongs to the disk and
+	// survives a port move. A by-path name belongs to the port. After
+	// the claim, every boot finds the role's partition by the GPT
+	// name written on it, so this field never names a filesystem, and
+	// a /dev/disk/by-uuid/ name is refused.
 	Device string `json:"device"`
 
 	// Size is how much of the device this role takes, as a binary
@@ -255,6 +267,24 @@ func (s StorageSpec) Validate() error {
 	for _, role := range s.Roles() {
 		if role.Device == "" {
 			return fmt.Errorf("storage role %s: no device", role.Name)
+		}
+		if suffix, ok := strings.CutPrefix(role.Device, "/dev/disk/"); ok {
+			tree, name, _ := strings.Cut(suffix, "/")
+			if tree == "by-uuid" {
+				return fmt.Errorf(
+					"storage role %s: device %s is a by-uuid name; a role claims a whole blank disk, and a blank disk has no filesystem, so no UUID can name it",
+					role.Name, role.Device)
+			}
+			if tree != "by-id" && tree != "by-path" {
+				return fmt.Errorf(
+					"storage role %s: device %s names a /dev/disk/%s tree; only by-id and by-path names are allowed",
+					role.Name, role.Device, tree)
+			}
+			if name == "" {
+				return fmt.Errorf(
+					"storage role %s: device %s names the /dev/disk/%s tree, not a disk under it",
+					role.Name, role.Device, tree)
+			}
 		}
 		if role.Size == "" {
 			if other, ok := remainders[role.Device]; ok {

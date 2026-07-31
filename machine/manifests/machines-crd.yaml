@@ -498,15 +498,18 @@ spec:
                       properties:
                         device:
                           type: string
-                          maxLength: 128
-                          pattern: ^/dev/[a-zA-Z0-9/_-]+$
+                          maxLength: 256
+                          pattern: ^/dev/[a-zA-Z0-9/_.:=+#@-]+$
                           description: >-
-                            The disk that this role is on, as a device
-                            path (/dev/vda). The system reads this field
-                            only on the boot that claims a blank disk.
-                            After that, the system finds the role's
-                            partition by the GPT partition name written
-                            on it.
+                            The disk that this role is on: a device path
+                            (/dev/vda), or a stable name under
+                            /dev/disk/by-id/ or /dev/disk/by-path/. The
+                            system reads this field only on the boot that
+                            claims a blank disk. The by-id name belongs
+                            to the disk and survives a port move; the
+                            by-path name belongs to the port. After the
+                            claim, the system finds the role's partition
+                            by the GPT partition name written on it.
                         size:
                           type: string
                           maxLength: 32
@@ -535,15 +538,18 @@ spec:
                       properties:
                         device:
                           type: string
-                          maxLength: 128
-                          pattern: ^/dev/[a-zA-Z0-9/_-]+$
+                          maxLength: 256
+                          pattern: ^/dev/[a-zA-Z0-9/_.:=+#@-]+$
                           description: >-
-                            The disk that this role is on, as a device
-                            path (/dev/vda). The system reads this field
-                            only on the boot that claims a blank disk.
-                            After that, the system finds the role's
-                            partition by the GPT partition name written
-                            on it.
+                            The disk that this role is on: a device path
+                            (/dev/vda), or a stable name under
+                            /dev/disk/by-id/ or /dev/disk/by-path/. The
+                            system reads this field only on the boot that
+                            claims a blank disk. The by-id name belongs
+                            to the disk and survives a port move; the
+                            by-path name belongs to the port. After the
+                            claim, the system finds the role's partition
+                            by the GPT partition name written on it.
                         size:
                           type: string
                           maxLength: 32
@@ -571,15 +577,18 @@ spec:
                       properties:
                         device:
                           type: string
-                          maxLength: 128
-                          pattern: ^/dev/[a-zA-Z0-9/_-]+$
+                          maxLength: 256
+                          pattern: ^/dev/[a-zA-Z0-9/_.:=+#@-]+$
                           description: >-
-                            The disk that this role is on, as a device
-                            path (/dev/vda). The system reads this field
-                            only on the boot that claims a blank disk.
-                            After that, the system finds the role's
-                            partition by the GPT partition name written
-                            on it.
+                            The disk that this role is on: a device path
+                            (/dev/vda), or a stable name under
+                            /dev/disk/by-id/ or /dev/disk/by-path/. The
+                            system reads this field only on the boot that
+                            claims a blank disk. The by-id name belongs
+                            to the disk and survives a port move; the
+                            by-path name belongs to the port. After the
+                            claim, the system finds the role's partition
+                            by the GPT partition name written on it.
                         size:
                           type: string
                           maxLength: 32
@@ -600,15 +609,18 @@ spec:
                       properties:
                         device:
                           type: string
-                          maxLength: 128
-                          pattern: ^/dev/[a-zA-Z0-9/_-]+$
+                          maxLength: 256
+                          pattern: ^/dev/[a-zA-Z0-9/_.:=+#@-]+$
                           description: >-
-                            The disk that this role is on, as a device
-                            path (/dev/vda). The system reads this field
-                            only on the boot that claims a blank disk.
-                            After that, the system finds the role's
-                            partition by the GPT partition name written
-                            on it.
+                            The disk that this role is on: a device path
+                            (/dev/vda), or a stable name under
+                            /dev/disk/by-id/ or /dev/disk/by-path/. The
+                            system reads this field only on the boot that
+                            claims a blank disk. The by-id name belongs
+                            to the disk and survives a port move; the
+                            by-path name belongs to the port. After the
+                            claim, the system finds the role's partition
+                            by the GPT partition name written on it.
                         size:
                           type: string
                           maxLength: 32
@@ -634,15 +646,18 @@ spec:
                       properties:
                         device:
                           type: string
-                          maxLength: 128
-                          pattern: ^/dev/[a-zA-Z0-9/_-]+$
+                          maxLength: 256
+                          pattern: ^/dev/[a-zA-Z0-9/_.:=+#@-]+$
                           description: >-
-                            The disk that this role is on, as a device
-                            path (/dev/vda). The system reads this field
-                            only on the boot that claims a blank disk.
-                            After that, the system finds the role's
-                            partition by the GPT partition name written
-                            on it.
+                            The disk that this role is on: a device path
+                            (/dev/vda), or a stable name under
+                            /dev/disk/by-id/ or /dev/disk/by-path/. The
+                            system reads this field only on the boot that
+                            claims a blank disk. The by-id name belongs
+                            to the disk and survives a port move; the
+                            by-path name belongs to the port. After the
+                            claim, the system finds the role's partition
+                            by the GPT partition name written on it.
                         size:
                           type: string
                           maxLength: 32
@@ -662,15 +677,18 @@ spec:
                       properties:
                         device:
                           type: string
-                          maxLength: 128
-                          pattern: ^/dev/[a-zA-Z0-9/_-]+$
+                          maxLength: 256
+                          pattern: ^/dev/[a-zA-Z0-9/_.:=+#@-]+$
                           description: >-
-                            The disk that this role is on, as a device
-                            path (/dev/vda). The system reads this field
-                            only on the boot that claims a blank disk.
-                            After that, the system finds the role's
-                            partition by the GPT partition name written
-                            on it.
+                            The disk that this role is on: a device path
+                            (/dev/vda), or a stable name under
+                            /dev/disk/by-id/ or /dev/disk/by-path/. The
+                            system reads this field only on the boot that
+                            claims a blank disk. The by-id name belongs
+                            to the disk and survives a port move; the
+                            by-path name belongs to the port. After the
+                            claim, the system finds the role's partition
+                            by the GPT partition name written on it.
                         size:
                           type: string
                           maxLength: 32
@@ -693,15 +711,18 @@ spec:
                       properties:
                         device:
                           type: string
-                          maxLength: 128
-                          pattern: ^/dev/[a-zA-Z0-9/_-]+$
+                          maxLength: 256
+                          pattern: ^/dev/[a-zA-Z0-9/_.:=+#@-]+$
                           description: >-
-                            The disk that this role is on, as a device
-                            path (/dev/vda). The system reads this field
-                            only on the boot that claims a blank disk.
-                            After that, the system finds the role's
-                            partition by the GPT partition name written
-                            on it.
+                            The disk that this role is on: a device path
+                            (/dev/vda), or a stable name under
+                            /dev/disk/by-id/ or /dev/disk/by-path/. The
+                            system reads this field only on the boot that
+                            claims a blank disk. The by-id name belongs
+                            to the disk and survives a port move; the
+                            by-path name belongs to the port. After the
+                            claim, the system finds the role's partition
+                            by the GPT partition name written on it.
                         size:
                           type: string
                           maxLength: 32
@@ -723,15 +744,18 @@ spec:
                       properties:
                         device:
                           type: string
-                          maxLength: 128
-                          pattern: ^/dev/[a-zA-Z0-9/_-]+$
+                          maxLength: 256
+                          pattern: ^/dev/[a-zA-Z0-9/_.:=+#@-]+$
                           description: >-
-                            The disk that this role is on, as a device
-                            path (/dev/vda). The system reads this field
-                            only on the boot that claims a blank disk.
-                            After that, the system finds the role's
-                            partition by the GPT partition name written
-                            on it.
+                            The disk that this role is on: a device path
+                            (/dev/vda), or a stable name under
+                            /dev/disk/by-id/ or /dev/disk/by-path/. The
+                            system reads this field only on the boot that
+                            claims a blank disk. The by-id name belongs
+                            to the disk and survives a port move; the
+                            by-path name belongs to the port. After the
+                            claim, the system finds the role's partition
+                            by the GPT partition name written on it.
                         size:
                           type: string
                           maxLength: 32
@@ -758,15 +782,18 @@ spec:
                       properties:
                         device:
                           type: string
-                          maxLength: 128
-                          pattern: ^/dev/[a-zA-Z0-9/_-]+$
+                          maxLength: 256
+                          pattern: ^/dev/[a-zA-Z0-9/_.:=+#@-]+$
                           description: >-
-                            The disk that this role is on, as a device
-                            path (/dev/vda). The system reads this field
-                            only on the boot that claims a blank disk.
-                            After that, the system finds the role's
-                            partition by the GPT partition name written
-                            on it.
+                            The disk that this role is on: a device path
+                            (/dev/vda), or a stable name under
+                            /dev/disk/by-id/ or /dev/disk/by-path/. The
+                            system reads this field only on the boot that
+                            claims a blank disk. The by-id name belongs
+                            to the disk and survives a port move; the
+                            by-path name belongs to the port. After the
+                            claim, the system finds the role's partition
+                            by the GPT partition name written on it.
                         size:
                           type: string
                           maxLength: 32
@@ -1998,9 +2025,11 @@ spec:
                             device:
                               type: string
                               description: >-
-                                The disk that this role is on, as a
-                                device path (/dev/vda), as the
-                                manifest of this boot declared it.
+                                The disk that this role is on, exactly
+                                as the manifest of this boot declared
+                                it: a device path (/dev/vda), or a
+                                stable name under /dev/disk/by-id/ or
+                                /dev/disk/by-path/.
                             size:
                               type: string
                               description: >-
@@ -2018,9 +2047,11 @@ spec:
                             device:
                               type: string
                               description: >-
-                                The disk that this role is on, as a
-                                device path (/dev/vda), as the
-                                manifest of this boot declared it.
+                                The disk that this role is on, exactly
+                                as the manifest of this boot declared
+                                it: a device path (/dev/vda), or a
+                                stable name under /dev/disk/by-id/ or
+                                /dev/disk/by-path/.
                             size:
                               type: string
                               description: >-
@@ -2038,9 +2069,11 @@ spec:
                             device:
                               type: string
                               description: >-
-                                The disk that this role is on, as a
-                                device path (/dev/vda), as the
-                                manifest of this boot declared it.
+                                The disk that this role is on, exactly
+                                as the manifest of this boot declared
+                                it: a device path (/dev/vda), or a
+                                stable name under /dev/disk/by-id/ or
+                                /dev/disk/by-path/.
                             size:
                               type: string
                               description: >-
@@ -2058,9 +2091,11 @@ spec:
                             device:
                               type: string
                               description: >-
-                                The disk that this role is on, as a
-                                device path (/dev/vda), as the
-                                manifest of this boot declared it.
+                                The disk that this role is on, exactly
+                                as the manifest of this boot declared
+                                it: a device path (/dev/vda), or a
+                                stable name under /dev/disk/by-id/ or
+                                /dev/disk/by-path/.
                             size:
                               type: string
                               description: >-
@@ -2078,9 +2113,11 @@ spec:
                             device:
                               type: string
                               description: >-
-                                The disk that this role is on, as a
-                                device path (/dev/vda), as the
-                                manifest of this boot declared it.
+                                The disk that this role is on, exactly
+                                as the manifest of this boot declared
+                                it: a device path (/dev/vda), or a
+                                stable name under /dev/disk/by-id/ or
+                                /dev/disk/by-path/.
                             size:
                               type: string
                               description: >-
@@ -2099,9 +2136,11 @@ spec:
                             device:
                               type: string
                               description: >-
-                                The disk that this role is on, as a
-                                device path (/dev/vda), as the
-                                manifest of this boot declared it.
+                                The disk that this role is on, exactly
+                                as the manifest of this boot declared
+                                it: a device path (/dev/vda), or a
+                                stable name under /dev/disk/by-id/ or
+                                /dev/disk/by-path/.
                             size:
                               type: string
                               description: >-
@@ -2119,9 +2158,11 @@ spec:
                             device:
                               type: string
                               description: >-
-                                The disk that this role is on, as a
-                                device path (/dev/vda), as the
-                                manifest of this boot declared it.
+                                The disk that this role is on, exactly
+                                as the manifest of this boot declared
+                                it: a device path (/dev/vda), or a
+                                stable name under /dev/disk/by-id/ or
+                                /dev/disk/by-path/.
                             size:
                               type: string
                               description: >-
@@ -2139,9 +2180,11 @@ spec:
                             device:
                               type: string
                               description: >-
-                                The disk that this role is on, as a
-                                device path (/dev/vda), as the
-                                manifest of this boot declared it.
+                                The disk that this role is on, exactly
+                                as the manifest of this boot declared
+                                it: a device path (/dev/vda), or a
+                                stable name under /dev/disk/by-id/ or
+                                /dev/disk/by-path/.
                             size:
                               type: string
                               description: >-
@@ -2159,9 +2202,11 @@ spec:
                             device:
                               type: string
                               description: >-
-                                The disk that this role is on, as a
-                                device path (/dev/vda), as the
-                                manifest of this boot declared it.
+                                The disk that this role is on, exactly
+                                as the manifest of this boot declared
+                                it: a device path (/dev/vda), or a
+                                stable name under /dev/disk/by-id/ or
+                                /dev/disk/by-path/.
                             size:
                               type: string
                               description: >-
