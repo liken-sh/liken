@@ -345,7 +345,16 @@ BOOT ?= disk
 # Selected by name at recipe expansion (never ifeq, which evaluates
 # at parse time and would ignore the target-specific BOOT overrides
 # install and run-once rely on).
-QEMU_BOOT_kernel = -kernel $(VMLINUZ) -initrd $(INITRD) -append "console=ttyS0 rdinit=/liken liken.machine=$(NODE) $(LIKEN_BOOT_ARGS)"
+# rootfstype=ramfs: a -kernel boot's initrd carries the whole OS, and
+# the unpack writes hundreds of megabytes into rootfs. The default
+# memory filesystem caps itself at half the memory the kernel has
+# accounted when rootfs mounts, and early in boot that accounting can
+# still be racing page initialization, so the cap can bind far below
+# the guest's real memory and corrupt the unpack partway. ramfs has no
+# capacity, so the unpack is bounded by the initrd itself. The
+# ramRootParam comment in image/stick.go carries the full story; the
+# stick's install entries make the same choice for the same reason.
+QEMU_BOOT_kernel = -kernel $(VMLINUZ) -initrd $(INITRD) -append "console=ttyS0 rootfstype=ramfs rdinit=/liken liken.machine=$(NODE) $(LIKEN_BOOT_ARGS)"
 QEMU_BOOT_disk =
 QEMU_BOOT = $(QEMU_BOOT_$(BOOT))
 

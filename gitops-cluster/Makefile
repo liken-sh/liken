@@ -79,7 +79,10 @@ endif
 # firmware; BOOT=kernel is the direct-kernel arrangement for
 # machines that have not installed yet. Same idiom, and same
 # recursive-assignment caveats, as the dev cluster.
-QEMU_BOOT_kernel = -kernel $(VMLINUZ) -initrd $(INITRD) -append "console=ttyS0 rdinit=/liken liken.machine=$(NODE) $(LIKEN_BOOT_ARGS)"
+# rootfstype=ramfs keeps the big-initrd unpack off the default memory
+# filesystem's capacity cap; the ramRootParam comment in image/stick.go
+# carries the full story.
+QEMU_BOOT_kernel = -kernel $(VMLINUZ) -initrd $(INITRD) -append "console=ttyS0 rootfstype=ramfs rdinit=/liken liken.machine=$(NODE) $(LIKEN_BOOT_ARGS)"
 QEMU_BOOT_disk =
 QEMU_BOOT = $(QEMU_BOOT_$(BOOT))
 QEMU_EXIT_ON_REBOOT :=

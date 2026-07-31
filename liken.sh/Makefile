@@ -183,7 +183,7 @@ image/disk.img: image/install.cpio channel/$(RELEASE)/release.yaml
 		-smp 2 \
 		-m 4096 \
 		-kernel channel/$(RELEASE)/vmlinuz -initrd image/install.cpio \
-		-append "console=ttyS0 scsi_mod.scan=sync rdinit=/liken liken.machine=node-1 liken.install" \
+		-append "console=ttyS0 rootfstype=ramfs scsi_mod.scan=sync rdinit=/liken liken.machine=node-1 liken.install" \
 		-display none \
 		-serial file:image/install.log \
 		-monitor none \

@@ -50,6 +50,23 @@ const microcodeArtifact = "microcode.cpio"
 // a person picked this boot. init/attended.go owns the meaning.
 const attendedParam = "liken.attended"
 
+// ramRootParam makes the kernel build rootfs on ramfs, which has no
+// capacity limit, instead of the default memory filesystem, which caps
+// itself at half the memory the kernel has accounted when rootfs
+// mounts. A stick boot's initrd carries the whole OS, and its unpack
+// writes hundreds of megabytes into rootfs. Early in boot, page
+// initialization can still be running, so the default cap can bind far
+// below the machine's real memory. An unpack that hits the cap fails
+// partway, and the file it was writing keeps its full size with a
+// corrupt tail, which no later check can tell from a good file until a
+// mount rejects it. ramfs bounds the unpack by the initrd's own
+// contents instead, which the slot sizes already bound. Boots from an
+// installed slot do not carry this parameter: their initrd holds only
+// the boot archive and microcode, two orders of magnitude below any
+// observed cap, and the entries that name them belong to the boot
+// chain that init alone rewrites.
+const ramRootParam = "rootfstype=ramfs"
+
 // sortKeySeparator divides a machine name from the action in a menu
 // entry's sort-key. entryText explains why it must sort below every
 // character a machine name can hold.
@@ -301,7 +318,7 @@ func entryText(name string, reinstall bool, consoles []string) []byte {
 	if reinstall {
 		word, action, sortSuffix = "liken.reinstall", "wipe and reinstall", "reinstall"
 	}
-	options := []string{"rdinit=/liken", "liken.machine=" + name, word, attendedParam}
+	options := []string{ramRootParam, "rdinit=/liken", "liken.machine=" + name, word, attendedParam}
 	for _, c := range consoles {
 		options = append(options, "console="+c)
 	}
@@ -333,7 +350,7 @@ options %s
 // by printing a proposal that a person reads, so it must hold the
 // console until they have read it.
 func reportEntryText(consoles []string) []byte {
-	options := []string{"rdinit=/liken", "liken.report", attendedParam}
+	options := []string{ramRootParam, "rdinit=/liken", "liken.report", attendedParam}
 	for _, c := range consoles {
 		options = append(options, "console="+c)
 	}

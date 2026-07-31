@@ -111,7 +111,7 @@ func TestStickGivesEachMachineInstallAndReinstall(t *testing.T) {
 			"initrd /boot.cpio",
 			"initrd /deployment.cpio",
 			"initrd /payload.cpio",
-			"options rdinit=/liken liken.machine=" + name + " liken.install liken.attended",
+			"options rootfstype=ramfs rdinit=/liken liken.machine=" + name + " liken.install liken.attended",
 		} {
 			if !strings.Contains(string(install), want) {
 				t.Errorf("%s's install entry is missing %q:\n%s", name, want, install)
@@ -125,7 +125,7 @@ func TestStickGivesEachMachineInstallAndReinstall(t *testing.T) {
 		for _, want := range []string{
 			"title wipe and reinstall as " + name,
 			"sort-key " + name + "+reinstall",
-			"options rdinit=/liken liken.machine=" + name + " liken.reinstall liken.attended",
+			"options rootfstype=ramfs rdinit=/liken liken.machine=" + name + " liken.reinstall liken.attended",
 		} {
 			if !strings.Contains(string(reinstall), want) {
 				t.Errorf("%s's reinstall entry is missing %q:\n%s", name, want, reinstall)
@@ -154,7 +154,7 @@ func TestStickCarriesTheHardwareReportEntry(t *testing.T) {
 	for _, want := range []string{
 		"title liken hardware report",
 		"initrd /payload.cpio",
-		"options rdinit=/liken liken.report liken.attended",
+		"options rootfstype=ramfs rdinit=/liken liken.report liken.attended",
 		"hardware-report.yaml",
 	} {
 		if !strings.Contains(text, want) {
