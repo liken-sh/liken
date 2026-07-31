@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/liken-sh/liken/disks"
 )
 
 // fakeInitiator points the three link trees, and the two iSCSI class
@@ -512,6 +514,69 @@ func TestACollisionThatClearsAndReturnsPrintsAgain(t *testing.T) {
 	reportNewCollisions(third, seen)
 	if got := strings.Count(logs(), "names both"); got != 2 {
 		t.Errorf("the walk that reintroduced the collision printed %d lines total, want 2", got)
+	}
+}
+
+// threeSlotsSharingAVolumeID formats three FAT32 partitions the way a
+// claim formats bootHome and both system slots inside one boot: the
+// same volume id on all three, standing in for a machine that
+// installed under a release whose volume id came from the clock
+// rather than crypto/rand. It returns the partition names, in the
+// order discoverPartitions reports them.
+func threeSlotsSharingAVolumeID(t *testing.T) []string {
+	t.Helper()
+	sys, dev := fakeMachine(t)
+	fakeInitiator(t)
+	addDisk(t, sys, dev, "vdc", 2<<30, nil)
+	names := []string{"vdc2", "vdc3", "vdc4"}
+	for _, name := range names {
+		addPartition(t, sys, "vdc", name, "", 512<<20)
+		f, err := os.OpenFile(filepath.Join(dev, name), os.O_RDWR|os.O_CREATE, 0o644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.Truncate(512 << 20); err != nil {
+			t.Fatal(err)
+		}
+		if err := disks.FormatFAT32(f, 512<<20, "SLOT", 0x6A6CDB4B); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return names
+}
+
+// TestWalkDiskLinksPrintsAPersistentCollisionOnceOnItsFirstWalk pins
+// watchDiskLinks' own loop body, not just reportNewCollisions in
+// isolation. A boot that finds three same-id FAT32 volumes already on
+// disk, left by a release that minted volume ids from the clock,
+// must behave exactly as a fresh claim under the old code did: one
+// line naming the first two claimants, both of their by-uuid links
+// withheld, and the third claimant silently caught by the blocked
+// name once mergeDiskLinks has already refused to link it. A second walk
+// over the same, still-colliding disks must stay quiet, the way every
+// walk after the first one did under the old code's own per-call
+// print.
+func TestWalkDiskLinksPrintsAPersistentCollisionOnceOnItsFirstWalk(t *testing.T) {
+	threeSlotsSharingAVolumeID(t)
+	logs := fakeLogStream(t)
+
+	seen := walkDiskLinks(diskLinkSeen{})
+	if got := strings.Count(logs(), "names both"); got != 1 {
+		t.Fatalf("the first walk printed %d lines, want 1", got)
+	}
+	if !strings.Contains(logs(), "6A6C-DB4B names both vdc2 and vdc3") {
+		t.Errorf("stderr %q does not name the first two claimants", logs())
+	}
+	if names := publishedNames(t, diskUUIDsDir); len(names) != 0 {
+		t.Errorf("three slots sharing a volume id published %v, want no by-uuid link for any of them", names)
+	}
+
+	walkDiskLinks(seen)
+	if got := strings.Count(logs(), "names both"); got != 1 {
+		t.Errorf("a second walk over the same collision printed %d lines total, want still 1", got)
 	}
 }
 

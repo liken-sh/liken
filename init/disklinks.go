@@ -107,21 +107,9 @@ func watchDiskLinks(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// Each tree keeps its own memory of what it already reported, so a
-	// name that collides in two trees at once, unlikely as that is,
-	// still gets one line per tree rather than being folded into one
-	// or dropped.
-	var seenPathCollisions, seenIDCollisions, seenUUIDCollisions map[diskLinkCollision]bool
+	var seen diskLinkSeen
 	for {
-		pathLinks, pathCollisions := localPaths()
-		idLinks, idCollisions := idPaths()
-		uuidLinks, uuidCollisions := uuidPaths()
-		reconcileDiskLinks(diskLinksDir, pathLinks)
-		reconcileDiskLinks(diskIDsDir, idLinks)
-		reconcileDiskLinks(diskUUIDsDir, uuidLinks)
-		seenPathCollisions = reportNewCollisions(pathCollisions, seenPathCollisions)
-		seenIDCollisions = reportNewCollisions(idCollisions, seenIDCollisions)
-		seenUUIDCollisions = reportNewCollisions(uuidCollisions, seenUUIDCollisions)
+		seen = walkDiskLinks(seen)
 		select {
 		case <-ctx.Done():
 			return nil
@@ -135,6 +123,36 @@ func watchDiskLinks(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
+	}
+}
+
+// diskLinkSeen carries the collision memory reportNewCollisions needs
+// from one walk to the next, one field per tree. Each tree keeps its
+// own memory, so a name that collides in two trees at once, unlikely
+// as that is, still gets one line per tree rather than being folded
+// into one or dropped. The zero value is the state watchDiskLinks
+// starts a boot with: nothing reported yet.
+type diskLinkSeen struct {
+	path, id, uuid map[diskLinkCollision]bool
+}
+
+// walkDiskLinks runs the one reconcile watchDiskLinks repeats on
+// every settled burst of uevents: read the truth from sysfs and the
+// partitions, publish it to all three trees, and report whatever
+// collision is new since the walk seen described. It is pulled out
+// on its own so a test can drive a walk, or a sequence of walks,
+// directly, without needing a live uevent socket.
+func walkDiskLinks(seen diskLinkSeen) diskLinkSeen {
+	pathLinks, pathCollisions := localPaths()
+	idLinks, idCollisions := idPaths()
+	uuidLinks, uuidCollisions := uuidPaths()
+	reconcileDiskLinks(diskLinksDir, pathLinks)
+	reconcileDiskLinks(diskIDsDir, idLinks)
+	reconcileDiskLinks(diskUUIDsDir, uuidLinks)
+	return diskLinkSeen{
+		path: reportNewCollisions(pathCollisions, seen.path),
+		id:   reportNewCollisions(idCollisions, seen.id),
+		uuid: reportNewCollisions(uuidCollisions, seen.uuid),
 	}
 }
 
