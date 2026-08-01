@@ -14,7 +14,7 @@ A document's directory states its status:
   built yet.
 
 The numbers run in one sequence across all three directories. The next
-milestone is 50.
+milestone is 52.
 
 ## Completed
 
@@ -165,6 +165,14 @@ milestone is 50.
   — the sharing rule tests every node a device delivers, so the i2c
   nodes an integrated GPU registers for its display outputs keep it
   exclusive.
+* **50.** [Netboot for a declared machine](50-netboot-for-a-declared-machine.md)
+  — a `netboot` feature serves proxyDHCP, iPXE, and the leader's own
+  slot artifacts, so a new machine boots the report when unknown, the
+  installer when declared, and its own disk once installed.
+* **51.** [Enrollment over the network](51-enrollment-over-the-network.md)
+  — the netbooted report posts to the cluster as an Enrollment, and
+  approval is applying the proposed Machine, with a CLI verb as
+  sugar.
 
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.
@@ -182,8 +190,10 @@ its name from a hardware fact, probably its MAC address, because the
 network already forces that address to be unique. It would take its
 address from a pool, probably by ARP-probe claiming, in the same way
 that storage claiming works: probe reality, take what is free, and
-refuse an ambiguous case. This waits until the declared-machine flow is
-proven.
+refuse an ambiguous case. Milestones 50 and 51 propose the supervised
+half: the unknown machine presents itself over the network, and a
+person applies the proposal. The template is the unsupervised half,
+and it waits until the supervised flow is proven.
 
 **The apiservers abort requests that liken's operators send.** On a
 five-machine fleet, the apiservers logged "Timeout or abort while
