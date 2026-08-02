@@ -58,3 +58,12 @@ spec:
   # label by hand, the next reconcile pass restores it.
   nodeLabels:
     guid.foo/drill: node-labels
+  # The node-taints drill (milestone 52): the repelling half of the
+  # same identity. PreferNoSchedule only biases the scheduler away, so
+  # this standing example never blocks a drill pod from landing here.
+  # A fresh registration carries the taint from the k3s boot drop-in,
+  # and the operator restores it if someone removes it by hand.
+  nodeTaints:
+    - key: guid.foo/drill
+      value: node-taints
+      effect: PreferNoSchedule

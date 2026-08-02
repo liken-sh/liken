@@ -335,6 +335,16 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 		// cluster, not merely reachable.
 		status.Conditions = api.SetCondition(status.Conditions, nodeHealthyCondition(node), now)
 
+		// Node taints reconcile live, and go before the labels
+		// (taints.go). The taints patch names the resourceVersion this
+		// pass read, and the labels patch names none. Sending the
+		// taints patch first spends that precondition while the
+		// version it names is still current. The labels patch cannot
+		// conflict with the version bump the taints patch causes,
+		// because it states no version to conflict with.
+		status.Conditions = api.SetCondition(status.Conditions,
+			carryOutNodeTaints(c, m.Metadata.Name, decideNodeTaints(m.Spec.NodeTaints, node)), now)
+
 		// Node labels reconcile live, like sysctls, but against the
 		// Node object instead of the kernel (labels.go). This
 		// reapplies what the spec declares, and removes what it took

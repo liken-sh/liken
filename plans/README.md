@@ -14,7 +14,7 @@ A document's directory states its status:
   built yet.
 
 The numbers run in one sequence across all three directories. The next
-milestone is 52.
+milestone is 53.
 
 ## Completed
 
@@ -137,6 +137,14 @@ milestone is 52.
   every domain that vendors something reports what it pins and what
   its upstream has now, and moves the pin when asked. One `latest.sh`
   beside each `fetch.sh`, and `make versions` for the whole table.
+* **49.** [Sharing integrated graphics](completed/49-sharing-integrated-graphics.md)
+  — a device's delivery groups by kernel subsystem, and each group
+  publishes as its own slice device, so a real integrated GPU shares
+  while its display outputs stay exclusive.
+* **52.** [Node taints on the Machine](completed/52-node-taints.md) —
+  `spec.nodeTaints` declares the repelling half of a machine's
+  scheduling identity: init registers the fresh node with its taints,
+  and the operator reconciles them live.
 
 ## Rejected
 
@@ -161,10 +169,6 @@ milestone is 52.
 * **46.** [Configuring etcd snapshots](46-configuring-etcd-snapshots.md)
   — `spec.datastore.snapshots` gives a schedule, a retention, and an
   S3 destination to the snapshots every leader already takes.
-* **49.** [Sharing integrated graphics](49-sharing-integrated-graphics.md)
-  — the sharing rule tests every node a device delivers, so the i2c
-  nodes an integrated GPU registers for its display outputs keep it
-  exclusive.
 * **50.** [Netboot for a declared machine](50-netboot-for-a-declared-machine.md)
   — a `netboot` feature serves proxyDHCP, iPXE, and the leader's own
   slot artifacts, so a new machine boots the report when unknown, the

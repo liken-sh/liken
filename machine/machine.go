@@ -171,6 +171,26 @@ type MachineSpec struct {
 	// controllers.
 	NodeLabels map[string]string `json:"nodeLabels,omitempty"`
 
+	// NodeTaints is the repelling half of that same scheduling
+	// identity. A label draws a workload in; a taint keeps out every
+	// pod that does not tolerate it, which is how a machine dedicated
+	// to one job stays dedicated to it. A taint's identity is its key
+	// together with its effect, and one key can carry two effects at
+	// once, so this is a list where NodeLabels is a map.
+	//
+	// Init renders these taints into the k3s boot drop-in, so a node
+	// that registers for the first time is born repelling and never
+	// accepts, in its first minutes, the pods that the taint exists to
+	// keep out. The kubelet applies registration taints only when it
+	// creates the Node object, on a first boot or after a reinstall. On
+	// every later boot the Node object already exists and the setting
+	// does nothing, so the operator's live reconciliation is the only
+	// mechanism from then on. The operator also removes a taint that
+	// this spec once declared and no longer declares, and it never
+	// touches a taint applied outside this spec, such as one set by
+	// kubectl taint or by another controller.
+	NodeTaints []NodeTaint `json:"nodeTaints,omitempty"`
+
 	// Storage assigns storage roles to disks (see storage.go). Init
 	// applies this field at boot, before k3s starts, because a
 	// filesystem cannot be swapped while a cluster is running. Edits
@@ -189,6 +209,30 @@ type MachineSpec struct {
 	// automatically.
 	RebootPolicy RebootPolicy `json:"rebootPolicy,omitempty"`
 }
+
+// NodeTaint is one taint on this machine's Node object. A pod
+// tolerates a taint by naming its key and its effect, so those two
+// fields together are the taint's identity. The value is optional: a
+// taint often needs none, because the key and the effect alone already
+// say to stay off this machine.
+type NodeTaint struct {
+	Key    string      `json:"key"`
+	Value  string      `json:"value,omitempty"`
+	Effect TaintEffect `json:"effect"`
+}
+
+// TaintEffect states what happens to a pod that does not tolerate the
+// taint. NoSchedule keeps a new pod off the node and leaves the pods
+// already running there alone. PreferNoSchedule asks the scheduler to
+// avoid the node but permits it when no other node fits. NoExecute
+// keeps new pods off and evicts the running ones as well.
+type TaintEffect string
+
+const (
+	TaintNoSchedule       TaintEffect = "NoSchedule"
+	TaintPreferNoSchedule TaintEffect = "PreferNoSchedule"
+	TaintNoExecute        TaintEffect = "NoExecute"
+)
 
 // RebootPolicy states who starts the reboot that a staged change
 // waits on. The system treats any unrecognized value as Manual, so an

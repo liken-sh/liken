@@ -4,8 +4,9 @@ package main
 // is the kubelet's record of this machine, and the operator reads
 // and writes it for several jobs: mirroring its health onto the
 // Machine (conditions.go), reconciling its labels (labels.go),
-// cordoning and draining it ahead of a reboot (drain.go), and
-// deleting it to finish a demotion (demotion.go).
+// reconciling its taints (taints.go), cordoning and draining it ahead
+// of a reboot (drain.go), and deleting it to finish a demotion
+// (demotion.go).
 
 import (
 	"net/http"
@@ -23,22 +24,36 @@ const nodesPath = "/api/v1/nodes"
 // still shows; the conditions, where the kubelet's health shows
 // (reconcile.go mirrors the Node's Ready condition onto the
 // Machine); the cordon state, meaning the unschedulable flag plus
-// the annotations that record whether liken set it (drain.go); and
-// the UID, which ties the device inventory's owner reference to this
-// instance of the node (dra.go).
+// the annotations that record whether liken set it (drain.go); the
+// taints, which the operator rewrites as a whole list under the
+// resourceVersion it read (taints.go); and the UID, which ties the
+// device inventory's owner reference to this instance of the node
+// (dra.go).
 type nodeObject struct {
 	Metadata struct {
-		Name        string            `json:"name"`
-		UID         string            `json:"uid"`
-		Labels      map[string]string `json:"labels"`
-		Annotations map[string]string `json:"annotations"`
+		Name            string            `json:"name"`
+		UID             string            `json:"uid"`
+		ResourceVersion string            `json:"resourceVersion"`
+		Labels          map[string]string `json:"labels"`
+		Annotations     map[string]string `json:"annotations"`
 	} `json:"metadata"`
 	Spec struct {
-		Unschedulable bool `json:"unschedulable"`
+		Unschedulable bool        `json:"unschedulable"`
+		Taints        []nodeTaint `json:"taints"`
 	} `json:"spec"`
 	Status struct {
 		Conditions []api.Condition `json:"conditions"`
 	} `json:"status"`
+}
+
+// nodeTaint is one entry of the Node's spec.taints, in the Node's own
+// shape rather than the Machine spec's. The value carries omitempty,
+// because a taint with no value stores no value field at all, and a
+// written empty string would be a value the API server keeps.
+type nodeTaint struct {
+	Key    string `json:"key"`
+	Value  string `json:"value,omitempty"`
+	Effect string `json:"effect"`
 }
 
 func getNode(c *kubernetes.Client, name string) (*nodeObject, error) {

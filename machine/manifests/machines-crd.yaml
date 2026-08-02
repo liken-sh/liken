@@ -445,6 +445,111 @@ spec:
                     type: string
                     maxLength: 63
                     pattern: ^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$
+                nodeTaints:
+                  type: array
+                  maxItems: 64
+                  description: >-
+                    The taints that this machine's Node object
+                    carries. A taint repels every pod that does not
+                    tolerate it, which is how a machine that is
+                    dedicated to one job keeps other work off it. The
+                    system writes these taints into the k3s boot
+                    configuration, so a node that registers for the
+                    first time carries them from its first moment. The
+                    kubelet applies those registration taints only
+                    when it creates the Node object, on a first boot
+                    or after a reinstall. On every later boot the Node
+                    object exists already and the boot configuration
+                    changes nothing, so the liken operator is the only
+                    mechanism from then on: it reconciles this list
+                    while the machine runs. This includes the removal
+                    of a taint that this spec no longer declares. The
+                    system never changes a taint applied outside this
+                    spec.
+                  # A taint's identity is its key together with its
+                  # effect, and one key can carry two effects at once.
+                  # The API server keys the list on that pair, so it
+                  # refuses a duplicate pair instead of trusting the
+                  # caller.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [key, effect]
+                  # These rules read as the reverse of the label rules
+                  # above, and the reason is that they defend against
+                  # something else. A label rule protects the boot:
+                  # under the NodeRestriction admission plugin, a
+                  # kubelet that gets a forbidden label does not
+                  # start, so admission refuses exactly what the
+                  # kubelet refuses. A registration taint passes no
+                  # such gate, and a mistyped taint stops no boot. A
+                  # taint rule protects against a controller that
+                  # manages the same key while the machine runs, which
+                  # is why node.kubernetes.io is safe for a label and
+                  # refused for a taint.
+                  x-kubernetes-validations:
+                    - rule: >-
+                        self.all(t, !t.key.matches('^([^/]*[.])?(kubernetes[.]io|k8s[.]io)/') ||
+                        t.key.matches('^node-role[.]kubernetes[.]io/'))
+                      message: >-
+                        the kubernetes.io and k8s.io namespaces belong to
+                        Kubernetes. The node lifecycle controller and the
+                        scheduler manage the node.kubernetes.io taint keys
+                        while the machine runs, adding and removing them as
+                        the node's condition changes, so a declared taint on
+                        one of those keys fights them. Use
+                        node-role.kubernetes.io, which is the one exception
+                        because no controller manages it, or a namespace of
+                        your own
+                    - rule: >-
+                        self.all(t, !t.key.matches('^([^/]*[.])?liken[.]sh/'))
+                      message: >-
+                        the liken.sh namespace belongs to the operating
+                        system, which sets its own taints
+                  items:
+                    type: object
+                    required: [key, effect]
+                    properties:
+                      # A label key takes its shape from a CEL rule
+                      # because a map's keys are not properties and a
+                      # pattern cannot reach them. A taint's key is a
+                      # property of a list item, so the same shape is
+                      # a pattern here.
+                      key:
+                        type: string
+                        maxLength: 317
+                        pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$
+                        description: >-
+                          The taint's key: an optional DNS-style
+                          prefix, a slash, and a name that contains
+                          letters, digits, dashes, underscores, and
+                          dots. A pod tolerates this taint by naming
+                          the key and the effect.
+                      value:
+                        type: string
+                        maxLength: 63
+                        pattern: ^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$
+                        description: >-
+                          An optional value that goes with the key. A
+                          taint often needs none, because the key and
+                          the effect alone say to stay off this
+                          machine. A toleration that names a value
+                          must name the same value.
+                      effect:
+                        type: string
+                        enum: [NoSchedule, PreferNoSchedule, NoExecute]
+                        description: >-
+                          What happens to a pod that does not tolerate
+                          this taint. NoSchedule keeps a new pod off
+                          the node and leaves the pods already running
+                          there alone. PreferNoSchedule asks the
+                          scheduler to avoid the node, but the
+                          scheduler still places a pod there when no
+                          other node fits. NoExecute keeps new pods
+                          off and also evicts every running pod
+                          without a matching toleration, at the moment
+                          the taint lands. That eviction includes
+                          DaemonSet pods, because the DaemonSet
+                          controller adds tolerations only for the
+                          node lifecycle keys.
                 rebootPolicy:
                   type: string
                   enum: [Auto, Manual]

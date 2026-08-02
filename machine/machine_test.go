@@ -115,6 +115,41 @@ spec:
 	}
 }
 
+func TestLoadParsesNodeTaints(t *testing.T) {
+	// A taint carries a value or leaves it empty, and the empty one is
+	// the common case: the key and the effect alone say to stay off
+	// this machine.
+	path := writeManifest(t, `
+apiVersion: liken.sh/v1alpha1
+kind: Machine
+metadata:
+  name: liken-dev
+spec:
+  nodeTaints:
+    - key: guid.foo/drill
+      value: node-taints
+      effect: PreferNoSchedule
+    - key: node-role.kubernetes.io/database
+      effect: NoSchedule
+`)
+	m, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taints := m.Spec.NodeTaints
+	if len(taints) != 2 {
+		t.Fatalf("nodeTaints: got %v", taints)
+	}
+	want := NodeTaint{Key: "guid.foo/drill", Value: "node-taints", Effect: TaintPreferNoSchedule}
+	if taints[0] != want {
+		t.Errorf("nodeTaints[0]: got %+v, want %+v", taints[0], want)
+	}
+	want = NodeTaint{Key: "node-role.kubernetes.io/database", Effect: TaintNoSchedule}
+	if taints[1] != want {
+		t.Errorf("nodeTaints[1]: got %+v, want %+v", taints[1], want)
+	}
+}
+
 func TestLoadRejectsWrongKind(t *testing.T) {
 	path := writeManifest(t, `
 apiVersion: liken.sh/v1alpha1

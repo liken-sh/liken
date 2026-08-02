@@ -228,6 +228,28 @@ func TestK3sBootConfigRendersNodeLabels(t *testing.T) {
 	}
 }
 
+func TestK3sBootConfigRendersNodeTaints(t *testing.T) {
+	taints := []machine.NodeTaint{
+		{Key: "node-role.kubernetes.io/database", Value: "primary", Effect: machine.TaintNoSchedule},
+		{Key: "guid.foo/drill", Effect: machine.TaintPreferNoSchedule},
+		{Key: "guid.foo/drill", Effect: machine.TaintNoExecute},
+	}
+	for _, role := range []api.Role{api.RoleLeader, api.RoleFollower} {
+		got := k3sBootConfig(k3sBootInputs{role: role, clusterDoc: labCluster(), haveToken: true, nodeTaints: taints})
+		// A taint with no value renders key:Effect, and a taint with
+		// one renders key=value:Effect, which is the grammar the
+		// kubelet parses. Entries render sorted by key and then by
+		// effect, so the drop-in is deterministic for the same spec.
+		want := "node-taint+:\n" +
+			"  - guid.foo/drill:NoExecute\n" +
+			"  - guid.foo/drill:PreferNoSchedule\n" +
+			"  - node-role.kubernetes.io/database=primary:NoSchedule\n"
+		if !strings.Contains(got, want) {
+			t.Errorf("%s config should append the spec's node taints:\n%s", role, got)
+		}
+	}
+}
+
 // kube-proxy runs on every node, so both roles carry the setting,
 // and the drop-in always states it whole. The static config files
 // name it nowhere, so this drop-in is its only author.
@@ -462,6 +484,13 @@ func TestK3sBootConfigWithoutNodeLabelsRendersNone(t *testing.T) {
 	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, clusterDoc: labCluster(), haveToken: true})
 	if strings.Contains(got, "node-label") {
 		t.Errorf("no declared labels means no node-label key:\n%s", got)
+	}
+}
+
+func TestK3sBootConfigWithoutNodeTaintsRendersNone(t *testing.T) {
+	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, clusterDoc: labCluster(), haveToken: true})
+	if strings.Contains(got, "node-taint") {
+		t.Errorf("no declared taints means no node-taint key:\n%s", got)
 	}
 }
 

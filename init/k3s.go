@@ -221,6 +221,7 @@ type k3sBootInputs struct {
 	clusterInit   bool
 	joinURL       string
 	nodeLabels    map[string]string
+	nodeTaints    []machine.NodeTaint
 	kubeletConfig string
 	debug         bool
 }
@@ -410,6 +411,42 @@ func k3sBootConfig(in k3sBootInputs) string {
 		b.WriteString("node-label+:\n")
 		for _, name := range slices.Sorted(maps.Keys(in.nodeLabels)) {
 			fmt.Fprintf(&b, "  - %s=%s\n", name, in.nodeLabels[name])
+		}
+	}
+
+	// The spec's node taints, so a node that registers for the first
+	// time is born repelling. An untainted first minute accepts
+	// exactly the pods that the taint exists to keep out, and those
+	// pods are running workloads that a later taint would have to
+	// evict. node-taint is k3s's key for the kubelet's
+	// registerWithTaints setting, which k3s writes into the kubelet
+	// configuration it generates rather than onto the kubelet's
+	// command line, and the kubelet reads that setting only when it
+	// creates the Node object. This block therefore does
+	// its work on a first boot or after a reinstall. On every later
+	// boot the Node object already exists, this block changes nothing,
+	// and the operator's live reconciliation is the only mechanism
+	// left. The + suffix appends, as it does for node-label above, so
+	// this drop-in can never claim the whole list away from a static
+	// file. An entry renders as key=value:Effect, or as key:Effect
+	// when the value is empty, which is the kubelet's own taint
+	// grammar. This code sorts by key and then by effect, so the same
+	// spec always renders the same bytes.
+	if len(in.nodeTaints) > 0 {
+		taints := slices.Clone(in.nodeTaints)
+		slices.SortFunc(taints, func(left, right machine.NodeTaint) int {
+			if byKey := strings.Compare(left.Key, right.Key); byKey != 0 {
+				return byKey
+			}
+			return strings.Compare(string(left.Effect), string(right.Effect))
+		})
+		b.WriteString("node-taint+:\n")
+		for _, taint := range taints {
+			entry := taint.Key
+			if taint.Value != "" {
+				entry += "=" + taint.Value
+			}
+			fmt.Fprintf(&b, "  - %s:%s\n", entry, taint.Effect)
 		}
 	}
 	return b.String()
@@ -746,6 +783,7 @@ func writeK3sBootConfig(clusterDoc *cluster.Cluster, m *machine.Machine, conns [
 		clusterInit:   clusterInit,
 		joinURL:       joinURL,
 		nodeLabels:    m.Spec.NodeLabels,
+		nodeTaints:    m.Spec.NodeTaints,
 		kubeletConfig: kubeletConfig,
 		debug:         clusterDoc.RuntimeSpec().Debug,
 	})
