@@ -2,8 +2,8 @@
 One release's page.
 
 The catalog entry comes first, because it is the reason to open this
-page. Adopting a release means pasting that entry into a Cluster, and
-until this page existed the only way to compute the digest was to
+page. Cataloging a release means pasting that entry into a Cluster,
+and until this page existed the only way to compute the digest was to
 download the document and hash it.
 
 Every link here is root-absolute. The website hostname class answers a
@@ -18,19 +18,31 @@ channel's root for a reader who left the trailing slash off.
 
 {{if .IsLatest}}<p>This is the newest release the channel names.</p>{{end}}
 
-<h2>Adopt it</h2>
+<h2>Catalog it</h2>
 
 <p>Add this entry to your cluster's
 <code>spec.releases.catalog</code>, then set
 <code>spec.version</code> to the same version. The digest is the
-release document's own bytes, and it is the root of the chain that
-verifies every artifact below.</p>
+sha256 of the release document's exact bytes, and the document gives
+the digest of every artifact below.</p>
 
 <pre>  - version: {{.Version}}
     digest: {{.Digest}}</pre>
 
 <p>The <a href="https://liken.sh/docs/guides/upgrade/">upgrade
-guide</a> gives the rest of the steps.</p>
+guide</a> gives the rest of the steps. See release
+<a href="https://github.com/liken-sh/liken/releases/tag/v{{.Version}}">{{.Version}}
+on GitHub</a>.</p>
+
+{{if .Notes}}
+<h2>What changed</h2>
+
+{{/* The notes are prose from the channel's notes.md, shown as text.
+Nothing pins them and no machine reads them, so they carry the same
+trust as this page: none. The pre keeps the commit-subject lines as
+lines, and the template escapes whatever they contain. */}}
+<pre>{{.Notes}}</pre>
+{{end}}
 
 <h2>Artifacts</h2>
 
@@ -46,7 +58,7 @@ guide</a> gives the rest of the steps.</p>
 </table>
 
 <p><a href="/{{.Version}}/release.yaml"><code>release.yaml</code></a>
-is the document that names them.
+is the document that lists them.
 <a href="/{{.Version}}/LICENSES.md"><code>LICENSES.md</code></a>
 carries the third-party notices{{if .HasSources}}, and
 <a href="/sources/">the source mirror</a> serves the corresponding
@@ -54,9 +66,6 @@ source for the components that require it{{end}}.</p>
 
 {{if .Components}}
 <h2>What is inside</h2>
-
-<p>The version is a calendar date, so it says nothing about the
-contents. The release document records them instead.</p>
 
 <table>
 <tr><th>Component</th><th>Version</th></tr>

@@ -259,3 +259,65 @@ func TestIndexIsIdempotent(t *testing.T) {
 		}
 	}
 }
+
+// notedRelease writes a notes object beside a bundled release, the
+// way the release workflow uploads one, and returns the key that the
+// channel's storage would report for it.
+func notedRelease(t *testing.T, channel, version, notes string) string {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(channel, version, "notes.md"), []byte(notes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return version + "/notes.md"
+}
+
+func TestIndexRendersTheNotesTheChannelServes(t *testing.T) {
+	source, channel, keys := servedReleases(t, "2026.07.15-001")
+	keys = append(keys, notedRelease(t, channel, "2026.07.15-001",
+		"Changes since 2026.07.14-001:\n\n- Fix the <thing> nobody liked\n"))
+
+	dir := t.TempDir()
+	if err := Index(source, keys, dir, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	page := pageAt(t, dir, "2026.07.15-001", "index.html")
+	if !strings.Contains(page, "What changed") {
+		t.Errorf("the page has no notes section:\n%s", page)
+	}
+	// The notes are prose from a Markdown file, rendered as text: the
+	// template must escape them, never trust them as markup.
+	if !strings.Contains(page, "Fix the &lt;thing&gt; nobody liked") {
+		t.Errorf("the page does not carry the notes, escaped:\n%s", page)
+	}
+}
+
+func TestIndexOmitsTheNotesSectionWhenTheChannelHasNone(t *testing.T) {
+	dir, _ := indexed(t, "2026.07.15-001")
+
+	page := pageAt(t, dir, "2026.07.15-001", "index.html")
+	if strings.Contains(page, "What changed") {
+		t.Errorf("the page renders a notes section with no notes:\n%s", page)
+	}
+}
+
+// A key list that names notes the channel does not serve is the same
+// kind of disagreement as a release the channel does not serve: the
+// listing and the channel must agree, or the pages describe fiction.
+func TestIndexRefusesNotesTheChannelDoesNotServe(t *testing.T) {
+	source, _, keys := servedReleases(t, "2026.07.15-001")
+	keys = append(keys, "2026.07.15-001/notes.md")
+
+	if err := Index(source, keys, t.TempDir(), nil); err == nil {
+		t.Error("Index accepted notes the channel does not serve")
+	}
+}
+
+func TestIndexLinksTheGitHubRelease(t *testing.T) {
+	dir, _ := indexed(t, "2026.07.15-001")
+
+	page := pageAt(t, dir, "2026.07.15-001", "index.html")
+	if !strings.Contains(page, "https://github.com/liken-sh/liken/releases/tag/v2026.07.15-001") {
+		t.Errorf("the page does not link the GitHub release:\n%s", page)
+	}
+}

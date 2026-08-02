@@ -59,7 +59,7 @@ func Index(source string, keys []string, outDir string, out io.Writer) error {
 	}
 	source = strings.TrimSuffix(source, "/")
 
-	versions, sources := readKeys(keys)
+	versions, notes, sources := readKeys(keys)
 	if len(versions) == 0 {
 		return fmt.Errorf("the key list names no release")
 	}
@@ -75,7 +75,7 @@ func Index(source string, keys []string, outDir string, out io.Writer) error {
 
 	channel := &channelView{page: newPage("liken releases"), Source: source, Sources: sources}
 	for _, version := range versions {
-		release, err := releaseView(source, version)
+		release, err := releaseView(source, version, notes[version])
 		if err != nil {
 			return err
 		}
@@ -153,6 +153,11 @@ type releaseInfo struct {
 	Components []machine.ReleaseComponent
 	IsLatest   bool
 	HasSources bool
+	// Notes is the release's changes list, from the channel's own
+	// notes.md beside the release. The notes are announcement prose:
+	// no digest pins them and no machine reads them, which is what
+	// lets a release published before notes existed gain them later.
+	Notes string
 }
 
 // Component gives one component's version for the front page's
@@ -189,20 +194,24 @@ type sourceFile struct {
 	Path string // <component>/<version>/<name>, under /sources/
 }
 
-// readKeys sorts a channel's object keys into the releases it holds
-// and the source mirror it carries. Anything else on the channel, the
-// channel document and the pages themselves included, belongs to no
-// listing and is skipped. A key whose first segment does not parse as
-// a version is not a release, which is what keeps a stray prefix from
-// becoming a page.
-func readKeys(keys []string) ([]string, []*sourceComponent) {
+// readKeys sorts a channel's object keys into the releases it holds,
+// the releases that carry notes, and the source mirror. Anything else
+// on the channel, the channel document and the pages themselves
+// included, belongs to no listing and is skipped. A key whose first
+// segment does not parse as a version is not a release, which is what
+// keeps a stray prefix from becoming a page.
+func readKeys(keys []string) ([]string, map[string]bool, []*sourceComponent) {
 	versions := map[string]bool{}
+	notes := map[string]bool{}
 	components := map[string]map[string][]sourceFile{}
 	for _, key := range keys {
 		segments := strings.Split(strings.TrimPrefix(key, "/"), "/")
 		switch {
 		case len(segments) == 2 && api.ValidVersion(segments[0]) == nil:
 			versions[segments[0]] = true
+			if segments[1] == "notes.md" {
+				notes[segments[0]] = true
+			}
 		case len(segments) == 4 && segments[0] == "sources":
 			component, version, name := segments[1], segments[2], segments[3]
 			if components[component] == nil {
@@ -230,14 +239,17 @@ func readKeys(keys []string) ([]string, []*sourceComponent) {
 		}
 		sources = append(sources, component)
 	}
-	return ordered, sources
+	return ordered, notes, sources
 }
 
 // releaseView fetches one release's document from the channel and
 // arranges it for the page. Fetching over the public URL is also a
 // check: a release the channel does not serve gets no page, and the
-// error names it.
-func releaseView(source, version string) (*releaseInfo, error) {
+// error names it. withNotes says the key list saw a notes object
+// beside this release, so a fetch that fails then is the same
+// disagreement between the listing and the channel, not an old
+// release from before notes existed.
+func releaseView(source, version string, withNotes bool) (*releaseInfo, error) {
 	raw, err := fetchDocument(source + "/" + version + "/release.yaml")
 	if err != nil {
 		return nil, fmt.Errorf("fetching %s's release document: %w", version, err)
@@ -252,10 +264,11 @@ func releaseView(source, version string) (*releaseInfo, error) {
 
 	info := &releaseInfo{
 		page: newPage("liken " + version),
-		// The digest is the document's own bytes, the same value the
-		// release workflow prints and an operator pins in a catalog
-		// entry. It is computed here and never read from the channel,
-		// because a digest the channel supplied would vouch for nothing.
+		// The digest is computed from the document's exact bytes, the
+		// same value the release workflow prints and an operator pins
+		// in a catalog entry. It is computed here and never read from
+		// the channel, because a digest the channel supplied would
+		// vouch for nothing.
 		Version:    version,
 		Digest:     fmt.Sprintf("sha256:%x", sha256.Sum256(raw)),
 		Components: release.Components,
@@ -266,6 +279,13 @@ func releaseView(source, version string) (*releaseInfo, error) {
 			SHA256: artifact.SHA256,
 			Human:  humanSize(artifact.Size),
 		})
+	}
+	if withNotes {
+		raw, err := fetchDocument(source + "/" + version + "/notes.md")
+		if err != nil {
+			return nil, fmt.Errorf("fetching %s's notes: %w", version, err)
+		}
+		info.Notes = strings.TrimSpace(string(raw))
 	}
 	return info, nil
 }

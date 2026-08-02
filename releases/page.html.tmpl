@@ -30,11 +30,11 @@ The rules after it are the ones only a channel page needs.
   td.latest::after { content: "latest"; font-size: 0.75rem;
                      background: var(--ink); color: var(--page);
                      padding: 0.05rem 0.4rem; margin-left: 0.5rem; }
-  /* The mark rides beside every page's title. It is inlined as SVG,
+  /* The mark appears in every page's title. It is inlined as SVG,
      so it needs a size given here: the file carries a viewBox and no
      width, which is what lets one file serve a favicon and a heading.
-     The mark is transparent, so it sits on either scheme with no
-     plate behind it. */
+     The mark is transparent, so it works on either color scheme with
+     no plate behind it. */
   h1 { display: flex; align-items: center; gap: 0.6rem; }
   h1 svg { width: 2.25rem; height: 2.25rem; flex: none; }
   h2 { margin-top: 2.5rem; }

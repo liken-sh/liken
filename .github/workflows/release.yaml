@@ -195,6 +195,31 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # The notes are the commit subjects since the last release:
+      # commit messages here are written as prose, so the log is the
+      # changelog. The channel serves the list as <version>/notes.md,
+      # and the release's index page renders it, so this upload comes
+      # before the index step. No digest names the notes and no
+      # machine reads them: they are announcement prose in the same
+      # trust class as the pages, which is what lets a release
+      # published before notes existed gain them later.
+      - name: publish the release notes
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          PREVIOUS=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)
+          {
+            if [ -n "$PREVIOUS" ]; then
+              echo "Changes since $PREVIOUS:"
+            else
+              echo "Changes:"
+            fi
+            echo
+            git log --format='- %s' ${PREVIOUS:+$PREVIOUS..}"$GITHUB_REF_NAME"
+          } > changes.md
+          s3cmd put --acl-public --no-progress \
+            --mime-type="text/markdown; charset=utf-8" \
+            changes.md "s3://releases.liken.sh/$VERSION/notes.md"
+
       # The index comes after the release is published and proven,
       # because it is how a person finds a release and not what makes
       # one exist. A machine reads channel.yaml and release.yaml and
@@ -236,9 +261,8 @@ jobs:
       # channel is the one place binaries live, because the GPL notice
       # requirements travel with the binaries, and the channel is
       # where LICENSES.md and the source mirror already satisfy them.
-      # The notes are the commit subjects since the last release:
-      # commit messages here are written as prose, so the log is the
-      # changelog.
+      # The body wraps the same changes list the channel serves as
+      # notes.md, so the two places always tell the same story.
       - name: publish the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -249,7 +273,6 @@ jobs:
             exit 0
           fi
           DIGEST=$(sha256sum "releases/dist/$VERSION/release.yaml" | cut -d' ' -f1)
-          PREVIOUS=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)
           {
             echo "Published to https://releases.liken.sh/$VERSION/release.yaml."
             echo
@@ -261,13 +284,7 @@ jobs:
             echo "    digest: sha256:$DIGEST"
             echo '```'
             echo
-            if [ -n "$PREVIOUS" ]; then
-              echo "Changes since $PREVIOUS:"
-            else
-              echo "Changes:"
-            fi
-            echo
-            git log --format='- %s' ${PREVIOUS:+$PREVIOUS..}"$GITHUB_REF_NAME"
+            cat changes.md
           } > notes.md
           gh release create "$GITHUB_REF_NAME" --verify-tag \
             --title "liken $VERSION" --notes-file notes.md
