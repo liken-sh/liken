@@ -34,12 +34,17 @@ spec:
     upstreams: [time.cloudflare.com, time.nist.gov]
 
   # The declaration this lab exists for: the fleet's declared state
-  # lives in the liken-dev-cluster repository, laid out the
+  # lives in the liken-dev-cluster repository
+  # (https://github.com/liken-sh/liken-dev-cluster), laid out the
   # single-cluster way: flux-system/ holds the engine, liken/ holds
   # the fleet's documents, and the sync path is the repository root
-  # (the path default). The repository is private. The cluster mints
-  # its own deploy key, and status.flux.publicKey carries the half
-  # to register at the forge. knownHosts pins the forge's identity:
+  # (the path default). That repository is public, and its history is
+  # the lab's drill log, so it reads as a worked example beside this
+  # file. The sync still exercises the credential path a private
+  # fleet repository needs, because the clone runs over ssh and the
+  # forge authenticates every ssh clone: the cluster mints its own
+  # deploy key, and status.flux.publicKey carries the half to
+  # register at the forge. knownHosts pins the forge's identity:
   # GitHub's published SSH host keys, public material that lets the
   # first clone verify the forge.
   features:
