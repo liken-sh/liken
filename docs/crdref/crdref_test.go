@@ -21,12 +21,38 @@ func TestGenerateMatchesGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := Generate(crd, "testdata/sample-crd.yaml")
+	got, err := Generate(crd, "testdata/sample-crd.yaml", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(got) != string(want) {
 		t.Errorf("generated page does not match testdata/sample.md:\n%s", string(got))
+	}
+}
+
+// A preamble is hand-written prose the schema cannot carry, such as a
+// link into the guides. It lands verbatim between the generated-from
+// comment and the schema's own description, so the page opens with
+// the words a person wrote for it.
+func TestGenerateInsertsThePreamble(t *testing.T) {
+	crd, err := os.ReadFile("testdata/sample-crd.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	preamble, err := os.ReadFile("testdata/sample-preamble.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile("testdata/sample-with-preamble.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Generate(crd, "testdata/sample-crd.yaml", preamble)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("generated page does not match testdata/sample-with-preamble.md:\n%s", string(got))
 	}
 }
 
@@ -45,7 +71,7 @@ func TestGenerateHandlesTheRealCRDs(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := Generate(crd, tc.path)
+		got, err := Generate(crd, tc.path, nil)
 		if err != nil {
 			t.Fatalf("%s: %v", tc.path, err)
 		}
@@ -56,7 +82,7 @@ func TestGenerateHandlesTheRealCRDs(t *testing.T) {
 }
 
 func TestGenerateRefusesANonCRD(t *testing.T) {
-	_, err := Generate([]byte("apiVersion: v1\nkind: ConfigMap\n"), "x.yaml")
+	_, err := Generate([]byte("apiVersion: v1\nkind: ConfigMap\n"), "x.yaml", nil)
 	if err == nil {
 		t.Error("a non-CRD document must be refused")
 	}
@@ -72,7 +98,7 @@ spec:
   versions:
     - name: v1alpha1
 `
-	_, err := Generate([]byte(doc), "x.yaml")
+	_, err := Generate([]byte(doc), "x.yaml", nil)
 	if err == nil {
 		t.Error("a CRD without a schema must be refused")
 	}
@@ -144,21 +170,6 @@ func TestCellText(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
-	}
-}
-
-// The anchors must match the ids Hugo generates for the headings
-// (lowercase, punctuation dropped), or every type link would point
-// at nothing. These cases mirror ids verified against a built site.
-func TestAnchorFor(t *testing.T) {
-	for path, want := range map[string]string{
-		"spec.network.interfaces[]": "specnetworkinterfaces",
-		"spec.storage.biosBoot":     "specstoragebiosboot",
-		"spec.features.*":           "specfeatures",
-	} {
-		if got := anchorFor(path); got != want {
-			t.Errorf("anchorFor(%q) = %q, want %q", path, got, want)
-		}
 	}
 }
 

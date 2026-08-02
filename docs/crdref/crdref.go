@@ -13,16 +13,22 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/liken-sh/liken/docs/linkcheck"
 )
 
 // Generate renders one CRD manifest as a Markdown page with Hugo
 // front matter. The source path appears in a comment so a reader of
-// the page knows where the words come from.
+// the page knows where the words come from. The preamble is optional
+// hand-written prose that opens the page: the schema's descriptions
+// document the fields, but only a person can say how the page relates
+// to the guides, so that paragraph lives in a file beside this
+// program and lands here verbatim.
 //
 // The walk uses yaml.v3 nodes rather than decoded maps, because
 // nodes preserve the document's field order. The CRDs declare their
 // fields in a deliberate teaching order, and the page keeps it.
-func Generate(crdYAML []byte, source string) ([]byte, error) {
+func Generate(crdYAML []byte, source string, preamble []byte) ([]byte, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(crdYAML, &doc); err != nil {
 		return nil, err
@@ -61,6 +67,9 @@ func Generate(crdYAML []byte, source string) ([]byte, error) {
 	// and short pages would not.
 	fmt.Fprintf(&b, "---\ntitle: %s\nweight: 10\ntoc: true\n---\n\n", kind)
 	fmt.Fprintf(&b, "<!-- Generated from %s by docs/crdref. Do not edit. -->\n\n", displayPath(source))
+	if p := strings.TrimRight(string(preamble), "\n"); p != "" {
+		b.WriteString(p + "\n\n")
+	}
 	if d := foldText(scalar(mapGet(schema, "description"))); d != "" {
 		b.WriteString(d + "\n\n")
 	}
@@ -115,7 +124,8 @@ func emitSection(b *strings.Builder, path string, node *yaml.Node, depth int, in
 		if required[name] {
 			yesno = "yes"
 		}
-		fmt.Fprintf(b, "| `%s` | %s | %s | %s |\n", name, typeCell(field, path+"."+name), yesno, cellText(field))
+		fmt.Fprintf(b, "| <span id=%q></span>`%s` | %s | %s | %s |\n",
+			rowAnchor(path, name), name, typeCell(field, path+"."+name), yesno, cellText(field))
 	})
 	b.WriteString("\n")
 
@@ -159,21 +169,20 @@ func typeCell(field *yaml.Node, childPath string) string {
 		return t
 	}
 	escaped := strings.NewReplacer("[", `\[`, "]", `\]`).Replace(t)
-	return fmt.Sprintf("[%s](#%s)", escaped, anchorFor(target))
+	// The link and the heading must agree on the heading's id, and
+	// linkcheck owns the one implementation of Hugo's id algorithm,
+	// so the manual's link check and these links cannot drift apart.
+	return fmt.Sprintf("[%s](#%s)", escaped, linkcheck.Anchor(target))
 }
 
-// anchorFor turns a section's path into the id Hugo gives its
-// heading: lowercased, with everything but letters and digits
-// dropped. The link and the heading must agree on this, and the
-// heading's side is Goldmark's GitHub-style autoHeadingID.
-func anchorFor(path string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(path) {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
+// rowAnchor gives one field's table row its own id: the section's
+// anchor, two hyphens, then the field's, as in spec--features. A
+// field with no section of its own is still a row, so this is the id
+// that lets a link land on exactly one field. The two hyphens keep
+// row ids apart from heading ids, because a heading id here comes
+// from a dotted path and never contains a hyphen.
+func rowAnchor(path, name string) string {
+	return linkcheck.Anchor(path) + "--" + linkcheck.Anchor(name)
 }
 
 // fieldType renders a schema's type the way a Go reader expects:

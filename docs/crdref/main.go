@@ -2,7 +2,7 @@
 //
 // The docs Makefile runs it once per CRD:
 //
-//	go run ./crdref <crd.yaml> <out.md>
+//	go run ./crdref <crd.yaml> <out.md> [preamble.md]
 //
 // The output lands in the Hugo content tree and is gitignored: the
 // schemas are the source of truth, and the pages are build products,
@@ -22,14 +22,20 @@ func main() {
 }
 
 func run(args []string) error {
-	if len(args) != 2 {
-		return fmt.Errorf("usage: crdref <crd.yaml> <out.md>")
+	if len(args) < 2 || len(args) > 3 {
+		return fmt.Errorf("usage: crdref <crd.yaml> <out.md> [preamble.md]")
 	}
 	crd, err := os.ReadFile(args[0])
 	if err != nil {
 		return err
 	}
-	page, err := Generate(crd, args[0])
+	var preamble []byte
+	if len(args) == 3 {
+		if preamble, err = os.ReadFile(args[2]); err != nil {
+			return err
+		}
+	}
+	page, err := Generate(crd, args[0], preamble)
 	if err != nil {
 		return err
 	}

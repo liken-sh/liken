@@ -57,8 +57,11 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: test the generator
-        run: go test ./docs/crdref/
+      # The make target generates the reference pages first, because
+      # the link check reads them as sources and as targets. Only Go
+      # is needed here; Hugo enters at the build step below.
+      - name: test the docs
+        run: make -C docs test
 
       # The site builds outside Docker, by the same make target a
       # workstation runs, so local and CI builds produce the same

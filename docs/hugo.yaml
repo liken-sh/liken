@@ -12,6 +12,16 @@ title: liken
 # sitemap stays, because it is free and crawlers use it.
 disableKinds: [taxonomy, term, rss]
 
+# The generated reference pages put an id on each field's table row,
+# as a raw-HTML span, so a link can land on exactly one field
+# (docs/crdref emits them). Goldmark drops raw HTML unless this is
+# set, and everything this site renders is authored in this
+# repository.
+markup:
+  goldmark:
+    renderer:
+      unsafe: true
+
 outputFormats:
   markdown:
     # text/markdown is a media type Hugo already has, with the md
