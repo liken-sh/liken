@@ -41,6 +41,14 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # The manual's link check reads the two generated reference
+      # pages, and a fresh checkout does not have them: they are build
+      # products, gitignored. The go-test hook below runs the check
+      # through `go test ./...`, so the pages must exist first. Only
+      # Go is needed; this is the same generation `make -C docs test`
+      # does.
+      - run: make -C docs generate
+
       # prek runs the hooks. Its version is pinned here, because the
       # workflow is the only place CI reads it from. The action caches
       # the environments of the remote hooks (shellcheck and the
