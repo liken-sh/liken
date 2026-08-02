@@ -13,7 +13,8 @@ one in force. The hard limit is the ceiling on the soft limit. A
 process may lower either half, and may raise its soft limit up to its
 hard limit, but it can never raise its hard limit.
 
-Two rules make these limits different from sysctls. The kernel fixes a
+Two rules make these limits different from
+[sysctls](/docs/reference/sysctls/). The kernel fixes a
 process's limits when the process starts, and it copies them from the
 parent. So a limit reaches a program only if whoever started that
 program held the limit first, and nothing can change a program that is
@@ -29,7 +30,8 @@ instead, listed below.
 Init applies two sets of limits to itself, in this order.
 
 1. liken's own values, listed on this page.
-2. The values in the machine's `spec.rlimits`.
+2. The values in the machine's
+   [`spec.rlimits`](/docs/reference/machine/#spec--rlimits).
 
 Both run at boot, before k3s starts. Init is the first process on the
 machine, so every process started after this point inherits the
@@ -56,7 +58,8 @@ next reconcile pass. This is the one way resource limits differ from
 sysctls in practice. The kernel fixes a process's limits when it
 forks, so nothing can raise the ceiling of a k3s that is already
 running. The operator stages the edit and reports it, and
-`rebootPolicy` says who starts the boot that applies it. A container
+[`rebootPolicy`](/docs/reference/machine/#spec--rebootpolicy) says
+who starts the boot that applies it. A container
 that is already running keeps its old limits until its pod restarts,
 which the reboot does anyway.
 

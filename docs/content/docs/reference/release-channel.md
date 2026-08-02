@@ -8,8 +8,10 @@ toc: true
 
 A release channel is a directory that any web server can share. The
 public channel is at [releases.liken.sh](https://releases.liken.sh/).
-Machines download upgrades from it, and `liken fetch` downloads
-releases from it to your workstation.
+Machines download upgrades from it, and
+[`liken fetch`](/docs/reference/cli/#liken-fetch) downloads releases
+from it to your workstation. [Upgrade the
+fleet](/docs/guides/upgrade/) gives the steps that use it.
 
 ## Layout
 
@@ -28,10 +30,12 @@ releases from it to your workstation.
       grub-boot.img            the BIOS boot loader's first stage
       grub-core.img            the BIOS boot loader's second stage
       LICENSES.md              third-party license notices
+      notes.md                 what changed in this release
     sources/                   source mirrors for GPL and LGPL components,
       <component>/<version>/   keyed by the component's own version
     index.html                 the index pages, one at the root, one in
                                each release, and one in sources/
+    favicon.ico                the icon browsers request
 
 ## Versions
 
@@ -66,6 +70,11 @@ newest published version. The cluster polls this document to fill the
 AVAILABLE column of `kubectl get clusters`, and `liken fetch
 ... latest ...` reads it to resolve `latest`.
 
+The channel document is the only object in the channel that changes.
+Every other object is published one time and never changes, which is
+why a machine can verify a release byte for byte against a pinned
+digest.
+
 ## The versions document
 
 `versions.yaml` is a `Versions` document. It lists every release that
@@ -84,7 +93,8 @@ releases:
 ```
 
 Each entry has the shape of a catalog entry, so you can copy one
-straight into your cluster's `spec.releases.catalog`.
+straight into your cluster's
+[`spec.releases.catalog`](/docs/reference/cluster/#specreleasescatalog).
 
 Read this document when you want the whole list in one request. The
 storage refuses to list itself, so this file is the only way to learn
@@ -95,6 +105,16 @@ stays one small file however many releases exist. The digests here are
 a convenience, not an authority: a digest that the channel served
 vouches for nothing by itself, which is why you pin the digest in your
 own Cluster.
+
+## The notes
+
+`<version>/notes.md` lists what changed in the release: the commit
+subjects since the release before it. The release's page on the
+channel shows the list, and the body of the release's page on GitHub
+wraps the same text. No digest pins the notes, `release.yaml` does
+not list them, and no machine reads them. They are announcement
+prose, in the same trust class as the index pages. That is also what
+lets a release published before notes existed gain them later.
 
 ## The index pages
 

@@ -5,11 +5,15 @@ title: Manual
 # The `liken` manual
 
 This manual tells you how to set up and run a `liken` cluster. The
-guides give the steps for the common tasks. The reference describes
-the API resources, the release channel, and the `liken` command.
+concepts section gives the model. The guides give the steps for the
+common tasks. The reference describes the API resources, the release
+channel, and the `liken` command.
 
-Read [Install a cluster](/docs/guides/install/) first. It gives the
-steps from a downloaded release to `kubectl get nodes`.
+If `liken` is new to you, read
+[How liken works](/docs/concepts/how-liken-works/) first. It gives
+the model in one read. Then read
+[Install a cluster](/docs/guides/install/): the steps from a
+downloaded release to `kubectl get nodes`.
 
 This manual is small on purpose. Each script, manifest, and program in
 [liken-sh/liken](https://github.com/liken-sh/liken) has comments that

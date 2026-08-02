@@ -24,10 +24,11 @@ into the new slot one time only, as a trial:
 
 In both cases, the machine serves on the version it ran before. Its
 phase shows Blocked, its conditions show `RejectedLastBoot`, and
-[`status.boot.systemRejection`](/docs/reference/machine/#statusboot)
+[`status.boot.systemRejection`](/docs/reference/machine/#statusbootsystemrejection)
 records what happened. The rejection stays until you point
-[`spec.version`](/docs/reference/cluster/#spec) at a different
-version, so the machine does not try the failed version again.
+[`spec.version`](/docs/reference/cluster/#spec--version) at a
+different version, so the machine does not try the failed version
+again.
 
 A bad release is never published again. To correct a bad release,
 publish a release with the next serial number, add it to the catalog,

@@ -41,6 +41,21 @@ navigation and all chrome excluded.
                color: var(--ink-muted); text-align: center; }
   nav.toc { font-size: 0.9em; background: var(--panel);
             padding: 0.6rem 1rem; margin: 1.5rem 0; }
+  /* A wide listing (the front page's kubectl output) reads best
+     unwrapped. The text keeps its measure, and a pre that needs more
+     room centers itself on the column and grows toward the viewport
+     edges, so it uses the page's margins before it scrolls. Only
+     pages without the sidebar get this: on the manual's grid pages
+     the sidebar owns the left margin, so their pre blocks stay
+     inside the text column. */
+  body:not(.manual) main pre {
+    width: fit-content;
+    min-width: 100%;
+    max-width: min(100vw - 3rem, 80rem);
+    margin-left: 50%;
+    transform: translateX(-50%);
+  }
+  body:not(.manual) main pre code { font-size: 0.875em; }
   nav.toc ul { list-style: none; margin: 0; padding-left: 0; }
   nav.toc ul ul { padding-left: 1rem; }
   /* The sidebar appears only when the viewport can hold it beside

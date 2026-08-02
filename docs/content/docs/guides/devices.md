@@ -60,7 +60,8 @@ it. Look at the hardware the machine reports that it cannot drive:
 ## 2. Declare the driver
 
 A device becomes available for a claim when a driver binds it. Add the
-module to the machine's manifest:
+module to [`spec.modules`](/docs/reference/machine/#spec--modules)
+in the machine's manifest:
 
     spec:
       modules:

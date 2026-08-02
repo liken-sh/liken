@@ -89,8 +89,8 @@ fleet then syncs from the first boot.
 default for `path` is the repository root. `knownHosts` holds the
 forge's host keys, one key per line. The keys are public material, so
 they belong in the spec. They let the first clone verify the forge.
-The [Cluster reference](/docs/reference/cluster/#spec) describes each
-parameter.
+The [Cluster reference](/docs/reference/cluster/#spec--features)
+describes each parameter.
 
 On a running cluster, k3s restarts in place on each machine, one
 machine at a time, to apply this edit. The machines and their pods

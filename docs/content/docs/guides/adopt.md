@@ -56,7 +56,8 @@ the same for a minted identity and an adopted identity.
 
 Edit `mycluster/cluster.yaml`:
 
-* Set [`spec.origin`](/docs/reference/cluster/#spec) to `Adopted`.
+* Set [`spec.origin`](/docs/reference/cluster/#spec--origin) to
+  `Adopted`.
 * Set `spec.endpoint` to the existing cluster's join URL.
 
 The datastore of an adopted cluster already exists. Each `liken` leader
@@ -66,7 +67,8 @@ into two clusters.
 
 ### The document claims the whole cluster
 
-`spec.features` is an opt-in list, and `liken` reads it as a statement
+[`spec.features`](/docs/reference/cluster/#spec--features) is an
+opt-in list, and `liken` reads it as a statement
 about the cluster, not only about the machines you install. A feature
 that the document does not name is a feature that the cluster
 retracts, and a retracted feature is one `liken` tears down.

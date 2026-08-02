@@ -20,7 +20,8 @@ Two programs apply kernel settings, and they apply them in the same
 order.
 
 1. liken's own values, listed on this page.
-2. The values in the machine's `spec.sysctls`.
+2. The values in the machine's
+   [`spec.sysctls`](/docs/reference/machine/#spec--sysctls).
 
 Init applies both at boot, before k3s starts. The liken operator
 applies both again on every pass, about every ten seconds. Each pass
@@ -139,18 +140,20 @@ Not every kernel setting is a sysctl. Four other kinds matter.
 **Resource limits** are ceilings the kernel puts on one process, such
 as how many files it may hold open. They are not files under
 `/proc/sys`, and no sysctl changes one. liken sets its own, and
-`spec.rlimits` overrides them. See the Resource limits page.
+`spec.rlimits` overrides them.
+[Resource limits](/docs/reference/rlimits/) describes both sets.
 
 **The kernel command line** is read once, at boot. It carries the
 settings the kernel needs before any program runs. liken builds this
-line itself, and there is no field to add to it. `status.boot.commandLine`
+line itself, and there is no field to add to it.
+[`status.boot.commandLine`](/docs/reference/machine/#statusboot--commandline)
 reports the line the machine booted with.
 
 **Kernel modules** are drivers and other kernel parts that load on
 demand. Some sysctls need one: `net.core.default_qdisc` cannot name
 `fq_codel` unless the `sch_fq_codel` module is loaded. liken loads a
-fixed list at boot, and `spec.modules` adds to it. See the Machine
-reference.
+fixed list at boot, and
+[`spec.modules`](/docs/reference/machine/#spec--modules) adds to it.
 
 **Compiled settings** are fixed when the kernel is built, and liken
 does not build kernels. The build's own configuration ships in the

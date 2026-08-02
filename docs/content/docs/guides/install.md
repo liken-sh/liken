@@ -12,8 +12,10 @@ toolkit that does these steps.
 
 You need:
 
-* One or more machines with blank disks. The installation erases the
-  disks it claims.
+* One or more x86-64 machines with blank disks. UEFI firmware and
+  BIOS firmware both work. A machine needs 1 GB of memory, and more
+  for its workloads. The default disk layout asks for about 20 GB.
+  The installation erases the disks it claims.
 * A USB stick. The installation image overwrites it.
 * A Linux workstation with `kubectl`.
 * A keyboard and a screen on each machine, for the installation. A
@@ -59,8 +61,8 @@ the trust chain.
 
     ./liken new mycluster
 
-[`liken new`](/docs/reference/cli/#liken-new) asks approximately twelve
-simple questions: the names of your machines, which machines are
+[`liken new`](/docs/reference/cli/#liken-new) asks a short series of
+plain questions: the names of your machines, which machines are
 leaders, their addresses, and their disks. Then it writes `mycluster/`:
 a `cluster.yaml` file and one manifest for each machine. Each field has
 a comment that explains what the field means. Keep `mycluster/` in
@@ -164,8 +166,8 @@ can install with them unchanged. Two roles still need your attention.
 containerd image store. Thus the workloads on the node set its size.
 Increase it if this machine runs many images, or large images. Select
 this number carefully. The Cluster's
-`spec.runtime.kubelet.imageGC` section controls how much of this
-filesystem the image store keeps. `podStorage` comes after
+[`spec.runtime.kubelet.imageGC`](/docs/reference/cluster/#specruntimekubeletimagegc)
+section controls how much of this filesystem the image store keeps. `podStorage` comes after
 `clusterState` on the disk, so `clusterState` cannot become larger
 after the installation.
 Set `podStorage` to the size that your workloads' volumes need. If the
@@ -274,4 +276,6 @@ Edit those resources to make configuration changes. The
 [Machine](/docs/reference/machine/) and
 [Cluster](/docs/reference/cluster/) pages describe each field. When a
 new release is available, [Upgrade the fleet](/docs/guides/upgrade/)
-moves each machine to it with one edit.
+moves each machine to it with one edit. If a step did not go as this
+guide says, [Troubleshoot](/docs/guides/troubleshoot/) starts from
+the symptom.

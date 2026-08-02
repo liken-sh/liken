@@ -10,6 +10,8 @@ toc: true
 deployment. It runs on your workstation, and every release includes
 it. You do not need the repository or a build to make a cluster. To
 print the full usage, run `liken` with no arguments.
+[Install a cluster](/docs/guides/install/) runs the common commands
+in order.
 
 Three terms occur on this page:
 
@@ -64,7 +66,8 @@ your machine reaches the cluster at a different address.
     liken approve-reboot [-server URL] <deployment-dir> <machine>
 
 Reports what a machine waits for, and grants it one disruption. A
-machine whose [`rebootPolicy`](/docs/reference/machine/#spec) is
+machine whose
+[`rebootPolicy`](/docs/reference/machine/#spec--rebootpolicy) is
 `Manual` stages each change and waits. This command reads the
 machine's `status.pending`, prints each waiting change, and writes
 the `liken.sh/approve-disruption` annotation with the staged

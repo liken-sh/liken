@@ -39,7 +39,8 @@ a catalog entry you can copy. To compute the digest yourself:
 
 Add the release to
 [`spec.releases.catalog`](/docs/reference/cluster/#specreleasescatalog),
-and point [`spec.version`](/docs/reference/cluster/#spec) at it:
+and point [`spec.version`](/docs/reference/cluster/#spec--version)
+at it:
 
     spec:
       version: "2026.07.20-001"
@@ -77,9 +78,11 @@ The cluster grants turns within
 time, whatever the budget says, because the datastore needs a majority
 of the leaders.
 
-If a machine's [`rebootPolicy`](/docs/reference/machine/#spec) is
+If a machine's
+[`rebootPolicy`](/docs/reference/machine/#spec--rebootpolicy) is
 `Manual` (the default), the machine stages the change, reports
-`RebootPending`, and waits for you. Grant the reboot with:
+`RebootPending`, and waits for you. Grant the reboot with
+[`liken approve-reboot`](/docs/reference/cli/#liken-approve-reboot):
 
     liken approve-reboot mycluster <machine>
 
