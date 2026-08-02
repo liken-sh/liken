@@ -181,6 +181,31 @@ resource "linode_domain_record" "www" {
   target      = "liken.sh"
 }
 
+# GitHub's proof that the liken-sh organization owns these names.
+# GitHub issues a code for each name, and reads it back from a TXT
+# record at a label derived from the organization's login. When the
+# records answer, GitHub marks the organization's liken.sh link with
+# a "Verified" badge. The badge tells a visitor that the website on
+# the profile and the account that publishes the code answer to the
+# same owner. GitHub verifies each name separately, so the apex and
+# the release channel each carry a record. The codes are not
+# secrets: they prove control of this zone, and control of this zone
+# is exactly what this file declares.
+
+resource "linode_domain_record" "github_org_verification" {
+  domain_id   = linode_domain.liken_sh.id
+  name        = "_gh-liken-sh-o"
+  record_type = "TXT"
+  target      = "6c1f53b738"
+}
+
+resource "linode_domain_record" "github_org_verification_releases" {
+  domain_id   = linode_domain.liken_sh.id
+  name        = "_gh-liken-sh-o.releases"
+  record_type = "TXT"
+  target      = "fa73a639f2"
+}
+
 # ---------------------------------------------------------------------------
 # The machine: one nanode, carrying the cluster.
 
