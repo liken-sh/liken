@@ -15,7 +15,7 @@ the design and the biology behind it.
 
 `liken` is a small operating system that boots a machine directly into
 Kubernetes and uses Kubernetes as the service manager. **Li**nux +
-**K**ubernetes. The name also describes the operation: a reconciler
+**K**ub**e**r**n**etes. The name also describes the operation: a reconciler
 makes the machine like its declared state.
 
 ## What is in the image
