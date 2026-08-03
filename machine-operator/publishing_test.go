@@ -208,6 +208,27 @@ func TestPublishKeepsTheUsbfsNodeOffACompanion(t *testing.T) {
 	}
 }
 
+func TestPublishDeliversTheBusNodeAloneWhenTheSubtreeIsEmpty(t *testing.T) {
+	// A libusb program detaches the kernel driver from the interface
+	// it claims, and the driver's nodes leave with it. Network UPS
+	// Tools leaves a UPS in this state for as long as it runs. The
+	// delivery still carries the bus node, and the claim receives it,
+	// so a spec refreshed while the program runs names a node that a
+	// container restart can inject.
+	published := publishDevices(hardware.Delivery{BusNode: "/dev/bus/usb/003/002"})
+
+	if len(published) != 1 {
+		t.Fatalf("published = %+v, want one device", published)
+	}
+	only := published[0]
+	if only.Suffix != "" || only.Subsystem != "" || only.RenderNode || only.Shareable {
+		t.Errorf("device = %+v, want a bare exclusive primary", only)
+	}
+	if !slices.Equal(only.Nodes, []string{"/dev/bus/usb/003/002"}) {
+		t.Errorf("nodes = %v, want the bus node alone", only.Nodes)
+	}
+}
+
 func TestPublishReturnsNothingForAnEmptyDelivery(t *testing.T) {
 	if published := publishDevices(hardware.Delivery{}); len(published) != 0 {
 		t.Errorf("published = %+v, want none", published)

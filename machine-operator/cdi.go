@@ -182,6 +182,15 @@ func refreshCDISpecs(sysRoot string) {
 // had. The claim names hardware that left, and unprepare ends the
 // claim when its pods do. An empty edit list would start the next
 // pod with no device and no error.
+//
+// A device that is present with no driver is a different case: the
+// program under this claim detached the kernel driver, and the
+// kernel driver's nodes went with it. The publish policy resolves
+// that shape to the bus node alone, so the refresh rewrites the spec
+// to the one node the program uses. Without this rewrite the spec
+// keeps a node the program deleted, and the claim's container can
+// never restart: the runtime injects the spec's nodes at every
+// container creation, and a stat on the deleted node fails it.
 func refreshCDISpec(sysRoot, claimUID string, byName map[string]hardware.Device) error {
 	cdiWrites.Lock()
 	defer cdiWrites.Unlock()

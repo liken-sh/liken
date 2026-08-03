@@ -112,6 +112,33 @@ func TestRefreshKeepsTheNodesOfHardwareThatLeft(t *testing.T) {
 	}
 }
 
+func TestRefreshDeliversTheBusNodeAloneAfterADriverDetach(t *testing.T) {
+	// A libusb program in the claim's pod detaches the kernel driver
+	// from the interface, and the driver's nodes leave with it. The
+	// interface stays on the bus. The refresh rewrites the spec to
+	// the bus node, the one node the program uses, so a container
+	// restart under the same prepared claim injects a node that
+	// exists. Before this rewrite the spec kept the driver's deleted
+	// node, and every restart failed on it.
+	fixture := newDRAFixture(t)
+	fixture.enumerate(t, 4)
+	prepared(t, fixture)
+
+	stick := filepath.Join(draSysfsRoot, "bus", "usb", "devices", "2-1:1.0")
+	if err := os.Remove(filepath.Join(stick, "driver")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(stick, "host0")); err != nil {
+		t.Fatal(err)
+	}
+	refreshCDISpecs(draSysfsRoot)
+
+	paths := specPaths(t, fixture, "claim-1")
+	if !slices.Equal(paths, []string{"/dev/bus/usb/002/004"}) {
+		t.Errorf("paths = %v, want the bus node alone", paths)
+	}
+}
+
 func TestRefreshIgnoresFilesItDidNotWrite(t *testing.T) {
 	// containerd reads every spec in this directory, and another
 	// driver's file can sit beside liken's.

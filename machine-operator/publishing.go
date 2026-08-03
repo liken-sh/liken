@@ -70,11 +70,27 @@ var companionSubsystems = map[string]bool{"i2c-dev": true, "drm_dp_aux_dev": tru
 // that node to reach the device at all. A companion is one wire
 // beside the primary. The bus node opens the whole device, so a
 // companion must not carry it.
+//
+// A delivery with a bus node and nothing else publishes the bus node
+// alone. This is the state a userspace driver leaves an interface in
+// while it runs: libusb detaches the kernel driver to claim the
+// interface, and the kernel driver's nodes leave with it. The bus
+// node is the one node such a program opens, and the one node it
+// cannot destroy, so a spec refreshed to this shape survives a
+// container restart under the same prepared claim. Publishing here
+// does not add the device to any slice: the inventory gates on the
+// driver and on the subtree's nodes before it applies this policy,
+// so only resolution for a claim that already holds the hardware
+// sees this shape.
 func publishDevices(delivery hardware.Delivery) []publishedDevice {
 	published := splitBySubsystem(delivery)
-	if len(published) > 0 && delivery.BusNode != "" {
-		published[0].Nodes = append(published[0].Nodes, delivery.BusNode)
+	if delivery.BusNode == "" {
+		return published
 	}
+	if len(published) == 0 {
+		return []publishedDevice{{Nodes: []string{delivery.BusNode}}}
+	}
+	published[0].Nodes = append(published[0].Nodes, delivery.BusNode)
 	return published
 }
 
