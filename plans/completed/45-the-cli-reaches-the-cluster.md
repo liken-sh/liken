@@ -76,8 +76,8 @@ is the one that carries liken's own meaning: it reads `status.pending`,
 reports what is waiting, and writes the annotation.
 
 ```
-$ liken approve-reboot mycluster nuc5
-nuc5 is waiting on one change:
+$ liken approve-reboot mycluster node-5
+node-5 is waiting on one change:
   CredentialsConverged  RestartPending
   registry credentials for 2 hosts (3943abfa6adf)
   a k3s restart applies this; the machine does not reboot

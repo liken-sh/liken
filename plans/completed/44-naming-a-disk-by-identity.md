@@ -23,9 +23,9 @@ holds iSCSI LUNs, which the kernel names `sdb`, `sdc`, and onward in
 the same series:
 
 ```
-nuc3  declares /dev/sda    sda 238Gi local SSD  + 5 iSCSI LUNs
-nuc4  declares /dev/sda    sda 476Gi local SSD  + 11 iSCSI LUNs
-nuc5  declares /dev/sda    sda 476Gi local SSD  + 1 iSCSI LUN
+node-3  declares /dev/sda    sda 238Gi local SSD  + 5 iSCSI LUNs
+node-4  declares /dev/sda    sda 476Gi local SSD  + 11 iSCSI LUNs
+node-5  declares /dev/sda    sda 476Gi local SSD  + 1 iSCSI LUN
 ```
 
 The other two declare `/dev/nvme0n1`, which no SCSI disk can take.

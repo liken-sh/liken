@@ -61,7 +61,7 @@ func TestChooseApprovalReturnsNilWhenNothingIsPending(t *testing.T) {
 
 func TestRenderPendingShowsEachChangeWithItsReason(t *testing.T) {
 	m := &machine.Machine{
-		Metadata: api.ObjectMeta{Name: "nuc5"},
+		Metadata: api.ObjectMeta{Name: "node-5"},
 		Status: machine.MachineStatus{
 			Conditions: []api.Condition{
 				{Type: "CredentialsConverged", Status: api.ConditionFalse, Reason: "RestartPending"},
@@ -75,7 +75,7 @@ func TestRenderPendingShowsEachChangeWithItsReason(t *testing.T) {
 	}
 	got := renderPending(m)
 	for _, want := range []string{
-		"nuc5 is waiting on one change:",
+		"node-5 is waiting on one change:",
 		"CredentialsConverged  RestartPending",
 		"registry credentials for 2 hosts (3943abfa6adf)",
 		"a k3s restart applies this; the machine does not reboot",
@@ -88,7 +88,7 @@ func TestRenderPendingShowsEachChangeWithItsReason(t *testing.T) {
 
 func TestRenderPendingOmitsTheReasonWhenTheConditionIsMissing(t *testing.T) {
 	m := &machine.Machine{
-		Metadata: api.ObjectMeta{Name: "nuc5"},
+		Metadata: api.ObjectMeta{Name: "node-5"},
 		Status: machine.MachineStatus{
 			Pending: []machine.PendingDisruption{
 				{Condition: "CredentialsConverged", Kind: machine.DisruptionRestart,
@@ -108,7 +108,7 @@ func TestRenderPendingOmitsTheReasonWhenTheConditionIsMissing(t *testing.T) {
 
 func TestRenderPendingSaysARebootAppliesEveryStagedChange(t *testing.T) {
 	m := &machine.Machine{
-		Metadata: api.ObjectMeta{Name: "nuc5"},
+		Metadata: api.ObjectMeta{Name: "node-5"},
 		Status: machine.MachineStatus{
 			Conditions: []api.Condition{
 				{Type: "VersionConverged", Status: api.ConditionFalse, Reason: "RebootPending"},
@@ -127,8 +127,8 @@ func TestRenderPendingSaysARebootAppliesEveryStagedChange(t *testing.T) {
 }
 
 func TestRenderPendingSaysConverged(t *testing.T) {
-	m := &machine.Machine{Metadata: api.ObjectMeta{Name: "nuc5"}}
-	if got := renderPending(m); !strings.Contains(got, "nuc5 is converged; nothing is waiting") {
+	m := &machine.Machine{Metadata: api.ObjectMeta{Name: "node-5"}}
+	if got := renderPending(m); !strings.Contains(got, "node-5 is converged; nothing is waiting") {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -144,7 +144,7 @@ func TestApproveRebootReportsAndGrantsTheChosenChange(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method {
 		case http.MethodGet:
-			fmt.Fprint(w, `{"metadata":{"name":"nuc5"},"status":{"pending":[
+			fmt.Fprint(w, `{"metadata":{"name":"node-5"},"status":{"pending":[
 				{"condition":"CredentialsConverged","kind":"Restart",
 				 "hash":"aaaabbbbcccc0000","summary":"registry credentials for 2 hosts"}]}}`)
 		case http.MethodPatch:
@@ -161,10 +161,10 @@ func TestApproveRebootReportsAndGrantsTheChosenChange(t *testing.T) {
 	defer server.Close()
 
 	var out bytes.Buffer
-	if err := approveReboot([]string{"-server", server.URL, dir, "nuc5"}, &out); err != nil {
+	if err := approveReboot([]string{"-server", server.URL, dir, "node-5"}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "nuc5 is waiting on one change:") {
+	if !strings.Contains(out.String(), "node-5 is waiting on one change:") {
 		t.Fatalf("the report is missing from the output:\n%s", out.String())
 	}
 	if !strings.Contains(out.String(), "approved: liken.sh/approve-disruption=aaaabbbbcccc") {
