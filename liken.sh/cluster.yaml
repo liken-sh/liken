@@ -14,7 +14,7 @@ spec:
   # The release every machine here runs. It must name an entry in the
   # catalog below. Each machine fetches, verifies, and proves this
   # version itself, and the rollout moves one machine at a time.
-  version: 2026.08.03-001
+  version: 2026.08.03-002
 
   # One leader is a complete cluster: k3s keeps its state in sqlite
   # until this list grows to three, and growing it is an ordinary
@@ -80,16 +80,17 @@ spec:
     # rollback to name it, and two slots is all a machine has. An
     # older entry names a release no machine could return to.
     catalog:
-      # The release that binds a kernel driver back to a claimed USB
-      # interface at unprepare, so the device returns to the
-      # inventory when its pod ends.
-      - version: 2026.08.02-003
-        digest: sha256:15c6c4ba9adbe19a7d2665e3faa4d79cb204e9b026f0831062eb2c00e9addc07
       # The release whose operators read each API response to its
       # end, so a request no longer closes its connection early and
       # the apiservers stop logging it as aborted.
       - version: 2026.08.03-001
         digest: sha256:002ae38513d37041e6a63d0e6da9e139a852f15b69b5d5140f50c3c99c38e526
+      # The release that keeps a claimed USB device's CDI spec
+      # current while a libusb program holds the interface, so a
+      # container restart under the prepared claim injects the bus
+      # node instead of a node the program deleted.
+      - version: 2026.08.03-002
+        digest: sha256:9b65b839c18d5b6bfefd4ffc87f22d802874116a4a6e0c3909542c77d1b1152c
 
   runtime:
     # The Go runtime environment for the k3s process. k3s uses the
