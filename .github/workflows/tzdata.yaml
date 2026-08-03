@@ -41,11 +41,20 @@ jobs:
       # it. Its first row is the database: the pinned version, then
       # that name. Reading it here keeps one rule in one place, and
       # costs one request a week with no API token.
+      #
+      # The step reads the whole report before it takes a row. A
+      # `head -1` on the other end of a pipe closes the pipe once it
+      # has its line, and the runner starts a job with SIGPIPE
+      # ignored, so the script's next printf returns EPIPE rather than
+      # ending the script on a signal. That is a failed command under
+      # the script's own `set -e`, and pipefail carries the exit
+      # status back here.
       - name: read the current release
         id: upstream
         run: |
           set -euo pipefail
-          row="$(tzdata/latest.sh | head -1)"
+          report="$(tzdata/latest.sh)"
+          row="$(head -1 <<<"$report")"
           pinned="$(cut -f2 <<<"$row")"
           latest="$(cut -f3 <<<"$row")"
           echo "latest=$latest" >>"$GITHUB_OUTPUT"
