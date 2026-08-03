@@ -183,6 +183,13 @@ opens this node to communicate with it. A node that a kernel driver
 registers, such as `hidraw`, carries that driver's protocol only, so
 it cannot take the place of the usbfs node.
 
+A program that uses libusb cannot share an interface with a kernel
+driver, so it detaches the kernel driver while it runs. liken
+publishes only devices that have a driver, so the device leaves the
+node's slice for as long as the pod runs. When the pod stops and its
+claim ends, the node binds a kernel driver to the interface again, and
+the device returns to the slice at the next reconcile pass.
+
 The kernel gives the device a new device number at each enumeration.
 The node changes when you unplug the device and plug it in again.
 Each reconcile pass writes the current node into the specification of

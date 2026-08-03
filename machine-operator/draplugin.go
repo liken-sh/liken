@@ -39,6 +39,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"google.golang.org/grpc"
 	healthv1alpha1 "k8s.io/kubelet/pkg/apis/dra-health/v1alpha1"
@@ -259,12 +260,26 @@ func (h *draHealth) NodeWatchResources(req *healthv1alpha1.NodeWatchResourcesReq
 	return nil
 }
 
-// NodeUnprepareResources removes each claim's CDI spec. As with
-// prepare, every claim gets an answer, and failures stay specific to
-// each claim.
+// NodeUnprepareResources gives each claim's hardware back to the
+// machine and removes the claim's CDI spec. As with prepare, every
+// claim gets an answer, and failures stay specific to each claim.
+//
+// The repair runs before the removal, because the spec file is the
+// only record of what the claim held (rebinding.go explains the
+// repair and why it never fails the call). One sysfs walk serves
+// every claim in the request, and the walk runs only when a claim has
+// a spec file, so an unprepare the kubelet repeats costs nothing.
 func (p *draPlugin) NodeUnprepareResources(ctx context.Context, req *drav1.NodeUnprepareResourcesRequest) (*drav1.NodeUnprepareResourcesResponse, error) {
+	devices := sync.OnceValue(func() map[string]hardware.Device {
+		byName := map[string]hardware.Device{}
+		for _, d := range hardware.DiscoverDevices(draSysfsRoot, draNaming()) {
+			byName[deviceName(d)] = d
+		}
+		return byName
+	})
 	resp := &drav1.NodeUnprepareResourcesResponse{Claims: map[string]*drav1.NodeUnprepareResourceResponse{}}
 	for _, claim := range req.Claims {
+		rebindClaimDevices(claim.Uid, devices)
 		if err := removeCDISpec(claim.Uid); err != nil {
 			resp.Claims[claim.Uid] = &drav1.NodeUnprepareResourceResponse{Error: err.Error()}
 			continue
