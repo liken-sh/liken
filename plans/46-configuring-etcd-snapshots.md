@@ -78,6 +78,10 @@ spec:
         region: us-east-1
         folder: dev-cluster
         retention: 30
+        insecure: false
+        skipSSLVerify: false
+        bucketLookupType: auto
+        endpointCA: ""
 ```
 
 `spec.datastore` names what is snapshotted. The Cluster document does
@@ -91,6 +95,32 @@ An unset section renders nothing, so k3s keeps its own defaults and
 this milestone changes no existing cluster. `schedule: "off"` renders
 `etcd-disable-snapshots`, which is the only way to turn the snapshots
 off. An unset `s3` object means local snapshots only.
+
+### Any S3-compatible store, not just AWS
+
+k3s uploads snapshots through minio-go, the client SDK whose reference
+implementation is MinIO. It builds the client from the declared
+endpoint and region, so any object store that speaks the S3 API works:
+MinIO, Ceph RGW, or a public cloud that is not AWS. This is why
+`endpoint` is a plain host and why the extra fields exist. Four of them
+answer the differences between stores and a self-hosted deployment:
+
+* `insecure` speaks plain HTTP, for a store with no TLS.
+* `skipSSLVerify` ignores a bad certificate on an HTTPS store.
+* `bucketLookupType` names how the client finds the bucket. The
+  default (`auto`) and `dns` use virtual-host addressing, which AWS and
+  some others need; `path` uses path addressing, which MinIO and most
+  self-hosted stores need.
+* `endpointCA` carries a PEM bundle for a store behind an internal CA,
+  which neither of the two flags above covers.
+
+The k3s key names are `etcd-s3-endpoint`, `etcd-s3-region`,
+`etcd-s3-bucket`, `etcd-s3-folder`, `etcd-s3-insecure`,
+`etcd-s3-skip-ssl-verify`, `etcd-s3-bucket-lookup-type`, and
+`etcd-s3-endpoint-ca`. `etcd-s3-retention` defaults to
+`etcd-snapshot-retention` when it is unset, which is what lets the two
+retentions (local and off-machine) work without an operator having to
+repeat the number.
 
 Every key here is read when the k3s server starts, so an edit
 converges by restarting k3s in place. That is the restart tier
@@ -117,11 +147,9 @@ access key or the secret key, because it is the document a deployment
 keeps in git.
 
 k3s offers `--etcd-s3-config-secret`, which reads the whole S3
-configuration from a Secret in `kube-system`. Its help text says the
-secret applies only when no other `etcd-s3` option is set, so taking
-that path would move the endpoint, the bucket, and the folder out of
-the Cluster document too. The document would then say that snapshots
-go somewhere, and a reader would have to open a Secret to learn where.
+configuration from a Secret in `kube-system`. It exists, and this
+plan does not use it. The paragraph below on the config-secret rule
+states why.
 
 liken already solved this shape once. The fleet's registry credentials
 live in a `registry-credentials` Secret in `liken-system`, the
@@ -137,12 +165,41 @@ trade `registries.yaml` already makes, and the plan should not pretend
 otherwise. A missing Secret on a cluster that declares an `s3` block
 is a reported condition, not a silent fall back to local-only.
 
-**Verify the config-secret rule before building this.** The design
-above avoids `--etcd-s3-config-secret` on the strength of one line of
-help text. If k3s v1.36 in fact merges the secret over the
-command-line values, then naming the secret is simpler than rendering
-the keys, and the design should change. Read `pkg/etcd/s3.go` in the
-pinned k3s source first.
+**The config-secret rule is settled, and it keeps the secret out of
+the document.** k3s's `--etcd-s3-config-secret` is all-or-nothing,
+not a merge. In `pkg/etcd/s3/s3.go`, `GetClient` loads the whole S3
+configuration from the secret only when no other S3 option is set, and
+ignores the secret with a warning the moment any option comes from the
+command line or a config file. Rendering the endpoint and the bucket
+from the Cluster document therefore rules that path out: an operator
+would have to move the destination too, and the document would no
+longer say where the snapshots go. The keys land beside the
+destination in the drop-in instead, for the same reason
+`registries.yaml` does: a Secret in `liken-system` holds the
+credentials, init renders them, and the document is the single place
+that answers where the snapshots go.
+
+### How init renders it
+
+k3s reads its configuration from `config.yaml` and every `*.yaml` in
+the `config.yaml.d` directory beside it, in sorted order, merging
+later keys over earlier ones. init already writes one drop-in there
+(`boot.yaml`). The snapshot keys go in their own drop-in,
+`etcd-snapshot.yaml`, owned by init and written at mode 0600. Three
+things force the separate file rather than a section in `boot.yaml`:
+
+* `boot.yaml` is written at 0644, and its lines are echoed to the
+  console at boot. The S3 keys are credentials, so both the readable
+  file and the serial port must not carry them.
+* A separate file gives the credentials one author and one mode, the
+  same arrangement `registries.yaml` already makes.
+* Only leaders render it, and a cluster that retracts the section or a
+  machine that is no longer a leader removes it.
+
+The drop-in carries the server-side keys: the schedule, the
+retention, the directory, the S3 destination, and the access and
+secret keys. `boot.yaml` stays as it is, and no key collides between
+the two files.
 
 ## What the fleet multiplies
 
@@ -205,6 +262,13 @@ five minutes, confirm objects land in the bucket, and confirm both
 retentions prune. Then delete the credentials Secret and confirm the
 machine reports the gap instead of quietly writing local snapshots
 only.
+
+The MinIO drill also proves the "any S3-compatible store" claim,
+because it exercises exactly the fields that self-hosted stores need:
+`insecure` (http), `bucketLookupType: path`, and a non-AWS region.
+Rerun the same objects against an HTTPS endpoint behind a private CA
+to cover `skipSSLVerify` and `endpointCA`. A store that needed only
+AWS defaults would be a weaker test of the same sentence.
 
 ## The manual
 

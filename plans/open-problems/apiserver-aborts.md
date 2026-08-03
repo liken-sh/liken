@@ -64,9 +64,9 @@ and it is the first sign that the stall is not a property of
 
 ## The client goes away, at least sometimes
 
-A small share of the aborts carry the write that failed. On nuc4, for
-a `PUT .../machines/nuc4/status`, five lines land inside two
-milliseconds, in this order:
+A small share of the aborts carry the write that failed. On one
+machine, for a `PUT .../machines/<name>/status`, five lines land
+inside two milliseconds, in this order:
 
 ```
 writers.go:123  apiserver was unable to write a JSON response:
@@ -75,7 +75,7 @@ writers.go:123  apiserver was unable to write a JSON response:
 status.go:71    apiserver received an error that is not an
                 metav1.Status: ... connection reset by peer
 wrap.go:53      Timeout or abort while handling
-                PUT /apis/liken.sh/v1alpha1/machines/nuc4/status
+                PUT /apis/liken.sh/v1alpha1/machines/<name>/status
 writers.go:136  apiserver was unable to write a fallback JSON
                 response: http: Handler timeout
 timeout.go:140  Post-timeout activity timeElapsed=1.375445ms
