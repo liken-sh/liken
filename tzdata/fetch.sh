@@ -35,11 +35,10 @@
 # before it verifies a digest. A digest pin detects a change made
 # after somebody chose the version. It cannot detect a bad download
 # at the moment the pin was written, because the person who wrote the
-# pin computed it from that same download. A weekly job in CI opens
-# the pull request that moves this pin
-# (.github/workflows/tzdata.yaml), so no person sees the bytes
-# before the digest is written. IANA signs each release, and tz.asc
-# holds the coordinator's public key.
+# pin computed it from that same download. tzdata/latest.sh --bump
+# moves this pin, and it writes the digest from bytes it fetched
+# itself, so no person sees them before the digest is written. IANA
+# signs each release, and tz.asc holds the coordinator's public key.
 #
 # The digest stays, in DIGESTS, and does its usual job: a rebuild
 # produces the same bytes the pull request showed. It lives in its
