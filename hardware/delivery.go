@@ -19,12 +19,20 @@ package hardware
 // controller that hosts it. Each PCI and USB device gets its own
 // inventory decision. For this reason, a walk claims only the nodes
 // between this device and the next bus device below it.
+//
+// One node comes from above the walk instead of below it. A USB
+// interface's driver publishes its own nodes, but the device that the
+// interface belongs to also has a usbfs node, and that is the node
+// every libusb program opens. The walk reports it beside the subtree's
+// nodes, because both belong to the same claim.
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -44,8 +52,16 @@ type DeliveredNode struct {
 // kernel subsystem. The publish policy groups these nodes by
 // subsystem, so the pairing is the record, and the flat views below
 // derive from it.
+//
+// BusNode is the node that carries transfers to the whole device on
+// its bus, rather than to one driver's interface: on USB, the usbfs
+// node. It is not part of Nodes because it is not one of the kinds
+// the policy sorts by. If it were among them, the policy could
+// deliver it with a companion device, and a claim on one wire would
+// reach the whole device.
 type Delivery struct {
-	Nodes []DeliveredNode
+	Nodes   []DeliveredNode
+	BusNode string
 }
 
 // DevNodes lists the /dev paths in walk order.
@@ -118,7 +134,43 @@ func InspectDelivery(sysRoot string, d Device) Delivery {
 		delivery.Nodes = append(delivery.Nodes, node)
 		return nil
 	})
+	delivery.BusNode = usbfsNode(sysRoot, d)
 	return delivery
+}
+
+// usbfsNode reports the usbfs node of the USB device that an
+// interface belongs to. usbfs gives every USB device one character
+// node, /dev/bus/usb/<busnum>/<devnum>, with three digits in each
+// number, and that node carries raw transfers to any endpoint of the
+// device. A userspace driver built on libusb reads sysfs to enumerate
+// the hardware, which needs no privilege, and then opens this node to
+// talk to it. The nodes a kernel driver registers carry that driver's
+// own protocol, so hidraw or a tty cannot take its place, and a
+// libusb program in a container without it enumerates the device and
+// then fails to open it.
+//
+// The walk adds this node only for an interface. Leaf drivers bind
+// interfaces, usbfs names the usb_device above them, and the walk
+// already reports that node for the usb_device itself.
+//
+// The kernel assigns devnum at enumeration, so the same hardware in
+// the same port gets a different node after a replug. liken does not
+// store the number: each walk reads it again.
+func usbfsNode(sysRoot string, d Device) string {
+	parent, _, isInterface := strings.Cut(d.Address, ":")
+	if d.Bus != "usb" || !isInterface {
+		return ""
+	}
+	dir := filepath.Join(sysRoot, "bus", "usb", "devices", parent)
+	bus, err := strconv.Atoi(readAttr(dir, "busnum"))
+	if err != nil {
+		return ""
+	}
+	device, err := strconv.Atoi(readAttr(dir, "devnum"))
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("/dev/bus/usb/%03d/%03d", bus, device)
 }
 
 // isBusDevice reports whether a sysfs directory is itself a PCI or

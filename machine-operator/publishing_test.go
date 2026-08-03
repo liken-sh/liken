@@ -142,6 +142,72 @@ func TestPublishKeepsAnUnknownMixWholeAndExclusive(t *testing.T) {
 	}
 }
 
+func TestPublishGivesTheUsbfsNodeToThePrimary(t *testing.T) {
+	// A USB HID device delivers what usbhid registers for it. A libusb
+	// program opens neither of those nodes, so the claim also carries
+	// the usbfs node of the device the interface belongs to.
+	published := publishDevices(hardware.Delivery{
+		Nodes: []hardware.DeliveredNode{
+			{Path: "/dev/hidraw0", Subsystem: "hidraw"},
+			{Path: "/dev/usb/hiddev0", Subsystem: "usbmisc"},
+		},
+		BusNode: "/dev/bus/usb/003/004",
+	})
+
+	if len(published) != 1 {
+		t.Fatalf("published = %+v, want one device", published)
+	}
+	want := []string{"/dev/hidraw0", "/dev/usb/hiddev0", "/dev/bus/usb/003/004"}
+	if !slices.Equal(published[0].Nodes, want) {
+		t.Errorf("nodes = %v, want the driver's nodes and the usbfs node", published[0].Nodes)
+	}
+}
+
+func TestPublishNamesTheSubsystemBesideTheUsbfsNode(t *testing.T) {
+	// The usbfs node does not count as a kind of its own. A device that
+	// delivers one kind still names it, so a selector on subsystem
+	// keeps working.
+	published := publishDevices(hardware.Delivery{
+		Nodes:   []hardware.DeliveredNode{{Path: "/dev/ttyUSB0", Subsystem: "tty"}},
+		BusNode: "/dev/bus/usb/001/007",
+	})
+
+	if len(published) != 1 {
+		t.Fatalf("published = %+v, want one device", published)
+	}
+	if published[0].Subsystem != "tty" {
+		t.Errorf("subsystem = %q, want tty", published[0].Subsystem)
+	}
+	if !slices.Equal(published[0].Nodes, []string{"/dev/ttyUSB0", "/dev/bus/usb/001/007"}) {
+		t.Errorf("nodes = %v", published[0].Nodes)
+	}
+}
+
+func TestPublishKeepsTheUsbfsNodeOffACompanion(t *testing.T) {
+	// A USB display adapter delivers drm nodes and a monitor bus. The
+	// graphics device is the claim on the hardware, so it carries the
+	// usbfs node. The monitor bus must not: the usbfs node reaches
+	// every endpoint of the device, which is what the split withholds.
+	published := publishDevices(hardware.Delivery{
+		Nodes: []hardware.DeliveredNode{
+			{Path: "/dev/dri/card0", Subsystem: "drm"},
+			{Path: "/dev/dri/renderD128", Subsystem: "drm"},
+			{Path: "/dev/i2c-5", Subsystem: "i2c-dev"},
+		},
+		BusNode: "/dev/bus/usb/001/007",
+	})
+
+	if len(published) != 2 {
+		t.Fatalf("published = %+v, want the graphics device and its companion", published)
+	}
+	if !slices.Contains(published[0].Nodes, "/dev/bus/usb/001/007") {
+		t.Errorf("primary nodes = %v, want the usbfs node", published[0].Nodes)
+	}
+	if !slices.Equal(published[1].Nodes, []string{"/dev/i2c-5"}) {
+		t.Errorf("companion nodes = %v, want the monitor bus alone", published[1].Nodes)
+	}
+}
+
 func TestPublishReturnsNothingForAnEmptyDelivery(t *testing.T) {
 	if published := publishDevices(hardware.Delivery{}); len(published) != 0 {
 		t.Errorf("published = %+v, want none", published)

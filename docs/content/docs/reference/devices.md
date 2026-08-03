@@ -174,6 +174,27 @@ The workload supplies everything else that it needs: the userspace
 library that communicates with the device, and the group membership
 that its image gives its user.
 
+### USB devices
+
+A claim on a USB device also delivers that device's usbfs node,
+`/dev/bus/usb/<busnum>/<devnum>`. A program that uses libusb, for
+example Network UPS Tools, reads sysfs to find the hardware and then
+opens this node to communicate with it. A node that a kernel driver
+registers, such as `hidraw`, carries that driver's protocol only, so
+it cannot take the place of the usbfs node.
+
+The kernel gives the device a new device number at each enumeration.
+The node changes when you unplug the device and plug it in again.
+Each reconcile pass writes the current node into the specification of
+every claim that the kubelet prepared, so the next pod receives the
+current node. A container that already runs keeps the node that it
+received, and it receives the current node when the pod restarts.
+
+usbfs has no interface boundary. If a device has more than one
+interface with a driver, each interface publishes as its own device,
+and each one delivers the same usbfs node. A pod that holds one of
+these claims can communicate with the whole device.
+
 ## Limits
 
 * One slice for each node, with a maximum of 128 devices. If a node

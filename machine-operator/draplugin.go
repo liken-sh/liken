@@ -220,10 +220,7 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 		if !ok {
 			return fail("allocated device %s is not in this machine's inventory now", result.Device)
 		}
-		nodes := make([]cdiDeviceNode, 0, len(published.Nodes))
-		for _, path := range published.Nodes {
-			nodes = append(nodes, cdiDeviceNode{Path: path})
-		}
+		nodes := deviceNodes(published.Nodes)
 		name := claim.Uid + "-" + result.Device
 		specDevices = append(specDevices, cdiDevice{
 			Name:           name,

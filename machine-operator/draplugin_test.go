@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -112,6 +113,24 @@ func newDRAFixture(t *testing.T) *draFixture {
 	fixture.plugin = &draPlugin{client: kubernetes.NewClient(server.URL, server.Client(), credentials)}
 	fixture.cdi = cdi
 	return fixture
+}
+
+// enumerate writes the usb_device that the stick's interface belongs
+// to, with the numbers the bus assigned it. The bus number names the
+// controller and does not change. The bus assigns the device number
+// in order at each enumeration, so a replug of the same hardware in
+// the same port produces a different one.
+func (f *draFixture) enumerate(t *testing.T, devnum int) {
+	t.Helper()
+	device := filepath.Join(draSysfsRoot, "bus", "usb", "devices", "2-1")
+	if err := os.MkdirAll(device, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]string{"busnum": "2", "devnum": fmt.Sprint(devnum)} {
+		if err := os.WriteFile(filepath.Join(device, name), []byte(value+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 // addGPU plants an integrated GPU beside the stick: two drm nodes and
@@ -275,6 +294,30 @@ func TestPrepareDeliversTheClaimedDevicesNodes(t *testing.T) {
 	nodes := spec.Devices[0].ContainerEdits.DeviceNodes
 	if len(nodes) != 1 || nodes[0].Path != "/dev/sda" {
 		t.Errorf("device nodes = %+v", nodes)
+	}
+}
+
+func TestPrepareDeliversTheUsbfsNodeBesideTheDriversNodes(t *testing.T) {
+	// The stick's driver delivers a block node. A userspace driver that
+	// speaks to the same hardware over libusb needs the usbfs node
+	// instead, and the pod cannot open a node the spec does not name.
+	fixture := newDRAFixture(t)
+	fixture.enumerate(t, 4)
+
+	resp, err := fixture.plugin.NodePrepareResources(t.Context(), &drav1.NodePrepareResourcesRequest{
+		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if answer := resp.Claims["claim-1"]; answer == nil || answer.Error != "" {
+		t.Fatalf("answer = %+v", answer)
+	}
+
+	paths := specPaths(t, fixture, "claim-1")
+	slices.Sort(paths)
+	if !slices.Equal(paths, []string{"/dev/bus/usb/002/004", "/dev/sda"}) {
+		t.Errorf("paths = %v, want the block node and the usbfs node", paths)
 	}
 }
 

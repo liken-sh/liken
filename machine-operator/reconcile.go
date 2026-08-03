@@ -251,6 +251,13 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 		publishDeviceInventory(c, node, facts)
 	}
 
+	// The claims the kubelet already prepared get the same treatment,
+	// because a device that enumerates again moves the nodes a claim
+	// delivers (cdi.go). This runs without a Node, because a prepared
+	// claim is a file on this machine, and containerd reads that file
+	// at every container creation.
+	refreshCDISpecs(draSysfsRoot)
+
 	// Convergence checks whether the cluster's copy of each document
 	// matches what this boot actuated. If not, it stages the
 	// difference for the next boot (converge.go for the Machine,

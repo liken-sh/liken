@@ -99,6 +99,76 @@ func TestDeliveryReportsEachSubsystemOnce(t *testing.T) {
 	}
 }
 
+func TestDeliveryNamesTheUsbfsNodeAboveAnInterface(t *testing.T) {
+	// usbhid binds the UPS's HID interface and registers hidraw and
+	// hiddev nodes for it. Neither node carries raw USB transfers, so a
+	// libusb program in the pod opens the usbfs node of the device the
+	// interface belongs to. The walk never reaches that node, because
+	// it is above the interface, not below it.
+	sysfs := newFakeSysfs(t)
+	sysfs.device("usb", "3-3", "usb", map[string]string{
+		"modalias": "usb:v0764p0601d0100dc00dsc00dp00ic00isc00ip00in00",
+		"busnum":   "3",
+		"devnum":   "4",
+	})
+	sysfs.device("usb", "3-3:1.0", "usbhid", map[string]string{
+		"modalias": "usb:v0764p0601d0100dc00dsc00dp00ic03isc00ip00in00",
+	})
+	sysfs.child("usb", "3-3:1.0", "0003:0764:0601.0001/hidraw/hidraw0", "hidraw", "hidraw0")
+	sysfs.child("usb", "3-3:1.0", "usbmisc/hiddev0", "usbmisc", "usb/hiddev0")
+
+	delivery := InspectDelivery(sysfs.root, Device{Bus: "usb", Address: "3-3:1.0"})
+
+	if delivery.BusNode != "/dev/bus/usb/003/004" {
+		t.Errorf("BusNode = %q, want the usbfs node with three digits in each number", delivery.BusNode)
+	}
+	if !slices.Equal(delivery.DevNodes(), []string{"/dev/hidraw0", "/dev/usb/hiddev0"}) {
+		t.Errorf("DevNodes = %v, want the driver's own nodes as well", delivery.DevNodes())
+	}
+}
+
+func TestDeliveryFollowsADeviceThatEnumeratedAgain(t *testing.T) {
+	// The bus assigns a device number at each enumeration, so the same
+	// hardware in the same port gets a different usbfs node after a
+	// replug. Every walk reads the number again.
+	sysfs := newFakeSysfs(t)
+	sysfs.device("usb", "3-3", "usb", map[string]string{
+		"modalias": "usb:v0764p0601d0100dc00dsc00dp00ic00isc00ip00in00",
+		"busnum":   "3",
+		"devnum":   "4",
+	})
+	sysfs.device("usb", "3-3:1.0", "usbhid", map[string]string{
+		"modalias": "usb:v0764p0601d0100dc00dsc00dp00ic03isc00ip00in00",
+	})
+	sysfs.child("usb", "3-3:1.0", "0003:0764:0601.0001/hidraw/hidraw0", "hidraw", "hidraw0")
+	devnum := filepath.Join(sysfs.root, "bus", "usb", "devices", "3-3", "devnum")
+	if err := os.WriteFile(devnum, []byte("17\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	delivery := InspectDelivery(sysfs.root, Device{Bus: "usb", Address: "3-3:1.0"})
+
+	if delivery.BusNode != "/dev/bus/usb/003/017" {
+		t.Errorf("BusNode = %q, want the number this enumeration assigned", delivery.BusNode)
+	}
+}
+
+func TestDeliveryNamesNoUsbfsNodeOffTheUSBBus(t *testing.T) {
+	// usbfs is a USB facility. A PCI function has no equivalent node,
+	// and a claim on one delivers its subtree and nothing else.
+	sysfs := newFakeSysfs(t)
+	sysfs.device("pci", "0000:00:02.0", "i915", map[string]string{
+		"modalias": "pci:v00008086d000046D2sv00000301sd000002F3bc03sc00i00",
+	})
+	sysfs.child("pci", "0000:00:02.0", "drm/card0", "drm", "dri/card0")
+
+	delivery := InspectDelivery(sysfs.root, Device{Bus: "pci", Address: "0000:00:02.0"})
+
+	if delivery.BusNode != "" {
+		t.Errorf("BusNode = %q, want none", delivery.BusNode)
+	}
+}
+
 func TestDeliveryIsEmptyForADeviceWithNoNodes(t *testing.T) {
 	sysfs := newFakeSysfs(t)
 	sysfs.device("pci", "0000:00:04.0", "virtio-pci", map[string]string{

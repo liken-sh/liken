@@ -64,7 +64,23 @@ var companionSubsystems = map[string]bool{"i2c-dev": true, "drm_dp_aux_dev": tru
 // device is always first, and the companions follow in sorted
 // subsystem order, so the same hardware always publishes the same
 // devices.
+//
+// The primary alone carries the delivery's bus node. A claim on the
+// primary is a claim on the hardware, and a userspace driver needs
+// that node to reach the device at all. A companion is one wire
+// beside the primary. The bus node opens the whole device, so a
+// companion must not carry it.
 func publishDevices(delivery hardware.Delivery) []publishedDevice {
+	published := splitBySubsystem(delivery)
+	if len(published) > 0 && delivery.BusNode != "" {
+		published[0].Nodes = append(published[0].Nodes, delivery.BusNode)
+	}
+	return published
+}
+
+// splitBySubsystem sorts one delivery's nodes into the devices the
+// policy publishes for them.
+func splitBySubsystem(delivery hardware.Delivery) []publishedDevice {
 	if len(delivery.Nodes) == 0 {
 		return nil
 	}
