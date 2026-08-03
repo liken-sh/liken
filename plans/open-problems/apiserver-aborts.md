@@ -25,20 +25,26 @@ suspect on liken's side.
 
 Raising `engineProbeInterval` to 60 seconds
 (`cluster-operator/flux.go`) cut the count and left the fault alone.
-With the probe asking once a minute, a five-machine fleet aborted
-1,405 requests over 24 hours, which is 2,875 ERROR lines:
+When a five-machine fleet took that release, its aborts fell from
+about 2,400 a day to about 1,050, which is close to the probe's own
+share of them.
 
-* 732 on `PUT /apis/liken.sh/v1alpha1/machines/<name>/status`
-* 288 on `GET /apis/liken.sh/v1alpha1/machines/<name>`
-* 207 on other paths, most of them `GET /api/v1/nodes/<name>`
-* 178 on the engine probe's Deployment GET
+Measure on a window with no rolling reboot in it. A fleet roll lifts
+the count by a third for about a day afterwards. Over 24 quiet hours,
+with the probe asking once a minute, that fleet aborted 1,043
+requests, which is 2,086 ERROR lines:
+
+* 621 on `PUT /apis/liken.sh/v1alpha1/machines/<name>/status`
+* 227 on the engine probe's Deployment GET
+* 110 on other paths, most of them `GET /api/v1/nodes/<name>`
+* 85 on `GET /apis/liken.sh/v1alpha1/machines/<name>`
 
 The probe's count fell by six, in step with the interval, and its rate
-did not move: 178 of the 1,440 probes a day is 12%, against the 13%
-measured while it asked every 10 seconds. The interval bought quiet at
-the same fault rate.
+did not fall with it: 227 of the 1,440 probes a day is 16%, against
+the 13% measured while it asked every 10 seconds. The interval bought
+quiet at the same fault rate.
 
-The two machine paths are 72% of the total. A four-machine lab fleet
+The two machine paths are 68% of the total. A four-machine lab fleet
 showed the same shape from the other direction: no abort landed on the
 engine probe's path at all, and every abort landed on a machine
 operator's Node and Machine status writes. So the machine operator is
@@ -81,10 +87,10 @@ the apiserver was writing the response, which is the abort branch of
 the filter and not a slow handler. The apiserver then failed to write
 its fallback too, because the request was already past its deadline.
 
-This is a minority of the traffic. The same fleet logged 45 lines a
-day carrying `connection reset by peer` and 161 carrying "unable to
-write a JSON response", against 1,405 aborts. So this explains about
-3% of them, and what the other 97% do is unmeasured. The next
-measurement should establish whether every abort is a client reset
-that the apiserver did not happen to log, or whether two different
-things share one log line.
+This is a small minority of the traffic. Over the same quiet 24 hours
+the fleet logged 13 lines carrying `connection reset by peer` and 75
+carrying "unable to write a JSON response", against 1,043 aborts. So
+this explains about 1% of them, and what the other 99% do is
+unmeasured. The next measurement should establish whether every abort
+is a client reset that the apiserver did not happen to log, or whether
+two different things share one log line.
