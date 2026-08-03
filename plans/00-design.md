@@ -112,6 +112,7 @@ A few milestones closed out of that order: 18 closed before 17, which
 builds on it, and 24 closed before 22. The
 completed milestones are in plans/completed/. Milestone 39 was built and
 then backed out, and it is in plans/rejected/. The milestones that are
-still open stay next to this file. README.md, next to this file, is the
-index. It also holds the shorter-term notes: the deferred hardening tier
-and the open problems.
+still open stay next to this file. The questions that liken owes an
+answer to are in plans/open-problems/, one document each and no
+numbers. README.md, next to this file, is the index. It also holds the
+deferred hardening tier.

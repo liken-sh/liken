@@ -16,6 +16,10 @@ A document's directory states its status:
 The numbers run in one sequence across all three directories. The next
 milestone is 53.
 
+[`open-problems/`](open-problems/) holds the questions that liken owes
+an answer to. Those documents carry no number, because nobody has
+decided yet what work they become.
+
 ## Completed
 
 * **01.** [Boot to a hello world](completed/01-boot-to-hello-world.md) — a
@@ -184,53 +188,14 @@ dm-verity, secure boot, TPM-sealed secrets, and signed releases.
 ## Open problems
 
 These are the questions that liken owes an answer to. It does not have
-one yet.
+one yet. Each one has a document in [`open-problems/`](open-problems/).
 
-**Claiming unknown machines.** `liken.machine=` identifies a machine
-that somebody declared before it booted. The other half is the machine
-that nobody declared. A Machine template on the Cluster would let an
-unknown node claim an identity on its first boot. The node would take
-its name from a hardware fact, probably its MAC address, because the
-network already forces that address to be unique. It would take its
-address from a pool, probably by ARP-probe claiming, in the same way
-that storage claiming works: probe reality, take what is free, and
-refuse an ambiguous case. Milestones 50 and 51 propose the supervised
-half: the unknown machine presents itself over the network, and a
-person applies the proposal. The template is the unsupervised half,
-and it waits until the supervised flow is proven.
-
-**The apiservers abort requests that liken's operators send.** On a
-five-machine fleet, the apiservers logged "Timeout or abort while
-handling" for a few of each machine's status PUTs every hour, and for
-13% of the cluster operator's engine-probe GETs, measured while the
-probe still asked every 10 seconds. The engine probe asks
-once every 60 seconds (`engineProbeInterval` in
-`cluster-operator/flux.go`), and the stall behind the log pair stays
-unexplained. The aborts include requests to `127.0.0.1:6443`, so the
-network between machines is not the cause. Neither operator reports an
-error, so from liken's side every request succeeds, and the noise
-lands in the apiserver's log at ERROR: near 2,800 lines a day, as
-measured while the probe still asked every 10 seconds, and unmeasured
-since. The log pair matches a request whose client closed the
-connection while the handler still ran, and `ResponseHeaderTimeout` in
-`kubernetes/apiclient.go` is the client's only ten-second deadline.
-What stalls a response for ten seconds is the open question, and the
-loopback case reproduces on one machine. On a four-machine lab fleet,
-no abort landed on the engine probe's path at all; every abort landed
-on a machine operator's node and machine status writes. So the probe
-share may be a property of the five-machine fleet's load, and the
-next measurement should start from the status writers.
-
-**containerd and the kubelet write lines that no log level explains.**
-`spec.runtime.containerd.logLevel` and `spec.runtime.k3s.debug` set the
-levels, so what stays open is two measurements from the five-machine
-fleet. The machines' own streams wrote 295,000 lines a day, and
-containerd's pod lifecycle at info was 171,000 of them. containerd logs
-`container event discarded` when nothing consumes its event stream, and
-that line alone is a third of containerd's volume, so it may mark a
-missing subscriber rather than verbosity. And a reboot is followed by
-about a day of elevated logging, while the kubelet's garbage collector
-removes the sandboxes the reboot orphaned. A floor also stays under
-any level: the CNI plugin writes about three lines per pod on its own
-stderr, which no log level reaches. The lab measured it at 30 lines
-across a ten-pod churn that wrote 211 before the level was set.
+* [Claiming unknown machines](open-problems/claiming-unknown-machines.md)
+  — `liken.machine=` identifies a machine that somebody declared before
+  it booted, and nothing identifies the machine that nobody declared.
+* [The apiservers abort requests that liken's operators send](open-problems/apiserver-aborts.md)
+  — 1,405 aborts a day on a five-machine fleet, no error on liken's
+  side, and the machine operator's own paths are 72% of them.
+* [containerd and the kubelet write lines that no log level explains](open-problems/unexplained-log-volume.md)
+  — the levels are settable, and what stays open is the volume they do
+  not reach.
