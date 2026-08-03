@@ -7,11 +7,13 @@ package kubernetes
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/liken-sh/liken/api"
@@ -86,6 +88,77 @@ func TestRequestJSONCarriesTheServersWords(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %q: %v", want, err)
 		}
+	}
+}
+
+// countingClient connects a Client to a test server that counts the
+// TCP connections it accepts. Go hands a connection back to its pool
+// only when the response body reaches EOF, so the count is how many
+// bodies the client left unfinished, plus one.
+func countingClient(t *testing.T, handler http.Handler) (*Client, *atomic.Int64) {
+	t.Helper()
+	connections := &atomic.Int64{}
+	server := httptest.NewUnstartedServer(handler)
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			connections.Add(1)
+		}
+	}
+	server.Start()
+	t.Cleanup(server.Close)
+
+	credentials := t.TempDir()
+	if err := os.WriteFile(filepath.Join(credentials, "token"), []byte("test-token"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return NewClient(server.URL, server.Client(), credentials), connections
+}
+
+func TestEveryRequestLeavesTheConnectionReusable(t *testing.T) {
+	// Every Kubernetes response carries a body, including the ones
+	// that report a failure: a 404 and a 409 each answer with a
+	// Status object. A caller that returns before reading one costs
+	// the connection and reaches the API server as a hang-up. The
+	// connection count is that cost, made visible.
+	filler := strings.Repeat("x", 8192)
+	cases := []struct {
+		name   string
+		status int
+		send   func(c *Client) error
+	}{
+		{"a write whose answer the caller does not want", http.StatusOK, func(c *Client) error {
+			return c.RequestJSON(http.MethodPut, "/x", []byte(`{}`), nil)
+		}},
+		{"a read the caller decodes", http.StatusOK, func(c *Client) error {
+			out := map[string]any{}
+			return c.RequestJSON(http.MethodGet, "/x", nil, &out)
+		}},
+		{"an absent object", http.StatusNotFound, func(c *Client) error {
+			return c.RequestJSON(http.MethodGet, "/x", nil, nil)
+		}},
+		{"a lost write race", http.StatusConflict, func(c *Client) error {
+			return c.RequestJSON(http.MethodGet, "/x", nil, nil)
+		}},
+		{"a refusal whose message runs past the excerpt", http.StatusForbidden, func(c *Client) error {
+			return c.RequestJSON(http.MethodGet, "/x", nil, nil)
+		}},
+		{"a merge patch", http.StatusOK, func(c *Client) error {
+			return c.PatchJSON("/x", []byte(`{}`))
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			client, connections := countingClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(c.status)
+				_ = json.NewEncoder(w).Encode(map[string]string{"filler": filler})
+			}))
+			for range 5 {
+				_ = c.send(client)
+			}
+			if got := connections.Load(); got != 1 {
+				t.Errorf("5 requests opened %d connections, want 1", got)
+			}
+		})
 	}
 }
 

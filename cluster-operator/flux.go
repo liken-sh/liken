@@ -264,12 +264,12 @@ func collectionPath(o seedObject) (string, error) {
 }
 
 // engineProbeInterval sets how long the sweep waits between engine
-// probes. The sweep runs every ten seconds, which makes this GET the
-// most frequent request liken sends, and the apiservers log a
-// "Timeout or abort while handling" pair for a noticeable share of
-// them. The engine goes missing only when someone deletes it, and an
-// engine that heals within a minute is still far faster than the only
-// other repair, which is this program's next start.
+// probes. The sweep runs every ten seconds, and a probe on every
+// sweep would make this GET the most frequent request liken sends,
+// for an answer that almost never changes. The engine goes missing
+// only when someone deletes it, and an engine that heals within a
+// minute is still far faster than the only other repair, which is
+// this program's next start.
 const engineProbeInterval = 60 * time.Second
 
 // engineProbe holds the one fact the engine's care must remember

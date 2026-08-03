@@ -193,9 +193,6 @@ one yet. Each one has a document in [`open-problems/`](open-problems/).
 * [Claiming unknown machines](open-problems/claiming-unknown-machines.md)
   — `liken.machine=` identifies a machine that somebody declared before
   it booted, and nothing identifies the machine that nobody declared.
-* [The apiservers abort requests that liken's operators send](open-problems/apiserver-aborts.md)
-  — 1,043 aborts a day on a five-machine fleet, no error on liken's
-  side, and the machine operator's own paths are 68% of them.
 * [containerd and the kubelet write lines that no log level explains](open-problems/unexplained-log-volume.md)
   — the levels are settable, and what stays open is the volume they do
   not reach.

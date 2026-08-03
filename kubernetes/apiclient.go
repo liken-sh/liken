@@ -225,6 +225,37 @@ var RetryPause = func() {
 	time.Sleep(base + rand.N(base/2))
 }
 
+// maxDrain bounds the read below. The largest answer liken asks for
+// is a fleet-wide list of Machines, and the caller decodes that whole
+// list into memory anyway, so reading the tail of one costs nothing
+// the pass was not already paying. Past this size, the connection is
+// the cheaper thing to lose.
+const maxDrain = 4 << 20
+
+// drain reads whatever the caller left in the response body, then
+// closes it. Go hands a connection back to its pool only when the
+// body reaches EOF. A body closed before then costs the connection
+// two ways, and both are invisible from this side, because the caller
+// already has its answer. The next request pays for a fresh TCP
+// connection and TLS handshake. And the socket closing while the API
+// server is still finishing the request arrives there as a hang-up,
+// so the server abandons the request it just answered and logs it as
+// aborted.
+//
+// Reading to EOF matters most on the paths that want nothing back. A
+// PUT to a status subresource answers with the whole updated object,
+// which is tens of kilobytes that no caller here reads. A 404 and a
+// 409 each answer with a Status object. None of those bodies ends on
+// its own.
+//
+// A watch is the one body that cannot be drained, because a watch
+// response never ends (see watch.go). Its reader closes the body
+// outright and accepts the lost connection.
+func drain(body io.ReadCloser) {
+	_, _ = io.Copy(io.Discard, io.LimitReader(body, maxDrain))
+	_ = body.Close()
+}
+
 // ErrNotFound marks the difference between "this object does not
 // exist" and a real failure. An absent object is a normal state, and
 // the caller handles it by creating the object. ErrConflict marks the
@@ -248,7 +279,7 @@ func (c *Client) PatchJSON(path string, patch []byte) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer drain(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		message, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		return fmt.Errorf("PATCH %s: %s: %s", path, resp.Status, message)
@@ -270,7 +301,7 @@ func (c *Client) RequestJSON(method, path string, body []byte, out any) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer drain(resp.Body)
 	if resp.StatusCode == http.StatusNotFound {
 		return ErrNotFound
 	}
