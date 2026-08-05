@@ -24,12 +24,21 @@ import (
 // what this code writes into it.
 type kubeconfigDocument struct {
 	Clusters []struct {
+		Name    string `json:"name"`
 		Cluster struct {
 			Server                   string `json:"server"`
 			CertificateAuthorityData []byte `json:"certificate-authority-data"`
 		} `json:"cluster"`
 	} `json:"clusters"`
-	Users []struct {
+	Contexts []struct {
+		Name    string `json:"name"`
+		Context struct {
+			Cluster string `json:"cluster"`
+			User    string `json:"user"`
+		} `json:"context"`
+	} `json:"contexts"`
+	CurrentContext string `json:"current-context"`
+	Users          []struct {
 		User struct {
 			ClientCertificateData []byte `json:"client-certificate-data"`
 			ClientKeyData         []byte `json:"client-key-data"`
@@ -37,12 +46,13 @@ type kubeconfigDocument struct {
 	} `json:"users"`
 }
 
-// computedKubeconfig mints an identity, computes its kubeconfig
-// against the forwarded dev-lab address, and parses the result.
+// computedKubeconfig mints an identity, computes its kubeconfig for
+// a cluster named mycluster against the forwarded dev-lab address,
+// and parses the result.
 func computedKubeconfig(t *testing.T) (string, kubeconfigDocument) {
 	t.Helper()
 	dir := mintedIdentity(t)
-	if err := Kubeconfig(dir, "https://127.0.0.1:16443", io.Discard); err != nil {
+	if err := Kubeconfig(dir, "mycluster", "https://127.0.0.1:16443", io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "kubeconfig"))
@@ -57,6 +67,28 @@ func computedKubeconfig(t *testing.T) (string, kubeconfigDocument) {
 		t.Fatalf("kubeconfig shape: %d clusters, %d users", len(doc.Clusters), len(doc.Users))
 	}
 	return dir, doc
+}
+
+func TestKubeconfigNamesTheClusterAndContext(t *testing.T) {
+	_, doc := computedKubeconfig(t)
+	if got := doc.Clusters[0].Name; got != "mycluster" {
+		t.Errorf("cluster name: got %q", got)
+	}
+	if len(doc.Contexts) != 1 {
+		t.Fatalf("kubeconfig shape: %d contexts", len(doc.Contexts))
+	}
+	if got := doc.Contexts[0].Name; got != "mycluster" {
+		t.Errorf("context name: got %q", got)
+	}
+	if got := doc.Contexts[0].Context.Cluster; got != "mycluster" {
+		t.Errorf("context cluster: got %q", got)
+	}
+	if got := doc.Contexts[0].Context.User; got != "admin" {
+		t.Errorf("context user: got %q", got)
+	}
+	if got := doc.CurrentContext; got != "mycluster" {
+		t.Errorf("current-context: got %q", got)
+	}
 }
 
 func TestKubeconfigPointsAtTheForwardedPort(t *testing.T) {
@@ -115,7 +147,7 @@ func TestKubeconfigEmbedsAWorkingKeypair(t *testing.T) {
 
 func TestKubeconfigMintsAFreshCredentialEachRun(t *testing.T) {
 	dir, doc := computedKubeconfig(t)
-	if err := Kubeconfig(dir, "https://127.0.0.1:16443", io.Discard); err != nil {
+	if err := Kubeconfig(dir, "mycluster", "https://127.0.0.1:16443", io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "kubeconfig"))
@@ -133,7 +165,7 @@ func TestKubeconfigMintsAFreshCredentialEachRun(t *testing.T) {
 
 func TestKubeconfigCarriesTheServerItWasGiven(t *testing.T) {
 	dir := mintedIdentity(t)
-	if err := Kubeconfig(dir, "https://198.51.100.7:6443", io.Discard); err != nil {
+	if err := Kubeconfig(dir, "mycluster", "https://198.51.100.7:6443", io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "kubeconfig"))

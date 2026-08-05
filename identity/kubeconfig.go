@@ -41,7 +41,9 @@ import (
 // and writes dir/kubeconfig, pointed at server. The caller resolves
 // server: the CLI reads it from the deployment's cluster.yaml, or
 // takes it from the operator's -server flag when that document's
-// endpoint is not reachable from the workstation. Kubeconfig writes
+// endpoint is not reachable from the workstation. The caller also
+// resolves name, the cluster's own name from the same document,
+// which labels the cluster and context entries in the file. Kubeconfig writes
 // the result into the identity directory and nowhere else. liken
 // never changes ~/.kube/config or any other kubeconfig that the
 // operator already has. Point kubectl at the file explicitly:
@@ -51,7 +53,7 @@ import (
 // Each run mints a fresh keypair and certificate. The certificate
 // lasts one year, which is generous for a development credential.
 // Running Kubeconfig again replaces it in seconds.
-func Kubeconfig(dir, server string, out io.Writer) error {
+func Kubeconfig(dir, name, server string, out io.Writer) error {
 	tls := filepath.Join(dir, "tls")
 
 	caCert, caKey, err := readCA(tls, "client-ca")
@@ -103,26 +105,32 @@ func Kubeconfig(dir, server string, out io.Writer) error {
 	// This is the kubeconfig itself, with the certificates embedded
 	// in base64, as every kubeconfig does. This makes the file
 	// self-contained and portable.
+	//
+	// The cluster and context entries carry the cluster's own name,
+	// because these labels are how kubectl tells clusters apart when
+	// an operator merges kubeconfigs from more than one of them. The
+	// user entry stays admin: the certificate's subject, not this
+	// label, is the identity the API server reads.
 	b64 := base64.StdEncoding.EncodeToString
 	kubeconfig := fmt.Sprintf(`apiVersion: v1
 kind: Config
 clusters:
-  - name: liken
+  - name: %[1]s
     cluster:
-      server: %s
-      certificate-authority-data: %s
+      server: %[2]s
+      certificate-authority-data: %[3]s
 contexts:
-  - name: liken
+  - name: %[1]s
     context:
-      cluster: liken
+      cluster: %[1]s
       user: admin
-current-context: liken
+current-context: %[1]s
 users:
   - name: admin
     user:
-      client-certificate-data: %s
-      client-key-data: %s
-`, server, b64(serverCA), b64(adminCert), b64(adminKey))
+      client-certificate-data: %[4]s
+      client-key-data: %[5]s
+`, name, server, b64(serverCA), b64(adminCert), b64(adminKey))
 
 	path := filepath.Join(dir, "kubeconfig")
 	if err := os.WriteFile(path, []byte(kubeconfig), 0o600); err != nil {

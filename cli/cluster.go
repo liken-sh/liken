@@ -35,35 +35,44 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// resolveEndpoint decides where the cluster is: the -server flag
-// when given, otherwise the endpoint in the deployment's
-// cluster.yaml. A deployment with no cluster.yaml at all is a
-// single machine on its own (see cluster.LoadCluster), which never
-// declares an endpoint, so that case also asks for -server.
-func resolveEndpoint(dir, server string) (string, error) {
-	if server != "" {
-		return server, nil
-	}
+// resolveCluster decides where the cluster is and what it is named.
+// The endpoint is the -server flag when given, otherwise the
+// endpoint in the deployment's cluster.yaml. A deployment with no
+// cluster.yaml at all is a single machine on its own (see
+// cluster.LoadCluster), which never declares an endpoint, so that
+// case also asks for -server. The name comes from the same
+// document's metadata, so that the kubeconfig for each cluster an
+// operator holds labels its entries with that cluster's own name. A
+// deployment with no cluster.yaml has no name, and falls back to
+// liken.
+func resolveCluster(dir, server string) (name, endpoint string, err error) {
 	c, err := cluster.LoadCluster(filepath.Join(dir, "cluster.yaml"))
 	if err != nil {
-		return "", fmt.Errorf("reading the deployment's cluster.yaml: %w", err)
+		return "", "", fmt.Errorf("reading the deployment's cluster.yaml: %w", err)
+	}
+	name = "liken"
+	if c != nil && c.Metadata.Name != "" {
+		name = c.Metadata.Name
+	}
+	if server != "" {
+		return name, server, nil
 	}
 	if c == nil || c.Spec.Endpoint == "" {
-		return "", fmt.Errorf("%s/cluster.yaml declares no endpoint; pass -server", dir)
+		return "", "", fmt.Errorf("%s/cluster.yaml declares no endpoint; pass -server", dir)
 	}
-	return c.Spec.Endpoint, nil
+	return name, c.Spec.Endpoint, nil
 }
 
-// writeKubeconfig resolves the endpoint, mints the admin credential
-// into the deployment's identity directory, and returns the
-// kubeconfig's path.
+// writeKubeconfig resolves the cluster's name and endpoint, mints
+// the admin credential into the deployment's identity directory, and
+// returns the kubeconfig's path.
 func writeKubeconfig(dir, server string, out io.Writer) (string, error) {
-	endpoint, err := resolveEndpoint(dir, server)
+	name, endpoint, err := resolveCluster(dir, server)
 	if err != nil {
 		return "", err
 	}
 	identityDir := filepath.Join(dir, "identity")
-	if err := identity.Kubeconfig(identityDir, endpoint, out); err != nil {
+	if err := identity.Kubeconfig(identityDir, name, endpoint, out); err != nil {
 		return "", err
 	}
 	return filepath.Join(identityDir, "kubeconfig"), nil
