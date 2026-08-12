@@ -1,6 +1,9 @@
 package main
 
-import "github.com/liken-sh/liken/api"
+import (
+	"github.com/liken-sh/liken/api"
+	"github.com/liken-sh/liken/machine"
+)
 
 // The machine's phase: the whole set of conditions summarized in
 // one word.
@@ -89,7 +92,7 @@ func conditionPhase(c api.Condition) api.Phase {
 		// which ordinarily takes seconds.
 		return api.PhaseUpdating
 	case "RebootPending", "RestartPending", "DemotionPending", "AwaitingTurn",
-		"StagedForNextBoot":
+		"StagedForNextBoot", "AwaitingPodRefresh":
 		// A change is staged and waiting, either on a Manual reboot
 		// or on the cluster granting this machine its turn. A
 		// verified release waiting for its proving reboot reads the
@@ -98,13 +101,45 @@ func conditionPhase(c api.Condition) api.Phase {
 		// own, so nothing is scheduled to apply it and any later boot
 		// does. The listing still shows the machine as pending,
 		// because it does not yet run the document the deployment
-		// wrote.
+		// wrote. AwaitingPodRefresh waits the same way: the machine
+		// already runs the new release, and only the pod steward's
+		// refresh, after a leader boots that release, is left.
 		return api.PhaseUpdatePending
 	}
 	// Anything unrecognized reads as Degraded, deliberately. A
 	// reason missing from this table fails visibly in the fleet
 	// listing, instead of passing silently as Ready.
 	return api.PhaseDegraded
+}
+
+// readyCondition is the Ready roll-up: True exactly when every other
+// condition is True. The scan skips any prior Ready, so the previous
+// pass's value cannot affect this one. It also skips the conductor's
+// grant, because the grant is a permission, not an observation about
+// this machine's health.
+//
+// When something is False, the reason is the phase word the
+// conditions argue for (decidePhase), so the roll-up and the phase
+// can never disagree about how bad things are. A machine waiting on
+// its reboot turn reads Ready=False with reason UpdatePending, and
+// Degraded appears on the roll-up exactly when the phase says
+// Degraded. The message still names a failing condition, which is
+// where the detail lives.
+func readyCondition(conditions []api.Condition) api.Condition {
+	ready := api.Condition{Type: "Ready", Status: api.ConditionTrue, Reason: "Reconciled"}
+	for _, condition := range conditions {
+		if condition.Type == "Ready" || condition.Type == machine.RebootApprovedCondition {
+			continue
+		}
+		if condition.Status != api.ConditionTrue {
+			ready = api.Condition{
+				Type: "Ready", Status: api.ConditionFalse,
+				Reason:  string(decidePhase(conditions)),
+				Message: condition.Type + " is " + string(condition.Status),
+			}
+		}
+	}
+	return ready
 }
 
 // decidePhase reduces the conditions to the single most severe

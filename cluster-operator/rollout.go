@@ -13,6 +13,19 @@ package main
 // and the conductor hands out reboot turns one budget slot at a
 // time.
 //
+// Turns normally go to workers before leaders, because a worker
+// mistake costs little while every leader carries a share of quorum.
+// One case reorders that default: a version rollout, while the
+// machine-operator DaemonSet's applied template lags the fleet's
+// target release. Only a leader's boot rewrites the AddOn manifests
+// that produce that template (cluster-operator/steward.go), so a
+// follower that reboots into the new release first only extends the
+// lag, running its new binary inside the old template until the pod
+// steward can refresh it (the guard in machine-operator/conditions.go
+// covers that follower in the meantime). Sending a leader first ends
+// the lag instead, so while it lasts, the gate holds workers back and
+// grants a waiting leader its turn.
+//
 // The coordination happens through conditions. A machine that needs
 // a reboot sets reason AwaitingTurn on its convergence condition and
 // waits. This program responds by writing a RebootApproved condition
@@ -102,10 +115,27 @@ func available(phase api.Phase) bool {
 // because a mistake with a worker costs little, while every leader
 // carries a share of quorum. Name order makes the decision
 // deterministic, so two sweeps of the same fleet agree.
-func decideRollout(machines []machine.Machine, renewals map[string]time.Time, clusterDoc *cluster.Cluster, now time.Time) rollout {
+//
+// One exception reorders that default. appliedVersion is the release
+// the machine-operator DaemonSet's template actually carries
+// (daemonSetVersion, steward.go); an empty value, meaning no
+// DaemonSet has applied anything yet, never triggers the exception.
+// While appliedVersion lags clusterDoc.Spec.Version, and a leader
+// either waits for a turn or holds an unspent grant, every waiting
+// worker sits out the sweep: granting one would send it into the
+// very template lag the leader's boot is about to end. The hold
+// lasts through the leader's whole turn, because each sweep
+// recomputes it from the grant that is still outstanding. When no
+// leader waits and none holds a grant, the workers proceed in the
+// default order, because holding them for a leader that cannot take
+// or use a turn would stall the rollout; the guard in
+// machine-operator/conditions.go is what makes a worker's lag
+// survivable in that case.
+func decideRollout(machines []machine.Machine, renewals map[string]time.Time, clusterDoc *cluster.Cluster, appliedVersion string, now time.Time) rollout {
 	var r rollout
 	inFlight := 0 // budget slots occupied: unavailable machines and unspent grants
 	leaderBusy := false
+	leaderAdvancing := false // a leader holds an unspent grant; its boot advances the template
 	var stalled, inProgress, waiting, workers, leaders []string
 
 	for i := range machines {
@@ -139,6 +169,12 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 			}
 			if leader {
 				leaderBusy = true
+				// A leader that holds an unspent grant is mid-turn:
+				// its boot is the event that advances the applied
+				// template, and the gate below keys on that. A leader
+				// that is merely unavailable, with no grant, advances
+				// nothing.
+				leaderAdvancing = leaderAdvancing || grant != nil
 			}
 		case wantsTurn(m):
 			if leader {
@@ -152,14 +188,32 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 	slices.Sort(workers)
 	slices.Sort(leaders)
 	capacity := clusterDoc.Spec.Disruption.MaxUnavailableOrDefault() - inFlight
-	for _, name := range workers {
-		if len(stalled) > 0 || capacity <= 0 {
-			waiting = append(waiting, name)
-			continue
+
+	// The gate: while the applied template lags the fleet's target,
+	// advancing it is worth more than a worker's turn. The hold must
+	// outlive the sweep that grants the leader, because every sweep
+	// recomputes this decision from scratch, and the grant's own
+	// status write triggers the next sweep within milliseconds. So
+	// the hold keys on durable state: a leader that can be granted
+	// now, or a leader whose granted turn is still running. When
+	// neither exists, because every leader is Manual or a leader is
+	// stuck without a grant, the workers proceed: holding them for a
+	// leader that cannot take or use a turn would stall the rollout,
+	// and the machine operator's guard makes a worker's lag
+	// survivable.
+	gate := appliedVersion != "" && clusterDoc.Spec.Version != "" && appliedVersion != clusterDoc.Spec.Version
+	holdWorkers := gate && ((len(leaders) > 0 && !leaderBusy) || leaderAdvancing)
+
+	if !holdWorkers {
+		for _, name := range workers {
+			if len(stalled) > 0 || capacity <= 0 {
+				waiting = append(waiting, name)
+				continue
+			}
+			r.grant = append(r.grant, name)
+			inProgress = append(inProgress, name)
+			capacity--
 		}
-		r.grant = append(r.grant, name)
-		inProgress = append(inProgress, name)
-		capacity--
 	}
 	for _, name := range leaders {
 		if len(stalled) > 0 || capacity <= 0 || leaderBusy {
@@ -170,6 +224,12 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 		inProgress = append(inProgress, name)
 		capacity--
 		leaderBusy = true
+	}
+	if holdWorkers {
+		// Every waiting worker sits out the sweep: the gate holds the
+		// whole group back rather than admit some of them ahead of the
+		// leader turn that ends the lag.
+		waiting = append(waiting, workers...)
 	}
 
 	switch {
@@ -186,6 +246,10 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 		}
 		if len(waiting) > 0 {
 			message += "; waiting: " + strings.Join(waiting, ", ")
+		}
+		if holdWorkers && len(workers) > 0 {
+			message += fmt.Sprintf("; the applied system-pod template (%s) lags the fleet's target (%s); "+
+				"a leader goes first to advance the template, and workers wait", appliedVersion, clusterDoc.Spec.Version)
 		}
 		r.progressing = api.Condition{
 			Type: "Progressing", Status: api.ConditionTrue, Reason: "RollingOut", Message: message,

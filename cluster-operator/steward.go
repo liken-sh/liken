@@ -53,13 +53,21 @@ import (
 // the real version into each DaemonSet when it bakes the image.
 const osVersionAnnotation = "liken.sh/os-version"
 
+// machineOperatorDaemonSet names the stewarded DaemonSet whose
+// applied os-version the rollout gate also reads (fleet.go and
+// rollout.go). Both OS DaemonSets ship in the same manifests write,
+// so one annotation answers for the applied release, and the machine
+// operator's template is the one whose lag blocks a machine's
+// actuation after a reboot.
+const machineOperatorDaemonSet = "liken-machine-operator"
+
 // stewardedDaemonSets lists the OS's own DaemonSets: the operator and
 // the log relays. Their images are baked into the initramfs, so
 // their pods need the steward's refresh after an upgrade. Each
 // DaemonSet is expected to label its pods app: <name>, matching the
 // selector its manifest declares.
 var stewardedDaemonSets = []string{
-	"liken-machine-operator",
+	machineOperatorDaemonSet,
 	"machine-logs",
 }
 
@@ -108,6 +116,25 @@ func stewardOSPods(c *kubernetes.Client, machines []machine.Machine) {
 	}
 }
 
+// daemonSetVersion reads one DaemonSet's os-version annotation: the
+// release whose manifests are actually applied. It returns "" when
+// the DaemonSet does not exist yet, or predates this annotation,
+// because both cases mean there is nothing yet to compare a machine's
+// running version against. The rollout gate reads this same function
+// for the machine-operator DaemonSet, on the same terms
+// (fleet.go, rollout.go).
+func daemonSetVersion(c *kubernetes.Client, name string) string {
+	var ds struct {
+		Metadata struct {
+			Annotations map[string]string `json:"annotations"`
+		} `json:"metadata"`
+	}
+	if err := c.RequestJSON(http.MethodGet, daemonSetPath(name), nil, &ds); err != nil {
+		return ""
+	}
+	return ds.Metadata.Annotations[osVersionAnnotation]
+}
+
 // stewardDaemonSet reads one DaemonSet's shipped version, lists its
 // pods, and evicts the stale ones. It deliberately evicts pods
 // instead of deleting them, because eviction is the same action
@@ -117,15 +144,10 @@ func stewardOSPods(c *kubernetes.Client, machines []machine.Machine) {
 // that machine's log streams once, and the envelopes' seq field
 // removes any duplicates.
 func stewardDaemonSet(c *kubernetes.Client, machines []machine.Machine, name string) {
-	var ds struct {
-		Metadata struct {
-			Annotations map[string]string `json:"annotations"`
-		} `json:"metadata"`
+	dsVersion := daemonSetVersion(c, name)
+	if dsVersion == "" {
+		return // no DaemonSet, or nothing applied yet, to steward toward
 	}
-	if err := c.RequestJSON(http.MethodGet, daemonSetPath(name), nil, &ds); err != nil {
-		return // no DaemonSet exists to steward; nothing to do
-	}
-	dsVersion := ds.Metadata.Annotations[osVersionAnnotation]
 	pods, err := kubernetes.List[kubernetes.Pod](c, daemonSetPodsPath(name))
 	if err != nil {
 		fmt.Printf("listing %s pods for the steward: %v\n", name, err)

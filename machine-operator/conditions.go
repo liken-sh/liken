@@ -8,6 +8,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"slices"
 	"strings"
@@ -68,10 +69,21 @@ func sysctlsCondition(defaultsErr, specErr error) api.Condition {
 // hostEntriesCondition reports the outcome of applyHostEntries, on
 // the same terms as storageCondition and modulesCondition above:
 // True and Applied on an ordinary pass, True and NothingDeclared when
-// the spec declares no host entry at all, and False when a read, a
-// render, or a write failed.
-func hostEntriesCondition(desired []machine.HostEntry, err error) api.Condition {
+// the spec declares no host entry at all, False and ApplyFailed when
+// a read, a render, or a write failed, and False and
+// AwaitingPodRefresh when that same failure is the pod-freshness
+// guard's concern instead (awaitingPodRefresh, below). podStale is
+// this pass's verdict from staleness.go.
+func hostEntriesCondition(desired []machine.HostEntry, err error, podStale bool) api.Condition {
 	if err != nil {
+		if awaitingPodRefresh(podStale, err) {
+			return api.Condition{
+				Type: "HostEntriesApplied", Status: api.ConditionFalse,
+				Reason: "AwaitingPodRefresh",
+				Message: "the pod's template predates the release this machine runs; " +
+					"the pod steward replaces the pod after a leader boots that release: " + err.Error(),
+			}
+		}
 		return api.Condition{
 			Type: "HostEntriesApplied", Status: api.ConditionFalse,
 			Reason: "ApplyFailed", Message: err.Error(),
@@ -84,6 +96,40 @@ func hostEntriesCondition(desired []machine.HostEntry, err error) api.Condition 
 		}
 	}
 	return api.Condition{Type: "HostEntriesApplied", Status: api.ConditionTrue, Reason: "Applied"}
+}
+
+// awaitingPodRefresh judges whether an actuation failure is the
+// template lag itself, rather than a fault the machine actually has.
+// System pods run the stable :installed tag and their DaemonSets
+// update on OnDelete (cluster-operator/steward.go), so a reboot
+// restarts a machine's own operator into a new binary without
+// touching the pod spec around it. Only a leader's boot rewrites the
+// AddOn manifests that produce a fresh template, so a follower that
+// reboots first runs the new binary inside the old pod spec for a
+// while. A path that does not exist inside that stale pod means a
+// mount the old template lacks, whatever the mount is, so this rule
+// covers every mount a future release may add without naming any of
+// them by name.
+//
+// Two precedents already treat a release-wide condition as something
+// other than one machine's own fault. The DRA plugin tolerates a
+// mount its own stale pod lacks (main.go), because dying there would
+// kill the very status publishing the pod steward waits on.
+// sysctlsCondition reports a bad default as DefaultsIncomplete rather
+// than ApplyFailed, because a fault every machine on the release
+// carries at once tells a person nothing about which machine needs
+// attention. This rule follows the same reasoning for a stale pod's
+// missing mount.
+//
+// The reason this rule reports must not be AwaitingTurn. The rollout
+// conductor scans a machine's conditions for that exact reason
+// (cluster-operator/rollout.go, wantsTurn) to learn that the machine
+// has a staged change ready for a disruption. AwaitingPodRefresh
+// names a wait on the pod steward instead, so the conductor never
+// reads this guard as a change the machine is asking permission to
+// make.
+func awaitingPodRefresh(podStale bool, err error) bool {
+	return podStale && errors.Is(err, fs.ErrNotExist)
 }
 
 // applySysctls writes both sets of kernel parameters to the host's

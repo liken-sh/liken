@@ -14,7 +14,7 @@ A document's directory states its status:
   built yet.
 
 The numbers run in one sequence across all three directories. The next
-milestone is 54.
+milestone is 55.
 
 [`open-problems/`](open-problems/) holds the questions that liken owes
 an answer to. Those documents carry no number, because nobody has
@@ -186,6 +186,11 @@ decided yet what work they become.
   — the netbooted report posts to the cluster as an Enrollment, and
   approval is applying the proposed Machine, with a CLI verb as
   sugar.
+* **54.** [The system-pod template lag](54-system-pod-template-lag.md)
+  — a follower that reboots first runs the new binary in the old pod
+  spec: the machine operator reports that lag as `UpdatePending`
+  instead of a fault, and the conductor sends a leader first while
+  the applied template is behind the target.
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.
 

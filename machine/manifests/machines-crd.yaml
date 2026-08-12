@@ -3103,8 +3103,14 @@ spec:
                           Why the condition holds this status, in
                           one CamelCase word. Programs read this
                           field, so it changes less than the message
-                          does. Ready reports Reconciled or
-                          Degraded. NothingDeclared is the reason
+                          does. Ready reports Reconciled when it is
+                          True. When Ready is False, its reason is
+                          the phase word that the conditions produce,
+                          so the roll-up and the phase agree: a
+                          machine that waits on a reboot turn reads
+                          UpdatePending, and Degraded appears exactly
+                          when the phase says Degraded.
+                          NothingDeclared is the reason
                           that a check with nothing to do reports.
                           The convergence conditions share one set
                           of reasons: Converged, FactsIncomplete,

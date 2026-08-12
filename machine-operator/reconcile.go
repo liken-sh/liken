@@ -172,6 +172,15 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	status.Sysctls = sysctls
 	status.Conditions = api.SetCondition(status.Conditions, sysctlsCondition(defaultsErr, specErr), now)
 
+	// podStale answers whether this pod's own template predates the
+	// release it is running (staleness.go). A follower that reboots
+	// first always runs its new binary inside the old pod spec for a
+	// while, because the OS DaemonSets update on OnDelete and only a
+	// leader's boot rewrites the AddOn manifests that produce a fresh
+	// template. hostEntriesCondition reads this verdict below to judge
+	// a missing mount as that ordinary lag instead of a fault.
+	podStale := ownPodIsStale(c, m.Metadata.Name, status.Version.Liken)
+
 	// Host entries reconcile live too, under the same write-on-
 	// divergence rule (hosts.go). The hostname is the Machine's own
 	// name rather than a read of the host's hostname, because init
@@ -184,7 +193,7 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	hostEntries, hostsErr := applyHostEntries(hostsPath, m.Metadata.Name, m.Spec.Network.HostEntries)
 	status.HostEntries = hostEntries
 	status.Conditions = api.SetCondition(status.Conditions,
-		hostEntriesCondition(m.Spec.Network.HostEntries, hostsErr), now)
+		hostEntriesCondition(m.Spec.Network.HostEntries, hostsErr, podStale), now)
 
 	// Modules judge what the boot reported, not what the spec asks
 	// for now. A freshly declared module has no outcome yet; it
@@ -397,23 +406,8 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	}
 
 	// Ready is the roll-up: True exactly when every other condition
-	// is True. The scan skips any prior Ready, so the previous
-	// pass's value cannot affect this one. It also skips the
-	// conductor's grant, because the grant is a permission, not an
-	// observation about this machine's health.
-	ready := api.Condition{Type: "Ready", Status: api.ConditionTrue, Reason: "Reconciled"}
-	for _, condition := range status.Conditions {
-		if condition.Type == "Ready" || condition.Type == machine.RebootApprovedCondition {
-			continue
-		}
-		if condition.Status != api.ConditionTrue {
-			ready = api.Condition{
-				Type: "Ready", Status: api.ConditionFalse,
-				Reason: "Degraded", Message: condition.Type + " is " + string(condition.Status),
-			}
-		}
-	}
-	status.Conditions = api.SetCondition(status.Conditions, ready, now)
+	// is True, with a reason that agrees with the phase (phase.go).
+	status.Conditions = api.SetCondition(status.Conditions, readyCondition(status.Conditions), now)
 
 	// Every condition this pass publishes judged the spec at this
 	// generation. The API server increases metadata.generation only

@@ -7,6 +7,8 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,14 +37,14 @@ func TestFactsConditionCarriesTheReadError(t *testing.T) {
 
 func TestHostEntriesConditionApplied(t *testing.T) {
 	entries := []machine.HostEntry{{Address: "10.10.0.20", Names: []string{"nas"}}}
-	c := hostEntriesCondition(entries, nil)
+	c := hostEntriesCondition(entries, nil, false)
 	if c.Type != "HostEntriesApplied" || c.Status != api.ConditionTrue || c.Reason != "Applied" {
 		t.Errorf("got %+v", c)
 	}
 }
 
 func TestHostEntriesConditionNothingDeclared(t *testing.T) {
-	c := hostEntriesCondition(nil, nil)
+	c := hostEntriesCondition(nil, nil, false)
 	if c.Status != api.ConditionTrue || c.Reason != "NothingDeclared" {
 		t.Errorf("got %+v", c)
 	}
@@ -50,12 +52,48 @@ func TestHostEntriesConditionNothingDeclared(t *testing.T) {
 
 func TestHostEntriesConditionCarriesTheApplyError(t *testing.T) {
 	entries := []machine.HostEntry{{Address: "10.10.0.20", Names: []string{"nas"}}}
-	c := hostEntriesCondition(entries, errors.New("writing /host/etc/hosts: permission denied"))
+	c := hostEntriesCondition(entries, errors.New("writing /host/etc/hosts: permission denied"), false)
 	if c.Status != api.ConditionFalse || c.Reason != "ApplyFailed" {
 		t.Errorf("got %+v", c)
 	}
 	if !strings.Contains(c.Message, "permission denied") {
 		t.Errorf("the message should carry the error: %q", c.Message)
+	}
+}
+
+// A stale pod's missing mount is the template lag, not a fault: the
+// guard reports AwaitingPodRefresh instead of ApplyFailed.
+func TestHostEntriesConditionStalePodMissingMountAwaitsRefresh(t *testing.T) {
+	entries := []machine.HostEntry{{Address: "10.10.0.20", Names: []string{"nas"}}}
+	err := fmt.Errorf("writing /host/etc/hosts.tmp-1: %w", fs.ErrNotExist)
+	c := hostEntriesCondition(entries, err, true)
+	if c.Status != api.ConditionFalse || c.Reason != "AwaitingPodRefresh" {
+		t.Errorf("got %+v", c)
+	}
+	if !strings.Contains(c.Message, "predates the release") {
+		t.Errorf("the message should name the wait: %q", c.Message)
+	}
+}
+
+// A stale pod's failure still reports ApplyFailed when the error is
+// not a missing path. A stale template explains an absent mount, not
+// a permission problem or a full disk.
+func TestHostEntriesConditionStalePodOtherErrorStaysApplyFailed(t *testing.T) {
+	entries := []machine.HostEntry{{Address: "10.10.0.20", Names: []string{"nas"}}}
+	c := hostEntriesCondition(entries, errors.New("writing /host/etc/hosts: permission denied"), true)
+	if c.Status != api.ConditionFalse || c.Reason != "ApplyFailed" {
+		t.Errorf("got %+v", c)
+	}
+}
+
+// A missing path on a current pod is a real fault: nothing about the
+// template explains it, so the guard must not apply.
+func TestHostEntriesConditionFreshPodMissingMountStaysApplyFailed(t *testing.T) {
+	entries := []machine.HostEntry{{Address: "10.10.0.20", Names: []string{"nas"}}}
+	err := fmt.Errorf("writing /host/etc/hosts.tmp-1: %w", fs.ErrNotExist)
+	c := hostEntriesCondition(entries, err, false)
+	if c.Status != api.ConditionFalse || c.Reason != "ApplyFailed" {
+		t.Errorf("got %+v", c)
 	}
 }
 

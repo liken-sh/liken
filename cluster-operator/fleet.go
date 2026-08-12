@@ -127,8 +127,14 @@ func sweepFleet(c *kubernetes.Client, clusterDoc *cluster.Cluster, available str
 	// take their reboot turn now, and which spent grants return to
 	// the budget (see rollout.go). This sequencing happens here for
 	// the same reason the tally does: the sweep is the one place that
-	// sees the whole fleet at once.
-	r := decideRollout(machines, renewals, clusterDoc, now)
+	// sees the whole fleet at once. appliedVersion is the release the
+	// machine-operator DaemonSet's template actually carries
+	// (daemonSetVersion, steward.go); decideRollout compares it
+	// against the fleet's target so a leader can go first while the
+	// applied template lags, because only a leader's boot can advance
+	// it.
+	appliedVersion := daemonSetVersion(c, machineOperatorDaemonSet)
+	r := decideRollout(machines, renewals, clusterDoc, appliedVersion, now)
 	carryOutRollout(c, machines, r, now)
 
 	// The OS's own pods, the operator's pods and the log relay pods,

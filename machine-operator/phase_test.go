@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/liken-sh/liken/api"
+	"github.com/liken-sh/liken/machine"
 )
 
 func condition(ctype string, status api.ConditionStatus, reason string) api.Condition {
@@ -179,6 +180,53 @@ func TestAwaitingTurnIsUpdatePending(t *testing.T) {
 	})
 	if phase != api.PhaseUpdatePending {
 		t.Errorf("waiting on the cluster's grant is a pending update: %s", phase)
+	}
+}
+
+func TestReadyRollupAllTrue(t *testing.T) {
+	c := readyCondition([]api.Condition{
+		condition("HostEntriesApplied", "True", "Applied"),
+	})
+	if c.Status != api.ConditionTrue || c.Reason != "Reconciled" {
+		t.Errorf("got %+v", c)
+	}
+}
+
+func TestReadyRollupReasonFollowsThePhase(t *testing.T) {
+	c := readyCondition([]api.Condition{
+		condition("HostEntriesApplied", "False", "AwaitingPodRefresh"),
+	})
+	if c.Status != api.ConditionFalse || c.Reason != "UpdatePending" {
+		t.Errorf("a waiting machine is not degraded: %+v", c)
+	}
+}
+
+func TestReadyRollupDegradedWhenThePhaseSaysSo(t *testing.T) {
+	c := readyCondition([]api.Condition{
+		condition("SysctlsApplied", "False", "ApplyFailed"),
+	})
+	if c.Status != api.ConditionFalse || c.Reason != "Degraded" {
+		t.Errorf("got %+v", c)
+	}
+}
+
+func TestReadyRollupSkipsThePriorReadyAndTheGrant(t *testing.T) {
+	c := readyCondition([]api.Condition{
+		condition("Ready", "False", "Degraded"),
+		condition(machine.RebootApprovedCondition, "True", "DisruptionBudgetAllows"),
+		condition("HostEntriesApplied", "True", "Applied"),
+	})
+	if c.Status != api.ConditionTrue || c.Reason != "Reconciled" {
+		t.Errorf("a stale roll-up and the grant say nothing about health: %+v", c)
+	}
+}
+
+func TestAwaitingPodRefreshIsUpdatePending(t *testing.T) {
+	phase := decidePhase([]api.Condition{
+		{Type: "HostEntriesApplied", Status: "False", Reason: "AwaitingPodRefresh"},
+	})
+	if phase != api.PhaseUpdatePending {
+		t.Errorf("a stale pod template waiting on the steward's refresh is a pending update: %s", phase)
 	}
 }
 

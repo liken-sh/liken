@@ -109,6 +109,9 @@ column. For a machine that did not move, read its conditions:
 * `Downloading`: the machine still fetches or verifies the release.
   A slow link makes this step long. The machine retries a failed
   download on its own.
+* `AwaitingPodRefresh`: the machine runs the new release and waits
+  for its operator pod to be recreated from the new template, which
+  happens after a leader boots the release.
 
 If the Cluster's `Progressing` condition is `False` with the reason
 `RolloutStalled`, a machine with a granted turn did not return. The
