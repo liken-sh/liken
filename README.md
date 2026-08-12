@@ -101,19 +101,20 @@ sync from its first boot.
 
 ## Status
 
-`liken` runs in public. A `liken` cluster serves
-[liken.sh](https://liken.sh) from a 1 GB cloud node. That node installed
-itself from the project's release channel, and it continues to upgrade
-itself from the channel. The channel,
-[releases.liken.sh](https://releases.liken.sh/channel.yaml), serves
-digest-verified releases. CI publishes a new release on every version
-tag. [GETTING-STARTED.md](GETTING-STARTED.md) describes the path from a
+`liken` runs in public. The release channel,
+[releases.liken.sh](https://releases.liken.sh/), serves
+digest-verified releases, and CI publishes a new release on every
+version tag. For the project's first public month, a one-node
+`liken` cluster on a 1 GB cloud machine served
+[liken.sh](https://liken.sh) itself: it installed from the channel
+once, then upgraded from the channel with every release.
+[GETTING-STARTED.md](GETTING-STARTED.md) describes the path from a
 release to a running cluster of your own.
 
 The milestones in [plans/](plans/) record the progress of the project.
 The QEMU lab proved most of them, from a bare PID 1 to a five-node HA
-cluster. The website and the release channel were proved where they
-run, on the liken.sh cluster and in CI. Later milestones added
+cluster. The release channel was proved where it runs, published by
+CI and polled by real machines. Later milestones added
 declarative upgrades, rolling reboots, adoption of an existing `k3s`
 cluster, updates directly from the internet under both UEFI and BIOS
 firmware, and GitOps with Flux.

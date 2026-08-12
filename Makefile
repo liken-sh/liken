@@ -588,15 +588,15 @@ release: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils hwdata tzdata l
 # This target serves the release channel to the lab over HTTP. The
 # guests reach it at http://10.0.2.2:8017, the source URL that the
 # dev cluster's Cluster document declares. This is the lab's
-# substitute for the releases on the liken.sh website.
+# substitute for the public channel at releases.liken.sh.
 serve:
 	$(MAKE) -C releases serve
 
 # The website: the front page and the manual, built as static files
 # (docs/README.md tells the whole story). The site is not an OS
 # artifact, so `all` does not build it and a release does not bundle
-# it. It ships on its own path, as a container image published by CI
-# when a push touches the docs domain.
+# it. It ships on its own path: CI deploys the built tree to GitHub
+# Pages when a push touches the docs domain.
 docs:
 	$(MAKE) -C docs
 

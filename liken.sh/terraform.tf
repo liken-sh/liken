@@ -1,10 +1,10 @@
 # The liken.sh domain: the project's public presence, as
 # infrastructure. This one file declares everything Linode needs for
-# the name to answer: the DNS zone, the machine that runs the
-# cluster, the firewall in front of it, and the release channel. The
-# release channel is the object storage bucket that holds published
-# releases, the credential that lets this repo's CI upload them, and
-# the token that keeps the channel's TLS certificate fresh.
+# the name to answer: the DNS zone, the website's records, and the
+# release channel. The release channel is the object storage bucket
+# that holds published releases, the credential that lets this
+# repo's CI upload them, and the token that keeps the channel's TLS
+# certificate fresh.
 #
 # The channel lives in object storage, rather than on a liken
 # machine, for a reason worth stating plainly: machines upgrade
@@ -204,9 +204,7 @@ resource "linode_domain_record" "www" {
 # same owner. GitHub verifies each name separately, so the apex and
 # the release channel each carry a record. The codes are not
 # secrets: they prove control of this zone, and control of this zone
-# is exactly what this file declares. Verification also locks these
-# names for GitHub Pages: no other account can claim a verified
-# domain as its own Pages custom domain.
+# is exactly what this file declares.
 
 resource "linode_domain_record" "github_org_verification" {
   domain_id   = linode_domain.liken_sh.id
@@ -222,266 +220,18 @@ resource "linode_domain_record" "github_org_verification_releases" {
   target      = "fa73a639f2"
 }
 
-# ---------------------------------------------------------------------------
-# The machine: one nanode, carrying the cluster.
+# GitHub Pages' own domain verification, a separate feature from the
+# profile badge above. This record makes liken.sh a verified Pages
+# domain for the organization, which locks the name and its
+# immediate subdomains to this account: no other GitHub account can
+# publish a Pages site under them. The code is not a secret, for the
+# same reason the badge codes are not.
 
-resource "linode_instance" "node" {
-  label  = "liken-node-1"
-  region = "us-east"
-
-  # The smallest Linode: 1 GB of memory. liken runs from a read-only
-  # system image on disk, so the OS itself needs little RAM, and a
-  # single small machine can carry the cluster and its website.
-  type = "g6-nanode-1"
-
-  # Backups snapshot disks, and a liken machine's disks are the wrong
-  # thing to snapshot: the slots are reproducible from published
-  # releases, and everything that matters lives in the cluster's own
-  # state.
-  backups_enabled = false
-
-  # The watchdog (Lassie) boots the instance whenever it finds the
-  # instance powered off unexpectedly, and on this host that behavior
-  # is essential. Linode treats a guest-initiated reboot as a
-  # power-off. Every reboot that a liken machine performs on itself
-  # (proving a new release, rolling back from one, applying a spec
-  # that needs a fresh boot) ends with the instance off, and the
-  # watchdog is what turns it back on. Without the watchdog, the
-  # machine's first self-reboot would be its last.
-  watchdog_enabled = true
-
-  lifecycle {
-    prevent_destroy = true
-  }
-}
-
-# The OS, as a custom image. `make RELEASE=<version>` in this
-# directory downloads that published release from the channel,
-# verifies it, and really installs it onto image/disk.img.gz, a
-# complete installed system disk. This resource uploads the result,
-# so the file must exist before a plan. Linode accepts raw disk
-# images, gzipped, up to 6 GB uncompressed. The Makefile explains how
-# that limit shaped the disk layout.
-#
-# Replacing this image is how an OS ships from the outside, which
-# founding a machine needs exactly once. After that, the machine
-# upgrades itself from the channel, and shipping a disk again is the
-# recovery path, not the routine path. A new image forces Terraform
-# to recreate the system disk below from it, which erases that disk.
-# For this reason, shipping is an explicit act, never a side effect.
-# ignore_changes keeps a routine apply from noticing a rebuilt local
-# image (builds are not byte-reproducible, so every rebuild would
-# otherwise read as a ship), and
-#
-#   terraform apply -replace=linode_image.system
-#
-# is the command that means "reinstall the node's OS from the image I
-# just built". Run it with the instance powered off, then power the
-# instance on.
-
-resource "linode_image" "system" {
-  label       = "liken-node-1-system"
-  description = "The liken.sh node's installed system disk"
-  region      = "us-east"
-
-  file_path = "${path.module}/image/disk.img.gz"
-  file_hash = filemd5("${path.module}/image/disk.img.gz")
-
-  lifecycle {
-    ignore_changes = [file_hash]
-  }
-}
-
-# The system disk, stamped from the image above. Slightly larger than
-# the 3 GiB image, because Linode's advertised sizes do not land on
-# exact byte counts. liken grows the partition table to the disk's
-# real end on first boot. Replacing a disk needs the instance powered
-# off, so a ship follows three steps: power off, apply, power on.
-
-resource "linode_instance_disk" "system" {
-  label     = "liken-system"
-  linode_id = linode_instance.node.id
-  size      = 3200
-  image     = linode_image.system.id
-
-  # The API requires a login credential whenever a disk comes from an
-  # image, so that Linode can write it into the disk's filesystem. A
-  # raw image has no filesystem that Linode can read, so nothing is
-  # ever written anywhere, and no such login exists. This value only
-  # satisfies the API's schema and does nothing else.
-  root_pass = "inert!on a raw image 0"
-}
-
-# The data disk: raw, blank, and never shipped to. liken claims it on
-# the machine's first boot, writing role names into its GPT, and
-# every ship after that replaces the OS around it. The cluster's
-# database, images, and volumes survive each ship. 22400 MB is the
-# rest of the nanode's storage allotment.
-
-resource "linode_instance_disk" "data" {
-  label      = "liken-data"
-  linode_id  = linode_instance.node.id
-  size       = 22400
-  filesystem = "raw"
-
-  lifecycle {
-    prevent_destroy = true
-  }
-}
-
-resource "linode_instance_config" "boot" {
-  label     = "liken"
-  linode_id = linode_instance.node.id
-
-  # Linode's hosts boot guests only in BIOS style, with no UEFI, so
-  # this machine's disk carries its own bootloader, laid down by the
-  # installer: GRUB's first stage in the MBR, its core image in a
-  # BIOS boot partition, and its config and environment block on the
-  # boot home. Direct disk boot means the host simply runs what the
-  # MBR carries, and upgrades take effect through GRUB's environment
-  # block, the same way UEFI machines take effect through firmware
-  # variables. (Linode's GRUB 2 setting does not work for this disk:
-  # their loader reads its config from the disk treated as one
-  # whole-disk filesystem, the way Linode's own images are laid out,
-  # and never looks inside a partition table.)
-  #
-  # The MBR's 440 boot-code bytes carry one item of history worth a
-  # sentence: Linode's image deploys used to zero them, which once
-  # meant a rescue-boot restoration after every ship. Today's deploys
-  # copy data byte for byte, verified by hashing a deployed disk end
-  # to end, and the machine guards those bytes itself anyway. It
-  # re-derives them from its proven slot's artifacts on every boot
-  # and before every reboot. The config says nothing about power on
-  # purpose: `booted` here is not a description but an instruction
-  # (false shuts a running machine down to match), so power stays an
-  # explicit act through the API, never a side effect of an apply.
-  kernel      = "linode/direct-disk"
-  root_device = "/dev/sda"
-
-  device {
-    device_name = "sda"
-    disk_id     = linode_instance_disk.system.id
-  }
-
-  device {
-    device_name = "sdb"
-    disk_id     = linode_instance_disk.data.id
-  }
-
-  # Two interfaces, and the second is the reason this cluster can
-  # grow: eth0 is the public internet, and eth1 joins a private VLAN
-  # named "liken", Linode's free layer-2 segment within a region. The
-  # VLAN is the cluster segment (the Cluster document's nodeCIDR
-  # lives here), so adding a node later means another instance with
-  # the same VLAN label and the next address, the same way the lab's
-  # machines share their cluster network. The ipam_address is
-  # Linode-side bookkeeping only; the machine configures its own
-  # addresses from its Machine manifest.
-  interface {
-    purpose = "public"
-  }
-
-  interface {
-    purpose      = "vlan"
-    label        = "liken"
-    ipam_address = "10.10.0.1/24"
-  }
-
-  # Every helper here assumes that Linode installed the distro and
-  # may reach into its filesystem at boot to adjust it. liken is not
-  # that kind of distro, and nothing on the outside may edit a slot.
-  helpers {
-    devtmpfs_automount = false
-    distro             = false
-    modules_dep        = false
-    network            = false
-    updatedb_disabled  = true
-  }
-}
-
-# ---------------------------------------------------------------------------
-# The firewall: the node answers the world on the website's ports and
-# the cluster API, and drops everything else at the edge.
-#
-# The API on 6443 answers publicly because CI deploys the website
-# from GitHub-hosted runners, whose addresses cannot usefully be
-# pinned. This is a real trade-off: an open port can be scanned,
-# fuzzed, and hit by the next pre-auth vulnerability, and a 1 GB node
-# would rather not spend its one CPU handling the internet's
-# background noise. What bounds the exposure is what a caller can
-# actually do. The API authenticates everyone with client
-# certificates or tokens, unauthenticated requests stop at TLS, and
-# the one credential that leaves the operator's hands (the
-# certificate that CI deploys with) is scoped to the website's
-# namespace alone (website/manifests/deployer.yaml). Because of this,
-# the worst that a leak spends is the page itself.
-#
-# The operator's address arrives as a variable, so it never lands in
-# this public repository: .envrc.private exports
-# TF_VAR_operator_cidr (it lives on in the Terraform state, which is
-# already private, like every other secret here). The firewall
-# leaves the VLAN untouched: Cloud Firewalls filter the public
-# interface, and cluster traffic uses the private segment.
-
-variable "operator_cidr" {
-  description = "The address allowed to reach rescue-mode ssh, as a CIDR"
-  type        = string
-  sensitive   = true
-}
-
-resource "linode_firewall" "node" {
-  label           = "liken-node-1"
-  inbound_policy  = "DROP"
-  outbound_policy = "ACCEPT"
-  linodes         = [linode_instance.node.id]
-
-  inbound {
-    label    = "website-http"
-    action   = "ACCEPT"
-    protocol = "TCP"
-    ports    = "80"
-    ipv4     = ["0.0.0.0/0"]
-    ipv6     = ["::/0"]
-  }
-
-  inbound {
-    label    = "website-https"
-    action   = "ACCEPT"
-    protocol = "TCP"
-    ports    = "443"
-    ipv4     = ["0.0.0.0/0"]
-    ipv6     = ["::/0"]
-  }
-
-  # Ping stays answerable: it costs nothing, and it is the first
-  # question anyone asks about a machine that seems down.
-  inbound {
-    label    = "ping"
-    action   = "ACCEPT"
-    protocol = "ICMP"
-    ipv4     = ["0.0.0.0/0"]
-    ipv6     = ["::/0"]
-  }
-
-  inbound {
-    label    = "kubernetes-api"
-    action   = "ACCEPT"
-    protocol = "TCP"
-    ports    = "6443"
-    ipv4     = ["0.0.0.0/0"]
-    ipv6     = ["::/0"]
-  }
-
-  # Rescue mode's sshd, the emergency access path: the machine itself
-  # runs no ssh server, so outside a rescue boot, this rule matches
-  # nothing.
-  inbound {
-    label    = "rescue-ssh"
-    action   = "ACCEPT"
-    protocol = "TCP"
-    ports    = "22"
-    ipv4     = [var.operator_cidr]
-  }
+resource "linode_domain_record" "github_pages_verification" {
+  domain_id   = linode_domain.liken_sh.id
+  name        = "_github-pages-challenge-liken-sh"
+  record_type = "TXT"
+  target      = "182c9382c6c411f394267ede17a401"
 }
 
 # ---------------------------------------------------------------------------
@@ -612,103 +362,6 @@ resource "github_actions_secret" "releases_cert_token" {
   repository  = "liken"
   secret_name = "RELEASES_CERT_TOKEN"
   value       = var.releases_cert_token
-}
-
-# ---------------------------------------------------------------------------
-# The website deploy credential: how CI updates the page.
-#
-# CI authenticates to the cluster the same way the operator does,
-# with a client certificate signed by the cluster's client CA, but as
-# a lesser user. The cluster's identity is minted offline (`make
-# identity`), and its CA material lives in identity/, so Terraform
-# can mint this credential offline too: a key and a certificate
-# naming the user website-deployer, whose entire authority is the
-# RBAC in website/manifests/deployer.yaml (content updates in the
-# website's namespace, nothing else). Kubernetes reads the
-# certificate's common name as the username, so the signature is the
-# authentication, and the RoleBinding is the authorization. Nothing
-# here talks to the cluster. What a plan needs is the identity files
-# on disk, the same bootstrap that the system image above asks for,
-# so the credential can be minted and delivered while the machine is
-# down, mid-refound, or not yet founded at all.
-#
-# The certificate lives a year, and any plan inside the last month of
-# that period proposes a fresh one, so renewal happens on whichever
-# `terraform apply` comes next. Rotation on demand is
-#
-#   terraform apply -replace=tls_private_key.website_deployer
-#
-# and revocation does not involve the certificate at all, because
-# issued certificates cannot be recalled. Instead, delete the
-# RoleBinding on the cluster, and the name that the certificate
-# proves stops meaning anything.
-
-resource "tls_private_key" "website_deployer" {
-  algorithm   = "ECDSA"
-  ecdsa_curve = "P256"
-}
-
-resource "tls_cert_request" "website_deployer" {
-  private_key_pem = tls_private_key.website_deployer.private_key_pem
-
-  subject {
-    common_name = "website-deployer"
-  }
-}
-
-resource "tls_locally_signed_cert" "website_deployer" {
-  cert_request_pem   = tls_cert_request.website_deployer.cert_request_pem
-  ca_private_key_pem = file("${path.module}/identity/tls/client-ca.key")
-  ca_cert_pem        = file("${path.module}/identity/tls/client-ca.crt")
-
-  allowed_uses = ["client_auth", "digital_signature"]
-
-  validity_period_hours = 24 * 365
-  early_renewal_hours   = 24 * 30
-}
-
-# The kubeconfig that CI receives, assembled from parts that
-# Terraform already holds: the certificate above, the server CA that
-# lets the client trust what it dials, and the same
-# public-address/tls-server-name pair that the ./kubectl wrapper
-# uses (the API server's certificate names the VLAN address, and the
-# tls-server-name is what lets one certificate serve both the VLAN
-# and the world).
-
-locals {
-  website_deployer_kubeconfig = yamlencode({
-    apiVersion = "v1"
-    kind       = "Config"
-    clusters = [{
-      name = "liken-sh"
-      cluster = {
-        server                       = "https://${tolist(linode_instance.node.ipv4)[0]}:6443"
-        "tls-server-name"            = "10.10.0.1"
-        "certificate-authority-data" = base64encode(file("${path.module}/identity/tls/server-ca.crt"))
-      }
-    }]
-    users = [{
-      name = "website-deployer"
-      user = {
-        "client-certificate-data" = base64encode(tls_locally_signed_cert.website_deployer.cert_pem)
-        "client-key-data"         = base64encode(tls_private_key.website_deployer.private_key_pem)
-      }
-    }]
-    contexts = [{
-      name = "website"
-      context = {
-        cluster = "liken-sh"
-        user    = "website-deployer"
-      }
-    }]
-    "current-context" = "website"
-  })
-}
-
-resource "github_actions_secret" "website_kubeconfig" {
-  repository  = "liken"
-  secret_name = "WEBSITE_KUBECONFIG"
-  value       = local.website_deployer_kubeconfig
 }
 
 # ---------------------------------------------------------------------------
