@@ -54,7 +54,14 @@ mkdir -p "$cache"
 
 if ! sha256sum --check --status <<<"$digest  $cache/$tarball" >/dev/null 2>&1; then
     echo "downloading $tarball"
-    curl -fL --progress-bar -o "$cache/$tarball" "$url"
+    # This tarball is about half a gigabyte, and a long HTTP/2 stream
+    # sometimes breaks partway through. A plain retry would start
+    # over and can fail the same way forever, so -C - resumes each
+    # attempt from the bytes already on disk and repeated breaks
+    # still converge on a complete file. The checksum below is what
+    # decides whether the assembled bytes are good.
+    curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
+        --progress-bar -o "$cache/$tarball" "$url"
     sha256sum --check --quiet <<<"$digest  $cache/$tarball"
 fi
 
