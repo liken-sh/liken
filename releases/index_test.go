@@ -85,6 +85,21 @@ func TestIndexMarksTheReleaseTheChannelDocumentNames(t *testing.T) {
 	}
 }
 
+func TestReleasePageBadgesTheLatest(t *testing.T) {
+	dir, _ := indexed(t, "2026.07.14-001", "2026.07.15-001")
+
+	// The badge sits in the heading, beside the version it applies
+	// to, and only the release the channel document records gets one.
+	latest := pageAt(t, dir, "2026.07.15-001", "index.html")
+	if !strings.Contains(latest, `<span class="badge">latest</span>`) {
+		t.Errorf("the latest release's heading carries no badge:\n%s", latest)
+	}
+	older := pageAt(t, dir, "2026.07.14-001", "index.html")
+	if strings.Contains(older, `class="badge"`) {
+		t.Errorf("an older release's page carries the latest badge:\n%s", older)
+	}
+}
+
 func TestIndexWritesAPageForEachRelease(t *testing.T) {
 	dir, _ := indexed(t, "2026.07.14-001", "2026.07.15-001")
 

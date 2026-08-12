@@ -15,9 +15,8 @@ lands here. That is another reason the whole list belongs on it.
 
 <p>This is the release channel for
 <a href="https://liken.sh"><code>liken</code></a>, a small operating
-system that boots a machine directly into Kubernetes. The channel is
-plain object storage: every published file is public, and a
-published release's artifacts never change.</p>
+system that boots a machine directly into Kubernetes. Every file
+here is public, and a published release never changes.</p>
 
 <p><a href="https://liken.sh/docs/guides/install/">The install
 guide</a> gives the steps from a release to a running cluster.
@@ -26,10 +25,9 @@ reference</a> describes this layout in full.</p>
 
 <h2>Releases</h2>
 
-<p>{{len .Releases}} published, newest first. Open one to get the
-catalog entry to copy, or read
-<a href="/versions.yaml"><code>versions.yaml</code></a> for the same
-list in one file that a script can parse.</p>
+<p>Newest first. Open a release to get the catalog entry to copy,
+or read <a href="/versions.yaml"><code>versions.yaml</code></a> for
+the same list in one file that a script can parse.</p>
 
 <table>
 <tr><th>Version</th><th>Kernel</th><th>k3s</th><th>Release document</th></tr>
@@ -46,9 +44,10 @@ list in one file that a script can parse.</p>
 <h2>The layout</h2>
 
 <ul>
-  <li><a href="/channel.yaml"><code>channel.yaml</code></a> names the
-  newest published version. A cluster polls it for a newer version,
-  so it stays one small file however many releases exist.</li>
+  <li><a href="/channel.yaml"><code>channel.yaml</code></a> records
+  the newest published version. A cluster polls it for a newer
+  version, so it stays one small file however many releases
+  exist.</li>
   <li><a href="/versions.yaml"><code>versions.yaml</code></a> lists
   every release the channel holds, each with the digest of its
   release document. No machine reads this one.</li>

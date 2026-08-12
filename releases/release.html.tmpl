@@ -14,9 +14,7 @@ channel's root for a reader who left the trailing slash off.
 {{template "head" .}}
 <nav><a href="/">← every release</a></nav>
 
-<h1>{{.Mark}} <span>liken {{.Version}}</span></h1>
-
-{{if .IsLatest}}<p>This is the newest release the channel names.</p>{{end}}
+<h1>{{.Mark}} <span>liken {{.Version}}</span>{{if .IsLatest}} <span class="badge">latest</span>{{end}}</h1>
 
 <h2>Catalog it</h2>
 

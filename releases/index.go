@@ -119,9 +119,9 @@ func Index(source string, keys []string, outDir string, out io.Writer) error {
 }
 
 // page is what every template needs, whichever page it renders. The
-// stylesheet and the mark are inlined rather than linked: the channel
-// answers when the cluster that serves liken.sh does not, so a page
-// here fetches nothing (brand/liken.css says more).
+// stylesheet and the mark are inlined rather than linked: a channel
+// page must render whole with no request to any other site, so a
+// page here fetches nothing (brand/liken.css says more).
 type page struct {
 	Title      string
 	Stylesheet template.CSS

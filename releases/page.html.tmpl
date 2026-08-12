@@ -5,8 +5,8 @@ content.
 
 The stylesheet is the project's shared one, from the brand domain, so
 these pages and liken.sh are the same document in two places. It is
-inlined and not linked, and brand/liken.css gives the reason: the
-channel has to answer when the cluster that serves liken.sh does not.
+inlined and not linked, and brand/liken.css gives the reason: a
+channel page must render whole with no request to any other site.
 The rules after it are the ones only a channel page needs.
 */}}
 {{define "head"}}<!doctype html>
@@ -26,10 +26,15 @@ The rules after it are the ones only a channel page needs.
   td.digest { font-family: ui-monospace, monospace; font-size: 0.8rem;
               color: var(--ink-muted); word-break: break-all; }
   td.size { text-align: right; }
+  /* The latest chip: the front page's table hangs it after the
+     newest version's cell, and a release's own heading carries it as
+     a .badge span. One rule styles both, so the two reads match. */
   td.latest { white-space: nowrap; }
-  td.latest::after { content: "latest"; font-size: 0.75rem;
-                     background: var(--ink); color: var(--page);
-                     padding: 0.05rem 0.4rem; margin-left: 0.5rem; }
+  td.latest::after { content: "latest"; }
+  td.latest::after, .badge { font-size: 0.75rem;
+                             background: var(--ink); color: var(--page);
+                             padding: 0.05rem 0.4rem; margin-left: 0.5rem; }
+  h1 .badge { margin-left: 0; font-weight: 400; }
   /* The mark appears in every page's title. It is inlined as SVG,
      so it needs a size given here: the file carries a viewBox and no
      width, which is what lets one file serve a favicon and a heading.
