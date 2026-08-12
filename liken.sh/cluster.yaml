@@ -14,7 +14,7 @@ spec:
   # The release every machine here runs. It must name an entry in the
   # catalog below. Each machine fetches, verifies, and proves this
   # version itself, and the rollout moves one machine at a time.
-  version: 2026.08.05-001
+  version: 2026.08.12-001
 
   # One leader is a complete cluster: k3s keeps its state in sqlite
   # until this list grows to three, and growing it is an ordinary
@@ -80,17 +80,16 @@ spec:
     # rollback to name it, and two slots is all a machine has. An
     # older entry names a release no machine could return to.
     catalog:
-      # The release that keeps a claimed USB device's CDI spec
-      # current while a libusb program holds the interface, so a
-      # container restart under the prepared claim injects the bus
-      # node instead of a node the program deleted.
-      - version: 2026.08.03-002
-        digest: sha256:9b65b839c18d5b6bfefd4ffc87f22d802874116a4a6e0c3909542c77d1b1152c
       # The release whose kubeconfig names its cluster and context
       # entries after the cluster, so kubeconfigs from two liken
       # clusters no longer collide on the name liken.
       - version: 2026.08.05-001
         digest: sha256:2dbf5d5ae778764eb0dc72c6c8c74bfc9bf9567e1831545fd3c39d60bcb66491
+      # The release that carries k3s v1.36.3+k3s1, whose Kubernetes
+      # 1.36.3 fixes a kubelet memory leak, and the current firmware,
+      # microcode, and NFS client.
+      - version: 2026.08.12-001
+        digest: sha256:a7c0704c4ee6aa36e320bd1f478ac1f0626befddf69113aa04bbe5ba300ec7ed
 
   runtime:
     # The Go runtime environment for the k3s process. k3s uses the
