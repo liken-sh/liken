@@ -1,24 +1,19 @@
 # The liken.sh domain: the project's public presence, as
 # infrastructure. This one file declares everything Linode needs for
-# the name to answer: the DNS zone, the machine that runs the cluster
-# and serves the website, the firewall in front of it, and the
-# release channel. The release channel is the object storage bucket
-# that holds published releases, the credential that lets this
-# repo's CI upload them, and the token that keeps the channel's TLS
-# certificate fresh.
+# the name to answer: the DNS zone, the machine that runs the
+# cluster, the firewall in front of it, and the release channel. The
+# release channel is the object storage bucket that holds published
+# releases, the credential that lets this repo's CI upload them, and
+# the token that keeps the channel's TLS certificate fresh.
 #
 # The channel lives in object storage, rather than on a liken
 # machine, for a reason worth stating plainly: machines upgrade
 # themselves from the channel, so the channel must outlive any
 # machine it feeds. A cluster that served its own update channel
-# could never be rescued by an update. The website has no such
-# constraint, so the cluster serves it. But the site's Kubernetes
-# resources do not live in this file, on purpose. Terraform's
-# kubernetes provider fetches the API server's entire OpenAPI
-# document on every plan, and this is real memory pressure on a 1 GB
-# node (plans/31 tells that story). For this reason, Terraform stops
-# at Linode's edge, and the website deploys with kubectl instead
-# (website/README.md).
+# could never be rescued by an update. The website is the same shape
+# of thing, a tree of files built ahead of time, and GitHub Pages
+# serves it at liken.sh; the DNS records below are everything the
+# site needs from this file (docs/README.md tells the deploy story).
 #
 # Terraform fits here for the same reason that the Machine and
 # Cluster documents fit the OS: the desired state is declared in
@@ -153,32 +148,51 @@ resource "linode_domain_record" "releases" {
   target      = "releases.liken.sh.website-us-east-1.linodeobjects.com"
 }
 
-# The website's names: the apex points at the node, and www follows
-# along as a CNAME. Traefik on the cluster answers for both
-# (website/), and it proves control of them to Let's Encrypt by
-# answering a challenge dialed back to the name. Because of this,
-# these records must resolve before the site's first deploy can earn
-# its certificate.
+# The website's names. GitHub Pages serves liken.sh, and the DNS
+# specification forbids a CNAME at a zone's apex, so the apex
+# carries GitHub's published anycast addresses for Pages as plain A
+# and AAAA records. These addresses are a documented contract
+# (docs.github.com, "configuring a custom domain"), which is what
+# makes pinning them safe; an address pool that a provider resolves
+# behind a traffic manager would not be. www CNAMEs to the
+# organization's Pages hostname, and GitHub redirects it to the
+# apex. GitHub also issues and renews the site's TLS certificate, so
+# liken.sh needs no certificate machinery in this repository; only
+# the channel's name below does.
 
 resource "linode_domain_record" "apex_a" {
+  for_each = toset([
+    "185.199.108.153",
+    "185.199.109.153",
+    "185.199.110.153",
+    "185.199.111.153",
+  ])
+
   domain_id   = linode_domain.liken_sh.id
   name        = ""
   record_type = "A"
-  target      = tolist(linode_instance.node.ipv4)[0]
+  target      = each.value
 }
 
 resource "linode_domain_record" "apex_aaaa" {
+  for_each = toset([
+    "2606:50c0:8000::153",
+    "2606:50c0:8001::153",
+    "2606:50c0:8002::153",
+    "2606:50c0:8003::153",
+  ])
+
   domain_id   = linode_domain.liken_sh.id
   name        = ""
   record_type = "AAAA"
-  target      = split("/", linode_instance.node.ipv6)[0]
+  target      = each.value
 }
 
 resource "linode_domain_record" "www" {
   domain_id   = linode_domain.liken_sh.id
   name        = "www"
   record_type = "CNAME"
-  target      = "liken.sh"
+  target      = "liken-sh.github.io"
 }
 
 # GitHub's proof that the liken-sh organization owns these names.
@@ -190,7 +204,9 @@ resource "linode_domain_record" "www" {
 # same owner. GitHub verifies each name separately, so the apex and
 # the release channel each carry a record. The codes are not
 # secrets: they prove control of this zone, and control of this zone
-# is exactly what this file declares.
+# is exactly what this file declares. Verification also locks these
+# names for GitHub Pages: no other account can claim a verified
+# domain as its own Pages custom domain.
 
 resource "linode_domain_record" "github_org_verification" {
   domain_id   = linode_domain.liken_sh.id

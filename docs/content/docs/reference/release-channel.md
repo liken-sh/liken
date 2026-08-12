@@ -15,7 +15,7 @@ fleet](/docs/guides/upgrade/) gives the steps that use it.
 
 ## Layout
 
-    channel.yaml               the channel document: names the latest version
+    channel.yaml               the channel document: the latest version
     versions.yaml              the versions document: every release, by digest
     <version>/                 one directory per release
       release.yaml             the release document: every artifact, by digest
@@ -42,15 +42,14 @@ fleet](/docs/guides/upgrade/) gives the steps that use it.
 A version is a calendar date and a serial number: `2026.07.20-001`.
 Every field is zero-padded to a fixed width, so a plain string
 comparison puts versions in the correct order. The serial starts at `001` and
-increases during the day. Serial `000` never names a published
-release.
+increases during the day. No published release uses serial `000`.
 
 The version gives the date only. The `components` section of the
 release document records what is in the release.
 
-A version always names the same bytes. If a release is bad, nobody
-builds it again or publishes it again with the same name. Publish the
-next serial number instead.
+A version always refers to the same bytes. If a release is bad,
+nobody builds it again or publishes it again with the same name.
+Publish the next serial number instead.
 
 ## The release document
 
@@ -65,8 +64,8 @@ liken.sh/v1alpha1`). It has two lists:
 
 ## The channel document
 
-`channel.yaml` is a `Channel` document. Its `latest` field names the
-newest published version. The cluster polls this document to fill the
+`channel.yaml` is a `Channel` document. Its `latest` field records
+the newest published version. The cluster polls this document to fill the
 AVAILABLE column of `kubectl get clusters`, and `liken fetch
 ... latest ...` reads it to resolve `latest`.
 
@@ -120,7 +119,8 @@ lets a release published before notes existed gain them later.
 
 Open [releases.liken.sh](https://releases.liken.sh/) in a browser to
 read the channel. The front page lists every release, newest first,
-and marks the one that `channel.yaml` names. Each release has a page
+and marks the one that `channel.yaml` records as the latest. Each
+release has a page
 at `https://releases.liken.sh/<version>/`. It gives the catalog entry
 to copy, every artifact with its digest and its size, and the
 component versions in the release. The mirror at

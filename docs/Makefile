@@ -7,8 +7,8 @@
 # The build has three inputs: the hand-written content and layouts
 # here, the CRD schemas in machine/ and cluster/ (which crdref turns
 # into the reference pages), and the brand assets. Hugo assembles
-# them into dist/site/, which the Dockerfile bakes into the nginx
-# image that serves liken.sh.
+# them into dist/site/, the tree that CI publishes to GitHub Pages
+# as liken.sh.
 
 # The pin is a file, not a variable, so a Hugo upgrade shows as a
 # one-line, reviewable diff. override keeps the pin authoritative
@@ -25,7 +25,7 @@ GENERATED := content/docs/reference/machine.md content/docs/reference/cluster.md
 
 BRAND := static/icon.svg static/favicon.ico static/brand/liken.svg static/brand/liken.png assets/liken.css
 
-.PHONY: all build generate serve image test clean
+.PHONY: all build generate serve test clean
 
 all: build
 
@@ -96,12 +96,6 @@ build: dist/site/index.html
 # a layout edit would go stale for any page fetched another way.
 serve: $(HUGO) $(GENERATED) $(BRAND)
 	$(HUGO) server --renderToMemory --disableFastRender
-
-# The production preview: the same image the cluster runs, serving on
-# localhost. `docker run --rm -p 8080:80 liken-website:dev` and read
-# http://localhost:8080/.
-image: build
-	docker build -t liken-website:dev .
 
 # The link check in linkcheck resolves every internal link in the
 # manual, and the generated pages are both link sources and link

@@ -2,8 +2,7 @@
 
 This domain is the website: the front page of liken.sh and the
 manual under /docs/. This document explains the content model, the
-parallel output trees, the build, and how the site reaches the
-cluster that serves it.
+parallel output trees, the build, and how the site publishes.
 
 ## The content model
 
@@ -62,21 +61,24 @@ the whole stylesheet. The built tree contains no JavaScript.
     make -C docs build     build the site into dist/site/
     make -C docs serve     the authoring loop, with live reload
     make -C docs test      test the crdref generator
-    make -C docs image     bake dist/site/ into a local nginx image
 
-To get an exact preview of production, build the image and run it:
-
-    make -C docs image
-    docker run --rm -p 8080:80 liken-website:dev
+`dist/site/` is exactly what production serves, so a static file
+server pointed at it is an exact preview.
 
 ## The deploy path
 
 A push to main that changes this domain publishes the site. CI
-builds `dist/site/`, bakes it into the nginx image (`Dockerfile`),
-pushes the image to ghcr.io, and points the website Deployment on
-the liken.sh cluster at the new tag. The Deployment and its
-credentials are in `liken.sh/website/manifests/`, and the workflow
-is `.github/workflows/docs.yaml`.
+builds `dist/site/` and deploys the tree to GitHub Pages, which
+serves it at liken.sh. The workflow is
+`.github/workflows/docs.yaml`.
+
+The name reaches Pages through DNS: the apex records in
+`liken.sh/terraform.tf` point liken.sh at GitHub's published Pages
+addresses, and www CNAMEs to the Pages hostname. GitHub issues and
+renews the site's TLS certificate. The Pages configuration itself
+(the workflow source and the custom domain) lives in the
+repository's settings, set once by hand, the same class of one-time
+act as delegating the zone.
 
 `dist/site/release.txt` carries the commit that the site was built
 from. CI reads it back over https://liken.sh/release.txt to prove

@@ -9,14 +9,13 @@
  * that site and not to this file.
  *
  * Neither site links this file over the network. Each one inlines it
- * into every page. That matters most for the channel: it lives in
- * object storage, apart from any cluster, because machines upgrade
- * themselves from it and it has to answer when the cluster does not.
- * A stylesheet fetched from liken.sh would put the website back in
- * that path, and the pages would arrive unstyled at exactly the
- * moment an operator is reading them to find a release to roll back
- * to. The brand domain owns the file, and each consumer takes a copy
- * at build time.
+ * into every page. That matters most for the channel: machines
+ * upgrade themselves from it, so it must answer on its own, whatever
+ * else is down. A stylesheet fetched from liken.sh would make the
+ * channel's pages depend on the website, and they would arrive
+ * unstyled at exactly the moment an operator is reading them to find
+ * a release to roll back to. The brand domain owns the file, and
+ * each consumer takes a copy at build time.
  *
  * The colors come from the mark (README.md). The greens are the
  * lichen palette, and links take the darkest green on a light page
