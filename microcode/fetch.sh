@@ -61,7 +61,7 @@ version="$(cat "$here/VERSION")"
 tarball="intel-microcode-$version.tar.gz"
 url="https://github.com/intel/Intel-Linux-Processor-Microcode-Data-Files/archive/refs/tags/microcode-$version.tar.gz"
 
-digest="5a07ce745d0bd8b360a4713564d46d5e38be797316a52abedaff0761e1b02370"
+digest="643a1ac6154f065eb467d45a0c8277844d5b60f10b650a23c1c893386b82cd30"
 
 linuxfirmware_version="$(cat "$here/../linux-firmware/VERSION")"
 amd="$here/../linux-firmware/cache/$linuxfirmware_version/amd-ucode"

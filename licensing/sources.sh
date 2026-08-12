@@ -293,10 +293,10 @@ mirror "systemd-boot/$systemdboot_version" "systemd_259.5.orig.tar.gz" \
     "80ed55a8a69c4bd1fb12a36659303372b37baf9ee224ef4f032db4b748be0f76" \
     "$launchpad/systemd/$systemdboot_version/systemd_259.5.orig.tar.gz"
 mirror "systemd-boot/$systemdboot_version" "systemd_$systemdboot_version.debian.tar.xz" \
-    "3ddc123b649a25f40e7580e973b6603685d8c603e8e93606f633e01b24dffd03" \
+    "34048bc4b67dce61835a5a959d903f912d68bb09a93ba654e6ae33410c74aaa9" \
     "$launchpad/systemd/$systemdboot_version/systemd_$systemdboot_version.debian.tar.xz"
 mirror "systemd-boot/$systemdboot_version" "systemd_$systemdboot_version.dsc" \
-    "dd8109a73f4ee052a180ed666083d2f3c207cf20415d2cf283412e6ae837a097" \
+    "c4c764e0b98b7840619f16f42fb8229a344bc2946bd1a74612280d5e218f8177" \
     "$launchpad/systemd/$systemdboot_version/systemd_$systemdboot_version.dsc"
 mirror "grub/$grub_version" "grub2_2.12.orig.tar.xz" \
     "f3c97391f7c4eaa677a78e090c7e97e6dc47b16f655f04683ebd37bef7fe0faa" \

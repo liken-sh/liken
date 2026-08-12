@@ -47,7 +47,7 @@ version="$(cat "$here/VERSION")"
 tarball="linux-firmware-$version.tar.xz"
 url="https://cdn.kernel.org/pub/linux/kernel/firmware/$tarball"
 
-digest="2b9d8a358e76eb766588609135e53fa548b902c551daae33ee32f26f25e60dbb"
+digest="ac17c34fe73756926a961fbafadf8d8f07a3bd2dd2f4ea31a0fb5d50c714a49a"
 
 cache="$here/cache"
 mkdir -p "$cache"
