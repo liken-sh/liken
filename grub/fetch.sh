@@ -83,7 +83,8 @@ fetch() {
     fi
     if ! sha256sum --check --status <<<"$digest  $cache/$deb" >/dev/null 2>&1; then
         echo "downloading $deb"
-        curl -fL --progress-bar -o "$cache/$deb" "$pool/$deb"
+        curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
+            --progress-bar -o "$cache/$deb" "$pool/$deb"
         sha256sum --check --quiet <<<"$digest  $cache/$deb"
     fi
 }

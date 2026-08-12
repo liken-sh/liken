@@ -63,7 +63,8 @@ mkdir -p "$cache"
 
 if ! sha256sum --check --status <<<"$digest  $cache/mke2fs" >/dev/null 2>&1; then
     echo "downloading mke2fs (e2fsprogs $version, via gokrazy/mkfs)"
-    curl -fL --progress-bar -o "$cache/mke2fs" "$url"
+    curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
+        --progress-bar -o "$cache/mke2fs" "$url"
     sha256sum --check --quiet <<<"$digest  $cache/mke2fs"
 fi
 

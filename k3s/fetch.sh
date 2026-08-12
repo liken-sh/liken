@@ -56,7 +56,13 @@ fi
 
 if ! sha256sum --check --status <<<"$digest  $cache/k3s" >/dev/null 2>&1; then
     echo "downloading k3s $version"
-    curl -fL --progress-bar -o "$cache/k3s" "$base/k3s"
+    # The k3s binary is about 80 MB, and a long stream sometimes
+    # breaks partway through. -C - resumes each retry from the bytes
+    # already on disk, so repeated breaks still converge on a
+    # complete file. The checksum below decides whether the
+    # assembled bytes are good.
+    curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
+        --progress-bar -o "$cache/k3s" "$base/k3s"
     sha256sum --check --quiet <<<"$digest  $cache/k3s"
 fi
 

@@ -110,7 +110,8 @@ mv "$cache/tz.gpg.partial" "$cache/tz.gpg"
 for name in "tzcode$version.tar.gz" "tzdata$version.tar.gz"; do
     for file in "$name" "$name.asc"; do
         if [[ ! -f "$cache/$file" ]]; then
-            curl -fsSL "$releases/$file" -o "$cache/$file.partial"
+            curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -C - \
+                "$releases/$file" -o "$cache/$file.partial"
             mv "$cache/$file.partial" "$cache/$file"
         fi
     done

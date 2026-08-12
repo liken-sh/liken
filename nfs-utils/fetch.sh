@@ -76,7 +76,8 @@ mkdir -p "$cache" "$out"
 fetch() {
     local url="$1" sha="$2" file="$cache/$3"
     if [[ ! -f "$file" ]]; then
-        curl -fsSL "$url" -o "$file.partial"
+        curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -C - \
+            "$url" -o "$file.partial"
         mv "$file.partial" "$file"
     fi
     echo "$sha  $file" | sha256sum --check --quiet

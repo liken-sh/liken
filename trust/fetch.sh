@@ -52,7 +52,8 @@ fi
 
 if ! sha256sum --check --status <<<"$digest  $cache/cacert.pem" >/dev/null 2>&1; then
     echo "downloading CA bundle $version"
-    curl -fL --progress-bar -o "$cache/cacert.pem" "$url"
+    curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
+        --progress-bar -o "$cache/cacert.pem" "$url"
     sha256sum --check --quiet <<<"$digest  $cache/cacert.pem"
 fi
 

@@ -56,7 +56,12 @@ fi
 
 if ! sha512sum --check --status <<<"$digest  $cache/$image" >/dev/null 2>&1; then
     echo "downloading Debian cloud image $version"
-    curl -fL --progress-bar -o "$cache/$image" "$url/$image"
+    # The cloud image is large, and a long stream sometimes breaks
+    # partway through. -C - resumes each retry from the bytes already
+    # on disk, so repeated breaks still converge on a complete file.
+    # The checksum below decides whether the assembled bytes are good.
+    curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
+        --progress-bar -o "$cache/$image" "$url/$image"
     sha512sum --check --quiet <<<"$digest  $cache/$image"
 fi
 

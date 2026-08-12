@@ -50,7 +50,8 @@ mkdir -p "$cache"
 
 if ! sha256sum --check --status <<<"$digest  $cache/$tarball" >/dev/null 2>&1; then
     echo "downloading hugo $version"
-    curl -fL --progress-bar -o "$cache/$tarball" "$url"
+    curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
+        --progress-bar -o "$cache/$tarball" "$url"
     sha256sum --check --quiet <<<"$digest  $cache/$tarball"
 fi
 

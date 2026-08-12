@@ -124,7 +124,13 @@ fetch() {
     # it.
     if ! sha256sum --check --status <<<"$digest  $cache/$deb" >/dev/null 2>&1; then
         echo "downloading $deb"
-        curl -fL --progress-bar -o "$cache/$deb" "$base/$deb"
+        # These .debs are large, and a long stream sometimes breaks
+        # partway through. -C - resumes each retry from the bytes
+        # already on disk, so repeated breaks still converge on a
+        # complete file. The checksum below decides whether the
+        # assembled bytes are good.
+        curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
+            --progress-bar -o "$cache/$deb" "$base/$deb"
         sha256sum --check --quiet <<<"$digest  $cache/$deb"
     fi
 

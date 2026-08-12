@@ -75,7 +75,8 @@ mkdir -p "$cache"
 
 if ! sha256sum --check --status <<<"$digest  $cache/$deb" >/dev/null 2>&1; then
     echo "downloading systemd-boot-efi $version"
-    curl -fL --progress-bar -o "$cache/$deb" "$url"
+    curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
+        --progress-bar -o "$cache/$deb" "$url"
     sha256sum --check --quiet <<<"$digest  $cache/$deb"
 fi
 

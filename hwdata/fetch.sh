@@ -50,7 +50,8 @@ mkdir -p "$cache"
 
 if ! sha256sum --check --status <<<"$digest  $cache/pci.ids" >/dev/null 2>&1; then
     echo "downloading pci.ids $version"
-    curl -fL --progress-bar -o "$cache/pci.ids" "$url"
+    curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
+        --progress-bar -o "$cache/pci.ids" "$url"
     sha256sum --check --quiet <<<"$digest  $cache/pci.ids"
 fi
 
