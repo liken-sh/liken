@@ -39,7 +39,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
+	"slices"
 
 	"github.com/liken-sh/liken/api"
 	"sigs.k8s.io/yaml"
@@ -105,13 +107,15 @@ type Machine struct {
 // state can be reconciled live.
 type MachineSpec struct {
 	// Network is applied by init at boot. The cluster cannot reconcile
-	// this field live, because the cluster reaches this machine over
-	// the addresses that an edit changes: re-addressing a running
-	// machine would cut the connection that carries the next
+	// most of this field live, because the cluster reaches this
+	// machine over the addresses that an edit changes: re-addressing a
+	// running machine would cut the connection that carries the next
 	// instruction. So an edit converges the same way a storage edit
 	// does. The operator stages it to the machineState filesystem, and
 	// the next boot applies it. RebootPolicy says who starts that
-	// boot.
+	// boot. HostEntries is the one exception: it names no address of
+	// this machine's own, so an edit to it cannot cut the connection,
+	// and it reconciles live instead (see its own comment below).
 	Network NetworkSpec `json:"network,omitzero"`
 
 	// Sysctls is kernel tuning: it maps a parameter name to its
@@ -264,17 +268,36 @@ type NetworkSpec struct {
 	// that other machines were configured to use when they contact
 	// it.
 	Interfaces []InterfaceSpec `json:"interfaces,omitempty"`
+
+	// HostEntries names addresses that resolve with no DNS lookup.
+	// Init writes each one as a line in /etc/hosts, below the three
+	// fixed lines that define localhost and this machine's own name,
+	// so an entry can add a name but never override those two. Init
+	// also writes /etc/nsswitch.conf on every boot, so that the hosts
+	// file wins over DNS on every resolver the machine runs. This
+	// gives a program that resolves a name from the host's own files,
+	// such as the NFS mount helper, an answer that does not depend on
+	// cluster DNS being up.
+	//
+	// Unlike the rest of network, an edit here applies live: init
+	// writes the file at every boot, so the entries prove the cold
+	// start on their own, and the machine operator then reconciles
+	// the same file on every pass, so a later edit lands within one
+	// reconcile pass, with no reboot.
+	HostEntries []HostEntry `json:"hostEntries,omitempty"`
 }
 
 // Validate checks the spec's internal consistency. It catches the
 // errors that a person can fix in the manifest, before the code
 // touches any link.
 //
-// The API server enforces both of these rules on any spec applied
-// through it, because the list of interfaces is keyed by name. This
-// check exists for the specs that reach a machine another way: init
-// also reads manifests that a person wrote by hand and carried in on
-// a stick, and no API server ever saw those.
+// The API server enforces every one of these rules on any spec
+// applied through it: the interface list is keyed by name, the host
+// entry list is keyed by address, an address matches a pattern, a
+// name list holds at least one item, and a CEL rule refuses the name
+// localhost. This check exists for the specs that reach a machine
+// another way: init also reads manifests that a person wrote by hand
+// and carried in on a stick, and no API server ever saw those.
 //
 // Whether the machine really has a port with a declared name is a
 // question only the machine can answer, so init answers that one
@@ -292,6 +315,35 @@ func (s NetworkSpec) Validate() error {
 			return fmt.Errorf("interfaces %d and %d both declare %s; declare each port once", first, i, ifc.Name)
 		}
 		claimed[ifc.Name] = i
+	}
+
+	claimedAddresses := map[string]int{}
+	for i, entry := range s.HostEntries {
+		// A hosts file line takes one literal address, not a hostname
+		// or a CIDR block. init writes this value straight into
+		// /etc/hosts with no lookup step, so a value that does not
+		// parse as an address would write a line that resolves
+		// nothing.
+		if net.ParseIP(entry.Address) == nil {
+			return fmt.Errorf("host entry %d declares %q as its address, which is not a literal address", i, entry.Address)
+		}
+		// One address is one line of the file, and the facts record
+		// keys entries by address. Two entries that declare the same
+		// address would collide on both, so a manifest declares each
+		// address once, with all of its names.
+		if first, seen := claimedAddresses[entry.Address]; seen {
+			return fmt.Errorf("host entries %d and %d both declare %s; declare each address once", first, i, entry.Address)
+		}
+		claimedAddresses[entry.Address] = i
+		if len(entry.Names) == 0 {
+			return fmt.Errorf("host entry %d (%s) declares no names; an entry with no name resolves nothing", i, entry.Address)
+		}
+		// The fixed lines that init writes first already define
+		// localhost. An entry that names it again could only shadow
+		// or contradict a fixed line, never add to it.
+		if slices.Contains(entry.Names, "localhost") {
+			return fmt.Errorf("host entry %d (%s) names localhost; the fixed lines already define localhost, ahead of any entry", i, entry.Address)
+		}
 	}
 	return nil
 }
@@ -321,6 +373,15 @@ type InterfaceSpec struct {
 	// Nameservers lists nameservers to use in addition to any that
 	// DHCP leases supply.
 	Nameservers []string `json:"nameservers,omitempty"`
+}
+
+// HostEntry is one static line for /etc/hosts: one address and the
+// names that resolve to it. Address is a literal IP address, not a
+// CIDR block or a hostname, because a hosts file line answers with
+// one address, and Names is the list of names that get that answer.
+type HostEntry struct {
+	Address string   `json:"address"`
+	Names   []string `json:"names"`
 }
 
 // Parse reads a Machine manifest from its bytes. Parsing is strict,

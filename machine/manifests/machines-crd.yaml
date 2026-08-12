@@ -295,6 +295,81 @@ spec:
                             items:
                               type: string
                               maxLength: 253
+                    hostEntries:
+                      type: array
+                      maxItems: 64
+                      description: >-
+                        Static entries for /etc/hosts, each one
+                        address and the names that resolve to it.
+                        Init writes each entry as a line below the
+                        three lines that define localhost and this
+                        machine's own name, so an entry can add a
+                        name but never override those two. Init also
+                        writes /etc/nsswitch.conf with hosts: files
+                        dns on every boot, so every resolver on the
+                        machine reads the hosts file before it
+                        queries DNS. This gives a program that
+                        resolves a name from the host's own files,
+                        such as the NFS mount helper, an answer that
+                        does not depend on cluster DNS being up. Init
+                        applies these entries at boot, and the liken
+                        operator applies them again on every pass, so
+                        an edit here takes effect without a reboot.
+                        status.hostEntries reports the entries as the
+                        hosts file holds them, read back after each
+                        pass.
+                      # One line of the file per address: a map keyed
+                      # by address. The API server enforces that key,
+                      # so it refuses a manifest that declares one
+                      # address twice.
+                      x-kubernetes-list-type: map
+                      x-kubernetes-list-map-keys: [address]
+                      x-kubernetes-validations:
+                        - rule: >-
+                            self.all(e, !e.names.exists(n, n == 'localhost'))
+                          message: >-
+                            localhost is already defined by the fixed
+                            lines that init writes first; an entry
+                            cannot redefine it
+                      items:
+                        type: object
+                        required: [address, names]
+                        properties:
+                          address:
+                            type: string
+                            maxLength: 64
+                            pattern: ^[0-9a-fA-F:.]+$
+                            description: >-
+                              The address this entry resolves to: an
+                              IPv4 or IPv6 literal, with no prefix
+                              length. This is the exact text that
+                              init writes into /etc/hosts.
+                          names:
+                            type: array
+                            minItems: 1
+                            # The bound is not taste: the CEL rule
+                            # above iterates this list, and the API
+                            # server prices a rule by the worst case
+                            # its schema allows. An unbounded list
+                            # prices as unbounded work, and the API
+                            # server refuses the whole CRD.
+                            maxItems: 20
+                            description: >-
+                              The names that resolve to this address,
+                              at most twenty, for example [nas,
+                              nas.home.arpa]. Each name is lowercase,
+                              because DNS compares names without case
+                              and one spelling keeps the file
+                              readable.
+                            # Each name should appear once, and the
+                            # list is short, so order carries no
+                            # meaning and the whole list replaces at
+                            # once.
+                            x-kubernetes-list-type: atomic
+                            items:
+                              type: string
+                              maxLength: 253
+                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                 sysctls:
                   type: object
                   description: >-
@@ -2553,6 +2628,37 @@ spec:
                     than the parameters somebody wanted.
                   additionalProperties:
                     type: string
+                hostEntries:
+                  type: array
+                  description: >-
+                    The entries /etc/hosts actually holds, observed on
+                    the pass that published them: the live view of
+                    spec.network.hostEntries, the same way sysctls
+                    above is the live view of spec.sysctls. Init
+                    writes the file at boot, and the liken operator
+                    reconciles it live afterward, so this field
+                    changes within one reconcile pass of an edit, with
+                    no reboot.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [address]
+                  items:
+                    type: object
+                    required: [address, names]
+                    properties:
+                      address:
+                        type: string
+                        maxLength: 64
+                        description: >-
+                          The address, as the hosts file holds it.
+                      names:
+                        type: array
+                        description: >-
+                          The names that resolve to this address, as
+                          the hosts file holds them.
+                        x-kubernetes-list-type: atomic
+                        items:
+                          type: string
+                          maxLength: 253
                 rlimits:
                   type: object
                   description: >-

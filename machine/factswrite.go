@@ -453,7 +453,7 @@ func (t FactsTree) WriteBootStorage(spec StorageSpec) error {
 	return t.report(syncEntryDirs(filepath.Join(t.Dir, "boot", "storage"), want))
 }
 
-// WriteBootNetwork publishes the network the boot actuated, one
+// WriteBootNetwork publishes the network the boot actuated: one
 // directory for each declared interface. A nil spec means this boot
 // recorded nothing about its network, so the whole subtree goes away.
 //
@@ -470,6 +470,13 @@ func (t FactsTree) WriteBootStorage(spec StorageSpec) error {
 // part of what it asks for, since it is the order in which each
 // interface's nameservers reach resolv.conf, and position is also
 // what the comparison uses.
+//
+// Host entries carry no boot record. A boot record answers what one
+// boot actuated, and spec.network.hostEntries reconciles live: the
+// machine operator may rewrite /etc/hosts on any later pass, so a
+// file it may have already changed is not one boot's fact.
+// status.hostEntries is the current view, the same as status.sysctls
+// is for sysctls, which also keeps no boot record.
 func (t FactsTree) WriteBootNetwork(spec *NetworkSpec) error {
 	base := filepath.Join("boot", "network")
 	if spec == nil {

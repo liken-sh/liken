@@ -172,6 +172,20 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	status.Sysctls = sysctls
 	status.Conditions = api.SetCondition(status.Conditions, sysctlsCondition(defaultsErr, specErr), now)
 
+	// Host entries reconcile live too, under the same write-on-
+	// divergence rule (hosts.go). The hostname is the Machine's own
+	// name rather than a read of the host's hostname, because init
+	// derives the kernel's hostname from this same field
+	// (unix.Sethostname(m.Metadata.Name) in init/main.go) and a
+	// Kubernetes object's name never changes once it exists, so the
+	// two can never disagree the way they could if this program
+	// depended on the pod's network namespace carrying the host's UTS
+	// namespace along with it.
+	hostEntries, hostsErr := applyHostEntries(hostsPath, m.Metadata.Name, m.Spec.Network.HostEntries)
+	status.HostEntries = hostEntries
+	status.Conditions = api.SetCondition(status.Conditions,
+		hostEntriesCondition(m.Spec.Network.HostEntries, hostsErr), now)
+
 	// Modules judge what the boot reported, not what the spec asks
 	// for now. A freshly declared module has no outcome yet; it
 	// stays SpecConverged's concern until a reboot loads it. This

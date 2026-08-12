@@ -222,6 +222,17 @@ func TestNetworkDriftSeesAReorderedList(t *testing.T) {
 	}
 }
 
+// Host entries reconcile live, through the machine operator, on
+// every pass. An edit here must never report drift and never stage a
+// manifest, because the pass that read the edit already applied it.
+func TestNetworkDriftIgnoresHostEntries(t *testing.T) {
+	desired := NetworkSpec{HostEntries: []HostEntry{{Address: "10.10.0.20", Names: []string{"nas"}}}}
+	actuated := NetworkSpec{HostEntries: []HostEntry{{Address: "10.10.0.21", Names: []string{"printer"}}}}
+	if diffs := NetworkDrift(desired, &actuated); len(diffs) != 0 {
+		t.Errorf("host entries must never drift: %v", diffs)
+	}
+}
+
 func TestModulesDriftIgnoresOrderAndRepetition(t *testing.T) {
 	diffs := ModulesDrift([]string{"nvidia", "zram", "nvidia"}, []string{"zram", "nvidia"})
 	if len(diffs) != 0 {

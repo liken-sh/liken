@@ -414,6 +414,8 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	if firstSync != nil {
 		writeRTC()
 	}
+	hostname, _ := os.Hostname()
+	configureNameResolution(hostname, m.Spec.Network.HostEntries)
 	prepareForK3s()
 	// Pod logs land on podEphemeral, and still appear at the path
 	// Kubernetes uses, /var/log/pods. This call comes after

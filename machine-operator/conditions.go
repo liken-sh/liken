@@ -65,14 +65,35 @@ func sysctlsCondition(defaultsErr, specErr error) api.Condition {
 	return api.Condition{Type: "SysctlsApplied", Status: api.ConditionTrue, Reason: "Applied"}
 }
 
+// hostEntriesCondition reports the outcome of applyHostEntries, on
+// the same terms as storageCondition and modulesCondition above:
+// True and Applied on an ordinary pass, True and NothingDeclared when
+// the spec declares no host entry at all, and False when a read, a
+// render, or a write failed.
+func hostEntriesCondition(desired []machine.HostEntry, err error) api.Condition {
+	if err != nil {
+		return api.Condition{
+			Type: "HostEntriesApplied", Status: api.ConditionFalse,
+			Reason: "ApplyFailed", Message: err.Error(),
+		}
+	}
+	if len(desired) == 0 {
+		return api.Condition{
+			Type: "HostEntriesApplied", Status: api.ConditionTrue,
+			Reason: "NothingDeclared", Message: "no host entries declared",
+		}
+	}
+	return api.Condition{Type: "HostEntriesApplied", Status: api.ConditionTrue, Reason: "Applied"}
+}
+
 // applySysctls writes both sets of kernel parameters to the host's
 // /proc/sys (dir): the settings every liken machine holds, and then
 // the Machine spec's own. The pod runs privileged in the host's
 // namespaces, so it reaches /proc/sys directly.
 //
 // The order is the same order init uses at boot, and it is what makes
-// spec.sysctls an override: a name in both sets is written twice, and
-// the second write is the one that holds.
+// spec.sysctls an override: a name in both sets is applied twice, in
+// this order, so the spec's value is the one this pass reports.
 //
 // The returned map merges the two observations with the spec's on top,
 // for the same reason. A name in both sets was read back once before
@@ -91,15 +112,31 @@ func applySysctls(dir string, defaults, desired map[string]string) (map[string]s
 	return observed, defaultsErr, specErr
 }
 
-// applySysctlSet writes one set of parameters and reads each one back.
+// applySysctlSet reconciles one set of parameters against the kernel,
+// under the same write-on-divergence rule as applyHostEntries
+// (hosts.go): read a parameter first, and write it only when the
+// kernel's reported value differs from the desired one. A converged
+// parameter costs one read and no write, which is the common case on
+// every pass after the first. The comparison is a plain string
+// compare, which is enough because every parameter this package
+// writes is a single token; a value that the kernel echoes back
+// differently from how it was written, through whitespace
+// normalization, is still written once, read back, and reported from
+// that reading, not rewritten forever.
+//
 // The returned map holds what the kernel now reports, not what the
 // function wrote. If another process resets a value, the next pass
-// writes it again and reports what the pass actually observed.
+// finds the divergence and writes it again.
 func applySysctlSet(dir string, desired map[string]string) (map[string]string, error) {
 	var errs []error
 	observed := map[string]string{}
 	for _, name := range slices.Sorted(maps.Keys(desired)) {
-		if err := machine.ApplySysctl(dir, name, desired[name]); err != nil {
+		value := desired[name]
+		if current, err := machine.ReadSysctl(dir, name); err == nil && current == value {
+			observed[name] = current
+			continue
+		}
+		if err := machine.ApplySysctl(dir, name, value); err != nil {
 			errs = append(errs, err)
 			continue
 		}

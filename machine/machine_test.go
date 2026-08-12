@@ -3,6 +3,7 @@ package machine
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -227,5 +228,84 @@ func TestNetworkValidateAcceptsNoInterfacesAtAll(t *testing.T) {
 	// mistake.
 	if err := (NetworkSpec{}).Validate(); err != nil {
 		t.Error(err)
+	}
+}
+
+func TestLoadParsesHostEntries(t *testing.T) {
+	path := writeManifest(t, `
+apiVersion: liken.sh/v1alpha1
+kind: Machine
+metadata:
+  name: liken-dev
+spec:
+  network:
+    hostEntries:
+      - address: 10.10.0.20
+        names: [nas, nas.home.arpa]
+`)
+	m, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := m.Spec.Network.HostEntries
+	if len(entries) != 1 {
+		t.Fatalf("hostEntries: got %v", entries)
+	}
+	want := HostEntry{Address: "10.10.0.20", Names: []string{"nas", "nas.home.arpa"}}
+	if !reflect.DeepEqual(entries[0], want) {
+		t.Errorf("hostEntries[0]: got %+v, want %+v", entries[0], want)
+	}
+}
+
+func TestNetworkValidateAcceptsAHostEntry(t *testing.T) {
+	spec := NetworkSpec{HostEntries: []HostEntry{
+		{Address: "10.10.0.20", Names: []string{"nas", "nas.home.arpa"}},
+	}}
+	if err := spec.Validate(); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestNetworkValidateRejectsAHostEntryThatIsNotALiteralAddress(t *testing.T) {
+	// A hostname or a CIDR block has no place in a hosts file line:
+	// init writes the value straight into the file, with no lookup
+	// step to resolve it first.
+	spec := NetworkSpec{HostEntries: []HostEntry{
+		{Address: "nas.example.com", Names: []string{"nas"}},
+	}}
+	if err := spec.Validate(); err == nil {
+		t.Error("expected an error for an address that is not a literal address")
+	}
+}
+
+func TestNetworkValidateRejectsTwoHostEntriesForOneAddress(t *testing.T) {
+	spec := NetworkSpec{HostEntries: []HostEntry{
+		{Address: "10.10.0.20", Names: []string{"nas"}},
+		{Address: "10.10.0.20", Names: []string{"nas2"}},
+	}}
+	err := spec.Validate()
+	if err == nil {
+		t.Fatal("expected an error for two entries declaring 10.10.0.20")
+	}
+	if !strings.Contains(err.Error(), "10.10.0.20") {
+		t.Errorf("the error must name the address declared twice: %v", err)
+	}
+}
+
+func TestNetworkValidateRejectsAHostEntryWithNoNames(t *testing.T) {
+	spec := NetworkSpec{HostEntries: []HostEntry{{Address: "10.10.0.20"}}}
+	if err := spec.Validate(); err == nil {
+		t.Error("expected an error for a host entry with no names")
+	}
+}
+
+func TestNetworkValidateRejectsAHostEntryNamedLocalhost(t *testing.T) {
+	// The fixed lines that init writes first already define
+	// localhost. An entry cannot redefine it.
+	spec := NetworkSpec{HostEntries: []HostEntry{
+		{Address: "10.10.0.20", Names: []string{"localhost"}},
+	}}
+	if err := spec.Validate(); err == nil {
+		t.Error("expected an error for an entry that names localhost")
 	}
 }

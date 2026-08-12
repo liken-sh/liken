@@ -33,6 +33,32 @@ func TestFactsConditionCarriesTheReadError(t *testing.T) {
 	}
 }
 
+func TestHostEntriesConditionApplied(t *testing.T) {
+	entries := []machine.HostEntry{{Address: "10.10.0.20", Names: []string{"nas"}}}
+	c := hostEntriesCondition(entries, nil)
+	if c.Type != "HostEntriesApplied" || c.Status != api.ConditionTrue || c.Reason != "Applied" {
+		t.Errorf("got %+v", c)
+	}
+}
+
+func TestHostEntriesConditionNothingDeclared(t *testing.T) {
+	c := hostEntriesCondition(nil, nil)
+	if c.Status != api.ConditionTrue || c.Reason != "NothingDeclared" {
+		t.Errorf("got %+v", c)
+	}
+}
+
+func TestHostEntriesConditionCarriesTheApplyError(t *testing.T) {
+	entries := []machine.HostEntry{{Address: "10.10.0.20", Names: []string{"nas"}}}
+	c := hostEntriesCondition(entries, errors.New("writing /host/etc/hosts: permission denied"))
+	if c.Status != api.ConditionFalse || c.Reason != "ApplyFailed" {
+		t.Errorf("got %+v", c)
+	}
+	if !strings.Contains(c.Message, "permission denied") {
+		t.Errorf("the message should carry the error: %q", c.Message)
+	}
+}
+
 func TestSysctlsConditionApplied(t *testing.T) {
 	c := sysctlsCondition(nil, nil)
 	if c.Type != "SysctlsApplied" || c.Status != api.ConditionTrue || c.Reason != "Applied" {
@@ -97,6 +123,10 @@ func sysctlDir(t *testing.T, names ...string) string {
 	return dir
 }
 
+// TestApplySysctlSetAppliesAndReadsBack covers the divergent case:
+// sysctlDir seeds every file with "0\n", which differs from what this
+// test asks for, so applySysctlSet must write both parameters and
+// read the values back.
 func TestApplySysctlSetAppliesAndReadsBack(t *testing.T) {
 	dir := sysctlDir(t, "vm.swappiness", "vm.overcommit_memory")
 	observed, err := applySysctlSet(dir, map[string]string{
@@ -108,6 +138,38 @@ func TestApplySysctlSetAppliesAndReadsBack(t *testing.T) {
 	}
 	if observed["vm.swappiness"] != "10" || observed["vm.overcommit_memory"] != "1" {
 		t.Errorf("the kernel's values come back: %+v", observed)
+	}
+}
+
+// A converged parameter costs no write. This is the same
+// write-on-divergence rule applyHostEntries follows: a pass that
+// finds the kernel already holding the desired value must leave the
+// file alone, which an unchanged mtime is what proves.
+func TestApplySysctlSetSkipsAConvergedParameter(t *testing.T) {
+	dir := sysctlDir(t, "vm.swappiness")
+	path := filepath.Join(dir, "vm", "swappiness")
+	if err := os.WriteFile(path, []byte("10\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	observed, err := applySysctlSet(dir, map[string]string{"vm.swappiness": "10"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed["vm.swappiness"] != "10" {
+		t.Errorf("a converged parameter still reports its value: %+v", observed)
+	}
+
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Errorf("a converged parameter must not be written: mtime moved from %v to %v", before.ModTime(), after.ModTime())
 	}
 }
 

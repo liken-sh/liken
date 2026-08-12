@@ -338,6 +338,18 @@ spec:
             # for the same reason machine-state is writable.
             - name: system-slots
               mountPath: /var/lib/liken/system
+            # The host's /etc, so this operator can reconcile
+            # /etc/hosts on every pass (hosts.go), the same way init
+            # writes it at boot from the shared renderer. The mount is
+            # the directory, not the file, because the write is
+            # atomic: a temporary file lands beside /etc/hosts and a
+            # rename replaces it. A bind mount of the file alone would
+            # follow the file's inode into the container, and the
+            # rename would then discard the very inode the mount
+            # pinned, leaving the container looking at a file the host
+            # had already replaced.
+            - name: host-etc
+              mountPath: /host/etc
             # The container store's filesystem, held only as a
             # syncfs handle. Promoting an imports trial flushes every
             # byte the imports wrote, before the record says
@@ -388,6 +400,9 @@ spec:
           hostPath:
             path: /var/lib/liken/system
             type: DirectoryOrCreate
+        - name: host-etc
+          hostPath:
+            path: /etc
         - name: container-store
           hostPath:
             path: /var/lib/rancher/k3s/agent

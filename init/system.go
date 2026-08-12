@@ -77,7 +77,6 @@ var k3sMounts = []mount{
 }
 
 func prepareForK3s() {
-	hostname, _ := os.Hostname()
 	for _, m := range k3sMounts {
 		if err := os.MkdirAll(m.target, 0o755); err != nil {
 			fmt.Fprintf(os.Stderr, "liken: mkdir %s: %v\n", m.target, err)
@@ -112,15 +111,6 @@ func prepareForK3s() {
 		}
 	}
 
-	// /etc/hosts: this machine has no nsswitch and no local DNS, so
-	// this file is the only way that "localhost", and the machine's
-	// own hostname, resolve. Kubernetes components connect to
-	// localhost often.
-	hosts := fmt.Sprintf("127.0.0.1 localhost\n::1 localhost\n127.0.1.1 %s\n", hostname)
-	if err := os.WriteFile("/etc/hosts", []byte(hosts), 0o644); err != nil {
-		fmt.Fprintf(os.Stderr, "liken: /etc/hosts: %v\n", err)
-	}
-
 	// k3s reads $HOME and $PATH like any Unix program. PID 1 gets
 	// neither variable from the kernel, so this code sets them. The
 	// four conventional directories are enough, because k3s adds its
@@ -143,4 +133,35 @@ func prepareForK3s() {
 	// must be set exactly.
 	_ = os.MkdirAll("/tmp", 0o1777)
 	_ = os.Chmod("/tmp", 0o1777)
+}
+
+// configureNameResolution writes /etc/hosts and /etc/nsswitch.conf, the
+// two files that decide how a name on this machine resolves to an
+// address.
+func configureNameResolution(hostname string, entries []machine.HostEntry) {
+	// /etc/hosts is the only place "localhost" and this machine's own
+	// hostname resolve, and it is also where spec.network.hostEntries
+	// lands: one line below the three fixed lines, for each entry the
+	// manifest declares. The fixed lines come first, so a resolver's
+	// first match always wins and no entry can override localhost or
+	// this machine's own name.
+	if err := os.WriteFile("/etc/hosts", []byte(machine.HostsFile(hostname, entries)), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "liken: /etc/hosts: %v\n", err)
+	}
+	for _, entry := range entries {
+		fmt.Printf("liken: /etc/hosts: %s %s\n", entry.Address, strings.Join(entry.Names, " "))
+	}
+
+	// nsswitch.conf tells a glibc resolver the order to try its
+	// lookup sources in. musl ignores this file, and Go's own
+	// resolver already defaults to this order, so on this machine's
+	// binaries today the file changes nothing. It exists in advance
+	// of that: a glibc binary that lands on the node later, in a
+	// vendored component or an add-on image, would otherwise query
+	// DNS before it read /etc/hosts, and a static entry would lose to
+	// DNS silently. Writing "files dns" makes the hosts file always
+	// win, on any resolver that reads this file.
+	if err := os.WriteFile("/etc/nsswitch.conf", []byte("hosts: files dns\n"), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "liken: /etc/nsswitch.conf: %v\n", err)
+	}
 }

@@ -93,6 +93,17 @@ type MachineStatus struct {
 	// somebody wanted.
 	Sysctls map[string]string `json:"sysctls,omitempty"`
 
+	// HostEntries echoes the entries /etc/hosts actually holds,
+	// observed on the pass that published them: the live view of
+	// spec.network.hostEntries, the way Sysctls above is the live
+	// view of spec.sysctls. Init writes the file at boot, and the
+	// machine operator reconciles it live afterward, so this field
+	// changes within one reconcile pass of a spec edit, with no
+	// reboot. There is no boot record for it, for the same reason
+	// there is none for Sysctls: a file the operator may rewrite on
+	// any pass is not one boot's fact.
+	HostEntries []HostEntry `json:"hostEntries,omitempty"`
+
 	// Rlimits echoes the resource limits init holds, read back from
 	// the kernel: the limits every liken machine holds
 	// (machine.OSRlimits) and the ones spec.rlimits declares. Init is

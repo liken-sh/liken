@@ -59,11 +59,11 @@ func StorageDrift(desired, actuated StorageSpec) []string {
 // stage a manifest and ask for a reboot on every machine whose facts
 // happen to lack this record.
 //
-// The comparison walks both lists by position, because the order of
-// this list carries meaning: interface order is the order that each
-// interface's nameservers reach resolv.conf in. Two specs that name
-// the same ports in a different order are two different requests. The
-// name at each position says which port that position asks for.
+// HostEntries takes no part in this comparison. Unlike an interface,
+// a host entry reconciles live (milestone 53): the machine operator
+// applies spec.network.hostEntries on every pass, so an edit never
+// waits for a reboot and never belongs in the set of differences
+// that asks for one.
 func NetworkDrift(desired NetworkSpec, actuated *NetworkSpec) []string {
 	if actuated == nil {
 		return nil
