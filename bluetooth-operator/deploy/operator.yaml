@@ -1,0 +1,163 @@
+# The operator itself: one pod for one adapter, the storage its bonds
+# live on, and the claim that places it.
+---
+# The adapter claim. A template rather than a plain claim, so each
+# replica allocates a distinct adapter: raise replicas below to the
+# number of adapters in the cluster, and the scheduler spreads the
+# pods to wherever the radios are. A replica past that number parks
+# Pending and costs nothing. Nobody writes down which machine has the
+# radio.
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: bluetooth-adapter
+spec:
+  spec:
+    devices:
+      requests:
+        - name: adapter
+          exactly:
+            deviceClassName: bluetooth-adapter
+---
+# A StatefulSet, not a Deployment, for the bonds. Each replica holds
+# one adapter and needs its own link keys, and volumeClaimTemplates is
+# what gives each replica a volume of its own. One shared
+# ReadWriteOnce claim would pin every replica to one node, which is
+# the opposite of what the adapter claims are for.
+#
+# It also gets the update behavior the adapter needs for free. An
+# adapter allocates to one claim, so a second pod holding the same
+# ordinal would park Pending until the first released the radio, and
+# the update would never finish. A StatefulSet update deletes a pod
+# before it creates the replacement, so the radio is always free for
+# the pod that claims it next.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: bluetooth-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bluetooth-operator
+  # The replicas are independent: each one claims a different adapter
+  # on a different machine, and none of them waits on another's
+  # storage. Parallel starts them all at once instead of in ordinal
+  # order.
+  podManagementPolicy: Parallel
+  template:
+    metadata:
+      labels:
+        app: bluetooth-operator
+    spec:
+      serviceAccountName: bluetooth-operator
+      # AF_BLUETOOTH sockets exist only in the host's network
+      # namespace. A socket call in a pod's own namespace fails with
+      # EAFNOSUPPORT, and no device node or mount changes that,
+      # because the Bluetooth stack's whole control surface is a
+      # socket family.
+      hostNetwork: true
+      # The kernel delivers uevents to the initial user namespace
+      # only. A pod in its own user namespace receives an empty
+      # stream, with no error to read, and no controller would ever
+      # appear. This is the default, and it is stated because the
+      # failure is silent.
+      hostUsers: true
+      containers:
+        - name: operator
+          image: ghcr.io/liken-sh/bluetooth-operator:latest
+          env:
+            # A ResourceSlice names the node whose hardware it
+            # describes, and the downward API is where a pod reads
+            # that.
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          securityContext:
+            # NET_ADMIN is what the kernel checks: the Bluetooth
+            # management channel's privileged commands test for
+            # CAP_NET_ADMIN. NET_RAW looked like a companion
+            # requirement and proved unnecessary, because bluetoothd
+            # uses the management channel and seqpacket L2CAP sockets,
+            # not raw HCI, so it stays off. Everything else drops.
+            capabilities:
+              drop: ["ALL"]
+              add: ["NET_ADMIN"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+            # The adapter, claimed from liken. This is the placement:
+            # the scheduler puts the pod where the hardware is.
+            claims:
+              - name: adapter
+          volumeMounts:
+            # The two mounts every DRA driver takes. The registry
+            # directory is where the kubelet discovers plugins, and
+            # the plugin's own directory holds the socket that serves
+            # the prepare calls. Both are writable, because serving a
+            # socket is the actuation.
+            - name: kubelet-plugin
+              mountPath: /var/lib/kubelet/plugins/bluetooth.liken.sh
+            - name: kubelet-plugins-registry
+              mountPath: /var/lib/kubelet/plugins_registry
+            # Where prepared claims become device-node grants for the
+            # container runtime to resolve. liken writes its own specs
+            # in this same directory, and the two drivers' file name
+            # prefixes keep them apart.
+            - name: cdi
+              mountPath: /var/run/cdi
+            - name: bonds
+              mountPath: /var/lib/bluetooth
+      resourceClaims:
+        - name: adapter
+          resourceClaimTemplateName: bluetooth-adapter
+      volumes:
+        # DirectoryOrCreate on all three, because a node that has
+        # never run a DRA driver has none of these paths.
+        - name: kubelet-plugin
+          hostPath:
+            path: /var/lib/kubelet/plugins/bluetooth.liken.sh
+            type: DirectoryOrCreate
+        - name: kubelet-plugins-registry
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry
+            type: DirectoryOrCreate
+        - name: cdi
+          hostPath:
+            path: /var/run/cdi
+            type: DirectoryOrCreate
+  # The link keys and the device cache. This is kilobytes, and it is
+  # the difference between "press the PS button" and "hold Create and
+  # PS and pair again" after every pod restart. A bond that died with
+  # the pod would turn every restart into a re-pairing with a person's
+  # hands on the controller.
+  #
+  # No storageClassName, so the cluster's default class provides it.
+  # ReadWriteOnce is no limit: each volume serves the one replica that
+  # holds the adapter on that machine.
+  #
+  # A StatefulSet keeps these volumes when its pods go, and most
+  # default storage classes bind a volume to the node that first used
+  # it. So if the adapter later moves to a different machine, the
+  # replica that holds it cannot start there and parks Unschedulable
+  # until a person deletes the volume:
+  #
+  #     kubectl delete pvc bonds-bluetooth-operator-0 -n liken-system
+  #
+  # That costs one re-pairing of each controller on that adapter, and
+  # nothing else.
+  volumeClaimTemplates:
+    - metadata:
+        name: bonds
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 64Mi

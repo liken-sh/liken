@@ -1,0 +1,56 @@
+# The operator's identity in the cluster, and deliberately nothing
+# more. The pod is powerful on the machine it runs on, because a
+# Bluetooth stack has to be, and correspondingly narrow here: it
+# writes one ResourceSlice, reads the claims the kubelet asks it to
+# prepare, and reads its own Node.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bluetooth-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bluetooth-operator
+rules:
+  # The device inventory (slices.go): this node's ResourceSlice under
+  # bluetooth.liken.sh. The verbs cover the collection, because RBAC
+  # cannot say "only the slice named for your node": resourceNames
+  # cannot be templated per pod. The program only ever writes its own,
+  # whose name it builds from NODE_NAME. No list and no watch: the
+  # name is deterministic, and reading anyone else's inventory is the
+  # scheduler's job.
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceslices]
+    verbs: [get, create, update, delete]
+  # The DRA plugin (dra.go): when the kubelet asks this driver to
+  # prepare a claim, the request names the claim and nothing more. The
+  # allocation lives on the claim's status, so the driver reads it
+  # back. This is read-only across every namespace, because claims
+  # belong to workloads and the driver serves whichever namespace
+  # claims a controller. Still no list and no watch: prepare calls
+  # arrive with exact names.
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceclaims]
+    verbs: [get]
+  # This node, read once at startup for the UID that the slice's owner
+  # reference needs. The Node owns the slice, so a Node that leaves
+  # the cluster takes the slice with it, and the garbage collector
+  # cleans up after an operator that exits without running any code.
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: bluetooth-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: bluetooth-operator
+subjects:
+  - kind: ServiceAccount
+    name: bluetooth-operator
+    namespace: liken-system

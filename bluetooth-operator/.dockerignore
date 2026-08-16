@@ -1,0 +1,7 @@
+# The build needs the module files, the Go sources, the BlueZ config,
+# and the entrypoint. Everything else is documentation or manifests.
+.git
+.github
+deploy
+README.md
+LICENSE

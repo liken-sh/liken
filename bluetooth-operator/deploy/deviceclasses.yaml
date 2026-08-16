@@ -1,0 +1,45 @@
+# The two ends of this operator: the raw device it claims from liken,
+# and the refined device it publishes for everybody else.
+---
+# The adapter, as liken publishes it. The operator's own pod claims
+# one of these, and that claim does two jobs. It places the pod,
+# because only a machine with an adapter publishes one, so no node
+# selector has to name the machine with the radio. And it arbitrates,
+# because liken publishes an adapter as a device that allocates once,
+# so the claim holder is the only Bluetooth stack on that radio. The
+# kernel arbitrates nothing between two stacks on one adapter: both
+# scan, both pair, and each reads a state the other wrote.
+#
+# btusb is the driver for every adapter that follows the standard USB
+# Bluetooth interface, which covers the dongles and the radios built
+# into a board. Selecting on the driver, rather than on a vendor and a
+# product ID, keeps this class correct across a fleet of different
+# machines.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: bluetooth-adapter
+spec:
+  selectors:
+    - cel:
+        expression: |
+          device.driver == "liken.sh" &&
+          device.attributes["liken.sh"].driver == "btusb"
+---
+# A paired controller, as this operator publishes it. A claim against
+# this class alone allocates any paired controller. To name one, add a
+# selector on its address:
+#
+#     device.attributes["bluetooth.liken.sh"].address == "A0:AB:51:33:B7:12"
+#
+# The README has the whole claim. The address is the identity that
+# survives a reboot, and the device's own name is that address in
+# lowercase with dashes, because a device name must be a DNS label.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: bluetooth-controller
+spec:
+  selectors:
+    - cel:
+        expression: device.driver == "bluetooth.liken.sh"
