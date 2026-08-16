@@ -2,7 +2,8 @@ package hardware
 
 // This file tests what claiming a device would hand over: the /dev
 // nodes beneath it in sysfs. The walk stops at nested bus devices,
-// which get their own inventory decision.
+// which get their own inventory decision, and at bluetooth devices,
+// whose nodes belong to the peripherals connected over the air.
 
 import (
 	"os"
@@ -11,15 +12,27 @@ import (
 	"testing"
 )
 
-// child adds a nested, non-bus child directory under an existing
-// device. It can optionally carry a device node: a dev file, the
-// uevent DEVNAME that the kernel publishes, and a subsystem symlink
-// that names the node's class.
+// child adds a nested child directory under an existing device. The
+// subsystem names the kernel class the directory belongs to, and an
+// empty subsystem builds a plain container directory, the shape sysfs
+// gives the grouping directories between real devices. The devname
+// adds a device node: a dev file and the uevent DEVNAME that the
+// kernel publishes. A directory with a subsystem and no devname is a
+// device the kernel registers no node for, such as an hci object.
 func (f *fakeSysfs) child(bus, device, rel, subsystem, devname string) {
 	f.t.Helper()
 	dir := filepath.Join(f.root, "bus", bus, "devices", device, rel)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		f.t.Fatal(err)
+	}
+	if subsystem != "" {
+		target := filepath.Join(f.root, "class", subsystem)
+		if err := os.MkdirAll(target, 0o755); err != nil {
+			f.t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(dir, "subsystem")); err != nil {
+			f.t.Fatal(err)
+		}
 	}
 	if devname == "" {
 		return
@@ -28,13 +41,6 @@ func (f *fakeSysfs) child(bus, device, rel, subsystem, devname string) {
 		f.t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "uevent"), []byte("DEVNAME="+devname+"\n"), 0o644); err != nil {
-		f.t.Fatal(err)
-	}
-	target := filepath.Join(f.root, "class", subsystem)
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		f.t.Fatal(err)
-	}
-	if err := os.Symlink(target, filepath.Join(dir, "subsystem")); err != nil {
 		f.t.Fatal(err)
 	}
 }
@@ -201,6 +207,67 @@ func TestDeliveryPrunesAtNestedBusDevices(t *testing.T) {
 
 	if len(delivery.DevNodes()) != 0 {
 		t.Errorf("DevNodes = %v, want none: the stick's nodes are the stick's, not the controller's", delivery.DevNodes())
+	}
+}
+
+func TestDeliveryPrunesAtABluetoothSubtree(t *testing.T) {
+	// A game controller that connects over Bluetooth gets its HID
+	// device under the adapter's own USB interface, and that HID device
+	// carries the input and hidraw nodes the controller is driven by.
+	// The nodes belong to the controller, so a claim on the adapter
+	// must not receive them, and a second controller must not add nodes
+	// to the same claim.
+	//
+	// The nesting also depends on how BlueZ drives the kernel. With
+	// /dev/uhid present, BlueZ 5.73 and later put the same HID device
+	// under /sys/devices/virtual/misc/uhid, where nothing connects it
+	// to the adapter at all. A claim that delivered these nodes would
+	// deliver them only under one of the two arrangements.
+	sysfs := newFakeSysfs(t)
+	sysfs.device("usb", "1-8", "usb", map[string]string{
+		"modalias": "usb:v8087p0033d0001dcE0dsc01dp01ic00isc00ip00in00",
+		"busnum":   "1",
+		"devnum":   "8",
+	})
+	sysfs.device("usb", "1-8:1.0", "btusb", map[string]string{
+		"modalias": "usb:v8087p0033d0001dcE0dsc01dp01icE0isc01ip01in00",
+	})
+	sysfs.child("usb", "1-8:1.0", "bluetooth/hci0", "bluetooth", "")
+	controller := "bluetooth/hci0/hci0:11/0005:054C:0CE6.0004"
+	sysfs.child("usb", "1-8:1.0", controller+"/input/input25/event20", "input", "input/event20")
+	sysfs.child("usb", "1-8:1.0", controller+"/hidraw/hidraw3", "hidraw", "hidraw3")
+
+	delivery := InspectDelivery(sysfs.root, Device{Bus: "usb", Address: "1-8:1.0"})
+
+	if len(delivery.DevNodes()) != 0 {
+		t.Errorf("DevNodes = %v, want none: the controller's nodes are the controller's, not the adapter's", delivery.DevNodes())
+	}
+	if delivery.BusNode != "/dev/bus/usb/001/008" {
+		t.Errorf("BusNode = %q, want the adapter's usbfs node", delivery.BusNode)
+	}
+}
+
+func TestDeliveryKeepsNodesUnderAUSBHIDDevice(t *testing.T) {
+	// The boundary is the bluetooth subsystem, and not the HID device
+	// below it. usbhid registers the UPS's hidraw node inside a HID
+	// device of its own, and that node is the whole point of the
+	// claim.
+	sysfs := newFakeSysfs(t)
+	sysfs.device("usb", "3-3", "usb", map[string]string{
+		"modalias": "usb:v0764p0601d0100dc00dsc00dp00ic00isc00ip00in00",
+		"busnum":   "3",
+		"devnum":   "4",
+	})
+	sysfs.device("usb", "3-3:1.0", "usbhid", map[string]string{
+		"modalias": "usb:v0764p0601d0100dc00dsc00dp00ic03isc00ip00in00",
+	})
+	sysfs.child("usb", "3-3:1.0", "0003:0764:0601.0001", "hid", "")
+	sysfs.child("usb", "3-3:1.0", "0003:0764:0601.0001/hidraw/hidraw0", "hidraw", "hidraw0")
+
+	delivery := InspectDelivery(sysfs.root, Device{Bus: "usb", Address: "3-3:1.0"})
+
+	if !slices.Equal(delivery.DevNodes(), []string{"/dev/hidraw0"}) {
+		t.Errorf("DevNodes = %v, want the UPS's hidraw node", delivery.DevNodes())
 	}
 }
 

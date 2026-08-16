@@ -14,7 +14,7 @@ func TestPublishSplitsAGraphicsDeviceFromItsMonitorBuses(t *testing.T) {
 	// i915 registers an i2c bus for each display output, under the
 	// GPU's own sysfs directory. The GPU's render node shares; the raw
 	// i2c wires do not. Each set publishes as its own device.
-	published := publishDevices(hardware.Delivery{Nodes: []hardware.DeliveredNode{
+	published := publishDevices(hardware.Device{}, hardware.Delivery{Nodes: []hardware.DeliveredNode{
 		{Path: "/dev/dri/card0", Subsystem: "drm"},
 		{Path: "/dev/dri/renderD128", Subsystem: "drm"},
 		{Path: "/dev/fb0", Subsystem: "graphics"},
@@ -49,7 +49,7 @@ func TestPublishSplitsTheCardNodeFromTheRenderNode(t *testing.T) {
 	// limit. The card node publishes as an exclusive companion, so a
 	// second display workload waits in the scheduler instead of
 	// starting and failing.
-	published := publishDevices(hardware.Delivery{Nodes: []hardware.DeliveredNode{
+	published := publishDevices(hardware.Device{}, hardware.Delivery{Nodes: []hardware.DeliveredNode{
 		{Path: "/dev/dri/card0", Subsystem: "drm"},
 		{Path: "/dev/dri/renderD128", Subsystem: "drm"},
 	}})
@@ -81,7 +81,7 @@ func TestPublishSplitsTheCardNodeFromTheRenderNode(t *testing.T) {
 func TestPublishOmitsTheDisplayCompanionWithoutACardNode(t *testing.T) {
 	// A device that delivers a render node and no card node has no
 	// display half to publish.
-	published := publishDevices(hardware.Delivery{Nodes: []hardware.DeliveredNode{
+	published := publishDevices(hardware.Device{}, hardware.Delivery{Nodes: []hardware.DeliveredNode{
 		{Path: "/dev/dri/renderD128", Subsystem: "drm"},
 	}})
 
@@ -101,7 +101,7 @@ func TestPublishSharesAnAudioController(t *testing.T) {
 	// delivers the whole subtree. ALSA gives each PCM subdevice to the
 	// process that opened it and refuses the second open, so two pods
 	// play through different outputs at once.
-	published := publishDevices(hardware.Delivery{Nodes: []hardware.DeliveredNode{
+	published := publishDevices(hardware.Device{}, hardware.Delivery{Nodes: []hardware.DeliveredNode{
 		{Path: "/dev/snd/controlC0", Subsystem: "sound"},
 		{Path: "/dev/snd/hwC0D2", Subsystem: "sound"},
 		{Path: "/dev/snd/pcmC0D3p", Subsystem: "sound"},
@@ -129,7 +129,7 @@ func TestPublishSharesAUSBAudioInterface(t *testing.T) {
 	// A USB audio interface delivers ALSA's nodes and nothing else,
 	// because its control endpoints are a separate USB interface, and
 	// the walk stops at a nested bus device. One kind is still a card.
-	published := publishDevices(hardware.Delivery{
+	published := publishDevices(hardware.Device{}, hardware.Delivery{
 		Nodes: []hardware.DeliveredNode{
 			{Path: "/dev/snd/controlC1", Subsystem: "sound"},
 			{Path: "/dev/snd/pcmC1D0p", Subsystem: "sound"},
@@ -154,7 +154,7 @@ func TestPublishKeepsSoundExclusiveBesideAnUnexaminedKind(t *testing.T) {
 	// is hardware nobody has looked at. It publishes whole and
 	// exclusive, and names no subsystem, which is the milestone 38
 	// default.
-	published := publishDevices(hardware.Delivery{Nodes: []hardware.DeliveredNode{
+	published := publishDevices(hardware.Device{}, hardware.Delivery{Nodes: []hardware.DeliveredNode{
 		{Path: "/dev/snd/controlC0", Subsystem: "sound"},
 		{Path: "/dev/ttyS4", Subsystem: "tty"},
 	}})
@@ -173,7 +173,7 @@ func TestPublishSplitsTheDPAuxChannelAsItsOwnCompanion(t *testing.T) {
 	// AUX channel carries DPCD register access and EDID reads, and like
 	// an i2c bus it is raw wire access with one writer. It publishes as
 	// its own exclusive companion, separate from the i2c-dev companion.
-	published := publishDevices(hardware.Delivery{Nodes: []hardware.DeliveredNode{
+	published := publishDevices(hardware.Device{}, hardware.Delivery{Nodes: []hardware.DeliveredNode{
 		{Path: "/dev/dri/card0", Subsystem: "drm"},
 		{Path: "/dev/dri/renderD128", Subsystem: "drm"},
 		{Path: "/dev/fb0", Subsystem: "graphics"},
@@ -213,7 +213,7 @@ func TestPublishDropsTheFramebufferFromAGraphicsDevice(t *testing.T) {
 	// The fbdev node is the kernel's legacy console interface. Holding
 	// it grants display takeover, and no workload claims a bare
 	// framebuffer, so a graphics device does not deliver it.
-	published := publishDevices(hardware.Delivery{Nodes: []hardware.DeliveredNode{
+	published := publishDevices(hardware.Device{}, hardware.Delivery{Nodes: []hardware.DeliveredNode{
 		{Path: "/dev/dri/card0", Subsystem: "drm"},
 		{Path: "/dev/dri/renderD128", Subsystem: "drm"},
 		{Path: "/dev/fb0", Subsystem: "graphics"},
@@ -233,7 +233,7 @@ func TestPublishDropsTheFramebufferFromAGraphicsDevice(t *testing.T) {
 }
 
 func TestPublishKeepsASingleKindDeviceWhole(t *testing.T) {
-	published := publishDevices(hardware.Delivery{Nodes: []hardware.DeliveredNode{
+	published := publishDevices(hardware.Device{}, hardware.Delivery{Nodes: []hardware.DeliveredNode{
 		{Path: "/dev/ttyUSB0", Subsystem: "tty"},
 	}})
 
@@ -254,7 +254,7 @@ func TestPublishKeepsAnUnknownMixWholeAndExclusive(t *testing.T) {
 	// its known companions is hardware nobody has examined. It
 	// publishes whole, names no one subsystem, and stays exclusive,
 	// which is the milestone 38 default.
-	published := publishDevices(hardware.Delivery{Nodes: []hardware.DeliveredNode{
+	published := publishDevices(hardware.Device{}, hardware.Delivery{Nodes: []hardware.DeliveredNode{
 		{Path: "/dev/dri/renderD128", Subsystem: "drm"},
 		{Path: "/dev/ttyS4", Subsystem: "tty"},
 	}})
@@ -278,7 +278,7 @@ func TestPublishGivesTheUsbfsNodeToThePrimary(t *testing.T) {
 	// A USB HID device delivers what usbhid registers for it. A libusb
 	// program opens neither of those nodes, so the claim also carries
 	// the usbfs node of the device the interface belongs to.
-	published := publishDevices(hardware.Delivery{
+	published := publishDevices(hardware.Device{}, hardware.Delivery{
 		Nodes: []hardware.DeliveredNode{
 			{Path: "/dev/hidraw0", Subsystem: "hidraw"},
 			{Path: "/dev/usb/hiddev0", Subsystem: "usbmisc"},
@@ -299,7 +299,7 @@ func TestPublishNamesTheSubsystemBesideTheUsbfsNode(t *testing.T) {
 	// The usbfs node does not count as a kind of its own. A device that
 	// delivers one kind still names it, so a selector on subsystem
 	// keeps working.
-	published := publishDevices(hardware.Delivery{
+	published := publishDevices(hardware.Device{}, hardware.Delivery{
 		Nodes:   []hardware.DeliveredNode{{Path: "/dev/ttyUSB0", Subsystem: "tty"}},
 		BusNode: "/dev/bus/usb/001/007",
 	})
@@ -320,7 +320,7 @@ func TestPublishKeepsTheUsbfsNodeOffACompanion(t *testing.T) {
 	// graphics device is the claim on the hardware, so it carries the
 	// usbfs node. The monitor bus must not: the usbfs node reaches
 	// every endpoint of the device, which is what the split withholds.
-	published := publishDevices(hardware.Delivery{
+	published := publishDevices(hardware.Device{}, hardware.Delivery{
 		Nodes: []hardware.DeliveredNode{
 			{Path: "/dev/dri/card0", Subsystem: "drm"},
 			{Path: "/dev/dri/renderD128", Subsystem: "drm"},
@@ -350,7 +350,7 @@ func TestPublishDeliversTheBusNodeAloneWhenTheSubtreeIsEmpty(t *testing.T) {
 	// delivery still carries the bus node, and the claim receives it,
 	// so a spec refreshed while the program runs names a node that a
 	// container restart can inject.
-	published := publishDevices(hardware.Delivery{BusNode: "/dev/bus/usb/003/002"})
+	published := publishDevices(hardware.Device{}, hardware.Delivery{BusNode: "/dev/bus/usb/003/002"})
 
 	if len(published) != 1 {
 		t.Fatalf("published = %+v, want one device", published)
@@ -364,8 +364,65 @@ func TestPublishDeliversTheBusNodeAloneWhenTheSubtreeIsEmpty(t *testing.T) {
 	}
 }
 
+func TestPublishGivesABluetoothAdapterItsUsbfsNode(t *testing.T) {
+	// A Bluetooth adapter is reached through a socket, so the kernel
+	// registers no node for the radio, and the walk stops at the
+	// bluetooth subtree that holds the connected peripherals' nodes.
+	// The adapter publishes on the strength of its driver, with the
+	// one node it has.
+	published := publishDevices(
+		hardware.Device{Bus: "usb", Address: "1-8:1.0", Driver: "btusb"},
+		hardware.Delivery{BusNode: "/dev/bus/usb/001/008"})
+
+	if len(published) != 1 {
+		t.Fatalf("published = %+v, want the adapter", published)
+	}
+	adapter := published[0]
+	if adapter.Suffix != "" || adapter.Subsystem != "" || adapter.RenderNode || adapter.DisplayNode {
+		t.Errorf("adapter = %+v, want a bare primary", adapter)
+	}
+	if adapter.Shareable {
+		t.Error("one Bluetooth stack drives one radio")
+	}
+	if !slices.Equal(adapter.Nodes, []string{"/dev/bus/usb/001/008"}) {
+		t.Errorf("nodes = %v, want the usbfs node", adapter.Nodes)
+	}
+}
+
+func TestPublishDeliversAnAdaptersOwnNodeBesideItsUsbfsNode(t *testing.T) {
+	// The walk removes the connected peripherals' nodes, so anything
+	// left under the interface is the adapter's own. Such a node is
+	// delivered beside the usbfs node, and never in place of it.
+	published := publishDevices(
+		hardware.Device{Bus: "usb", Address: "1-8:1.0", Driver: "btusb"},
+		hardware.Delivery{
+			Nodes:   []hardware.DeliveredNode{{Path: "/dev/rfkill", Subsystem: "misc"}},
+			BusNode: "/dev/bus/usb/001/008",
+		})
+
+	if len(published) != 1 {
+		t.Fatalf("published = %+v, want one device", published)
+	}
+	want := []string{"/dev/rfkill", "/dev/bus/usb/001/008"}
+	if !slices.Equal(published[0].Nodes, want) {
+		t.Errorf("nodes = %v, want %v", published[0].Nodes, want)
+	}
+}
+
+func TestPublishSkipsABluetoothAdapterWithNoUsbfsNode(t *testing.T) {
+	// The usbfs node is the whole delivery of an adapter. Without it
+	// the claim would grant nothing, so nothing publishes.
+	published := publishDevices(
+		hardware.Device{Bus: "usb", Address: "1-8:1.0", Driver: "btusb"},
+		hardware.Delivery{})
+
+	if len(published) != 0 {
+		t.Errorf("published = %+v, want none", published)
+	}
+}
+
 func TestPublishReturnsNothingForAnEmptyDelivery(t *testing.T) {
-	if published := publishDevices(hardware.Delivery{}); len(published) != 0 {
+	if published := publishDevices(hardware.Device{}, hardware.Delivery{}); len(published) != 0 {
 		t.Errorf("published = %+v, want none", published)
 	}
 }
@@ -374,7 +431,7 @@ func TestPublishOrdersThePrimaryFirst(t *testing.T) {
 	// The primary carries the bare name, and resolveAllocated finds
 	// it as the published entry whose Suffix is empty. A deterministic
 	// order means the same hardware always publishes the same devices.
-	published := publishDevices(hardware.Delivery{Nodes: []hardware.DeliveredNode{
+	published := publishDevices(hardware.Device{}, hardware.Delivery{Nodes: []hardware.DeliveredNode{
 		{Path: "/dev/i2c-0", Subsystem: "i2c-dev"},
 		{Path: "/dev/dri/renderD128", Subsystem: "drm"},
 	}})
@@ -390,7 +447,7 @@ func TestPublishRoutesAnUnknownNodeToTheUnknownBranch(t *testing.T) {
 	// node beside a real subsystem, the delivery publishes whole,
 	// exclusive, with no sole subsystem, applying the milestone 38
 	// default to any hardware liken has not met.
-	published := publishDevices(hardware.Delivery{Nodes: []hardware.DeliveredNode{
+	published := publishDevices(hardware.Device{}, hardware.Delivery{Nodes: []hardware.DeliveredNode{
 		{Path: "/dev/dri/renderD128", Subsystem: ""},
 		{Path: "/dev/i2c-0", Subsystem: "i2c-dev"},
 	}})

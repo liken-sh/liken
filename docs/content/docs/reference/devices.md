@@ -45,7 +45,10 @@ these three conditions are true:
    the Machine's `spec.modules`.
 2. **A claim on it supplies something.** The device's sysfs subtree
    must contain device nodes. A network card is hardware, but it has
-   nothing to give a pod, so it never appears.
+   nothing to give a pod, so it never appears. A Bluetooth adapter is
+   the one exception. Its driver, `btusb`, puts it in the slice,
+   because the kernel gives a radio no device node at all. See
+   [Bluetooth adapters](#bluetooth-adapters).
 3. **The machine does not depend on it.** A device whose subtree holds a
    storage role belongs to the machine, and never to a workload. A
    disk belongs to the machine, through a storage role, or to the
@@ -88,7 +91,7 @@ not have an attribute, the attribute is absent, not empty. Thus
 | `driver` | string | the name of the bound driver, such as `i915` |
 | `class` | string | the type of device, in one word: `display`, `multimedia`, `serial-bus` |
 | `classCode` | string | the full class code that the bus published: six hex digits on PCI, two on USB |
-| `subsystem` | string | the kind of device that liken published: `drm`, `sound`, `tty`. It is absent when the delivery is a mix that liken does not know |
+| `subsystem` | string | the kind of device that liken published: `drm`, `sound`, `tty`. It is absent when the delivery is a mix that liken does not know, and when the device delivers no node of its own, as a Bluetooth adapter does |
 | `renderNode` | bool | the device supplies a DRM render node |
 | `displayNode` | bool | the device supplies a DRM card node, which carries modesetting |
 | `name` | string | the name of the device in words, from its own strings or from the PCI database |
@@ -177,7 +180,9 @@ framebuffer.
 
 A device that delivers one kind of node publishes as one device,
 unless it is a GPU. A device that delivers a mix that liken does not
-know publishes whole and exclusive, and names no `subsystem`.
+know publishes whole and exclusive, and names no `subsystem`. A
+Bluetooth adapter publishes the same way, whole and exclusive with no
+`subsystem`, because the only node it delivers is its usbfs node.
 
 A DRM render node has a multiplexing contract in the kernel: the
 driver arbitrates between concurrent clients. A drill measured this
@@ -250,6 +255,31 @@ usbfs has no interface boundary. If a device has more than one
 interface with a driver, each interface publishes as its own device,
 and each one delivers the same usbfs node. A pod that holds one of
 these claims can communicate with the whole device.
+
+### Bluetooth adapters
+
+A claim on a Bluetooth adapter delivers the adapter's usbfs node, and
+nothing else. The adapter has no node of its own. A program reaches a
+radio through an `AF_BLUETOOTH` socket, which it binds to an adapter
+by index, so the kernel registers no `/dev` entry anywhere the adapter
+owns. The claim states which workload owns the radio, and it holds
+that workload on the machine the radio is in. A stack that drives the
+radio through the kernel opens its socket with the capabilities of its
+own container, because a claim grants no privilege.
+
+liken stops the delivery walk at a `bluetooth` subtree. The kernel
+puts the HID device of a connected peripheral under the adapter's own
+USB interface, so a game controller's `/dev/input/event*` and
+`/dev/hidraw*` nodes appear in the adapter's part of sysfs. Those
+nodes belong to the controller. A claim on the adapter does not
+deliver them, and a controller that connects later adds no nodes to
+the claim.
+
+The same nodes move when BlueZ changes how it drives the kernel. With
+`/dev/uhid` present, BlueZ 5.73 and later create the HID device under
+`/sys/devices/virtual/misc/uhid`, where nothing connects it to the
+adapter. A claim that delivered these nodes would deliver them only
+under one of the two arrangements.
 
 ## Limits
 

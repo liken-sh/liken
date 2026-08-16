@@ -20,6 +20,13 @@ package hardware
 // inventory decision. For this reason, a walk claims only the nodes
 // between this device and the next bus device below it.
 //
+// The walk stops at a bluetooth device as well. Sysfs puts the HID
+// device of a connected peripheral under the adapter's own USB
+// interface, so the nodes below a bluetooth device are the
+// peripherals' nodes. They come and go as people turn controllers and
+// headsets on, and the air is not a bus this walk can descend to give
+// each peripheral its own inventory decision.
+//
 // One node comes from above the walk instead of below it. A USB
 // interface's driver publishes its own nodes, but the device that the
 // interface belongs to also has a usbfs node, and that is the node
@@ -117,7 +124,7 @@ func InspectDelivery(sysRoot string, d Device) Delivery {
 		if err != nil || !entry.IsDir() {
 			return nil
 		}
-		if path != resolved && isBusDevice(path) {
+		if path != resolved && isSubtreeBoundary(path) {
 			return fs.SkipDir
 		}
 		if _, err := os.Stat(filepath.Join(path, "dev")); err != nil {
@@ -173,12 +180,26 @@ func usbfsNode(sysRoot string, d Device) string {
 	return fmt.Sprintf("/dev/bus/usb/%03d/%03d", bus, device)
 }
 
-// isBusDevice reports whether a sysfs directory is itself a PCI or
-// USB device. This is the subtree boundary where another inventory
-// decision begins.
-func isBusDevice(path string) bool {
-	name := subsystemName(path)
-	return name == "pci" || name == "usb"
+// isSubtreeBoundary reports whether a sysfs directory ends the walk.
+//
+// A PCI or USB device is the boundary because another inventory
+// decision begins there: the device below gets its own entry in the
+// slice, and its nodes go with that entry.
+//
+// A bluetooth device is the boundary for a different reason. The
+// nodes below it belong to the peripherals that are connected to the
+// radio right now, not to the radio. A game controller's HID device
+// lands under the adapter's own USB interface, so without this
+// boundary a claim on the adapter receives the input and hidraw nodes
+// of every controller a person turns on. The peripherals reach the
+// radio over the air, which is not a bus this walk can descend, and
+// they connect and disconnect while a pod holds the adapter.
+func isSubtreeBoundary(path string) bool {
+	switch subsystemName(path) {
+	case "pci", "usb", "bluetooth":
+		return true
+	}
+	return false
 }
 
 // subsystemName reads the subsystem symlink that every sysfs device

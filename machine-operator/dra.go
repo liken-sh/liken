@@ -128,7 +128,12 @@ func platformBlocks(facts *machine.MachineStatus) map[string]bool {
 //  2. Claiming the device would deliver something: its subtree
 //     carries device nodes that a pod could receive. A NIC or a
 //     bare controller fails this test, because it is real hardware
-//     with nothing to hand to a pod.
+//     with nothing to hand to a pod. A Bluetooth adapter is the one
+//     device that passes on its driver instead. hci is a socket
+//     interface, so the radio registers no node, and a working
+//     adapter has an empty subtree. This test alone would refuse
+//     hardware that workloads do claim. publishing.go carries the
+//     rest of that story.
 //  3. The machine does not depend on the device: nothing in its
 //     subtree backs a storage role. A claim on the system disk
 //     would hand an unprivileged pod the machine's own root
@@ -149,7 +154,7 @@ func inventoryDevices(discovered []hardware.Device,
 			continue
 		}
 		delivery := inspect(d)
-		if len(delivery.DevNodes()) == 0 {
+		if len(delivery.DevNodes()) == 0 && !bluetoothAdapter(d) {
 			continue
 		}
 		if slices.ContainsFunc(delivery.Blocks(), func(b string) bool { return platform[b] }) {
@@ -161,7 +166,7 @@ func inventoryDevices(discovered []hardware.Device,
 		// slice device, joined to the physical device's own name, so
 		// the primary keeps the bare name and an allocation made
 		// before a split stays valid.
-		for _, p := range publishDevices(delivery) {
+		for _, p := range publishDevices(d, delivery) {
 			attrs := map[string]kubernetes.DeviceAttribute{}
 			// Attribute names are unqualified, so the Kubernetes API
 			// places them under the driver's own domain: a DeviceClass

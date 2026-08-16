@@ -178,6 +178,84 @@ func (f *draFixture) addGPU(t *testing.T) {
 	}
 }
 
+// addBluetooth plants a Bluetooth adapter beside the stick: a USB
+// interface bound to btusb, with the hci object the kernel registers
+// under it and a game controller connected to that object. The
+// adapter's own subtree carries no device node, which is the shape a
+// working radio has.
+func (f *draFixture) addBluetooth(t *testing.T) {
+	t.Helper()
+	devices := filepath.Join(draSysfsRoot, "bus", "usb", "devices")
+	adapter := filepath.Join(devices, "1-8:1.0")
+	controller := filepath.Join(adapter, "bluetooth", "hci0", "hci0:11", "0005:054C:0CE6.0004")
+	event := filepath.Join(controller, "input", "input25", "event20")
+	if err := os.MkdirAll(event, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(event, "dev"), []byte("13:84\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(event, "uevent"), []byte("DEVNAME=input/event20\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for class, dir := range map[string]string{
+		"bluetooth": filepath.Join(adapter, "bluetooth", "hci0"),
+		"input":     event,
+	} {
+		target := filepath.Join(draSysfsRoot, "class", class)
+		if err := os.MkdirAll(target, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(dir, "subsystem")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(adapter, "modalias"), []byte("usb:v8087p0033d0001dcE0dsc01dp01icE0isc01ip01in00\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	driver := filepath.Join(draSysfsRoot, "bus", "usb", "drivers", "btusb")
+	if err := os.MkdirAll(driver, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(driver, filepath.Join(adapter, "driver")); err != nil {
+		t.Fatal(err)
+	}
+	device := filepath.Join(devices, "1-8")
+	if err := os.MkdirAll(device, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]string{"busnum": "1", "devnum": "8"} {
+		if err := os.WriteFile(filepath.Join(device, name), []byte(value+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestPrepareDeliversTheUsbfsNodeOfABluetoothAdapter(t *testing.T) {
+	// A claim on an adapter receives the usbfs node, which is the only
+	// node the adapter has. The connected controller's event node stays
+	// out: it belongs to the controller, and it leaves when somebody
+	// turns the controller off.
+	fixture := newDRAFixture(t)
+	fixture.addBluetooth(t)
+	fixture.allocated = "usb-1-8-1-0"
+
+	resp, err := fixture.plugin.NodePrepareResources(t.Context(), &drav1.NodePrepareResourcesRequest{
+		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if answer := resp.Claims["claim-1"]; answer == nil || answer.Error != "" {
+		t.Fatalf("answer = %+v", answer)
+	}
+
+	paths := specPaths(t, fixture, "claim-1")
+	if !slices.Equal(paths, []string{"/dev/bus/usb/001/008"}) {
+		t.Errorf("paths = %v, want the adapter's usbfs node alone", paths)
+	}
+}
+
 func TestPrepareDeliversOnlyTheRenderNodeOfAGPU(t *testing.T) {
 	fixture := newDRAFixture(t)
 	fixture.addGPU(t)

@@ -25,6 +25,12 @@ package main
 // question each time is what a claim on this hardware is, and the
 // answer is a device, not a subsystem.
 //
+// A Bluetooth adapter is the third examined shape. It delivers no
+// node of its own, because a program reaches a radio through a
+// socket, so the policy names this shape by its driver rather than by
+// the kinds it delivers. The device it publishes carries the usbfs
+// node.
+//
 // The mechanism is generic; the tables below are deliberately not.
 // Only a shape somebody examined splits. Everything else publishes
 // whole and exclusive, so hardware liken has not met keeps the
@@ -88,10 +94,15 @@ var audioSubsystems = map[string]bool{"sound": true, "input": true}
 // device's card node.
 const displaySuffix = "-display"
 
-// publishDevices applies the policy to one delivery. The primary
-// device is always first, the display companion follows it, and the
-// wire companions follow in sorted subsystem order, so the same
-// hardware always publishes the same devices.
+// publishDevices applies the policy to one device and what it
+// delivers. Most of the policy reads the delivery alone, because the
+// nodes state what the hardware is. A Bluetooth adapter is the shape
+// that needs the device itself: its driver is the only fact that
+// distinguishes it, because it delivers no node of its own.
+//
+// The primary device is always first, the display companion follows
+// it, and the wire companions follow in sorted subsystem order, so
+// the same hardware always publishes the same devices.
 //
 // The primary alone carries the delivery's bus node. A claim on the
 // primary is a claim on the hardware, and a userspace driver needs
@@ -105,12 +116,16 @@ const displaySuffix = "-display"
 // interface, and the kernel driver's nodes leave with it. The bus
 // node is the one node such a program opens, and the one node it
 // cannot destroy, so a spec refreshed to this shape survives a
-// container restart under the same prepared claim. Publishing here
-// does not add the device to any slice: the inventory gates on the
-// driver and on the subtree's nodes before it applies this policy,
-// so only resolution for a claim that already holds the hardware
-// sees this shape.
-func publishDevices(delivery hardware.Delivery) []publishedDevice {
+// container restart under the same prepared claim. For a device with
+// a driver, publishing here does not add it to any slice: the
+// inventory gates on the subtree's nodes before it applies this
+// policy, so only resolution for a claim that already holds the
+// hardware sees this shape. A Bluetooth adapter is the exception the
+// inventory makes to that gate.
+func publishDevices(d hardware.Device, delivery hardware.Delivery) []publishedDevice {
+	if bluetoothAdapter(d) {
+		return publishBluetooth(delivery)
+	}
 	published := splitBySubsystem(delivery)
 	if delivery.BusNode == "" {
 		return published
@@ -149,7 +164,9 @@ func splitBySubsystem(delivery hardware.Delivery) []publishedDevice {
 		}}
 	}
 
-	// The two examined shapes come before the single-kind branch. A
+	// The two examined shapes that sort nodes come before the
+	// single-kind branch. The third, a Bluetooth adapter, delivers no
+	// node to sort, so publishDevices answers it before this. A
 	// delivery of drm nodes alone, or of sound nodes alone, answers
 	// that branch too, and the examined answer is the specific one: it
 	// separates the card node from the render node, and it states what
@@ -269,6 +286,42 @@ func publishAudio(delivery hardware.Delivery) []publishedDevice {
 	}}
 }
 
+// publishBluetooth publishes one Bluetooth adapter as one exclusive
+// device that delivers the adapter's usbfs node.
+//
+// An adapter has no device node of its own. hci is a socket
+// interface: a Bluetooth stack opens an AF_BLUETOOTH socket and binds
+// it to an adapter by index, and sysfs registers no `dev` file
+// anywhere the adapter owns. The nodes that do appear under the
+// adapter belong to the peripherals connected to it, and the walk
+// stops at the bluetooth subtree that holds them. So the test the
+// rest of the inventory applies, that the subtree carries device
+// nodes, does not see an adapter that works correctly, and no other
+// branch of this policy publishes one.
+//
+// The claim is worth publishing without a node to hand over. It
+// states which workload owns the radio, and it holds that workload on
+// the machine the radio is plugged into, which is what a Bluetooth
+// service in a container needs. The usbfs node is what a userspace
+// stack opens if it drives the hardware itself, and it is the only
+// node the adapter has to give.
+//
+// Any node left in the subtree belongs to the adapter, because the
+// walk already removed the peripherals' nodes, so the delivery
+// carries it beside the usbfs node. An adapter with no usbfs node
+// publishes nothing, because such a claim would deliver no node at
+// all.
+//
+// The device is exclusive. The kernel arbitrates nothing between two
+// Bluetooth stacks on one radio: both scan, both pair, and each one
+// reads a state the other wrote.
+func publishBluetooth(delivery hardware.Delivery) []publishedDevice {
+	if delivery.BusNode == "" {
+		return nil
+	}
+	return []publishedDevice{{Nodes: append(delivery.DevNodes(), delivery.BusNode)}}
+}
+
 // hasRenderNode reports whether the device delivers a DRM render
 // node. The kernel names these /dev/dri/renderD<n>, and they are the
 // nodes that do GPU work without display authority: a container that
@@ -311,4 +364,14 @@ func audioDevice(kinds []string) bool {
 		}
 	}
 	return true
+}
+
+// bluetoothAdapter reports whether a device is a Bluetooth host
+// controller on the USB bus. This is the one shape the policy names
+// by its driver instead of by the kinds it delivers, because it
+// delivers no kind at all. btusb drives every adapter that follows
+// the standard USB Bluetooth interface, which covers the dongles and
+// the radios built into a board.
+func bluetoothAdapter(d hardware.Device) bool {
+	return d.Bus == "usb" && d.Driver == "btusb"
 }

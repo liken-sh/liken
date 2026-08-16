@@ -283,6 +283,35 @@ func TestInventorySkipsUndeliverableDevices(t *testing.T) {
 	}
 }
 
+func TestInventoryPublishesAnIdleBluetoothAdapter(t *testing.T) {
+	// An adapter with nothing connected to it delivers no node from its
+	// subtree, because hci is a socket interface and the radio has no
+	// node. The device is still real hardware a workload claims, so the
+	// driver is what puts it in the slice, and the usbfs node is what
+	// the claim delivers.
+	devices := inventoryDevices([]hardware.Device{
+		{Bus: "usb", Address: "1-8:1.0", Driver: "btusb", Class: "wireless", ClassCode: "e0",
+			Name: "Intel AX211 Bluetooth", Vendor: "8087", Product: "0033"},
+	}, delivering(hardware.Delivery{BusNode: "/dev/bus/usb/001/008"}), nil)
+
+	if len(devices) != 1 {
+		t.Fatalf("devices = %+v, want the adapter", devices)
+	}
+	adapter := devices[0]
+	if adapter.Name != "usb-1-8-1-0" {
+		t.Errorf("name = %q, want the sanitized bus address", adapter.Name)
+	}
+	if adapter.AllowMultipleAllocations != nil {
+		t.Error("one Bluetooth stack drives one radio")
+	}
+	if got := adapter.Attributes["driver"].String; got == nil || *got != "btusb" {
+		t.Errorf("driver = %v, want btusb, the attribute a DeviceClass selects an adapter by", got)
+	}
+	if _, ok := adapter.Attributes["subsystem"]; ok {
+		t.Error("the usbfs node is not a kind of node the policy sorts by")
+	}
+}
+
 func TestInventoryWithholdsThePlatformsOwnDisks(t *testing.T) {
 	platform := map[string]bool{"vda1": true}
 	devices := inventoryDevices([]hardware.Device{
