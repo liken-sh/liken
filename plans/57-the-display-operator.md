@@ -208,3 +208,10 @@ The drill runs on `liken-1` with both monitors connected.
   display operator should claim the audio controller too, and publish
   each output's PCM with the output it belongs to, or whether audio
   stays a separate claim that a person pairs by hand, is undecided.
+  [Milestone 59](59-the-audio-operator.md) is the answer under
+  consideration: audio stays its own operator, `audio.liken.sh`, and a
+  client gets a screen and that screen's speakers from one claim that
+  holds a request against each driver with a `matchAttribute`
+  constraint across the two. That answer costs both operators a shared
+  attribute domain, and milestone 59's open questions carry the case
+  for merging them instead.

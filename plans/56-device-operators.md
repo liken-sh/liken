@@ -1,7 +1,7 @@
 # Device operators
 
-Milestone 56 — Proposed. It is the pattern that milestones 57 and 58
-both build. A device operator claims raw hardware from liken through an
+Milestone 56 — Proposed. It is the pattern that milestones 57, 58,
+and 59 build. A device operator claims raw hardware from liken through an
 ordinary `liken.sh` DRA claim, runs the daemon that manages that
 hardware, and publishes what the daemon holds as its own DRA devices,
 under its own driver name, in its own ResourceSlices. Each operator is
@@ -318,9 +318,12 @@ an instance document answers each one.
 * **Milestone 58, [the Bluetooth operator](58-the-bluetooth-operator.md).**
   `bluetooth.liken.sh`. It claims the Bluetooth adapter, runs
   bluetoothd, and publishes one device for each paired controller.
+* **Milestone 59, [the audio operator](59-the-audio-operator.md).**
+  `audio.liken.sh`. It claims the audio controller, runs PipeWire, and
+  publishes one device for each physical output.
 
-Both are proposed. Each carries its own drill, because the pattern is
-only proven by hardware.
+All three are proposed. Each carries its own drill, because the
+pattern is only proven by hardware.
 
 ## Open questions
 

@@ -1,0 +1,336 @@
+# The audio operator
+
+Milestone 59 — Proposed. It would publish each physical audio output
+as its own DRA device, so a pod claims one HDMI output's speakers or
+the analog jack, and receives the PipeWire socket and the name of the
+sink its streams must reach. It is the third instance of milestone
+56's pattern: the operator claims the machine's audio controller
+through an ordinary `liken.sh` claim, runs PipeWire, and publishes what
+PipeWire holds under `audio.liken.sh`.
+
+## The problem
+
+liken publishes the audio controller as one device. The policy is in
+`machine-operator/publishing.go`: `publishAudio` returns a single
+device with subsystem `sound`, delivering the controller's whole
+subtree, which is the ALSA control node, the hardware-dependent nodes,
+one node for each PCM subdevice, and the jack input nodes beside them.
+That is the right thing for the OS to publish, because the OS can read
+the nodes and nothing else.
+
+What the nodes do not say is which output is which. An Intel N95 with
+two monitors publishes one audio device that carries `pcmC0D3p`,
+`pcmC0D7p`, `pcmC0D8p`, and an analog PCM, and nothing in that list
+says which one plays into the kitchen monitor's speakers. A workload
+that must play into one monitor's speakers has two ways to get them
+today, and both are wrong.
+
+* **Claim the controller and open a PCM by number.** The pod receives
+  every PCM on the card. It must find the right device number itself,
+  and the number it finds on one machine names different hardware on
+  the next one. Nothing stops it from opening the wrong output.
+* **Let several pods share the controller.** liken publishes the audio
+  device with `AllowMultipleAllocations` set, so this is what happens
+  now (`machine-operator/dra.go`). ALSA arbitrates one PCM subdevice at
+  a time and returns `EBUSY` on the second open, so nothing is damaged,
+  and nothing states which claim gets which output either.
+
+One fact governs the design: which PCM plays into which monitor is a
+fact that only a running daemon reads. It comes from the ELD, the
+EDID-Like Data block that the graphics driver writes into the audio
+driver when a monitor is connected. liken's inventory walk does not
+read it, and a walk that did would report a fact that changes whenever
+somebody moves a cable.
+
+## What the pod runs and what it holds
+
+The pod runs PipeWire, with WirePlumber for session management.
+PipeWire is to audio what Weston is to displays: the userspace daemon
+that owns the hardware and holds the facts the OS cannot read.
+
+PipeWire reads the ELD through the ALSA control interface. Its ALSA
+card profile code finds the control named `ELD` for a PCM device
+(`spa/plugins/alsa/acp/acp.c`, `pa_alsa_mixer_find_pcm(mixer_handle,
+"ELD", device)`), parses it (`pa_alsa_get_hdmi_eld` in
+`spa/plugins/alsa/acp/alsa-util.c`), and copies the monitor name onto
+the port as `device.product.name`. It takes the channel count, the
+speaker allocation, and the IEC958 codec list from the same block. It
+subscribes to that control, so an ELD that changes calls
+`hdmi_eld_changed`, and a monitor that arrives or leaves is an event,
+not a poll.
+
+PipeWire keeps only part of the block. Its `pa_hdmi_eld` struct holds
+`monitor_name`, `speakers`, `iec958_codecs`, and `lpcm_channels`
+(`spa/plugins/alsa/acp/alsa-util.h`). The manufacturer and product
+codes are in the ELD and not in that struct, so the operator reads the
+raw `ELD` control itself for them. The same bytes are readable as text
+at `/proc/asound/card<N>/eld#<codec>.<pin>`, which
+`sound/pci/hda/patch_hdmi.c` creates with `snprintf(name, sizeof(name),
+"eld#%d.%d", codec->addr, index)` where `index` is the pin index. The
+proc file is for a person to read. The control element is what the
+operator reads, because `snd_hctl_elem_get_device` gives the PCM device
+number the block belongs to, and the proc file's second number is a pin
+index instead.
+
+The privilege is none. The operator declares no `hostNetwork` and adds
+no capability. Everything it touches, it touches through the ALSA nodes
+its claim delivers, plus the two hostPath mounts every DRA driver
+takes, which milestone 56 lists.
+
+## The controller claim
+
+The operator acquires the audio controller through a claim against
+liken's driver, which is milestone 56's arbitration rule. One thing
+about that claim is different from the other two instances, and it has
+to be decided before this milestone is built.
+
+liken publishes the audio controller as shareable. `publishAudio` sets
+`Shareable: true`, and `dra.go` turns that into
+`allowMultipleAllocations: true` on the slice device. The reason is in
+the code comment: ALSA multiplexes the card, two claims can play
+through different outputs at once, and over-sharing fails visibly with
+`EBUSY`. That reasoning holds for a machine with no operator on it. On
+a machine that runs this operator, the operator is the one program that
+should have the card open, and a shareable device cannot say so.
+
+Two ways out, and this milestone must pick one.
+
+* **Change liken's audio policy.** Publish the controller exclusively,
+  the way the display device and the Bluetooth adapter publish. It
+  costs the case the comment names: two pods playing through two PCMs
+  of one card with no operator between them.
+* **Accept a shared raw device.** The operator takes a claim on a
+  device that a second pod may also claim, and ALSA's `EBUSY` stays the
+  whole of the arbitration below it. The operator's own devices are
+  still exclusive, so a consumer that goes through the operator is
+  arbitrated. A pod that goes around the operator is not.
+
+Milestone 56's rule is that the raw claim is the arbitration, so the
+first option is the one that matches the pattern. It is a change to
+liken, not to the operator, which is why it is called out here rather
+than assumed.
+
+The delivery sets stay disjoint with no rule needed. liken delivers the
+card's nodes, and the operator delivers no node at all, which the
+delivery section states.
+
+## One device for each output
+
+The operator publishes its own ResourceSlices under `audio.liken.sh`,
+with one device for each physical output that PipeWire drives: each
+HDMI or DisplayPort PCM, and the analog jack.
+
+The device name is the output's ALSA card and PCM device number, such
+as `card0-pcm3`. The number comes from the codec's pin order, which the
+driver enumerates the same way at every boot on the same hardware and
+kernel. It is not stable across machines, and this document does not
+claim it is stable across a kernel change, because that was not
+verified. A claim that must survive either one selects on the
+attributes instead.
+
+The attributes come from the ELD and from PipeWire's node:
+
+* the connection type, which is HDMI, DisplayPort, or analog,
+* the monitor's manufacturer code and product code, for an HDMI output,
+* the monitor name, which is the same EDID descriptor the display
+  operator publishes as the model name,
+* the maximum LPCM channel count and the speaker allocation,
+* the PipeWire node name of the sink, which is what a consumer's
+  environment names.
+
+The ELD carries no serial number. The kernel prints the whole block at
+`snd_hdmi_print_eld_info` in `sound/pci/hda/hda_eld.c`, and the fields
+are `monitor_present`, `eld_valid`, `codec_pin_nid`, `codec_dev_id`,
+`codec_cvt_nid`, `monitor_name`, `connection_type`, `eld_version`,
+`edid_version`, `manufacture_id`, `product_id`, `port_id`,
+`support_hdcp`, `support_ai`, `audio_sync_delay`, `speakers`,
+`sad_count`, and the audio descriptors. There is no EDID serial among
+them. So an audio device can say which model of monitor it plays into,
+and it cannot say which unit. The display operator publishes the
+serial, because it reads the whole EDID. The next section has to answer
+that difference.
+
+## Pairing a screen with its speakers
+
+A pod that plays a video on the kitchen monitor needs that monitor and
+that monitor's speakers. One ResourceClaim does that, with one request
+against `display.liken.sh`, one request against `audio.liken.sh`, and a
+`matchAttribute` constraint across the two.
+
+The Kubernetes behavior was verified against the v1.36 sources.
+
+* A claim holds a list of requests, and each request names its own
+  DeviceClass. `DeviceClaim.Requests` is a list of `DeviceRequest`, and
+  `DeviceClassName` is required on each one
+  (`staging/src/k8s.io/api/resource/v1/types.go`, release-1.36). So one
+  claim can hold a request against each driver.
+* A constraint names the requests it applies to and requires that all
+  devices in question carry the same value for one attribute. The
+  field's doc states "MatchAttribute requires that all devices in
+  question have this attribute and that its type and value are the same
+  across those devices", and "Must include the domain qualifier". Its
+  type is `FullyQualifiedName`.
+* The scheduler compares the attribute across devices without regard to
+  which driver published them.
+  `structured/internal/stable/allocator_stable.go` builds one
+  `matchAttributeConstraint` for the constraint and calls `add` for
+  every candidate device in every named request. `lookupAttribute`
+  looks the fully qualified name up in the device's attribute map
+  first, and falls back to the bare identifier only when the name's
+  domain equals the device's own driver name.
+
+The consequence for the two operators is a naming rule. A device
+attribute written without a domain is assumed to be in the publishing
+driver's domain, so the display operator's bare `monitorName` and the
+audio operator's bare `monitorName` are two different fully qualified
+names and never match. Both operators publish the pairing attribute
+under one shared domain that neither driver owns, which the
+`QualifiedName` documentation expects: names defined by a third party
+must include the domain prefix. The proposal is `monitor.liken.sh/id`,
+built from the manufacturer code, the product code, and the monitor
+name, because those are the three facts the ELD and the EDID both
+carry.
+
+One limit comes with it. Two monitors of the same model produce the
+same `monitor.liken.sh/id`, so the constraint is satisfied by either
+pairing, and a claim can get one screen with the other screen's
+speakers. The fix needs a value tied to the connector rather than to
+the model. The ELD's `port_id` is the candidate, and whether it
+corresponds to the DRM connector the display operator names was not
+verified. The drill measures it on a machine with two identical
+monitors.
+
+## The delivery is a socket, not a device node
+
+The delivery has the shape milestone 57 uses, not the shape milestone
+58 uses. A consumer receives no `/dev/snd` node. What it needs is the
+PipeWire socket and the name of the sink its streams must reach, and
+CDI carries both as a mount and environment variables.
+
+The client mechanisms were verified against the PipeWire sources.
+
+* **The socket.** A client resolves `PIPEWIRE_REMOTE` first, then the
+  `remote.name` context property, then the default `pipewire-0`
+  (`src/modules/module-protocol-native/local-socket.c`, `get_remote`).
+  A name that starts with `/` is used as an absolute path, and the
+  runtime directory is not consulted (`try_connect_name`). Otherwise
+  the socket is looked for in `PIPEWIRE_RUNTIME_DIR`, then
+  `XDG_RUNTIME_DIR`, then `USERPROFILE`, and last in `/run/pipewire`.
+  So the CDI spec mounts the socket directory and sets one of the two,
+  and an absolute `PIPEWIRE_REMOTE` is the simplest of the two forms.
+* **The target sink.** `PIPEWIRE_NODE` sets `target.object` on every
+  stream, in `src/pipewire/stream.c`:
+  `pw_properties_set(stream->properties, PW_KEY_TARGET_OBJECT, str)`.
+  The client documentation gives the example
+  `PIPEWIRE_NODE=alsa_output.pci-0000_00_1b.0.analog-stereo aplay ...`
+  (`doc/dox/config/pipewire-client.conf.5.md`). `target.object` takes a
+  `node.name` or an `object.serial`
+  (`doc/dox/config/pipewire-props.7.md`). The general form is
+  `PIPEWIRE_PROPS`, which updates the whole property set of a stream or
+  a filter (`src/pipewire/stream.c`, `src/pipewire/filter.c`), and
+  `PIPEWIRE_NODE` is the one variable this delivery needs.
+
+Both variables are read by clients that use PipeWire's own stream API.
+A client that plays through the PulseAudio protocol or the ALSA
+compatibility plugin selects its sink another way, and this document
+does not state which, because that was not verified.
+
+The consumer therefore holds no audio device node, and the operator
+holds them all. That is the same trade the display operator makes: the
+session is a connection to a daemon, and the daemon restarting ends it.
+
+## A monitor that leaves
+
+A monitor that somebody unplugs takes its HDMI output's sink with it,
+and that is milestone 56's loss case with nothing new in it. The device
+stays published, the operator applies a `NoExecute` taint to it, the
+taint-eviction controller ends the consumer pod, and
+`tolerationSeconds` on the claim sets how long an output may be silent
+first. A monitor coming back clears the taint.
+
+The loss signal is the ELD control, the same one that publishes the
+identity. The block goes invalid when the monitor leaves, and the
+control change is an event the operator already listens to. The jack
+input nodes that liken delivers with the card carry the same fact from
+the kernel's side, and the ALSA control names them per PCM, in the form
+`HDMI/DP,pcm=3 Jack` (`spa/plugins/alsa/acp/alsa-mixer.c`).
+
+What PipeWire does with the sink node when a port goes unavailable
+depends on the profile WirePlumber then selects. The operator must not
+depend on the node vanishing, so it treats the ELD as the fact and the
+node as a consequence. The drill measures which one happens.
+
+## What a drill must show
+
+The drill runs on `liken-1`, an Intel N95 with two HDMI monitors, which
+is also where milestone 57's drill runs.
+
+* **The Kustomization deploys it and deleting it removes it.** Before
+  the apply, the machine publishes what it publishes today and no
+  `audio.liken.sh` slice exists. Apply the published base, and the
+  operator's pod starts on the machine with the audio controller, with
+  no node selector written by hand. Delete it, and the published
+  devices return to what they were.
+* **Each output publishes once.** One device for each HDMI PCM and one
+  for the analog jack, each carrying its connection type, and each HDMI
+  device carrying its monitor's manufacturer code, product code, and
+  name.
+* **A claim by name.** A pod that names one output plays into that
+  monitor's speakers and no other.
+* **A claim by attribute.** A pod that selects on the monitor name gets
+  that monitor's output. A second pod that asks for the same one parks
+  as Unschedulable while the first one runs.
+* **The paired claim.** One claim with a `display.liken.sh` request, an
+  `audio.liken.sh` request, and a `matchAttribute` on
+  `monitor.liken.sh/id` allocates a screen and that screen's speakers.
+  Moving the cables between the two monitors and repeating it must
+  still pair them correctly.
+* **The identical-monitor case.** With two monitors of the same model
+  and the same `monitor.liken.sh/id`, record whether the constraint
+  pairs a screen with the other screen's speakers, and record whether
+  the ELD's `port_id` distinguishes the two outputs. The result sets
+  whether the pairing attribute needs a connector-level value.
+* **Unplug and replug.** With a `tolerationSeconds` of thirty, a five
+  second unplug must not end the consumer pod, and an unplug past
+  thirty seconds must end it. Replugging clears the taint and the
+  consumer starts again, with no human step.
+* **An operator restart while a claim is live.** Deleting the operator
+  pod restarts PipeWire, so the consumer loses its socket and its
+  streams. The drill records what the consumer does and what the
+  operator does when it comes back, which is the same question
+  milestone 57's drill asks about Weston.
+
+## Open questions
+
+* **Siblings or one operator.** The display operator and the audio
+  operator claim two devices of one machine, publish two halves of one
+  monitor, and are paired by a constraint that only exists because they
+  are separate. One operator claiming both, publishing a screen device
+  with its audio attributes on it, would need no constraint at all. It
+  would also put Weston and PipeWire in one image and one restart
+  domain, and it would give a machine with speakers and no monitors
+  nothing to run. Keeping them separate is the current answer, and the
+  cost is the shared attribute domain that the pairing section defines.
+* **Sharing semantics.** PipeWire mixes streams, so an audio sink can
+  serve several consumers, which a monitor cannot. DRA can express it:
+  `allowMultipleAllocations` on a device marks it as allocatable to
+  more than one request, and its feature gate `DRAConsumableCapacity`
+  is beta and on by default in v1.36 (`pkg/features/kube_features.go`,
+  release-1.36). liken already uses the field for the audio controller.
+  The proposal here is exclusive by default anyway, for the one-owner
+  clarity the other two operators have, and because a claim on a shared
+  sink gives a workload no say over what else plays through it. A
+  second, shared DeviceClass over the same devices is the obvious
+  extension, and it is not part of this milestone.
+* **The analog jack on a machine that uses none.** Every HDA controller
+  has an analog output, and most machines in the fleet have nothing
+  plugged into it. Publishing it costs a device in every slice that
+  nothing will ever claim. The jack detection nodes say whether
+  something is plugged in, so the operator can publish the jack only
+  when it is occupied, at the cost of a device that appears and
+  disappears with a cable.
+* **How exclusive the raw claim is.** The controller claim section
+  states the choice: change liken's audio device to exclusive, or
+  accept that a second pod can hold the card alongside the operator.
+  The first one is a change to liken and belongs to liken's own
+  milestone list, not to this repository's operator.

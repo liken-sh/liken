@@ -14,7 +14,7 @@ A document's directory states its status:
   built yet.
 
 The numbers run in one sequence across all three directories. The next
-milestone is 59.
+milestone is 60.
 
 [`open-problems/`](open-problems/) holds the questions that liken owes
 an answer to. Those documents carry no number, because nobody has
@@ -213,6 +213,12 @@ decided yet what work they become.
   and publishes each paired controller as a device named by its MAC
   address, so a pod receives one controller's evdev node and nothing
   else.
+* **59.** [The audio operator](59-the-audio-operator.md) —
+  `audio.liken.sh` claims the audio controller, runs PipeWire, and
+  publishes one device for each physical output, with each HDMI output
+  carrying the monitor identity its ELD block names. Its delivery is
+  the PipeWire socket and a target sink, and one claim pairs a screen
+  with that screen's speakers across the two drivers.
 
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.

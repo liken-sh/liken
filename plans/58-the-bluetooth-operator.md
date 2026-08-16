@@ -220,7 +220,11 @@ controllers.
   can offer pairing. Whether it should is open: a pairing API is a
   privileged operation on a radio that reaches past the house walls,
   and the alternative is a one-time pairing done by a person with a
-  short-lived pod.
+  short-lived pod. The leaning is a CRD in a later iteration: a person
+  creates a pairing-request resource, the operator opens a pairing
+  window, and the resource's status reports the result. The first
+  release ships without it, and a person pairs by hand in the
+  operator's pod.
 * **Where the drill runs.** `liken-1` is the testbed and it has the
   hardware nearby. It is also where milestone 57's drill runs. Whether
   the two share the machine, or this drill moves to a machine with no
