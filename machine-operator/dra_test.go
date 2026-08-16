@@ -163,13 +163,13 @@ func TestInventoryGivesOneCardsDevicesOneAddress(t *testing.T) {
 	}
 }
 
-func TestInventorySharesAnAudioController(t *testing.T) {
+func TestInventoryPublishesAnAudioControllerExclusively(t *testing.T) {
 	// The HDA controller on the testbed, with the nodes its sysfs
 	// subtree holds: the card's own nodes, and the input device that
-	// ALSA registers for each HDMI jack the codec can sense. A card
-	// holds several PCM subdevices, and ALSA gives each one to a
-	// single opener, so two pods can hold this device and play through
-	// different outputs.
+	// ALSA registers for each HDMI jack the codec can sense. The card
+	// is exclusive because one sound server owns every PCM on it, and
+	// a second claimant should wait in the scheduler rather than meet
+	// EBUSY at play time.
 	devices := inventoryDevices([]hardware.Device{
 		{Bus: "pci", Address: "0000:00:1f.3", Driver: "snd_hda_intel", Class: "multimedia",
 			Name: "Alder Lake-N PCH High Definition Audio"},
@@ -182,8 +182,8 @@ func TestInventorySharesAnAudioController(t *testing.T) {
 	if len(devices) != 1 {
 		t.Fatalf("devices = %+v, want the controller", devices)
 	}
-	if devices[0].AllowMultipleAllocations == nil || !*devices[0].AllowMultipleAllocations {
-		t.Error("a card's subdevices divide between claims")
+	if devices[0].AllowMultipleAllocations != nil && *devices[0].AllowMultipleAllocations {
+		t.Error("an audio controller belongs to one claim")
 	}
 	if got := devices[0].Attributes["subsystem"].String; got == nil || *got != "sound" {
 		t.Errorf("subsystem = %v, want sound", got)

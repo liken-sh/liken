@@ -93,14 +93,14 @@ func TestPublishOmitsTheDisplayCompanionWithoutACardNode(t *testing.T) {
 	}
 }
 
-func TestPublishSharesAnAudioController(t *testing.T) {
+func TestPublishKeepsAnAudioControllerExclusive(t *testing.T) {
 	// The HDA controller on the testbed, with the shape sysfs gives
 	// it: ALSA's own nodes under the card, and one input device for
 	// each HDMI jack the codec can sense. Both kinds belong to the
-	// card, so the controller publishes as one shareable device that
-	// delivers the whole subtree. ALSA gives each PCM subdevice to the
-	// process that opened it and refuses the second open, so two pods
-	// play through different outputs at once.
+	// card, so the controller publishes as one exclusive device that
+	// delivers the whole subtree. One sound server owns every PCM on
+	// the card, so a second claimant waits in the scheduler instead
+	// of meeting EBUSY at play time.
 	published := publishDevices(hardware.Device{}, hardware.Delivery{Nodes: []hardware.DeliveredNode{
 		{Path: "/dev/snd/controlC0", Subsystem: "sound"},
 		{Path: "/dev/snd/hwC0D2", Subsystem: "sound"},
@@ -117,15 +117,15 @@ func TestPublishSharesAnAudioController(t *testing.T) {
 	if p.Suffix != "" || p.Subsystem != "sound" || p.RenderNode || p.DisplayNode {
 		t.Errorf("p = %+v", p)
 	}
-	if !p.Shareable {
-		t.Error("a card's subdevices divide between claims")
+	if p.Shareable {
+		t.Error("an audio controller belongs to one claim")
 	}
 	if len(p.Nodes) != 6 {
 		t.Errorf("nodes = %v, want the whole delivery, jack nodes with the card", p.Nodes)
 	}
 }
 
-func TestPublishSharesAUSBAudioInterface(t *testing.T) {
+func TestPublishKeepsAUSBAudioInterfaceExclusive(t *testing.T) {
 	// A USB audio interface delivers ALSA's nodes and nothing else,
 	// because its control endpoints are a separate USB interface, and
 	// the walk stops at a nested bus device. One kind is still a card.
@@ -141,8 +141,8 @@ func TestPublishSharesAUSBAudioInterface(t *testing.T) {
 		t.Fatalf("published = %+v, want one device", published)
 	}
 	p := published[0]
-	if p.Subsystem != "sound" || !p.Shareable {
-		t.Errorf("p = %+v, want a shareable sound device", p)
+	if p.Subsystem != "sound" || p.Shareable {
+		t.Errorf("p = %+v, want an exclusive sound device", p)
 	}
 	if !slices.Contains(p.Nodes, "/dev/bus/usb/001/006") {
 		t.Errorf("nodes = %v, want the usbfs node with the card", p.Nodes)

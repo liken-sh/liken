@@ -22,18 +22,13 @@ What the nodes do not say is which output is which. An Intel N95 with
 two monitors publishes one audio device that carries `pcmC0D3p`,
 `pcmC0D7p`, `pcmC0D8p`, and an analog PCM, and nothing in that list
 says which one plays into the kitchen monitor's speakers. A workload
-that must play into one monitor's speakers has two ways to get them
-today, and both are wrong.
-
-* **Claim the controller and open a PCM by number.** The pod receives
-  every PCM on the card. It must find the right device number itself,
-  and the number it finds on one machine names different hardware on
-  the next one. Nothing stops it from opening the wrong output.
-* **Let several pods share the controller.** liken publishes the audio
-  device with `AllowMultipleAllocations` set, so this is what happens
-  now (`machine-operator/dra.go`). ALSA arbitrates one PCM subdevice at
-  a time and returns `EBUSY` on the second open, so nothing is damaged,
-  and nothing states which claim gets which output either.
+that must play into one monitor's speakers has one way to get them
+today, and it is wrong: claim the controller and open a PCM by
+number. The claim is exclusive, so the pod takes every output on the
+card to play through one. It must find the right device number
+itself, and the number it finds on one machine names different
+hardware on the next one. Nothing stops it from opening the wrong
+output.
 
 One fact governs the design: which PCM plays into which monitor is a
 fact that only a running daemon reads. It comes from the ELD, the
@@ -79,36 +74,23 @@ takes, which milestone 56 lists.
 
 ## The controller claim
 
-The operator acquires the audio controller through a claim against
-liken's driver, which is milestone 56's arbitration rule. One thing
-about that claim is different from the other two instances, and it has
-to be decided before this milestone is built.
+The operator acquires the audio controller through an ordinary
+exclusive claim against liken's driver, which is milestone 56's
+arbitration rule.
 
-liken publishes the audio controller as shareable. `publishAudio` sets
-`Shareable: true`, and `dra.go` turns that into
-`allowMultipleAllocations: true` on the slice device. The reason is in
-the code comment: ALSA multiplexes the card, two claims can play
-through different outputs at once, and over-sharing fails visibly with
-`EBUSY`. That reasoning holds for a machine with no operator on it. On
-a machine that runs this operator, the operator is the one program that
-should have the card open, and a shareable device cannot say so.
-
-Two ways out, and this milestone must pick one.
-
-* **Change liken's audio policy.** Publish the controller exclusively,
-  the way the display device and the Bluetooth adapter publish. It
-  costs the case the comment names: two pods playing through two PCMs
-  of one card with no operator between them.
-* **Accept a shared raw device.** The operator takes a claim on a
-  device that a second pod may also claim, and ALSA's `EBUSY` stays the
-  whole of the arbitration below it. The operator's own devices are
-  still exclusive, so a consumer that goes through the operator is
-  arbitrated. A pod that goes around the operator is not.
-
-Milestone 56's rule is that the raw claim is the arbitration, so the
-first option is the one that matches the pattern. It is a change to
-liken, not to the operator, which is why it is called out here rather
-than assumed.
+The exclusivity was a decision this milestone forced. liken published
+the controller as shareable at first, because ALSA gives each PCM
+subdevice to one opener and refuses a second open with `EBUSY`, so
+two direct claims could play through different outputs of one card.
+The sharing lost on two counts. In practice one sound server owns the
+card and mixes every stream through it, so the shared case never
+happens. And two claims sharing a card have no contract over which
+claim gets which output, so the `EBUSY` arrived at play time, on
+whichever pod opened second, instead of in the scheduler where a
+person can see a claim wait. `publishAudio` in
+`machine-operator/publishing.go` publishes the controller exclusively
+now, the way the display device and the Bluetooth adapter publish,
+and the operator's claim is the whole of the arbitration.
 
 The delivery sets stay disjoint with no rule needed. liken delivers the
 card's nodes, and the operator delivers no node at all, which the
@@ -329,8 +311,3 @@ is also where milestone 57's drill runs.
   something is plugged in, so the operator can publish the jack only
   when it is occupied, at the cost of a device that appears and
   disappears with a cable.
-* **How exclusive the raw claim is.** The controller claim section
-  states the choice: change liken's audio device to exclusive, or
-  accept that a second pod can hold the card alongside the operator.
-  The first one is a change to liken and belongs to liken's own
-  milestone list, not to this repository's operator.

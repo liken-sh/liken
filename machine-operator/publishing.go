@@ -256,24 +256,25 @@ func publishGraphics(byKind map[string][]string, kinds []string) []publishedDevi
 	return published
 }
 
-// publishAudio publishes one audio controller as one shareable
+// publishAudio publishes one audio controller as one exclusive
 // device that delivers its whole subtree.
 //
-// ALSA multiplexes the card. A card holds several PCM subdevices, the
-// core gives each one to the process that opened it and refuses a
-// second open of the same subdevice with EBUSY, and the control node
-// answers every opener. So two claims on one controller play through
-// different outputs at the same time, which is what the HDMI outputs
-// of a display controller are. Over-sharing here fails the way a
-// person can see: the second open returns EBUSY, and no stream is
-// damaged by the attempt.
+// The card is exclusive for the same reason the display node is: in
+// practice one program owns it. A sound server such as PipeWire opens
+// the card's PCMs and mixes every stream through them, and an
+// exclusive device makes a second claimant wait in the scheduler,
+// where a person can see it wait. ALSA itself would tolerate sharing,
+// because the core gives each PCM subdevice to one opener and refuses
+// a second open with EBUSY. But two claims sharing a card have no
+// contract over which claim gets which output, so the EBUSY arrives
+// at play time instead of at scheduling time, on whichever pod opened
+// second.
 //
 // The jack nodes are delivered with the card, not split off. An i2c
 // bus is a wire to separate hardware, and the split withholds it. A
 // jack belongs to the outputs the same claim already plays through,
 // and reading its state tells a player whether a display is
-// connected. An event node serves many readers, so it shares the same
-// way the card does.
+// connected.
 //
 // The device names sound as its subsystem, because that is the kind a
 // deployment selects an audio controller by. The jack nodes ride
@@ -282,7 +283,6 @@ func publishAudio(delivery hardware.Delivery) []publishedDevice {
 	return []publishedDevice{{
 		Subsystem: "sound",
 		Nodes:     delivery.DevNodes(),
-		Shareable: true,
 	}}
 }
 
