@@ -104,18 +104,24 @@ instead.
   where the hardware is. No node selector states it, and no label has
   to be maintained.
 * **Cardinality.** The unit is one operator for each adapter or each
-  graphics device, not one for each cluster. A Deployment with a
+  graphics device, not one for each cluster. A workload with a
   ResourceClaimTemplate against the raw device's DeviceClass and
-  `replicas: N` says that. The raw devices are exclusive, so each
+  `replicas: N` says that: a Deployment when the operator holds no
+  state, a StatefulSet when each replica carries a volume, which is
+  what the Bluetooth operator's bonds need. The raw devices are exclusive, so each
   replica's claim allocates a distinct one, and the scheduler spreads
   the replicas to wherever the hardware is. A replica past the number
   of devices parks Pending and costs nothing. Nobody writes down which
   machine has the radio.
 
-Deleting the workload is the whole of the retraction, and it leaves
-every machine publishing exactly what it publishes now. The operator's
-devices leave with its slices, and liken's own inventory never changed
-while it ran.
+Deleting the workload stops the operator, and liken's own inventory
+never changed while it ran. The operator's slices outlive it: a slice
+delete must not couple to the pod's shutdown, because the shutdown
+signal cannot tell a rollout from a removal, and a restart must never
+delete a device while a claim holds it. The Node owner reference on
+each slice removes it with a dead node, and a permanent removal is
+two deletes, the workload and the slice, which each operator's README
+states by name.
 
 ## The raw claim is the arbitration
 
