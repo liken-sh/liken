@@ -139,7 +139,12 @@ asked for it.
 
 A controller that disconnects takes milestone 56's taint path, with
 `tolerationSeconds` on the consumer's claim deciding how long a radio
-may be silent before the pod ends.
+may be silent before the pod ends. The taint is stricter than
+bluetoothd's word: it applies when bluetoothd reports a disconnect,
+and also when the controller registers no evdev node, because a
+session can be up and mute. The lab met one: the ACL alive, BlueZ
+answering `Connected: yes`, and no input device on the machine. The
+taint tracks what a claim can deliver, not what bluetoothd believes.
 
 ## Events, not polling
 
