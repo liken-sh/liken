@@ -70,6 +70,10 @@ with an identical dongle in the same port, the device name does not
 change, which is what a claim on the adapter on that port needs. To
 select one physical unit instead, select on its `serial` attribute.
 
+A constraint pairs the requests of a claim by an attribute, and never
+by name. The address is also an attribute, `address`, so a claim can
+constrain two requests to one physical device.
+
 ## Attributes
 
 Every attribute belongs to the driver's domain, so a selector reads
@@ -80,11 +84,13 @@ not have an attribute, the attribute is absent, not empty. Thus
 | Attribute | Type | What it is |
 |---|---|---|
 | `bus` | string | `pci` or `usb` |
+| `address` | string | the device's address on that bus: `0000:00:02.0` on PCI, the port path on USB. Every device liken publishes for one physical device carries the same address |
 | `driver` | string | the name of the bound driver, such as `i915` |
 | `class` | string | the type of device, in one word: `display`, `multimedia`, `serial-bus` |
 | `classCode` | string | the full class code that the bus published: six hex digits on PCI, two on USB |
-| `subsystem` | string | the type of node that a claim supplies, when all the nodes agree: `drm`, `tty` |
+| `subsystem` | string | the kind of device that liken published: `drm`, `sound`, `tty`. It is absent when the delivery is a mix that liken does not know |
 | `renderNode` | bool | the device supplies a DRM render node |
+| `displayNode` | bool | the device supplies a DRM card node, which carries modesetting |
 | `name` | string | the name of the device in words, from its own strings or from the PCI database |
 | `modalias` | string | the identifier that the kernel uses to match drivers |
 | `serial` | string | the serial number of the hardware, when it has one |
@@ -97,6 +103,14 @@ correct across a fleet of different machines. `vendor` and `product`
 give one model, and a DeviceClass that uses them stops working on the
 next machine that you buy.
 
+`address` is the attribute that pairs devices. Two cards in one
+machine have different addresses, and every device liken publishes for
+one card carries that card's address. So a claim with a request for a
+render node and a request for a card node constrains the two with
+`matchAttribute: liken.sh/address`, and both requests get halves of
+the same card. The
+[guide](/docs/guides/devices/#two-requests-one-card) has the claim.
+
 liken publishes no capability facts that need a driver stack to
 measure, for example the codecs that a GPU can encode. To read those
 facts, you must run libva and a vendor driver, which the image does
@@ -108,27 +122,62 @@ them for itself, so the operating system does not publish them.
 liken allocates a device to one claim, unless liken publishes
 `allowMultipleAllocations` for that device. A device's subtree can
 deliver nodes of more than one kernel subsystem. When it does, liken
-can publish more than one device for it, one for each kind of node.
-The name of each extra device is the primary device's name plus the
-subsystem. A claim receives the nodes of the one published device it
-allocated, and no others.
+can publish more than one device for it, one for each kind of node. A
+GPU splits again, because its render node and its card node give
+different authority over the same silicon. The name of each extra
+device is the primary device's name plus a suffix. A claim receives
+the nodes of the one published device it allocated, and no others.
 
-liken publishes `allowMultipleAllocations` on a graphics device only.
-A graphics device is one that delivers a DRM render node, and the
-published graphics device delivers only the `/dev/dri` nodes. A GPU
-driver registers i2c monitor-control buses. These publish as their
-own device, with `subsystem: i2c-dev`. That device stays exclusive.
-An i2c node passes raw transfers to every device on its wire, and two
-writers on one wire have no arbitration contract. A DisplayPort output
-also registers a DisplayPort AUX channel, with `subsystem:
-drm_dp_aux_dev`. This node publishes the same way, as its own
-exclusive device, and it exists only while a display is connected. The
-legacy framebuffer node is not delivered at all: holding it grants
-display takeover, and no workload claims a bare framebuffer.
+liken publishes `allowMultipleAllocations` for two kinds of device.
 
-A device that delivers one kind of node publishes as one device. A
-device that delivers a mix that liken does not know publishes whole
-and exclusive, and names no `subsystem`.
+The first is the graphics half of a GPU. A graphics device is one
+that delivers a DRM render node, and the published graphics device
+delivers that render node, `/dev/dri/renderD*`. It carries
+`renderNode: true`. The driver arbitrates between concurrent clients
+on a render node, so more than one claim can hold it.
+
+The second is an audio controller: a device that delivers ALSA's
+nodes, and no nodes except the ones a sound card holds. It carries
+`subsystem: sound`. ALSA gives each PCM subdevice of a card to the
+process that opened it, and refuses a second open of the same
+subdevice. A card holds several subdevices, so two claims on one
+controller can play through different outputs at the same time.
+
+A claim on an audio controller delivers the card's whole subtree,
+which is more than the `/dev/snd` nodes. ALSA registers an input
+device for each jack that it can sense, and an HDA controller with
+HDMI outputs has one for each display pin, so the claim also delivers
+those `/dev/input/event*` nodes. A jack reports the state of an
+output that the same claim plays through, so it is not a separate
+device. An event node serves more than one reader, so it shares as
+the card does.
+
+A GPU publishes its card node, `/dev/dri/card*`, as a separate
+device. The name of that device is the primary name plus `-display`,
+and it carries `displayNode: true`. This device is exclusive, because
+DRM master is one for each card: the kernel gives modesetting to one
+open card node, and a second display program on the same card fails
+when it starts. An exclusive device makes the second claim wait in
+the scheduler instead, where a person can see it wait. A workload
+that modesets and also renders claims both devices, with one request
+for each. On a machine with two cards, a constraint of
+`matchAttribute: liken.sh/address` on those two requests keeps both on
+one card.
+
+A GPU driver also registers i2c monitor-control buses. These publish
+as their own device, with `subsystem: i2c-dev`. That device stays
+exclusive. An i2c node passes raw transfers to every device on its
+wire, and two writers on one wire have no arbitration contract. A
+DisplayPort output also registers a DisplayPort AUX channel, with
+`subsystem: drm_dp_aux_dev`. This node publishes the same way, as its
+own exclusive device, and it exists only while a display is
+connected. The legacy framebuffer node is not delivered at all:
+holding it grants display takeover, and no workload claims a bare
+framebuffer.
+
+A device that delivers one kind of node publishes as one device,
+unless it is a GPU. A device that delivers a mix that liken does not
+know publishes whole and exclusive, and names no `subsystem`.
 
 A DRM render node has a multiplexing contract in the kernel: the
 driver arbitrates between concurrent clients. A drill measured this

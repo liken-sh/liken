@@ -61,9 +61,9 @@ var draNaming = sync.OnceValue(func() *hardware.PCIIDs {
 
 // maxSliceDevices is the API's limit on devices in one
 // ResourceSlice. One slice per node is enough: a physical device
-// publishes at most a primary and one companion, so a busy server's
-// dozens of physical devices become at most twice as many published
-// devices, still far under the limit of 128. If a machine ever
+// publishes a primary and a few companions, four in the widest shape
+// the fleet has met, so a busy server's dozens of physical devices
+// stay far under the limit of 128. If a machine ever
 // exceeds this limit, the operator drops the overflow and reports
 // it, rather than splitting devices across slices. This will change
 // if real hardware needs the multi-slice pool protocol.
@@ -172,8 +172,18 @@ func inventoryDevices(discovered []hardware.Device,
 			// says. Every published device carries its physical parent's
 			// identifying attributes: the companion is the same silicon,
 			// the same driver, and the same address as its primary.
+			//
+			// The address is also what pairs one physical device's
+			// published devices back together. On a machine with two
+			// GPUs, a claim that asks for a render node and a card node
+			// constrains its two requests with matchAttribute, and
+			// matchAttribute reads an attribute, never a name. The
+			// address is equal across the devices of one card and
+			// different across cards, so it is the fact that constraint
+			// needs.
 			for name, value := range map[string]string{
 				"bus":       d.Bus,
+				"address":   d.Address,
 				"driver":    d.Driver,
 				"class":     d.Class,
 				"classCode": d.ClassCode,
@@ -196,6 +206,14 @@ func inventoryDevices(discovered []hardware.Device,
 			// the monitor buses by mistake.
 			if p.RenderNode {
 				attrs["renderNode"] = kubernetes.AttrBool(true)
+			}
+			// A display node is the other fact a workload selects on: the
+			// card node that carries modesetting authority, which a
+			// player or a kiosk needs and a transcoder never does. The two
+			// facts are exclusive of each other, so a DeviceClass that
+			// asks for one can never allocate the other by mistake.
+			if p.DisplayNode {
+				attrs["displayNode"] = kubernetes.AttrBool(true)
 			}
 			device := kubernetes.SliceDevice{
 				Name:       deviceName(d) + p.Suffix,

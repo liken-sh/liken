@@ -7,6 +7,7 @@ package main
 // Each test has a case that refuses its counterexample.
 
 import (
+	"maps"
 	"testing"
 
 	"github.com/liken-sh/liken/hardware"
@@ -40,6 +41,7 @@ func TestInventoryPublishesDrivenDeliverableDevices(t *testing.T) {
 	}
 	want := map[string]string{
 		"bus":      "usb",
+		"address":  "2-1:1.0",
 		"driver":   "uas",
 		"class":    "mass-storage",
 		"name":     "QEMU QEMU USB HARDDRIVE",
@@ -78,10 +80,26 @@ func TestInventorySplitsTheGPUAndSharesTheGraphicsHalf(t *testing.T) {
 	discovered, inspect := gpu()
 	devices := inventoryDevices(discovered, inspect, nil)
 
-	if len(devices) != 2 {
-		t.Fatalf("devices = %+v, want the graphics device and its i2c companion", devices)
+	if len(devices) != 3 {
+		t.Fatalf("devices = %+v, want the graphics device, the display companion, and the i2c companion", devices)
 	}
-	graphics, i2c := devices[0], devices[1]
+	graphics, display, i2c := devices[0], devices[1], devices[2]
+
+	if display.Name != "pci-0000-00-02-0-display" {
+		t.Errorf("name = %q, want the bare name plus the display suffix", display.Name)
+	}
+	if display.AllowMultipleAllocations != nil {
+		t.Error("one card node carries modesetting authority for one process")
+	}
+	if display.Attributes["displayNode"].Bool == nil || !*display.Attributes["displayNode"].Bool {
+		t.Error("a display node is the fact a player selects on")
+	}
+	if _, ok := display.Attributes["renderNode"]; ok {
+		t.Error("the display companion delivers no render node")
+	}
+	if _, ok := graphics.Attributes["displayNode"]; ok {
+		t.Error("the graphics device delivers no card node")
+	}
 
 	if graphics.Name != "pci-0000-00-02-0" {
 		t.Errorf("name = %q, want the bare name, so an existing allocation stays valid", graphics.Name)
@@ -110,6 +128,68 @@ func TestInventorySplitsTheGPUAndSharesTheGraphicsHalf(t *testing.T) {
 	}
 	if got := i2c.Attributes["driver"].String; got == nil || *got != "i915" {
 		t.Errorf("driver = %v, want the parent's identifying attributes", got)
+	}
+}
+
+func TestInventoryGivesOneCardsDevicesOneAddress(t *testing.T) {
+	// Two GPUs in one machine. A claim that asks for a render node and
+	// a card node pairs its requests with a matchAttribute constraint,
+	// and a constraint reads an attribute, never a name. Every device
+	// published from one card carries that card's address, and the
+	// second card carries its own.
+	discovered, inspect := gpu()
+	discovered = append(discovered, hardware.Device{
+		Bus: "pci", Address: "0000:03:00.0", Driver: "amdgpu", Class: "display",
+		ClassCode: "030000", Name: "Navi 23 [Radeon RX 6600]", Vendor: "1002", Product: "73ff",
+	})
+	devices := inventoryDevices(discovered, inspect, nil)
+
+	addresses := map[string]string{}
+	for _, d := range devices {
+		if got := d.Attributes["address"].String; got != nil {
+			addresses[d.Name] = *got
+		}
+	}
+	want := map[string]string{
+		"pci-0000-00-02-0":         "0000:00:02.0",
+		"pci-0000-00-02-0-display": "0000:00:02.0",
+		"pci-0000-00-02-0-i2c-dev": "0000:00:02.0",
+		"pci-0000-03-00-0":         "0000:03:00.0",
+		"pci-0000-03-00-0-display": "0000:03:00.0",
+		"pci-0000-03-00-0-i2c-dev": "0000:03:00.0",
+	}
+	if !maps.Equal(addresses, want) {
+		t.Errorf("addresses = %v, want every device of a card to carry that card's own address", addresses)
+	}
+}
+
+func TestInventorySharesAnAudioController(t *testing.T) {
+	// The HDA controller on the testbed, with the nodes its sysfs
+	// subtree holds: the card's own nodes, and the input device that
+	// ALSA registers for each HDMI jack the codec can sense. A card
+	// holds several PCM subdevices, and ALSA gives each one to a
+	// single opener, so two pods can hold this device and play through
+	// different outputs.
+	devices := inventoryDevices([]hardware.Device{
+		{Bus: "pci", Address: "0000:00:1f.3", Driver: "snd_hda_intel", Class: "multimedia",
+			Name: "Alder Lake-N PCH High Definition Audio"},
+	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{
+		{Path: "/dev/snd/controlC0", Subsystem: "sound"},
+		{Path: "/dev/snd/pcmC0D3p", Subsystem: "sound"},
+		{Path: "/dev/input/event16", Subsystem: "input"},
+	}}), nil)
+
+	if len(devices) != 1 {
+		t.Fatalf("devices = %+v, want the controller", devices)
+	}
+	if devices[0].AllowMultipleAllocations == nil || !*devices[0].AllowMultipleAllocations {
+		t.Error("a card's subdevices divide between claims")
+	}
+	if got := devices[0].Attributes["subsystem"].String; got == nil || *got != "sound" {
+		t.Errorf("subsystem = %v, want sound", got)
+	}
+	if _, ok := devices[0].Attributes["renderNode"]; ok {
+		t.Error("an audio controller has no render node")
 	}
 }
 

@@ -178,7 +178,7 @@ func (f *draFixture) addGPU(t *testing.T) {
 	}
 }
 
-func TestPrepareDeliversOnlyTheGraphicsHalfOfAGPU(t *testing.T) {
+func TestPrepareDeliversOnlyTheRenderNodeOfAGPU(t *testing.T) {
 	fixture := newDRAFixture(t)
 	fixture.addGPU(t)
 	fixture.allocated = "pci-0000-00-02-0"
@@ -206,8 +206,43 @@ func TestPrepareDeliversOnlyTheGraphicsHalfOfAGPU(t *testing.T) {
 		paths = append(paths, n.Path)
 	}
 	slices.Sort(paths)
-	if !slices.Equal(paths, []string{"/dev/dri/card0", "/dev/dri/renderD128"}) {
-		t.Errorf("paths = %v, want the dri nodes and no monitor bus", paths)
+	if !slices.Equal(paths, []string{"/dev/dri/renderD128"}) {
+		t.Errorf("paths = %v, want the render node, with no card node and no monitor bus", paths)
+	}
+}
+
+func TestPrepareDeliversTheCardNodeForTheDisplayName(t *testing.T) {
+	// A claim on the display companion receives the card node, which
+	// carries modesetting authority, and nothing else. A workload that
+	// modesets and renders holds both devices, one request each.
+	fixture := newDRAFixture(t)
+	fixture.addGPU(t)
+	fixture.allocated = "pci-0000-00-02-0-display"
+
+	resp, err := fixture.plugin.NodePrepareResources(t.Context(), &drav1.NodePrepareResourcesRequest{
+		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if answer := resp.Claims["claim-1"]; answer == nil || answer.Error != "" {
+		t.Fatalf("answer = %+v", answer)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(fixture.cdi, "liken.sh-claim-1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec cdiSpec
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		t.Fatal(err)
+	}
+	var paths []string
+	for _, n := range spec.Devices[0].ContainerEdits.DeviceNodes {
+		paths = append(paths, n.Path)
+	}
+	if !slices.Equal(paths, []string{"/dev/dri/card0"}) {
+		t.Errorf("paths = %v, want the card node alone", paths)
 	}
 }
 

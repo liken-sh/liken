@@ -22,6 +22,7 @@ Each entry is one device you can claim:
     - name: pci-0000-00-02-0
       allowMultipleAllocations: true
       attributes:
+        address: {string: "0000:00:02.0"}
         bus: {string: pci}
         class: {string: display}
         classCode: {string: "030000"}
@@ -32,8 +33,22 @@ Each entry is one device you can claim:
         renderNode: {bool: true}
         subsystem: {string: drm}
         vendor: {string: "8086"}
+    - name: pci-0000-00-02-0-display
+      attributes:
+        address: {string: "0000:00:02.0"}
+        bus: {string: pci}
+        class: {string: display}
+        classCode: {string: "030000"}
+        displayNode: {bool: true}
+        driver: {string: i915}
+        modalias: {string: "pci:v00008086d000046D2..."}
+        name: {string: Alder Lake-N [UHD Graphics]}
+        product: {string: 46d2}
+        subsystem: {string: drm}
+        vendor: {string: "8086"}
     - name: pci-0000-00-02-0-i2c-dev
       attributes:
+        address: {string: "0000:00:02.0"}
         bus: {string: pci}
         class: {string: display}
         classCode: {string: "030000"}
@@ -44,13 +59,22 @@ Each entry is one device you can claim:
         subsystem: {string: i2c-dev}
         vendor: {string: "8086"}
 
-This machine publishes two devices for one GPU. i915 registers an
-i2c monitor-control bus for each display output, and those buses are
-not graphics nodes, so liken publishes them as their own device. A
-claim on `pci-0000-00-02-0` delivers the `/dev/dri` nodes only, and
-more than one claim can allocate it. The device
-`pci-0000-00-02-0-i2c-dev` allocates to one claim at a time, and that
-claim receives the monitor buses.
+This machine publishes three devices for one GPU.
+
+* `pci-0000-00-02-0` delivers the render node,
+  `/dev/dri/renderD128`. More than one claim can allocate it, so
+  several workloads encode, decode, and compute on this GPU at the
+  same time.
+* `pci-0000-00-02-0-display` delivers the card node,
+  `/dev/dri/card0`, which carries modesetting. One claim allocates it,
+  because one process at a time can drive a display.
+* `pci-0000-00-02-0-i2c-dev` delivers the i2c monitor-control buses
+  that i915 registers for each display output. One claim allocates it,
+  because those buses are raw wires.
+
+All three carry the same `address`, because they are one card. A claim
+uses that to ask for halves of the same GPU. See
+[Two requests, one card](#two-requests-one-card).
 
 If the hardware you expect is not in the list, no driver is bound to
 it. Look at the hardware the machine reports that it cannot drive:
@@ -98,9 +122,13 @@ with `has()` before you read it. The Kubernetes API treats an
 unguarded read of a missing attribute as an evaluation error, and an
 evaluation error aborts the whole allocation.
 
-Do not select on `driver` alone. The i2c companion device carries the
-same `driver` attribute. It carries no `renderNode`, and a class that
-matches both can allocate the monitor buses to your transcoder.
+Do not select on `driver` alone, and do not select on `subsystem`
+alone. Every device that liken publishes for one GPU carries the same
+`driver`, and the card node carries the same `subsystem: drm` as the
+render node. A class that matches more than one of them can allocate
+the monitor buses, or the display, to your transcoder. `renderNode`
+is the fact that names the half you want, and only that half carries
+it.
 
 This class matches any GPU with a DRM render node, on any machine in
 the fleet. A selector that asks for a vendor and a product ID names
@@ -142,10 +170,10 @@ names the pod's entry:
                   - name: gpu
 
 The container receives every node the published device delivers. For
-the GPU above, that is `/dev/dri/card0` and `/dev/dri/renderD128`
-only. The `/dev/i2c-*` monitor-control nodes belong to the companion
-device, `pci-0000-00-02-0-i2c-dev`, which needs its own claim.
-Nothing else changes: no privilege, and no host mount. Your image supplies the
+the GPU above, that is `/dev/dri/renderD128` only. The card node and
+the `/dev/i2c-*` monitor-control nodes belong to the companion
+devices, and each companion needs its own request. Nothing else
+changes: no privilege, and no host mount. Your image supplies the
 userspace driver, and the image's user must be able to open the node.
 Check what the container received:
 
@@ -162,6 +190,80 @@ strategy. A rolling update runs the old pod and the new pod at once,
 both name the same claim, and Kubernetes gives a claim's device to
 every pod that names the claim. `Recreate` stops the old pod first,
 so one pod holds the device at a time.
+
+### A workload that drives a display
+
+A player or a kiosk sets the video mode, so it needs the card node as
+well. Write a second `DeviceClass` for the display half:
+
+    apiVersion: resource.k8s.io/v1
+    kind: DeviceClass
+    metadata:
+      name: gpu-display
+    spec:
+      selectors:
+        - cel:
+            expression: |
+              device.driver == "liken.sh" &&
+              has(device.attributes["liken.sh"].displayNode)
+
+Then put both requests in one claim. The container receives the nodes
+of both devices:
+
+    apiVersion: resource.k8s.io/v1
+    kind: ResourceClaim
+    metadata:
+      name: player-gpu
+      namespace: media
+    spec:
+      devices:
+        requests:
+          - name: render
+            exactly:
+              deviceClassName: gpu-render
+          - name: display
+            exactly:
+              deviceClassName: gpu-display
+
+The display device allocates to one claim, so a second player waits
+until the first claim ends. This is the correct behavior: the kernel
+gives modesetting to one process for each card, and a second player
+that started would fail when it opened the card node.
+
+Sound is a third device, and a different one: the audio controller
+has its own PCI address, so a player that plays HDMI audio adds a
+request for it. That device is shareable, so a second player does not
+wait for it.
+
+### Two requests, one card
+
+On a machine with two GPUs, the two requests above can allocate halves
+of different cards. A `constraints` block pairs them. Each constraint
+names the requests it applies to and one attribute, and the scheduler
+then allocates devices whose value for that attribute is the same.
+The attribute to use is `address`, which is the device's address on
+its bus:
+
+    spec:
+      devices:
+        requests:
+          - name: render
+            exactly:
+              deviceClassName: gpu-render
+          - name: display
+            exactly:
+              deviceClassName: gpu-display
+        constraints:
+          - requests: [render, display]
+            matchAttribute: liken.sh/address
+
+Every device that liken publishes for one card carries that card's
+address, and two cards in a machine have different addresses. The
+render node and the card node the claim allocates are now halves of
+the same GPU.
+
+Leave the audio controller out of the list. It has an address of its
+own, so a constraint that included its request would never match.
 
 ## 5. Give one pod a device alone
 

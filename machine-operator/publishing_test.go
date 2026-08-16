@@ -12,7 +12,7 @@ import (
 
 func TestPublishSplitsAGraphicsDeviceFromItsMonitorBuses(t *testing.T) {
 	// i915 registers an i2c bus for each display output, under the
-	// GPU's own sysfs directory. The GPU's drm nodes share; the raw
+	// GPU's own sysfs directory. The GPU's render node shares; the raw
 	// i2c wires do not. Each set publishes as its own device.
 	published := publishDevices(hardware.Delivery{Nodes: []hardware.DeliveredNode{
 		{Path: "/dev/dri/card0", Subsystem: "drm"},
@@ -22,21 +22,148 @@ func TestPublishSplitsAGraphicsDeviceFromItsMonitorBuses(t *testing.T) {
 		{Path: "/dev/i2c-1", Subsystem: "i2c-dev"},
 	}})
 
-	if len(published) != 2 {
-		t.Fatalf("published = %+v, want the graphics device and its i2c companion", published)
+	if len(published) != 3 {
+		t.Fatalf("published = %+v, want the render device, the display companion, and the i2c companion", published)
 	}
-	gpu, i2c := published[0], published[1]
+	gpu, display, i2c := published[0], published[1], published[2]
 	if gpu.Suffix != "" || gpu.Subsystem != "drm" || !gpu.RenderNode || !gpu.Shareable {
 		t.Errorf("gpu = %+v", gpu)
 	}
-	if !slices.Equal(gpu.Nodes, []string{"/dev/dri/card0", "/dev/dri/renderD128"}) {
-		t.Errorf("gpu nodes = %v, want the dri nodes and nothing else", gpu.Nodes)
+	if !slices.Equal(gpu.Nodes, []string{"/dev/dri/renderD128"}) {
+		t.Errorf("gpu nodes = %v, want the render node and nothing else", gpu.Nodes)
+	}
+	if display.Suffix != "-display" || display.Subsystem != "drm" || display.RenderNode || display.Shareable {
+		t.Errorf("display = %+v", display)
 	}
 	if i2c.Suffix != "-i2c-dev" || i2c.Subsystem != "i2c-dev" || i2c.RenderNode || i2c.Shareable {
 		t.Errorf("i2c = %+v", i2c)
 	}
 	if !slices.Equal(i2c.Nodes, []string{"/dev/i2c-0", "/dev/i2c-1"}) {
 		t.Errorf("i2c nodes = %v", i2c.Nodes)
+	}
+}
+
+func TestPublishSplitsTheCardNodeFromTheRenderNode(t *testing.T) {
+	// DRM master is one per card: the kernel gives modesetting
+	// authority to one open card node. The render node has no such
+	// limit. The card node publishes as an exclusive companion, so a
+	// second display workload waits in the scheduler instead of
+	// starting and failing.
+	published := publishDevices(hardware.Delivery{Nodes: []hardware.DeliveredNode{
+		{Path: "/dev/dri/card0", Subsystem: "drm"},
+		{Path: "/dev/dri/renderD128", Subsystem: "drm"},
+	}})
+
+	if len(published) != 2 {
+		t.Fatalf("published = %+v, want the render device and its display companion", published)
+	}
+	render, display := published[0], published[1]
+	if !slices.Equal(render.Nodes, []string{"/dev/dri/renderD128"}) {
+		t.Errorf("render nodes = %v, want the render node alone", render.Nodes)
+	}
+	if render.DisplayNode {
+		t.Error("the render node carries no display authority")
+	}
+	if display.Suffix != "-display" || display.Subsystem != "drm" {
+		t.Errorf("display = %+v, want the -display suffix and the drm subsystem", display)
+	}
+	if !slices.Equal(display.Nodes, []string{"/dev/dri/card0"}) {
+		t.Errorf("display nodes = %v, want the card node alone", display.Nodes)
+	}
+	if !display.DisplayNode || display.RenderNode {
+		t.Errorf("display = %+v, want the display fact and not the render fact", display)
+	}
+	if display.Shareable {
+		t.Error("two modesetting clients on one card have no arbitration contract")
+	}
+}
+
+func TestPublishOmitsTheDisplayCompanionWithoutACardNode(t *testing.T) {
+	// A device that delivers a render node and no card node has no
+	// display half to publish.
+	published := publishDevices(hardware.Delivery{Nodes: []hardware.DeliveredNode{
+		{Path: "/dev/dri/renderD128", Subsystem: "drm"},
+	}})
+
+	if len(published) != 1 {
+		t.Fatalf("published = %+v, want the render device alone", published)
+	}
+	if !published[0].Shareable || !published[0].RenderNode {
+		t.Errorf("published = %+v, want a shareable render device", published[0])
+	}
+}
+
+func TestPublishSharesAnAudioController(t *testing.T) {
+	// The HDA controller on the testbed, with the shape sysfs gives
+	// it: ALSA's own nodes under the card, and one input device for
+	// each HDMI jack the codec can sense. Both kinds belong to the
+	// card, so the controller publishes as one shareable device that
+	// delivers the whole subtree. ALSA gives each PCM subdevice to the
+	// process that opened it and refuses the second open, so two pods
+	// play through different outputs at once.
+	published := publishDevices(hardware.Delivery{Nodes: []hardware.DeliveredNode{
+		{Path: "/dev/snd/controlC0", Subsystem: "sound"},
+		{Path: "/dev/snd/hwC0D2", Subsystem: "sound"},
+		{Path: "/dev/snd/pcmC0D3p", Subsystem: "sound"},
+		{Path: "/dev/snd/pcmC0D7p", Subsystem: "sound"},
+		{Path: "/dev/input/event16", Subsystem: "input"},
+		{Path: "/dev/input/event17", Subsystem: "input"},
+	}})
+
+	if len(published) != 1 {
+		t.Fatalf("published = %+v, want one device", published)
+	}
+	p := published[0]
+	if p.Suffix != "" || p.Subsystem != "sound" || p.RenderNode || p.DisplayNode {
+		t.Errorf("p = %+v", p)
+	}
+	if !p.Shareable {
+		t.Error("a card's subdevices divide between claims")
+	}
+	if len(p.Nodes) != 6 {
+		t.Errorf("nodes = %v, want the whole delivery, jack nodes with the card", p.Nodes)
+	}
+}
+
+func TestPublishSharesAUSBAudioInterface(t *testing.T) {
+	// A USB audio interface delivers ALSA's nodes and nothing else,
+	// because its control endpoints are a separate USB interface, and
+	// the walk stops at a nested bus device. One kind is still a card.
+	published := publishDevices(hardware.Delivery{
+		Nodes: []hardware.DeliveredNode{
+			{Path: "/dev/snd/controlC1", Subsystem: "sound"},
+			{Path: "/dev/snd/pcmC1D0p", Subsystem: "sound"},
+		},
+		BusNode: "/dev/bus/usb/001/006",
+	})
+
+	if len(published) != 1 {
+		t.Fatalf("published = %+v, want one device", published)
+	}
+	p := published[0]
+	if p.Subsystem != "sound" || !p.Shareable {
+		t.Errorf("p = %+v, want a shareable sound device", p)
+	}
+	if !slices.Contains(p.Nodes, "/dev/bus/usb/001/006") {
+		t.Errorf("nodes = %v, want the usbfs node with the card", p.Nodes)
+	}
+}
+
+func TestPublishKeepsSoundExclusiveBesideAnUnexaminedKind(t *testing.T) {
+	// A card beside a kind that no examined audio controller delivers
+	// is hardware nobody has looked at. It publishes whole and
+	// exclusive, and names no subsystem, which is the milestone 38
+	// default.
+	published := publishDevices(hardware.Delivery{Nodes: []hardware.DeliveredNode{
+		{Path: "/dev/snd/controlC0", Subsystem: "sound"},
+		{Path: "/dev/ttyS4", Subsystem: "tty"},
+	}})
+
+	if len(published) != 1 {
+		t.Fatalf("published = %+v, want one whole device", published)
+	}
+	if published[0].Subsystem != "" || published[0].Shareable {
+		t.Errorf("p = %+v, want no sole subsystem and no sharing", published[0])
 	}
 }
 
@@ -55,15 +182,18 @@ func TestPublishSplitsTheDPAuxChannelAsItsOwnCompanion(t *testing.T) {
 		{Path: "/dev/drm_dp_aux0", Subsystem: "drm_dp_aux_dev"},
 	}})
 
-	if len(published) != 3 {
-		t.Fatalf("published = %+v, want the graphics device and two companions", published)
+	if len(published) != 4 {
+		t.Fatalf("published = %+v, want the graphics device and three companions", published)
 	}
-	gpu, aux, i2c := published[0], published[1], published[2]
+	gpu, display, aux, i2c := published[0], published[1], published[2], published[3]
 	if gpu.Suffix != "" || gpu.Subsystem != "drm" || !gpu.RenderNode || !gpu.Shareable {
 		t.Errorf("gpu = %+v", gpu)
 	}
-	if !slices.Equal(gpu.Nodes, []string{"/dev/dri/card0", "/dev/dri/renderD128"}) {
-		t.Errorf("gpu nodes = %v, want the dri nodes and nothing else", gpu.Nodes)
+	if !slices.Equal(gpu.Nodes, []string{"/dev/dri/renderD128"}) {
+		t.Errorf("gpu nodes = %v, want the render node and nothing else", gpu.Nodes)
+	}
+	if display.Suffix != "-display" || !slices.Equal(display.Nodes, []string{"/dev/dri/card0"}) {
+		t.Errorf("display = %+v, want the card node alone", display)
 	}
 	if aux.Suffix != "-drm-dp-aux-dev" || aux.Subsystem != "drm_dp_aux_dev" || aux.RenderNode || aux.Shareable {
 		t.Errorf("aux = %+v", aux)
@@ -89,11 +219,13 @@ func TestPublishDropsTheFramebufferFromAGraphicsDevice(t *testing.T) {
 		{Path: "/dev/fb0", Subsystem: "graphics"},
 	}})
 
-	if len(published) != 1 {
-		t.Fatalf("published = %+v, want one device", published)
+	if len(published) != 2 {
+		t.Fatalf("published = %+v, want the render device and its display companion", published)
 	}
-	if slices.Contains(published[0].Nodes, "/dev/fb0") {
-		t.Error("the framebuffer must not be delivered")
+	for _, p := range published {
+		if slices.Contains(p.Nodes, "/dev/fb0") {
+			t.Errorf("%+v: the framebuffer must not be delivered", p)
+		}
 	}
 	if !published[0].Shareable {
 		t.Error("the lab guest's drm+graphics shape must stay shareable")
@@ -197,14 +329,17 @@ func TestPublishKeepsTheUsbfsNodeOffACompanion(t *testing.T) {
 		BusNode: "/dev/bus/usb/001/007",
 	})
 
-	if len(published) != 2 {
-		t.Fatalf("published = %+v, want the graphics device and its companion", published)
+	if len(published) != 3 {
+		t.Fatalf("published = %+v, want the graphics device and its two companions", published)
 	}
 	if !slices.Contains(published[0].Nodes, "/dev/bus/usb/001/007") {
 		t.Errorf("primary nodes = %v, want the usbfs node", published[0].Nodes)
 	}
-	if !slices.Equal(published[1].Nodes, []string{"/dev/i2c-5"}) {
-		t.Errorf("companion nodes = %v, want the monitor bus alone", published[1].Nodes)
+	if !slices.Equal(published[1].Nodes, []string{"/dev/dri/card0"}) {
+		t.Errorf("display nodes = %v, want the card node alone", published[1].Nodes)
+	}
+	if !slices.Equal(published[2].Nodes, []string{"/dev/i2c-5"}) {
+		t.Errorf("companion nodes = %v, want the monitor bus alone", published[2].Nodes)
 	}
 }
 
