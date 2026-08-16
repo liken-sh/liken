@@ -353,6 +353,22 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 		}
 	}
 
+	// A reboot a person asked for, which no document requires
+	// (rebootrequest.go). It goes through the same gate as every
+	// staged document, so it takes its turn, cordons, and drains
+	// like the rest. It goes last because the gate's order decides
+	// which entry liken approve-reboot offers first, and a staged
+	// document is the more useful answer: approving it reboots the
+	// machine and satisfies the request along the way. This runs
+	// outside the cluster block above, because a standalone machine
+	// can be asked to reboot too.
+	rreq := disr.gate(c, node, nodeErr, t, now, decideRebootRequest(m, facts, t))
+	status.Conditions = api.SetCondition(status.Conditions,
+		carryOutRebootRequest(machine.OperatorRunDir, rreq, now), now)
+	if rreq.pending != nil {
+		status.Pending = append(status.Pending, *rreq.pending)
+	}
+
 	if nodeErr == nil {
 		// NodeHealthy mirrors the Node's Ready condition onto the
 		// Machine. This catches the one failure the heartbeat

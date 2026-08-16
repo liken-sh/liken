@@ -62,6 +62,13 @@ disruption stages the change, reports it in the Machine's
 `status.pending`, and waits for its turn under the cluster's
 disruption budget.
 
+A machine that agrees with every document still reboots for one
+reason: because you asked it to.
+[`liken request-reboot`](/docs/reference/cli/#liken-request-reboot)
+is that request, for a driver that bound the wrong device or a
+machine you are experimenting on. It takes the same turn, the same
+cordon, and the same drain as every other reboot.
+
 ## Releases and the channel
 
 A release is a set of files with a version such as `2026.07.20-001`.

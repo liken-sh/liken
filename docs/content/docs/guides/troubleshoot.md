@@ -127,6 +127,25 @@ the log lines that the kernel wrote as it failed:
 
     kubectl get machine <name> -o jsonpath='{.status.lastCrash}' | jq
 
+## A machine needs a reboot and nothing is staged
+
+A machine converges to its documents, so a machine that already
+matches them stages nothing and reboots for nothing. Some faults
+clear only at boot anyway. A kernel driver that bound the wrong
+device holds it until the machine restarts, and no edit takes it
+back.
+
+[`liken request-reboot`](/docs/reference/cli/#liken-request-reboot)
+asks for that boot:
+
+    ./liken request-reboot mycluster <name>
+
+The machine waits for its reboot turn, cordons, and drains, the same
+as a machine applying a staged change. If its `rebootPolicy` is
+`Manual`, it reports `RebootPending` and waits for
+[`liken approve-reboot`](/docs/reference/cli/#liken-approve-reboot).
+The `RebootRequestHonored` condition reports where the request is.
+
 ## A pod with a device claim stays Pending
 
 [Give a workload a device](/docs/guides/devices/#when-a-claim-does-not-schedule)

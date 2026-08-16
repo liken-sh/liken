@@ -856,14 +856,66 @@ const RebootApprovedCondition = "RebootApproved"
 const ApproveDisruptionAnnotation = "liken.sh/approve-disruption"
 
 // ApprovalGrants reports whether an approve-disruption annotation
-// approves the staged document with this hash. The annotation may
-// carry the full hash or a prefix of it, because every condition
-// message shows the hash in its 12-character short form and a
-// person pastes what they can see. A prefix shorter than 12
-// characters never grants: below that length a paste error could
-// match by accident.
+// approves the staged document with this hash.
 func ApprovalGrants(annotation, hash string) bool {
+	return annotationNames(annotation, hash)
+}
+
+// RequestRebootAnnotation asks a machine to reboot once, with no
+// change to apply. Every other reboot liken performs is the tail of
+// a staged document, so a machine whose documents all match its boot
+// has no way to reboot: a driver bound to the wrong device, and a
+// machine used as a testbed, both need one anyway, and the machine
+// has no shell to ask from. A person (or the liken CLI's
+// request-reboot command) sets this on the Machine, valued with the
+// identity of the boot that is running now (BootID).
+//
+// Naming the running boot is what makes the request one-shot, the
+// same construction the approve-disruption grant uses. The boot that
+// comes back has a different identity, so the annotation no longer
+// names the running boot, and a later request names that boot instead.
+// Nobody has to clear it, which matters for the same reason the
+// grant is never consumed: clearing an annotation would need patch
+// on machines, and the machine operator holds no such verb.
+//
+// The request skips none of the coordination. It gates on
+// rebootPolicy, waits for the rollout conductor's turn, and drains
+// the node, exactly as a staged document's reboot does. What it
+// skips is the staged document, and only that.
+const RequestRebootAnnotation = "liken.sh/request-reboot"
+
+// RebootRequestNames reports whether a request-reboot annotation
+// names the boot that is running now. A boot that published no time
+// has no identity, and no annotation names it.
+func RebootRequestNames(annotation, bootID string) bool {
+	return bootID != "" && annotationNames(annotation, bootID)
+}
+
+// annotationNames is the matching rule both annotations use. The
+// annotation may carry the full hash or a prefix of it, because
+// every condition message shows a hash in its 12-character short
+// form and a person pastes what they can see. A prefix shorter than
+// 12 characters never matches: below that length a paste error could
+// match by accident.
+func annotationNames(annotation, hash string) bool {
 	return len(annotation) >= 12 && strings.HasPrefix(hash, annotation)
+}
+
+// BootID is the running boot's identity: the sha256 of the moment
+// the machine booted, which is the one value in the boot record that
+// no two boots share. A request-reboot annotation names it, so a
+// request applies to one boot and to no other.
+//
+// It is a hash rather than the timestamp itself so that it reads and
+// truncates like every other identity liken hands a person: 12
+// hexadecimal characters in a condition message, in status.pending,
+// and in an annotation. A boot that published no time has no
+// identity, and this returns "".
+func BootID(boot BootStatus) string {
+	if boot.Time == nil || boot.Time.IsZero() {
+		return ""
+	}
+	return ManifestHash([]byte(boot.Time.UTC().Format(time.RFC3339Nano)))
 }
 
 // A DisruptionKind names what applies a staged document: a machine
@@ -878,11 +930,13 @@ const (
 // A PendingDisruption is one staged document waiting for its
 // disruption. The machine operator publishes one entry per gated
 // document on every pass and stores nothing between passes, like
-// the rest of status.
+// the rest of status. A reboot a person requested is an entry here
+// too, because it waits on the same policy, the same turn, and the
+// same drain; its document is the one thing it lacks.
 type PendingDisruption struct {
-	// Condition names the convergence condition that reported this
-	// entry: SpecConverged, ClusterConverged, VersionConverged, or
-	// CredentialsConverged.
+	// Condition names the condition that reported this entry:
+	// SpecConverged, ClusterConverged, VersionConverged,
+	// CredentialsConverged, or RebootRequestHonored.
 	Condition string `json:"condition"`
 
 	// Kind says what applies the staged document. A reboot applies
@@ -892,7 +946,9 @@ type PendingDisruption struct {
 
 	// Hash is the staged document's identity, the value an
 	// approve-disruption annotation names to grant this change its
-	// disruption.
+	// disruption. A requested reboot has no document, so its entry
+	// carries the running boot's identity instead (BootID), which
+	// spends itself the same way.
 	Hash string `json:"hash"`
 
 	// Summary says in one line what the document changes.

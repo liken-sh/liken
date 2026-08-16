@@ -76,6 +76,15 @@ usage:
       itself when the change applies, and running this twice is
       the same grant. When nothing waits, this writes nothing.
 
+  liken request-reboot [-server URL] <deployment-dir> <machine>
+      Ask a machine to reboot when no change asks it to: a driver
+      bound to the wrong device, or a machine you are experimenting
+      on. The machine still takes its turn from the cluster,
+      cordons, and drains. On rebootPolicy: Auto that is the whole
+      procedure. On Manual the request waits for approve-reboot.
+      The request names the running boot, so it spends itself when
+      the machine comes back.
+
   liken kubectl [-server URL] <deployment-dir> [args...]
   liken stern   [-server URL] <deployment-dir> [args...]
   liken flux    [-server URL] <deployment-dir> [args...]
@@ -194,6 +203,8 @@ func run(args []string) error {
 		return passthrough(args[0], args[1:])
 	case "approve-reboot":
 		return approveReboot(args[1:], os.Stdout)
+	case "request-reboot":
+		return requestReboot(args[1:], os.Stdout)
 	case "layer":
 		if len(args) != 4 {
 			return fmt.Errorf("usage: liken layer <manifests-dir> <identity-dir> <output.cpio>")

@@ -638,7 +638,15 @@ spec:
                     Manual, the default, stages the change to the
                     machineState filesystem and reports RebootPending,
                     and the next boot applies the change. Auto permits
-                    the operator to reboot the machine.
+                    the operator to reboot the machine. This field
+                    also gates a reboot that a person asked for
+                    through the liken.sh/request-reboot annotation,
+                    which is the one reboot that applies no change:
+                    Manual reports RebootPending until the reboot is
+                    approved, and Auto takes the reboot turn on its
+                    own. Whichever policy is in force, the machine
+                    waits for the cluster to grant the turn, and
+                    drains before it goes down.
                 storage:
                   type: object
                   description: >-
@@ -3157,7 +3165,12 @@ spec:
                     one-shot: once the change applies, its hash is no
                     longer pending, and the next change hashes
                     differently, so a stale annotation approves
-                    nothing.
+                    nothing. A reboot that a person requested through
+                    the liken.sh/request-reboot annotation is an entry
+                    here too. It waits on the same policy, the same
+                    turn, and the same drain, and the one thing it
+                    lacks is a document, so its hash is the running
+                    boot's identity instead.
                   items:
                     type: object
                     required: [condition, kind, hash, summary]
@@ -3165,8 +3178,10 @@ spec:
                       condition:
                         type: string
                         description: >-
-                          The convergence condition that reported
-                          this entry, for example CredentialsConverged.
+                          The condition that reported this entry, for
+                          example CredentialsConverged, or
+                          RebootRequestHonored for a reboot that a
+                          person requested.
                       kind:
                         type: string
                         enum: [Reboot, Restart]
@@ -3181,7 +3196,10 @@ spec:
                         description: >-
                           The staged document's identity: the value
                           that an approve-disruption annotation names
-                          to grant this change its disruption.
+                          to grant this change its disruption. A
+                          requested reboot has no document, so its
+                          entry carries the running boot's identity,
+                          which spends itself the same way.
                       summary:
                         type: string
                         description: >-

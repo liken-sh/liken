@@ -178,6 +178,46 @@ func TestApproveRebootReportsAndGrantsTheChosenChange(t *testing.T) {
 	}
 }
 
+func TestApproveRebootReleasesARequestedReboot(t *testing.T) {
+	// A requested reboot reports itself in status.pending like every
+	// staged change, so the Manual machine's second step is this
+	// same command, with no special case for a request.
+	dir := deploymentDirForTest(t)
+	serverCert, clientCAs := issueServerCertForTest(t, dir)
+
+	var gotPatch []byte
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			fmt.Fprint(w, `{"metadata":{"name":"node-5"},"status":{"pending":[
+				{"condition":"RebootRequestHonored","kind":"Reboot",
+				 "hash":"3943abfa6adf0000","summary":"a reboot of this machine, with no change to apply"}]}}`)
+		case http.MethodPatch:
+			gotPatch, _ = io.ReadAll(r.Body)
+			fmt.Fprint(w, `{}`)
+		}
+	}))
+	server.TLS = &tls.Config{
+		Certificates: []tls.Certificate{serverCert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    clientCAs,
+	}
+	server.StartTLS()
+	defer server.Close()
+
+	var out bytes.Buffer
+	if err := approveReboot([]string{"-server", server.URL, dir, "node-5"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(gotPatch), `"liken.sh/approve-disruption":"3943abfa6adf"`) {
+		t.Fatalf("the patch is missing the grant: %s", gotPatch)
+	}
+	if !strings.Contains(out.String(), "a reboot of this machine, with no change to apply") {
+		t.Fatalf("the report should say what waits:\n%s", out.String())
+	}
+}
+
 // issueServerCertForTest signs a server certificate for 127.0.0.1
 // with the deployment's own server-ca, and returns a pool holding
 // its client-ca. identity.Kubeconfig trusts the server-ca and signs

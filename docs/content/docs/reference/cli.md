@@ -83,6 +83,49 @@ same annotation. When two changes are pending, the command approves
 the reboot-class one, because a reboot applies every staged change.
 When nothing is pending, it reports that and writes nothing.
 
+## liken request-reboot
+
+    liken request-reboot [-server URL] <deployment-dir> <machine>
+
+Asks a machine to reboot when no change asks it to. Every other
+reboot that `liken` performs applies a staged document, so a machine
+that agrees with every document it was given has no way to reboot,
+and it has no shell to be told from. Two cases need one anyway: a
+kernel driver that bound the wrong device, which releases it only at
+boot, and a machine you are experimenting on. The command writes the
+`liken.sh/request-reboot` annotation, valued with the identity of the
+boot that is running now.
+
+The request skips none of the cluster's coordination. The machine
+waits for the cluster to grant it a reboot turn under
+[`spec.disruption`](/docs/reference/cluster/#specdisruption), cordons
+its node, and drains its workloads, the same as a machine applying a
+staged change. What the two policies decide is only the approval:
+
+* `rebootPolicy: Auto` needs nothing more. The machine takes its
+  turn, drains, and reboots.
+* `rebootPolicy: Manual`, the default, reports `RebootPending` and
+  waits, the same as it does for a staged change.
+  [`liken approve-reboot`](#liken-approve-reboot) releases it,
+  through the same annotation.
+
+Nothing is staged, so the machine comes back on the documents it
+already runs. The reboot promotes no system slot and proves no
+release.
+
+The request is one-shot, and nothing has to clear it. It names the
+boot it was written for, so the boot that comes back is a boot the
+annotation does not name, and the `RebootRequestHonored` condition
+reads `True` again. Run the command a second time and it names the
+new boot.
+
+The annotation is the whole interface, so `kubectl` alone can write
+it. The machine reports the value to use in the same
+`RebootRequestHonored` condition:
+
+    kubectl describe machine <name>
+    kubectl annotate machine <name> liken.sh/request-reboot=<identity>
+
 ## liken kubectl
 
     liken kubectl [-server URL] <deployment-dir> [args...]

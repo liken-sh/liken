@@ -373,3 +373,31 @@ func TestRolloutGateDoesNotHoldWhenTheTemplateAlreadyMatches(t *testing.T) {
 		t.Errorf("the worker goes first once the template has caught up: %v", r.grant)
 	}
 }
+
+func TestRolloutSequencesARequestedRebootLikeAnyOther(t *testing.T) {
+	// A reboot a person asked for waits on the same condition reason
+	// as a staged change, so it takes a turn from the same budget.
+	// The conductor never learns the difference, and it must not:
+	// two machines rebooting on request at once is the same outage
+	// as two rebooting on an upgrade.
+	machines, renewals := rolloutInputs(
+		rolloutEntry{"node-1", api.PhaseReady, fresh, false, -1},
+		rolloutEntry{"node-3", api.PhaseUpdatePending, fresh, false, -1},
+		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, false, -1},
+	)
+	for i := range machines {
+		if machines[i].Metadata.Name == "node-1" {
+			continue
+		}
+		machines[i].Status.Conditions = api.SetCondition(machines[i].Status.Conditions, api.Condition{
+			Type: "RebootRequestHonored", Status: "False", Reason: "AwaitingTurn",
+		}, sweepNow)
+	}
+	r := decideRollout(machines, renewals, labCluster(0), "", sweepNow)
+	if !slices.Equal(r.grant, []string{"node-3"}) {
+		t.Errorf("one requested reboot at a time, like every other reboot: %v", r.grant)
+	}
+	if !strings.Contains(r.progressing.Message, "node-4") {
+		t.Errorf("the condition should name who is still waiting: %s", r.progressing.Message)
+	}
+}

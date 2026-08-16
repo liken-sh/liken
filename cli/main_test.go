@@ -37,6 +37,8 @@ func TestRunChecksArgumentCounts(t *testing.T) {
 		{"mint without a directory", []string{"mint"}},
 		{"adopt without directories", []string{"adopt", "only-one"}},
 		{"kubeconfig without a directory", []string{"kubeconfig"}},
+		{"approve-reboot without a machine", []string{"approve-reboot", "mycluster"}},
+		{"request-reboot without a machine", []string{"request-reboot", "mycluster"}},
 		{"layer without its inputs", []string{"layer", "manifests"}},
 		{"fetch without its inputs", []string{"fetch", "https://example.com"}},
 		{"media without its inputs", []string{"media", "release-dir"}},
