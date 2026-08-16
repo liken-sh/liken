@@ -14,7 +14,7 @@ A document's directory states its status:
   built yet.
 
 The numbers run in one sequence across all three directories. The next
-milestone is 56.
+milestone is 59.
 
 [`open-problems/`](open-problems/) holds the questions that liken owes
 an answer to. Those documents carry no number, because nobody has
@@ -196,6 +196,24 @@ decided yet what work they become.
   init passes to `finit_module`; a parameter on a loaded module is a
   reboot-class change, and the status reads the result back from
   `/sys/module` without comparing it.
+* **56.** [Device operators](56-device-operators.md) — the pattern
+  milestones 57 and 58 build: an operator claims raw hardware through
+  an ordinary `liken.sh` claim, runs the daemon that owns it, and
+  republishes what that daemon holds as its own devices under
+  `<domain>.liken.sh`. Each one is its own repository and an ordinary
+  workload, deployed by the cluster's own GitOps, so a liken release
+  carries none of those daemons and nothing in liken deploys them.
+* **57.** [The display operator](57-the-display-operator.md) —
+  `display.liken.sh` claims the GPU's display device, runs the Weston
+  kiosk compositor, and publishes one device for each monitor output,
+  named by its connector and described by its EDID. Its delivery is a
+  Wayland socket and an app-id, not a device node.
+* **58.** [The Bluetooth operator](58-the-bluetooth-operator.md) —
+  `bluetooth.liken.sh` claims the Bluetooth adapter, runs bluetoothd,
+  and publishes each paired controller as a device named by its MAC
+  address, so a pod receives one controller's evdev node and nothing
+  else.
+
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.
 
@@ -207,6 +225,6 @@ one yet. Each one has a document in [`open-problems/`](open-problems/).
 * [Claiming unknown machines](open-problems/claiming-unknown-machines.md)
   — `liken.machine=` identifies a machine that somebody declared before
   it booted, and nothing identifies the machine that nobody declared.
-* [containerd and the kubelet write lines that no log level explains](open-problems/unexplained-log-volume.md)
-  — the levels are settable, and what stays open is the volume they do
-  not reach.
+* [A system pod's new mount wedges a follower-first rollout](open-problems/system-pod-mounts-wedge-follower-first-rollouts.md)
+  — the follower runs the new binary inside the old pod spec, and the
+  new template only arrives when a leader boots the new release.
