@@ -345,3 +345,17 @@ pattern is only proven by hardware.
   each operator's design belongs beside its own code. Milestones 57 and
   58 stay here while they are proposals, because the pattern they build
   on is here.
+* **What the images carry.** The first images are debian-slim with the
+  daemon installed by apt, which ships a package manager and a shell
+  nobody runs. The intent is minimal: the operator binaries are static
+  Go and belong in `FROM scratch` images, and each daemon belongs in
+  its own single-daemon image, so a pod is two containers and the
+  privilege lands only on the container whose daemon needs it.
+  bluetoothd and dbus-daemon build statically against musl. Weston and
+  PipeWire do not, because both load code at runtime, Mesa's GPU
+  drivers and PipeWire's SPA plugins through `dlopen`, so their floor
+  is an image carrying the computed library closure rather than a
+  single binary. Splitting the containers also changes the
+  die-together coupling: the kubelet restarts containers
+  independently, so the operator's watch on its daemon, not a shared
+  process tree, is what couples their lives.
