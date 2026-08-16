@@ -14,7 +14,7 @@ A document's directory states its status:
   built yet.
 
 The numbers run in one sequence across all three directories. The next
-milestone is 55.
+milestone is 56.
 
 [`open-problems/`](open-problems/) holds the questions that liken owes
 an answer to. Those documents carry no number, because nobody has
@@ -191,6 +191,11 @@ decided yet what work they become.
   spec: the machine operator reports that lag as `UpdatePending`
   instead of a fault, and the conductor sends a leader first while
   the applied template is behind the target.
+* **55.** [Kernel module parameters](55-kernel-module-parameters.md)
+  — `spec.moduleParameters` maps `<module>.<parameter>` to the value
+  init passes to `finit_module`; a parameter on a loaded module is a
+  reboot-class change, and the status reads the result back from
+  `/sys/module` without comparing it.
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.
 
