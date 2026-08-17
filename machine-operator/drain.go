@@ -26,6 +26,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/liken-sh/liken/api"
@@ -82,14 +83,117 @@ func evictablePods(pods []kubernetes.Pod) []kubernetes.Pod {
 	return evictable
 }
 
+// draPluginPaths are the kubelet directories that a DRA driver's
+// pod mounts from the host. The kubelet discovers a driver by
+// watching plugins_registry for the driver's registration socket,
+// and it makes its prepare and unprepare calls on a second socket,
+// which the driver serves from its own directory under plugins. A
+// pod that mounts neither of these cannot be serving a driver.
+var draPluginPaths = []string{
+	"/var/lib/kubelet/plugins_registry",
+	"/var/lib/kubelet/plugins",
+}
+
+// servesDRAPlugin reports whether the pod serves a DRA driver on
+// this node. The test reads the pod's own hostPath mounts, which the
+// drain already has in hand, and it needs no read of the node's
+// ResourceSlices. That second route does not reach a pod anyway:
+// a slice names its driver, and nothing in the API links a driver
+// name back to the pod that serves it.
+//
+// The test names no driver, so it also matches pods that mount these
+// directories for another reason: a CSI driver registers through the
+// same directory, and so would a pod that mounts it to look at it.
+// The cost of a wrong match is ordering alone. Such a pod leaves in
+// the second phase, a few seconds later than it could have.
+//
+// liken's own driver, liken.sh, is this operator. It matches the
+// test and never reaches it, because it runs as a DaemonSet pod and
+// evictablePods drops those first. So nothing ever sequences against
+// liken's driver, which is correct: the kubelet keeps calling it
+// until the machine reboots.
+func servesDRAPlugin(p kubernetes.Pod) bool {
+	for _, v := range p.Spec.Volumes {
+		if v.HostPath == nil {
+			continue
+		}
+		for _, path := range draPluginPaths {
+			if v.HostPath.Path == path || strings.HasPrefix(v.HostPath.Path, path+"/") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// holdsResourceClaim reports whether the pod consumes DRA devices.
+// spec.resourceClaims is the whole signal. A pod that names a claim
+// directly and a pod that gets one from a template both carry an
+// entry there, and the kubelet calls NodeUnprepareResources for
+// either one. What the entry points at does not change the order the
+// pods leave in, so the drain reads no further.
+func holdsResourceClaim(p kubernetes.Pod) bool {
+	return len(p.Spec.ResourceClaims) > 0
+}
+
+// drainOrder returns the pods to ask to leave on this pass, so that
+// a claim holder always leaves before the driver that prepared its
+// claim.
+//
+// The kubelet calls NodeUnprepareResources while a pod terminates,
+// on the driver's own socket. A driver whose pod is already gone
+// answers nothing, and the kubelet retries the unprepare with no
+// bound, so the pod never finishes terminating. The drain then sits
+// until drainDeadline and the machine reboots with the pod still on
+// it, which is the outcome the drain exists to avoid.
+//
+// The first phase asks every other pod to leave, claim holders
+// included. The second phase asks the driver pods, and it starts
+// only on a pass where no claim holder is left on the node. The
+// Eviction API returns as soon as the API server accepts the
+// request, long before the pod is gone, so the pod listing is what
+// reports the termination: a terminating pod stays in the listing
+// until the kubelet finishes with it. Each reconcile pass lists the
+// node again and runs this split again, so the wait blocks nothing,
+// and drainDeadline bounds it. Past the deadline decideDrainStep
+// clears the drain and the reboot proceeds.
+//
+// A driver pod that holds a claim of its own belongs in the second
+// phase, and the driver test runs first to put it there. A device
+// operator claims its raw hardware from liken.sh, whose driver is
+// this operator, which no drain evicts. So a driver pod's own claim
+// has no pod to wait for, and the first phase would only make the
+// pod wait for itself.
+func drainOrder(evictable []kubernetes.Pod) []kubernetes.Pod {
+	var first, drivers []kubernetes.Pod
+	holders := 0
+	for _, p := range evictable {
+		if servesDRAPlugin(p) {
+			drivers = append(drivers, p)
+			continue
+		}
+		if holdsResourceClaim(p) {
+			holders++
+		}
+		first = append(first, p)
+	}
+	if holders > 0 {
+		return first
+	}
+	return append(first, drivers...)
+}
+
 // A drainStep is one pass's worth of drain: the Node patch to apply
 // (nil when the cordon and deadline record are already in place),
-// the pods to ask to leave, and whether the node is clear, meaning
-// nothing is left delaying the reboot.
+// the pods to ask to leave on this pass, how many pods still have to
+// move, and whether the node is clear, meaning nothing is left
+// delaying the reboot. The two pod counts differ while the drain
+// holds a driver back for its claim holders.
 type drainStep struct {
-	patch []byte
-	evict []kubernetes.Pod
-	clear bool
+	patch     []byte
+	evict     []kubernetes.Pod
+	remaining int
+	clear     bool
 }
 
 // decideDrainStep is the drain's decision for one pass. The
@@ -116,8 +220,9 @@ func decideDrainStep(node *nodeObject, pods []kubernetes.Pod, now time.Time) dra
 		return step
 	}
 	evictable := evictablePods(pods)
-	step.evict = evictable
-	step.clear = len(evictable) == 0
+	step.remaining = len(evictable)
+	step.evict = drainOrder(evictable)
+	step.clear = step.remaining == 0
 	return step
 }
 
@@ -150,7 +255,7 @@ func gateThroughDrain(c *kubernetes.Client, node *nodeObject, conv convergence, 
 	if step.clear {
 		return conv
 	}
-	return holdForDrain(conv, fmt.Sprintf("draining this node ahead of the reboot; %d pods still to move", len(step.evict)))
+	return holdForDrain(conv, fmt.Sprintf("draining this node ahead of the reboot; %d pods still to move", step.remaining))
 }
 
 // holdForDrain keeps reporting the convergence on its own condition

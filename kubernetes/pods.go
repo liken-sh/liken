@@ -17,8 +17,36 @@ type PodMetadata struct {
 	OwnerReferences []OwnerReference  `json:"ownerReferences"`
 }
 
+// HostPathVolume is a directory or file the pod takes from the
+// machine it runs on. The path is the whole of it: what a hostPath
+// mount reaches on the host is what a drain reads to tell a DRA
+// driver's pod from an ordinary workload.
+type HostPathVolume struct {
+	Path string `json:"path"`
+}
+
+// PodVolume carries the one volume kind liken reads. Every other
+// kind decodes with a nil HostPath, which is the answer the readers
+// want anyway.
+type PodVolume struct {
+	Name     string          `json:"name"`
+	HostPath *HostPathVolume `json:"hostPath"`
+}
+
+// PodResourceClaim is one entry in spec.resourceClaims: a DRA claim
+// the pod's containers may reference by Name. The claim itself is
+// either named directly or made from a template, so exactly one of
+// the last two fields carries a value.
+type PodResourceClaim struct {
+	Name                      string `json:"name"`
+	ResourceClaimName         string `json:"resourceClaimName"`
+	ResourceClaimTemplateName string `json:"resourceClaimTemplateName"`
+}
+
 type PodSpec struct {
-	NodeName string `json:"nodeName"`
+	NodeName       string             `json:"nodeName"`
+	Volumes        []PodVolume        `json:"volumes"`
+	ResourceClaims []PodResourceClaim `json:"resourceClaims"`
 }
 
 // ContainerStatus holds the part of a container's status that liken
@@ -38,7 +66,8 @@ type PodStatus struct {
 }
 
 // Pod holds the part of a Kubernetes Pod that liken needs: identity,
-// where it runs, who owns it, and whether it is still running.
+// where it runs, who owns it, what it takes from the host and from
+// DRA, and whether it is still running.
 type Pod struct {
 	Metadata PodMetadata `json:"metadata"`
 	Spec     PodSpec     `json:"spec"`

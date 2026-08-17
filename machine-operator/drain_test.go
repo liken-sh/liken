@@ -38,6 +38,34 @@ func completed(p *kubernetes.Pod) {
 	p.Status.Phase = "Succeeded"
 }
 
+// servesDRA gives a pod the mounts a DRA driver takes: the
+// kubelet's registration directory and the plugin directory holding
+// its own socket.
+func servesDRA(p *kubernetes.Pod) {
+	p.Spec.Volumes = append(p.Spec.Volumes,
+		kubernetes.PodVolume{Name: "registry", HostPath: &kubernetes.HostPathVolume{
+			Path: "/var/lib/kubelet/plugins_registry"}},
+		kubernetes.PodVolume{Name: "plugins", HostPath: &kubernetes.HostPathVolume{
+			Path: "/var/lib/kubelet/plugins"}})
+}
+
+// holdsAClaim gives a pod a claim from a template, the shape a
+// consumer of a device operator's devices takes.
+func holdsAClaim(p *kubernetes.Pod) {
+	p.Spec.ResourceClaims = []kubernetes.PodResourceClaim{
+		{Name: "screen", ResourceClaimTemplateName: "screens"},
+	}
+}
+
+// evicted names the pods a step asks to leave, in the order it asks.
+func evicted(step drainStep) string {
+	var names []string
+	for _, p := range step.evict {
+		names = append(names, p.Metadata.Name)
+	}
+	return strings.Join(names, " ")
+}
+
 func TestEvictablePodsSkipsWhatCannotMove(t *testing.T) {
 	pods := []kubernetes.Pod{
 		pod("web", "default"),
@@ -128,6 +156,72 @@ func TestDrainKeepsEvictingBeforeTheDeadline(t *testing.T) {
 	}
 	if len(step.evict) != 1 {
 		t.Errorf("got %+v", step.evict)
+	}
+}
+
+// draining builds the drain's steady state: cordoned by us, one
+// minute into the deadline.
+func draining(pods ...kubernetes.Pod) drainStep {
+	since := drainNow.Add(-time.Minute).Format(time.RFC3339)
+	return decideDrainStep(drainNode(true, true, since), pods, drainNow)
+}
+
+func TestDrainHoldsADriverUntilItsClaimHoldersLeave(t *testing.T) {
+	step := draining(
+		pod("display-operator", "displays", servesDRA),
+		pod("movie-lg", "media", holdsAClaim),
+		pod("web", "default"))
+	if evicted(step) != "movie-lg web" {
+		t.Errorf("the driver waits for the claim holder: %s", evicted(step))
+	}
+	if step.remaining != 3 {
+		t.Errorf("all three still have to move: %d", step.remaining)
+	}
+	if step.clear {
+		t.Error("three pods still run here")
+	}
+}
+
+func TestDrainEvictsADriverOnceNoClaimHolderRemains(t *testing.T) {
+	step := draining(
+		pod("display-operator", "displays", servesDRA),
+		pod("web", "default"))
+	if evicted(step) != "web display-operator" {
+		t.Errorf("nothing holds a claim, so the driver goes too: %s", evicted(step))
+	}
+}
+
+func TestDrainEvictsADriverThatHoldsItsOwnClaimWithTheDrivers(t *testing.T) {
+	// The device operators claim raw hardware from liken.sh, whose
+	// driver is this operator, and no drain evicts it. So a driver
+	// pod's own claim waits for nothing, and the pod must not wait
+	// for itself.
+	step := draining(pod("display-operator", "displays", servesDRA, holdsAClaim))
+	if evicted(step) != "display-operator" {
+		t.Errorf("a driver that holds a claim still leaves last: %s", evicted(step))
+	}
+}
+
+func TestDRADriverPodsAreThoseMountingTheKubeletsPluginDirectories(t *testing.T) {
+	if !servesDRAPlugin(pod("display-operator", "displays", servesDRA)) {
+		t.Error("the registration directory is what makes a pod a driver")
+	}
+	plugin := pod("audio-operator", "audio")
+	plugin.Spec.Volumes = []kubernetes.PodVolume{{Name: "socket",
+		HostPath: &kubernetes.HostPathVolume{Path: "/var/lib/kubelet/plugins/audio.liken.sh"}}}
+	if !servesDRAPlugin(plugin) {
+		t.Error("a plugin's own socket directory counts as well")
+	}
+	logs := pod("log-reader", "default")
+	logs.Spec.Volumes = []kubernetes.PodVolume{
+		{Name: "logs", HostPath: &kubernetes.HostPathVolume{Path: "/var/log"}},
+		{Name: "scratch"},
+	}
+	if servesDRAPlugin(logs) {
+		t.Error("another hostPath says nothing about DRA")
+	}
+	if servesDRAPlugin(pod("web", "default")) {
+		t.Error("a pod with no volumes serves no plugin")
 	}
 }
 
@@ -226,6 +320,42 @@ func TestGateThroughDrainEvictsAndHolds(t *testing.T) {
 	}
 	if conv.condition.Reason != "Draining" || !strings.Contains(conv.condition.Message, "1 pods") {
 		t.Errorf("the condition reports the drain's progress: %+v", conv.condition)
+	}
+}
+
+func TestGateThroughDrainAsksTheClaimHolderAndNotYetTheDriver(t *testing.T) {
+	// The failure this ordering exists for: the driver leaves first,
+	// the kubelet's unprepare call for the claim holder has nobody to
+	// answer it, and the pod never finishes terminating.
+	fake := &drainAPI{pods: []kubernetes.Pod{
+		pod("display-operator", "displays", servesDRA),
+		pod("movie-lg", "media", holdsAClaim),
+	}}
+	client := testClient(t, fake.handler())
+	since := drainNow.Add(-time.Minute).Format(time.RFC3339)
+	conv := gateThroughDrain(client, drainNode(true, true, since), rebootingConvergence(), drainNow)
+	want := "/api/v1/namespaces/media/pods/movie-lg/eviction"
+	if len(fake.evictions) != 1 || fake.evictions[0] != want {
+		t.Errorf("only the claim holder is asked this pass: %v", fake.evictions)
+	}
+	if conv.requestReboot {
+		t.Error("two pods still run here")
+	}
+	if !strings.Contains(conv.condition.Message, "2 pods") {
+		t.Errorf("the count covers the driver it is holding back: %+v", conv.condition)
+	}
+}
+
+func TestGateThroughDrainAsksTheDriverOnceTheClaimHolderIsGone(t *testing.T) {
+	// The next pass, after the kubelet finished terminating the claim
+	// holder and the pod left this node's listing.
+	fake := &drainAPI{pods: []kubernetes.Pod{pod("display-operator", "displays", servesDRA)}}
+	client := testClient(t, fake.handler())
+	since := drainNow.Add(-time.Minute).Format(time.RFC3339)
+	gateThroughDrain(client, drainNode(true, true, since), rebootingConvergence(), drainNow)
+	want := "/api/v1/namespaces/displays/pods/display-operator/eviction"
+	if len(fake.evictions) != 1 || fake.evictions[0] != want {
+		t.Errorf("the driver's turn: %v", fake.evictions)
 	}
 }
 

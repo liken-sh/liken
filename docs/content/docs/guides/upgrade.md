@@ -65,7 +65,9 @@ Each machine that runs a different version:
    verifies each artifact against the digest chain.
 2. Stages the change and asks the cluster for a reboot turn.
 3. Cordons and drains its node when the cluster grants the turn. The
-   PodDisruptionBudgets of the workloads apply during the drain.
+   PodDisruptionBudgets of the workloads apply during the drain. A pod
+   that holds a DRA claim leaves before the pod that serves its
+   driver. The driver stays to answer the kubelet's unprepare call.
 4. Reboots into the new slot one time, as a trial. The trial is a
    success when the OS starts and rejoins the cluster, and the machine
    then boots that slot from then on. If the trial fails, the machine
