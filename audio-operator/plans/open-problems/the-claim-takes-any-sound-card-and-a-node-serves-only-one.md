@@ -151,15 +151,21 @@ in that same comment and says the program does not use it, and no
 production file in the repository reads it. It appears only in
 `discovery_test.go` fixtures.
 
-That operator's README tells a person to raise `replicas` to the number
-of adapters. That instruction is correct for adapters on separate
-machines. Nobody has run two adapters on one machine.
+That operator's README now states both halves. It tells a person to
+raise `replicas` to the number of *machines*, and it says plainly that
+two replicas on one machine is a case the operator does not serve,
+naming the slice collision and the discovery collision as the reasons.
+This operator's README does not say the equivalent. Nobody has run two
+adapters, or two sound cards, on one machine.
 
-A different mismatch in the same StatefulSet is in
-[Bonds follow the pod's ordinal and adapters do not](https://github.com/liken-sh/bluetooth-operator/blob/main/plans/open-problems/bonds-follow-the-ordinal-and-adapters-do-not.md).
-That one is about which volume a replica mounts. This one is about which
-object a replica writes. Neither one causes the other, and a fix for
-either leaves the other in place.
+That operator had a second mismatch of the same shape, over which
+volume a replica mounts, and it is fixed: its bonds moved to a Secret
+named for the adapter's own address, and the StatefulSet became a
+Deployment. See
+[A Secret for each adapter](https://github.com/liken-sh/bluetooth-operator/blob/main/plans/03-a-secret-for-each-adapter.md).
+The fix worked by keying the state to the hardware instead of to the
+replica, and it left this problem untouched, because this one is about
+which object a replica writes rather than which state it reads.
 
 ## What a fix would have to provide
 

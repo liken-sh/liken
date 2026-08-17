@@ -9,9 +9,9 @@ set aside. It also states how the work was proved, and a proof runs on
 hardware, because nothing else proves a design about a sound card.
 
 The pattern these documents build on lives in liken's repository:
-[milestone 56, device operators](https://github.com/liken-sh/liken/blob/main/plans/56-device-operators.md),
+[milestone 56, device operators](https://github.com/liken-sh/liken/blob/main/plans/completed/56-device-operators.md),
 and this operator's own instance,
-[milestone 59](https://github.com/liken-sh/liken/blob/main/plans/59-the-audio-operator.md).
+[milestone 59](https://github.com/liken-sh/liken/blob/main/plans/completed/59-the-audio-operator.md).
 
 The README states how to use the operator. These documents state why it
 is built the way it is, and what it still owes an answer to.
@@ -46,3 +46,10 @@ decided yet what work they become.
   operator gets and not which card it should get, and the slice is
   named for the node and the driver, so two replicas on one machine
   would overwrite each other.
+* [A sink can be shared and this one is not](open-problems/a-sink-can-be-shared-and-this-one-is-not.md).
+  PipeWire mixes streams and every device this operator publishes is
+  exclusive, so the second pod to claim a sink waits behind the first.
+* [The analog jack publishes whether or not anything is plugged in](open-problems/the-analog-jack-publishes-whether-or-not-anything-is-plugged-in.md).
+  A dark HDMI connector publishes with two taints and the analog jack
+  publishes with none, which may make this a missing taint rather than
+  an extra device.
