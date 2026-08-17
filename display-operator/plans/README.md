@@ -35,3 +35,7 @@ decided yet what work they become.
 * [The library closure carries loads that `ldd` cannot see](open-problems/loads-that-ldd-cannot-see.md).
   Four kinds of load and four data paths were added by hand, and
   nothing in the build finds the next one.
+* [LLVM is two thirds of the image](open-problems/llvm-is-two-thirds-of-the-image.md).
+  The image is already on scratch, and 68% of it is LLVM and the
+  libraries only LLVM needs, because Debian builds mesa with llvmpipe
+  and no liken machine runs llvmpipe.
