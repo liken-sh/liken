@@ -165,8 +165,8 @@ func AttrInt(i int) DeviceAttribute { v := int64(i); return DeviceAttribute{Int:
 // routed holds the device names the compositor's config carries an
 // [output] section for, which the operator writes once at startup. A
 // connector that is not in it cannot be routed to, whatever is plugged
-// into it, and that is the one case where an untainted device would be
-// worse than useless: the kiosk shell sends a surface whose app-id
+// into it, and that is the one case where an untainted device does
+// harm: the kiosk shell sends a surface whose app-id
 // matches no output to the first output it enumerated, on top of the
 // client that owns that screen. The NoSchedule taint is what keeps a
 // claim off it until the operator restarts and writes the section.

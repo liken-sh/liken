@@ -55,8 +55,8 @@ spec:
       # stated because the failure is silent.
       hostUsers: true
       # The compositor holds the screens for as long as it runs, so it
-      # goes down quickly when asked. A client waiting on a restart is
-      # watching a black monitor.
+      # goes down quickly when asked. While it is down, every monitor it
+      # drives is black.
       terminationGracePeriodSeconds: 5
       containers:
         - name: operator

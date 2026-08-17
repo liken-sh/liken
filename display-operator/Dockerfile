@@ -12,8 +12,8 @@
 #
 # The compositor ships in a workload's image and not in the read-only
 # root that every liken machine boots. That is the device operator
-# pattern's whole reason for a separate repository: one machine has
-# screens, and the other six would carry weston for it.
+# pattern's whole reason for a separate repository: a machine with no
+# screens does not carry weston.
 
 FROM golang:1.26.5-bookworm AS build
 WORKDIR /src

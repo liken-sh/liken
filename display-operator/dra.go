@@ -19,7 +19,7 @@ package main
 //
 // Failures are per-claim strings inside the response, not gRPC errors.
 // The kubelet holds the affected pod in ContainerCreating and retries,
-// which is the honest behavior for an output whose monitor is dark:
+// which is what should happen for an output whose monitor is dark:
 // the pod waits, visibly, and a describe of the pod says why.
 
 import (

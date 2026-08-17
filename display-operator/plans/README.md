@@ -32,6 +32,10 @@ decided yet what work they become.
   Every connector publishes as a device, and only the connectors that
   had a monitor at startup have an output in the compositor's
   configuration.
+* [A removed device has no bounded retry](open-problems/a-removed-device-has-no-bounded-retry.md).
+  The kubelet retries `NodePrepareResources` without a bound for a
+  device an allocation names but the slice no longer lists, so the
+  operator taints a dark output and never deletes it.
 * [The library closure carries loads that `ldd` cannot see](open-problems/loads-that-ldd-cannot-see.md).
   Four kinds of load and four data paths were added by hand, and
   nothing in the build finds the next one.

@@ -2,8 +2,9 @@ package main
 
 // Reporting what each pass did to the slice.
 //
-// A pass that finds nothing changed writes nothing, which is the right
-// thing to do to the API server and the wrong thing to leave silent.
+// A pass that finds nothing changed writes nothing. That is correct
+// for the API server, but it leaves no sign that the operator is still
+// running.
 // The slice's resourceVersion and its pool generation do not change
 // while an operator republishes the same content, and they do not
 // change after the operator dies and leaves its last slice behind. A

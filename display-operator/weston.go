@@ -17,9 +17,9 @@ package main
 //
 // The operator starts weston rather than the entrypoint, because the
 // config file has to exist first and the operator is what writes it.
-// The two live and die together in both directions: weston that exits
-// ends the operator, and an operator that exits ends the container,
-// which ends weston.
+// The two exit together in both directions: weston that exits ends the
+// operator, and an operator that exits ends the container, which ends
+// weston.
 //
 // The flags match what the lab machine runs today, weston 14.0.2 with
 // LIBSEAT_BACKEND=noop. That backend opens the device path with a
@@ -121,8 +121,8 @@ func writeWestonConfig(path string, outputs []Output) error {
 // that carries its exit.
 //
 // The channel is the supervision. Weston holds the screens and the
-// socket, so an operator that outlived it would publish outputs that
-// no client can draw on, and every client that was drawing has already
+// socket, so an operator that outlived it would advertise outputs it
+// can no longer drive, and every client that was drawing has already
 // lost its connection. main ends the process on that channel, with a
 // nonzero status, and the kubelet restarts the pair.
 func startWeston(ctx context.Context, card, configPath, socketDir, socketName string) (<-chan error, error) {
@@ -174,7 +174,7 @@ func startWeston(ctx context.Context, card, configPath, socketDir, socketName st
 //
 // Nothing may publish before this returns. The delivery a consumer
 // receives is the socket, so an output published while the socket is
-// missing offers a screen that no client can reach, and the consumer's
+// missing offers a screen a client cannot connect to, and the consumer's
 // pod would start and fail rather than wait.
 //
 // The exited channel is what turns a compositor that refuses to start

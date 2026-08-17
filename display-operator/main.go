@@ -19,9 +19,9 @@
 // card node as an exclusive device, so the claim holder is the only
 // program setting a mode on that card.
 //
-// The published outputs then arbitrate for everybody else. A screen
-// stops being a string in a config file that a client repeats, and
-// becomes a resource the scheduler allocates once.
+// The published outputs then arbitrate for every consumer: a screen
+// is a resource the scheduler allocates once, not a name that any
+// client can repeat from its config to take the same screen.
 package main
 
 import (
@@ -181,9 +181,9 @@ func main() {
 	// NoSchedule taint on every output. Two things need that. A previous
 	// pod's slice may still say every screen is free, and it says so
 	// until this pass replaces it. And a compositor that cannot start at
-	// all still leaves an honest answer behind, so a claim on a screen
+	// all still leaves a usable inventory, so a claim on a screen
 	// that is cabled and asleep parks instead of being allocated a
-	// screen that nothing drives. The reconcile after the socket appears
+	// screen the compositor cannot drive. The reconcile after the socket appears
 	// clears the taint from the screens that can serve a client.
 	//
 	// This write does not read the published slice first, so it drops

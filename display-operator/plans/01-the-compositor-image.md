@@ -94,6 +94,19 @@ the pod runs are the same set of bytes and cannot drift. The two share
 every layer, so a node that pulls both pulls the second for the size of
 one binary.
 
+## Running it headless
+
+The release starts the compositor with no graphics card to prove the
+image. Build the `weston` target and run the headless backend:
+
+    printf '[core]\nshell=kiosk\nrenderer=gl\nrequire-input=false\n' > weston.ini
+    docker run --rm --tmpfs /run -e XDG_RUNTIME_DIR=/run \
+        -v "$PWD/weston.ini:/weston.ini:ro" weston \
+        --backend=headless --config=/weston.ini --socket=smoke
+
+The log records each module as it loads. `Using GL renderer` says Mesa
+resolved a driver, and the `kiosk-shell.so` load is the last one.
+
 ## What was proven, and where
 
 Two runs, both local, neither one on a target machine.

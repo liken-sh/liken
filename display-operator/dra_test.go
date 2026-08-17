@@ -81,7 +81,7 @@ func prepare(t *testing.T, plugin *draPlugin) *drav1.NodePrepareResourceResponse
 	}
 	claim, ok := resp.Claims[testClaimUID]
 	if !ok {
-		t.Fatalf("the response names no answer for the claim: %+v", resp.Claims)
+		t.Fatalf("the response has no answer for the claim: %+v", resp.Claims)
 	}
 	return claim
 }

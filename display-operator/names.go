@@ -50,10 +50,11 @@ func deviceName(connector string) string {
 // receives DISPLAY_APP_ID=hdmi-a-1 and a client that passes that to
 // its toolkit lands on that monitor.
 //
-// The app-id is the routing and the claim is the arbitration. The
-// compositor refuses nothing: two clients that present one app-id both
-// get the screen, one on top of the other. What stops that here is
-// that the second pod cannot allocate an output the first pod holds.
+// The app-id only routes a surface to an output; it does not decide
+// who may use the output. The claim decides that. The compositor
+// refuses nothing: two clients that present one app-id both get the
+// screen, one on top of the other. What stops that here is that the
+// second pod cannot allocate an output the first pod holds.
 func appID(connector string) string {
 	return deviceName(connector)
 }

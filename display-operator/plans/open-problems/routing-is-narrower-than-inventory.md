@@ -3,8 +3,8 @@
 Open problem. The operator publishes a device for every connector the
 card has, and the compositor routes a surface only to the connectors
 that had a monitor on them when the operator started. A connector that
-was dark at startup publishes as a device that no claim can use, and it
-stays that way until the operator restarts.
+was dark at startup publishes as a device that a claim cannot use, and
+it stays that way until the operator restarts.
 
 ## What happens
 

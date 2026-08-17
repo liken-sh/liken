@@ -154,8 +154,9 @@ func TestSliceDevicesTaintsAConnectorTheCompositorCannotRouteTo(t *testing.T) {
 	// monitor plugged into a connector that was empty then has no
 	// [output] section, so no app-id reaches it, and the kiosk shell
 	// sends a surface whose app-id matches nothing to the first output
-	// instead, on top of the client that owns that screen. An
-	// untainted device here is worse than a missing one.
+	// instead, on top of the client that owns that screen. An untainted
+	// device here would let a claim land on a screen the compositor
+	// cannot route to.
 	outputs := discoverOutputs(fakeSysfs(t, "card1", map[string]string{
 		"HDMI-A-1": "lg-hdr-wqhd",
 		"HDMI-A-2": "portable-display",
@@ -223,8 +224,9 @@ func TestBeforeTheCompositorAddsNoScheduleAndKeepsTheHardwareTaints(t *testing.T
 		if device.Taints[0].Key != noOutputTaint || device.Taints[0].Effect != "NoSchedule" {
 			t.Errorf("%s: taint = %+v", device.Name, device.Taints[0])
 		}
-		// The monitor's facts stay. What the taint says is that nothing
-		// routes to the screen yet, not what is plugged into it.
+		// The monitor's facts stay. What the taint says is that the
+		// compositor has not routed a surface here yet, not what is
+		// plugged into it.
 		if _, ok := device.Attributes["connector"]; !ok {
 			t.Errorf("%s: the connector attribute left with the compositor", device.Name)
 		}
@@ -289,8 +291,8 @@ func TestAfterTheCompositorTaintsEveryOutput(t *testing.T) {
 		if device.Taints[1].Key != noOutputTaint || device.Taints[1].Effect != "NoSchedule" {
 			t.Errorf("%s: taints[1] = %+v", device.Name, device.Taints[1])
 		}
-		// The monitor's facts stay. What changed is that nothing can
-		// serve a client, not what is plugged in.
+		// The monitor's facts stay. What changed is that the output
+		// cannot serve a client, not what is plugged in.
 		if _, ok := device.Attributes["connector"]; !ok {
 			t.Errorf("%s: the connector attribute left with the compositor", device.Name)
 		}
