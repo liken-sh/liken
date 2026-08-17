@@ -22,7 +22,7 @@ package main
 //
 // Failures are per-claim strings inside the response, not gRPC
 // errors. The kubelet holds the affected pod in ContainerCreating and
-// retries, which is the honest behavior for an output whose monitor
+// retries, which is the right behavior for an output whose monitor
 // is unplugged: the pod waits, visibly, and a describe of the pod
 // says why.
 

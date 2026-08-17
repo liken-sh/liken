@@ -14,7 +14,7 @@ package main
 // A daemon that dies ends the container with a nonzero status. The
 // operator holds the card's exclusive claim, and PipeWire is what
 // makes the claim useful, so an operator that outlived PipeWire would
-// publish outputs that no pod can play through and hold the hardware
+// publish outputs it can no longer play and hold the hardware
 // away from a pod that could. The kubelet's restart is the repair.
 
 import (

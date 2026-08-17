@@ -123,7 +123,7 @@ settled on. The source says what the code does. It does not say what
 with nothing plugged in, and that number is what the whole path turns
 on.
 
-The documentation names no number for either property. In
+The documentation gives no number for either property. In
 `doc/dox/config/pipewire-props.7.md` at tag 1.6.8, the ALSA node section
 gives `audio.channels` as "The number of audio channels to open the
 device with. Defaults depends on the profile of the device." (line 957),
@@ -144,8 +144,8 @@ declared node set already follows.
 What it costs: a channel count with no channel positions, on any device
 whose reported minimum and maximum differ. WirePlumber marks that format
 `SPA_AUDIO_FLAG_UNPOSITIONED` rather than rejecting it, so the node is
-usable, and an unpositioned eight-channel sink is a sink whose channels
-name no speakers. What a client does with one, and what WirePlumber's
+usable, and an unpositioned eight-channel sink has channels with no
+speaker positions. What a client does with one, and what WirePlumber's
 own linking policy does with one, is not recorded anywhere in this
 repository and nobody has measured it.
 

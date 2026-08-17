@@ -11,8 +11,8 @@ package main
 // timer.
 //
 // The event says only that something changed. Every pass re-reads the
-// ELD elements and PipeWire's graph, because a mirror built from
-// event payloads drifts out of step with the hardware and a re-read
+// ELD elements and PipeWire's graph, because state rebuilt from the
+// event payloads can diverge from the hardware, and a full read
 // cannot.
 
 import (

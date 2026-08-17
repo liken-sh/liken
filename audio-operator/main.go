@@ -194,14 +194,14 @@ func run(ctx context.Context, operator *reconciler, died <-chan error, settled <
 		case err := <-died:
 			// PipeWire holds the card, and this operator holds the card's
 			// exclusive claim. An operator that outlived its sound server
-			// would publish outputs that no pod can play through, and
-			// hold the hardware away from a pod that could.
+			// would publish outputs it can no longer play, and hold the
+			// hardware away from a pod that could.
 			//
 			// The taint goes out first. Without it the slice keeps saying
 			// that every output plays, and the consumers of a card whose
 			// sound server just died would hold a dead socket until
-			// somebody noticed. The taint is what ends their session,
-			// which is milestone 56's loss rule.
+			// somebody noticed. The taint is what ends their session: a
+			// device that cannot serve evicts the pod that holds it.
 			operator.taintEverything()
 			return err
 		case _, ok := <-settled:
@@ -212,8 +212,8 @@ func run(ctx context.Context, operator *reconciler, died <-chan error, settled <
 				// The jack nodes and the backstop tick are the only
 				// sources. A closed channel while the context is live
 				// leaves the operator running with no way to notice a
-				// monitor again, and a pod that runs and publishes
-				// nothing new is worse than a pod that restarts.
+				// monitor again, so it exits and the kubelet
+				// restarts it.
 				return errors.New("the event sources closed while running")
 			}
 			if err := operator.reconcile(ctx); err != nil {

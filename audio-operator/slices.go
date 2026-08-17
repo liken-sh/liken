@@ -181,7 +181,7 @@ func sliceDevices(outputs []alsaOutput, sinks map[pcmAddress]string) []SliceDevi
 		// select with CEL over device.driver, device.attributes,
 		// device.capacity, and device.allowMultipleAllocations, and
 		// there is no device.name among them, so an identity that lives
-		// only in the name is an identity nothing can ask for. The
+		// only in the name is one a selector cannot read. The
 		// output attribute carries the same string, and card and pcm
 		// carry its two halves as numbers, so a claim can name one
 		// output and a claim can ask for every output of one card.
@@ -226,9 +226,8 @@ func sliceDevices(outputs []alsaOutput, sinks map[pcmAddress]string) []SliceDevi
 // publishSink writes what PipeWire holds for one output: the sink
 // node's name as an attribute, or the no-sink taint when there is no
 // node. One branch decides both, so no device can carry the name of a
-// sink and the taint that says it has none. That pair says two
-// opposite things about one output, and a reader of the slice cannot
-// tell which one to believe.
+// sink and the taint that says it has none. Those two would state
+// opposite facts about one output.
 //
 // A name past the attribute limit is left out, and the output keeps
 // its sink. The name still reaches the consumer, because the delivery

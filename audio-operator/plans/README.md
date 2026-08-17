@@ -6,7 +6,7 @@ numbered in sequence and keeps its number for life.
 The form follows liken's own `plans/`. A document states a problem,
 states the design that answers it, and states what was considered and
 set aside. It also states how the work was proved, and a proof runs on
-hardware, because nothing else proves a design about a sound card.
+hardware.
 
 The pattern these documents build on lives in liken's repository:
 [milestone 56, device operators](https://github.com/liken-sh/liken/blob/main/plans/completed/56-device-operators.md),

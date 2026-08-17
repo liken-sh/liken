@@ -182,8 +182,8 @@ func TestSliceDevicesTaintsAnOutputThatCannotPlay(t *testing.T) {
 
 // The sink name and the no-sink taint come from one fact, so a device
 // that publishes the name of its sink must never also say it has none.
-// The pair is what a reader of the slice cannot resolve: the name says
-// a claim would play, and the taint says a claim would reach nothing.
+// Those two would state opposite facts: the name says a claim would
+// play, and the taint says a claim would reach nothing.
 func TestSliceDevicesNeverPublishesASinkNameAndTheNoSinkTaint(t *testing.T) {
 	outputs := []alsaOutput{
 		{Card: 0, PCM: 0},
@@ -215,7 +215,7 @@ func TestSliceDevicesNeverPublishesASinkNameAndTheNoSinkTaint(t *testing.T) {
 }
 
 func TestSliceDevicesOmitsASinkNameTooLongToPublish(t *testing.T) {
-	// A truncated name would name nothing, and the delivery reads the
+	// A truncated name would not name the sink, and the delivery reads the
 	// current name from PipeWire rather than from the slice.
 	long := ""
 	for range maxAttributeLength + 1 {

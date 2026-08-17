@@ -99,9 +99,9 @@ func TestMonitorID(t *testing.T) {
 		},
 		{
 			// Two bytes that decode to something other than three
-			// letters name no monitor, so the caller publishes no
-			// pairing attribute and a constraint on it allocates
-			// nothing.
+			// letters do not identify a monitor, so the caller publishes
+			// no pairing attribute, and a constraint on that attribute
+			// never allocates a device.
 			name:         "the manufacturer did not decode",
 			manufacturer: pnpID(0x0000), product: 0x5b09, monitor: "LG ULTRAWIDE",
 			want: "",

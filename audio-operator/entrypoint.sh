@@ -16,8 +16,8 @@ set -eu
 # operator, which ends the container, and the kubelet restarts the
 # whole set. That coupling is not optional. PipeWire holds the card,
 # and this operator holds the card's exclusive claim, so an operator
-# that outlived PipeWire would publish outputs that no pod can play
-# through and keep the hardware from a pod that could.
+# that outlived PipeWire would publish outputs it can no longer play
+# and keep the hardware from a pod that could.
 
 # dbus-daemon creates its socket in /run/dbus and does not create the
 # directory.

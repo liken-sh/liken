@@ -153,9 +153,8 @@ func (id ctlElemID) name() string {
 // HDMI reports whether the PCM device has an ELD element. An output
 // that has one is an HDMI or a DisplayPort output, and an output that
 // has none is the analog jack. Monitor reports whether that element
-// currently holds a block this operator could parse, which is the
-// difference between a connected monitor and a cable that leads
-// nowhere.
+// currently holds a block this operator could parse. That tells a
+// connected monitor from an HDMI cable with no monitor on it.
 type alsaOutput struct {
 	Card    int
 	PCM     int
