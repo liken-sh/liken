@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -143,8 +144,12 @@ func TestReconcilePublishesWhatItReads(t *testing.T) {
 	if len(devices[0].Taints) != 0 {
 		t.Errorf("the output with a sink is tainted: %+v", devices[0].Taints)
 	}
-	if len(devices[1].Taints) != 2 {
-		t.Errorf("the output with no sink carries %+v, want both taints", devices[1].Taints)
+	noSink := []DeviceTaint{
+		{Key: disconnectedTaint, Effect: "NoExecute"},
+		{Key: noSinkTaint, Effect: "NoSchedule"},
+	}
+	if got := devices[1].Taints; !reflect.DeepEqual(got, noSink) {
+		t.Errorf("the output with no sink node carries %+v, want %+v", got, noSink)
 	}
 }
 
@@ -204,7 +209,8 @@ func TestTaintEverythingTaintsEveryOutput(t *testing.T) {
 	}
 	for _, device := range api.updated.Spec.Devices {
 		if len(device.Taints) != 2 {
-			t.Errorf("%s carries %+v, want both taints", device.Name, device.Taints)
+			t.Errorf("%s carries %+v, want the disconnected and no-sink taints",
+				device.Name, device.Taints)
 		}
 	}
 }
@@ -227,7 +233,8 @@ func TestRunTaintsAndStopsWhenADaemonDies(t *testing.T) {
 	}
 	for _, device := range api.updated.Spec.Devices {
 		if len(device.Taints) != 2 {
-			t.Errorf("%s carries %+v, want both taints", device.Name, device.Taints)
+			t.Errorf("%s carries %+v, want the disconnected and no-sink taints",
+				device.Name, device.Taints)
 		}
 	}
 }

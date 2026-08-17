@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 )
 
@@ -109,17 +110,60 @@ func TestSliceDevicesPublishesEachOutput(t *testing.T) {
 }
 
 func TestSliceDevicesTaintsAnOutputThatCannotPlay(t *testing.T) {
+	// Each case names the taints the output must carry, in the order
+	// the slice publishes them. The NoExecute taint says the output
+	// cannot serve a stream now, and each NoSchedule taint names one
+	// reason, so the set states the whole condition.
 	cases := []struct {
-		name    string
-		output  alsaOutput
-		sink    bool
-		tainted bool
+		name   string
+		output alsaOutput
+		sink   bool
+		taints []DeviceTaint
 	}{
-		{name: "an HDMI output with a monitor and a sink", output: alsaOutput{Card: 0, PCM: 3, HDMI: true, Monitor: true}, sink: true},
-		{name: "the analog jack with a sink", output: alsaOutput{Card: 0, PCM: 0}, sink: true},
-		{name: "an unplugged monitor", output: alsaOutput{Card: 0, PCM: 3, HDMI: true}, sink: true, tainted: true},
-		{name: "an output with no sink", output: alsaOutput{Card: 0, PCM: 3, HDMI: true, Monitor: true}, tainted: true},
-		{name: "the analog jack with no sink", output: alsaOutput{Card: 0, PCM: 0}, tainted: true},
+		{
+			name:   "an HDMI output with a monitor and a sink",
+			output: alsaOutput{Card: 0, PCM: 3, HDMI: true, Monitor: true},
+			sink:   true,
+		},
+		{
+			name:   "the analog jack with a sink",
+			output: alsaOutput{Card: 0, PCM: 0},
+			sink:   true,
+		},
+		{
+			name:   "an unplugged monitor whose sink node is still there",
+			output: alsaOutput{Card: 0, PCM: 3, HDMI: true},
+			sink:   true,
+			taints: []DeviceTaint{
+				{Key: disconnectedTaint, Effect: "NoExecute"},
+				{Key: noMonitorTaint, Effect: "NoSchedule"},
+			},
+		},
+		{
+			name:   "an output with a monitor and no sink node",
+			output: alsaOutput{Card: 0, PCM: 3, HDMI: true, Monitor: true},
+			taints: []DeviceTaint{
+				{Key: disconnectedTaint, Effect: "NoExecute"},
+				{Key: noSinkTaint, Effect: "NoSchedule"},
+			},
+		},
+		{
+			name:   "the analog jack with no sink node",
+			output: alsaOutput{Card: 0, PCM: 0},
+			taints: []DeviceTaint{
+				{Key: disconnectedTaint, Effect: "NoExecute"},
+				{Key: noSinkTaint, Effect: "NoSchedule"},
+			},
+		},
+		{
+			name:   "an unplugged monitor with no sink node either",
+			output: alsaOutput{Card: 0, PCM: 3, HDMI: true},
+			taints: []DeviceTaint{
+				{Key: disconnectedTaint, Effect: "NoExecute"},
+				{Key: noMonitorTaint, Effect: "NoSchedule"},
+				{Key: noSinkTaint, Effect: "NoSchedule"},
+			},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -129,28 +173,44 @@ func TestSliceDevicesTaintsAnOutputThatCannotPlay(t *testing.T) {
 			}
 
 			devices := sliceDevices([]alsaOutput{c.output}, sinks)
-			taints := devices[0].Taints
-			if !c.tainted {
-				if len(taints) != 0 {
-					t.Fatalf("an output that can play carries taints: %+v", taints)
-				}
-				return
-			}
-			// Two keys, because a consumer tolerates one of them and
-			// never the other. Without the NoSchedule taint, a consumer
-			// that tolerated the NoExecute one would be scheduled onto an
-			// output it cannot use, fail in prepare, and be evicted and
-			// scheduled again.
-			if len(taints) != 2 {
-				t.Fatalf("taints = %+v, want two", taints)
-			}
-			if taints[0].Key != disconnectedTaint || taints[0].Effect != "NoExecute" {
-				t.Errorf("the first taint = %+v", taints[0])
-			}
-			if taints[1].Key != noSinkTaint || taints[1].Effect != "NoSchedule" {
-				t.Errorf("the second taint = %+v", taints[1])
+			if got := devices[0].Taints; !reflect.DeepEqual(got, c.taints) {
+				t.Fatalf("taints = %+v, want %+v", got, c.taints)
 			}
 		})
+	}
+}
+
+// The sink name and the no-sink taint come from one fact, so a device
+// that publishes the name of its sink must never also say it has none.
+// The pair is what a reader of the slice cannot resolve: the name says
+// a claim would play, and the taint says a claim would reach nothing.
+func TestSliceDevicesNeverPublishesASinkNameAndTheNoSinkTaint(t *testing.T) {
+	outputs := []alsaOutput{
+		{Card: 0, PCM: 0},
+		{Card: 0, PCM: 3, HDMI: true, Monitor: true},
+		{Card: 0, PCM: 8, HDMI: true},
+		{Card: 0, PCM: 9, HDMI: true},
+	}
+	// Every declared node is in the graph, which is what PipeWire holds
+	// once it has loaded the operator's drop-in, whether a monitor is on
+	// the port or not.
+	sinks := map[pcmAddress]string{}
+	for _, output := range outputs {
+		sinks[pcmAddress{Card: output.Card, PCM: output.PCM}] = sinkNodeName(output.Card, output.PCM)
+	}
+
+	for _, device := range sliceDevices(outputs, sinks) {
+		name, named := device.Attributes["sinkName"]
+		if !named {
+			t.Errorf("%s published no sink name for a node in the graph", device.Name)
+			continue
+		}
+		for _, taint := range device.Taints {
+			if taint.Key == noSinkTaint {
+				t.Errorf("%s published sinkName %q and the no-sink taint",
+					device.Name, *name.String)
+			}
+		}
 	}
 }
 

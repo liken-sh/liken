@@ -245,9 +245,10 @@ pairing attribute, whose full name is `monitor.liken.sh/id`, reads as
 the key `id` under the domain `monitor.liken.sh`. The `matchAttribute`
 field in the next section is not CEL, and it takes the full name.
 
-Do not tolerate `audio.liken.sh/no-sink`. The two taints answer two
-different questions, which the section on disconnects and restarts
-sets out.
+Do not tolerate `audio.liken.sh/no-monitor` or
+`audio.liken.sh/no-sink`. Those two say why an output cannot play, and
+`audio.liken.sh/disconnected` says what happens to the pod that holds
+it, which the section on disconnects and restarts sets out.
 
 Choose `tolerationSeconds` with one more transient in mind, which is
 this operator's own. WirePlumber drops a card's sinks and builds them
@@ -422,11 +423,13 @@ follows the card never moves.
 
 The taints stay honest under that. An HDMI output with no monitor has a
 sink node now, so it is the ELD and not the missing node that taints
-it, and the ELD is the fact that says whether a monitor is there. The
-`no-sink` taint keeps its own meaning: PipeWire holds no node for this
-PCM device. That is what `nofail` on each object leaves possible. One
-output that cannot be created must not stop the daemon, because every
-other output on the card would lose its sink with it.
+it, and the ELD is the fact that says whether a monitor is there. That
+output carries `disconnected` and `no-monitor`, and it carries no
+`no-sink`, because it has a sink and the slice publishes the name of
+it. The `no-sink` taint keeps its own meaning: PipeWire holds no node
+for this PCM device. That is what `nofail` on each object leaves
+possible. One output that cannot be created must not stop the daemon,
+because every other output on the card would lose its sink with it.
 
 **What this gives up.** The card profile path, which is what builds
 sinks from a card's profiles and ports, needs the ALSA monitor. So
@@ -476,25 +479,33 @@ comes from the host and not from this pod.
 ## Disconnects and restarts
 
 **An output that cannot play is tainted, never deleted.** The device
-stays in the slice, and it carries two taints with two different keys:
+stays in the slice, and it carries two taints or three:
 
-| Key | Effect | Who tolerates it |
-|---|---|---|
-| `audio.liken.sh/disconnected` | `NoExecute` | the consumer, with its own `tolerationSeconds` |
-| `audio.liken.sh/no-sink` | `NoSchedule` | nobody |
+| Key | Effect | When it appears | Who tolerates it |
+|---|---|---|---|
+| `audio.liken.sh/disconnected` | `NoExecute` | the output cannot play | the consumer, with its own `tolerationSeconds` |
+| `audio.liken.sh/no-monitor` | `NoSchedule` | no monitor answers on this HDMI output | nobody |
+| `audio.liken.sh/no-sink` | `NoSchedule` | PipeWire holds no node for this PCM device | nobody |
 
-Both appear together, and both mean the same thing: the output cannot
-serve a stream right now, because its monitor is unplugged or because
-PipeWire holds no sink for it. They are two keys because they answer
-two different questions. The `NoExecute` taint ends the pod that holds
-the claim once the claim's `tolerationSeconds` runs out, and a monitor
-that drops for two seconds and comes back must not do that, so the
-consumer tolerates it. A tolerated `NoExecute` taint still permits
-allocation, though, so a consumer that tolerated only that one would
-be scheduled onto an output with no sink, fail in prepare, wait out
-its toleration, get evicted, and be scheduled again. The untolerated
-`NoSchedule` taint is what holds the pod Unschedulable instead, until
-the output can really play.
+The `NoExecute` taint says the output cannot serve a stream right now.
+It goes on for either reason, and it ends the pod that holds the claim
+once the claim's `tolerationSeconds` runs out. A monitor that drops for
+two seconds and comes back must not do that, so the consumer tolerates
+it.
+
+A tolerated `NoExecute` taint still permits allocation, though, so a
+consumer that tolerated only that one would be scheduled onto an output
+that cannot play, wait out its toleration, get evicted, and be
+scheduled again. One of the two untolerated `NoSchedule` taints is
+always there beside it, and that is what holds the pod Unschedulable
+instead, until the output can really play.
+
+The reasons carry separate keys because they are separate facts, and
+each one has its own repair. `no-monitor` reads the ELD, so it clears
+when somebody plugs the cable back in. `no-sink` says PipeWire could
+not create the node, and only a restart creates it. An output that
+publishes a `sinkName` never carries `no-sink`, because one branch in
+the operator writes the name or the taint.
 
 Deleting the device instead of tainting it would strand the next
 consumer: the allocation still names the device, `NodePrepareResources`

@@ -111,9 +111,10 @@ func sinkNodeName(card, pcm int) string {
 // monitor on it. The PCM device is what the card has, and a monitor is
 // what somebody plugs into it, so a node set that followed the cables
 // would change under a running graph and a node set that follows the
-// card does not. An HDMI output with no monitor still carries both
-// taints, because the taint reads the ELD and not the node, so nothing
-// schedules onto it while the cable is out.
+// card does not. An HDMI output with no monitor still carries the
+// disconnected and no-monitor taints, because those two read the ELD
+// and not the node, so nothing schedules onto it while the cable is
+// out. Its node is there, so it carries no no-sink taint.
 func nodeConfig(outputs []alsaOutput) string {
 	sorted := slices.Clone(outputs)
 	slices.SortFunc(sorted, func(a, b alsaOutput) int {
