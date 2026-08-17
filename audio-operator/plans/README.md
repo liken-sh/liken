@@ -27,14 +27,15 @@ is built the way it is, and what it still owes an answer to.
   starts the daemons and fails on any file they map that the image
   lacks. Answers and replaces the open problem "The image is still
   Debian".
-* [03, The kubelet supervises the daemons](03-the-kubelet-supervises-the-daemons.md).
-  Built, and drilled on liken-1 on 2026-08-17 except the daemon-kill
-  fault drill. The pod becomes four containers: a declare init step,
-  the two daemons as native sidecars with real-client probes, and the
+* [03, The kubelet supervises the daemons](completed/03-the-kubelet-supervises-the-daemons.md).
+  Built, and drilled on liken-1 on 2026-08-17, the fault drill
+  included. The pod becomes four containers: a declare init step, the
+  two daemons as native sidecars with real-client probes, and the
   operator. The die-together guarantee survives as an all-devices
-  taint the operator publishes when it loses the graph. The drill
-  surfaced the cross-namespace access defect that
-  `config/51-access-rules.conf` answers.
+  taint the operator publishes when it loses the graph, and the drill
+  proved it end to end, from the cross-namespace access defect that
+  `config/51-access-rules.conf` answers to the eviction a sustained
+  outage carries.
 
 ## Open problems
 

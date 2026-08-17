@@ -1,7 +1,7 @@
 # 03, The kubelet supervises the daemons
 
-Built. Drilled on liken-1 on 2026-08-17, except the daemon-kill
-fault drill, which is still owed.
+Built, and drilled on liken-1 on 2026-08-17, the fault drill
+included.
 
 ## The problem
 
@@ -96,7 +96,29 @@ server's grant stands, because the CDI mount is the access control.
 The release gate could not have caught this, because no cardless run
 links a stream; a linking check is a candidate addition.
 
-Still owed: the fault drill. Kill the PipeWire container, watch the
-kubelet restart it alone, the operator republish, and the consumer
-recover or evict on its toleration, with the all-devices taint
-standing in the window where the graph is gone.
+The fault drill killed PipeWire two ways. A single kill is repaired
+in about two seconds: the kubelet restarts the PipeWire and
+WirePlumber containers alone, and recovery beats the operator's
+detection, so no taint goes out. That is correct, because by the
+time anything could taint, the outputs play again. The cost of a
+fast bounce is the documented one: a connected client strands
+silent and has to restart, on the new pod exactly as on the old.
+
+A sustained kill, held down by repeated murders until the kubelet's
+crashloop backoff stretched the downtime past the detection window,
+ran the whole contract: three failed graph reads in a row, one
+write with every device tainted, a nonzero exit, and the kubelet
+restarting the operator container alone. The pod was never
+recreated (restart counts: pipewire 6, wireplumber 6, operator 1),
+and `DeviceTaintManagerEviction` ended the consumer on its 30
+second toleration. When the kills stopped, the backoff expired and
+the pod converged unattended: ordered restart, honest slice, a
+fresh consumer claiming and playing.
+
+The drill also showed what the taint write actually buys. The
+kubelet deletes a driver's ResourceSlices when the plugin
+deregisters, which the operator's exit causes, so a sustained
+outage's steady state is an absent slice, and a claim pends against
+nothing rather than reading a lie. The all-tainted write covers the
+gap between losing the graph and that deregistration, and it is
+what carries the eviction.
