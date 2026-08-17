@@ -116,6 +116,26 @@ func TestReadTreeSkipsEntriesThatAreNotBonds(t *testing.T) {
 	}
 }
 
+// The info file is the bond. A read that fails on it for any reason
+// other than the file's absence means the tree is not readable, and a
+// silent skip would write a Secret with this bond missing. The read is
+// forced to fail here by replacing the info file with a directory,
+// which os.ReadFile refuses with a non-ENOENT error.
+func TestReadTreeFailsOnAnUnreadableInfoFile(t *testing.T) {
+	root := blueZTree(t)
+	info := filepath.Join(root, testAdapter, testDevice, "info")
+	if err := os.Remove(info); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(info, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ReadTree(root, address(t, testAdapter)); err == nil {
+		t.Fatal("an info file that fails to read must fail the whole call")
+	}
+}
+
 // An adapter that has paired nothing has no directory at all, which
 // is the ordinary state of a machine on its first start.
 func TestReadTreeWithNoDirectory(t *testing.T) {

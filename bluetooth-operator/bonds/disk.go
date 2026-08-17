@@ -72,12 +72,21 @@ func ReadTree(root string, adapter Address) (Tree, error) {
 		if err != nil {
 			continue
 		}
-		// An info file that is missing, unreadable, or empty is a
-		// pairing that did not finish. Writing it back would give
-		// bluetoothd a device directory with no key in it, which is a
-		// device that can never connect and that no unpairing removes.
+		// An info file that is missing or empty is a pairing that did
+		// not finish. Writing it back would give bluetoothd a device
+		// directory with no key in it, which is a device that can never
+		// connect and that no unpairing removes. Any other read failure
+		// fails the whole call. The info file is the bond, and a read
+		// that fails on a file this process owns means something already
+		// went wrong. The caller compares this tree against the Secret
+		// and writes the difference, so a silent skip would write a
+		// Secret with this bond missing, which is the loss the Secret
+		// exists to prevent.
 		info, err := os.ReadFile(filepath.Join(directory, entry.Name(), infoFile))
-		if err != nil || len(info) == 0 {
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+		if len(info) == 0 {
 			continue
 		}
 		// The cache entry takes the same name BlueZ gave the device's

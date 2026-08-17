@@ -1,9 +1,8 @@
 # The restore set is proven for one BR/EDR device
 
 Open problem. Everything the Secret carries was chosen by reading
-BlueZ's source and proven with one DualSense over BR/EDR. Three edges
-of that work are unmeasured, and one of them is a defect in the reader
-rather than a gap in the set.
+BlueZ's source and proven with one DualSense over BR/EDR. Two edges of
+that work are unmeasured.
 
 [Plan 03](../03-a-secret-for-each-adapter.md) decides which files
 travel. It prices `settings` and `attributes` and sets both aside. It
@@ -56,30 +55,3 @@ than measured.
 A DualSense pairs BR/EDR, so neither claim has met hardware. The drill
 that would settle both is small: pair one LE device, delete the
 operator pod, and reconnect it.
-
-## ReadTree fails on the less important file
-
-`ReadTree` in `bonds/disk.go` treats the two files by opposite rules.
-An `info` file that fails to read is skipped, and the device drops out
-of the tree. A `cache` file that fails to read for any reason other
-than "not found" fails the whole call.
-
-Each rule has a reason, and each reason is sound alone. An unreadable
-or empty `info` is a pairing that did not finish, and writing it back
-would give bluetoothd a device directory with no key in it. A missed
-`cache` file is a cache file the next write drops, and a BR/EDR HID
-device does not reconnect without its SDP records.
-
-Together they rank the two files backwards. The file that *is* the
-bond is the one a read failure discards silently, and the file
-that only matters once the bond exists is the one that stops the read.
-
-The case is narrow. Both files are 0600 under a 0700 directory, owned
-by the user that reads them, so a failure that is not `ErrNotExist`
-means something already went wrong. But if it happens, the operator
-writes a Secret with that bond missing, and the bond is gone. That is
-the exact loss the Secret exists to prevent.
-
-**What has to be decided.** Whether to fail on any `info` read error
-that is not `ErrNotExist`, and keep the skip for the missing and empty
-cases that the comment actually describes.
