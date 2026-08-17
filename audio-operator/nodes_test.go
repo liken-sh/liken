@@ -66,8 +66,6 @@ func TestNodeConfigDeclaresOneSinkForEachPlaybackPCM(t *testing.T) {
 			"api.alsa.path":     want.path,
 			"api.alsa.pcm.card": "0",
 			"node.name":         sinkNodeName(want.card, want.pcm),
-			"audio.channels":    "2",
-			"audio.position":    "FL,FR",
 			nodeCardProperty:    "0",
 			nodePCMProperty:     strings.TrimPrefix(want.path, "hw:0,"),
 		}

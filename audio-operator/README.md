@@ -140,13 +140,13 @@ satisfied by either pairing. See
 Or reference `deploy/` from your own GitOps. The base assumes the
 namespace `liken-system` exists.
 
-Nothing states which machine has the speakers. The pod claims the audio
-controller, only a machine with one publishes one, and the scheduler
-places the pod there. To serve cards on several machines, raise
-`replicas` to the number of machines; a replica past that parks
-Pending. A machine with two sound cards serves only one, because the
-slice is named for the node and the driver. See
-[the claim takes any sound card](plans/open-problems/the-claim-takes-any-sound-card-and-a-node-serves-only-one.md).
+The operator runs as a DaemonSet, so a pod lands on every node and
+nobody states which machine has the speakers. Each pod claims every
+audio controller on its node and serves every sound card there, and a
+consumer's own claim selects the card and output by attribute. A node
+with no controller publishes no matching device, so the claim parks
+that pod Pending, and it costs nothing. A deployment that must leave a
+card for something else adds a selector to the controller request.
 
 The base ships two DeviceClasses. `audio-controller` is the raw device
 the operator claims from liken
@@ -304,8 +304,6 @@ the daemons start, one `context.objects` entry for each PCM device:
           "media.class": "Audio/Sink",
           "node.name": "liken.audio.card0-pcm3",
           "node.description": "liken audio output, ALSA card 0 device 3",
-          "audio.channels": "2",
-          "audio.position": "FL,FR",
           "liken.audio.card": "0",
           "liken.audio.pcm": "3"
         }
@@ -329,11 +327,10 @@ other output's sink with it.
 
 **What this gives up.** The card-profile path needs the ALSA monitor,
 so there is no hardware mixer volume, no profile switching, and no port
-availability. Volume is PipeWire's software volume, every output is
-stereo, and jack detection is the operator's, read from the card's
-input nodes. A monitor that accepts more than two channels still gets
-two. See
-[every sink is declared stereo](plans/open-problems/every-sink-is-declared-stereo.md).
+availability. Volume is PipeWire's software volume, the channel layout
+is left unset so PipeWire takes the count from the card, and jack
+detection is the operator's, read from the card's input nodes. The
+layout then depends on what is connected when PipeWire starts.
 
 ## The privilege it takes
 
@@ -344,14 +341,12 @@ and the card's `/dev/input/event*` jacks, where a monitor arriving or
 leaving is a switch event. PipeWire asks RTKit for real-time priority,
 finds none, and runs without it, so not even `SYS_NICE` is here.
 
-The pod runs a D-Bus system bus of its own, because WirePlumber's
-device reservation and PipeWire's RTKit lookup speak it, and no process
-outside the pod reaches it. WirePlumber runs the stateless
-`main-embedded` profile with every hardware monitor off: the ALSA
-monitor because it finds nothing without udev, and the Bluetooth and
-camera monitors because this operator's domain is the sound card its
-claim allocated. `config/50-audio-operator.conf` states that rather
-than resting on what happens to be reachable.
+WirePlumber runs the stateless `main-embedded` profile with every
+hardware monitor off: the ALSA monitor because it finds nothing without
+udev, and the Bluetooth and camera monitors because this operator's
+domain is the sound cards its claim allocated.
+`config/50-audio-operator.conf` states that rather than resting on what
+happens to be reachable.
 
 Beside those, the pod takes the two hostPath mounts every DRA driver
 takes, the kubelet plugin registry and `/var/run/cdi`, its own plugin
@@ -420,9 +415,6 @@ ends the container nonzero, and the kubelet restarts the set.
   unconditionally, so an empty jack allocates to a claim and produces
   no sound. See
   [the analog jack publishes whether or not anything is plugged in](plans/open-problems/the-analog-jack-publishes-whether-or-not-anything-is-plugged-in.md).
-* **More than stereo.** Every node asks for two channels at `FL,FR`, so
-  a monitor that accepts more gets two. See
-  [every sink is declared stereo](plans/open-problems/every-sink-is-declared-stereo.md).
 * **The identical-monitor tiebreak.** Two monitors of one model share
   one `monitor.liken.sh/id`. Whether the ELD's `port_id` distinguishes
   them awaits a machine with two identical monitors.

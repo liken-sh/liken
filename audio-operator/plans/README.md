@@ -34,15 +34,6 @@ decided yet what work they become.
 * [The image is still Debian](open-problems/the-image-is-still-debian.md).
   The two sibling operators ship images built from a named set of
   files, and this one installs its daemons from a distribution.
-* [Every sink is declared stereo](open-problems/every-sink-is-declared-stereo.md).
-  The operator declares two channels at `FL,FR` on every output, and
-  the PipeWire sources say a node declared without a channel count
-  takes the count from the hardware.
-* [The claim takes any sound card, and a node serves only one](open-problems/the-claim-takes-any-sound-card-and-a-node-serves-only-one.md).
-  The controller claim's `bus == "pci"` pin says which card the
-  operator gets and not which card it should get, and the slice is
-  named for the node and the driver, so two replicas on one machine
-  would overwrite each other.
 * [A sink can be shared and this one is not](open-problems/a-sink-can-be-shared-and-this-one-is-not.md).
   PipeWire mixes streams and every device this operator publishes is
   exclusive, so the second pod to claim a sink waits behind the first.

@@ -179,14 +179,10 @@ const configHeader = `# The claimed card's playback outputs, written by audio-op
 // copies no default onto the PipeWire node, so a node declared without
 // it is a node that no client and no session manager sees as a sink.
 //
-// The channel layout is stereo on every output. A monitor's ELD
-// reports how many uncompressed channels it accepts, and the operator
-// publishes that number as an attribute, but the ELD is readable only
-// while the monitor is connected and this file is written once at
-// start. A layout that came from a cable would give one graph when the
-// monitor is plugged in at boot and another when somebody plugs it in
-// later. Stereo is what every HDMI monitor and every analog jack
-// accepts, so it is the layout that is true at every start.
+// The channel layout is left unset. With audio.channels absent,
+// PipeWire's default_channels is 0, so the ALSA node reports the card's
+// own channel range and PipeWire takes the count from the hardware. The
+// layout then depends on what is connected when PipeWire starts.
 func sinkObject(card, pcm int) staticNode {
 	return staticNode{
 		Factory: "adapter",
@@ -198,9 +194,7 @@ func sinkObject(card, pcm int) staticNode {
 			"node.name":         sinkNodeName(card, pcm),
 			"node.description": fmt.Sprintf("liken audio output, ALSA card %d device %d",
 				card, pcm),
-			"media.class":    "Audio/Sink",
-			"audio.channels": "2",
-			"audio.position": "FL,FR",
+			"media.class": "Audio/Sink",
 			// The two numbers readSinks maps a node back to. The adapter
 			// module hands the whole args dictionary to the node it
 			// creates, and a node's info block carries its whole property

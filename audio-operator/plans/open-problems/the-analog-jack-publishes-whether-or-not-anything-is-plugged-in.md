@@ -21,16 +21,19 @@ silence. The analog jack has no equivalent signal in the slice.
 
 ## What is unmeasured
 
-On liken-1 the pinned PCI controller published four outputs on
-2026-08-17, `card0-pcm3`, `card0-pcm7`, `card0-pcm8`, and
-`card0-pcm9`, and every one of them had an ELD element. No analog
-device appeared at all. The machine's other card is USB and the
-controller claim excludes it, which is
-[The claim takes any sound card, and a node serves only one](the-claim-takes-any-sound-card-and-a-node-serves-only-one.md).
+On liken-1 the PCI controller published four outputs on 2026-08-17,
+`card0-pcm3`, `card0-pcm7`, `card0-pcm8`, and `card0-pcm9`, and every
+one of them had an ELD element. No analog device appeared. The
+machine's other card is a USB codec. On that date the controller claim
+took only the PCI card, so the USB card was not served. The claim now
+takes every sound card on the node with `allocationMode: All`, so the
+operator serves the USB card too, and its one PCM device has no ELD, so
+the operator labels it `analog`. What that publishes is a question for
+the next drill.
 
-So the cost this question describes has not been seen on the one
-machine that runs the operator. What it would cost on a machine with
-an analog codec is still a guess.
+So the HDA analog jack this question describes has not been seen on the
+one machine that runs the operator. What it would cost on a machine
+with an analog HDA codec is still a guess.
 
 ## The fix that was named, and what it costs
 

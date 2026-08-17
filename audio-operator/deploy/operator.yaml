@@ -1,16 +1,15 @@
-# The operator itself: one pod for one audio controller, and the claim
-# that places it.
+# The operator itself: a DaemonSet that runs one pod per node, and the
+# claim that lets each pod run only where sound hardware is.
 #
 # There is no volume for state. PipeWire and WirePlumber keep their
-# graph in memory and build it again from the card at every start, so
+# graph in memory and build it again from the cards at every start, so
 # a restart loses nothing that a person would have to restore by hand.
 ---
 # The controller claim. A template rather than a plain claim, so each
-# replica allocates a distinct controller: raise replicas below to the
-# number of audio controllers in the cluster, and the scheduler
-# spreads the pods to wherever the cards are. A replica past that
-# number parks Pending and costs nothing. Nobody writes down which
-# machine has the speakers.
+# pod allocates the controllers on its own node. The DaemonSet places a
+# pod on every node, and a claim with zero matching devices parks that
+# pod Pending, so a pod runs only where sound hardware is. Nobody writes
+# down which machine has the speakers.
 apiVersion: resource.k8s.io/v1
 kind: ResourceClaimTemplate
 metadata:
@@ -22,32 +21,30 @@ spec:
         - name: controller
           exactly:
             deviceClassName: audio-controller
-            selectors:
-              # The machine's own sound card, and not a USB headset or
-              # a webcam's microphone. Both answer the device class,
-              # because both are the sound subsystem, and the outputs
-              # this operator publishes are the ones wired to the
-              # machine's display connectors.
-              - cel:
-                  expression: |
-                    has(device.attributes["liken.sh"].bus) &&
-                    device.attributes["liken.sh"].bus == "pci"
+            # Every sound controller on the node, not one. PipeWire spans
+            # every ALSA card on the machine, and this operator keys each
+            # output by card number, so one pod serves all the node's
+            # cards. A consumer's own claim selects the card and output by
+            # attribute.
+            allocationMode: All
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: DaemonSet
 metadata:
   name: audio-operator
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: audio-operator
-  # Recreate, never a rolling update. The controller allocates to one
-  # claim, so a rolling update's second pod would park Pending until
-  # the first one released the card, and the update would never
-  # finish. Recreate stops the old pod first.
-  strategy:
-    type: Recreate
+  # The old pod stops before the new one starts. The operator holds an
+  # exclusive claim on the node's controllers, so a second pod on the
+  # same node would park Pending until the first one released them.
+  # maxSurge 0 keeps two pods from ever coexisting on one node.
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   template:
     metadata:
       labels:
@@ -71,12 +68,10 @@ spec:
             # node, its PCM nodes, and the input nodes of its jacks.
             # PipeWire asks RTKit for a real-time priority, finds no
             # RTKit in this pod, and runs without one, so not even
-            # SYS_NICE is here. dbus-daemon drops to its messagebus
-            # user at start, and the drop itself takes CAP_SETUID and
-            # CAP_SETGID.
+            # SYS_NICE is here. No process in the pod drops to another
+            # user, so the pod adds no capability back.
             capabilities:
               drop: ["ALL"]
-              add: ["SETUID", "SETGID"]
             privileged: false
             allowPrivilegeEscalation: false
           resources:
@@ -85,9 +80,10 @@ spec:
               memory: 128Mi
             limits:
               memory: 256Mi
-            # The audio controller, claimed from liken. This is the
-            # placement: the scheduler puts the pod where the hardware
-            # is.
+            # The node's audio controllers, claimed from liken. The
+            # DaemonSet places a pod on every node, and this claim keeps
+            # the pod Pending on a node that has no controller, so a pod
+            # runs only where the hardware is.
             claims:
               - name: controller
           volumeMounts:

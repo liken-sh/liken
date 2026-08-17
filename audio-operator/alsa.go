@@ -23,6 +23,7 @@ package main
 // kernel does not answer.
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -191,6 +192,15 @@ func (o alsaOutput) connectionType() string {
 // and sinks come and go.
 func readOutputs() ([]alsaOutput, error) {
 	entries, err := os.ReadDir(sndDir)
+	if errors.Is(err, os.ErrNotExist) {
+		// A node with no sound card has no /dev/snd for the claim to
+		// deliver. The operator publishes no output and keeps serving, so
+		// a DaemonSet can place a pod on every node and the pod idles
+		// where there is nothing to play. A read error on a directory
+		// that does exist still fails, because that is a delivered card
+		// the operator cannot enumerate.
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", sndDir, err)
 	}

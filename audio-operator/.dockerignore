@@ -1,6 +1,6 @@
 # The build needs the module files, the Go sources, and the
-# entrypoint. Everything else is documentation, test data, or
-# manifests.
+# WirePlumber configuration. Everything else is documentation, test
+# data, or manifests.
 .git
 .github
 deploy

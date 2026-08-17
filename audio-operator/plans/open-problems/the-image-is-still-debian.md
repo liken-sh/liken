@@ -1,8 +1,8 @@
 # The image is still Debian
 
 Open problem. This operator's image is `debian:stable-slim` with
-`pipewire`, `pipewire-bin`, `wireplumber`, and `dbus` installed from
-the distribution. The two sibling operators build their images from a
+`pipewire`, `pipewire-bin`, and `wireplumber` installed from the
+distribution. The two sibling operators build their images from a
 named set of files instead.
 
 ## What the siblings did
@@ -33,17 +33,17 @@ the reading.
 
 Nobody has written that list for PipeWire and WirePlumber.
 
-## One finding that may remove a daemon
+## The D-Bus bus is gone
 
-The pod runs a private D-Bus system bus beside the two daemons. Two
-reasons put it there, and only one of them is still live. With the ALSA
-monitor disabled, WirePlumber's device reservation no longer runs, so
-PipeWire's RTKit lookup is the only remaining reason the pod starts a
-bus. Nothing answers RTKit in this pod, and PipeWire runs without a
-real-time priority either way.
+The pod ran a private D-Bus system bus beside the two daemons. Two
+reasons put it there, and only one was ever live. With the ALSA monitor
+disabled, WirePlumber's device reservation does not run, so PipeWire's
+RTKit lookup was the only remaining reason for the bus. Nothing answers
+RTKit in this pod, and PipeWire runs without a real-time priority
+either way, so the bus did nothing.
 
-So the bus may be removable, which takes a whole daemon out of the
-image and takes the wait loop out of `entrypoint.sh`. Nobody has tested
-that. `entrypoint.sh` and `config/50-audio-operator.conf` both still
-name device reservation as a reason for the bus, so a test that
-confirms this finding also corrects those two comments.
+The bus is removed. The image no longer installs `dbus`, the operator
+is the container's entrypoint and starts the two daemons itself, and
+the deleted `entrypoint.sh` took its bus start and its wait loop with
+it. That subtracts one daemon from the image. The closure below is what
+the image still owes.

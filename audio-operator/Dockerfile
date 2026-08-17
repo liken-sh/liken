@@ -20,11 +20,8 @@ FROM debian:stable-slim
 # the node declarations the operator writes before it starts, because
 # WirePlumber's ALSA monitor needs udev and a liken machine runs no
 # udevd. wireplumber links each client's stream to the sink it names.
-# dbus is the bus those two look for: PipeWire's RTKit lookup falls
-# back to the system bus, so the image carries a bus for it to find.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        dbus \
         pipewire \
         pipewire-bin \
         wireplumber \
@@ -32,7 +29,7 @@ RUN apt-get update \
 
 # WirePlumber's profile is baked in, not mounted. It is a requirement
 # of this operator rather than a choice a deployment makes: the pod
-# manages the one sound card its claim allocated, so every hardware
+# manages every sound card its claim allocated, so every hardware
 # monitor is off, including the ALSA one that finds nothing without
 # udev. The file says why.
 COPY config/50-audio-operator.conf /etc/wireplumber/wireplumber.conf.d/
@@ -43,6 +40,8 @@ COPY config/50-audio-operator.conf /etc/wireplumber/wireplumber.conf.d/
 # if the image has none.
 
 COPY --from=build /audio-operator /usr/local/bin/audio-operator
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+# The operator is PID 1. It starts PipeWire and WirePlumber as its own
+# children and waits on them, so a daemon that dies ends the container
+# and the kubelet restarts the whole set. See daemons.go.
+ENTRYPOINT ["/usr/local/bin/audio-operator"]

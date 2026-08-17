@@ -93,10 +93,17 @@ func TestReadOutputsFindsPlaybackDevices(t *testing.T) {
 	}
 }
 
-func TestReadOutputsReportsAMissingDirectory(t *testing.T) {
+// A node with no sound card has no /dev/snd. The operator publishes no
+// output and keeps serving, so a missing directory is a clean idle and
+// not an error.
+func TestReadOutputsIdlesWithNoDirectory(t *testing.T) {
 	sndDir = filepath.Join(t.TempDir(), "absent")
-	if _, err := readOutputs(); err == nil {
-		t.Fatal("a missing directory did not report an error")
+	outputs, err := readOutputs()
+	if err != nil {
+		t.Fatalf("a missing directory reported an error: %v", err)
+	}
+	if len(outputs) != 0 {
+		t.Fatalf("a missing directory produced %d outputs, want zero", len(outputs))
 	}
 }
 
