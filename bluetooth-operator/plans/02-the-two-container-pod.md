@@ -154,6 +154,4 @@ DualSense controller.
   files on disk, and resolving them needs no running operator.
 
 The one check the drill could not run was a directory listing of
-`/var/lib/bluetooth`, because the image carries no `ls`. That is
-recorded in
-[Inspecting a pod with no tools](open-problems/inspecting-a-pod-with-no-tools.md).
+`/var/lib/bluetooth`, because the image carries no `ls`.

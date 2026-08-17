@@ -26,15 +26,10 @@ decided yet what work they become.
 
 ## Open problems
 
-* [Bonds follow the pod's ordinal and adapters do not](open-problems/bonds-follow-the-ordinal-and-adapters-do-not.md).
-  A link key belongs to one adapter, and the StatefulSet gives a
-  replica its bonds volume by ordinal.
-* [Whether the bonds belong in the cluster](open-problems/whether-the-bonds-belong-in-the-cluster.md).
-  The workload is a StatefulSet because the bonds live on a volume,
-  and nobody has priced keeping them in the API instead.
+* [Where a bond lives when the adapter moves](open-problems/where-a-bond-lives-when-the-adapter-moves.md).
+  A link key belongs to one adapter, the volume that holds it belongs
+  to a replica ordinal and to a node, and the storage decision picks
+  the workload shape.
 * [Who owns the pairing UX](open-problems/who-owns-the-pairing-ux.md).
   The operator runs bluetoothd, so it is the only layer that can offer
   pairing, and whether it should is not decided.
-* [Inspecting a pod with no tools](open-problems/inspecting-a-pod-with-no-tools.md).
-  The bluetoothd image carries four binaries and no shell, so the
-  ordinary way to read a pod's state does not run.
