@@ -60,6 +60,16 @@ spec:
       terminationGracePeriodSeconds: 5
       containers:
         - name: operator
+          # One container, because the operator writes weston.ini and
+          # then runs weston as its own child, and a weston that exits
+          # has to end this process. Two containers in one pod restart
+          # on their own, and nothing in a pod spec binds one
+          # container's life to another's.
+          #
+          # The image holds the operator's binary, weston, and the
+          # libraries weston loads. It holds no shell, so kubectl exec
+          # can run only a binary the image carries by name, such as
+          # wayland-info.
           image: ghcr.io/liken-sh/display-operator:latest
           env:
             # A ResourceSlice names the node whose hardware it

@@ -1,5 +1,5 @@
-# Every push to main tests the code, builds the image, and releases
-# it.
+# Every push to main tests the code, builds both images, starts the
+# compositor, and releases them.
 #
 # The version is the date and the run number, which is liken's own
 # scheme: 2026.08.16-002. The two release cadences do not couple, and
@@ -51,13 +51,59 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/build-push-action@v6
+      # Both images build here and neither one pushes yet. The
+      # compositor has to start before anything reaches ghcr.io, and a
+      # push that happened first would leave a broken :latest behind
+      # when the start failed.
+      - name: Build the compositor
+        uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
+          target: weston
+          load: true
+          tags: |
+            ghcr.io/liken-sh/weston:${{ env.VERSION }}
+            ghcr.io/liken-sh/weston:latest
+
+      # The compositor opens its backend, its renderer and its shell by
+      # file name, so a library the image does not carry shows up at the
+      # first start and at no earlier point. go test cannot see any of
+      # it. The headless backend needs no graphics card, so this runs on
+      # an ordinary runner, and it covers everything but the card: the
+      # module loads, the EGL vendor, the DRI driver, and the shell.
+      #
+      # weston runs until it is stopped, so timeout is what ends it, and
+      # the log is what says whether it got that far.
+      - name: Start the compositor
+        run: |
+          printf '[core]\nshell=kiosk\nrenderer=gl\nrequire-input=false\n' > weston.ini
+          timeout 30 docker run --rm --tmpfs /run \
+            -e XDG_RUNTIME_DIR=/run \
+            -v "$PWD/weston.ini:/weston.ini:ro" \
+            "ghcr.io/liken-sh/weston:$VERSION" \
+            --backend=headless --config=/weston.ini --socket=release \
+            > weston.log 2>&1 || true
+          cat weston.log
+          grep -q "Using GL renderer" weston.log
+          grep -q "kiosk-shell.so" weston.log
+
+      - name: Build the operator
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
           tags: |
             ghcr.io/liken-sh/display-operator:${{ env.VERSION }}
             ghcr.io/liken-sh/display-operator:latest
+
+      # The operator image is built from the compositor image, so the
+      # two share every layer and the second push sends one binary.
+      - name: Push both images
+        run: |
+          docker push "ghcr.io/liken-sh/weston:$VERSION"
+          docker push "ghcr.io/liken-sh/weston:latest"
+          docker push "ghcr.io/liken-sh/display-operator:$VERSION"
+          docker push "ghcr.io/liken-sh/display-operator:latest"
 
       # The tag lands after the push, so a tag in the repository always
       # names a version that exists in the registry.

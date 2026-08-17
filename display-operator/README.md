@@ -391,15 +391,63 @@ after the socket appears clears them.
 * **Metrics.** The operator prints what it does to stderr and reports
   output state through the taints. It exposes no metrics endpoint.
 
+## The images
+
+Two, from one `Dockerfile`.
+
+* `ghcr.io/liken-sh/weston` is the compositor and every library it
+  loads, on nothing else. No shell, no package manager, no libc
+  userland.
+* `ghcr.io/liken-sh/display-operator` is that image plus the operator's
+  binary, which is static and is the whole of what this repository
+  adds. It is the image the Deployment names.
+
+The second is built **from** the first rather than beside it, so the
+compositor that the release starts and reads the log of is the same set
+of bytes the pod runs. The two share every layer, so a node that has
+one pulls the other for the size of one binary.
+
+The pod runs **one** container. The operator writes `weston.ini` from
+the outputs it enumerated and then runs weston as its own child, and a
+weston that exits has to end the operator. A pod spec has no way to
+bind one container's life to another's: two containers restart
+separately, and rebuilding that binding across a shared volume would
+put two restart loops where there is now one exit status.
+
+The compositor's own image exists because it is the artifact the
+release proves. Debian ships every libweston backend in one package, so
+installing `weston` also installs FreeRDP, neatvnc, GStreamer,
+PipeWire, libavcodec and a speech synthesiser, none of which this
+operator loads. `weston-closure.sh` takes the four modules the operator
+uses, resolves what the loader needs for each, and copies that. It
+names the loads that `ldd` cannot see, which is every module weston
+opens by file name, glvnd's EGL vendor, mesa's gbm backend, and the DRI
+drivers.
+
 ## Building it
 
     go build ./...
     go test ./...
+    docker build --target weston -t weston .
     docker build -t display-operator .
 
 The Kubernetes libraries and the Go version are pinned to what liken
 builds against, because the two drivers serve the same kubelet on the
-same node.
+same node. The Debian suite is pinned as well, because the closure
+script names weston 14 and a suite that carries weston 15 has to fail
+the build rather than ship a set of modules nobody read.
+
+To start the compositor with no graphics card, which is what the
+release does:
+
+    printf '[core]\nshell=kiosk\nrenderer=gl\nrequire-input=false\n' > weston.ini
+    docker run --rm --tmpfs /run -e XDG_RUNTIME_DIR=/run \
+        -v "$PWD/weston.ini:/weston.ini:ro" weston \
+        --backend=headless --config=/weston.ini --socket=smoke
+
+The log names each module as it opens it. `Using GL renderer` is the
+line that says mesa resolved a driver, and the `kiosk-shell.so` line is
+the last load.
 
 The EDID fixtures in `testdata` are whole EDIDs read off real monitors
 with `od -An -tx1 /sys/class/drm/<card>-<connector>/edid`. To add one,
