@@ -14,4 +14,24 @@ The pattern these documents build on lives in liken's repository:
 and this operator's own instance,
 [milestone 58](https://github.com/liken-sh/liken/blob/main/plans/58-the-bluetooth-operator.md).
 
+[`open-problems/`](open-problems/) holds the questions this operator
+owes an answer to. Those documents carry no number, because nobody has
+decided yet what work they become.
+
+## The designs
+
 * [01, Bluetooth audio](01-bluetooth-audio.md). Proposed.
+* [02, The two-container pod](02-the-two-container-pod.md). Built, and
+  drilled on liken-1 on 2026-08-17.
+
+## Open problems
+
+* [Bonds follow the pod's ordinal and adapters do not](open-problems/bonds-follow-the-ordinal-and-adapters-do-not.md).
+  A link key belongs to one adapter, and the StatefulSet gives a
+  replica its bonds volume by ordinal.
+* [Who owns the pairing UX](open-problems/who-owns-the-pairing-ux.md).
+  The operator runs bluetoothd, so it is the only layer that can offer
+  pairing, and whether it should is not decided.
+* [Inspecting a pod with no tools](open-problems/inspecting-a-pod-with-no-tools.md).
+  The bluetoothd image carries four binaries and no shell, so the
+  ordinary way to read a pod's state does not run.

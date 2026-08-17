@@ -1,6 +1,6 @@
 # Bluetooth audio
 
-Plan 01 — Proposed. It would publish each paired Bluetooth speaker as
+Plan 01, Proposed. It would publish each paired Bluetooth speaker as
 its own DRA device, so a pod claims one speaker by its MAC address and
 receives a PipeWire socket and the name of the sink its streams must
 reach. The operator already claims the adapter and runs `bluetoothd`.
@@ -431,8 +431,8 @@ and a real A2DP speaker.
   asks for them.
 * **A shared attribute so one DeviceClass spans both drivers.** A
   Bluetooth speaker publishes under `bluetooth.liken.sh` and an HDMI
-  output publishes under `audio.liken.sh`, so a consumer that wants any
-  speaker reads two drivers. A DeviceClass selector can read
+  output publishes under `audio.liken.sh`, so a consumer that can use
+  any speaker reads two drivers. A DeviceClass selector can read
   `device.driver` and cover both, and milestone 59 already sets the
   precedent for the tidier form with `monitor.liken.sh/id`, a shared
   attribute in a domain that neither driver owns. A `sound.liken.sh`
