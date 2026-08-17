@@ -38,12 +38,13 @@ sides.
 
 ## The candidate
 
-The ELD's `port_id` field is the candidate tiebreak. Nobody measured
-it. Two questions are open. The first is whether `port_id` differs
-between two outputs of one card. The second is whether it corresponds
-to the DRM connector the display operator names, because a value that
-only this operator can read pairs nothing. This document names the
-candidate and does not pick it.
+The ELD's `port_id` field was the candidate tiebreak, and the
+measurement killed it. On liken-1 on 2026-08-17, with a monitor on
+each of two outputs, both live ELD blocks (`eld#2.0` and `eld#2.4`
+under `/proc/asound/card0`) reported `port_id 0x0`. The i915 driver
+does not fill the field in, so it distinguishes nothing and
+corresponds to nothing the display operator names. No new candidate
+is chosen.
 
 ## What a claim can do today
 
