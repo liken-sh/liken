@@ -1,0 +1,56 @@
+# The operator's identity in the cluster, and deliberately nothing
+# more. It writes one ResourceSlice, reads the claims the kubelet asks
+# it to prepare, and reads its own Node.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: audio-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: audio-operator
+rules:
+  # The device inventory (slices.go): this node's ResourceSlice under
+  # audio.liken.sh. The verbs cover the collection, because RBAC
+  # cannot say "only the slice named for your node": resourceNames
+  # cannot be templated per pod. The program only ever writes its own,
+  # whose name it builds from NODE_NAME. There is no delete, because
+  # the operator never retracts its slice: the Node owns it, and a
+  # slice that left with the pod would strand every prepared consumer.
+  # No list and no watch either: the name is deterministic, and
+  # reading anyone else's inventory is the scheduler's job.
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceslices]
+    verbs: [get, create, update]
+  # The DRA plugin (dra.go): when the kubelet asks this driver to
+  # prepare a claim, the request names the claim and nothing more. The
+  # allocation lives on the claim's status, so the driver reads it
+  # back. This is read-only across every namespace, because claims
+  # belong to workloads and the driver serves whichever namespace
+  # claims an output. Still no list and no watch: prepare calls arrive
+  # with exact names.
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceclaims]
+    verbs: [get]
+  # This node, read once at startup for the UID that the slice's owner
+  # reference needs. The Node owns the slice, so a Node that leaves
+  # the cluster takes the slice with it, and the garbage collector
+  # cleans up after an operator that exits without running any code.
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: audio-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: audio-operator
+subjects:
+  - kind: ServiceAccount
+    name: audio-operator
+    namespace: liken-system

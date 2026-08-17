@@ -1,0 +1,57 @@
+# The two ends of this operator: the raw device it claims from liken,
+# and the refined device it publishes for everybody else.
+---
+# The audio controller, as liken publishes it. The operator's own pod
+# claims one of these, and that claim does two jobs. It places the
+# pod, because only a machine with an audio controller publishes one,
+# so no node selector has to name the machine with the speakers. And
+# it arbitrates, because liken publishes a controller as a device that
+# allocates once, so the claim holder is the only sound server on that
+# card. ALSA gives each PCM subdevice to one opener and refuses a
+# second open with EBUSY, and two claims sharing a card have no
+# contract over which claim gets which output, so that refusal would
+# arrive at play time on whichever pod opened second.
+#
+# subsystem is the fact that names an audio controller. liken publishes
+# it for a device whose subtree delivers ALSA's nodes and no others,
+# and it is absent on a device that delivers a mix, so the has() guard
+# is what keeps an unguarded read from aborting the allocation.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: audio-controller
+spec:
+  selectors:
+    - cel:
+        expression: |
+          device.driver == "liken.sh" &&
+          has(device.attributes["liken.sh"].subsystem) &&
+          device.attributes["liken.sh"].subsystem == "sound"
+---
+# One physical output, as this operator publishes it. A claim against
+# this class alone allocates any output on the card. To name one, add
+# a selector on its attributes:
+#
+#     device.attributes["audio.liken.sh"].output == "card0-pcm3"
+#
+#     device.attributes["audio.liken.sh"].connectionType == "analog"
+#
+#     device.attributes["monitor.liken.sh"].id == "gsm-5b09-lg-ultrawide"
+#
+# A selector reads attributes and never the device's name, because CEL
+# is given device.driver, device.attributes, device.capacity, and
+# device.allowMultipleAllocations, and no device.name. The map is two
+# levels deep and splits on the domain, so the pairing attribute,
+# whose full name is monitor.liken.sh/id, reads as the key id under
+# the domain monitor.liken.sh.
+#
+# The README has the whole claim, including the one that pairs a
+# screen with that screen's speakers.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: audio-output
+spec:
+  selectors:
+    - cel:
+        expression: device.driver == "audio.liken.sh"

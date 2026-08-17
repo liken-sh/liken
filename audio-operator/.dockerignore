@@ -1,0 +1,10 @@
+# The build needs the module files, the Go sources, and the
+# entrypoint. Everything else is documentation, test data, or
+# manifests.
+.git
+.github
+deploy
+testdata
+README.md
+LICENSE
+/audio-operator

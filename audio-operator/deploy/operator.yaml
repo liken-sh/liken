@@ -1,0 +1,122 @@
+# The operator itself: one pod for one audio controller, and the claim
+# that places it.
+#
+# There is no volume for state. PipeWire and WirePlumber keep their
+# graph in memory and build it again from the card at every start, so
+# a restart loses nothing that a person would have to restore by hand.
+---
+# The controller claim. A template rather than a plain claim, so each
+# replica allocates a distinct controller: raise replicas below to the
+# number of audio controllers in the cluster, and the scheduler
+# spreads the pods to wherever the cards are. A replica past that
+# number parks Pending and costs nothing. Nobody writes down which
+# machine has the speakers.
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: audio-controller
+spec:
+  spec:
+    devices:
+      requests:
+        - name: controller
+          exactly:
+            deviceClassName: audio-controller
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audio-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: audio-operator
+  # Recreate, never a rolling update. The controller allocates to one
+  # claim, so a rolling update's second pod would park Pending until
+  # the first one released the card, and the update would never
+  # finish. Recreate stops the old pod first.
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: audio-operator
+    spec:
+      serviceAccountName: audio-operator
+      containers:
+        - name: operator
+          image: ghcr.io/liken-sh/audio-operator:latest
+          env:
+            # A ResourceSlice names the node whose hardware it
+            # describes, and the downward API is where a pod reads
+            # that.
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          securityContext:
+            # The pod needs no privilege at all. Everything it touches
+            # it touches through the device nodes its claim delivers:
+            # the card's control node, its PCM nodes, and the input
+            # nodes of its jacks. PipeWire asks RTKit for a real-time
+            # priority, finds no RTKit in this pod, and runs without
+            # one, so not even SYS_NICE is here.
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+            # The audio controller, claimed from liken. This is the
+            # placement: the scheduler puts the pod where the hardware
+            # is.
+            claims:
+              - name: controller
+          volumeMounts:
+            # The two mounts every DRA driver takes. The registry
+            # directory is where the kubelet discovers plugins, and
+            # the plugin's own directory holds the socket that serves
+            # the prepare calls. Both are writable, because serving a
+            # socket is the actuation.
+            - name: kubelet-plugin
+              mountPath: /var/lib/kubelet/plugins/audio.liken.sh
+            - name: kubelet-plugins-registry
+              mountPath: /var/lib/kubelet/plugins_registry
+            # Where prepared claims become container edits for the
+            # container runtime to resolve. liken writes its own specs
+            # in this same directory, and the two drivers' file name
+            # prefixes keep them apart.
+            - name: cdi
+              mountPath: /var/run/cdi
+            # Where PipeWire creates its socket. A consumer's CDI spec
+            # binds this same host directory into its container, so
+            # the path is the same on both sides of the mount.
+            - name: runtime
+              mountPath: /var/run/audio.liken.sh
+      resourceClaims:
+        - name: controller
+          resourceClaimTemplateName: audio-controller
+      volumes:
+        # DirectoryOrCreate on all four, because a node that has never
+        # run this operator or any DRA driver has none of these paths.
+        - name: kubelet-plugin
+          hostPath:
+            path: /var/lib/kubelet/plugins/audio.liken.sh
+            type: DirectoryOrCreate
+        - name: kubelet-plugins-registry
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry
+            type: DirectoryOrCreate
+        - name: cdi
+          hostPath:
+            path: /var/run/cdi
+            type: DirectoryOrCreate
+        - name: runtime
+          hostPath:
+            path: /var/run/audio.liken.sh
+            type: DirectoryOrCreate
