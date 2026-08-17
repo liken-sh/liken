@@ -40,20 +40,29 @@ Bluetooth speaker is not on that card. It is on this radio.
 
 ## What the pod runs and what it holds
 
-The pod runs four processes on one restart domain: the bus daemon,
-`bluetoothd`, PipeWire, and WirePlumber, with the operator as the
-container's main process. `entrypoint.sh` already starts the first two
-in that order and holds them behind the operator. PipeWire and
-WirePlumber join them under the same rule: a daemon that dies ends the
-container, and the kubelet's restart is the repair.
+The pod runs four daemons: the bus daemon, `bluetoothd`, PipeWire, and
+WirePlumber. The first two are already here, in the `bluetoothd`
+sidecar, where the bus daemon starts first and `bluetoothd` becomes the
+container's process. PipeWire and WirePlumber join that container,
+because the A2DP transport is a file descriptor `bluetoothd` hands over
+its own bus and the sound server has to be a client of that bus.
+
+Adding them to the sidecar puts all four daemons on one restart domain,
+which is the rule the two already follow: a daemon that dies ends the
+container, and the kubelet's restart is the repair. The operator stays
+in its own container with no capabilities, and the restart of the
+sidecar beside it is a bus that goes away and comes back, which the
+operator already handles by republishing its devices fully tainted.
 
 The bus is the one this operator already runs. Its socket is at
-`/var/run/bluetooth.liken.sh/dbus/system_bus_socket`, which is a path a
-hostPath volume can back. That location is deliberate. It costs
+`/var/run/bluetooth.liken.sh/dbus/system_bus_socket`, on an emptyDir
+the two containers share. That location is deliberate. It costs
 nothing today, because only this pod's own processes use the bus, and
 it is what keeps the two stacked designs in "What was considered and
 set aside" available later without a breaking change to a published
-path.
+path. Reaching the bus from a second pod would mean backing that same
+path with a hostPath instead, which is a change of volume and not a
+change of address.
 
 PipeWire's runtime directory is `/var/run/bluetooth.liken.sh`, a
 hostPath, so the operator's CDI files can mount the socket into a
