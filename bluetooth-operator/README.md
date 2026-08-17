@@ -102,7 +102,7 @@ bond reaches no Secret.
 
 Pairing is an API. A person creates a PairingRequest, the operator
 opens a pairing window on the radio, and approval is a write to the
-request's spec. [Plan 04](plans/04-an-api-for-pairing.md) states the
+request's spec. [Plan 04](plans/completed/04-an-api-for-pairing.md) states the
 design.
 
 Open a window:
@@ -181,7 +181,7 @@ init-container order guarantees. Nothing in the pod is storage, so a
 dongle carried to another machine takes its bonds with it: the pod
 that claims it there lists the same Secrets.
 [A Secret for each adapter](plans/completed/03-a-secret-for-each-adapter.md) has
-the details, and [plan 04](plans/04-an-api-for-pairing.md) states why
+the details, and [plan 04](plans/completed/04-an-api-for-pairing.md) states why
 the Secret is per bond.
 
 The keys sit in the cluster datastore. Whether it is encrypted at rest

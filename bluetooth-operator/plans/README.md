@@ -20,12 +20,12 @@ decided yet what work they become.
 ## The designs
 
 * [01, Bluetooth audio](01-bluetooth-audio.md). Proposed.
-* [02, The two-container pod](02-the-two-container-pod.md). Built, and
+* [02, The two-container pod](completed/02-the-two-container-pod.md). Built, and
   drilled on liken-1 on 2026-08-17.
 * [03, A Secret for each adapter](completed/03-a-secret-for-each-adapter.md).
   Built, and drilled on liken-1 on 2026-08-17. Plan 04 amends its
   Secret layout to one Secret per bond.
-* [04, An API for pairing](04-an-api-for-pairing.md). Built, and
+* [04, An API for pairing](completed/04-an-api-for-pairing.md). Built, and
   drilled on liken-1 on 2026-08-17. An Adapter and Pairing inventory
   owned by the operator, and a PairingRequest a person opens and
   approves with kubectl. Answers and replaces the open problem "Who
