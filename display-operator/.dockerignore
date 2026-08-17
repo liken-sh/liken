@@ -1,6 +1,6 @@
-# The build needs the module files, the Go sources, and the script
-# that collects the compositor. Everything else is documentation,
-# manifests, or test fixtures.
+# The build needs the module files, the Go sources, the script that
+# collects the compositor, and the hotplug shim's source. Everything
+# else is documentation, manifests, or test fixtures.
 .git
 .github
 deploy

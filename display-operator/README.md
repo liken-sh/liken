@@ -73,8 +73,6 @@ name must be a DNS label. The rest are attributes, and every one but
           taints:
             - key: display.liken.sh/disconnected
               effect: NoExecute
-            - key: display.liken.sh/no-output
-              effect: NoSchedule
 
 A connector name is stable across reboots on one machine, but not
 across machines, and it says nothing about which monitor is plugged
@@ -130,13 +128,11 @@ attribute fails the whole allocation:
     has(device.attributes["display.liken.sh"].widthPixels) &&
     device.attributes["display.liken.sh"].widthPixels >= 1920
 
-Tolerate `display.liken.sh/disconnected` and nothing else. It is
-`NoExecute`, and its `tolerationSeconds` says how long the pod may hold
-a dark screen before it ends. Leave the second taint,
-`display.liken.sh/no-output` (`NoSchedule`), untolerated: a pod that
-tolerated both would be allocated a dark output and churn between
-`ContainerCreating` and eviction. Untolerated, it parks
-`Unschedulable`, visibly, until a monitor comes back.
+Tolerate `display.liken.sh/disconnected`, the one taint a dark
+connector carries. It is `NoExecute`, and its `tolerationSeconds` says
+how long the pod may hold a dark screen before it ends. A claim on a
+connector that has no monitor yet parks `Unschedulable`, visibly, and
+starts on its own when one is plugged in.
 
     apiVersion: resource.k8s.io/v1
     kind: ResourceClaim
@@ -215,8 +211,8 @@ registry and `/var/run/cdi`, and its own plugin socket directory.
 ## Disconnects and restarts
 
 **A dark monitor is tainted, never deleted.** The device stays in the
-slice with both taints, the `NoExecute` taint evicts the holder after
-its `tolerationSeconds`, and a monitor that returns clears them.
+slice with its `disconnected` taint, the taint evicts the holder after
+its `tolerationSeconds`, and a monitor that returns clears it.
 Deleting the device instead would strand the claim, because the kubelet
 retries `NodePrepareResources` against a device in no slice with no
 bound. See
@@ -233,6 +229,17 @@ workload and then the slice:
 at container creation only, so the pod is one session, and the taint is
 what ends it so the scheduler can start the next.
 
+**A monitor that arrives needs no restart.** The startup config has
+an `[output]` section for every connector, dark or lit, and a preload
+shim moves the compositor's hotplug subscription to the kernel's own
+netlink group. When a monitor lands on a dark connector, the
+compositor enables the head and routes the section's app-id. Every
+other screen keeps its session. The same event clears the device's
+taint, so a parked claim starts on its own. The cost is on unplug:
+the compositor destroys that output, so a cable reseated within the
+toleration ends that one session. See
+[plan 02](plans/02-an-output-for-every-connector.md).
+
 **The compositor and the operator exit together.** The operator starts
 weston as its child and exits nonzero when weston exits; the kubelet
 restarts both. A restart ends every client's Wayland connection, which
@@ -242,11 +249,12 @@ prepared device nodes survive it.
 
 ## Not here yet
 
-* **Minted app-ids and hotplug.** Version 0 writes one fixed app-id per
-  output at startup, and routes only to connectors that had a monitor
-  then. Both wait on the same question, because changing the routing
-  table means restarting the compositor and ending every client. See
-  [routing is narrower than inventory](plans/open-problems/routing-is-narrower-than-inventory.md).
+* **Minted app-ids.** The routing table maps each output to one fixed,
+  public app-id, so the string is the whole credential for taking a
+  screen. Weston reads a section's `app-ids=` only when it creates the
+  output, so minting one per allocation has no path into a running
+  compositor. See
+  [the app-id is a guessable string](plans/open-problems/the-app-id-is-a-guessable-string.md).
 * **HDMI audio.** Each output carries an HDMI PCM on the audio
   controller, which the audio operator publishes. One claim holds a
   request against each driver with a `matchAttribute` constraint on

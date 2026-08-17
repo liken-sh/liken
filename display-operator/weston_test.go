@@ -11,12 +11,16 @@ import (
 )
 
 func TestWestonConfigNamesEachOutputAndItsAppID(t *testing.T) {
-	config := westonConfig(connected(discoverOutputs(labSysfs(t), "card1")))
+	config := westonConfig(discoverOutputs(labSysfs(t), "card1"))
 
 	// The kiosk shell reads app-ids= and matches it against the app-id
 	// a client sets. The app-id is the device name, so a claim on
 	// hdmi-a-1 receives DISPLAY_APP_ID=hdmi-a-1 and the client that
 	// passes it to its toolkit lands on that monitor.
+	//
+	// DP-1 has nothing on it and gets a section like the others.
+	// Weston reads this file once, so the section has to be there
+	// before the monitor is.
 	for _, want := range []string{
 		"shell=kiosk",
 		"renderer=gl",
@@ -24,25 +28,21 @@ func TestWestonConfigNamesEachOutputAndItsAppID(t *testing.T) {
 		"idle-time=0",
 		"name=HDMI-A-1\nmode=preferred\napp-ids=hdmi-a-1",
 		"name=HDMI-A-2\nmode=preferred\napp-ids=hdmi-a-2",
+		"name=DP-1\nmode=preferred\napp-ids=dp-1",
 	} {
 		if !strings.Contains(config, want) {
 			t.Errorf("the config does not contain %q:\n%s", want, config)
 		}
 	}
-	// The connector with nothing on it gets no section. The compositor
-	// drives the monitors that are there.
-	if strings.Contains(config, "DP-1") {
-		t.Errorf("an output with no monitor got a section:\n%s", config)
-	}
-	if got := strings.Count(config, "[output]"); got != 2 {
-		t.Errorf("got %d output sections, want 2:\n%s", got, config)
+	if got := strings.Count(config, "[output]"); got != 3 {
+		t.Errorf("got %d output sections, want 3:\n%s", got, config)
 	}
 }
 
 func TestWriteWestonConfigCreatesTheDirectory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "weston", "weston.ini")
 
-	if err := writeWestonConfig(path, connected(discoverOutputs(labSysfs(t), "card1"))); err != nil {
+	if err := writeWestonConfig(path, discoverOutputs(labSysfs(t), "card1")); err != nil {
 		t.Fatal(err)
 	}
 	written, err := os.ReadFile(path)

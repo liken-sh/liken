@@ -47,28 +47,12 @@ const ResourceSlicesPath = "/apis/resource.k8s.io/v1/resourceslices"
 // connectors than that.
 const maxSliceDevices = 64
 
-// The two taints an output carries while it can serve nobody. Both go
-// on together, and they are separate keys because they do separate
-// jobs.
-//
 // disconnectedTaint is the one a consumer tolerates. Its NoExecute
 // effect makes the taint-eviction controller end the pod that holds
 // the claim, and the claim's own tolerationSeconds says how long a
 // monitor may be dark first. A five second unplug should not end a
 // video.
-//
-// noOutputTaint is the one nothing tolerates. A tolerated NoExecute
-// taint still lets the scheduler allocate the device, and a pod that
-// allocates an output the operator cannot prepare loops: the kubelet
-// holds it in ContainerCreating, the eviction controller ends it when
-// the tolerationSeconds runs out, and the scheduler allocates the same
-// dark output to the replacement. An untolerated NoSchedule taint
-// stops that at the front: the pod parks Unschedulable, visibly, until
-// a monitor comes back.
-const (
-	disconnectedTaint = DriverName + "/disconnected"
-	noOutputTaint     = DriverName + "/no-output"
-)
+const disconnectedTaint = DriverName + "/disconnected"
 
 type ResourceSlice struct {
 	APIVersion string            `json:"apiVersion"`
@@ -154,23 +138,19 @@ func AttrInt(i int) DeviceAttribute { v := int64(i); return DeviceAttribute{Int:
 // Membership is every connector, and it never depends on what is
 // plugged in. A dark output is still a device a person can claim, and
 // the pod parks until a monitor arrives. A monitor that leaves takes
-// its EDID attributes with it and leaves the device in place with two
-// taints on it, because deleting a device that a claim holds strands
+// its EDID attributes with it and leaves the device in place with its
+// taint on it, because deleting a device that a claim holds strands
 // the next consumer.
 //
 // The attributes are the monitor's own facts, so a claim can name one
 // screen by model or by serial, or select any output that fits and
 // take whichever one is free.
 //
-// routed holds the device names the compositor's config carries an
-// [output] section for, which the operator writes once at startup. A
-// connector that is not in it cannot be routed to, whatever is plugged
-// into it, and that is the one case where an untainted device does
-// harm: the kiosk shell sends a surface whose app-id
-// matches no output to the first output it enumerated, on top of the
-// client that owns that screen. The NoSchedule taint is what keeps a
-// claim off it until the operator restarts and writes the section.
-func sliceDevices(outputs []Output, routed map[string]bool) []SliceDevice {
+// The compositor's config has an [output] section for every
+// connector, so only one fact taints a device: whether a monitor is
+// connected. A monitor that arrives on any connector can serve a
+// client as soon as the compositor enables its head.
+func sliceDevices(outputs []Output) []SliceDevice {
 	devices := make([]SliceDevice, 0, len(outputs))
 	for _, output := range outputs {
 		name := deviceName(output.Connector)
@@ -192,15 +172,8 @@ func sliceDevices(outputs []Output, routed map[string]bool) []SliceDevice {
 			addSize(device.Attributes, "widthMillimeters", monitor.WidthMillimeters)
 			addSize(device.Attributes, "heightMillimeters", monitor.HeightMillimeters)
 		}
-		switch {
-		case !output.Connected:
+		if !output.Connected {
 			device.Taints = unservableTaints()
-		case !routed[name]:
-			// The monitor is on the wire and the compositor has no
-			// section for it. Nothing is running on this screen, so
-			// there is no pod to evict and the NoExecute taint would
-			// say something untrue.
-			device.Taints = []DeviceTaint{{Key: noOutputTaint, Effect: "NoSchedule"}}
 		}
 		devices = append(devices, device)
 	}
@@ -211,68 +184,30 @@ func sliceDevices(outputs []Output, routed map[string]bool) []SliceDevice {
 }
 
 // unservableTaints is what an output that can serve nobody carries:
-// the NoExecute taint that ends the pod holding it, and the NoSchedule
-// taint that keeps the next pod from allocating it.
+// the NoExecute taint that ends the pod holding it.
 func unservableTaints() []DeviceTaint {
 	return []DeviceTaint{
 		{Key: disconnectedTaint, Effect: "NoExecute"},
-		{Key: noOutputTaint, Effect: "NoSchedule"},
 	}
 }
 
-// beforeTheCompositor is what the operator publishes at startup. It
-// adds the untolerated NoSchedule taint to every device and keeps every
-// taint the hardware read already produced.
+// compositorDown taints every device, whatever is plugged in. The
+// operator publishes this form at the two moments when it runs no
+// compositor: at startup, before the compositor starts, and again as
+// the compositor exits.
 //
-// The two taints answer two questions, and startup has an answer for
-// only one of them.
+// The taint is a fact at both moments. No compositor holds the
+// screens, so no output can serve a client. At startup this write
+// replaces the slice the previous pod left. The first reconcile after
+// the socket appears removes the taint from every screen that has a
+// monitor. If the compositor never starts, the taint stays, and a
+// claim parks instead of taking a screen that no compositor drives.
 //
-// Nothing routes to a screen until the compositor enumerates its
-// heads, so no output can serve a client yet and no new claim may
-// land on one. Last boot's slice may still say they all can. That is
-// the noOutputTaint, and it goes on every device.
-//
-// Whether a connector is dark is the other question, and sysfs and
-// the EDID answer it with no compositor running at all. sliceDevices
-// has already read them, so a dark connector arrives here with its
-// NoExecute taint on it and keeps it. Its holder is evicted even if
-// the compositor never starts, so nothing waits on a reconcile that
-// never runs.
-//
-// A connector with a monitor on it arrives with no NoExecute taint,
-// and none is added. That taint ends the pod holding the output, and
-// a restart of this operator is no reason to end a client whose
-// monitor never moved.
-func beforeTheCompositor(devices []SliceDevice) []SliceDevice {
-	out := make([]SliceDevice, len(devices))
-	for i, device := range devices {
-		out[i] = device
-		out[i].Taints = slices.Clone(device.Taints)
-		if !carries(out[i].Taints, noOutputTaint) {
-			out[i].Taints = append(out[i].Taints,
-				DeviceTaint{Key: noOutputTaint, Effect: "NoSchedule"})
-		}
-	}
-	return out
-}
-
-// carries reports whether the taints already name this key.
-func carries(taints []DeviceTaint, key string) bool {
-	return slices.ContainsFunc(taints, func(taint DeviceTaint) bool {
-		return taint.Key == key
-	})
-}
-
-// afterTheCompositor taints every device, whatever is plugged in. It is
-// what the operator publishes as the compositor it runs exits.
-//
-// Both taints are facts here. The compositor held the screens and the
-// socket, so every client has already lost its connection, and this
-// write is the only thing that ends them: a replacement pod that
-// published the same untainted devices would raise no scheduler event
-// at all, so nothing would ever evict the pods that are drawing into a
-// socket that is gone.
-func afterTheCompositor(devices []SliceDevice) []SliceDevice {
+// At exit this write is the only thing that ends the clients. Each
+// client has already lost its connection to the socket. A replacement
+// pod that published the same untainted devices would raise no
+// scheduler event, so nothing would ever evict those clients.
+func compositorDown(devices []SliceDevice) []SliceDevice {
 	out := make([]SliceDevice, len(devices))
 	for i, device := range devices {
 		out[i] = device

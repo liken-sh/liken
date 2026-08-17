@@ -47,9 +47,7 @@ func allocatedClaim(t *testing.T, results []AllocatedDevice) *Client {
 }
 
 // labPlugin is the driver as it runs on the lab machine: an ultrawide
-// on HDMI-A-1, a portable monitor on HDMI-A-2, an empty DP-1, and a
-// compositor config that names the two monitors that were there at
-// startup.
+// on HDMI-A-1, a portable monitor on HDMI-A-2, and an empty DP-1.
 func labPlugin(t *testing.T, results []AllocatedDevice) *draPlugin {
 	t.Helper()
 	cdiDir = t.TempDir()
@@ -57,7 +55,6 @@ func labPlugin(t *testing.T, results []AllocatedDevice) *draPlugin {
 		client:    allocatedClaim(t, results),
 		sysRoot:   labSysfs(t),
 		card:      "card1",
-		routed:    labRouted(),
 		socketDir: defaultSocketDir,
 	}
 }
@@ -155,52 +152,45 @@ func TestPrepareDeliversTheSocketAndTheAppID(t *testing.T) {
 	}
 }
 
-func TestPrepareRefusesAnOutputItCannotServe(t *testing.T) {
-	cases := []struct {
-		name   string
-		device string
-		reason string
-	}{
-		{
-			// The monitor left between the allocation and this call.
-			// Delivering the socket anyway would put the client's
-			// surface on the first output, on top of whatever was
-			// there.
-			name:   "a connector with no monitor on it",
-			device: "dp-1",
-			reason: "no monitor",
-		},
-		{
-			// The connector got its first monitor after the operator
-			// wrote the compositor's config, so no [output] section
-			// names this app-id and the kiosk shell would route the
-			// client to the first output.
-			name:   "a monitor the compositor cannot route to",
-			device: "hdmi-a-2",
-			reason: "no output",
-		},
+func TestPrepareRefusesAnOutputWithNoMonitorOnIt(t *testing.T) {
+	// The monitor left between the allocation and this call.
+	// Delivering the socket anyway would put the client's surface on
+	// the first output, on top of whatever was there.
+	plugin := labPlugin(t, []AllocatedDevice{
+		{Request: "screen", Driver: DriverName, Pool: "liken-1", Device: "dp-1"},
+	})
+
+	claim := prepare(t, plugin)
+	if claim.Error == "" {
+		t.Fatal("prepare accepted a connector with no monitor on it")
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
+	if !strings.Contains(claim.Error, "no monitor") {
+		t.Errorf("error = %q, want it to say %q", claim.Error, "no monitor")
+	}
+	if len(claim.Devices) != 0 {
+		t.Errorf("devices = %+v", claim.Devices)
+	}
+	if got := specFiles(t); len(got) != 0 {
+		t.Errorf("a refused claim left %v behind", got)
+	}
+}
+
+func TestPrepareServesEveryConnectorWithAMonitorOnIt(t *testing.T) {
+	// The driver checks one fact: whether a monitor is connected. The
+	// config has a section for every connector, so when the monitor
+	// arrived does not matter.
+	for _, device := range []string{"hdmi-a-1", "hdmi-a-2"} {
+		t.Run(device, func(t *testing.T) {
 			plugin := labPlugin(t, []AllocatedDevice{
-				{Request: "screen", Driver: DriverName, Pool: "liken-1", Device: c.device},
+				{Request: "screen", Driver: DriverName, Pool: "liken-1", Device: device},
 			})
-			// The second case needs a config that names only the other
-			// monitor, which is what a hotplug after startup leaves.
-			plugin.routed = map[string]bool{"hdmi-a-1": true}
 
 			claim := prepare(t, plugin)
-			if claim.Error == "" {
-				t.Fatalf("prepare accepted %s", c.device)
+			if claim.Error != "" {
+				t.Fatalf("prepare refused %s: %s", device, claim.Error)
 			}
-			if !strings.Contains(claim.Error, c.reason) {
-				t.Errorf("error = %q, want it to say %q", claim.Error, c.reason)
-			}
-			if len(claim.Devices) != 0 {
-				t.Errorf("devices = %+v", claim.Devices)
-			}
-			if got := specFiles(t); len(got) != 0 {
-				t.Errorf("a refused claim left %v behind", got)
+			if len(claim.Devices) != 1 || claim.Devices[0].DeviceName != device {
+				t.Fatalf("devices = %+v", claim.Devices)
 			}
 		})
 	}

@@ -11,10 +11,10 @@ import (
 	"time"
 )
 
-// unusableTaint is this operator's NoSchedule taint, the one nothing
-// tolerates. Its key differs from operator to operator. What it
-// exercises here does not.
-const unusableTaint = noOutputTaint
+// otherTaint is a taint key that this operator does not write. The
+// published slice comes back from the API server, and the reporter
+// names every key it reads there.
+const otherTaint = "example.com/unusable"
 
 // sliceLogCapture replaces the operator's reporter with one that
 // writes to a buffer and reads a clock the test moves.
@@ -91,17 +91,17 @@ func TestSliceLogNamesWhatAWriteChanged(t *testing.T) {
 		},
 		{
 			name:      "a device lost both taints",
-			published: []SliceDevice{loggedDevice("device-a", disconnectedTaint, unusableTaint), loggedDevice("device-b")},
+			published: []SliceDevice{loggedDevice("device-a", disconnectedTaint, otherTaint), loggedDevice("device-b")},
 			current:   []SliceDevice{loggedDevice("device-a"), loggedDevice("device-b")},
 			want: "slice: wrote generation 5, 2 devices, 0 tainted: device-a lost " +
-				disconnectedTaint + ", " + unusableTaint,
+				disconnectedTaint + ", " + otherTaint,
 		},
 		{
 			name:      "a device gained one taint and lost another",
 			published: []SliceDevice{loggedDevice("device-a", disconnectedTaint)},
-			current:   []SliceDevice{loggedDevice("device-a", unusableTaint)},
+			current:   []SliceDevice{loggedDevice("device-a", otherTaint)},
 			want: "slice: wrote generation 5, 1 device, 1 tainted: device-a gained " +
-				unusableTaint + "; device-a lost " + disconnectedTaint,
+				otherTaint + "; device-a lost " + disconnectedTaint,
 		},
 		{
 			name:      "a device appeared",
@@ -112,8 +112,8 @@ func TestSliceLogNamesWhatAWriteChanged(t *testing.T) {
 		{
 			name:      "a device appeared already tainted",
 			published: []SliceDevice{loggedDevice("device-a")},
-			current:   []SliceDevice{loggedDevice("device-a"), loggedDevice("device-b", unusableTaint)},
-			want:      "slice: wrote generation 5, 2 devices, 1 tainted: device-b appeared with " + unusableTaint,
+			current:   []SliceDevice{loggedDevice("device-a"), loggedDevice("device-b", otherTaint)},
+			want:      "slice: wrote generation 5, 2 devices, 1 tainted: device-b appeared with " + otherTaint,
 		},
 		{
 			name:      "a device left",
@@ -147,11 +147,11 @@ func TestSliceLogCreateListsTheTaintedDevices(t *testing.T) {
 
 	sliceLog.created(1, []SliceDevice{
 		loggedDevice("device-a"),
-		loggedDevice("device-b", disconnectedTaint, unusableTaint),
+		loggedDevice("device-b", disconnectedTaint, otherTaint),
 	})
 
 	want := "slice: created generation 1, 2 devices, 1 tainted: device-b carries " +
-		disconnectedTaint + ", " + unusableTaint
+		disconnectedTaint + ", " + otherTaint
 	if got := capture.only(t); got != want {
 		t.Errorf("line = %q, want %q", got, want)
 	}

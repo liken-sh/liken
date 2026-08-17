@@ -58,15 +58,8 @@ func testOutputs(t *testing.T) []Output {
 	return discoverOutputs(labSysfs(t), "card1")
 }
 
-// labRouted is what the operator wrote into the compositor's config on
-// the lab machine: a section for each connector that had a monitor on
-// it when the operator started.
-func labRouted() map[string]bool {
-	return map[string]bool{"hdmi-a-1": true, "hdmi-a-2": true}
-}
-
 func TestSliceDevicesPublishesTheMonitorsFacts(t *testing.T) {
-	devices := sliceDevices(testOutputs(t), labRouted())
+	devices := sliceDevices(testOutputs(t))
 	if len(devices) != 3 {
 		t.Fatalf("got %d devices, want 3", len(devices))
 	}
@@ -115,7 +108,7 @@ func TestSliceDevicesPublishesTheMonitorsFacts(t *testing.T) {
 }
 
 func TestSliceDevicesTaintsAnOutputThatServesNobody(t *testing.T) {
-	devices := sliceDevices(testOutputs(t), labRouted())
+	devices := sliceDevices(testOutputs(t))
 	dark := devices[0]
 
 	if dark.Name != "dp-1" {
@@ -133,163 +126,91 @@ func TestSliceDevicesTaintsAnOutputThatServesNobody(t *testing.T) {
 		}
 	}
 
-	// Two taints, two jobs. The NoExecute one is what a consumer
-	// tolerates with tolerationSeconds, so a five second unplug does
-	// not end a video. The NoSchedule one is tolerated by nothing, so
-	// a pod cannot allocate an output that cannot be prepared and then
-	// loop between the scheduler and the eviction controller.
-	if len(dark.Taints) != 2 {
+	// The NoExecute taint is what a consumer tolerates with
+	// tolerationSeconds, so a five second unplug does not end a video.
+	if len(dark.Taints) != 1 {
 		t.Fatalf("taints = %+v", dark.Taints)
 	}
 	if dark.Taints[0].Key != disconnectedTaint || dark.Taints[0].Effect != "NoExecute" {
 		t.Errorf("taints[0] = %+v", dark.Taints[0])
 	}
-	if dark.Taints[1].Key != noOutputTaint || dark.Taints[1].Effect != "NoSchedule" {
-		t.Errorf("taints[1] = %+v", dark.Taints[1])
-	}
 }
 
-func TestSliceDevicesTaintsAConnectorTheCompositorCannotRouteTo(t *testing.T) {
-	// The operator writes the compositor's config once, at startup. A
-	// monitor plugged into a connector that was empty then has no
-	// [output] section, so no app-id reaches it, and the kiosk shell
-	// sends a surface whose app-id matches nothing to the first output
-	// instead, on top of the client that owns that screen. An untainted
-	// device here would let a claim land on a screen the compositor
-	// cannot route to.
+func TestSliceDevicesLeavesAConnectorThatGainedItsMonitorClear(t *testing.T) {
+	// A monitor plugged into a connector that was dark at startup
+	// routes like any other, because the config names every
+	// connector. A device with a monitor on it carries no taint.
 	outputs := discoverOutputs(fakeSysfs(t, "card1", map[string]string{
 		"HDMI-A-1": "lg-hdr-wqhd",
 		"HDMI-A-2": "portable-display",
 	}), "card1")
-	devices := sliceDevices(outputs, map[string]bool{"hdmi-a-1": true})
+	devices := sliceDevices(outputs)
 
-	if devices[0].Name != "hdmi-a-1" || len(devices[0].Taints) != 0 {
-		t.Fatalf("the routed output is not clear: %+v", devices[0])
+	if len(devices) != 2 {
+		t.Fatalf("got %d devices, want 2", len(devices))
 	}
 	hotplugged := devices[1]
 	if hotplugged.Name != "hdmi-a-2" {
 		t.Fatalf("devices[1] = %q", hotplugged.Name)
 	}
-	// The monitor is there, so its facts publish and a person can see
-	// what is waiting for a restart.
 	if _, ok := hotplugged.Attributes["model"]; !ok {
 		t.Errorf("the monitor's facts are missing: %+v", hotplugged.Attributes)
 	}
-	// NoSchedule alone. Nothing is running on this screen, so there is
-	// no pod to evict and a NoExecute taint would say something
-	// untrue.
-	if len(hotplugged.Taints) != 1 {
-		t.Fatalf("taints = %+v", hotplugged.Taints)
-	}
-	if hotplugged.Taints[0].Key != noOutputTaint || hotplugged.Taints[0].Effect != "NoSchedule" {
-		t.Errorf("taint = %+v", hotplugged.Taints[0])
-	}
-}
-
-// TestBeforeTheCompositorAddsNoScheduleAndKeepsTheHardwareTaints covers
-// the two dimensions the startup publish answers separately. Whether
-// the compositor routes to an output is unknown until it runs, so every
-// device takes the NoSchedule taint. Whether a connector is dark comes
-// from sysfs and the EDID, which need no compositor, so the taints that
-// read produced go out as they are.
-func TestBeforeTheCompositorAddsNoScheduleAndKeepsTheHardwareTaints(t *testing.T) {
-	devices := beforeTheCompositor(sliceDevices(testOutputs(t), labRouted()))
-
-	if len(devices) != 3 {
-		t.Fatalf("got %d devices, want 3", len(devices))
-	}
-	dark := devices[0]
-	if dark.Name != "dp-1" {
-		t.Fatalf("devices[0] = %q", dark.Name)
-	}
-	// Nothing is on this connector, and sysfs said so without the
-	// compositor. Both taints, the same answer the reconcile gives.
-	if len(dark.Taints) != 2 {
-		t.Fatalf("%s: taints = %+v", dark.Name, dark.Taints)
-	}
-	if dark.Taints[0].Key != disconnectedTaint || dark.Taints[0].Effect != "NoExecute" {
-		t.Errorf("%s: taints[0] = %+v", dark.Name, dark.Taints[0])
-	}
-	if dark.Taints[1].Key != noOutputTaint || dark.Taints[1].Effect != "NoSchedule" {
-		t.Errorf("%s: taints[1] = %+v", dark.Name, dark.Taints[1])
-	}
-
-	for _, device := range devices[1:] {
-		// A monitor is on the wire here. The compositor is not routing to
-		// it yet, so no new claim may land on it, and the pod already
-		// holding it is not threatened.
-		if len(device.Taints) != 1 {
-			t.Fatalf("%s: taints = %+v", device.Name, device.Taints)
-		}
-		if device.Taints[0].Key != noOutputTaint || device.Taints[0].Effect != "NoSchedule" {
-			t.Errorf("%s: taint = %+v", device.Name, device.Taints[0])
-		}
-		// The monitor's facts stay. What the taint says is that the
-		// compositor has not routed a surface here yet, not what is
-		// plugged into it.
-		if _, ok := device.Attributes["connector"]; !ok {
-			t.Errorf("%s: the connector attribute left with the compositor", device.Name)
+	for _, device := range devices {
+		if len(device.Taints) != 0 {
+			t.Errorf("%s carries taints with a monitor on it: %+v", device.Name, device.Taints)
 		}
 	}
 }
 
-// TestPublishingBeforeTheCompositorLeavesALiveScreensClientRunning is
-// the regression test for a restart that ends healthy sessions. The
-// operator's pod restarts for ordinary reasons, and the previous pod's
-// slice says the routed screens are free because they were. A publish
-// that put the NoExecute taint on those screens would start an eviction
-// timer against every pod holding one, on hardware that never moved.
-func TestPublishingBeforeTheCompositorLeavesALiveScreensClientRunning(t *testing.T) {
-	devices := sliceDevices(testOutputs(t), labRouted())
+// The pod that dies taints every device as its compositor exits. That
+// slice stays in the API until the next pod's first reconcile, after
+// the socket appears, publishes the devices untainted again. dp-1
+// stays tainted through that reconcile, because sysfs still reports
+// it dark.
+func TestTheFirstReconcileFreesTheScreensThatCameBack(t *testing.T) {
+	devices := sliceDevices(testOutputs(t))
 	fixture := &slicePublishFixture{existing: &ResourceSlice{
 		Metadata: ResourceSliceMeta{Name: "liken-1-display.liken.sh", ResourceVersion: "7"},
 		Spec: ResourceSliceSpec{
 			Driver:   DriverName,
 			NodeName: "liken-1",
 			Pool:     ResourcePool{Name: "liken-1", Generation: 3, ResourceSliceCount: 1},
-			Devices:  devices,
+			Devices:  compositorDown(devices),
 		},
 	}}
 	client := testClient(t, fixture.handler(t))
 
-	if err := EnsureResourceSlice(client, "liken-1", testOwner(), beforeTheCompositor(devices)); err != nil {
+	if err := EnsureResourceSlice(client, "liken-1", testOwner(), devices); err != nil {
 		t.Fatal(err)
 	}
 	if fixture.updated == nil {
-		t.Fatal("the slice was not replaced, so a stale one says the screens are free")
+		t.Fatal("the slice was not replaced, so a stale one says every screen is dark")
 	}
+	wantTaints := map[string]int{"dp-1": 1, "hdmi-a-1": 0, "hdmi-a-2": 0}
 	for _, device := range fixture.updated.Spec.Devices {
-		// dp-1 is dark, and the sysfs read that says so stands whether
-		// the compositor runs or not. Its holder is evicted even if the
-		// compositor never starts, so nothing waits on a reconcile that
-		// a crash loop never reaches.
-		want := device.Name == "dp-1"
-		if got := carries(device.Taints, disconnectedTaint); got != want {
-			t.Errorf("%s carries the disconnected taint = %v, want %v: %+v",
-				device.Name, got, want, device.Taints)
-		}
-		if !carries(device.Taints, noOutputTaint) {
-			t.Errorf("%s went out schedulable before the compositor ran: %+v",
-				device.Name, device.Taints)
+		if len(device.Taints) != wantTaints[device.Name] {
+			t.Errorf("%s: taints = %+v, want %d of them",
+				device.Name, device.Taints, wantTaints[device.Name])
 		}
 	}
 }
 
-func TestAfterTheCompositorTaintsEveryOutput(t *testing.T) {
-	devices := afterTheCompositor(sliceDevices(testOutputs(t), labRouted()))
+// The operator publishes compositorDown devices at startup and again
+// as the compositor exits. At both moments every device carries the
+// one NoExecute taint, because no compositor serves this node.
+func TestCompositorDownTaintsEveryOutput(t *testing.T) {
+	devices := compositorDown(sliceDevices(testOutputs(t)))
 
 	if len(devices) != 3 {
 		t.Fatalf("got %d devices, want 3", len(devices))
 	}
 	for _, device := range devices {
-		if len(device.Taints) != 2 {
+		if len(device.Taints) != 1 {
 			t.Fatalf("%s: taints = %+v", device.Name, device.Taints)
 		}
 		if device.Taints[0].Key != disconnectedTaint || device.Taints[0].Effect != "NoExecute" {
 			t.Errorf("%s: taints[0] = %+v", device.Name, device.Taints[0])
-		}
-		if device.Taints[1].Key != noOutputTaint || device.Taints[1].Effect != "NoSchedule" {
-			t.Errorf("%s: taints[1] = %+v", device.Name, device.Taints[1])
 		}
 		// The monitor's facts stay. What changed is that the output
 		// cannot serve a client, not what is plugged in.
@@ -299,7 +220,7 @@ func TestAfterTheCompositorTaintsEveryOutput(t *testing.T) {
 	}
 }
 
-func TestPublishingAfterTheCompositorEvictsTheClients(t *testing.T) {
+func TestPublishingCompositorDownEvictsTheClients(t *testing.T) {
 	// This is the write the operator makes as the compositor dies. It
 	// is the only thing that ends the clients that are drawing into a
 	// socket that is gone: the pod the kubelet starts next publishes
@@ -311,12 +232,12 @@ func TestPublishingAfterTheCompositorEvictsTheClients(t *testing.T) {
 			Driver:   DriverName,
 			NodeName: "liken-1",
 			Pool:     ResourcePool{Name: "liken-1", Generation: 3, ResourceSliceCount: 1},
-			Devices:  sliceDevices(testOutputs(t), labRouted()),
+			Devices:  sliceDevices(testOutputs(t)),
 		},
 	}}
 	client := testClient(t, fixture.handler(t))
 
-	devices := afterTheCompositor(sliceDevices(testOutputs(t), labRouted()))
+	devices := compositorDown(sliceDevices(testOutputs(t)))
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(), devices); err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +248,7 @@ func TestPublishingAfterTheCompositorEvictsTheClients(t *testing.T) {
 		t.Errorf("generation = %d, want 4", fixture.updated.Spec.Pool.Generation)
 	}
 	for _, device := range fixture.updated.Spec.Devices {
-		if len(device.Taints) != 2 {
+		if len(device.Taints) != 1 {
 			t.Errorf("%s went out untainted: %+v", device.Name, device.Taints)
 		}
 	}
@@ -340,7 +261,7 @@ func TestSliceDevicesPublishesAPanelWithNoName(t *testing.T) {
 	// absent attribute, and a selector that compares an empty string
 	// matches every monitor that stated nothing.
 	root := fakeSysfs(t, "card1", map[string]string{"eDP-1": "framework-edp"})
-	devices := sliceDevices(discoverOutputs(root, "card1"), map[string]bool{"edp-1": true})
+	devices := sliceDevices(discoverOutputs(root, "card1"))
 
 	if len(devices) != 1 || devices[0].Name != "edp-1" {
 		t.Fatalf("devices = %+v", devices)
@@ -371,7 +292,7 @@ func TestSliceDevicesPublishesNoPairingIDWithoutAManufacturer(t *testing.T) {
 			WidthPixels:  1920,
 			HeightPixels: 1080,
 		},
-	}}, map[string]bool{"hdmi-a-1": true})
+	}})
 
 	attributes := devices[0].Attributes
 	if _, ok := attributes[pairingAttribute]; ok {
@@ -421,7 +342,7 @@ func TestEnsureCreatesTheSliceOnFirstPublish(t *testing.T) {
 	fixture := &slicePublishFixture{}
 	client := testClient(t, fixture.handler(t))
 
-	if err := EnsureResourceSlice(client, "liken-1", testOwner(), sliceDevices(testOutputs(t), labRouted())); err != nil {
+	if err := EnsureResourceSlice(client, "liken-1", testOwner(), sliceDevices(testOutputs(t))); err != nil {
 		t.Fatal(err)
 	}
 	if fixture.created == nil {
@@ -450,7 +371,7 @@ func TestEnsureCreatesTheSliceOnFirstPublish(t *testing.T) {
 }
 
 func TestEnsureLeavesAnUnchangedSliceAlone(t *testing.T) {
-	devices := sliceDevices(testOutputs(t), labRouted())
+	devices := sliceDevices(testOutputs(t))
 	fixture := &slicePublishFixture{existing: &ResourceSlice{
 		Metadata: ResourceSliceMeta{Name: "liken-1-display.liken.sh", ResourceVersion: "7"},
 		Spec: ResourceSliceSpec{
@@ -485,7 +406,7 @@ func TestEnsureReplacesAChangedSliceAndBumpsTheGeneration(t *testing.T) {
 	}}
 	client := testClient(t, fixture.handler(t))
 
-	if err := EnsureResourceSlice(client, "liken-1", testOwner(), sliceDevices(testOutputs(t), labRouted())); err != nil {
+	if err := EnsureResourceSlice(client, "liken-1", testOwner(), sliceDevices(testOutputs(t))); err != nil {
 		t.Fatal(err)
 	}
 	if fixture.updated == nil {
@@ -513,12 +434,11 @@ func TestEnsureLogsTheSliceItCreated(t *testing.T) {
 	fixture := &slicePublishFixture{}
 	client := testClient(t, fixture.handler(t))
 
-	if err := EnsureResourceSlice(client, "liken-1", testOwner(), sliceDevices(testOutputs(t), labRouted())); err != nil {
+	if err := EnsureResourceSlice(client, "liken-1", testOwner(), sliceDevices(testOutputs(t))); err != nil {
 		t.Fatal(err)
 	}
 	// DP-1 is the connector with nothing plugged into it.
-	want := "slice: created generation 1, 3 devices, 1 tainted: dp-1 carries " +
-		disconnectedTaint + ", " + noOutputTaint
+	want := "slice: created generation 1, 3 devices, 1 tainted: dp-1 carries " + disconnectedTaint
 	if got := capture.only(t); got != want {
 		t.Errorf("line = %q, want %q", got, want)
 	}
@@ -526,7 +446,7 @@ func TestEnsureLogsTheSliceItCreated(t *testing.T) {
 
 func TestEnsureLogsTheSliceItWrote(t *testing.T) {
 	capture := captureSliceLog(t)
-	devices := sliceDevices(testOutputs(t), labRouted())
+	devices := sliceDevices(testOutputs(t))
 	fixture := &slicePublishFixture{existing: &ResourceSlice{
 		Metadata: ResourceSliceMeta{Name: "liken-1-display.liken.sh", ResourceVersion: "7"},
 		Spec: ResourceSliceSpec{
@@ -540,12 +460,11 @@ func TestEnsureLogsTheSliceItWrote(t *testing.T) {
 
 	// The compositor died, so every output takes both taints. The
 	// device count does not move, and the taints are the whole event.
-	if err := EnsureResourceSlice(client, "liken-1", testOwner(), afterTheCompositor(devices)); err != nil {
+	if err := EnsureResourceSlice(client, "liken-1", testOwner(), compositorDown(devices)); err != nil {
 		t.Fatal(err)
 	}
-	both := disconnectedTaint + ", " + noOutputTaint
-	want := "slice: wrote generation 4, 3 devices, 3 tainted: hdmi-a-1 gained " + both +
-		"; hdmi-a-2 gained " + both
+	want := "slice: wrote generation 4, 3 devices, 3 tainted: hdmi-a-1 gained " + disconnectedTaint +
+		"; hdmi-a-2 gained " + disconnectedTaint
 	if got := capture.only(t); got != want {
 		t.Errorf("line = %q, want %q", got, want)
 	}
@@ -553,7 +472,7 @@ func TestEnsureLogsTheSliceItWrote(t *testing.T) {
 
 func TestEnsureLogsThatNothingMoved(t *testing.T) {
 	capture := captureSliceLog(t)
-	devices := sliceDevices(testOutputs(t), labRouted())
+	devices := sliceDevices(testOutputs(t))
 	fixture := &slicePublishFixture{existing: &ResourceSlice{
 		Metadata: ResourceSliceMeta{Name: "liken-1-display.liken.sh", ResourceVersion: "7"},
 		Spec: ResourceSliceSpec{
@@ -588,7 +507,7 @@ func TestEnsureRefusesToPublishAnEmptyInventory(t *testing.T) {
 			Driver:   DriverName,
 			NodeName: "liken-1",
 			Pool:     ResourcePool{Name: "liken-1", Generation: 3, ResourceSliceCount: 1},
-			Devices:  sliceDevices(testOutputs(t), labRouted()),
+			Devices:  sliceDevices(testOutputs(t)),
 		},
 	}}
 	client := testClient(t, fixture.handler(t))

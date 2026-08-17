@@ -28,6 +28,17 @@ COPY *.go ./
 # loader and no libc under it.
 RUN CGO_ENABLED=0 go build -trimpath -o /display-operator .
 
+# The shim builds on the same Debian suite as the compositor, so both
+# link the same glibc. The build needs no libudev, because the shim's
+# source declares the two libudev types it names.
+FROM debian:trixie-slim AS shim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY hotplug/udev-kernel-group.c /
+RUN gcc -Wall -Wextra -Werror -shared -fPIC \
+        -o /udev-kernel-group.so /udev-kernel-group.c
+
 # The suite is pinned because the closure script names weston 14. A
 # Debian that moves weston to 15 fails this build, which is the report
 # that the module set needs reading again.
@@ -50,6 +61,11 @@ RUN sh /weston-closure.sh /out
 
 FROM scratch AS weston
 COPY --from=closure /out /
+# The operator preloads this library into the compositor. It moves
+# the compositor's hotplug subscription onto the kernel's netlink
+# group. The loader opens the library by absolute path, so it needs no
+# entry in the cache that the closure built.
+COPY --from=shim /udev-kernel-group.so /usr/lib/liken/udev-kernel-group.so
 # The image runs the compositor and holds no other program, so a
 # release can start it and read what it says.
 ENTRYPOINT ["/usr/bin/weston"]

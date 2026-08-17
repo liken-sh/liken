@@ -46,16 +46,14 @@ var (
 )
 
 // draPlugin answers the kubelet's DRA calls. It holds the API client,
-// the card whose connectors it publishes, the outputs the compositor's
-// config can route to, and where the socket a consumer receives lives.
-// Everything else it derives again on each call, from the claim and
-// from sysfs.
+// the card whose connectors it publishes, and where the socket a
+// consumer receives lives. Everything else it derives again on each
+// call, from the claim and from sysfs.
 type draPlugin struct {
 	drav1.UnimplementedDRAPluginServer
 	client    *Client
 	sysRoot   string
 	card      string
-	routed    map[string]bool
 	socketDir string
 }
 
@@ -183,15 +181,6 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 			// The pod waits in ContainerCreating, and the output's
 			// NoExecute taint is what the eviction controller acts on.
 			return fail("output %s has no monitor on it right now", result.Device)
-		}
-		if !p.routed[result.Device] {
-			// The connector got its first monitor after the operator
-			// wrote the compositor's config, so no [output] section
-			// names this app-id. Delivering it anyway would put the
-			// client's surface on whichever output the compositor
-			// enumerated first, on top of the client that owns that
-			// screen. A restart of the operator writes the section.
-			return fail("the compositor has no output for %s; it appeared after the operator started", result.Device)
 		}
 		name := claim.Uid + "-" + result.Device
 		specDevices = append(specDevices, cdiDevice{

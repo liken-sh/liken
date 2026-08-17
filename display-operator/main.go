@@ -145,10 +145,10 @@ func main() {
 	card := cards[0]
 
 	// The outputs are enumerated once, here, and the config the
-	// compositor reads is written from that enumeration. A connector
-	// that gets its first monitor later publishes and taints
-	// correctly, and it has no [output] section until the operator
-	// restarts. Version 0 accepts that, and the README says so.
+	// compositor reads is written from that enumeration. Every
+	// connector gets an [output] section, dark or lit. The compositor
+	// parses the file once, so the section for a connector must exist
+	// before a monitor arrives on it.
 	outputs := discoverOutputs(sysRoot, card)
 	if len(outputs) == 0 {
 		fatal("%s registers no connectors under %s/class/drm", card, sysRoot)
@@ -170,33 +170,24 @@ func main() {
 		fmt.Printf("%s: %s carries %s, app-id %s\n",
 			DriverName, output.Connector, monitor, appID(output.Connector))
 	}
-	if err := writeWestonConfig(westonConfigPath, live); err != nil {
+	if err := writeWestonConfig(westonConfigPath, outputs); err != nil {
 		fatal("writing %s: %v", westonConfigPath, err)
 	}
-	// What the config names is what the compositor can route to, and
-	// the rest of the operator tests every connector against this set.
-	routed := routedOutputs(live)
 
-	// The inventory publishes before the compositor runs, with the
-	// NoSchedule taint on every output. Two things need that. A previous
-	// pod's slice may still say every screen is free, and it says so
-	// until this pass replaces it. And a compositor that cannot start at
-	// all still leaves a usable inventory, so a claim on a screen
-	// that is cabled and asleep parks instead of being allocated a
-	// screen the compositor cannot drive. The reconcile after the socket appears
-	// clears the taint from the screens that can serve a client.
+	// The inventory publishes before the compositor runs, with every
+	// device tainted, because no compositor serves any screen yet.
+	// sysfs and the EDID say what is plugged in without a compositor,
+	// so the attributes are complete. This write replaces the slice
+	// the previous pod left. The first reconcile after the socket
+	// appears removes the taint from every screen that has a monitor.
+	// If the compositor never starts, the taint stays, and a claim
+	// parks instead of taking a screen that no compositor drives.
 	//
-	// This write does not read the published slice first, so it drops
-	// the NoExecute taint that a previous instance wrote as its
-	// compositor died. That is deliberate. The eviction that taint asks
-	// for does not reach its deadline anyway: the replacement compositor
-	// is up about three seconds later and the first reconcile clears the
-	// taint, against the 30 second tolerationSeconds the README
-	// recommends. A connector that is really dark keeps its NoExecute
-	// taint across the restart, because sysfs still says it is dark. One
-	// more API read on every startup buys nothing.
-	if err := EnsureResourceSlice(client, nodeName, owner,
-		beforeTheCompositor(sliceDevices(outputs, routed))); err != nil {
+	// A client that was drawing before a restart keeps its screen.
+	// The taint clears about three seconds after this write, and the
+	// README recommends a tolerationSeconds of 30, so the restart
+	// never evicts the client.
+	if err := EnsureResourceSlice(client, nodeName, owner, compositorDown(sliceDevices(outputs))); err != nil {
 		fmt.Fprintf(os.Stderr, "publishing the outputs before the compositor starts: %v\n", err)
 	}
 
@@ -223,7 +214,6 @@ func main() {
 		client:    client,
 		sysRoot:   sysRoot,
 		card:      card,
-		routed:    routed,
 		socketDir: socketDir,
 	}
 	go func() {
@@ -242,7 +232,7 @@ func main() {
 	// time and takes the same settle window.
 	retries := make(chan struct{}, 1)
 	publish := func() {
-		if err := reconcile(client, nodeName, owner, card, routed); err != nil {
+		if err := reconcile(client, nodeName, owner, card); err != nil {
 			fmt.Fprintf(os.Stderr, "publishing the slice: %v; retrying in %s\n", err, writeRetryDelay)
 			time.AfterFunc(writeRetryDelay, func() {
 				select {
@@ -254,10 +244,10 @@ func main() {
 	}
 	settled := settle(ctx, wakes(ctx, uevents, retries), settleWindow, settleLimit)
 
-	// The first pass runs before any event, because the operator
-	// starts with monitors already plugged in, and a restart must
-	// republish what the previous pod published. It is also what
-	// clears the taints that went out before the compositor started.
+	// The first pass runs before any event. It removes the taint that
+	// the startup publish put on every screen that has a monitor. It
+	// also catches a monitor that arrived while the compositor was
+	// starting, before this process listened on the kernel's socket.
 	publish()
 
 	for {
@@ -283,7 +273,7 @@ func main() {
 			// and a slice that does not change raises no scheduler
 			// event.
 			if writeErr := EnsureResourceSlice(client, nodeName, owner,
-				afterTheCompositor(sliceDevices(discoverOutputs(sysRoot, card), routed))); writeErr != nil {
+				compositorDown(sliceDevices(discoverOutputs(sysRoot, card)))); writeErr != nil {
 				fmt.Fprintf(os.Stderr, "tainting the outputs after the compositor exited: %v\n", writeErr)
 			}
 			fatal("the compositor exited: %v", err)
@@ -322,12 +312,12 @@ func eventsEnded(ctx context.Context) error {
 // leaves, so an empty answer means the card is going away or the walk
 // read the wrong path, and publishing it would delete every device a
 // consumer holds.
-func reconcile(client *Client, nodeName string, owner OwnerReference, card string, routed map[string]bool) error {
+func reconcile(client *Client, nodeName string, owner OwnerReference, card string) error {
 	outputs := discoverOutputs(sysRoot, card)
 	if len(outputs) == 0 {
 		return fmt.Errorf("%s registers no connectors, so the published slice stays as it is", card)
 	}
-	return EnsureResourceSlice(client, nodeName, owner, sliceDevices(outputs, routed))
+	return EnsureResourceSlice(client, nodeName, owner, sliceDevices(outputs))
 }
 
 // wakes turns the kernel's drm events and the write retries into one

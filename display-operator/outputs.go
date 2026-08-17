@@ -86,9 +86,8 @@ func discoverOutputs(sysRoot, card string) []Output {
 	return outputs
 }
 
-// connected keeps the outputs that can serve a client right now. The
-// compositor gets an [output] section for each of these, and every
-// other connector publishes with the taints that say it delivers
+// connected keeps the outputs that can serve a client right now, and
+// every other connector publishes with the taint that says it delivers
 // nothing.
 func connected(outputs []Output) []Output {
 	var live []Output

@@ -21,6 +21,12 @@ claim an output. These documents say why it is built the way it is.
 * [01, The compositor image](01-the-compositor-image.md). Built. The
   image is a library closure on scratch, and the pod runs one
   container.
+* [02, An output for every connector](02-an-output-for-every-connector.md).
+  Proposed. Every connector gets an `[output]` section at startup, and
+  a preload shim moves the compositor's hotplug subscription to the
+  kernel's own netlink group, so a monitor that arrives on a dark
+  connector routes without a restart. Answers and replaces the open
+  problem "Routing is narrower than inventory".
 
 ## Open problems
 
@@ -28,10 +34,9 @@ claim an output. These documents say why it is built the way it is.
 owes an answer to. Those documents carry no number, because nobody has
 decided yet what work they become.
 
-* [Routing is narrower than inventory](open-problems/routing-is-narrower-than-inventory.md).
-  Every connector publishes as a device, and only the connectors that
-  had a monitor at startup have an output in the compositor's
-  configuration.
+* [The app-id is a guessable string](open-problems/the-app-id-is-a-guessable-string.md).
+  One fixed app-id per output is the whole credential for taking a
+  screen, and the string is public in the ResourceSlice.
 * [A removed device has no bounded retry](open-problems/a-removed-device-has-no-bounded-retry.md).
   The kubelet retries `NodePrepareResources` without a bound for a
   device an allocation names but the slice no longer lists, so the

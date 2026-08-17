@@ -12,8 +12,8 @@ package main
 // client fullscreen on one output, with no decorations and no desktop,
 // and it routes a client to an output by the app-id the client sets.
 // weston.ini's app-ids= line is the routing table, and this operator
-// writes it: one [output] section for each connected connector, whose
-// app-id is the published device's name.
+// writes it: one [output] section for each connector, whose app-id is
+// the published device's name.
 //
 // The operator starts weston rather than the entrypoint, because the
 // config file has to exist first and the operator is what writes it.
@@ -38,6 +38,12 @@ import (
 	"time"
 )
 
+// hotplugShim is the path of the preload library in the image. The
+// library moves the compositor's hotplug subscription from udevd's
+// netlink group to the kernel's netlink group. The comment in
+// hotplug/udev-kernel-group.c explains why.
+const hotplugShim = "/usr/lib/liken/udev-kernel-group.so"
+
 // socketWaitTimeout bounds the wait for weston's Wayland socket at
 // startup. Weston that never creates it is a failure to report, and
 // the pod's restart is the retry.
@@ -54,6 +60,11 @@ const socketPollInterval = 100 * time.Millisecond
 // Every setting here is a requirement of running a compositor in a pod
 // on a machine with no keyboard, not a preference a deployment makes,
 // so the operator writes the file instead of taking one.
+//
+// Every connector gets a section, dark or lit. Weston parses this
+// file once, at startup. It enables only the heads whose connector
+// reports a monitor, so a dark section does nothing at first. When a
+// monitor arrives, that section configures and routes the new output.
 func westonConfig(outputs []Output) string {
 	var config strings.Builder
 	config.WriteString(`# Written by display.liken.sh at startup. Every edit is lost on the
@@ -88,23 +99,6 @@ app-ids=%s
 `, output.Connector, appID(output.Connector))
 	}
 	return config.String()
-}
-
-// routedOutputs is the set of published device names that the
-// compositor's config carries an [output] section for. Pass it the
-// same outputs that westonConfig received.
-//
-// This is what the rest of the operator tests a connector against. The
-// config is written once, at startup, so a connector that gets its
-// first monitor while the operator runs has no section, and a client
-// sent to it would land on the first output instead. The set is the
-// operator's own record of what it wrote.
-func routedOutputs(outputs []Output) map[string]bool {
-	routed := make(map[string]bool, len(outputs))
-	for _, output := range outputs {
-		routed[deviceName(output.Connector)] = true
-	}
-	return routed
 }
 
 // writeWestonConfig writes the compositor's config where weston reads
@@ -144,6 +138,13 @@ func startWeston(ctx context.Context, card, configPath, socketDir, socketName st
 		// libseat never selects noop on its own, so ask for it by
 		// name.
 		"LIBSEAT_BACKEND=noop",
+		// Weston subscribes to hotplug events on the netlink group
+		// that only udevd broadcasts on, and liken runs no udevd. The
+		// preloaded shim moves that subscription to the kernel's own
+		// netlink group, which carries the same events. The variable
+		// goes on the compositor alone: the operator's binary is
+		// static and loads no libraries.
+		"LD_PRELOAD="+hotplugShim,
 		// Weston creates the socket in XDG_RUNTIME_DIR, and this is
 		// the directory a consumer's container mounts.
 		"XDG_RUNTIME_DIR="+socketDir,
