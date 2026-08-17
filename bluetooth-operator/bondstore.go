@@ -16,6 +16,16 @@ package main
 // a burst and a signal that changed no key costs a read of a few
 // kilobytes.
 //
+// A device's two files can land on different passes. bluetoothd writes
+// the info file in the management callback that completes the pairing,
+// and it writes the cache entry when it resolves the device's name and
+// browses its services, which is a separate event. So a pass can read
+// a bond with one file and the next pass reads it with two, and the
+// backstop tick at 60 seconds carries the second file whether or not a
+// signal announced it. The comparison is what makes that safe: a tree
+// that gained a cache entry differs from the Secret, and a difference
+// is a write.
+//
 // The settle window is what makes the read safe to take, and it is
 // 1500 ms. BlueZ writes the key material synchronously in the
 // management callback, through g_file_set_contents, which renames

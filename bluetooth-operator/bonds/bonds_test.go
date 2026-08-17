@@ -46,8 +46,8 @@ func blueZTree(t *testing.T) string {
 	}
 	write(filepath.Join(adapter, testDevice, "info"), testInfo)
 	write(filepath.Join(adapter, testDevice, "attributes"), "")
-	write(filepath.Join(adapter, "cache", testDevice), "[General]\nName=DualSense\n")
-	write(filepath.Join(adapter, "cache", testNeighbour), "[General]\nName=Somebody's Phone\n")
+	write(filepath.Join(adapter, "cache", testDevice), testCache)
+	write(filepath.Join(adapter, "cache", testNeighbour), testNeighbourCache)
 	write(filepath.Join(adapter, "settings"), "")
 	return root
 }
@@ -68,6 +68,30 @@ Blocked=false
 Services=00001124-0000-1000-8000-00805f9b34fb;
 `
 
+// testCache is the same device's cache file, cut down from the one on
+// the lab machine. The HID SDP record under [ServiceRecords] is why
+// this file travels: the input profile parses it when the controller
+// connects, and bluetoothd runs no new discovery for a device it
+// already holds a bond for.
+const testCache = `[General]
+Name=DualSense Wireless Controller
+
+[ServiceRecords]
+0x00010000=35760900000A0001000009000135031124
+`
+
+// testNeighbourCache is a cache entry for a device this adapter has
+// never paired with. It carries a name and no key, and it must not
+// reach the API.
+const testNeighbourCache = `[General]
+Name=Somebody's Phone
+`
+
+// files builds one device's stored files out of the two strings.
+func files(info, cache string) Files {
+	return Files{Info: []byte(info), Cache: []byte(cache)}
+}
+
 func TestTreeSame(t *testing.T) {
 	one, two := address(t, testDevice), address(t, testNeighbour)
 	cases := []struct {
@@ -78,26 +102,38 @@ func TestTreeSame(t *testing.T) {
 		{name: "two empty trees", a: Tree{}, b: Tree{}, want: true},
 		{name: "an empty tree and a nil one", a: Tree{}, b: nil, want: true},
 		{
-			name: "the same device with the same info",
-			a:    Tree{one: []byte(testInfo)},
-			b:    Tree{one: []byte(testInfo)},
+			name: "the same device with the same files",
+			a:    Tree{one: files(testInfo, testCache)},
+			b:    Tree{one: files(testInfo, testCache)},
 			want: true,
 		},
 		{
 			name: "the same device with a rewritten info",
-			a:    Tree{one: []byte(testInfo)},
-			b:    Tree{one: []byte("[LinkKey]\nKey=FF\n")},
+			a:    Tree{one: files(testInfo, testCache)},
+			b:    Tree{one: files("[LinkKey]\nKey=FF\n", testCache)},
+			want: false,
+		},
+		{
+			name: "the same device with a rewritten cache",
+			a:    Tree{one: files(testInfo, testCache)},
+			b:    Tree{one: files(testInfo, "[General]\nName=Renamed\n")},
+			want: false,
+		},
+		{
+			name: "a cache file that arrived after the pairing",
+			a:    Tree{one: files(testInfo, "")},
+			b:    Tree{one: files(testInfo, testCache)},
 			want: false,
 		},
 		{
 			name: "a device that was paired since",
-			a:    Tree{one: []byte(testInfo)},
-			b:    Tree{one: []byte(testInfo), two: []byte(testInfo)},
+			a:    Tree{one: files(testInfo, testCache)},
+			b:    Tree{one: files(testInfo, testCache), two: files(testInfo, testCache)},
 			want: false,
 		},
 		{
 			name: "a device that was unpaired",
-			a:    Tree{one: []byte(testInfo)},
+			a:    Tree{one: files(testInfo, testCache)},
 			b:    Tree{},
 			want: false,
 		},

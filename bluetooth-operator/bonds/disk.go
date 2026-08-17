@@ -2,21 +2,28 @@ package bonds
 
 // BlueZ's storage tree, read and written in the daemon's own shape.
 //
-// The tree under one adapter holds three kinds of entry, and only the
-// first is a bond:
+// The tree under one adapter holds three kinds of entry:
 //
 //   - a directory named after a paired device, holding that device's
-//     info file, and often an attributes file that is empty.
-//   - cache, a directory holding one file per device BlueZ has seen on
-//     the air. These are the neighbours' phones and headsets. They
-//     carry no key, this machine has no claim on them, and copying
-//     them into the API would publish who lives nearby.
+//     info file, and often an attributes file that is empty. The info
+//     file is the bond.
+//   - cache, a directory holding one file per device BlueZ has
+//     resolved a name for. That is every device the radio has seen,
+//     so most of these entries are the neighbours' phones and headsets.
 //   - settings, the adapter's own power state, which the pod already
 //     states in bluetoothd's main.conf.
 //
-// Only the info files travel. An entry whose name does not parse as an
-// address is skipped rather than fatal, because a later BlueZ may
-// write more beside the bonds and an unknown name is not a failure.
+// The device directories and the cache entries that match them travel,
+// and nothing else does. A cache entry is not discovery residue when
+// the device has a directory: it carries the SDP records, and a BR/EDR
+// HID device does not reconnect without them. A cache entry with no
+// device directory is a device this adapter never paired with, and
+// carrying it would publish who lives nearby, so the device directory
+// is the test.
+//
+// An entry whose name does not parse as an address is skipped rather
+// than fatal, because a later BlueZ may write more beside the bonds
+// and an unknown name is not a failure.
 
 import (
 	"errors"
@@ -32,8 +39,12 @@ const (
 	bondDirMode  = 0o700
 	bondFileMode = 0o600
 
-	// infoFile is the one file per device that carries the bond.
-	infoFile = "info"
+	// infoFile is the file under each device's own directory that
+	// carries the bond, and cacheDirectory is where the adapter keeps
+	// one file per device it has resolved a name for, named by the
+	// device's address.
+	infoFile       = "info"
+	cacheDirectory = "cache"
 )
 
 // ReadTree reads one adapter's bonds out of a BlueZ storage tree.
@@ -69,7 +80,18 @@ func ReadTree(root string, adapter Address) (Tree, error) {
 		if err != nil || len(info) == 0 {
 			continue
 		}
-		tree[device] = info
+		// The cache entry takes the same name BlueZ gave the device's
+		// directory. A device that paired before name resolution
+		// finished has no cache entry yet, and that is a bond with one
+		// file. Any other read failure fails the whole call, because
+		// the caller compares this tree against the Secret and writes
+		// the difference, so a cache file this misses is a cache file
+		// the next write drops.
+		cache, err := os.ReadFile(filepath.Join(directory, cacheDirectory, entry.Name()))
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+		tree[device] = Files{Info: info, Cache: cache}
 	}
 	return tree, nil
 }
@@ -85,12 +107,27 @@ func WriteTree(root string, adapter Address, tree Tree) error {
 	if err := os.MkdirAll(directory, bondDirMode); err != nil {
 		return err
 	}
-	for device, info := range tree {
+	for device, stored := range tree {
 		deviceDirectory := filepath.Join(directory, device.Directory())
 		if err := os.MkdirAll(deviceDirectory, bondDirMode); err != nil {
 			return err
 		}
-		if err := os.WriteFile(filepath.Join(deviceDirectory, infoFile), info, bondFileMode); err != nil {
+		if err := os.WriteFile(filepath.Join(deviceDirectory, infoFile), stored.Info, bondFileMode); err != nil {
+			return err
+		}
+		// A device with no stored cache entry gets no file. An empty
+		// one would give bluetoothd a key file with no
+		// [ServiceRecords] group, which reads as a device whose
+		// records are known to be none, and bluetoothd would not run
+		// the discovery that fills it in.
+		if len(stored.Cache) == 0 {
+			continue
+		}
+		cache := filepath.Join(directory, cacheDirectory)
+		if err := os.MkdirAll(cache, bondDirMode); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(cache, device.Directory()), stored.Cache, bondFileMode); err != nil {
 			return err
 		}
 	}

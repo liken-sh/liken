@@ -170,14 +170,32 @@ nothing in the cluster has to press a button after a reboot.
 One Secret for each adapter, in the operator's own namespace, named
 `bluetooth-bonds-<address>`. The address is the adapter's own MAC in
 lowercase with dashes, because a Secret's name has to be a DNS
-subdomain. Each Secret holds one entry for each device paired to that
-adapter: the key is the device's address in the same form, and the
-value is that device's BlueZ `info` file, byte for byte. Nothing here
-parses that file.
+subdomain. Each Secret holds two entries for each device paired to
+that adapter. The keys are the device's address in the same form, with
+a suffix that names the file, and each value is one of BlueZ's own
+files, byte for byte. Nothing here parses either file.
 
     $ kubectl get secret -n liken-system bluetooth-bonds-14-b4-57-91-2f-c8
     NAME                                TYPE     DATA   AGE
     bluetooth-bonds-14-b4-57-91-2f-c8   Opaque   2      3d
+
+DATA counts files and not devices, so one paired controller reads as
+2. `kubectl describe` on the same Secret names the keys.
+
+`<device>.info` is `/var/lib/bluetooth/<adapter>/<device>/info`, which
+holds the link key. `<device>.cache` is
+`/var/lib/bluetooth/<adapter>/cache/<device>`, which holds the SDP
+records the adapter read from that device. Both have to come back. A
+BR/EDR controller restored from its link key alone connects and drops
+again, because bluetoothd's input profile reads the HID report
+descriptor out of the cache entry and runs no new discovery for a
+device it already holds a bond with.
+
+The adapter's cache directory also holds an entry for every other
+device the radio has resolved a name for, which in a house is the
+neighbours' phones. Those never travel. A cache entry reaches the
+Secret only when the device has a directory of its own under the
+adapter, which is what pairing creates.
 
 The adapter's address is the identity BlueZ files a link key under, so
 the Secret carries the same identity the keys do. The `bondfetch` init

@@ -2,10 +2,10 @@ package bonds
 
 // The Secret that carries an adapter's bonds between pods.
 //
-// One Secret holds one adapter's whole tree: one entry per paired
-// device, keyed by the device's address, holding that device's info
-// file. The Secret's own name carries the adapter's address, so the
-// keys follow the radio and not the machine.
+// One Secret holds one adapter's whole tree: two entries per paired
+// device, one for each of the files the device has. The Secret's own
+// name carries the adapter's address, so the keys follow the radio and
+// not the machine.
 //
 // The Secret lives in the operator's own namespace. Nothing outside
 // the operator reads it, and a link key in it is as good as the
@@ -15,6 +15,8 @@ package bonds
 // only the fields both programs read or write. The API's Secret also
 // has stringData, immutable, and every field an ordinary object has,
 // and none of them changes what a bond needs.
+
+import "strings"
 
 const (
 	// The Secret's name is this prefix and the adapter's address, so a
@@ -35,7 +37,42 @@ const (
 	nameLabel    = "app.kubernetes.io/name"
 	operatorName = "bluetooth-operator"
 	adapterLabel = "bluetooth.liken.sh/adapter"
+
+	// The suffixes that separate a device's two files inside one
+	// Secret. A Secret key accepts a letter, a digit, and any of - _
+	// and . , so the address and a dotted suffix both fit, and a
+	// person reading kubectl describe reads which device each file
+	// belongs to. The alternative shapes both cost more: a Secret for
+	// each device multiplies the objects the init container reads,
+	// and one key holding an archive of both files makes every read
+	// parse a format this package would have to define.
+	//
+	// Nothing outside this file writes these strings. secretKey and
+	// deviceOf are the only two places that join and split them, so
+	// the operator's write and the init container's read cannot spell
+	// the layout differently.
+	infoSuffix  = ".info"
+	cacheSuffix = ".cache"
 )
+
+// secretKey names one of a device's files inside the Secret.
+func secretKey(device Address, suffix string) string {
+	return device.Key() + suffix
+}
+
+// deviceOf answers with the device a key names, when the key names a
+// device's file of that kind.
+func deviceOf(key, suffix string) (Address, bool) {
+	name, found := strings.CutSuffix(key, suffix)
+	if !found {
+		return Address{}, false
+	}
+	device, err := ParseAddress(name)
+	if err != nil {
+		return Address{}, false
+	}
+	return device, true
+}
 
 // Secret is one adapter's stored bonds as the API server holds them.
 //
@@ -83,9 +120,15 @@ func SecretPath(namespace string, adapter Address) string {
 
 // NewSecret builds the object the operator writes for one adapter.
 func NewSecret(namespace string, adapter Address, tree Tree) *Secret {
-	data := make(map[string][]byte, len(tree))
-	for device, info := range tree {
-		data[device.Key()] = info
+	data := make(map[string][]byte, 2*len(tree))
+	for device, stored := range tree {
+		data[secretKey(device, infoSuffix)] = stored.Info
+		// A device with no cache entry gets no cache key, so that the
+		// restore writes no cache file for it. An empty value would
+		// restore an empty file, and that is a different fact.
+		if len(stored.Cache) > 0 {
+			data[secretKey(device, cacheSuffix)] = stored.Cache
+		}
 	}
 	return &Secret{
 		APIVersion: "v1",
@@ -102,18 +145,55 @@ func NewSecret(namespace string, adapter Address, tree Tree) *Secret {
 
 // Tree reads the bonds back out of a stored Secret.
 //
-// A key that is not an address names no device, so it is skipped. The
-// alternative is to fail the whole read, and that would start
-// bluetoothd with no bonds at all over one bad key, which disconnects
-// every controller that the other keys would have connected.
+// A key that names no device's file is skipped. The alternative is to
+// fail the whole read, and that would start bluetoothd with no bonds
+// at all over one bad key, which disconnects every controller that the
+// other keys would have connected.
+//
+// The three passes run in this order for two reasons. The first
+// layout this operator wrote held one key per device, the bare
+// address, carrying the info file, and a Secret written that way is
+// still in the field, so the second pass reads it where the current
+// keys said nothing. The operator replaces the whole object on the
+// first pass that sees a difference, so a Secret carries both layouts
+// only until then, and the current keys win for as long as it does.
+// The cache pass runs last because it attaches to a device that one of
+// the first two established, and a cache key alone establishes
+// nothing.
 func (s *Secret) Tree() Tree {
 	tree := make(Tree, len(s.Data))
 	for key, info := range s.Data {
-		device, err := ParseAddress(key)
-		if err != nil {
+		device, named := deviceOf(key, infoSuffix)
+		if !named || len(info) == 0 {
 			continue
 		}
-		tree[device] = info
+		tree[device] = Files{Info: info}
+	}
+	for key, info := range s.Data {
+		device, err := ParseAddress(key)
+		if err != nil || len(info) == 0 {
+			continue
+		}
+		if _, found := tree[device]; found {
+			continue
+		}
+		tree[device] = Files{Info: info}
+	}
+	for key, cache := range s.Data {
+		device, named := deviceOf(key, cacheSuffix)
+		if !named {
+			continue
+		}
+		stored, paired := tree[device]
+		// A cache key with no info key beside it names a device this
+		// adapter holds no bond with. Restoring it would write a cache
+		// entry for hardware the machine has no claim on, which is
+		// what the whole tree is filtered to keep out.
+		if !paired {
+			continue
+		}
+		stored.Cache = cache
+		tree[device] = stored
 	}
 	return tree
 }

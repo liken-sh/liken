@@ -9,9 +9,10 @@
 //
 // bluetoothd keeps the bonds in a directory tree under
 // /var/lib/bluetooth, one directory per adapter and one directory per
-// paired device below it. The tree is the daemon's, so this package
-// reads and writes it in the daemon's own shape, and never asks
-// bluetoothd to store them anywhere else.
+// paired device below it, with a cache directory the adapter's devices
+// share. The tree is the daemon's, so this package reads and writes it
+// in the daemon's own shape, and never asks bluetoothd to store them
+// anywhere else.
 //
 // The copy that survives the pod lives in a Kubernetes Secret, keyed
 // by the adapter's Bluetooth address. The address is what identifies
@@ -29,14 +30,36 @@ import (
 	"maps"
 )
 
-// Tree is one adapter's stored bonds: each paired device's info file,
+// Tree is one adapter's stored bonds: each paired device's files,
 // keyed by that device's address.
+type Tree map[Address]Files
+
+// Files is what this package carries for one paired device. Both files
+// are BlueZ's own, byte for byte, and nothing here parses either one.
 //
-// The info file is the whole of what this package carries. It holds
-// the link key, the device's class, and the services BlueZ recorded,
-// which is what bluetoothd needs to accept a connection from that
-// device without a new pairing.
-type Tree map[Address][]byte
+// Info is <adapter>/<device>/info. It holds the link key, the device's
+// class, and the list of services BlueZ recorded. A device with no
+// info file is not a bond.
+//
+// Cache is <adapter>/cache/<device>. It holds the SDP records BlueZ
+// read from the device, under [ServiceRecords]. A BR/EDR HID device
+// does not reconnect without them, because bluetoothd runs no new SDP
+// discovery for a device it already holds a bond for, and the input
+// profile parses the HID SDP record out of this file to bring the
+// connection up. Cache is empty for a device BlueZ has written no
+// cache entry for, which is a device paired before name resolution
+// finished.
+type Files struct {
+	Info  []byte
+	Cache []byte
+}
+
+// Equal reports whether two devices hold the same two files. A device
+// that has one file and a device that has both are different, so a
+// cache entry that arrives after the pairing reaches the Secret.
+func (f Files) Equal(other Files) bool {
+	return bytes.Equal(f.Info, other.Info) && bytes.Equal(f.Cache, other.Cache)
+}
 
 // Same reports whether two trees hold the same devices with the same
 // contents. The operator writes the Secret only when this says no,
@@ -44,5 +67,5 @@ type Tree map[Address][]byte
 // and a write on every pass would be a write to the API server on
 // every pass.
 func (t Tree) Same(other Tree) bool {
-	return maps.EqualFunc(t, other, bytes.Equal)
+	return maps.EqualFunc(t, other, Files.Equal)
 }

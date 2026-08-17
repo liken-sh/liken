@@ -17,11 +17,12 @@ established and this design keeps is in
 Two kinds of claim appear below and they are marked. A claim about
 BlueZ or the kernel was read in the source that is named beside it. A
 claim marked "measured" was run: on Kubernetes v1.36.3+k3s1 for the
-pod behavior, and in a container on a machine with a real adapter for
-the address read. The BlueZ reading was done in master `bd898962`,
-which calls itself 5.87. The `bluetoothd` image builds 5.82, so a
-reader who checks these lines against the shipped image reads an older
-tree.
+pod behavior, in a container on a machine with a real adapter for the
+address read, and on liken-1 with a real DualSense for
+[What to store, and what not to](#what-to-store-and-what-not-to). The
+BlueZ reading was done in master `bd898962`, which calls itself 5.87.
+The `bluetoothd` image builds 5.82, so a reader who checks these lines
+against the shipped image reads an older tree.
 
 ## The problem
 
@@ -52,16 +53,18 @@ on no other object, so the storage decision picks the workload shape.
 ## The design
 
 * **One Secret for each adapter**, named for the adapter's BD_ADDR, in
-  the operator's namespace. It holds each paired device's `info` file
+  the operator's namespace. It holds two files for each paired device
   and nothing else. A Secret's name must be a DNS subdomain name and a
   colon is not permitted in one, so the name is `bluetooth-bonds-`
   plus the address in lowercase with dashes: the adapter in plan 02's
   drill, `04:4A:69:66:92:27`, gives
   `bluetooth-bonds-04-4a-69-66-92-27`. The prefix names the domain
   because several operators share the namespace. The data keys
-  take the same form, because a Secret's keys accept only letters,
-  digits, `-`, `_`, and `.`. Each value is the `info` file, byte for
-  byte.
+  take the same form with a suffix that names the file,
+  `7c-66-ef-22-e7-80.info` and `7c-66-ef-22-e7-80.cache`, because a
+  Secret's keys accept only letters, digits, `-`, `_`, and `.`. Each
+  value is the file, byte for byte. A device with no cache entry yet
+  has one key and not two.
 * **A plain init container** runs before the bluetoothd sidecar. It
   reads the adapter's BD_ADDR from the kernel, reads that adapter's
   Secret from the API server, writes the files into an `emptyDir`
@@ -76,11 +79,14 @@ on no other object, so the storage decision picks the workload shape.
   DaemonSet. See [The workload shape](#the-workload-shape).
 
 The Secret carries files and not fields. Nothing in this design parses
-`info`, so the layout changes BlueZ has made inside 5.x cost nothing
-here: `[SlaveLongTermKey]` in 5.15, `[PeripheralLongTermKey]` in 5.63,
-`PreferredBearer` in 5.80, `LastUsedBearer` and `CablePairing` in 5.83.
-That property is the strongest thing the PVC had, and this design
-keeps it.
+either file, so the layout changes BlueZ has made inside 5.x cost
+nothing here: `[SlaveLongTermKey]` in 5.15, `[PeripheralLongTermKey]`
+in 5.63, `PreferredBearer` in 5.80, `LastUsedBearer` and
+`CablePairing` in 5.83. That property is the strongest thing the PVC
+had, and this design keeps it. The one thing the design does have to
+know is which files to carry, and
+[What to store, and what not to](#what-to-store-and-what-not-to) is
+where that knowledge lives.
 
 ## What the storage has to do
 
@@ -231,29 +237,75 @@ That is what lets the init container name the same adapter claim the
 
 ## What to store, and what not to
 
-Store `<adapter>/<device>/info` for each paired device. That file is
-the whole bond.
+Store two files for each paired device: `<adapter>/<device>/info` and
+`<adapter>/cache/<device>`. The rule is the device's own directory. A
+device that has one is paired to this adapter, and its cache entry
+travels with it. A cache entry with no device directory beside it is a
+device the radio has only seen, and it is skipped.
 
-**Do not store `cache/`.** Its entries are created at name resolution
-during discovery, so the directory holds every device the radio has
-noticed, including devices that were never paired. On a home machine
-that means the neighbours' phones. It is also entirely rediscoverable,
-so skipping it costs a slower first reconnect and never a re-pairing.
+**`info` is the bond.** It holds the link key, the class, the DeviceID,
+and the `[General] Services` list.
+
+**`cache/<device>` is required.** It holds the SDP records under
+`[ServiceRecords]`, and for a BR/EDR HID device the report descriptor
+exists in no other file. `read_device_records` in `src/device.c` is the
+only reader. It builds the path `/%s/cache/%s` under
+`/var/lib/bluetooth` and reads the `ServiceRecords` group. Its one caller is
+`btd_device_get_record`, which the input profile calls through
+`input_device_update_rec` to fill `idev->rec`. `extract_hid_record`
+returns `-ENOENT` when that pointer is null, and `hidp_add_connection`
+logs `Could not parse HID SDP record` and tears both L2CAP channels
+down.
+
+Nothing regenerates the file on the path a controller reconnects by.
+`load_info` in `src/device.c` does check for the cache file and sets
+`bredr_state.svc_resolved = false` when it is absent, but that flag
+only arms a discovery in `device_bonding_complete` and
+`device_wait_for_svc_complete`. An incoming ACL from a device that is
+already bonded reaches `device_add_connection`, which arms no
+discovery, and the HID accept path in `profiles/input/server.c` calls
+`hidp_add_connection` directly. So the missing file clears the
+flag, and the path a controller reconnects by never reads it. An
+outgoing `Device1.Connect()` does run the discovery, which is the
+repair in [What is left open](#what-is-left-open).
+
+**Measured, 2026-08-17.** On liken-1, with a real DualSense, `info`
+restored and `cache/` absent, bluetoothd 5.82 logged:
+
+    src/device.c:read_device_records() Unable to load key file from /var/lib/bluetooth/04:4A:69:66:92:27/cache/7C:66:EF:22:E7:80: (No such file or directory)
+    profiles/input/device.c:hidp_add_connection() Could not parse HID SDP record: No such file or directory (2)
+
+The bond itself restored correctly, `Trusted=true` and all. The
+controller connected and dropped again, repeatedly.
+
+**The privacy reason for the old rule still holds, and the device
+directory is what enforces it.** `device_store_cached_name` writes a
+cache entry for any device whose name bluetoothd resolves, paired or
+not, and no code sweeps the stale ones. On a home machine that
+directory is the neighbours' phones. Unpairing does not remove the
+file either: `device_remove_stored` strips `[ServiceRecords]`,
+`[Attributes]`, and `[Endpoints]` and keeps the rest. So a cache entry
+alone never travels, and an unpaired device's leftover entry stops
+travelling the moment its directory goes.
 
 **Skip `settings`.** It is adapter preferences, and it was zero bytes
-on the lab machine.
+on the lab machine. It carries the adapter's powered and pairable
+state, which the bluetoothd image already states as `AutoEnable=true`
+in `main.conf`.
 
 **Skip `attributes` when it is empty.** `create_file` creates it
 unconditionally, and it holds only the legacy primary-services list.
 
 For a BLE device the GATT database lives in `cache/<device>` under
-`[Attributes]`. Losing it costs a rediscovery, not a re-pairing.
+`[Attributes]`, and the A2DP endpoint cache lives in the same file
+under `[Endpoints]`. Both belong to a paired device, so both travel
+now, as groups inside a file this design does not parse.
 
-Nobody has read a real `/var/lib/bluetooth` and weighed it. The one
-number that matters is the ceiling:
+Nobody has weighed a real `/var/lib/bluetooth`. The one number that
+matters is the ceiling:
 [a Secret is limited to 1 MiB](https://kubernetes.io/docs/concepts/configuration/secret/).
-This design stores the smallest subset of the tree, so it is the
-subset most likely to stay under that.
+This design stores the subset a restore needs and nothing else, so it
+is the subset most likely to stay under that.
 
 ## Writing changes back
 
@@ -411,8 +463,10 @@ Each of these was priced in the deleted document. The pricing stands.
 
 * **A PVC for each replica, which is today.** Its one real strength is
   that a volume needs no knowledge of BlueZ's layout at all. This
-  design keeps that strength by copying `info` byte for byte. What it
-  costs is the whole of [The problem](#the-problem).
+  design keeps most of that strength by copying whole files byte for
+  byte, and pays the rest: it has to know which files a restore needs,
+  and it got that set wrong once already. What the PVC costs is the
+  whole of [The problem](#the-problem).
 * **One shared volume keyed by the adapter address.** It gets the
   identity right without leaving the filesystem, and it needs
   `ReadWriteMany`. liken supplies volumes from the `podStorage` role
@@ -453,11 +507,26 @@ costs.
   left the fleet.
 * **Deployment or DaemonSet.** See
   [The workload shape](#the-workload-shape).
-* **`attributes` and `ccc` are not stored.** Both are BLE state. If
-  this turns out to matter, a person would see it as a BLE device that
-  reconnects but does not deliver notifications until something
-  rediscovers its services, and they would see it only after a pod
-  restart, never on the first pairing.
+* **`attributes` and `ccc` are not stored.** Both are BLE state, and
+  `ccc` is written only by the converters that read a BlueZ 4.x tree.
+  If `attributes` turns out to matter, a person would see it as a BLE
+  device that reconnects but does not deliver notifications until
+  something rediscovers its services, and they would see it only after
+  a pod restart, never on the first pairing. The BLE GATT database
+  itself is in `cache/<device>` under `[Attributes]`, which does
+  travel, so `attributes` is the legacy flat copy alone.
+* **Migrating the Secrets written before `cache/<device>` travelled.**
+  The reader takes both layouts, so nothing has to be done by hand,
+  and the operator rewrites each Secret on its first pass that sees a
+  difference. What is not decided is when the old layout stops being
+  read. A Secret in the old layout restores a bond with no SDP records,
+  so the first reconnect of a BR/EDR HID device after such a restore
+  fails the way the drill did. Read and not measured: an outgoing
+  `Device1.Connect()` should repair it without a new pairing, because
+  `btd_device_connect_services` in `src/device.c` runs
+  `device_discover_services` when `svc_resolved` is false, and the SDP
+  browse writes the cache entry. Pressing PS does not, because that
+  path never reaches `btd_device_connect_services`.
 * **How often an adapter really moves between machines.** Nobody has
   counted it. This design makes the move free, so the count now sets
   how much the design is worth, and not whether it is right.
@@ -471,4 +540,7 @@ costs.
   `info` measured 343 bytes on the lab adapter, so the 1 MiB ceiling on
   a Secret holds a few thousand devices and no house reaches it. What
   is unmeasured is whether any `info` grows much larger for a device
-  richer than a game controller.
+  richer than a game controller, and what `cache/<device>` weighs. The
+  cache entry is the larger of the two: it carries whole SDP records
+  hex-encoded, and for a BLE device it carries the GATT database as
+  well.
