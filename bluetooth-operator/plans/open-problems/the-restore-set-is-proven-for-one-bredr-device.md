@@ -4,7 +4,7 @@ Open problem. Everything the Secret carries was chosen by reading
 BlueZ's source and proven with one DualSense over BR/EDR. Two edges of
 that work are unmeasured.
 
-[Plan 03](../03-a-secret-for-each-adapter.md) decides which files
+[Plan 03](../completed/03-a-secret-for-each-adapter.md) decides which files
 travel. It prices `settings` and `attributes` and sets both aside. It
 does not price the two below.
 

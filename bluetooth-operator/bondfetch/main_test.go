@@ -36,21 +36,28 @@ func testAPI(t *testing.T, handler http.Handler) *apiClient {
 	return newAPIClient(server.URL, server.Client(), credentials)
 }
 
-// storedBonds serves one adapter's Secret, and fails any other path,
-// so a request for the wrong Secret shows up as a failure here.
+// storedBonds serves one Secret for each bond, out of the collection
+// and under the adapter's label. Any other path fails, so a request
+// that named one Secret rather than the label shows up here.
 func storedBonds(t *testing.T, tree bonds.Tree) http.Handler {
 	t.Helper()
+	list := bonds.SecretList{}
+	for device, files := range tree {
+		list.Items = append(list.Items, *bonds.NewBondSecret("bluetooth", testAddress, device, files, bonds.Owner{}))
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		want := "/api/v1/namespaces/bluetooth/secrets/bluetooth-bonds-04-4a-69-66-92-27"
-		if r.URL.Path != want {
-			t.Errorf("path = %q, want %q", r.URL.Path, want)
+		if r.URL.Path != "/api/v1/namespaces/bluetooth/secrets" {
+			t.Errorf("path = %q", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 			return
+		}
+		if got := r.URL.Query().Get("labelSelector"); got != "bluetooth.liken.sh/adapter=04-4a-69-66-92-27" {
+			t.Errorf("labelSelector = %q", got)
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
 			t.Errorf("Authorization = %q", got)
 		}
-		body, err := json.Marshal(bonds.NewSecret("bluetooth", testAddress, tree))
+		body, err := json.Marshal(list)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -101,8 +108,8 @@ func TestMaterializeWritesTheTreeBlueZReads(t *testing.T) {
 // recognise.
 func TestMaterializeReadsASecretInTheBareAddressLayout(t *testing.T) {
 	api := testAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"data":{"7c-66-ef-22-e7-80":"` +
-			base64.StdEncoding.EncodeToString([]byte(testInfo)) + `"}}`))
+		_, _ = w.Write([]byte(`{"items":[{"data":{"7c-66-ef-22-e7-80":"` +
+			base64.StdEncoding.EncodeToString([]byte(testInfo)) + `"}}]}`))
 	}))
 	root := t.TempDir()
 
@@ -120,12 +127,12 @@ func TestMaterializeReadsASecretInTheBareAddressLayout(t *testing.T) {
 	}
 }
 
-// An adapter that has paired nothing has no Secret. That is the
+// An adapter that has paired nothing has no Secrets. That is the
 // ordinary first start of a machine, so it writes nothing and exits
 // zero, and bluetoothd starts on an empty tree.
-func TestMaterializeAcceptsAMissingSecret(t *testing.T) {
+func TestMaterializeAcceptsAnAdapterWithNoBonds(t *testing.T) {
 	api := testAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"items":[]}`))
 	}))
 	root := t.TempDir()
 
@@ -142,11 +149,10 @@ func TestMaterializeAcceptsAMissingSecret(t *testing.T) {
 	}
 }
 
-// A read that fails for any other reason is not an adapter that has
-// paired nothing. bluetoothd must not start on an empty tree here: the
-// controllers would not connect, and the operator would then write the
-// empty tree back over the stored keys.
-func TestMaterializeFailsWhenTheSecretCannotBeRead(t *testing.T) {
+// A read that fails is not an adapter that has paired nothing.
+// bluetoothd must not start on an empty tree here: the controllers
+// would not connect, and a person would pair each one again.
+func TestMaterializeFailsWhenTheSecretsCannotBeRead(t *testing.T) {
 	api := testAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -178,5 +184,44 @@ func TestMaterializeWritesEveryStoredBond(t *testing.T) {
 	}
 	if len(tree) != 2 {
 		t.Fatalf("got %d bonds, want 2: %v", len(tree), tree)
+	}
+}
+
+// The older per-adapter Secret carries the same label, so a machine
+// that has paired nothing since that layout changed still restores its
+// bonds. A device in both layouts takes the per-bond copy, which is
+// the one the operator keeps current.
+func TestMaterializeReadsBothLayoutsAndPrefersThePerBondSecret(t *testing.T) {
+	device, err := bonds.ParseAddress("7C:66:EF:22:E7:80")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := bonds.Files{Info: []byte("[LinkKey]\nKey=OLD\n")}
+	list := bonds.SecretList{Items: []bonds.Secret{
+		*bonds.NewBondSecret("bluetooth", testAddress, device, testFiles, bonds.Owner{}),
+		{
+			Metadata: bonds.SecretMeta{Name: bonds.SecretName(testAddress)},
+			Data:     map[string][]byte{"7c-66-ef-22-e7-80.info": stale.Info},
+		},
+	}}
+	api := testAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := json.Marshal(list)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write(body)
+	}))
+	root := t.TempDir()
+
+	if err := materialize(api, "bluetooth", testAddress, root); err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+
+	tree, err := bonds.ReadTree(root, testAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(tree[device].Info); got != testInfo {
+		t.Errorf("info = %q, want the per-bond Secret's copy", got)
 	}
 }

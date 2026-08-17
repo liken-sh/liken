@@ -1,32 +1,38 @@
 // bondfetch writes an adapter's stored bonds into the directory
 // bluetoothd reads, and then exits.
 //
-// It is a plain init container. The pod's bonds live in a Kubernetes
-// Secret named after the adapter's own Bluetooth address (see the
-// bonds package), and bluetoothd reads them from a directory tree. The
-// pod's bluetoothd container mounts an emptyDir at that tree, this
-// program fills it before bluetoothd starts, and the operator writes
-// the Secret back whenever the tree changes.
+// It is a plain init container. The pod's bonds live in Kubernetes
+// Secrets, one for each bond, each labelled with the adapter it
+// belongs to (see the bonds package), and bluetoothd reads them from a
+// directory tree. The pod's bluetoothd container mounts an emptyDir at
+// that tree, this program fills it before bluetoothd starts, and the
+// operator writes each Secret back whenever the tree changes.
+//
+// A label selector gathers them. This program runs before bluetoothd,
+// so nothing here has the list of paired devices, and the adapter's
+// own address is the only identity it has. An older layout put every
+// bond in one Secret named for the adapter, and that object carries
+// the same label, so a machine that has not paired anything since the
+// change still reads its keys and needs no migration step of its own.
 //
 // The address comes from the kernel, because bluetoothd is not running
 // yet and no other source in the pod carries the address of the radio
 // the kubelet delivered. The pod runs in the host's network namespace,
 // which is the whole of what the ioctl needs.
 //
-// Every failure here exits nonzero, and one case is not a failure: a
-// Secret that does not exist. The two cases need different handling.
-// bluetoothd starts with whatever tree it finds, so an empty tree is
-// correct for an adapter that has paired nothing, and wrong for an
-// adapter whose keys this program could not read. In the second case
-// the paired controllers would not connect, and the operator would
-// then write the empty tree back over the stored keys. A nonzero exit
-// holds the pod in Init, leaves the Secret alone, and shows in
-// kubectl. The kubelet's restart is the retry.
+// Every failure here exits nonzero, and one case is not a failure: an
+// adapter with no Secrets at all. The two cases need different
+// handling. bluetoothd starts with whatever tree it finds, so an empty
+// tree is correct for an adapter that has paired nothing, and wrong
+// for an adapter whose keys this program could not read. In the second
+// case the paired controllers would not connect. A nonzero exit holds
+// the pod in Init, leaves the Secrets alone, and shows in kubectl. The
+// kubelet's restart is the retry.
 package main
 
 import (
-	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"time"
 
@@ -98,24 +104,41 @@ func run() error {
 // materialize writes one adapter's stored bonds into the tree
 // bluetoothd reads. It is separate from run so that a test drives it
 // against an httptest server, with no adapter and no cluster.
+//
+// The older per-adapter Secret is read first and the per-bond Secrets
+// second, so a device that is in both takes the copy the operator
+// keeps current. The operator does not delete the older object, so
+// both can be there for as long as a person leaves them.
 func materialize(api *apiClient, namespace string, adapter bonds.Address, root string) error {
-	var secret bonds.Secret
-	err := api.get(bonds.SecretPath(namespace, adapter), &secret)
-	if errors.Is(err, errNotFound) {
-		// The first start of a machine whose adapter has paired
-		// nothing. bluetoothd creates the tree itself at the first
-		// pairing, and the operator writes the Secret from it.
+	var list bonds.SecretList
+	path := bonds.SecretsPath(namespace) + "?labelSelector=" + url.QueryEscape(bonds.AdapterSelector(adapter))
+	if err := api.get(path, &list); err != nil {
+		return fmt.Errorf("listing the bonds for %s: %w", adapter, err)
+	}
+
+	tree := bonds.Tree{}
+	for _, secret := range list.Items {
+		if !secret.OneBond() {
+			tree.Merge(secret.Tree())
+		}
+	}
+	for _, secret := range list.Items {
+		if secret.OneBond() {
+			tree.Merge(secret.Tree())
+		}
+	}
+	if len(tree) == 0 {
+		// The first start of a machine whose adapter has paired nothing.
+		// bluetoothd creates the tree itself at the first pairing, and
+		// the operator writes the Secret from it.
 		fmt.Printf("bondfetch: no stored bonds for %s\n", adapter)
 		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("reading %s: %w", bonds.SecretName(adapter), err)
-	}
 
-	tree := secret.Tree()
 	if err := bonds.WriteTree(root, adapter, tree); err != nil {
 		return fmt.Errorf("writing the bonds under %s: %w", root, err)
 	}
-	fmt.Printf("bondfetch: wrote %d bonds for %s under %s\n", len(tree), adapter, root)
+	fmt.Printf("bondfetch: wrote %d bonds for %s under %s, from %d Secrets\n",
+		len(tree), adapter, root, len(list.Items))
 	return nil
 }

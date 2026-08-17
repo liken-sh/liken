@@ -11,7 +11,7 @@ bluetoothd can manage several adapters at once, so the limit is not
 BlueZ. It is this operator. Two parts of it are written for one
 adapter:
 
-* The bond store is per adapter. [Plan 03](../03-a-secret-for-each-adapter.md)
+* The bond store is per adapter. [Plan 03](../completed/03-a-secret-for-each-adapter.md)
   keeps one Secret that holds the bonds of one adapter, keyed by that
   adapter's address.
 * Controller discovery is scoped to the operator's own adapter. The

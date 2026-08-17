@@ -26,7 +26,6 @@ import (
 	"reflect"
 	"slices"
 	"strings"
-	"unicode/utf8"
 )
 
 // DriverName identifies this operator as a DRA driver. A driver name
@@ -205,22 +204,11 @@ func sliceDevices(controllers map[string]controller, nodes map[string][]string) 
 // attributeString limits a free-text value to the API's 64-character
 // limit on attribute strings. A controller's alias is the only value
 // here that a person can make long, and a truncated alias still
-// identifies the controller to a reader.
-//
-// The cut moves back to a rune boundary. A person can name a
-// controller in any script, the limit counts bytes, and a cut through
-// the middle of a multi-byte rune produces a string the API server
-// rejects as invalid UTF-8. That would fail the whole slice write, not
-// just the one attribute.
+// identifies the controller to a reader. A PairingRequest's status
+// carries a device's name under the same limit, so both cut with the
+// same function.
 func attributeString(s string) string {
-	if len(s) <= 64 {
-		return s
-	}
-	cut := 64
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return s[:cut]
+	return truncateRunes(s, maxSeenNameBytes)
 }
 
 // sameDevices reports whether the published devices already say what

@@ -97,6 +97,14 @@ func InClusterClient() (*Client, error) {
 // out. It turns any non-2xx status into an error that carries the
 // server's own message.
 func (c *Client) RequestJSON(method, path string, body []byte, out any) error {
+	return c.RequestWithType(method, path, "application/json", body, out)
+}
+
+// RequestWithType is RequestJSON with the request's own content type
+// stated. A PATCH needs it: the API server reads the patch's dialect
+// from the header alone, and the same bytes mean different things as a
+// merge patch and as a JSON patch.
+func (c *Client) RequestWithType(method, path, contentType string, body []byte, out any) error {
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
@@ -118,7 +126,7 @@ func (c *Client) RequestJSON(method, path string, body []byte, out any) error {
 	}
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", contentType)
 	}
 
 	resp, err := c.http.Do(req)

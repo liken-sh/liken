@@ -120,7 +120,7 @@ func assertQuiet(t *testing.T, out <-chan struct{}, within time.Duration) {
 // merge. A source that closed and was not noticed would spin the loop
 // on a channel that is always ready to receive.
 func TestWakesEndsWhenAnySourceCloses(t *testing.T) {
-	sources := []string{"uevents", "bluez", "retries"}
+	sources := []string{"uevents", "bluez", "retries", "requests"}
 	for i, closing := range sources {
 		t.Run(closing, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
@@ -129,7 +129,8 @@ func TestWakesEndsWhenAnySourceCloses(t *testing.T) {
 			uevents := make(chan hidEvent)
 			bluez := make(chan struct{})
 			retries := make(chan struct{})
-			out := wakes(ctx, uevents, bluez, retries)
+			requests := make(chan struct{})
+			out := wakes(ctx, uevents, bluez, retries, requests)
 
 			switch i {
 			case 0:
@@ -138,6 +139,8 @@ func TestWakesEndsWhenAnySourceCloses(t *testing.T) {
 				close(bluez)
 			case 2:
 				close(retries)
+			case 3:
+				close(requests)
 			}
 			select {
 			case _, ok := <-out:
@@ -158,12 +161,15 @@ func TestWakesPassesEachSourceThrough(t *testing.T) {
 	uevents := make(chan hidEvent, 1)
 	bluez := make(chan struct{}, 1)
 	retries := make(chan struct{}, 1)
-	out := wakes(ctx, uevents, bluez, retries)
+	requests := make(chan struct{}, 1)
+	out := wakes(ctx, uevents, bluez, retries, requests)
 
 	uevents <- hidEvent{Action: "add", MAC: "a0:ab:51:33:b7:12"}
 	waitForWake(t, out, time.Second)
 	bluez <- struct{}{}
 	waitForWake(t, out, time.Second)
 	retries <- struct{}{}
+	waitForWake(t, out, time.Second)
+	requests <- struct{}{}
 	waitForWake(t, out, time.Second)
 }

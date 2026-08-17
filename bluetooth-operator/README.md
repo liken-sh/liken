@@ -16,7 +16,8 @@ and publishes what bluetoothd holds under `bluetooth.liken.sh`. The
 system image carries no BlueZ and no D-Bus.
 
 The pod is three containers. `bondfetch` runs first and exits: it
-restores the adapter's bonds from a Secret so bluetoothd finds them.
+restores the adapter's bonds from that adapter's Secrets so bluetoothd
+finds them.
 `bluetoothd` carries the daemon, its D-Bus bus, and every capability.
 `bluetooth-operator` is one static binary with no capabilities. See
 [The images](#the-images).
@@ -74,7 +75,7 @@ namespace `liken-system` exists.
 The operator runs as a DaemonSet, so a pod lands on every node and
 nobody states which machine has the radio. Each pod claims the adapter
 on its node and restores that adapter's bonds from that adapter's
-Secret. A node with no adapter publishes no matching device, so the
+Secrets. A node with no adapter publishes no matching device, so the
 claim parks that pod Pending, and it costs nothing.
 
 The DaemonSet updates with `RollingUpdate` and `maxSurge: 0`, because
@@ -91,57 +92,79 @@ the operator claims from liken
 `bluetooth-controller` is what a consumer claims
 (`device.driver == "bluetooth.liken.sh"`).
 
+The base also ships the three CustomResourceDefinitions of the pairing
+API: Adapter, Pairing, and PairingRequest. Install them with the
+DaemonSet. The operator records every bond as a Pairing and stores its
+keys in a Secret that Pairing owns, so with no CRDs installed a new
+bond reaches no Secret.
+
 ## Pairing
 
-There is no pairing API yet. A person pairs each controller once, by
-hand, in the operator's pod.
+Pairing is an API. A person creates a PairingRequest, the operator
+opens a pairing window on the radio, and approval is a write to the
+request's spec. [Plan 04](plans/04-an-api-for-pairing.md) states the
+design.
 
-A DualSense needs one setting relaxed for its first pairing. It opens
-its HID channel before the bond registers, and BlueZ's
-`ClassicBondedOnly` rejects that, so pairing fails with the setting on.
-Leaving it off permanently re-opens CVE-2023-45866, where anyone in
-range can open an HID channel with no bond and type into the machine,
-so it goes back on after pairing. The bonds persist in the Secret, so
-the flip costs one restart:
+Open a window:
 
-    kubectl set env daemonset/bluetooth-operator -n liken-system \
-      -c bluetoothd BLUETOOTH_CLASSIC_BONDED_ONLY=false
+    kubectl apply -f - <<'EOF'
+    apiVersion: bluetooth.liken.sh/v1alpha1
+    kind: PairingRequest
+    metadata:
+      name: new-gamepad
+      namespace: liken-system
+    spec:
+      adapter: 7c-66-ef-22-e7-80
+      windowSeconds: 180
+    EOF
 
-The `bluetoothd` container reads the variable. Any value other than
-`true` or `false` stops that container, because BlueZ reads an
-unrecognized value as `false`, and a misspelling would open the hole
-with no error.
+Hold **Create** and **PS** until the light bar flashes, then read what
+the radio sees:
 
-Wait for the restart, hold **Create** and **PS** until the light bar
-flashes, and pair:
+    kubectl get pairingrequest new-gamepad -n liken-system -o yaml
 
-    kubectl exec -it -n liken-system daemonset/bluetooth-operator \
-      -c bluetoothd -- bluetoothctl
+Every device the scan finds appears in `status.seen` with its address
+and name. Approve the one you meant:
 
-    scan on
-    # wait for "Wireless Controller" and note its address
-    pair A0:AB:51:33:B7:12
-    trust A0:AB:51:33:B7:12
-    connect A0:AB:51:33:B7:12
-    scan off
+    kubectl patch pairingrequest new-gamepad -n liken-system \
+      --type merge -p '{"spec":{"device":"A0:AB:51:33:B7:12"}}'
 
-`trust` matters: without it the controller pairs again on every
-reconnection. On a cluster with several adapters, exec into the pod
-that holds the adapter you are pairing to. Then put the setting back:
+The operator pairs that device, trusts it so it reconnects on its own,
+creates the Pairing, and closes the window. A request with an empty
+`spec.device` never pairs anything: a window nobody approves only
+scans. It expires on its own, and the finished request is collected
+after `ttlSecondsAfterFinished`, a day by default.
 
-    kubectl set env daemonset/bluetooth-operator -n liken-system \
-      -c bluetoothd BLUETOOTH_CLASSIC_BONDED_ONLY-
+To re-pair a device the cluster already records, set `spec.device` when
+you create the request. Setting the address at creation approves it in
+advance.
 
-After that, **PS** alone reconnects. The link keys live in the Secret,
-so they survive a pod restart and a reboot, and `AutoEnable=true`
-powers the adapter on when bluetoothd starts.
+To unpair, delete the Pairing:
+
+    kubectl delete pairing a0-ab-51-33-b7-12
+
+The operator disconnects the controller, waits for any claim on it to
+release, retires it from the slice, removes the bond, and the Secret is
+collected with the object.
+
+`BLUETOOTH_CLASSIC_BONDED_ONLY` stays at `true` through all of this.
+The operator initiates the pairing itself over D-Bus with its own
+agent, so the bond registers before any input channel opens, and the
+guard has nothing to reject. Between windows the operator keeps the
+adapter neither pairable nor discoverable, so a manual `bluetoothctl`
+pairing now needs `pairable on` first. After a pairing, **PS** alone
+reconnects: the link keys live in the Secrets, so they survive a pod
+restart and a reboot, and `AutoEnable=true` powers the adapter on when
+bluetoothd starts.
 
 ## Where the bonds live
 
-One Secret for each adapter, in the operator's namespace, named
-`bluetooth-bonds-<address>` after the adapter's MAC. Each Secret holds
-two files for each paired device, byte for byte from BlueZ, and nothing
-here parses them:
+One Secret for each bond, in the operator's namespace, named
+`bluetooth-bond-<device>` after the controller's MAC. Each Secret holds
+that device's two files, byte for byte from BlueZ, a
+`bluetooth.liken.sh/adapter` label naming the radio the bond is keyed
+to, and its Pairing as owner, so deleting the Pairing collects the
+keys. Nothing here parses the files:
 
 * `<device>.info` holds the link key.
 * `<device>.cache` holds the SDP records the adapter read from the
@@ -150,15 +173,16 @@ here parses them:
   report descriptor out of the cache entry and runs no fresh discovery
   for a device it already has a bond with. Both files have to come back.
 
-`bondfetch` asks the kernel for the adapter's address, reads that
-Secret, and writes BlueZ's tree into an `emptyDir` before bluetoothd
-starts. BlueZ loads the tree once, at adapter registration, so
-`bondfetch` must finish first, which the init-container order
-guarantees. Nothing in the pod is storage, so a dongle carried to
-another machine takes its bonds with it: the pod that claims it there
-reads the same Secret.
-[A Secret for each adapter](plans/03-a-secret-for-each-adapter.md) has
-the details.
+`bondfetch` asks the kernel for the adapter's address, lists that
+radio's Secrets by the adapter label, and writes BlueZ's tree into an
+`emptyDir` before bluetoothd starts. BlueZ loads the tree once, at
+adapter registration, so `bondfetch` must finish first, which the
+init-container order guarantees. Nothing in the pod is storage, so a
+dongle carried to another machine takes its bonds with it: the pod
+that claims it there lists the same Secrets.
+[A Secret for each adapter](plans/completed/03-a-secret-for-each-adapter.md) has
+the details, and [plan 04](plans/04-an-api-for-pairing.md) states why
+the Secret is per bond.
 
 The keys sit in the cluster datastore. Whether it is encrypted at rest
 is a property of the cluster, not this operator. Without encryption at
@@ -235,16 +259,16 @@ the `operator` and `bondfetch` containers drop everything, and
 `bondfetch` also runs as uid 65534 with a read-only root. Each one
 answers a kernel or daemon check:
 
-* **`hostNetwork`** — `AF_BLUETOOTH` sockets exist only in the host's
+* **`hostNetwork`**: `AF_BLUETOOTH` sockets exist only in the host's
   network namespace; a socket call elsewhere fails `EAFNOSUPPORT`. The
   Bluetooth stack's whole control surface is a socket family, so no
   device node replaces this.
-* **`NET_ADMIN`** — the management channel's privileged commands test
+* **`NET_ADMIN`**: the management channel's privileged commands test
   for it. `NET_RAW` proved unnecessary and stays off.
-* **`NET_BIND_SERVICE`** — the SDP and GATT servers bind PSMs 1 and 31,
+* **`NET_BIND_SERVICE`**: the SDP and GATT servers bind PSMs 1 and 31,
   and any PSM below 0x1001 takes it. Without it bluetoothd registers no
   adapter.
-* **`SETUID`, `SETGID`** — dbus-daemon drops to its messagebus user at
+* **`SETUID`, `SETGID`**: dbus-daemon drops to its messagebus user at
   start, and the drop takes both.
 
 The operator needs none: it reads bluetoothd over D-Bus, walks sysfs,
@@ -269,7 +293,9 @@ stays in the slice with both taints, the `NoExecute` taint evicts the
 holder after its `tolerationSeconds`, and a return clears both.
 Deleting the device would strand the claim, because the kubelet retries
 `NodePrepareResources` against a device in no slice with no bound. A
-device leaves the slice only when it is unpaired.
+device leaves the slice only when it is unpaired, which is a
+`kubectl delete pairing`, and the teardown retires it only after its
+claim releases.
 
 **An empty answer from bluetoothd is not an empty paired set.**
 bluetoothd publishes no devices for a moment after it starts, and it
@@ -309,11 +335,11 @@ deleted or you remove it:
 
 ## Not here yet
 
-* **A pairing API.** By-hand pairing ships first. A later iteration
-  leans toward a pairing-request CRD that opens a bounded, audited
-  pairing window and gives the `BLUETOOTH_CLASSIC_BONDED_ONLY` flip a
-  home. See
-  [who owns the pairing UX](plans/open-problems/who-owns-the-pairing-ux.md).
+* **A passkey flow.** The operator's agent registers the
+  NoInputNoOutput capability, which pairs a game controller. A device
+  that needs a
+  passkey shown and typed is out of scope for `v1alpha1`; the request's
+  status is where a passkey would go.
 * **The drill.** No drill against a real adapter and two controllers
   has run yet. The plans state what one must show.
 * **Metrics.** The operator prints to stderr and reports state through
@@ -329,7 +355,7 @@ that mixes versions runs a combination nobody tested.
 |---|---|---|
 | `ghcr.io/liken-sh/bluetooth-operator` | one static Go binary | 12 MB |
 | `ghcr.io/liken-sh/bluetoothd` | bluetoothd, bluetoothctl, dbus-daemon, the entrypoint that starts them, and their configuration | 8 MB |
-| `ghcr.io/liken-sh/bluetooth-bondfetch` | the program that restores one adapter's bonds from its Secret | 6 MB |
+| `ghcr.io/liken-sh/bluetooth-bondfetch` | the program that restores one adapter's bonds from its Secrets | 6 MB |
 
 All three are `FROM scratch`: no shell, no package manager, no shared
 object. `kubectl exec` runs a program by name, and `bluetoothctl` is

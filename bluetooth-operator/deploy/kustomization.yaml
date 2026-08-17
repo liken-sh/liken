@@ -4,20 +4,22 @@
 # your own GitOps with patches of your own, or read it and write your
 # own manifests.
 #
-# Everything here except the DeviceClasses is namespaced.
-# DeviceClasses are cluster-scoped, like the ResourceSlices they
-# select over. kustomize reads which kinds are cluster-scoped from
-# the OpenAPI schema it was compiled with, and resource.k8s.io/v1 is
-# newer than the schema in kustomize 5.8.1, so the namespace below
-# lands on the two DeviceClasses as well. The API server discards a
-# namespace on a cluster-scoped object, so the classes apply
-# correctly, and the field in the rendered output means nothing.
+# Everything here except the CustomResourceDefinitions and the
+# DeviceClasses is namespaced. Both of those are cluster-scoped, like
+# the ResourceSlices they describe and select over. kustomize reads
+# which kinds are cluster-scoped from the OpenAPI schema it was
+# compiled with, and resource.k8s.io/v1 is newer than the schema in
+# kustomize 5.8.1, so the namespace below lands on the two
+# DeviceClasses as well. The API server discards a namespace on a
+# cluster-scoped object, so the classes apply correctly, and the field
+# in the rendered output means nothing.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 namespace: liken-system
 
 resources:
+  - crds.yaml
   - deviceclasses.yaml
   - rbac.yaml
   - operator.yaml

@@ -7,27 +7,57 @@ import (
 	"testing"
 )
 
-func TestSecretNameCarriesTheAdapter(t *testing.T) {
-	// One Secret per adapter, named after the adapter and not after
-	// the node or the pod, so the keys follow the radio they belong to.
+func TestBondSecretNameCarriesTheDevice(t *testing.T) {
+	// One Secret per bond, named after the device and not after the
+	// node or the pod, so the keys follow the hardware they belong to.
+	if got := BondSecretName(address(t, testDevice)); got != "bluetooth-bond-7c-66-ef-22-e7-80" {
+		t.Errorf("BondSecretName = %q", got)
+	}
+}
+
+func TestSecretNameStillReadsTheOlderPerAdapterName(t *testing.T) {
+	// Nothing writes this name now. The operator reports the object so
+	// that a person deletes it, which takes the name.
 	if got := SecretName(address(t, testAdapter)); got != "bluetooth-bonds-04-4a-69-66-92-27" {
 		t.Errorf("SecretName = %q", got)
 	}
 }
 
-func TestSecretPathNamesTheOperatorsNamespace(t *testing.T) {
-	want := "/api/v1/namespaces/bluetooth/secrets/bluetooth-bonds-04-4a-69-66-92-27"
-	if got := SecretPath("bluetooth", address(t, testAdapter)); got != want {
-		t.Errorf("SecretPath = %q, want %q", got, want)
+func TestBondSecretPathNamesTheOperatorsNamespace(t *testing.T) {
+	want := "/api/v1/namespaces/bluetooth/secrets/bluetooth-bond-7c-66-ef-22-e7-80"
+	if got := BondSecretPath("bluetooth", address(t, testDevice)); got != want {
+		t.Errorf("BondSecretPath = %q, want %q", got, want)
 	}
 }
 
-func TestNewSecretHoldsEveryBond(t *testing.T) {
-	tree := Tree{address(t, testDevice): files(testInfo, testCache)}
+// The label is what gathers one radio's bonds, because the init
+// container runs before bluetoothd and knows no device addresses.
+func TestAdapterSelectorNamesTheRadio(t *testing.T) {
+	want := "bluetooth.liken.sh/adapter=04-4a-69-66-92-27"
+	if got := AdapterSelector(address(t, testAdapter)); got != want {
+		t.Errorf("AdapterSelector = %q, want %q", got, want)
+	}
+}
 
-	secret := NewSecret("bluetooth", address(t, testAdapter), tree)
+// A Secret that carries one bond and one that carries a whole adapter
+// are told apart by name, so the init container can apply the older
+// layout first and let the current one win.
+func TestOneBondReadsTheLayoutFromTheName(t *testing.T) {
+	perBond := Secret{Metadata: SecretMeta{Name: BondSecretName(address(t, testDevice))}}
+	perAdapter := Secret{Metadata: SecretMeta{Name: SecretName(address(t, testAdapter))}}
+	if !perBond.OneBond() {
+		t.Errorf("%q did not read as one bond", perBond.Metadata.Name)
+	}
+	if perAdapter.OneBond() {
+		t.Errorf("%q read as one bond", perAdapter.Metadata.Name)
+	}
+}
 
-	if secret.Metadata.Name != "bluetooth-bonds-04-4a-69-66-92-27" {
+func TestNewBondSecretHoldsTheDevicesFiles(t *testing.T) {
+	secret := NewBondSecret("bluetooth", address(t, testAdapter), address(t, testDevice),
+		files(testInfo, testCache), testOwner)
+
+	if secret.Metadata.Name != "bluetooth-bond-7c-66-ef-22-e7-80" {
 		t.Errorf("name = %q", secret.Metadata.Name)
 	}
 	if secret.Metadata.Namespace != "bluetooth" {
@@ -43,6 +73,11 @@ func TestNewSecretHoldsEveryBond(t *testing.T) {
 	if !reflect.DeepEqual(secret.Metadata.Labels, want) {
 		t.Errorf("labels = %v, want %v", secret.Metadata.Labels, want)
 	}
+	// The Pairing owns the Secret, so deleting the Pairing collects the
+	// keys and no bond outlives the object that names it.
+	if !reflect.DeepEqual(secret.Metadata.OwnerReferences, []Owner{testOwner}) {
+		t.Errorf("ownerReferences = %+v", secret.Metadata.OwnerReferences)
+	}
 	// Each key is the device's address in the one form a Secret key
 	// accepts, a colon is not legal in one, and the suffix names which
 	// of the device's two files the value holds.
@@ -57,10 +92,9 @@ func TestNewSecretHoldsEveryBond(t *testing.T) {
 // A device paired before its cache entry was written has one file, and
 // the Secret carries one key for it. An empty value would restore an
 // empty cache file, which is not the same as no cache file.
-func TestNewSecretWritesNoCacheKeyWithoutOne(t *testing.T) {
-	tree := Tree{address(t, testDevice): files(testInfo, "")}
-
-	secret := NewSecret("bluetooth", address(t, testAdapter), tree)
+func TestNewBondSecretWritesNoCacheKeyWithoutOne(t *testing.T) {
+	secret := NewBondSecret("bluetooth", address(t, testAdapter), address(t, testDevice),
+		files(testInfo, ""), testOwner)
 
 	if _, found := secret.Data["7c-66-ef-22-e7-80.cache"]; found {
 		t.Errorf("data = %v, want no cache key", secret.Data)
@@ -70,7 +104,8 @@ func TestNewSecretWritesNoCacheKeyWithoutOne(t *testing.T) {
 // A Secret's data is base64 on the wire. encoding/json does that for
 // []byte, so an info file with any byte in it survives the round trip.
 func TestSecretDataIsBase64OnTheWire(t *testing.T) {
-	secret := NewSecret("bluetooth", address(t, testAdapter), Tree{address(t, testDevice): files(testInfo, testCache)})
+	secret := NewBondSecret("bluetooth", address(t, testAdapter), address(t, testDevice),
+		files(testInfo, testCache), testOwner)
 
 	body, err := json.Marshal(secret)
 	if err != nil {
@@ -191,13 +226,33 @@ func TestSecretTreeSkipsACacheKeyWithNoBond(t *testing.T) {
 
 // One round trip through the API, so that what the operator reads off
 // one machine is what the init container writes on the next.
-func TestSecretTreeReturnsWhatNewSecretStored(t *testing.T) {
-	tree := Tree{
-		address(t, testDevice):    files(testInfo, testCache),
-		address(t, testNeighbour): files(testInfo, ""),
-	}
+func TestSecretTreeReturnsWhatNewBondSecretStored(t *testing.T) {
+	tree := Tree{address(t, testDevice): files(testInfo, testCache)}
 
-	if again := NewSecret("bluetooth", address(t, testAdapter), tree).Tree(); !tree.Same(again) {
+	secret := NewBondSecret("bluetooth", address(t, testAdapter), address(t, testDevice),
+		tree[address(t, testDevice)], testOwner)
+	if again := secret.Tree(); !tree.Same(again) {
 		t.Fatalf("the tree changed on the way through a Secret: %v, want %v", again, tree)
 	}
+}
+
+// The init container gathers one radio's bonds out of several Secrets,
+// so the merge is what rebuilds the tree bluetoothd reads.
+func TestMergeGathersEveryBond(t *testing.T) {
+	one := Tree{address(t, testDevice): files(testInfo, testCache)}
+	two := Tree{address(t, testNeighbour): files(testInfo, "")}
+
+	one.Merge(two)
+
+	if len(one) != 2 {
+		t.Fatalf("got %d bonds, want 2: %v", len(one), one)
+	}
+}
+
+// testOwner is the Pairing that owns a bond's Secret.
+var testOwner = Owner{
+	APIVersion: "bluetooth.liken.sh/v1alpha1",
+	Kind:       "Pairing",
+	Name:       "7c-66-ef-22-e7-80",
+	UID:        "8f0f0b32-0000-4000-8000-000000000001",
 }

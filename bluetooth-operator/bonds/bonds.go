@@ -61,6 +61,16 @@ func (f Files) Equal(other Files) bool {
 	return bytes.Equal(f.Info, other.Info) && bytes.Equal(f.Cache, other.Cache)
 }
 
+// Merge copies another tree's bonds into this one. The init container
+// reads one radio's bonds out of several Secrets, so it merges them,
+// and a device that appears in two of them takes the value from the
+// tree merged last.
+func (t Tree) Merge(other Tree) {
+	for device, files := range other {
+		t[device] = files
+	}
+}
+
 // Same reports whether two trees hold the same devices with the same
 // contents. The operator writes the Secret only when this says no,
 // because bluetoothd rewrites its tree for reasons that change no key,

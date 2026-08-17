@@ -1,20 +1,26 @@
 package main
 
-// Carrying a new pairing back into the adapter's Secret.
+// Writing a new pairing back into that bond's Secret.
 //
-// bondfetch fills the pod's /var/lib/bluetooth from the Secret before
+// bondfetch fills the pod's /var/lib/bluetooth from the Secrets before
 // bluetoothd starts, and this is the other half: whatever bluetoothd
-// writes into that tree afterwards goes back into the same Secret, so
-// the next pod reads it. The pod's copy is an emptyDir and goes when
-// the pod goes, so a bond that never reaches the API is a controller
-// somebody pairs again.
+// writes into that tree afterwards goes back into the API, so the next
+// pod reads it. The pod's copy is an emptyDir and goes when the pod
+// goes, so a bond that never reaches the API is a controller somebody
+// pairs again.
+//
+// One Secret carries one bond. Its owner is that bond's Pairing, so
+// deleting the Pairing collects the keys, and the label on it names the
+// adapter, so the init container can gather one radio's bonds without
+// a list of paired devices. A bond with no Pairing yet is not
+// written: an owner reference cannot be added to a Secret that has
+// none, and the Pairing is created on the same pass or the next one.
 //
 // The trigger is the same signal set the slice reconcile runs on, and
-// the same settle window (see bluez.go and main.go). Nothing here
-// reads a signal's payload: a pass re-reads the whole tree, compares
-// it with the Secret, and writes on a difference, so one wake answers
-// a burst and a signal that changed no key costs a read of a few
-// kilobytes.
+// the same settle window (see bluez.go and main.go). Nothing here reads
+// a signal's payload: a pass re-reads the whole tree, compares it with
+// the Secrets, and writes on a difference, so one wake answers a burst
+// and a signal that changed no key costs a read of a few kilobytes.
 //
 // A device's two files can land on different passes. bluetoothd writes
 // the info file in the management callback that completes the pairing,
@@ -22,9 +28,9 @@ package main
 // browses its services, which is a separate event. So a pass can read
 // a bond with one file and the next pass reads it with two, and the
 // backstop tick at 60 seconds carries the second file whether or not a
-// signal announced it. The comparison is what makes that safe: a tree
-// that gained a cache entry differs from the Secret, and any
-// difference triggers a write.
+// signal announced it. The comparison is what makes that safe: a bond
+// that gained a cache entry differs from its Secret, and any difference
+// triggers a write.
 //
 // The settle window is what makes the read safe to take, and it is
 // 1500 ms. BlueZ writes the key material synchronously in the
@@ -37,10 +43,7 @@ package main
 // BR/EDR and never reconnects again. A GLib idle callback runs at the
 // next turn of the main loop, which is microseconds after the source
 // is queued, so 1500 ms is three orders of magnitude more than the
-// deferred write needs. The settle stage also has a 10 second limit,
-// which can end a burst early, and that costs nothing here: the pass
-// compares what it read, and the next pass writes whatever the burst
-// settled on.
+// deferred write needs.
 //
 // A failed write is logged and reported, and nothing more happens.
 // There is no retry with escalation, no taint for a bond that is not
@@ -54,7 +57,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
 )
@@ -88,7 +90,7 @@ func bondsRoot() string {
 // including ErrNoAdapter, without a bus.
 type adapterAddressReader func() (bonds.Address, error)
 
-// bondStore keeps one adapter's Secret in step with the bonds on disk.
+// bondStore keeps each bond's Secret in step with the bonds on disk.
 type bondStore struct {
 	client    *Client
 	namespace string
@@ -98,15 +100,24 @@ type bondStore struct {
 	// from bluetoothd the first time bluetoothd answers, and then it is
 	// fixed for the life of the process. A pod serves one adapter, and
 	// re-reading it would point a write at a radio whose keys this pod
-	// never restored, whose tree is therefore not under root, and whose
-	// Secret an empty read would then empty.
+	// never restored and whose tree is therefore not under root.
 	adapter bonds.Address
+
+	// reportedLegacy records that the operator has already named the
+	// older per-adapter Secret. The migration leaves that object alone,
+	// so the line is printed once for a person to act on rather than on
+	// every pass.
+	reportedLegacy bool
 }
 
-// persist copies the adapter's bonds into the adapter's Secret when
-// the two differ. It reports whether the pass left the Secret correct,
-// so that the caller can run a failure again shortly.
-func (s *bondStore) persist(readAdapter adapterAddressReader) bool {
+// persist copies each bond on disk into that bond's own Secret when the
+// two differ. It reports whether the pass left every bond stored, so
+// that the caller can run a failure again shortly.
+//
+// owners names the Pairing that owns each bond's Secret, and unpairing
+// names the bonds a teardown is working through. Both come from the
+// inventory pass, which runs first.
+func (s *bondStore) persist(readAdapter adapterAddressReader, owners map[bonds.Address]OwnerReference, unpairing map[bonds.Address]bool) bool {
 	if s.adapter.IsZero() {
 		address, err := readAdapter()
 		if errors.Is(err, ErrNoAdapter) {
@@ -127,112 +138,121 @@ func (s *bondStore) persist(readAdapter adapterAddressReader) bool {
 		fmt.Fprintf(os.Stderr, "reading the bonds under %s: %v\n", s.root, err)
 		return false
 	}
+	s.reportLegacySecret()
 
-	path := bonds.SecretPath(s.namespace, s.adapter)
+	stored := true
+	for device, files := range tree {
+		if unpairing[device] {
+			continue
+		}
+		owner, owned := owners[device]
+		if !owned {
+			// The bond has no Pairing yet, which is the state between
+			// bluetoothd writing the keys and the inventory pass adopting
+			// them. A Secret written now would have no owner, and nothing
+			// would ever collect it.
+			stored = false
+			continue
+		}
+		if !s.persistBond(device, files, owner) {
+			stored = false
+		}
+	}
+	return stored
+}
+
+// persistBond writes one bond's Secret when it differs from the bond on
+// disk.
+func (s *bondStore) persistBond(device bonds.Address, files bonds.Files, owner OwnerReference) bool {
+	name := bonds.BondSecretName(device)
+	path := bonds.BondSecretPath(s.namespace, device)
 	current, err := get[bonds.Secret](s.client, path)
 	if errors.Is(err, ErrNotFound) {
-		if len(tree) == 0 {
-			// An adapter that has paired nothing. An empty Secret says
-			// nothing that its absence does not, and bluetoothd creates
-			// the tree at the first pairing.
-			return true
-		}
-		return s.create(tree)
+		return s.create(device, files, owner)
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "reading %s: %v\n", bonds.SecretName(s.adapter), err)
+		fmt.Fprintf(os.Stderr, "reading %s: %v\n", name, err)
 		return false
 	}
-
-	stored := current.Tree()
-	if stored.Same(tree) {
+	if current.Tree()[device].Equal(files) {
 		return true
 	}
-	if len(tree) == 0 && !s.observedEmpty() {
-		fmt.Fprintf(os.Stderr,
-			"the bonds under %s are unreadable and %s holds %d; the Secret keeps them\n",
-			s.adapterDirectory(), bonds.SecretName(s.adapter), len(stored))
-		return false
-	}
-	return s.update(current.Metadata.ResourceVersion, stored, tree)
+	return s.update(current, device, files, owner)
 }
 
-// observedEmpty reports whether an empty read is what the adapter
-// really holds.
-//
-// bonds.ReadTree answers with an empty tree for an adapter that paired
-// nothing and for an adapter whose directory is not there at all, and
-// those are different facts. The directory is absent when the volume
-// did not mount, and when the tree on disk belongs to a different
-// radio than the one this store writes for. Neither of those says any
-// device was unpaired, and emptying a Secret on either would lose keys
-// that cannot be rebuilt.
-//
-// The directory is the authority because bluetoothd creates it when it
-// registers the adapter, and keeps it for the adapter's own settings
-// after the last device directory below it is gone. So an empty tree
-// under a directory that is there is bluetoothd's own answer that
-// nothing is paired.
-//
-// This is the rule the slice writes already follow: an empty paired
-// set deletes the slice only when bluetoothd answered with an adapter
-// present (see ErrNoAdapter in bluez.go), and never when the answer
-// itself is missing.
-func (s *bondStore) observedEmpty() bool {
-	info, err := os.Stat(s.adapterDirectory())
-	return err == nil && info.IsDir()
-}
-
-// adapterDirectory is where BlueZ keeps this adapter's tree.
-func (s *bondStore) adapterDirectory() string {
-	return filepath.Join(s.root, s.adapter.Directory())
-}
-
-// create puts the adapter's first bonds in the API. A create names the
-// collection, which is the API's rule for every resource, where every
-// other call here names the object.
-func (s *bondStore) create(tree bonds.Tree) bool {
-	body, err := json.Marshal(bonds.NewSecret(s.namespace, s.adapter, tree))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "encoding %s: %v\n", bonds.SecretName(s.adapter), err)
-		return false
-	}
-	if err := s.client.RequestJSON(http.MethodPost, secretsPath(s.namespace), body, nil); err != nil {
-		fmt.Fprintf(os.Stderr, "creating %s: %v\n", bonds.SecretName(s.adapter), err)
-		return false
-	}
-	fmt.Printf("bonds: created %s with %d bonds\n", bonds.SecretName(s.adapter), len(tree))
-	return true
-}
-
-// update replaces the stored bonds with the ones on disk.
-//
-// The write carries the resourceVersion from the read, so a second
-// writer gets ErrConflict instead of losing the first writer's bonds,
-// and the next pass reads again and writes again.
-//
-// A PUT replaces the whole object, so a tree with no devices in it
-// clears the Secret's data. That is the write an unpairing produces,
-// and observedEmpty is what has already established that the unpairing
-// is real.
-func (s *bondStore) update(resourceVersion string, stored, tree bonds.Tree) bool {
-	secret := bonds.NewSecret(s.namespace, s.adapter, tree)
-	secret.Metadata.ResourceVersion = resourceVersion
+// create puts one bond in the API for the first time. A create names
+// the collection, which is the API's rule for every resource, where
+// every other call here names the object.
+func (s *bondStore) create(device bonds.Address, files bonds.Files, owner OwnerReference) bool {
+	name := bonds.BondSecretName(device)
+	secret := bonds.NewBondSecret(s.namespace, s.adapter, device, files, bondOwner(owner))
 	body, err := json.Marshal(secret)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "encoding %s: %v\n", bonds.SecretName(s.adapter), err)
+		fmt.Fprintf(os.Stderr, "encoding %s: %v\n", name, err)
 		return false
 	}
-	if err := s.client.RequestJSON(http.MethodPut, bonds.SecretPath(s.namespace, s.adapter), body, nil); err != nil {
-		fmt.Fprintf(os.Stderr, "updating %s: %v\n", bonds.SecretName(s.adapter), err)
+	if err := s.client.RequestJSON(http.MethodPost, bonds.SecretsPath(s.namespace), body, nil); err != nil {
+		fmt.Fprintf(os.Stderr, "creating %s: %v\n", name, err)
 		return false
 	}
-	fmt.Printf("bonds: wrote %s, %d bonds, was %d\n", bonds.SecretName(s.adapter), len(tree), len(stored))
+	fmt.Printf("bonds: created %s for the bond with %s\n", name, device)
 	return true
 }
 
-// secretsPath is the collection a create posts to. bonds.SecretPath
-// names one Secret, and the collection is the path without the name.
-func secretsPath(namespace string) string {
-	return "/api/v1/namespaces/" + namespace + "/secrets"
+// update replaces one bond's stored files with the ones on disk.
+//
+// The write carries the resourceVersion from the read, so a second
+// writer gets ErrConflict instead of losing the first writer's bond,
+// and the next pass reads again and writes again.
+func (s *bondStore) update(current *bonds.Secret, device bonds.Address, files bonds.Files, owner OwnerReference) bool {
+	name := bonds.BondSecretName(device)
+	secret := bonds.NewBondSecret(s.namespace, s.adapter, device, files, bondOwner(owner))
+	secret.Metadata.ResourceVersion = current.Metadata.ResourceVersion
+	body, err := json.Marshal(secret)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "encoding %s: %v\n", name, err)
+		return false
+	}
+	if err := s.client.RequestJSON(http.MethodPut, bonds.BondSecretPath(s.namespace, device), body, nil); err != nil {
+		fmt.Fprintf(os.Stderr, "updating %s: %v\n", name, err)
+		return false
+	}
+	fmt.Printf("bonds: wrote %s\n", name)
+	return true
+}
+
+// reportLegacySecret names the older per-adapter Secret once, if one is
+// still there.
+//
+// The migration does not delete it. bondfetch reads both layouts, so a
+// bond that is only in the old Secret still restores, and this
+// operator writes the per-bond Secrets from the tree that restore
+// produced. Deleting the old object is a person's act, after a drill
+// has shown the controllers reconnecting from the new ones.
+func (s *bondStore) reportLegacySecret() {
+	if s.reportedLegacy {
+		return
+	}
+	_, err := get[bonds.Secret](s.client, bonds.SecretPath(s.namespace, s.adapter))
+	if err != nil {
+		// An absent Secret is the ordinary state, and any other failure
+		// is reported by the reads that matter.
+		s.reportedLegacy = errors.Is(err, ErrNotFound)
+		return
+	}
+	s.reportedLegacy = true
+	fmt.Printf("bonds: %s still holds this adapter's bonds in the older layout; "+
+		"delete it once the per-bond Secrets have restored a controller\n", bonds.SecretName(s.adapter))
+}
+
+// bondOwner turns the Pairing this operator holds into the owner
+// reference a Secret carries. The two structs carry the same fields,
+// and the bonds package has its own because it cannot import this one.
+func bondOwner(owner OwnerReference) bonds.Owner {
+	return bonds.Owner{
+		APIVersion: owner.APIVersion,
+		Kind:       owner.Kind,
+		Name:       owner.Name,
+		UID:        owner.UID,
+	}
 }

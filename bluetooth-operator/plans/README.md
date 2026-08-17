@@ -22,14 +22,16 @@ decided yet what work they become.
 * [01, Bluetooth audio](01-bluetooth-audio.md). Proposed.
 * [02, The two-container pod](02-the-two-container-pod.md). Built, and
   drilled on liken-1 on 2026-08-17.
-* [03, A Secret for each adapter](03-a-secret-for-each-adapter.md).
-  Proposed.
+* [03, A Secret for each adapter](completed/03-a-secret-for-each-adapter.md).
+  Built, and drilled on liken-1 on 2026-08-17. Plan 04 amends its
+  Secret layout to one Secret per bond.
+* [04, An API for pairing](04-an-api-for-pairing.md). Proposed. An
+  Adapter and Pairing inventory owned by the operator, and a
+  PairingRequest a person opens and approves with kubectl. Answers and
+  replaces the open problem "Who owns the pairing UX".
 
 ## Open problems
 
-* [Who owns the pairing UX](open-problems/who-owns-the-pairing-ux.md).
-  The operator runs bluetoothd, so it is the only layer that can offer
-  pairing, and whether it should is not decided.
 * [The restore set is proven for one BR/EDR device](open-problems/the-restore-set-is-proven-for-one-bredr-device.md).
   The adapter's own `identity` file does not travel, and no LE device
   has been through a restore.

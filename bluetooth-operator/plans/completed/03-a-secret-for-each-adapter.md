@@ -445,10 +445,10 @@ carries the DaemonSet and its update strategy.
 
 ## This is not the pairing CRD
 
-[Who owns the pairing UX](open-problems/who-owns-the-pairing-ux.md)
-proposes a pairing-request resource: a person creates an object that
-names an adapter and a duration, the operator opens a pairing window,
-and the status reports which controller paired.
+[Plan 04](04-an-api-for-pairing.md) designs a pairing-request
+resource: a person creates an object that names an adapter and a
+duration, the operator opens a pairing window, and the status reports
+which controller paired.
 
 The two are separate, and the deleted document's suggestion that they
 might be one feature is not carried forward. The Secret is where the

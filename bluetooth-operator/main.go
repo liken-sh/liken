@@ -18,7 +18,12 @@
 // an adapter as an exclusive device, so the claim holder is the only
 // Bluetooth stack on that radio.
 //
-// Four sources drive the loop, and each one only says that something
+// The operator also keeps the pairing API: an Adapter for the radio it
+// holds, a Pairing for each bond, and the PairingRequests a person
+// creates to open a pairing window. Those objects are the reason a
+// person never needs a shell in this pod.
+//
+// Five sources drive the loop, and each one only says that something
 // changed. Every pass re-reads bluetoothd's whole object tree and
 // re-walks sysfs. A cache built from event payloads can fall out of
 // step with the daemon; a full re-read stays correct.
@@ -84,6 +89,14 @@ const (
 	// socket is a file on a volume shared with the other container,
 	// and there is no event to wait on.
 	busRetryDelay = 500 * time.Millisecond
+
+	// requestPoll is how often the operator asks the API server whether
+	// a PairingRequest needs attention. A request is a small object that
+	// a person creates and edits by hand, and neither the kernel nor
+	// bluetoothd raises an event when that happens, so this is the one
+	// place the loop polls. Five seconds is what a person waits between
+	// creating a request and reading the window it opened.
+	requestPoll = 5 * time.Second
 )
 
 func main() {
@@ -98,8 +111,8 @@ func main() {
 	if nodeName == "" {
 		fatal("NODE_NAME is unset; the pod spec must supply it from spec.nodeName")
 	}
-	// The bonds live in one Secret for each adapter, in this pod's own
-	// namespace, and the downward API is where a pod reads which
+	// The bonds are stored in one Secret for each bond, in this pod's
+	// own namespace, and the downward API is where a pod reads which
 	// namespace that is. The same variable names the same Secrets for
 	// bondfetch, which restored them before bluetoothd started.
 	namespace := os.Getenv(namespaceVar)
@@ -154,11 +167,14 @@ func main() {
 		fatal("watching bluetoothd's bus name: %v", err)
 	}
 
-	// retries carries the one extra pass that follows a failed write.
-	// It is a source of wakes like the kernel and the bus are, so a
-	// retry goes through the same settle window as everything else.
+	// retries carries the passes the loop asks itself for: the one that
+	// follows a failed write, and the follow-up a pairing window or an
+	// unpair asks for while it is between two of its steps. Both are
+	// sources of wakes like the kernel and the bus are, so they go
+	// through the same settle window as everything else.
 	retries := make(chan struct{}, 1)
-	settled := settle(ctx, wakes(ctx, uevents, blueZChanges, retries), settleWindow, settleLimit)
+	requests := watchPairingRequests(ctx, client, requestPoll, time.Now)
+	settled := settle(ctx, wakes(ctx, uevents, blueZChanges, retries, requests), settleWindow, settleLimit)
 
 	// The first pass runs before any event, because the operator
 	// starts with controllers already paired and possibly already
@@ -166,17 +182,38 @@ func main() {
 	// published.
 	publish := &publisher{client: client, nodeName: nodeName, owner: owner}
 	keep := &bondStore{client: client, namespace: namespace, root: bondsRoot()}
+	objects := newInventory(client, newBlueZRadio(conn), nodeName, namespace)
 	readPairedSet := func() (map[string]controller, error) { return pairedControllers(conn) }
 	readAdapter := func() (bonds.Address, error) { return adapterAddress(conn) }
+	wakeSoon := func(after time.Duration) {
+		time.AfterFunc(after, func() {
+			select {
+			case retries <- struct{}{}:
+			default:
+			}
+		})
+	}
 	retryScheduled := false
 	pass := func() {
-		// The two halves of a pass are independent, and both run. A
-		// pairing that the slice write failed to publish is still a key
-		// that must reach the API, and a slice that the bonds could not
-		// be written for is still the truth about this node's hardware.
-		published := publish.reconcile(readPairedSet, readAdapter)
-		persisted := keep.persist(readAdapter)
-		if published && persisted {
+		// The three parts of a pass run in order and all of them run. The
+		// object reconcile runs first, because a bond's Secret is owned by
+		// that bond's Pairing and a device under teardown must leave the
+		// slice before its bond is removed. A pairing that the slice
+		// write failed to publish is still a key that must reach the
+		// API, and a slice that the bonds could not be written for is
+		// still the truth about this node's hardware.
+		state := objects.reconcile()
+		published := publish.reconcile(readPairedSet, readAdapter, state.keepOut)
+		if published {
+			objects.published()
+		}
+		persisted := keep.persist(readAdapter, state.owners, state.unpairing)
+		if state.again > 0 {
+			// A window that is open or a teardown between two of its steps
+			// needs the next pass sooner than the backstop tick.
+			wakeSoon(state.again)
+		}
+		if published && persisted && state.ok {
 			retryScheduled = false
 			return
 		}
@@ -184,12 +221,7 @@ func main() {
 			return
 		}
 		retryScheduled = true
-		time.AfterFunc(retryDelay, func() {
-			select {
-			case retries <- struct{}{}:
-			default:
-			}
-		})
+		wakeSoon(retryDelay)
 	}
 	pass()
 
@@ -249,115 +281,11 @@ func exitReason(ctx context.Context, ok bool) error {
 	return errSourcesClosed
 }
 
-// pairedSetReader answers with the controllers bluetoothd holds.
-// reconcile takes one as a parameter rather than calling bluetoothd
-// itself, so that a test can supply an answer, including ErrNoAdapter,
-// without a bus.
-type pairedSetReader func() (map[string]controller, error)
-
-// publisher writes one node's slice. It holds the last paired set
-// that bluetoothd answered with, because an adapter that departs
-// takes every device object with it, and that record is then the only
-// account of which controllers the slice is offering.
-type publisher struct {
-	client   *Client
-	nodeName string
-	owner    OwnerReference
-	known    map[string]controller
-
-	// adapter is the radio this pod serves. It scopes discovery to the
-	// controllers on this operator's own adapter. It is read from
-	// bluetoothd the first time bluetoothd answers, and then it is fixed
-	// for the life of the process, because a pod serves one adapter and
-	// re-reading it could point the filter at a different radio.
-	adapter bonds.Address
-}
-
-// reconcile makes the published slice and every prepared CDI spec
-// agree with what bluetoothd and sysfs say right now. It reports
-// whether the pass left the node's state correct, so that the caller
-// can run a failure again shortly.
-//
-// The order matters. The CDI refresh runs first, so that a controller
-// which came back on a different evdev node has a correct spec before
-// the slice says the controller is usable again.
-func (p *publisher) reconcile(readPairedSet pairedSetReader, readAdapter adapterAddressReader) bool {
-	// The adapter address scopes discovery to this operator's own radio.
-	// Until bluetoothd answers, the address stays zero and discovery
-	// keeps every device, which is correct on the single-adapter machine
-	// this runs on and no worse than the pre-filter walk on the startup
-	// window of any machine.
-	if p.adapter.IsZero() {
-		if address, err := readAdapter(); err == nil {
-			p.adapter = address
-		}
-	}
-	nodes := nodesByMAC(discoverHIDDevices(draSysfsRoot, p.adapter))
-	refreshCDISpecs(nodes)
-
-	controllers, err := readPairedSet()
-	switch {
-	case errors.Is(err, ErrNoAdapter) && len(p.known) == 0:
-		// The startup window. bluetoothd has not published its object
-		// tree yet, so there is no last-known set to taint and nothing
-		// true to say about this node.
-		fmt.Fprintf(os.Stderr, "waiting for bluetoothd to publish an adapter\n")
-		return false
-
-	case errors.Is(err, ErrNoAdapter):
-		// The adapter departed, by an unplug or a USB reset. Every
-		// controller it held is out of reach, and the slice has to say
-		// so rather than say nothing: the devices stay, so no
-		// allocation is stranded, and both taints go on, so the
-		// eviction controller ends the sessions that are already
-		// running and the next claim parks instead of failing in
-		// prepare. Passing no nodes is what derives both taints, which
-		// is the same rule a single controller going quiet takes.
-		fmt.Fprintf(os.Stderr, "the adapter is gone; taints all %d published controllers\n", len(p.known))
-		controllers, nodes = unreachable(p.known), nil
-
-	case err != nil:
-		fmt.Fprintf(os.Stderr, "reading the paired set: %v\n", err)
-		return false
-
-	default:
-		p.known = controllers
-	}
-
-	devices := sliceDevices(controllers, nodes)
-	if len(devices) > maxSliceDevices {
-		fmt.Fprintf(os.Stderr, "%d paired controllers exceed one slice's capacity of %d; dropping the overflow\n",
-			len(devices), maxSliceDevices)
-		devices = devices[:maxSliceDevices]
-	}
-	if err := EnsureResourceSlice(p.client, p.nodeName, p.owner, devices); err != nil {
-		fmt.Fprintf(os.Stderr, "publishing the slice: %v\n", err)
-		return false
-	}
-	// A tainted slice is correct but degraded. Reporting it as
-	// unfinished triggers one quick retry, which catches an adapter
-	// that comes back from a USB reset a second later.
-	return !errors.Is(err, ErrNoAdapter)
-}
-
-// unreachable copies the last-known controllers with every one of
-// them marked disconnected. The connected attribute must agree with
-// the taints: an adapter that is gone holds no connection, whatever
-// bluetoothd last reported.
-func unreachable(known map[string]controller) map[string]controller {
-	out := make(map[string]controller, len(known))
-	for mac, c := range known {
-		c.Connected = false
-		out[mac] = c
-	}
-	return out
-}
-
-// wakes merges the kernel's HID events, bluetoothd's signals, and the
-// loop's own retries into one channel. None of them carries state that
-// the loop uses, so the merge loses nothing: they all say to look
-// again.
-func wakes(ctx context.Context, uevents <-chan hidEvent, blueZChanges, retries <-chan struct{}) <-chan struct{} {
+// wakes merges the kernel's HID events, bluetoothd's signals, the
+// PairingRequests that need a pass, and the loop's own retries into
+// one channel. None of them carries state that the loop uses, so the
+// merge loses nothing: they all say to look again.
+func wakes(ctx context.Context, uevents <-chan hidEvent, blueZChanges, retries, requests <-chan struct{}) <-chan struct{} {
 	out := make(chan struct{}, 1)
 	wake := func() {
 		select {
@@ -385,6 +313,11 @@ func wakes(ctx context.Context, uevents <-chan hidEvent, blueZChanges, retries <
 				}
 				wake()
 			case _, ok := <-retries:
+				if !ok {
+					return
+				}
+				wake()
+			case _, ok := <-requests:
 				if !ok {
 					return
 				}
