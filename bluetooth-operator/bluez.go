@@ -174,9 +174,43 @@ func relayBlueZSignals(ctx context.Context, signals <-chan *dbus.Signal, release
 	return changed
 }
 
+// waitForBus connects to the pod's D-Bus system bus, and retries
+// until the socket is there or the timeout passes.
+//
+// The bus is not this container's to start. dbus-daemon runs in the
+// bluetoothd container, and the two containers share the socket's
+// directory as one emptyDir, so this operator can reach
+// dbus.SystemBus() before that container has bound the socket. An exit
+// would work, because the kubelet restarts the container, but it
+// restarts with a backoff that reaches five minutes, and an ordinary
+// pod start does not deserve that.
+//
+// The wait is bounded for the same reason waitForBlueZ is bounded: a
+// bus that never arrives is a failure to report.
+func waitForBus(ctx context.Context, timeout time.Duration) (*dbus.Conn, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		// godbus caches the connection it returns and caches nothing
+		// when it fails, so calling this again after a failure opens a
+		// new connection.
+		conn, err := dbus.SystemBus()
+		if err == nil {
+			return conn, nil
+		}
+		if !time.Now().Before(deadline) {
+			return nil, fmt.Errorf("no bus within %s: %w", timeout, err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(busRetryDelay):
+		}
+	}
+}
+
 // waitForBlueZ blocks until bluetoothd owns its bus name, or until
 // the timeout passes. The operator and bluetoothd start in the same
-// container, so the operator can reach the bus before the daemon has
+// pod, so the operator can reach the bus before the daemon has
 // claimed its name.
 //
 // The wait is bounded on purpose. A bluetoothd that never claims the

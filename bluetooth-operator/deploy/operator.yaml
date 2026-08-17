@@ -55,7 +55,8 @@ spec:
       # namespace. A socket call in a pod's own namespace fails with
       # EAFNOSUPPORT, and no device node or mount changes that,
       # because the Bluetooth stack's whole control surface is a
-      # socket family.
+      # socket family. It is a pod-level setting, so both containers
+      # take it.
       hostNetwork: true
       # The kernel delivers uevents to the initial user namespace
       # only. A pod in its own user namespace receives an empty
@@ -63,17 +64,28 @@ spec:
       # appear. This is the default, and it is stated because the
       # failure is silent.
       hostUsers: true
-      containers:
-        - name: operator
-          image: ghcr.io/liken-sh/bluetooth-operator:latest
+      initContainers:
+        # bluetoothd, as a sidecar: an init container that restarts
+        # always, which the kubelet starts before the operator and
+        # stops after it. Both halves of that order matter. The bus
+        # this container serves is what the operator connects to, and
+        # on the way out the operator ends first, so an ordinary pod
+        # deletion is a clean exit rather than the operator reporting
+        # that bluetoothd left the bus.
+        #
+        # It carries every capability in this pod. bluetoothd is the
+        # Bluetooth stack, and the operator beside it only reads the
+        # daemon over D-Bus and writes to the API server.
+        - name: bluetoothd
+          image: ghcr.io/liken-sh/bluetoothd:latest
+          restartPolicy: Always
           env:
-            # A ResourceSlice names the node whose hardware it
-            # describes, and the downward API is where a pod reads
-            # that.
-            - name: NODE_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: spec.nodeName
+            # The address of the bus this container serves. It names
+            # the socket inside the directory the volume below
+            # carries, and the operator's container states the same
+            # address.
+            - name: DBUS_SYSTEM_BUS_ADDRESS
+              value: unix:path=/var/run/bluetooth.liken.sh/dbus/system_bus_socket
           securityContext:
             # NET_ADMIN is what the kernel checks: the Bluetooth
             # management channel's privileged commands test for
@@ -94,13 +106,53 @@ spec:
           resources:
             requests:
               cpu: 10m
-              memory: 64Mi
+              memory: 32Mi
             limits:
-              memory: 128Mi
+              memory: 64Mi
             # The adapter, claimed from liken. This is the placement:
-            # the scheduler puts the pod where the hardware is.
+            # the scheduler puts the pod where the hardware is. The
+            # claim is named here, on the container that is the
+            # Bluetooth stack, rather than on the operator.
             claims:
               - name: adapter
+          volumeMounts:
+            - name: bus
+              mountPath: /var/run/bluetooth.liken.sh/dbus
+            - name: bonds
+              mountPath: /var/lib/bluetooth
+      containers:
+        - name: operator
+          image: ghcr.io/liken-sh/bluetooth-operator:latest
+          env:
+            # A ResourceSlice names the node whose hardware it
+            # describes, and the downward API is where a pod reads
+            # that.
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            # The same address the bluetoothd container states, for
+            # the same socket on the same volume.
+            - name: DBUS_SYSTEM_BUS_ADDRESS
+              value: unix:path=/var/run/bluetooth.liken.sh/dbus/system_bus_socket
+          securityContext:
+            # No capabilities at all. The operator reads bluetoothd
+            # over D-Bus, walks sysfs, writes CDI files, and serves a
+            # socket to the kubelet, and none of that is privileged.
+            # Its uevent socket is not either: the kernel creates the
+            # uevent netlink socket with NL_CFG_F_NONROOT_RECV, so
+            # binding group 1 needs no capability, only the initial
+            # user namespace that hostUsers gives it.
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
           volumeMounts:
             # The two mounts every DRA driver takes. The registry
             # directory is where the kubelet discovers plugins, and
@@ -117,8 +169,8 @@ spec:
             # prefixes keep them apart.
             - name: cdi
               mountPath: /var/run/cdi
-            - name: bonds
-              mountPath: /var/lib/bluetooth
+            - name: bus
+              mountPath: /var/run/bluetooth.liken.sh/dbus
       resourceClaims:
         - name: adapter
           resourceClaimTemplateName: bluetooth-adapter
@@ -137,6 +189,18 @@ spec:
           hostPath:
             path: /var/run/cdi
             type: DirectoryOrCreate
+        # The D-Bus socket the two containers share. The bus serves
+        # this pod alone, so the volume is the pod's own and it goes
+        # when the pod goes. dbus-daemon unlinks and recreates the
+        # socket at every start, which is why the directory is the
+        # mount and never the socket file: a mount of the file would
+        # pin the inode the daemon deleted.
+        #
+        # A later capability that has to reach this bluetoothd over
+        # its bus, such as a PipeWire that handles Bluetooth audio,
+        # runs in this pod and mounts this volume.
+        - name: bus
+          emptyDir: {}
   # The link keys and the device cache. This is kilobytes, and it is
   # the difference between "press the PS button" and "hold Create and
   # PS and pair again" after every pod restart. A bond that died with

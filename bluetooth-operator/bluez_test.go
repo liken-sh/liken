@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -241,5 +243,31 @@ func TestWatchNameLossStaysQuietOnShutdown(t *testing.T) {
 	case <-gone:
 		t.Fatal("the shutdown reported the daemon gone")
 	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+// An address with no bus behind it is what the operator meets when it
+// starts before the bluetoothd container binds the socket.
+func absentBusAddress(t *testing.T) {
+	t.Helper()
+	t.Setenv("DBUS_SYSTEM_BUS_ADDRESS", "unix:path="+filepath.Join(t.TempDir(), "system_bus_socket"))
+}
+
+func TestWaitForBusReportsABusThatNeverArrives(t *testing.T) {
+	absentBusAddress(t)
+
+	if _, err := waitForBus(context.Background(), 0); err == nil {
+		t.Fatal("waitForBus reported a connection to a bus that is not there")
+	}
+}
+
+func TestWaitForBusStopsOnShutdown(t *testing.T) {
+	absentBusAddress(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := waitForBus(ctx, time.Minute)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("waitForBus err = %v, want %v", err, context.Canceled)
 	}
 }

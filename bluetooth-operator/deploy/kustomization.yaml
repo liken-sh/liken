@@ -31,3 +31,5 @@ labels:
 images:
   - name: ghcr.io/liken-sh/bluetooth-operator
     newTag: latest
+  - name: ghcr.io/liken-sh/bluetoothd
+    newTag: latest

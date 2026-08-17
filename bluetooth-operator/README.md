@@ -17,6 +17,11 @@ ordinary workload. It claims the Bluetooth adapter through an ordinary
 publishes what bluetoothd holds under its own driver name,
 `bluetooth.liken.sh`. The system image carries no BlueZ and no D-Bus.
 
+The pod is two containers from two images. `bluetoothd` carries the
+daemon, its D-Bus bus, and every capability. `bluetooth-operator`
+carries one static binary with no capabilities at all. See
+[The images](#the-images).
+
 The operator uses no private interface into liken. The raw claim, the
 ResourceSlices it writes, and the CDI files it leaves for the
 container runtime are the public contracts that any DRA driver on any
@@ -107,12 +112,18 @@ after the pairing. The bonds persist on their volume, so the flip
 costs one restart and nothing else.
 
     kubectl set env statefulset/bluetooth-operator -n liken-system \
-      BLUETOOTH_CLASSIC_BONDED_ONLY=false
+      -c bluetoothd BLUETOOTH_CLASSIC_BONDED_ONLY=false
+
+The variable is read by the `bluetoothd` container, which is where
+BlueZ's `input.conf` is written. Anything other than `true` or `false`
+stops that container, because BlueZ reads a value it does not
+recognize as `false`, and a misspelling would open the hole quietly.
 
 Wait for the pod to restart, then hold **Create** and **PS** together
 until the light bar flashes quickly, and pair:
 
-    kubectl exec -it -n liken-system bluetooth-operator-0 -- bluetoothctl
+    kubectl exec -it -n liken-system bluetooth-operator-0 \
+      -c bluetoothd -- bluetoothctl
 
     scan on
     # wait for "Wireless Controller" and note its address
@@ -127,13 +138,13 @@ every reconnection.
 Then put the setting back:
 
     kubectl set env statefulset/bluetooth-operator -n liken-system \
-      BLUETOOTH_CLASSIC_BONDED_ONLY-
+      -c bluetoothd BLUETOOTH_CLASSIC_BONDED_ONLY-
 
 After that, pressing **PS** alone reconnects. The link keys live on
 the `bonds` volume, so they survive a restart of the operator's pod
-and a reboot of the machine. `AutoEnable=true` in the image's
-`main.conf` powers the adapter on when bluetoothd starts, so nothing
-in the cluster has to press a button after a reboot.
+and a reboot of the machine. `AutoEnable=true` in the bluetoothd
+image's `main.conf` powers the adapter on when bluetoothd starts, so
+nothing in the cluster has to press a button after a reboot.
 
 ## Claiming a controller
 
@@ -219,7 +230,10 @@ subtree, so the two drivers never deliver the same `/dev` path.
 
 ## The privilege it takes
 
-`hostNetwork` and four capabilities, with everything else dropped.
+`hostNetwork` and four capabilities, with everything else dropped. The
+four are all on the `bluetoothd` container. The `operator` container
+drops every capability and adds none.
+
 Each one is what a kernel or daemon check demands.
 
 * **`hostNetwork` is not optional.** `AF_BLUETOOTH` sockets exist only
@@ -243,6 +257,12 @@ Each one is what a kernel or daemon check demands.
   to its messagebus user at start, and the drop itself takes both.
   Without them the forking parent exits 0 while the bus dies, which
   is why the entrypoint also waits for the socket.
+* **The operator needs none of them.** It reads bluetoothd over
+  D-Bus, walks sysfs, writes CDI files, and serves a socket to the
+  kubelet. Its uevent socket is not privileged either: the kernel
+  creates the uevent netlink socket with `NL_CFG_F_NONROOT_RECV`, so
+  binding group 1 takes no capability, only the initial user
+  namespace.
 * **`hostUsers: true`.** The kernel delivers uevents to the initial
   user namespace only. A pod in its own user namespace receives an
   empty stream with no error to read, and no controller would ever
@@ -257,12 +277,12 @@ container runtime reads them. Its own plugin socket directory,
 
 The D-Bus bus that bluetoothd and the operator share runs at
 `/var/run/bluetooth.liken.sh/dbus/system_bus_socket`, and both find it
-through `DBUS_SYSTEM_BUS_ADDRESS`. Nothing mounts that directory
-today. The path is written down now because a later capability that
-has to reach this bluetoothd over its bus, such as a PipeWire handling
-Bluetooth audio from another pod, needs a path that was stable before
-it arrived. Share the **directory** if you ever share it, never the
-socket file: dbus-daemon unlinks and recreates the socket at every
+through `DBUS_SYSTEM_BUS_ADDRESS`. The directory is one `emptyDir`
+that both containers mount, so the bus serves this pod and goes when
+the pod goes. A later capability that has to reach this bluetoothd
+over its bus, such as a PipeWire handling Bluetooth audio, runs in
+this pod and mounts the same volume. Share the **directory**, never
+the socket file: dbus-daemon unlinks and recreates the socket at every
 start, so a mount of the file alone pins an inode the daemon already
 deleted.
 
@@ -333,8 +353,16 @@ the HID sessions, and killing it disconnects every controller at once,
 so an operator that outlived it would publish devices that no pod can
 use. The operator watches BlueZ's bus name and ends with a nonzero
 exit when it goes away, and it does the same when the D-Bus connection
-itself dies. The container ends with the operator, and the kubelet
-restarts both.
+itself dies. The kubelet restarts the operator's container, and it
+waits up to 30 seconds for the bus to come back before it gives up
+and exits again.
+
+**bluetoothd is a sidecar, so the order is stated rather than raced.**
+It is an init container with `restartPolicy: Always`, which the
+kubelet starts before the operator and stops after it. A pod deletion
+therefore ends the operator first and its exit is clean. Without that
+order, an ordinary deletion would stop bluetoothd first and the
+operator would report that bluetoothd left the bus on its way out.
 
 ## Not here yet
 
@@ -353,11 +381,39 @@ restarts both.
 * **Metrics.** The operator prints what it does to stderr and reports
   device state through the taint. It exposes no metrics endpoint.
 
+## The images
+
+Two images, one version. They are two halves of one pod, so the
+release builds and tags both from the same commit, and a deployment
+that mixes versions is a pairing nobody tested.
+
+| Image | What is in it | Size |
+|---|---|---|
+| `ghcr.io/liken-sh/bluetooth-operator` | one static Go binary | 12 MB |
+| `ghcr.io/liken-sh/bluetoothd` | bluetoothd, bluetoothctl, dbus-daemon, the entrypoint that starts them, and their configuration | 8 MB |
+
+Both are `FROM scratch`. There is no shell in either one, no package
+manager, and no shared object: `kubectl exec` runs a program in the
+image by name, and `bluetoothctl` is the program pairing needs.
+
+The `bluetoothd` image builds BlueZ and dbus from source and links
+them statically against musl. A distribution's bluetoothd opens six
+shared libraries on Alpine and fifteen on Debian, and each one is a
+file whose version has to agree with the binary that opens it. There
+is nothing to disagree here. `bluetoothd/Dockerfile` states the two
+flags that make the static link real, because both are easy to lose.
+
 ## Building it
 
     go build ./...
     go test ./...
     docker build -t bluetooth-operator .
+    docker build -f bluetoothd/Dockerfile -t bluetoothd .
+
+Both builds read this directory, because both binaries come from this
+module. The BlueZ and dbus releases are pinned by version and SHA-256
+in `bluetoothd/Dockerfile`, so that build takes minutes rather than
+seconds.
 
 The Kubernetes libraries and the Go version are pinned to what liken
 builds against, because the two drivers serve the same kubelet on the

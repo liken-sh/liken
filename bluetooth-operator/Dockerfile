@@ -1,7 +1,13 @@
-# The image carries the operator and the daemon it runs. That pairing
-# is the device operator pattern's whole reason for a separate
-# repository: bluetoothd ships here, in a workload's image, and not in
-# the read-only root that every liken machine boots.
+# The operator's image: one static binary on an empty filesystem.
+#
+# Nothing else belongs here. The operator reaches the API server at
+# the address KUBERNETES_SERVICE_HOST names, over TLS it verifies
+# against the CA the kubelet mounts, so the image needs no certificate
+# store and no resolver configuration. It writes CDI files and serves
+# a socket to the kubelet, both under mounted directories. It formats
+# no time in a named zone, so it needs no zoneinfo. Everything the
+# daemon side needs lives in the bluetoothd image, which the same pod
+# runs beside this one.
 
 FROM golang:1.26.5-bookworm AS build
 WORKDIR /src
@@ -11,24 +17,12 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY *.go ./
 # CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
-# static binary with no paths from the build machine in it.
-RUN CGO_ENABLED=0 go build -trimpath -o /bluetooth-operator .
+# static binary with no paths from the build machine in it. -s -w drop
+# the symbol table and the DWARF sections, which is a quarter of the
+# binary and costs nothing a reader of this program uses: Go reads
+# panic traces from its own pclntab, which stays.
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /bluetooth-operator .
 
-FROM debian:stable-slim
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        bluez \
-        dbus \
-    && rm -rf /var/lib/apt/lists/*
-
-# AutoEnable is baked in, because an adapter that this operator holds
-# must power itself on, and no deployment has a reason to say
-# otherwise. input.conf is not here: the entrypoint writes it at start
-# from BLUETOOTH_CLASSIC_BONDED_ONLY, because that setting is a
-# security choice a person makes for one pairing session.
-COPY config/main.conf /etc/bluetooth/
-
-COPY --from=build /bluetooth-operator /usr/local/bin/bluetooth-operator
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+FROM scratch
+COPY --from=build /bluetooth-operator /bluetooth-operator
+ENTRYPOINT ["/bluetooth-operator"]

@@ -1,5 +1,9 @@
-# Every push to main tests the code, builds the image, and releases
-# it.
+# Every push to main tests the code, builds both images, and releases
+# them.
+#
+# The two images carry the same version, because they are two halves
+# of one pod and a deployment that mixes versions is a pairing nobody
+# tested.
 #
 # The version is the date and the run number, which is liken's own
 # scheme: 2026.08.03-002. The two release cadences do not couple, and
@@ -51,13 +55,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/build-push-action@v6
+      - name: Build and push the operator
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           tags: |
             ghcr.io/liken-sh/bluetooth-operator:${{ env.VERSION }}
             ghcr.io/liken-sh/bluetooth-operator:latest
+
+      # This one builds BlueZ and dbus from source, so it takes
+      # minutes rather than seconds.
+      - name: Build and push bluetoothd
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: bluetoothd/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/liken-sh/bluetoothd:${{ env.VERSION }}
+            ghcr.io/liken-sh/bluetoothd:latest
 
       # The tag lands after the push, so a tag in the repository always
       # names a version that exists in the registry.

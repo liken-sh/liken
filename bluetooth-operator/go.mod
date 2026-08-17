@@ -1,6 +1,7 @@
-// One module, one package, one program. The operator and the daemon
-// it runs ship in one image, so there is nothing here that versions
-// or releases on its own.
+// One module, two programs, two images: the operator, and the
+// entrypoint of the image that carries bluetoothd. They release
+// together on one version, so there is nothing here that versions on
+// its own.
 //
 // The Kubernetes libraries are pinned to the versions liken builds
 // against, because the two drivers serve the same kubelet on the same

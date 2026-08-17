@@ -33,8 +33,6 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-
-	"github.com/godbus/dbus/v5"
 )
 
 const (
@@ -72,6 +70,19 @@ const (
 	// name at startup. A daemon that never claims it is a failure to
 	// report, and the pod's restart is the retry.
 	blueZTimeout = 30 * time.Second
+
+	// busTimeout bounds the wait for the bus socket itself. The bus
+	// runs in the pod's other container, so its socket appears when
+	// that container's dbus-daemon binds it, which is after this
+	// process starts. The kubelet starts the bluetoothd container
+	// first, because it is a sidecar, and this wait covers the gap
+	// between "started" and "listening".
+	busTimeout = 30 * time.Second
+
+	// busRetryDelay is how often the wait tries the socket again. The
+	// socket is a file on a volume shared with the other container,
+	// and there is no event to wait on.
+	busRetryDelay = 500 * time.Millisecond
 )
 
 func main() {
@@ -101,9 +112,10 @@ func main() {
 		fatal("reading node %s: %v", nodeName, err)
 	}
 
-	// The bus is the one in this pod, started by the entrypoint for
-	// these two processes alone. Nothing outside the pod reaches it.
-	conn, err := dbus.SystemBus()
+	// The bus is the one in this pod, started by the bluetoothd
+	// container for these two containers alone. Nothing outside the pod
+	// reaches it.
+	conn, err := waitForBus(ctx, busTimeout)
 	if err != nil {
 		fatal("connecting to the D-Bus system bus: %v", err)
 	}
