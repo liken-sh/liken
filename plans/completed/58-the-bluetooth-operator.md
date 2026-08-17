@@ -1,8 +1,8 @@
 # The Bluetooth operator
 
-Milestone 58 — Proposed. It would publish each paired Bluetooth
-controller as its own DRA device, so a pod claims one controller by its
-MAC address and receives that controller's evdev node and nothing else.
+Milestone 58 — Completed. Each paired Bluetooth controller publishes
+as its own DRA device, so a pod claims one controller by its MAC
+address and receives that controller's evdev node and nothing else.
 It is an instance of milestone 56's pattern: the operator claims the
 Bluetooth adapter through an ordinary `liken.sh` claim, runs
 bluetoothd, and publishes what bluetoothd holds under
@@ -40,9 +40,12 @@ the pattern milestone 56 states.
 The pod runs BlueZ's `bluetoothd`. bluetoothd owns pairing, the link
 keys, and the HID sessions on top of them, and the lab proved the
 ownership is not shareable: killing bluetoothd disconnects every
-controller at once. The link keys persist on a volume, because a bond
-that dies with the pod turns every restart into a re-pairing with a
-person's hands on the controller.
+controller at once. The link keys outlive the pod, because a bond that
+dies with the pod turns every restart into a re-pairing with a
+person's hands on the controller. This milestone proposed a volume for
+them. The operator ships a Secret instead, named for the adapter's own
+address, which answers the last of the
+[open questions](#open-questions) below.
 
 bluetoothd speaks over the D-Bus system bus, so the pod runs a bus
 daemon beside it. The bus is a socket in the pod's own filesystem, it
@@ -226,25 +229,29 @@ controllers.
 
 ## Open questions
 
-* **Who owns the pairing UX.** The operator must run bluetoothd, so it
-  can offer pairing. Whether it should is open: a pairing API is a
-  privileged operation on a radio that reaches past the house walls,
-  and the alternative is a one-time pairing done by a person with a
-  short-lived pod. The leaning is a CRD in a later iteration: a person
-  creates a pairing-request resource, the operator opens a pairing
-  window, and the resource's status reports the result. The first
-  release ships without it, and a person pairs by hand in the
-  operator's pod.
-* **Where the drill runs.** `liken-1` is the testbed and it has the
-  hardware nearby. It is also where milestone 57's drill runs. Whether
-  the two share the machine, or this drill moves to a machine with no
-  display duties, is undecided.
-* **Bonds follow the pod's ordinal, and adapters do not.** Link keys
-  bind to the adapter's own MAC, and the StatefulSet keys its storage
-  by ordinal. A recreated pod allocates its adapter afresh, so on a
-  fleet with several adapters, ordinal 0 can win a different machine's
-  radio than the one its bonds belong to, and every shuffle re-pairs
-  that machine's controllers. One adapter hides this completely.
-  Nothing in the StatefulSet vocabulary maps a volume to a claim's
-  allocation, so the fix is not known yet. A multi-adapter drill in
-  the QEMU lab is what would size the problem.
+These were the questions this milestone could not answer. Each one
+below records what happened to it.
+
+* **Who owns the pairing UX.** Still open, and it belongs to the
+  operator now:
+  [Who owns the pairing UX](https://github.com/liken-sh/bluetooth-operator/blob/main/plans/open-problems/who-owns-the-pairing-ux.md).
+  The shipped release pairs by hand in the operator's pod, as this
+  milestone proposed. The pairing-request CRD is still the leaning and
+  still unbuilt.
+* **Where the drill runs.** Answered: `liken-1`, sharing the machine
+  with milestone 57's drill. The two ran together on 2026-08-17, a
+  compositor on both monitors and a DualSense on the radio, and
+  neither disturbed the other. A machine with no display duties was
+  never needed.
+* **Bonds follow the pod's ordinal, and adapters do not.** Solved, and
+  the fix removed the volume rather than mapping it. The operator
+  keeps each adapter's bonds in a Secret named for that adapter's
+  BD_ADDR, and an init container reads the address from the kernel and
+  restores the tree before bluetoothd starts. Storage follows the
+  radio, so a shuffle carries the right keys to whichever machine wins
+  the adapter, and the workload is an ordinary Deployment. See
+  [A Secret for each adapter](https://github.com/liken-sh/bluetooth-operator/blob/main/plans/03-a-secret-for-each-adapter.md).
+  The multi-adapter QEMU drill this asked for is no longer needed to
+  size the problem. One replica per adapter still collides on the
+  slice object, which is a different question and lives with the
+  operators.

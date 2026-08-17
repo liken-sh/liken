@@ -1,9 +1,9 @@
 # The audio operator
 
-Milestone 59 — Proposed. It would publish each physical audio output
-as its own DRA device, so a pod claims one HDMI output's speakers or
-the analog jack, and receives the PipeWire socket and the name of the
-sink its streams must reach. It is the third instance of milestone
+Milestone 59 — Completed. Each physical audio output publishes as its
+own DRA device, so a pod claims one HDMI output's speakers or the
+analog jack, and receives the PipeWire socket and the name of the sink
+its streams must reach. It is the third instance of milestone
 56's pattern: the operator claims the machine's audio controller
 through an ordinary `liken.sh` claim, runs PipeWire, and publishes what
 PipeWire holds under `audio.liken.sh`.
@@ -432,30 +432,23 @@ is also where milestone 57's drill runs.
 
 ## Open questions
 
-* **Siblings or one operator.** The display operator and the audio
-  operator claim two devices of one machine, publish two halves of one
-  monitor, and are paired by a constraint that only exists because they
-  are separate. One operator claiming both, publishing a screen device
-  with its audio attributes on it, would need no constraint at all. It
-  would also put Weston and PipeWire in one image and one restart
-  domain, and it would give a machine with speakers and no monitors
-  nothing to run. Keeping them separate is the current answer, and the
-  cost is the shared attribute domain that the pairing section defines.
-* **Sharing semantics.** PipeWire mixes streams, so an audio sink can
-  serve several consumers, which a monitor cannot. DRA can express it:
-  `allowMultipleAllocations` on a device marks it as allocatable to
-  more than one request, and its feature gate `DRAConsumableCapacity`
-  is beta and on by default in v1.36 (`pkg/features/kube_features.go`,
-  release-1.36). liken already uses the field for the audio controller.
-  The proposal here is exclusive by default anyway, for the one-owner
-  clarity the other two operators have, and because a claim on a shared
-  sink gives a workload no say over what else plays through it. A
-  second, shared DeviceClass over the same devices is the obvious
-  extension, and it is not part of this milestone.
-* **The analog jack on a machine that uses none.** Every HDA controller
-  has an analog output, and most machines in the fleet have nothing
-  plugged into it. Publishing it costs a device in every slice that
-  nothing will ever claim. The jack detection nodes say whether
-  something is plugged in, so the operator can publish the jack only
-  when it is occupied, at the cost of a device that appears and
-  disappears with a cable.
+These were the questions this milestone could not answer. Each one
+below records what happened to it.
+
+* **Siblings or one operator.** Answered: they stay siblings, and the
+  drill supports it. Each operator ships and runs on its own, the
+  pairing constraint works across the two drivers, and the display
+  operator's compositor restarts without touching audio. The cost this
+  milestone named is the one that arrived: a shared attribute domain,
+  held together by parity test vectors in both repositories. Merging
+  them would still remove the constraint. It would also put Weston and
+  PipeWire in one restart domain, and a compositor restart already
+  ends every session on every screen, so audio would join a blast
+  radius it currently sits outside.
+* **Sharing semantics.** Still open, and it belongs to the operator
+  now:
+  [A sink can be shared and this one is not](https://github.com/liken-sh/audio-operator/blob/main/plans/open-problems/a-sink-can-be-shared-and-this-one-is-not.md).
+  The shipped release is exclusive, as proposed.
+* **The analog jack on a machine that uses none.** Still open, and it
+  belongs to the operator now:
+  [The analog jack publishes whether or not anything is plugged in](https://github.com/liken-sh/audio-operator/blob/main/plans/open-problems/the-analog-jack-publishes-whether-or-not-anything-is-plugged-in.md).

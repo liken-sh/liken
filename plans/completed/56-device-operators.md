@@ -1,6 +1,6 @@
 # Device operators
 
-Milestone 56 — Proposed. It is the pattern that milestones 57, 58,
+Milestone 56 — Completed. It is the pattern that milestones 57, 58,
 and 59 build. A device operator claims raw hardware from liken through an
 ordinary `liken.sh` DRA claim, runs the daemon that manages that
 hardware, and publishes what the daemon holds as its own DRA devices,
@@ -107,8 +107,13 @@ instead.
   graphics device, not one for each cluster. A workload with a
   ResourceClaimTemplate against the raw device's DeviceClass and
   `replicas: N` says that: a Deployment when the operator holds no
-  state, a StatefulSet when each replica carries a volume, which is
-  what the Bluetooth operator's bonds need. The raw devices are exclusive, so each
+  state, a StatefulSet when each replica carries a volume. All three
+  operators ship as Deployments. The Bluetooth operator was the one
+  case that looked like it needed a volume, and it did not: an ordinal
+  names a replica, a bond belongs to a radio, and the two do not track
+  each other. Its keys live in a Secret named for the adapter, so the
+  state is keyed by the hardware that owns it. The raw devices are
+  exclusive, so each
   replica's claim allocates a distinct one, and the scheduler spreads
   the replicas to wherever the hardware is. A replica past the number
   of devices parks Pending and costs nothing. Nobody writes down which
@@ -343,29 +348,36 @@ pattern is only proven by hardware.
 
 ## Open questions
 
-* **The repositories.** What each one is called, and which
-  organization holds it. `liken-sh` is the obvious home and it is not
-  the only one that fits, because the driver name states the contract
-  and not the owner.
-* **How the Kustomization publishes.** A git path that a person's
-  GitOps references by tag, or an OCI artifact pushed beside the image.
-  The OCI form gives a consumer one digest-pinned thing to take, and
-  the git form is what most GitOps tooling reads today.
-* **Where these instance plans live.** Once the repositories exist,
-  each operator's design belongs beside its own code. Milestones 57 and
-  58 stay here while they are proposals, because the pattern they build
-  on is here.
-* **What the images carry.** The first images are debian-slim with the
-  daemon installed by apt, which ships a package manager and a shell
-  nobody runs. The intent is minimal: the operator binaries are static
-  Go and belong in `FROM scratch` images, and each daemon belongs in
-  its own single-daemon image, so a pod is two containers and the
-  privilege lands only on the container whose daemon needs it.
-  bluetoothd and dbus-daemon build statically against musl. Weston and
-  PipeWire do not, because both load code at runtime, Mesa's GPU
-  drivers and PipeWire's SPA plugins through `dlopen`, so their floor
-  is an image carrying the computed library closure rather than a
-  single binary. Splitting the containers also changes the
-  die-together coupling: the kubelet restarts containers
-  independently, so the operator's watch on its daemon, not a shared
-  process tree, is what couples their lives.
+These were the questions this milestone could not answer. Each one
+below records what happened to it.
+
+* **The repositories.** Answered: `liken-sh` holds all three, as
+  [display-operator](https://github.com/liken-sh/display-operator),
+  [bluetooth-operator](https://github.com/liken-sh/bluetooth-operator),
+  and [audio-operator](https://github.com/liken-sh/audio-operator),
+  each MIT-licensed with its own images on ghcr.io.
+* **How the Kustomization publishes.** Answered: the git form. Each
+  repository carries a kustomize base in `deploy/`, and a person's
+  GitOps references it by tag. No OCI artifact ships beside the
+  images. The digest-pinned argument for OCI stands; nothing has
+  needed it yet.
+* **Where these instance plans live.** Answered, both ways. Milestones
+  57, 58, and 59 stay here as the proposals they were, and each
+  operator's own design documents live beside its code in that
+  repository's `plans/`. The instance plan that supersedes part of
+  this one says so and links back.
+* **What the images carry.** Mostly answered. Every operator binary
+  ships in a `FROM scratch` image. The Bluetooth pod is two
+  containers, bluetoothd static against musl beside the operator, and
+  the privilege lands only on the daemon's container. The display
+  image is a computed library closure on scratch, as predicted, and it
+  is 252 MB because Debian builds mesa with llvmpipe, which no liken
+  machine runs:
+  [LLVM is two thirds of the image](https://github.com/liken-sh/display-operator/blob/main/plans/open-problems/llvm-is-two-thirds-of-the-image.md).
+  The audio image is still debian-slim and is the one that has not
+  moved:
+  [The image is still Debian](https://github.com/liken-sh/audio-operator/blob/main/plans/open-problems/the-image-is-still-debian.md).
+  The die-together reasoning held for Bluetooth and reversed for
+  display: nothing in a pod spec binds one container's life to
+  another's, and weston's death must end the operator, so that pod
+  stays one container on purpose.

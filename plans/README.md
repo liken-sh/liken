@@ -154,6 +154,31 @@ decided yet what work they become.
   `/etc/hosts` and an `/etc/nsswitch.conf` that pins the hosts file
   ahead of DNS at every boot, and the operator reconciles the file
   live, writing only on divergence.
+* **56.** [Device operators](completed/56-device-operators.md) — the
+  pattern milestones 57, 58, and 59 build: an operator claims raw
+  hardware through an ordinary `liken.sh` claim, runs the daemon that
+  owns it, and republishes what that daemon holds as its own devices
+  under `<domain>.liken.sh`. Each one is its own repository and an
+  ordinary workload, deployed by the cluster's own GitOps, so a liken
+  release carries none of those daemons and nothing in liken deploys
+  them.
+* **57.** [The display operator](completed/57-the-display-operator.md)
+  — `display.liken.sh` claims the GPU's display device, runs the
+  Weston kiosk compositor, and publishes one device for each monitor
+  output, named by its connector and described by its EDID. Its
+  delivery is a Wayland socket and an app-id, not a device node.
+* **58.** [The Bluetooth operator](completed/58-the-bluetooth-operator.md)
+  — `bluetooth.liken.sh` claims the Bluetooth adapter, runs
+  bluetoothd, and publishes each paired controller as a device named
+  by its MAC address, so a pod receives one controller's evdev node
+  and nothing else. Each adapter's bonds live in a Secret named for
+  that adapter, so they follow the radio and not the replica.
+* **59.** [The audio operator](completed/59-the-audio-operator.md) —
+  `audio.liken.sh` claims the audio controller, runs PipeWire, and
+  publishes one device for each physical output, with each HDMI output
+  carrying the monitor identity its ELD block names. Its delivery is
+  the PipeWire socket and a target sink, and one claim pairs a screen
+  with that screen's speakers across the two drivers.
 
 ## Rejected
 
@@ -196,30 +221,6 @@ decided yet what work they become.
   init passes to `finit_module`; a parameter on a loaded module is a
   reboot-class change, and the status reads the result back from
   `/sys/module` without comparing it.
-* **56.** [Device operators](56-device-operators.md) — the pattern
-  milestones 57 and 58 build: an operator claims raw hardware through
-  an ordinary `liken.sh` claim, runs the daemon that owns it, and
-  republishes what that daemon holds as its own devices under
-  `<domain>.liken.sh`. Each one is its own repository and an ordinary
-  workload, deployed by the cluster's own GitOps, so a liken release
-  carries none of those daemons and nothing in liken deploys them.
-* **57.** [The display operator](57-the-display-operator.md) —
-  `display.liken.sh` claims the GPU's display device, runs the Weston
-  kiosk compositor, and publishes one device for each monitor output,
-  named by its connector and described by its EDID. Its delivery is a
-  Wayland socket and an app-id, not a device node.
-* **58.** [The Bluetooth operator](58-the-bluetooth-operator.md) —
-  `bluetooth.liken.sh` claims the Bluetooth adapter, runs bluetoothd,
-  and publishes each paired controller as a device named by its MAC
-  address, so a pod receives one controller's evdev node and nothing
-  else.
-* **59.** [The audio operator](59-the-audio-operator.md) —
-  `audio.liken.sh` claims the audio controller, runs PipeWire, and
-  publishes one device for each physical output, with each HDMI output
-  carrying the monitor identity its ELD block names. Its delivery is
-  the PipeWire socket and a target sink, and one claim pairs a screen
-  with that screen's speakers across the two drivers.
-
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.
 

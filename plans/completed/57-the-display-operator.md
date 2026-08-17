@@ -1,9 +1,9 @@
 # The display operator
 
-Milestone 57 — Proposed. It would publish each monitor output as its
-own DRA device, so a pod claims one screen by its connector name or by
-what the monitor is, and receives the Wayland socket and the app-id
-that put its window on that screen. It is the first instance of
+Milestone 57 — Completed. Each monitor output publishes as its own DRA
+device, so a pod claims one screen by its connector name or by what
+the monitor is, and receives the Wayland socket and the app-id that
+put its window on that screen. It is the first instance of
 milestone 56's pattern: the operator claims the GPU's display device
 through an ordinary `liken.sh` claim, runs the compositor, and
 publishes what the compositor holds under `display.liken.sh`.
@@ -199,30 +199,26 @@ The drill runs on `liken-1` with both monitors connected.
 
 ## Open questions
 
-* **Static app-ids or minted ones.** The app-id can stay a fixed string
-  per output, written into `weston.ini` once and handed to whichever
-  claim allocates that output. Or the operator can mint one per claim
-  and map it to the output. A fixed string is simpler and it lets a
-  client outside the cluster take the screen by guessing the string. A
-  minted one is a capability, and it costs the compositor a config
-  change on every allocation.
-* **How the compositor gets the mapping.** If app-ids are minted, the
-  routing table changes while the compositor runs. Weston reloads some
-  of `weston.ini` and not all of it, and a restart of the compositor
-  ends every client on every output, not only the one that changed.
-  The choice between the two sets whether one claim can disturb an
-  unrelated screen.
-* **Where the HDMI audio belongs.** Each display output carries an HDMI
-  PCM on the machine's HDA controller, and a client that plays video on
-  a monitor should reach that monitor's speakers. liken publishes the audio
-  controller as its own device today, with every PCM in it. Whether the
-  display operator should claim the audio controller too, and publish
-  each output's PCM with the output it belongs to, or whether audio
-  stays a separate claim that a person pairs by hand, is undecided.
-  [Milestone 59](59-the-audio-operator.md) is the answer under
-  consideration: audio stays its own operator, `audio.liken.sh`, and a
-  client gets a screen and that screen's speakers from one claim that
-  holds a request against each driver with a `matchAttribute`
-  constraint across the two. That answer costs both operators a shared
-  attribute domain, and milestone 59's open questions carry the case
-  for merging them instead.
+These were the questions this milestone could not answer. Each one
+below records what happened to it.
+
+* **Static app-ids or minted ones.** Still open, and it belongs to the
+  operator now. The shipped release uses fixed strings, written into
+  `weston.ini` once, which is the simpler half of the choice this
+  milestone framed. The case for minting them is in
+  [Routing is narrower than inventory](https://github.com/liken-sh/display-operator/blob/main/plans/open-problems/routing-is-narrower-than-inventory.md).
+* **How the compositor gets the mapping.** Still open, and it is the
+  same question as the one above, for the reason this milestone gave:
+  minting an app-id per allocation changes the routing table while the
+  compositor runs. The one document above carries both halves.
+* **Where the HDMI audio belongs.** Answered, and drilled. Audio stays
+  its own operator. A client gets a screen and that screen's speakers
+  from one claim holding a request against each driver, joined by a
+  `matchAttribute` constraint on `monitor.liken.sh/id`, which both
+  drivers derive byte for byte from the same monitor: the display
+  operator from its EDID, the audio operator from the PCM's ELD. On
+  liken-1 that matched the LG as `gsm-7716-lg-hdr-wqhd` from both
+  sides. The cost this milestone named arrived with the answer: the
+  two operators share an attribute domain, and five parity test
+  vectors in each repository keep the two derivations identical. See
+  [milestone 59](59-the-audio-operator.md).
