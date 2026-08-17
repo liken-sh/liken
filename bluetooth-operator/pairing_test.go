@@ -34,6 +34,9 @@ func TestReconcileAdoptsEveryBondAsAPairing(t *testing.T) {
 	if pairing.Status.Address != testDevice || pairing.Status.Adapter != testAdapter {
 		t.Errorf("status = %+v", pairing.Status)
 	}
+	if pairing.Status.Node != "liken-1" {
+		t.Errorf("status.node = %q, want the adapter's node", pairing.Status.Node)
+	}
 	if !pairing.Status.Bonded || !pairing.Status.Connected {
 		t.Errorf("status = %+v", pairing.Status)
 	}

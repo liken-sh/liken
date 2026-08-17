@@ -219,6 +219,7 @@ type PairingStatus struct {
 	Address    string `json:"address,omitempty"`
 	DeviceName string `json:"deviceName,omitempty"`
 	Adapter    string `json:"adapter,omitempty"`
+	Node       string `json:"node,omitempty"`
 	Connected  bool   `json:"connected"`
 
 	// Bonded reports whether bluetoothd still holds the bond. It is

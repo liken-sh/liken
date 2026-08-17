@@ -162,6 +162,7 @@ func (i *inventory) writePairingStatus(pairing *Pairing, adapter *Adapter, addre
 		Address:    address.Directory(),
 		DeviceName: attributeString(deviceReportedName(device)),
 		Adapter:    adapter.Status.Address,
+		Node:       adapter.Status.Node,
 		Connected:  present && device.Connected,
 		Bonded:     present && device.Paired,
 		Secret:     i.namespace + "/" + bonds.BondSecretName(address),

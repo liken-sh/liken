@@ -154,6 +154,14 @@ spec:
           type: string
           description: The name the controller reports for itself.
           jsonPath: .status.deviceName
+        - name: Node
+          type: string
+          description: The machine whose operator holds this bond now.
+          jsonPath: .status.node
+        - name: Adapter
+          type: string
+          description: The address of the adapter this bond belongs to.
+          jsonPath: .status.adapter
         - name: Connected
           type: boolean
           description: Whether the controller holds a connection now.
@@ -207,6 +215,11 @@ spec:
                 adapter:
                   type: string
                   description: The address of the adapter this bond belongs to.
+                node:
+                  type: string
+                  description: >-
+                    The machine whose operator holds this bond now. The
+                    value changes when the adapter moves.
                 connected:
                   type: boolean
                   description: Whether the controller holds a connection now.
