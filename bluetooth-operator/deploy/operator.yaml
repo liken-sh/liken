@@ -283,8 +283,8 @@ spec:
         # The Secret is what survives, and it is named for the
         # adapter. That is the identity BlueZ files a link key under,
         # so the bonds follow the radio to whichever machine the
-        # radio moves to. Losing them is the difference between
-        # "press the PS button" and "hold Create and PS and pair
-        # again" after every pod restart.
+        # radio moves to. Without them, a controller no longer
+        # reconnects with the PS button, and a person has to hold
+        # Create and PS and pair it again after every pod restart.
         - name: bonds
           emptyDir: {}

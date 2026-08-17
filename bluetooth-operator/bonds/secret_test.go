@@ -103,7 +103,7 @@ func TestSecretDataIsBase64OnTheWire(t *testing.T) {
 	}
 }
 
-// A key that is not an address names no device. Skipping it lets
+// A key that is not an address does not name a device. Skipping it lets
 // bluetoothd start with the bonds that are readable, where failing the
 // whole read would start it with none.
 func TestSecretTreeSkipsKeysThatAreNotAddresses(t *testing.T) {
@@ -124,11 +124,11 @@ func TestSecretTreeSkipsKeysThatAreNotAddresses(t *testing.T) {
 	}
 }
 
-// The first Secrets this operator wrote held one key for each device,
-// the bare address, carrying the info file. One of them is in the
-// field. Reading it costs a few lines here, where the alternative is
-// a person who recreates the Secret by pairing the controller again.
-func TestSecretTreeReadsTheFirstLayout(t *testing.T) {
+// Some Secrets in the field hold one key for each device, the bare
+// address, carrying the info file. Reading that layout costs a few
+// lines here; the alternative is a person who recreates the Secret by
+// pairing the controller again.
+func TestSecretTreeReadsTheBareAddressLayout(t *testing.T) {
 	secret := Secret{Data: map[string][]byte{
 		"7c-66-ef-22-e7-80": []byte(testInfo),
 	}}
@@ -141,8 +141,8 @@ func TestSecretTreeReadsTheFirstLayout(t *testing.T) {
 	if string(device.Info) != testInfo {
 		t.Errorf("info = %q", device.Info)
 	}
-	// The first layout stored no cache file, so the restored device
-	// has none, and bluetoothd writes one at the next discovery.
+	// The bare-address layout stored no cache file, so the restored
+	// device has none, and bluetoothd writes one at the next discovery.
 	if len(device.Cache) != 0 {
 		t.Errorf("cache = %q, want none", device.Cache)
 	}
@@ -150,8 +150,8 @@ func TestSecretTreeReadsTheFirstLayout(t *testing.T) {
 
 // The operator rewrites the Secret on the first pass that sees a
 // difference, and the write replaces the whole object, so both layouts
-// coexist only until then. The current keys win for as long as they do.
-func TestSecretTreeTakesTheCurrentLayoutOverTheFirst(t *testing.T) {
+// coexist only until then, and the current keys win while they do.
+func TestSecretTreeTakesTheCurrentLayoutOverTheBareAddress(t *testing.T) {
 	secret := Secret{Data: map[string][]byte{
 		"7c-66-ef-22-e7-80":       []byte("[LinkKey]\nKey=FF\n"),
 		"7c-66-ef-22-e7-80.info":  []byte(testInfo),

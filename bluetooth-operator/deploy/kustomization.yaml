@@ -1,8 +1,8 @@
 # The kustomize base for the Bluetooth operator.
 #
-# This is an offer, not a mechanism. liken does not apply it and does
-# not name it. Take it through your own GitOps with patches of your
-# own, or read it and write your own manifests.
+# liken does not apply this base and does not name it. Take it through
+# your own GitOps with patches of your own, or read it and write your
+# own manifests.
 #
 # Everything here except the DeviceClasses is namespaced.
 # DeviceClasses are cluster-scoped, like the ResourceSlices they

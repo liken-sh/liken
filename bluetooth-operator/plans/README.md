@@ -6,8 +6,7 @@ numbered in sequence and keeps its number for life.
 The form follows liken's own `plans/`. A document states a problem,
 states the design that answers it, and states what was considered and
 set aside. It stays **Proposed** until the thing it describes runs. A
-drill proves it, and a drill runs on hardware, because nothing else
-proves a design about a radio.
+drill proves it, and a drill runs on hardware.
 
 The pattern these documents build on lives in liken's repository:
 [milestone 56, device operators](https://github.com/liken-sh/liken/blob/main/plans/completed/56-device-operators.md),

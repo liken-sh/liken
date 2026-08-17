@@ -145,21 +145,21 @@ func NewSecret(namespace string, adapter Address, tree Tree) *Secret {
 
 // Tree reads the bonds back out of a stored Secret.
 //
-// A key that names no device's file is skipped. The alternative is to
+// A key that does not name a device's file is skipped. The alternative is to
 // fail the whole read, and that would start bluetoothd with no bonds
 // at all over one bad key, which disconnects every controller that the
 // other keys would have connected.
 //
-// The three passes run in this order for two reasons. The first
-// layout this operator wrote held one key per device, the bare
-// address, carrying the info file, and a Secret written that way is
-// still in the field, so the second pass reads it where the current
-// keys said nothing. The operator replaces the whole object on the
-// first pass that sees a difference, so a Secret carries both layouts
-// only until then, and the current keys win for as long as it does.
-// The cache pass runs last because it attaches to a device that one of
-// the first two established, and a cache key alone establishes
-// nothing.
+// The three passes run in this order for two reasons. Some Secrets in
+// the field key a device's info file by the bare address, with no
+// suffix, while the current layout suffixes it with .info. The second
+// pass reads the bare-address form only where the first pass found
+// nothing, so the suffixed keys win while a Secret carries both. A
+// Secret carries both only until the operator next rewrites it,
+// because the operator replaces the whole object on the first pass
+// that sees a difference. The cache pass runs last because it attaches
+// to a device that one of the first two passes established, and a
+// cache key alone establishes nothing.
 func (s *Secret) Tree() Tree {
 	tree := make(Tree, len(s.Data))
 	for key, info := range s.Data {

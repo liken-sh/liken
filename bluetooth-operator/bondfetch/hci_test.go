@@ -37,8 +37,9 @@ func TestParseDeviceInfoReadsTheKernelsLayout(t *testing.T) {
 		t.Errorf("name = %q", adapter.Name)
 	}
 	// The kernel holds the address least significant octet first, so a
-	// reader that copied it straight through would name a Secret for
-	// the address 27:92:66:69:4A:04, which belongs to nothing.
+	// reader that copied it straight through would read the address
+	// 27:92:66:69:4A:04, the bytes in reverse, and name the
+	// Secret after it.
 	if got := adapter.Address.String(); got != "04:4A:69:66:92:27" {
 		t.Errorf("address = %q", got)
 	}

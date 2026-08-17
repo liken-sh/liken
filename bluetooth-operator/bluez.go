@@ -17,9 +17,9 @@ package main
 //
 // The signals here say only that something changed. Every consumer
 // re-reads the whole managed-object tree, the same way liken's
-// hardware watcher re-walks sysfs after a uevent. A mirror built from
-// signal payloads can drift out of step with the daemon, and a
-// re-read cannot.
+// hardware watcher re-walks sysfs after a uevent. A cache built from
+// signal payloads can fall out of step with the daemon; a full
+// re-read stays correct.
 
 import (
 	"context"
@@ -41,8 +41,8 @@ const (
 // ErrNoAdapter reports that bluetoothd published no adapter, so its
 // answer says nothing about which controllers are paired.
 //
-// This is the difference between "no controller is paired" and "there
-// is nothing to ask". bluetoothd publishes its object tree a moment
+// It separates two states: no controller is paired, and there is
+// nothing to ask yet. bluetoothd publishes its object tree a moment
 // after it claims its bus name, and it removes every device object
 // when the adapter itself goes away, so an empty answer arrives in
 // both of those cases as well. Treating one as the other would retract
@@ -175,8 +175,8 @@ func adapterAddressFrom(objects map[dbus.ObjectPath]map[string]map[string]dbus.V
 // for an unpairing, and PropertiesChanged on a device object for a
 // connect, a disconnect, or the Bonded property a completed pairing
 // sets. Each one starts a pass that re-reads the whole tree and keeps
-// the paired devices, so a signal that names no pairing costs a read
-// and changes nothing.
+// the paired devices, so a signal with no pairing in it costs a read
+// and no more.
 //
 // The bond store reads the same three signals through the same
 // channel, and it needs each of them. Bonded is the property that says
@@ -324,8 +324,9 @@ func waitForBlueZ(ctx context.Context, conn *dbus.Conn, timeout time.Duration) e
 //
 // bluetoothd owns the HID sessions, and killing it disconnects every
 // controller at once, so an operator that kept publishing after the
-// daemon died would offer devices that no pod can use. The operator
-// ends instead, the container ends with it, and the kubelet restarts
+// daemon died would advertise controllers it can no longer deliver.
+// The operator ends instead, the container ends with it, and the
+// kubelet restarts
 // the pair.
 //
 // The channel carries a value rather than closing, and the watcher

@@ -14,14 +14,13 @@
 // which is the whole of what the ioctl needs.
 //
 // Every failure here exits nonzero, and one case is not a failure: a
-// Secret that does not exist. What separates them is what happens
-// next. bluetoothd starts with whatever tree it finds, so an empty
-// tree is correct for an adapter that has paired nothing, and wrong
-// for an adapter whose keys this program could not read. In the second
-// case the paired controllers would not connect, and the operator
-// would then write the empty tree back over the stored keys, so a
-// failed read would destroy the bonds it failed to read. A nonzero
-// exit holds the pod in Init, leaves the Secret alone, and shows in
+// Secret that does not exist. The two cases need different handling.
+// bluetoothd starts with whatever tree it finds, so an empty tree is
+// correct for an adapter that has paired nothing, and wrong for an
+// adapter whose keys this program could not read. In the second case
+// the paired controllers would not connect, and the operator would
+// then write the empty tree back over the stored keys. A nonzero exit
+// holds the pod in Init, leaves the Secret alone, and shows in
 // kubectl. The kubelet's restart is the retry.
 package main
 

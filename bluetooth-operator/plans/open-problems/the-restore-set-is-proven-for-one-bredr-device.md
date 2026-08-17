@@ -71,7 +71,7 @@ would give bluetoothd a device directory with no key in it. A missed
 device does not reconnect without its SDP records.
 
 Together they rank the two files backwards. The file that *is* the
-bond is the one a read failure discards without a word, and the file
+bond is the one a read failure discards silently, and the file
 that only matters once the bond exists is the one that stops the read.
 
 The case is narrow. Both files are 0600 under a 0700 directory, owned

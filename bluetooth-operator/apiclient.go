@@ -5,7 +5,7 @@ package main
 // This follows liken's own client (kubernetes/apiclient.go) and for
 // the same reason: the Kubernetes API is HTTPS that serves JSON, and
 // this program speaks to three URLs. client-go would bring informers,
-// work queues, and generated types that nothing here uses, into a
+// work queues, and generated types this program does not use, into a
 // container that also carries BlueZ.
 //
 // Every pod starts with what it needs to reach the API server.

@@ -137,8 +137,9 @@ func TestPrepareClaimLeavesAnotherDriversAllocationAlone(t *testing.T) {
 func TestPrepareClaimWaitsForAControllerThatIsOffTheAir(t *testing.T) {
 	// The controller is paired and switched off, so it registers no
 	// node. Failing per claim holds the pod in ContainerCreating with
-	// a reason a describe of the pod shows, which is the honest answer
-	// while the device's NoSchedule taint keeps the next pod parked.
+	// a reason a describe of the pod shows, which is the correct
+	// outcome while the device's NoSchedule taint keeps the next pod
+	// parked.
 	plugin := preparePlugin(t, allocatedClaim(t, AllocatedDevice{
 		Request: "controller",
 		Driver:  DriverName,

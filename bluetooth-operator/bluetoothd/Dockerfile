@@ -12,8 +12,8 @@
 # programs and their configuration with no loader and no shared
 # objects under them. A distribution's bluetoothd loads six shared
 # libraries on Alpine and fifteen on Debian, and each one is a file
-# whose version has to agree with the binary that opens it. There is
-# nothing to disagree here.
+# whose version has to agree with the binary that opens it. The static
+# binaries here open none, so no version can disagree.
 #
 # Two things make the static link work, and both are easy to lose:
 #

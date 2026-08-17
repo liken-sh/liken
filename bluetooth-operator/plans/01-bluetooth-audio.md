@@ -16,8 +16,8 @@ None of it was run. Every claim about behavior on real hardware is in
 ## The problem
 
 A Bluetooth speaker is the same kind of thing as a Bluetooth
-controller, and milestone 58's argument covers it without a word
-changed. The pairing state lives in `bluetoothd`. It is not in sysfs
+controller, and milestone 58's argument covers it unchanged. The
+pairing state lives in `bluetoothd`. It is not in sysfs
 and it is not on the Machine. So the layer that publishes speakers
 must be the layer that runs `bluetoothd`, and that layer is this
 operator.
@@ -269,9 +269,9 @@ capability is. A design that put PipeWire anywhere except a pod in the
 host network namespace would give up HFP, and this one does not have
 to choose.
 
-## Restart blast radius
+## What a restart takes down
 
-The pod is one restart domain and the cost of that is real.
+The pod is one restart domain. That has a cost.
 
 `bluetoothd` owns the HID sessions, and killing it disconnects every
 controller at once, which the lab proved. Adding audio means it also
@@ -280,13 +280,13 @@ That is true of every design in "What was considered and set aside",
 including the ones that put PipeWire in a separate pod, so it is not a
 cost of this choice.
 
-The cost of this choice is the arrow in the other direction. A
+The cost of this choice is the reverse. A
 PipeWire or WirePlumber fault now restarts the pod, and that
 disconnects every controller. Before this plan, an audio fault could
 not do that, because there was no audio in the pod.
 
 The size of that cost is unknown and the drill measures it. If it is
-unacceptable, option C in the next section is the escape hatch, and
+unacceptable, option C in the next section is the fallback, and
 moving to it changes how the operator is packaged and not what it
 publishes.
 
@@ -346,7 +346,7 @@ daemon that exits ends the container anyway.
   repository, a third image carrying PipeWire again, a third pod, and a
   published device whose whole meaning is permission to talk to another
   operator's daemon, which is not a thing `bluetoothd` holds. **This is
-  the recorded escape hatch.** If the drill shows that an audio fault
+  the recorded fallback.** If the drill shows that an audio fault
   taking down the controllers is unacceptable, this is where the design
   goes, and the bus socket path in "What the pod runs and what it
   holds" is already where it needs to be for that move.

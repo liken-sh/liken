@@ -22,7 +22,7 @@ package main
 //
 // Failures are per-claim strings inside the response, not gRPC
 // errors. The kubelet holds the affected pod in ContainerCreating and
-// retries, which is the honest behavior for a controller that is
+// retries, which is the correct behavior for a controller that is
 // paired and switched off: the pod waits, visibly, and a describe of
 // the pod says why.
 

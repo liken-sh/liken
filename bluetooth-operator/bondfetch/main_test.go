@@ -95,11 +95,11 @@ func TestMaterializeWritesTheTreeBlueZReads(t *testing.T) {
 	}
 }
 
-// A Secret written before the cache entry travelled holds one key per
-// device, the bare address, carrying the info file. One of them is in
-// the field, and the pod that reads it restores the bond it holds
-// rather than exiting on a layout it does not recognise.
-func TestMaterializeReadsASecretInTheFirstLayout(t *testing.T) {
+// Some Secrets in the field key a device by the bare address, with no
+// suffix, carrying the info file. The pod reads that layout and
+// restores the bond, rather than exiting on keys it does not
+// recognise.
+func TestMaterializeReadsASecretInTheBareAddressLayout(t *testing.T) {
 	api := testAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"data":{"7c-66-ef-22-e7-80":"` +
 			base64.StdEncoding.EncodeToString([]byte(testInfo)) + `"}}`))

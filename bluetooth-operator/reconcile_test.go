@@ -3,7 +3,7 @@ package main
 // These tests drive one reconcile pass against the test API server,
 // with the paired-set answer supplied directly. That answer is the one
 // input that separates a slice write from a delete and from no write
-// at all, and it is the input a bus would otherwise hide.
+// at all, and the tests supply it directly instead of through a bus.
 
 import (
 	"context"

@@ -196,9 +196,8 @@ func TestSliceLogRateLimitsTheUnchangedLine(t *testing.T) {
 	}
 }
 
-// A write is its own proof that the operator is alive, so it starts
-// the quiet interval again and no unchanged line follows straight
-// after it.
+// A write already shows the operator is alive, so it starts the quiet
+// interval again and no unchanged line follows straight after it.
 func TestSliceLogWriteRestartsTheQuietInterval(t *testing.T) {
 	capture := captureSliceLog(t)
 	devices := []SliceDevice{loggedDevice("device-a")}

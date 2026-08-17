@@ -113,8 +113,8 @@ func (s *hciSocket) Close() error {
 //
 // The kernel holds the address least significant octet first, and a
 // person reads it the other way, so the octets are reversed here. A
-// reader that copied them straight through would name a Secret for an
-// address that belongs to nothing.
+// reader that copied them straight through would build the wrong
+// address and name the Secret after it.
 func parseDeviceInfo(buffer []byte) deviceInfo {
 	var address bonds.Address
 	for i := range address {
@@ -135,8 +135,8 @@ func parseDeviceInfo(buffer []byte) deviceInfo {
 // hci_register_dev returns before the queued power-on work has read
 // the address out of the controller, and until that work runs the
 // kernel answers with 00:00:00:00:00:00. For a USB dongle the gap is
-// about a second after enumeration. That address names no Secret, so
-// the wait counts it as "not ready" and never as an answer.
+// about a second after enumeration. That address is not a real
+// adapter, so the wait counts it as "not ready" and never as an answer.
 //
 // The wait is bounded, and running out is a failure the caller
 // reports. An adapter that never reports an address is a pod that must

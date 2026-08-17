@@ -6,13 +6,13 @@
 // dbus-daemon and starts a bus with one service and two clients on it:
 // bluetoothd owns org.bluez, and the operator's container and any
 // bluetoothctl session read it. This is also why liken's system image
-// needs no D-Bus. The bus exists for one daemon, in the image that
-// carries that daemon.
+// needs no D-Bus: the bus exists only for this daemon and ships in the
+// image that carries it.
 //
 // This program is Go rather than a shell script because the image
 // carries no shell. Three static binaries and their configuration are
-// the whole of it, and a shell would be a fourth binary that exists
-// only to run these forty lines.
+// the whole of it, and a shell would be a fourth binary added only to
+// run this program.
 //
 // The exec at the end makes bluetoothd this container's process, so
 // the kubelet's TERM reaches bluetoothd directly and bluetoothd writes
@@ -45,8 +45,8 @@ const (
 	// The directory is the mount unit, never the socket file.
 	// dbus-daemon unlinks and recreates the socket at every start, so a
 	// mount of the file alone would pin the inode the daemon deleted,
-	// and whatever mounted it would hold a socket that nothing listens
-	// on.
+	// and whatever mounted it would hold a socket with no
+	// listener.
 	busAddressVar     = "DBUS_SYSTEM_BUS_ADDRESS"
 	defaultBusAddress = "unix:path=/var/run/bluetooth.liken.sh/dbus/system_bus_socket"
 	unixAddressPrefix = "unix:path="
@@ -142,8 +142,8 @@ func busSocket(address string) (string, error) {
 }
 
 // writeInputConf writes BlueZ's ClassicBondedOnly setting at start
-// rather than baking it into the image, because its two values are a
-// security choice that belongs to the moment.
+// rather than baking it into the image, because the choice between its
+// two values is a security decision made at deploy time.
 //
 // true, the default, is BlueZ's own default and the fix for
 // CVE-2023-45866: with it off, an attacker in radio range can open an
@@ -155,8 +155,8 @@ func busSocket(address string) (string, error) {
 //
 // Any other value is a failure to start. BlueZ reads this file with
 // glib, and glib reads a value it does not recognize as false, so a
-// misspelled "yes" would quietly open the hole that "false" opens
-// deliberately.
+// misspelled "yes" reads as false and disables the protection with no
+// error.
 func writeInputConf(path, bondedOnly string) error {
 	switch bondedOnly {
 	case "":

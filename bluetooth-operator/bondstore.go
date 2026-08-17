@@ -23,8 +23,8 @@ package main
 // a bond with one file and the next pass reads it with two, and the
 // backstop tick at 60 seconds carries the second file whether or not a
 // signal announced it. The comparison is what makes that safe: a tree
-// that gained a cache entry differs from the Secret, and a difference
-// is a write.
+// that gained a cache entry differs from the Secret, and any
+// difference triggers a write.
 //
 // The settle window is what makes the read safe to take, and it is
 // 1500 ms. BlueZ writes the key material synchronously in the
@@ -166,7 +166,7 @@ func (s *bondStore) persist(readAdapter adapterAddressReader) bool {
 // did not mount, and when the tree on disk belongs to a different
 // radio than the one this store writes for. Neither of those says any
 // device was unpaired, and emptying a Secret on either would lose keys
-// that nothing can rebuild.
+// that cannot be rebuilt.
 //
 // The directory is the authority because bluetoothd creates it when it
 // registers the adapter, and keeps it for the adapter's own settings

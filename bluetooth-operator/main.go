@@ -12,17 +12,16 @@
 // the public contracts that any DRA driver on any Kubernetes cluster
 // gets.
 //
-// The claim does two jobs that a person would otherwise write down.
-// It places the pod, because only a machine that has an adapter
-// publishes one, so no node selector names the machine with the
-// radio. And it arbitrates, because liken publishes an adapter as an
-// exclusive device, so the claim holder is the only Bluetooth stack
-// on that radio.
+// The claim does two jobs. It places the pod, because only a machine
+// that has an adapter publishes one, so no node selector names the
+// machine with the radio. It also arbitrates, because liken publishes
+// an adapter as an exclusive device, so the claim holder is the only
+// Bluetooth stack on that radio.
 //
 // Four sources drive the loop, and each one only says that something
 // changed. Every pass re-reads bluetoothd's whole object tree and
-// re-walks sysfs, because a mirror built from event payloads drifts
-// out of step with the daemon and a re-read cannot.
+// re-walks sysfs. A cache built from event payloads can fall out of
+// step with the daemon; a full re-read stays correct.
 package main
 
 import (
@@ -40,8 +39,8 @@ import (
 const (
 	// settleWindow is how long the loop waits for quiet after the last
 	// event before it writes. A controller that connects produces a
-	// burst of uevents and a burst of D-Bus signals, and the whole
-	// burst deserves one write.
+	// burst of uevents and a burst of D-Bus signals, and one write
+	// covers the whole burst.
 	//
 	// Every ResourceSlice write wakes every DRA-pending pod in the
 	// cluster, because the scheduler event that a slice change raises
@@ -205,7 +204,8 @@ func main() {
 		case <-blueZGone:
 			// bluetoothd owns the HID sessions, and its death
 			// disconnects every controller at once, so an operator that
-			// kept publishing would offer devices no pod can use. The
+			// kept publishing would advertise controllers it can no
+			// longer deliver. The
 			// published devices keep their taints from the last pass
 			// until the replacement pod corrects them.
 			fatal("bluetoothd left the bus")
@@ -317,9 +317,9 @@ func (p *publisher) reconcile(readPairedSet pairedSetReader) bool {
 		fmt.Fprintf(os.Stderr, "publishing the slice: %v\n", err)
 		return false
 	}
-	// A tainted slice is a correct answer and a degraded one. Reporting
-	// it as unfinished buys one quick retry, which is what catches an
-	// adapter that comes back from a USB reset a second later.
+	// A tainted slice is correct but degraded. Reporting it as
+	// unfinished triggers one quick retry, which catches an adapter
+	// that comes back from a USB reset a second later.
 	return !errors.Is(err, ErrNoAdapter)
 }
 

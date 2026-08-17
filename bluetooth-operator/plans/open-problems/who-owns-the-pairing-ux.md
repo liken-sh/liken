@@ -9,8 +9,8 @@ decided.
 Pairing is a privileged act on a radio that reaches past the house
 walls. A pairing window accepts a bond from whoever is in range and
 pressing the button, and the operator has no way to tell the person
-who meant it from anybody else. An API that opens that window is an
-API that a mistake, or a token that leaked, can open.
+who meant it from anybody else. A mistake, or a leaked token, can open
+that window too.
 
 The counter-argument is that the by-hand path has the same reach and
 worse controls. Today a person pairs by running `bluetoothctl` inside

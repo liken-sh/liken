@@ -52,8 +52,8 @@ racing it.
 
 The shutdown half is the reason. The operator watches BlueZ's bus name
 and exits nonzero when that name goes away, because bluetoothd owns
-the HID sessions and an operator that outlived it would publish
-devices that no pod can use. In the other order, an ordinary
+the HID sessions and an operator that outlived it would advertise
+controllers it can no longer deliver. In the other order, an ordinary
 `kubectl delete pod` would stop bluetoothd first, and the operator
 would report that bluetoothd left the bus and exit 1 on every routine
 delete. As a sidecar, bluetoothd stops second, the operator ends

@@ -22,7 +22,7 @@ func TestSettleCollapsesABurst(t *testing.T) {
 	out := settle(ctx, in, testWindow, testLimit)
 
 	// A controller connecting produces a burst of uevents and a burst
-	// of D-Bus signals, and the whole burst deserves one write.
+	// of D-Bus signals, and one write covers the whole burst.
 	for range 8 {
 		in <- struct{}{}
 		time.Sleep(testWindow / 4)

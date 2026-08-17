@@ -107,7 +107,7 @@ candidate that answers all four.
 - An operator upgrade. The Secret is named for the adapter, so a
   replacement pod under any name loads the same bonds.
 - A node reboot. The bonds are in the datastore, not on the node. See
-  [Durability, stated honestly](#durability-stated-honestly).
+  [Durability](#durability).
 - The adapter moving to a different machine. The Secret is one object
   in one namespace, so a dongle carried to another machine finds its
   own bonds from the new machine.
@@ -346,7 +346,7 @@ debounced the same way.** Every write lands through `rename()`, so
 `IN_MOVED_TO` is a clean trigger with no torn read, and it catches a
 `[General]`-only update that carries no D-Bus signal at all.
 
-## Durability, stated honestly
+## Durability
 
 BlueZ never calls `fsync`. GLib's `g_file_set_contents` skips its fsync
 when the destination file is zero bytes, and BlueZ calls `create_file`

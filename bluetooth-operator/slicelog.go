@@ -2,8 +2,8 @@ package main
 
 // Reporting what each pass did to the slice.
 //
-// A pass that finds nothing changed writes nothing, which is the right
-// thing to do to the API server and the wrong thing to leave silent.
+// A pass that finds nothing changed writes nothing. That is correct
+// for the API server, but a silent log is not enough on its own.
 // The slice's resourceVersion and its pool generation do not change
 // while an operator republishes the same content, and they do not
 // change after the operator dies and leaves its last slice behind. A
@@ -88,9 +88,9 @@ func (r *sliceReport) unchangedSlice(generation int64, devices []SliceDevice) {
 		generation, sliceSummary(devices), r.unchanged, plural(r.unchanged, "pass", "passes"))
 }
 
-// line prints one line and starts the quiet interval again. A write is
-// its own proof that the operator is alive, so it resets the interval
-// the same way a liveness line does, and no unchanged line follows
+// line prints one line and starts the quiet interval again. A write
+// already shows the operator is alive, so it resets the interval the
+// same way a liveness line does, and no unchanged line follows
 // straight after a write.
 func (r *sliceReport) line(format string, args ...any) {
 	fmt.Fprintf(r.out, format+"\n", args...)
