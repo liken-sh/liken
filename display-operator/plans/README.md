@@ -9,9 +9,9 @@ set aside. It separates what was measured from what was only read, and
 it names where the measurement ran.
 
 The pattern these documents build on lives in liken's repository:
-[milestone 56, device operators](https://github.com/liken-sh/liken/blob/main/plans/56-device-operators.md),
+[milestone 56, device operators](https://github.com/liken-sh/liken/blob/main/plans/completed/56-device-operators.md),
 and this operator's own instance,
-[milestone 57](https://github.com/liken-sh/liken/blob/main/plans/57-the-display-operator.md).
+[milestone 57](https://github.com/liken-sh/liken/blob/main/plans/completed/57-the-display-operator.md).
 
 The [README](../README.md) says how to deploy the operator and how to
 claim an output. These documents say why it is built the way it is.

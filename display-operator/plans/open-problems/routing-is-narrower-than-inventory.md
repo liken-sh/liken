@@ -59,10 +59,14 @@ while it runs, and what that costs.
   scheduler can start the next one. An answer that changes the routing
   under a running client has to say what that client's session is.
 
-[Minted app-ids](https://github.com/liken-sh/liken/blob/main/plans/57-the-display-operator.md#open-questions)
-wait on the same question, and milestone 57 leaves them open for the
-same reason: minting an app-id per allocation changes the routing table
-while the compositor runs.
-Version 0 writes one fixed app-id per output and takes the restart.
+Minted app-ids wait on the same question, for the same reason: minting
+an app-id per allocation changes the routing table while the
+compositor runs. That question came here when
+[milestone 57](https://github.com/liken-sh/liken/blob/main/plans/completed/57-the-display-operator.md#open-questions)
+completed, having shipped the simpler half rather than decided the
+choice. A fixed string per output lets a client outside the cluster
+take a screen by guessing the string; a minted one is a capability and
+costs a config change on every allocation. Version 0 writes one fixed
+app-id per output and takes the restart.
 
 No answer is chosen.
