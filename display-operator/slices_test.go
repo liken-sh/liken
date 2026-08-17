@@ -185,8 +185,96 @@ func TestSliceDevicesTaintsAConnectorTheCompositorCannotRouteTo(t *testing.T) {
 	}
 }
 
-func TestWithoutTheCompositorTaintsEveryOutput(t *testing.T) {
-	devices := withoutTheCompositor(sliceDevices(testOutputs(t), labRouted()))
+// TestBeforeTheCompositorAddsNoScheduleAndKeepsTheHardwareTaints covers
+// the two dimensions the startup publish answers separately. Whether
+// the compositor routes to an output is unknown until it runs, so every
+// device takes the NoSchedule taint. Whether a connector is dark comes
+// from sysfs and the EDID, which need no compositor, so the taints that
+// read produced go out as they are.
+func TestBeforeTheCompositorAddsNoScheduleAndKeepsTheHardwareTaints(t *testing.T) {
+	devices := beforeTheCompositor(sliceDevices(testOutputs(t), labRouted()))
+
+	if len(devices) != 3 {
+		t.Fatalf("got %d devices, want 3", len(devices))
+	}
+	dark := devices[0]
+	if dark.Name != "dp-1" {
+		t.Fatalf("devices[0] = %q", dark.Name)
+	}
+	// Nothing is on this connector, and sysfs said so without the
+	// compositor. Both taints, the same answer the reconcile gives.
+	if len(dark.Taints) != 2 {
+		t.Fatalf("%s: taints = %+v", dark.Name, dark.Taints)
+	}
+	if dark.Taints[0].Key != disconnectedTaint || dark.Taints[0].Effect != "NoExecute" {
+		t.Errorf("%s: taints[0] = %+v", dark.Name, dark.Taints[0])
+	}
+	if dark.Taints[1].Key != noOutputTaint || dark.Taints[1].Effect != "NoSchedule" {
+		t.Errorf("%s: taints[1] = %+v", dark.Name, dark.Taints[1])
+	}
+
+	for _, device := range devices[1:] {
+		// A monitor is on the wire here. The compositor is not routing to
+		// it yet, so no new claim may land on it, and the pod already
+		// holding it is not threatened.
+		if len(device.Taints) != 1 {
+			t.Fatalf("%s: taints = %+v", device.Name, device.Taints)
+		}
+		if device.Taints[0].Key != noOutputTaint || device.Taints[0].Effect != "NoSchedule" {
+			t.Errorf("%s: taint = %+v", device.Name, device.Taints[0])
+		}
+		// The monitor's facts stay. What the taint says is that nothing
+		// routes to the screen yet, not what is plugged into it.
+		if _, ok := device.Attributes["connector"]; !ok {
+			t.Errorf("%s: the connector attribute left with the compositor", device.Name)
+		}
+	}
+}
+
+// TestPublishingBeforeTheCompositorLeavesALiveScreensClientRunning is
+// the regression test for a restart that ends healthy sessions. The
+// operator's pod restarts for ordinary reasons, and the previous pod's
+// slice says the routed screens are free because they were. A publish
+// that put the NoExecute taint on those screens would start an eviction
+// timer against every pod holding one, on hardware that never moved.
+func TestPublishingBeforeTheCompositorLeavesALiveScreensClientRunning(t *testing.T) {
+	devices := sliceDevices(testOutputs(t), labRouted())
+	fixture := &slicePublishFixture{existing: &ResourceSlice{
+		Metadata: ResourceSliceMeta{Name: "liken-1-display.liken.sh", ResourceVersion: "7"},
+		Spec: ResourceSliceSpec{
+			Driver:   DriverName,
+			NodeName: "liken-1",
+			Pool:     ResourcePool{Name: "liken-1", Generation: 3, ResourceSliceCount: 1},
+			Devices:  devices,
+		},
+	}}
+	client := testClient(t, fixture.handler(t))
+
+	if err := EnsureResourceSlice(client, "liken-1", testOwner(), beforeTheCompositor(devices)); err != nil {
+		t.Fatal(err)
+	}
+	if fixture.updated == nil {
+		t.Fatal("the slice was not replaced, so a stale one says the screens are free")
+	}
+	for _, device := range fixture.updated.Spec.Devices {
+		// dp-1 is dark, and the sysfs read that says so stands whether
+		// the compositor runs or not. Its holder is evicted even if the
+		// compositor never starts, so nothing waits on a reconcile that
+		// a crash loop never reaches.
+		want := device.Name == "dp-1"
+		if got := carries(device.Taints, disconnectedTaint); got != want {
+			t.Errorf("%s carries the disconnected taint = %v, want %v: %+v",
+				device.Name, got, want, device.Taints)
+		}
+		if !carries(device.Taints, noOutputTaint) {
+			t.Errorf("%s went out schedulable before the compositor ran: %+v",
+				device.Name, device.Taints)
+		}
+	}
+}
+
+func TestAfterTheCompositorTaintsEveryOutput(t *testing.T) {
+	devices := afterTheCompositor(sliceDevices(testOutputs(t), labRouted()))
 
 	if len(devices) != 3 {
 		t.Fatalf("got %d devices, want 3", len(devices))
@@ -209,7 +297,7 @@ func TestWithoutTheCompositorTaintsEveryOutput(t *testing.T) {
 	}
 }
 
-func TestPublishingWithoutTheCompositorEvictsTheClients(t *testing.T) {
+func TestPublishingAfterTheCompositorEvictsTheClients(t *testing.T) {
 	// This is the write the operator makes as the compositor dies. It
 	// is the only thing that ends the clients that are drawing into a
 	// socket that is gone: the pod the kubelet starts next publishes
@@ -226,7 +314,7 @@ func TestPublishingWithoutTheCompositorEvictsTheClients(t *testing.T) {
 	}}
 	client := testClient(t, fixture.handler(t))
 
-	devices := withoutTheCompositor(sliceDevices(testOutputs(t), labRouted()))
+	devices := afterTheCompositor(sliceDevices(testOutputs(t), labRouted()))
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(), devices); err != nil {
 		t.Fatal(err)
 	}
@@ -450,7 +538,7 @@ func TestEnsureLogsTheSliceItWrote(t *testing.T) {
 
 	// The compositor died, so every output takes both taints. The
 	// device count does not move, and the taints are the whole event.
-	if err := EnsureResourceSlice(client, "liken-1", testOwner(), withoutTheCompositor(devices)); err != nil {
+	if err := EnsureResourceSlice(client, "liken-1", testOwner(), afterTheCompositor(devices)); err != nil {
 		t.Fatal(err)
 	}
 	both := disconnectedTaint + ", " + noOutputTaint

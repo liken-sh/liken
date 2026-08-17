@@ -220,17 +220,59 @@ func unservableTaints() []DeviceTaint {
 	}
 }
 
-// withoutTheCompositor taints every device, whatever is plugged in.
+// beforeTheCompositor is what the operator publishes at startup. It
+// adds the untolerated NoSchedule taint to every device and keeps every
+// taint the hardware read already produced.
 //
-// It publishes two states that are otherwise invisible to a consumer.
-// Before the compositor starts, no output can serve a client yet, and
-// last boot's slice may still say they all can. After the compositor
-// exits, every client has already lost its connection, and the
-// operator is about to end: a replacement pod that published the same
-// untainted devices would raise no scheduler event at all, so nothing
-// would ever evict the clients that are now drawing into a socket that
-// is gone.
-func withoutTheCompositor(devices []SliceDevice) []SliceDevice {
+// The two taints answer two questions, and startup has an answer for
+// only one of them.
+//
+// Nothing routes to a screen until the compositor enumerates its
+// heads, so no output can serve a client yet and no new claim may
+// land on one. Last boot's slice may still say they all can. That is
+// the noOutputTaint, and it goes on every device.
+//
+// Whether a connector is dark is the other question, and sysfs and
+// the EDID answer it with no compositor running at all. sliceDevices
+// has already read them, so a dark connector arrives here with its
+// NoExecute taint on it and keeps it. Its holder is evicted even if
+// the compositor never starts, so nothing waits on a reconcile that
+// never runs.
+//
+// A connector with a monitor on it arrives with no NoExecute taint,
+// and none is added. That taint ends the pod holding the output, and
+// a restart of this operator is no reason to end a client whose
+// monitor never moved.
+func beforeTheCompositor(devices []SliceDevice) []SliceDevice {
+	out := make([]SliceDevice, len(devices))
+	for i, device := range devices {
+		out[i] = device
+		out[i].Taints = slices.Clone(device.Taints)
+		if !carries(out[i].Taints, noOutputTaint) {
+			out[i].Taints = append(out[i].Taints,
+				DeviceTaint{Key: noOutputTaint, Effect: "NoSchedule"})
+		}
+	}
+	return out
+}
+
+// carries reports whether the taints already name this key.
+func carries(taints []DeviceTaint, key string) bool {
+	return slices.ContainsFunc(taints, func(taint DeviceTaint) bool {
+		return taint.Key == key
+	})
+}
+
+// afterTheCompositor taints every device, whatever is plugged in. It is
+// what the operator publishes as the compositor it runs exits.
+//
+// Both taints are facts here. The compositor held the screens and the
+// socket, so every client has already lost its connection, and this
+// write is the only thing that ends them: a replacement pod that
+// published the same untainted devices would raise no scheduler event
+// at all, so nothing would ever evict the pods that are drawing into a
+// socket that is gone.
+func afterTheCompositor(devices []SliceDevice) []SliceDevice {
 	out := make([]SliceDevice, len(devices))
 	for i, device := range devices {
 		out[i] = device

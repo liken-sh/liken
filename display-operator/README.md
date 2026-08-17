@@ -347,11 +347,27 @@ write is what ends the clients, and it has to happen while this
 operator is still running: the pod the kubelet starts next publishes
 the same devices again, and a slice that does not change raises no
 scheduler event, so nothing would ever evict the pods that are drawing
-into a socket that is gone. The same taints go out once more at
-startup, before the compositor runs, so a previous pod's slice never
-outlives the compositor it described and a compositor that cannot
-start at all still leaves an honest answer behind. The first reconcile
-after the socket appears clears them.
+into a socket that is gone.
+
+**Startup taints each output for what the operator has read.** The two
+taints answer two questions, and a startup that has not run the
+compositor yet has an answer for only one of them.
+
+Nothing routes to a screen until the compositor enumerates its heads,
+so every output publishes with `display.liken.sh/no-output`,
+`NoSchedule`. A previous pod's slice never outlives the compositor it
+described, and a compositor that cannot start at all still leaves an
+honest answer behind.
+
+Whether a connector is dark is the other question, and sysfs and the
+EDID answer it with no compositor running. A dark connector publishes
+with `display.liken.sh/disconnected`, `NoExecute`, the same as on any
+other pass, so its holder is evicted even if the compositor never
+starts. A connector with a monitor on it publishes without that taint:
+it ends the pod holding the screen, and a restart of this operator is
+no reason to end a client whose monitor never moved. The first
+reconcile after the socket appears clears the `NoSchedule` taint from
+the outputs that can serve a client.
 
 ## Not here yet
 

@@ -177,16 +177,26 @@ func main() {
 	// the rest of the operator tests every connector against this set.
 	routed := routedOutputs(live)
 
-	// The inventory publishes before the compositor runs, with every
-	// output tainted. Two things need that. A previous pod's slice may
-	// still say every screen is free, and it says so until this pass
-	// replaces it. And a compositor that cannot start at all still
-	// leaves an honest answer behind, so a claim on a screen that is
-	// cabled and asleep parks instead of being allocated a screen that
-	// nothing drives. The reconcile after the socket appears clears
-	// the taints.
+	// The inventory publishes before the compositor runs, with the
+	// NoSchedule taint on every output. Two things need that. A previous
+	// pod's slice may still say every screen is free, and it says so
+	// until this pass replaces it. And a compositor that cannot start at
+	// all still leaves an honest answer behind, so a claim on a screen
+	// that is cabled and asleep parks instead of being allocated a
+	// screen that nothing drives. The reconcile after the socket appears
+	// clears the taint from the screens that can serve a client.
+	//
+	// This write does not read the published slice first, so it drops
+	// the NoExecute taint that a previous instance wrote as its
+	// compositor died. That is deliberate. The eviction that taint asks
+	// for does not reach its deadline anyway: the replacement compositor
+	// is up about three seconds later and the first reconcile clears the
+	// taint, against the 30 second tolerationSeconds the README
+	// recommends. A connector that is really dark keeps its NoExecute
+	// taint across the restart, because sysfs still says it is dark. One
+	// more API read on every startup buys nothing.
 	if err := EnsureResourceSlice(client, nodeName, owner,
-		withoutTheCompositor(sliceDevices(outputs, routed))); err != nil {
+		beforeTheCompositor(sliceDevices(outputs, routed))); err != nil {
 		fmt.Fprintf(os.Stderr, "publishing the outputs before the compositor starts: %v\n", err)
 	}
 
@@ -273,7 +283,7 @@ func main() {
 			// and a slice that does not change raises no scheduler
 			// event.
 			if writeErr := EnsureResourceSlice(client, nodeName, owner,
-				withoutTheCompositor(sliceDevices(discoverOutputs(sysRoot, card), routed))); writeErr != nil {
+				afterTheCompositor(sliceDevices(discoverOutputs(sysRoot, card), routed))); writeErr != nil {
 				fmt.Fprintf(os.Stderr, "tainting the outputs after the compositor exited: %v\n", writeErr)
 			}
 			fatal("the compositor exited: %v", err)
