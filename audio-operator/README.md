@@ -417,8 +417,10 @@ ends the container nonzero, and the kubelet restarts the set.
   signal can prove that sound reaches anyone, so the operator publishes
   the port it can see and a person who wired something claims it.
 * **The identical-monitor tiebreak.** Two monitors of one model share
-  one `monitor.liken.sh/id`. Whether the ELD's `port_id` distinguishes
-  them awaits a machine with two identical monitors.
+  one `monitor.liken.sh/id`. The ELD's `port_id` field was measured on
+  liken-1 and the driver leaves it zero, so no tiebreak candidate
+  stands. See
+  [the ELD carries no serial number](plans/open-problems/the-eld-carries-no-serial-number.md).
 * **The drill.** No drill against a real card and two monitors has run
   yet. The plans state what one must show.
 * **Metrics.** The operator prints to stderr and reports state through
