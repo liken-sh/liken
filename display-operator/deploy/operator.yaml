@@ -1,0 +1,136 @@
+# The operator itself: one pod for one graphics card, and the claim
+# that places it.
+---
+# The card's two nodes, in one claim with one request each. A template
+# rather than a plain claim, so each replica allocates a distinct card:
+# raise replicas below to the number of graphics cards in the cluster,
+# and the scheduler spreads the pods to wherever the monitors are. A
+# replica past that number parks Pending and costs nothing. Nobody
+# writes down which machine has the screens.
+#
+# The card node allocates once, which is what makes this pod the only
+# program setting a mode on it. The render node is shareable, so
+# holding it takes nothing away from the transcoders that use the same
+# GPU.
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: display-gpu
+spec:
+  spec:
+    devices:
+      requests:
+        - name: display
+          exactly:
+            deviceClassName: display-gpu
+        - name: render
+          exactly:
+            deviceClassName: display-render
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: display-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: display-operator
+  # Recreate, never a rolling update. The card node allocates to one
+  # claim, so a rolling update's second pod would park Pending until
+  # the first one released the card, and the update would never finish.
+  # Recreate stops the old pod first.
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: display-operator
+    spec:
+      serviceAccountName: display-operator
+      # The kernel delivers uevents to the initial user namespace only.
+      # A pod in its own user namespace receives an empty stream, with
+      # no error to read, and no monitor plugged in after the pod
+      # started would ever appear. This is the default, and it is
+      # stated because the failure is silent.
+      hostUsers: true
+      # The compositor holds the screens for as long as it runs, so it
+      # goes down quickly when asked. A client waiting on a restart is
+      # watching a black monitor.
+      terminationGracePeriodSeconds: 5
+      containers:
+        - name: operator
+          image: ghcr.io/liken-sh/display-operator:latest
+          env:
+            # A ResourceSlice names the node whose hardware it
+            # describes, and the downward API is where a pod reads
+            # that.
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          securityContext:
+            # No privilege and no capability. libseat's noop backend
+            # opens the card node with a plain open(), and the kernel
+            # hands DRM master to the first process to open it with no
+            # capability check, so everything this pod does to the
+            # hardware it does through its claim.
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+            # The card node and the render node, claimed from liken.
+            # This is the placement: the scheduler puts the pod where
+            # the hardware is.
+            claims:
+              - name: gpu
+          volumeMounts:
+            # The two mounts every DRA driver takes. The registry
+            # directory is where the kubelet discovers plugins, and the
+            # plugin's own directory holds the socket that serves the
+            # prepare calls. Both are writable, because serving a
+            # socket is the actuation.
+            - name: kubelet-plugin
+              mountPath: /var/lib/kubelet/plugins/display.liken.sh
+            - name: kubelet-plugins-registry
+              mountPath: /var/lib/kubelet/plugins_registry
+            # Where prepared claims become the mount and the variables
+            # that the container runtime applies. liken writes its own
+            # specs in this same directory, and the two drivers' file
+            # name prefixes keep them apart.
+            - name: cdi
+              mountPath: /var/run/cdi
+            # The compositor's runtime directory, on the host, because
+            # a consumer's container mounts the same path to reach the
+            # Wayland socket in it. The delivery is that socket, so it
+            # has to be somewhere both pods can name.
+            - name: socket
+              mountPath: /var/run/display.liken.sh
+      resourceClaims:
+        - name: gpu
+          resourceClaimTemplateName: display-gpu
+      volumes:
+        # DirectoryOrCreate on all four, because a node that has never
+        # run a DRA driver has none of these paths.
+        - name: kubelet-plugin
+          hostPath:
+            path: /var/lib/kubelet/plugins/display.liken.sh
+            type: DirectoryOrCreate
+        - name: kubelet-plugins-registry
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry
+            type: DirectoryOrCreate
+        - name: cdi
+          hostPath:
+            path: /var/run/cdi
+            type: DirectoryOrCreate
+        - name: socket
+          hostPath:
+            path: /var/run/display.liken.sh
+            type: DirectoryOrCreate
