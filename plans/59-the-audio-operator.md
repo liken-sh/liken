@@ -67,10 +67,139 @@ operator reads, because `snd_hctl_elem_get_device` gives the PCM device
 number the block belongs to, and the proc file's second number is a pin
 index instead.
 
+None of that card profile code runs in this pod. It belongs to the ACP
+path, which only the ALSA monitor builds, and the monitor needs udev.
+So the operator declares raw PCM sink nodes and reads the ELD control
+itself. The section on finding the card with no udev states why, and
+what it costs. The operator's own jack watcher is what makes a monitor
+an event rather than a poll.
+
 The privilege is none. The operator declares no `hostNetwork` and adds
 no capability. Everything it touches, it touches through the ALSA nodes
 its claim delivers, plus the two hostPath mounts every DRA driver
 takes, which milestone 56 lists.
+
+## Finding the card with no udev
+
+A liken machine runs no udevd, and WirePlumber's ALSA monitor
+enumerates cards through libudev. The monitor asks udev for the sound
+subsystem, gets nothing, builds no PipeWire device, and creates no
+sink. PipeWire then holds a graph with no ALSA node in it on a machine
+whose speakers work, every output the operator publishes carries the
+no-sink taint, and no pod can play. WirePlumber's own documentation
+states the dependency: "The plugin then monitors UDev and creates
+device and node objects for all the ALSA cards that are available on
+the system." There is no non-udev path through that monitor.
+
+The operator does not need the monitor, because it already enumerates
+the card without udev. `readOutputs` lists the playback PCM devices
+from the nodes the claim delivers, and reads each one's ELD through
+the ALSA control interface. So the operator writes the nodes down for
+PipeWire instead of asking it to discover them. Before it starts the
+daemons, it generates
+`/etc/pipewire/pipewire.conf.d/60-liken-outputs.conf` with one
+`context.objects` entry for each playback PCM device:
+
+    context.objects = [
+      { "factory": "adapter",
+        "flags": [ "nofail" ],
+        "args": {
+          "factory.name": "api.alsa.pcm.sink",
+          "api.alsa.path": "hw:0,3",
+          "api.alsa.pcm.card": "0",
+          "media.class": "Audio/Sink",
+          "node.name": "liken.audio.card0-pcm3",
+          "audio.channels": "2",
+          "audio.position": "FL,FR",
+          "liken.audio.card": "0",
+          "liken.audio.pcm": "3"
+        }
+      }
+    ]
+
+The mechanism was verified against the PipeWire sources at 1.4.11 and
+at master.
+
+* **It is the supported path.** `pipewire-props(7)` states it: "In
+  minimal PipeWire setups without a session manager, the device
+  properties can be configured via context.objects in pipewire.conf(5)
+  when creating the devices." The shipped `src/daemon/pipewire.conf.in`
+  carries the same object as a commented example, with
+  `api.alsa.pcm.source` in place of the sink.
+* **The factory exists under that name.** `spa_alsa_sink_factory` in
+  `spa/plugins/alsa/alsa-pcm-sink.c` registers
+  `SPA_NAME_API_ALSA_PCM_SINK`, which is `api.alsa.pcm.sink`.
+* **Nothing in the path touches udev.** `spa_alsa_init` in
+  `spa/plugins/alsa/alsa-pcm.c` reads `api.alsa.path` and
+  `api.alsa.pcm.card` and opens the device with `snd_pcm_open`.
+* **The drop-in adds and does not replace.** `pipewire.conf(5)` says a
+  dictionary section merges key by key and an array section is
+  appended. `context.objects` is an array, so the daemon's own dummy
+  and freewheel drivers stay.
+* **The operator's own properties survive to `pw-dump`.**
+  `module-adapter.c` hands the whole `args` dictionary to
+  `pw_adapter_new`, and `impl-node.c` sets `info.props` to the node's
+  whole property dictionary, so `liken.audio.card` and
+  `liken.audio.pcm` arrive in the dump. That is what maps a node back
+  to its output. A node the udev monitor built carries `alsa.card` and
+  `alsa.device` instead, and this graph has no such node in it.
+* **`media.class` has to be written.** The ALSA plugin keeps a media
+  class inside the SPA node, and `module-adapter.c` copies no default
+  onto the PipeWire node, so a node declared without it is a node that
+  nothing sees as a sink.
+
+WirePlumber stays, with `monitor.alsa` and `monitor.alsa-midi`
+disabled in the pod's profile. It still links each client's stream to
+the sink named in `PIPEWIRE_NODE`, which is the whole of what this
+operator needs from a session manager. `hardware.audio` stays required:
+WirePlumber's component list gives it `wants` on the two monitors and
+not `requires`, so disabling them leaves the profile satisfied.
+
+**The alternative, rejected: teach a session manager to enumerate
+without udev.** The ALSA card profile device, `api.alsa.acp.device`,
+uses no libudev either, and neither does `api.alsa.pcm.device`. Both
+were read and both are dead ends from a configuration file.
+`src/modules/spa/spa-device.c` installs no listener for a SPA device's
+child objects, and `struct pw_device_events` in `src/pipewire/device.h`
+carries only `info` and `param`, so a device declared in
+`context.objects` produces a Device global with profiles and routes on
+it and zero nodes. A session manager learns a device's children only by
+loading the SPA plugin in its own process, which is what WirePlumber's
+`monitors/alsa.lua` does with `api.alsa.enum.udev`. Taking that route
+means patching WirePlumber to enumerate from an ioctl scan instead. It
+is the only route to hardware mixer volume, profile switching, and
+port availability from jack detection, and it costs a fork of the
+session manager. Raw PCM sinks with software volume need no patch at
+all, and the operator reads jacks and ELD itself already.
+
+**Every playback PCM device is declared, including an HDMI PCM with no
+monitor on it.** PipeWire reads `context.objects` once, while it loads
+its configuration, so the declared set is fixed for the life of the
+daemon. A set that followed the cables would need a PipeWire restart
+every time somebody moved one, and a restart ends every consumer's
+session. The PCM devices a card has are fixed when its driver binds, so
+a set that follows the card never moves. The node creation does not
+depend on a monitor either: `impl_init` in `alsa-pcm-sink.c` ends at
+`spa_alsa_init`, and `snd_pcm_open` runs later, on the `ParamBegin`
+command, so the node exists in the graph whether the cable is in or
+not.
+
+The taints stay honest under that choice. An HDMI output with no
+monitor now has a sink node, so the no-sink taint no longer fires for
+it, and the operator taints it on the ELD instead, which is the fact
+that says whether a monitor is there. The no-sink taint keeps its own
+meaning: PipeWire holds no node for this PCM device, which is the one
+output that `nofail` let fail while the rest of the card came up.
+
+**A PCM device that appears or leaves is one restart.** Every reconcile
+pass generates the document again and compares it against the one
+PipeWire started with. A difference means the running graph cannot
+serve the card any more, so the operator stops and the kubelet's
+restart declares the new set. It does not taint on the way out, because
+the restart takes the socket from every consumer for a few seconds and
+a `NoExecute` taint would evict all of them for that gap. This costs
+one restart for a card that arrived or left, and it never fires for a
+monitor somebody plugged in.
 
 ## The controller claim
 
@@ -253,6 +382,23 @@ is also where milestone 57's drill runs.
   operator's pod starts on the machine with the audio controller, with
   no node selector written by hand. Delete it, and the published
   devices return to what they were.
+* **The declared nodes exist and play.** `pw-dump` lists one
+  `Audio/Sink` node for each playback PCM device, each one carrying
+  `liken.audio.card` and `liken.audio.pcm`, on a machine with no udevd.
+  A stream that names one of them by `PIPEWIRE_NODE` reaches the
+  speakers. This is the whole of what the static declaration buys, and
+  nothing off the hardware proves it.
+* **An HDMI PCM with no monitor.** The node exists in `pw-dump`.
+  Record what `snd_pcm_open` on `hw:N,D` does when nothing is plugged
+  in: whether the node enumerates formats, and what it reports if a
+  stream reaches it. The kernel's answer is driver-specific and it was
+  not verified.
+* **The declared format.** The nodes ask for two channels at `FL,FR`
+  and name no rate or sample format. Record whether each output
+  negotiates one, and record what a monitor that accepts more than two
+  channels does, because the ELD that reports the channel count is
+  readable only while the cable is in and the declaration is written
+  once at start.
 * **Each output publishes once.** One device for each HDMI PCM and one
   for the analog jack, each carrying its connection type, and each HDMI
   device carrying its monitor's manufacturer code, product code, and
