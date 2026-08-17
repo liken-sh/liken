@@ -46,6 +46,9 @@ COPY --from=closure /out /
 # monitor is off, including the ALSA one that finds nothing without
 # udev. The file says why.
 COPY config/50-audio-operator.conf /etc/wireplumber/wireplumber.conf.d/
+# The access rule beside it stops WirePlumber's default policy from
+# restricting this pod's clients, itself included. The file says why.
+COPY config/51-access-rules.conf /etc/wireplumber/wireplumber.conf.d/
 
 # PipeWire's access mode is baked in for the same reason. It goes
 # under /usr/share because the pod mounts an emptyDir over

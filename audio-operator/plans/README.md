@@ -18,19 +18,23 @@ is built the way it is, and what it still owes an answer to.
 
 ## Designs
 
-* [01, The taints an output carries](01-the-taints-an-output-carries.md).
+* [01, The taints an output carries](completed/01-the-taints-an-output-carries.md).
   Built.
-* [02, A closure on scratch](02-a-closure-on-scratch.md). Proposed.
-  The image becomes the display operator's shape: a named file set on
-  `scratch`, measured from the running daemons' memory maps, with a
-  release gate that starts the daemons and fails on any file they map
-  that the image lacks. Answers and replaces the open problem "The
-  image is still Debian".
+* [02, A closure on scratch](completed/02-a-closure-on-scratch.md).
+  Built, and drilled on liken-1 on 2026-08-17. The image becomes the
+  display operator's shape: a named file set on `scratch`, measured
+  from the running daemons' memory maps, with a release gate that
+  starts the daemons and fails on any file they map that the image
+  lacks. Answers and replaces the open problem "The image is still
+  Debian".
 * [03, The kubelet supervises the daemons](03-the-kubelet-supervises-the-daemons.md).
-  Proposed. The pod becomes four containers: a declare init step, the
-  two daemons as native sidecars with real-client probes, and the
+  Built, and drilled on liken-1 on 2026-08-17 except the daemon-kill
+  fault drill. The pod becomes four containers: a declare init step,
+  the two daemons as native sidecars with real-client probes, and the
   operator. The die-together guarantee survives as an all-devices
-  taint the operator publishes when it loses the graph.
+  taint the operator publishes when it loses the graph. The drill
+  surfaced the cross-namespace access defect that
+  `config/51-access-rules.conf` answers.
 
 ## Open problems
 

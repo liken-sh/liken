@@ -1,6 +1,7 @@
 # 03, The kubelet supervises the daemons
 
-Proposed.
+Built. Drilled on liken-1 on 2026-08-17, except the daemon-kill
+fault drill, which is still owed.
 
 ## The problem
 
@@ -73,11 +74,29 @@ teardown. Neither is zero; both are honest within a second.
   would start after the operator that needs it, or force the
   declare step back into the operator's startup.
 
-## The drill
+## What the drill showed
 
-The drill runs on liken-1. It must show the ordered startup on a
-fresh roll, the movie's audio surviving it, and then the contract
-under fault: kill the PipeWire container and watch the kubelet
-restart it alone, the operator republish, and the consumer recover
-or evict on its toleration. The slice must carry the all-devices
-taint in the window where the graph is gone.
+The ordered startup ran on liken-1 on 2026-08-17, several times over:
+declare completed, both sidecars passed their probes, and the
+operator published the same slice the supervisor pod published. A
+consumer restarted after a roll claims its output and plays.
+
+The drill's real product was a defect the sibling design exposed and
+the supervisor design had masked. WirePlumber's default access policy
+reads `pipewire.sec.flatpak` before it trusts the access the server
+granted, and the kernel cannot translate a peer's pid across PID
+namespaces, so every client of the pod's socket looks sandboxed. The
+policy lowered every client to read-only, WirePlumber's own client
+included, and a read-only session manager cannot create a link, so
+streams parked silently against healthy sinks. In the supervisor pod
+WirePlumber shared PipeWire's PID namespace, so it never restricted
+itself, and consumers limped along on the read-only grant because
+playing needs no more. The fix is `config/51-access-rules.conf`: the
+server's grant stands, because the CDI mount is the access control.
+The release gate could not have caught this, because no cardless run
+links a stream; a linking check is a candidate addition.
+
+Still owed: the fault drill. Kill the PipeWire container, watch the
+kubelet restart it alone, the operator republish, and the consumer
+recover or evict on its toleration, with the all-devices taint
+standing in the window where the graph is gone.

@@ -1,6 +1,6 @@
 # 02, A closure on scratch
 
-Proposed.
+Built, and drilled on liken-1 on 2026-08-17.
 
 This plan answers the open problem "The image is still Debian", and
 this document replaces it.
@@ -94,11 +94,16 @@ by name.
   baggage libraries cost a few megabytes; owning a PipeWire build
   costs every future upgrade.
 
-## The drill
+## What the drill showed
 
-The drill runs on liken-1. It must show the new image serving the
-same graph the Debian image serves: the movie's audio playing
-through the claimed sink, the slice unchanged in shape, and
-`kubectl exec` still able to run `pw-dump`. It must record the image
-size beside the old image's, and the release gate must have passed
-on the release that shipped it.
+The drill ran on liken-1 on 2026-08-17, against the release built
+from this closure. The image is 36.4 MB against the Debian image's
+163.4 MB, a 4.5x reduction. The release gate passed on the release
+that shipped it, and a negative control during development proved the
+gate: an image built with `/usr/share/wireplumber` deleted failed it.
+
+The new image serves the same graph the Debian image serves. The
+slice came back identical in shape, `kubectl exec` runs `pw-dump`,
+and the movie's audio plays through the claimed sink. Not one file
+was missing from the closure: the one defect the drill surfaced was
+a permissions policy, recorded in plan 03, not an absent load.
