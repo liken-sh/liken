@@ -1,0 +1,37 @@
+# Plans
+
+This directory holds the operator's design documents. Each one is
+numbered in sequence and keeps its number for life.
+
+The form follows liken's own `plans/`. A document states a problem,
+states the design that answers it, and states what was considered and
+set aside. It separates what was measured from what was only read, and
+it names where the measurement ran.
+
+The pattern these documents build on lives in liken's repository:
+[milestone 56, device operators](https://github.com/liken-sh/liken/blob/main/plans/56-device-operators.md),
+and this operator's own instance,
+[milestone 57](https://github.com/liken-sh/liken/blob/main/plans/57-the-display-operator.md).
+
+The [README](../README.md) says how to deploy the operator and how to
+claim an output. These documents say why it is built the way it is.
+
+## Designs
+
+* [01, The compositor image](01-the-compositor-image.md). Built. The
+  image is a library closure on scratch, and the pod runs one
+  container.
+
+## Open problems
+
+[`open-problems/`](open-problems/) holds the questions this operator
+owes an answer to. Those documents carry no number, because nobody has
+decided yet what work they become.
+
+* [Routing is narrower than inventory](open-problems/routing-is-narrower-than-inventory.md).
+  Every connector publishes as a device, and only the connectors that
+  had a monitor at startup have an output in the compositor's
+  configuration.
+* [The library closure carries loads that `ldd` cannot see](open-problems/loads-that-ldd-cannot-see.md).
+  Four kinds of load and four data paths were added by hand, and
+  nothing in the build finds the next one.

@@ -37,7 +37,7 @@ lib=$(dirname "$(dpkg -L libweston-14-0 | grep '/libweston-14$')")
 #                     radeonsi_dri.so on AMD.
 #
 # The DRI names are all symlinks to one libdril_dri.so, so the whole
-# set costs one file plus fourteen links, and the image runs on any
+# set costs one file plus thirteen links, and the image runs on any
 # card mesa supports rather than on the card this was built for.
 #
 # wayland-info is the one program here that the compositor does not
