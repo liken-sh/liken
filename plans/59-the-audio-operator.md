@@ -352,9 +352,11 @@ session is a connection to a daemon, and the daemon restarting ends it.
 
 ## A monitor that leaves
 
-A monitor that somebody unplugs takes its HDMI output's sink with it,
-and that is milestone 56's loss case with nothing new in it. The device
-stays published, the operator applies a `NoExecute` taint to it, the
+A monitor that somebody unplugs leaves its HDMI output with a sink it
+cannot play through, and that is milestone 56's loss case with nothing
+new in it. The sink node stays, because the operator declares it from
+the card's PCM devices and not from the cables. The device stays
+published, the operator applies a `NoExecute` taint to it, the
 taint-eviction controller ends the consumer pod, and
 `tolerationSeconds` on the claim sets how long an output may be silent
 first. A monitor coming back clears the taint.
