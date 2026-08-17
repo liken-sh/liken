@@ -112,9 +112,12 @@ func controllersFrom(objects map[dbus.ObjectPath]map[string]map[string]dbus.Vari
 
 // watchBlueZ returns a channel that reports whenever the paired set
 // or a connection state may have changed. Three signals cover it:
-// InterfacesAdded for a new pairing, InterfacesRemoved for an
-// unpairing, and PropertiesChanged on a device object for a connect
-// or a disconnect.
+// InterfacesAdded when bluetoothd creates a device object, which is at
+// discovery and not at pairing, InterfacesRemoved for an unpairing, and
+// PropertiesChanged on a device object for a connect, a disconnect, or
+// the Bonded property a completed pairing sets. Each one starts a pass
+// that re-reads the whole tree and keeps the paired devices, so a
+// signal that names no pairing costs a read and changes nothing.
 //
 // The channel is buffered and a full channel drops the signal, for
 // the same reason the uevent channel does: the reader re-reads the
