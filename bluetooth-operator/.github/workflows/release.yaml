@@ -11,9 +11,25 @@
 # was cut.
 name: release
 
+# The filter is a deny-list, not an allow-list, because the Go sources
+# sit at the top level beside the packages and a new package is an
+# ordinary new directory. An allow-list would have to name every one of
+# them, and the day somebody adds a directory it does not name, the push
+# that adds it ships no image and says nothing. A deny-list fails the
+# other way: a file nobody thought about cuts a release that changes no
+# bytes, which costs a version number.
+#
+# Everything not listed here is a build input, including `deploy/`. That
+# directory builds no image, and the release tags the commit, so the tag
+# is what a consumer pins to when it references the kustomize base.
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'plans/**'
+      - 'README.md'
+      - 'LICENSE'
+      - '.gitignore'
 
 permissions:
   contents: write
