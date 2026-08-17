@@ -39,13 +39,24 @@ type pcmAddress struct {
 	PCM  int
 }
 
-// The property keys that carry a sink's ALSA address. The first pair
-// is what the card profile code puts on a node it creates from a
-// profile, and the second pair is what the ALSA plugin puts on a node
-// that opens a PCM device directly, as the Pro Audio profile does.
+// The property keys that carry a sink's ALSA address, in the order
+// this operator reads them.
+//
+// The first key of each list is the one the operator writes itself,
+// which is the only pair it can rely on: it declares every sink node
+// in a configuration drop-in (see nodes.go), and a declared node
+// carries no alsa.card and no alsa.device, because those two come from
+// the udev device that WirePlumber's ALSA monitor builds and this
+// graph has no monitor in it.
+//
+// The rest are kept so that a sink from any other source still maps.
+// alsa.card and alsa.device are what the card profile code puts on a
+// node it creates from a profile, and the api.alsa.pcm pair is what
+// the ALSA plugin puts on a node that opens a PCM device directly, as
+// the Pro Audio profile does.
 var (
-	sinkCardKeys = []string{"alsa.card", "api.alsa.pcm.card", "api.alsa.card"}
-	sinkPCMKeys  = []string{"alsa.device", "api.alsa.pcm.device"}
+	sinkCardKeys = []string{nodeCardProperty, "alsa.card", "api.alsa.pcm.card", "api.alsa.card"}
+	sinkPCMKeys  = []string{nodePCMProperty, "alsa.device", "api.alsa.pcm.device"}
 )
 
 // pwObject is the part of pw-dump's output this operator reads. Every

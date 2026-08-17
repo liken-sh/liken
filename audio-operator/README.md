@@ -68,6 +68,12 @@ while PipeWire holds a sink for the output, and it is absent when the
 name is longer than the API's 64-character limit on a string
 attribute, because a truncated name would name nothing.
 
+The sink name is `liken.audio.` followed by the device name. This operator
+declares every sink node itself, which the section on finding the card
+explains, so it names them too. A name built from the ALSA address is
+the same at every start on the same card, where the name a session
+manager builds from a card profile is not.
+
     $ kubectl get resourceslice liken-1-audio.liken.sh -o yaml
     spec:
       driver: audio.liken.sh
@@ -84,7 +90,7 @@ attribute, because a truncated name would name nothing.
             monitorName: {string: LG ULTRAWIDE}
             lpcmChannels: {int: 2}
             speakers: {string: FL/FR}
-            sinkName: {string: alsa_output.pci-0000_00_1f.3.hdmi-stereo}
+            sinkName: {string: liken.audio.card0-pcm3}
             monitor.liken.sh/id: {string: gsm-5b09-lg-ultrawide}
         - name: card0-pcm8
           attributes:
@@ -97,7 +103,7 @@ attribute, because a truncated name would name nothing.
             monitorName: {string: DELL U2415}
             lpcmChannels: {int: 2}
             speakers: {string: FL/FR}
-            sinkName: {string: alsa_output.pci-0000_00_1f.3.hdmi-stereo-extra1}
+            sinkName: {string: liken.audio.card0-pcm8}
             monitor.liken.sh/id: {string: del-4071-dell-u2415}
 
 The ELD carries no serial number. The kernel prints every field of the
@@ -352,6 +358,84 @@ card's whole subtree, which is the control node, the PCM nodes, and
 the input nodes of its jacks, and this operator republishes none of
 them, so the two drivers never deliver the same `/dev` path.
 
+## Finding the card with no udev
+
+**This operator declares PipeWire's sink nodes. WirePlumber's ALSA
+monitor is off.**
+
+The monitor enumerates cards through libudev. A liken machine runs no
+udevd, so udev answers with nothing, the monitor builds no device, and
+PipeWire ends up holding a graph with no ALSA node in it on a machine
+whose speakers work. Every output would then publish with the no-sink
+taint and no pod could play.
+
+The operator needs no udev to know the hardware. It already enumerates
+the card's playback PCM devices from the nodes its claim delivers, and
+reads each one's ELD through the ALSA control interface. So before it
+starts the daemons it writes what it found into
+`/etc/pipewire/pipewire.conf.d/60-liken-outputs.conf`, one
+`context.objects` entry for each playback PCM device:
+
+    context.objects = [
+      { "factory": "adapter",
+        "flags": [ "nofail" ],
+        "args": {
+          "factory.name": "api.alsa.pcm.sink",
+          "api.alsa.path": "hw:0,3",
+          "api.alsa.pcm.card": "0",
+          "media.class": "Audio/Sink",
+          "node.name": "liken.audio.card0-pcm3",
+          "node.description": "liken audio output, ALSA card 0 device 3",
+          "audio.channels": "2",
+          "audio.position": "FL,FR",
+          "liken.audio.card": "0",
+          "liken.audio.pcm": "3"
+        }
+      }
+    ]
+
+This is PipeWire's own answer for a setup with no session manager
+finding hardware, which `pipewire-props(7)` states and
+`src/daemon/pipewire.conf.in` carries as a commented example. A
+`context.objects` entry is appended to the daemon's own, because
+PipeWire merges a dictionary section key by key and appends an array
+section. `liken.audio.card` and `liken.audio.pcm` are this operator's
+own properties, and they are what map a node in `pw-dump` back to the
+output the slice publishes: the adapter module hands the whole `args`
+dictionary to the node, and a node's info block carries its whole
+property list, so a key PipeWire does not recognize still arrives in
+the dump.
+
+The monitor is off on every host and not only on a liken machine, so
+this operator builds one graph everywhere from one enumeration.
+WirePlumber stays for the policy: it links each client's stream to the
+sink the client names, which is the whole of what this operator needs
+from a session manager.
+
+**Every playback PCM device is declared, whether a monitor is on it or
+not.** PipeWire reads these declarations once, while it loads its
+configuration, so the set is fixed for the life of the daemon. A set
+that followed the cables would need a PipeWire restart every time
+somebody moved one, and a restart ends every consumer's session. The
+PCM devices a card has are fixed when its driver binds, so a set that
+follows the card never moves.
+
+The taints stay honest under that. An HDMI output with no monitor has a
+sink node now, so it is the ELD and not the missing node that taints
+it, and the ELD is the fact that says whether a monitor is there. The
+`no-sink` taint keeps its own meaning: PipeWire holds no node for this
+PCM device. That is what `nofail` on each object leaves possible. One
+output that cannot be created must not stop the daemon, because every
+other output on the card would lose its sink with it.
+
+**What this gives up.** The card profile path, which is what builds
+sinks from a card's profiles and ports, needs the ALSA monitor. So
+there is no hardware mixer volume, no profile switching, and no port
+availability from the card's own jack detection. Volume is PipeWire's
+software volume, the channel layout is stereo on every output, and jack
+detection is the operator's own, read from the card's input nodes. A
+monitor that accepts more than two channels still gets two.
+
 ## The privilege it takes
 
 None. The pod declares no `hostNetwork`, adds no capability, and drops
@@ -372,12 +456,14 @@ bus and PipeWire's RTKit lookup falls back to it. Nothing outside the
 pod reaches it.
 
 WirePlumber runs the `main-embedded` profile, which is systemwide and
-keeps no state across restarts, with the hardware monitors this
-operator does not own turned off. The operator's domain is the sound
-card its raw claim allocated, so a Bluetooth audio device or a camera
-must not arrive in this graph, and the image states that in
-`config/50-audio-operator.conf` instead of resting on what happens to
-be reachable from the pod.
+keeps no state across restarts, with every hardware monitor turned off.
+The ALSA monitor is off because it finds nothing without udev, which
+the section on finding the card explains. The Bluetooth and camera
+monitors are off because this operator has no claim on what they would
+find: its domain is the sound card its raw claim allocated, so a
+Bluetooth audio device or a camera must not arrive in this graph. The
+image states all of that in `config/50-audio-operator.conf` instead of
+resting on what happens to be reachable from the pod.
 
 Beside those, the pod takes the two hostPath mounts every DRA driver
 takes: the kubelet's plugin registry directory, so the kubelet finds
@@ -431,6 +517,19 @@ nothing in this operator restarts it. That is the same trade the
 display operator makes: the session is a connection to a daemon, and
 the daemon restarting ends it.
 
+**A PCM device that appears or leaves restarts the pod.** PipeWire
+builds its nodes from a document the operator writes before the daemons
+start, so a PCM device that was not there then has no node and cannot
+get one under this PipeWire. Every reconcile pass generates the
+document again and compares. A difference stops the operator, and the
+kubelet's restart declares the new set. The operator does not taint on
+its way out of that one: the restart takes the socket from every
+consumer for a few seconds, and a `NoExecute` taint would evict all of
+them for a gap they survive by reconnecting. This costs one restart for
+a card that arrived or left, and it never fires for a monitor somebody
+plugged in, because a card's PCM devices are fixed when its driver
+binds.
+
 **The published slice survives the restart.** The operator never
 deletes it, not on shutdown and not when it cannot read the card. The
 Node owns it, so the garbage collector removes it when the machine
@@ -464,6 +563,15 @@ status, and the kubelet restarts the set.
   later version could taint it, or publish it only when it is
   occupied, at the cost of a device that appears and disappears with a
   cable.
+* **More than stereo.** Every declared node asks for two channels at
+  `FL,FR`, so a monitor or a receiver that accepts more gets two. The
+  ELD reports the count, and the operator publishes it as
+  `lpcmChannels`, but the ELD is readable only while the cable is in
+  and the declaration is written once at start. A layout taken from the
+  ELD would give one graph when the cable is in at boot and another
+  when somebody plugs it in later. A version that wanted both would
+  have to restart PipeWire on a channel-count change, the way it
+  restarts for a new PCM device.
 * **The identical-monitor tiebreak.** Two monitors of the same model
   share one `monitor.liken.sh/id`, which the pairing section
   describes. Whether the ELD's `port_id` distinguishes them, and

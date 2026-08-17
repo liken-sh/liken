@@ -1,0 +1,60 @@
+[
+  {
+    "id": 32,
+    "type": "PipeWire:Interface:Core",
+    "info": {
+      "props": {
+        "core.name": "pipewire-0"
+      }
+    }
+  },
+  {
+    "id": 46,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "factory.name": "api.alsa.pcm.sink",
+        "media.class": "Audio/Sink",
+        "node.name": "liken.audio.card0-pcm3",
+        "node.description": "liken audio output, ALSA card 0 device 3",
+        "api.alsa.path": "hw:0,3",
+        "api.alsa.pcm.card": "0",
+        "audio.channels": "2",
+        "audio.position": "FL,FR",
+        "liken.audio.card": "0",
+        "liken.audio.pcm": "3",
+        "object.serial": 46
+      }
+    }
+  },
+  {
+    "id": 49,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "factory.name": "api.alsa.pcm.sink",
+        "media.class": "Audio/Sink",
+        "node.name": "liken.audio.card0-pcm0",
+        "node.description": "liken audio output, ALSA card 0 device 0",
+        "api.alsa.path": "hw:0,0",
+        "api.alsa.pcm.card": "0",
+        "audio.channels": "2",
+        "audio.position": "FL,FR",
+        "liken.audio.card": "0",
+        "liken.audio.pcm": "0",
+        "object.serial": 49
+      }
+    }
+  },
+  {
+    "id": 60,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "media.class": "Audio/Sink",
+        "node.name": "auto_null",
+        "node.description": "Dummy Output"
+      }
+    }
+  }
+]

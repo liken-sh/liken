@@ -109,6 +109,25 @@ func main() {
 		fatal("reading node %s: %v", nodeName, err)
 	}
 
+	// The card is enumerated before the daemons start, because PipeWire
+	// reads its configuration once and this operator writes part of it.
+	// WirePlumber's ALSA monitor finds cards through libudev, a liken
+	// machine runs no udevd, and the monitor is off in this image
+	// everywhere for that reason, so the sink nodes exist only because
+	// the drop-in below declares them. See nodes.go.
+	//
+	// An enumeration that fails here declares nothing, which is a
+	// PipeWire with no sink in it, so it ends the process and the
+	// kubelet's restart is the retry.
+	outputs, err := readOutputs()
+	if err != nil {
+		fatal("reading the card's outputs: %v", err)
+	}
+	declared, err := writeNodeConfig(outputs)
+	if err != nil {
+		fatal("declaring the card's outputs to PipeWire: %v", err)
+	}
+
 	died, err := startDaemons(ctx)
 	if err != nil {
 		fatal("starting the sound server: %v", err)
@@ -116,6 +135,13 @@ func main() {
 	if err := waitForPipeWire(ctx, pipewireReadyTimeout); err != nil {
 		fatal("waiting for PipeWire: %v", err)
 	}
+	// PipeWire creates the declared nodes while it loads its
+	// configuration, so they are there as soon as it answers. The wait
+	// costs one graph read in that case, and it covers the case where
+	// they are not: without it the first pass would taint every output,
+	// and a NoExecute taint ends the pods that the previous operator's
+	// prepared claims left running.
+	waitForNodes(ctx, readSinks, outputs, nodeReadyTimeout)
 
 	// The plugin registers with the kubelet only after PipeWire
 	// answers, so the driver appears when it can actually answer a
@@ -138,6 +164,7 @@ func main() {
 		nodeName: nodeName,
 		owner:    owner,
 		sinks:    readSinks,
+		declared: declared,
 	}
 
 	// The first pass runs before any event, because the operator
@@ -207,6 +234,13 @@ type reconciler struct {
 	owner    OwnerReference
 	sinks    func(context.Context) (map[pcmAddress]string, error)
 
+	// declared is the drop-in the operator wrote before it started
+	// PipeWire. PipeWire reads its configuration once, so this is what
+	// the running graph was built from, and a pass that would generate
+	// something else has found a card that no longer matches its own
+	// sound server.
+	declared string
+
 	sinkFailures int
 }
 
@@ -234,6 +268,23 @@ func (r *reconciler) reconcile(ctx context.Context) error {
 	if len(outputs) == 0 {
 		fmt.Fprintf(os.Stderr, "the claimed card has no playback PCM device; publishing nothing\n")
 		return nil
+	}
+	// A PCM device that appeared or left since the daemons started has
+	// no node in the running graph, and PipeWire reads context.objects
+	// only while it loads its configuration, so nothing short of a
+	// restart gives that output a sink. The restart is the repair, and
+	// it is bounded: the drop-in is generated from the card's PCM
+	// devices, which a card fixes when its driver binds, so this is one
+	// restart for a card that arrived or left and never a loop over a
+	// monitor somebody plugged in.
+	//
+	// The outputs are not tainted on the way out. A restart takes the
+	// socket away from every consumer, which the README states, and a
+	// consumer that reconnects finds the new one. Tainting would evict
+	// all of them for a gap they survive.
+	if current := nodeConfig(outputs); current != r.declared {
+		return errors.New("the card's playback PCM devices have changed since PipeWire started, " +
+			"so the new set has no nodes; restarting to declare them")
 	}
 	sinks, err := r.sinks(ctx)
 	if err != nil {

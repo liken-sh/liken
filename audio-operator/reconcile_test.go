@@ -22,11 +22,20 @@ func testReconciler(t *testing.T, api *slicePublishFixture, sinks func(context.C
 	t.Helper()
 	sndDir = deliveredNodes(t, nodes...)
 	specDirectory(t)
+	// The operator declares the card's outputs to PipeWire before it
+	// starts the daemons, and every later pass compares against that
+	// document, so a reconciler starts life agreeing with the card it
+	// was built over.
+	outputs, err := readOutputs()
+	if err != nil {
+		t.Fatal(err)
+	}
 	return &reconciler{
 		client:   testClient(t, api.handler(t)),
 		nodeName: "liken-1",
 		owner:    testOwner(),
 		sinks:    sinks,
+		declared: nodeConfig(outputs),
 	}
 }
 
@@ -136,6 +145,48 @@ func TestReconcilePublishesWhatItReads(t *testing.T) {
 	}
 	if len(devices[1].Taints) != 2 {
 		t.Errorf("the output with no sink carries %+v, want both taints", devices[1].Taints)
+	}
+}
+
+// PipeWire builds its nodes from a document the operator writes once,
+// before the daemons start, so a PCM device that appeared or left has
+// no node and can never get one under this PipeWire. The operator
+// stops, and the kubelet's restart declares the new set.
+func TestReconcileStopsWhenTheCardsPCMDevicesChange(t *testing.T) {
+	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
+	operator := testReconciler(t, api, func(context.Context) (map[pcmAddress]string, error) {
+		return map[pcmAddress]string{{Card: 0, PCM: 0}: sinkNodeName(0, 0)}, nil
+	}, "pcmC0D0p")
+
+	if err := operator.reconcile(context.Background()); err != nil {
+		t.Fatalf("the card it was built over stopped it: %v", err)
+	}
+
+	sndDir = deliveredNodes(t, "pcmC0D0p", "pcmC0D3p")
+	err := operator.reconcile(context.Background())
+	if err == nil {
+		t.Fatal("a new PCM device did not stop the operator")
+	}
+	if !strings.Contains(err.Error(), "changed since PipeWire started") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+// The restart does not taint on its way out. A restart takes the
+// socket from every consumer and gives it back within seconds, and a
+// NoExecute taint would evict all of them for that gap.
+func TestReconcileDoesNotTaintWhenItRestartsForANewPCM(t *testing.T) {
+	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
+	operator := testReconciler(t, api, func(context.Context) (map[pcmAddress]string, error) {
+		return map[pcmAddress]string{{Card: 0, PCM: 0}: sinkNodeName(0, 0)}, nil
+	}, "pcmC0D0p")
+
+	sndDir = deliveredNodes(t, "pcmC0D0p", "pcmC0D3p")
+	if err := operator.reconcile(context.Background()); err == nil {
+		t.Fatal("a new PCM device did not stop the operator")
+	}
+	if len(api.requests) != 0 {
+		t.Errorf("the restart wrote to the API server: %v", api.requests)
 	}
 }
 

@@ -16,11 +16,12 @@ RUN CGO_ENABLED=0 go build -trimpath -o /audio-operator .
 
 FROM debian:stable-slim
 # pipewire-bin carries the daemon and pw-dump, which is how the
-# operator reads the graph. wireplumber selects each card's profile
-# and creates the sinks. dbus is the bus those two look for:
-# WirePlumber's device reservation speaks the system bus, and
-# PipeWire's RTKit lookup falls back to it, so the image carries a bus
-# for them to find.
+# operator reads the graph. The daemon also creates every sink, from
+# the node declarations the operator writes before it starts, because
+# WirePlumber's ALSA monitor needs udev and a liken machine runs no
+# udevd. wireplumber links each client's stream to the sink it names.
+# dbus is the bus those two look for: PipeWire's RTKit lookup falls
+# back to the system bus, so the image carries a bus for it to find.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         dbus \
@@ -31,9 +32,15 @@ RUN apt-get update \
 
 # WirePlumber's profile is baked in, not mounted. It is a requirement
 # of this operator rather than a choice a deployment makes: the pod
-# manages the one sound card its claim allocated, so every other
-# hardware monitor is off. The file says why.
+# manages the one sound card its claim allocated, so every hardware
+# monitor is off, including the ALSA one that finds nothing without
+# udev. The file says why.
 COPY config/50-audio-operator.conf /etc/wireplumber/wireplumber.conf.d/
+#
+# PipeWire's own configuration is not baked in. The operator generates
+# it from the card it claimed and writes it into
+# /etc/pipewire/pipewire.conf.d/ at every start, creating the directory
+# if the image has none.
 
 COPY --from=build /audio-operator /usr/local/bin/audio-operator
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

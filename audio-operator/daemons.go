@@ -3,11 +3,13 @@ package main
 // The daemons the operator runs, and the coupling between their lives
 // and its own.
 //
-// PipeWire owns the card. WirePlumber is its session manager: it
-// selects each card's profile and creates the sinks whose names this
-// operator publishes. Neither belongs in the read-only root that
-// every liken machine boots, so they ship in this image, and the
-// operator starts them as its own children.
+// PipeWire owns the card, and it creates the sinks whose names this
+// operator publishes, from the node declarations the operator writes
+// before it starts them (see nodes.go). WirePlumber is the session
+// manager beside it: it links each client's stream to the sink the
+// client asks for. Neither belongs in the read-only root that every
+// liken machine boots, so they ship in this image, and the operator
+// starts them as its own children.
 //
 // A daemon that dies ends the container with a nonzero status. The
 // operator holds the card's exclusive claim, and PipeWire is what
@@ -20,6 +22,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -44,6 +48,13 @@ const pipewireReadyTimeout = 60 * time.Second
 // has no connection to it until it is, so this one wait polls. Every
 // later read is driven by an event.
 const pipewireReadyInterval = time.Second
+
+// nodeReadyTimeout bounds the wait for the declared sink nodes to
+// appear in the graph. PipeWire creates the objects its configuration
+// declares while it loads that configuration, which is before it
+// serves the socket, so the nodes are there on the first read or they
+// are not coming.
+const nodeReadyTimeout = 15 * time.Second
 
 // startDaemons starts PipeWire and WirePlumber and returns a channel
 // that carries the first one to exit. Nothing is ever sent on that
@@ -74,8 +85,9 @@ func startDaemons(ctx context.Context) (<-chan error, error) {
 // WirePlumber loads the profile this image names, and not its
 // default. main-embedded is systemwide and keeps no state across
 // restarts, which is the shape a pod needs, and the image's
-// configuration turns off the hardware monitors this operator has no
-// claim on. See config/50-audio-operator.conf.
+// configuration turns off every hardware monitor, including the ALSA
+// one that finds nothing without udev. See
+// config/50-audio-operator.conf.
 var daemons = []daemon{
 	{name: "pipewire"},
 	{name: "wireplumber", args: []string{"--profile=main-embedded"}},
@@ -112,6 +124,54 @@ func start(ctx context.Context, d daemon, died chan<- error) error {
 		died <- fmt.Errorf("%s exited: %v", d.name, err)
 	}()
 	return nil
+}
+
+// waitForNodes blocks until every output has a sink in the graph, or
+// until the timeout passes. It reports what it found and never fails.
+//
+// An output whose node PipeWire could not create is a fact the slice
+// carries as the no-sink taint, so the operator publishes it rather
+// than refusing to start. Failing here instead would restart the pod
+// over one PCM device that cannot open, and take the card's working
+// outputs down with it on every attempt.
+func waitForNodes(ctx context.Context, read func(context.Context) (map[pcmAddress]string, error), outputs []alsaOutput, timeout time.Duration) {
+	deadline := time.After(timeout)
+	tick := time.NewTicker(pipewireReadyInterval)
+	defer tick.Stop()
+	var report string
+	for {
+		sinks, err := read(ctx)
+		if err != nil {
+			report = fmt.Sprintf("PipeWire's graph did not read: %v", err)
+		} else {
+			missing := missingNodes(outputs, sinks)
+			if len(missing) == 0 {
+				return
+			}
+			report = "PipeWire holds no sink for " + strings.Join(missing, ", ")
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-deadline:
+			fmt.Fprintf(os.Stderr, "%s after %s; those outputs publish with the no-sink taint\n",
+				report, timeout)
+			return
+		case <-tick.C:
+		}
+	}
+}
+
+// missingNodes names the outputs that have no sink, sorted by name.
+func missingNodes(outputs []alsaOutput, sinks map[pcmAddress]string) []string {
+	var missing []string
+	for _, output := range outputs {
+		if _, has := sinks[pcmAddress{Card: output.Card, PCM: output.PCM}]; !has {
+			missing = append(missing, output.Name())
+		}
+	}
+	slices.Sort(missing)
+	return missing
 }
 
 // waitForPipeWire blocks until PipeWire answers a graph read, or
