@@ -234,3 +234,12 @@ controllers.
   hardware nearby. It is also where milestone 57's drill runs. Whether
   the two share the machine, or this drill moves to a machine with no
   display duties, is undecided.
+* **Bonds follow the pod's ordinal, and adapters do not.** Link keys
+  bind to the adapter's own MAC, and the StatefulSet keys its storage
+  by ordinal. A recreated pod allocates its adapter afresh, so on a
+  fleet with several adapters, ordinal 0 can win a different machine's
+  radio than the one its bonds belong to, and every shuffle re-pairs
+  that machine's controllers. One adapter hides this completely.
+  Nothing in the StatefulSet vocabulary maps a volume to a claim's
+  allocation, so the fix is not known yet. A multi-adapter drill in
+  the QEMU lab is what would size the problem.
