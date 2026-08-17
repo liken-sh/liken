@@ -34,9 +34,6 @@ decided yet what work they become.
 * [The image is still Debian](open-problems/the-image-is-still-debian.md).
   The two sibling operators ship images built from a named set of
   files, and this one installs its daemons from a distribution.
-* [A consumer's image needs PipeWire's client configuration](open-problems/a-consumers-image-needs-pipewires-client-configuration.md).
-  A consumer that carries only `libpipewire-0.3-0` fails before it
-  opens the socket, and nothing this operator publishes says so.
 * [Every sink is declared stereo](open-problems/every-sink-is-declared-stereo.md).
   The operator declares two channels at `FL,FR` on every output, and
   the PipeWire sources say a node declared without a channel count

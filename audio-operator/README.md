@@ -272,6 +272,14 @@ two containers. liken's claim on the controller delivers the card's
 whole subtree, and this operator republishes none of it, so the two
 drivers never deliver the same `/dev` path.
 
+**A consumer's image must carry PipeWire's client configuration.**
+`libpipewire` does not open a client context without
+`/usr/share/pipewire/client.conf`. Debian ships that file in
+`pipewire-bin`, the daemon package, not in the library package
+`libpipewire-0.3-0`. An image that installs the library alone fails
+before it reaches the socket, with `can't load config client.conf: No
+such file or directory`.
+
 ## Finding the card with no udev
 
 **This operator declares PipeWire's sink nodes, and WirePlumber's ALSA
