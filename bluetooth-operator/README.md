@@ -219,8 +219,8 @@ subtree, so the two drivers never deliver the same `/dev` path.
 
 ## The privilege it takes
 
-`hostNetwork` and `NET_ADMIN`, and nothing else. Every other
-capability drops.
+`hostNetwork` and four capabilities, with everything else dropped.
+Each one is what a kernel or daemon check demands.
 
 * **`hostNetwork` is not optional.** `AF_BLUETOOTH` sockets exist only
   in the host's network namespace. A socket call in a pod's own
@@ -232,6 +232,17 @@ capability drops.
   looked like a companion requirement and proved unnecessary, because
   bluetoothd uses the management channel and seqpacket L2CAP sockets,
   not raw HCI, so it stays off.
+* **`NET_BIND_SERVICE` is for the low L2CAP PSMs.** bluetoothd's SDP
+  server binds PSM 1 and its GATT server binds PSM 31, and binding
+  any PSM below 0x1001 takes `CAP_NET_BIND_SERVICE`. Without it,
+  bluetoothd starts, reports `Permission denied` on both binds, and
+  registers no adapter. The first hardware drill found this, because
+  a pod that drops nothing keeps the capability by default and hides
+  the requirement.
+* **`SETUID` and `SETGID` are for dbus-daemon.** The bus daemon drops
+  to its messagebus user at start, and the drop itself takes both.
+  Without them the forking parent exits 0 while the bus dies, which
+  is why the entrypoint also waits for the socket.
 * **`hostUsers: true`.** The kernel delivers uevents to the initial
   user namespace only. A pod in its own user namespace receives an
   empty stream with no error to read, and no controller would ever

@@ -80,12 +80,15 @@ spec:
             # CAP_NET_ADMIN. NET_RAW looked like a companion
             # requirement and proved unnecessary, because bluetoothd
             # uses the management channel and seqpacket L2CAP sockets,
-            # not raw HCI, so it stays off. dbus-daemon drops to its
-            # messagebus user at start, and the drop itself takes
-            # CAP_SETUID and CAP_SETGID. Everything else drops.
+            # not raw HCI, so it stays off. NET_BIND_SERVICE is for
+            # bluetoothd's SDP and GATT servers, which bind L2CAP
+            # PSMs 1 and 31, both below the kernel's 0x1001 privilege
+            # line. dbus-daemon drops to its messagebus user at
+            # start, and the drop itself takes CAP_SETUID and
+            # CAP_SETGID. Everything else drops.
             capabilities:
               drop: ["ALL"]
-              add: ["NET_ADMIN", "SETUID", "SETGID"]
+              add: ["NET_ADMIN", "NET_BIND_SERVICE", "SETUID", "SETGID"]
             privileged: false
             allowPrivilegeEscalation: false
           resources:
