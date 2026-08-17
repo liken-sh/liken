@@ -1,12 +1,11 @@
-# The operator itself: one pod for one graphics card, and the claim
-# that places it.
+# The operator itself: one pod per node, each taking the one graphics
+# card on its node, and the claim that gates it.
 ---
 # The card's two nodes, in one claim with one request each. A template
-# rather than a plain claim, so each replica allocates a distinct card:
-# raise replicas below to the number of graphics cards in the cluster,
-# and the scheduler spreads the pods to wherever the monitors are. A
-# replica past that number parks Pending and costs nothing. Nobody
-# writes down which machine has the screens.
+# rather than a plain claim, so each pod of the DaemonSet allocates the
+# card on its own node. A node with no graphics card offers no matching
+# device, so the claim parks that pod Pending, and it costs nothing.
+# Nobody writes down which machine has the screens.
 #
 # The card node allocates once, which is what makes this pod the only
 # program setting a mode on it. The render node is shareable, so
@@ -28,20 +27,23 @@ spec:
             deviceClassName: display-render
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: DaemonSet
 metadata:
   name: display-operator
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: display-operator
-  # Recreate, never a rolling update. The card node allocates to one
-  # claim, so a rolling update's second pod would park Pending until
-  # the first one released the card, and the update would never finish.
-  # Recreate stops the old pod first.
-  strategy:
-    type: Recreate
+  # The card node allocates to one claim, so the old pod on a node must
+  # release the card before the new pod takes it. maxSurge: 0 keeps the
+  # new pod from starting until the old pod on that node stops, so two
+  # pods never hold one card at once. maxUnavailable: 1 rolls the nodes
+  # one at a time.
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   template:
     metadata:
       labels:

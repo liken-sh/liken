@@ -43,3 +43,6 @@ decided yet what work they become.
   The image is already on scratch, and 68% of it is LLVM and the
   libraries only LLVM needs, because Debian builds mesa with llvmpipe
   and no liken machine runs llvmpipe.
+* [The compositor drives one card](open-problems/the-compositor-drives-one-card.md).
+  One Weston binds one DRM device, so a node with two graphics cards
+  serves only the card the claim took.

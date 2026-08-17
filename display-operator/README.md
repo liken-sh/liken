@@ -99,11 +99,11 @@ so a constraint is satisfied by either pairing.
 Or reference `deploy/` from your own GitOps. The base assumes the
 namespace `liken-system` exists.
 
-Nothing states which machine has the monitors. The pod claims the
-card's display device, only a machine with a graphics card publishes
-one, and the scheduler places the pod there. To serve more than one
-card, raise `replicas` to the number of cards; a replica past that
-parks Pending and costs nothing.
+The operator runs as a DaemonSet, so a pod lands on every node and
+nobody states which machine has the monitors. Each pod claims the card
+on its node. A node with no graphics card publishes no matching
+device, so the claim parks that pod Pending, and it costs nothing. A
+node with more than one card serves only the card the claim took.
 
 The base ships three DeviceClasses. `display-gpu` and `display-render`
 are the raw devices the operator claims from liken; `display-output` is
@@ -261,7 +261,7 @@ prepared device nodes survive it.
 Two, from one `Dockerfile`. `ghcr.io/liken-sh/weston` is the compositor
 and every library it loads, on nothing else.
 `ghcr.io/liken-sh/display-operator` is that image plus the operator's
-static binary, and it is the image the Deployment runs. The second
+static binary, and it is the image the DaemonSet runs. The second
 builds **from** the first, so the compositor the release tests is the
 same bytes the pod runs, and the two share every layer.
 

@@ -107,13 +107,13 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// The Deployment gives the pod its node's name through the
-	// downward API. A ResourceSlice names the node whose hardware it
-	// describes, and a pod cannot read that from anywhere else without
-	// asking the API server which node it is on.
+	// The DaemonSet gives the pod its node's name through the downward
+	// API. A ResourceSlice names the node whose hardware it describes,
+	// and a pod cannot read that from anywhere else without asking the
+	// API server which node it is on.
 	nodeName := os.Getenv("NODE_NAME")
 	if nodeName == "" {
-		fatal("NODE_NAME is unset; the Deployment must supply it from spec.nodeName")
+		fatal("NODE_NAME is unset; the DaemonSet must supply it from spec.nodeName")
 	}
 	socketDir := envOr("SOCKET_DIR", defaultSocketDir)
 	fmt.Printf("%s: operating the monitors on %s\n", DriverName, nodeName)
