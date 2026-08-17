@@ -49,8 +49,17 @@ spec:
 # one, add a selector on the connector or on what the monitor is:
 #
 #     device.attributes["display.liken.sh"].connector == "HDMI-A-1"
+#
+#     has(device.attributes["display.liken.sh"].model) &&
 #     device.attributes["display.liken.sh"].model == "LG HDR WQHD"
+#
+#     has(device.attributes["display.liken.sh"].widthPixels) &&
 #     device.attributes["display.liken.sh"].widthPixels >= 1920
+#
+# model and widthPixels come from the monitor and are absent on an
+# empty connector, so a selector on either one guards it first: a
+# selector that reads a missing attribute fails the whole allocation.
+# connector needs no guard, because every output publishes it.
 #
 # The README has the whole claim, with the toleration a consumer needs.
 # The device's own name is the connector in lowercase, because a device

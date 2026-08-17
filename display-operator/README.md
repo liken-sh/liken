@@ -188,12 +188,18 @@ Name one screen by its connector:
                   tolerationSeconds: 30
 
 Or name the monitor rather than the socket it is plugged into, which is
-the claim that survives somebody moving a cable:
+the claim that survives somebody moving a cable. `model` comes from the
+monitor and is absent on an empty connector, so the selector guards it
+first: a selector that reads a missing attribute fails the whole
+allocation.
 
+    has(device.attributes["display.liken.sh"].model) &&
     device.attributes["display.liken.sh"].model == "LG HDR WQHD"
 
-Or take any output that fits, which is the claim a video player makes:
+Or take any output that fits, which is the claim a video player makes.
+`widthPixels` is also a monitor fact, so it takes the same guard:
 
+    has(device.attributes["display.liken.sh"].widthPixels) &&
     device.attributes["display.liken.sh"].widthPixels >= 1920
 
 Leave out the `selectors` block to claim any output at all.
