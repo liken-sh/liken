@@ -27,10 +27,6 @@ is built the way it is, and what it still owes an answer to.
 owes an answer to. Those documents carry no number, because nobody has
 decided yet what work they become.
 
-* [The ELD carries no serial number](open-problems/the-eld-carries-no-serial-number.md).
-  An audio device names the model of monitor it plays into, and it
-  cannot name the unit, so two identical monitors share one pairing
-  identity.
 * [The image is still Debian](open-problems/the-image-is-still-debian.md).
   The two sibling operators ship images built from a named set of
   files, and this one installs its daemons from a distribution.

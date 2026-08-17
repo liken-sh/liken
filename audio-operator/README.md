@@ -93,8 +93,7 @@ the name is the same at every start on the same card.
             monitor.liken.sh/id: {string: del-4071-dell-u2415}
 
 The ELD carries no serial number, so an audio device says which model
-of monitor it plays into and cannot say which unit. See
-[the ELD carries no serial number](plans/open-problems/the-eld-carries-no-serial-number.md).
+of monitor it plays into and cannot say which unit.
 
 ## The pairing identity
 
@@ -130,8 +129,8 @@ publishing driver's domain, so a bare `monitorName` from each operator
 would be two different names that never match.
 
 Two monitors of one model produce one value, so a constraint is
-satisfied by either pairing. See
-[the ELD carries no serial number](plans/open-problems/the-eld-carries-no-serial-number.md).
+satisfied by either pairing. The ELD offers nothing finer: it has no
+serial number, and i915 leaves its `port_id` field zero.
 
 ## Deploying it
 
@@ -416,11 +415,6 @@ ends the container nonzero, and the kubelet restarts the set.
   into a stereo says nothing about whether the stereo has speakers. No
   signal can prove that sound reaches anyone, so the operator publishes
   the port it can see and a person who wired something claims it.
-* **The identical-monitor tiebreak.** Two monitors of one model share
-  one `monitor.liken.sh/id`. The ELD's `port_id` field could tell the
-  ports apart, but i915 leaves it zero, so no tiebreak candidate
-  stands. See
-  [the ELD carries no serial number](plans/open-problems/the-eld-carries-no-serial-number.md).
 * **Metrics.** The operator prints to stderr and reports state through
   the taints. There is no metrics endpoint.
 
