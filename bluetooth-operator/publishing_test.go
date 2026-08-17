@@ -196,6 +196,98 @@ func TestEnsureDeletesTheSliceWhenTheLastControllerIsUnpaired(t *testing.T) {
 	}
 }
 
+// The next three tests read the line the publisher prints for each
+// outcome. A slice that nobody rewrites and a slice that an operator
+// died and left behind hold the same resourceVersion and the same pool
+// generation, so the log is the only place the two come apart.
+
+func TestEnsureLogsTheSliceItCreated(t *testing.T) {
+	capture := captureSliceLog(t)
+	fixture := &slicePublishFixture{}
+	client := testClient(t, fixture.handler(t))
+
+	// The controller is paired and switched off, so it publishes with
+	// both taints on it.
+	if err := EnsureResourceSlice(client, "liken-1", testOwner(),
+		sliceDevices(map[string]controller{"a0:ab:51:33:b7:12": {}}, nil)); err != nil {
+		t.Fatal(err)
+	}
+	want := "slice: created generation 1, 1 device, 1 tainted: a0-ab-51-33-b7-12 carries " +
+		disconnectedTaint + ", " + noInputNodeTaint
+	if got := capture.only(t); got != want {
+		t.Errorf("line = %q, want %q", got, want)
+	}
+}
+
+func TestEnsureLogsTheSliceItWrote(t *testing.T) {
+	capture := captureSliceLog(t)
+	fixture := &slicePublishFixture{existing: &ResourceSlice{
+		Metadata: ResourceSliceMeta{Name: "liken-1-bluetooth.liken.sh", ResourceVersion: "7"},
+		Spec: ResourceSliceSpec{
+			Driver:   DriverName,
+			NodeName: "liken-1",
+			Pool:     ResourcePool{Name: "liken-1", Generation: 3, ResourceSliceCount: 1},
+			Devices:  []SliceDevice{publishedDevice()},
+		},
+	}}
+	client := testClient(t, fixture.handler(t))
+
+	// The controller went off the air. The device count does not move,
+	// so the taints are the whole event, and they are what evicts the
+	// pod that held the claim.
+	tainted := sliceDevices(map[string]controller{"a0:ab:51:33:b7:12": {}}, nil)
+	if err := EnsureResourceSlice(client, "liken-1", testOwner(), tainted); err != nil {
+		t.Fatal(err)
+	}
+	want := "slice: wrote generation 4, 1 device, 1 tainted: a0-ab-51-33-b7-12 gained " +
+		disconnectedTaint + ", " + noInputNodeTaint
+	if got := capture.only(t); got != want {
+		t.Errorf("line = %q, want %q", got, want)
+	}
+}
+
+func TestEnsureLogsThatNothingMoved(t *testing.T) {
+	capture := captureSliceLog(t)
+	fixture := &slicePublishFixture{existing: &ResourceSlice{
+		Metadata: ResourceSliceMeta{Name: "liken-1-bluetooth.liken.sh", ResourceVersion: "7"},
+		Spec: ResourceSliceSpec{
+			Driver:   DriverName,
+			NodeName: "liken-1",
+			Pool:     ResourcePool{Name: "liken-1", Generation: 3, ResourceSliceCount: 1},
+			Devices:  []SliceDevice{publishedDevice()},
+		},
+	}}
+	client := testClient(t, fixture.handler(t))
+
+	if err := EnsureResourceSlice(client, "liken-1", testOwner(), []SliceDevice{publishedDevice()}); err != nil {
+		t.Fatal(err)
+	}
+	if fixture.updated != nil {
+		t.Fatalf("a steady machine wrote to the API: %v", fixture.requests)
+	}
+	want := "slice: unchanged at generation 3, 1 device, 0 tainted (1 pass)"
+	if got := capture.only(t); got != want {
+		t.Errorf("line = %q, want %q", got, want)
+	}
+}
+
+func TestEnsureLogsTheSliceItDeleted(t *testing.T) {
+	capture := captureSliceLog(t)
+	fixture := &slicePublishFixture{existing: &ResourceSlice{
+		Metadata: ResourceSliceMeta{Name: "liken-1-bluetooth.liken.sh"},
+		Spec:     ResourceSliceSpec{Devices: []SliceDevice{publishedDevice()}},
+	}}
+	client := testClient(t, fixture.handler(t))
+
+	if err := EnsureResourceSlice(client, "liken-1", testOwner(), nil); err != nil {
+		t.Fatal(err)
+	}
+	want := "slice: deleted, the last paired controller is gone"
+	if got := capture.only(t); got != want {
+		t.Errorf("line = %q, want %q", got, want)
+	}
+}
+
 // TestReconcileNeverPublishesWithoutAnAdapter is the regression test
 // for the empty answer that is not an empty paired set. bluetoothd
 // publishes no device objects in the moments after it starts, and it

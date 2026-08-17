@@ -303,24 +303,38 @@ func EnsureResourceSlice(c *Client, nodeName string, owner OwnerReference, devic
 		if err != nil {
 			return err
 		}
-		return c.RequestJSON(http.MethodPost, ResourceSlicesPath, body, nil)
+		if err := c.RequestJSON(http.MethodPost, ResourceSlicesPath, body, nil); err != nil {
+			return err
+		}
+		sliceLog.created(1, devices)
+		return nil
 	}
 	if err != nil {
 		return err
 	}
 
 	if len(devices) == 0 {
-		return DeleteResourceSlice(c, nodeName)
-	}
-	if sameDevices(current.Spec.Devices, devices) {
+		if err := DeleteResourceSlice(c, nodeName); err != nil {
+			return err
+		}
+		sliceLog.deletedSlice()
 		return nil
 	}
+	if sameDevices(current.Spec.Devices, devices) {
+		sliceLog.unchangedSlice(current.Spec.Pool.Generation, devices)
+		return nil
+	}
+
+	// The published devices are read before the assignment overwrites
+	// them, because they are one half of what the line says changed.
+	published := current.Spec.Devices
+	generation := current.Spec.Pool.Generation + 1
 
 	current.Spec.NodeName = nodeName
 	current.Spec.Driver = DriverName
 	current.Spec.Pool = ResourcePool{
 		Name:               nodeName,
-		Generation:         current.Spec.Pool.Generation + 1,
+		Generation:         generation,
 		ResourceSliceCount: 1,
 	}
 	current.Spec.Devices = devices
@@ -328,7 +342,11 @@ func EnsureResourceSlice(c *Client, nodeName string, owner OwnerReference, devic
 	if err != nil {
 		return err
 	}
-	return c.RequestJSON(http.MethodPut, path, body, nil)
+	if err := c.RequestJSON(http.MethodPut, path, body, nil); err != nil {
+		return err
+	}
+	sliceLog.wrote(generation, published, devices)
+	return nil
 }
 
 // DeleteResourceSlice removes this operator's whole offer. The
