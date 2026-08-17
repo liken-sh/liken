@@ -81,11 +81,18 @@ base assumes the namespace `liken-system` exists.
 
 Nothing states which machine has the radio. The operator's pod claims
 the adapter, only a machine with an adapter publishes one, and the
-scheduler puts the pod where the hardware is. To serve more than one
-adapter, raise `replicas` on the StatefulSet to the number of
-adapters: each replica's claim allocates a distinct one, each replica
-gets its own bonds volume from the `volumeClaimTemplates`, and a
-replica past the number of adapters parks Pending and costs nothing.
+scheduler puts the pod where the hardware is. To serve the adapters on
+several machines, raise `replicas` on the StatefulSet to the number of
+machines: each replica's claim allocates a distinct adapter, each
+replica gets its own bonds volume from the `volumeClaimTemplates`, and
+a replica past that number parks Pending and costs nothing.
+
+Two replicas on one machine is a different case, and this operator
+does not serve it. Both would write the same ResourceSlice, because
+the slice is named for the node and the driver, and each write would
+replace the other's devices. Discovery would collide as well, because
+it reads every Bluetooth device on the HID bus without asking which
+adapter carries it. A machine with two adapters therefore serves one.
 
 Two DeviceClasses come with the base. `bluetooth-adapter` is the raw
 device the operator claims from liken, selected by its driver:

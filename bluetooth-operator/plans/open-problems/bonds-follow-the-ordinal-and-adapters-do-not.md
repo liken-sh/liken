@@ -63,3 +63,11 @@ guess.
 This is recorded in liken's
 [milestone 58](https://github.com/liken-sh/liken/blob/main/plans/58-the-bluetooth-operator.md)
 as well. It belongs here, with the operator that has the StatefulSet.
+
+Two adapters on one machine hit a second problem that this one does not
+cause. `sliceName` names the ResourceSlice for the node and the driver
+alone, so two replicas on the same machine write to the same object and
+each pass removes the other's devices. The audio operator has the same
+naming and the same collision, and its
+[The claim takes any sound card, and a node serves only one](https://github.com/liken-sh/audio-operator/blob/main/plans/open-problems/the-claim-takes-any-sound-card-and-a-node-serves-only-one.md)
+works it through for both operators.
