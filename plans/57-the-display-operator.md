@@ -144,10 +144,21 @@ pod, and `tolerationSeconds` on the claim sets how long a monitor may
 be dark before that happens. A monitor coming back clears the
 taint, and the scheduler starts the client again.
 
-The compositor's own hotplug is what the operator listens to. Weston
-reports output creation and destruction, so the operator reacts to the
-event rather than re-reading state on a timer, and it settles a burst
-before it writes a slice, for the reason milestone 56 gives.
+The kernel's own hotplug is what the operator listens to. A connector
+change is a drm uevent, so the operator re-reads the connector's
+sysfs state on the event rather than on a timer, and it settles a
+burst before it writes a slice, for the reason milestone 56 gives.
+Weston's view is not consulted, because sysfs carries the same fact
+without coupling the inventory to the compositor's IPC.
+
+The compositor's routing is narrower than the inventory. The operator
+writes `weston.ini` once, at its own start, so a connector that was
+dark then has no routing section while the operator runs. Such a
+connector publishes with the `NoSchedule` taint even after a monitor
+arrives on it, because a client whose app-id matches no section lands
+on the first output, on top of that output's rightful client. The
+claim parks instead, and an operator restart is what adopts the new
+connector.
 
 ## What a drill must show
 

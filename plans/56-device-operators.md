@@ -176,6 +176,16 @@ machinery that already runs:
 * A return clears the taint, and the scheduler places the consumer
   again.
 
+The loss is two taints with different keys, not one. The `NoExecute`
+taint is the one above, which the workload tolerates for its
+debounce. A `NoSchedule` taint with its own key goes on whenever the
+device cannot deliver, and nothing tolerates it, because the
+allocator treats a tolerated taint as allocatable: with one taint,
+a claim on an absent device allocates, the prepare call fails, the
+eviction ends the pod, and the workload loops through schedule and
+evict forever. The untolerated `NoSchedule` parks the claim as
+Unschedulable instead, which is the wait a person can see.
+
 ## A pod is one session
 
 The unit of consumption is one pod for one session. This is a limit in
