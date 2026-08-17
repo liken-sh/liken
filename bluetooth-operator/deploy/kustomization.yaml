@@ -33,3 +33,5 @@ images:
     newTag: latest
   - name: ghcr.io/liken-sh/bluetoothd
     newTag: latest
+  - name: ghcr.io/liken-sh/bluetooth-bondfetch
+    newTag: latest

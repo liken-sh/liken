@@ -28,6 +28,8 @@ import (
 	"time"
 
 	"github.com/godbus/dbus/v5"
+
+	"github.com/liken-sh/bluetooth-operator/bonds"
 )
 
 const (
@@ -110,14 +112,81 @@ func controllersFrom(objects map[dbus.ObjectPath]map[string]map[string]dbus.Vari
 	return controllers, nil
 }
 
-// watchBlueZ returns a channel that reports whenever the paired set
-// or a connection state may have changed. Three signals cover it:
-// InterfacesAdded when bluetoothd creates a device object, which is at
-// discovery and not at pairing, InterfacesRemoved for an unpairing, and
-// PropertiesChanged on a device object for a connect, a disconnect, or
-// the Bonded property a completed pairing sets. Each one starts a pass
-// that re-reads the whole tree and keeps the paired devices, so a
-// signal that names no pairing costs a read and changes nothing.
+// adapterAddress reads the address of the adapter bluetoothd holds.
+//
+// The address names the Secret that carries this adapter's bonds, so
+// the operator has to know it before it can write one. It comes from
+// org.bluez.Adapter1 and not from the kernel's HCIGETDEVINFO ioctl
+// that bondfetch uses, because the operator already talks to
+// bluetoothd and bluetoothd answers with the adapter it registered,
+// which is the adapter whose tree these containers share. bondfetch
+// has no such source: it runs before bluetoothd, so the kernel is the
+// only place the address is.
+func adapterAddress(conn *dbus.Conn) (bonds.Address, error) {
+	var objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant
+	err := conn.Object(bluezService, "/").
+		Call("org.freedesktop.DBus.ObjectManager.GetManagedObjects", 0).
+		Store(&objects)
+	if err != nil {
+		return bonds.Address{}, fmt.Errorf("reading BlueZ's managed objects: %w", err)
+	}
+	return adapterAddressFrom(objects)
+}
+
+// adapterAddressFrom picks the adapter out of one managed-object tree.
+// It is separate from the call for the same reason controllersFrom is:
+// the rules below are testable without a bus.
+//
+// An answer with no adapter is ErrNoAdapter, the same as the paired
+// set's read, because it arrives in the same two cases: bluetoothd has
+// not published its object tree yet, or the adapter has gone away.
+//
+// A pod claims one adapter, so a second one is not expected. This
+// takes the adapter at the lowest object path, so that two reads of
+// the same tree answer with the same adapter. A map's iteration order
+// alone would not give that.
+func adapterAddressFrom(objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant) (bonds.Address, error) {
+	chosen, address := "", ""
+	for path, interfaces := range objects {
+		properties, ok := interfaces[adapterInterface]
+		if !ok {
+			continue
+		}
+		if chosen != "" && string(path) >= chosen {
+			continue
+		}
+		chosen = string(path)
+		address, _ = properties["Address"].Value().(string)
+	}
+	if chosen == "" {
+		return bonds.Address{}, ErrNoAdapter
+	}
+	parsed, err := bonds.ParseAddress(address)
+	if err != nil {
+		return bonds.Address{}, fmt.Errorf("the adapter at %s reports no usable address: %w", chosen, err)
+	}
+	return parsed, nil
+}
+
+// watchBlueZ returns a channel that reports whenever the paired set,
+// a connection state, or the bonds on disk may have changed. Three
+// signals cover it: InterfacesAdded when bluetoothd creates a device
+// object, which is at discovery and not at pairing, InterfacesRemoved
+// for an unpairing, and PropertiesChanged on a device object for a
+// connect, a disconnect, or the Bonded property a completed pairing
+// sets. Each one starts a pass that re-reads the whole tree and keeps
+// the paired devices, so a signal that names no pairing costs a read
+// and changes nothing.
+//
+// The bond store reads the same three signals through the same
+// channel, and it needs each of them. Bonded is the property that says
+// the keys are stored, where Paired is deferred until service
+// discovery finishes and can lag by seconds. InterfacesAdded is not
+// redundant: when bluetoothd creates a device object and bonds it in
+// one iteration of its main loop, GDBus emits no property change for
+// an interface it has not yet published, and only InterfacesAdded
+// fires, carrying Bonded=true. Bonded never returns to false, so a
+// removal arrives as Paired going false or as InterfacesRemoved.
 //
 // The channel is buffered and a full channel drops the signal, for
 // the same reason the uevent channel does: the reader re-reads the

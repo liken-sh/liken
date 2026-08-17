@@ -1,5 +1,5 @@
-# The operator itself: one pod for one adapter, the storage its bonds
-# live on, and the claim that places it.
+# The operator itself: one pod for one adapter, the claim that places
+# it, and the bonds that the pod restores before bluetoothd starts.
 ---
 # The adapter claim. A template rather than a plain claim, so each
 # replica allocates a distinct adapter: raise replicas below to the
@@ -19,20 +19,28 @@ spec:
           exactly:
             deviceClassName: bluetooth-adapter
 ---
-# A StatefulSet, not a Deployment, for the bonds. Each replica holds
-# one adapter and needs its own link keys, and volumeClaimTemplates is
-# what gives each replica a volume of its own. One shared
-# ReadWriteOnce claim would pin every replica to one node, which is
-# the opposite of what the adapter claims are for.
+# A Deployment, because nothing in this pod is storage. The bonds
+# live in a Secret named for the adapter, an init container writes
+# them into an emptyDir, and the pod claims no volume that outlives
+# it. The one thing a StatefulSet adds is a volume for each replica,
+# and such a volume is keyed by the replica's ordinal, while a link
+# key belongs to an adapter's address.
 #
-# It also gets the update behavior the adapter needs for free. An
-# adapter allocates to one claim, so a second pod holding the same
-# ordinal would park Pending until the first released the radio, and
-# the update would never finish. A StatefulSet update deletes a pod
-# before it creates the replacement, so the radio is always free for
-# the pod that claims it next.
+# Not a DaemonSet either. A DaemonSet places a pod on every machine,
+# including the machines with no Bluetooth adapter, where the pod
+# stays unschedulable for as long as it exists. A Deployment's
+# replicas go to wherever the adapters are, and a replica past the
+# number of adapters parks Pending and costs nothing.
+#
+# Recreate, because an adapter allocates to one claim at a time. A
+# second pod that claimed the same adapter would park Pending until
+# the first released the radio, and a rolling update would never
+# finish. Recreate deletes the old pods before it creates any
+# replacement, so the radio is free for the pod that claims it next.
+# The price is that every adapter in the cluster is down for the
+# length of one update, rather than one adapter at a time.
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   name: bluetooth-operator
 spec:
@@ -40,11 +48,8 @@ spec:
   selector:
     matchLabels:
       app: bluetooth-operator
-  # The replicas are independent: each one claims a different adapter
-  # on a different machine, and none of them waits on another's
-  # storage. Parallel starts them all at once instead of in ordinal
-  # order.
-  podManagementPolicy: Parallel
+  strategy:
+    type: Recreate
   template:
     metadata:
       labels:
@@ -55,8 +60,8 @@ spec:
       # namespace. A socket call in a pod's own namespace fails with
       # EAFNOSUPPORT, and no device node or mount changes that,
       # because the Bluetooth stack's whole control surface is a
-      # socket family. It is a pod-level setting, so both containers
-      # take it.
+      # socket family. It is a pod-level setting, so every container
+      # takes it.
       hostNetwork: true
       # The kernel delivers uevents to the initial user namespace
       # only. A pod in its own user namespace receives an empty
@@ -64,7 +69,59 @@ spec:
       # appear. This is the default, and it is stated because the
       # failure is silent.
       hostUsers: true
+      # The order of these two matters. A plain init container
+      # listed before a sidecar runs to completion before the sidecar
+      # starts. The same container listed after the sidecar runs
+      # beside it, and bluetoothd would read an empty directory,
+      # because BlueZ loads the bonds once at adapter registration and
+      # watches the tree for nothing afterwards. bondfetch therefore
+      # comes first.
       initContainers:
+        # The bonds, restored into the volume that bluetoothd reads.
+        # bondfetch asks the kernel for the address of the adapter
+        # this pod claimed, reads the Secret named for that address,
+        # writes BlueZ's tree, and exits.
+        - name: bondfetch
+          image: ghcr.io/liken-sh/bluetooth-bondfetch:latest
+          env:
+            # The namespace that holds the Secrets. The operator
+            # writes them beside its own pod, and the downward API is
+            # where a pod reads which namespace that is.
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          securityContext:
+            # No capabilities, no root, and no writable root
+            # filesystem. Reading the adapter's address takes none of
+            # the three: it works as uid 65534 with everything
+            # dropped. What it does take is the pod's hostNetwork
+            # above, because the address comes over an AF_BLUETOOTH
+            # socket and those exist only in the initial network
+            # namespace.
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            readOnlyRootFilesystem: true
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+            # The same adapter the bluetoothd container claims. A
+            # plain init container may name a pod's claim, and the
+            # kubelet allocates the claim before that container runs,
+            # so the address is there to read.
+            claims:
+              - name: adapter
+          volumeMounts:
+            - name: bonds
+              mountPath: /var/lib/bluetooth
         # bluetoothd, as a sidecar: an init container that restarts
         # always, which the kubelet starts before the operator and
         # stops after it. Both halves of that order matter. The bus
@@ -131,6 +188,12 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            # The namespace whose Secrets hold the bonds. The same
+            # value bondfetch reads, for the same Secrets.
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             # The same address the bluetoothd container states, for
             # the same socket on the same volume.
             - name: DBUS_SYSTEM_BUS_ADDRESS
@@ -171,6 +234,11 @@ spec:
               mountPath: /var/run/cdi
             - name: bus
               mountPath: /var/run/bluetooth.liken.sh/dbus
+            # The bonds bluetoothd wrote. The operator reads this tree
+            # to carry a new pairing back into the adapter's Secret,
+            # which is the other half of what bondfetch does at start.
+            - name: bonds
+              mountPath: /var/lib/bluetooth
       resourceClaims:
         - name: adapter
           resourceClaimTemplateName: bluetooth-adapter
@@ -201,32 +269,17 @@ spec:
         # runs in this pod and mounts this volume.
         - name: bus
           emptyDir: {}
-  # The link keys and the device cache. This is kilobytes, and it is
-  # the difference between "press the PS button" and "hold Create and
-  # PS and pair again" after every pod restart. A bond that died with
-  # the pod would turn every restart into a re-pairing with a person's
-  # hands on the controller.
-  #
-  # No storageClassName, so the cluster's default class provides it.
-  # ReadWriteOnce is no limit: each volume serves the one replica that
-  # holds the adapter on that machine.
-  #
-  # A StatefulSet keeps these volumes when its pods go, and most
-  # default storage classes bind a volume to the node that first used
-  # it. So if the adapter later moves to a different machine, the
-  # replica that holds it cannot start there and parks Unschedulable
-  # until a person deletes the volume:
-  #
-  #     kubectl delete pvc bonds-bluetooth-operator-0 -n liken-system
-  #
-  # That costs one re-pairing of each controller on that adapter, and
-  # nothing else.
-  volumeClaimTemplates:
-    - metadata:
-        name: bonds
-      spec:
-        accessModes:
-          - ReadWriteOnce
-        resources:
-          requests:
-            storage: 64Mi
+        # The link keys and the device cache, which is kilobytes.
+        # bondfetch fills this directory from the adapter's Secret
+        # before bluetoothd starts, and the operator writes changes
+        # back to the same Secret, so the copy here is a working copy
+        # and it goes when the pod goes.
+        #
+        # The Secret is what survives, and it is named for the
+        # adapter. That is the identity BlueZ files a link key under,
+        # so the bonds follow the radio to whichever machine the
+        # radio moves to. Losing them is the difference between
+        # "press the PS button" and "hold Create and PS and pair
+        # again" after every pod restart.
+        - name: bonds
+          emptyDir: {}

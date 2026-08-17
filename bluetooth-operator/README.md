@@ -17,10 +17,11 @@ ordinary workload. It claims the Bluetooth adapter through an ordinary
 publishes what bluetoothd holds under its own driver name,
 `bluetooth.liken.sh`. The system image carries no BlueZ and no D-Bus.
 
-The pod is two containers from two images. `bluetoothd` carries the
-daemon, its D-Bus bus, and every capability. `bluetooth-operator`
-carries one static binary with no capabilities at all. See
-[The images](#the-images).
+The pod is three containers from three images. `bondfetch` runs first
+and exits: it restores the adapter's bonds from a Secret so that
+bluetoothd finds them. `bluetoothd` carries the daemon, its D-Bus bus,
+and every capability. `bluetooth-operator` carries one static binary
+with no capabilities at all. See [The images](#the-images).
 
 The operator uses no private interface into liken. The raw claim, the
 ResourceSlices it writes, and the CDI files it leaves for the
@@ -82,10 +83,17 @@ base assumes the namespace `liken-system` exists.
 Nothing states which machine has the radio. The operator's pod claims
 the adapter, only a machine with an adapter publishes one, and the
 scheduler puts the pod where the hardware is. To serve the adapters on
-several machines, raise `replicas` on the StatefulSet to the number of
+several machines, raise `replicas` on the Deployment to the number of
 machines: each replica's claim allocates a distinct adapter, each
-replica gets its own bonds volume from the `volumeClaimTemplates`, and
-a replica past that number parks Pending and costs nothing.
+replica restores that adapter's own bonds from that adapter's own
+Secret, and a replica past that number parks Pending and costs
+nothing.
+
+The Deployment updates with `strategy: Recreate`, because an adapter
+allocates to one claim at a time. A second pod that claimed the same
+adapter would park Pending until the first released the radio, and a
+rolling update would never finish. The price is that every adapter is
+down for the length of one update, rather than one adapter at a time.
 
 Two replicas on one machine is a different case, and this operator
 does not serve it. Both would write the same ResourceSlice, because
@@ -115,10 +123,10 @@ BlueZ's `ClassicBondedOnly` rejects that connection, so the pairing
 fails with the setting on. Leaving it off permanently re-opens
 CVE-2023-45866, where anybody in radio range can open an HID channel
 with no bond at all and type into the machine, so it goes back on
-after the pairing. The bonds persist on their volume, so the flip
-costs one restart and nothing else.
+after the pairing. The bonds persist in the adapter's Secret, so the
+flip costs one restart and nothing else.
 
-    kubectl set env statefulset/bluetooth-operator -n liken-system \
+    kubectl set env deployment/bluetooth-operator -n liken-system \
       -c bluetoothd BLUETOOTH_CLASSIC_BONDED_ONLY=false
 
 The variable is read by the `bluetoothd` container, which is where
@@ -129,7 +137,7 @@ recognize as `false`, and a misspelling would open the hole quietly.
 Wait for the pod to restart, then hold **Create** and **PS** together
 until the light bar flashes quickly, and pair:
 
-    kubectl exec -it -n liken-system bluetooth-operator-0 \
+    kubectl exec -it -n liken-system deployment/bluetooth-operator \
       -c bluetoothd -- bluetoothctl
 
     scan on
@@ -142,16 +150,54 @@ until the light bar flashes quickly, and pair:
 `trust` matters. Without it the controller has to be paired again on
 every reconnection.
 
+`deployment/bluetooth-operator` picks one of the Deployment's pods. On
+a cluster with several adapters, name the pod that holds the adapter
+you are pairing to instead.
+
 Then put the setting back:
 
-    kubectl set env statefulset/bluetooth-operator -n liken-system \
+    kubectl set env deployment/bluetooth-operator -n liken-system \
       -c bluetoothd BLUETOOTH_CLASSIC_BONDED_ONLY-
 
-After that, pressing **PS** alone reconnects. The link keys live on
-the `bonds` volume, so they survive a restart of the operator's pod
+After that, pressing **PS** alone reconnects. The link keys live in
+the adapter's Secret, so they survive a restart of the operator's pod
 and a reboot of the machine. `AutoEnable=true` in the bluetoothd
 image's `main.conf` powers the adapter on when bluetoothd starts, so
 nothing in the cluster has to press a button after a reboot.
+
+## Where the bonds live
+
+One Secret for each adapter, in the operator's own namespace, named
+`bluetooth-bonds-<address>`. The address is the adapter's own MAC in
+lowercase with dashes, because a Secret's name has to be a DNS
+subdomain. Each Secret holds one entry for each device paired to that
+adapter: the key is the device's address in the same form, and the
+value is that device's BlueZ `info` file, byte for byte. Nothing here
+parses that file.
+
+    $ kubectl get secret -n liken-system bluetooth-bonds-14-b4-57-91-2f-c8
+    NAME                                TYPE     DATA   AGE
+    bluetooth-bonds-14-b4-57-91-2f-c8   Opaque   2      3d
+
+The adapter's address is the identity BlueZ files a link key under, so
+the Secret carries the same identity the keys do. The `bondfetch` init
+container asks the kernel for the address of the adapter its pod
+claimed, reads that Secret, and writes BlueZ's tree into an `emptyDir`
+at `/var/lib/bluetooth` before bluetoothd starts. The operator reads
+the same tree and writes changes back. Nothing in the pod is storage,
+so a dongle carried to another machine takes its bonds with it: the
+pod that claims it there reads the same Secret by the same name.
+
+BlueZ loads the bonds once, at adapter registration, and watches the
+tree for nothing afterwards. So `bondfetch` has to finish before
+bluetoothd starts, and it does: a plain init container listed before a
+sidecar runs to completion first.
+
+The keys are in the cluster's datastore. Whether that datastore is
+encrypted at rest is a property of the cluster, not of this operator,
+and the operator cannot check it for you. On a cluster with no
+encryption at rest the keys sit there base64-encoded, and any read of
+the datastore or of its backups reads them.
 
 ## Claiming a controller
 
@@ -239,7 +285,8 @@ subtree, so the two drivers never deliver the same `/dev` path.
 
 `hostNetwork` and four capabilities, with everything else dropped. The
 four are all on the `bluetoothd` container. The `operator` container
-drops every capability and adds none.
+drops every capability and adds none. So does `bondfetch`, which also
+runs as uid 65534 with a read-only root filesystem.
 
 Each one is what a kernel or daemon check demands.
 
@@ -270,6 +317,12 @@ Each one is what a kernel or daemon check demands.
   creates the uevent netlink socket with `NL_CFG_F_NONROOT_RECV`, so
   binding group 1 takes no capability, only the initial user
   namespace.
+* **`bondfetch` needs none of them either.** It reads the adapter's
+  address, reads one Secret, and writes files into an `emptyDir`,
+  which works as uid 65534 with every capability dropped and a
+  read-only root filesystem. It does need the pod's `hostNetwork`,
+  for the same reason bluetoothd does: the address comes over an
+  `AF_BLUETOOTH` socket.
 * **`hostUsers: true`.** The kernel delivers uevents to the initial
   user namespace only. A pod in its own user namespace receives an
   empty stream with no error to read, and no controller would ever
@@ -341,8 +394,8 @@ on the way out, because a pod restarts for ordinary reasons such as a
 new image or a node drain, and a slice that left with each restart
 would strand every consumer. The new pod re-registers with the
 kubelet, re-acquires the adapter claim, rewrites its slice, and
-re-prepares whatever the kubelet asks it to. The pairing survives on
-the bonds volume.
+re-prepares whatever the kubelet asks it to. The pairing survives in
+the adapter's Secret, which `bondfetch` restores into the new pod.
 
 **Uninstalling leaves the slice behind, and one command removes it.**
 Deleting the workload stops the operator, and the ResourceSlice stays
@@ -370,6 +423,10 @@ kubelet starts before the operator and stops after it. A pod deletion
 therefore ends the operator first and its exit is clean. Without that
 order, an ordinary deletion would stop bluetoothd first and the
 operator would report that bluetoothd left the bus on its way out.
+`bondfetch` is a plain init container listed before that sidecar, so
+it runs to completion before bluetoothd starts. Listed after it, it
+would run beside bluetoothd and restore the bonds too late to be
+read.
 
 ## Not here yet
 
@@ -390,18 +447,20 @@ operator would report that bluetoothd left the bus on its way out.
 
 ## The images
 
-Two images, one version. They are two halves of one pod, so the
-release builds and tags both from the same commit, and a deployment
-that mixes versions is a pairing nobody tested.
+Three images, one version. They are three parts of one pod, so the
+release builds and tags all of them from the same commit, and a
+deployment that mixes versions is a pairing nobody tested.
 
 | Image | What is in it | Size |
 |---|---|---|
 | `ghcr.io/liken-sh/bluetooth-operator` | one static Go binary | 12 MB |
 | `ghcr.io/liken-sh/bluetoothd` | bluetoothd, bluetoothctl, dbus-daemon, the entrypoint that starts them, and their configuration | 8 MB |
+| `ghcr.io/liken-sh/bluetooth-bondfetch` | the program that restores one adapter's bonds from its Secret | 6 MB |
 
-Both are `FROM scratch`. There is no shell in either one, no package
-manager, and no shared object: `kubectl exec` runs a program in the
-image by name, and `bluetoothctl` is the program pairing needs.
+All three are `FROM scratch`. There
+is no shell in any of them, no package manager, and no shared object:
+`kubectl exec` runs a program in the image by name, and `bluetoothctl`
+is the program pairing needs.
 
 The `bluetoothd` image builds BlueZ and dbus from source and links
 them statically against musl. A distribution's bluetoothd opens six

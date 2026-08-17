@@ -2,7 +2,17 @@
 # more. The pod is powerful on the machine it runs on, because a
 # Bluetooth stack has to be, and correspondingly narrow here: it
 # writes one ResourceSlice, reads the claims the kubelet asks it to
-# prepare, and reads its own Node.
+# prepare, reads its own Node, and reads and writes the Secret that
+# holds its adapter's bonds.
+#
+# One ServiceAccount serves the whole pod. A ServiceAccount is a
+# pod-level field, and the ServiceAccount admission controller mounts
+# the projected token into the init containers as well as the
+# containers, so bondfetch reads its Secret through this identity and
+# there is no second one to give it. The two halves do not need the
+# same verbs, because bondfetch reads a Secret and never writes one.
+# Splitting the verbs would take a second pod, and both halves have
+# to hold the same adapter.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -49,6 +59,44 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
+  name: bluetooth-operator
+subjects:
+  - kind: ServiceAccount
+    name: bluetooth-operator
+    namespace: liken-system
+---
+# The bonds: one Secret for each adapter, holding that adapter's link
+# keys. bondfetch reads it before bluetoothd starts, and the operator
+# creates it at the first pairing and updates it whenever the paired
+# set changes, so the verbs are get, create, and update. No list and
+# no watch, because the pod builds the one name it reads. No delete
+# either: a Secret whose adapter is retired stays in the namespace,
+# and a person removes it.
+#
+# A Role and not a ClusterRole, because these Secrets live in the
+# operator's own namespace alone and a namespaced grant is the
+# narrower of the two. A ClusterRole on secrets would reach every
+# other workload's credentials in every namespace.
+#
+# resourceNames cannot narrow it further. A Secret's name comes from
+# the adapter's address, which the pod asks the kernel for after it
+# claims the adapter, so no name is known when this file is written.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bluetooth-operator
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, create, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bluetooth-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
   name: bluetooth-operator
 subjects:
   - kind: ServiceAccount

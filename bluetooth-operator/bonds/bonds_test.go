@@ -1,0 +1,112 @@
+package bonds
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+// The addresses of the machine this design was measured on: one
+// adapter, one paired controller, and one neighbour's device that
+// BlueZ saw on the air and holds no link key for.
+const (
+	testAdapter   = "04:4A:69:66:92:27"
+	testDevice    = "7C:66:EF:22:E7:80"
+	testNeighbour = "E3:28:E9:23:21:6F"
+)
+
+// address parses a literal that the test itself wrote, so a failure
+// here is a broken test and not a broken input.
+func address(t *testing.T, literal string) Address {
+	t.Helper()
+	parsed, err := ParseAddress(literal)
+	if err != nil {
+		t.Fatalf("ParseAddress(%q): %v", literal, err)
+	}
+	return parsed
+}
+
+// blueZTree builds the storage tree BlueZ writes, as a real machine
+// has it: one paired device with an info file and an empty attributes
+// file, a cache directory holding an entry for the paired device and
+// one for a neighbour's, and the adapter's own settings file.
+func blueZTree(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	adapter := filepath.Join(root, testAdapter)
+
+	write := func(path string, contents string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(adapter, testDevice, "info"), testInfo)
+	write(filepath.Join(adapter, testDevice, "attributes"), "")
+	write(filepath.Join(adapter, "cache", testDevice), "[General]\nName=DualSense\n")
+	write(filepath.Join(adapter, "cache", testNeighbour), "[General]\nName=Somebody's Phone\n")
+	write(filepath.Join(adapter, "settings"), "")
+	return root
+}
+
+// testInfo is one paired device's info file, in BlueZ's own shape.
+// The link key is what makes this file worth a Secret.
+const testInfo = `[LinkKey]
+Key=0123456789ABCDEF0123456789ABCDEF
+Type=4
+PINLength=0
+
+[General]
+Name=DualSense Wireless Controller
+Class=0x002508
+SupportedTechnologies=BR/EDR;
+Trusted=true
+Blocked=false
+Services=00001124-0000-1000-8000-00805f9b34fb;
+`
+
+func TestTreeSame(t *testing.T) {
+	one, two := address(t, testDevice), address(t, testNeighbour)
+	cases := []struct {
+		name string
+		a, b Tree
+		want bool
+	}{
+		{name: "two empty trees", a: Tree{}, b: Tree{}, want: true},
+		{name: "an empty tree and a nil one", a: Tree{}, b: nil, want: true},
+		{
+			name: "the same device with the same info",
+			a:    Tree{one: []byte(testInfo)},
+			b:    Tree{one: []byte(testInfo)},
+			want: true,
+		},
+		{
+			name: "the same device with a rewritten info",
+			a:    Tree{one: []byte(testInfo)},
+			b:    Tree{one: []byte("[LinkKey]\nKey=FF\n")},
+			want: false,
+		},
+		{
+			name: "a device that was paired since",
+			a:    Tree{one: []byte(testInfo)},
+			b:    Tree{one: []byte(testInfo), two: []byte(testInfo)},
+			want: false,
+		},
+		{
+			name: "a device that was unpaired",
+			a:    Tree{one: []byte(testInfo)},
+			b:    Tree{},
+			want: false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.a.Same(c.b); got != c.want {
+				t.Errorf("Same = %v, want %v", got, c.want)
+			}
+		})
+	}
+}

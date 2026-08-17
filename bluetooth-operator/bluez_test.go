@@ -109,6 +109,64 @@ func TestControllersFromWithoutAnAdapter(t *testing.T) {
 	}
 }
 
+func TestAdapterAddressFromReadsTheAdapter(t *testing.T) {
+	objects := managedObjects{}.
+		adapter("/org/bluez/hci0").
+		device("/org/bluez/hci0/dev_A0_AB_51_33_B7_12", map[string]any{
+			"Address": "A0:AB:51:33:B7:12",
+			"Paired":  true,
+		})
+
+	address, err := adapterAddressFrom(objects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The adapter's address names the Secret, and a device's address
+	// never does.
+	if address.Directory() != "00:1A:7D:DA:71:13" {
+		t.Fatalf("address = %s", address)
+	}
+}
+
+func TestAdapterAddressFromWithoutAnAdapter(t *testing.T) {
+	// The same startup window and the same departure that the paired
+	// set reads as ErrNoAdapter.
+	if _, err := adapterAddressFrom(managedObjects{}); err != ErrNoAdapter {
+		t.Fatalf("err = %v, want ErrNoAdapter", err)
+	}
+}
+
+func TestAdapterAddressFromWithTwoAdapters(t *testing.T) {
+	// A pod claims one adapter, so a second one is not expected. The
+	// lowest object path wins, so two reads of the same tree answer
+	// with the same adapter and the bonds go to one Secret.
+	objects := managedObjects{}.adapter("/org/bluez/hci1")
+	objects[dbus.ObjectPath("/org/bluez/hci0")] = map[string]map[string]dbus.Variant{
+		adapterInterface: {"Address": dbus.MakeVariant("14:B4:57:91:2F:C8")},
+	}
+
+	for range 4 {
+		address, err := adapterAddressFrom(objects)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if address.Directory() != "14:B4:57:91:2F:C8" {
+			t.Fatalf("address = %s", address)
+		}
+	}
+}
+
+func TestAdapterAddressFromWithAnUnusableAddress(t *testing.T) {
+	objects := managedObjects{}
+	objects[dbus.ObjectPath("/org/bluez/hci0")] = map[string]map[string]dbus.Variant{
+		adapterInterface: {"Address": dbus.MakeVariant("not-an-address")},
+	}
+
+	if _, err := adapterAddressFrom(objects); err == nil {
+		t.Fatal("an unusable address reported an adapter")
+	}
+}
+
 // nameOwnerChanged builds the bus daemon's report that a name changed
 // hands. An empty owner means the name has no owner now.
 func nameOwnerChanged(name, owner string) *dbus.Signal {

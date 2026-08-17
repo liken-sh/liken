@@ -16,6 +16,9 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY *.go ./
+# The bond storage the operator shares with bondfetch. A wildcard over
+# the root does not reach a directory, so this package is named.
+COPY bonds/ ./bonds/
 # CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
 # static binary with no paths from the build machine in it. -s -w drop
 # the symbol table and the DWARF sections, which is a quarter of the

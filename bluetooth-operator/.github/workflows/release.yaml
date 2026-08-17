@@ -1,9 +1,9 @@
-# Every push to main tests the code, builds both images, and releases
-# them.
+# Every push to main tests the code, builds all three images, and
+# releases them.
 #
-# The two images carry the same version, because they are two halves
-# of one pod and a deployment that mixes versions is a pairing nobody
-# tested.
+# The three images carry the same version, because they are three
+# parts of one pod and a deployment that mixes versions is a
+# combination nobody tested.
 #
 # The version is the date and the run number, which is liken's own
 # scheme: 2026.08.03-002. The two release cadences do not couple, and
@@ -63,6 +63,16 @@ jobs:
           tags: |
             ghcr.io/liken-sh/bluetooth-operator:${{ env.VERSION }}
             ghcr.io/liken-sh/bluetooth-operator:latest
+
+      - name: Build and push bluetooth-bondfetch
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: bondfetch/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/liken-sh/bluetooth-bondfetch:${{ env.VERSION }}
+            ghcr.io/liken-sh/bluetooth-bondfetch:latest
 
       # This one builds BlueZ and dbus from source, so it takes
       # minutes rather than seconds.

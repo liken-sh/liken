@@ -33,6 +33,8 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/liken-sh/bluetooth-operator/bonds"
 )
 
 const (
@@ -97,6 +99,14 @@ func main() {
 	if nodeName == "" {
 		fatal("NODE_NAME is unset; the pod spec must supply it from spec.nodeName")
 	}
+	// The bonds live in one Secret for each adapter, in this pod's own
+	// namespace, and the downward API is where a pod reads which
+	// namespace that is. The same variable names the same Secrets for
+	// bondfetch, which restored them before bluetoothd started.
+	namespace := os.Getenv(namespaceVar)
+	if namespace == "" {
+		fatal("%s is unset; the pod spec must supply it from metadata.namespace", namespaceVar)
+	}
 	fmt.Printf("%s: operating the Bluetooth adapter on %s\n", DriverName, nodeName)
 
 	// Failures during setup end the process deliberately. This code
@@ -156,10 +166,18 @@ func main() {
 	// connected, and a restart must republish what the previous pod
 	// published.
 	publish := &publisher{client: client, nodeName: nodeName, owner: owner}
+	keep := &bondStore{client: client, namespace: namespace, root: bondsRoot()}
 	readPairedSet := func() (map[string]controller, error) { return pairedControllers(conn) }
+	readAdapter := func() (bonds.Address, error) { return adapterAddress(conn) }
 	retryScheduled := false
 	pass := func() {
-		if publish.reconcile(readPairedSet) {
+		// The two halves of a pass are independent, and both run. A
+		// pairing that the slice write failed to publish is still a key
+		// that must reach the API, and a slice that the bonds could not
+		// be written for is still the truth about this node's hardware.
+		published := publish.reconcile(readPairedSet)
+		persisted := keep.persist(readAdapter)
+		if published && persisted {
 			retryScheduled = false
 			return
 		}
