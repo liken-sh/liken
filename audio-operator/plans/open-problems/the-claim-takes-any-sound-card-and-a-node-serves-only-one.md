@@ -135,28 +135,23 @@ ResourceSliceCount: 1}`, and the same read, compare, write in
 would take turns overwriting `liken-1-bluetooth.liken.sh`, in exactly
 the way described above.
 
-It has a second collision that this operator does not have. Its
-discovery walk starts at `/sys/bus/hid/devices` and keeps every HID
-device whose bus type is `0005`, BUS_BLUETOOTH. It does not filter by
-adapter. The comment at the top of `discovery.go` says why, and states
-the assumption the walk rests on: "the operator holds one adapter, so
-every controller it sees is on that adapter". Two replicas on one
-machine break that assumption. Each one would see every controller
-connected to either adapter, and both would publish the same device
-names, because `deviceName` is built from the peer MAC alone.
+It had a second collision that this operator does not have, and it is
+fixed. Its discovery walk kept every Bluetooth HID device and did not
+filter by adapter, so two replicas on one machine each saw every
+controller on either adapter and published the same device names,
+because `deviceName` is built from the peer MAC alone. `discovery.go`
+now filters by `HID_PHYS`, the local adapter address the uevent already
+carries, so a replica keeps only the controllers on the adapter it
+holds. The slice collision above is what remains.
 
-The material for a filter is already in the uevent and thrown away.
-`HID_PHYS` carries the adapter's address. `discovery.go` names the field
-in that same comment and says the program does not use it, and no
-production file in the repository reads it. It appears only in
-`discovery_test.go` fixtures.
-
-That operator's README now states both halves. It tells a person to
+That operator's README states the same limit. It tells a person to
 raise `replicas` to the number of *machines*, and it says plainly that
 two replicas on one machine is a case the operator does not serve,
-naming the slice collision and the discovery collision as the reasons.
-This operator's README does not say the equivalent. Nobody has run two
-adapters, or two sound cards, on one machine.
+naming the slice collision as the reason.
+This operator's README now says the equivalent: it tells a person to
+raise `replicas` to the number of machines and says a machine with two
+sound cards serves only one. Nobody has run two adapters, or two sound
+cards, on one machine.
 
 That operator had a second mismatch of the same shape, over which
 volume a replica mounts, and it is fixed: its bonds moved to a Secret
