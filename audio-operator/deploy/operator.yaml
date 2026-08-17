@@ -56,14 +56,17 @@ spec:
                 fieldRef:
                   fieldPath: spec.nodeName
           securityContext:
-            # The pod needs no privilege at all. Everything it touches
-            # it touches through the device nodes its claim delivers:
-            # the card's control node, its PCM nodes, and the input
-            # nodes of its jacks. PipeWire asks RTKit for a real-time
-            # priority, finds no RTKit in this pod, and runs without
-            # one, so not even SYS_NICE is here.
+            # PipeWire and WirePlumber touch hardware only through the
+            # device nodes their claim delivers: the card's control
+            # node, its PCM nodes, and the input nodes of its jacks.
+            # PipeWire asks RTKit for a real-time priority, finds no
+            # RTKit in this pod, and runs without one, so not even
+            # SYS_NICE is here. dbus-daemon drops to its messagebus
+            # user at start, and the drop itself takes CAP_SETUID and
+            # CAP_SETGID.
             capabilities:
               drop: ["ALL"]
+              add: ["SETUID", "SETGID"]
             privileged: false
             allowPrivilegeEscalation: false
           resources:

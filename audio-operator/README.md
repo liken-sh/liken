@@ -223,11 +223,15 @@ Name one output by its device name:
                   tolerationSeconds: 30
 
 Name it by its monitor instead, and the claim survives a cable that
-moves between the card's outputs:
+moves between the card's outputs. The pairing attribute is present
+only on an HDMI or DisplayPort output whose monitor answers, so the
+selector guards it first: a selector that reads a missing attribute
+fails the whole allocation.
 
     selectors:
       - cel:
           expression: |
+            has(device.attributes["monitor.liken.sh"].id) &&
             device.attributes["monitor.liken.sh"].id == "gsm-5b09-lg-ultrawide"
 
 The attribute map is two levels deep and splits on the domain, so the

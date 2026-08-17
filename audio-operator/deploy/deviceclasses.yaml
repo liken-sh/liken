@@ -36,7 +36,14 @@ spec:
 #
 #     device.attributes["audio.liken.sh"].connectionType == "analog"
 #
+#     has(device.attributes["monitor.liken.sh"].id) &&
 #     device.attributes["monitor.liken.sh"].id == "gsm-5b09-lg-ultrawide"
+#
+# The pairing attribute is present only on an HDMI or DisplayPort
+# output whose monitor answers, so a selector on it guards it first: a
+# selector that reads a missing attribute fails the whole allocation.
+# output and connectionType need no guard, because every output
+# publishes both.
 #
 # A selector reads attributes and never the device's name, because CEL
 # is given device.driver, device.attributes, device.capacity, and
