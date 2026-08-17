@@ -63,12 +63,26 @@ mkdir -p "$BUS_DIR"
 # and it does not create that directory either.
 mkdir -p /run/dbus
 
-# Without --nofork, dbus-daemon returns only after the bus socket
-# accepts connections, so bluetoothd never races it. --address
-# overrides the listen address in the packaged system.conf and leaves
-# every policy rule in it, including the one that lets root own
-# org.bluez.
+# --address overrides the listen address in the packaged system.conf
+# and leaves every policy rule in it, including the one that lets root
+# own org.bluez.
+#
+# dbus-daemon forks to the background by default, and the parent
+# process exits 0 whether the bus came up or not. set -eu never sees a
+# failure here, so this script waits for the socket itself instead of
+# trusting the exit code.
 dbus-daemon --system --address="$DBUS_SYSTEM_BUS_ADDRESS"
+
+SOCKET="${BUS_DIR}/system_bus_socket"
+waited=0
+while [ ! -S "$SOCKET" ]; do
+    if [ "$waited" -ge 20 ]; then
+        echo "dbus-daemon never created $SOCKET" >&2
+        exit 1
+    fi
+    sleep 0.5
+    waited=$((waited + 1))
+done
 
 # -n keeps bluetoothd in the foreground, because it daemonizes by
 # default and a daemonized process gives this script nothing to hold.
