@@ -31,3 +31,7 @@ decided yet what work they become.
 * [Who owns the pairing UX](open-problems/who-owns-the-pairing-ux.md).
   The operator runs bluetoothd, so it is the only layer that can offer
   pairing, and whether it should is not decided.
+* [The restore set is proven for one BR/EDR device](open-problems/the-restore-set-is-proven-for-one-bredr-device.md).
+  The adapter's own `identity` file does not travel, no LE device has
+  been through a restore, and `ReadTree` discards an unreadable bond
+  while failing on an unreadable cache entry.
