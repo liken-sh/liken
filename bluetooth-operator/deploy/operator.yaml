@@ -1,12 +1,13 @@
-# The operator itself: one pod for one adapter, the claim that places
-# it, and the bonds that the pod restores before bluetoothd starts.
+# The operator itself: one pod per node, the claim that runs it only
+# where an adapter is, and the bonds that the pod restores before
+# bluetoothd starts.
 ---
 # The adapter claim. A template rather than a plain claim, so each
-# replica allocates a distinct adapter: raise replicas below to the
-# number of adapters in the cluster, and the scheduler spreads the
-# pods to wherever the radios are. A replica past that number parks
-# Pending and costs nothing. Nobody writes down which machine has the
-# radio.
+# node's pod allocates that node's own adapter. On a node with an
+# adapter the claim matches one device and the pod runs. On a node
+# with none the claim matches zero devices and the pod parks Pending,
+# which is how a DaemonSet runs a pod only where a radio is. Nobody
+# writes down which machine has the radio.
 apiVersion: resource.k8s.io/v1
 kind: ResourceClaimTemplate
 metadata:
@@ -19,37 +20,39 @@ spec:
           exactly:
             deviceClassName: bluetooth-adapter
 ---
-# A Deployment, because nothing in this pod is storage. The bonds
-# live in a Secret named for the adapter, an init container writes
-# them into an emptyDir, and the pod claims no volume that outlives
-# it. The one thing a StatefulSet adds is a volume for each replica,
-# and such a volume is keyed by the replica's ordinal, while a link
-# key belongs to an adapter's address.
+# A DaemonSet, one pod per node. The claim on the pod matches an
+# adapter only on a node that has one, so a pod on a node with no
+# radio parks Pending and costs nothing, and a pod on a node with a
+# radio runs. This takes one adapter per node. Serving more than one
+# adapter on a node is a separate design, because the bonds Secret and
+# the discovery are both scoped to this operator's own adapter.
 #
-# Not a DaemonSet either. A DaemonSet places a pod on every machine,
-# including the machines with no Bluetooth adapter, where the pod
-# stays unschedulable for as long as it exists. A Deployment's
-# replicas go to wherever the adapters are, and a replica past the
-# number of adapters parks Pending and costs nothing.
+# Nothing in this pod is storage, so no StatefulSet. The bonds live in
+# a Secret named for the adapter, an init container writes them into
+# an emptyDir, and the pod claims no volume that outlives it. The one
+# thing a StatefulSet adds is a volume for each pod, and a link key
+# belongs to an adapter's address, not to a pod.
 #
-# Recreate, because an adapter allocates to one claim at a time. A
-# second pod that claimed the same adapter would park Pending until
-# the first released the radio, and a rolling update would never
-# finish. Recreate deletes the old pods before it creates any
-# replacement, so the radio is free for the pod that claims it next.
-# The price is that every adapter in the cluster is down for the
-# length of one update, rather than one adapter at a time.
+# RollingUpdate with maxSurge 0, because an adapter allocates to one
+# claim at a time. A second pod that claimed the same adapter would
+# park Pending until the first released the radio, and an update that
+# started the new pod before the old one stopped would never finish.
+# maxSurge 0 stops the old pod on a node before it starts the new one,
+# so the radio is free for the pod that claims it next. maxUnavailable
+# 1 takes one node down at a time.
 apiVersion: apps/v1
-kind: Deployment
+kind: DaemonSet
 metadata:
   name: bluetooth-operator
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: bluetooth-operator
-  strategy:
-    type: Recreate
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   template:
     metadata:
       labels:

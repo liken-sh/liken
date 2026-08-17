@@ -71,19 +71,19 @@ two questions:
 Or reference `deploy/` from your own GitOps. The base assumes the
 namespace `liken-system` exists.
 
-Nothing states which machine has the radio. The pod claims the adapter,
-only a machine with an adapter publishes one, and the scheduler places
-the pod there. To serve adapters on several machines, raise `replicas`
-to the number of machines: each replica claims a distinct adapter and
-restores that adapter's bonds from that adapter's Secret, and a replica
-past that number parks Pending.
+The operator runs as a DaemonSet, so a pod lands on every node and
+nobody states which machine has the radio. Each pod claims the adapter
+on its node and restores that adapter's bonds from that adapter's
+Secret. A node with no adapter publishes no matching device, so the
+claim parks that pod Pending, and it costs nothing.
 
-The Deployment updates with `strategy: Recreate`, because an adapter
-allocates to one claim at a time; a rolling update would deadlock on
-the second pod waiting for the first to release the radio. A machine
-with two adapters serves only one, because the slice is named for the
-node and the driver, so two replicas on one machine would overwrite
-each other's slice.
+The DaemonSet updates with `RollingUpdate` and `maxSurge: 0`, because
+an adapter allocates to one claim at a time. `maxSurge: 0` stops the
+old pod on a node before it starts the new one, so the new pod does
+not wait forever for the radio, and `maxUnavailable: 1` takes one node
+at a time. A node with two adapters serves only one, because the slice
+is named for the node and the driver, so two pods on one node would
+overwrite each other's slice.
 
 The base ships two DeviceClasses. `bluetooth-adapter` is the raw device
 the operator claims from liken
@@ -104,7 +104,7 @@ range can open an HID channel with no bond and type into the machine,
 so it goes back on after pairing. The bonds persist in the Secret, so
 the flip costs one restart:
 
-    kubectl set env deployment/bluetooth-operator -n liken-system \
+    kubectl set env daemonset/bluetooth-operator -n liken-system \
       -c bluetoothd BLUETOOTH_CLASSIC_BONDED_ONLY=false
 
 The `bluetoothd` container reads the variable. Any value other than
@@ -115,7 +115,7 @@ with no error.
 Wait for the restart, hold **Create** and **PS** until the light bar
 flashes, and pair:
 
-    kubectl exec -it -n liken-system deployment/bluetooth-operator \
+    kubectl exec -it -n liken-system daemonset/bluetooth-operator \
       -c bluetoothd -- bluetoothctl
 
     scan on
@@ -129,7 +129,7 @@ flashes, and pair:
 reconnection. On a cluster with several adapters, exec into the pod
 that holds the adapter you are pairing to. Then put the setting back:
 
-    kubectl set env deployment/bluetooth-operator -n liken-system \
+    kubectl set env daemonset/bluetooth-operator -n liken-system \
       -c bluetoothd BLUETOOTH_CLASSIC_BONDED_ONLY-
 
 After that, **PS** alone reconnects. The link keys live in the Secret,

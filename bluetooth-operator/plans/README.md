@@ -33,3 +33,6 @@ decided yet what work they become.
 * [The restore set is proven for one BR/EDR device](open-problems/the-restore-set-is-proven-for-one-bredr-device.md).
   The adapter's own `identity` file does not travel, and no LE device
   has been through a restore.
+* [The operator serves one adapter](open-problems/the-operator-serves-one-adapter.md).
+  The bond store and controller discovery are written for one adapter,
+  so a node with two adapters serves only the one the claim took.

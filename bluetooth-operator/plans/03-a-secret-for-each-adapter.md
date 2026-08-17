@@ -75,8 +75,8 @@ on no other object, so the storage decision picks the workload shape.
   the same `emptyDir` at `/var/lib/bluetooth`, which it does not mount
   today.
 * **The PVC, the `volumeClaimTemplates`, and the StatefulSet go away.**
-  The workload becomes a Deployment with `strategy: Recreate`, or a
-  DaemonSet. See [The workload shape](#the-workload-shape).
+  The workload becomes a DaemonSet. See
+  [The workload shape](#the-workload-shape).
 
 The Secret carries files and not fields. Nothing in this design parses
 either file, so the layout changes BlueZ has made inside 5.x cost
@@ -403,7 +403,8 @@ and an update that creates before it deletes never finishes. That
 property belongs to the hardware, so it survives this plan intact, and
 whatever replaces the StatefulSet has to delete before it creates.
 
-Two shapes are on the table and the choice is open.
+The operator runs as a DaemonSet. Two other shapes were considered,
+and this section states why each was set aside.
 
 **A Deployment with `strategy: Recreate`.** It deletes every pod before
 it creates any replacement, which satisfies the claim. Kubernetes states
@@ -421,8 +422,9 @@ with the hardware count. Its default update strategy is `RollingUpdate`
 with `maxUnavailable: 1` and `maxSurge: 0`, and Kubernetes states the
 order directly: the update stops the old pods and "then brings up new
 DaemonSet pods in their place". The cost is a pod on every machine that
-has no adapter, which the current shape avoids, because a replica past
-the adapter count parks Pending and costs nothing.
+has no adapter. That pod parks Pending, because its claim matches no
+device, and a drill on liken-1 proved the Pending pod does not crash
+and costs nothing.
 
 A third shape stays on the shelf. A Deployment with `RollingUpdate` and
 `maxSurge: 0` would keep the update per-pod, because `maxSurge` is the
@@ -437,10 +439,9 @@ The Kubernetes behavior above is verified in
 and the
 [DaemonSet API reference](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/daemon-set-v1/).
 
-Whichever shape wins, the README's pairing section names the
-StatefulSet in two `kubectl set env` commands and one
-`kubectl exec bluetooth-operator-0`, and `deploy/operator.yaml` carries
-the `kubectl delete pvc` note. Those change with the workload.
+The README's pairing section names the DaemonSet in its
+`kubectl set env` and `kubectl exec` commands, and `deploy/operator.yaml`
+carries the DaemonSet and its update strategy.
 
 ## This is not the pairing CRD
 
@@ -505,8 +506,6 @@ costs.
   is retired stays in the namespace, and nothing collects it. Nothing
   in this design creates or deletes on behalf of an adapter that has
   left the fleet.
-* **Deployment or DaemonSet.** See
-  [The workload shape](#the-workload-shape).
 * **`attributes` and `ccc` are not stored.** Both are BLE state, and
   `ccc` is written only by the converters that read a BlueZ 4.x tree.
   If `attributes` turns out to matter, a person would see it as a BLE
