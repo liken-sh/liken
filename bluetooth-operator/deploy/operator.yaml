@@ -101,9 +101,14 @@ spec:
             # namespace.
             capabilities:
               drop: ["ALL"]
-            runAsNonRoot: true
-            runAsUser: 65534
-            runAsGroup: 65534
+            # Root, and no capability at all. BlueZ writes its tree as
+            # root at mode 0700, and bluetoothd reads it back as root
+            # with CAP_DAC_OVERRIDE dropped, so it obeys those modes
+            # like any other user. Files this container leaves under a
+            # different owner are files the daemon beside it cannot
+            # read.
+            runAsUser: 0
+            runAsGroup: 0
             readOnlyRootFilesystem: true
             privileged: false
             allowPrivilegeEscalation: false
