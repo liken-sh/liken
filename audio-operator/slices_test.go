@@ -399,6 +399,65 @@ func publishedSlice(devices []SliceDevice, generation int64) *ResourceSlice {
 	}
 }
 
+// The next three tests read the line the publisher prints for each
+// outcome. A slice that nobody rewrites and a slice that an operator
+// died and left behind hold the same resourceVersion and the same pool
+// generation, so the log is the only place the two come apart.
+
+func TestEnsureLogsTheSliceItCreated(t *testing.T) {
+	capture := captureSliceLog(t)
+	api := &slicePublishFixture{}
+	client := testClient(t, api.handler(t))
+
+	// PipeWire holds no node for the output, so it publishes silent.
+	if err := EnsureResourceSlice(client, "liken-1", testOwner(),
+		sliceDevices([]alsaOutput{{Card: 0, PCM: 3}}, nil)); err != nil {
+		t.Fatal(err)
+	}
+	want := "slice: created generation 1, 1 device, 1 tainted: card0-pcm3 carries " +
+		disconnectedTaint + ", " + noSinkTaint
+	if got := capture.only(t); got != want {
+		t.Errorf("line = %q, want %q", got, want)
+	}
+}
+
+func TestEnsureLogsTheSliceItWrote(t *testing.T) {
+	capture := captureSliceLog(t)
+	outputs := []alsaOutput{{Card: 0, PCM: 3}}
+	playing := sliceDevices(outputs, map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.test"})
+	api := &slicePublishFixture{existing: publishedSlice(playing, 3)}
+	client := testClient(t, api.handler(t))
+
+	// PipeWire lost the node. The device count does not move, so the
+	// taints are the whole event, and they are what evicts the pod that
+	// held the claim.
+	if err := EnsureResourceSlice(client, "liken-1", testOwner(), sliceDevices(outputs, nil)); err != nil {
+		t.Fatal(err)
+	}
+	want := "slice: wrote generation 4, 1 device, 1 tainted: card0-pcm3 gained " +
+		disconnectedTaint + ", " + noSinkTaint
+	if got := capture.only(t); got != want {
+		t.Errorf("line = %q, want %q", got, want)
+	}
+}
+
+func TestEnsureLogsThatNothingMoved(t *testing.T) {
+	capture := captureSliceLog(t)
+	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
+	client := testClient(t, api.handler(t))
+
+	if err := EnsureResourceSlice(client, "liken-1", testOwner(), testDevices()); err != nil {
+		t.Fatal(err)
+	}
+	if api.updated != nil {
+		t.Fatalf("an unchanged inventory wrote to the API: %v", api.requests)
+	}
+	want := "slice: unchanged at generation 3, 1 device, 0 tainted (1 pass)"
+	if got := capture.only(t); got != want {
+		t.Errorf("line = %q, want %q", got, want)
+	}
+}
+
 func TestSliceName(t *testing.T) {
 	// The driver name is the suffix, so liken's slice and this
 	// operator's slice can both exist for one node.
