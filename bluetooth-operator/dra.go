@@ -38,6 +38,8 @@ import (
 	healthv1alpha1 "k8s.io/kubelet/pkg/apis/dra-health/v1alpha1"
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
 	regv1 "k8s.io/kubelet/pkg/apis/pluginregistration/v1"
+
+	"github.com/liken-sh/bluetooth-operator/bonds"
 )
 
 // The kubelet's plugin directories. The registry is where the kubelet
@@ -165,8 +167,12 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 
 	// One walk answers every result in the claim, and it is the same
 	// walk that publishes the slice, so the two can never disagree
-	// about which nodes a controller registers.
-	nodes := nodesByMAC(discoverHIDDevices(draSysfsRoot))
+	// about which nodes a controller registers. The walk runs with no
+	// adapter filter. The plugin holds no D-Bus connection and cannot
+	// read the adapter address, and it does not need to: the claim names
+	// controllers that this operator's own slice already published, and
+	// the publish half scoped that slice to this adapter.
+	nodes := nodesByMAC(discoverHIDDevices(draSysfsRoot, bonds.Address{}))
 
 	var specDevices []cdiDevice
 	var devices []*drav1.Device

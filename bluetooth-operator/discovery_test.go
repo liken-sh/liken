@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/liken-sh/bluetooth-operator/bonds"
 )
 
 // fakeHID describes one HID device to build into a fake sysfs tree.
@@ -72,18 +74,33 @@ func writeUevent(t *testing.T, dir string, values map[string]string) {
 }
 
 // dualSense is a DualSense over Bluetooth, as BlueZ 5.73 and later
-// present it: a uhid device with no ancestry to the adapter.
+// present it: a uhid device with no ancestry to the adapter. HID_PHYS
+// is the test adapter, so the device reads as one on the operator's own
+// radio.
 func dualSense(instance string, mac string, nodes ...string) fakeHID {
 	return fakeHID{
 		Dir: "virtual/misc/uhid/0005:054C:0CE6." + instance,
 		Uevent: map[string]string{
 			"HID_ID":   "0005:0000054C:00000CE6",
 			"HID_NAME": "DualSense Wireless Controller",
-			"HID_PHYS": "00:1a:7d:da:71:13",
+			"HID_PHYS": "14:b4:57:91:2f:c8",
 			"HID_UNIQ": mac,
 		},
 		Nodes: nodes,
 	}
+}
+
+// hidOn builds a HID device whose HID_PHYS is the given adapter
+// address. An empty phys removes HID_PHYS, which is the device the
+// filter keeps because it cannot place it on an adapter.
+func hidOn(instance, mac, phys string, nodes ...string) fakeHID {
+	device := dualSense(instance, mac, nodes...)
+	if phys == "" {
+		delete(device.Uevent, "HID_PHYS")
+	} else {
+		device.Uevent["HID_PHYS"] = phys
+	}
+	return device
 }
 
 func TestDiscoverHIDDevicesKeepsBluetoothOnly(t *testing.T) {
@@ -101,7 +118,7 @@ func TestDiscoverHIDDevicesKeepsBluetoothOnly(t *testing.T) {
 		},
 	)
 
-	devices := discoverHIDDevices(root)
+	devices := discoverHIDDevices(root, bonds.Address{})
 	if len(devices) != 1 {
 		t.Fatalf("got %d devices, want 1: %+v", len(devices), devices)
 	}
@@ -120,14 +137,47 @@ func TestDiscoverHIDDevicesKeepsBluetoothOnly(t *testing.T) {
 
 func TestDiscoverHIDDevicesSkipsDeviceWithoutAddress(t *testing.T) {
 	root := fakeSysfs(t, dualSense("0001", "", "input/event5"))
-	if devices := discoverHIDDevices(root); len(devices) != 0 {
+	if devices := discoverHIDDevices(root, bonds.Address{}); len(devices) != 0 {
 		t.Fatalf("got %d devices, want 0: %+v", len(devices), devices)
 	}
 }
 
 func TestDiscoverHIDDevicesWithoutHIDBus(t *testing.T) {
-	if devices := discoverHIDDevices(t.TempDir()); devices != nil {
+	if devices := discoverHIDDevices(t.TempDir(), bonds.Address{}); devices != nil {
 		t.Fatalf("got %+v, want nil", devices)
+	}
+}
+
+// The operator holds one adapter, and a machine with a second adapter
+// registers HID devices on it that belong to another operator. A device
+// whose HID_PHYS names a different adapter is left out. A device with no
+// HID_PHYS, or one that does not parse, is kept, so a single-adapter
+// machine never regresses.
+func TestDiscoverHIDDevicesFiltersByAdapter(t *testing.T) {
+	ours := "14:b4:57:91:2f:c8"
+	adapter, err := bonds.ParseAddress(ours)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		phys string
+		kept bool
+	}{
+		{name: "on this adapter", phys: ours, kept: true},
+		{name: "on this adapter in uppercase", phys: "14:B4:57:91:2F:C8", kept: true},
+		{name: "on another adapter", phys: "aa:bb:cc:dd:ee:ff", kept: false},
+		{name: "no HID_PHYS", phys: "", kept: true},
+		{name: "an unparsable HID_PHYS", phys: "not-an-address", kept: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := fakeSysfs(t, hidOn("0001", "a0:ab:51:33:b7:12", c.phys, "input/event5"))
+			devices := discoverHIDDevices(root, adapter)
+			if kept := len(devices) == 1; kept != c.kept {
+				t.Fatalf("kept = %v, want %v: %+v", kept, c.kept, devices)
+			}
+		})
 	}
 }
 
@@ -138,7 +188,7 @@ func TestNodesByMACMergesOneControllersDevices(t *testing.T) {
 		dualSense("0003", "b4:8c:9d:11:22:33", "input/event7"),
 	)
 
-	nodes := nodesByMAC(discoverHIDDevices(root))
+	nodes := nodesByMAC(discoverHIDDevices(root, bonds.Address{}))
 	if len(nodes) != 2 {
 		t.Fatalf("got %d controllers, want 2: %+v", len(nodes), nodes)
 	}

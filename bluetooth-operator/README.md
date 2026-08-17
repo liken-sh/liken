@@ -82,8 +82,8 @@ The Deployment updates with `strategy: Recreate`, because an adapter
 allocates to one claim at a time; a rolling update would deadlock on
 the second pod waiting for the first to release the radio. A machine
 with two adapters serves only one, because the slice is named for the
-node and the driver and discovery does not ask which adapter carries a
-device.
+node and the driver, so two replicas on one machine would overwrite
+each other's slice.
 
 The base ships two DeviceClasses. `bluetooth-adapter` is the raw device
 the operator claims from liken

@@ -17,9 +17,12 @@ package main
 //
 // HID_UNIQ in the device's uevent file carries the peer MAC address,
 // which is the identity the ResourceSlice publishes. HID_PHYS carries
-// the adapter's address, which this program does not use: the
-// operator holds one adapter, so every controller it sees is on that
-// adapter.
+// the local adapter address the controller connects through, and the
+// walk keeps a device only when HID_PHYS names the adapter this
+// operator holds. A machine with a second adapter registers HID
+// devices on it too, and those belong to another operator. A device
+// with no HID_PHYS, or one that does not parse, is kept, so a
+// single-adapter machine never regresses.
 //
 // The node paths come from DEVNAME, the same way liken's own delivery
 // walk reads them. DEVNAME for an evdev node is input/eventN, so the
@@ -35,6 +38,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/liken-sh/bluetooth-operator/bonds"
 )
 
 // busBluetooth is BUS_BLUETOOTH from the kernel's input.h, as the
@@ -51,15 +56,20 @@ type hidDevice struct {
 	Nodes   []string
 }
 
-// discoverHIDDevices lists every Bluetooth HID device on the machine,
-// with the evdev nodes each one registers. The result is sorted by
-// DevPath, so the same hardware always produces the same list and the
-// slice comparison sees real changes only.
+// discoverHIDDevices lists the Bluetooth HID devices on the operator's
+// own adapter, with the evdev nodes each one registers. The result is
+// sorted by DevPath, so the same hardware always produces the same list
+// and the slice comparison sees real changes only.
+//
+// adapter is the address of the radio this operator holds. A device on
+// another adapter is left out. A zero adapter turns the filter off, so
+// a caller that has no adapter address keeps every device, which is the
+// single-adapter machine's behavior.
 //
 // A HID device with no valid HID_UNIQ is skipped. Bluetooth HID
 // always carries one, and a device without it has no identity that a
 // claim could name.
-func discoverHIDDevices(sysRoot string) []hidDevice {
+func discoverHIDDevices(sysRoot string, adapter bonds.Address) []hidDevice {
 	entries, err := os.ReadDir(filepath.Join(sysRoot, "bus", "hid", "devices"))
 	if err != nil {
 		// No HID bus means no controller has ever connected on this
@@ -84,6 +94,9 @@ func discoverHIDDevices(sysRoot string) []hidDevice {
 		if !validMAC(mac) {
 			continue
 		}
+		if !onOperatorAdapter(values["HID_PHYS"], adapter) {
+			continue
+		}
 		devices = append(devices, hidDevice{
 			MAC:     mac,
 			DevPath: devPath(sysRoot, resolved),
@@ -94,6 +107,24 @@ func discoverHIDDevices(sysRoot string) []hidDevice {
 		return strings.Compare(a.DevPath, b.DevPath)
 	})
 	return devices
+}
+
+// onOperatorAdapter reports whether a HID device's HID_PHYS names the
+// adapter this operator holds. A zero adapter turns the test off, and a
+// HID_PHYS that is absent or does not parse passes it, so the filter
+// only ever removes a device it can place on a different adapter. Both
+// sides parse into a bonds.Address, so the comparison ignores case and
+// the colon or dash form, the same way an address comparison does
+// everywhere else.
+func onOperatorAdapter(phys string, adapter bonds.Address) bool {
+	if adapter.IsZero() {
+		return true
+	}
+	local, err := bonds.ParseAddress(phys)
+	if err != nil {
+		return true
+	}
+	return local == adapter
 }
 
 // nodesByMAC collects the evdev nodes of every HID device, keyed by

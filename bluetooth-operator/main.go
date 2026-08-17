@@ -174,7 +174,7 @@ func main() {
 		// pairing that the slice write failed to publish is still a key
 		// that must reach the API, and a slice that the bonds could not
 		// be written for is still the truth about this node's hardware.
-		published := publish.reconcile(readPairedSet)
+		published := publish.reconcile(readPairedSet, readAdapter)
 		persisted := keep.persist(readAdapter)
 		if published && persisted {
 			retryScheduled = false
@@ -264,6 +264,13 @@ type publisher struct {
 	nodeName string
 	owner    OwnerReference
 	known    map[string]controller
+
+	// adapter is the radio this pod serves. It scopes discovery to the
+	// controllers on this operator's own adapter. It is read from
+	// bluetoothd the first time bluetoothd answers, and then it is fixed
+	// for the life of the process, because a pod serves one adapter and
+	// re-reading it could point the filter at a different radio.
+	adapter bonds.Address
 }
 
 // reconcile makes the published slice and every prepared CDI spec
@@ -274,8 +281,18 @@ type publisher struct {
 // The order matters. The CDI refresh runs first, so that a controller
 // which came back on a different evdev node has a correct spec before
 // the slice says the controller is usable again.
-func (p *publisher) reconcile(readPairedSet pairedSetReader) bool {
-	nodes := nodesByMAC(discoverHIDDevices(draSysfsRoot))
+func (p *publisher) reconcile(readPairedSet pairedSetReader, readAdapter adapterAddressReader) bool {
+	// The adapter address scopes discovery to this operator's own radio.
+	// Until bluetoothd answers, the address stays zero and discovery
+	// keeps every device, which is correct on the single-adapter machine
+	// this runs on and no worse than the pre-filter walk on the startup
+	// window of any machine.
+	if p.adapter.IsZero() {
+		if address, err := readAdapter(); err == nil {
+			p.adapter = address
+		}
+	}
+	nodes := nodesByMAC(discoverHIDDevices(draSysfsRoot, p.adapter))
 	refreshCDISpecs(nodes)
 
 	controllers, err := readPairedSet()

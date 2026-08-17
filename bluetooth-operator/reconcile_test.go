@@ -49,7 +49,7 @@ func TestReconcilePublishesAConnectedController(t *testing.T) {
 	publish, fixture := reconcileFixture(t, "",
 		dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"))
 
-	if !publish.reconcile(pairedSet(connectedController())) {
+	if !publish.reconcile(pairedSet(connectedController()), adapterIs(t)) {
 		t.Fatal("the pass reported a failure")
 	}
 	if fixture.created == nil {
@@ -72,7 +72,7 @@ func TestReconcileNeverDeletesWhenTheAdapterIsGone(t *testing.T) {
 
 	// A first pass with the adapter present, so there is a published
 	// slice and a last-known paired set.
-	if !publish.reconcile(pairedSet(connectedController())) {
+	if !publish.reconcile(pairedSet(connectedController()), adapterIs(t)) {
 		t.Fatal("the first pass reported a failure")
 	}
 	fixture.existing = fixture.created
@@ -80,7 +80,7 @@ func TestReconcileNeverDeletesWhenTheAdapterIsGone(t *testing.T) {
 
 	// The dongle is unplugged. bluetoothd answers with no adapter and
 	// no devices.
-	if publish.reconcile(failing(ErrNoAdapter)) {
+	if publish.reconcile(failing(ErrNoAdapter), adapterIs(t)) {
 		t.Fatal("a departed adapter reported a finished pass")
 	}
 	if fixture.deleted {
@@ -112,7 +112,7 @@ func TestReconcileWritesNothingBeforeBluetoothdPublishesAnAdapter(t *testing.T) 
 
 	// The startup window: no successful read has happened, so there is
 	// no last-known set to taint and nothing true to say.
-	if publish.reconcile(failing(ErrNoAdapter)) {
+	if publish.reconcile(failing(ErrNoAdapter), adapterIs(t)) {
 		t.Fatal("the startup window reported a finished pass")
 	}
 	if len(fixture.requests) != 0 {
@@ -123,7 +123,7 @@ func TestReconcileWritesNothingBeforeBluetoothdPublishesAnAdapter(t *testing.T) 
 func TestReconcileLeavesTheSliceAloneOnAReadFailure(t *testing.T) {
 	publish, fixture := reconcileFixture(t, "")
 
-	if publish.reconcile(failing(errors.New("the bus went away"))) {
+	if publish.reconcile(failing(errors.New("the bus went away")), adapterIs(t)) {
 		t.Fatal("a failed read reported a finished pass")
 	}
 	if len(fixture.requests) != 0 {
@@ -133,14 +133,14 @@ func TestReconcileLeavesTheSliceAloneOnAReadFailure(t *testing.T) {
 
 func TestReconcileDeletesTheSliceWhenTheLastControllerIsUnpaired(t *testing.T) {
 	publish, fixture := reconcileFixture(t, "")
-	if !publish.reconcile(pairedSet(connectedController())) {
+	if !publish.reconcile(pairedSet(connectedController()), adapterIs(t)) {
 		t.Fatal("the first pass reported a failure")
 	}
 	fixture.existing = fixture.created
 
 	// An adapter that answers with no paired devices is the one
 	// sanctioned removal.
-	if !publish.reconcile(pairedSet(map[string]controller{})) {
+	if !publish.reconcile(pairedSet(map[string]controller{}), adapterIs(t)) {
 		t.Fatal("the unpair pass reported a failure")
 	}
 	if !fixture.deleted {
@@ -153,7 +153,7 @@ func TestReconcileReportsAFailedWrite(t *testing.T) {
 	// A write that the API server refuses must not read as a finished
 	// pass, because that is what buys the one quick retry.
 	publish.client = testClient(t, failingAPI(t))
-	if publish.reconcile(pairedSet(connectedController())) {
+	if publish.reconcile(pairedSet(connectedController()), adapterIs(t)) {
 		t.Fatal("a refused write reported a finished pass")
 	}
 }
