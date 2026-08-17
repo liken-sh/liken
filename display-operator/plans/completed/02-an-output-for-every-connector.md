@@ -114,11 +114,12 @@ cost more than the one screen whose cable moved.
   worth of config on top. Mutter wants logind and a session bus. The
   kiosk shell's config-file routing table is the interface an
   operator wants, and nothing else has it.
-* **Minted app-ids.** Still set aside. Weston reads a section's
+* **Minted app-ids.** Set aside for good. Weston reads a section's
   `app-ids=` only when it creates the output, so minting a fresh
   app-id per allocation has no path into a running compositor. The
-  open problem "The app-id is a guessable string" keeps that
-  question.
+  fixed strings stay, because every client that can reach the
+  compositor's socket already holds a display claim on this node, and
+  that is inside the trust boundary.
 
 ## What the drill showed
 

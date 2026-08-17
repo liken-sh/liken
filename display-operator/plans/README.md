@@ -35,13 +35,6 @@ claim an output. These documents say why it is built the way it is.
 owes an answer to. Those documents carry no number, because nobody has
 decided yet what work they become.
 
-* [The app-id is a guessable string](open-problems/the-app-id-is-a-guessable-string.md).
-  One fixed app-id per output is the whole credential for taking a
-  screen, and the string is public in the ResourceSlice.
-* [A removed device has no bounded retry](open-problems/a-removed-device-has-no-bounded-retry.md).
-  The kubelet retries `NodePrepareResources` without a bound for a
-  device an allocation names but the slice no longer lists, so the
-  operator taints a dark output and never deletes it.
 * [The library closure carries loads that `ldd` cannot see](open-problems/loads-that-ldd-cannot-see.md).
   Four kinds of load and four data paths were added by hand, and
   nothing in the build finds the next one.

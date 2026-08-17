@@ -215,8 +215,7 @@ slice with its `disconnected` taint, the taint evicts the holder after
 its `tolerationSeconds`, and a monitor that returns clears it.
 Deleting the device instead would strand the claim, because the kubelet
 retries `NodePrepareResources` against a device in no slice with no
-bound. See
-[a removed device has no bounded retry](plans/open-problems/a-removed-device-has-no-bounded-retry.md).
+bound, and upstream declined to bound it (KEP-5322).
 
 **The slice outlives the pod.** The operator retracts nothing when it
 stops, and it publishes nothing when its sysfs walk comes back empty.
@@ -250,12 +249,6 @@ prepared device nodes survive it.
 
 ## Not here yet
 
-* **Minted app-ids.** The routing table maps each output to one fixed,
-  public app-id, so the string is the whole credential for taking a
-  screen. Weston reads a section's `app-ids=` only when it creates the
-  output, so minting one per allocation has no path into a running
-  compositor. See
-  [the app-id is a guessable string](plans/open-problems/the-app-id-is-a-guessable-string.md).
 * **HDMI audio.** Each output carries an HDMI PCM on the audio
   controller, which the audio operator publishes. One claim holds a
   request against each driver with a `matchAttribute` constraint on
