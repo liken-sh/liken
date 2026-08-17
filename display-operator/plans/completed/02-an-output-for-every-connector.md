@@ -1,6 +1,6 @@
 # 02, An output for every connector
 
-Proposed.
+Built, and drilled on liken-1 on 2026-08-17.
 
 This plan answers the open problem "Routing is narrower than
 inventory", and this document replaces it.
@@ -81,13 +81,14 @@ startup, a dark connector needs only the honest taint,
 
 ## What unplug now costs
 
-Delivering hotplug events changes unplug as well. Today Weston never
-learns that a monitor left, so a cable reseated within the claim's
-`tolerationSeconds` resumes the same session with no sign. With
-events, Weston destroys the output when the connector disconnects, and
-recreates it on replug. A bumped cable now costs that one session. It
-can never cost more than the one screen whose cable moved, and the
-drill records what the client on that screen observes.
+Delivering hotplug events changes unplug as well. Without them,
+Weston never learns that a monitor left. With them, Weston destroys
+the output when the connector disconnects and recreates it on replug.
+The drill measured what that costs the client: nothing. The client's
+Wayland connection never breaks, its surface re-homes when the output
+returns, and only the taint's `tolerationSeconds` bounds how long the
+screen may stay dark before the pod is evicted. An unplug can never
+cost more than the one screen whose cable moved.
 
 ## What was considered and set aside
 
@@ -119,22 +120,38 @@ drill records what the client on that screen observes.
   open problem "The app-id is a guessable string" keeps that
   question.
 
-## The drill
+## What the drill showed
 
-The drill runs on liken-1, whose DP-1 connector publishes dark today.
-It must show four things.
+All four drills ran on liken-1 on 2026-08-17, against the release
+2026.08.17-013, with the portable monitor on HDMI-A-2 and a movie
+playing on HDMI-A-1 throughout.
 
-1. **The event, byte for byte.** A pod with a listener on netlink
-   group 1 captures the real datagram while a monitor is plugged in.
-2. **A monitor arrives, nothing else moves.** With clients holding
-   two lit screens, a pod parks on a claim for the dark connector.
-   Plugging a monitor in must take the pod from `Unschedulable` to
-   `Running` with no operator restart, and the two running clients
-   must show zero restarts.
-3. **A monitor leaves.** Unplugging it must evict only its own pod,
-   on that claim's toleration, and the orphaned surface must not
-   cover another client's screen. What the kiosk shell does with an
-   orphaned surface is the one edge the source does not settle.
-4. **A reseated cable.** Unplug and replug within the toleration,
-   and record what the session does. That record becomes the
-   documented behavior.
+1. **The event, byte for byte, passed.** A pod with a listener on
+   netlink group 1 captured the unplug and the replug. Each one is a
+   `change` on `/devices/pci0000:00/0000:00:02.0/drm/card1` with
+   `SUBSYSTEM=drm`, `HOTPLUG=1`, and `CONNECTOR=400`, the KMS object
+   id of HDMI-A-2. The kernel names the card, never the connector
+   string.
+2. **A monitor arrives, nothing else moves, passed.** The operator
+   started with HDMI-A-2 dark, and its log showed the head found,
+   disconnected, with its section written. A fresh claim and its pod
+   parked `Pending`; the scheduler did not allocate the tainted dark
+   device even though the pod tolerates `disconnected` for 30
+   seconds, which matches what the Bluetooth operator's drills
+   showed. The plug-in ran the whole chain inside one second: the
+   datagram, the head connected with the BOE EDID, `Output 'HDMI-A-2'
+   enabled`, the taint dropped, the claim allocated, and the pod
+   `Running`. The operator was never restarted, and the movie's pod
+   showed zero restarts.
+3. **A monitor leaves, passed.** Weston disabled the output in the
+   same second as the datagram. The orphaned surface never covered
+   the other screen; the movie kept playing untouched.
+   `DeviceTaintManagerEviction` evicted the holder on its 30 second
+   toleration.
+4. **A reseated cable, passed.** A five second unplug and replug put
+   the taint on and took it off, and Weston disabled and re-enabled
+   the output, twice within 244 ms on the replug as the link
+   retrained. The pod survived with zero restarts and its picture
+   came back on its own, because the client's Wayland connection
+   never broke and its surface re-homed when the output returned. A
+   bump within the toleration costs nothing.

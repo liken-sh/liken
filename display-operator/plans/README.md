@@ -18,11 +18,12 @@ claim an output. These documents say why it is built the way it is.
 
 ## Designs
 
-* [01, The compositor image](01-the-compositor-image.md). Built. The
+* [01, The compositor image](completed/01-the-compositor-image.md). Built. The
   image is a library closure on scratch, and the pod runs one
   container.
-* [02, An output for every connector](02-an-output-for-every-connector.md).
-  Proposed. Every connector gets an `[output]` section at startup, and
+* [02, An output for every connector](completed/02-an-output-for-every-connector.md).
+  Built, and drilled on liken-1 on 2026-08-17. Every connector gets an
+  `[output]` section at startup, and
   a preload shim moves the compositor's hotplug subscription to the
   kernel's own netlink group, so a monitor that arrives on a dark
   connector routes without a restart. Answers and replaces the open

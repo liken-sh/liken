@@ -7,7 +7,7 @@ LLVM is in the closure because Debian builds mesa with llvmpipe, and
 llvmpipe is the one driver in that build that no liken machine ever
 runs.
 
-[Plan 01](../01-the-compositor-image.md#what-stays-and-why) calls
+[Plan 01](../completed/01-the-compositor-image.md#what-stays-and-why) calls
 LLVM and gallium "the floor for a GL renderer on mesa". That is the
 floor for Debian's mesa. Mesa's own build has options that Debian does
 not take, and this document states what those options would drop, what

@@ -16,7 +16,7 @@ What blocks minting is the compositor. Weston reads a section's
 per allocation has no path into a running compositor. Minting therefore
 costs a restart per allocation, which ends every session on the node.
 That trade is recorded in
-[plan 02](../02-an-output-for-every-connector.md) with the rest of the
+[plan 02](../completed/02-an-output-for-every-connector.md) with the rest of the
 runtime routing design.
 
 No answer is chosen.

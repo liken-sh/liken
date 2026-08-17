@@ -31,8 +31,8 @@ deploys it behaves as it does now.
 One device for each **connector** on the card, not for each monitor
 plugged in. A cabled monitor that is asleep still reports itself, so
 its output publishes untainted and a claim on it starts a pod. An empty
-connector publishes with both taints, so a claim on it parks instead of
-failing.
+connector publishes with the `disconnected` taint, so a claim on it
+parks instead of failing.
 
 The device name is the connector in lowercase, because a DRA device
 name must be a DNS label. The rest are attributes, and every one but
@@ -235,10 +235,11 @@ shim moves the compositor's hotplug subscription to the kernel's own
 netlink group. When a monitor lands on a dark connector, the
 compositor enables the head and routes the section's app-id. Every
 other screen keeps its session. The same event clears the device's
-taint, so a parked claim starts on its own. The cost is on unplug:
-the compositor destroys that output, so a cable reseated within the
-toleration ends that one session. See
-[plan 02](plans/02-an-output-for-every-connector.md).
+taint, so a parked claim starts on its own. On unplug the compositor
+destroys that output, and on replug it recreates it. A cable reseated
+within the toleration costs nothing: the client's connection never
+breaks, and its picture returns with the output. See
+[plan 02](plans/completed/02-an-output-for-every-connector.md).
 
 **The compositor and the operator exit together.** The operator starts
 weston as its child and exits nonzero when weston exits; the kubelet
@@ -277,7 +278,7 @@ The compositor's image exists because Debian ships every libweston
 backend in one package, most of which this operator never loads.
 `weston-closure.sh` copies only the four modules it uses and the loads
 `ldd` cannot see.
-[The compositor image](plans/01-the-compositor-image.md) gives the
+[The compositor image](plans/completed/01-the-compositor-image.md) gives the
 reasons.
 
 ## Building it
