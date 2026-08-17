@@ -10,9 +10,9 @@ drill proves it, and a drill runs on hardware, because nothing else
 proves a design about a radio.
 
 The pattern these documents build on lives in liken's repository:
-[milestone 56, device operators](https://github.com/liken-sh/liken/blob/main/plans/56-device-operators.md),
+[milestone 56, device operators](https://github.com/liken-sh/liken/blob/main/plans/completed/56-device-operators.md),
 and this operator's own instance,
-[milestone 58](https://github.com/liken-sh/liken/blob/main/plans/58-the-bluetooth-operator.md).
+[milestone 58](https://github.com/liken-sh/liken/blob/main/plans/completed/58-the-bluetooth-operator.md).
 
 [`open-problems/`](open-problems/) holds the questions this operator
 owes an answer to. Those documents carry no number, because nobody has

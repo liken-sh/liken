@@ -50,5 +50,5 @@ closes.
 - What the status says when two controllers pair inside one window.
 
 This is recorded in liken's
-[milestone 58](https://github.com/liken-sh/liken/blob/main/plans/58-the-bluetooth-operator.md)
+[milestone 58](https://github.com/liken-sh/liken/blob/main/plans/completed/58-the-bluetooth-operator.md)
 as well. It belongs here, with the operator that would serve it.

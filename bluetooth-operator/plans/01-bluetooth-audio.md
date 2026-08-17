@@ -34,7 +34,7 @@ the pairing UX this operator already owns and the audio path are one
 question, not two.
 
 liken publishes the machine's HDA controller as its own device, and
-[milestone 59](https://github.com/liken-sh/liken/blob/main/plans/59-the-audio-operator.md)
+[milestone 59](https://github.com/liken-sh/liken/blob/main/plans/completed/59-the-audio-operator.md)
 publishes each of its physical outputs under `audio.liken.sh`. A
 Bluetooth speaker is not on that card. It is on this radio.
 
