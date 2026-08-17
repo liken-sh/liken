@@ -410,11 +410,12 @@ ends the container nonzero, and the kubelet restarts the set.
   several consumers, which a monitor cannot. This version is exclusive,
   for the one-owner clarity the other operators have. See
   [a sink can be shared](plans/open-problems/a-sink-can-be-shared-and-this-one-is-not.md).
-* **The analog jack.** Every HDA controller has an analog output, and
-  most machines have nothing plugged in. This version publishes it
-  unconditionally, so an empty jack allocates to a claim and produces
-  no sound. See
-  [the analog jack publishes whether or not anything is plugged in](plans/open-problems/the-analog-jack-publishes-whether-or-not-anything-is-plugged-in.md).
+* **The analog jack.** An analog output publishes untainted whether or
+  not anything is in the socket. Most codecs report nothing about the
+  socket, and even a codec that does sees only the first link: a cable
+  into a stereo says nothing about whether the stereo has speakers. No
+  signal can prove that sound reaches anyone, so the operator publishes
+  the port it can see and a person who wired something claims it.
 * **The identical-monitor tiebreak.** Two monitors of one model share
   one `monitor.liken.sh/id`. Whether the ELD's `port_id` distinguishes
   them awaits a machine with two identical monitors.

@@ -37,7 +37,3 @@ decided yet what work they become.
 * [A sink can be shared and this one is not](open-problems/a-sink-can-be-shared-and-this-one-is-not.md).
   PipeWire mixes streams and every device this operator publishes is
   exclusive, so the second pod to claim a sink waits behind the first.
-* [The analog jack publishes whether or not anything is plugged in](open-problems/the-analog-jack-publishes-whether-or-not-anything-is-plugged-in.md).
-  A dark HDMI connector publishes with two taints and the analog jack
-  publishes with none, which may make this a missing taint rather than
-  an extra device.
