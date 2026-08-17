@@ -172,10 +172,18 @@ base assumes the namespace `liken-system` exists.
 
 Nothing states which machine has the speakers. The operator's pod
 claims the audio controller, only a machine with one publishes one,
-and the scheduler puts the pod where the hardware is. To serve more
-than one card, raise `replicas` on the Deployment to the number of
-cards: each replica's claim allocates a distinct one, and a replica
-past that number parks Pending and costs nothing.
+and the scheduler puts the pod where the hardware is. To serve the
+cards on several machines, raise `replicas` on the Deployment to the
+number of machines: each replica's claim allocates a distinct card,
+the scheduler spreads the pods to wherever the hardware is, and a
+replica past that number parks Pending and costs nothing.
+
+Two replicas on one machine is a different case, and this operator
+does not serve it. Both would write the same ResourceSlice, because
+the slice is named for the node and the driver, and each write would
+replace the other's devices. A machine with two sound cards therefore
+serves one of them, and the claim's selector decides which. See
+[the claim takes any sound card](plans/open-problems/the-claim-takes-any-sound-card-and-a-node-serves-only-one.md).
 
 Two DeviceClasses come with the base. `audio-controller` is the raw
 device the operator claims from liken:
