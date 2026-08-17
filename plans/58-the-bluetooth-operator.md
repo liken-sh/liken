@@ -56,7 +56,12 @@ ships a `main.conf` with `AutoEnable=true`, and a machine that reboots
 comes back with its radio on and its bonds intact. Nothing in the
 cluster has to press a button.
 
-The privilege is `hostNetwork` plus `NET_ADMIN`, and nothing else.
+The privilege is `hostNetwork` plus four capabilities, with
+everything else dropped. `NET_ADMIN` is the radio's requirement,
+`NET_BIND_SERVICE` covers bluetoothd's SDP and GATT servers on L2CAP
+PSMs 1 and 31 (the first hardware drill found this, because a pod
+that drops nothing keeps the capability by default), and `SETUID`
+with `SETGID` lets dbus-daemon drop to its own user.
 
 * **`hostNetwork` is not optional.** `AF_BLUETOOTH` sockets exist only
   in the host network namespace. A socket call in a pod's own network
