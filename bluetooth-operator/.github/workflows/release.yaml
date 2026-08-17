@@ -31,15 +31,9 @@ on:
       - 'LICENSE'
       - '.gitignore'
 
-# workflows: write is what lets the tag push at the end of the job
-# through. GitHub refuses a push from an App token when the pushed ref's
-# workflow files differ from the ones on the default branch, and a tag
-# cut from an older commit carries an older release.yaml whenever main
-# has changed it since the run started.
 permissions:
   contents: write
   packages: write
-  workflows: write
 
 # Two pushes in quick succession would otherwise race for the same
 # tag and push two images to :latest in an order nobody chose.
