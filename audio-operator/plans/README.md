@@ -20,6 +20,17 @@ is built the way it is, and what it still owes an answer to.
 
 * [01, The taints an output carries](01-the-taints-an-output-carries.md).
   Built.
+* [02, A closure on scratch](02-a-closure-on-scratch.md). Proposed.
+  The image becomes the display operator's shape: a named file set on
+  `scratch`, measured from the running daemons' memory maps, with a
+  release gate that starts the daemons and fails on any file they map
+  that the image lacks. Answers and replaces the open problem "The
+  image is still Debian".
+* [03, The kubelet supervises the daemons](03-the-kubelet-supervises-the-daemons.md).
+  Proposed. The pod becomes four containers: a declare init step, the
+  two daemons as native sidecars with real-client probes, and the
+  operator. The die-together guarantee survives as an all-devices
+  taint the operator publishes when it loses the graph.
 
 ## Open problems
 
@@ -27,9 +38,6 @@ is built the way it is, and what it still owes an answer to.
 owes an answer to. Those documents carry no number, because nobody has
 decided yet what work they become.
 
-* [The image is still Debian](open-problems/the-image-is-still-debian.md).
-  The two sibling operators ship images built from a named set of
-  files, and this one installs its daemons from a distribution.
 * [A sink can be shared and this one is not](open-problems/a-sink-can-be-shared-and-this-one-is-not.md).
   PipeWire mixes streams and every device this operator publishes is
   exclusive, so the second pod to claim a sink waits behind the first.

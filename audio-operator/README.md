@@ -147,6 +147,17 @@ with no controller publishes no matching device, so the claim parks
 that pod Pending, and it costs nothing. A deployment that must leave a
 card for something else adds a selector to the controller request.
 
+The pod runs one image four times, and the kubelet orders them: a
+`declare` init container writes PipeWire's node declarations, PipeWire
+and WirePlumber run as native sidecars with startup probes, and the
+operator is the only regular container. The image is a file closure on
+`scratch`: the four binaries, the modules the daemons load, and their
+libraries, with no shell and no package manager. `kubectl exec` can
+run only what the image names, and `pw-dump` is the debugging window,
+the way the display operator keeps `wayland-info`. The release
+workflow starts both daemons in the built image and fails the release
+if they map any file the image does not carry.
+
 The base ships two DeviceClasses. `audio-controller` is the raw device
 the operator claims from liken
 (`device.attributes["liken.sh"].subsystem == "sound"`); `audio-output`
@@ -381,27 +392,33 @@ bound. A device leaves the slice only when the card does.
 at container creation only, so the pod is one session and the taint is
 what ends it.
 
-**An operator restart ends every client's audio.** The socket belongs
-to the PipeWire in this pod, so a restart takes it away; a client that
-reconnects finds the new one, and a client that does not has to
-restart. This is the same trade the display operator makes.
+**A PipeWire restart ends every client's audio.** The socket belongs
+to the PipeWire container, so its restart takes the socket away; a
+client that reconnects finds the new one, and a client that does not
+has to restart. The operator's own restart takes nothing away,
+because the daemons run in their own containers and keep playing
+through it.
 
-**A PCM device that appears or leaves restarts the pod.** PipeWire
-builds its nodes from the document written before it starts, so a PCM
-device that was not there then has no node. Every reconcile regenerates
-the document and compares; a difference stops the operator, and the
-kubelet's restart declares the new set. The operator does not taint on
-its way out, because the gap is a few seconds a consumer survives by
-reconnecting. This never fires for a monitor plugged in, because a
-card's PCM devices are fixed when its driver binds.
+**A PCM device that appears or leaves waits for a pod replacement.**
+PipeWire builds its nodes from the declaration the init container
+wrote, so a PCM device that was not there then has no node. The
+operator reports the divergence once, and the outputs with no node
+publish with the `no-sink` taint, so nothing schedules onto them.
+Deleting the pod declares the new set. This never fires for a monitor
+plugged in, because a card's PCM devices are fixed when its driver
+binds.
 
 **The slice survives the restart.** The operator never deletes it, and
 the Node owns it, so the garbage collector removes it when the machine
 leaves the cluster and the new pod republishes over it.
 
-**PipeWire, WirePlumber, and the operator exit together.** The operator
-starts both daemons as children and waits on them; either one exiting
-ends the container nonzero, and the kubelet restarts the set.
+**The slice never says an output plays while nothing plays.** The
+kubelet supervises each daemon's container alone, so the operator
+cannot die with them. Instead, when it loses the graph, at startup
+when PipeWire never answers or later when a run of graph reads fails,
+it publishes every output with the `disconnected` taint and exits.
+The kubelet restarts only the operator container, and its next start
+publishes the truth.
 
 ## Not here yet
 

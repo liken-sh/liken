@@ -1,6 +1,11 @@
 package main
 
-// Reading PipeWire's graph, and running the daemons that hold it.
+// Reading PipeWire's graph, and waiting for the container beside this
+// one to serve it.
+//
+// PipeWire and WirePlumber run in their own containers of this pod,
+// started before the operator and stopped after it, so nothing here
+// starts or supervises a daemon. The kubelet does both.
 //
 // The operator needs one fact from PipeWire that ALSA cannot give it:
 // the node name of the sink that plays through each PCM device. That
@@ -20,7 +25,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +38,42 @@ import (
 // that stops answering would otherwise hold the reconcile pass
 // forever.
 const pwDumpTimeout = 10 * time.Second
+
+// runtimeDir is where PipeWire creates its socket. It is a hostPath
+// mount, so that a consumer's CDI spec can bind the same directory
+// into a container on the same node.
+//
+// The PipeWire container and the operator container both mount it,
+// so the socket the operator reads is the socket a consumer gets.
+const runtimeDir = "/var/run/audio.liken.sh"
+
+// socketPath is the absolute path of the socket a client connects to.
+// A PIPEWIRE_REMOTE that starts with a slash is used as a path, and
+// the runtime directory is not consulted, so one absolute path is the
+// whole of what a consumer needs.
+const socketPath = runtimeDir + "/pipewire-0"
+
+// pipewireReadyTimeout bounds the wait for PipeWire to answer at
+// startup.
+//
+// A PipeWire that never answers within this window is a container
+// crashlooping beside this one. The operator publishes every output
+// tainted and exits, so the slice says nothing plays, and the
+// kubelet's restart of this container is the retry.
+const pipewireReadyTimeout = 60 * time.Second
+
+// pipewireReadyInterval is how often the startup wait asks again.
+// PipeWire raises no event that says it is ready, and the operator
+// has no connection to it until it is, so this one wait polls. Every
+// later read is driven by an event.
+const pipewireReadyInterval = time.Second
+
+// nodeReadyTimeout bounds the wait for the declared sink nodes to
+// appear in the graph. PipeWire creates the objects its configuration
+// declares while it loads that configuration, which is before it
+// serves the socket, so the nodes are there on the first read or they
+// are not coming.
+const nodeReadyTimeout = 15 * time.Second
 
 // pcmAddress names one playback PCM device, which is what ties a
 // PipeWire sink to the ALSA output the operator publishes.
@@ -158,4 +201,75 @@ func numericProperty(props map[string]json.RawMessage, keys []string) (int, bool
 		}
 	}
 	return 0, false
+}
+
+// waitForPipeWire blocks until PipeWire answers a graph read, or
+// until the timeout passes.
+func waitForPipeWire(ctx context.Context, read func(context.Context) (map[pcmAddress]string, error), timeout time.Duration) error {
+	deadline := time.After(timeout)
+	tick := time.NewTicker(pipewireReadyInterval)
+	defer tick.Stop()
+	var last error
+	for {
+		_, err := read(ctx)
+		if err == nil {
+			return nil
+		}
+		last = err
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline:
+			return fmt.Errorf("PipeWire did not answer within %s: %w", timeout, last)
+		case <-tick.C:
+		}
+	}
+}
+
+// waitForNodes blocks until every output has a sink in the graph, or
+// until the timeout passes. It reports what it found and never fails.
+//
+// An output whose node PipeWire could not create is a fact the slice
+// carries as the no-sink taint, so the operator publishes it rather
+// than refusing to start. Failing here instead would restart the pod
+// over one PCM device that cannot open, and take the card's working
+// outputs down with it on every attempt.
+func waitForNodes(ctx context.Context, read func(context.Context) (map[pcmAddress]string, error), outputs []alsaOutput, timeout time.Duration) {
+	deadline := time.After(timeout)
+	tick := time.NewTicker(pipewireReadyInterval)
+	defer tick.Stop()
+	var report string
+	for {
+		sinks, err := read(ctx)
+		if err != nil {
+			report = fmt.Sprintf("PipeWire's graph did not read: %v", err)
+		} else {
+			missing := missingNodes(outputs, sinks)
+			if len(missing) == 0 {
+				return
+			}
+			report = "PipeWire holds no sink for " + strings.Join(missing, ", ")
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-deadline:
+			fmt.Fprintf(os.Stderr, "%s after %s; those outputs publish with the no-sink taint\n",
+				report, timeout)
+			return
+		case <-tick.C:
+		}
+	}
+}
+
+// missingNodes names the outputs that have no sink, sorted by name.
+func missingNodes(outputs []alsaOutput, sinks map[pcmAddress]string) []string {
+	var missing []string
+	for _, output := range outputs {
+		if _, has := sinks[pcmAddress{Card: output.Card, PCM: output.PCM}]; !has {
+			missing = append(missing, output.Name())
+		}
+	}
+	slices.Sort(missing)
+	return missing
 }

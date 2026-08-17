@@ -65,13 +65,127 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/build-push-action@v6
+      # The image builds here and pushes nothing yet. The daemons
+      # have to start before anything reaches ghcr.io, and a push that
+      # happened first would leave a broken :latest behind when the
+      # start failed.
+      - name: Build the image
+        uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
+          load: true
           tags: |
             ghcr.io/liken-sh/audio-operator:${{ env.VERSION }}
             ghcr.io/liken-sh/audio-operator:latest
+
+      # The gate that makes a missing runtime load impossible to
+      # ship. PipeWire and WirePlumber open every module by file name,
+      # so ldd reports none of them and go test sees none of them
+      # either. This step starts both daemons, reads what the running
+      # processes mapped, and fails the release on any mapped file the
+      # image does not carry.
+      #
+      # The runner has no sound card and needs none. A cardless
+      # PipeWire still loads every module its configuration names, and
+      # that is the set this image exists to carry. libspa-alsa.so is
+      # the one load no cardless run reaches, so the check asserts it
+      # by name instead.
+      #
+      # The two daemons run as separate containers sharing one volume,
+      # the same shape the pod uses. The image has no shell, so every
+      # container names a binary directly.
+      - name: Prove the closure
+        run: |
+          set -eu
+          export LC_ALL=C
+          image="ghcr.io/liken-sh/audio-operator:$VERSION"
+          runtime=/var/run/audio.liken.sh
+
+          # Every path the image carries, as the paths a process sees.
+          container=$(docker create "$image")
+          docker export "$container" | tar -t | sed 's|^|/|; s|/$||' | sort -u > image-files.txt
+          docker rm "$container" > /dev/null
+
+          for path in \
+            /usr/bin/pipewire \
+            /usr/bin/wireplumber \
+            /usr/bin/pw-dump \
+            /usr/bin/wpctl \
+            /usr/lib/x86_64-linux-gnu/spa-0.2/alsa/libspa-alsa.so
+          do
+            grep -qx "$path" image-files.txt \
+              || { echo "the image carries no $path"; exit 1; }
+          done
+
+          docker volume create audio-release > /dev/null
+          # A container of this image, named for the binary it runs.
+          start() {
+            name=$1
+            shift
+            docker run -d --name "$name" -v "audio-release:$runtime" \
+              -e PIPEWIRE_RUNTIME_DIR="$runtime" -e XDG_RUNTIME_DIR="$runtime" \
+              --entrypoint "$1" "$image" "${@:2}" > /dev/null
+          }
+          # One client run, to completion, under a bound. A client that never
+          # returns is the failure this step exists to catch, so the wait for
+          # it cannot be unbounded.
+          probe() {
+            docker rm -f probe > /dev/null 2>&1 || true
+            start probe "$@"
+            code=$(timeout 20 docker wait probe || echo unfinished)
+            docker rm -f probe > /dev/null
+            [ "$code" = 0 ]
+          }
+          # The probe the pod's startupProbe runs. A socket nobody can reach
+          # is a broken image.
+          answers() {
+            for attempt in $(seq 10); do
+              probe "$@" && return 0
+              sleep 2
+            done
+            return 1
+          }
+
+          start pipewire /usr/bin/pipewire
+          answers /usr/bin/pw-dump \
+            || { docker logs pipewire; echo "pw-dump never connected"; exit 1; }
+          start wireplumber /usr/bin/wireplumber --profile=main-embedded
+          answers /usr/bin/wpctl status \
+            || { docker logs wireplumber; echo "wpctl never connected"; exit 1; }
+
+          # wpctl connects to PipeWire, not to WirePlumber, so it
+          # answers even when the session manager has left. Both
+          # daemons must still be up before their maps mean anything.
+          for name in pipewire wireplumber; do
+            docker inspect -f '{{.State.Running}}' "$name" | grep -qx true \
+              || { docker logs "$name"; echo "$name is not running"; exit 1; }
+          done
+
+          # What the two live processes mapped. The kernel writes the paths as
+          # the process sees them, so they compare against the listing above.
+          # The volume and the kernel's own filesystems are not the image.
+          missing=0
+          for name in pipewire wireplumber; do
+            pid=$(docker inspect -f '{{.State.Pid}}' "$name")
+            sudo awk '$6 ~ /^\// { print $6 }' "/proc/$pid/maps" \
+              | grep -v '^/memfd:' \
+              | grep -Ev "^/(dev|proc|sys)/|^$runtime/" \
+              | sort -u > "maps-$name.txt"
+            echo "$name mapped $(wc -l < "maps-$name.txt") files"
+            [ -s "maps-$name.txt" ] || { echo "$name mapped nothing"; exit 1; }
+            if comm -23 "maps-$name.txt" image-files.txt | grep .; then
+              echo "$name mapped files the image does not carry"
+              missing=1
+            fi
+          done
+          docker rm -f pipewire wireplumber > /dev/null
+          docker volume rm audio-release > /dev/null
+          exit "$missing"
+
+      - name: Push the image
+        run: |
+          docker push "ghcr.io/liken-sh/audio-operator:$VERSION"
+          docker push "ghcr.io/liken-sh/audio-operator:latest"
 
       # The tag lands after the push, so a tag in the repository always
       # names a version that exists in the registry. A tag that already

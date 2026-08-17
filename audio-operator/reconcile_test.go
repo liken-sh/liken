@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // failingSinks stands in for a PipeWire that does not answer.
@@ -23,8 +24,8 @@ func testReconciler(t *testing.T, api *slicePublishFixture, sinks func(context.C
 	t.Helper()
 	sndDir = deliveredNodes(t, nodes...)
 	specDirectory(t)
-	// The operator declares the card's outputs to PipeWire before it
-	// starts the daemons, and every later pass compares against that
+	// The init container declares the card's outputs to PipeWire before
+	// PipeWire starts, and every later pass compares against that
 	// document, so a reconciler starts life agreeing with the card it
 	// was built over.
 	outputs, err := readOutputs()
@@ -153,45 +154,34 @@ func TestReconcilePublishesWhatItReads(t *testing.T) {
 	}
 }
 
-// PipeWire builds its nodes from a document the operator writes once,
-// before the daemons start, so a PCM device that appeared or left has
-// no node and can never get one under this PipeWire. The operator
-// stops, and the kubelet's restart declares the new set.
-func TestReconcileStopsWhenTheCardsPCMDevicesChange(t *testing.T) {
+// PipeWire builds its nodes from a document the init container writes
+// once, so a PCM device that appeared or left has no node and can never
+// get one under this PipeWire. Only a replacement pod declares the new
+// set, so the operator keeps running and the new output publishes with
+// the no-sink taint.
+func TestReconcilePublishesWhenTheCardsPCMDevicesChange(t *testing.T) {
 	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
 	operator := testReconciler(t, api, func(context.Context) (map[pcmAddress]string, error) {
 		return map[pcmAddress]string{{Card: 0, PCM: 0}: sinkNodeName(0, 0)}, nil
 	}, "pcmC0D0p")
 
+	sndDir = deliveredNodes(t, "pcmC0D0p", "pcmC0D3p")
 	if err := operator.reconcile(context.Background()); err != nil {
-		t.Fatalf("the card it was built over stopped it: %v", err)
+		t.Fatalf("a new PCM device stopped the operator: %v", err)
 	}
-
-	sndDir = deliveredNodes(t, "pcmC0D0p", "pcmC0D3p")
-	err := operator.reconcile(context.Background())
-	if err == nil {
-		t.Fatal("a new PCM device did not stop the operator")
+	if api.updated == nil {
+		t.Fatal("a new PCM device published nothing")
 	}
-	if !strings.Contains(err.Error(), "changed since PipeWire started") {
-		t.Errorf("error = %v", err)
+	devices := api.updated.Spec.Devices
+	if len(devices) != 2 {
+		t.Fatalf("devices = %+v, want two", devices)
 	}
-}
-
-// The restart does not taint on its way out. A restart takes the
-// socket from every consumer and gives it back within seconds, and a
-// NoExecute taint would evict all of them for that gap.
-func TestReconcileDoesNotTaintWhenItRestartsForANewPCM(t *testing.T) {
-	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
-	operator := testReconciler(t, api, func(context.Context) (map[pcmAddress]string, error) {
-		return map[pcmAddress]string{{Card: 0, PCM: 0}: sinkNodeName(0, 0)}, nil
-	}, "pcmC0D0p")
-
-	sndDir = deliveredNodes(t, "pcmC0D0p", "pcmC0D3p")
-	if err := operator.reconcile(context.Background()); err == nil {
-		t.Fatal("a new PCM device did not stop the operator")
+	noSink := []DeviceTaint{
+		{Key: disconnectedTaint, Effect: "NoExecute"},
+		{Key: noSinkTaint, Effect: "NoSchedule"},
 	}
-	if len(api.requests) != 0 {
-		t.Errorf("the restart wrote to the API server: %v", api.requests)
+	if got := devices[1].Taints; !reflect.DeepEqual(got, noSink) {
+		t.Errorf("the undeclared output carries %+v, want %+v", got, noSink)
 	}
 }
 
@@ -215,27 +205,76 @@ func TestTaintEverythingTaintsEveryOutput(t *testing.T) {
 	}
 }
 
-// The loop ends the process when a daemon dies, and it says so in the
-// slice on the way out.
-func TestRunTaintsAndStopsWhenADaemonDies(t *testing.T) {
+// wakesFor builds a channel that already holds one wake for each pass
+// the loop is meant to run.
+func wakesFor(passes int) <-chan struct{} {
+	settled := make(chan struct{}, passes)
+	for range passes {
+		settled <- struct{}{}
+	}
+	return settled
+}
+
+// The operator loses its connection to PipeWire when a run of graph
+// reads fails. The pod's PipeWire container is what died, and this
+// container cannot restart it, so the slice has to say that nothing
+// plays before the process ends. Otherwise the consumers of that card
+// hold a dead socket until somebody notices.
+func TestRunTaintsAndStopsWhenPipeWireStopsAnswering(t *testing.T) {
 	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
 	operator := testReconciler(t, api, failingSinks, "pcmC0D0p", "pcmC0D3p")
 
-	died := make(chan error, 1)
-	died <- errors.New("pipewire exited: signal: killed")
-
-	err := run(context.Background(), operator, died, make(chan struct{}))
+	err := run(context.Background(), operator, wakesFor(maxSinkFailures))
 	if err == nil {
-		t.Fatal("a daemon that died did not stop the operator")
+		t.Fatal("a PipeWire that stopped answering did not stop the operator")
 	}
 	if api.updated == nil {
-		t.Fatal("a daemon that died left the slice saying the outputs play")
+		t.Fatal("a PipeWire that stopped answering left the slice saying the outputs play")
 	}
 	for _, device := range api.updated.Spec.Devices {
 		if len(device.Taints) != 2 {
 			t.Errorf("%s carries %+v, want the disconnected and no-sink taints",
 				device.Name, device.Taints)
 		}
+	}
+}
+
+// A PipeWire that never answers at startup is a container crashlooping
+// beside this one. The previous pod's slice still says every output
+// plays, so the operator replaces it with the tainted form before it
+// exits.
+func TestAwaitPipeWireTaintsEveryOutputWhenItNeverAnswers(t *testing.T) {
+	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
+	operator := testReconciler(t, api, failingSinks, "pcmC0D0p", "pcmC0D3p")
+
+	err := operator.awaitPipeWire(context.Background(), 50*time.Millisecond)
+	if err == nil {
+		t.Fatal("a PipeWire that never answered let the operator start")
+	}
+	if api.updated == nil {
+		t.Fatal("a PipeWire that never answered left the slice saying the outputs play")
+	}
+	for _, device := range api.updated.Spec.Devices {
+		if len(device.Taints) != 2 {
+			t.Errorf("%s carries %+v, want the disconnected and no-sink taints",
+				device.Name, device.Taints)
+		}
+	}
+}
+
+// A PipeWire that answers publishes nothing and taints nothing. The
+// first reconcile pass is what writes the slice.
+func TestAwaitPipeWireWritesNothingWhenPipeWireAnswers(t *testing.T) {
+	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
+	operator := testReconciler(t, api, func(context.Context) (map[pcmAddress]string, error) {
+		return map[pcmAddress]string{{Card: 0, PCM: 0}: sinkNodeName(0, 0)}, nil
+	}, "pcmC0D0p")
+
+	if err := operator.awaitPipeWire(context.Background(), time.Minute); err != nil {
+		t.Fatalf("a PipeWire that answered failed the wait: %v", err)
+	}
+	if len(api.requests) != 0 {
+		t.Errorf("the startup wait reached the API server: %v", api.requests)
 	}
 }
 
@@ -249,7 +288,7 @@ func TestRunStopsWhenTheEventSourcesClose(t *testing.T) {
 	settled := make(chan struct{})
 	close(settled)
 
-	err := run(context.Background(), operator, make(chan error), settled)
+	err := run(context.Background(), operator, settled)
 	if err == nil {
 		t.Fatal("the operator ran on after its event sources closed")
 	}
@@ -269,7 +308,7 @@ func TestRunEndsQuietlyWhenTheContextIsDone(t *testing.T) {
 	settled := make(chan struct{})
 	close(settled)
 
-	if err := run(ctx, operator, make(chan error), settled); err != nil {
+	if err := run(ctx, operator, settled); err != nil {
 		t.Fatalf("a shutdown reported a failure: %v", err)
 	}
 	if len(api.requests) != 0 {

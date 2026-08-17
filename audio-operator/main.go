@@ -5,8 +5,8 @@
 //
 // It is an instance of liken's device operator pattern. The operator
 // claims the machine's audio controller through an ordinary liken.sh
-// claim, runs PipeWire and WirePlumber beside itself in the same pod,
-// and publishes what PipeWire holds under its own driver name,
+// claim, reads the PipeWire that runs beside it in the same pod, and
+// publishes what PipeWire holds under its own driver name,
 // audio.liken.sh. The operator uses no private interface into liken:
 // the raw claim, the slices it writes, and the CDI files it leaves
 // for the runtime are the public contracts that any DRA driver on any
@@ -82,7 +82,21 @@ const (
 	writeRetryDelay = 2 * time.Second
 )
 
+// main selects the mode from the command line.
+//
+// The pod runs this one image four times. The declare init container
+// passes the declare argument and writes PipeWire's node
+// declarations, the PipeWire and WirePlumber containers name their
+// own binary, and the operator container runs with no argument.
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == declareMode {
+		declare()
+		return
+	}
+	operate()
+}
+
+func operate() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -109,31 +123,32 @@ func main() {
 		fatal("reading node %s: %v", nodeName, err)
 	}
 
-	// The card is enumerated before the daemons start, because PipeWire
-	// reads its configuration once and this operator writes part of it.
-	// WirePlumber's ALSA monitor finds cards through libudev, a liken
-	// machine runs no udevd, and the monitor is off in this image
-	// everywhere for that reason, so the sink nodes exist only because
-	// the drop-in below declares them. See nodes.go.
+	// The declaration the init container wrote, which is what PipeWire
+	// built its graph from. See nodes.go.
 	//
-	// An enumeration that fails here declares nothing, which is a
-	// PipeWire with no sink in it, so it ends the process and the
-	// kubelet's restart is the retry.
+	// The operator cannot regenerate the file, because PipeWire has
+	// already read it. A missing file is an init container that did
+	// not run, so the process ends.
+	declared, err := readNodeConfig()
+	if err != nil {
+		fatal("reading the declaration PipeWire loaded: %v", err)
+	}
+
+	operator := &reconciler{
+		client:   client,
+		nodeName: nodeName,
+		owner:    owner,
+		sinks:    readSinks,
+		declared: declared,
+	}
+
+	if err := operator.awaitPipeWire(ctx, pipewireReadyTimeout); err != nil {
+		fatal("waiting for PipeWire: %v", err)
+	}
+
 	outputs, err := readOutputs()
 	if err != nil {
 		fatal("reading the card's outputs: %v", err)
-	}
-	declared, err := writeNodeConfig(outputs)
-	if err != nil {
-		fatal("declaring the card's outputs to PipeWire: %v", err)
-	}
-
-	died, err := startDaemons(ctx)
-	if err != nil {
-		fatal("starting the sound server: %v", err)
-	}
-	if err := waitForPipeWire(ctx, pipewireReadyTimeout); err != nil {
-		fatal("waiting for PipeWire: %v", err)
 	}
 	// PipeWire creates the declared nodes while it loads its
 	// configuration, so they are there as soon as it answers. The wait
@@ -159,21 +174,13 @@ func main() {
 
 	settled := settle(ctx, wakes(ctx, jacks), settleWindow, settleLimit)
 
-	operator := &reconciler{
-		client:   client,
-		nodeName: nodeName,
-		owner:    owner,
-		sinks:    readSinks,
-		declared: declared,
-	}
-
 	// The first pass runs before any event, because the operator
 	// starts with monitors already connected, and a restart must
 	// republish what the previous pod published.
-	if err := operator.reconcile(ctx); err != nil {
+	if err := operator.pass(ctx); err != nil {
 		fatal("%v", err)
 	}
-	if err := run(ctx, operator, died, settled); err != nil {
+	if err := run(ctx, operator, settled); err != nil {
 		fatal("%v", err)
 	}
 }
@@ -181,7 +188,7 @@ func main() {
 // run is the operator's loop. It returns nil when the process is
 // shutting down, and an error when the operator must stop, which the
 // caller turns into a nonzero exit for the kubelet to restart.
-func run(ctx context.Context, operator *reconciler, died <-chan error, settled <-chan struct{}) error {
+func run(ctx context.Context, operator *reconciler, settled <-chan struct{}) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -191,19 +198,6 @@ func run(ctx context.Context, operator *reconciler, died <-chan error, settled <
 			// that owns the slice is what retracts it when the machine
 			// leaves the cluster.
 			return nil
-		case err := <-died:
-			// PipeWire holds the card, and this operator holds the card's
-			// exclusive claim. An operator that outlived its sound server
-			// would publish outputs it can no longer play, and hold the
-			// hardware away from a pod that could.
-			//
-			// The taint goes out first. Without it the slice keeps saying
-			// that every output plays, and the consumers of a card whose
-			// sound server just died would hold a dead socket until
-			// somebody noticed. The taint is what ends their session: a
-			// device that cannot serve evicts the pod that holds it.
-			operator.taintEverything()
-			return err
 		case _, ok := <-settled:
 			if !ok {
 				if ctx.Err() != nil {
@@ -216,7 +210,7 @@ func run(ctx context.Context, operator *reconciler, died <-chan error, settled <
 				// restarts it.
 				return errors.New("the event sources closed while running")
 			}
-			if err := operator.reconcile(ctx); err != nil {
+			if err := operator.pass(ctx); err != nil {
 				return err
 			}
 		}
@@ -234,14 +228,48 @@ type reconciler struct {
 	owner    OwnerReference
 	sinks    func(context.Context) (map[pcmAddress]string, error)
 
-	// declared is the drop-in the operator wrote before it started
-	// PipeWire. PipeWire reads its configuration once, so this is what
+	// declared is the drop-in the init container wrote before PipeWire
+	// started. PipeWire reads its configuration once, so this is what
 	// the running graph was built from, and a pass that would generate
 	// something else has found a card that no longer matches its own
 	// sound server.
 	declared string
 
 	sinkFailures int
+
+	// driftReported keeps the divergence report to one line. The
+	// backstop tick runs every minute and the card does not change back.
+	driftReported bool
+}
+
+// pass runs one reconcile and taints every output when the operator
+// has to stop.
+//
+// This is the coupling contract. The daemons run in their own
+// containers and the operator cannot end them, so when it loses the
+// graph it publishes the fact instead: every output tainted, then a
+// nonzero exit for the kubelet to restart. The slice must never say
+// an output plays while nothing plays.
+func (r *reconciler) pass(ctx context.Context) error {
+	if err := r.reconcile(ctx); err != nil {
+		r.taintEverything()
+		return err
+	}
+	return nil
+}
+
+// awaitPipeWire waits for the container beside this one to serve its
+// socket, and taints every output when it never does.
+//
+// A PipeWire that never answers leaves the previous pod's slice
+// published, and that slice says every output plays. The taint is
+// what ends the sessions of the consumers that slice still holds.
+func (r *reconciler) awaitPipeWire(ctx context.Context, timeout time.Duration) error {
+	if err := waitForPipeWire(ctx, r.sinks, timeout); err != nil {
+		r.taintEverything()
+		return err
+	}
+	return nil
 }
 
 // reconcile makes the published slice and every prepared CDI spec
@@ -269,22 +297,19 @@ func (r *reconciler) reconcile(ctx context.Context) error {
 		fmt.Fprintf(os.Stderr, "the claimed card has no playback PCM device; publishing nothing\n")
 		return nil
 	}
-	// A PCM device that appeared or left since the daemons started has
-	// no node in the running graph, and PipeWire reads context.objects
-	// only while it loads its configuration, so nothing short of a
-	// restart gives that output a sink. The restart is the repair, and
-	// it is bounded: the drop-in is generated from the card's PCM
-	// devices, which a card fixes when its driver binds, so this is one
-	// restart for a card that arrived or left and never a loop over a
-	// monitor somebody plugged in.
-	//
-	// The outputs are not tainted on the way out. A restart takes the
-	// socket away from every consumer, which the README states, and a
-	// consumer that reconnects finds the new one. Tainting would evict
-	// all of them for a gap they survive.
-	if current := nodeConfig(outputs); current != r.declared {
-		return errors.New("the card's playback PCM devices have changed since PipeWire started, " +
-			"so the new set has no nodes; restarting to declare them")
+	// A PCM device that appeared or left since PipeWire started has no
+	// node in the running graph, and PipeWire reads context.objects
+	// only while it loads its configuration, so nothing this operator
+	// does gives that output a sink. Only the init container writes
+	// the declaration, and an init container runs once per pod, so an
+	// operator restart would re-read the same file and find the same
+	// divergence. The report goes out once, the pass continues, and
+	// every output with no node publishes with the no-sink taint.
+	// Deleting the pod is what declares the new set.
+	if current := nodeConfig(outputs); current != r.declared && !r.driftReported {
+		r.driftReported = true
+		fmt.Fprintf(os.Stderr, "the card's playback PCM devices have changed since PipeWire started; "+
+			"the outputs with no declared node publish with the no-sink taint until this pod is replaced\n")
 	}
 	sinks, err := r.sinks(ctx)
 	if err != nil {
@@ -303,8 +328,11 @@ func (r *reconciler) reconcile(ctx context.Context) error {
 }
 
 // taintEverything publishes the card's outputs with every one of them
-// tainted, which is what an operator says on its way out when the
-// sound server it runs has died.
+// tainted.
+//
+// The operator publishes this form at the two moments when it holds
+// no connection to PipeWire: at startup, when the socket never
+// answers, and on the way out, when a run of graph reads has failed.
 //
 // It is best effort. The process is ending either way, so a failure
 // here is reported and not retried, and the next pod republishes the

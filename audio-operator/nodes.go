@@ -16,8 +16,11 @@ package main
 // delivers, and reads each one's ELD through the control interface. So
 // the operator writes the nodes down for PipeWire rather than asking
 // it to discover them: one adapter object for each playback PCM,
-// declared in a PipeWire configuration drop-in that the operator
-// generates before it starts the daemons.
+// declared in a PipeWire configuration drop-in.
+//
+// An init container writes the drop-in and exits, and the PipeWire
+// container starts after it, so the pod's own container order is what
+// puts the declaration on disk before PipeWire reads it.
 //
 // This runs the same way on a machine that does have udevd, because
 // the drop-in declares the nodes and the image's WirePlumber
@@ -146,9 +149,9 @@ func nodeConfig(outputs []alsaOutput) string {
 
 // configHeader explains the file to whoever finds it on a machine.
 // PipeWire's parser takes # to the end of the line as a comment.
-const configHeader = `# The claimed card's playback outputs, written by audio-operator
-# before it started PipeWire. Editing this file achieves nothing: the
-# operator writes it again at every start.
+const configHeader = `# The claimed card's playback outputs, written by the pod's declare
+# init container before PipeWire starts, and written again by every
+# replacement pod. Editing this file achieves nothing.
 #
 # WirePlumber's ALSA monitor enumerates cards through libudev, and a
 # liken machine runs no udevd, so the monitor finds no card and builds
@@ -211,16 +214,30 @@ func sinkObject(card, pcm int) staticNode {
 	}
 }
 
-// writeNodeConfig generates the drop-in and writes it where PipeWire
-// reads it. It returns the document it wrote, which the reconcile pass
-// compares against to notice a card whose PCM devices changed under a
-// running PipeWire.
+// declareMode is the argument that selects the declaration mode. The
+// pod runs the image once in this mode, as an init container, and the
+// container exits when the drop-in is on disk.
+const declareMode = "declare"
+
+// declare writes the drop-in and ends the process.
 //
-// The write happens before the daemons start. PipeWire builds
-// context.objects while it loads its configuration, so a fragment that
-// arrives later is not read, and the operator starts the daemons
-// itself, which makes generate-then-start one ordinary sequence rather
-// than a synchronization problem.
+// The write must finish before PipeWire starts, because PipeWire
+// builds context.objects while it loads its configuration and never
+// reads a fragment that arrives later. An init container that runs to
+// completion before the PipeWire sidecar starts is the kubelet's own
+// expression of that order, so no code here waits for anything.
+func declare() {
+	outputs, err := readOutputs()
+	if err != nil {
+		fatal("reading the card's outputs: %v", err)
+	}
+	if _, err := writeNodeConfig(outputs); err != nil {
+		fatal("declaring the card's outputs to PipeWire: %v", err)
+	}
+}
+
+// writeNodeConfig generates the drop-in and writes it where PipeWire
+// reads it. It returns the document it wrote.
 func writeNodeConfig(outputs []alsaOutput) (string, error) {
 	document := nodeConfig(outputs)
 	if err := os.MkdirAll(pipewireConfigDir, 0o755); err != nil {
@@ -232,4 +249,19 @@ func writeNodeConfig(outputs []alsaOutput) (string, error) {
 	}
 	fmt.Printf("declared %d sink node(s) to PipeWire in %s\n", len(outputs), path)
 	return document, nil
+}
+
+// readNodeConfig reads the drop-in back.
+//
+// The declare init container is the only writer of this file, so the
+// file is the record of what PipeWire built its graph from. The
+// reconcile pass compares the card's current PCM devices against it
+// to notice a card that changed under a running PipeWire.
+func readNodeConfig() (string, error) {
+	path := filepath.Join(pipewireConfigDir, dropInName)
+	document, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("reading %s: %w", path, err)
+	}
+	return string(document), nil
 }
