@@ -114,7 +114,7 @@ Open a window:
       name: new-gamepad
       namespace: liken-system
     spec:
-      adapter: 7c-66-ef-22-e7-80
+      adapter: 04-4a-69-66-92-27
       windowSeconds: 180
     EOF
 

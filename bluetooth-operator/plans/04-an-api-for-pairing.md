@@ -1,6 +1,6 @@
 # 04, An API for pairing
 
-Proposed. Nothing below runs until a drill on liken-1 proves it.
+Built, and drilled on liken-1 on 2026-08-17.
 
 This plan answers the open problem "Who owns the pairing UX", and this
 document replaces it.
@@ -33,7 +33,7 @@ appear only in the status of an object a person created.
 ### Adapter
 
 Cluster-scoped, created by the operator, named by the adapter's MAC in
-DNS-label form (`7c-66-ef-22-e7-80`). It is the root of the ownership
+DNS-label form (`04-4a-69-66-92-27`). It is the root of the ownership
 tree: Pairings belong to it, and each Pairing owns its bond Secret, so
 retiring a dead radio is one delete that collects every bond keyed to
 it.
@@ -42,11 +42,11 @@ it.
 apiVersion: bluetooth.liken.sh/v1alpha1
 kind: Adapter
 metadata:
-  name: 7c-66-ef-22-e7-80
+  name: 04-4a-69-66-92-27
 spec:
   alias: liken-1-living-room
 status:
-  address: "7C:66:EF:22:E7:80"
+  address: "04:4A:69:66:92:27"
   node: liken-1
   powered: true
 ```
@@ -86,14 +86,14 @@ apiVersion: bluetooth.liken.sh/v1alpha1
 kind: Pairing
 metadata:
   name: a0-ab-51-33-b7-12
-  ownerReferences: [{kind: Adapter, name: 7c-66-ef-22-e7-80, ...}]
+  ownerReferences: [{kind: Adapter, name: 04-4a-69-66-92-27, ...}]
 spec:
   alias: player-one-pad
   trusted: true
 status:
   address: "A0:AB:51:33:B7:12"
   deviceName: "DualSense Wireless Controller"
-  adapter: "7C:66:EF:22:E7:80"
+  adapter: "04:4A:69:66:92:27"
   connected: true
   secret: liken-system/bluetooth-bond-a0-ab-51-33-b7-12
   pairedAt: "2026-08-17T17:30:41Z"
@@ -130,7 +130,7 @@ metadata:
   name: new-gamepad
   namespace: liken-system
 spec:
-  adapter: 7c-66-ef-22-e7-80
+  adapter: 04-4a-69-66-92-27
   windowSeconds: 180
   device: ""            # empty: scan and report. set: pair this one.
   ttlSecondsAfterFinished: 86400
@@ -233,15 +233,32 @@ would go when that day comes.
   unpair, an act with a finalizer and consequences. The operator
   reports; a person deletes.
 
-## What a drill must show
+## What the drill showed
 
-1. A first pairing, guard on, end to end: request, flashing controller
-   in `status.seen`, approval, Pairing created, Secret created, slice
-   publishes the controller, PS reconnects after.
-2. Adoption: the pre-existing bond becomes a Pairing and a per-bond
-   Secret on first startup, and the DualSense reconnects with no
-   re-pairing.
-3. Unpair while claimed: delete the Pairing while gamepad-remote holds
-   the claim, and watch the ordered teardown end with the slice device
-   gone and the Secret collected.
-4. TTL: a finished request is collected on schedule.
+All four drills ran on liken-1 on 2026-08-17, against the release
+2026.08.17-020 and a DualSense.
+
+1. **A first pairing, guard on, passed.** The window's scan reported
+   three devices in `status.seen`: the flashing DualSense and two
+   strangers in radio range. The empty `spec.device` paired none of
+   them. Approval by patch reached `Paired` in about ten seconds, the
+   Pairing and its Secret appeared, the slice published the
+   controller, and the consumer that was parked on the taint started
+   on its own. `ClassicBondedOnly` stayed at `true` throughout, so
+   the fallback flip was never needed.
+2. **Adoption passed.** On the release's first roll, the pre-existing
+   bond became a Pairing and a per-bond Secret with the Pairing as
+   owner, and the DualSense reconnected on its own ten to twenty
+   seconds after bluetoothd restarted.
+3. **Unpair while claimed passed.** Deleting the Pairing while a pod
+   held the prepared claim ran the ordered teardown in about 95
+   seconds: disconnect, taints, eviction at the 30 second toleration,
+   unprepare, the device retired from the slice, the bond removed,
+   and the Secret collected with the object. The same drill taught a
+   consumer lesson: a consumer under a Deployment must claim through
+   a ResourceClaimTemplate, because a standing claim keeps its
+   allocation across the eviction, the NoSchedule taint blocks only
+   new allocations, and the ReplicaSet loops through pods that
+   schedule and are evicted at once.
+4. **TTL passed.** The finished request was collected on its
+   `ttlSecondsAfterFinished` schedule.

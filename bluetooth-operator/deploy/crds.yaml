@@ -48,6 +48,10 @@ spec:
           type: string
           description: The name the radio broadcasts about itself.
           jsonPath: .spec.alias
+        - name: Address
+          type: string
+          description: The adapter's MAC, uppercase with colons.
+          jsonPath: .status.address
         - name: Node
           type: string
           description: The machine the radio is plugged into now.
@@ -56,6 +60,9 @@ spec:
           type: boolean
           description: Whether bluetoothd has the radio powered on.
           jsonPath: .status.powered
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
       schema:
         openAPIV3Schema:
           type: object
@@ -139,6 +146,10 @@ spec:
           type: string
           description: The name a person gave the controller.
           jsonPath: .spec.alias
+        - name: Address
+          type: string
+          description: The controller's MAC, uppercase with colons.
+          jsonPath: .status.address
         - name: Device
           type: string
           description: The name the controller reports for itself.
@@ -147,6 +158,9 @@ spec:
           type: boolean
           description: Whether the controller holds a connection now.
           jsonPath: .status.connected
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
       schema:
         openAPIV3Schema:
           type: object
@@ -262,6 +276,10 @@ spec:
           type: string
           description: The address a person approved.
           jsonPath: .spec.device
+        - name: Pairing
+          type: string
+          description: The Pairing a successful window produced.
+          jsonPath: .status.pairing
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp

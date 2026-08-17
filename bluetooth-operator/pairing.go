@@ -160,7 +160,7 @@ func (i *inventory) reconcileDeviceSpec(pairing *Pairing, device deviceState) {
 func (i *inventory) writePairingStatus(pairing *Pairing, adapter *Adapter, address bonds.Address, device deviceState, present bool) {
 	status := PairingStatus{
 		Address:    address.Directory(),
-		DeviceName: attributeString(deviceDisplayName(device)),
+		DeviceName: attributeString(deviceReportedName(device)),
 		Adapter:    adapter.Status.Address,
 		Connected:  present && device.Connected,
 		Bonded:     present && device.Paired,
@@ -195,4 +195,17 @@ func deviceDisplayName(device deviceState) string {
 		return device.Alias
 	}
 	return device.Name
+}
+
+// deviceReportedName is the name the controller reports for itself,
+// which is what status.deviceName promises. Alias is only the
+// fallback, for a device that has published no name, where BlueZ
+// derives an alias from the address. Without this split, a person who
+// sets spec.alias would see their own name in both columns and lose
+// the device's.
+func deviceReportedName(device deviceState) string {
+	if device.Name != "" {
+		return device.Name
+	}
+	return device.Alias
 }
