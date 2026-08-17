@@ -413,6 +413,80 @@ func TestEnsureReplacesAChangedSliceAndBumpsTheGeneration(t *testing.T) {
 	}
 }
 
+// The next three tests read the line the publisher prints for each
+// outcome. A slice that nobody rewrites and a slice that an operator
+// died and left behind hold the same resourceVersion and the same pool
+// generation, so the log is the only place the two come apart.
+
+func TestEnsureLogsTheSliceItCreated(t *testing.T) {
+	capture := captureSliceLog(t)
+	fixture := &slicePublishFixture{}
+	client := testClient(t, fixture.handler(t))
+
+	if err := EnsureResourceSlice(client, "liken-1", testOwner(), sliceDevices(testOutputs(t), labRouted())); err != nil {
+		t.Fatal(err)
+	}
+	// DP-1 is the connector with nothing plugged into it.
+	want := "slice: created generation 1, 3 devices, 1 tainted: dp-1 carries " +
+		disconnectedTaint + ", " + noOutputTaint
+	if got := capture.only(t); got != want {
+		t.Errorf("line = %q, want %q", got, want)
+	}
+}
+
+func TestEnsureLogsTheSliceItWrote(t *testing.T) {
+	capture := captureSliceLog(t)
+	devices := sliceDevices(testOutputs(t), labRouted())
+	fixture := &slicePublishFixture{existing: &ResourceSlice{
+		Metadata: ResourceSliceMeta{Name: "liken-1-display.liken.sh", ResourceVersion: "7"},
+		Spec: ResourceSliceSpec{
+			Driver:   DriverName,
+			NodeName: "liken-1",
+			Pool:     ResourcePool{Name: "liken-1", Generation: 3, ResourceSliceCount: 1},
+			Devices:  devices,
+		},
+	}}
+	client := testClient(t, fixture.handler(t))
+
+	// The compositor died, so every output takes both taints. The
+	// device count does not move, and the taints are the whole event.
+	if err := EnsureResourceSlice(client, "liken-1", testOwner(), withoutTheCompositor(devices)); err != nil {
+		t.Fatal(err)
+	}
+	both := disconnectedTaint + ", " + noOutputTaint
+	want := "slice: wrote generation 4, 3 devices, 3 tainted: hdmi-a-1 gained " + both +
+		"; hdmi-a-2 gained " + both
+	if got := capture.only(t); got != want {
+		t.Errorf("line = %q, want %q", got, want)
+	}
+}
+
+func TestEnsureLogsThatNothingMoved(t *testing.T) {
+	capture := captureSliceLog(t)
+	devices := sliceDevices(testOutputs(t), labRouted())
+	fixture := &slicePublishFixture{existing: &ResourceSlice{
+		Metadata: ResourceSliceMeta{Name: "liken-1-display.liken.sh", ResourceVersion: "7"},
+		Spec: ResourceSliceSpec{
+			Driver:   DriverName,
+			NodeName: "liken-1",
+			Pool:     ResourcePool{Name: "liken-1", Generation: 3, ResourceSliceCount: 1},
+			Devices:  devices,
+		},
+	}}
+	client := testClient(t, fixture.handler(t))
+
+	if err := EnsureResourceSlice(client, "liken-1", testOwner(), devices); err != nil {
+		t.Fatal(err)
+	}
+	if fixture.updated != nil {
+		t.Fatalf("an unchanged inventory wrote to the API: %v", fixture.requests)
+	}
+	want := "slice: unchanged at generation 3, 3 devices, 1 tainted (1 pass)"
+	if got := capture.only(t); got != want {
+		t.Errorf("line = %q, want %q", got, want)
+	}
+}
+
 func TestEnsureRefusesToPublishAnEmptyInventory(t *testing.T) {
 	// A card keeps its connectors until it leaves, so a pass that
 	// found none read a card that is going away or read the wrong
