@@ -22,6 +22,16 @@ spec:
         - name: controller
           exactly:
             deviceClassName: audio-controller
+            selectors:
+              # The machine's own sound card, and not a USB headset or
+              # a webcam's microphone. Both answer the device class,
+              # because both are the sound subsystem, and the outputs
+              # this operator publishes are the ones wired to the
+              # machine's display connectors.
+              - cel:
+                  expression: |
+                    has(device.attributes["liken.sh"].bus) &&
+                    device.attributes["liken.sh"].bus == "pci"
 ---
 apiVersion: apps/v1
 kind: Deployment
