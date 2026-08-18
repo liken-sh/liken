@@ -1,1 +1,8 @@
 /bluetooth-operator
+
+# The rendered site. `go tool hugo` writes it under docs/dist, and CI
+# rebuilds it from the sources on every publish, so the tree is never
+# committed. The lock file is Hugo's guard against two builds in one
+# source tree at once.
+/docs/dist/
+/docs/.hugo_build.lock
