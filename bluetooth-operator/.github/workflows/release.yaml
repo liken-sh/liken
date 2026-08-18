@@ -1,42 +1,30 @@
-# Every push to main tests the code, builds all three images, and
-# releases them.
+# A pushed tag cuts a release. The tag is the release act, as in the
+# main liken repository: a push to main only runs the tests
+# (ci.yaml), so docs and intermediate work land freely, and a person
+# chooses the commit a version names by tagging it. The version is
+# the tag's name, in liken's own scheme: 2026.08.03-001, the date and
+# a counter.
 #
 # The three images carry the same version, because they are three
 # parts of one pod and a deployment that mixes versions is a
-# combination nobody tested.
-#
-# The version is the date and the run number, which is liken's own
-# scheme: 2026.08.03-002. The two release cadences do not couple, and
-# reading one version beside the other still tells you when each one
-# was cut.
+# combination nobody tested. The tag also names the commit a consumer
+# pins to when it references the kustomize base in `deploy/`, so one
+# tag versions the images and the manifests together.
 name: release
 
-# The filter is a deny-list, not an allow-list, because the Go sources
-# sit at the top level beside the packages and a new package is an
-# ordinary new directory. An allow-list would have to name every one of
-# them, and the day somebody adds a directory it does not name, the push
-# that adds it ships no image and says nothing. A deny-list fails the
-# other way: a file nobody thought about cuts a release that changes no
-# bytes, which costs a version number.
-#
-# Everything not listed here is a build input, including `deploy/`. That
-# directory builds no image, and the release tags the commit, so the tag
-# is what a consumer pins to when it references the kustomize base.
 on:
   push:
-    branches: [main]
-    paths-ignore:
-      - 'plans/**'
-      - 'README.md'
-      - 'LICENSE'
-      - '.gitignore'
+    tags: ['*']
 
+# The registry pushes need packages: write. Nothing here writes to
+# the repository: the tag exists before the run, so the workflow
+# only reads the commit it names.
 permissions:
-  contents: write
+  contents: read
   packages: write
 
-# Two pushes in quick succession would otherwise race for the same
-# tag and push two images to :latest in an order nobody chose.
+# Two tags pushed in quick succession would otherwise race their
+# pushes to :latest in an order nobody chose.
 concurrency:
   group: release
 
@@ -44,13 +32,18 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      # Every tag reaches this workflow, so the first step decides
+      # whether the tag is a version. A tag of any other shape fails
+      # here, before anything builds, and the log says why.
+      - name: check the tag shape
+        run: |
+          echo "$GITHUB_REF_NAME" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3}$' || {
+            echo "tag '$GITHUB_REF_NAME' is not a version: a release tag looks like 2026.08.03-001"
+            exit 1
+          }
+          echo "VERSION=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
-        with:
-          # actions/checkout clones one commit deep and fetches no
-          # tags. Without this the tag guard below asks about a tag
-          # that is not in the local repository, so it never finds
-          # one, and the guard passes everything through.
-          fetch-tags: true
 
       - uses: actions/setup-go@v5
         with:
@@ -61,9 +54,6 @@ jobs:
       # that worked.
       - run: go vet ./...
       - run: go test -race ./...
-
-      - name: Compute the version
-        run: echo "VERSION=$(date -u +%Y.%m.%d)-$(printf '%03d' "$GITHUB_RUN_NUMBER")" >> "$GITHUB_ENV"
 
       - uses: docker/login-action@v3
         with:
@@ -101,16 +91,3 @@ jobs:
           tags: |
             ghcr.io/liken-sh/bluetoothd:${{ env.VERSION }}
             ghcr.io/liken-sh/bluetoothd:latest
-
-      # The tag lands after the push, so a tag in the repository always
-      # names a version that exists in the registry.
-      #
-      # A re-run of a finished run computes the same version from the
-      # same run number, so the tag is already there. The guard reads
-      # the tag the checkout above fetched and skips the tagging, which
-      # keeps the tag pointing at the commit that first carried this
-      # version rather than moving it.
-      - name: Tag the commit
-        run: |
-          git rev-parse -q --verify "refs/tags/$VERSION" \
-            || { git tag "$VERSION" && git push origin "$VERSION"; }

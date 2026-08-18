@@ -1,0 +1,32 @@
+# Every push to main and every pull request runs the tests. Nothing
+# here releases: a push to main is ordinary work landing, and the
+# release act is a pushed tag (release.yaml). That separation lets
+# docs and intermediate commits land on main without cutting a
+# version, and it means main's history carries a test verdict for
+# every commit a release could later tag.
+#
+# There is no path filter. The tests are cheap next to the image
+# builds, and a filter that guessed wrong would leave a commit with
+# no verdict.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - run: go vet ./...
+      - run: go test -race ./...
