@@ -11,6 +11,13 @@
 # program setting a mode on it. The render node is shareable, so
 # holding it takes nothing away from the transcoders that use the same
 # GPU.
+#
+# The two deviceClassName values below are literal. The base ships no
+# DeviceClass, because a class is the cluster owner's policy, so the
+# owner creates display-gpu and display-render before this template
+# can allocate anything. An owner who names the classes differently
+# patches this template to match. The install guide gives the classes'
+# YAML.
 apiVersion: resource.k8s.io/v1
 kind: ResourceClaimTemplate
 metadata:
