@@ -1,0 +1,35 @@
+# The site's configuration. The site is the manual for the audio
+# operator, served at audio.liken.sh. The hostname is the operator's
+# DRA device class name, so the name a claim selects on is also the
+# address where a reader learns what it selects.
+#
+# The theme is the shared brand repository, taken as a git submodule
+# at themes/brand. It carries the page shell, the top nav, the mark,
+# and the stylesheet that every liken site uses, so this site reads
+# as part of the same family as liken.sh.
+baseURL: https://audio.liken.sh/
+title: audio.liken.sh
+theme: brand
+
+# No taxonomies and no feeds: the site is a manual, not a blog. The
+# sitemap stays, because it is free and crawlers use it.
+disableKinds: [taxonomy, term, rss]
+
+# Every page renders twice, once as HTML for people and once as the
+# authored Markdown for agents and scripts. The two files land side
+# by side, so the Markdown twin of / is /index.md. The theme renders
+# the twin, but only when the site declares this format; without it,
+# the site builds as HTML alone (themes/brand/README.md).
+outputFormats:
+  markdown:
+    # text/markdown is a media type Hugo already has, with the md
+    # suffix. baseName index makes the output index.md, beside
+    # index.html in the same pretty-URL directory.
+    mediaType: text/markdown
+    baseName: index
+    isPlainText: true
+
+outputs:
+  home: [html, markdown]
+  section: [html, markdown]
+  page: [html, markdown]
