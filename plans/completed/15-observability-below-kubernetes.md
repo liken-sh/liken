@@ -1,6 +1,6 @@
 # Observability below Kubernetes
 
-Milestone 15 — Completed. Each host log stream below Kubernetes becomes
+Milestone 15. Completed. Each host log stream below Kubernetes becomes
 a pod's stdout, so `kubectl logs` is the machine's log interface.
 
 This milestone covers observability for everything below Kubernetes.
@@ -34,14 +34,14 @@ efi-pstore for kernel panics.
    printk timestamps, so console behavior stays the same. Every liken
    line also lands in the ring buffer as a structured record,
    interleaved with the kernel's own records in the true time order.
-   Userspace records carry facility 1, and the kernel's records carry
+   Userspace records have facility 1, and the kernel's records have
    facility 0. The two streams therefore separate by this field, and
    not by a match on the "liken:" prefix in the text. By default, the
    kernel rate-limits userspace kmsg writes, and this limit would
    silently drop most of the boot report. Init disables the limit by
    writing to the `kernel.printk_devkmsg` sysctl early in boot. This
    method covers every boot path, including machines whose boot entries
-   are already baked into firmware, and it does not touch a kernel
+   are already baked into firmware, and it does not change a kernel
    command line. If init cannot open the sysctl or `/dev/kmsg`, it
    keeps writing to the console directly, so a degraded boot still
    shows what is happening. A few lines print before `/dev` exists: the
@@ -67,11 +67,11 @@ efi-pstore for kernel panics.
    shutdown's unmount fails because the mount is still busy.
 3. [x] The relay is hand-rolled. The kmsg record format and a
    rotation-aware tail are each small formats in the GPT-writer family.
-   The tail notices an inode change and reopens the file, the same
+   The tail detects an inode change and reopens the file, the same
    behavior that `tail -F` gives. The relay must be in the baked image
    anyway, because what it parses is coupled to the OS version.
 
-   One multi-call entrypoint sits behind one `machine-logs` DaemonSet,
+   One multi-call entrypoint is behind one `machine-logs` DaemonSet,
    with one container per source. The kernel and liken containers both
    read `/dev/kmsg`, which supports concurrent readers, and each one
    filters by facility. The k3s and containerd containers run the same
@@ -148,12 +148,12 @@ efi-pstore for kernel panics.
    after the fleet settles shows the fleet quiet, not chattering.
 
    Two releases rolled onto the live five-node lab and proved this.
-   Release 0.3.0 carried the relays and found the privilege bug
-   described above. Release 0.3.1 carried the fix. The whole fleet went
+   Release 0.3.0 shipped the relays and found the privilege bug
+   described above. Release 0.3.1 shipped the fix. The whole fleet went
    through the rollout, and all twenty-five OS pods, which are the
    operator plus four relays on five nodes, refreshed through the
    steward and settled at zero restarts. That count belongs to the
-   four-DaemonSet layout that these two releases carried. Commit
+   four-DaemonSet layout that these two releases shipped. Commit
    030900b folded the four relays into one four-container pod, so a
    fleet of this size runs fewer pods now.
 

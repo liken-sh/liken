@@ -1,6 +1,6 @@
 # A reinstall formats every partition
 
-Milestone 37 — Completed. A reinstall erases every role it claims, and
+Milestone 37. Completed. A reinstall erases every role it claims, and
 the proposed disk layout scales with the size of the disk.
 
 Milestone 36 put liken on real hardware. That machine showed two faults
@@ -27,7 +27,8 @@ password, and its rejection records. The testbed's `creationTimestamp`
 showed this: hours older than the reinstall that was to replace it.
 
 The fix does not belong in the reinstall path, because the reinstall
-path did not decide this. It belongs in the claim path, as one rule: a
+path is not where that decision is made. It belongs in the claim path,
+as one rule: a
 partition this boot created is always formatted. A partition liken
 created seconds ago holds nothing to keep, whatever the bytes in it
 are.
@@ -35,7 +36,7 @@ are.
 The rule keeps the property that the old check gave. A claim writes the
 role's name before a file system exists, so a boot that stops between
 the partition step and mkfs leaves a partition that the next boot
-recognizes and completes. That next boot does not create the partition,
+detects and completes. That next boot does not create the partition,
 so it still reads the signature, still finds none, and still formats. A
 boot that stopped after mkfs still keeps its file system.
 
@@ -65,11 +66,11 @@ The layout gains a step above the conventional one, for a disk with
 free space. `clusterState` takes an eighth of the disk, with the
 conventional 6Gi as its floor and 64Gi as its ceiling. `podEphemeral`
 takes a bounded share, and `podStorage` takes the remainder. The steps
-for a small disk do not change: `podStorage` gives up space first, and
-`clusterState` gives up space last and never below its floor.
+for a small disk do not change: `podStorage` loses space first, and
+`clusterState` loses space last and never below its floor.
 
 The note beside the numbers states what a person cannot see: this size
-is permanent, and the images this node runs decide it.
+is permanent, and the images this node runs determine it.
 
 ## The Machine document after a reinstall
 
@@ -81,14 +82,14 @@ until a person patches the Machine by hand.
 
 The Machine document is authoritative, and this milestone does not
 change that. It changes what the refusal says. The message names the
-role, the declared size, the size the disk carries, and the remedy, so
+role, the declared size, the size on the disk, and the remedy, so
 the person who reads it has no diagnosis left to do. The install guide
 gives the order the edit needs: the machine publishes its new layout in
 status first, and the spec is edited to match after that.
 
 ## The lab drill
 
-A file system carries a UUID that `mke2fs` writes once, so the UUID is
+A file system has a UUID that `mke2fs` writes once, so the UUID is
 the evidence. The drill installed node-1, read every partition's UUID
 from the guest's disk images, booted `liken.reinstall`, and read the
 UUIDs again. Every one changed: `machineState`, `clusterState`,

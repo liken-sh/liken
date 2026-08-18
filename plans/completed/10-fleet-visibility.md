@@ -1,10 +1,10 @@
 # Fleet visibility: phases, heartbeats, and the sweep
 
-Milestone 10 — Completed. A fleet listing shows a named phase for each
+Milestone 10. Completed. A fleet listing shows a named phase for each
 machine, and the leaders mark a machine that stops reporting as Lost.
 
 Every state that a fleet listing shows is now an enumerated word,
-instead of a boolean. Machines carry `status.phase`, derived from the
+instead of a boolean. Machines have `status.phase`, derived from the
 conditions on every reconcile pass: Ready, UpdatePending, Updating,
 Blocked, Degraded, Booting, Unknown, or Lost. The Ready condition
 remains, for `kubectl wait` to use. Only its printer column went away.
@@ -21,7 +21,7 @@ sends a heartbeat with an update to `status.observedAt`. The leaders
 run a fleet sweep that marks an unresponsive machine Lost. Leaders run
 the sweep because a follower that can reach the API is, by definition,
 reaching a leader. The sweep is a safe multi-writer, because it only
-touches machines whose own writer has stopped.
+writes to machines whose own writer has stopped.
 
 The sweep also publishes the Cluster's first status: a phase (Ready,
 Updating, or Degraded) and a ready-out-of-total headcount, shown as

@@ -1,6 +1,6 @@
 # Init starts k3s and nothing else
 
-Milestone 02 — Completed. Init prepares every host dependency that k3s
+Milestone 02. Completed. Init prepares every host dependency that k3s
 needs, then supervises k3s as its only child process.
 
 The host dependencies are cgroups, kernel modules, time, and entropy.
@@ -40,7 +40,7 @@ Init supplies all of them on a system with no shell.
    the machine runs. The operator uses plain net/http against the API
    server in place of client-go, because a hand-written watch loop shows
    the reader how the Kubernetes watch protocol works. The shared Go
-   types live in the machine/ domain, and both programs use them. This
+   types are in the machine/ domain, and both programs use them. This
    work also explains an old console message. "The manifest file is
    empty, ignoring." comes once from each embedded control-plane
    component as it parses its options. The message is not about the k3s

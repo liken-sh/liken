@@ -5,8 +5,8 @@ from the same operator and the same PipeWire graph that serve the HDMI
 outputs and the analog jack. The Bluetooth operator owns reaching the
 speaker: the radio, the pairing, and the bonds. The audio operator
 owns playing into it. Exactly one thing crosses between them, and it
-crosses in public: the Bluetooth operator publishes its media bus as a
-DRA device, and the audio operator claims it.
+crosses through the API: the Bluetooth operator publishes its media
+bus as a DRA device, and the audio operator claims it.
 
 This milestone spans three repositories. This document is the design
 record; each operator's own plans directory records its half of the
@@ -16,21 +16,22 @@ build.
 
 A paired Bluetooth speaker leaves nothing in the kernel. There is no
 sysfs node and no ALSA card. The audio exists only while a sound
-server is a live party on `bluetoothd`'s D-Bus socket: it must
+server is connected to `bluetoothd`'s D-Bus socket: it must
 register a media endpoint, negotiate the codec, encode the samples
 itself, and hold the L2CAP socket that `bluetoothd` hands over as a
 file descriptor. BlueZ does not advertise A2DP at all until an
 endpoint registers, so a `bluetoothd` with no sound server beside it
 cannot even pair a speaker usefully. The Bluetooth operator's plan 01
-read all of this from the upstream sources and its citations stand;
+read all of this from the upstream sources and its citations remain
+valid;
 this document does not repeat them.
 
 That fact splits Bluetooth audio across two operators. The pairing
-state lives in `bluetoothd`, which milestone 58's operator runs. The
-sound server, the graph, and the sink contract live in milestone 59's
+state is in `bluetoothd`, which milestone 58's operator runs. The
+sound server, the graph, and the sink contract are in milestone 59's
 audio operator. Plan 01 of the Bluetooth operator resolved the split
 by putting a second PipeWire in the Bluetooth pod and publishing
-speakers under `bluetooth.liken.sh`. That design carries three costs:
+speakers under `bluetooth.liken.sh`. That design has three costs:
 two sound stacks on one machine, two sockets where `PIPEWIRE_REMOTE`
 can name only one, and a fallback that adds a third operator if an
 audio fault restarting the controllers proves unacceptable. This
@@ -38,8 +39,8 @@ milestone replaces that design.
 
 ## The design: the media bus is a device
 
-"May do Bluetooth audio on this machine" is exactly equal to "may talk
-on `bluetoothd`'s socket". The Bluetooth operator makes that right
+"May do Bluetooth audio on this machine" is exactly equal to "may
+connect to `bluetoothd`'s socket". The Bluetooth operator makes that right
 claimable. It publishes one device per adapter, the media bus, in the
 ResourceSlice it already writes. The device is exclusive, because one
 radio supports one sound server: two endpoints registering on one
@@ -64,7 +65,7 @@ The audio operator's DeviceClass changes from "liken's audio
 controller" to "any sound substrate", and its ResourceClaimTemplate
 keeps `allocationMode: All`. Each DaemonSet pod then allocates
 everything on its node that can make sound: the card, the radio's
-media bus, or both. A node with neither parks the pod Pending, which
+media bus, or both. A node with neither parks the pod `Pending`, which
 is the placement rule the operator already relies on.
 
 With the bus delivered, the audio operator enables WirePlumber's
@@ -91,7 +92,7 @@ namespace is fixed at creation, and read, write, and `shutdown` on an
 existing socket do no namespace check. The descriptor crosses the pod
 boundary by `SCM_RIGHTS` over the mounted bus socket. Plan 01 recorded
 both facts with sources when it set aside the cross-pod mount; this
-design is that mount, made legible to the scheduler.
+design is that mount, declared to the scheduler as a claim.
 
 ## Who does what
 
@@ -104,11 +105,11 @@ OS still publishes raw hardware and nothing refined.
 
 ### The Bluetooth operator
 
-* Publishes the media bus device, one per adapter, exclusive, carrying
+* Publishes the media bus device, one per adapter, exclusive, with
   `sound.liken.sh/substrate` and a kind attribute beside the
   controllers it already publishes.
 * Backs the bus socket with a hostPath instead of an emptyDir. The
-  path does not change: plan 01 parked the socket at
+  path does not change: plan 01 put the socket at
   `/var/run/bluetooth.liken.sh/dbus/system_bus_socket` so that this
   move would change a volume and not an address.
 * Writes the CDI file that delivers the mount and
@@ -128,7 +129,7 @@ OS still publishes raw hardware and nothing refined.
   pointed at the delivered `DBUS_SYSTEM_BUS_ADDRESS`. The ALSA side is
   untouched on machines with no radio.
 * Publishes each paired speaker as a sink device under
-  `audio.liken.sh`: named by peer MAC, carrying the device name BlueZ
+  `audio.liken.sh`: named by peer MAC, with the device name BlueZ
   reports, the codec, and the sink's node name. A paired speaker
   publishes even while switched off, tainted, so a consumer can claim
   ahead of the connect and park, which is milestone 56's deferred
@@ -138,13 +139,13 @@ OS still publishes raw hardware and nothing refined.
 
 ## Why one claim can span two drivers
 
-The design leans on three allocator facts, read from Kubernetes 1.36,
+The design depends on three allocator facts, read from Kubernetes 1.36,
 the release these operators pin, in
 `staging/src/k8s.io/dynamic-resource-allocation/structured/internal/stable/allocator_stable.go`:
 
 1. An `All` request collects every selectable device from every pool
    that targets the node, across drivers; each allocated device
-   carries its own driver name. The API comment's phrase "in a pool"
+   has its own driver name. The API comment's phrase "in a pool"
    is loose; the code has no per-driver pin.
 2. An `All` request with zero matching devices fails allocation, so
    the pod parks Pending. The at-least-one placement rule survives the
@@ -160,7 +161,7 @@ the release these operators pin, in
 **A Bluetooth pod restart still restarts the audio pod.** PipeWire's
 `bluez5` plugin survives a `bluetoothd` restart, but it has no
 reconnect path after the bus daemon itself goes away, and the bus
-daemon lives in the Bluetooth pod. So a Bluetooth pod restart ends
+daemon runs in the Bluetooth pod. So a Bluetooth pod restart ends
 Bluetooth audio and forces the audio pod to restart to get it back,
 which also interrupts HDMI audio on that machine. Whether restarting
 only WirePlumber repairs it, leaving the PipeWire daemon and its ALSA
@@ -171,7 +172,7 @@ the pod schedules, and an `All` allocation does not grow afterward. A
 dongle plugged into a machine whose audio pod already runs publishes a
 new substrate that the running pod's claim does not include; a person
 deletes the pod and the replacement allocates both. A hot-plugged USB
-sound card has the same shape today. These machines carry fixed
+sound card has the same shape today. These machines have fixed
 hardware almost always, so this stays manual.
 
 **Pairing a speaker requires the audio pod.** The endpoint
@@ -183,7 +184,7 @@ pairing API can report that plainly when the bus is unclaimed.
 must be opened by the sound server itself in the host network
 namespace. That would push `hostNetwork` onto an operator whose plan
 states its privilege is none. The headset profiles stay out of scope
-until a real use asks, and the answer may be different then.
+until a real use appears, and the answer may be different then.
 
 ## What was considered and set aside
 
@@ -191,15 +192,15 @@ until a real use asks, and the answer may be different then.
   graphs and two sockets on one machine, a consumer that cannot reach
   a monitor's speakers and a Bluetooth speaker at once, and an audio
   fault that disconnects every controller. Its fallback, a third
-  stacked operator, costs a third repository, a third image carrying
+  stacked operator, costs a third repository, a third image holding
   PipeWire, and a third pod, to publish what this design publishes
   with none of them.
 * **The audio operator mounts the Bluetooth pod's bus directly.**
   Technically identical at the socket, but invisible: nothing places
   the audio operator on the machine with the radio, nothing arbitrates
-  a second mounter, and the coupling hides in a volume instead of
-  standing in the API. The claim states the same dependency where the
-  scheduler and a reader can see it.
+  a second mounter, and the coupling is in a volume instead of the
+  API. The claim states the same dependency where the scheduler and a
+  reader can read it.
 * **A DeviceClass that ORs the two drivers by name.** It works, but it
   hard-codes each producer into the consumer's class. The shared
   attribute lets a future substrate join by stamping one field,
@@ -232,16 +233,16 @@ and a real A2DP speaker.
    playback experiences either way.
 8. **Coexistence on one radio.** A controller and the speaker run on
    the one adapter. Record input latency and audio dropouts, each with
-   and without the other active, and repeat with the house's Wi-Fi
+   and without the other active, and repeat with the local Wi-Fi
    busy. Plan 01's protocol argument says A2DP does not starve an HID
    link; this is the measurement that argument has no source for.
 
 ## Open questions
 
 * **Whether WirePlumber alone can restart.** If the Bluetooth nodes
-  live in WirePlumber and the ALSA sinks live in the PipeWire daemon,
+  are in WirePlumber and the ALSA sinks are in the PipeWire daemon,
   a WirePlumber-only restart may repair a lost bus without ending HDMI
-  playback. Drill 7 answers it, and the answer decides how bad the
+  playback. Drill 7 answers it, and the answer settles how bad the
   restart coupling really is.
 * **Where the headset profiles land** if a microphone use ever
-  arrives: `hostNetwork` on the audio operator, or a narrower home.
+  arrives: `hostNetwork` on the audio operator, or a narrower place.

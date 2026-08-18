@@ -1,6 +1,6 @@
 # Boot to a hello world
 
-Milestone 01 — Completed. The machine boots into a Go init that prints
+Milestone 01. Completed. The machine boots into a Go init that prints
 to the serial console.
 
 `make run` boots QEMU, and PID 1 prints to the serial console. There is
@@ -18,4 +18,4 @@ output-only.
    serial output for a marker, and this is the start point for CI. Use
    explicit flags (`-display none -serial stdio -monitor none
    -no-reboot`) in place of the `-nographic` group, so that each flag
-   can carry its own comment.
+   can have its own comment.

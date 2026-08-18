@@ -1,6 +1,6 @@
 # Naming an interface by MAC address
 
-Milestone 39 — Rejected. The `mac` field on
+Milestone 39. Rejected. The `mac` field on
 `spec.network.interfaces` came out, because the hardware report
 already names the cabled port and an optional `name` cost the
 interfaces list its merge key.
@@ -32,9 +32,9 @@ machine.
 
 ## What it built
 
-`mac` sat beside `name`, and `name` became optional. An entry could
-carry either field or both. An entry with both asked the boot to
-refuse the interface when the two fields identified different ports.
+`mac` was beside `name`, and `name` became optional. An entry could
+have either field or both. An entry with both made the boot refuse
+the interface when the two fields identified different ports.
 Addresses were compared through `net.ParseMAC` on both sides, so a
 manifest could write one with colons, with hyphens, or as the dotted
 quads that a switch console prints.
@@ -57,7 +57,7 @@ which required a read of each port's driver from its sysfs symlink.
 The lab installed a three-machine cluster from blank disks. node-1
 declared its uplink by name and its cluster segment by address, and
 came up with `liken: MAC 52:54:00:4c:4c:01 is eth1 on this machine` on
-its console. An address that no port carried produced the listing of
+its console. An address that matched no port produced the listing of
 the guest's real ports, and the machine came up on its remaining
 interface. The report's same-driver rule ran on real cards rather than
 fabricated ones and declared both ports by address.
@@ -115,9 +115,9 @@ manifest.
 apply: an interface with no name, and two entries that name one port.
 With the list keyed on name again, the API server enforces both rules
 for anything applied through it. Init also reads manifests written by
-hand and carried in on a stick, which no API server ever saw, so the
-validator still applies. It runs where the storage validator runs:
-init before it touches a link, the operator before it stages a spec,
+hand and carried in on a stick, which no API server ever checked, so
+the validator still applies. It runs where the storage validator runs:
+init before it configures a link, the operator before it stages a spec,
 and the scaffold before it writes a manifest it generated.
 
 The shape that those two need also stays. The boot reads the kernel's

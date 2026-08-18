@@ -1,6 +1,6 @@
 # Configuring etcd snapshots
 
-Milestone 46 — Proposed. It would let a Cluster state the schedule,
+Milestone 46. Proposed. It would let a Cluster state the schedule,
 the retention, and the off-machine destination for the snapshots that
 k3s already takes of the cluster's datastore.
 
@@ -28,7 +28,7 @@ The snapshots are visible. k3s installs the
 the size, and the creation time. `kubectl get etcdsnapshotfiles` is
 the inventory, and it needs nothing from liken.
 
-An on-demand snapshot is also reachable, which is the surprise. `k3s
+An on-demand snapshot is also reachable. `k3s
 etcd-snapshot save` is not a node-side act. It calls the supervisor
 API, so it runs from a workstation:
 
@@ -47,9 +47,9 @@ remove snapshots today.
 
 ## What no operator can do
 
-Three things stay out of reach, and each is out of reach for the same
-reason: init writes the whole k3s configuration from the Cluster
-document, and liken has no shell.
+Three things stay out of reach, and each for the same reason. init
+writes the whole k3s configuration from the Cluster document, and
+liken has no shell.
 
 * **The schedule, the retention, and the directory.** These are k3s
   server configuration keys. A key that liken does not render cannot
@@ -59,9 +59,8 @@ document, and liken has no shell.
 * **A restore.** `--cluster-reset` and `--cluster-reset-restore-path`
   are flags on the server's own start. Only init starts the server.
 
-So this is not an exercise for the reader. The reader has no exercise
-available. This milestone takes the first two. The third is its own
-work, described at the end.
+This milestone takes the first two. The third is its own work,
+described at the end.
 
 ## The spec surface
 
@@ -96,22 +95,22 @@ this milestone changes no existing cluster. `schedule: "off"` renders
 `etcd-disable-snapshots`, which is the only way to turn the snapshots
 off. An unset `s3` object means local snapshots only.
 
-### Any S3-compatible store, not just AWS
+### Any S3-compatible store
 
 k3s uploads snapshots through minio-go, the client SDK whose reference
 implementation is MinIO. It builds the client from the declared
-endpoint and region, so any object store that speaks the S3 API works:
+endpoint and region, so any object store that implements the S3 API works:
 MinIO, Ceph RGW, or a public cloud that is not AWS. This is why
 `endpoint` is a plain host and why the extra fields exist. Four of them
 answer the differences between stores and a self-hosted deployment:
 
-* `insecure` speaks plain HTTP, for a store with no TLS.
+* `insecure` uses plain HTTP, for a store with no TLS.
 * `skipSSLVerify` ignores a bad certificate on an HTTPS store.
 * `bucketLookupType` names how the client finds the bucket. The
   default (`auto`) and `dns` use virtual-host addressing, which AWS and
   some others need; `path` uses path addressing, which MinIO and most
   self-hosted stores need.
-* `endpointCA` carries a PEM bundle for a store behind an internal CA,
+* `endpointCA` holds a PEM bundle for a store behind an internal CA,
   which neither of the two flags above covers.
 
 The k3s key names are `etcd-s3-endpoint`, `etcd-s3-region`,
@@ -124,7 +123,7 @@ repeat the number.
 
 Every key here is read when the k3s server starts, so an edit
 converges by restarting k3s in place. That is the restart tier
-milestone 20 built for registry credentials, not a reboot.
+milestone 20 built for registry credentials, and not a reboot.
 
 ### Why this is not a feature slug
 
@@ -140,9 +139,9 @@ a nested S3 object would all become strings, validated in Go rather
 than at the door. A real schema gets CEL rules at admission and a
 generated page in the manual.
 
-## Where the credentials live
+## Where the credentials are stored
 
-The Cluster document names the destination. It never carries the
+The Cluster document names the destination. It never holds the
 access key or the secret key, because it is the document a deployment
 keeps in git.
 
@@ -152,7 +151,7 @@ plan does not use it. The paragraph below on the config-secret rule
 states why.
 
 liken already solved this shape once. The fleet's registry credentials
-live in a `registry-credentials` Secret in `liken-system`, the
+are in a `registry-credentials` Secret in `liken-system`, the
 machine operator reads exactly that one Secret by name, and the
 credentials are rendered into the configuration file that consumes
 them. Snapshots take the same path: an `etcd-snapshot-credentials`
@@ -163,7 +162,7 @@ that came from the document.
 The keys land in a file on `clusterState`, mode 0600. That is the same
 trade `registries.yaml` already makes, and the plan should not pretend
 otherwise. A missing Secret on a cluster that declares an `s3` block
-is a reported condition, not a silent fall back to local-only.
+is a reported condition, and not a silent fall back to local-only.
 
 **The config-secret rule is settled, and it keeps the secret out of
 the document.** k3s's `--etcd-s3-config-secret` is all-or-nothing,
@@ -175,7 +174,7 @@ from the Cluster document therefore rules that path out: an operator
 would have to move the destination too, and the document would no
 longer say where the snapshots go. The keys land beside the
 destination in the drop-in instead, for the same reason
-`registries.yaml` does: a Secret in `liken-system` holds the
+`registries.yaml` does. A Secret in `liken-system` holds the
 credentials, init renders them, and the document is the single place
 that answers where the snapshots go.
 
@@ -189,14 +188,14 @@ later keys over earlier ones. init already writes one drop-in there
 things force the separate file rather than a section in `boot.yaml`:
 
 * `boot.yaml` is written at 0644, and its lines are echoed to the
-  console at boot. The S3 keys are credentials, so both the readable
-  file and the serial port must not carry them.
+  console at boot. The S3 keys are credentials, so they must not appear
+  in the readable file or on the serial port.
 * A separate file gives the credentials one author and one mode, the
   same arrangement `registries.yaml` already makes.
 * Only leaders render it, and a cluster that retracts the section or a
   machine that is no longer a leader removes it.
 
-The drop-in carries the server-side keys: the schedule, the
+The drop-in holds the server-side keys: the schedule, the
 retention, the directory, the S3 destination, and the access and
 secret keys. `boot.yaml` stays as it is, and no key collides between
 the two files.
@@ -222,7 +221,7 @@ the document is what lets an operator make that call.
 ## Refusing what cannot work
 
 A cluster with one leader runs sqlite through kine. It has no etcd and
-nothing to snapshot. A CEL rule on the Cluster CRD can see
+nothing to snapshot. A CEL rule on the Cluster CRD can read
 `spec.leaders`, so the section is refused at admission when the
 cluster names fewer than two leaders, with a message that says to add
 leaders first. The same judgment runs at the file doors, where init
@@ -232,7 +231,7 @@ Followers render none of these keys. They run no datastore.
 
 ## What status reports
 
-liken reports the policy it resolved, not the snapshots themselves.
+liken reports the policy it resolved, and not the snapshots themselves.
 k3s already publishes an `ETCDSnapshotFile` for every snapshot, and a
 second inventory in the Machine status would be a second source for
 one fact.

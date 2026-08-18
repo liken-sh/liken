@@ -13,9 +13,9 @@ The lag itself is by design. System pods run the stable image tag
 `:installed`, their DaemonSets update on `OnDelete`, and only a
 leader's boot rewrites the AddOn manifests. A follower that reboots
 first always runs the new binary inside the old pod spec for a while.
-The failure is not the lag. The failure is that the machine operator
-reported the lag as a fault, and that the conductor let every follower
-enter the lag before any leader could end it.
+The lag is not the failure. The machine operator reported the lag as a
+fault, and the conductor let every follower enter the lag before any
+leader could end it.
 
 This milestone builds two halves. The guard makes the lag a reported,
 expected state instead of a fault. The gate makes the conductor send
@@ -24,16 +24,16 @@ the lag stays short.
 
 ## The guard: the lag is not a fault
 
-The machine operator learns to recognize its own stale pod spec, and
-judges failures differently while it has one. The signal costs
+The machine operator detects its own stale pod spec, and classifies
+failures differently while it has one. The signal costs
 nothing new. The pod template stamps the `liken.sh/os-version`
 annotation on every pod, the facts say which release this machine
 runs, and the operator already holds `pods: list` for the drain. Once
 per pass, the operator finds its own pod, the one
 `app: liken-machine-operator` pod on its node, and compares the
 annotation against the running release. A difference means the pod
-spec predates the binary. When the read fails, the operator assumes
-the pod is current, so a real fault never hides behind an API error.
+spec predates the binary. When the read fails, the operator treats
+the pod as current, so an API error never masks a real fault.
 
 While the pod is stale, one rule applies: an actuation failure whose
 error is `fs.ErrNotExist` reports the reason `AwaitingPodRefresh`
@@ -41,9 +41,9 @@ instead of `ApplyFailed`, and the phase table maps that reason to
 `UpdatePending`. A path that does not exist inside a stale pod means
 a mount the old template lacks, whatever the mount is, so a release
 that adds any future mount gets this behavior for free. The machine
-reads as mid-change, not unwell, which is the truth: an update to its
-pod is pending, and the pod steward delivers it seconds after a
-leader boots the release. The conductor keeps granting turns, and the
+reads as mid-change and not as unwell. An update to its pod is
+pending, and the pod steward delivers it seconds after a leader boots
+the release. The conductor keeps granting turns, and the
 fleet sweep keeps the Cluster out of `Degraded`.
 
 For host entries, `status.hostEntries` stays empty while the mount is
@@ -56,9 +56,9 @@ Three precedents shape this half. The DRA plugin already tolerates a
 mount the old template lacks (`machine-operator/main.go`), because
 dying would kill the status publishing the pod steward waits on.
 `sysctlsCondition` already keeps a machine `Ready` when the fault
-belongs to the release rather than to the machine, because a
-per-machine health signal that a whole fleet trips at once carries no
-information. And the reason must not be `AwaitingTurn`, because the
+belongs to the release rather than to the machine. A per-machine
+health signal that a whole fleet trips at once gives no information.
+And the reason must not be `AwaitingTurn`, because the
 conductor scans conditions for that reason and would read the guard
 as a staged change.
 
@@ -67,14 +67,14 @@ cover an RBAC rule or an environment variable the new binary needs,
 because those fail as a 403 or a bad value, not as a missing path.
 The gate keeps those lags out of the common path, and the downgrade
 rule can widen if a real case appears. The cluster operator has the
-same lag window and stays out of this milestone: its Deployment
+same lag window and stays out of this milestone. Its Deployment
 recreates its own pod when new manifests apply, and its conditions
 land on the Cluster, which the conductor never blocks on.
 
 ## The gate: a leader goes first while the template lags
 
 The conductor grants workers first, then leaders, because a worker
-mistake costs little while every leader carries a share of quorum.
+mistake costs little while every leader holds a share of quorum.
 That order stays the default. The gate adds one exception: while the
 applied system-pod template is behind the fleet's target release, the
 first turn goes to a leader, because only a leader's boot can advance
@@ -82,15 +82,15 @@ the template, and every follower that reboots before then extends the
 lag instead of ending it.
 
 The signal already exists and costs nothing new. The
-`liken-machine-operator` DaemonSet carries the `liken.sh/os-version`
+`liken-machine-operator` DaemonSet has the `liken.sh/os-version`
 annotation naming the release whose manifests are applied, and the
 pod steward already reads it every sweep (`cluster-operator/steward.go`).
 The fleet sweep reads it once and passes it to `decideRollout`, which
 compares it against `spec.version`:
 
 * The annotation differs from the target, and a leader either awaits
-  a turn or holds an unspent grant: the leader goes first, and every
-  waiting worker sits out the sweep. The hold lasts through the
+  a turn or holds an unspent grant: the leader goes first, and no
+  waiting worker is granted in that sweep. The hold lasts through the
   leader's whole turn, because each sweep recomputes it from the
   grant that is still outstanding, and the `Progressing` message says
   what the workers wait for as long as the hold lasts.
@@ -98,14 +98,14 @@ compares it against `spec.version`:
   and none holds a grant, because every leader's `rebootPolicy` is
   `Manual`, every leader is still staging, or a leader is down
   without a grant: workers proceed in today's order. The gate must
-  not starve the rollout, and the guard carries the followers through
+  not stall the rollout, and the guard covers the followers through
   the lag.
 * The annotation matches the target, or is empty because no DaemonSet
   exists yet: today's order, workers first.
 
 The gate is self-clearing. The first leader that boots the target
 release rewrites the manifests, k3s applies them, the annotation
-catches up, and the rest of the rollout runs workers-first as before.
+advances, and the rest of the rollout runs workers-first as before.
 On a single-machine cluster the one machine is a leader and nothing
 changes. No new RBAC: the cluster operator already holds `get` on
 DaemonSets.
@@ -120,12 +120,12 @@ DaemonSets.
   rollout. The gate's cost is too small to buy back at that price.
 * **The cluster operator applies the templates itself.** The flux
   planter proves the shape, but the wrong actor holds the bytes: the
-  cluster-operator pod runs whatever build its node carries, so
+  cluster-operator pod runs whatever build is on its node, so
   during a wedge it may hold the old template. It would also
   duplicate the image's manifest seed and put a second writer on an
   object the k3s AddOn owns.
 * **Always leader-first for version rollouts.** Fixes the class, but
-  gives up worker-first proving on every release forever, when most
+  stops worker-first proving on every release forever, when most
   releases change no template.
 
 ## The drill
@@ -176,14 +176,14 @@ workers only in the sweep that granted the leader. The grant's own
 status write wakes the next sweep within milliseconds, that sweep
 reads the granted leader as busy, and the hold and its message were
 both rewritten away. With the default budget of one machine this cost
-nothing, but a budget of two would have granted a worker during the
-leader's turn, into the lag the gate exists to prevent, and the
-message an operator could observe survived under a second. The hold
+nothing. A budget of two would have granted a worker during the
+leader's turn, into the lag the gate exists to prevent. The message an
+operator could observe survived under a second. The hold
 now keys on durable state, a leader that can be granted or a leader
 whose granted turn still runs, so it lasts the whole turn. The gate
 stays best-effort in one case: while every leader is still staging,
 no leader waits and none holds a grant, so a fast-staging worker can
-enter the lag. The guard carries that case.
+enter the lag. The guard covers that case.
 
 A second drill verified the durable hold, at a budget of two, on a
 fleet whose conductor already ran the fixed code. The leader was

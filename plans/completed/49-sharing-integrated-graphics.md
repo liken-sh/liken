@@ -1,10 +1,10 @@
 # Sharing integrated graphics
 
-Milestone 49 — Completed. It lets a real integrated GPU publish as
+Milestone 49. Completed. It lets a real integrated GPU publish as
 shareable, so a second claim allocates hardware that the lab measured
 serving twelve encoders at once. The design below groups a device's
 delivery by kernel subsystem and publishes each group as its own
-slice device. Releases 2026.07.31-003 and -004 carry it; the second
+slice device. Releases 2026.07.31-003 and -004 include it; the second
 adds the DisplayPort AUX channel, the companion kind that only a
 machine with a connected DP display delivers.
 
@@ -39,7 +39,7 @@ guide describes has nine of them. `InspectDelivery` in
 a nested bus device, so those nodes are inside the walk. They join
 `Delivery.DevNodes`, and `i2c-dev` joins `Delivery.Subsystems`.
 `graphicsSubsystems` does not hold `i2c-dev`, so `shareable` returns
-false for every integrated GPU liken has met.
+false for every integrated GPU liken has run on.
 
 The failed subsystem test has four results.
 
@@ -72,7 +72,7 @@ answer to that finding, and the i2c nodes are the next one.
 `InspectDelivery` keeps its walk, but the result gains structure: the
 device nodes group by the kernel subsystem they belong to. One grouping
 function turns one physical device into one or more published devices,
-and each published device carries exactly one subsystem's nodes. The
+and each published device delivers exactly one subsystem's nodes. The
 inventory half and the prepare half both call this function, so the
 slice and the CDI spec can never disagree about what a name delivers.
 
@@ -80,11 +80,11 @@ The plan considered three narrower fixes: widening
 `graphicsSubsystems` with `i2c-dev`, testing only the render node, and
 deriving the wanted node kind from the DeviceClass selectors that
 matched a claim. The first leaves the monitor buses in the container
-and the `subsystem` attribute absent. The second gives up the guard
-against hardware liken has not met. The third founders on the API: a
+and the `subsystem` attribute absent. The second loses the guard
+against hardware liken has not run on. The third fails on the API: a
 request selects a device and names no node kind, so nothing in a claim
-can carry the answer. Publishing one slice device per subsystem
-dissolves that problem, because the allocated device's own name states
+can state the answer. Publishing one slice device per subsystem
+removes that problem, because the allocated device's own name states
 which nodes the claim receives.
 
 ### The policy table
@@ -93,8 +93,8 @@ The mechanism is generic; the policy stays explicit. A device whose
 delivery holds a render node is a graphics device. Its primary
 published device carries only the `drm` nodes, and its `i2c-dev` nodes
 publish as a secondary device. A device whose delivery is all one
-subsystem publishes exactly as before. A mixed delivery the table does
-not know publishes as before: whole, exclusive, and with no
+subsystem publishes exactly as before. A mixed delivery that the table
+does not cover publishes as before: whole, exclusive, and with no
 `subsystem` attribute, which keeps the milestone 38 default for
 hardware nobody has examined.
 
@@ -107,10 +107,10 @@ display takeover, and no workload claims a bare framebuffer.
 The primary device keeps its bare name, so an existing allocation
 against `pci-0000-00-02-0` stays valid. A secondary device appends its
 subsystem to that name: `pci-0000-00-02-0-i2c-dev`. Every published
-device carries the parent's identifying attributes plus its own
+device has the parent's identifying attributes plus its own
 `subsystem`, which now always publishes, because each published device
 holds one kind by construction. Only the primary graphics device
-carries `renderNode` and `allowMultipleAllocations`. The i2c device
+has `renderNode` and `allowMultipleAllocations`. The i2c device
 stays exclusive: two raw writers on one wire have no arbitration
 contract.
 
@@ -139,9 +139,9 @@ nothing else. A third claim, through a DeviceClass that selects
 `subsystem == "i2c-dev"`, must receive the nine monitor buses and no
 dri node.
 
-The guest drill from milestone 38 cannot decide this milestone. A
+The guest drill from milestone 38 cannot settle this milestone. A
 `virtio-gpu` delivers `drm` nodes and no i2c nodes, so it passes the
-old rule and the new one. It still serves as the regression check: the
+old rule and the new one. It is still the regression check: the
 guest's GPU must keep publishing as shareable, now without its
 framebuffer node in the delivery.
 

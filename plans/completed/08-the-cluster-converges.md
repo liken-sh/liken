@@ -1,6 +1,6 @@
 # The Cluster converges
 
-Milestone 08 — Completed. An edit to the in-cluster Cluster resource
+Milestone 08. Completed. An edit to the in-cluster Cluster resource
 reaches every machine and takes effect on the next boot.
 
 Before this milestone, the in-cluster Cluster resource was seed-only.

@@ -1,12 +1,12 @@
 # Crash-safe image imports
 
-Milestone 23 — Completed. A machine that is killed during an image
+Milestone 23. Completed. A machine that is killed during an image
 unpack heals itself, because a later boot discards a container store
 that was never proven.
 
 liken machines can be killed without warning. The design assumes this:
 the OS is an initramfs that rebuilds itself from two files, the
-documents that matter live in a staged/proven lifecycle, and a power
+documents that matter go through a staged/proven lifecycle, and a power
 cut costs a machine nothing but the reboot. Milestone 17's lab work
 found the one place where that was not true, twice. A machine killed in
 the wrong few seconds after a boot could be left permanently unable to
@@ -21,7 +21,7 @@ clusterState and records the unpack in its metadata database. These two
 writes are not ordered against a crash. If the machine is killed
 between the database commit and the moment the extracted files reach
 the disk, the metadata says the image is unpacked while the files are
-torn. Containerd trusts its own record, so it does not unpack the same
+torn. Containerd relies on its own record, so it does not unpack the same
 digest again on any later boot, no matter how many times the tarball is
 imported again. Every container started from that image dies with `exec
 format error`, permanently. If the torn image is the machine operator's
@@ -37,7 +37,7 @@ hard kill, timed 200ms to 1.3s after the import of a fresh operator
 image committed, and each came up healthy. On this containerd (vendored
 k3s v1.36.2), a small tarball's unpack is durable by the time the
 import's own commit lands. The layer is one 10MB file, and the metadata
-database's fsync call drags the freshly allocated data blocks into the
+database's fsync call writes the freshly allocated data blocks in the
 same ext4 journal transaction. The failure window described in the plan
 is real, but it needs either large layers, with hundreds of megabytes
 of delayed-allocation pages that an unrelated fsync does not touch, or
@@ -61,13 +61,13 @@ every committed snapshot on the state disk. This is what lost dirty
 pages look like after a journal replay: the file size stays intact, but
 its content is zeros. The machine then booted. The operator pod died
 with `exec format error`. A reboot imported the same tarball again,
-containerd saw the digest already recorded, skipped the unpack, and the
+containerd found the digest already recorded, skipped the unpack, and the
 pod died again. This ran for nine restarts across two boots, with no
 heal. This is the milestone-17 failure, reproduced on demand.
 
 ## The design
 
-The fix does not live inside containerd. Containerd's unpack cannot be
+The fix is not inside containerd. Containerd's unpack cannot be
 made transactional from outside, and edits to its metadata database to
 delete individual snapshots would couple init to another program's
 private schema, which a future k3s upgrade can break. No configuration
@@ -79,23 +79,23 @@ with three deliberate differences from how documents use it.
 
 The record (machine/imports.go) maps each tarball's basename to the
 sha256 hash of its bytes, rendered canonically so that a hash
-comparison answers the question "did anything change". It lives in its
+comparison answers the question "did anything change". It is in its
 own store directory, imports/, beside the directories for the other
 documents.
 
 init's half of the work (init/imports.go) runs after storage settles
 and before k3s starts, and only when both machineState and clusterState
-are durable. Without machineState, there is nowhere to remember a
+are durable. Without machineState, there is nowhere to record a
 trial. Without clusterState, the container store resets with every boot
 and cannot get stuck. The quiet path, where the tarballs hash to what
 the proven record already names, covers almost every boot and costs one
 pass over four files. New digests stage a trial record, durably, before
-k3s sees the tarballs. A staged record still standing at boot is the
+k3s reads the tarballs. A staged record still standing at boot is the
 signal that the whole design turns on. It means the previous boot died
 before its imports were proven, so the store can be wrong. In that
 case, init discards the k3s agent directory wholesale and keeps only
-the images/ tarballs that this boot just seeded, rather than trust the
-directory's contents. OS images unpack again from the tarballs.
+the images/ tarballs that this boot just seeded, rather than depend on
+the directory's contents. OS images unpack again from the tarballs.
 Workload images pull again from their registries, cheaply between peers
 when milestone 20's embedded registry is on. The kubelet's credentials
 mint again from the join token.
@@ -125,7 +125,7 @@ The design differs from the document lifecycle in three ways:
 
 The operator's half of the work (machine-operator/imports.go) supplies
 the proof. The record cannot prove itself. Only something that watches
-containers run from the imported images can vouch for the unpacks, and
+containers run from the imported images can prove the unpacks, and
 the operator is exactly that, because its own pod runs from the tarball
 most worth proving. The proof rests on two observations and one
 barrier. First, every OS container on this node, which is every

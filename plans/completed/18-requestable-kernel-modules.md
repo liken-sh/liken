@@ -1,6 +1,6 @@
 # Requestable kernel modules
 
-Milestone 18 — Completed. A Machine declares the extra kernel modules
+Milestone 18. Completed. A Machine declares the extra kernel modules
 that its workloads need, the image build ships them, and init loads
 them at boot.
 
@@ -82,13 +82,13 @@ driver.
 One split matters and is deliberate. SpecConverged reports whether this
 boot ran the manifest, and it can be Converged while the ModulesLoaded
 condition is False, because a spec that the boot honored can still name
-modules that the image never carried. The condition, not the
+modules that the image never shipped. The condition, not the
 convergence machinery, states that the image needs a rebuild.
 
-Each layer of validation checks only what it can know. The CRD checks
-shape only. Module names are free-form (xt_MASQUERADE is a real one),
+Each layer of validation checks only what is available to it. The CRD
+checks shape only. Module names are free-form (xt_MASQUERADE is a real one),
 so admission enforces a character pattern and a reasonable count, and
-nothing more. Existence is checked where existence is knowable: at
+nothing more. Existence is checked where it can be: at
 build time for the manifests that the image bakes in, and at boot,
 reported through status, for edits that arrive later.
 

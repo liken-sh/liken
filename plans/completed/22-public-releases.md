@@ -1,13 +1,13 @@
 # Public releases
 
-Milestone 22 — Completed. A published release and one command make a
+Milestone 22. Completed. A published release and one command make a
 USB stick that installs a cluster, with no repository and no build
 step.
 
 The goal is this path: download a release, run a command, make a USB
 stick, and boot the cluster. A human or an agent can do it.
 GETTING-STARTED.md, at the repository root, gives the path from end to
-end. These pieces sit under it:
+end. These pieces are under it:
 
 - **The toolkit** is one static Go binary, `liken` (cli/), shipped with
   releases. It scaffolds a deployment from answers, mints or adopts a
@@ -25,7 +25,7 @@ end. These pieces sit under it:
   because the kernel unpacks concatenated archives in order into one
   filesystem.
 
-- **One channel, and it is public.** A release (releases/) carries
+- **One channel, and it is public.** A release (releases/) holds
   vmlinuz, the generic liken.cpio, the toolkit, and systemd-boot, named
   by digest in a release.yaml whose digests stay stable and
   publishable. Every fleet upgrades from that channel directly. A
@@ -38,7 +38,7 @@ end. These pieces sit under it:
 
 - **One stick for each deployment, with a menu.** `liken stick` turns a
   downloaded release and a deployment layer into a GPT disk image.
-  systemd-boot sits at the removable-media path that the firmware runs,
+  systemd-boot is at the removable-media path that the firmware runs,
   with a menu that has one entry for each machine. The entries differ
   only by liken.machine=<name>. The operator can boot any machine from
   the same stick and pick the name of the machine in front of them. The
@@ -49,12 +49,12 @@ end. These pieces sit under it:
   nothing. systemd-boot was chosen over GRUB, because it is smaller by
   an order of magnitude and has no configuration language, and over
   menu code inside init, because PID 1 stays non-interactive. The
-  systemd-boot domain's fetch.sh carries the full reasoning.
+  systemd-boot domain's fetch.sh gives the full reasoning.
 
 - **Scaffolding.** `liken new` asks the dozen questions that describe a
   deployment (machines, leaders, addresses, interfaces, disks, time,
   features) and writes cluster.yaml and the machine manifests. These
-  carry the dev cluster's teaching comments, written in general terms.
+  include the dev cluster's teaching comments, written in general terms.
   The machines' own strict parsers parse everything generated before it
   is written.
 
@@ -63,7 +63,7 @@ ships in the bundle, and nothing is fetched on demand. Signatures stay
 deferred with the rest of the hardening tier. Integrity today comes
 from the digest chain, rooted in the Cluster's catalog for fleets and
 in the published release.yaml for first contact. The stick's payload
-duplicates the OS artifacts that also sit beside it as boot files,
+duplicates the OS artifacts that are also beside it as boot files,
 about 160MB, because the installer reads only its own initramfs. An
 installer that reads the stick's filesystem instead would save that
 space, and this design deliberately does not take that step.

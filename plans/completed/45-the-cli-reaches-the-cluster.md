@@ -1,12 +1,12 @@
 # The CLI reaches the cluster
 
-Milestone 45 — Completed. `liken` has a cluster client: one command
+Milestone 45. Completed. `liken` has a cluster client: one command
 that grants a machine the reboot its policy withholds, and three that
 run the tools an operator already uses against the right cluster.
 
 One detail settled differently than the sketch below. `gateDisruption`
 takes the annotation's value, not an `approved bool`, so the mismatch
-report lives in the gate once instead of in four callers. The matching
+report is in the gate once instead of in four callers. The matching
 rule accepts the full hash or a prefix of at least 12 characters,
 because every condition message shows the hash in its short form and a
 person pastes what they can see.
@@ -52,7 +52,7 @@ replaces, where an operator following the machine's own advice cuts
 power and no budget applies at all.
 
 An annotation naming some other hash is reported, not ignored. The
-Pending message would carry both values, so a wrong paste is visible
+Pending message would name both values, so a wrong paste is visible
 where the person is already looking.
 
 `status.pending` would list what each machine waits for: the condition
@@ -72,7 +72,7 @@ liken flux           [-server URL] <deployment-dir> [args...]
 
 Three of these are passthrough. They resolve the credential, set
 `KUBECONFIG`, and hand the terminal to the real tool. `approve-reboot`
-is the one that carries liken's own meaning: it reads `status.pending`,
+is the one that adds liken's own meaning: it reads `status.pending`,
 reports what is waiting, and writes the annotation.
 
 ```
@@ -112,7 +112,7 @@ should not have to build a kubeconfig by hand to do it.
 ## The deployment directory
 
 The one positional argument is the deployment directory, not an
-identity directory. Identity sits at `<deployment-dir>/identity` and the
+identity directory. Identity is at `<deployment-dir>/identity` and the
 endpoint comes from `<deployment-dir>/cluster.yaml`. That is the layout
 GETTING-STARTED.md documents and the layout `dev-cluster/` already uses.
 
@@ -130,7 +130,7 @@ cannot reach; the host reaches those guests through QEMU's forwarded
 dev-cluster Makefile would pass the forwarded address, which also
 deletes the `sed` that rewrites the gitops kubeconfig by hand.
 
-## Where the kubeconfig lives
+## Where the kubeconfig is written
 
 An exec replaces the process, so no deferred cleanup runs and a
 temporary file would leak. The kubeconfig would go to a predictable
@@ -169,7 +169,7 @@ worker first and one leader at a time.
 
 With `rebootPolicy: Manual` on node-4 and a two-host Secret created,
 `CredentialsConverged` reported `RestartPending` and `status.pending`
-carried one entry: `CredentialsConverged`, kind `Restart`, the full
+listed one entry: `CredentialsConverged`, kind `Restart`, the full
 hash, and the summary `registry credentials for 2 hosts`. A hand-pasted
 annotation naming `deadbeefdead` put both values in the condition
 message within one reconcile pass.

@@ -61,13 +61,13 @@ person who knows the parameter can find the line by its name.
 
 The obvious alternative was to let each `spec.modules` entry be either
 a plain name or an object with a name and parameters. It cannot be
-built. A v1 CustomResourceDefinition must carry a structural schema,
+built. A v1 CustomResourceDefinition must have a structural schema,
 and a structural schema requires a `type` on every node except a node
 with `x-kubernetes-int-or-string` or `x-kubernetes-preserve-unknown-fields`.
 `x-kubernetes-int-or-string` is the only union Kubernetes defines, and
 it does not cover string-or-object. Preserving unknown fields on the
-items node would buy the union by giving up every check on the
-entry, and by giving up `x-kubernetes-list-type: set`, which is what
+items node would buy the union at the cost of every check on the
+entry. It would also lose `x-kubernetes-list-type: set`, which is what
 makes the API server refuse a duplicate module today.
 
 Converting `spec.modules` to a list of objects would express it, but
@@ -99,7 +99,7 @@ sort makes the string stable, so the same spec produces the same
 record on every boot and the drift comparison stays a string
 comparison.
 
-Three loads cannot carry parameters, and the loader detects each one
+Three loads cannot take parameters, and the loader detects each one
 before it asks the kernel for anything:
 
 * **The module is built into the kernel.** `modules.builtin` already
@@ -112,7 +112,7 @@ before it asks the kernel for anything:
   dependency chain loaded it. `finit_module` returns `EEXIST` for a
   resident module and ignores the parameter string, so the loader must
   read the residency before the load to report it.
-* **The module did not load.** `Missing` and `Failed` carry their own
+* **The module did not load.** `Missing` and `Failed` have their own
   message, and a parameter for a module that is not in the kernel is
   not a separate problem.
 
@@ -123,7 +123,7 @@ parameterized modules first would deliver more parameter strings and
 break that recipe, so the loader keeps the order and reports the case
 instead.
 
-The console line grows the string it passed:
+The console line gains the string it passed:
 
 ```
 liken: modules: snd_hda_intel: loaded (power_save=0)
@@ -138,8 +138,8 @@ change flows through: `ModulesDrift` writes a line for it,
 `gateDisruption` applies `rebootPolicy`, the conductor grants the
 turn, and the next boot loads the module with the new string.
 
-The live-load path stays exactly as it is. `converge.go` decides that
-a spec change is live-applicable by counting: `len(drift) == len(added)`
+The live-load path stays exactly as it is. `converge.go` classifies
+a spec change as live-applicable by counting: `len(drift) == len(added)`
 with nothing retracted, which holds only when added modules are the
 whole of the drift. That test is structural on purpose, so a new spec
 field is reboot-class from the day it lands. Parameters keep the
@@ -190,11 +190,11 @@ Admission checks shape, and one relationship:
 * `maxProperties: 64`, matching the module list's own cap.
 
 Admission cannot check anything else, and each layer checks only what
-it can know. It cannot know that the module exists in this kernel
-build, that the parameter exists on that module, that the value is in
-range, or that the module is built in. The build cannot check either.
-Since milestone 32 the image carries the kernel build's whole module
-tree, so the build no longer resolves declared module names at all,
+it can read. It has no way to check that the module exists in this
+kernel build, that the parameter exists on that module, that the value
+is in range, or that the module is built in. The build cannot check
+either. Since milestone 32 the image holds the kernel build's whole
+module tree, so the build no longer resolves declared module names at all,
 and parameters get the same treatment.
 
 The load is where the answer comes from, and the kernel gives two
@@ -210,7 +210,7 @@ different ones:
 * **A recognized parameter with a value the module refuses fails the
   whole load.** The setter returns `EINVAL`, `finit_module` returns
   `EINVAL`, and the driver is not in the kernel. The outcome is the
-  existing `Failed` state, its message carries the errno and the
+  existing `Failed` state, its message holds the errno and the
   string that was passed, and, as with every other module outcome,
   nothing here stops the boot.
 
@@ -235,18 +235,18 @@ The two are not compared. The kernel prints a bool parameter back as
 `Y` or `N`, an array with its own separators, and a charp as whatever
 the driver stored, so a machine comparison of the declared string
 against the readback would report false drift on the most common
-parameter type there is. A person compares two fields that sit next to
+parameter type there is. A person compares two fields that are next to
 each other. Init compares nothing.
 
 One new condition, `ModuleParametersApplied`, reports only the cases
-liken can judge without comparing values: a parameter declared for a
+liken can check without comparing values: a parameter declared for a
 `Builtin` module, and a parameter declared for a module that was
 already resident when the declared pass reached it. Both are
 structural facts. The message names the fix, as every other outcome
 message does: the command line for a builtin, and the fixed list or
 the earlier declared module for a resident one. A False condition
-carries a new reason, and `conditionPhase` maps a reason it does not
-recognize to `Degraded`, which is the right phase here and needs no
+has a new reason, and `conditionPhase` maps an unknown reason to
+`Degraded`, which is the right phase here and needs no
 entry in the phase table. A declared parameter that never reached the
 kernel stays wrong until somebody edits the declaration, and Degraded
 is the phase that says so.
@@ -276,13 +276,13 @@ that loaded is loaded, whatever happened to its parameters.
 kernel build, so `drm.debug` is not a module parameter on this kernel
 at all. Built-in code takes its parameters from the kernel command
 line, and liken's command line is boot-entry state, not spec state.
-Reaching it means solving a different set of problems: a UEFI machine
+Reaching it means solving a different set of problems. A UEFI machine
 rewrites its boot entries on every boot (`init/bootentries.go`), so a
 change would land on the boot after the one that wrote it, while a
 BIOS machine's `grub.cfg` renders once at install time and never
-again, so a change would reach nothing without a re-render; the
-argument list is what the proving and fallback machinery steers with,
-so a bad value is a machine that does not come back; and liken owns
+again, so a change would reach nothing without a re-render. The
+argument list is what the proving and fallback machinery uses, so a
+bad value is a machine that does not come back. liken owns
 `rdinit`, `root`, `console`, `panic`, and every `liken.*` argument, so
 a `spec.kernelParameters` field would need a refusal list before it
 had a feature. That is a milestone, not a section. Until it exists,
@@ -306,7 +306,7 @@ parameters worth reading back:
   `status.modules[].parameters`.
 * A parameter name that is wrong: the module loads, the condition
   stays True, the readback map lacks the key, and the machine-logs
-  pod carries the kernel's `unknown parameter ... ignored` line.
+  pod shows the kernel's `unknown parameter ... ignored` line.
 * A value the module refuses: `Failed`, an `EINVAL` message naming the
   string that was passed, `ModulesLoaded` False, and a boot that
   finishes.
@@ -333,7 +333,7 @@ cluster.
 `docs/content/docs/reference/machine.md` regenerates from the schema,
 so the schema's descriptions are the text. Write them knowing that
 they become the page, and state in `spec.modules` that its parameters
-live in `spec.moduleParameters` and that they apply at the load.
+are in `spec.moduleParameters` and that they apply at the load.
 
 The troubleshooting guide gains one entry: a parameter that reads
 back missing means the parameter name is wrong, and the kernel said

@@ -1,6 +1,6 @@
 # Turning a feature off turns it off
 
-Milestone 42 — Completed. Retraction becomes an ordered act with an
+Milestone 42. Completed. Retraction becomes an ordered act with an
 owner, so a feature that leaves `spec.features` stops running instead
 of losing its controller and keeping its effects.
 
@@ -32,10 +32,10 @@ edit, and the deploy controller then deletes the HelmChart into a
 cluster whose helm controller has already stopped. The HelmChart holds
 on its own finalizer and the release keeps running.
 
-## The edit is not the problem, the partial apply is
+## The partial apply is the problem
 
 It is tempting to refuse the edit. The invariant that matters cannot
-be seen from the object, though. Whether a LoadBalancer Service exists
+be read from the object, though. Whether a LoadBalancer Service exists
 is cluster state, and making that unrepresentable at admission means a
 validating webhook. liken should not have one. A webhook that fails
 closed blocks the edit that would repair the cluster, a webhook that
@@ -52,7 +52,7 @@ states what is holding it.
 Read that way, a retraction that waits is not an invalid state. It is
 an unconverged one, and liken already models unconverged everywhere:
 staged, `AwaitingTurn`, `Blocked`, `RejectedLastBoot`. The spec states
-what the deployment wants. The status states why the fleet has not
+what the deployment declares. The status states why the fleet has not
 reached it.
 
 ## The manifests directory has two authors
@@ -95,7 +95,7 @@ The second fault is ordering, and the escape hatch found in the lab is
 the proof. Re-declaring helm alone, after the traefik retraction had
 stranded everything, was enough. The controller came back, ran its
 remove handler, uninstalled the release, and the CRDs went with it.
-liken knew nothing about traefik and did not need to. The teardown
+liken performed no traefik-specific step, and needed none. The teardown
 worked because it ran through the component that owned the objects,
 while that component was alive.
 
@@ -125,19 +125,20 @@ cluster operator publish what was held and the machine operator honour
 it, which needs a handshake between two programs, a new status field,
 and a guard against acting on a stale answer. None of that is
 necessary. The machine operator already talks to the API and already
-decides what to stage, so it evaluates the preconditions itself and
+selects what to stage, so it evaluates the preconditions itself and
 the handshake disappears.
 
 ## The vocabulary states each feature's retraction contract
 
 The contract is not a list of objects to delete. liken must never
-learn what a traefik release contains or what a klipper-lb pod does,
+hold a list of what a traefik release contains or what a klipper-lb
+pod does,
 because a list like that goes stale the first time k3s renames
 something, and it goes stale silently.
 
 Each feature answers one question instead: what must be true in the
-cluster before this feature may stop. `FeatureTeardown` is that field
-in embryo, with two values.
+cluster before this feature may stop. `FeatureTeardown` is the first form
+of that field, with two values.
 
 * `traefik` states nothing. Stopping it is what clears helm's
   precondition, because k3s deletes the HelmCharts when the component
@@ -157,7 +158,7 @@ reason that names what the deployment must remove. This is a much
 better outcome than an undeletable Service and a DaemonSet that
 outlives it.
 
-Every precondition here needs cluster state, so none of them can live
+Every precondition here needs cluster state, so none of them can run
 at admission. A CRD judges only what the object itself says, and no
 feature's readiness to stop is visible in the document. There is also
 nothing left for a schema rule to refuse: a requirement cannot be
@@ -167,7 +168,7 @@ declared.
 
 ## Kernel state takes the reboot class
 
-A boot is the one teardown liken already trusts. It clears netfilter
+A boot is the one teardown liken already relies on. It clears netfilter
 chains and ipsets, mounts, iSCSI sessions, and loaded modules, with no
 per-feature teardown code and no reimplementation of another project's
 cleanup. The drill confirmed the clearing: after a boot, the node had
@@ -179,7 +180,7 @@ available, and it is the right answer for the features that touch the
 host.
 
 It also does more than clean up afterwards. A machine on the reboot
-class never stops the controller and then lives with its leftovers. It
+class never stops the controller and then runs with its leftovers. It
 runs the controller, waits for its turn, and boots without it. The
 window in which stale rules enforce a dead policy does not get
 shortened. It stops existing.
@@ -195,7 +196,7 @@ its object and its Addon in place after six watcher cycles.
 
 metrics-server retracted by a features-only edit left nothing:
 Deployment, APIService, and all seven Addons gone. The same retraction
-carried on a reboot left all of it, and `kubectl top node` still
+applied by a reboot left all of it, and `kubectl top node` still
 answered.
 
 traefik retracted the ordinary way left two HelmCharts terminating on
@@ -224,7 +225,7 @@ the same export afterwards, because the module stays loaded and
 ## What the lab measured after it
 
 The same drills, on a machine that upgraded from the release that
-produced the numbers above, so the clusterState disk still carried the
+produced the numbers above, so the clusterState disk still held the
 old layout.
 
 The upgrade itself swept liken's six manifests off the top of the
@@ -260,7 +261,7 @@ remained, against a live session and a live mount before the edit.
 
 Retraction is an operational flow, so the feature guide states what
 retracting a feature does and what it waits for. The Cluster reference
-regenerates from the schema, so the `features` description carries the
+regenerates from the schema, so the `features` description states the
 preconditions, and the flux paragraph's existing statement that
 retraction stops the sync without undeploying becomes one case of a
 general rule rather than a special note.
@@ -269,7 +270,7 @@ general rule rather than a special note.
 
 The open question was whether a hold covers one feature or one edit.
 Per-feature is what the work settled on, and the traefik case is what
-decides it. That edit retracts two features whose readiness differs:
+settles it. That edit retracts two features whose readiness differs:
 traefik may stop at once, and helm may not stop until traefik's charts
 are gone. A per-edit hold would keep both running until the whole edit
 was ready, and nothing would ever make it ready, because stopping

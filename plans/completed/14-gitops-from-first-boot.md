@@ -1,6 +1,6 @@
 # GitOps from first boot
 
-Milestone 14 — Completed. A cluster declares the `flux` feature, and
+Milestone 14. Completed. A cluster declares the `flux` feature, and
 liken plants the Flux engine once, mints the deploy key, renders the
 sync objects, and removes all of it when the declaration goes away.
 
@@ -30,7 +30,7 @@ The rule holds for `iscsi`, because the kernel interface is the
 capability and `open-iscsi` can be replaced behind it. A GitOps engine
 is different. Its in-cluster CRDs (`GitRepository`, `Kustomization`) and
 its repository conventions are the interface that the user builds the
-whole repository against. A generic `gitops` slug would promise a
+whole repository against. A generic `gitops` slug would claim a
 swappability that the design cannot give. The name `flux` states the
 contract. If a deployment needs a different engine, it needs a
 different feature.
@@ -68,7 +68,7 @@ Git owns the engine, and liken only plants it.
 repository, so Flux manages itself from git and a Flux upgrade is a
 commit. An earlier version of this plan rejected that shape and gave
 liken the engine, pinned and released like every other vendored
-component. That rejection rested on the trust chain: the engine would
+component. That rejection depended on the trust chain: the engine would
 update outside the release's digest chain. The argument does not hold.
 A fleet that declares GitOps has already given the repository the power
 to run any workload, including a privileged one, so repository access
@@ -79,17 +79,17 @@ upgrades, and it would put a liken release between a deployment and
 every Flux patch.
 
 The engine therefore follows liken's own seed pattern, the same pattern
-as a Machine manifest: the image carries a pinned copy, the system
+as a Machine manifest: the image holds a pinned copy, the system
 plants it exactly once, and the live side owns it after that.
 
 * The seed is `gotk-components.yaml` with the floor components, which
   are the source controller and the kustomize controller. The flux
   domain fetches and pins it (`flux/VERSION`, `fetch.sh`). The seed
   only has to be good enough to reach the first sync.
-* The repository carries its own `gotk-components.yaml` inside the
+* The repository holds its own `gotk-components.yaml` inside the
   synced path. The first sync upgrades the engine to the version the
   repository pins, and every later engine change is a commit. Component
-  choice belongs to the repository too: a deployment that wants the
+  choice belongs to the repository too: a deployment that needs the
   helm-controller commits it. The vocabulary never gets a component
   parameter.
 * The cluster operator plants the seed on every sweep, with the same
@@ -117,7 +117,7 @@ liken owns the ground permanently: the flux-system namespace, the
 minting Role, the deploy key, and the sync objects (`GitRepository`,
 `Kustomization`), which init renders from the declared parameters so
 that an edit to the Cluster document stays a real act. Git owns the
-engine and everything above it. The repository must never carry the
+engine and everything above it. The repository must never hold the
 sync objects, or git and liken would both write them. The manual owns
 that warning. The `clusters/<cluster-name>` layout is a convention that
 the manual explains, not a default that the system derives. `path`
@@ -144,8 +144,8 @@ because image-update automation will later commit tag changes back to
 the repository.
 
 The key is per-cluster, not per-machine. Per-machine keys would narrow
-nothing, because every key would live in the same datastore that every
-leader carries, so the datastore is the unit of exposure either way.
+nothing, because every key would be in the same datastore that every
+leader holds, so the datastore is the unit of exposure either way.
 Rotation is one act: delete the Secret, and the next sweep mints a
 fresh pair to register. The minting belongs to the cluster operator,
 because the credential is cluster-scoped and the sweep is the one
@@ -165,8 +165,9 @@ ran on the GitOps lab (`gitops-cluster/`) against its fleet repository
 the repository moved the Cluster, and the fleet staged and applied each
 change, feature edits by restart and version edits by sequenced reboot.
 
-The seed carries the floor components only, and the repository decides
-everything past the floor. The flux-operator, a meta-controller that
+The seed holds the floor components only, and the repository
+determines everything past the floor. The flux-operator, a
+meta-controller that
 manages the engine's lifecycle, was considered and rejected. Once git
 owns the engine, the flux-operator manages something that already has
 an owner, at the cost of an always-on controller and a second manifest
@@ -183,7 +184,7 @@ objects' finalizers and delete the rest. The order is necessary because
 the engine's deletion finalizer garbage-collects everything the
 repository ever applied. k3s's addon machinery must never delete these
 objects, so a flux retraction removes its seeded files only while k3s
-is down. The Teardown field in the feature vocabulary carries this
+is down. The Teardown field in the feature vocabulary records this
 distinction. The janitor's rights are standing rights in the operator's
 manifest, delete-only and held by name, because rights delivered by the
 feature could not clean up after the feature that delivered them.
@@ -213,7 +214,7 @@ design is a live edit, so every rescue leaves fields that a person
 owns, and the rescue guide must end with the step that gives those
 fields back.
 
-One risk stays with the user by design. The synced path carries the
+One risk stays with the user by design. The synced path holds the
 Cluster document that declares Flux itself. A commit that drops that
 path, while the feature stays declared and the engine stays alive, lets
 the engine's garbage collector delete the Cluster and its Machines from
@@ -231,8 +232,8 @@ removal of the fleet stays a deliberate live act.
 
 The manual's guide (`docs/content/docs/guides/gitops.md`) closes the
 milestone. It gives the repository layout with the `prune: disabled`
-mark in it, the rule that the repository never carries the sync
+mark in it, the rule that the repository never holds the sync
 objects, the field-ownership rule for rescues, and the memory warning
 that came with moving component choice to the repository: the
-repository decides how many controllers run, and a 1 GB machine carries
+repository determines how many controllers run, and a 1 GB machine runs
 the two floor controllers with little room past them.

@@ -1,11 +1,11 @@
 # Choosing the bundled components
 
-Milestone 19 — Completed. Milestone 17 absorbed this milestone: a
+Milestone 19. Completed. Milestone 17 absorbed this milestone: a
 cluster opts into k3s's bundled components through spec.features.
 
 The static k3s configuration disables traefik, servicelb, and
 metrics-server, as a rule: anything beyond the control plane must be a
-declared, visible workload. Some deployments want k3s's bundled
+declared, visible workload. Some deployments need k3s's bundled
 versions instead. That choice belongs to the deployment, and must not
 be fixed in the image.
 

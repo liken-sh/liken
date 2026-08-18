@@ -1,6 +1,6 @@
 # The hardware report
 
-Milestone 36 — Completed. The installer stick gets a report boot that
+Milestone 36. Completed. The installer stick gets a report boot that
 proposes a machine manifest, and every attended boot ends at a held
 console.
 
@@ -39,7 +39,7 @@ makes a pick. That is also the consent for the reinstall entry. A
 person who picks "wipe and reinstall as liken-1" at the keyboard gives
 the same instruction that the hand-edited `liken.reinstall` word gave.
 
-The report entry carries no `liken.machine=` identity, because the
+The report entry has no `liken.machine=` identity, because the
 report describes the hardware and not a machine in the deployment. The
 two entries for each machine sort together, and the report entry sorts
 last.
@@ -58,7 +58,7 @@ MAC, and link state.
 The report does not guess the interface names. It loads the drivers it
 recommends and reads what appears. A name is real only after the driver
 binds: `eth0` does not exist until `r8169` loads. The modules come from
-the payload the stick already carries. The install boot mounts
+the payload the stick already holds. The install boot mounts
 `liken.sqfs` for its module tree, and the report boot does the same. A
 module load changes only RAM, so the report changes nothing on the
 machine.
@@ -102,8 +102,9 @@ Nobody watches these boots, and `panic=10` with the fall-back slot is
 their recovery.
 
 The menu is what separates the two kinds, so the menu states it. Each
-entry carries `liken.attended`, and only that word makes init hold. The
-boot words cannot carry the meaning, because anything can write them.
+entry includes `liken.attended`, and only that word makes init hold.
+The boot words cannot state the meaning, because anything can write
+them.
 The liken.sh image build boots `liken.install` in QEMU with its serial
 port pointed at a file, and a PXE server boots it with nobody in the
 room. Both power off as before.

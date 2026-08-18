@@ -1,12 +1,12 @@
 # The Bluetooth operator
 
-Milestone 58 — Completed. Each paired Bluetooth controller publishes
+Milestone 58. Completed. Each paired Bluetooth controller publishes
 as its own DRA device, so a pod claims one controller by its MAC
 address and receives that controller's evdev node and nothing else.
 It is an instance of milestone 56's pattern: the operator claims the
 Bluetooth adapter through an ordinary `liken.sh` claim, runs
 bluetoothd, and publishes what bluetoothd holds under
-`bluetooth.liken.sh`. The system image carries no BlueZ and no D-Bus.
+`bluetooth.liken.sh`. The system image holds no BlueZ and no D-Bus.
 
 ## The problem
 
@@ -29,7 +29,7 @@ both are wrong.
   means the keyboard and the mouse as well. Nothing says which node is
   which controller, and the numbers change on every boot.
 
-One fact governs the design: where the pairing state lives. bluetoothd
+One fact governs the design: where the pairing state is. bluetoothd
 holds it, which is the paired set, the link keys, and the HID sessions.
 It is not in sysfs and it is not on the Machine. So the layer that
 publishes controllers must be the layer that runs bluetoothd, which is
@@ -51,7 +51,7 @@ bluetoothd speaks over the D-Bus system bus, so the pod runs a bus
 daemon beside it. The bus is a socket in the pod's own filesystem, it
 has one client and one service on it, and nothing outside the pod
 reaches it. This is the whole reason the OS image needs no D-Bus: the
-bus exists for one daemon, in the image that carries that daemon.
+bus exists for one daemon, in the image that holds that daemon.
 
 The operator also has to power the adapter. bluetoothd leaves an
 adapter down unless its configuration says otherwise, so the image
@@ -87,7 +87,7 @@ own terms, apart from this proposal.
 
 * **The delivery walk stops at a Bluetooth subtree.** `InspectDelivery`
   in `hardware/delivery.go` walks the adapter's sysfs subtree. A
-  connected controller hangs under the adapter's `hci0` node, so
+  connected controller appears under the adapter's `hci0` node, so
   without a boundary the controller's input nodes join the adapter's
   delivery list. Then a pod that claims the adapter receives every
   controller's evdev node, and the delivery changes shape every time
@@ -142,24 +142,25 @@ and not only the connected set. It publishes a paired controller that
 is disconnected, the same as a connected one. A person can then create
 a pod for a controller that is switched off, and the pod starts when
 somebody turns the controller on. Milestone 56 gives the Kubernetes
-behavior this rests on, and a switched-off controller is the case that
+behavior this depends on, and a switched-off controller is the case that
 asked for it.
 
 A controller that disconnects takes milestone 56's taint path, with
 `tolerationSeconds` on the consumer's claim deciding how long a radio
 may be silent before the pod ends. The taint is stricter than
-bluetoothd's word: it applies when bluetoothd reports a disconnect,
+bluetoothd's report: it applies when bluetoothd reports a disconnect,
 and also when the controller registers no evdev node, because a
 session can be up and mute. The lab met one: the ACL alive, BlueZ
 answering `Connected: yes`, and no input device on the machine. The
-taint tracks what a claim can deliver, not what bluetoothd believes.
+taint tracks what a claim can deliver, and not what bluetoothd
+reports.
 
-## Events, not polling
+## Events instead of polling
 
 The daemon listens for kernel uevents on a netlink socket bound to
 group 1. An unprivileged process may receive that group, because the
 kernel's uevent socket is created with `NL_CFG_F_NONROOT_RECV`. Two
-traps around it are worth writing down, because both fail silently.
+traps around it fail silently.
 
 * **Do not bind group 2.** Group 2 is udev's own event group. On a
   machine with no udev the bind succeeds, the socket opens, and it
@@ -192,7 +193,7 @@ joydev stays out, for three reasons.
   a design that needs `/dev/input/jsN` needs a kernel change first.
 * joydev exposes a DualSense's motion sensors as a second `jsN` device,
   which is wrong, and a kernel patch for it is pending. A consumer that
-  reads evdev never meets the bug.
+  reads evdev is not affected by the bug.
 
 ## What a drill must show
 
@@ -236,8 +237,8 @@ below records what happened to it.
   operator now:
   [Who owns the pairing UX](https://github.com/liken-sh/bluetooth-operator/blob/main/plans/open-problems/who-owns-the-pairing-ux.md).
   The shipped release pairs by hand in the operator's pod, as this
-  milestone proposed. The pairing-request CRD is still the leaning and
-  still unbuilt.
+  milestone proposed. The pairing-request CRD is still the preferred
+  answer and still unbuilt.
 * **Where the drill runs.** Answered: `liken-1`, sharing the machine
   with milestone 57's drill. The two ran together on 2026-08-17, a
   compositor on both monitors and a DualSense on the radio, and
@@ -253,5 +254,5 @@ below records what happened to it.
   [A Secret for each adapter](https://github.com/liken-sh/bluetooth-operator/blob/main/plans/03-a-secret-for-each-adapter.md).
   The multi-adapter QEMU drill this asked for is no longer needed to
   size the problem. One replica per adapter still collides on the
-  slice object, which is a different question and lives with the
+  slice object, which is a different question and belongs with the
   operators.

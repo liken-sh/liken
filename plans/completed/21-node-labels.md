@@ -1,6 +1,6 @@
 # Node labels on the Machine
 
-Milestone 21 — Completed. A Machine declares its node labels, init
+Milestone 21. Completed. A Machine declares its node labels, init
 applies them when the node registers, and the operator reconciles them
 live.
 
@@ -66,7 +66,7 @@ The lab proved every path on node-4, which declares guid.foo/drill:
 node-labels as its standing example, beside the dummy module. The
 admission drills all refused with messages that name the fix:
 node-role.kubernetes.io/database, liken.sh/machine, and a malformed key
-each bounced at the API server, and topology.kubernetes.io/zone passed,
+were each refused at the API server, and topology.kubernetes.io/zone passed,
 as the kubelet's own vocabulary permits. A declared label reached the
 Node within one reconcile pass, with no reboot, and the ownership
 annotation recorded the key. A value rewritten by hand (kubectl label
@@ -76,6 +76,6 @@ removed it from the Node and shrank the annotation with it.
 
 The registration path proved out on a staged reboot. The serial console
 showed init render "node-label+: - guid.foo/drill=node-labels" into the
-drop-in, and the kubelet's own command line carried
+drop-in, and the kubelet's own command line included
 --node-labels=liken.sh/machine=true,guid.foo/drill=node-labels: the
 static file's label and the spec's label, appended as designed.

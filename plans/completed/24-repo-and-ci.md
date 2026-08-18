@@ -1,6 +1,6 @@
 # A real repository and CI builds
 
-Milestone 24 — Completed. liken has a public repository and continuous
+Milestone 24. Completed. liken has a public repository and continuous
 integration that builds every commit and boots the result.
 
 The repository is public at github.com/liken-sh/liken, and CI runs on
@@ -15,7 +15,7 @@ and assembles a bootable image. CI does all of this, and it also does
 the one thing that unit tests cannot prove: it boots the assembled
 image. The lab was already prepared for this. Its QEMU flags prefer KVM
 and fall back to pure emulation, because CI runners rarely offer
-virtualization, and run-once makes a boot a bounded, machine-readable
+virtualization. run-once makes a boot a bounded, machine-readable
 artifact. A smoke boot under TCG, checked by a read of the serial
 console, is the necessary minimum. Whether CI can go further, for
 example forming a single-node cluster, depends on how much time each

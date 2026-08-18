@@ -1,6 +1,6 @@
 # The audio operator
 
-Milestone 59 — Completed. Each physical audio output publishes as its
+Milestone 59. Completed. Each physical audio output publishes as its
 own DRA device, so a pod claims one HDMI output's speakers or the
 analog jack, and receives the PipeWire socket and the name of the sink
 its streams must reach. It is the third instance of milestone
@@ -19,7 +19,7 @@ That is the right thing for the OS to publish, because the OS can read
 the nodes and nothing else.
 
 What the nodes do not say is which output is which. An Intel N95 with
-two monitors publishes one audio device that carries `pcmC0D3p`,
+two monitors publishes one audio device that delivers `pcmC0D3p`,
 `pcmC0D7p`, `pcmC0D8p`, and an analog PCM, and nothing in that list
 says which one plays into the kitchen monitor's speakers. A workload
 that must play into one monitor's speakers has one way to get them
@@ -75,8 +75,8 @@ what it costs. The operator's own jack watcher is what makes a monitor
 an event rather than a poll.
 
 The privilege is none. The operator declares no `hostNetwork` and adds
-no capability. Everything it touches, it touches through the ALSA nodes
-its claim delivers, plus the two hostPath mounts every DRA driver
+no capability. Everything it does to the hardware, it does through the
+ALSA nodes its claim delivers, plus the two hostPath mounts every DRA driver
 takes, which milestone 56 lists.
 
 ## Finding the card with no udev
@@ -85,7 +85,7 @@ A liken machine runs no udevd, and WirePlumber's ALSA monitor
 enumerates cards through libudev. The monitor asks udev for the sound
 subsystem, gets nothing, builds no PipeWire device, and creates no
 sink. PipeWire then holds a graph with no ALSA node in it on a machine
-whose speakers work, every output the operator publishes carries the
+whose speakers work, every output the operator publishes has the
 no-sink taint, and no pod can play. WirePlumber's own documentation
 states the dependency: "The plugin then monitors UDev and creates
 device and node objects for all the ALSA cards that are available on
@@ -124,12 +124,12 @@ at master.
   minimal PipeWire setups without a session manager, the device
   properties can be configured via context.objects in pipewire.conf(5)
   when creating the devices." The shipped `src/daemon/pipewire.conf.in`
-  carries the same object as a commented example, with
+  includes the same object as a commented example, with
   `api.alsa.pcm.source` in place of the sink.
 * **The factory exists under that name.** `spa_alsa_sink_factory` in
   `spa/plugins/alsa/alsa-pcm-sink.c` registers
   `SPA_NAME_API_ALSA_PCM_SINK`, which is `api.alsa.pcm.sink`.
-* **Nothing in the path touches udev.** `spa_alsa_init` in
+* **Nothing in the path uses udev.** `spa_alsa_init` in
   `spa/plugins/alsa/alsa-pcm.c` reads `api.alsa.path` and
   `api.alsa.pcm.card` and opens the device with `snd_pcm_open`.
 * **The drop-in adds and does not replace.** `pipewire.conf(5)` says a
@@ -141,12 +141,12 @@ at master.
   `pw_adapter_new`, and `impl-node.c` sets `info.props` to the node's
   whole property dictionary, so `liken.audio.card` and
   `liken.audio.pcm` arrive in the dump. That is what maps a node back
-  to its output. A node the udev monitor built carries `alsa.card` and
+  to its output. A node the udev monitor built has `alsa.card` and
   `alsa.device` instead, and this graph has no such node in it.
 * **`media.class` has to be written.** The ALSA plugin keeps a media
   class inside the SPA node, and `module-adapter.c` copies no default
   onto the PipeWire node, so a node declared without it is a node that
-  nothing sees as a sink.
+  nothing treats as a sink.
 
 WirePlumber stays, with `monitor.alsa` and `monitor.alsa-midi`
 disabled in the pod's profile. It still links each client's stream to
@@ -161,9 +161,9 @@ uses no libudev either, and neither does `api.alsa.pcm.device`. Both
 were read and both are dead ends from a configuration file.
 `src/modules/spa/spa-device.c` installs no listener for a SPA device's
 child objects, and `struct pw_device_events` in `src/pipewire/device.h`
-carries only `info` and `param`, so a device declared in
+has only `info` and `param`, so a device declared in
 `context.objects` produces a Device global with profiles and routes on
-it and zero nodes. A session manager learns a device's children only by
+it and zero nodes. A session manager reads a device's children only by
 loading the SPA plugin in its own process, which is what WirePlumber's
 `monitors/alsa.lua` does with `api.alsa.enum.udev`. Taking that route
 means patching WirePlumber to enumerate from an ioctl scan instead. It
@@ -249,7 +249,7 @@ The attributes come from the ELD and from PipeWire's node:
 * the PipeWire node name of the sink, which is what a consumer's
   environment names.
 
-The ELD carries no serial number. The kernel prints the whole block at
+The ELD holds no serial number. The kernel prints the whole block at
 `snd_hdmi_print_eld_info` in `sound/pci/hda/hda_eld.c`, and the fields
 are `monitor_present`, `eld_valid`, `codec_pin_nid`, `codec_dev_id`,
 `codec_cvt_nid`, `monitor_name`, `connection_type`, `eld_version`,
@@ -276,7 +276,7 @@ The Kubernetes behavior was verified against the v1.36 sources.
   (`staging/src/k8s.io/api/resource/v1/types.go`, release-1.36). So one
   claim can hold a request against each driver.
 * A constraint names the requests it applies to and requires that all
-  devices in question carry the same value for one attribute. The
+  devices in question have the same value for one attribute. The
   field's doc states "MatchAttribute requires that all devices in
   question have this attribute and that its type and value are the same
   across those devices", and "Must include the domain qualifier". Its
@@ -300,7 +300,7 @@ under one shared domain that neither driver owns, which the
 must include the domain prefix. The proposal is `monitor.liken.sh/id`,
 built from the manufacturer code, the product code, and the monitor
 name, because those are the three facts the ELD and the EDID both
-carry.
+hold.
 
 One limit comes with it. Two monitors of the same model produce the
 same `monitor.liken.sh/id`, so the constraint is satisfied by either
@@ -316,7 +316,7 @@ monitors.
 The delivery has the shape milestone 57 uses, not the shape milestone
 58 uses. A consumer receives no `/dev/snd` node. What it needs is the
 PipeWire socket and the name of the sink its streams must reach, and
-CDI carries both as a mount and environment variables.
+CDI delivers both as a mount and environment variables.
 
 The client mechanisms were verified against the PipeWire sources.
 
@@ -364,7 +364,7 @@ first. A monitor coming back clears the taint.
 The loss signal is the ELD control, the same one that publishes the
 identity. The block goes invalid when the monitor leaves, and the
 control change is an event the operator already listens to. The jack
-input nodes that liken delivers with the card carry the same fact from
+input nodes that liken delivers with the card report the same fact from
 the kernel's side, and the ALSA control names them per PCM, in the form
 `HDMI/DP,pcm=3 Jack` (`spa/plugins/alsa/acp/alsa-mixer.c`).
 
@@ -385,7 +385,7 @@ is also where milestone 57's drill runs.
   no node selector written by hand. Delete it, and the published
   devices return to what they were.
 * **The declared nodes exist and play.** `pw-dump` lists one
-  `Audio/Sink` node for each playback PCM device, each one carrying
+  `Audio/Sink` node for each playback PCM device, each one with
   `liken.audio.card` and `liken.audio.pcm`, on a machine with no udevd.
   A stream that names one of them by `PIPEWIRE_NODE` reaches the
   speakers. This is the whole of what the static declaration buys, and
@@ -402,8 +402,8 @@ is also where milestone 57's drill runs.
   readable only while the cable is in and the declaration is written
   once at start.
 * **Each output publishes once.** One device for each HDMI PCM and one
-  for the analog jack, each carrying its connection type, and each HDMI
-  device carrying its monitor's manufacturer code, product code, and
+  for the analog jack, each with its connection type, and each HDMI
+  device with its monitor's manufacturer code, product code, and
   name.
 * **A claim by name.** A pod that names one output plays into that
   monitor's speakers and no other.
@@ -443,8 +443,8 @@ below records what happened to it.
   held together by parity test vectors in both repositories. Merging
   them would still remove the constraint. It would also put Weston and
   PipeWire in one restart domain, and a compositor restart already
-  ends every session on every screen, so audio would join a blast
-  radius it currently sits outside.
+  ends every session on every screen, so audio would join a restart
+  domain it is currently outside.
 * **Sharing semantics.** Still open, and it belongs to the operator
   now:
   [A sink can be shared and this one is not](https://github.com/liken-sh/audio-operator/blob/main/plans/open-problems/a-sink-can-be-shared-and-this-one-is-not.md).

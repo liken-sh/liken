@@ -1,6 +1,6 @@
 # Static host entries
 
-Milestone 53 — Completed. A Machine declares names that resolve
+Milestone 53. Completed. A Machine declares names that resolve
 without any DNS: a `hostEntries` list on the network spec. Init
 writes the entries into `/etc/hosts` on every boot, together with an
 `/etc/nsswitch.conf` that pins the hosts file ahead of DNS, and the
@@ -12,7 +12,7 @@ without a reboot.
 init writes `/etc/hosts` on every boot, with three fixed lines:
 `localhost`, its IPv6 form, and the machine's own name at `127.0.1.1`.
 Nothing in the machine spec adds a fourth line. A name that must
-resolve without cluster DNS has nowhere to live.
+resolve without cluster DNS has no place to be declared.
 
 A machine that mounts NFS by hostname re-resolves that name on every
 kubelet reconcile, because neither the kubelet nor the mount helper
@@ -26,8 +26,8 @@ and iSCSI clients, but no way to name their target without DNS.
 
 A static entry has one failure mode worse than none: an entry that
 DNS shadows. If a resolver queries DNS before it reads the hosts
-file, the entry sits in the file and never answers, and nobody sees
-that it lost. The node ships no `/etc/nsswitch.conf`, so the order
+file, the entry stays in the file and never answers, and nothing
+reports that it lost. The node ships no `/etc/nsswitch.conf`, so the order
 between `files` and `dns` is whatever each resolver compiled in. This
 design starts by measuring those defaults.
 
@@ -98,8 +98,8 @@ spec:
         names: [nas, nas.home.arpa]
 ```
 
-It lives under `network` because it is name-resolution configuration,
-and that is where resolution already lives: each interface's
+It belongs under `network` because it is name-resolution
+configuration, and that is where resolution already is: each interface's
 `nameservers` reach `/etc/resolv.conf` the same way these entries
 reach `/etc/hosts`. That is the whole argument for the placement.
 The field does not share the rest of the network spec's convergence
@@ -117,7 +117,7 @@ The schema, in the style the CRD already uses:
   length the `gateway` field uses. IPv4 and IPv6 both pass. init
   parses the literal again when it writes the file, and the file
   parser refuses a value that is not an address, because a manifest
-  carried in on a stick never met the API server
+  carried in on a stick never reached the API server
   (`NetworkSpec.Validate` is the precedent).
 * `names` is required with at least one item and at most twenty: an
   atomic list of DNS names, lowercase letters, digits, dashes, and
@@ -159,7 +159,7 @@ line per entry, in spec order:
 The same step writes `/etc/nsswitch.conf` with `hosts: files dns`,
 whether or not the spec declares any entry.
 
-One function renders the file, and it lives in the machine package,
+One function renders the file, and it is in the machine package,
 which holds the logic that init and the operator must agree on
 (machine/drift.go states that rule). Both writers call it, so the
 two programs can never produce two shapes of the file (the
@@ -168,7 +168,7 @@ Convergence section explains why the file has two writers).
 init prints each entry as it writes it, one line per entry, so the
 serial console shows what this boot's file holds. The console-parity
 rule then requires the same facts on the Machine, and the live
-status carries them: `status.hostEntries` reports the entries as the
+status reports them: `status.hostEntries` reports the entries as the
 file actually holds them, observed on the pass that publishes them.
 There is no `boot/network/hostEntries` facts record. A boot record
 answers what one boot actuated, and a file the operator may rewrite
@@ -223,11 +223,11 @@ mount is the only change to its manifest.
 Two objections argue for converging by reboot instead, and both have
 answers. The first: the entry's purpose is the cold start, storage
 resolving before cluster DNS, and only a boot proves the entry in
-that order. That proof stands, because init still writes the file at
+that order. That proof holds, because init still writes the file at
 every boot, before k3s starts; the operator's live writes add
 convergence without changing what a boot proves. The second: a live
 writer gives `/etc/hosts` a second author beside init. The sysctls
-design already carries this shape: two writers, one desired state,
+design already has this shape: two writers, one desired state,
 and one application path. The shared renderer is that path here, so
 the two writers can only ever produce one file.
 
@@ -235,7 +235,7 @@ the two writers can only ever produce one file.
 
 These entries serve the programs that resolve with the host's own
 files: `mount.nfs` for NFS volumes, `iscsiadm` for portal addresses,
-and k3s itself. Pods never see them, because the kubelet writes each
+and k3s itself. Pods never receive them, because the kubelet writes each
 pod's `/etc/hosts` itself and cluster DNS serves pod lookups. That is
 the correct boundary: the motivating mount happens on the host, and a
 workload that needs a static name has `hostAliases` in the pod spec
@@ -281,5 +281,5 @@ shadowing variant, a nameserver that answers a declared name with a
 wrong address, ran only in the resolver experiment's containers,
 because the lab has no nameserver of its own to poison. And the
 lookup-volume count, the steady query rate that a static entry ends,
-rests on the fleet measurement in the problem statement rather than
+depends on the fleet measurement in the problem statement rather than
 on a lab count.

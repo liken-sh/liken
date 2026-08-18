@@ -1,6 +1,6 @@
 # Editing the network spec
 
-Milestone 41 — Completed. The boot records the network it came up
+Milestone 41. Completed. The boot records the network it came up
 under, so an edit to `spec.network` drifts, stages, and applies at the
 next boot.
 
@@ -52,7 +52,7 @@ ten interfaces.
 
 An empty network spec means the zero-configuration default: DHCP on
 the first port that looks like real hardware. A boot that recorded no
-network at all means something else, and the difference decides
+network at all means something else, and the difference determines
 whether a fleet reboots. If the operator read a missing record as an
 empty spec, it would report every declared interface as drift on every
 machine whose facts lack the record, and each machine would stage a
@@ -61,8 +61,8 @@ manifest and ask for its turn.
 The record is therefore a pointer, and `boot/network` is a directory
 that exists whenever a boot recorded anything, even with no file under
 it. This is the one place in the facts tree where an empty directory
-carries meaning. A machine whose boot recorded nothing is a machine
-the operator cannot judge, and the verdict for something unjudgeable
+has meaning. A machine whose boot recorded nothing is a machine
+the operator cannot judge, and the verdict for a case it cannot judge
 is the one that `FactsIncomplete` already takes: report no drift
 rather than reboot on a guess.
 
@@ -73,10 +73,10 @@ the drift that the decision table measures, the manifest stages, and
 the same gate decides who starts the boot: Manual waits for a person,
 a cluster member on Auto waits for its turn, and only then is a reboot
 requested. The condition reasons are the ones the phase table already
-knows, so a staged network change reads as UpdatePending in a fleet
+has, so a staged network change reads as UpdatePending in a fleet
 listing, exactly like a staged storage change.
 
-Two rules that the storage drift carries do not apply here. Storage
+Two rules from the storage drift do not apply here. Storage
 roles are grow-only, and a network has no such rule: any spec may
 replace any other, and the only question is whether the machine
 matches the spec that the cluster asks for now. Storage also compares
@@ -98,7 +98,7 @@ refusal from the same shared function before it acts on any intent.
 `NetworkSpec.Validate` was already wired into the operator, ahead of
 staging, so that a spec which init would refuse at boot is refused in
 the cluster instead. A refusal at boot costs a reboot and returns the
-machine on its old manifest with a rejection record. The gate sat
+machine on its old manifest with a rejection record. The gate was
 after the drift check, and no network-only edit ever reached it. With
 drift measured, the gate runs.
 
@@ -107,19 +107,19 @@ drift measured, the gate runs.
 The drill that found the fault ran again on a two-machine cluster
 installed from blank disks, and the edit now behaves the way the
 schema says. Both machines came up with a boot network recorded that
-matched the manifest they booted under, which is the record that the
-whole milestone rests on.
+matched the manifest they booted under, which is the record the
+whole milestone depends on.
 
 The Manual case matters most, because Manual is the default. The lab
 added a nameserver to node-4's uplink under that policy. The node
-reported `RebootPending`, and the message carried the diff:
+reported `RebootPending`, and the message stated the diff:
 `network: eth0: nameservers 10.10.0.1 declared, (none) actuated`. The
 machine held that verdict with its boot time unmoved, and the fleet
 listing read UpdatePending rather than Degraded. Nothing rebooted
 until the policy changed.
 
 The policy was then set to Auto. The node rebooted, its new boot
-record carried the declared nameserver, and its live network status
+record held the declared nameserver, and its live network status
 listed that nameserver beside the one that its DHCP lease supplied.
 The machine returned to Converged. The leader stayed Converged
 throughout and did not reboot, because a machine with no network edit
@@ -128,10 +128,10 @@ has no drift.
 The invalid spec is refused earlier than the operator. Because the
 list of interfaces is keyed by name, the API server itself rejects a
 manifest that declares one port twice and names the duplicate entry,
-so no such spec is ever staged or seen by a machine. The validator
+so no such spec is ever staged or reaches a machine. The validator
 that milestone 39 left behind still applies to the manifests that
 arrive another way: init also reads a manifest written by hand and
-carried in on a stick, which no API server ever saw.
+carried in on a stick, which no API server ever checked.
 
 ## The manual
 

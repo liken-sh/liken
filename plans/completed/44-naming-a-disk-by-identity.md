@@ -1,6 +1,6 @@
 # Naming a disk by identity
 
-Milestone 44 — Completed. It lets a Machine declare its storage by a
+Milestone 44. Completed. It lets a Machine declare its storage by a
 name that belongs to the disk, and it grows `/dev/disk` past the one
 tree that iSCSI needed.
 
@@ -37,8 +37,8 @@ reason sets how small this milestone is.
 
 Recognition never reads the device path. `matchRoles` finds each role
 by its GPT partition name across every partition on the machine, and it
-refuses to guess when two partitions carry one role's name. A disk that
-changed letters, or moved to another controller, still carries its
+refuses to guess when two partitions have one role's name. A disk that
+changed letters, or moved to another controller, still holds its
 roles. `awaitStorageDevices` says the same thing in its second door: a
 spec is satisfiable once every role is recognized, whatever letter the
 disk holds.
@@ -132,7 +132,7 @@ deriving it.
 
 The hardware report (milestone 36) writes a proposed manifest to the
 stick. It proposes the stable name, so a machine installed from its own
-report never carries a letter in its spec.
+report never has a letter in its spec.
 
 A kernel name stays legal in the spec. A fleet that declares
 `/dev/nvme0n1` has nothing to gain from a change, and breaking those
@@ -173,7 +173,7 @@ firmwares. An unattended install under a declared `by-id` spec reached
 `Ready` in 21 seconds under UEFI and 26 seconds under BIOS, matching
 the timing a letter spec already gets.
 
-A stray-disk race stood in for the USB-stick case: two blank disks were
+A stray-disk race took the place of the USB-stick case: two blank disks were
 attached so they took `vda` and `vdb` ahead of the declared disks, and
 the claims still landed on the right disk by identity. Both strays were
 confirmed at zero written bytes afterward.

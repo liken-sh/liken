@@ -1,6 +1,6 @@
 # Updating the machine's own firmware
 
-Milestone 33 — Proposed, except for the boot-path work below, which is
+Milestone 33. Proposed, except for the boot-path work below, which is
 built. It would add fwupd as a feature slug, so a firmware update would
 use the rolling-reboot orchestration that liken already has, and init
 would stay the only writer of the boot chain.
@@ -13,24 +13,24 @@ fwupd and the Linux Vendor Firmware Service own this area. The work
 waits for experience with bare metal from milestone 32.
 
 fwupd is not inert payload. It is an agent with a daemon's memory cost
-and a live trust relationship with LVFS, whose vendor-signed downloads
-sit outside liken's own digest chain. Its job also reaches into the
-boot chain that liken guards most carefully. It writes BootNext, it
+and a live trust relationship with LVFS. LVFS's vendor-signed downloads
+are outside liken's own digest chain. Its job also writes to the
+boot chain that liken controls most carefully. It writes BootNext, it
 creates a boot entry of its own, it writes OsIndications, and it
 stages an EFI capsule on an EFI system partition. Those are the writes
 that init owns, for the reasons proving.go gives: the store on disk is
 the authority, and the machine plane is what talks to the firmware.
 
 The design below keeps that rule by removing fwupd's ability to break
-it, rather than by asking fwupd to take turns.
+it, and not by scheduling fwupd's writes into turns.
 
 ## The fallback that a firmware update can erase
 
-This part is built. It is not really about fwupd, and it stands on its
-own merit, so it landed ahead of the rest of this milestone.
+This part is built. It is not really about fwupd, and it is worth doing
+on its own, so it landed ahead of the rest of this milestone.
 
 A UEFI machine's boot entry loads `\vmlinuz` from the slot through the
-kernel's EFI stub, and the kernel command line lives in the boot
+kernel's EFI stub, and the kernel command line is in the boot
 option's optional data. Nothing else on a UEFI machine holds that
 command line. Some firmware resets NVRAM to defaults as part of an
 update, a dead NVRAM battery does the same, and so does the setup
@@ -48,44 +48,45 @@ First, every boot writes the slots' boot entries again
 facts on the disk and writes back only what drifted, so a machine that
 boots at all repairs its own boot menu. Both slots lead BootOrder with
 the proven slot first, so a firmware that cannot load one slot's kernel
-tries the other half of the pair before it reaches its own setup menu.
+starts the other half of the pair before it reaches its own setup menu.
 The comparison runs before every write, because NVRAM accepts a limited
 number of writes and this now runs on every boot and before every
 reboot. This also finishes the dead-battery case that the UEFI dialect
 could only half repair: it could fix a boot order and could not
-recreate a boot entry. The UEFI dialect now carries the same healing
-duty the GRUB dialect has carried since milestone 30.
+recreate a boot entry. The UEFI dialect now has the same healing
+duty the GRUB dialect has had since milestone 30.
 
-Second, the proven slot carries a default-path loader
+Second, the proven slot holds a default-path loader
 (init/slotloader.go): `\EFI\BOOT\BOOTX64.EFI`, a `loader.conf` that
 never waits, and one loader entry holding the same command line the
 firmware entry holds. A firmware at defaults searches each device for
-that one path, which is how an installation stick boots a machine that
-has never seen it, so such a firmware finds this and boots. That boot
+that one path. That search is how an installation stick boots a machine
+with no boot entry for the stick, so a firmware at defaults finds this
+loader and boots it. That boot
 then repairs NVRAM, and the boot after it is ordinary. The loader
 program is a copy of the `systemd-bootx64.efi` that every slot already
-carries as a release artifact, so this costs no new artifact and no
+holds as a release artifact, so this costs no new artifact and no
 slot budget worth counting.
 
-The loader lives on the proven slot alone, and the other slot's copy is
+The loader is on the proven slot alone, and the other slot's copy is
 removed only after the proven slot has taken one, so a machine is never
 left with neither. Putting one on each slot was the first design, and
 it is worse twice over. A firmware at defaults takes the first answer
-it finds, which would be an older release or, at install time, an empty
-slot whose loader would stop at a menu with no kernel to load. One
-answer means such a firmware cannot boot the wrong half of the pair.
+it finds. That answer would be an older release or, at install time, an
+empty slot whose loader would stop at a menu with no kernel to load.
+One answer means such a firmware cannot boot the wrong half of the pair.
 
-The command line now lives in two places that must agree, which is the
-burden init/grubcfg.go already carries for BIOS machines. One function
+The command line is now in two places that must agree, and
+init/grubcfg.go already has that burden for BIOS machines. One function
 renders both, so they cannot disagree. The loader entry names only the
-archives its own slot carries, because a proven slot can hold an older
+archives its own slot holds, because a proven slot can hold an older
 release than the code writing the loader, and systemd-boot refuses an
 entry whose initrd is missing.
 
 One durability rule came out of the lab. A rename on FAT is the only
 record of a file's name, size, and first cluster, and neither the
-per-file fsync nor an fsync of the directory reaches that record: a FAT
-directory's entries live in buffers attached to the block device rather
+per-file fsync nor an fsync of the directory reaches that record. A FAT
+directory's entries are in buffers attached to the block device rather
 than in the directory's own pages. The first promotion drill left slot
 B holding a loader entry with the right name, no size, and no data. The
 firmware started that loader and stopped at its menu with nothing to
@@ -124,10 +125,10 @@ The feature would give the fwupd pod no access to
 `/sys/firmware/efi/efivars`. A tmpfs in that place mimics efivarfs,
 and `/sys/firmware/efi/esrt` binds read-only so device discovery still
 works. init watches the tmpfs with the inotify machinery that the
-facts tree already uses. A write from fwupd is then a request, not an
-action. init decides whether and when to honor it, and after init
-writes the real variable it copies the value into the tmpfs so later
-reads agree.
+facts tree already uses. A write from fwupd is then a request, and not
+an action. init controls whether that request becomes a real write, and
+when. After init writes the real variable it copies the value into the
+tmpfs so later reads agree.
 
 The alternative is a scheduled window: give fwupd the real variable
 store, and let it apply only while liken holds a conductor grant. The
@@ -141,17 +142,17 @@ The plugin's own options do not offer a third way. It reads
 EspLocation, DisableCapsuleUpdateOnDisk, and RequireESPFreeSpace, and
 none of them stops the BootNext write.
 
-One measurement decides whether the shim works as written. fwupd
+One measurement settles whether the shim works as written. fwupd
 clears the per-file immutable flag before it writes a variable, the
-same dance writeEFIVar performs, and `FS_IOC_GETFLAGS` may return
+same sequence writeEFIVar performs, and `FS_IOC_GETFLAGS` may return
 ENOTTY on tmpfs. The shim depends on fwupd reading that as nothing to
 clear rather than as an error.
 
-## One reboot carries one change
+## One reboot applies one change
 
 The UEFI specification has the firmware read `\EFI\UpdateCapsule` only
 from the EFI system partition on the device named in the active boot
-option, which is BootNext when it is set and BootOrder otherwise.
+option. That option is BootNext when it is set and BootOrder otherwise.
 liken controls that entry completely: `installBootEntries` puts both
 slots at the head of BootOrder, and `assertProven` keeps the proven
 slot first.
@@ -183,8 +184,8 @@ the dangerous one.
 Serialization settles which ESP is correct: with no slot switch
 pending, it is always the running slot's. init would bind-mount that
 slot at a stable path and set EspLocation to the constant. fwupd's
-configuration then never changes, and init decides each boot what the
-path means.
+configuration then never changes, and each boot init binds that path to
+the correct slot.
 
 Where the firmware supports capsule-on-disk, prefer it, because fwupd
 then writes OsIndications instead of BootNext and the seam is smaller.
@@ -195,7 +196,7 @@ Do not depend on it. fwupd itself calls that path uncommon.
 `wantsTurn` matches the AwaitingTurn reason on any condition
 (cluster-operator/rollout.go). A FirmwareConverged condition that sets
 that reason joins the rollout conductor with no change to the
-conductor, and firmware updates inherit the budget, the one-leader
+conductor. Firmware updates then inherit the budget, the one-leader
 floor, the drain, and stall detection. fwupd would never reboot a
 machine itself. The grant owns the reboot, the same as every other
 staged change.
@@ -236,7 +237,7 @@ drills need no fwupd, no capsule, and no ESRT:
   including the immutable-flag question.
 
 One question needs more than stock OVMF. Whether the firmware consumes
-a staged capsule needs an ESRT and an updatable firmware device, which
+a staged capsule needs an ESRT and an updatable firmware device. That
 means OVMF built with edk2's FmpDevicePkg and EsrtFmpDxe, or real
 metal. That question is independent of every decision above, so it
 does not gate the design.
@@ -254,7 +255,7 @@ liken's arming. A deployment that runs fwupd now should do it with no
 release staged.
 
 An update that resets NVRAM no longer strands the machine, because the
-proven slot carries a loader that a firmware at its defaults finds. An
+proven slot holds a loader that a firmware at its defaults finds. An
 update that turns Secure Boot on still strands it, because liken's
 vmlinuz and that loader are both unsigned. The answer to this one is
 the hardening tier's signed releases and UKIs.

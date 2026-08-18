@@ -1,6 +1,6 @@
 # Netboot for a declared machine
 
-Milestone 50 — Proposed. It would let a new machine boot from an
+Milestone 50. Proposed. It would let a new machine boot from an
 existing leader over the network: the report image when nobody
 declared it, the installer when somebody did, and its own disk once
 it is installed. No stick is involved.
@@ -10,13 +10,13 @@ it is installed. No stick is involved.
 Every machine today starts from a stick. The CLI composes one per
 machine, a person carries it to the hardware, and the firmware boots
 it. That works, and milestone 36 made the stick teach the operator
-what it found. But the carry does not scale past a handful of
+what it found. But carrying media does not scale past a handful of
 machines, and a machine in a rack far from the drawer waits on a
-person with media. The cluster already holds everything the stick
-carries: the artifacts are on every boot slot, and the declarations
+person with media. The cluster already holds everything that is on
+the stick: the artifacts are on every boot slot, and the declarations
 are in the API. This milestone serves both from the leaders.
 
-## One Go program, not dnsmasq
+## One Go program
 
 The serve decision needs the cluster. An unknown MAC gets the report
 image, a declared MAC gets the installer, and an installed machine
@@ -51,7 +51,7 @@ does about it.
 ## iPXE
 
 PXE firmware loads files over TFTP, and TFTP moves a large file
-badly. The standard bridge is iPXE: the firmware chainloads a small
+badly. The standard answer is iPXE: the firmware chainloads a small
 iPXE binary over TFTP, and iPXE pulls the kernel and the initrds
 over HTTP. The controller serves `undionly.kpxe` to BIOS firmware
 and `snponly.efi` to UEFI firmware, which covers both boot dialects
@@ -65,8 +65,8 @@ the release mirrors its source.
 The feature pod mounts the leader's boot slot read-only and serves
 the same pieces a stick boot loads: the kernel, the microcode cpio,
 and the whole-OS payload, concatenated as initrds the way the
-stick's boot entries load them. The command line carries
-`rootfstype=ramfs`, because this is a boot whose initrd carries the
+stick's boot entries load them. The command line includes
+`rootfstype=ramfs`, because this is a boot whose initrd holds the
 OS. Serving from the slot gives two properties without further
 machinery. The version a machine joins on is exactly the version the
 leader runs, so a join can never pull a version the cluster is not
@@ -81,7 +81,7 @@ comes from instead.
 
 ## The three serve states
 
-The rule that decides what a MAC boots has three states, and the
+The rule that selects what a MAC boots has three states, and the
 controller resolves them from the Machine list alone.
 
 * **Unknown.** No Machine names this MAC. The controller serves the
@@ -118,18 +118,18 @@ for every megabyte.
 
 ## Trust
 
-The installer payload carries the material a machine needs to join,
-so netboot trusts the layer-2 segment the way the operator trusts
-the drawer that holds the sticks. Anyone who can plug into the
+The installer payload holds the material a machine needs to join,
+so netboot depends on the layer-2 segment the way the operator depends
+on the drawer that holds the sticks. Anyone who can plug into the
 segment and present a declared MAC can receive what that machine
-would receive. The report image carries no secret; it is the same
+would receive. The report image holds no secret; it is the same
 public bytes the release channel serves. The manual states this
-plainly, so an operator can decide whether a segment deserves the
-feature.
+plainly, so an operator can decide whether to turn the feature on for
+a segment.
 
 ## The netboot-cluster
 
-The drill lives in a new `netboot-cluster` domain beside
+The drill runs in a new `netboot-cluster` domain beside
 `dev-cluster` and `gitops-cluster`, which already set the precedent
 for a lab cluster built around one behavior. It uses its own
 multicast group, so the two labs never share a segment. The topology is
@@ -176,7 +176,7 @@ consider, with leader election as its cost.
 
 **The first machine.** Netboot here requires a leader that already
 runs. Booting the first machine of a new cluster from the release
-channel, iPXE against the internet, is a different trust story and
+channel, iPXE against the internet, is a different trust question and
 its own milestone.
 
 **Cloud images.** A VPS that cannot PXE from a liken leader needs a

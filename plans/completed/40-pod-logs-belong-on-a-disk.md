@@ -1,6 +1,6 @@
 # Pod logs belong on a disk
 
-Milestone 40 — Completed. A bind mount puts the pod log directory on
+Milestone 40. Completed. A bind mount puts the pod log directory on
 the podEphemeral storage role and keeps it visible at `/var/log/pods`.
 
 liken's root is a read-only squashfs with a 128 MiB tmpfs upper layer.
@@ -84,7 +84,7 @@ The readers that depend on the path all still work. `kubectl logs`
 read a pod's output through the canonical path, which is the most
 important check, because every other reader uses that path. Every
 symlink in `/var/log/containers` resolved into the disk, and none
-dangled on any node. A pod with a hostPath mount of `/var/log` saw the
+dangled on any node. A pod with a hostPath mount of `/var/log` had the
 same disk under `pods/`, which is the shape a log collector uses, so
 the bind propagates into a container that asks for it.
 

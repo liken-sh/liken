@@ -1,6 +1,6 @@
 # Node taints on the Machine
 
-Milestone 52 — Completed. A Machine declares its node taints beside its
+Milestone 52. Completed. A Machine declares its node taints beside its
 node labels, init applies them when the node first registers, and the
 operator reconciles them live.
 
@@ -20,7 +20,7 @@ of that identity.
 The declaration is spec.nodeTaints, a list of key, value, and effect,
 in the same shape as the Node's own spec.taints. A map from key to
 value, the shape nodeLabels uses, cannot hold a taint, because a
-taint's identity is its key plus its effect, and one key may carry two
+taint's identity is its key plus its effect, and one key may have two
 effects at once. The list is a map-typed list on key and effect, so
 the API server refuses a duplicate instead of trusting the caller, and
 a merge on the pair behaves like the map that labels have.
@@ -35,7 +35,7 @@ because a taint often needs no value: the key and effect alone say
 A taint reaches the Node the same two ways a label does. Init renders
 the list into the k3s boot drop-in as node-taint entries, which k3s
 writes into the registerWithTaints field of the kubelet configuration
-it generates. Labels ride the kubelet's command line; taints do not.
+it generates. Labels reach the kubelet on its command line; taints do not.
 The operator then reconciles the list live, in the same pass that
 reconciles labels.
 
@@ -43,14 +43,13 @@ Registration matters more for a taint than for a label. A blank node
 attracts by accident; an untainted node accepts by accident, and the
 pods it accepts in its first minutes are running workloads that a
 later taint would have to evict. Registration taints close that
-window: the node is born repelling.
+window: the node registers already repelling.
 
 One asymmetry with labels: the kubelet applies registration taints
 only when it creates the Node object, on a first boot or after a
 reinstall. On every later boot the Node already exists and the
 setting does nothing. So the drop-in covers exactly the fresh-node
-window,
-and the operator covers everything after. The drop-in uses the
+window, and the operator covers everything after. The drop-in uses the
 node-taint+ append form, like node-label+, so it can never claim the
 whole list away from a static file. Each entry renders as
 key=value:Effect, or key:Effect when the value is empty, which is the
@@ -64,7 +63,7 @@ liken.sh/node-taints, naming the key:Effect pairs the operator
 manages. A pair in the annotation but no longer in the spec gives the
 operator permission to remove that taint. A taint applied by hand or
 by another controller is in neither the spec nor the annotation, and
-the operator never touches it.
+the operator never changes it.
 
 The write differs from the labels write in one mechanical way. Labels
 are a map, and a JSON merge patch on a map touches only the keys it
@@ -73,7 +72,7 @@ whole. So the operator writes the full merged list: the spec's taints
 upserted, the retracted owned pairs dropped, and every foreign taint
 kept. A full-list write can race the node lifecycle controller, which
 writes the same array when a node goes unready. The patch therefore
-carries the resourceVersion the operator read, so a concurrent write
+includes the resourceVersion the operator read, so a concurrent write
 fails with a conflict instead of erasing the controller's taint. The
 failed pass reports ApplyFailed, and the next pass reads the Node
 again and patches again.
@@ -88,7 +87,7 @@ The label rules protect the boot: under NodeRestriction, a kubelet
 given a forbidden label refuses to start, so the schema refuses what
 the kubelet would refuse. Registration taints have no such gate, so a
 mistyped taint cannot stop a boot. The taint rules protect against a
-different fight: a controller that manages the same key live.
+different conflict: a controller that manages the same key live.
 
 The node lifecycle controller owns the node.kubernetes.io taint keys.
 It adds not-ready and unreachable when a node fails and removes them
@@ -114,7 +113,7 @@ NoExecute stays permitted, with its consequence stated in the schema
 description: it evicts running pods the moment it lands, and a
 DaemonSet pod is evicted with the rest unless it tolerates the taint,
 because the DaemonSet controller adds tolerations only for the
-lifecycle keys. The machine operator is such a DaemonSet, but its pod
+lifecycle keys. The machine operator is such a DaemonSet. Its pod
 tolerates every taint (operator: Exists in its manifest, which its
 job as the machine's manager already requires), so it schedules onto
 a tainted fresh node and NoExecute never evicts it. A retraction
@@ -130,10 +129,10 @@ biases the scheduler without ever blocking a drill pod.
 The lab proved every path on a two-node fleet reinstalled from
 working-tree media. The admission drills all refused with messages
 that name the fix: node.kubernetes.io/unreachable, a liken.sh key, a
-malformed key, and an effect outside the enum each bounced at the API
-server, node-role.kubernetes.io/database with NoSchedule passed, and
+malformed key, and an effect outside the enum were each refused at the
+API server, node-role.kubernetes.io/database with NoSchedule passed, and
 a duplicate key-and-effect pair was refused by the map-typed list
-itself. One wrinkle: an effect outside the enum is a structural
+itself. One detail: an effect outside the enum is a structural
 error, and the API server skips the CEL rules once a structural error
 exists, so that request reports the enum failure plus a note that the
 other rules were not checked.
@@ -163,9 +162,9 @@ retraction let the evicted workloads back onto the node in under a
 second.
 
 The registration drill deleted the Node object and rebooted the
-guest. The fresh Node was born carrying the drill taint beside the
+guest. The fresh Node registered with the drill taint beside the
 lifecycle controller's own not-ready taint, before the operator's
 first pass and with no ownership annotation yet. The serial console
 showed init render the node-taint+ block at 1.6 seconds, and the
-generated kubelet configuration carried the registerWithTaints field,
-while the kubelet's command line carried only the labels.
+generated kubelet configuration included the registerWithTaints field,
+while the kubelet's command line included only the labels.

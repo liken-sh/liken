@@ -1,9 +1,9 @@
 # Documentation on the website
 
-Milestone 27 — Completed. The website serves a user manual at
+Milestone 27. Completed. The website serves a user manual at
 liken.sh/docs/, built by Hugo and shipped as an nginx image.
 
-The website meets people who do not yet read the repository. This
+The website is for people who do not yet read the repository. This
 milestone gives them a user manual at liken.sh/docs/. The manual has
 five guides (install, adopt an existing k3s cluster, add machines,
 upgrade, and roll back) and a reference (the two CRDs, the release
@@ -46,5 +46,5 @@ Deployment's image and watch the rollout, and nothing else.
 Versioned documentation is deferred, on purpose. The manual documents
 the latest release, which is also the only release that the project
 supports, because every release takes over from the release before it.
-If versioned docs become necessary, `release.txt` and the Markdown twins
-are the hooks that a scheme can build on.
+If versioned docs become necessary, `release.txt` and the Markdown
+copies are the hooks that a scheme can build on.

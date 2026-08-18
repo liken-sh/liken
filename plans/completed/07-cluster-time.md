@@ -1,6 +1,6 @@
 # Cluster time
 
-Milestone 07 — Completed. The leaders sync from NTP upstreams declared
+Milestone 07. Completed. The leaders sync from NTP upstreams declared
 on the Cluster, and they serve time to the rest of the fleet.
 
 Because the leaders serve time, followers need no internet access. The
@@ -9,7 +9,7 @@ pool.ntp.org as a default enrolls every deployment's machines in a
 volunteer service without permission.
 
 Followers query every leader directly. Init resolves leader addresses
-from the Machine manifests that the image already carries. For a leader
+from the Machine manifests that the image already holds. For a leader
 that declares no address, init uses the endpoint's host. There is no
 discovery mechanism: every step in the hierarchy comes from an explicit
 input.
@@ -66,13 +66,13 @@ first component in the stack that depends on clock behavior.
    four-timestamp exchange and why symmetric delay cancels out. It
    steps the clock once at boot, before k3s starts. After that it only
    slews the clock (adjtimex) for the life of the machine. A step on a
-   running node pulls time out from under lease renewals and etcd
+   running node changes time under lease renewals and etcd
    heartbeats, so the one step must happen before anything depends on
    the clock. Sources differ by role. Leaders ask the declared
    upstreams. Followers ask every leader, resolved from the image's
    Machine manifests, with the endpoint's host as the fallback. Failure
    handling is conservative: init makes a bounded number of attempts at
-   boot, then continues to try forever. It never touches the clock on
+   boot, then continues to try forever. It never sets the clock on
    bad data, and it never blocks the boot.
 4. [x] The responder is a second goroutine, and it runs on leaders
    only. It holds UDP port 123 and answers each 48-byte query with the

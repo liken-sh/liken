@@ -1,6 +1,6 @@
 # The timezone database
 
-Milestone 47 — Built. The image carries the IANA timezone database, so
+Milestone 47. Built. The image holds the IANA timezone database, so
 a CronJob can name the zone its schedule means. A weekly job in CI
 opens the pull request that moves the pin.
 
@@ -18,7 +18,7 @@ That message comes from admission, so the object never reached etcd
 and Flux could not apply one at all.
 
 A CronJob written before the zone field existed failed differently.
-The apiserver had already accepted it, so it sat in etcd and never
+The apiserver had already accepted it, so it stayed in etcd and never
 fired. The controller logged one event for the failure, and that event
 aged out within the hour.
 
@@ -34,7 +34,7 @@ k3s does not import it, and liken staged no zoneinfo, so every lookup
 came up empty.
 
 No container needs the database. A CronJob's zone is resolved entirely
-in the control plane, and a workload that uses a zone carries its own
+in the control plane, and a workload that uses a zone holds its own
 copy in its image. So the fix is one directory in the system image,
 and no environment variable, because the default search path already
 names it.
@@ -51,10 +51,10 @@ A distribution package would name the same data
 `2026c-0ubuntu0.24.04`, and a language ecosystem's package would name
 it `2026.3`.
 
-The archive does not rot. `data.iana.org/time-zones/releases/` keeps
+The archive stays available. `data.iana.org/time-zones/releases/` keeps
 every release back to 1993. The Ubuntu pool returns a 404 error the
 day a newer version replaces the pinned one. `grub/fetch.sh` and
-`systemd-boot/fetch.sh` both carry that warning, and tzdata is
+`systemd-boot/fetch.sh` both state that warning, and tzdata is
 superseded four to six times a year, far more often than either of
 those.
 
@@ -120,7 +120,7 @@ setting with no reader.
 
 `image/build.sh` writes `/usr/share/liken/components.yaml` from each
 domain's `VERSION` file, and `tzdata` joins that list.
-`init/versions.go` carries it into `status.version.tzdata` on the
+`init/versions.go` copies it into `status.version.tzdata` on the
 Machine, beside the kernel, k3s, and the rest. `releases/Makefile`
 publishes the same pin in the release document.
 
@@ -146,7 +146,7 @@ into `backward` as a link. A person should see that.
 
 GitHub starts no workflow for a pull request that `GITHUB_TOKEN`
 opened, so `checks.yaml` and `build.yaml` stay quiet on that pull
-request until somebody pushes to the branch. The bump job carries the
+request until somebody pushes to the branch. The bump job supplies the
 evidence instead: it runs `tzdata/fetch.sh` on the runner, so the pull
 request arrives only after both signatures verified and `zic` compiled
 the new data. Merging to main runs the full build, which is liken's
@@ -180,7 +180,7 @@ $ kubectl get machine node-1 -o jsonpath='{.status.version.tzdata}'
 ```
 
 The apiserver admits a real zone and still rejects a name that no
-zone file carries:
+zone file matches:
 
 ```
 $ kubectl apply -f cronjob-america-new-york.yaml
@@ -213,11 +213,11 @@ ny-fires-29753934   Complete   1/1           5s         25s
 ## What the drill caught
 
 The first boot of the drill reported no `tzdata` at all, with a live
-CRD that carried the property and an image whose components record
+CRD that had the property and an image whose components record
 named the pin. The version reaches the Machine through the facts
 tree, and `WriteVersion` and `readVersion` each name their fields by
 hand. Both lists had to grow, and the first attempt grew neither. A
-field that one list forgets fails quietly: no error is raised
+field that one list omits fails quietly: no error is raised
 anywhere, and the operator publishes a status that is missing a
 component.
 
@@ -235,7 +235,7 @@ liken: switch_root: mounting /liken.sqfs at /liken-boot/system:
 invalid argument (continuing on rootfs)
 ```
 
-The rootfs carries no k3s, so that boot printed "boot complete,
+The rootfs holds no k3s, so that boot printed "boot complete,
 powering off" and stopped. It happened on the boot that followed a
 hard kill of the previous guest's QEMU process.
 
@@ -246,7 +246,7 @@ throughout, and `unsquashfs -s` read a valid superblock from the same
 file on the build host.
 
 So this milestone changes no memory pin. The lab's `MEM_kernel` of
-4 GB carries the current image, and the smoke drill's install phase
-carries the larger `install.cpio` at that same size. What caused the
+4 GB fits the current image, and the smoke drill's install phase
+fits the larger `install.cpio` at that same size. What caused the
 one failure is unknown, and it is written down here because a second
 occurrence should be read against this one rather than met fresh.

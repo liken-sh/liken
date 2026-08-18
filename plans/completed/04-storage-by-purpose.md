@@ -1,6 +1,6 @@
 # Storage, declared by purpose
 
-Milestone 04 — Completed. A machine declares storage by role, then
+Milestone 04. Completed. A machine declares storage by role, then
 claims and formats blank disks itself.
 
 Before this milestone the whole machine runs in RAM. The goal is to put
@@ -22,7 +22,7 @@ mounts its own partitions, and refuses a disk that is foreign or
 ambiguous. If the system cannot reconcile a declared role, the boot
 stops: init prints the full explanation to the console and powers the
 machine off, and k3s does not start. The reason is this. A machine that
-promises persistent cluster state, but boots with ephemeral storage,
+declares persistent cluster state, but boots with ephemeral storage,
 loses data with no warning. A person can recover a machine that is down,
 but nobody can recover data written to the wrong place. Undeclared roles
 go where everything goes today: the root tmpfs. `status.storage` lists

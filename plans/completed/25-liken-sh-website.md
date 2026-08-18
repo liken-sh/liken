@@ -1,9 +1,9 @@
 # The liken.sh website
 
-Milestone 25 — Completed. The liken.sh domain serves one static web page
+Milestone 25. Completed. The liken.sh domain serves one static web page
 from the project's own cluster.
 
-The domain already serves code, because every CRD lives under
+The domain already serves code, because every CRD is under
 liken.sh/v1alpha1, and it already serves machines, because
 releases.liken.sh feeds the fleet. This milestone makes it serve people.
 The page says what liken is and where to start reading. The project's
@@ -43,7 +43,7 @@ to the image's seeds on every boot, so a file put there needs an image
 rebuild to survive. That is the coupling this milestone removes.
 
 Terraform stops at Linode's edge, at the DNS records and the firewall,
-and never speaks to Kubernetes. Terraform's kubernetes provider fetches
+and never calls Kubernetes. Terraform's kubernetes provider fetches
 the API server's full OpenAPI document on every plan, and milestone 31
 measured that as memory pressure on the 1 GB node. kubectl applies the
 same resources without that cost.

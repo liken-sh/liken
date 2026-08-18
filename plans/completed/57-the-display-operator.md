@@ -1,6 +1,6 @@
 # The display operator
 
-Milestone 57 — Completed. Each monitor output publishes as its own DRA
+Milestone 57. Completed. Each monitor output publishes as its own DRA
 device, so a pod claims one screen by its connector name or by what
 the monitor is, and receives the Wayland socket and the app-id that
 put its window on that screen. It is the first instance of
@@ -18,13 +18,13 @@ hardware, it does through one DRA claim.
 * The pod claims the graphics device's display companion, the
   `-display` device that milestone 49 publishes for a GPU's card node.
   The claim is exclusive, which is what milestone 49 decided for it: a
-  card node carries display authority, and two display programs on one
+  card node holds display authority, and two display programs on one
   card have no arbitration contract.
 * It runs Weston 14 with the kiosk shell. The shell makes every client
   fullscreen on one output, which is what a screen in a house is for:
   one program, no decorations, no desktop.
 * Clients are separate pods. They reach the compositor over a Wayland
-  socket on a shared PVC, and they carry no device claim of their own.
+  socket on a shared PVC, and they hold no device claim of their own.
 * A client lands on an output by its app-id. `weston.ini` names the
   app-ids for each output with an `app-ids=` line. A client sets its
   own: chromium takes `--class`, and mpv takes `--wayland-app-id`.
@@ -55,10 +55,10 @@ person who wants a second screen also has to edit `weston.ini`,
 restart the compositor, and remember which string went where, and none
 of that is in the cluster.
 
-One more gap sits beside them. A client pod needs the machine that has
+One more gap remains. A client pod needs the machine that has
 the monitors, and today nothing states that. The lab's clients land on
-the right machine only because the socket PVC's volume affinity drags
-them to the node where the volume happened to provision. The pod's own
+the right machine only because the socket PVC's volume affinity places
+them on the node where the volume happened to provision. The pod's own
 spec says nothing about a screen, so the placement is an accident of
 storage, and it holds only while the socket stays on that one kind of
 volume.
@@ -113,7 +113,7 @@ receives no device node at all. What it needs is two other things: the
 compositor's socket, and the app-id that the compositor routes to the
 claimed output.
 
-CDI carries both. A CDI device may inject environment variables and
+CDI delivers both. A CDI device may inject environment variables and
 mounts as well as device nodes, and the operator's CDI spec uses them:
 
 * `WAYLAND_DISPLAY`, and the mount of the socket directory the
@@ -131,7 +131,7 @@ this is the instance where the answer is not a node.
 One consequence is worth stating plainly. A client still has to pass
 the app-id to its own toolkit, because no Wayland client reads an
 environment variable that chromium and mpv do not define. The pod spec
-carries the flag, and the variable is what the flag reads from:
+has the flag, and the variable is what the flag reads from:
 `--class=$(DISPLAY_APP_ID)`. The operator's job ends at making the
 value correct and unique.
 
@@ -148,8 +148,8 @@ The kernel's own hotplug is what the operator listens to. A connector
 change is a drm uevent, so the operator re-reads the connector's
 sysfs state on the event rather than on a timer, and it settles a
 burst before it writes a slice, for the reason milestone 56 gives.
-Weston's view is not consulted, because sysfs carries the same fact
-without coupling the inventory to the compositor's IPC.
+The operator does not consult Weston, because sysfs reports the same
+fact without coupling the inventory to the compositor's IPC.
 
 The compositor's routing is narrower than the inventory. The operator
 writes `weston.ini` once, at its own start, so a connector that was
@@ -171,7 +171,7 @@ The drill runs on `liken-1` with both monitors connected.
   node selector written by hand. Delete it, and the published devices
   return to what they were.
 * **Each output publishes once.** Two devices appear, named for the two
-  connectors, each carrying its own monitor's model, serial, mode, and
+  connectors, each with its own monitor's model, serial, mode, and
   physical size.
 * **A claim by name.** A pod that names one connector starts on that
   monitor. A pod that selects on the model of the other monitor starts
@@ -210,7 +210,7 @@ below records what happened to it.
 * **How the compositor gets the mapping.** Still open, and it is the
   same question as the one above, for the reason this milestone gave:
   minting an app-id per allocation changes the routing table while the
-  compositor runs. The one document above carries both halves.
+  compositor runs. The one document above covers both halves.
 * **Where the HDMI audio belongs.** Answered, and drilled. Audio stays
   its own operator. A client gets a screen and that screen's speakers
   from one claim holding a request against each driver, joined by a

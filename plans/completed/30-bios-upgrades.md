@@ -1,6 +1,6 @@
 # Upgrades under BIOS
 
-Milestone 30 — Completed. A machine that boots through BIOS upgrades
+Milestone 30. Completed. A machine that boots through BIOS upgrades
 with the same one-shot trial and fallback that a UEFI machine uses.
 
 liken's declarative upgrades (milestone 12) act through UEFI firmware.
@@ -8,7 +8,7 @@ The operator writes the new release into the inactive slot. The
 firmware sets BootNext to try the new slot one time. The new slot
 moves into BootOrder only after the new boot proves itself. This
 design uses the firmware for two properties, the one-shot trial and
-the automatic fallback, and it assumes that the firmware exists.
+the automatic fallback, and it requires the firmware to exist.
 
 The liken.sh deployment has no UEFI firmware. Linode boots guests in
 BIOS style only, and no Linode option gives a guest UEFI. The project
@@ -37,7 +37,7 @@ The plan's open questions have these answers. The regime test looks
 for /sys/firmware/efi, the same test that the installer and the facts
 report use. GRUB's configuration and environment block are on their
 own small filesystem: the `bootHome` storage role, FAT32, with the
-label LIKEN-BOOT. It sits beside `biosBoot`, the raw partition that
+label LIKEN-BOOT. It is beside `biosBoot`, the raw partition that
 holds GRUB's core image. A Machine spec that declares these two roles
 declares that the machine boots through GRUB, so there is no separate
 firmware field.
@@ -45,7 +45,7 @@ firmware field.
 The installer writes the whole chain, and the liken.sh Makefile no
 longer plants GRUB by hand. The chain starts from `grub-boot.img` and
 `grub-core.img`. The grub/ domain vendors these two files from
-Ubuntu's archive, and every release bundle carries them. liken writes
+Ubuntu's archive, and every release bundle holds them. liken writes
 the environment block directly, because the block is 1 KiB with a
 documented format. The tests compare the codec's fixtures with
 grub-editenv's own output.

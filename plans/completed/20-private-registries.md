@@ -1,6 +1,6 @@
 # Private registries and the k3s restart tier
 
-Milestone 20 — Completed. A cluster declares registry mirrors and
+Milestone 20. Completed. A cluster declares registry mirrors and
 credentials, and changes to k3s configuration apply with a process
 restart, not a reboot.
 
@@ -30,7 +30,7 @@ that the fleet offers. Registries are configuration about how every
 image arrives. This is closer to the network plan than to iscsi, and it
 needs a parameterized shape, a map of hosts to endpoint lists. The
 features map has a deliberately closed value schema that refuses such a
-shape. spec.registries lives on the Cluster because the scheduler may
+shape. spec.registries is on the Cluster because the scheduler may
 ask any node to pull any image. It stays in the canonical staged
 document, unlike spec.version and spec.releases, whose actuation is a
 download. An edit therefore changes the document's hash and rolls the
@@ -48,7 +48,7 @@ this problem. The scratch-CRD drill showed the schema refusing to
 install at all. The fix is a dyn() cast in the rule. The parity test in
 machine/registries_test.go pins the pair.
 
-## Credentials: a Secret, not the image
+## Credentials arrive in a Secret
 
 Credentials do not travel inside the image, although the first sketch
 of this plan put them there beside the join token, on the argument that
@@ -112,10 +112,10 @@ liken sorts a change by where its configuration is read. Some facts
 reconcile live: sysctls and node labels are read continuously and the
 operator reasserts them. Some are read early in a boot and nowhere
 else: the address plan, storage claiming, and the time hierarchy need
-the whole boot. Between them sits everything that k3s reads only at
+the whole boot. Between them is everything that k3s reads only at
 process start, the boot drop-in and registries.yaml. The disruption for
-those is a restart of one process. A k3s restart does not touch running
-containers, because the containerd shims hold them. Only the control
+those is a restart of one process. A k3s restart leaves running
+containers alone, because the containerd shims hold them. Only the control
 plane and the kubelet stop briefly. Since milestone 17, liken used a
 full reboot for this middle tier, at unnecessary cost: a traefik toggle
 rolled the fleet through full reboots to change one line of a
@@ -134,7 +134,7 @@ too:
   works. Machine-document changes (storage, modules) and system
   releases require a reboot in every case.
 
-- **The intent is a sibling file.** A restart intent lives beside the
+- **The intent is a sibling file.** A restart intent is beside the
   reboot intent in /run/liken/operator, deliberately not a field on it.
   init honors an unreadable reboot intent by rebooting anyway, so a new
   field there would cause a surprise reboot on any init that predates
@@ -178,7 +178,7 @@ too:
   covers both tiers.
 
 - **The observable is status.boot.restarts.** It counts the in-place
-  restarts of this boot, and it lives in the boot record because it
+  restarts of this boot, and it is in the boot record because it
   shares the boot's lifetime. A change that arrives by restart
   increases this count and does not move bootedAt. A change that
   arrives by reboot moves bootedAt and returns the count to zero. The
@@ -262,7 +262,7 @@ is the inverse of the restart signature.
 
 - TLS to a private registry with a private CA (registries.yaml's tls
   block: ca_file, insecure_skip_verify) is deliberately out of scope.
-  The credential Secret's dockerconfigjson shape has nowhere to carry a
+  The credential Secret's dockerconfigjson shape has nowhere to hold a
   CA, and the correct way to deliver that material is a question for
   the deployment that first needs it.
 - The restart tier stops at k3s's own configuration. The auto-deploy

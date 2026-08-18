@@ -1,6 +1,6 @@
 # Optional features: network storage clients and bundled components
 
-Milestone 17 — Completed. A Cluster declares optional features, and
+Milestone 17. Completed. A Cluster declares optional features, and
 liken ships the binaries, kernel modules, and k3s configuration that
 each feature needs.
 
@@ -18,7 +18,7 @@ milestone 19. The mechanism is a single vocabulary of optional features
 that a cluster can opt into. The mechanism behind each feature is
 liken's concern, not the user's.
 
-The declaration lives at spec.features on the Cluster. A feature is a
+The declaration is at spec.features on the Cluster. A feature is a
 fact that every node must agree on. A PersistentVolume can attach to
 any node that the scheduler picks. Milestone 16 showed that even the
 k3s disable list has an effect across the whole cluster: one joining
@@ -44,7 +44,7 @@ hand-written YAML meant enabled would work against every tool in the
 Kubernetes ecosystem. A vocabulary where it meant disabled would hide
 the misspelled-manifest error that the strict parser exists to catch.
 
-Both entry points refuse a null feature. The CRD carries a validation
+Both entry points refuse a null feature. The CRD has a validation
 rule that refuses a null feature and tells the user to write {}
 instead. The file parser refuses it the same way.
 
@@ -130,7 +130,7 @@ that milestone 18 built. init loads those modules only when the cluster
 document declares the feature.
 
 The presence of that file also tells init whether the booted image
-carries the payload at all. No feature-to-modules mapping is hardcoded
+holds the payload at all. No feature-to-modules mapping is hardcoded
 anywhere. A missing file means the image predates the feature. This
 happens when a cluster document declares a feature newer than the
 release that a machine runs. The machine then reports the gap, and does
@@ -140,7 +140,7 @@ A feature too large to ship in every image, a GPU toolkit for example,
 is the point to introduce build-time conditioning. Until then, the
 design does not need it.
 
-On the liken side, the vocabulary lives in one table, in the cluster
+On the liken side, the vocabulary is in one table, in the cluster
 package at cluster/features.go. The table lists a slug and a kind for
 each feature. Everything that must agree on the vocabulary reads this
 table. init validates the cluster document against the table and
@@ -151,7 +151,7 @@ The CRD stays hand-written, so a reader can learn the API from its
 schema. A parity test checks that the CRD's feature properties match
 the table's slugs exactly, in both directions.
 
-The table deliberately carries nothing else. Module lists live in the
+The table deliberately holds nothing else. Module lists are in the
 feature files described above. Each domain's shipping steps are in
 image/build.sh, because the build recipes differ from feature to
 feature, and they read best in the open, not behind a table.
@@ -175,7 +175,7 @@ changes and conductor-granted reboots.
 
 The whole-document hash proves that a boot ran the document. It does
 not prove that the image could honor every part of the document. A
-per-machine FeaturesReady condition carries this second claim, with the
+per-machine FeaturesReady condition makes this second claim, with the
 same message discipline as ModulesLoaded: it names the problem and the
 fix.
 
@@ -192,7 +192,7 @@ certainly as a privileged hostNetwork DaemonSet.
 
 hostNetwork is a requirement here, not a preference. With the in-kernel
 initiator, iscsid opens the TCP connection to the target in userspace
-and hands the socket to the kernel. The session then lives in the
+and hands the socket to the kernel. The session then belongs to the
 network namespace that iscsid was in. iscsiadm reaches iscsid over an
 abstract unix socket, which is also namespace-scoped. Sessions
 themselves are kernel state. A restarted iscsid re-adopts its sessions
@@ -226,7 +226,7 @@ mount.nfs (with libtirpc built in) and the nfsv4 kernel module, and no
 daemon at all, because the feature covers NFSv4 only. NFSv3 would need
 rpcbind and rpc.statd on the host, two daemons that k3s does not depend
 on, and the two-planes rule refuses those. NFSv4 needs only one TCP
-connection to port 2049, and the protocol's own leases carry the
+connection to port 2049, and the protocol's own leases handle the
 locking. A deployment with a v3-only filer needs a future feature
 discussion. It is not a silent gap in this design.
 
@@ -238,7 +238,7 @@ iscsid for discovery, login, and logout; raw bytes went to the LUN over
 the wire and came back; and the host's mount.nfs4 mounted the export,
 wrote to it, and survived unmount and remount cycles.
 
-The milestone deliberately stops at that contract. It does not stand up
+The milestone deliberately stops at that contract. It does not deploy
 a CSI driver in the lab, because a driver exercises its own code on top
 of the same calls. The proof against a real filer with synology-csi
 belongs to a deployment that runs one.
@@ -274,25 +274,25 @@ tells mount.nfs that the kernel already keeps the mount table.
 The drills exposed one gap that needed its own fix. k3s deletes an
 auto-deploy addon's resources when its manifest file is removed while
 k3s is running. But a retraction removes the file at boot, before k3s
-starts, so k3s never sees the deletion. Without a fix, the retracted
+starts, so the deletion never reaches k3s. Without a fix, the retracted
 feature's workload object would survive, with its pods in failure.
 
 The retraction still disarms the feature, because init stops writing
 its boot files, so the workload cannot function. But the clean removal
 of the workload object belongs to the cluster operator's feature
 janitor (cluster-operator/janitor.go). Each feature-seeded manifest
-carries a liken.sh/feature annotation that names its owning feature.
+has a liken.sh/feature annotation that names its owning feature.
 Every sweep deletes any liken-system workload whose annotation names a
 feature that the document no longer declares. The janitor tests only
 one condition: whether the document still declares the feature. So it
 acts as soon as the document is edited, and does not wait for the fleet
-to roll. This is the timing that k3s itself would show, if k3s saw the
-file removed.
+to roll. This is the timing that k3s itself would show, if the file removal
+reached k3s.
 
 Running the milestone settled three questions that the design had left
 open.
 
-The static build recipe lives in open-iscsi/fetch.sh. It pins alpine by
+The static build recipe is in open-iscsi/fetch.sh. It pins alpine by
 digest, pins three sources by sha256 (open-iscsi, plus kmod and
 libeconf, whose static libraries alpine does not package), and applies
 two one-line patches to open-iscsi's build definition, which never

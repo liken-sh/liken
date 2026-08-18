@@ -1,6 +1,6 @@
 # The spec becomes editable
 
-Milestone 05 — Completed. An edit to a Machine in the cluster converges
+Milestone 05. Completed. An edit to a Machine in the cluster converges
 on the machine through a reboot.
 
 The roles are now named for their owners. `machineState` and
@@ -49,7 +49,7 @@ by an ioctl call, with no resize2fs.
    shrink. The only way out was `kubectl replace --force`, which will
    not work when Flux owns the spec. The rules now compare the spec
    against `status.boot.storage`, the sizes that the machine booted
-   with. Thus an edit can always bring a failed aspiration back to
+   with. Thus an edit can always bring a failed spec back to
    reality, and the rules refuse only a real on-disk shrink. When the
    spec returns to what the machine runs, the operator also withdraws a
    manifest that is still staged, because the next boot would apply it,

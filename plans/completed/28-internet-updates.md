@@ -1,6 +1,6 @@
 # Internet updates
 
-Milestone 28 — Completed. After a machine boots from install media,
+Milestone 28. Completed. After a machine boots from install media,
 every update comes from liken's public release channel, with no build
 step for a cluster or a machine.
 
@@ -32,7 +32,7 @@ them at load time:
   (the layer), a deployment.cpio.sha256 sidecar that names the layer's
   digest in `sha256sum -c` form, and the public release.yaml, stored
   byte for byte.
-* **A boot entry carries two initrd= parameters.** The kernel's EFI stub
+* **A boot entry has two initrd= parameters.** The kernel's EFI stub
   loads every initrd= occurrence in order and gives the kernel one
   concatenated image. The composed build used the same mechanism at
   build time, and this design uses it at load time. The layer's entries
@@ -51,8 +51,9 @@ them at load time:
   verifies the active slot's layer against its sidecar and copies both
   to the inactive slot, durably, before the release document lands. A
   slot is bootable, or it has no release.yaml at all.
-* **One channel format.** The release server stands in for the public
-  releases on the liken.sh website, and it serves only public bundles.
+* **One channel format.** The release server takes the place of the
+  public releases on the liken.sh website, and it serves only public
+  bundles.
   Nothing that is specific to a deployment is hosted. A person produces
   install media locally, from a downloaded release plus a deployment
   directory. The deployment's choices stay on each machine, on its slots
@@ -80,7 +81,7 @@ The kernel freed 130,524K of initrd, which is the generic archive alone.
 The machine still reached the Ready state, because the install boot had
 already put the manifests and the identity onto durable state. A settled
 machine needs little from its layer at boot. The layer carries the seeds
-that a first boot needs, plus the declared kernel modules, which live
+that a first boot needs, plus the declared kernel modules, which are
 only in the initramfs. This control run established the size measurement
 for the real test.
 
@@ -165,7 +166,7 @@ machine-lifecycle work for a later milestone.
   directory removes its disks and firmware variables together. The
   project is pre-release, and the composed layout never shipped.
 * **The CLI travels on the slot.** The public document lists it, and "a
-  slot carries exactly what its document lists" is a simpler rule than a
+  slot holds exactly what its document lists" is a simpler rule than a
   machine-side exception. Five megabytes buys recovery tools on every
   disk.
 * **Layer updates over the network are out of scope.** The on-slot layer

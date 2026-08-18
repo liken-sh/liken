@@ -1,6 +1,6 @@
 # Adopting an existing cluster
 
-Milestone 16 — Completed. liken machines join a cluster that liken did
+Milestone 16. Completed. liken machines join a cluster that liken did
 not found, and they replace the cluster's machines one at a time while
 the cluster keeps serving.
 
@@ -12,12 +12,12 @@ exports or restores anything in etcd, such as Secrets, PVs, or
 workloads.
 
 Most of the mechanism follows from the identity design. The image
-already carries the cluster's CAs and join token, so adoption of a
+already holds the cluster's CAs and join token, so adoption of a
 cluster means that liken imports the cluster's identity instead of
 minting a new one. `liken adopt` takes the token and the CA tree
 harvested from any of the existing cluster's servers, and it writes
 them into the same `dist/` layout that minting produces. After that
-step, the build does not care where the identity came from. An image
+step, the build does not depend on where the identity came from. An image
 built this way joins the existing cluster directly. Follower machines
 need no code changes.
 
@@ -78,8 +78,9 @@ runbook.
    a datastore already exists. The CEL rule refused the
    `founded → adopted` edit after the promotion.
 
-   One result is worth remembering: a server's disable list acts on the
-   whole cluster. When the first liken server joined, it submitted the
+   One result matters beyond this drill: a server's disable list acts
+   on the whole cluster. When the first liken server joined, it
+   submitted the
    helm-delete job for the foreign cluster's packaged traefik, and it
    removed traefik cluster-wide. A deployment that relies on the
    bundled components must have replacements running before the first

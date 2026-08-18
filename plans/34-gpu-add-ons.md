@@ -1,23 +1,23 @@
 # GPU add-ons
 
-Milestone 34 — Proposed. It would let one machine carry a GPU compute
+Milestone 34. Proposed. It would let one machine hold a GPU compute
 stack as a second read-only image on its boot slot, declared on the
 Machine.
 
 The stock image ships no GPU compute stack, and this milestone would
-keep it that way. It would give one machine a way to carry a compute
+keep it that way. It would give one machine a way to hold a compute
 stack without a change to every machine: an add-on, a second read-only
 image on the boot slot, declared on the Machine, and mounted over the
 stock root at boot. The first add-on would be NVIDIA compute, because
 CUDA on Kubernetes is the use case that asks for this. The work waits
 for experience with bare metal from milestone 32.
 
-## An add-on, not a flavor
+## An add-on
 
 A flavor would be a second release: the same OS built again with more
 aboard. That shape works against liken's own upgrade model. The
 Cluster moves the whole fleet with one version field, so a flavor
-makes every node carry what one node needs, and mixed fleets are the
+makes every node hold what one node needs, and mixed fleets are the
 normal case. A flavor also doubles the release matrix for each axis it
 adds. An add-on follows the Machine instead, the way `spec.modules`
 already does: one stock release for the fleet, plus a payload for the
@@ -27,15 +27,15 @@ machines that declare it.
 
 An add-on would be a squashfs beside liken.sqfs on the slot. When the
 Machine declares it, boot.cpio would mount it as an overlay under the
-stock root. The artifact would travel the same machinery as everything
+stock root. The artifact would use the same machinery as everything
 else on a slot: digest-pinned in a release document, fetched from the
-channel, staged and proven before a machine trusts it. The enabling
+channel, staged and proven before a machine uses it. The enabling
 pieces already exist. The feature vocabulary (milestone 17) turns the
 stack on, the k3s restart tier (milestone 20) picks up the container
 runtime that k3s detects on its own, and the machine operator's DRA
 driver (milestone 11) publishes the devices.
 
-## What the NVIDIA add-on would carry
+## What the NVIDIA add-on would hold
 
 Four layers:
 
@@ -51,9 +51,9 @@ Four layers:
   itself.
 
 CUDA stays out. A pod brings its own CUDA in its image, and the host
-only needs a driver at least as new as the pod's CUDA asks for.
+only needs a driver at least as new as the pod's CUDA requires.
 
-The difficult part is not the payload. It is the module build: an
+The payload is not the difficult part. The module build is: an
 out-of-tree compile against the kernel pin, in CI, run again in
 lockstep with every kernel bump. This would be liken's first vendored
 domain that builds source instead of one that verifies a download. The
@@ -67,8 +67,8 @@ approximately 380 to 530 MiB compressed: 101 for the GSP firmware, an
 estimated 250 to 350 for the userspace driver, and tens of MiB for the
 modules. A 1Gi slot holds about 520 MiB beyond the stock payload, so
 the add-on fits tightly at best. The likely answer is that a machine
-which declares a GPU add-on claims 2Gi slots, and that the bundle's
-budget guard states which add-ons a slot size holds. Slot sizes are
+which declares a GPU add-on claims 2Gi slots. The bundle's budget
+guard would then state which add-ons a slot size holds. Slot sizes are
 grow-only and set at claim time, so this choice belongs to the
 install, which is where the Machine already declares its storage.
 

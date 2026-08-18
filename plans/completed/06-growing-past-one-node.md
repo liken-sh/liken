@@ -1,6 +1,6 @@
 # Growing the cluster past one node
 
-Milestone 06 — Completed. The cluster runs two machines, one leader and
+Milestone 06. Completed. The cluster runs two machines, one leader and
 one follower, from a `kind: Cluster` resource.
 
 Every part of the topology is explicit. Init does not find roles at
@@ -11,7 +11,7 @@ k3s's secure token format is `K10<CA-hash>::user:pass`. The token
 hashes the server CA that identity/ already mints, so make computes the
 whole token offline and adds it to the identity bundle.
 
-The spec carries the cluster's topology. The identity bundle carries
+The spec holds the cluster's topology. The identity bundle holds
 the secrets. No process extracts a secret from a running machine. A
 machine with no shell has no way to extract a secret.
 
@@ -19,7 +19,7 @@ Machines get static addresses, declared in their manifests. A machine
 finds its own manifest by `liken.machine=<name>` on the kernel command
 line. This is the one input channel that the bootloader controls.
 
-One boot medium carries cluster.yaml and one manifest for each machine
+One boot medium holds cluster.yaml and one manifest for each machine
 (node-1.yaml, node-2.yaml, and more). A single image boots the whole
 fleet this way. The choice of which fleet to boot belongs to the
 deployment, not to the OS. The manifests are an input to the image
@@ -28,8 +28,8 @@ holds those manifests and the QEMU guests that boot them.
 
 1. [x] The Cluster CRD: cluster.yaml comes from a file, like the
    Machine manifest, and the operator seeds it. Every node's operator
-   tries to create cluster.yaml at the same time. Only one operator
-   succeeds. The others receive a 409 response, which they treat as
+   sends the create for cluster.yaml at the same time. Only one
+   operator succeeds. The others receive a 409 response, which they treat as
    success. spec.leaders names the machines that run control planes.
    spec.network holds the facts that k3s requires every node to agree
    on: cluster CIDR, service CIDR, cluster DNS, and cluster domain.
@@ -43,7 +43,7 @@ holds those manifests and the QEMU guests that boot them.
    CA, appends a random secret, and writes the token next to the TLS
    material. This process is idempotent. If you run mint.sh again, it
    fills gaps but never replaces an identity that a machine already
-   carries. The token is at /etc/liken/token, outside k3s's data
+   holds. The token is at /etc/liken/token, outside k3s's data
    directory, because the clusterState filesystem mounts over that
    directory. Init gives k3s only the token's *path* (token-file), so
    the secret never appears in a config file or on a command line.
@@ -59,7 +59,7 @@ holds those manifests and the QEMU guests that boot them.
    selects the interface with the default route. That interface is the
    uplink, which is the wrong choice.
 4. [x] liken.machine=: init reads its own name from the kernel command
-   line and selects its seed from the manifests that the image carries.
+   line and selects its seed from the manifests that the image holds.
    After the first boot, machineState carries the proven manifest
    forward, as before. Selection never guesses. If a name matches no
    manifest, or if many manifests have no matching name, init prints
@@ -67,7 +67,8 @@ holds those manifests and the QEMU guests that boot them.
    under the wrong identity could join the wrong cluster or claim
    another machine's disks. Both results are worse than a failed boot.
    A cluster manifest that does not parse is fatal for the same reason:
-   a machine that cannot tell if it is a leader must not guess, because
+   a machine that cannot determine whether it is a leader must not guess,
+   because
    a wrong guess of "leader" starts a second, conflicting control
    plane.
 5. [x] The lab grows a node dimension: one dist directory, one MAC, and

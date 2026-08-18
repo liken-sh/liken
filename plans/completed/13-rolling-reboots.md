@@ -1,6 +1,6 @@
 # Rolling reboots at the cluster level
 
-Milestone 13 — Completed. The fleet applies staged changes one machine
+Milestone 13. Completed. The fleet applies staged changes one machine
 at a time, with no manual steps.
 
 Rolling reboots work at the cluster level. The milestone was first

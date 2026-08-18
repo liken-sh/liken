@@ -1,6 +1,6 @@
 # Device management
 
-Milestone 11 — Completed. The OS reports hardware that no driver
+Milestone 11. Completed. The OS reports hardware that no driver
 claims, and a DRA driver delivers devices to unprivileged pods.
 
 The milestone has two halves. The OS half covers unclaimed-device
@@ -32,7 +32,7 @@ four are policy:
    holds an address inside nodeCIDR.
 3. **Permissions.** This is desktop and multiuser policy. liken has no
    users. Workloads reach devices through Kubernetes, where the device
-   plugin and the container runtime decide what reaches a pod.
+   plugin and the container runtime control what reaches a pod.
 4. **The event bus** for other software (libudev). liken's only
    possible subscribers read the kernel's netlink socket directly.
 
@@ -42,7 +42,7 @@ The milestone's work is the first job, module loading, plus reporting.
 ## QEMU drills, 2026-07-17
 
 A dev-cluster guest booted with an xhci controller and a QMP socket
-(`QEMU_EXTRA`). A privileged pod observed the guest and carried tools
+(`QEMU_EXTRA`). A privileged pod observed the guest with tools
 that the OS does not include: a netlink listener for uevents, `/sys`
 and `/dev` through a hostPath, and insmod for the phases that needed
 it.
@@ -107,14 +107,14 @@ A driver declaration is only a pure edit if the module is already on
 the machine. Milestone 32 makes that true: the image ships the kernel
 build's full module tree, the firmware blobs those modules can
 request, and CPU microcode, all inert until something asks for them.
-Milestone 32 also carries the slot budget. Milestone 11 takes one
+Milestone 32 also covers the slot budget. Milestone 11 takes one
 piece of that work: the naming data. The image ships the kernel
 build's complete `modules.alias` (1.8 MB), while `modules.dep`
 describes only what the image ships. The report's job is to name
-drivers that the image may not carry, and a pruned table cannot name
+drivers that the image may not ship, and a pruned table cannot name
 the missing module.
 
-The reporting lives in the hardware package and in init's
+The reporting is in the hardware package and in init's
 `hardware.go`. It has two parts:
 
 * A sysfs walk over the pci and usb buses at boot. This is the same
@@ -133,9 +133,9 @@ with no reboot.
 For each device that no driver claims, the status names the candidate
 modules from the full alias table. It names every match, because one
 fingerprint that matches several drivers, such as `uas` and
-`usb_storage` for one stick, is normal. The status also carries a
+`usb_storage` for one stick, is normal. The status also includes a
 message phrased as the fix: "declare usb_storage or uas in
-spec.modules" when the image carries those modules, or "upgrade to a
+spec.modules" when the image ships those modules, or "upgrade to a
 release that does" when it does not. The report excludes two kinds of
 device: a device that only a builtin driver could claim, and a device
 that no loadable module matches at all, such as a host bridge or a
@@ -148,9 +148,10 @@ can read `/sys` from a workload, which is how the drills observed the
 machine.
 
 There is no HardwareClaimed condition. Conditions judge requests: a
-declared module that failed to load is a broken promise. An unclaimed
+declared module that failed to load is a request the machine did not
+satisfy. An unclaimed
 device is hardware that nobody requested, and staying undriven is a
-normal, permanent state. Every QEMU guest carries a VGA adapter, which
+normal, permanent state. Every QEMU guest has a VGA adapter, which
 needs `bochs`, that no server image drives, and a headless machine
 with a GPU also leaves that GPU undriven by design. A condition would
 mark all of those machines Degraded forever. The report follows the
@@ -163,19 +164,19 @@ driver. At that point `status.modules` judges the request.
 The report names hardware the way an operator knows it. The cost
 differs across three kinds of name.
 
-USB devices carry their manufacturer and product strings in the
+USB devices have their manufacturer and product strings in the
 hardware. The kernel reads these strings at enumeration, so the names
 cost nothing. An undriven interface borrows its parent device's
-strings, because leaf drivers bind interfaces and the strings live on
+strings, because leaf drivers bind interfaces and the strings are on
 the device.
 
-PCI devices carry only numeric IDs. The names that lspci prints come
+PCI devices have only numeric IDs. The names that lspci prints come
 from the pci.ids database. liken vendors this database as a pinned
 flat file in the hwdata domain, the same way it ships the full
 `modules.alias`. This small image cost lets the status say "Red Hat,
 Inc. Virtio 1.0 GPU" instead of "1af4:1050".
 
-PCI class codes are a small, spec-defined enum. They live in a Go
+PCI class codes are a small, spec-defined enum. They are in a Go
 table and need no database.
 
 The pci.ids dependency is soft. The reporter falls back to numeric IDs
@@ -225,13 +226,13 @@ otherwise build:
   class, decorated with hwdata's names. This is where bulk hardware
   belongs. ResourceSlice is built for churn, and Kubernetes
   garbage-collects it with the node, which is why `Machine.status`
-  never carries a full census. Slices carry what works, and
-  `status.unclaimed` carries what does not work and what would fix it.
+  never holds a full census. Slices list what works, and
+  `status.unclaimed` lists what does not work and what would fix it.
   A device whose driver is not loaded never reaches a slice, because
   `spec.modules` stays the gate.
 * **DeviceClass is the purpose vocabulary.** It is a cluster-scoped
   name (`zigbee`, `ups`, `transcode`) with CEL selectors over device
-  attributes. The hex vendor IDs live in exactly one object, owned by
+  attributes. The hex vendor IDs are in exactly one object, owned by
   the deployment, and every workload manifest refers only to the name.
   To pin one physical unit, use a serial-number selector. For a
   capability class, such as "any VAAPI-capable render node", use an
@@ -268,12 +269,12 @@ become DeviceClass selectors, because upstream built the rule engine.
 SYMLINK's stable name becomes the class name, resolved to a node path
 at injection time. OWNER, GROUP, and MODE become which pod holds the
 claim. The event bus becomes the uevent listener. The OS runs no
-host-policy daemon. The API carries the vocabulary, and a reconciler
+host-policy daemon. The API holds the vocabulary, and a reconciler
 closes the loop.
 
 Three hosting questions are settled:
 
-* The driver lives inside the machine operator, as one more goroutine
+* The driver runs inside the machine operator, as one more goroutine
   in a process that already runs on every node with API access. The
   memory envelope has no room for a second daemon.
 * The driver is standing equipment, not a feature slug. Slugs keep
@@ -297,7 +298,7 @@ style as every other API type. Importing `k8s.io/api` for the slice
 structs was measured and declined, because that import links 11 MB of
 apimachinery for what sixty lines of code write directly.
 
-Each device carries string attributes under the driver's own domain:
+Each device has string attributes under the driver's own domain:
 bus, driver, class, name, modalias, vendor, product, and serial number
 when the hardware has one. Each device is named by its bus-prefixed
 sysfs address. That address names the slot, not the physical unit, so
@@ -328,7 +329,7 @@ because the scheduler can only allocate what a slice lists.
 The publish rule applies three tests:
 
 1. The device must be driven and must not be bus plumbing.
-2. The device must be deliverable. Its sysfs subtree must carry `/dev`
+2. The device must be deliverable. Its sysfs subtree must hold `/dev`
    nodes, pruned at nested bus devices so that a controller does not
    inherit its peripherals' nodes.
 3. The device must not belong to the platform. Nothing in its subtree
@@ -413,7 +414,7 @@ Re-plug semantics define what a standing allocation means when its
 device disappears. Upstream is answering this. DRA's device-health and
 device-taints features, alpha and maturing in the Kubernetes version
 liken runs, let a driver report a published device as unhealthy and
-taint it. This steers new claims away and surfaces the failure in the
+taint it. This steers new claims away and reports the failure in the
 claiming pod's own status.
 
 The device lifecycle then has three stages, each reported by the right
@@ -422,12 +423,12 @@ API to the right audience:
 * A device is unclaimed in Machine status when the kernel cannot drive
   it and an operator can fix it.
 * A device is published in a ResourceSlice when it is claimable.
-* A device is tainted when it was claimable but is now sick, and the
+* A device is tainted when it was claimable but is now faulty, and the
   workload must tolerate it or leave.
 
-The driver's uevent watcher already sees the remove events that this
-needs, so the same listener feeds a third output. The driver interface
-carries health support from day one, enabled as the feature matures.
+The driver's uevent watcher already receives the remove events that
+this needs, so the same listener feeds a third output. The driver interface
+includes health support from day one, enabled as the feature matures.
 Two workloads will prove it: a transcode claim against a render node,
 which the lab can fake today with virtio-gpu, and an identity-pinned
 claim against a real USB device once one is available.
@@ -461,5 +462,5 @@ already-plugged hardware. This is the device-first order that the
 first drills proved.
 
 Also open: real GPU compute stacks, because no emulation can
-substitute for them. Firmware and everything else the image must carry
+substitute for them. Firmware and everything else the image must hold
 belong to milestone 32.

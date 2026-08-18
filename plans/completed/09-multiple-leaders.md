@@ -1,6 +1,6 @@
 # Multiple leaders: quorum
 
-Milestone 09 — Completed. The control plane grows from one leader to
+Milestone 09. Completed. The control plane grows from one leader to
 three, with quorum, through one Cluster edit.
 
 The whole growth path is one Cluster edit that converges. spec.leaders
@@ -27,7 +27,7 @@ leader. More than one leader requires embedded etcd.
    can change. The code comment must state that difference clearly.
 2. [x] The endpoint stays one explicit input. Followers use it for
    first contact only. After a follower joins, its k3s agent maintains
-   a client-side load balancer that learns every leader's address. So a
+   a client-side load balancer that discovers every leader's address. So a
    dead endpoint blocks only new followers from joining. It does not
    affect followers that already joined. Time queries already bypass
    the endpoint and ask each leader by address. A VIP or DNS name is a

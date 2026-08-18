@@ -1,6 +1,6 @@
 # TLS for the website
 
-Milestone 31 — Completed. liken.sh answers over HTTPS with a
+Milestone 31. Completed. liken.sh answers over HTTPS with a
 certificate that Traefik gets from Let's Encrypt.
 
 The milestone landed on 2026-07-12. Before it, liken.sh served its
@@ -76,8 +76,8 @@ server's full OpenAPI document, which terraform's
 During these events, the datastore misses its IO deadlines, apiserver
 handlers time out, and k3s's own embedded controllers lose their
 leader leases and stop the whole process. The lab reproduced this: a
-1GB guest with four vCPUs crash-looped for twenty minutes as it tried
-to converge the traefik feature from an empty state, then converged in
+1GB guest with four vCPUs crash-looped for twenty minutes while
+converging the traefik feature from an empty state, then converged in
 three minutes with 1.5GB. The steady state fits a 1GB node, but
 convergence to that state needs more memory headroom. A node that
 booted recently has that headroom, because its caches are empty and

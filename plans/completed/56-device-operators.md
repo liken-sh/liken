@@ -1,6 +1,6 @@
 # Device operators
 
-Milestone 56 — Completed. It is the pattern that milestones 57, 58,
+Milestone 56. Completed. It is the pattern that milestones 57, 58,
 and 59 build. A device operator claims raw hardware from liken through an
 ordinary `liken.sh` DRA claim, runs the daemon that manages that
 hardware, and publishes what the daemon holds as its own DRA devices,
@@ -15,22 +15,23 @@ drill.
 
 ## The problem the pattern answers
 
-liken publishes the facts about hardware that no other layer can know.
-That is milestone 38's rule, and the pattern keeps it. The rule cuts
-both ways: there are facts about hardware that liken cannot know,
-because a running daemon is what makes them true.
+liken publishes the facts about hardware that no other layer can
+observe. That is milestone 38's rule, and the pattern keeps it. The
+rule applies in both directions: there are facts about hardware that
+liken cannot observe, because a running daemon is what makes them
+true.
 
 liken walks the buses the kernel enumerates and publishes what it
-finds. That walk sees a Bluetooth adapter, and it does not see which
-controllers are paired, because the paired set lives in bluetoothd. It
-sees a graphics device, and it does not see which of the machine's
+finds. That walk finds a Bluetooth adapter, and it does not find which
+controllers are paired, because the paired set is in bluetoothd. It
+finds a graphics device, and it does not find which of the machine's
 monitors is free, because the compositor is what drives them. In both
 cases the useful device is one level up from the hardware liken
 publishes, and reading it means running a daemon.
 
 The layer that publishes those devices must be the layer that runs the
 daemon. liken must not be that layer. The daemon would then ship in the
-read-only root that every machine boots, and every machine would carry
+read-only root that every machine boots, and every machine would hold
 it for the one machine that uses it.
 
 ## The pattern
@@ -56,7 +57,7 @@ repositories are separate ones, which the next section covers.
 
 The operator uses no private interface into liken. Every piece of the
 four steps above is the public contract that any DRA driver on any
-Kubernetes cluster gets, and that is what lets an operator live
+Kubernetes cluster gets, and that is what lets an operator run
 anywhere.
 
 ## Separate repositories
@@ -67,7 +68,7 @@ own repository, apart from liken's.
 
 A repository publishes two artifacts.
 
-* **A container image.** It carries the operator and the daemon it
+* **A container image.** It holds the operator and the daemon it
   runs. The images publish to ghcr.io, which is the working assumption,
   so a cluster pulls one without a private registry.
 * **A Kustomization.** A kustomize base holding the Deployment, the
@@ -78,9 +79,9 @@ A repository publishes two artifacts.
 
 The base system does not grow, and no rule has to hold it there.
 Nothing about an operator is in a liken release, so the read-only root
-that every machine boots carries none of the daemons these operators
+that every machine boots holds none of the daemons these operators
 run, and no edit to an operator can change what the system image
-carries.
+holds.
 
 The release cadences do not couple either. A system image change
 reboots a machine and an operator image change restarts a pod. Neither
@@ -107,14 +108,14 @@ instead.
   graphics device, not one for each cluster. A workload with a
   ResourceClaimTemplate against the raw device's DeviceClass and
   `replicas: N` says that: a Deployment when the operator holds no
-  state, a StatefulSet when each replica carries a volume. All three
+  state, a StatefulSet when each replica has its own volume. All three
   operators ship as Deployments. The Bluetooth operator was the one
   case that looked like it needed a volume, and it did not: an ordinal
   names a replica, a bond belongs to a radio, and the two do not track
-  each other. Its keys live in a Secret named for the adapter, so the
+  each other. Its keys are in a Secret named for the adapter, so the
   state is keyed by the hardware that owns it. The raw devices are
-  exclusive, so each
-  replica's claim allocates a distinct one, and the scheduler spreads
+  exclusive, so each replica's claim allocates a distinct one, and the
+  scheduler spreads
   the replicas to wherever the hardware is. A replica past the number
   of devices parks Pending and costs nothing. Nobody writes down which
   machine has the radio.
@@ -157,7 +158,7 @@ design, and the behavior was verified against the v1.36 sources.
   scheduler requeues the parked pod when the slice changes, within
   informer latency.
 
-## A loss is a taint, not a delete
+## A loss is a taint
 
 One rule governs every disappearance: never delete a published device
 while a claim holds it.
@@ -216,21 +217,21 @@ before it writes. liken's init settles a burst of uevents before it
 re-walks (`init/disklinks.go`), and these daemons do the same for the
 same reason, plus one that is specific to DRA: every ResourceSlice
 write wakes every DRA-pending pod in the cluster, because the
-ResourceSlice scheduler event carries no queueing hint. Hardware that
+ResourceSlice scheduler event has no queueing hint. Hardware that
 flaps in a loop must not turn into a cluster-wide scheduling storm.
 
 ## Two drivers on one machine
 
 Two DRA drivers publishing on one node coexist by construction, and
-liken's code already carries the pieces. The rules do not change
+liken's code already has the pieces. The rules do not change
 because an operator's code ships from liken's own repository.
 
 * A device's identity is the triple `<driver>/<pool>/<device>`, so two
   drivers cannot collide in the API even if they choose the same device
   name.
-* Slice names carry the driver name as a suffix.
+* Slice names include the driver name as a suffix.
   `kubernetes/resourceslices.go` builds the name as
-  `nodeName + "-" + DriverName`, which anticipates a second driver on
+  `nodeName + "-" + DriverName`, which allows a second driver on
   the same node.
 * liken's CDI refresh reads only the spec files whose names start with
   its own prefix. `machine-operator/cdi.go` writes
@@ -251,7 +252,7 @@ an instance document answers each one.
 * **The daemon it runs.** What owns the hardware, what state it holds
   that liken cannot read, and what happens to that state when the pod
   restarts.
-* **The identity its devices carry.** The name a published device
+* **The identity its devices have.** The name a published device
   takes, and the evidence that the name survives a reboot. A name built
   from a number the kernel assigns at boot names different hardware
   after the next one.
@@ -262,7 +263,7 @@ an instance document answers each one.
   kubelet finds the driver, and `/var/run/cdi`, so the prepared claims
   land where the container runtime reads them.
 * **The form its delivery takes.** liken's own driver injects device
-  nodes only. CDI also carries environment variables and mounts, and an
+  nodes only. CDI also delivers environment variables and mounts, and an
   operator stacked on top of liken may use them, so an instance states
   what a consumer's container receives and why that is the whole of it.
 
@@ -273,9 +274,9 @@ an instance document answers each one.
   the `flux` feature seeds a workload from the image at first boot
   (milestone 14). An operator looks like the next entry in that list.
   It is not one. What a liken feature is for draws the line: a feature
-  carries a capability that sits beneath GitOps. flux is seeded by the
+  delivers a capability that is beneath GitOps. flux is seeded by the
   OS because nothing else can bootstrap flux, and a storage client must
-  be on the host before a workload mounts a volume. These operators sit
+  be on the host before a workload mounts a volume. These operators are
   above GitOps. Nothing in a machine's boot path needs a game
   controller or a screen, so the cluster's own workload machinery can
   deliver one, and OS seeding is the wrong mechanism for it. Three
@@ -288,8 +289,7 @@ an instance document answers each one.
   depend on which machine holds the hardware, and a cluster-level
   feature must not require per-machine hardware knowledge. The last two
   are objections to any cluster-level flag, and the claims answer both,
-  which "How a cluster deploys one" states. The first one stands on its
-  own.
+  which "How a cluster deploys one" states. The first one is still valid.
 * **Build the refined shape into liken's machine-operator.** This is
   the shortest path and it fails milestone 38's test. The refined set
   is a fact that another layer holds, and reading it means running that
@@ -299,7 +299,7 @@ an instance document answers each one.
   the kubelet's lease cadence (`machine-operator/main.go`). Hardware
   that returns should not wait ten seconds, and the OS driver should
   not run faster for it.
-* **An exclusion list in liken, so liken stands down for the raw
+* **An exclusion list in liken, so liken does not publish the raw
   device.** A field on the Machine that names hardware liken must not
   publish would make the hardware inventory depend on what else the
   cluster runs. A cluster-wide switch does not repair that: a switch
@@ -308,13 +308,13 @@ an instance document answers each one.
   applies at boot, and the operator that justifies it is a pod that
   starts later, so a machine that reboots without that pod publishes
   nothing where the hardware is. The DRA claim has no ordering hole,
-  because the claim itself is what stands liken down.
+  because the claim itself is what assigns the device to the operator.
 * **Userspace fd-passing instead of DRA.** One privileged manager pod
   holds every device and passes file descriptors to consumers over a
   Unix socket. It loses the scheduler completely: a pod cannot ask for
   a device, cannot park until one exists, and cannot be evicted when
   one leaves. Every placement decision moves into an application
-  protocol that the cluster cannot see. It is noted here because it is
+  protocol that the cluster cannot read. It is noted here because it is
   the only true fix for in-place hot-plug. A manager that re-exports
   devices through an indirection like uhid or uinput can add and remove
   them under a running consumer, which is what InputPlumber and Wolf
@@ -343,7 +343,7 @@ an instance document answers each one.
   `audio.liken.sh`. It claims the audio controller, runs PipeWire, and
   publishes one device for each physical output.
 
-All three are proposed. Each carries its own drill, because the
+All three are proposed. Each has its own drill, because the
 pattern is only proven by hardware.
 
 ## Open questions
@@ -357,16 +357,16 @@ below records what happened to it.
   and [audio-operator](https://github.com/liken-sh/audio-operator),
   each MIT-licensed with its own images on ghcr.io.
 * **How the Kustomization publishes.** Answered: the git form. Each
-  repository carries a kustomize base in `deploy/`, and a person's
+  repository has a kustomize base in `deploy/`, and a person's
   GitOps references it by tag. No OCI artifact ships beside the
   images. The digest-pinned argument for OCI stands; nothing has
   needed it yet.
 * **Where these instance plans live.** Answered, both ways. Milestones
   57, 58, and 59 stay here as the proposals they were, and each
-  operator's own design documents live beside its code in that
+  operator's own design documents are beside its code in that
   repository's `plans/`. The instance plan that supersedes part of
   this one says so and links back.
-* **What the images carry.** Mostly answered. Every operator binary
+* **What the images hold.** Mostly answered. Every operator binary
   ships in a `FROM scratch` image. The Bluetooth pod is two
   containers, bluetoothd static against musl beside the operator, and
   the privilege lands only on the daemon's container. The display

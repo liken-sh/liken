@@ -1,6 +1,6 @@
 # A browsable release channel
 
-Milestone 43 — Completed. The release channel has an index: a front
+Milestone 43. Completed. The release channel has an index: a front
 page that lists every published release, and a page for each release
 that names its artifacts, its digests, and the catalog entry that
 adopts it.
@@ -67,10 +67,10 @@ page that is wrong or missing.
 
 ## `liken index`
 
-The renderer lives in the `releases` package, beside `bundle`,
-`fetch`, and `serve`, and the CLI carries a fourth channel command.
+The renderer is in the `releases` package, beside `bundle`,
+`fetch`, and `serve`, and the CLI gains a fourth channel command.
 These are already the commands that operate a channel rather than a
-machine, so this is the shelf it belongs on. The command ships to
+machine, so this is where it belongs. The command ships to
 operators for the same reason `serve` does: a deployment that runs its
 own channel, on a private network or with no internet at all, gets the
 same pages the public one has.
@@ -116,7 +116,7 @@ A release's page gives, in this order:
   without GitHub now.
 * each artifact, with its size, its sha256, and a link to it.
 * the components and their upstream versions, which is how a reader
-  learns which kernel and which k3s a release carries.
+  learns which kernel and which k3s a release includes.
 * links to `release.yaml`, to `LICENSES.md`, and to the sources page.
 
 The channel serves `.yaml` and `.md` as `text/plain` already, so
@@ -124,7 +124,7 @@ those links open in a browser instead of downloading.
 
 ## The versions document
 
-`versions.yaml` is the front page's machine-readable twin: every
+`versions.yaml` is the machine-readable form of the front page: every
 release the channel holds, newest first, each with the digest that
 adopts it. The same index run writes both, from the same data.
 
@@ -144,13 +144,13 @@ it belongs to.
 
 liken.sh and the channel share `brand/liken.css`: the colors, the
 type, and the elements that prose and reference tables need. Both
-carry a light and a dark scheme now, chosen by the reader's system
+have a light and a dark scheme now, chosen by the reader's system
 setting, and links take the mark's darkest green on a light page and
-its palest on a dark one. Each page also carries the mark itself,
+its palest on a dark one. Each page also includes the mark itself,
 inline, beside its title.
 
 Neither site links the stylesheet over the network, and the channel is
-why. The channel lives in object storage, apart from any cluster,
+why. The channel is in object storage, apart from any cluster,
 because machines upgrade themselves from it and it has to answer when
 the cluster does not. A stylesheet fetched from liken.sh would put the
 website back in that path, and the pages would arrive unstyled at
@@ -181,7 +181,7 @@ it.
 ## The error document stays the front page
 
 A missing path returns the front page with status 403, and this
-milestone leaves that alone. A dedicated 404 page would still carry
+milestone leaves that alone. A dedicated 404 page would still return
 status 403, because the private bucket ACL produces that code, so it
 would buy a better sentence and nothing else. The front page is now a
 list of every release, so a mistyped version lands on the answer.
@@ -206,7 +206,7 @@ the same key.
 
 ## What the lab measured
 
-The behaviour the whole design rests on was measured before any of it
+The behaviour the whole design depends on was measured before any of it
 was written. A probe object at `_indexprobe/index.html` answered at
 `/_indexprobe/index.html`, at `/_indexprobe/`, and at `/_indexprobe`,
 all with status 200. So the website hostname class applies its index
@@ -231,7 +231,7 @@ The machine path did not move. `channel.yaml` still named
 the fleet has pinned. The UEFI smoke drill installed node-1 onto a
 blank disk, booted it, and reported Ready after 15 seconds.
 
-The shared stylesheet reaches both sites. The built site carries the
+The shared stylesheet reaches both sites. The built site has the
 scheme and the greens in every page, and so does every page on the
 channel. One defect turned up while drilling this: the cli Makefile
 listed the scaffold's templates among its inputs but not the release
@@ -246,8 +246,8 @@ document lists every release newest first with the right digests.
 
 ## The manual
 
-Two pages changed. The CLI reference carries `liken index`
+Two pages changed. The CLI reference documents `liken index`
 (`docs/content/docs/reference/cli.md`). The release channel reference
-carries the index pages and the versions document in its layout, and
+includes the index pages and the versions document in its layout, and
 says that both are derived and that the machine path does not read
 them (`docs/content/docs/reference/release-channel.md`).

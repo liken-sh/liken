@@ -22,7 +22,7 @@ this wedge can appear.
 
 ## The mechanism
 
-Three facts combine into the circle:
+Three facts combine into the wedge:
 
 - System pods run the static image tag `:installed`. A reboot restarts
   the container into the new binary, but the pod spec around it keeps
@@ -51,13 +51,13 @@ Two halves, and the first is the guard:
   and the spec declares no entries, the condition should say
   "waiting for the new template", not `ApplyFailed`, and the machine
   should stay well so the rollout can continue.
-- Scheduling could refresh the template sooner. The conductor knows
-  when a release changes a system pod's template, and it could grant
-  the first turn to a leader in that case, so the AddOn is current
+- Scheduling could refresh the template sooner. The conductor can
+  detect when a release changes a system pod's template, and it could
+  grant the first turn to a leader in that case, so the AddOn is current
   before any follower restarts into the new binary. Follower-first
   ordering stays the default, because proving a release on the
   machines outside the quorum is worth keeping. Node affinity cannot
-  express this today: nodes carry only `liken.sh/machine=true`, with
+  express this today: nodes have only `liken.sh/machine=true`, with
   no label naming the release a machine runs.
 
 ## The workaround

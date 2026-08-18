@@ -1,12 +1,12 @@
 # Root on disk
 
-Milestone 29 — Completed. A machine boots and runs from a read-only
+Milestone 29. Completed. A machine boots and runs from a read-only
 system image on its own disk, instead of from a copy of the system in
 RAM.
 
 Before this milestone the operating system ran entirely from RAM. The
 kernel unpacked a ~130 MB initramfs into rootfs, init copied all of it
-into a tmpfs, and the machine then ran for the rest of its life from
+into a tmpfs, and the machine then ran for the rest of its uptime from
 memory that it could never return. The lab's 4 GB guests absorbed that
 cost. A 1 GB Linode nanode did not: the boot failed before liken ran one
 instruction, because GRUB's relocator could not stage the kernel and the
@@ -33,7 +33,7 @@ lab's standing proof, and the dev cluster's guests are now that size.
   module to reach its root. The running root is the digest-verified
   artifact itself, byte for byte, mounted read-only. The system is
   therefore immutable by construction, not by convention.
-* **A small boot archive carries init.** boot.cpio holds /liken and the
+* **A small boot archive holds init.** boot.cpio holds /liken and the
   few modules that the early boot needs, such as overlayfs, which Ubuntu
   builds as a module. It replaces the large archive as the initrd that
   the firmware or GRUB loads. The boot-time memory cost drops from about
@@ -47,7 +47,7 @@ lab's standing proof, and the dev cluster's guests are now that size.
   therefore does not make the root filesystem use more RAM.
 * **The deployment layer travels exactly as before.** deployment.cpio
   stays a second initrd, and it unpacks into rootfs before the switch.
-  init carries its files (manifests, identity, and module overrides)
+  init copies its files (manifests, identity, and module overrides)
   onto the overlay. The layer never travels over the network and never
   grows past its seed content, so RAM is the correct place for it during
   this part of the boot.
@@ -63,8 +63,9 @@ lab's standing proof, and the dev cluster's guests are now that size.
 
 Some things do not change: the two-archive split and its reasons, the
 release document and catalog shapes, the slot layout and its GPT names,
-the installer's verify-copy-reverify discipline, and the fetcher's carry
-of the layer. Artifact names change inside the release document. This
+the installer's verify-copy-reverify discipline, and the way the
+fetcher carries the layer. Artifact names change inside the release
+document. This
 project is pre-release, so existing machines are reinstalled and not
 migrated.
 

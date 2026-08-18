@@ -1,10 +1,10 @@
 # The public release channel
 
-Milestone 26 — Completed. Public releases live in an object-storage
+Milestone 26. Completed. Public releases are in an object-storage
 bucket at releases.liken.sh, and CI publishes to it.
 
 Public releases (milestone 22) need a public home. The update channel
-must not live on anything that it updates. An earlier plan had the
+must not run on anything that it updates. An earlier plan had the
 liken.sh cluster serve the channel, but that arrangement is circular.
 Machines upgrade themselves from the channel, so a cluster that serves
 its own updates cannot be rescued by one, and a dead cluster takes down
@@ -30,7 +30,7 @@ The channel is object storage, under its own name:
 * The channel is linear, and one mutable object announces it.
   `channel.yaml` at the root names the newest published version. `liken
   bundle` maintains it, and the release workflow uploads it last. This
-  pointer is advisory by design. A cluster polls it to learn that a
+  pointer is advisory by design. A cluster polls it to detect that a
   newer version exists, but a cluster adopts a release only through the
   digest-pinned catalog entry. A tampered pointer can misstate what
   exists, but it cannot change what a machine installs. Apart from that

@@ -1,10 +1,10 @@
 # Remove the known hacks
 
-Milestone 03 — Completed. The boot path drops the fixes that depend on
+Milestone 03. Completed. The boot path drops the fixes that depend on
 k3s internals.
 
 These fixes come from the boot-to-k3s work. Each fix depends on k3s
-internals that k3s does not promise to keep. Each fix works today, and
+internals that k3s does not guarantee. Each fix works today, and
 the version pin and `make run-once` protect them. Every milestone below
 builds on the boot path, so the project removes this coupling first.
 1. [x] The PATH variable in init hardcoded the internal k3s layout.

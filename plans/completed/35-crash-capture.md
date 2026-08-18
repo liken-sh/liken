@@ -1,11 +1,11 @@
 # The machine reports its last crash
 
-Milestone 35 — Completed. The next boot preserves the kernel's crash
+Milestone 35. Completed. The next boot preserves the kernel's crash
 records from pstore on machineState and publishes a one-line summary
 as status.lastCrash.
 
 A kernel panic is the one failure that liken's observability cannot
-see. Milestone 15 makes every host log stream a pod's stdout, but a
+report. Milestone 15 makes every host log stream a pod's stdout, but a
 panic ends the kernel that those relays run on. The trace goes to the
 serial console, the baked `panic=10` argument reboots the machine ten
 seconds later, and the firmware falls back to the proven slot. The
@@ -27,7 +27,7 @@ then log lines, in parts of about one kilobyte each, because EFI
 variables are small.
 
 The backend is a module in the vendored Ubuntu kernel, so the image's
-fixed module list now carries `efi-pstore`. It loads at the top of
+fixed module list now includes `efi-pstore`. It loads at the top of
 boot, with the other OS modules. The order is important: the backend
 must be registered before this boot's own crashes, not only in time to
 read the last boot's records. A machine that panics while storage
@@ -68,7 +68,7 @@ same in both cases.
 
 ## The stub in status
 
-The facts file carries a summary, not the trace. Kubernetes reads
+The facts file holds a summary, and not the trace. Kubernetes reads
 Machine status on every list and watch, and the kernel log tail is
 kilobytes of text, so status gets one stub, `lastCrash`. The stub has
 the time of the crash, the kernel's reason word (`Panic` or `Oops`),

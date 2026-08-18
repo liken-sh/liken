@@ -1,11 +1,11 @@
 # Declarative upgrades
 
-Milestone 12 — Completed. One field on the Cluster moves the whole
+Milestone 12. Completed. One field on the Cluster moves the whole
 fleet to a new liken version.
 
 Milestone 28 later changed two details in this document. A boot slot
 now holds the generic OS and the deployment layer as separate files. A
-boot entry now carries two initrd= parameters. Machines now fetch
+boot entry now has two initrd= parameters. Machines now fetch
 releases from liken's public channel, not from a per-deployment one.
 The machinery this milestone built does not change: spec.version, the
 catalog, the fetcher, the proving boot, and the BootOrder repair.
@@ -33,9 +33,9 @@ fall back if it fails" logic. The firmware does the fallback, and no
 software is part of it.
 
 Upgrades get their trust from explicit inputs, as the rest of liken
-does. The Cluster carries a release source URL and a catalog. The
+does. The Cluster holds a release source URL and a catalog. The
 catalog maps each version to the digest of its release manifest. The
-release manifest carries the sha256 of every artifact. The
+release manifest holds the sha256 of every artifact. The
 verification chain runs from the API, to the catalog digest, to the
 manifest, to the artifact bytes. liken adds no signatures until the
 hardening tier.
@@ -115,18 +115,18 @@ firmware only caches that authority.
    it.
 3. [x] Self-install, in the shape of a USB stick: `make install
    NODE=x` boots through -kernel one more time. QEMU is the installer
-   stick or the PXE server. Init sees liken.install, claims the boot
+   stick or the PXE server. Init reads liken.install, claims the boot
    disk, verifies the release payload the installer carries, copies it
    into slot A, writes both boot entries and BootOrder, and powers
    off.
 
    install.cpio is liken.cpio with a second archive attached to the
-   end, which carries vmlinuz, liken.cpio, and release.yaml. The
+   end, which holds vmlinuz, liken.cpio, and release.yaml. The
    kernel unpacks concatenated cpios, the same mechanism the early
    microcode updates use. The installer's payload is thus
    byte-identical to what the digest chain describes.
 
-   Each boot entry's baked command line carries the machine's name,
+   Each boot entry's baked command line includes the machine's name,
    its slot, and panic=10. The panic setting is necessary because a
    trial kernel that panics must reset into the firmware's fallback
    and must not hang.
@@ -154,8 +154,8 @@ firmware only caches that authority.
    overridable version and output knobs, and the everyday dist/ trees
    do not change. The build publishes releases/dist/<v>/, which
    contains vmlinuz, liken.cpio, install.cpio, and release.yaml.
-   release.yaml lists the sha256 of every artifact. The digest a
-   catalog carries is the sha256 of that file's exact bytes.
+   release.yaml lists the sha256 of every artifact. The digest in a
+   catalog is the sha256 of that file's exact bytes.
 
    `make serve` is a small file server with a log. Guests reach it at
    the host's NAT address. It is the release host on the internet.
@@ -215,8 +215,8 @@ firmware only caches that authority.
    liken.slot= lands in status.boot.slot, and the downloads go to the
    other slot. The down-server drill found a bug: a failed fetch
    restarted on the next pass, so the Failed state lasted only between
-   passes and the condition always said "starting". The fix carries
-   the previous failure's message into the retry, and the drill then
+   passes and the condition always said "starting". The fix keeps
+   the previous failure's message in the retry, and the drill then
    read "retrying after: connection refused". The corrupted 0.1.1
    fetched once in full, held at DigestMismatch/Blocked with the
    recovery in the message (publish a corrected release under a new
@@ -326,7 +326,7 @@ firmware only caches that authority.
    shows the change from AwaitingTurn to Ready on the new version.
 
    A rebuild replaced an in-place migration of the pre-slot lab. The
-   old builds' operators could not see the slot roles in their specs,
+   old builds' operators could not read the slot roles in their specs,
    and every old leader's k3s restart re-applied its baked CRDs, which
    pruned the new schema across the fleet. The lab was factory-reset
    instead, and every node took the designed path: one `make install`

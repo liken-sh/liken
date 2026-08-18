@@ -1,6 +1,6 @@
 # Device attributes and shared devices
 
-Milestone 38 — Completed. liken publishes structural device attributes
+Milestone 38. Completed. liken publishes structural device attributes
 in its ResourceSlices, marks a graphics device shareable, and names
 undriven hardware in the report.
 
@@ -13,8 +13,8 @@ claim did not reach the person who installs the machine, because the
 hardware report is about the boot and the join, not about claims.
 
 This milestone works from one rule: liken publishes the facts about
-hardware that no other layer can know, and it publishes them where no
-other layer can add them later. A ResourceSlice is written by its
+hardware that no other layer can observe, and it publishes them where
+no other layer can add them later. A ResourceSlice is written by its
 driver and by nobody else, so a fact that is not in the slice is a fact
 that no DeviceClass, no claim, and no workload can supply.
 
@@ -30,8 +30,8 @@ design, because that is how two pods share one allocation. So two pods
 that name the same claim both receive the device, even a device that
 must have one writer.
 
-`NodePrepareResources` is the last layer that sees this, and it must
-still not refuse the second consumer.
+`NodePrepareResources` is the last layer that could refuse this, and it
+must still not refuse the second consumer.
 
 * The refusal would be racy. Which pod wins depends on the order the
   kubelet calls in, and a pod rescheduled onto the node can lose to a
@@ -52,10 +52,10 @@ So the manual gives this rule, and the node does not enforce it.
 
 "This GPU can encode HEVC" is the question a transcoding deployment
 has. To answer it, the OS must open the render node through libva and a
-vendor driver. The image carries neither, and both are large. A pod
+vendor driver. The image holds neither, and both are large. A pod
 that holds a claim on that render node can answer the question for
 itself, so the fact fails the test above: it is not something only the
-OS can know.
+OS can observe.
 
 liken publishes the structural facts instead, and the manual states
 where the limit is. If a deployment needs codec attributes, build a
@@ -70,15 +70,15 @@ the base-class word.
 
 The slice gains three attributes and one flag:
 
-* `renderNode` — the device delivers a DRM render node. This is the
+* `renderNode`. The device delivers a DRM render node. This is the
   attribute a transcoder's DeviceClass should select on, in place of a
   PCI ID that is true of one machine.
-* `subsystem` — the kind of node a claim delivers, when the nodes
+* `subsystem`. The kind of node a claim delivers, when the nodes
   agree: `drm` for a GPU, `tty` for a serial adapter.
-* `classCode` — the whole class code, six hex digits on PCI and two on
+* `classCode`. The whole class code, six hex digits on PCI and two on
   USB. A selector can ask for a VGA controller without liken shipping a
   subclass table it would have to maintain.
-* `allowMultipleAllocations` — true for a graphics device: one that
+* `allowMultipleAllocations`. True for a graphics device: one that
   delivers a DRM render node, and delivers nothing from outside the
   graphics stack.
 
@@ -106,7 +106,7 @@ beta and on in the k3s liken ships.
 The report loads storage drivers and network drivers and no others, and
 that limit stays: a display driver takes over the screen the report
 prints to. The report can still name what it does not load. It now
-carries a second section for hardware that is present and undriven,
+has a second section for hardware that is present and undriven,
 with the modules that would drive it, written as commented lines under
 `spec.modules`. The proposal installs with no change, and the person
 sees the GPU the machine has.

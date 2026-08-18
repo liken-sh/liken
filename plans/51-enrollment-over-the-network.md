@@ -1,6 +1,6 @@
 # Enrollment over the network
 
-Milestone 51 — Proposed. It would carry a netbooted machine's
+Milestone 51. Proposed. It would send a netbooted machine's
 hardware report to the cluster as an Enrollment, and make approval
 an edit-and-apply of the proposed Machine, with a CLI verb as sugar.
 It builds on milestone 50 and changes nothing in its serve rule.
@@ -25,17 +25,17 @@ records.
 
 ## The Enrollment CRD
 
-An Enrollment is a mailbox with a proposal in it. It is a new
+An Enrollment holds one machine's proposal. It is a new
 cluster-scoped kind in `liken.sh/v1alpha1`, one per enrolling
 machine, named from the machine's MAC. The controller writes it and
-the operator only reads it, so the proposal lives in `status`,
-following the rule that the system owns status. Status carries the
+the operator only reads it, so the proposal is in `status`,
+following the rule that the system owns status. Status holds the
 proposed Machine document and the hardware report behind it, so the
-operator can see why the proposal says what it says.
+operator can read why the proposal says what it says.
 
 There is no `approved` field. Approval is the Machine's existence:
 the operator applies a Machine, the serve rule from milestone 50
-sees a declared MAC, and the next boot installs. A flag would be a
+reads a declared MAC, and the next boot installs. A flag would be a
 second copy of that fact, and the two copies would disagree the
 first time someone applied a Machine directly.
 
@@ -50,8 +50,8 @@ that reboots five times while it waits does not litter the API.
 
 The POST is unauthenticated, and that is safe because a proposal is
 inert. Nobody acts on an Enrollment until an operator applies a
-Machine, so the worst an intruder on the segment can do is fill
-mailboxes, which the operator can list and delete. The trust
+Machine, so the worst an intruder on the segment can do is create
+Enrollments, which the operator can list and delete. The trust
 boundary is the layer-2 segment, the same boundary milestone 50
 states for the installer payload.
 

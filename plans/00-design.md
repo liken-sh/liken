@@ -13,13 +13,14 @@ milestone depends on the one before it.
 ## The operating system is a kernel and a system image
 
 liken vendors the kernel from Ubuntu's mainline builds, with no changes
-to the upstream code. A small boot archive, boot.cpio, carries init, the
+to the upstream code. A small boot archive, `boot.cpio`, holds init, the
 modules that the early boot needs, and mke2fs for an install boot. The
-system image, liken.sqfs, is a read-only squashfs that carries k3s and
+system image, `liken.sqfs`, is a read-only squashfs that holds k3s and
 everything that k3s needs from a host. Init loop-mounts that image from
-the boot slot, or from RAM when the boot loader delivered it. A third archive, microcode.cpio, carries CPU microcode
-ahead of the others, because the kernel looks for microcode before it
-decompresses anything else.
+the boot slot, or from RAM when the boot loader delivered it. A third
+archive, `microcode.cpio`, delivers CPU microcode ahead of the others,
+because the kernel reads microcode before it decompresses anything
+else.
 
 liken has no package manager, no shell, and no SSH. The serial console
 reports what the machine does. Every other operation goes through the
@@ -70,10 +71,10 @@ them.
 
 ## Identity is an input
 
-The image carries the certificate authorities and the join token for the
+The image holds the certificate authorities and the join token for the
 cluster. Someone mints these offline before any machine boots, or
 imports them from the servers of an existing cluster during adoption.
-Because the image carries the identity, machines built from the same
+Because the image holds the identity, machines built from the same
 image belong to the same cluster. The build computes an operator
 kubeconfig offline from the client CA. The join token holds a hash of
 the server CA. Thus a machine that joins verifies the cluster before it
@@ -96,10 +97,10 @@ members can break the etcd majority.
 
 ## The lab
 
-dev-cluster/ is the deployment that this repository develops against. It
-uses QEMU guests with real UEFI firmware, and SeaBIOS guests for the
-BIOS path, blank disks that the machines
-claim and format themselves, and a multicast socket in place of a
+`dev-cluster/` is the deployment that this repository develops against.
+It uses QEMU guests with real UEFI firmware, and SeaBIOS guests for the
+BIOS path. It also uses blank disks that the machines claim and format
+themselves, and a multicast socket in place of a
 switch. Each milestone ends with a run of its design in the lab,
 including the failure paths: clocks set years wrong, power cuts during
 install, and releases built to panic. A fallback is proven only after
