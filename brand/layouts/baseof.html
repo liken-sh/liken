@@ -9,17 +9,21 @@ breadcrumbs, a table of contents, and a sidebar. No JavaScript
 anywhere.
 
 Two things orient the reader. Every page below the front page
-carries a breadcrumb trail, built from the page's ancestors. When a
-site has a /docs section, pages inside it also get a sidebar with
-that section's whole tree, on screens wide enough to hold one; on
-narrow screens the breadcrumbs alone carry the orientation. The
-sidebar and breadcrumbs exist only in the HTML: a page's Markdown
-twin is the authored file, navigation and all chrome excluded.
+carries a breadcrumb trail, built from the page's ancestors. When
+the site has a /docs section, every page, the front page included,
+also gets a sidebar with the manual's whole tree, on screens wide
+enough to hold one; on narrow screens the breadcrumbs alone carry
+the orientation. The sidebar's heading names the project whose
+manual this is, taken from the last path segment of the site's
+repository parameter, so the bluetooth operator's site heads its
+sidebar with that operator's name and not with liken's. The sidebar
+and breadcrumbs exist only in the HTML: a page's Markdown twin is
+the authored file, navigation and all chrome excluded.
 -->
 {{- $docs := .Site.GetPage "/docs" -}}
-{{- $inManual := false -}}
-{{- with $docs -}}
-{{- $inManual = or (eq $.Page .) ($.Page.IsDescendant .) -}}
+{{- $project := "" -}}
+{{- with site.Params.repository -}}
+{{- $project = path.Base . -}}
 {{- end -}}
 <!doctype html>
 <html lang="en">
@@ -45,13 +49,13 @@ twin is the authored file, navigation and all chrome excluded.
                color: var(--ink-muted); text-align: center; }
   nav.toc { font-size: 0.9em; background: var(--panel);
             padding: 0.6rem 1rem; margin: 1.5rem 0; }
-  /* A wide listing, such as command output on a front page, reads
-     best unwrapped. The text keeps its measure, and a pre that needs
-     more room centers itself on the column and grows toward the
-     viewport edges, so it uses the page's margins before it scrolls.
-     Only pages without the sidebar get this: on the manual's grid
-     pages the sidebar owns the left margin, so their pre blocks stay
-     inside the text column. */
+  /* A wide listing, such as command output, reads best unwrapped.
+     The text keeps its measure, and a pre that needs more room
+     centers itself on the column and grows toward the viewport
+     edges, so it uses the page's margins before it scrolls. Only a
+     site with no manual gets this: where the sidebar exists it owns
+     the left margin, so pre blocks stay inside the text column and
+     scroll there. */
   body:not(.manual) main pre {
     width: fit-content;
     min-width: 100%;
@@ -81,12 +85,12 @@ twin is the authored file, navigation and all chrome excluded.
   }
 </style>
 </head>
-<body{{ if $inManual }} class="manual"{{ end }}>
+<body{{ if $docs }} class="manual"{{ end }}>
 {{ partial "nav.html" . }}
-{{ if $inManual }}
+{{ with $docs }}
 <aside>
-  <p><a href="{{ $docs.RelPermalink }}"{{ if eq .Page $docs }} aria-current="page"{{ end }}>Manual</a></p>
-  {{ range $docs.Sections }}
+  <p><a href="{{ .RelPermalink }}"{{ if eq $.Page . }} aria-current="page"{{ end }}>{{ with $project }}<code>{{ . }}</code> manual{{ else }}Manual{{ end }}</a></p>
+  {{ range .Sections }}
   <p><a href="{{ .RelPermalink }}"{{ if eq $.Page .Page }} aria-current="page"{{ end }}>{{ .Title }}</a></p>
   <ul>
     {{ range .RegularPages }}

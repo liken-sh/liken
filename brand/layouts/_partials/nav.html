@@ -1,8 +1,16 @@
 {{- /* The top nav, one line of links shared by every liken site.
-The entries come from data/nav.yaml, which explains why they are the
-same everywhere. A label marked code renders in the code face. */ -}}
+The entries come from data/nav.yaml, which explains which
+destinations are family-wide and which are site-scoped. An entry
+that names a site parameter renders only when the site sets it; the
+data file explains why there is no fallback. A label marked code
+renders in the code face. */ -}}
 <nav class="site">
   {{- range hugo.Data.nav }}
-  <a href="{{ .url }}">{{ if .code }}<code>{{ .label }}</code>{{ else }}{{ .label }}{{ end }}</a>
+  {{- $entry := . }}
+  {{- $url := .url }}
+  {{- with .param }}{{ $url = index site.Params . }}{{ end }}
+  {{- with $url }}
+  <a href="{{ . }}">{{ if $entry.code }}<code>{{ $entry.label }}</code>{{ else }}{{ $entry.label }}{{ end }}</a>
+  {{- end }}
   {{- end }}
 </nav>

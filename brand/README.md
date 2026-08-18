@@ -40,6 +40,12 @@ output format:
 ```yaml
 theme: brand
 
+params:
+  # The repository this site documents. The nav's "repository"
+  # entry links here, and the sidebar's heading takes the project
+  # name from the URL's last path segment.
+  repository: https://github.com/liken-sh/liken
+
 outputFormats:
   markdown:
     mediaType: text/markdown
@@ -66,10 +72,23 @@ public homes for the mark. The stylesheet never becomes a URL: the
 shell inlines it into every page, for the reason the stylesheet
 section below gives.
 
-`data/nav.yaml` lists the entries of the top nav, in order, with
-absolute URLs. Every site renders the same nav from this file, so a
-change to the family's links is one commit here and a submodule bump
-in each site.
+`data/nav.yaml` lists the entries of the top nav, in order. Every
+site renders the same labels from this file. "liken" and "releases"
+carry absolute URLs, the same from every site, so a change to those
+links is one commit here and a submodule bump in each site.
+"repository" is site-scoped: it links to the URL the site sets in
+`params.repository`. If a site does not set `params.repository`,
+the nav omits the entry rather than guess at a destination.
+
+The nav has no entry for the site's manual, because the sidebar
+carries it. When a site has a `/docs` section, every page shows the
+manual's tree in a sidebar, the front page included, on viewports
+wide enough to hold it; on narrow viewports the breadcrumbs orient
+the reader instead. The sidebar's heading names the project, taken
+from the last path segment of `params.repository`: `liken` on
+liken.sh, `bluetooth-operator` on the bluetooth operator's site.
+Without the parameter, the heading is the word "Manual". A site
+with no `/docs` section shows no sidebar.
 
 The layouts a site can override by shipping its own file of the same
 name, because Hugo gives a site's `layouts/` precedence over the
