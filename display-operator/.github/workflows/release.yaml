@@ -3,7 +3,7 @@
 # both images, starts the compositor, and pushes the images to
 # ghcr.io tagged with that version and latest. A push to main
 # releases nothing; ci.yaml tests it and stops. The two are separate
-# so that main can carry docs and intermediate work freely, and so
+# so that main can take docs and intermediate work freely, and so
 # that every version in the registry is one a person chose to cut.
 #
 # The version is the tag, in liken's own scheme: the date and a
@@ -50,8 +50,8 @@ jobs:
           go-version-file: go.mod
 
       # The tests gate the release. ci.yaml already ran them on the
-      # commit when it landed on main, and they run again here so the
-      # gate holds on the tag itself: an image that reaches ghcr.io
+      # commit when it landed on main. They run again here so the
+      # gate holds on the tag itself. An image that reaches ghcr.io
       # is one that passed them, so a rollback target is always a
       # build that worked.
       - run: go vet ./...
@@ -78,8 +78,8 @@ jobs:
             ghcr.io/liken-sh/weston:latest
 
       # The compositor opens its backend, its renderer and its shell by
-      # file name, so a library the image does not carry shows up at the
-      # first start and at no earlier point. go test cannot see any of
+      # file name, so a library the image does not contain shows up at
+      # the first start and at no earlier point. go test covers none of
       # it. The headless backend needs no graphics card, so this runs on
       # an ordinary runner, and it covers everything but the card: the
       # module loads, the EGL vendor, the DRI driver, and the shell.

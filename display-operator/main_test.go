@@ -21,9 +21,9 @@ func TestSettleCollapsesABurst(t *testing.T) {
 	in := make(chan struct{}, 16)
 	out := settle(ctx, in, testWindow, testLimit)
 
-	// One monitor plugged in produces a burst of uevents, and the
-	// whole burst deserves one write. Every ResourceSlice write wakes
-	// every DRA-pending pod in the cluster.
+	// One monitor plugged in produces a burst of uevents, and one
+	// write must cover the whole burst. Every ResourceSlice write
+	// wakes every DRA-pending pod in the cluster.
 	for range 8 {
 		in <- struct{}{}
 		time.Sleep(testWindow / 4)
@@ -57,7 +57,7 @@ func TestSettleEmitsUnderAConstantFlap(t *testing.T) {
 	out := settle(ctx, in, testWindow, testLimit)
 
 	// A cable that flaps faster than the quiet window would restart
-	// the wait forever. The limit is what still publishes.
+	// the wait forever. The limit keeps the loop publishing.
 	stop := make(chan struct{})
 	defer close(stop)
 	go func() {
@@ -114,7 +114,7 @@ func TestWakesCarriesARetryThrough(t *testing.T) {
 	retries := make(chan struct{}, 1)
 	out := wakes(ctx, nil, retries)
 
-	// A write that failed asks for one more pass through the same
+	// A write that failed schedules one more pass through the same
 	// channel every other source uses, so the retry never blocks the
 	// loop that watches the compositor.
 	retries <- struct{}{}

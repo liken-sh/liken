@@ -50,15 +50,15 @@ const hotplugShim = "/usr/lib/liken/udev-kernel-group.so"
 const socketWaitTimeout = 30 * time.Second
 
 // socketPollInterval is how often the wait looks for the socket. A
-// file appearing raises no event that a program can wait on without
-// another dependency, so this is the one place that polls, and it
+// new file raises no event that a program can wait on without
+// another dependency. So this is the one place that polls, and it
 // polls for a bounded time on one path.
 const socketPollInterval = 100 * time.Millisecond
 
 // westonConfig builds the weston.ini for one set of outputs.
 //
-// Every setting here is a requirement of running a compositor in a pod
-// on a machine with no keyboard, not a preference a deployment makes,
+// Every setting here is a requirement of a compositor in a pod on a
+// machine with no keyboard. No setting is a deployment's preference,
 // so the operator writes the file instead of taking one.
 //
 // Every connector gets a section, dark or lit. Weston parses this
@@ -71,9 +71,8 @@ func westonConfig(outputs []Output) string {
 # next restart of the operator.
 
 [core]
-# The kiosk shell makes each client fullscreen on one output and
-# routes it there by its app-id, which is what a screen in a house is
-# for: one program, no decorations, no desktop.
+# The kiosk shell makes each client fullscreen on one output, with
+# no decorations and no desktop, and routes it there by its app-id.
 shell=kiosk
 
 # The GL renderer advertises zwp_linux_dmabuf_v1 at version 4. mpv
@@ -112,10 +111,10 @@ func writeWestonConfig(path string, outputs []Output) error {
 }
 
 // startWeston starts the compositor on one card and returns a channel
-// that carries its exit.
+// that reports its exit.
 //
 // The channel is the supervision. Weston holds the screens and the
-// socket, so an operator that outlived it would advertise outputs it
+// socket. An operator that outlived it would advertise outputs it
 // can no longer drive, and every client that was drawing has already
 // lost its connection. main ends the process on that channel, with a
 // nonzero status, and the kubelet restarts the pair.
@@ -160,7 +159,7 @@ func startWeston(ctx context.Context, card, configPath, socketDir, socketName st
 		if err == nil {
 			// A compositor that ends by itself ends every screen, and a
 			// zero status does not make that a success. The channel
-			// carries a reason either way, so no reader has to treat a
+			// delivers a reason either way, so no reader has to treat a
 			// nil error as an exit.
 			err = errors.New("exit status 0")
 		}
@@ -175,7 +174,7 @@ func startWeston(ctx context.Context, card, configPath, socketDir, socketName st
 //
 // Nothing may publish before this returns. The delivery a consumer
 // receives is the socket, so an output published while the socket is
-// missing offers a screen a client cannot connect to, and the consumer's
+// missing offers a screen a client cannot connect to. The consumer's
 // pod would start and fail rather than wait.
 //
 // The exited channel is what turns a compositor that refuses to start

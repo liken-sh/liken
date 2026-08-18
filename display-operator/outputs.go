@@ -40,7 +40,7 @@ type Output struct {
 	// EDID this operator cannot read.
 	//
 	// Read this only when Connected is true. Some drivers keep the
-	// last EDID they read in the file after the monitor leaves, so a
+	// last EDID they read in the file after the monitor leaves. So a
 	// dark connector can answer a whole, valid block that describes a
 	// monitor that is no longer on the wire. sliceDevices gates every
 	// attribute on Connected for that reason, and every other reader
@@ -50,12 +50,12 @@ type Output struct {
 
 // discoverOutputs lists every connector on one card, sorted by
 // connector name so that the same hardware always produces the same
-// list and the slice comparison sees real changes only.
+// list and the slice comparison reports real changes only.
 //
 // Every connector publishes, including one that has never had a
-// monitor on it. Membership must not depend on what is plugged in:
-// deleting a device that a claim holds strands the next consumer,
-// because the allocation still names the device and the kubelet's
+// monitor on it. Membership must not depend on what is plugged in.
+// Deleting a device that a claim holds strands the next consumer:
+// the allocation still names the device, and the kubelet's
 // prepare call retries against a device that is in no slice, with no
 // bound on the retry. The connector list changes only when the card
 // itself leaves.

@@ -6,14 +6,14 @@ package main
 // cable's I2C wire. The kernel reads it when a connector detects a
 // monitor and exposes it at
 // /sys/class/drm/<card>-<connector>/edid, so this operator reads a
-// file rather than a bus, and it needs no privilege to learn what is
+// file rather than a bus, and it needs no privilege to read what is
 // plugged in.
 //
 // The format is VESA's, and the part this operator reads is the first
 // 128-byte block. Byte 0 to byte 7 are a fixed header. Bytes 8 and 9
 // hold the manufacturer's PNP id as three five-bit letters. Bytes 10
 // and 11 hold the product code. Bytes 54 to 125 hold four 18-byte
-// descriptors: a descriptor whose first two bytes are zero carries
+// descriptors: a descriptor whose first two bytes are zero holds
 // text or timing limits, and any other descriptor is a detailed
 // timing.
 //
@@ -25,7 +25,7 @@ package main
 // it in whole centimeters, and the detailed timing gives it in
 // millimeters. The millimeters win where they exist: the portable
 // monitor on the lab machine reports 29 by 27 centimeters in bytes 21
-// and 22, and 344 by 196 millimeters in its timing, and only the
+// and 22, and 344 by 196 millimeters in its timing. Only the
 // second one describes a 15.6-inch panel.
 
 import (
@@ -39,7 +39,7 @@ import (
 // publishes is in the first one.
 const blockSize = 128
 
-// descriptor tags. A tag lives in byte 3 of a descriptor whose first
+// descriptor tags. The tag is byte 3 of a descriptor whose first
 // three bytes are zero.
 const (
 	tagSerialNumber = 0xff
@@ -128,7 +128,7 @@ func ParseEDID(raw []byte) (EDID, error) {
 		descriptor := block[offset : offset+18]
 		if descriptor[0] != 0 || descriptor[1] != 0 {
 			// A detailed timing. Only the first one is the preferred
-			// mode, and the physical size rides with it.
+			// mode, and the physical size is in the same descriptor.
 			if !preferred {
 				continue
 			}
@@ -197,7 +197,7 @@ func (edid *EDID) readExtensions(raw []byte, count int) {
 		}
 		// Tag 0x02 is CTA-861. A revision below 3 has no descriptor
 		// area, and byte 2 holds the offset where the descriptors
-		// start. An offset of 0 says the block carries none.
+		// start. An offset of 0 says the block holds none.
 		if sum != 0 || extension[0] != 0x02 || extension[1] < 3 || extension[2] < 4 {
 			continue
 		}
@@ -231,7 +231,7 @@ func manufacturerID(high, low byte) string {
 }
 
 // descriptorText reads the 13 bytes of text a display descriptor
-// carries. The text ends at a line feed and pads with spaces to the
+// holds. The text ends at a line feed and pads with spaces to the
 // end of the field, so both have to come off before the value is
 // published.
 func descriptorText(descriptor []byte) string {

@@ -64,8 +64,8 @@ spec:
       # stated because the failure is silent.
       hostUsers: true
       # The compositor holds the screens for as long as it runs, so it
-      # goes down quickly when asked. While it is down, every monitor it
-      # drives is black.
+      # must stop quickly on SIGTERM. While it is down, every monitor
+      # it drives is black.
       terminationGracePeriodSeconds: 5
       containers:
         - name: operator
@@ -77,7 +77,7 @@ spec:
           #
           # The image holds the operator's binary, weston, and the
           # libraries weston loads. It holds no shell, so kubectl exec
-          # can run only a binary the image carries by name, such as
+          # can run only a binary the image contains, by name, such as
           # wayland-info.
           image: ghcr.io/liken-sh/display-operator:latest
           env:
@@ -92,8 +92,8 @@ spec:
             # No privilege and no capability. libseat's noop backend
             # opens the card node with a plain open(), and the kernel
             # hands DRM master to the first process to open it with no
-            # capability check, so everything this pod does to the
-            # hardware it does through its claim.
+            # capability check. So everything this pod does to the
+            # hardware, it does through its claim.
             capabilities:
               drop: ["ALL"]
             privileged: false

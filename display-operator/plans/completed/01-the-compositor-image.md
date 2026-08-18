@@ -7,7 +7,7 @@ the pod runs one container, and two images publish from one
 ## The problem
 
 Debian ships every libweston backend in one package. `rdp-backend.so`,
-`vnc-backend.so`, and `remoting-plugin.so` sit beside
+`vnc-backend.so`, and `remoting-plugin.so` are in the same package as
 `drm-backend.so`, so installing `weston` also installs FreeRDP,
 neatvnc, GStreamer, PipeWire, libavcodec, libx265, and a speech
 synthesiser.
@@ -26,11 +26,10 @@ copied in. It has no shell, no package manager, and no libc userland
 beyond the libraries the closure resolved.
 
 The script copies every hop of a symlink chain and then the file at the
-end of it, because the loader opens a library by its soname and a
-soname is a link. It writes `/etc/ld.so.conf` naming the multiarch
-directory and runs `ldconfig -r`, because without a cache the loader
-searches its built-in directory list, and that list does not name the
-directory these libraries live in.
+end of it. The loader opens a library by its soname, and a soname is a
+link. It writes `/etc/ld.so.conf` naming the multiarch directory and
+runs `ldconfig -r`. Without a cache the loader searches its built-in
+directory list, and that list does not name the multiarch directory.
 
 The loads that `ldd` cannot report were added by hand, and they are the
 subject of
@@ -62,25 +61,26 @@ is the remaining 17 MB.
   do it, so in an image with no shell it is the only diagnostic
   available.
 
-## One container, not two
+## One container
 
 The pod keeps one container. Splitting the compositor and the operator
 into two containers was considered and rejected.
 
 The split saves no bytes. The closure is 234 MB either way, and the
-operator's binary is 17 MB whether it sits in its own scratch image or
-as one more layer on the compositor's.
+operator's binary is 17 MB whether it is in its own scratch image or
+one more layer on the compositor's.
 
 The split costs the supervision contract. The operator writes
 `weston.ini` from the outputs it enumerated and then runs the
 compositor as its own child, so a compositor that exits ends the
 operator, and the kubelet restarts both. Nothing in a pod spec binds
 one container's life to another's. Rebuilding that binding across a
-shared volume needs three things that do not exist today: a death
-signal written from scratch, a bounded wait for the configuration file
-in a compositor entrypoint, and two independent kubelet restart loops
-that agree on which generation of the configuration is live. That is
-three new silent failure modes in place of one exit status.
+shared volume needs three things that do not exist today. The first is
+a death signal written from scratch. The second is a bounded wait for
+the configuration file in a compositor entrypoint. The third is two
+independent kubelet restart loops that converge on one generation of
+the configuration. That is three new silent failure modes in place of
+one exit status.
 
 ## Two images, one file
 

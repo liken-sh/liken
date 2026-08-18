@@ -26,12 +26,12 @@ func TestDeviceNameIsTheConnectorAsADNSLabel(t *testing.T) {
 	}
 }
 
-// The pairing vectors. The audio operator carries this same table
-// against its own derivation from the ELD, and the two suites together
-// are what prove the drivers agree. A matchAttribute constraint
-// compares the values byte for byte, so a disagreement of one
-// character parks every pairing claim forever. Change a row here only
-// with the same row changed there.
+// These are the pairing vectors. The audio operator holds this same
+// table against its own derivation from the ELD, and the two suites
+// together prove the drivers produce the same values. A
+// matchAttribute constraint compares the values byte for byte, so a
+// one-character difference parks every pairing claim forever. Change
+// a row here only with the same row changed there.
 func TestMonitorIDPairsAScreenWithItsSpeakers(t *testing.T) {
 	cases := []struct {
 		name string
@@ -46,7 +46,7 @@ func TestMonitorIDPairsAScreenWithItsSpeakers(t *testing.T) {
 		{
 			// A nameless panel takes the two-part form, never a
 			// trailing dash and never an empty value, because those
-			// two parts are what the ELD also carries.
+			// two parts are what the ELD also holds.
 			name: "a monitor with no name",
 			edid: EDID{Manufacturer: "BOE", ProductCode: 0x095f},
 			want: "boe-095f",

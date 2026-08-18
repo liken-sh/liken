@@ -93,8 +93,8 @@ func TestRemoveCDISpecIsIdempotent(t *testing.T) {
 	if err := removeCDISpec("claim-uid"); err != nil {
 		t.Fatal(err)
 	}
-	// The kubelet repeats unprepare whenever it is not sure the call
-	// succeeded.
+	// The kubelet repeats unprepare whenever it has no record that
+	// the call succeeded.
 	if err := removeCDISpec("claim-uid"); err != nil {
 		t.Fatalf("removing an absent spec: %v", err)
 	}

@@ -11,9 +11,9 @@
 # pulls both pulls the second one for the size of one binary.
 #
 # The compositor ships in a workload's image and not in the read-only
-# root that every liken machine boots. That is the device operator
-# pattern's whole reason for a separate repository: a machine with no
-# screens does not carry weston.
+# root that every liken machine boots. That is why the device operator
+# pattern puts the compositor in a separate repository: a machine with
+# no screens does not download weston.
 
 FROM golang:1.26.5-bookworm AS build
 WORKDIR /src
@@ -46,7 +46,7 @@ FROM debian:trixie-slim AS closure
 # libgl1-mesa-dri is what the GL renderer builds its EGL device from.
 # Without it weston falls back to the pixman renderer, which advertises
 # zwp_linux_dmabuf_v1 at version 3 and leaves mpv on software paths.
-# wayland-utils carries wayland-info, which lists every global the
+# wayland-utils provides wayland-info, which lists every global the
 # compositor advertises and is the first thing to read when a client
 # connects and draws nothing. kubectl exec runs it by name, which is
 # the only way to run anything in an image with no shell.

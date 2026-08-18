@@ -12,7 +12,7 @@ import (
 )
 
 // slicePublishFixture is a small API server that holds at most one
-// ResourceSlice. It remembers the requests it received.
+// ResourceSlice. It records the requests it received.
 type slicePublishFixture struct {
 	existing *ResourceSlice
 	requests []string
@@ -103,7 +103,7 @@ func TestSliceDevicesPublishesTheMonitorsFacts(t *testing.T) {
 		}
 	}
 	if len(devices[1].Taints) != 0 {
-		t.Errorf("a monitor that is on the wire carries taints: %+v", devices[1].Taints)
+		t.Errorf("a monitor that is on the wire has taints: %+v", devices[1].Taints)
 	}
 }
 
@@ -139,7 +139,7 @@ func TestSliceDevicesTaintsAnOutputThatServesNobody(t *testing.T) {
 func TestSliceDevicesLeavesAConnectorThatGainedItsMonitorClear(t *testing.T) {
 	// A monitor plugged into a connector that was dark at startup
 	// routes like any other, because the config names every
-	// connector. A device with a monitor on it carries no taint.
+	// connector. A device with a monitor on it has no taint.
 	outputs := discoverOutputs(fakeSysfs(t, "card1", map[string]string{
 		"HDMI-A-1": "lg-hdr-wqhd",
 		"HDMI-A-2": "portable-display",
@@ -158,7 +158,7 @@ func TestSliceDevicesLeavesAConnectorThatGainedItsMonitorClear(t *testing.T) {
 	}
 	for _, device := range devices {
 		if len(device.Taints) != 0 {
-			t.Errorf("%s carries taints with a monitor on it: %+v", device.Name, device.Taints)
+			t.Errorf("%s has taints with a monitor on it: %+v", device.Name, device.Taints)
 		}
 	}
 }
@@ -197,7 +197,7 @@ func TestTheFirstReconcileFreesTheScreensThatCameBack(t *testing.T) {
 }
 
 // The operator publishes compositorDown devices at startup and again
-// as the compositor exits. At both moments every device carries the
+// as the compositor exits. At both moments every device has the
 // one NoExecute taint, because no compositor serves this node.
 func TestCompositorDownTaintsEveryOutput(t *testing.T) {
 	devices := compositorDown(sliceDevices(testOutputs(t)))
@@ -438,7 +438,7 @@ func TestEnsureLogsTheSliceItCreated(t *testing.T) {
 		t.Fatal(err)
 	}
 	// DP-1 is the connector with nothing plugged into it.
-	want := "slice: created generation 1, 3 devices, 1 tainted: dp-1 carries " + disconnectedTaint
+	want := "slice: created generation 1, 3 devices, 1 tainted: dp-1 has " + disconnectedTaint
 	if got := capture.only(t); got != want {
 		t.Errorf("line = %q, want %q", got, want)
 	}
@@ -458,8 +458,9 @@ func TestEnsureLogsTheSliceItWrote(t *testing.T) {
 	}}
 	client := testClient(t, fixture.handler(t))
 
-	// The compositor died, so every output takes both taints. The
-	// device count does not move, and the taints are the whole event.
+	// The compositor died, so every output takes the unservable
+	// taint. The device count does not move, and the taints are the
+	// whole event.
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(), compositorDown(devices)); err != nil {
 		t.Fatal(err)
 	}

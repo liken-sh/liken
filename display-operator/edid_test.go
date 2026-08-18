@@ -4,7 +4,7 @@ package main
 // with `od -An -tx1 /sys/class/drm/<card>-<connector>/edid`:
 //
 //   - lg-hdr-wqhd, the ultrawide on the lab machine's HDMI-A-1. It
-//     carries a CTA extension block, and its name and its label serial
+//     has a CTA extension block, and its name and its label serial
 //     are in that block rather than in the base block.
 //   - portable-display, the second monitor on the lab machine's
 //     HDMI-A-2. Its bytes 21 and 22 claim 29 by 27 centimeters, which
@@ -181,7 +181,7 @@ func indexOfDescriptor(t *testing.T, block []byte, tag byte) int {
 			return offset
 		}
 	}
-	t.Fatalf("the block carries no descriptor with tag %#x", tag)
+	t.Fatalf("the block has no descriptor with tag %#x", tag)
 	return 0
 }
 

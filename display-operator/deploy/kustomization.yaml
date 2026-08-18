@@ -1,13 +1,12 @@
 # The kustomize base for the display operator.
 #
-# This is an offer, not a mechanism. liken does not apply it and does
-# not name it. Take it through your own GitOps with patches of your
-# own, or read it and write your own manifests.
+# This base is for the cluster owner to take. liken does not apply it
+# and does not name it. Take it through your own GitOps with patches
+# of your own, or read it and write your own manifests.
 #
 # The base ships no DeviceClass. A DeviceClass is cluster-scoped
 # policy, the cluster owner's to name and curate, the same convention
-# as a StorageClass, so this base does not create one behind the
-# owner's back. The install guide at
+# as a StorageClass, so this base creates none. The install guide at
 # https://display.liken.sh/docs/guides/install/ gives copyable YAML
 # for the three classes this operator involves: the two bootstrap
 # classes the operator's own claim names, and the class consumers

@@ -5,11 +5,11 @@ package main
 // A device operator publishes under its own driver name, in its own
 // slices, beside whatever liken publishes on the same node. The two
 // cannot collide: a device's identity is the triple
-// <driver>/<pool>/<device>, and the slice name carries the driver name
-// as a suffix, so this node's two slices are <node>-liken.sh and
+// <driver>/<pool>/<device>, and the slice name ends with the driver
+// name, so this node's two slices are <node>-liken.sh and
 // <node>-display.liken.sh.
 //
-// Like liken's own client, these structs carry only the part of the
+// Like liken's own client, these structs hold only the part of the
 // upstream API that this program writes. The full ResourceSlice can
 // describe partitionable devices, shared counters, and per-device node
 // selection, and none of that changes what a monitor output needs: a
@@ -31,11 +31,11 @@ import (
 
 // DriverName identifies this operator as a DRA driver. A driver name
 // is a DNS name so that drivers cannot collide, and a device
-// operator's name is <domain>.liken.sh. The name states which contract
-// family the operator implements, not which repository builds it.
+// operator's name is <domain>.liken.sh. The name states the contract
+// the operator implements rather than the repository that builds it.
 const DriverName = "display.liken.sh"
 
-// ResourceSlicesPath names the URL where DRA inventory lives. Slices
+// ResourceSlicesPath names the URL of the DRA inventory. Slices
 // are cluster-scoped, like Nodes, because hardware inventory belongs
 // to the machine and not to any tenant.
 const ResourceSlicesPath = "/apis/resource.k8s.io/v1/resourceslices"
@@ -95,7 +95,7 @@ type ResourcePool struct {
 // unique within the pool. An attribute name left unqualified belongs
 // to the publishing driver's domain, so a selector reads these as
 // device.attributes["display.liken.sh"].model. The one exception is
-// the pairing identity, which carries its own domain.
+// the pairing identity, which has its own domain.
 type SliceDevice struct {
 	Name       string                     `json:"name"`
 	Attributes map[string]DeviceAttribute `json:"attributes,omitempty"`
@@ -183,8 +183,8 @@ func sliceDevices(outputs []Output) []SliceDevice {
 	return devices
 }
 
-// unservableTaints is what an output that can serve nobody carries:
-// the NoExecute taint that ends the pod holding it.
+// unservableTaints is the taint set of an output that can serve
+// nobody: the NoExecute taint that ends the pod holding it.
 func unservableTaints() []DeviceTaint {
 	return []DeviceTaint{
 		{Key: disconnectedTaint, Effect: "NoExecute"},
@@ -254,7 +254,7 @@ func attributeString(s string) string {
 // this pass would say.
 //
 // The comparison ignores TimeAdded, which the API server fills in on
-// every taint it stores. A plain comparison would see the stored
+// every taint it stores. A plain comparison would compare the stored
 // timestamp against an empty one, call every pass a change, and write
 // the slice on every pass. Each ResourceSlice write wakes every
 // DRA-pending pod in the cluster, so a needless write is a
@@ -284,7 +284,7 @@ func withoutTimeAdded(devices []SliceDevice) []SliceDevice {
 
 // ErrNoDevices refuses a write that would publish nothing.
 //
-// An empty inventory is never a fact this operator learns. The card
+// An empty inventory is never a real state of the card. The card
 // registers its connectors when the driver binds and keeps them until
 // the card leaves, so a pass that finds none read a card that is going
 // away, or read the wrong path. Writing that would replace a slice
@@ -301,7 +301,7 @@ var ErrNoDevices = errors.New("the card reports no connectors")
 // the pod. The Node owns the slice, so a node that leaves the cluster
 // takes the slice with it, and that is the only automatic removal.
 //
-// The write carries the resourceVersion from the read, so a
+// The write includes the resourceVersion from the read, so a
 // conflicting writer gets ErrConflict instead of losing its change.
 // The next pass reads again and writes again.
 func EnsureResourceSlice(c *Client, nodeName string, owner OwnerReference, devices []SliceDevice) error {
@@ -376,7 +376,7 @@ func sliceName(nodeName string) string {
 	return nodeName + "-" + DriverName
 }
 
-// nodeObject carries the one thing this operator reads from its Node:
+// nodeObject holds the one thing this operator reads from its Node:
 // the UID that the slice's owner reference needs.
 type nodeObject struct {
 	Metadata struct {

@@ -13,20 +13,20 @@ package main
 // compositor routes to the output the claim allocated, so this
 // driver's edits are a mount and three environment variables.
 //
-//   - the mount of the socket directory, at the same path inside the
-//     container as on the host,
-//   - XDG_RUNTIME_DIR, which is where a Wayland client looks for the
-//     socket named by
-//   - WAYLAND_DISPLAY, and
-//   - DISPLAY_APP_ID, the app-id of the allocated output.
+//   - The mount grants the socket directory, at the same path inside
+//     the container as on the host.
+//   - XDG_RUNTIME_DIR names the directory where a Wayland client
+//     looks for its socket.
+//   - WAYLAND_DISPLAY names the socket inside that directory.
+//   - DISPLAY_APP_ID is the app-id of the allocated output.
 //
 // The client still has to pass the app-id to its own toolkit, because
 // no Wayland client reads a variable that chromium and mpv do not
-// define. The pod spec carries the flag and the variable is what the
+// define. The pod spec supplies the flag and the variable is what the
 // flag reads: --class=$(DISPLAY_APP_ID) for chromium,
 // --wayland-app-id=$(DISPLAY_APP_ID) for mpv.
 //
-// The file name carries this driver's own prefix,
+// The file name starts with this driver's own prefix,
 // display.liken.sh-<claimUID>.json. liken writes
 // liken.sh-<claimUID>.json in the same directory and reads back only
 // the files whose names start with its own prefix, so the two drivers
@@ -37,7 +37,7 @@ package main
 // the same name is a different grant, and its file must not collide
 // with a stale one.
 //
-// Nothing refreshes these files. What they carry is the socket
+// Nothing refreshes these files. What they hold is the socket
 // directory, which the pod mounts at a fixed path, and the app-id,
 // which version 0 derives from the connector name. Neither changes
 // while the operator runs, so a spec written at prepare time stays
@@ -99,8 +99,8 @@ type cdiMount struct {
 // operator's own pod mounts the socket directory from the host at the
 // path it names here, so what the operator sees and what the host has
 // are one path, and a consumer that mounts the same path reads the
-// same socket. A path that differed between the two would need the
-// operator to know its own mount table.
+// same socket. A path that differed between the two would make the
+// operator read its own mount table.
 //
 // A claim that allocates two outputs into one container delivers two
 // app-ids, and only one DISPLAY_APP_ID survives: CDI applies the edits
@@ -151,7 +151,7 @@ func writeCDISpec(claimUID string, devices []cdiDevice) error {
 
 // removeCDISpec deletes a claim's spec file. An already absent file
 // counts as success, because unprepare must be idempotent: the kubelet
-// repeats it whenever it is not sure the call succeeded.
+// repeats it whenever it has no record that the call succeeded.
 func removeCDISpec(claimUID string) error {
 	cdiWrites.Lock()
 	defer cdiWrites.Unlock()

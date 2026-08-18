@@ -8,10 +8,9 @@ package main
 // plugged in or unplugged produces a "change" event on the drm
 // subsystem, with HOTPLUG=1, for the card rather than for the
 // connector, so the event says only that something moved and the
-// operator re-reads sysfs to learn what.
+// operator re-reads sysfs for the new state.
 //
-// Two traps around the socket fail silently, and both are worth
-// writing down.
+// Two ways to open this socket fail silently:
 //
 //   - Bind group 1, never group 2. Group 1 carries the kernel's own
 //     broadcasts. Group 2 carries udev's re-broadcasts to libudev
@@ -36,7 +35,7 @@ import (
 
 // drmEvent reports that something changed on the drm subsystem.
 // Action is the kernel's word, and DevPath names the card or the
-// connector the kernel attached the event to. Neither carries the new
+// connector the kernel attached the event to. Neither holds the new
 // state, so both exist for the log line alone.
 type drmEvent struct {
 	Action  string
@@ -70,8 +69,8 @@ func parseUevent(datagram []byte) (action, devpath string, values map[string]str
 // reports a change on the drm subsystem. Everything else on the
 // socket, which on a running machine is most of it, reports false.
 //
-// The subsystem test is what keeps the volume down, and the action
-// test is what keeps a monitor's own events in. A hotplug is a
+// The subsystem test drops every other subsystem's events, and the
+// action test keeps a monitor's own events in the stream. A hotplug is a
 // "change" on an existing card, not an "add": the card and its
 // connectors were registered when the driver bound. An "add" or a
 // "remove" of a drm device is the card itself arriving or leaving, and

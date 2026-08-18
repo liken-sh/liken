@@ -11,7 +11,7 @@ player. You need the operator
 [installed](/docs/guides/install/) on your
 [`liken`](https://liken.sh/docs/) cluster.
 
-The claim names the screen, the scheduler places the pod, and the
+The claim names the screen. The scheduler places the pod, and the
 container receives the compositor's Wayland socket and the app-id
 that puts its window on that screen.
 
@@ -72,10 +72,10 @@ selector that reads a missing attribute fails the whole allocation.
                   tolerationSeconds: 30
 
 Tolerate `display.liken.sh/disconnected`, the taint a dark connector
-carries. Its effect is `NoExecute`, and `tolerationSeconds` says how
-long your pod may hold a dark screen before it is evicted. Thirty
-seconds means a reseated cable costs nothing, and it also carries
-the pod across a restart of the operator itself. A claim on a
+has. Its effect is `NoExecute`, and `tolerationSeconds` says how
+long your pod may hold a dark screen before the eviction controller
+ends it. Thirty seconds means a reseated cable costs nothing, and it
+also keeps the pod through a restart of the operator itself. A claim on a
 connector with no monitor parks the pod `Pending`, visibly, and the
 pod starts on its own when a monitor is plugged in.
 
@@ -112,22 +112,22 @@ pod starts on its own when a monitor is plugged in.
                 claims:
                   - name: screen
 
-Two lines carry the whole arrangement:
+Two lines make this work:
 
 * `resources.claims` gives the container the claim. That is what
   places the pod and delivers the socket.
 * `--class=$(DISPLAY_APP_ID)` hands the allocated output's app-id to
   the program. The compositor routes a window to a screen by its
   app-id, so the program must present the one the claim delivered.
-  Each toolkit has its own flag: chromium takes
-  `--class=$(DISPLAY_APP_ID)`, mpv takes
+  Each toolkit has its own flag: `chromium` takes
+  `--class=$(DISPLAY_APP_ID)`, and `mpv` takes
   `--wayland-app-id=$(DISPLAY_APP_ID)`.
 
 The image is yours. Any Wayland client works; the operator delivers
 only the socket and the app-id.
 
 `strategy: Recreate` matters. Pods that share one `ResourceClaim`
-share its output, and the compositor refuses nothing: during a
+share its output, and the compositor refuses nothing. During a
 rolling update, the old and the new pod would both present the same
 app-id and cover each other on the one screen. `Recreate` ends the
 old pod first.
@@ -149,7 +149,7 @@ workloads off one screen is the allocation: the second pod cannot
 claim an output the first holds, so it parks until the first
 releases it.
 
-## Unplugs, moves, and a second screen
+## Unplugged monitors, moved monitors, and second screens
 
 **A monitor unplugged.** The device keeps its place in the slice and
 gains the `disconnected` taint. After your `tolerationSeconds`, the
@@ -159,8 +159,9 @@ breaks, and its picture returns with the output.
 
 **A monitor moved to another connector.** A claim that selects by
 `model` or by `serial` instead of by `connector` follows the
-monitor: the old pod is evicted off the dark connector, and its
-replacement allocates the output the monitor is on now.
+monitor. The eviction controller ends the old pod on the dark
+connector, and its replacement allocates the output the monitor is
+on now.
 
 **Two screens from one pod.** One container drives one screen,
 because a claim delivers one `DISPLAY_APP_ID` per container. A pod
@@ -169,7 +170,7 @@ request in the claim.
 
 **A screen and its speakers.** A monitor's HDMI speakers belong to
 the [audio operator](https://audio.liken.sh). Both operators publish
-`monitor.liken.sh/id`, the same identity read from the same monitor,
-so one claim can request a screen from this driver and the matching
-audio output from that one, held together with a `matchAttribute`
-constraint on `monitor.liken.sh/id`.
+`monitor.liken.sh/id`, the same identity read from the same monitor.
+So one claim can request a screen from this driver and the matching
+audio output from that one. A `matchAttribute` constraint on
+`monitor.liken.sh/id` holds the two requests together.

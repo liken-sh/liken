@@ -56,7 +56,7 @@ func (c *sliceLogCapture) only(t *testing.T) string {
 	return lines[0]
 }
 
-// loggedDevice is one device as the slice carries it, with the taint
+// loggedDevice is one device as the slice holds it, with the taint
 // keys the case needs.
 func loggedDevice(name string, keys ...string) SliceDevice {
 	device := SliceDevice{
@@ -150,7 +150,7 @@ func TestSliceLogCreateListsTheTaintedDevices(t *testing.T) {
 		loggedDevice("device-b", disconnectedTaint, otherTaint),
 	})
 
-	want := "slice: created generation 1, 2 devices, 1 tainted: device-b carries " +
+	want := "slice: created generation 1, 2 devices, 1 tainted: device-b has " +
 		disconnectedTaint + ", " + otherTaint
 	if got := capture.only(t); got != want {
 		t.Errorf("line = %q, want %q", got, want)

@@ -13,7 +13,7 @@ package main
 // permissions on the kubelet's directories are the authentication.
 //
 // The prepare protocol tells the driver almost nothing: a claim's
-// namespace, name, and UID. What was allocated lives on the claim's
+// namespace, name, and UID. What was allocated is on the claim's
 // status in the API server, so the driver reads that back, walks sysfs
 // again, and answers for the output the claim holds now.
 //
@@ -38,7 +38,7 @@ import (
 
 // The kubelet's plugin directories. The registry is where the kubelet
 // discovers plugins, and the plugin's own directory holds the socket
-// that does the real work. These are variables so the tests can
+// that answers the prepare calls. These are variables so the tests can
 // substitute them.
 var (
 	draRegistryDir = "/var/lib/kubelet/plugins_registry"
@@ -46,8 +46,8 @@ var (
 )
 
 // draPlugin answers the kubelet's DRA calls. It holds the API client,
-// the card whose connectors it publishes, and where the socket a
-// consumer receives lives. Everything else it derives again on each
+// the card whose connectors it publishes, and the directory of the
+// socket a consumer receives. Everything else it derives again on each
 // call, from the claim and from sysfs.
 type draPlugin struct {
 	drav1.UnimplementedDRAPluginServer
@@ -126,9 +126,10 @@ func serveDRAPlugin(ctx context.Context, plugin *draPlugin) error {
 }
 
 // NodePrepareResources prepares every claim in the request. The
-// response must carry one entry for each claim, because the kubelet
-// treats a missing entry as a failure to retry. Each entry stands on
-// its own, so trouble with one claim never blocks another claim's pod.
+// response must include one entry for each claim, because the kubelet
+// treats a missing entry as a failure to retry. Each entry is
+// independent, so trouble with one claim never blocks another claim's
+// pod.
 func (p *draPlugin) NodePrepareResources(ctx context.Context, req *drav1.NodePrepareResourcesRequest) (*drav1.NodePrepareResourcesResponse, error) {
 	resp := &drav1.NodePrepareResourcesResponse{Claims: map[string]*drav1.NodePrepareResourceResponse{}}
 	for _, claim := range req.Claims {
@@ -159,8 +160,8 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 	}
 
 	// One walk answers every result in the claim, and it is the same
-	// walk that publishes the slice, so the two can never disagree
-	// about which outputs have a monitor on them.
+	// walk that publishes the slice, so the two always report the same
+	// set of outputs with a monitor on them.
 	live := map[string]bool{}
 	for _, output := range connected(discoverOutputs(p.sysRoot, p.card)) {
 		live[deviceName(output.Connector)] = true
@@ -220,9 +221,9 @@ func (p *draPlugin) NodeUnprepareResources(ctx context.Context, req *drav1.NodeU
 
 // draHealth is the device-health stream. The driver keeps it open and
 // sends nothing on it. The service is optional in the DRA protocol,
-// and the kubelet does not treat it that way in practice: an
+// and the kubelet does not treat it that way in practice. An
 // unregistered service produces an Unimplemented error and a retry
-// every few seconds, forever, in the kubelet's log. This operator
+// in the kubelet's log every few seconds, with no end. This operator
 // reports health through the device taints instead, which is the
 // mechanism that evicts a pod when a monitor goes dark.
 type draHealth struct {

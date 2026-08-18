@@ -8,20 +8,21 @@ cluster. It runs the Weston compositor in its pod. A pod that claims
 an output receives the Wayland socket and the app-id that puts its
 window, fullscreen, on that screen.
 
-That makes a screen something you give a workload from a manifest: a
-kiosk browser on the lobby screen, run from a `Deployment`; a dashboard
-on a wall monitor; a movie on the TV. The claim names the screen, by
-connector or by which monitor is plugged in, the scheduler finds the
-machine, and the container receives the socket. No SSH, no
-configuration on the host, no privileged pod.
+That makes a screen something you give a workload from a manifest.
+A kiosk browser runs on the lobby screen from a `Deployment`, a
+dashboard runs on a wall monitor, and a movie runs on the TV. The
+claim names the screen, by connector or by which monitor is plugged
+in. The scheduler finds the machine, and the container receives the
+socket. This needs no SSH, no configuration on the host, and no
+privileged pod.
 
 The operator is one of `liken`'s
 [hardware operators](https://liken.sh/docs/concepts/hardware-operators/):
 optional workloads, installed like any other manifest, that a cluster
 runs fine without. What it needs from `liken` is the card. `liken`'s
-own DRA driver publishes the raw hardware, this operator claims the
+own DRA driver publishes the raw hardware. This operator claims the
 card through an ordinary `liken.sh` claim, and it publishes the
-outputs at the grain a workload asks for, one device per connector
+outputs at the grain a workload asks for: one device per connector
 under `display.liken.sh`. It uses no private interface into `liken`:
 the claim, the `ResourceSlices`, and the CDI files are the public
 contracts any DRA driver gets.
@@ -45,7 +46,7 @@ their YAML):
       -f https://display.liken.sh/deploy/rbac.yaml \
       -f https://display.liken.sh/deploy/operator.yaml
 
-[`deploy/`](deploy/) is the source of those files: a kustomize base
+[`deploy/`](deploy/) is the source of those files: a `kustomize` base
 with the RBAC and the `DaemonSet` whose pod claims the card on its
 own node. It ships no `DeviceClass`, because a class is cluster
 policy, the cluster owner's to name and curate, like a
@@ -56,10 +57,10 @@ policy, the cluster owner's to name and curate, like a
 [`plans/`](plans/README.md) holds the design documents: why the image
 is a library closure on scratch, and how a monitor arrives on a dark
 connector without a restart. The pattern this operator is an instance
-of lives in `liken`'s repository, in
+of is documented in `liken`'s repository, in
 [milestone 56, device operators](https://github.com/liken-sh/liken/blob/main/plans/completed/56-device-operators.md).
 
-## Building it
+## The build
 
     go build ./...
     go test ./...

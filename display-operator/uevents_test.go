@@ -74,8 +74,8 @@ func TestDRMEventFrom(t *testing.T) {
 		},
 		{
 			// Most of what a running machine puts on this socket is
-			// another subsystem's, and the subsystem test is what
-			// keeps the volume down.
+			// another subsystem's, and the subsystem test drops all
+			// of it.
 			name:     "another subsystem",
 			datagram: datagram("add@/devices/virtual/input/input5", "SUBSYSTEM=input"),
 			want:     false,

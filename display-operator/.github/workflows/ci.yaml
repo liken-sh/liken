@@ -1,9 +1,10 @@
 # Every push to main and every pull request runs the tests. Nothing
 # here releases: a release is a pushed tag, and release.yaml owns
 # that. The split lets docs and intermediate work land on main
-# without cutting a version, while every commit still proves itself.
+# without cutting a version, while the tests still run on every
+# commit.
 #
-# There is no path filter. The Go sources sit at the top level beside
+# There is no path filter. The Go sources are at the top level beside
 # the packages, and a new package is an ordinary new directory, so a
 # filter would either miss new code or name every file. The tests run
 # in about a minute; running them on a docs commit costs less than

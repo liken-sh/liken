@@ -59,7 +59,7 @@ func TestDiscoverOutputsPublishesEveryConnector(t *testing.T) {
 		t.Fatalf("got %d outputs, want 3: %+v", len(outputs), outputs)
 	}
 	// Sorted, so the same hardware always produces the same list and
-	// the slice comparison sees real changes only.
+	// the slice comparison reports real changes only.
 	if outputs[0].Connector != "DP-1" || outputs[1].Connector != "HDMI-A-1" || outputs[2].Connector != "HDMI-A-2" {
 		t.Fatalf("connectors = %q, %q, %q", outputs[0].Connector, outputs[1].Connector, outputs[2].Connector)
 	}

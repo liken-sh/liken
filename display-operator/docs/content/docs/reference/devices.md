@@ -8,14 +8,15 @@ toc: true
 
 `display-operator` publishes one
 [Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
-device for each **connector** on the graphics card its pod claims
-from [`liken`](https://liken.sh/docs/): not one for each monitor
-plugged in. A cabled monitor that is asleep still answers its EDID,
+device for each connector on the graphics card its pod claims
+from [`liken`](https://liken.sh/docs/). The device count follows the
+card's connectors, whether or not a monitor is plugged into each
+one. A cabled monitor that is asleep still answers its EDID,
 so its output publishes untainted and a claim on it starts a pod. An
 empty connector publishes with the `disconnected` taint, so a claim
 on it parks instead of failing.
 
-The devices live in one
+The operator publishes the devices into one
 [`ResourceSlice`](https://kubernetes.io/docs/reference/kubernetes-api/resource/resource-slice-v1/)
 per node, named `<node>-display.liken.sh`, beside the slice `liken`
 itself publishes:
@@ -71,7 +72,7 @@ from a claim instead, add a selector on the attributes below, as
 [Put a window on a screen](/docs/guides/claim/) shows.
 
 The other two classes from the install guide, `display-gpu` and
-`display-render`, are not for consumers: they select the raw card
+`display-render`, are not for consumers. They select the raw card
 node and render node that `liken`'s own driver publishes, and the
 operator's own pod claims one of each. The pod cannot start without
 them.
@@ -114,14 +115,14 @@ monitor attribute first:
 which the [audio operator](https://audio.liken.sh) publishes from
 the same monitor's HDMI ELD. Both drivers build the value the same
 way, byte for byte, because the scheduler compares them under a
-`matchAttribute` constraint: the lowercase PNP id, the four-digit
-hexadecimal product code, then the lowercase monitor name with each
-run of spaces turned to one dash. An LG ultrawide reads
+`matchAttribute` constraint. The value is the lowercase PNP id, the
+four-digit hexadecimal product code, then the lowercase monitor name
+with each run of spaces turned to one dash. An LG ultrawide reads
 `gsm-5b09-lg-ultrawide`. A monitor with no name keeps the two-part
-form, `boe-095f`. Two monitors of one model share one value, so a
-constraint is satisfied by either pairing.
+form, `boe-095f`. Two monitors of one model share one value, so
+either pairing satisfies a constraint.
 
-The attribute carries its own domain because an unqualified name
+The attribute has its own domain because an unqualified name
 belongs to the driver that published it. A bare `model` here and a
 bare `model` in the audio driver's slice would never match.
 
@@ -134,7 +135,7 @@ on this attribute with `has()`, like every other monitor attribute.
 ## The taint
 
 `display.liken.sh/disconnected`, with effect `NoExecute`, is the one
-taint a device carries, and it means the output can serve nobody
+taint a device has, and it means the output can serve nobody
 right now. It appears in three cases:
 
 * the connector has no monitor,
@@ -144,14 +145,14 @@ right now. It appears in three cases:
 A consumer tolerates it with a `tolerationSeconds`, which is how
 long the pod may hold a dark screen before the eviction controller
 ends it. Thirty seconds covers a reseated cable and an operator
-restart. A device is tainted, never deleted: the allocation on a
-running claim names the device, and a device removed from the slice
-would strand the kubelet's prepare retries.
+restart. The operator taints a device and never deletes it: the
+allocation on a running claim names the device, and a device removed
+from the slice would strand the kubelet's prepare retries.
 
 ## What a prepared claim delivers
 
-The delivery is a mount and three environment variables, applied to
-the container by the runtime. There is no device node, because a
+The delivery is a mount and three environment variables, which the
+runtime applies to the container. There is no device node, because a
 Wayland client draws through the compositor, which holds the card.
 
 | What | Value |
@@ -169,7 +170,7 @@ containers, each naming its own request.
 ## The slice's lifetime
 
 The operator creates its slice on the first pass, rewrites it when
-sysfs disagrees with it, and never deletes it. The `Node` owns the
+it differs from sysfs, and never deletes it. The `Node` owns the
 slice, so a node that leaves the cluster takes the slice with it.
 The slice outlives the operator's pod on purpose, so removing the
 operator for good ends with:

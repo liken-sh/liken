@@ -1,6 +1,6 @@
 package main
 
-// The identity a published device carries.
+// The identity of a published device.
 //
 // The name is the connector the kernel assigns to one of the graphics
 // card's outputs: HDMI-A-1, DP-2, eDP-1. A connector is a property of
@@ -32,7 +32,7 @@ import (
 // operator and the audio operator both publish. The domain is
 // monitor.liken.sh, which is neither driver's own name: the
 // QualifiedName documentation reserves an unqualified name for the
-// publishing driver, so a shared value has to carry a domain that
+// publishing driver, so a shared value needs a domain that
 // says what it identifies rather than who wrote it.
 const pairingAttribute = "monitor.liken.sh/id"
 
@@ -48,10 +48,10 @@ func deviceName(connector string) string {
 // Version 0 uses the device name, and the operator writes it into
 // weston.ini as the output's app-ids= line, so a claim on hdmi-a-1
 // receives DISPLAY_APP_ID=hdmi-a-1 and a client that passes that to
-// its toolkit lands on that monitor.
+// its toolkit puts its surface on that monitor.
 //
-// The app-id only routes a surface to an output; it does not decide
-// who may use the output. The claim decides that. The compositor
+// The app-id only routes a surface to an output; it grants nothing.
+// The claim is what grants the output. The compositor
 // refuses nothing: two clients that present one app-id both get the
 // screen, one on top of the other. What stops that here is that the
 // second pod cannot allocate an output the first pod holds.
@@ -67,7 +67,7 @@ func appID(connector string) string {
 //
 // The rule is shared with the audio operator, which derives the same
 // value from the HDMI ELD, and the scheduler compares the two byte for
-// byte. A pair of drivers that disagree by one character parks every
+// byte. Two drivers whose values differ by one character park every
 // pairing claim forever, so the three steps are fixed:
 //
 //   - Decode the manufacturer. A decode that fails publishes no
@@ -78,7 +78,7 @@ func appID(connector string) string {
 //   - Append the dashed lowercase name only when the name says
 //     something after trimming. A monitor with no name descriptor gets
 //     the two-part form, boe-095f, and never a trailing dash or an
-//     empty string. The ELD carries the manufacturer, the product
+//     empty string. The ELD holds the manufacturer, the product
 //     code, and the monitor name and nothing else, so a nameless panel
 //     still pairs with its own speakers on the two parts both drivers
 //     can build.
@@ -94,7 +94,7 @@ func monitorID(edid EDID) string {
 }
 
 // slug turns a monitor name into the form the pairing identity
-// carries: lowercase, with each run of spaces replaced by one dash.
+// uses: lowercase, with each run of spaces replaced by one dash.
 // "LG HDR WQHD" becomes lg-hdr-wqhd.
 func slug(name string) string {
 	return strings.Join(strings.Fields(strings.ToLower(name)), "-")

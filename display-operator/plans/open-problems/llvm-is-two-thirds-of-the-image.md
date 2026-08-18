@@ -33,8 +33,9 @@ for the published image.
 prover. Nothing in mesa calls it. It is in the image because Debian
 builds LLVM with `-DLLVM_ENABLE_Z3_SOLVER=ON`, which
 `llvm-toolchain-19` sets for every architecture except sh4 whenever
-`libz3-dev` is newer than 4.7.0. So the true cost of LLVM in this image
-is not 127 MB. It is 159,444,752 bytes over four files.
+`libz3-dev` is newer than 4.7.0. So the whole cost of LLVM in this
+image is 159,444,752 bytes over four files: the 127 MB of
+`libLLVM.so.19.1` itself plus its three private dependents.
 
 LLVM and gallium together are 202,010,656 bytes, or 86.2% of the
 image. Everything else is 32.3 MB: weston, libweston, the four modules,
@@ -104,7 +105,7 @@ closure stage into a source build, and four costs follow from that.
   `apt-get install` and one `go build` today. A mesa build replaces the
   first of those, and neither its duration nor a cache strategy for it
   has been measured.
-* **A version to carry.** Debian's suite pin already fixes weston at
+* **A version to own.** Debian's suite pin already fixes weston at
   14 and mesa at 25.0.7. A source build replaces the mesa half of that
   pin with a tag this repository chooses, and with the security updates
   this repository then owes. Debian issued 25.0.7-2+deb13u1 as an
@@ -129,7 +130,7 @@ llvmpipe fails that check on the first line it reads.
 
 Three ways out, none chosen:
 
-* **Keep a second image that carries llvmpipe, and check that one.**
+* **Keep a second image that includes llvmpipe, and check that one.**
   The check then passes on bytes the fleet never runs. Plan 01 builds
   the operator image `FROM` the weston image for one stated reason:
   "the compositor that passed the check and the compositor the pod runs
@@ -137,15 +138,15 @@ Three ways out, none chosen:
   property up.
 * **Build `softpipe` beside `iris`.** `softpipe` is a choice in
   `gallium-drivers` at 26.2.0, and it is absent from every `enable_if`
-  that forces LLVM, so a build of `iris` and `softpipe` with
+  that forces LLVM. So a build of `iris` and `softpipe` with
   `-Dllvm=disabled` keeps a software rasterizer. Mesa's `meson.build`
   treats either one as the swrast path: `with_gallium_swrast =
   with_gallium_softpipe or with_gallium_llvmpipe`. Whether weston's
   headless backend starts its GL renderer on softpipe, and how long one
   frame takes, is unverified. Softpipe is slower than llvmpipe by
-  design. The check starts the compositor and reads two lines from the
-  log, so how much that costs is a question of seconds, not of whether
-  the check can pass.
+  design. But the check starts the compositor and reads two lines from
+  the log, so a slower rasterizer costs seconds of runner time and
+  does not block the check.
 * **Move the check to hardware.** The
   [other open problem](loads-that-ldd-cannot-see.md#what-it-does-not-cover)
   already asks for this for a different reason: a headless runner never
@@ -165,10 +166,10 @@ machines in `44stonypoint/cluster/machines` are an i5-8279U with Iris
 Plus 655, an i5-8257U with Iris Plus 645, three N100s, and two N95s.
 Five of them declare the `i915` kernel module. studio1 and utility1
 declare no graphics module at all, and say why: an undriven GPU stays
-out of the ResourceSlice, so no GPU claim lands there. liken's own
+out of the `ResourceSlice`, so no GPU claim lands there. liken's own
 testbed, `liken-1`, is an N95. Every one of those parts is Gen9 or
 newer. Mesa's `src/loader/pci_id_driver_map.h` sorts an Intel card into
-`i915`, `crocus`, or `iris`: the first two carry explicit chip-id
+`i915`, `crocus`, or `iris`: the first two have explicit chip-id
 lists, and `iris` takes everything its predicate accepts, which is Gen8
 and newer. So `iris` alone covers this fleet, and `crocus`, `i915`,
 `radeonsi`, `r300`, `r600`, `nouveau`, `svga`, `virgl`, `d3d12` and
@@ -180,26 +181,25 @@ keeps `i915`, `xe`, `radeon` and `amdgpu` so that a console works on an
 ordinary machine
 ([milestone 32](https://github.com/liken-sh/liken/blob/main/plans/completed/32-hardware-support-in-the-image.md)).
 An `iris`-only compositor image would be narrower than the OS that runs
-it: a machine with AMD integrated graphics would boot, publish a GPU,
+it. A machine with AMD integrated graphics would boot, publish a GPU,
 and then start a compositor with no driver for the card. The image is
-one artifact on ghcr.io for every liken user, not one artifact for this
-house. What that image owes a machine it was not built for is not
-decided.
+one artifact on ghcr.io, and every liken user pulls the same one. What
+that image owes a machine it was not built for is not decided.
 
 ## What is next after LLVM and gallium
 
 Take LLVM, Z3, libxml2, libedit and gallium out, and 32.3 MB is left.
 The next items are small, and the closure attributes each of them to a
 seed. Removing one seed and recomputing the graph gives what only that
-seed carries:
+seed adds:
 
-* **`headless-backend.so` carries 11,269,608 bytes over 28 files that
+* **`headless-backend.so` adds 11,269,608 bytes over 28 files that
   nothing else in the closure needs.** It links cairo, pango,
   harfbuzz, freetype, fontconfig, glib, gio, libjpeg, libwebp, libpng
   and libX11. The production path never loads the headless backend.
   The release check is the only thing that does, and the check is also
   the reason plan 01 keeps one image rather than two.
-* **`drm-backend.so` carries 1,848,232 bytes over 6 files**, which is
+* **`drm-backend.so` adds 1,848,232 bytes over 6 files**, which is
   libsystemd through libseat, libva, libva-drm, and libdisplay-info.
   That is the backend the fleet runs, and it is 0.8% of the image.
 * **`wayland-info` is 55,976 bytes.** Plan 01 keeps it as the only
@@ -214,8 +214,8 @@ x86_64 uses X86. Mesa's `meson.build` asks LLVM for the `native` module
 when `draw-use-llvm` is on, and it asks for `all-targets` only on
 darwin, or as an optional module when it builds `clc`. A private LLVM
 built with `-DLLVM_TARGETS_TO_BUILD=X86` and
-`-DLLVM_ENABLE_Z3_SOLVER=OFF` would drop Z3's 27.7 MB outright and an
-unmeasured share of LLVM's 129.7 MB, with no change to mesa at all.
+`-DLLVM_ENABLE_Z3_SOLVER=OFF` would drop Z3's 27.7 MB outright, plus
+an unmeasured share of LLVM's 129.7 MB. Mesa would not change at all.
 That trades a mesa build for an LLVM build, which is the larger of the
 two, so it is a worse trade for CI time and a better one for coverage.
 

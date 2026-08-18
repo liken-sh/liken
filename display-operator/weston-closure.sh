@@ -5,9 +5,9 @@
 # Debian puts every libweston backend in one package, so apt cannot
 # express what this image needs. Installing weston pulls FreeRDP,
 # neatvnc, GStreamer, PipeWire, libavcodec and flite, because
-# rdp-backend.so, vnc-backend.so and remoting-plugin.so sit in the same
+# rdp-backend.so, vnc-backend.so and remoting-plugin.so are in the same
 # package as drm-backend.so. This script takes the four modules the
-# operator uses and leaves the other eight behind.
+# operator uses and omits the other eight.
 #
 # Run it in a builder that has the packages installed. It writes a
 # rootfs to the directory named on the command line.
@@ -15,7 +15,7 @@ set -eu
 
 out=$1
 
-# The multiarch directory that every library below lives in. dpkg
+# The multiarch directory that holds every library below. dpkg
 # names it for the architecture this builds on, so no architecture is
 # written down here.
 lib=$(dirname "$(dpkg -L libweston-14-0 | grep '/libweston-14$')")
@@ -23,7 +23,7 @@ lib=$(dirname "$(dpkg -L libweston-14-0 | grep '/libweston-14$')")
 # The dynamic loader finds a library by its DT_NEEDED name, and ldd
 # reports that whole graph. It reports nothing about a library that a
 # program opens by file name at runtime, and every line below is such a
-# library. Each one is a load that ldd cannot see:
+# library. Each one is a load that ldd cannot report:
 #
 #   weston            opens the backend, the renderer and the shell
 #                     that weston.ini names.
@@ -74,10 +74,10 @@ $lib/dri/kms_swrast_dri.so
 #
 # glvnd refuses to load a vendor it has no JSON for. mesa reads
 # drirc for the per-application workarounds it applies. xkbcommon
-# compiles a keymap for the seat whenever weston starts, and it
-# compiles that keymap from the rules, the symbols and the keycodes
-# under /usr/share/X11/xkb, with require-input=false and no keyboard
-# on the machine. libinput reads its quirks database whether or not a
+# compiles a keymap for the seat whenever weston starts, even with
+# require-input=false and no keyboard on the machine. It compiles
+# that keymap from the rules, the symbols and the keycodes under
+# /usr/share/X11/xkb. libinput reads its quirks database whether or not a
 # device is there to apply one to, and it says "failed to find data
 # files" at every start without it.
 data="
@@ -140,7 +140,7 @@ done
 
 # Without a cache the loader searches its built-in directory list on
 # every open, and that list does not name the multiarch directory
-# every library above lives in.
+# that holds every library above.
 mkdir -p "$out/etc"
 printf '%s\n' "$lib" >"$out/etc/ld.so.conf"
 ldconfig -r "$out"

@@ -1,16 +1,16 @@
 // display-operator publishes each of a graphics card's monitor
-// outputs as its own DRA device, so that a pod claims one screen by
-// its connector name or by what the monitor is, and receives the
+// outputs as its own DRA device. A pod claims one screen by its
+// connector name or by what the monitor is, and receives the
 // Wayland socket and the app-id that put its window on that screen.
 //
 // It is an instance of liken's device operator pattern. The operator
 // claims the card's display device through an ordinary liken.sh claim,
 // runs Weston with the kiosk shell beside itself in the same pod, and
 // publishes what the compositor drives under its own driver name,
-// display.liken.sh. The operator uses no private interface into liken:
-// the raw claim, the slices it writes, and the CDI files it leaves for
-// the runtime are the public contracts that any DRA driver on any
-// Kubernetes cluster gets.
+// display.liken.sh. The operator uses no private interface into
+// liken. The raw claim, the slices it writes, and the CDI files it
+// leaves for the runtime are the public contracts that any DRA
+// driver on any cluster gets.
 //
 // The claim does two jobs that a person would otherwise write down. It
 // places the pod, because only a machine that has a graphics card
@@ -19,9 +19,9 @@
 // card node as an exclusive device, so the claim holder is the only
 // program setting a mode on that card.
 //
-// The published outputs then arbitrate for every consumer: a screen
-// is a resource the scheduler allocates once, not a name that any
-// client can repeat from its config to take the same screen.
+// The published outputs then arbitrate for every consumer: the
+// scheduler allocates a screen once, and a client cannot take the
+// same screen by repeating its name from a config.
 package main
 
 import (
@@ -39,18 +39,18 @@ import (
 const (
 	// settleWindow is how long the loop waits for quiet after the last
 	// event before it writes. One monitor plugged in produces a burst
-	// of uevents, and the whole burst deserves one write.
+	// of uevents, and one write must cover the whole burst.
 	//
 	// Every ResourceSlice write wakes every DRA-pending pod in the
 	// cluster, because the scheduler event that a slice change raises
-	// carries no queueing hint. A cable that flaps must not turn into
+	// includes no queueing hint. A cable that flaps must not turn into
 	// a cluster-wide scheduling storm.
 	settleWindow = 1500 * time.Millisecond
 
 	// settleLimit bounds the wait. A monitor that wakes and sleeps in
 	// a loop restarts the quiet window forever, and the state it
-	// settles on may never arrive, so the loop publishes what it can
-	// see at this interval regardless.
+	// settles on may never arrive, so the loop publishes what it
+	// reads at this interval regardless.
 	settleLimit = 10 * time.Second
 
 	// backstopInterval is how often the loop reconciles with no event
@@ -157,9 +157,9 @@ func main() {
 	if len(live) == 0 {
 		// Every connector still publishes, tainted, so a person can
 		// claim a screen that is cabled and asleep and the pod parks
-		// until somebody wakes it. Whether the compositor tolerates
-		// starting with no output is the compositor's answer, and it
-		// gives it by exiting.
+		// until somebody wakes it. The operator does not test whether
+		// the compositor starts with no output: a compositor that
+		// refuses exits, and that exit is the report.
 		fmt.Fprintf(os.Stderr, "%s has no monitor on any of its %d connectors\n", card, len(outputs))
 	}
 	for _, output := range live {
@@ -167,7 +167,7 @@ func main() {
 		if monitor == "" {
 			monitor = "a monitor with no readable EDID"
 		}
-		fmt.Printf("%s: %s carries %s, app-id %s\n",
+		fmt.Printf("%s: %s has %s, app-id %s\n",
 			DriverName, output.Connector, monitor, appID(output.Connector))
 	}
 	if err := writeWestonConfig(westonConfigPath, outputs); err != nil {
@@ -227,8 +227,8 @@ func main() {
 		fatal("watching for kernel events: %v", err)
 	}
 
-	// A write that failed asks for one more pass through the same
-	// channel every other source uses, so the retry costs the loop no
+	// A write that failed schedules one more pass through the same
+	// channel every other source uses. The retry costs the loop no
 	// time and takes the same settle window.
 	retries := make(chan struct{}, 1)
 	publish := func() {
@@ -322,7 +322,7 @@ func reconcile(client *Client, nodeName string, owner OwnerReference, card strin
 
 // wakes turns the kernel's drm events and the write retries into one
 // channel of wakes, with a backstop tick in it. Nothing on any of them
-// carries state that the loop uses: they say to look again, and the
+// holds state that the loop uses: each wake means look again, and the
 // look is a fresh read of sysfs.
 func wakes(ctx context.Context, uevents <-chan drmEvent, retries <-chan struct{}) <-chan struct{} {
 	out := make(chan struct{}, 1)
@@ -363,9 +363,9 @@ func wakes(ctx context.Context, uevents <-chan drmEvent, retries <-chan struct{}
 // input has been quiet for window, or after limit has passed since the
 // first event of the burst, whichever comes first.
 //
-// The limit is what keeps a flapping cable publishing. Without it,
-// hardware that changes faster than the quiet window would restart the
-// wait on every event and the loop would never write.
+// The limit keeps the loop publishing under a flapping cable. Without
+// it, hardware that changes faster than the quiet window would restart
+// the wait on every event and the loop would never write.
 func settle(ctx context.Context, in <-chan struct{}, window, limit time.Duration) <-chan struct{} {
 	out := make(chan struct{}, 1)
 	go func() {

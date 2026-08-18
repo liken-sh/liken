@@ -41,7 +41,7 @@ operator refines it into outputs.
 
 A `DeviceClass` is cluster-scoped policy: you name and curate the
 classes, the same convention as a `StorageClass`, so the base ships
-none. Save this as `deviceclasses.yaml` and apply it:
+none. Save this as `deviceclasses.yaml`. Then apply it:
 
     apiVersion: resource.k8s.io/v1
     kind: DeviceClass
@@ -81,9 +81,9 @@ The three classes do two different jobs:
 * `display-gpu` and `display-render` are bootstrap. The operator's
   own pod claims the graphics card's card node and render node
   through them, from the devices `liken` publishes, so without them
-  the operator cannot start. Selecting on the `displayNode` and
-  `renderNode` attributes, rather than on a vendor and a product id,
-  keeps the classes correct across a fleet of different machines.
+  the operator cannot start. The classes select on the `displayNode`
+  and `renderNode` attributes rather than on a vendor and a product
+  id, so they stay correct across a fleet of different machines.
 * `display-output` is what workloads claim: this operator's monitor
   outputs.
 
@@ -91,7 +91,7 @@ The names are yours to choose, with one consequence: the operator's
 `ResourceClaimTemplate` in [`operator.yaml`](/deploy/operator.yaml)
 names `display-gpu` and `display-render` literally, so different
 names there mean patching the template. A different name for
-`display-output` costs nothing; your claims carry it in
+`display-output` costs nothing; your claims name it in
 `deviceClassName`.
 
 ### Generic or specific
@@ -101,9 +101,9 @@ choose its grain. `display-output` above is generic: it matches
 every monitor output, keeps the class list short, and leaves the
 choice of screen to each claim's selector, written in
 [Common Expression Language (CEL)](https://kubernetes.io/docs/reference/using-api/cel/).
-A specific class bakes the selector into the class itself, so a
-claim names the class and writes no CEL, and the choice is made
-once, in cluster policy you control:
+A specific class holds the selector itself. A claim then names the
+class and writes no CEL, and you make the choice once, in cluster
+policy you control:
 
     apiVersion: resource.k8s.io/v1
     kind: DeviceClass
@@ -116,15 +116,15 @@ once, in cluster policy you control:
               device.driver == "display.liken.sh" &&
               device.attributes["display.liken.sh"].connector == "HDMI-A-1"
 
-Start generic. Mint a specific class when several workloads keep
-writing the same selector, or when you want the choice of screen to
-live in cluster policy rather than in each workload's manifest.
+Start generic. When several workloads repeat the same selector, or
+when you want the choice of screen in cluster policy rather than in
+each workload's manifest, create a specific class.
 
 The example selects by `connector`, the one attribute every output
 always publishes. A specific class that selects by a monitor
 attribute, such as `model`, must guard the read with `has()`, the
-way [Put a window on a screen](/docs/guides/claim/) shows, because
-those attributes are absent on a dark connector and a selector that
+way [Put a window on a screen](/docs/guides/claim/) shows. Those
+attributes are absent on a dark connector, and a selector that
 reads a missing attribute fails the whole allocation.
 
 ## 3. Apply the manifests
@@ -189,8 +189,8 @@ Now [put a window on a screen](/docs/guides/claim/).
 
 ## Remove the operator
 
-Delete the manifests, then the slice on each node that published
-one:
+Delete the manifests. Then delete the slice on each node that
+published one:
 
     kubectl delete -n liken-system \
       -f https://display.liken.sh/deploy/rbac.yaml \
@@ -199,7 +199,7 @@ one:
 
 The slice step is yours because the operator never deletes its
 slice. A device that leaves the inventory while a claim still names
-it strands the kubelet's prepare call, so the operator taints
+it strands the kubelet's prepare call. So the operator taints
 devices instead of removing them, and the slice outlives every pod.
-The device classes are yours too; delete them when nothing else
-claims through them.
+The device classes are yours too. When nothing else claims through
+them, delete them.

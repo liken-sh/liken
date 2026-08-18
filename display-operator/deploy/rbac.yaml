@@ -20,19 +20,18 @@ rules:
   # is deterministic, and reading anyone else's inventory is the
   # scheduler's job.
   #
-  # No delete either. This operator never removes its slice: a monitor
-  # that leaves is a taint, and a device that leaves the inventory
-  # strands the kubelet's prepare call for the next consumer with no
+  # No delete either. This operator never removes its slice. A monitor
+  # that leaves is a taint, and a device that left the inventory would
+  # strand the kubelet's prepare call for the next consumer, with no
   # bound on the retry. The Node owns the slice, so a node that leaves
-  # the cluster is what takes it away, and a person who uninstalls the
-  # operator for good deletes the slice by name with their own
-  # credentials.
+  # the cluster takes it away. A person who uninstalls the operator
+  # for good deletes the slice by name with their own credentials.
   - apiGroups: [resource.k8s.io]
     resources: [resourceslices]
     verbs: [get, create, update]
   # The DRA plugin (dra.go): when the kubelet asks this driver to
   # prepare a claim, the request names the claim and nothing more. The
-  # allocation lives on the claim's status, so the driver reads it
+  # allocation is on the claim's status, so the driver reads it
   # back. This is read-only across every namespace, because claims
   # belong to workloads and the driver serves whichever namespace
   # claims a screen. Still no list and no watch: prepare calls arrive
