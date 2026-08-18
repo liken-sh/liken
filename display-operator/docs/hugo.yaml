@@ -19,7 +19,7 @@ disableKinds: [taxonomy, term, rss]
 # The theme renders every page twice, once as HTML for people and
 # once as the authored Markdown for agents and scripts. The two files
 # land side by side, so the Markdown twin of / is /index.md. The
-# theme carries the templates, but a theme cannot declare output
+# theme provides the templates, but a theme cannot declare output
 # formats, so this block is the site's part of the contract
 # (themes/brand/README.md states it).
 outputFormats:
@@ -40,13 +40,13 @@ outputs:
 # YAML, at /deploy/<file>.yaml. A reader reads the real manifests in
 # place, `kubectl apply -f` takes the URLs directly, and a
 # Kustomization can name them as resources, so an install needs no
-# clone. The mount publishes the files the repository actually
-# carries: there is no copy to drift.
+# clone. The mount publishes the files the repository holds: there
+# is no copy to drift.
 #
 # Declaring any mount replaces every default mount for the site, so
 # the content mount comes back explicitly. The theme's own mounts,
-# which carry the favicon and the brand images, are the theme's and
-# stay as they are.
+# which provide the favicon and the brand images, are the theme's
+# and stay as they are.
 module:
   mounts:
     - source: content
