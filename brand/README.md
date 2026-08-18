@@ -19,9 +19,9 @@ Two kinds of consumer read this repository:
   stylesheet and the mark, so a page builder such as liken's release
   channel inlines them with no file to copy.
 
-`VOICE.md` carries the voice and tone rules for every word the sites
+`voice.md` carries the voice and tone rules for every word the sites
 publish. It stands alone, so a consuming repo references it from its
-`docs/AGENTS.md` with the import line `@themes/brand/VOICE.md`, and
+`docs/AGENTS.md` with the import line `@themes/brand/voice.md`, and
 the writing rules arrive with the same submodule that carries the
 theme.
 
