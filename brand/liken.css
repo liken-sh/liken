@@ -59,6 +59,26 @@ body {
 
 a { color: var(--link); }
 
+/* An external link carries a small up-and-out mark after its text,
+   so a reader knows the next page leaves the liken sites. The
+   selector tests the href as a string, because CSS cannot parse a
+   hostname: an absolute http(s) link gets the mark unless the
+   string carries a family host, liken.sh itself or a *.liken.sh
+   subdomain, followed by its path or standing at the string's end.
+   The string test has known limits: an external URL whose text
+   happens to contain ".liken.sh/" escapes the mark. Family pages
+   link ordinary URLs, so that miss does not occur in practice. A
+   relative link never starts with "http", so it never matches. The
+   mark is part of the anchor, so it inherits the link color in both
+   color schemes, and a wrap at a line end keeps it attached to the
+   last word, because nothing separates them. */
+a[href^="http"]:not([href*="//liken.sh/"]):not([href*=".liken.sh/"]):not([href$="//liken.sh"]):not([href$=".liken.sh"])::after {
+  content: "\2197";
+  font-size: 0.7em;
+  margin-left: 0.2em;
+  vertical-align: 0.1em;
+}
+
 h1, h2, h3 { line-height: 1.25; }
 
 /* Tables carry reference material on both sites: a CRD's fields in
