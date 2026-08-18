@@ -1,0 +1,20 @@
+# The entries of the top nav, in order. Every liken site renders the
+# same nav from this file, so the family reads as one place whichever
+# site the reader lands on. The URLs are absolute, because the sites
+# live on different hostnames and a relative link would point into
+# the wrong site.
+#
+# `code: true` sets the label in the code face; the project's name is
+# a command, and the nav writes it the way the prose does. A site can
+# replace this file by shipping its own data/nav.yaml, because Hugo
+# gives a site's data/ precedence over the theme's, but the point of
+# this file is that no site does.
+- label: liken
+  url: https://liken.sh/
+  code: true
+- label: manual
+  url: https://liken.sh/docs/
+- label: repository
+  url: https://github.com/liken-sh/liken
+- label: releases
+  url: https://releases.liken.sh/

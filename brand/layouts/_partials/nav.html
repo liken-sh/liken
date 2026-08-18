@@ -1,0 +1,8 @@
+{{- /* The top nav, one line of links shared by every liken site.
+The entries come from data/nav.yaml, which explains why they are the
+same everywhere. A label marked code renders in the code face. */ -}}
+<nav class="site">
+  {{- range hugo.Data.nav }}
+  <a href="{{ .url }}">{{ if .code }}<code>{{ .label }}</code>{{ else }}{{ .label }}{{ end }}</a>
+  {{- end }}
+</nav>
