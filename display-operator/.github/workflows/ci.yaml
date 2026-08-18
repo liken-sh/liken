@@ -1,0 +1,33 @@
+# Every push to main and every pull request runs the tests. Nothing
+# here releases: a release is a pushed tag, and release.yaml owns
+# that. The split lets docs and intermediate work land on main
+# without cutting a version, while every commit still proves itself.
+#
+# There is no path filter. The Go sources sit at the top level beside
+# the packages, and a new package is an ordinary new directory, so a
+# filter would either miss new code or name every file. The tests run
+# in about a minute; running them on a docs commit costs less than
+# the filter that would skip them.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - run: go vet ./...
+      - run: go test -race ./...
