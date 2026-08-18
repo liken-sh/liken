@@ -2,8 +2,9 @@
 
 This repository is the brand domain of
 [liken](https://github.com/liken-sh/liken): the mark, the shared
-stylesheet, the Hugo theme that every liken site uses, and the voice
-rules for everything those sites publish. The main manual at
+stylesheet, the Hugo theme, and the voice rules. Every `liken` site
+uses the theme, and every word those sites publish follows the
+voice rules. The main manual at
 [liken.sh](https://liken.sh) and the operators' sites use the same
 shell, the same nav, and the same stylesheet, so the family reads as
 one place.
@@ -11,20 +12,19 @@ one place.
 Two kinds of consumer read this repository:
 
 * **Hugo sites** take it as a git submodule at `themes/brand` and set
-  `theme: brand`. The theme carries the page shell (`layouts/`), the
+  `theme: brand`. The theme is the page shell (`layouts/`), the
   public files every site serves (`static/`), and the nav entries
   (`data/nav.yaml`).
 * **Go programs** that build pages outside Hugo import it as the
   module `github.com/liken-sh/brand`. The package embeds the
-  stylesheet and the mark, so a page builder such as liken's release
-  channel inlines them with no file to copy.
+  stylesheet and the mark, so a page builder such as `liken`'s
+  release channel inlines them with no file to copy.
 
-`voice.md` carries the voice and tone rules for every word the
+`voice.md` states the voice and tone rules for every word the
 project publishes, on the sites and in the source files' comments.
-It stands alone, so a consuming repo references it from its
-`docs/AGENTS.md` with the import line `@themes/brand/voice.md`, and
-the writing rules arrive with the same submodule that carries the
-theme.
+It needs no other file. A consuming repo references it from its
+`docs/AGENTS.md` with the import line `@themes/brand/voice.md`, so
+the writing rules arrive in the same submodule as the theme.
 
 ## Using the theme
 
@@ -74,23 +74,24 @@ section below gives.
 
 `data/nav.yaml` lists the entries of the top nav, in order. Every
 site renders the same labels from this file. "liken" and "releases"
-carry absolute URLs, the same from every site, so a change to those
+have absolute URLs, the same from every site, so a change to those
 links is one commit here and a submodule bump in each site.
 "repository" is site-scoped: it links to the URL the site sets in
 `params.repository`. If a site does not set `params.repository`,
-the nav omits the entry rather than guess at a destination.
+the nav omits the entry, because there is no URL to link.
 
 The nav has no entry for the site's manual, because the sidebar
-carries it. When a site has a `/docs` section, every page shows the
-manual's tree in a sidebar, the front page included, on viewports
-wide enough to hold it; on narrow viewports the breadcrumbs orient
-the reader instead. The sidebar's heading names the project, taken
+shows it. When a site has a `/docs` section, every page shows the
+manual's tree in a sidebar, the front page included. The sidebar
+appears on viewports wide enough to hold it; on narrow viewports
+the breadcrumbs orient the reader. The sidebar's heading names the
+project, taken
 from the last path segment of `params.repository`: `liken` on
 liken.sh, `bluetooth-operator` on the bluetooth operator's site.
 Without the parameter, the heading is the word "Manual". A site
 with no `/docs` section shows no sidebar.
 
-The layouts a site can override by shipping its own file of the same
+A site can override any layout by shipping its own file of the same
 name, because Hugo gives a site's `layouts/` precedence over the
 theme's. liken.sh does this for its `llms.txt` outputs; a site with
 no override gets the theme's shell unchanged.
@@ -110,14 +111,14 @@ is: the Linux kernel and `k3s`, each its own upstream project,
 assembled so tightly that a machine boots the pair as one system.
 
 Lichens are also pioneers. They are among the first living things to
-take hold on bare rock, enduring drought, heat, and bare mineral where
-nothing else will grow, and they are what begins to turn rock into
+take hold on bare rock. They endure drought, heat, and bare mineral
+where nothing else will grow, and they begin to turn rock into
 soil. `liken` starts from the same emptiness: a blank machine, bare
 metal, nothing installed.
 
 And a lichen is frugal by nature, thriving on almost nothing. `liken`
 is built to run a real Kubernetes cluster inside a gigabyte of memory,
-on hardware other systems would call too small.
+on hardware smaller than most systems require.
 
 ## The tiles
 
@@ -166,20 +167,20 @@ shrunk to a favicon, and it would print cleanly in one ink.
 
 `liken.css` is the presentation that every liken site and
 releases.liken.sh share: the colors, the type, and the few elements
-that prose and reference tables need. It carries both a light and a
+that prose and reference tables need. It has both a light and a
 dark scheme, chosen by the reader's system setting, and it takes its
 accent from the greens above. Anything about the shape of one site,
 the manual's sidebar or the channel's digest columns, stays with that
 site.
 
 No site links the file over the network. Each one inlines it into
-every page. The channel needs this: it lives in object storage, apart
+every page. The channel needs this: it is in object storage, apart
 from any cluster, because machines upgrade themselves from it and it
 has to answer when the cluster does not. A stylesheet fetched from
 liken.sh would put the website back in that path.
 
 The consumers read the file two ways. The Hugo theme inlines the
-committed copy in `assets/`, and the release channel's pages read the
+committed copy in `assets/`. The release channel's pages read the
 original through the `brand` Go package, because a Go program can
 only embed files from its own module. The file at the root of this
 repository is the only original.
@@ -189,17 +190,17 @@ repository is the only original.
 `liken.svg` is the original file; every other image in this list
 comes from it. `make` derives the other files, and the repository
 also commits them. Because of this, anyone can get a favicon or an
-avatar without installing a rasterizer, and a site that takes the
+avatar without installing a rasterizer. A site that takes the
 theme as a submodule serves them with no build step:
 
-* `liken.svg` — the original file, for any use at any size.
-* `favicon.ico` — a 16, 32, and 48 pixel raster image, for the browser
+* `liken.svg`: the original file, for any use at any size.
+* `favicon.ico`: a 16, 32, and 48 pixel raster image, for the browser
   tab. The sites also serve the SVG file itself. Modern browsers
   prefer the SVG file and render it sharp at any size; `favicon.ico`
   is the fallback for browsers that cannot use the SVG file.
-* `liken.png` — a 1024-pixel transparent export. Use it for a GitHub
+* `liken.png`: a 1024-pixel transparent export. Use it for a GitHub
   organization avatar or anywhere else that needs a raster image.
-* `static/` and `assets/` — the copies the theme serves, under the
+* `static/` and `assets/`: the copies the theme serves, under the
   URLs the pages link to. The Makefile explains each one.
 
 To rebuild these files, you need `rsvg-convert` (from librsvg) and
@@ -211,12 +212,12 @@ change.
 The biology in this document comes from standard lichenology sources:
 
 * Irwin M. Brodo, Sylvia Duran Sharnoff, and Stephen Sharnoff,
-  *Lichens of North America* (Yale University Press, 2001) — the
+  *Lichens of North America* (Yale University Press, 2001), the
   standard field reference for the symbiosis and for growth forms.
 * [British Lichen Society: Lichen
-  Morphology](https://britishlichensociety.org.uk/learning/lichen-morphology)
-  — areoles and the areolate crustose thallus.
+  Morphology](https://britishlichensociety.org.uk/learning/lichen-morphology),
+  for areoles and the areolate crustose thallus.
 * [Crustose lichen](https://en.wikipedia.org/wiki/Crustose_lichen) and
-  [Lichen](https://en.wikipedia.org/wiki/Lichen), Wikipedia — the
+  [Lichen](https://en.wikipedia.org/wiki/Lichen), Wikipedia, for the
   mycobiont/photobiont symbiosis and the pioneer role in primary
   succession, both with citations to the primary literature.

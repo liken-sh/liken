@@ -1,24 +1,25 @@
 <!--
-The shared shell around every HTML page, for every site in the liken
-family: the manual at liken.sh and the operators' sites beside it.
+This is the shared shell around every HTML page, for every site in
+the liken family: the manual at liken.sh and the operators' sites.
 The colors, the type, and the common elements come from the shared
-stylesheet in this repository, which the release channel's pages
-inline too, so every liken page reads as one place. The rules after
-it are the ones only a documentation site needs: a one-line nav,
-breadcrumbs, a table of contents, and a sidebar. No JavaScript
-anywhere.
+stylesheet in this repository. The release channel's pages inline
+the same stylesheet, so every liken page reads as one place. The
+rules after it are the ones only a documentation site needs: a
+one-line nav, breadcrumbs, a table of contents, and a sidebar. None
+of it uses JavaScript.
 
-Two things orient the reader. Every page below the front page
-carries a breadcrumb trail, built from the page's ancestors. When
-the site has a /docs section, every page, the front page included,
-also gets a sidebar with the manual's whole tree, on screens wide
-enough to hold one; on narrow screens the breadcrumbs alone carry
-the orientation. The sidebar's heading names the project whose
-manual this is, taken from the last path segment of the site's
-repository parameter, so the bluetooth operator's site heads its
-sidebar with that operator's name and not with liken's. The sidebar
-and breadcrumbs exist only in the HTML: a page's Markdown twin is
-the authored file, navigation and all chrome excluded.
+Two things orient the reader. Every page below the front page has
+a breadcrumb trail, built from the page's ancestors. When the site
+has a /docs section, every page also gets a sidebar with the
+manual's whole tree, the front page included. The sidebar appears
+on screens wide enough to hold one; on narrow screens the
+breadcrumbs alone orient the reader. The sidebar's heading names
+the project whose manual this is, taken from the last path segment
+of the site's repository parameter. The bluetooth operator's site
+therefore heads its sidebar with that operator's name rather than
+liken's. The sidebar and breadcrumbs exist only in the HTML: a
+page's Markdown twin is the authored file, navigation and all
+chrome excluded.
 -->
 {{- $docs := .Site.GetPage "/docs" -}}
 {{- $project := "" -}}
@@ -39,7 +40,7 @@ the authored file, navigation and all chrome excluded.
   nav.site a { margin-right: 1rem; }
   nav.crumbs { font-size: 0.9em; margin-bottom: 1.5rem; }
   nav.crumbs span[aria-current] { color: var(--ink-muted); }
-  /* A figure is a floated aside: the image sits at the right margin
+  /* A figure is a floated aside: the image is at the right margin
      with its caption under it, and the text wraps beside it. The
      width matches the mark on the repository's README, small enough
      to leave the text column readable on a phone. */
@@ -50,8 +51,8 @@ the authored file, navigation and all chrome excluded.
   nav.toc { font-size: 0.9em; background: var(--panel);
             padding: 0.6rem 1rem; margin: 1.5rem 0; }
   /* A wide listing, such as command output, reads best unwrapped.
-     The text keeps its measure, and a pre that needs more room
-     centers itself on the column and grows toward the viewport
+     The text keeps its measure. A pre that needs more room is
+     centered on the column and widens toward the viewport
      edges, so it uses the page's margins before it scrolls. Only a
      site with no manual gets this: where the sidebar exists it owns
      the left margin, so pre blocks stay inside the text column and
@@ -68,7 +69,7 @@ the authored file, navigation and all chrome excluded.
   nav.toc ul ul { padding-left: 1rem; }
   /* The sidebar appears only when the viewport can hold it beside
      the text column without squeezing either. Below that width it
-     stays hidden, and the breadcrumbs do the orienting. */
+     stays hidden, and the breadcrumbs orient the reader. */
   aside { display: none; }
   @media (min-width: 70rem) {
     body.manual { max-width: 63rem; display: grid;

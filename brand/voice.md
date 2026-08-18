@@ -1,18 +1,18 @@
 # Voice
 
-These rules govern every word the liken project publishes, on its
+These rules govern every word the `liken` project publishes, on its
 sites and in its repositories: page copy, guides, reference text,
 the field descriptions that generators turn into pages, and the
 comments in the source files. Read them before you write. Scan your
 text against them before you publish. This file follows its own
-rules and stands as an example of them.
+rules and is an example of them.
 
 Write in Simplified Technical English (ASD-STE100). That standard is
-the base, and the rules below add only what it does not carry.
+the base, and the rules below add only what it does not state.
 
 ## Comments
 
-The liken repositories are literate: the scripts, manifests, and Go
+The `liken` repositories are literate: the scripts, manifests, and Go
 files are the documentation, and a comment is published writing in
 the same sense a page is. Every rule in this file applies inside a
 source file. Four more rules apply to comments:

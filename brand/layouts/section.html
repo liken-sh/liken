@@ -1,7 +1,7 @@
 {{ define "main" }}
-{{/* A section index: the section's own prose, then its pages in
-weight order. Sections nested below list here too, because .Pages
-holds both. */}}
+{{/* This renders a section index: the section's own prose, then its
+pages in weight order. Sections nested below list here too, because
+.Pages holds both. */}}
 {{ .Content }}
 <ul>
 {{ range .Pages }}

@@ -1,13 +1,13 @@
-# The entries of the top nav, in order. Every liken site renders the
-# same labels from this file, so the family reads as one place
-# whichever site the reader lands on. There is no entry for the
-# site's manual, because the sidebar on every page carries the whole
+# These are the entries of the top nav, in order. Every liken site
+# renders the same labels from this file, so the family reads as one
+# place whichever site the reader lands on. There is no entry for the
+# site's manual, because the sidebar on every page shows the whole
 # manual already; a nav entry would name the same destination twice.
 #
 # An entry with an absolute url is family-wide: "liken" and
 # "releases" point at the same places from every site. An entry with
 # param instead of url is site-scoped: it takes its destination from
-# the named parameter in the site's hugo.yaml, so "repository"
+# the named parameter in the site's hugo.yaml. "repository" therefore
 # points at the code that the site documents. When a site does not
 # set the parameter, the nav omits the entry. There is no fallback
 # on purpose, because a guessed destination would point readers at
@@ -16,8 +16,8 @@
 # `code: true` sets the label in the code face; the project's name is
 # a command, and the nav writes it the way the prose does. A site can
 # replace this file by shipping its own data/nav.yaml, because Hugo
-# gives a site's data/ precedence over the theme's, but the point of
-# this file is that no site does.
+# gives a site's data/ precedence over the theme's. No site does, so
+# every site renders the same nav.
 - label: liken
   url: https://liken.sh/
   code: true

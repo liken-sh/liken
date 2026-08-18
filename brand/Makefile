@@ -20,9 +20,10 @@ COPIES := static/favicon.ico static/icon.svg \
 all: favicon.ico liken.png $(COPIES)
 
 # This is the browser-tab icon, packed at three sizes so the tab stays
-# sharp whether the browser asks for 16, 32, or 48 pixels. Each size
-# is rasterized straight from the vector image, not downscaled from
-# one large raster image. This method keeps the smallest size crisp.
+# sharp whether the browser asks for 16, 32, or 48 pixels.
+# rsvg-convert rasterizes each size straight from the vector image.
+# Rasterizing one large image and downscaling it would blur the
+# 16-pixel size.
 favicon.ico: liken.svg
 	rsvg-convert -w 16 -h 16 $< -o favicon-16.png
 	rsvg-convert -w 32 -h 32 $< -o favicon-32.png
@@ -36,14 +37,14 @@ favicon.ico: liken.svg
 liken.png: liken.svg
 	rsvg-convert -w 1024 -h 1024 $< -o $@
 
-# The theme's public files. Hugo merges a theme's static/ tree into
-# every consuming site's output, so these copies give each site the
-# same URLs: the two icon names that browsers fetch on their own, and
-# a brand/ directory that gives the mark a stable public URL, so a
-# page anywhere can embed the image without a deep link into the
-# forge. The stylesheet lands in assets/ rather than static/ because
-# the theme inlines it into every page instead of serving it as a
-# file, and assets/ is the tree Hugo reads for that.
+# These are the theme's public files. Hugo merges a theme's static/
+# tree into every consuming site's output, so these copies give each
+# site the same URLs. The two icon names are the ones browsers fetch
+# on their own. The brand/ directory gives the mark a stable public
+# URL, so a page anywhere can embed the image without a deep link
+# into the forge. The stylesheet goes to assets/ rather than static/,
+# because the theme inlines it into every page instead of serving it
+# as a file, and assets/ is the tree Hugo reads for that.
 static/favicon.ico: favicon.ico
 	mkdir -p static
 	cp $< $@
