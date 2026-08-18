@@ -162,6 +162,25 @@ type releaseInfo struct {
 	Notes string
 }
 
+// bareTagsFrom is the first release whose git tag is the bare
+// version. The tags before it carry a v prefix, and tags never move,
+// so both forms exist on GitHub permanently. Every field of a
+// version is zero-padded, so CompareVersions places any version on
+// the correct side of this boundary.
+const bareTagsFrom = "2026.08.18-002"
+
+// Tag gives the git tag that names this release on GitHub, in
+// whichever form GitHub holds it. The pages are rewritten on every
+// release, so this link is constructed here, not recorded at publish
+// time, and it must stay correct for old releases and new ones
+// alike.
+func (r *releaseInfo) Tag() string {
+	if api.CompareVersions(r.Version, bareTagsFrom) < 0 {
+		return "v" + r.Version
+	}
+	return r.Version
+}
+
 // Component gives one component's version for the front page's
 // columns, and an empty string when the release carries no component
 // by that name. An older release predates a component that a newer

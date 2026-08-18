@@ -5,7 +5,7 @@
 # that name down as LIKEN_VERSION. Every other build is a development
 # build, and its version comes from what git already records:
 # `git describe` names the most recent release tag and how far past
-# it this tree is (v2026.07.11-001-5-gabc123), or the bare commit
+# it this tree is (2026.08.18-002-5-gabc123), or the bare commit
 # when no tag exists yet, with -dirty appended when the tree has
 # uncommitted changes. This build invents nothing and needs no manual
 # version bump. A dev machine's status.version.liken points at the

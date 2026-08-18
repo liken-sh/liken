@@ -60,12 +60,16 @@ The git tag is the act of release. Everything else follows from it.
 1. Pick the next version. Use today's date, and use the serial number
    one past the highest serial already tagged today.
 
-       git tag -l "v$(date +%Y.%m.%d)-*"
+       git tag -l "$(date +%Y.%m.%d)-*"
+
+   On a day that has tags in both forms (see the note on the v
+   prefix below), list the v form as well before you pick the
+   serial.
 
 2. Tag the commit and push the tag:
 
-       git tag v2026.07.11-001
-       git push origin v2026.07.11-001
+       git tag 2026.08.18-002
+       git push origin 2026.08.18-002
 
 Pushing the tag hands the rest of the process to CI
 (.github/workflows/release.yaml). The workflow rebuilds every liken
@@ -90,10 +94,11 @@ without publishing anything:
 
        make -C releases release VERSION=2026.07.11-001
 
-The tag carries a v prefix, as git release tags conventionally do. The
-version itself never carries this prefix. Between releases,
-development builds name themselves from the same tags. `git describe`
-yields a name such as v2026.07.11-001-5-gabc123, which means five
-commits past the release, at that commit. A dev machine reports this
-name as status.version.liken. version.mk at the repository root
-explains the mechanism.
+The tag is the bare version, with no prefix. Tags before
+2026.08.18-002 carry a v prefix; those tags never move, and nothing
+reinterprets them. Between releases, development builds name
+themselves from the same tags. `git describe` yields a name such as
+2026.08.18-002-5-gabc123, which means five commits past the release,
+at that commit. A dev machine reports this name as
+status.version.liken. version.mk at the repository root explains the
+mechanism.

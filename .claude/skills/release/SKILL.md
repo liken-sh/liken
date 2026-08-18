@@ -22,14 +22,20 @@ verification.**
 
 ## 2. Pick the version
 
-The format is CalVer: `yyyy.mm.dd-nnn`, and the tag carries a `v`
-prefix, for example `v2026.07.30-001`. `nnn` counts releases within
-one day, starting at `001`. Run `git tag -l "v$(date +%Y.%m.%d)*"`
-and take the next number. Tags are lightweight, not annotated.
+The format is CalVer: `yyyy.mm.dd-nnn`, and the tag is the bare
+version with no prefix, for example `2026.08.18-002`. `nnn` counts
+releases within one day, starting at `001`. Run
+`git tag -l "$(date +%Y.%m.%d)-*"` and take the next number. Tags
+are lightweight, not annotated.
+
+Tags before 2026.08.18-002 carry a `v` prefix. On a day that has
+tags in both forms, list both to find the highest serial:
+`git tag -l "$(date +%Y.%m.%d)-*" "v$(date +%Y.%m.%d)-*"`. On any
+other day, the bare listing alone is complete.
 
 ## 3. Tag and publish
 
-1. `git tag v<version> <commit>` and `git push origin v<version>`.
+1. `git tag <version> <commit>` and `git push origin <version>`.
 2. The tag triggers the `release` workflow: it builds, runs the smoke
    drills, publishes the artifacts and source mirrors to
    `https://releases.liken.sh`, and prints the catalog entry (version

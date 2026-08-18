@@ -5,7 +5,7 @@
 # (releases/versioning.md). This workflow only carries out what the
 # tag requires. So cutting a release from a workstation is only
 #
-#   git tag v2026.07.11-001 && git push origin v2026.07.11-001
+#   git tag 2026.08.18-002 && git push origin 2026.08.18-002
 #
 # The channel is object storage, and the workflow talks directly to
 # it, using the scoped key that Terraform delivered as repository
@@ -17,7 +17,14 @@ name: release
 
 on:
   push:
-    tags: ["v*"]
+    # A release tag is the bare CalVer version, yyyy.mm.dd-nnn, the
+    # same convention the operator repositories use. Tag filters here
+    # take globs, not regular expressions, so a glob cannot state the
+    # grammar; the year's leading digit is the narrowest honest
+    # filter, and the guard below checks the full grammar. Tags before
+    # 2026.08.18-002 carry a v prefix. They do not match this pattern,
+    # and nothing rewrites or reinterprets them.
+    tags: ["2*"]
 
 # contents: write is what lets the last step create the GitHub
 # release. Every step before it only reads the tree. The real
@@ -44,19 +51,19 @@ jobs:
           fetch-depth: 0
           submodules: true
 
-      # The version is the tag without its conventional v prefix, and
-      # it must be a real release version: it must follow the CalVer
-      # grammar that the whole system agrees on, and it must not be
-      # serial 000, which versioning.md reserves for lab substitutes
-      # that must never be published. The releases Makefile checks the
-      # grammar again. Failing here just names the problem before the
-      # workflow spends a build on it.
+      # The version is the tag itself, and it must be a real release
+      # version: it must follow the CalVer grammar that the whole
+      # system agrees on, and it must not be serial 000, which
+      # versioning.md reserves for lab substitutes that must never be
+      # published. The releases Makefile checks the grammar again.
+      # Failing here just names the problem before the workflow spends
+      # a build on it.
       - name: derive the version from the tag
         id: version
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="$GITHUB_REF_NAME"
           if [[ ! "$VERSION" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3}$ ]]; then
-            echo "tag $GITHUB_REF_NAME is not a release version (vyyyy.mm.dd-nnn)" >&2
+            echo "tag $GITHUB_REF_NAME is not a release version (yyyy.mm.dd-nnn)" >&2
             exit 1
           fi
           if [[ "$VERSION" == *-000 ]]; then

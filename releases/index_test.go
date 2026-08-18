@@ -328,11 +328,20 @@ func TestIndexRefusesNotesTheChannelDoesNotServe(t *testing.T) {
 	}
 }
 
+// The GitHub tag convention has a boundary: tags before
+// 2026.08.18-002 carry a v prefix, and tags from it on are the bare
+// version. The pages are rewritten on every release, so one render
+// covers releases on both sides, and each link must name the tag as
+// GitHub holds it.
 func TestIndexLinksTheGitHubRelease(t *testing.T) {
-	dir, _ := indexed(t, "2026.07.15-001")
+	dir, _ := indexed(t, "2026.07.15-001", "2026.08.18-002")
 
-	page := pageAt(t, dir, "2026.07.15-001", "index.html")
-	if !strings.Contains(page, "https://github.com/liken-sh/liken/releases/tag/v2026.07.15-001") {
-		t.Errorf("the page does not link the GitHub release:\n%s", page)
+	old := pageAt(t, dir, "2026.07.15-001", "index.html")
+	if !strings.Contains(old, "https://github.com/liken-sh/liken/releases/tag/v2026.07.15-001") {
+		t.Errorf("an old release's page does not link its v-prefixed tag:\n%s", old)
+	}
+	bare := pageAt(t, dir, "2026.08.18-002", "index.html")
+	if !strings.Contains(bare, "https://github.com/liken-sh/liken/releases/tag/2026.08.18-002\"") {
+		t.Errorf("a new release's page does not link its bare tag:\n%s", bare)
 	}
 }
