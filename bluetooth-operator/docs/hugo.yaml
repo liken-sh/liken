@@ -12,6 +12,12 @@ theme: brand
 # sitemap stays, because it is free and crawlers use it.
 disableKinds: [taxonomy, term, rss]
 
+# The repository this site documents. The theme's nav points its
+# repository entry here, and the sidebar heads the manual with the
+# project's name, taken from the last path segment.
+params:
+  repository: https://github.com/liken-sh/bluetooth-operator
+
 # Every page renders twice, once as HTML for people and once as the
 # authored Markdown for agents and scripts. The two files land side
 # by side, so the Markdown twin of / is /index.md. The theme carries
@@ -29,3 +35,18 @@ outputs:
   home: [html, markdown]
   section: [html, markdown]
   page: [html, markdown]
+
+# The site serves the repository's own manifests as raw YAML under
+# /deploy/, so a reader reads the CRDs in place and a Kustomization
+# references the files without cloning the repository. The mount takes
+# the files straight from deploy/, so the served YAML is the same file
+# the repository holds, never a copy that can drift. Declaring any
+# mount replaces every default mount for this module, so content/ is
+# declared again beside it; the other defaults name directories this
+# site does not have.
+module:
+  mounts:
+    - source: content
+      target: content
+    - source: ../deploy
+      target: static/deploy

@@ -20,11 +20,18 @@ on:
     branches: [main]
     paths:
       - docs/**
+      # The site serves the deploy manifests as raw YAML under
+      # /deploy/ (a module mount in docs/hugo.yaml), so a change to
+      # them is a publish. Without this path the served YAML would go
+      # stale the first time a manifest changed with no docs edit.
+      - deploy/**
       - .github/workflows/docs.yaml
   pull_request:
     branches: [main]
     paths:
       - docs/**
+      # The same reason as on push: the site serves these files.
+      - deploy/**
       - .github/workflows/docs.yaml
   # A dispatch republishes the current main with no docs change, for
   # the times the serving side needs a fresh deployment.

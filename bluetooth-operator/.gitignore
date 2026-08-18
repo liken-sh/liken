@@ -2,7 +2,9 @@
 
 # The rendered site. `go tool hugo` writes it under docs/dist, and CI
 # rebuilds it from the sources on every publish, so the tree is never
-# committed. The lock file is Hugo's guard against two builds in one
-# source tree at once.
+# committed. `go tool hugo server` writes the same build output under
+# docs/public when it serves from disk. The lock file is Hugo's guard
+# against two builds in one source tree at once.
 /docs/dist/
+/docs/public/
 /docs/.hugo_build.lock

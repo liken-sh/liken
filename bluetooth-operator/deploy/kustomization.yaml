@@ -4,15 +4,18 @@
 # your own GitOps with patches of your own, or read it and write your
 # own manifests.
 #
-# Everything here except the CustomResourceDefinitions and the
-# DeviceClasses is namespaced. Both of those are cluster-scoped, like
-# the ResourceSlices they describe and select over. kustomize reads
-# which kinds are cluster-scoped from the OpenAPI schema it was
-# compiled with, and resource.k8s.io/v1 is newer than the schema in
-# kustomize 5.8.1, so the namespace below lands on the two
-# DeviceClasses as well. The API server discards a namespace on a
-# cluster-scoped object, so the classes apply correctly, and the field
-# in the rendered output means nothing.
+# The base ships no DeviceClass. A DeviceClass is cluster-scoped
+# policy, the cluster owner's to name and curate, the same convention
+# a StorageClass follows. The install guide gives copyable YAML for
+# the two classes this operator needs: bluetooth-adapter, which the
+# claim template in operator.yaml names, and bluetooth-controller,
+# which consumers claim. Create them before this base, because the
+# operator's own pod cannot start without the adapter class.
+#
+# Everything here except the CustomResourceDefinitions is namespaced.
+# The CRDs are cluster-scoped, and kustomize reads that from the
+# OpenAPI schema it was compiled with, so the namespace below leaves
+# them alone.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -20,7 +23,6 @@ namespace: liken-system
 
 resources:
   - crds.yaml
-  - deviceclasses.yaml
   - rbac.yaml
   - operator.yaml
 
