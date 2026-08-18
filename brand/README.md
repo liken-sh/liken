@@ -2,10 +2,11 @@
 
 This repository is the brand domain of
 [liken](https://github.com/liken-sh/liken): the mark, the shared
-stylesheet, and the Hugo theme that every liken site uses. The main
-manual at [liken.sh](https://liken.sh) and the operators' sites use
-the same shell, the same nav, and the same stylesheet, so the family
-reads as one place.
+stylesheet, the Hugo theme that every liken site uses, and the voice
+rules for everything those sites publish. The main manual at
+[liken.sh](https://liken.sh) and the operators' sites use the same
+shell, the same nav, and the same stylesheet, so the family reads as
+one place.
 
 Two kinds of consumer read this repository:
 
@@ -17,6 +18,12 @@ Two kinds of consumer read this repository:
   module `github.com/liken-sh/brand`. The package embeds the
   stylesheet and the mark, so a page builder such as liken's release
   channel inlines them with no file to copy.
+
+`VOICE.md` carries the voice and tone rules for every word the sites
+publish. It stands alone, so a consuming repo references it from its
+`docs/AGENTS.md` with the import line `@themes/brand/VOICE.md`, and
+the writing rules arrive with the same submodule that carries the
+theme.
 
 ## Using the theme
 
