@@ -1,439 +1,71 @@
 # audio-operator
 
-A Kubernetes DRA driver that publishes each physical audio output as a
-device. A pod claims one monitor's speakers, or the analog jack, and
-receives the PipeWire socket and the name of the sink its streams must
-reach.
-
-This is an instance of liken's device operator pattern. liken publishes
-the hardware facts no other layer can observe, and which PCM device
-plays into which monitor is not one of them: it comes from the ELD
-block the graphics driver writes into the audio driver, so a running
-daemon makes it true, and it changes whenever somebody moves a cable.
-That daemon does not belong in the read-only root every machine boots,
-because only some machines play audio. So the operator is an ordinary
-workload. It claims the audio controller through a `liken.sh` claim,
-runs PipeWire and WirePlumber in the same pod, and publishes what
-PipeWire holds under `audio.liken.sh`. The system image carries no
-sound server.
-
-The operator uses no private interface into liken. The raw claim, the
-ResourceSlices it writes, and the CDI files it leaves for the runtime
-are the public contracts any DRA driver gets. A cluster that never
-deploys it behaves as it does now.
-
-## What it publishes
-
-One device for each playback PCM device on the claimed card: each HDMI
-or DisplayPort output, and the analog jack. Membership does not depend
-on a monitor being connected or on PipeWire holding a sink, so a device
-whose monitor is unplugged stays in the slice with two taints and a pod
-can wait for it.
-
-The device name is the ALSA card and PCM number, `card0-pcm3`. The
-number comes from the codec's pin order, which the driver enumerates
-the same way at every boot on the same hardware and kernel; it is not
-stable across machines, and a claim that must survive a kernel change
-selects on the attributes instead. The name is also the `output`
-attribute, with its halves as `card` and `pcm`, because CEL cannot read
-a device's name.
-
-| Attribute | Type | What it is |
-|---|---|---|
-| `output` | string | the device's name, `card0-pcm3` |
-| `card` | int | the ALSA card number |
-| `pcm` | int | the PCM device number on that card |
-| `connectionType` | string | `hdmi`, `displayport`, or `analog` |
-| `sinkName` | string | the PipeWire node name a consumer's streams target |
-| `manufacturer` | string | the monitor's three-letter PNP manufacturer code, from the ELD |
-| `product` | string | the monitor's product code, four lowercase hexadecimal digits |
-| `monitorName` | string | the monitor's name, the same EDID descriptor the display operator publishes as the model |
-| `lpcmChannels` | int | the highest uncompressed channel count the monitor accepts |
-| `speakers` | string | the speaker allocation, in the kernel's names: `FL/FR` |
-| `monitor.liken.sh/id` | string | the pairing identity, defined below |
-
-The monitor attributes are present on an HDMI or DisplayPort output
-whose monitor answers, and absent otherwise. `sinkName` is present
-while PipeWire holds a sink, and absent when the name passes the API's
-64-character limit. The sink name is `liken.audio.` plus the device
-name: this operator declares every sink node itself (see
-[Finding the card with no udev](#finding-the-card-with-no-udev)), so
-the name is the same at every start on the same card.
-
-    $ kubectl get resourceslice liken-1-audio.liken.sh -o yaml
-    spec:
-      driver: audio.liken.sh
-      nodeName: liken-1
-      devices:
-        - name: card0-pcm3
-          attributes:
-            output: {string: card0-pcm3}
-            card: {int: 0}
-            pcm: {int: 3}
-            connectionType: {string: hdmi}
-            manufacturer: {string: GSM}
-            product: {string: "5b09"}
-            monitorName: {string: LG ULTRAWIDE}
-            lpcmChannels: {int: 2}
-            speakers: {string: FL/FR}
-            sinkName: {string: liken.audio.card0-pcm3}
-            monitor.liken.sh/id: {string: gsm-5b09-lg-ultrawide}
-        - name: card0-pcm8
-          attributes:
-            output: {string: card0-pcm8}
-            card: {int: 0}
-            pcm: {int: 8}
-            connectionType: {string: hdmi}
-            manufacturer: {string: DEL}
-            product: {string: "4071"}
-            monitorName: {string: DELL U2415}
-            lpcmChannels: {int: 2}
-            speakers: {string: FL/FR}
-            sinkName: {string: liken.audio.card0-pcm8}
-            monitor.liken.sh/id: {string: del-4071-dell-u2415}
-
-The ELD carries no serial number, so an audio device says which model
-of monitor it plays into and cannot say which unit.
-
-## The pairing identity
-
-`monitor.liken.sh/id` pairs a screen with that screen's speakers. The
-display operator publishes the same value for the same monitor, and a
-`matchAttribute` constraint compares the two, so they must be identical
-byte for byte. The derivation is a contract between the two
-repositories:
-
-    <manufacturer>-<product>[-<name>]
-
-* **`<manufacturer>`** is the three-letter PNP id in lowercase, decoded
-  from the two bytes at ELD offsets 16 and 17. `0x1e6d` is `GSM`, which
-  is LG. Bytes that decode to something other than three letters
-  publish no pairing attribute.
-* **`<product>`** is the product code as four lowercase hexadecimal
-  digits, from the little-endian value at offsets 18 and 19.
-* **`<name>`** is the monitor name in lowercase, trimmed, with each run
-  of spaces turned to one dash. It is appended only when the name is
-  present.
-
-An LG UltraWide gives `gsm-5b09-lg-ultrawide`; a panel with no name
-gives `boe-095f`. The name is optional because one operator can read a
-name the other cannot: if a missing name dropped the whole value, one
-driver would publish the attribute and the other none, and the
-constraint would park forever with nothing saying why. Both
-repositories test the same vectors, so a change that breaks parity
-fails a test.
-
-The domain `monitor.liken.sh` belongs to neither driver, and that is
-deliberate. The scheduler assumes an attribute with no domain is in the
-publishing driver's domain, so a bare `monitorName` from each operator
-would be two different names that never match.
-
-Two monitors of one model produce one value, so a constraint is
-satisfied by either pairing. The ELD offers nothing finer: it has no
-serial number, and i915 leaves its `port_id` field zero.
-
-## Deploying it
-
-    kubectl apply -k deploy/
-
-Or reference `deploy/` from your own GitOps. The base assumes the
-namespace `liken-system` exists.
-
-The operator runs as a DaemonSet, so a pod lands on every node and
-nobody states which machine has the speakers. Each pod claims every
-audio controller on its node and serves every sound card there, and a
-consumer's own claim selects the card and output by attribute. A node
-with no controller publishes no matching device, so the claim parks
-that pod Pending, and it costs nothing. A deployment that must leave a
-card for something else adds a selector to the controller request.
-
-The pod runs one image four times, and the kubelet orders them: a
-`declare` init container writes PipeWire's node declarations, PipeWire
-and WirePlumber run as native sidecars with startup probes, and the
-operator is the only regular container. The image is a file closure on
-`scratch`: the four binaries, the modules the daemons load, and their
-libraries, with no shell and no package manager. `kubectl exec` can
-run only what the image names, and `pw-dump` is the debugging window,
-the way the display operator keeps `wayland-info`. The release
-workflow starts both daemons in the built image and fails the release
-if they map any file the image does not carry.
-
-The base ships two DeviceClasses. `audio-controller` is the raw device
-the operator claims from liken
-(`device.attributes["liken.sh"].subsystem == "sound"`); `audio-output`
-is what a consumer claims (`device.driver == "audio.liken.sh"`).
-
-To uninstall, delete the workload and then the slice, which the
-operator never deletes on its own:
-
-    kubectl delete -k deploy/
-    kubectl delete resourceslice liken-1-audio.liken.sh
-
-## Claiming an output
-
-Select an output by its device name, or by its monitor, which survives
-a cable moving between the card's outputs. The monitor selector guards
-the attribute first, because a selector that reads a missing attribute
-fails the whole allocation:
-
-    # by output
-    device.attributes["audio.liken.sh"].output == "card0-pcm3"
-
-    # by monitor, cable-independent
-    has(device.attributes["monitor.liken.sh"].id) &&
-    device.attributes["monitor.liken.sh"].id == "gsm-5b09-lg-ultrawide"
-
-The attribute map splits on the domain, so `monitor.liken.sh/id` reads
-in CEL as the key `id` under the domain `monitor.liken.sh`. The
-`matchAttribute` field below is not CEL and takes the full name.
-
-Tolerate `audio.liken.sh/disconnected` and nothing else; leave
-`audio.liken.sh/no-monitor` and `audio.liken.sh/no-sink` untolerated.
-Choose `tolerationSeconds` with one more transient in mind: WirePlumber
-drops and rebuilds a card's sinks when it switches profile, so a
-reconcile inside that window taints every output for a moment. A number
-in the tens of seconds absorbs that and a person moving a cable.
-
-    apiVersion: resource.k8s.io/v1
-    kind: ResourceClaim
-    metadata:
-      name: kitchen-speakers
-      namespace: media
-    spec:
-      devices:
-        requests:
-          - name: output
-            exactly:
-              deviceClassName: audio-output
-              selectors:
-                - cel:
-                    expression: |
-                      device.attributes["audio.liken.sh"].output == "card0-pcm3"
-              tolerations:
-                - key: audio.liken.sh/disconnected
-                  operator: Exists
-                  effect: NoExecute
-                  tolerationSeconds: 30
-
-Leave out the selector to claim any output on the card.
-
-## Claiming a screen and that screen's speakers
-
-A pod that plays a video on the kitchen monitor needs that monitor and
-its speakers. One claim holds both: a request against
-`display.liken.sh`, a request against `audio.liken.sh`, and a
-`matchAttribute` constraint that requires one value of
-`monitor.liken.sh/id` across the two, so the screen and the speakers
-come from one monitor.
-
-    apiVersion: resource.k8s.io/v1
-    kind: ResourceClaim
-    metadata:
-      name: kitchen-screen
-      namespace: media
-    spec:
-      devices:
-        requests:
-          - name: screen
-            exactly:
-              deviceClassName: display-output
-              tolerations:
-                - key: display.liken.sh/disconnected
-                  operator: Exists
-                  effect: NoExecute
-                  tolerationSeconds: 30
-          - name: speakers
-            exactly:
-              deviceClassName: audio-output
-              tolerations:
-                - key: audio.liken.sh/disconnected
-                  operator: Exists
-                  effect: NoExecute
-                  tolerationSeconds: 30
-        constraints:
-          - requests: [screen, speakers]
-            matchAttribute: monitor.liken.sh/id
-
-The container receives both deliveries: the display operator's, and
-this operator's socket and sink name.
-
-## What a consumer receives
-
-A mount and two environment variables. No device node.
-
-| | |
-|---|---|
-| mount | `/var/run/audio.liken.sh`, read-only, the directory that holds PipeWire's socket |
-| `PIPEWIRE_REMOTE` | `/var/run/audio.liken.sh/pipewire-0` |
-| `PIPEWIRE_NODE` | the allocated output's sink name |
-
-A PipeWire client resolves `PIPEWIRE_REMOTE` first, and an absolute
-path is used as-is. `PIPEWIRE_NODE` sets `target.object` on every
-stream. Both are read by clients that use PipeWire's stream API; a
-client on the PulseAudio protocol or the ALSA compatibility plugin
-selects its sink another way, which this document does not state. The
-mount is read-only, because connecting to a Unix socket needs write
-permission on the socket, not on the directory.
-
-**One container holds at most one output.** `PIPEWIRE_REMOTE` and
-`PIPEWIRE_NODE` each hold one value, so two claims on one container
-overwrite, and the last wins. A pod that plays into two outputs runs
-two containers. liken's claim on the controller delivers the card's
-whole subtree, and this operator republishes none of it, so the two
-drivers never deliver the same `/dev` path.
-
-**A consumer's image must carry PipeWire's client configuration.**
-`libpipewire` does not open a client context without
-`/usr/share/pipewire/client.conf`. Debian ships that file in
-`pipewire-bin`, the daemon package, not in the library package
-`libpipewire-0.3-0`. An image that installs the library alone fails
-before it reaches the socket, with `can't load config client.conf: No
-such file or directory`.
-
-## Finding the card with no udev
-
-**This operator declares PipeWire's sink nodes, and WirePlumber's ALSA
-monitor is off.** The monitor enumerates cards through libudev, and a
-liken machine runs no udevd, so the monitor would build nothing and
-PipeWire would hold a graph with no ALSA node on a machine whose
-speakers work.
-
-The operator needs no udev to know the hardware. It enumerates the
-card's playback PCM devices from the nodes its claim delivers, reads
-each one's ELD through the ALSA control interface, and writes what it
-found into `/etc/pipewire/pipewire.conf.d/60-liken-outputs.conf` before
-the daemons start, one `context.objects` entry for each PCM device:
-
-    context.objects = [
-      { "factory": "adapter",
-        "flags": [ "nofail" ],
-        "args": {
-          "factory.name": "api.alsa.pcm.sink",
-          "api.alsa.path": "hw:0,3",
-          "api.alsa.pcm.card": "0",
-          "media.class": "Audio/Sink",
-          "node.name": "liken.audio.card0-pcm3",
-          "node.description": "liken audio output, ALSA card 0 device 3",
-          "liken.audio.card": "0",
-          "liken.audio.pcm": "3"
-        }
-      }
-    ]
-
-This is PipeWire's own answer for a setup with no session manager
-finding hardware, which `pipewire-props(7)` documents. The
-`liken.audio.card` and `liken.audio.pcm` properties map a node in
-`pw-dump` back to the output the slice publishes. WirePlumber stays for
-the policy: it links each client's stream to the sink named in
-`PIPEWIRE_NODE`.
-
-**Every PCM device is declared, monitor or not.** PipeWire reads the
-declarations once, so the set is fixed for the daemon's life. A set
-that followed the cables would need a restart every time somebody moved
-one; a card's PCM devices are fixed when its driver binds, so a set
-that follows the card never moves. `nofail` on each object keeps one
-output that cannot be created from stopping the daemon and taking every
-other output's sink with it.
-
-**What this gives up.** The card-profile path needs the ALSA monitor,
-so there is no hardware mixer volume, no profile switching, and no port
-availability. Volume is PipeWire's software volume, the channel layout
-is left unset so PipeWire takes the count from the card, and jack
-detection is the operator's, read from the card's input nodes. The
-layout then depends on what is connected when PipeWire starts.
-
-## The privilege it takes
-
-None. The pod declares no `hostNetwork`, adds no capability, and drops
-`ALL`. Everything it touches it touches through the device nodes its
-claim delivers: the control and PCM nodes PipeWire opens like any file,
-and the card's `/dev/input/event*` jacks, where a monitor arriving or
-leaving is a switch event. PipeWire asks RTKit for real-time priority,
-finds none, and runs without it, so not even `SYS_NICE` is here.
-
-WirePlumber runs the stateless `main-embedded` profile with every
-hardware monitor off: the ALSA monitor because it finds nothing without
-udev, and the Bluetooth and camera monitors because this operator's
-domain is the sound cards its claim allocated.
-`config/50-audio-operator.conf` states that rather than resting on what
-happens to be reachable.
-
-Beside those, the pod takes the two hostPath mounts every DRA driver
-takes, the kubelet plugin registry and `/var/run/cdi`, its own plugin
-socket directory, and `/var/run/audio.liken.sh`, because a consumer's
-mount comes from the host.
-
-## Disconnects and restarts
-
-**An output that cannot play is tainted, never deleted.** The device
-stays in the slice with two taints or three:
-
-| Key | Effect | When it appears | Who tolerates it |
-|---|---|---|---|
-| `audio.liken.sh/disconnected` | `NoExecute` | the output cannot play | the consumer, with its own `tolerationSeconds` |
-| `audio.liken.sh/no-monitor` | `NoSchedule` | no monitor answers on this HDMI output | nobody |
-| `audio.liken.sh/no-sink` | `NoSchedule` | PipeWire holds no node for this PCM device | nobody |
-
-The `NoExecute` taint says the output cannot serve a stream now; it
-ends the holder after the claim's `tolerationSeconds`, so the consumer
-tolerates it to survive a short drop. A tolerated `NoExecute` taint
-still permits allocation, so one of the untolerated `NoSchedule` taints
-is always beside it to hold the pod `Unschedulable` until the output
-can really play. The two reasons carry separate keys because they have
-separate repairs: `no-monitor` reads the ELD and clears when the cable
-returns, and `no-sink` clears only on a restart. An output that
-publishes a `sinkName` never carries `no-sink`.
-
-Deleting the device instead would strand the claim, because the kubelet
-retries `NodePrepareResources` against a device in no slice with no
-bound. A device leaves the slice only when the card does.
-
-**A running pod's device set never changes.** CRI carries CDI devices
-at container creation only, so the pod is one session and the taint is
-what ends it.
-
-**A PipeWire restart ends every client's audio.** The socket belongs
-to the PipeWire container, so its restart takes the socket away; a
-client that reconnects finds the new one, and a client that does not
-has to restart. The operator's own restart takes nothing away,
-because the daemons run in their own containers and keep playing
-through it.
-
-**A PCM device that appears or leaves waits for a pod replacement.**
-PipeWire builds its nodes from the declaration the init container
-wrote, so a PCM device that was not there then has no node. The
-operator reports the divergence once, and the outputs with no node
-publish with the `no-sink` taint, so nothing schedules onto them.
-Deleting the pod declares the new set. This never fires for a monitor
-plugged in, because a card's PCM devices are fixed when its driver
-binds.
-
-**The slice survives the restart.** The operator never deletes it, and
-the Node owns it, so the garbage collector removes it when the machine
-leaves the cluster and the new pod republishes over it.
-
-**The slice never says an output plays while nothing plays.** The
-kubelet supervises each daemon's container alone, so the operator
-cannot die with them. Instead, when it loses the graph, at startup
-when PipeWire never answers or later when a run of graph reads fails,
-it publishes every output with the `disconnected` taint and exits.
-The kubelet restarts only the operator container, and its next start
-publishes the truth.
-
-## Not here yet
-
-* **Shared sinks.** PipeWire mixes streams, so one sink could serve
-  several consumers, which a monitor cannot. This version is exclusive,
-  for the one-owner clarity the other operators have. See
-  [a sink can be shared](plans/open-problems/a-sink-can-be-shared-and-this-one-is-not.md).
-* **The analog jack.** An analog output publishes untainted whether or
-  not anything is in the socket. Most codecs report nothing about the
-  socket, and even a codec that does sees only the first link: a cable
-  into a stereo says nothing about whether the stereo has speakers. No
-  signal can prove that sound reaches anyone, so the operator publishes
-  the port it can see and a person who wired something claims it.
-* **Metrics.** The operator prints to stderr and reports state through
-  the taints. There is no metrics endpoint.
+A Kubernetes
+[Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
+driver that publishes each physical audio output of a
+[`liken`](https://github.com/liken-sh/liken) machine as a claimable
+device: each monitor's speakers, and the analog jack. It runs
+PipeWire and WirePlumber in its pod, so the system image carries no
+sound server. A pod that claims an output receives the PipeWire
+socket and the name of the sink its streams must reach.
+
+That makes an audio output something you give a workload from a
+manifest: a video's sound on the same monitor that shows its
+picture, paired with the display operator through one claim; music
+from a player pod to the amplifier on the analog jack. The claim
+names the output, by monitor or by jack, the scheduler finds the
+machine, and the container receives the socket. No SSH, no
+configuration on the host, no privileged pod.
+
+The operator is one of `liken`'s
+[hardware operators](https://liken.sh/docs/concepts/hardware-operators/):
+optional workloads, installed like any other manifest, that a
+cluster runs fine without. What it needs from `liken` is the card.
+`liken`'s own DRA driver publishes the raw hardware, this operator
+claims the sound card through an ordinary `liken.sh` claim, and it
+publishes the outputs at the grain a workload asks for, one device
+per playback PCM device under `audio.liken.sh`. It uses no private
+interface into `liken`: the claim, the `ResourceSlices`, and the
+Container Device Interface (CDI) files are the public contracts any
+DRA driver gets.
+
+## The manual
+
+**[audio.liken.sh](https://audio.liken.sh)** is the manual, and it
+serves the deployment manifests as raw YAML, so an install starts
+and ends there:
+
+* [Install the operator](docs/content/docs/guides/install.md)
+* [Play sound to an output](docs/content/docs/guides/claim.md)
+* [Pair sound with its screen](docs/content/docs/guides/pair.md):
+  one claim that holds a monitor's screen and that monitor's
+  speakers
+* [Devices](docs/content/docs/reference/devices.md): the class, the
+  attributes, the taints, and what a claim delivers
+
+The short version, on a cluster whose machine publishes its sound
+card, after the two `DeviceClasses` the install guide has you
+create:
+
+    kubectl apply -n liken-system \
+      -f https://audio.liken.sh/deploy/rbac.yaml \
+      -f https://audio.liken.sh/deploy/operator.yaml
+
+[`deploy/`](deploy/) is the source of those files: a kustomize base
+with the RBAC and the `DaemonSet` whose pod claims every audio
+controller on its own node. The base ships no `DeviceClass`,
+because a class is cluster policy, yours to name and curate; the
+install guide gives both classes as YAML to copy.
+
+## The design
+
+[`plans/`](plans/README.md) holds the design documents: the taints
+an output carries, why the image is a file closure on `scratch`, and
+how the kubelet supervises the daemons. The pattern this operator is
+an instance of lives in `liken`'s repository, in
+[milestone 56, device operators](https://github.com/liken-sh/liken/blob/main/plans/completed/56-device-operators.md),
+and this operator's own design in
+[milestone 59](https://github.com/liken-sh/liken/blob/main/plans/completed/59-the-audio-operator.md).
 
 ## Building it
 
@@ -441,9 +73,14 @@ publishes the truth.
     go test ./...
     docker build -t audio-operator .
 
-The Kubernetes libraries and the Go version are pinned to what liken
-builds against, because the two drivers serve the same kubelet on the
-same node.
+The image is a file closure on `scratch`: the four binaries the pod
+runs, the modules the daemons load, and their libraries, with no
+shell and no package manager. The Kubernetes libraries and the Go
+version are pinned to what `liken` builds against, because the two
+drivers serve the same kubelet on the same node. The ELD fixtures in
+`testdata` are assembled the way the kernel's `hda_eld.c` lays the
+block out, because a machine with no monitor reports no block to
+capture.
 
 ## License
 
