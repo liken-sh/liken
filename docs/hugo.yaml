@@ -16,6 +16,12 @@ title: liken
 # about this manual; Hugo gives a site's layouts/ precedence over the
 # theme's.
 theme: brand
+# The repository this site documents. The theme's nav links its
+# "repository" entry to this URL, and the sidebar heading on every
+# page takes the project name from the URL's last path segment. A
+# site without this parameter gets no "repository" entry.
+params:
+  repository: https://github.com/liken-sh/liken
 # No taxonomies and no feeds: the site is a manual, not a blog. The
 # sitemap stays, because it is free and crawlers use it.
 disableKinds: [taxonomy, term, rss]
