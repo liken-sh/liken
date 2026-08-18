@@ -38,9 +38,13 @@ repos:
         entry: gofmt -l -w
         language: system
         types: [go]
-      # The repo is one Go module (see go.mod at the root). So every
-      # check is a single invocation of ./.... This covers Go files in
-      # any domain directory, present or future, without listing them.
+      # The repo's programs are one Go module (see go.mod at the
+      # root). So every check is a single invocation of ./.... This
+      # covers Go files in any domain directory, present or future,
+      # without listing them. The one exception is docs/, a nested
+      # module that exists to keep Hugo's dependency graph out of the
+      # root go.sum; ./... does not descend into it, and `make -C
+      # docs test` runs the same checks against that module.
       - id: go-vet
         name: go vet
         entry: bash -c 'go vet ./...'

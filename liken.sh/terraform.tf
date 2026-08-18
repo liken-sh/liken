@@ -195,6 +195,29 @@ resource "linode_domain_record" "www" {
   target      = "liken-sh.github.io"
 }
 
+# The hardware operators' manuals. Each operator repository
+# (bluetooth-operator, display-operator, audio-operator) publishes
+# its own Pages site under the hostname that is also its device
+# class's name. A subdomain can CNAME where the apex cannot, so each
+# name points at the organization's Pages hostname, and GitHub routes
+# the request to the repository that claims the name as its custom
+# domain. The Pages verification record below covers these names
+# too, because it locks liken.sh's immediate subdomains to this
+# organization.
+
+resource "linode_domain_record" "hardware_operators" {
+  for_each = toset([
+    "bluetooth",
+    "display",
+    "audio",
+  ])
+
+  domain_id   = linode_domain.liken_sh.id
+  name        = each.value
+  record_type = "CNAME"
+  target      = "liken-sh.github.io"
+}
+
 # GitHub's proof that the liken-sh organization owns these names.
 # GitHub issues a code for each name, and reads it back from a TXT
 # record at a label derived from the organization's login. When the

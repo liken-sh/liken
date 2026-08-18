@@ -36,10 +36,13 @@ jobs:
     steps:
       # This step checks out full history and tags: version.mk names
       # dev artifacts with git describe even during a release build,
-      # and describe needs to see the tags to do that.
+      # and describe needs to see the tags to do that. The submodule
+      # is the brand theme, which carries the favicon the publish
+      # step below uploads to the channel.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          submodules: true
 
       # The version is the tag without its conventional v prefix, and
       # it must be a real release version: it must follow the CalVer
@@ -160,7 +163,7 @@ jobs:
           s3cmd put --acl-public --no-progress ../channel.yaml \
             "s3://releases.liken.sh/channel.yaml"
           s3cmd put --acl-public --no-progress --mime-type=image/x-icon \
-            ../../../brand/favicon.ico \
+            ../../../docs/themes/brand/static/favicon.ico \
             "s3://releases.liken.sh/favicon.ico"
 
       # This step proves the release the way a consumer meets it: it

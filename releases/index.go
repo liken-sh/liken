@@ -40,8 +40,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/liken-sh/brand"
+
 	"github.com/liken-sh/liken/api"
-	"github.com/liken-sh/liken/brand"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -121,7 +122,8 @@ func Index(source string, keys []string, outDir string, out io.Writer) error {
 // page is what every template needs, whichever page it renders. The
 // stylesheet and the mark are inlined rather than linked: a channel
 // page must render whole with no request to any other site, so a
-// page here fetches nothing (brand/liken.css says more).
+// page here fetches nothing (the brand repository's stylesheet
+// section says more).
 type page struct {
 	Title      string
 	Stylesheet template.CSS

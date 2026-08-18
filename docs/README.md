@@ -34,8 +34,8 @@ Every page is built twice: as HTML for people, and as the authored
 Markdown for agents and scripts. The two land side by side, so the
 Markdown twin of `/docs/guides/install/` is
 `/docs/guides/install/index.md`. `hugo.yaml` declares the extra
-output format, and `layouts/all.markdown.md` is its whole template:
-the page's raw content.
+output format, and the theme's `layouts/all.markdown.md` is its
+whole template: the page's raw content.
 
 The site root also serves the llms.txt convention
 (<https://llmstxt.org>): `/llms.txt` is an index of the Markdown
@@ -49,14 +49,31 @@ would not appear in the twin.
 ## The build
 
 Hugo builds the HTML ahead of time, on the machine that runs the
-build. The pin is in `VERSION`, and `fetch.sh` downloads and
-verifies the binary, the same arrangement every vendored domain
-uses. A release never redistributes the bytes of Hugo, so the
-licensing domain carries no entry for it.
+build. Hugo is a tool dependency of this domain's own Go module:
+`go.mod` pins the version, `go.sum` pins the digest of every module
+in Hugo's graph, and `go tool hugo` compiles and runs it from the
+module cache. The module is nested, apart from the repository's root
+module, so Hugo's large dependency graph stays out of the root
+`go.sum`. A release never redistributes the bytes of Hugo, so the
+licensing domain carries no entry for it. `latest.sh --bump` moves
+the pin; build the site after a bump before trusting it, because a
+Hugo release can change the template lookup rules the layouts depend
+on.
 
-There is no theme. The few files in `layouts/` are the whole
-presentation, and the stylesheet inline in `layouts/baseof.html` is
-the whole stylesheet. The built tree contains no JavaScript.
+The presentation is the brand theme, the git submodule at
+`themes/brand` (<https://github.com/liken-sh/brand>). The theme
+carries the page shell, the shared stylesheet that every page
+inlines, the nav that every liken site renders from its
+`data/nav.yaml`, and the public brand files: `/favicon.ico`,
+`/icon.svg`, and the mark under `/brand/`. The theme's `voice.md` is
+the voice rules for everything the sites publish; `AGENTS.md` here
+imports it. The built tree contains no JavaScript. The only layouts
+kept in this site are the two llms.txt templates, because their
+prose is about this manual, and Hugo gives a site's `layouts/`
+precedence over the theme's. A fresh checkout needs
+`git submodule update --init` before the site builds. To bump the
+theme, check out the new commit inside `themes/brand` and commit the
+moved submodule pointer.
 
     make -C docs build     build the site into dist/site/
     make -C docs serve     the authoring loop, with live reload

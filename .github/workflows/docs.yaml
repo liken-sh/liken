@@ -57,15 +57,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      # The submodule is the brand theme, the presentation every
+      # liken site shares; the site cannot build without it.
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
+      # Go is the whole toolchain here: the generators and tests are
+      # Go, and Hugo itself is a tool dependency of the docs module,
+      # so `go tool hugo` compiles it from the module cache. The
+      # cache paths cover both go.sum files, because Hugo's modules
+      # are pinned in the docs module's own go.sum.
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            docs/go.sum
 
       # The make target generates the reference pages first, because
-      # the link check reads them as sources and as targets. Only Go
-      # is needed here; Hugo enters at the build step below.
+      # the link check reads them as sources and as targets.
       - name: test the docs
         run: make -C docs test
 

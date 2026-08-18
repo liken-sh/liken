@@ -14,7 +14,7 @@ A document's directory states its status:
   built yet.
 
 The numbers run in one sequence across all three directories. The next
-milestone is 60.
+milestone is 61.
 
 [`open-problems/`](open-problems/) holds the questions that liken owes
 an answer to. Those documents carry no number, because nobody has
@@ -221,6 +221,12 @@ decided yet what work they become.
   init passes to `finit_module`; a parameter on a loaded module is a
   reboot-class change, and the status reads the result back from
   `/sys/module` without comparing it.
+* **60.** [Bluetooth audio](60-bluetooth-audio.md) — a paired speaker
+  publishes as an ordinary `audio.liken.sh` sink. The Bluetooth
+  operator publishes its media bus as an exclusive DRA device, and the
+  audio operator claims it through a shared `sound.liken.sh` attribute
+  and plays every sink the machine has from one graph.
+
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.
 

@@ -2,17 +2,17 @@
 #
 # Report what this domain pins, and what Hugo has released now.
 #
-# The website is built by Hugo, and this pin is the only build tool
-# liken vendors by version, because the site's theme and its shortcodes
-# are written against one Hugo release. The tag list comes from git:
-# no token, no rate limit.
-#
-# Hugo publishes a checksums file with every release, so a bump reads
-# the new digest from upstream rather than from its own download.
+# The website is built by Hugo, the one build tool liken pins by
+# version, because the site's theme and layouts are written against
+# one Hugo release. The pin is a tool dependency in this domain's own
+# go.mod: the standard Hugo build is pure Go, and the module system
+# records the version there and the digest of every module in go.sum,
+# so there is no fetch script and no digest to write by hand. The tag
+# list comes from git: no token, no rate limit.
 #
 # Usage:
 #   docs/latest.sh          report the pin and the newest release
-#   docs/latest.sh --bump   write the newest release and its digest
+#   docs/latest.sh --bump   move the tool dependency to the newest release
 
 set -euo pipefail
 
@@ -20,10 +20,13 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 repository="https://github.com/gohugoio/hugo"
 
-pinned="$(cat "$here/VERSION")"
+# go.mod names Hugo twice: bare in the tool block, and with its
+# version on a require line. The version test picks the require line.
+# The report strips the v, because Hugo's releases name themselves by
+# the bare number.
+pinned="$(awk '$1 == "github.com/gohugoio/hugo" && $2 ~ /^v/ { sub(/^v/, "", $2); print $2 }' \
+    "$here/go.mod")"
 
-# VERSION holds the bare number, because that is how the release
-# names its files. The tags carry a v.
 latest="$(git ls-remote --tags --refs "$repository" |
     sed 's|.*refs/tags/v||' |
     grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' |
@@ -43,17 +46,10 @@ printf '%s\t%s\t%s\t%s\n' hugo "$pinned" "${latest:-?}" \
     exit 0
 }
 
-tarball="hugo_${latest}_linux-amd64.tar.gz"
-sums="https://github.com/gohugoio/hugo/releases/download/v$latest/hugo_${latest}_checksums.txt"
-digest="$(curl -fsSL --retry 3 "$sums" |
-    awk -v t="$tarball" '$2 == t { print $1 }')"
-[[ -n "$digest" ]] || {
-    echo "latest.sh: no $tarball listed in $sums" >&2
-    exit 1
-}
-
-echo "$latest" >"$here/VERSION"
-sed -i "s|^digest=\".*\"|digest=\"$digest\"|" "$here/fetch.sh"
+# go get moves the tool directive's version and writes the new
+# digests into go.sum in the same step, so the version and the
+# digests cannot disagree the way a hand-edited pair could.
+(cd "$here" && go get -tool "github.com/gohugoio/hugo@v$latest" && go mod tidy)
 echo "hugo: $pinned -> $latest"
-echo "the release's checksums file stands behind these bytes"
+echo "go.sum stands behind these bytes"
 echo "next: make -C .. docs"

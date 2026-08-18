@@ -18,11 +18,11 @@ require (
 	github.com/beevik/ntp v1.5.0
 	github.com/insomniacslk/dhcp v0.0.0-20260719225207-c76316d4aa82
 	github.com/klauspost/compress v1.18.0
+	github.com/liken-sh/brand v0.0.0-20260818115746-363c05e82c71
 	github.com/vishvananda/netlink v1.3.1
 	golang.org/x/crypto v0.54.0
 	golang.org/x/sys v0.47.0
 	google.golang.org/grpc v1.82.1
-	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/kubelet v0.36.2
 	sigs.k8s.io/yaml v1.6.0
 )
@@ -58,6 +58,7 @@ require (
 	golang.org/x/tools v0.47.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 	honnef.co/go/tools v0.7.0 // indirect
 )
 

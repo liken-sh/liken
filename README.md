@@ -1,6 +1,6 @@
 # `liken`
 
-<img src="brand/liken.svg" alt="The liken mark: a patch of lichen drawn as hexagonal tiles" width="130" align="right">
+<img src="https://liken.sh/brand/liken.svg" alt="The liken mark: a patch of lichen drawn as hexagonal tiles" width="130" align="right">
 
 **liken** *(v.)* — to represent one thing as similar to another; to compare.
 
@@ -10,8 +10,9 @@ bare rock.
 
 The icon is a patch of that lichen, drawn as the polygonal plates
 (*[areoles](https://en.wikipedia.org/wiki/Crustose_lichen)*) that a
-crustose lichen cracks into as it grows. [`brand/`](brand/) explains
-the design and the biology behind it.
+crustose lichen cracks into as it grows. The
+[brand repository](https://github.com/liken-sh/brand) explains the
+design and the biology behind it.
 
 `liken` is a small operating system that boots a machine directly into
 Kubernetes and uses Kubernetes as the service manager. **Li**nux +

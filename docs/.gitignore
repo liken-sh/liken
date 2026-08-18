@@ -1,13 +1,9 @@
-# The vendored Hugo and the built site; `make` recreates both.
-cache/
+# The built site; `make` recreates it.
 dist/
 # hugo server's scratch output; the real build renders to dist/site.
 public/
 # Hugo's advisory lock, held only while a build runs.
 .hugo_build.lock
-# Copies of the brand assets; the originals live in brand/.
-static/
-assets/
 # The CRD reference pages; crdref regenerates them from the schemas.
 content/docs/reference/machine.md
 content/docs/reference/cluster.md

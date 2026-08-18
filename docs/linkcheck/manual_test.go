@@ -30,8 +30,8 @@ var servedAssets = map[string]string{
 	"/llms.txt": "layouts/home.llms.txt",
 	// layouts/home.llms-full.txt renders the whole manual as one file.
 	"/llms-full.txt": "layouts/home.llms-full.txt",
-	// The Makefile copies ../brand/liken.svg into static/brand/.
-	"/brand/liken.svg": "the brand copy in the Makefile",
+	// The brand theme's static/ tree serves the mark at this URL.
+	"/brand/liken.svg": "the theme's static tree",
 	// The Makefile writes the deploy marker into the built tree.
 	"/release.txt": "the build rule in the Makefile",
 }

@@ -28,6 +28,11 @@ liken's driver is part of the operating system, because the operating
 system is the only thing that identifies the hardware before other
 software starts.
 
+The [hardware operators](/docs/concepts/hardware-operators/) are
+separate DRA drivers that you install as workloads. Each one
+publishes a kind of device this driver does not, such as the
+controllers paired to a Bluetooth radio.
+
 ## What a node publishes
 
 Each node publishes one `ResourceSlice`, with the name

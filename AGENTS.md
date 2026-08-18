@@ -12,6 +12,11 @@ generous comments that give instruction, explanation, and commentary. A
 reader who reads the repository from top to bottom should learn how a
 Linux system boots and how Kubernetes takes control after that.
 
+The voice rules for everything the project publishes live in the brand
+repository and arrive with the theme submodule:
+
+@docs/themes/brand/voice.md
+
 Follow these rules for comments:
 
 * **Teach the domain, not the syntax.** Do not explain what `mkdir -p`
