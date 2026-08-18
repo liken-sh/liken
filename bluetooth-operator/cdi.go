@@ -7,11 +7,11 @@ package main
 // use, and what appears inside the container. A JSON file in a
 // well-known directory names devices and the edits that grant one to
 // a container. Here those edits are device nodes only. CDI also
-// carries mounts and environment variables, and a controller needs
+// defines mounts and environment variables, and a controller needs
 // neither: a program reads a gamepad by opening /dev/input/eventN,
 // and nothing about the device is configuration.
 //
-// The file name carries this driver's own prefix,
+// The file name starts with this driver's own prefix,
 // bluetooth.liken.sh-<claimUID>.json. liken writes
 // liken.sh-<claimUID>.json in the same directory and reads back only
 // the files whose names start with its own prefix, so the two drivers
@@ -54,8 +54,8 @@ var cdiDir = "/var/run/cdi"
 // "<kind>=<name>".
 const cdiKind = DriverName + "/controller"
 
-// cdiPrefix is what separates this driver's spec files from liken's
-// in the shared directory.
+// cdiPrefix separates this driver's spec files from liken's in the
+// shared directory.
 const cdiPrefix = DriverName + "-"
 
 // cdiSpec holds the part of the CDI spec schema that this operator
@@ -121,7 +121,8 @@ func writeSpecFile(claimUID string, devices []cdiDevice) error {
 
 // removeCDISpec deletes a claim's spec file. An already absent file
 // counts as success, because unprepare must be idempotent: the
-// kubelet repeats it whenever it is not sure the call succeeded.
+// kubelet repeats it whenever it has no record that the call
+// succeeded.
 func removeCDISpec(claimUID string) error {
 	cdiWrites.Lock()
 	defer cdiWrites.Unlock()
@@ -158,7 +159,7 @@ func claimUIDFromSpecName(name string) (string, bool) {
 // injects the nodes when it creates the container, and a node that
 // moves under a running container stays wrong until the pod restarts.
 // What it prevents is a stale file that every later pod would
-// receive: a controller that reconnects as event6 while the spec
+// receive. A controller that reconnects as event6 while the spec
 // still says event5 would give the next pod a node that does not
 // exist, and the runtime fails a container creation on a node it
 // cannot stat.
@@ -184,8 +185,8 @@ func refreshCDISpecs(nodes map[string][]string) {
 //
 // A controller that is disconnected registers no evdev node, and the
 // spec keeps the nodes it had. An empty edit list would start the
-// next pod with no device and no error, while the taint on the device
-// is what actually holds that pod back until the controller returns.
+// next pod with no device and no error. The taint on the device holds
+// that pod back until the controller returns.
 func refreshCDISpec(claimUID string, nodes map[string][]string) error {
 	cdiWrites.Lock()
 	defer cdiWrites.Unlock()

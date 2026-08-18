@@ -30,8 +30,8 @@ func TestBondSecretPathNamesTheOperatorsNamespace(t *testing.T) {
 	}
 }
 
-// The label is what gathers one radio's bonds, because the init
-// container runs before bluetoothd and knows no device addresses.
+// The label gathers one radio's bonds, because the init container
+// runs before bluetoothd and has no list of device addresses.
 func TestAdapterSelectorNamesTheRadio(t *testing.T) {
 	want := "bluetooth.liken.sh/adapter=04-4a-69-66-92-27"
 	if got := AdapterSelector(address(t, testAdapter)); got != want {
@@ -39,8 +39,8 @@ func TestAdapterSelectorNamesTheRadio(t *testing.T) {
 	}
 }
 
-// A Secret that carries one bond and one that carries a whole adapter
-// are told apart by name, so the init container can apply the older
+// A Secret that holds one bond and one that holds a whole adapter are
+// told apart by name, so the init container can apply the older
 // layout first and let the current one win.
 func TestOneBondReadsTheLayoutFromTheName(t *testing.T) {
 	perBond := Secret{Metadata: SecretMeta{Name: BondSecretName(address(t, testDevice))}}
@@ -90,7 +90,7 @@ func TestNewBondSecretHoldsTheDevicesFiles(t *testing.T) {
 }
 
 // A device paired before its cache entry was written has one file, and
-// the Secret carries one key for it. An empty value would restore an
+// the Secret holds one key for it. An empty value would restore an
 // empty cache file, which is not the same as no cache file.
 func TestNewBondSecretWritesNoCacheKeyWithoutOne(t *testing.T) {
 	secret := NewBondSecret("bluetooth", address(t, testAdapter), address(t, testDevice),
@@ -160,7 +160,7 @@ func TestSecretTreeSkipsKeysThatAreNotAddresses(t *testing.T) {
 }
 
 // Some Secrets in the field hold one key for each device, the bare
-// address, carrying the info file. Reading that layout costs a few
+// address, holding the info file. Reading that layout costs a few
 // lines here; the alternative is a person who recreates the Secret by
 // pairing the controller again.
 func TestSecretTreeReadsTheBareAddressLayout(t *testing.T) {
@@ -183,7 +183,7 @@ func TestSecretTreeReadsTheBareAddressLayout(t *testing.T) {
 	}
 }
 
-// The operator rewrites the Secret on the first pass that sees a
+// The operator rewrites the Secret on the first pass that finds a
 // difference, and the write replaces the whole object, so both layouts
 // coexist only until then, and the current keys win while they do.
 func TestSecretTreeTakesTheCurrentLayoutOverTheBareAddress(t *testing.T) {

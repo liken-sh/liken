@@ -5,11 +5,11 @@ package main
 // A device operator publishes under its own driver name, in its own
 // slices, beside whatever liken publishes on the same node. The two
 // cannot collide: a device's identity is the triple
-// <driver>/<pool>/<device>, and the slice name carries the driver
-// name as a suffix, so this node's two slices are <node>-liken.sh and
+// <driver>/<pool>/<device>, and the slice name ends with the driver
+// name, so this node's two slices are <node>-liken.sh and
 // <node>-bluetooth.liken.sh.
 //
-// Like liken's own client, these structs carry only the part of the
+// Like liken's own client, these structs hold only the part of the
 // upstream API that this program writes. The full ResourceSlice can
 // describe partitionable devices, shared counters, and per-device
 // node selection, and none of that changes what a paired controller
@@ -30,12 +30,11 @@ import (
 
 // DriverName identifies this operator as a DRA driver. A driver name
 // is a DNS name so that drivers cannot collide, and a device
-// operator's name is <domain>.liken.sh. The name states which
-// contract family the operator implements, not which repository
-// builds it.
+// operator's name is <domain>.liken.sh. The name states the contract
+// the operator implements rather than the repository that builds it.
 const DriverName = "bluetooth.liken.sh"
 
-// ResourceSlicesPath names the URL where DRA inventory lives. Slices
+// ResourceSlicesPath names the URL of the DRA inventory. Slices
 // are cluster-scoped, like Nodes, because hardware inventory belongs
 // to the machine and not to any tenant.
 const ResourceSlicesPath = "/apis/resource.k8s.io/v1/resourceslices"
@@ -61,12 +60,12 @@ const maxSliceDevices = 64
 // noInputNodeTaint says the controller registers no evdev node, so a
 // claim on it would deliver nothing and NodePrepareResources would
 // fail. The effect is NoSchedule, and no consumer should ever tolerate
-// it. This is what makes a claim ahead of a connect park instead of
-// loop: with only the NoExecute taint, a consumer that tolerated it
-// would be scheduled onto a controller that is switched off, fail in
-// prepare, get evicted when the toleration ran out, and be scheduled
-// again. An untolerated NoSchedule taint holds the pod Unschedulable
-// until the controller is really there.
+// it. It parks a claim that arrives ahead of a connect, instead of
+// looping it. With only the NoExecute taint, a consumer that tolerated
+// it would be scheduled onto a controller that is switched off. It
+// would fail in prepare, get evicted when the toleration ran out, and
+// be scheduled again. An untolerated NoSchedule taint holds the pod
+// Unschedulable until the controller is really there.
 const (
 	disconnectedTaint = DriverName + "/disconnected"
 	noInputNodeTaint  = DriverName + "/no-input-node"
@@ -156,10 +155,10 @@ func AttrBool(b bool) DeviceAttribute { return DeviceAttribute{Bool: &b} }
 // Membership is the paired set. A controller that is switched off is
 // still a device a person can claim, and the pod parks Unschedulable
 // until somebody turns it on. Connection state is an attribute and a
-// taint, never membership, because deleting a device that a claim
-// holds strands the next consumer: the allocation still names the
-// device, and the kubelet's prepare call retries against a device
-// that is in no slice, with no bound on the retry. A device leaves
+// taint, never membership. Deleting a device that a claim holds
+// strands the next consumer: the allocation still names the device,
+// and the kubelet's prepare call retries against a device that is in
+// no slice, with no bound on the retry. A device leaves
 // the slice only when it is unpaired.
 //
 // The connected attribute reports what bluetoothd says. The taints
@@ -205,7 +204,7 @@ func sliceDevices(controllers map[string]controller, nodes map[string][]string) 
 // limit on attribute strings. A controller's alias is the only value
 // here that a person can make long, and a truncated alias still
 // identifies the controller to a reader. A PairingRequest's status
-// carries a device's name under the same limit, so both cut with the
+// holds a device's name under the same limit, so both cut with the
 // same function.
 func attributeString(s string) string {
 	return truncateRunes(s, maxSeenNameBytes)
@@ -215,7 +214,7 @@ func attributeString(s string) string {
 // this pass would say.
 //
 // The comparison ignores TimeAdded, which the API server fills in on
-// every taint it stores. A plain comparison would see the stored
+// every taint it stores. A plain comparison would compare the stored
 // timestamp against an empty one, call every pass a change, and write
 // the slice on every pass. Each ResourceSlice write wakes every
 // DRA-pending pod in the cluster, so a needless write is a
@@ -261,7 +260,7 @@ func withoutTimeAdded(devices []SliceDevice) []SliceDevice {
 // deliver, so a Node that leaves the cluster takes the slice with it,
 // and nothing else has to run for that to happen.
 //
-// The write carries the resourceVersion from the read, so a
+// The write includes the resourceVersion from the read, so a
 // conflicting writer gets ErrConflict instead of losing its change.
 // The next pass reads again and writes again.
 func EnsureResourceSlice(c *Client, nodeName string, owner OwnerReference, devices []SliceDevice) error {
@@ -358,7 +357,7 @@ func sliceName(nodeName string) string {
 	return nodeName + "-" + DriverName
 }
 
-// nodeObject carries the one thing this operator reads from its Node:
+// nodeObject holds the one thing this operator reads from its Node:
 // the UID that the slice's owner reference needs.
 type nodeObject struct {
 	Metadata struct {

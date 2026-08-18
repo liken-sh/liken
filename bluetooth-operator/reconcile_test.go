@@ -91,7 +91,7 @@ func TestReconcileNeverDeletesWhenTheAdapterIsGone(t *testing.T) {
 	}
 
 	// Every published controller is out of reach, so every one of them
-	// carries both taints: NoExecute ends the sessions that are
+	// has both taints: NoExecute ends the sessions that are
 	// running, and NoSchedule keeps the next claim parked.
 	for _, device := range fixture.updated.Spec.Devices {
 		keys := map[string]string{}
@@ -151,7 +151,7 @@ func TestReconcileDeletesTheSliceWhenTheLastControllerIsUnpaired(t *testing.T) {
 func TestReconcileReportsAFailedWrite(t *testing.T) {
 	publish, _ := reconcileFixture(t, "")
 	// A write that the API server refuses must not read as a finished
-	// pass, because that is what buys the one quick retry.
+	// pass. The unfinished report schedules the one quick retry.
 	publish.client = testClient(t, failingAPI(t))
 	if publish.reconcile(pairedSet(connectedController()), adapterIs(t), nil) {
 		t.Fatal("a refused write reported a finished pass")

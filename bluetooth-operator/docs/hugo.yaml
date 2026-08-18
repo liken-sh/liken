@@ -1,5 +1,5 @@
 # The site's configuration. The look is not configured here: the
-# brand theme, a git submodule at themes/brand, carries the page
+# brand theme, a git submodule at themes/brand, provides the page
 # shell, the nav, and the stylesheet that every liken site shares, so
 # this site reads as one place with the manual at liken.sh. The site
 # is named for the operator's DRA driver, bluetooth.liken.sh, because
@@ -20,7 +20,7 @@ params:
 
 # Every page renders twice, once as HTML for people and once as the
 # authored Markdown for agents and scripts. The two files land side
-# by side, so the Markdown twin of / is /index.md. The theme carries
+# by side, so the Markdown twin of / is /index.md. The theme provides
 # the templates for the twin, but a theme cannot declare an output
 # format, so each consuming site declares this block itself
 # (themes/brand/README.md). Without it, the site builds, but only as

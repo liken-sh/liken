@@ -1,7 +1,7 @@
 package main
 
 // These tests cover the PairingRequest's state machine: the window
-// opens and reports what the radio sees, an approval pairs exactly the
+// opens and reports what the radio observes, an approval pairs exactly the
 // device a person named, an empty spec.device pairs nothing at all,
 // the window expires unapproved, and a finished request is collected
 // after its TTL.
@@ -93,8 +93,8 @@ func TestRequestPairsTheDeviceAPersonApproved(t *testing.T) {
 	if !radio.called("Pair a0-ab-51-33-b7-12") {
 		t.Fatalf("the approved device was not paired: %v", radio.calls)
 	}
-	// Trusting it is what lets the controller reconnect on its own,
-	// with no agent registered.
+	// Trusting it lets the controller reconnect on its own, with no
+	// agent registered.
 	if !radio.called("SetDeviceTrusted a0-ab-51-33-b7-12 true") {
 		t.Errorf("the device was not trusted: %v", radio.calls)
 	}
@@ -187,8 +187,8 @@ func TestRequestExpiresWhenItsWindowCloses(t *testing.T) {
 	if expired.Status.Phase != phaseExpired || expired.Status.FinishedAt != timestamp(testNow) {
 		t.Errorf("status = %+v", expired.Status)
 	}
-	// The radio goes back to not discoverable and not pairable, which
-	// is what everything outside a window depends on.
+	// The radio goes back to not discoverable and not pairable, and
+	// everything outside a window depends on that.
 	if !radio.called("CloseWindow") {
 		t.Fatalf("the radio was left in a window: %v", radio.calls)
 	}

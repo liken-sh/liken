@@ -8,7 +8,7 @@ import (
 
 // The addresses of the machine this design was measured on: one
 // adapter, one paired controller, and one neighbour's device that
-// BlueZ saw on the air and holds no link key for.
+// BlueZ detected on the air and holds no link key for.
 const (
 	testAdapter   = "04:4A:69:66:92:27"
 	testDevice    = "7C:66:EF:22:E7:80"
@@ -53,7 +53,7 @@ func blueZTree(t *testing.T) string {
 }
 
 // testInfo is one paired device's info file, in BlueZ's own shape.
-// The link key is what makes this file worth a Secret.
+// The link key makes this file worth a Secret.
 const testInfo = `[LinkKey]
 Key=0123456789ABCDEF0123456789ABCDEF
 Type=4
@@ -81,7 +81,7 @@ Name=DualSense Wireless Controller
 `
 
 // testNeighbourCache is a cache entry for a device this adapter has
-// never paired with. It carries a name and no key, and it must not
+// never paired with. It has a name and no key, and it must not
 // reach the API.
 const testNeighbourCache = `[General]
 Name=Somebody's Phone

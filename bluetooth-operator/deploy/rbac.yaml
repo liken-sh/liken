@@ -8,9 +8,9 @@
 # One ServiceAccount serves the whole pod. A ServiceAccount is a
 # pod-level field, and the ServiceAccount admission controller mounts
 # the projected token into the init containers as well as the
-# containers, so bondfetch reads its Secret through this identity and
+# containers, so bondfetch reads the Secrets through this identity and
 # there is no second one to give it. The two halves do not need the
-# same verbs, because bondfetch reads a Secret and never writes one.
+# same verbs, because bondfetch reads Secrets and never writes one.
 # Splitting the verbs would take a second pod, and both halves have
 # to hold the same adapter.
 ---
@@ -36,7 +36,7 @@ rules:
     verbs: [get, create, update, delete]
   # The DRA plugin (dra.go): when the kubelet asks this driver to
   # prepare a claim, the request names the claim and nothing more. The
-  # allocation lives on the claim's status, so the driver reads it
+  # allocation is on the claim's status, so the driver reads it
   # back. This is read-only across every namespace, because claims
   # belong to workloads and the driver serves whichever namespace
   # claims a controller. Still no list and no watch: prepare calls
@@ -46,8 +46,8 @@ rules:
     verbs: [get]
   # This node, read once at startup for the UID that the slice's owner
   # reference needs. The Node owns the slice, so a Node that leaves
-  # the cluster takes the slice with it, and the garbage collector
-  # cleans up after an operator that exits without running any code.
+  # the cluster takes the slice with it. The garbage collector does
+  # that removal, so the operator runs no cleanup code at exit.
   - apiGroups: [""]
     resources: [nodes]
     verbs: [get]
@@ -96,13 +96,14 @@ subjects:
 # deleting the Pairing collects the Secret through ordinary garbage
 # collection, and the operator never removes one itself.
 #
-# A Role and not a ClusterRole, because these Secrets live in the
+# A Role and not a ClusterRole, because these Secrets are in the
 # operator's own namespace alone and a namespaced grant is the
 # narrower of the two. A ClusterRole on secrets would reach every
 # other workload's credentials in every namespace.
 #
 # resourceNames cannot narrow it further. A Secret's name comes from a
-# device's address, which is not known until the radio reports it.
+# device's address, and no name exists until the radio reports that
+# address.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:

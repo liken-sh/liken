@@ -31,11 +31,11 @@ import (
 // slice line older than this knows the loop is not running, whatever
 // the API server still shows.
 //
-// The bound is time, not a count of passes. The loop's rate is what
-// sets how long a count takes to reach: the backstop tick alone gives
-// one pass a minute, and a flapping cable gives many passes a second,
-// so a line on every tenth pass says nothing fixed about how old the
-// newest line may be. Ten minutes against a 60 second backstop is one
+// The bound is time, not a count of passes. The loop's rate sets how
+// fast passes accumulate: the backstop tick alone gives one pass a
+// minute, and a controller that reconnects in a loop gives many passes
+// a second. So a line on every tenth pass says nothing fixed about how
+// old the newest line may be. Ten minutes against a 60 second backstop is one
 // line for every ten quiet passes, and it keeps that limit whatever
 // the hardware does.
 const sliceLivenessInterval = 10 * time.Minute
@@ -61,9 +61,9 @@ func (r *sliceReport) created(generation int64, devices []SliceDevice) {
 }
 
 // wrote reports a replacement and names what moved. The device count
-// alone does not: a device that gains or loses a taint keeps the count
-// where it was, and that is the event that parks a consumer or evicts
-// one, so it is the event worth naming.
+// alone does not name it: a device that gains or loses a taint keeps
+// the count where it was. That taint change is the event that parks a
+// consumer or evicts one, so the line names it.
 func (r *sliceReport) wrote(generation int64, published, current []SliceDevice) {
 	r.line("slice: wrote generation %d, %s%s",
 		generation, sliceSummary(current), tail(sliceChanges(published, current)))
@@ -71,14 +71,14 @@ func (r *sliceReport) wrote(generation int64, published, current []SliceDevice) 
 
 // deletedSlice reports the one removal this operator makes, which is
 // the last controller being unpaired. Nothing is left to count, so the
-// line carries no summary.
+// line has no summary.
 func (r *sliceReport) deletedSlice() {
 	r.line("slice: deleted, the last paired controller is gone")
 }
 
 // unchangedSlice reports a pass that wrote nothing, at most once per
-// sliceLivenessInterval. The pass count on the line is what proves the
-// loop ran the whole time instead of once.
+// sliceLivenessInterval. The pass count on the line proves the loop
+// ran the whole time instead of once.
 func (r *sliceReport) unchangedSlice(generation int64, devices []SliceDevice) {
 	r.unchanged++
 	if r.now().Sub(r.lastLine) < sliceLivenessInterval {
@@ -149,7 +149,7 @@ func sliceChanges(published, current []SliceDevice) []string {
 	return phrases
 }
 
-// appeared describes a device the slice did not carry before, with the
+// appeared describes a device the slice did not hold before, with the
 // taints it arrives with, because a device that appears already unable
 // to serve is a different fact from one that appears ready.
 func appeared(device SliceDevice) string {
@@ -160,13 +160,13 @@ func appeared(device SliceDevice) string {
 	return device.Name + " appeared with " + strings.Join(keys, ", ")
 }
 
-// moved describes what changed about a device the slice carried
+// moved describes what changed about a device the slice held
 // before. A device can gain one taint and lose another in one pass, so
 // this gives back up to two phrases.
 //
 // An attribute change with no taint change gets one flat phrase and no
 // detail. The attributes say what the hardware is, so a reader who
-// needs them reads the slice, and naming every one of them here would
+// needs them reads the slice. Naming every one of them here would
 // hide the taint changes, which are what park a consumer or evict one.
 func moved(was, is SliceDevice) []string {
 	gained := keysNotIn(taintKeys(is.Taints), taintKeys(was.Taints))
@@ -185,14 +185,14 @@ func moved(was, is SliceDevice) []string {
 	return phrases
 }
 
-// taintedPhrases lists the devices that carry taints, which is what a
+// taintedPhrases lists the devices that have taints, which is what a
 // newly created slice has to say. Every device in it is new, so naming
 // them all would only repeat the count on the front of the line.
 func taintedPhrases(devices []SliceDevice) []string {
 	var phrases []string
 	for _, device := range devices {
 		if keys := taintKeys(device.Taints); len(keys) > 0 {
-			phrases = append(phrases, device.Name+" carries "+strings.Join(keys, ", "))
+			phrases = append(phrases, device.Name+" has "+strings.Join(keys, ", "))
 		}
 	}
 	return phrases
@@ -200,8 +200,8 @@ func taintedPhrases(devices []SliceDevice) []string {
 
 // taintKeys gives the sorted keys of one device's taints. The key is
 // the whole comparison: this operator publishes one effect per key, so
-// a key that arrives or leaves is the whole change, and sorting keeps
-// the line the same whatever order the API server stored them in.
+// a key that arrives or leaves is the whole change. Sorting keeps the
+// line the same whatever order the API server stored them in.
 func taintKeys(taints []DeviceTaint) []string {
 	keys := make([]string, 0, len(taints))
 	for _, taint := range taints {

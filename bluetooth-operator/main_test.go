@@ -56,7 +56,7 @@ func TestSettleEmitsUnderAConstantFlap(t *testing.T) {
 	out := settle(ctx, in, testWindow, testLimit)
 
 	// A controller that reconnects faster than the quiet window would
-	// restart the wait forever. The limit is what still publishes.
+	// restart the wait forever. The limit keeps the loop publishing.
 	stop := make(chan struct{})
 	defer close(stop)
 	go func() {
@@ -116,9 +116,9 @@ func assertQuiet(t *testing.T, out <-chan struct{}, within time.Duration) {
 	}
 }
 
-// wakes merges three sources, and each of them closing must end the
-// merge. A source that closed and was not noticed would spin the loop
-// on a channel that is always ready to receive.
+// wakes merges four sources, and each of them closing must end the
+// merge. A source that closed and stayed in the select would spin the
+// loop on a channel that is always ready to receive.
 func TestWakesEndsWhenAnySourceCloses(t *testing.T) {
 	sources := []string{"uevents", "bluez", "retries", "requests"}
 	for i, closing := range sources {

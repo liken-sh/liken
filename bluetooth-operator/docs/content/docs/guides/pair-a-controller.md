@@ -9,7 +9,7 @@ This guide pairs a game controller with `kubectl` and hands it to one
 pod. The example is a DualSense and a game in a namespace named
 `arcade`, on a [`liken`](https://liken.sh/docs/) cluster with
 [the operator installed](/docs/guides/install/). Every step is a Kubernetes
-API call, so RBAC decides who may do each one, and nobody needs a
+API call, so RBAC controls who may do each one, and nobody needs a
 shell on a node or in a pod.
 
 ## 1. Open a pairing window
@@ -37,7 +37,7 @@ pairable and discoverable, for `windowSeconds` (180 by default, 15 to
 900). Between windows the radio is neither, so nothing pairs with the
 cluster while nobody asked.
 
-## 2. Put the controller in pairing mode and read what the radio sees
+## 2. Put the controller in pairing mode and read what the radio reports
 
 On a DualSense, hold **Create** and **PS** until the light bar
 flashes. Then read the request:
@@ -46,7 +46,7 @@ flashes. Then read the request:
 
 Every device the scan finds, and the cluster holds no bond with,
 appears in `status.seen` with its address, its name, and when the
-radio first saw it.
+radio first observed it.
 
 ## 3. Approve the device you meant
 
@@ -82,7 +82,7 @@ owns, and the controller is a device in this node's `ResourceSlice`:
             connected: {bool: true}
             name: {string: "DualSense Wireless Controller"}
 
-From here on, **PS** alone reconnects the controller. The keys live
+From here on, **PS** alone reconnects the controller. The keys are
 in the `Secret`, so they survive a pod restart, an upgrade, and a
 reboot.
 
@@ -117,9 +117,10 @@ that selects the controller by its address:
                   effect: NoExecute
                   tolerationSeconds: 30
 
-The toleration sets how long the radio may go silent before the pod
-is evicted. Tolerate `bluetooth.liken.sh/disconnected` and nothing
-else: [Devices](/docs/reference/devices/#the-taints) explains why the other
+The toleration sets how long the radio may go silent before the
+eviction controller ends the pod. Tolerate
+`bluetooth.liken.sh/disconnected` and nothing else:
+[Devices](/docs/reference/devices/#the-taints) explains why the other
 taint must stay untolerated. Leave out the selector to claim any
 paired controller.
 
@@ -155,8 +156,9 @@ session.
 In a `Deployment`, claim through a `ResourceClaimTemplate` instead of
 a standing `ResourceClaim`. A standing claim keeps its allocation
 across an eviction, so the `ReplicaSet`'s replacement pods would
-schedule onto a device that is gone and be evicted at once. A template gives each
-replacement pod a fresh claim, and a fresh claim respects the taints.
+schedule onto a device that is gone and be evicted at once. A
+template gives each replacement pod a fresh claim, and a fresh claim
+needs a new allocation, which the taints block.
 
 ## Unpair
 

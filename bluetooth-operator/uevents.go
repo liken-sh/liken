@@ -5,11 +5,10 @@ package main
 // The kernel broadcasts every device add and remove on a netlink
 // socket, NETLINK_KOBJECT_UEVENT. Each datagram is "action@devpath"
 // followed by KEY=VALUE pairs, each part ending in a NUL byte. A HID
-// add is what tells this program that a controller's evdev nodes
-// exist, moments before bluetoothd reports the connection over D-Bus.
+// add tells this program that a controller's evdev nodes exist,
+// moments before bluetoothd reports the connection over D-Bus.
 //
-// Two traps around the socket fail silently, and both are worth
-// writing down.
+// Two ways to open this socket fail silently:
 //
 //   - Bind group 1, never group 2. Group 1 carries the kernel's own
 //     broadcasts. Group 2 carries udev's re-broadcasts to libudev
@@ -48,8 +47,8 @@ type hidEvent struct {
 // devpathMACs remembers which controller registered each HID device,
 // so a remove event can name the controller that left.
 //
-// A remove datagram does carry HID_UNIQ in the kernels this program
-// has met, and the map is what makes the answer certain rather than
+// A remove datagram does include HID_UNIQ on every kernel this program
+// has run against, and the map makes the answer certain rather than
 // probable. The lookup prefers the datagram's own value and falls
 // back to the map, so a kernel that drops the key from a remove event
 // still resolves.
@@ -122,10 +121,10 @@ func parseUevent(datagram []byte) (action, devpath string, values map[string]str
 // reports a HID device appearing or disappearing. Everything else on
 // the socket, which on a running machine is most of it, reports false.
 //
-// The subsystem test is what keeps the volume down. A controller that
-// connects produces a HID add, an input add for each input device
-// under it, and several more, and the operator needs one wake for the
-// burst. Its settle window (main.go) collapses the rest.
+// The subsystem test drops every other subsystem's events. A
+// controller that connects produces a HID add, an input add for each
+// input device under it, and several more, and the operator needs one
+// wake for the burst. Its settle window (main.go) collapses the rest.
 func hidEventFrom(datagram []byte, macs *devpathMACs) (hidEvent, bool) {
 	action, devpath, values, ok := parseUevent(datagram)
 	if !ok {

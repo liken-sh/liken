@@ -52,7 +52,7 @@ type inventory struct {
 	// retired names the devices the publisher has already left out of
 	// the slice. A teardown removes a bond from bluetoothd only after
 	// the device is out of the published inventory, and the slice
-	// carries no record of a device that is not in it, so this is the
+	// holds no record of a device that is not in it, so this is the
 	// only account of that step.
 	retired map[bonds.Address]bool
 
@@ -80,7 +80,7 @@ func newInventory(client *Client, radio radio, nodeName, namespace string) *inve
 	}
 }
 
-// inventoryPass carries one pass's results to the rest of the loop.
+// inventoryPass holds one pass's results for the rest of the loop.
 type inventoryPass struct {
 	// keepOut names the controllers the slice must not publish, keyed
 	// the way the paired set is keyed. A device under teardown leaves
@@ -88,8 +88,8 @@ type inventoryPass struct {
 	// allocated to it in the moment between the two.
 	keepOut map[string]bool
 
-	// owners names each bond's Pairing, which is the owner reference its
-	// Secret carries. A bond with no Pairing yet gets no Secret this
+	// owners names each bond's Pairing, which is the owner reference on
+	// its Secret. A bond with no Pairing yet gets no Secret this
 	// pass, and the next pass writes it.
 	owners map[bonds.Address]OwnerReference
 
@@ -180,9 +180,9 @@ func (pass *inventoryPass) runAgainIn(after time.Duration) {
 //
 // The record is the CDI spec files this driver wrote. The kubelet
 // prepares a claim before the consumer's container starts and
-// unprepares it after the container is gone, and prepare and unprepare
-// are what create and remove those files, so a file that names a
-// device is a claim that still holds it. The alternative is to list
+// unprepares it after the container is gone. Prepare creates those
+// files and unprepare removes them, so a file that names a device is a
+// claim that still holds it. The alternative is to list
 // every ResourceClaim in the cluster and read its allocation, which
 // widens this operator's grant to every workload's claims for a fact
 // that is already on this node's disk.
@@ -190,7 +190,7 @@ func (pass *inventoryPass) runAgainIn(after time.Duration) {
 // A claim that the scheduler allocated but the kubelet has not
 // prepared yet is not in the result. That claim's pod is not running,
 // so nothing is using the controller, and the device leaves the slice
-// before the bond is removed, which is what keeps the allocation from
+// before the bond is removed, which keeps the allocation from
 // reaching prepare afterwards.
 func claimedDevices() map[string]bool {
 	held := map[string]bool{}

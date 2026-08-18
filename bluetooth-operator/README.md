@@ -11,11 +11,11 @@ on the machine.
 
 Everything runs through the Kubernetes API. You create a
 `PairingRequest`, hold the controller's pairing buttons, and approve
-the address the radio saw. Your game or emulator pod claims that
-address, and only that pod reads the controller. The bond's keys live
+the address the radio reported. Your game or emulator pod claims that
+address, and only that pod reads the controller. The bond's keys are
 in a `Secret`, so after a pod restart or a reboot the controller
-reconnects with one button. No SSH, no host configuration, and no shell in any
-pod.
+reconnects with one button. This needs no SSH, no host configuration,
+and no shell in any pod.
 
 ## What it needs from `liken`
 
@@ -29,7 +29,7 @@ runtime are the public contracts any DRA driver gets.
 The operator is one of `liken`'s optional
 [hardware operators](https://liken.sh/docs/concepts/hardware-operators/),
 and it installs as an ordinary workload. A cluster that never deploys
-it behaves as it does now. Its pod carries bluetoothd, so the `liken`
+it behaves as it does now. Its pod runs bluetoothd, so the `liken`
 system image ships no BlueZ and no D-Bus.
 
 ## Install
@@ -41,25 +41,25 @@ their YAML. Then apply the base:
 
     kubectl apply -k deploy/
 
-The base is a kustomize directory you can also reference from your
+The base is a `kustomize` directory you can also reference from your
 own GitOps. The guide gives the steps, the verification, and the
 privilege the pod takes.
 
 ## The manual
 
-The manual publishes at **<https://bluetooth.liken.sh>**. It carries:
+The manual publishes at **<https://bluetooth.liken.sh>**. It includes:
 
 * [Install the operator](docs/content/docs/guides/install.md)
 * [Pair a controller and give it to a pod](docs/content/docs/guides/pair-a-controller.md)
 * [Devices](docs/content/docs/reference/devices.md): the published devices,
   their attributes and taints, and the claims that select them
 
-The source files carry the rest. This repository is written to be
+The source files hold the rest. This repository is written to be
 read, like `liken` itself: the comments in the Go files and the
 manifests explain how the operator works and why it is built this way.
 [`plans/`](plans/) holds the design documents and the open problems.
 
-## Building it
+## The build
 
     go build ./...
     go test ./...

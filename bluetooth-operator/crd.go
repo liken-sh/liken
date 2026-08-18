@@ -3,7 +3,7 @@ package main
 // The pairing API: three custom resources that let a person create,
 // read, and delete a bond with kubectl.
 //
-// One rule decides what becomes an object and what stays status. A
+// One rule sets what becomes an object and what stays status. A
 // spec is desired state, a status is observed state, and a radio
 // session is never an object. So the Adapter and the Pairing are the
 // durable inventory, the PairingRequest is the act of pairing, and
@@ -18,10 +18,10 @@ package main
 // grant possible.
 //
 // Like the ResourceSlice and Secret types in this repository, these
-// structs carry only the fields the operator reads or writes. The
+// structs hold only the fields the operator reads or writes. The
 // objects also have annotations, generation, and everything else an
 // object has, and none of that changes what a pairing needs. The one
-// thing every write does carry is the resourceVersion from its read,
+// thing every write does include is the resourceVersion from its read,
 // so a second writer gets a conflict instead of losing the first
 // writer's change.
 
@@ -79,8 +79,8 @@ const (
 
 const (
 	// defaultWindowSeconds is how long a window runs when the request
-	// states no length. Three minutes is long enough to hold the controller's
-	// buttons, read status.seen, and write the address back.
+	// states no length. Three minutes is long enough to hold the
+	// controller's buttons, read status.seen, and write the address back.
 	defaultWindowSeconds = 180
 
 	// defaultTTLSeconds is how long a finished request stays before the
@@ -97,7 +97,7 @@ const (
 	maxSeenNameBytes = 64
 )
 
-// ObjectMeta is the identity every one of these objects carries.
+// ObjectMeta is the identity every one of these objects has.
 //
 // Finalizers and DeletionTimestamp are here because both controllers
 // are finalizer controllers: an object that is deleting keeps its
@@ -116,12 +116,12 @@ type ObjectMeta struct {
 }
 
 // deleting reports whether somebody has requested this object's
-// deletion. The API server refuses to remove an object that carries a
+// deletion. The API server refuses to remove an object that has a
 // finalizer, and writes this field instead. A teardown starts when
 // this field is set.
 func (m ObjectMeta) deleting() bool { return m.DeletionTimestamp != "" }
 
-// holds reports whether this object carries the named finalizer.
+// holds reports whether this object has the named finalizer.
 func (m ObjectMeta) holds(finalizer string) bool {
 	for _, held := range m.Finalizers {
 		if held == finalizer {
@@ -188,7 +188,7 @@ type AdapterStatus struct {
 // Pairing is the durable fact that one device holds a bond with one
 // adapter. The operator creates it when a pairing succeeds and when it
 // adopts a bond that bluetoothd already held, and it owns the Secret
-// that carries that one bond.
+// that holds that one bond.
 //
 // Deleting a Pairing is the unpair API. Nothing else deletes one: a
 // Pairing whose bond disappeared from bluetoothd keeps its object and
@@ -208,8 +208,8 @@ type PairingSpec struct {
 	// with the keys.
 	Alias string `json:"alias,omitempty"`
 
-	// Trusted reconciles into Device1.Trusted, which is what lets the
-	// device reconnect on its own. It is a pointer because the CRD
+	// Trusted reconciles into Device1.Trusted, which lets the device
+	// reconnect on its own. It is a pointer because the CRD
 	// defaults it to true, and a plain false would be indistinguishable
 	// from an unset field on the wire.
 	Trusted *bool `json:"trusted,omitempty"`
@@ -283,11 +283,10 @@ type PairingRequestStatus struct {
 	Seen           []SeenDevice `json:"seen,omitempty"`
 	Pairing        string       `json:"pairing,omitempty"`
 
-	// FinishedAt is when the request reached Paired or Expired, and it
-	// is what the TTL counts from. Job carries the same field for the
-	// same reason: a TTL needs a start, and the object's own
-	// creationTimestamp is the wrong one because a window can run for
-	// minutes.
+	// FinishedAt is when the request reached Paired or Expired, and the
+	// TTL counts from it. Job has the same field for the same reason: a
+	// TTL needs a start, and the object's own creationTimestamp is the
+	// wrong one because a window can run for minutes.
 	FinishedAt string `json:"finishedAt,omitempty"`
 
 	// Message explains a request that did not do what was asked, for
@@ -302,16 +301,16 @@ func (s PairingRequestStatus) finished() bool {
 	return s.Phase == phasePaired || s.Phase == phaseExpired
 }
 
-// SeenDevice is one device the radio observed during the window. The
-// list is what a person reads to learn the address to approve.
+// SeenDevice is one device the radio observed during the window. A
+// person reads the list to find the address to approve.
 type SeenDevice struct {
 	Address   string `json:"address"`
 	Name      string `json:"name,omitempty"`
 	FirstSeen string `json:"firstSeen,omitempty"`
 }
 
-// The list types. The API server's list responses carry far more than
-// this, and the operator reads the items and nothing else.
+// The list types. The API server's list responses include far more
+// than this, and the operator reads the items and nothing else.
 type (
 	AdapterList struct {
 		Items []Adapter `json:"items"`
@@ -347,7 +346,7 @@ func pairingRequestPath(namespace, name string) string {
 func statusPath(path string) string { return path + "/status" }
 
 // byAdapter narrows a list to the objects that belong to one radio.
-// The Pairings and the bond Secrets both carry the adapter's address as
+// The Pairings and the bond Secrets both have the adapter's address as
 // a label, because a label is selectable and a name is not, and this
 // operator must never write another radio's objects.
 func byAdapter(path, adapterKey string) string {
@@ -370,7 +369,7 @@ func fromCache(path string) string {
 }
 
 // createObject posts a new object to its collection and returns what
-// the server stored. The stored copy carries the UID that an owner
+// the server stored. The stored copy includes the UID that an owner
 // reference needs.
 func createObject[T any](c *Client, collection string, object *T) (*T, error) {
 	body, err := json.Marshal(object)
@@ -389,8 +388,8 @@ func createObject[T any](c *Client, collection string, object *T) (*T, error) {
 // keeps only the status half of it.
 //
 // Every caller states the object's apiVersion and kind before it calls
-// this. An object read out of a list does not always carry them, and
-// the API server refuses a write that carries neither.
+// this. An object read out of a list does not always have them, and
+// the API server refuses a write that includes neither.
 func replaceStatus[T any](c *Client, path string, object *T) error {
 	body, err := json.Marshal(object)
 	if err != nil {
@@ -425,7 +424,7 @@ const mergePatchType = "application/merge-patch+json"
 //
 // The caller needs that version. A patch is a write like any other, so
 // it produces a new resourceVersion, and the server would refuse a
-// second write in the same pass that still carried the version from
+// second write in the same pass that still stated the version from
 // before the patch.
 func patchFinalizers(c *Client, path, resourceVersion string, finalizers []string) (string, error) {
 	patch := map[string]any{

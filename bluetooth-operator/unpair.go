@@ -9,16 +9,16 @@ package main
 //
 //  1. Disconnect the device. The session ends, the controller
 //     registers no evdev node, and the ordinary reconcile puts both
-//     taints on the slice device. The NoExecute taint is what the
-//     eviction controller acts on, and the consumer's own
-//     tolerationSeconds is what sets how long that takes.
+//     taints on the slice device. The eviction controller acts on the
+//     NoExecute taint, and the consumer's own tolerationSeconds sets
+//     how long that takes.
 //  2. Wait until no prepared claim holds the controller. The kubelet's
 //     unprepare call ends the claim's hold, and it runs after the
 //     consumer's container is gone.
 //  3. Retire the device from the ResourceSlice, so no new claim can
 //     be allocated to a bond that is about to go.
 //  4. Remove the bond from bluetoothd, and release the finalizer.
-//     The Secret carrying the keys is owned by the Pairing, so garbage
+//     The Secret that holds the keys is owned by the Pairing, so garbage
 //     collection takes it in the same act.
 //
 // Steps 3 and 4 are separated by a pass on purpose. The publisher
@@ -68,8 +68,8 @@ func (i *inventory) unpair(pairing *Pairing, address bonds.Address, device devic
 		// A consumer still holds this controller. The device stays in the
 		// slice while that is true, because an allocation that names a
 		// device in no slice strands the kubelet's prepare call. The
-		// taints on the device are what end that pod, and this waits for
-		// the unprepare that follows.
+		// taints on the device end that pod, and this waits for the
+		// unprepare that follows.
 		fmt.Printf("unpair %s: a prepared claim still holds it; waiting\n", name)
 		return
 	}

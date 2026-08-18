@@ -5,7 +5,7 @@
 # the tag's name, in liken's own scheme: 2026.08.03-001, the date and
 # a counter.
 #
-# The three images carry the same version, because they are three
+# The three images share one version, because they are three
 # parts of one pod and a deployment that mixes versions is a
 # combination nobody tested. The tag also names the commit a consumer
 # pins to when it references the kustomize base in `deploy/`, so one
@@ -32,7 +32,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      # Every tag reaches this workflow, so the first step decides
+      # Every tag reaches this workflow, so the first step tests
       # whether the tag is a version. A tag of any other shape fails
       # here, before anything builds, and the log says why.
       - name: check the tag shape

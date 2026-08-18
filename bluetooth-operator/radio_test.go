@@ -9,7 +9,7 @@ import (
 	"github.com/godbus/dbus/v5"
 )
 
-// windowState adds the properties an adapter carries while a pairing
+// windowState adds the properties an adapter has while a pairing
 // window is open. The tree helper in bluez_test.go writes the two
 // every reader needs, and these are the rest.
 func (m managedObjects) window(path string, discoverable, pairable, discovering bool) managedObjects {

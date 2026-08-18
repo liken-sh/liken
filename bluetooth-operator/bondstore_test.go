@@ -22,7 +22,7 @@ import (
 // the README's example Secret belongs to.
 const testAdapter = "14:B4:57:91:2F:C8"
 
-// The device these tests pair, and the paths its Secret lives at.
+// The device these tests pair, and the paths of its Secret.
 const (
 	testDevice      = "A0:AB:51:33:B7:12"
 	testSecretPath  = "/api/v1/namespaces/liken-system/secrets/bluetooth-bond-a0-ab-51-33-b7-12"
@@ -85,7 +85,7 @@ func (f *bondSecretFixture) handler(t *testing.T) http.Handler {
 }
 
 // storedBond is one bond as the API server already holds it, with the
-// resourceVersion a read carries.
+// resourceVersion a read returns.
 func storedBond(t *testing.T, device string, files bonds.Files) map[string]*bonds.Secret {
 	t.Helper()
 	address := testAddress(t, device)
@@ -164,7 +164,7 @@ func adapterIs(t *testing.T) adapterAddressReader {
 
 // The two files BlueZ writes for a paired controller: the info file
 // under the device's own directory, and the cache entry that holds its
-// SDP records. Nothing here parses either, and these tests carry short
+// SDP records. Nothing here parses either, and these tests use short
 // ones for the same reason the operator does: the bytes travel and
 // their meaning does not.
 var oneBond = bonds.Files{
@@ -194,9 +194,9 @@ func TestPersistCreatesTheSecretAtTheFirstPairing(t *testing.T) {
 	if secret.Type != bonds.SecretType {
 		t.Errorf("type = %q", secret.Type)
 	}
-	// The label names the radio, which is what the init container lists
-	// by, and the owner is the Pairing, which is what collects the keys
-	// when somebody unpairs the controller.
+	// The label names the radio, which the init container lists by. The
+	// owner is the Pairing, so deleting it collects the keys when
+	// somebody unpairs the controller.
 	if secret.Metadata.Labels[bonds.AdapterLabel] != "14-b4-57-91-2f-c8" {
 		t.Errorf("labels = %+v", secret.Metadata.Labels)
 	}
@@ -253,7 +253,7 @@ func TestPersistCarriesACacheEntryThatLandsAfterThePairing(t *testing.T) {
 	if got := string(fixture.updated.Data["a0-ab-51-33-b7-12.cache"]); got != string(oneBond.Cache) {
 		t.Errorf("the cache entry arrived as %q", got)
 	}
-	// The write carries the resourceVersion from the read, so a second
+	// The write includes the resourceVersion from the read, so a second
 	// writer gets a conflict instead of losing the first writer's bond.
 	if fixture.updated.Metadata.ResourceVersion != "7" {
 		t.Errorf("resourceVersion = %q", fixture.updated.Metadata.ResourceVersion)
@@ -261,7 +261,7 @@ func TestPersistCarriesACacheEntryThatLandsAfterThePairing(t *testing.T) {
 }
 
 // The adapter's cache directory holds one entry for every device the
-// radio has resolved a name for, which in a house is the neighbours'
+// radio has resolved a name for, which in a home is the neighbours'
 // phones. A device with no directory of its own is not paired to this
 // adapter, and nothing about it may reach the API.
 func TestPersistCarriesNoCacheEntryForADeviceThatIsNotPaired(t *testing.T) {
@@ -281,7 +281,7 @@ func TestPersistCarriesNoCacheEntryForADeviceThatIsNotPaired(t *testing.T) {
 	}
 	for key, value := range fixture.created.Data {
 		if strings.HasPrefix(key, "e3-28-e9-23-21-6f") {
-			t.Errorf("the Secret carries %s, a device this adapter never paired with: %q", key, value)
+			t.Errorf("the Secret holds %s, a device this adapter never paired with: %q", key, value)
 		}
 	}
 }
@@ -317,7 +317,7 @@ func TestPersistWaitsForTheBondToHaveAPairing(t *testing.T) {
 }
 
 // A bond under teardown is on its way out. Its Secret is not rewritten,
-// and the Pairing that owns it is what collects it.
+// and it is collected with the Pairing that owns it.
 func TestPersistLeavesABondUnderTeardownAlone(t *testing.T) {
 	fixture := &bondSecretFixture{}
 	store := testBondStore(t, fixture, bondTree(t, map[string]bonds.Files{testDevice: oneBond}))
@@ -332,8 +332,8 @@ func TestPersistLeavesABondUnderTeardownAlone(t *testing.T) {
 }
 
 // An unpaired device's Secret is not emptied and not deleted here.
-// Deleting a Pairing is what removes a bond, and the Secret goes with
-// the Pairing through its owner reference.
+// Deleting a Pairing removes a bond, and the Secret goes with the
+// Pairing through its owner reference.
 func TestPersistWritesNothingForABondThatLeftTheTree(t *testing.T) {
 	fixture := &bondSecretFixture{existing: storedBond(t, testDevice, oneBond)}
 	store := testBondStore(t, fixture, bondTree(t, nil))
@@ -392,8 +392,8 @@ func TestPersistReadsTheAdapterAddressOnce(t *testing.T) {
 
 func TestPersistWaitsForBlueZToPublishAnAdapter(t *testing.T) {
 	// bluetoothd publishes its object tree a moment after it claims its
-	// bus name. Until it does, the operator does not know which radio
-	// the bonds on disk belong to.
+	// bus name. Until it does, the operator has no way to tell which
+	// radio the bonds on disk belong to.
 	fixture := &bondSecretFixture{}
 	store := testBondStore(t, fixture, bondTree(t, map[string]bonds.Files{testDevice: oneBond}))
 	read := func() (bonds.Address, error) { return bonds.Address{}, ErrNoAdapter }

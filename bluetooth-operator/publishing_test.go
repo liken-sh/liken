@@ -53,7 +53,7 @@ func testOwner() OwnerReference {
 	return OwnerReference{APIVersion: "v1", Kind: "Node", Name: "liken-1", UID: "abc-123"}
 }
 
-// publishedDevice is one connected controller as the slice carries it.
+// publishedDevice is one connected controller as the slice holds it.
 func publishedDevice() SliceDevice {
 	return SliceDevice{
 		Name: "a0-ab-51-33-b7-12",
@@ -168,7 +168,7 @@ func TestEnsureReplacesAChangedSliceAndBumpsTheGeneration(t *testing.T) {
 	if fixture.updated.Spec.Pool.Generation != 4 {
 		t.Errorf("generation = %d, want 4", fixture.updated.Spec.Pool.Generation)
 	}
-	// The write carries the resourceVersion from the read, so a
+	// The write includes the resourceVersion from the read, so a
 	// conflicting writer gets a 409 instead of losing its change.
 	if fixture.updated.Metadata.ResourceVersion != "7" {
 		t.Errorf("resourceVersion = %q", fixture.updated.Metadata.ResourceVersion)
@@ -212,7 +212,7 @@ func TestEnsureLogsTheSliceItCreated(t *testing.T) {
 		sliceDevices(map[string]controller{"a0:ab:51:33:b7:12": {}}, nil)); err != nil {
 		t.Fatal(err)
 	}
-	want := "slice: created generation 1, 1 device, 1 tainted: a0-ab-51-33-b7-12 carries " +
+	want := "slice: created generation 1, 1 device, 1 tainted: a0-ab-51-33-b7-12 has " +
 		disconnectedTaint + ", " + noInputNodeTaint
 	if got := capture.only(t); got != want {
 		t.Errorf("line = %q, want %q", got, want)
@@ -233,8 +233,8 @@ func TestEnsureLogsTheSliceItWrote(t *testing.T) {
 	client := testClient(t, fixture.handler(t))
 
 	// The controller went off the air. The device count does not move,
-	// so the taints are the whole event, and they are what evicts the
-	// pod that held the claim.
+	// so the taints are the whole event, and they evict the pod that
+	// held the claim.
 	tainted := sliceDevices(map[string]controller{"a0:ab:51:33:b7:12": {}}, nil)
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(), tainted); err != nil {
 		t.Fatal(err)

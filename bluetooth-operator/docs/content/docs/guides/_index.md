@@ -6,14 +6,14 @@ weight: 10
 # Guides
 
 The guides give the steps for the two tasks this operator exists
-for: the install, and the pairing that puts a controller in one
-pod's hands.
+for: the install, and the pairing that gives a controller to one
+pod.
 
 ## How the pieces fit
 
 Four kinds of [Dynamic Resource Allocation
 (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
-object carry a controller from the radio to your container.
+object take a controller from the radio to your container.
 
 The operator publishes what exists. It writes one `ResourceSlice`
 for each node, and the slice lists that node's paired controllers

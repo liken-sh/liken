@@ -15,8 +15,8 @@ package main
 // current BlueZ, and it finds everything on an older one, so the bus
 // type is the test that works under both arrangements.
 //
-// HID_UNIQ in the device's uevent file carries the peer MAC address,
-// which is the identity the ResourceSlice publishes. HID_PHYS carries
+// HID_UNIQ in the device's uevent file holds the peer MAC address,
+// which is the identity the ResourceSlice publishes. HID_PHYS holds
 // the local adapter address the controller connects through, and the
 // walk keeps a device only when HID_PHYS names the adapter this
 // operator holds. A machine with a second adapter registers HID
@@ -27,7 +27,7 @@ package main
 // The node paths come from DEVNAME, the same way liken's own delivery
 // walk reads them. DEVNAME for an evdev node is input/eventN, so the
 // node is /dev/input/eventN. joydev registers input/jsN through the
-// same subsystem, and the DEVNAME prefix is what leaves it out: the
+// same subsystem, and the DEVNAME prefix leaves it out: the
 // kernel's own documentation calls joydev legacy, liken's kernel may
 // not enable CONFIG_INPUT_JOYDEV at all, and joydev publishes a
 // DualSense's motion sensors as a second jsN device.
@@ -59,7 +59,7 @@ type hidDevice struct {
 // discoverHIDDevices lists the Bluetooth HID devices on the operator's
 // own adapter, with the evdev nodes each one registers. The result is
 // sorted by DevPath, so the same hardware always produces the same list
-// and the slice comparison sees real changes only.
+// and the slice comparison reports real changes only.
 //
 // adapter is the address of the radio this operator holds. A device on
 // another adapter is left out. A zero adapter turns the filter off, so
@@ -67,7 +67,7 @@ type hidDevice struct {
 // single-adapter machine's behavior.
 //
 // A HID device with no valid HID_UNIQ is skipped. Bluetooth HID
-// always carries one, and a device without it has no identity that a
+// always has one, and a device without it has no identity that a
 // claim could name.
 func discoverHIDDevices(sysRoot string, adapter bonds.Address) []hidDevice {
 	entries, err := os.ReadDir(filepath.Join(sysRoot, "bus", "hid", "devices"))

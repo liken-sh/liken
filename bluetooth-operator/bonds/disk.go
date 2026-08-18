@@ -8,18 +8,17 @@ package bonds
 //     info file, and often an attributes file that is empty. The info
 //     file is the bond.
 //   - cache, a directory holding one file per device BlueZ has
-//     resolved a name for. That is every device the radio has seen,
+//     resolved a name for. That is every device the radio detected,
 //     so most of these entries are the neighbours' phones and headsets.
 //   - settings, the adapter's own power state, which the pod already
 //     states in bluetoothd's main.conf.
 //
 // The device directories and the cache entries that match them travel,
-// and nothing else does. A cache entry is not discovery residue when
-// the device has a directory: it carries the SDP records, and a BR/EDR
-// HID device does not reconnect without them. A cache entry with no
-// device directory is a device this adapter never paired with, and
-// carrying it would publish who lives nearby, so the device directory
-// is the test.
+// and nothing else does. A cache entry whose device has a directory
+// holds the SDP records, and a BR/EDR HID device does not reconnect
+// without them. A cache entry with no device directory is a device
+// this adapter never paired with, and copying it would publish who
+// lives nearby, so the device directory is the test.
 //
 // An entry whose name does not parse as an address is skipped rather
 // than fatal, because a later BlueZ may write more beside the bonds
@@ -40,7 +39,7 @@ const (
 	bondFileMode = 0o600
 
 	// infoFile is the file under each device's own directory that
-	// carries the bond, and cacheDirectory is where the adapter keeps
+	// holds the bond, and cacheDirectory is where the adapter keeps
 	// one file per device it has resolved a name for, named by the
 	// device's address.
 	infoFile       = "info"
@@ -126,9 +125,9 @@ func WriteTree(root string, adapter Address, tree Tree) error {
 		}
 		// A device with no stored cache entry gets no file. An empty
 		// one would give bluetoothd a key file with no
-		// [ServiceRecords] group, which reads as a device whose
-		// records are known to be none, and bluetoothd would not run
-		// the discovery that fills it in.
+		// [ServiceRecords] group, which reads as a device with no
+		// service records, and bluetoothd would not run the discovery
+		// that fills it in.
 		if len(stored.Cache) == 0 {
 			continue
 		}

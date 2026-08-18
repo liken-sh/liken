@@ -12,7 +12,7 @@ import (
 	"github.com/liken-sh/bluetooth-operator/bonds"
 )
 
-// The two files one paired controller carries: the link key in its
+// The two files one paired controller has: the link key in its
 // info file, and the SDP records in its cache entry.
 const (
 	testInfo  = "[LinkKey]\nKey=0123456789ABCDEF0123456789ABCDEF\nType=4\n"
@@ -103,7 +103,7 @@ func TestMaterializeWritesTheTreeBlueZReads(t *testing.T) {
 }
 
 // Some Secrets in the field key a device by the bare address, with no
-// suffix, carrying the info file. The pod reads that layout and
+// suffix, holding the info file. The pod reads that layout and
 // restores the bond, rather than exiting on keys it does not
 // recognise.
 func TestMaterializeReadsASecretInTheBareAddressLayout(t *testing.T) {
@@ -187,7 +187,7 @@ func TestMaterializeWritesEveryStoredBond(t *testing.T) {
 	}
 }
 
-// The older per-adapter Secret carries the same label, so a machine
+// The older per-adapter Secret has the same label, so a machine
 // that has paired nothing since that layout changed still restores its
 // bonds. A device in both layouts takes the per-bond copy, which is
 // the one the operator keeps current.

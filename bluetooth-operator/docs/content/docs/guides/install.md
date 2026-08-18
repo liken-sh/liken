@@ -8,7 +8,7 @@ weight: 10
 This guide installs `bluetooth-operator` on a
 [`liken`](https://liken.sh/docs/) cluster and verifies that it holds
 the radio. The operator is an ordinary workload: everything it needs
-is in one kustomize base, and nothing here touches a machine over SSH.
+is in one `kustomize` base, and nothing here touches a machine over SSH.
 
 ## What you need
 
@@ -71,9 +71,9 @@ A class is the cluster's vocabulary for a kind of device, and you
 choose its grain. A generic class such as `bluetooth-controller`
 matches every paired controller: the class list stays short, and
 each claim picks its controller with a CEL selector. A specific
-class carries the selector itself. This one matches exactly one
-controller, so a claim names the class and carries no CEL, and the
-choice is made once, in cluster policy, where you control it:
+class holds the selector itself. This one matches exactly one
+controller, so a claim names the class and writes no CEL, and you
+make the choice once, in cluster policy you control:
 
     apiVersion: resource.k8s.io/v1
     kind: DeviceClass
@@ -86,9 +86,9 @@ choice is made once, in cluster policy, where you control it:
               device.driver == "bluetooth.liken.sh" &&
               device.attributes["bluetooth.liken.sh"].address == "A0:AB:51:33:B7:12"
 
-Start generic. Add a specific class when several workloads keep
-writing the same selector, or when you want the choice to live in
-cluster policy rather than in each workload's manifest.
+Start generic. When several workloads repeat the same selector, or
+when you want the choice in cluster policy rather than in each
+workload's manifest, create a specific class.
 
 ## Apply the manifests
 
@@ -114,7 +114,7 @@ Or point your own GitOps at the same files with a `Kustomization`:
 
 The site serves the manifests of the current `main`, and the images
 in `operator.yaml` name `:latest`. To pin a release instead,
-reference the repository's kustomize base at a release tag. One tag
+reference the repository's `kustomize` base at a release tag. One tag
 versions the manifests and the three images together, so pin all four
 to the same version:
 

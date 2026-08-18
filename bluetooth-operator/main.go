@@ -49,27 +49,27 @@ const (
 	//
 	// Every ResourceSlice write wakes every DRA-pending pod in the
 	// cluster, because the scheduler event that a slice change raises
-	// carries no queueing hint. Hardware that flaps must not turn into
+	// includes no queueing hint. Hardware that flaps must not turn into
 	// a cluster-wide scheduling storm.
 	settleWindow = 1500 * time.Millisecond
 
 	// settleLimit bounds the wait. A controller that reconnects in a
 	// loop restarts the quiet window forever, and the state it settles
-	// on may never arrive, so the loop publishes what it can see at
+	// on may never arrive, so the loop publishes what it reads at
 	// this interval regardless.
 	settleLimit = 10 * time.Second
 
 	// backstopInterval is how often the loop reconciles with no event
 	// to prompt it. The kernel drops uevent datagrams when its socket
 	// buffer fills, and a dropped datagram costs one edge, so this
-	// tick is what recovers the state after one.
+	// tick recovers the state after one.
 	backstopInterval = 60 * time.Second
 
 	// retryDelay is how long the loop waits before it runs a failed
-	// pass again. One retry follows each failure, and
-	// a retry that fails schedules nothing more, so a failure that
-	// persists falls back to the backstop tick instead of turning into
-	// a five-second poll.
+	// pass again. One retry follows each failure, and a retry that
+	// fails schedules nothing more, so a failure that persists falls
+	// back to the backstop tick instead of turning into a five-second
+	// poll.
 	retryDelay = 5 * time.Second
 
 	// blueZTimeout bounds the wait for bluetoothd to claim its bus
@@ -94,8 +94,8 @@ const (
 	// a PairingRequest needs attention. A request is a small object that
 	// a person creates and edits by hand, and neither the kernel nor
 	// bluetoothd raises an event when that happens, so this is the one
-	// place the loop polls. Five seconds is what a person waits between
-	// creating a request and reading the window it opened.
+	// place the loop polls. Five seconds is the delay a person accepts
+	// between creating a request and reading the window it opened.
 	requestPoll = 5 * time.Second
 )
 
@@ -230,16 +230,16 @@ func main() {
 		case <-ctx.Done():
 			// The slice stays. The operator's pod restarts for ordinary
 			// reasons while a consumer holds a prepared claim, and the
-			// Node's ownership of the slice is what retracts it when
-			// this node really leaves.
+			// Node's ownership of the slice retracts it when this node
+			// really leaves.
 			return
 		case <-blueZGone:
 			// bluetoothd owns the HID sessions, and its death
-			// disconnects every controller at once, so an operator that
+			// disconnects every controller at once. An operator that
 			// kept publishing would advertise controllers it can no
-			// longer deliver. The
-			// published devices keep their taints from the last pass
-			// until the replacement pod corrects them.
+			// longer deliver. The published devices keep their taints
+			// from the last pass until the replacement pod corrects
+			// them.
 			fatal("bluetoothd left the bus")
 		case _, ok := <-settled:
 			switch err := exitReason(ctx, ok); {
@@ -283,8 +283,8 @@ func exitReason(ctx context.Context, ok bool) error {
 
 // wakes merges the kernel's HID events, bluetoothd's signals, the
 // PairingRequests that need a pass, and the loop's own retries into
-// one channel. None of them carries state that the loop uses, so the
-// merge loses nothing: they all say to look again.
+// one channel. None of them holds state that the loop uses, so the
+// merge loses nothing: each wake means look again.
 func wakes(ctx context.Context, uevents <-chan hidEvent, blueZChanges, retries, requests <-chan struct{}) <-chan struct{} {
 	out := make(chan struct{}, 1)
 	wake := func() {
@@ -334,9 +334,10 @@ func wakes(ctx context.Context, uevents <-chan hidEvent, blueZChanges, retries, 
 // the input has been quiet for window, or after limit has passed
 // since the first event of the burst, whichever comes first.
 //
-// The limit is what keeps a flapping controller publishing. Without
-// it, hardware that reconnects faster than the quiet window would
-// restart the wait on every event and the loop would never write.
+// The limit keeps the loop publishing under a flapping controller.
+// Without it, hardware that reconnects faster than the quiet window
+// would restart the wait on every event and the loop would never
+// write.
 func settle(ctx context.Context, in <-chan struct{}, window, limit time.Duration) <-chan struct{} {
 	out := make(chan struct{}, 1)
 	go func() {

@@ -16,12 +16,12 @@ package main
 // reinstalling the operating system. The radio's current location is
 // reported in status.
 //
-// Adoption is also what repairs a forced deletion. Somebody who patches
-// the finalizer off a live radio's Adapter loses the objects to the
-// cascade, and the next pass creates the Adapter again, adopts every
-// bond bluetoothd still holds as a Pairing, and writes each bond's
-// Secret from the tree on disk. bluetoothd keeps the keys on its own
-// disk, so no change to these objects can lose them.
+// Adoption also repairs a forced deletion. Somebody who patches the
+// finalizer off a live radio's Adapter loses the objects to the
+// cascade. The next pass creates the Adapter again, adopts every bond
+// bluetoothd still holds as a Pairing, and writes each bond's Secret
+// from the tree on disk. bluetoothd keeps the keys on its own disk, so
+// no change to these objects can lose them.
 
 import (
 	"fmt"
@@ -78,7 +78,7 @@ func (i *inventory) ensureAdapter(state adapterState) (*Adapter, error) {
 
 // createAdapter puts a radio in the API for the first time.
 //
-// The create carries the finalizer, rather than a second write
+// The create includes the finalizer, rather than a second write
 // patching it on. In the window between those two writes a delete
 // would cascade to nothing yet, and stating the finalizer once is
 // simpler than repairing its absence.
@@ -171,7 +171,7 @@ func (i *inventory) releaseDepartedAdapters(present bonds.Address) {
 	}
 }
 
-// reconcileAdapterAlias carries spec.alias into BlueZ's Adapter1.Alias,
+// reconcileAdapterAlias writes spec.alias into BlueZ's Adapter1.Alias,
 // which is the name the radio broadcasts about itself, so a
 // discoverable window announces itself under the operator's chosen
 // name.
@@ -192,7 +192,7 @@ func (i *inventory) reconcileAdapterAlias(adapter *Adapter, state adapterState) 
 }
 
 // writeAdapterStatus writes the status when it differs from what the
-// object already carries, and writes nothing when it does not. The
+// object already has, and writes nothing when it does not. The
 // pass runs on every bus signal and every kernel event, and an
 // unconditional write would send a request to the API server on each
 // of them.

@@ -8,13 +8,13 @@ states the design that answers it, and states what was considered and
 set aside. It stays **Proposed** until the thing it describes runs. A
 drill proves it, and a drill runs on hardware.
 
-The pattern these documents build on lives in liken's repository:
+The pattern these documents follow is documented in liken's repository:
 [milestone 56, device operators](https://github.com/liken-sh/liken/blob/main/plans/completed/56-device-operators.md),
 and this operator's own instance,
 [milestone 58](https://github.com/liken-sh/liken/blob/main/plans/completed/58-the-bluetooth-operator.md).
 
 [`open-problems/`](open-problems/) holds the questions this operator
-owes an answer to. Those documents carry no number, because nobody has
+owes an answer to. Those documents have no number, because nobody has
 decided yet what work they become.
 
 ## The designs

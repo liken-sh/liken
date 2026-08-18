@@ -63,7 +63,7 @@ type controller struct {
 //
 // The call is GetManagedObjects on BlueZ's root object, which returns
 // the adapters, the devices below them, and every interface each one
-// carries, in one round trip.
+// has, in one round trip.
 func pairedControllers(conn *dbus.Conn) (map[string]controller, error) {
 	var objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant
 	err := conn.Object(bluezService, "/").
@@ -79,8 +79,8 @@ func pairedControllers(conn *dbus.Conn) (map[string]controller, error) {
 // tree. It is separate from the call so that the rules below are
 // testable without a bus.
 //
-// A device object with Paired false is a controller that BlueZ has
-// seen on the air and holds no link key for, so it is not this
+// A device object with Paired false is a controller that BlueZ
+// detected on the air and holds no link key for, so it is not this
 // machine's to offer. An answer with no adapter in it is ErrNoAdapter,
 // never an empty paired set.
 func controllersFrom(objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant) (map[string]controller, error) {
@@ -114,8 +114,8 @@ func controllersFrom(objects map[dbus.ObjectPath]map[string]map[string]dbus.Vari
 
 // adapterAddress reads the address of the adapter bluetoothd holds.
 //
-// The address names the Secret that carries this adapter's bonds, so
-// the operator has to know it before it can write one. It comes from
+// The address names the Secret that holds this adapter's bonds, so
+// the operator has to read it before it can write one. It comes from
 // org.bluez.Adapter1 and not from the kernel's HCIGETDEVINFO ioctl
 // that bondfetch uses, because the operator already talks to
 // bluetoothd and bluetoothd answers with the adapter it registered,
@@ -255,7 +255,7 @@ func relayBlueZSignals(ctx context.Context, signals <-chan *dbus.Signal, release
 // dbus.SystemBus() before that container has bound the socket. An exit
 // would work, because the kubelet restarts the container, but it
 // restarts with a backoff that reaches five minutes, and an ordinary
-// pod start does not deserve that.
+// pod start must not cost that.
 //
 // The wait is bounded for the same reason waitForBlueZ is bounded: a
 // bus that never arrives is a failure to report.
@@ -286,9 +286,9 @@ func waitForBus(ctx context.Context, timeout time.Duration) (*dbus.Conn, error) 
 // claimed its name.
 //
 // The wait is bounded on purpose. A bluetoothd that never claims the
-// name is a failure to report, not a state to sit in: the pod's
-// restart is the retry, and the failure is visible in kubectl instead
-// of hidden in a log.
+// name is a failure to report, and the operator does not wait in that
+// state. The pod's restart is the retry, and the failure is visible in
+// kubectl instead of hidden in a log.
 func waitForBlueZ(ctx context.Context, conn *dbus.Conn, timeout time.Duration) error {
 	// The match goes on before the check, so a daemon that claims the
 	// name between the two still wakes this wait.
@@ -326,8 +326,7 @@ func waitForBlueZ(ctx context.Context, conn *dbus.Conn, timeout time.Duration) e
 // controller at once, so an operator that kept publishing after the
 // daemon died would advertise controllers it can no longer deliver.
 // The operator ends instead, the container ends with it, and the
-// kubelet restarts
-// the pair.
+// kubelet restarts the pair.
 //
 // The channel carries a value rather than closing, and the watcher
 // leaves it open when its context ends. A closed channel is always

@@ -1,6 +1,6 @@
 package main
 
-// The identity a published device carries.
+// The identity of a published device.
 //
 // A controller's peer MAC address is the only name here that survives
 // a reboot. The HID instance suffix in a sysfs directory name, the
@@ -13,7 +13,7 @@ package main
 // character in one, so the device name is the address in lowercase
 // with dashes in place of the colons. The address itself publishes as
 // an attribute, in the uppercase form that BlueZ prints and the label
-// on the controller carries, so a selector can compare the address
+// on the controller shows, so a selector can compare the address
 // the way a person reads it.
 
 import "strings"
@@ -28,10 +28,10 @@ func normalizeMAC(address string) string {
 }
 
 // publishedMAC returns an address in the form the ResourceSlice
-// carries: uppercase, with colons. This is what `bluetoothctl
-// devices` prints and what the label on a controller reads, so a
-// DeviceClass or a claim that names one controller spells the address
-// the way a person already has it written down.
+// uses: uppercase, with colons. `bluetoothctl devices` prints this
+// form and the label on a controller shows it, so a DeviceClass or a
+// claim that names one controller spells the address the way a person
+// already has it written down.
 func publishedMAC(address string) string {
 	return strings.ToUpper(normalizeMAC(address))
 }
@@ -43,9 +43,9 @@ func deviceName(address string) string {
 	return strings.ReplaceAll(normalizeMAC(address), ":", "-")
 }
 
-// macFromDeviceName inverts deviceName. The DRA prepare call carries
-// the allocated device's name and nothing else, so this is what tells
-// the plugin which controller a claim holds.
+// macFromDeviceName inverts deviceName. The DRA prepare call supplies
+// the allocated device's name and nothing else, so this is how the
+// plugin reads which controller a claim holds.
 func macFromDeviceName(name string) string {
 	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(name)), "-", ":")
 }

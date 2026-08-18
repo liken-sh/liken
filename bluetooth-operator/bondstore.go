@@ -9,7 +9,7 @@ package main
 // goes, so a bond that never reaches the API is a controller somebody
 // pairs again.
 //
-// One Secret carries one bond. Its owner is that bond's Pairing, so
+// One Secret holds one bond. Its owner is that bond's Pairing, so
 // deleting the Pairing collects the keys, and the label on it names the
 // adapter, so the init container can gather one radio's bonds without
 // a list of paired devices. A bond with no Pairing yet is not
@@ -19,7 +19,7 @@ package main
 // The trigger is the same signal set the slice reconcile runs on, and
 // the same settle window (see bluez.go and main.go). Nothing here reads
 // a signal's payload: a pass re-reads the whole tree, compares it with
-// the Secrets, and writes on a difference, so one wake answers a burst
+// the Secrets, and writes on a difference. One wake answers a burst,
 // and a signal that changed no key costs a read of a few kilobytes.
 //
 // A device's two files can land on different passes. bluetoothd writes
@@ -27,15 +27,15 @@ package main
 // and it writes the cache entry when it resolves the device's name and
 // browses its services, which is a separate event. So a pass can read
 // a bond with one file and the next pass reads it with two, and the
-// backstop tick at 60 seconds carries the second file whether or not a
-// signal announced it. The comparison is what makes that safe: a bond
-// that gained a cache entry differs from its Secret, and any difference
+// backstop tick at 60 seconds stores the second file whether or not a
+// signal announced it. The comparison makes that safe: a bond that
+// gained a cache entry differs from its Secret, and any difference
 // triggers a write.
 //
-// The settle window is what makes the read safe to take, and it is
+// The settle window makes the read safe to take, and it is
 // 1500 ms. BlueZ writes the key material synchronously in the
 // management callback, through g_file_set_contents, which renames
-// atomically, so no reader sees a torn file. But it writes [General]
+// atomically, so no reader reads a torn file. But it writes [General]
 // AddressType on a deferred g_idle_add path, and on restore
 // load_devices reads AddressType first and interprets the rest of the
 // file by it. A snapshot taken between the two loses that key, and a
@@ -201,7 +201,7 @@ func (s *bondStore) create(device bonds.Address, files bonds.Files, owner OwnerR
 
 // update replaces one bond's stored files with the ones on disk.
 //
-// The write carries the resourceVersion from the read, so a second
+// The write includes the resourceVersion from the read, so a second
 // writer gets ErrConflict instead of losing the first writer's bond,
 // and the next pass reads again and writes again.
 func (s *bondStore) update(current *bonds.Secret, device bonds.Address, files bonds.Files, owner OwnerReference) bool {
@@ -246,8 +246,8 @@ func (s *bondStore) reportLegacySecret() {
 }
 
 // bondOwner turns the Pairing this operator holds into the owner
-// reference a Secret carries. The two structs carry the same fields,
-// and the bonds package has its own because it cannot import this one.
+// reference a Secret needs. The two structs hold the same fields, and
+// the bonds package has its own because it cannot import this one.
 func bondOwner(owner OwnerReference) bonds.Owner {
 	return bonds.Owner{
 		APIVersion: owner.APIVersion,

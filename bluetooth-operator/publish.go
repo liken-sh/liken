@@ -93,9 +93,9 @@ func (p *publisher) reconcile(readPairedSet pairedSetReader, readAdapter adapter
 		// allocation is stranded, and both taints go on, so the
 		// eviction controller ends the sessions that are already
 		// running and the next claim parks instead of failing in
-		// prepare. Passing no nodes is what derives both taints, which
-		// is the same rule a single controller going quiet takes.
-		fmt.Fprintf(os.Stderr, "the adapter is gone; taints all %d published controllers\n", len(p.known))
+		// prepare. Passing no nodes derives both taints, which is the
+		// same rule a single controller going quiet takes.
+		fmt.Fprintf(os.Stderr, "the adapter is gone; tainting all %d published controllers\n", len(p.known))
 		controllers, nodes = unreachable(p.known), nil
 
 	case err != nil:

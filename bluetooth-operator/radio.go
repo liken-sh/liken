@@ -19,9 +19,9 @@ package main
 //
 // The agent is registered for the window and unregistered when the
 // window closes, for the same reason. It reports the NoInputNoOutput
-// capability, which is what pairs a game controller, and it accepts a
-// service authorization, so it must not stay registered while no
-// window is open.
+// capability, which pairs a game controller, and it accepts a service
+// authorization, so it must not stay registered while no window is
+// open.
 
 import (
 	"context"
@@ -44,11 +44,11 @@ const (
 	// an object this program exports and bluetoothd calls back into.
 	agentPath = dbus.ObjectPath("/sh/liken/bluetooth/agent")
 
-	// agentCapability is what the operator can do during a pairing. It
-	// has no display and no keypad, which is what a game controller
-	// pairs with: BlueZ runs Just Works and asks the agent for nothing
-	// but an authorization. A device that needs a passkey shown and
-	// typed is out of scope for this API version.
+	// agentCapability states what the operator can do during a pairing.
+	// It has no display and no keypad, and that is the combination a
+	// game controller pairs with: BlueZ runs Just Works and asks the
+	// agent for nothing but an authorization. A device that needs a
+	// passkey shown and typed is out of scope for this API version.
 	agentCapability = "NoInputNoOutput"
 )
 
@@ -70,7 +70,7 @@ const (
 // ErrNoDevice reports that bluetoothd holds no device object for an
 // address. It is the ordinary result for a controller that is out of
 // range: BlueZ keeps a device object for a paired device, and drops
-// every object for a device it has only seen when the scan's results
+// every object for a device it only detected when the scan's results
 // age out.
 var ErrNoDevice = errors.New("bluetoothd holds no object for that device")
 
@@ -85,7 +85,7 @@ type adapterState struct {
 }
 
 // deviceState is one device object, as bluetoothd reports it. A device
-// object exists for every device the radio has seen recently as well as
+// object exists for every device the radio detected recently as well as
 // for every device it holds a bond with, and Paired is what separates
 // the two.
 type deviceState struct {
@@ -245,9 +245,10 @@ func snapshotFrom(objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant
 	return snapshot, nil
 }
 
-// paths finds the object paths this operator calls methods on. Every
-// actuation re-reads the tree for them rather than building a path from
-// an address, because a fresh read is also the check that the object is
+// adapterPath and devicePath find the object paths this operator calls
+// methods on. Every
+// actuation re-reads the tree rather than building a path from an
+// address, because a fresh read is also the check that the object is
 // still there, and a call against a path that went away is an error the
 // caller would have to tell apart from a real failure.
 func (r *blueZRadio) adapterPath() (dbus.ObjectPath, error) {
@@ -330,13 +331,13 @@ func (r *blueZRadio) SetDeviceTrusted(device bonds.Address, trusted bool) error 
 }
 
 // OpenWindow puts the radio into the state a first pairing needs, and
-// gives bluetoothd the same deadline the request carries.
+// gives bluetoothd the same deadline the request states.
 //
 // The order matters. The timeouts go on before the two flags, because
 // BlueZ starts counting a timeout when the flag turns on, and a
 // timeout written afterwards would restart the count. Discovery starts
-// last, because the scan is what fills status.seen and it is the part a
-// person waits on.
+// last, because the scan fills status.seen and it is the part a person
+// waits on.
 func (r *blueZRadio) OpenWindow(window time.Duration) error {
 	path, err := r.adapterPath()
 	if err != nil {

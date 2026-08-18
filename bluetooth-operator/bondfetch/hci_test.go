@@ -83,7 +83,7 @@ func notReady(index uint16, name string) deviceInfo {
 }
 
 // The kernel registers an adapter before the queued power-on work has
-// read the address out of the controller, so the first answers carry
+// read the address out of the controller, so the first answers report
 // the all-zero address. For a USB dongle that lasts about a second.
 func TestWaitForAdapterWaitsForARealAddress(t *testing.T) {
 	read, calls := answers(map[uint16][]deviceInfo{

@@ -25,7 +25,7 @@ notes that no Secret stores the adapter's own identity file.
 
 ## The design
 
-Three objects in `bluetooth.liken.sh/v1alpha1`. One rule decides what
+Three objects in `bluetooth.liken.sh/v1alpha1`. One rule sets what
 becomes an object and what stays status: spec is desired state, status
 is observed state, and a session is never an object. Radio observations
 appear only in the status of an object a person created.
@@ -53,7 +53,7 @@ status:
 
 `spec.alias` reconciles into BlueZ's `Adapter1.Alias`, which is the
 name the radio broadcasts about itself. During a discoverable window,
-other devices see the adapter under this name.
+the adapter appears to other devices under this name.
 
 The Adapter is not owned by the Node and not owned by liken's Machine.
 An owner reference binds to one UID, a reinstall re-registers the Node
@@ -79,7 +79,7 @@ not build that Secret. It only states where it will belong.
 Cluster-scoped, created by the operator when a pairing succeeds, owned
 by its Adapter, named for the device the way the ResourceSlice names it
 (`a0-ab-51-33-b7-12`). It is the durable fact: this device holds a bond
-with this adapter. It owns the Secret that carries that one bond.
+with this adapter. It owns the Secret that holds that one bond.
 
 ```yaml
 apiVersion: bluetooth.liken.sh/v1alpha1
@@ -100,10 +100,10 @@ status:
   request: liken-system/new-gamepad
 ```
 
-`spec.trusted` reconciles into `Device1.Trusted`, which is what lets
-the device reconnect on its own. `spec.alias` reconciles into
+`spec.trusted` reconciles into `Device1.Trusted`, which lets the
+device reconnect on its own. `spec.alias` reconciles into
 `Device1.Alias`; bluetoothd stores the alias in the bond's own info
-file, so the per-bond Secret carries the name with the keys.
+file, so the per-bond Secret holds the name with the keys.
 
 Deleting a Pairing is the unpair API. A finalizer runs the ordered
 teardown: disconnect the device, let the slice taints and the claim
@@ -120,7 +120,7 @@ in status and a person decides.
 
 Namespaced, created by a person, short-lived. It is the act, and it
 doubles as discovery: the scan and the pairing window are one radio
-session, so the address a person approves is one the radio is seeing
+session, so the address a person approves is one the radio reports
 now.
 
 ```yaml
@@ -165,7 +165,7 @@ list caps at 16 entries and names truncate at 64 characters, the same
 limit the ResourceSlice puts on a string attribute. Requests are
 namespaced so that RBAC can grant "may create PairingRequests" without
 granting exec, which is the narrower grant the open problem asked for.
-Approval is not a separate privilege: custom resources carry only the
+Approval is not a separate privilege: custom resources have only the
 status and scale subresources, so whoever can update a request can
 approve it. For this fleet that is acceptable, and the split would be a
 second object nobody needs yet.
@@ -186,7 +186,7 @@ is the same code every later startup runs.
 
 One Secret per bond replaces one Secret per adapter. Each Secret is
 named `bluetooth-bond-<device>` in the operator's namespace, holds that
-device's `info` and `cache` files, carries a label naming its adapter,
+device's `info` and `cache` files, has a label naming its adapter,
 and lists its Pairing as owner. `bondfetch` lists Secrets by the
 adapter label instead of reading one Secret by name. Everything else in
 plan 03, which files are stored and why, is unchanged.
@@ -204,19 +204,19 @@ this hardware. If the drill fails, the flip returns as an internal step
 of the window, and the API does not move.
 
 The operator's agent registers the NoInputNoOutput capability, which
-pairs a DualSense. A device that needs a passkey displayed and typed is out
-of scope for v1alpha1, and the request's status is where a passkey
+pairs a DualSense. A device that needs a passkey displayed and typed
+is out of scope for v1alpha1, and the request's status is where a passkey
 would go when that day comes.
 
 ## What was considered and set aside
 
 * **One permanent object with a reopenable window.** A first pairing
-  cannot name its device, because the address is what the scan
-  discovers, so the object's identity would live in a field the user
-  never wrote. Separate objects give the act and the fact each a spec
-  that its author really wrote.
+  cannot name its device, because the scan discovers the address, so
+  the object's identity would be in a field the user never wrote.
+  Separate objects give the act and the fact each a spec that its
+  author really wrote.
 * **A Connection object.** Sessions come and go on their own schedule
-  and carry no desired state. Connection state lives in the
+  and have no desired state. Connection state is in the
   ResourceSlice and in Pairing status.
 * **Device-initiated pairing.** A DualSense in pairing mode goes
   discoverable and waits to be found; it never initiates. The paths
@@ -254,9 +254,9 @@ All four drills ran on liken-1 on 2026-08-17, against the release
    held the prepared claim ran the ordered teardown in about 95
    seconds: disconnect, taints, eviction at the 30 second toleration,
    unprepare, the device retired from the slice, the bond removed,
-   and the Secret collected with the object. The same drill taught a
-   consumer lesson: a consumer under a Deployment must claim through
-   a ResourceClaimTemplate, because a standing claim keeps its
+   and the Secret collected with the object. The same drill showed one
+   more rule for consumers: a consumer under a Deployment must claim
+   through a ResourceClaimTemplate, because a standing claim keeps its
    allocation across the eviction, the NoSchedule taint blocks only
    new allocations, and the ReplicaSet loops through pods that
    schedule and are evicted at once.

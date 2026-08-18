@@ -72,7 +72,7 @@ func notRunning(err error) bool {
 	return isDBusError(err, "org.bluez.Error.Failed") || isDBusError(err, "org.bluez.Error.NotReady")
 }
 
-// isDBusError reads the error name out of a reply. godbus carries a
+// isDBusError reads the error name out of a reply. godbus returns a
 // remote error as a value on one path and as a pointer on another, so
 // both shapes are checked.
 func isDBusError(err error, name string) bool {
@@ -99,8 +99,8 @@ func isDBusError(err error, name string) bool {
 // for.
 //
 // The methods that need a passkey typed or displayed refuse. A device
-// that needs one is out of scope for this API version, and refusing is
-// what makes that visible as a failed pairing rather than a hang.
+// that needs one is out of scope for this API version, and a refusal
+// makes that visible as a failed pairing rather than a hang.
 type pairingAgent struct{}
 
 var errRejected = dbus.NewError("org.bluez.Error.Rejected", nil)

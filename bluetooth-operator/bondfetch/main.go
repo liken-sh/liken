@@ -1,7 +1,7 @@
 // bondfetch writes an adapter's stored bonds into the directory
 // bluetoothd reads, and then exits.
 //
-// It is a plain init container. The pod's bonds live in Kubernetes
+// It is a plain init container. The pod's bonds are in Kubernetes
 // Secrets, one for each bond, each labelled with the adapter it
 // belongs to (see the bonds package), and bluetoothd reads them from a
 // directory tree. The pod's bluetoothd container mounts an emptyDir at
@@ -11,12 +11,12 @@
 // A label selector gathers them. This program runs before bluetoothd,
 // so nothing here has the list of paired devices, and the adapter's
 // own address is the only identity it has. An older layout put every
-// bond in one Secret named for the adapter, and that object carries
-// the same label, so a machine that has not paired anything since the
+// bond in one Secret named for the adapter, and that object has the
+// same label, so a machine that has not paired anything since the
 // change still reads its keys and needs no migration step of its own.
 //
 // The address comes from the kernel, because bluetoothd is not running
-// yet and no other source in the pod carries the address of the radio
+// yet and no other source in the pod holds the address of the radio
 // the kubelet delivered. The pod runs in the host's network namespace,
 // which is the whole of what the ioctl needs.
 //
@@ -41,9 +41,9 @@ import (
 
 const (
 	// namespaceVar names the operator's own namespace, which the pod
-	// spec supplies through the downward API. The Secret lives beside
-	// the pod that made it, and a pod cannot read its own namespace
-	// from anywhere else without asking the API server.
+	// spec supplies through the downward API. Each Secret is in the same
+	// namespace as the pod that made it, and a pod cannot read its own
+	// namespace from anywhere else without asking the API server.
 	namespaceVar = "POD_NAMESPACE"
 
 	// rootVar overrides the directory the bonds are written into. The
@@ -92,7 +92,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("bondfetch: %s carries the adapter %s\n", adapter.Name, adapter.Address)
+	fmt.Printf("bondfetch: %s is the adapter at %s\n", adapter.Name, adapter.Address)
 
 	client, err := inClusterClient()
 	if err != nil {

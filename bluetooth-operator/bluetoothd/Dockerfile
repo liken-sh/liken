@@ -2,11 +2,11 @@
 # and nothing else.
 #
 # bluetoothd ships here, in a workload's image, and not in the
-# read-only root that every liken machine boots. That is the device
-# operator pattern's whole reason for a separate repository, and it is
-# why this image builds BlueZ rather than installing a distribution's
-# package: a package brings a package manager, a shell, and a base
-# filesystem, and this container runs three programs.
+# read-only root that every liken machine boots. That is why the
+# device operator pattern puts the daemon in a separate repository, and
+# it is why this image builds BlueZ rather than installing a
+# distribution's package: a package brings a package manager, a shell,
+# and a base filesystem, and this container runs three programs.
 #
 # The binaries are statically linked against musl, so the image is the
 # programs and their configuration with no loader and no shared
@@ -61,10 +61,11 @@ RUN meson setup build \
 # BlueZ. The disabled parts are the ones no controller on this bus
 # needs: the CUPS printer backend, the OBEX file-transfer daemon, the
 # btmon tracer, and the hciconfig-era tools. bluetoothctl stays,
-# because pairing a controller is a person's job in this version and
-# bluetoothctl is how the person does it.
+# because a kubectl exec session with it is how a person inspects the
+# running daemon by hand. Pairing itself is the operator's job, over
+# D-Bus, from a PairingRequest.
 #
-# LIBS carries -lncursesw because readline's pkg-config file names no
+# LIBS includes -lncursesw because readline's pkg-config file names no
 # terminal library, and a static bluetoothctl then has no tputs.
 WORKDIR /build
 RUN wget -q "https://mirrors.edge.kernel.org/pub/linux/bluetooth/bluez-${BLUEZ_VERSION}.tar.xz" \
@@ -130,7 +131,7 @@ COPY --from=entrypoint /start-bluetoothd /usr/local/bin/start-bluetoothd
 COPY bluetoothd/main.conf /etc/bluetooth/main.conf
 
 # The image's own default for the bus address. The pod states the same
-# address on both containers, next to the volume that carries the
+# address on both containers, next to the volume that holds the
 # socket, and a bluetoothctl session started with kubectl exec reads
 # whichever of the two applies.
 ENV DBUS_SYSTEM_BUS_ADDRESS=unix:path=/var/run/bluetooth.liken.sh/dbus/system_bus_socket

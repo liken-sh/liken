@@ -3,7 +3,7 @@ package bonds
 // The Secret that carries a bond between pods.
 //
 // One Secret holds one bond: the two files that one paired device has.
-// Its name carries the device's address, it carries a label naming the
+// Its name states the device's address, it has a label naming the
 // adapter the bond belongs to, and it lists that device's Pairing as
 // its owner. So the keys follow the radio and not the machine, and
 // deleting the Pairing collects the Secret through ordinary garbage
@@ -13,13 +13,13 @@ package bonds
 // named for the adapter. Nothing writes that layout now, and the
 // reader still accepts it, because a machine that has not paired
 // anything since the change still holds its keys there. Both layouts
-// carry the same keys inside, so one reader handles both.
+// hold the same keys inside, so one reader handles both.
 //
-// The Secret lives in the operator's own namespace. Nothing outside
+// The Secret is in the operator's own namespace. Nothing outside
 // the operator reads it, and a link key in it is as good as the
 // controller itself to whoever can read it.
 //
-// Like the ResourceSlice types in this repository, these structs carry
+// Like the ResourceSlice types in this repository, these structs hold
 // only the fields both programs read or write. The API's Secret also
 // has stringData, immutable, and every field an ordinary object has,
 // and none of them changes what a bond needs.
@@ -28,8 +28,8 @@ import "strings"
 
 const (
 	// BondSecretPrefix and the device's address name the Secret that
-	// carries one bond, so a person listing Secrets reads which
-	// controller each one belongs to.
+	// holds one bond, so a person listing Secrets reads which controller
+	// each one belongs to.
 	BondSecretPrefix = "bluetooth-bond-"
 
 	// secretPrefix names the older per-adapter Secret. Nothing writes
@@ -37,8 +37,8 @@ const (
 	// reports the leftover object and a person deletes it.
 	secretPrefix = "bluetooth-bonds-"
 
-	// SecretType is Opaque, which is what a Secret with data of no
-	// standard shape carries. The typed values, such as
+	// SecretType is Opaque, which is the type of a Secret with data of
+	// no standard shape. The typed values, such as
 	// kubernetes.io/tls, each fix a set of keys, and these keys are
 	// device addresses.
 	SecretType = "Opaque"
@@ -47,19 +47,20 @@ const (
 	// is the standard one that says which application owns the object.
 	// The adapter label names the radio the bond belongs to, because a
 	// label is selectable and a name is not: the init container lists
-	// one radio's Secrets by it, and the Secret's own name carries the
+	// one radio's Secrets by it, and the Secret's own name states the
 	// device instead.
 	nameLabel    = "app.kubernetes.io/name"
 	operatorName = "bluetooth-operator"
 	AdapterLabel = "bluetooth.liken.sh/adapter"
 
-	// The suffixes that separate a device's two files inside one
+	// The suffixes that separate a device's two files inside its
 	// Secret. A Secret key accepts a letter, a digit, and any of - _
 	// and . , so the address and a dotted suffix both fit, and a
 	// person reading kubectl describe reads which device each file
-	// belongs to. The alternative shapes both cost more: a Secret for
-	// each device multiplies the objects the init container reads,
-	// and one key holding an archive of both files makes every read
+	// belongs to. The address stays in the key because the older
+	// per-adapter layout put several devices in one object, and one
+	// reader handles both. The alternative to the two suffixes is one
+	// key holding an archive of both files, and that makes every read
 	// parse a format this package would have to define.
 	//
 	// Nothing outside this file writes these strings. secretKey and
@@ -89,7 +90,9 @@ func deviceOf(key, suffix string) (Address, bool) {
 	return device, true
 }
 
-// Secret is one adapter's stored bonds as the API server holds them.
+// Secret is the stored bonds as the API server holds them: one
+// device's bond in the current layout, and one adapter's whole tree in
+// the older one.
 //
 // Data is map[string][]byte because that is the shape the API's data
 // field takes on the wire: encoding/json writes a []byte as base64 and
@@ -103,7 +106,7 @@ type Secret struct {
 	Data       map[string][]byte `json:"data,omitempty"`
 }
 
-// SecretMeta carries the identity, the resourceVersion, and the owner.
+// SecretMeta holds the identity, the resourceVersion, and the owner.
 // The version goes with every write, so a second writer gets a
 // conflict instead of losing the first writer's bonds. The owner is
 // the bond's Pairing, so deleting the Pairing collects the keys with
@@ -131,7 +134,7 @@ type SecretList struct {
 	Items []Secret `json:"items"`
 }
 
-// OneBond reports whether this Secret carries a single device's bond.
+// OneBond reports whether this Secret holds a single device's bond.
 // The init container reads both layouts and applies the older
 // per-adapter Secret first, so a bond that is in both takes the value
 // the operator keeps current.
@@ -151,7 +154,7 @@ func BondSecretName(device Address) string {
 	return BondSecretPrefix + device.Key()
 }
 
-// SecretLabels are the labels every one of these Secrets carries.
+// SecretLabels are the labels every one of these Secrets has.
 func SecretLabels(adapter Address) map[string]string {
 	return map[string]string{
 		nameLabel:    operatorName,
@@ -214,19 +217,19 @@ func NewBondSecret(namespace string, adapter, device Address, stored Files, owne
 
 // Tree reads the bonds back out of a stored Secret.
 //
-// A key that does not name a device's file is skipped. The alternative is to
-// fail the whole read, and that would start bluetoothd with no bonds
-// at all over one bad key, which disconnects every controller that the
+// A key that does not name a device's file is skipped. The alternative
+// is to fail the whole read, and that would start bluetoothd with no
+// bonds at all over one bad key, which disconnects every controller that the
 // other keys would have connected.
 //
 // The three passes run in this order for two reasons. Some Secrets in
 // the field key a device's info file by the bare address, with no
 // suffix, while the current layout suffixes it with .info. The second
 // pass reads the bare-address form only where the first pass found
-// nothing, so the suffixed keys win while a Secret carries both. A
-// Secret carries both only until the operator next rewrites it,
-// because the operator replaces the whole object on the first pass
-// that sees a difference. The cache pass runs last because it attaches
+// nothing, so the suffixed keys win while a Secret holds both. A
+// Secret holds both only until the operator next rewrites it, because
+// the operator replaces the whole object on the first pass that finds
+// a difference. The cache pass runs last because it attaches
 // to a device that one of the first two passes established, and a
 // cache key alone establishes nothing.
 func (s *Secret) Tree() Tree {

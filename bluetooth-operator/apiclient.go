@@ -1,12 +1,13 @@
 package main
 
-// A Kubernetes API client, built from first principles.
+// This is a Kubernetes API client written directly against the HTTP
+// API.
 //
-// This follows liken's own client (kubernetes/apiclient.go) and for
+// It follows liken's own client (kubernetes/apiclient.go) and for
 // the same reason: the Kubernetes API is HTTPS that serves JSON, and
-// this program speaks to three URLs. client-go would bring informers,
-// work queues, and generated types this program does not use, into a
-// container that also carries BlueZ.
+// this program reads and writes seven kinds of object. client-go would
+// bring informers, work queues, and generated types this program does
+// not use, into an image that is otherwise one static binary.
 //
 // Every pod starts with what it needs to reach the API server.
 // Kubernetes injects two environment variables that name the server's
@@ -94,7 +95,7 @@ func InClusterClient() (*Client, error) {
 }
 
 // RequestJSON sends one request and decodes the JSON response into
-// out. It turns any non-2xx status into an error that carries the
+// out. It turns any non-2xx status into an error that includes the
 // server's own message.
 func (c *Client) RequestJSON(method, path string, body []byte, out any) error {
 	return c.RequestWithType(method, path, "application/json", body, out)
@@ -168,8 +169,9 @@ const maxDrain = 4 << 20
 // drain reads whatever the caller left in the response body, then
 // closes it. Go hands a connection back to its pool only when the
 // body reaches EOF, so a body closed early costs a fresh TCP
-// connection and TLS handshake on the next request, and reaches the
-// API server as a hang-up on a request it already answered.
+// connection and TLS handshake on the next request. The early close
+// also reaches the API server as a hang-up on a request it already
+// answered.
 func drain(body io.ReadCloser) {
 	_, _ = io.Copy(io.Discard, io.LimitReader(body, maxDrain))
 	_ = body.Close()

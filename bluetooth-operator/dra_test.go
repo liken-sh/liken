@@ -83,7 +83,7 @@ func TestPrepareClaimDeliversOneControllersInputNodes(t *testing.T) {
 		t.Errorf("cdiDeviceIds = %v, want [%s]", device.CdiDeviceIds, wantID)
 	}
 
-	// The file name carries this driver's prefix, so liken's own specs
+	// The file name starts with this driver's prefix, so liken's own specs
 	// in the same directory never collide with these.
 	path := filepath.Join(cdiDir, "bluetooth.liken.sh-"+testClaimUID+".json")
 	spec := readSpec(t, path)
@@ -188,8 +188,8 @@ func TestUnprepareRemovesTheSpecAndRepeats(t *testing.T) {
 	req := &drav1.NodeUnprepareResourcesRequest{
 		Claims: []*drav1.Claim{{Namespace: "arcade", Name: "player-one", Uid: testClaimUID}},
 	}
-	// The kubelet repeats an unprepare whenever it is not sure the
-	// call succeeded, so the second one must answer the same way.
+	// The kubelet repeats an unprepare whenever it has no record that
+	// the call succeeded, so the second one must answer the same way.
 	for range 2 {
 		resp, err := plugin.NodeUnprepareResources(t.Context(), req)
 		if err != nil {

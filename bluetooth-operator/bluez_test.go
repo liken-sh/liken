@@ -11,8 +11,8 @@ import (
 )
 
 // managedObjects builds a GetManagedObjects answer out of whole
-// objects, in the shape BlueZ returns: a path, the interfaces it
-// carries, and each interface's properties.
+// objects, in the shape BlueZ returns: a path, the interfaces it has,
+// and each interface's properties.
 type managedObjects map[dbus.ObjectPath]map[string]map[string]dbus.Variant
 
 func (m managedObjects) adapter(path string) managedObjects {
@@ -49,7 +49,7 @@ func TestControllersFromKeepsThePairedSet(t *testing.T) {
 			"Paired":    true,
 			"Connected": false,
 		}).
-		// Seen on the air with no link key, so it is not this
+		// Detected on the air with no link key, so it is not this
 		// machine's to offer.
 		device("/org/bluez/hci0/dev_CC_CC_CC_CC_CC_CC", map[string]any{
 			"Address": "CC:CC:CC:CC:CC:CC",
@@ -121,8 +121,9 @@ func TestAdapterAddressFromReadsTheAdapter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The adapter's address names the Secret, and a device's address
-	// never does.
+	// The adapter's address labels every bond Secret and names the
+	// adapter's directory in BlueZ's tree. A device's address does
+	// neither.
 	if address.Directory() != "00:1A:7D:DA:71:13" {
 		t.Fatalf("address = %s", address)
 	}
@@ -139,7 +140,7 @@ func TestAdapterAddressFromWithoutAnAdapter(t *testing.T) {
 func TestAdapterAddressFromWithTwoAdapters(t *testing.T) {
 	// A pod claims one adapter, so a second one is not expected. The
 	// lowest object path wins, so two reads of the same tree answer
-	// with the same adapter and the bonds go to one Secret.
+	// with the same adapter and every bond takes the same label.
 	objects := managedObjects{}.adapter("/org/bluez/hci1")
 	objects[dbus.ObjectPath("/org/bluez/hci0")] = map[string]map[string]dbus.Variant{
 		adapterInterface: {"Address": dbus.MakeVariant("14:B4:57:91:2F:C8")},
@@ -192,8 +193,8 @@ func TestRelayBlueZSignalsWakesOnASignal(t *testing.T) {
 	}
 
 	// A closed signal channel is godbus reporting that the connection
-	// to the bus is gone. The relay closes its own channel, which is
-	// what the main loop reads as the lost bus.
+	// to the bus is gone. The relay closes its own channel, and the
+	// main loop reads that as the lost bus.
 	close(signals)
 	select {
 	case _, ok := <-changed:
@@ -304,8 +305,8 @@ func TestWatchNameLossStaysQuietOnShutdown(t *testing.T) {
 	}
 }
 
-// An address with no bus behind it is what the operator meets when it
-// starts before the bluetoothd container binds the socket.
+// An address with no bus behind it is the state the operator finds
+// when it starts before the bluetoothd container binds the socket.
 func absentBusAddress(t *testing.T) {
 	t.Helper()
 	t.Setenv("DBUS_SYSTEM_BUS_ADDRESS", "unix:path="+filepath.Join(t.TempDir(), "system_bus_socket"))

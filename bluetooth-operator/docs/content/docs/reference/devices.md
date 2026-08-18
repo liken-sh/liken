@@ -31,9 +31,10 @@ per node, named `<node>-bluetooth.liken.sh`, beside `liken`'s own
             connected: {bool: true}
             name: {string: "DualSense Wireless Controller"}
 
-The slice holds one device for each **paired** controller, not for
-each connected one. A paired controller that is switched off still
-publishes, so a pod can claim it and start when somebody turns it on.
+The slice holds one device for each paired controller. The list
+follows the paired set, whether or not each controller is connected.
+A paired controller that is switched off still publishes, so a pod
+can claim it and start when somebody turns it on.
 A device leaves the slice only when it is unpaired, which is a
 `kubectl delete pairing`.
 
@@ -82,11 +83,11 @@ two different questions:
 | `bluetooth.liken.sh/disconnected` | `NoExecute` | bluetoothd reports the controller disconnected, or it registers no evdev node, or the adapter itself has departed |
 | `bluetooth.liken.sh/no-input-node` | `NoSchedule` | the controller registers no evdev node, or the adapter itself has departed |
 
-**Tolerate `/disconnected` only.** The `NoExecute` taint is what
-evicts a claim holder after its `tolerationSeconds`, so tolerating it
-sets how long a radio may be silent before the pod ends. The
-`NoSchedule` taint must stay untolerated: it is what parks a claim on
-a switched-off controller as `Unschedulable`. Tolerate both and the
+**Tolerate `/disconnected` only.** The `NoExecute` taint evicts a
+claim holder after its `tolerationSeconds`, so tolerating it sets how
+long a radio may be silent before the pod ends. The `NoSchedule`
+taint must stay untolerated, because it parks a claim on a
+switched-off controller as `Unschedulable`. Tolerate both and the
 scheduler allocates a controller with no evdev node,
 `NodePrepareResources` fails, and the pod churns between
 `ContainerCreating` and eviction for as long as the controller stays
@@ -148,7 +149,7 @@ DualSense's motion sensors as a wrong second `jsN` device.
 
 A running pod's device set never changes. The runtime injects the
 nodes when it creates the container, so the pod is one session, and
-the `NoExecute` taint is what ends it. A controller that reconnects
+the `NoExecute` taint ends it. A controller that reconnects
 usually returns as a different `eventN`, and the operator rewrites
 the claim's CDI file so the next pod receives the node that exists
 now.
@@ -176,13 +177,13 @@ The operator creates and reconciles all of them; a person creates a
 `PairingRequest`, edits a `Pairing`'s spec, and deletes a `Pairing` to
 unpair. The schema descriptions in
 [`deploy/crds.yaml`](/deploy/crds.yaml), which this site serves as
-the repository holds it, carry the field-level reference.
+the repository holds it, are the field-level reference.
 
 | Kind | Scope | What it is |
 |---|---|---|
 | `Adapter` | Cluster | one radio, named for its address; the root that owns every `Pairing` keyed to it |
 | `Pairing` | Cluster | one bond; deleting it is the unpair; it owns the `Secret` with the bond's keys |
-| `PairingRequest` | Namespaced | one pairing window; `status.seen` lists what the radio saw, and writing `spec.device` approves one |
+| `PairingRequest` | Namespaced | one pairing window; `status.seen` lists what the radio observed, and writing `spec.device` approves one |
 
 A `PairingRequest`'s spec takes four fields: `adapter` (required, the
 `Adapter`'s name), `windowSeconds` (default 180, 15 to 900), `device`
@@ -191,7 +192,7 @@ A `PairingRequest`'s spec takes four fields: `adapter` (required, the
 namespaced so RBAC can grant "may create `PairingRequests`" in one
 namespace, with no exec into the operator's pod.
 
-## Where the bonds live
+## Where the bonds are stored
 
 One `Secret` for each bond, in the operator's namespace, named
 `bluetooth-bond-<device>` after the controller's MAC. Each `Secret`
@@ -201,7 +202,7 @@ to. The bonds follow the radio: a dongle carried to another machine
 takes its bonds with it, because the pod that claims it there lists
 the same `Secrets`.
 
-The keys sit in the cluster datastore. Whether they are encrypted at
+The keys are in the cluster datastore. Whether they are encrypted at
 rest is a property of the cluster, not of this operator. Without
 encryption at rest the keys are base64 in the datastore and its
 backups.

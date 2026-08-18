@@ -2,15 +2,15 @@
 // bus socket, and then becomes bluetoothd.
 //
 // The bus belongs to this pod. bluetoothd's whole API is the D-Bus
-// system bus, and a pod has no host bus to join, so this image carries
+// system bus, and a pod has no host bus to join, so this image includes
 // dbus-daemon and starts a bus with one service and two clients on it:
 // bluetoothd owns org.bluez, and the operator's container and any
 // bluetoothctl session read it. This is also why liken's system image
 // needs no D-Bus: the bus exists only for this daemon and ships in the
-// image that carries it.
+// image that holds the daemon.
 //
-// This program is Go rather than a shell script because the image
-// carries no shell. Three static binaries and their configuration are
+// This program is Go rather than a shell script because the image has
+// no shell. Three static binaries and their configuration are
 // the whole of it, and a shell would be a fourth binary added only to
 // run this program.
 //
@@ -30,7 +30,7 @@ import (
 )
 
 const (
-	// The bus lives at a path of this operator's own, not at dbus's
+	// The bus is at a path of this operator's own, not at dbus's
 	// packaged /run/dbus, and every process here finds it through
 	// DBUS_SYSTEM_BUS_ADDRESS. bluetoothd and bluetoothctl read that
 	// variable through libdbus, and the operator reads it through
@@ -105,7 +105,7 @@ func run() error {
 	//
 	// --nopidfile drops the other thing system.conf asks for. The pid
 	// file exists so an init system can signal the bus, and this
-	// container has no init system: the bus lives and dies with the
+	// container has no init system: the bus runs only as long as the
 	// container that starts it.
 	//
 	// Run waits for the forking parent, which exits as soon as it has
@@ -130,7 +130,7 @@ func run() error {
 
 // busSocket reads the socket path out of a D-Bus address. Only the
 // unix:path= form appears here, because this program creates the
-// directory the socket lives in and then waits for the socket, and
+// directory the socket is in and then waits for the socket, and
 // neither is a thing it can do for an abstract socket or a TCP
 // address.
 func busSocket(address string) (string, error) {
@@ -148,10 +148,12 @@ func busSocket(address string) (string, error) {
 // true, the default, is BlueZ's own default and the fix for
 // CVE-2023-45866: with it off, an attacker in radio range can open an
 // HID channel without any bond and inject keystrokes into the machine.
-// false is what a DualSense needs for its first pairing, because the
-// controller opens its HID channel before the bond registers. Turn it
-// off for the pairing, pair, and turn it back on. The bonds persist on
-// their volume, so the flip costs one restart and nothing else.
+// The operator's own pairing runs with it on, because the operator
+// pairs over D-Bus and the bond registers before any input channel
+// opens. false is the fallback for a controller that opens its HID
+// channel first: turn it off for that pairing, pair, and turn it back
+// on. The bonds persist on their volume, so the flip costs one restart
+// and nothing else.
 //
 // Any other value is a failure to start. BlueZ reads this file with
 // glib, and glib reads a value it does not recognize as false, so a

@@ -42,7 +42,7 @@ func TestWriteAndRemoveCDISpec(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The file name carries this driver's prefix, so liken's own specs
+	// The file name starts with this driver's prefix, so liken's own specs
 	// in the same directory never collide with these.
 	path := filepath.Join(dir, "bluetooth.liken.sh-"+uid+".json")
 	spec := readSpec(t, path)
@@ -60,7 +60,7 @@ func TestWriteAndRemoveCDISpec(t *testing.T) {
 		t.Fatal("the spec file is still there")
 	}
 	// Unprepare must be idempotent: the kubelet repeats it whenever it
-	// is not sure the call succeeded.
+	// has no record that the call succeeded.
 	if err := removeCDISpec(uid); err != nil {
 		t.Fatalf("a repeated remove failed: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestRefreshCDISpecsFollowsAMovedNode(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	// liken's spec for another claim sits in the same directory. The
+	// liken's spec for another claim is in the same directory. The
 	// refresh must not read or rewrite it.
 	likenSpec := filepath.Join(dir, "liken.sh-"+uid+".json")
 	if err := os.WriteFile(likenSpec, []byte(`{"cdiVersion":"0.6.0"}`), 0o644); err != nil {

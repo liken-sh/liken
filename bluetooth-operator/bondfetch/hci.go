@@ -131,8 +131,8 @@ func parseDeviceInfo(buffer []byte) deviceInfo {
 // waitForAdapter returns the adapter this pod's bonds belong to, once
 // the kernel reports a real address for it.
 //
-// The retry is what makes this correct on a cold boot.
-// hci_register_dev returns before the queued power-on work has read
+// The retry makes this correct on a cold boot. hci_register_dev
+// returns before the queued power-on work has read
 // the address out of the controller, and until that work runs the
 // kernel answers with 00:00:00:00:00:00. For a USB dongle the gap is
 // about a second after enumeration. That address is not a real
@@ -167,8 +167,8 @@ func waitForAdapter(read adapterReader, timeout, poll time.Duration) (deviceInfo
 // is not written: the pod's DRA claim delivers one USB device, and
 // /sys/class/bluetooth/hciN resolves to a real path whose first
 // ancestor holding an idVendor file is the USB device behind that
-// adapter. Comparing that device against the claim is what would pick
-// the claimed adapter instead of the lowest one.
+// adapter. Comparing that device against the claim would pick the
+// claimed adapter instead of the lowest one.
 func readyAdapter(read adapterReader) (deviceInfo, bool) {
 	for index := uint16(0); index < maxAdapters; index++ {
 		adapter, err := read(index)

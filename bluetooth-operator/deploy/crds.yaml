@@ -1,7 +1,7 @@
 # The pairing API: three resources that let a person create, read, and
 # delete a bond with kubectl.
 #
-# One rule decides what is an object here and what is status. A spec is
+# One rule sets what is an object here and what is status. A spec is
 # desired state, a status is observed state, and a radio session is
 # never an object. So the Adapter and the Pairing are the durable
 # inventory, the PairingRequest is the act of pairing, and everything
@@ -91,7 +91,7 @@ spec:
                   type: string
                   description: >-
                     The adapter's Bluetooth address, in the uppercase
-                    form the label on the hardware carries.
+                    form the label on the hardware shows.
                 node:
                   type: string
                   description: >-
@@ -175,7 +175,7 @@ spec:
           description: >-
             One paired controller, named for its own address in the
             same form the ResourceSlice names it. The object owns the
-            Secret that carries this bond's keys.
+            Secret that holds this bond's keys.
           properties:
             spec:
               type: object
@@ -208,7 +208,7 @@ spec:
                   type: string
                   description: >-
                     The controller's Bluetooth address, in the
-                    uppercase form the label on the hardware carries.
+                    uppercase form the label on the hardware shows.
                 deviceName:
                   type: string
                   description: The name the controller reports for itself.
@@ -232,7 +232,7 @@ spec:
                 secret:
                   type: string
                   description: >-
-                    The namespace and name of the Secret that carries
+                    The namespace and name of the Secret that holds
                     this bond's keys. The Secret is owned by this
                     object, so deleting the Pairing collects it.
                 pairedAt:
@@ -257,7 +257,7 @@ spec:
 # It is namespaced so that RBAC can grant "may create PairingRequests"
 # in one namespace without granting exec into the operator's pod. This
 # API exists to make that narrower grant possible. Approval is not a
-# separate privilege: a custom resource carries only the status and
+# separate privilege: a custom resource has only the status and
 # scale subresources, so whoever may update a request may approve one.
 #
 # An empty spec.device never pairs anything. Pairing whatever responds

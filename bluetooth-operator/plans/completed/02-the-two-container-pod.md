@@ -61,12 +61,12 @@ first, and the exit is 0.
 
 ## The capability split
 
-The `bluetoothd` container carries `NET_ADMIN`, `NET_BIND_SERVICE`,
+The `bluetoothd` container takes `NET_ADMIN`, `NET_BIND_SERVICE`,
 `SETUID`, and `SETGID`, with everything else dropped. The `operator`
 container drops `ALL` and adds nothing. `hostNetwork` and
 `hostUsers: true` are pod-level settings, so both containers take
-them. The README's "The privilege it takes" section gives the kernel
-or daemon check behind each capability.
+them. The install guide's "The privilege it takes" section gives the
+kernel or daemon check behind each capability.
 
 The operator's uevent socket was the one entry in doubt, because
 binding a netlink multicast group is a privileged operation on most
@@ -78,7 +78,7 @@ user namespace and no capability.
 
 ## The bus is a directory, never a socket file
 
-The D-Bus socket lives at
+The D-Bus socket is at
 `/var/run/bluetooth.liken.sh/dbus/system_bus_socket`, on an `emptyDir`
 that both containers mount at `/var/run/bluetooth.liken.sh/dbus`. Both
 containers state the same address in `DBUS_SYSTEM_BUS_ADDRESS`.
@@ -110,7 +110,7 @@ BlueZ 5.82, on controller `04:4A:69:66:92:27`.
 ## The entrypoint is a Go binary in this module
 
 The shell entrypoint became `bluetoothd/main.go`, because the image
-carries no shell. It does four things in order:
+has no shell. It does four things in order:
 
 1. It writes `/etc/bluetooth/input.conf` from the environment.
 2. It starts dbus-daemon with `--system --nopidfile --address=`.
@@ -154,4 +154,4 @@ DualSense controller.
   files on disk, and resolving them needs no running operator.
 
 The one check the drill could not run was a directory listing of
-`/var/lib/bluetooth`, because the image carries no `ls`.
+`/var/lib/bluetooth`, because the image has no `ls`.

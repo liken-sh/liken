@@ -14,15 +14,15 @@
 // in the daemon's own shape, and never asks bluetoothd to store them
 // anywhere else.
 //
-// The copy that survives the pod lives in a Kubernetes Secret, keyed
-// by the adapter's Bluetooth address. The address is what identifies
-// the keys: a key belongs to one radio, and the radio can move to
-// another machine, be replaced on the same machine, or come back at a
-// different index after a USB reset. Anything else that could name the
-// Secret, such as a node name or a StatefulSet ordinal, names the
-// machine rather than the radio, and a machine whose adapter was
-// swapped would then be handed keys that belong to a radio it no
-// longer has.
+// The copy that survives the pod is in a Kubernetes Secret for each
+// bond, and a label on each one names the adapter's Bluetooth address.
+// The address identifies the keys: a key belongs to one radio, and the
+// radio can move to another machine, be replaced on the same machine,
+// or come back at a different index after a USB reset. Anything else
+// that could identify them, such as a node name or a StatefulSet
+// ordinal, names the machine rather than the radio, and a machine
+// whose adapter was swapped would then be handed keys that belong to a
+// radio it no longer has.
 package bonds
 
 import (
@@ -34,8 +34,9 @@ import (
 // keyed by that device's address.
 type Tree map[Address]Files
 
-// Files is what this package carries for one paired device. Both files
-// are BlueZ's own, byte for byte, and nothing here parses either one.
+// Files is the pair of files this package stores for one paired
+// device. Both are BlueZ's own, byte for byte, and nothing here parses
+// either one.
 //
 // Info is <adapter>/<device>/info. It holds the link key, the device's
 // class, and the list of services BlueZ recorded. A device with no

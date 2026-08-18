@@ -17,17 +17,17 @@ With it you can:
 
 * **Pair a DualSense from your desk.** Create a `PairingRequest`, hold
   the controller's pairing buttons, and approve the address the radio
-  saw. Pairing is an API, so RBAC decides who may pair, and nobody
-  needs a shell on a node or in a pod.
+  reported. Pairing is an API, so RBAC controls who may pair, and
+  nobody needs a shell on a node or in a pod.
 * **Give the controller to one pod.** A game or emulator pod claims
   the controller by address and receives its `/dev/input/event*`
-  nodes. No other pod sees that input, and the claiming pod sees no
-  other input device.
+  nodes. No other pod receives that input, and the claiming pod
+  receives no other input device.
 * **Wait for a controller that is switched off.** A paired controller
   stays published while it is off. A claim on it parks the pod
   `Unschedulable`, and the pod starts when somebody turns the
   controller on.
-* **Keep the pairing across restarts.** The bond's keys live in
+* **Keep the pairing across restarts.** The bond's keys are in
   `Secrets`, so one button reconnects the controller after a pod
   restart, an upgrade, or a reboot.
 
@@ -35,7 +35,7 @@ The operator is one of `liken`'s optional
 [hardware operators](https://liken.sh/docs/concepts/hardware-operators/),
 and it installs as an ordinary workload. A cluster that never deploys
 it behaves as it does now. `liken`'s own DRA driver publishes the raw
-adapter, this operator claims that adapter, and its pod carries
+adapter. This operator claims that adapter, and its pod runs
 bluetoothd, so the `liken` system image ships no BlueZ and no D-Bus.
 The sibling operators publish
 [monitor outputs](https://display.liken.sh) and

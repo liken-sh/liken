@@ -126,13 +126,13 @@ func (i *inventory) createPairing(adapter *Adapter, device deviceState, request 
 	return created, nil
 }
 
-// reconcileDeviceSpec carries a Pairing's spec into bluetoothd.
+// reconcileDeviceSpec writes a Pairing's spec into bluetoothd.
 //
-// spec.trusted is what lets the device reconnect on its own: without
-// it BlueZ asks an agent to authorize each service on every
-// connection, and no agent is registered outside a pairing window.
-// spec.alias is stored by bluetoothd in the bond's own info file, so
-// the name is stored in the Secret with the keys.
+// spec.trusted lets the device reconnect on its own: without it BlueZ
+// asks an agent to authorize each service on every connection, and no
+// agent is registered outside a pairing window. spec.alias is stored
+// by bluetoothd in the bond's own info file, so the name is stored in
+// the Secret with the keys.
 func (i *inventory) reconcileDeviceSpec(pairing *Pairing, device deviceState) {
 	if pairing.Spec.Trusted != nil && *pairing.Spec.Trusted != device.Trusted {
 		if err := i.radio.SetDeviceTrusted(device.Address, *pairing.Spec.Trusted); err != nil {
@@ -154,9 +154,8 @@ func (i *inventory) reconcileDeviceSpec(pairing *Pairing, device deviceState) {
 //
 // status.bonded reports a gap this operator never acts on: a Pairing
 // whose device object is gone from bluetoothd, or is there with no
-// bond, is a bond somebody removed by another route. The
-// object stays, because deleting it is the unpair API and that is a
-// person's act.
+// bond, is a bond somebody removed by another route. The object stays,
+// because deleting it is the unpair API and that is a person's act.
 func (i *inventory) writePairingStatus(pairing *Pairing, adapter *Adapter, address bonds.Address, device deviceState, present bool) {
 	status := PairingStatus{
 		Address:    address.Directory(),

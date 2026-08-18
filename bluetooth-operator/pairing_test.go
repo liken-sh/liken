@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// testPairingPath is where the test device's Pairing lives.
+// testPairingPath is the path of the test device's Pairing.
 func testPairingPath() string { return pairingPath("a0-ab-51-33-b7-12") }
 
 func TestReconcileAdoptsEveryBondAsAPairing(t *testing.T) {

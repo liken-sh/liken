@@ -61,7 +61,7 @@ func (a Address) Directory() string {
 	return strings.ToUpper(a.format(":"))
 }
 
-// Key returns the form a Kubernetes name and a Secret key carry:
+// Key returns the form a Kubernetes name and a Secret key use:
 // lowercase, separated by dashes.
 func (a Address) Key() string {
 	return a.format("-")

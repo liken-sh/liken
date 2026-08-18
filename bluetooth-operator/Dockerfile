@@ -6,7 +6,7 @@
 # store and no resolver configuration. It writes CDI files and serves
 # a socket to the kubelet, both under mounted directories. It formats
 # no time in a named zone, so it needs no zoneinfo. Everything the
-# daemon side needs lives in the bluetoothd image, which the same pod
+# daemon side needs is in the bluetoothd image, which the same pod
 # runs beside this one.
 
 FROM golang:1.26.5-bookworm AS build

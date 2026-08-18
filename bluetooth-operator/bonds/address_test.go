@@ -4,7 +4,7 @@ import "testing"
 
 func TestParseAddressReadsBothForms(t *testing.T) {
 	// BlueZ names its directories in the first form, and a Kubernetes
-	// name and a Secret key carry the second.
+	// name and a Secret key use the second.
 	for _, form := range []string{
 		"04:4A:69:66:92:27",
 		"04-4a-69-66-92-27",
@@ -27,8 +27,8 @@ func TestParseAddressReadsBothForms(t *testing.T) {
 }
 
 // A device directory that does not parse is skipped rather than
-// fatal, so the rejections here are what keeps cache/ and settings out
-// of the API.
+// fatal, so the rejections here keep cache/ and settings out of the
+// API.
 func TestParseAddressRejectsAnythingElse(t *testing.T) {
 	for _, name := range []string{
 		"",

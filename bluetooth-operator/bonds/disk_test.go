@@ -18,7 +18,7 @@ func TestReadTreeKeepsOnlyThePairedDevices(t *testing.T) {
 	// cache/ holds an entry for the paired device and one for a
 	// neighbour's device. Only the paired one has a directory of its
 	// own, and only that one travels. settings is the adapter's own
-	// state. Carrying the neighbour's entry would put their hardware
+	// state. Copying the neighbour's entry would put their hardware
 	// into the API.
 	if len(tree) != 1 {
 		t.Fatalf("got %d bonds, want 1: %v", len(tree), tree)
@@ -59,7 +59,7 @@ func TestReadTreeLeavesTheCacheEntriesOfUnpairedDevices(t *testing.T) {
 	}
 	for device, stored := range tree {
 		if string(stored.Cache) == testNeighbourCache {
-			t.Errorf("%s carries the neighbour's cache entry", device)
+			t.Errorf("%s has the neighbour's cache entry", device)
 		}
 	}
 }
@@ -99,7 +99,7 @@ func TestReadTreeSkipsEntriesThatAreNotBonds(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(adapter, "AA:BB:CC:DD:EE:FF"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	// An empty info file carries no link key.
+	// An empty info file has no link key.
 	if err := os.MkdirAll(filepath.Join(adapter, "AA:BB:CC:DD:EE:00"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestWriteTreeWritesWhereBlueZReads(t *testing.T) {
 
 // A device with no stored cache entry gets no cache file. An empty one
 // would give bluetoothd a key file with no [ServiceRecords] group,
-// which reads as a device whose records are known to be none.
+// which reads as a device with no service records.
 func TestWriteTreeWritesNoCacheFileWithoutOne(t *testing.T) {
 	root := t.TempDir()
 	tree := Tree{address(t, testDevice): files(testInfo, "")}

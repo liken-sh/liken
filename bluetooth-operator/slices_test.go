@@ -19,7 +19,7 @@ func TestSliceDevicesPublishesPairedControllers(t *testing.T) {
 		t.Fatalf("got %d devices, want 2", len(devices))
 	}
 	// The list is sorted, so the same hardware always makes the same
-	// slice and the change detection sees real changes only.
+	// slice and the change detection reports real changes only.
 	if devices[0].Name != "a0-ab-51-33-b7-12" || devices[1].Name != "b4-8c-9d-11-22-33" {
 		t.Fatalf("names = %q, %q", devices[0].Name, devices[1].Name)
 	}
@@ -33,12 +33,12 @@ func TestSliceDevicesPublishesPairedControllers(t *testing.T) {
 		t.Error("the connected controller published connected = false")
 	}
 	if len(devices[0].Taints) != 0 {
-		t.Errorf("the connected controller carries taints: %+v", devices[0].Taints)
+		t.Errorf("the connected controller has taints: %+v", devices[0].Taints)
 	}
 }
 
 // The two taints answer two questions. NoExecute ends a session that
-// a controller walked out of. NoSchedule keeps a session from starting
+// a controller left. NoSchedule keeps a session from starting
 // against a controller that is not there, and nobody tolerates it, so
 // a claim ahead of a connect parks instead of looping through
 // schedule, prepare-fail, and evict.

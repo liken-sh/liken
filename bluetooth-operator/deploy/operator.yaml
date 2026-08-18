@@ -24,12 +24,13 @@ spec:
 # adapter only on a node that has one, so a pod on a node with no
 # radio parks Pending and costs nothing, and a pod on a node with a
 # radio runs. This takes one adapter per node. Serving more than one
-# adapter on a node is a separate design, because the bonds Secret and
+# adapter on a node is a separate design, because the bond Secrets and
 # the discovery are both scoped to this operator's own adapter.
 #
-# Nothing in this pod is storage, so no StatefulSet. The bonds live in
-# a Secret named for the adapter, an init container writes them into
-# an emptyDir, and the pod claims no volume that outlives it. The one
+# Nothing in this pod is storage, so no StatefulSet. The bonds are in
+# one Secret for each bond, labelled with the adapter, an init
+# container writes them into an emptyDir, and the pod claims no volume
+# that outlives it. The one
 # thing a StatefulSet adds is a volume for each pod, and a link key
 # belongs to an adapter's address, not to a pod.
 #
@@ -82,8 +83,8 @@ spec:
       initContainers:
         # The bonds, restored into the volume that bluetoothd reads.
         # bondfetch asks the kernel for the address of the adapter
-        # this pod claimed, reads the Secret named for that address,
-        # writes BlueZ's tree, and exits.
+        # this pod claimed, reads the Secrets labelled with that
+        # address, writes BlueZ's tree, and exits.
         - name: bondfetch
           image: ghcr.io/liken-sh/bluetooth-bondfetch:latest
           env:
@@ -138,7 +139,7 @@ spec:
         # deletion is a clean exit rather than the operator reporting
         # that bluetoothd left the bus.
         #
-        # It carries every capability in this pod. bluetoothd is the
+        # It has every capability in this pod. bluetoothd is the
         # Bluetooth stack, and the operator beside it only reads the
         # daemon over D-Bus and writes to the API server.
         - name: bluetoothd
@@ -147,7 +148,7 @@ spec:
           env:
             # The address of the bus this container serves. It names
             # the socket inside the directory the volume below
-            # carries, and the operator's container states the same
+            # mounts, and the operator's container states the same
             # address.
             - name: DBUS_SYSTEM_BUS_ADDRESS
               value: unix:path=/var/run/bluetooth.liken.sh/dbus/system_bus_socket
@@ -243,7 +244,7 @@ spec:
             - name: bus
               mountPath: /var/run/bluetooth.liken.sh/dbus
             # The bonds bluetoothd wrote. The operator reads this tree
-            # to carry a new pairing back into the adapter's Secret,
+            # to write a new pairing back into that bond's Secret,
             # which is the other half of what bondfetch does at start.
             - name: bonds
               mountPath: /var/lib/bluetooth
@@ -278,14 +279,14 @@ spec:
         - name: bus
           emptyDir: {}
         # The link keys and the device cache, which is kilobytes.
-        # bondfetch fills this directory from the adapter's Secret
-        # before bluetoothd starts, and the operator writes changes
-        # back to the same Secret, so the copy here is a working copy
-        # and it goes when the pod goes.
+        # bondfetch fills this directory from the adapter's bond
+        # Secrets before bluetoothd starts, and the operator writes
+        # changes back to the same Secrets, so the copy here is a
+        # working copy and it goes when the pod goes.
         #
-        # The Secret is what survives, and it is named for the
-        # adapter. That is the identity BlueZ files a link key under,
-        # so the bonds follow the radio to whichever machine the
+        # The Secrets outlive the pod, and each one is labelled with
+        # the adapter. That is the identity BlueZ files a link key
+        # under, so the bonds follow the radio to whichever machine the
         # radio moves to. Without them, a controller no longer
         # reconnects with the PS button, and a person has to hold
         # Create and PS and pair it again after every pod restart.

@@ -11,7 +11,7 @@ package main
 // that can bond a stranger's device.
 //
 // Writing the spec is the approval, the same way editing a Deployment
-// approves a rollout. Custom resources carry only the status and scale
+// approves a rollout. Custom resources have only the status and scale
 // subresources, so whoever may update a request may approve one, and
 // splitting the two would take a second object nobody needs yet.
 //
@@ -94,8 +94,8 @@ func (i *inventory) runWindow(adapter *Adapter, request *PairingRequest, snapsho
 		return false
 	}
 
-	// The radio's own timeouts carry what is left of the window, so a
-	// window outlives this operator by no longer than one pass. The
+	// The radio's own timeouts are set to what is left of the window, so
+	// a window outlives this operator by no longer than one pass. The
 	// window is re-asserted on every pass because a bluetoothd that
 	// restarted, or an adapter that powered itself back on, holds none
 	// of this state.
@@ -145,10 +145,9 @@ func (i *inventory) approve(adapter *Adapter, request *PairingRequest, status *P
 		}
 		fmt.Printf("request %s: paired with %s\n", name, address)
 	}
-	// Trusting the device is what lets it reconnect on its own
-	// afterwards. Without it BlueZ asks an agent to authorize each
-	// service on every connection, and no agent is registered outside a
-	// window.
+	// Trusting the device lets it reconnect on its own afterwards.
+	// Without it BlueZ asks an agent to authorize each service on every
+	// connection, and no agent is registered outside a window.
 	if err := i.radio.SetDeviceTrusted(address, true); err != nil {
 		fmt.Fprintf(os.Stderr, "request %s: trusting %s: %v\n", name, address, err)
 	}
@@ -261,7 +260,7 @@ func (i *inventory) collectRequest(request *PairingRequest, pass *inventoryPass)
 // expired, and one the radio reports, which covers an operator that
 // was restarted mid-window and an adapter that came back powered from
 // a USB reset. An idle adapter is not discoverable and not pairable,
-// which is what everything outside a window depends on.
+// and everything outside a window depends on that.
 //
 // bluetoothd's own timeouts end an open window as well, so this is
 // the second of two protections against the same exposure and not the
@@ -280,7 +279,7 @@ func (i *inventory) closeIdleWindow(snapshot radioSnapshot) {
 }
 
 // writeRequestStatus writes a request's status when it differs from
-// what the object already carries.
+// what the object already has.
 func (i *inventory) writeRequestStatus(request *PairingRequest, status PairingRequestStatus, pass *inventoryPass) {
 	if sameRequestStatus(request.Status, status) {
 		return

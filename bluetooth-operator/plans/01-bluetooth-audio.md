@@ -17,7 +17,7 @@ None of it was run. Every claim about behavior on real hardware is in
 
 A Bluetooth speaker is the same kind of thing as a Bluetooth
 controller, and milestone 58's argument covers it unchanged. The
-pairing state lives in `bluetoothd`. It is not in sysfs
+pairing state is in `bluetoothd`. It is not in sysfs
 and it is not on the Machine. So the layer that publishes speakers
 must be the layer that runs `bluetoothd`, and that layer is this
 operator.
@@ -26,8 +26,8 @@ One fact makes the speaker case stronger than the controller case.
 BlueZ advertises no A2DP at all until a media endpoint registers with
 it. `endpoint_init_a2dp_source` calls `a2dp_add_sep`
 ([`profiles/audio/media.c:781`](https://github.com/bluez/bluez/blob/master/profiles/audio/media.c)),
-and that call is what puts an AVDTP stream endpoint and its SDP record
-in place. A `bluetoothd` with no sound server beside it has no A2DP
+and that call puts an AVDTP stream endpoint and its SDP record in
+place. A `bluetoothd` with no sound server beside it has no A2DP
 Source record, so a speaker cannot connect to it and a person cannot
 usefully pair one. The daemon and the endpoint have to be together, so
 the pairing UX this operator already owns and the audio path are one
@@ -58,8 +58,8 @@ The bus is the one this operator already runs. Its socket is at
 `/var/run/bluetooth.liken.sh/dbus/system_bus_socket`, on an emptyDir
 the two containers share. That location is deliberate. It costs
 nothing today, because only this pod's own processes use the bus, and
-it is what keeps the two stacked designs in "What was considered and
-set aside" available later without a breaking change to a published
+it keeps the two stacked designs in "What was considered and set
+aside" available later without a breaking change to a published
 path. Reaching the bus from a second pod would mean backing that same
 path with a hostPath instead, which is a change of volume and not a
 change of address.
@@ -161,7 +161,7 @@ The proposal is `bluetooth.liken.sh/kind`, with the values `input` and
 
 Both are named the same way, which is the peer MAC address in
 lowercase with dashes for the colons, because a device name must be a
-DNS label. Both carry the unmodified MAC as an attribute. A speaker
+DNS label. Both publish the unmodified MAC as an attribute. A speaker
 and a controller have different addresses, so the two kinds share a
 name space and never collide in it.
 
@@ -174,8 +174,8 @@ scheduler. The classes select on `bluetooth.liken.sh/kind`.
 The discovery path is different for the two kinds, and this is the
 part of the operator that grows. A controller is found by walking
 `/sys/bus/hid/devices` and keeping the entries with bus type `0005`. A
-speaker has no sysfs node at all. It is a BlueZ device that carries the
-A2DP Sink UUID, with an `org.bluez.MediaTransport1` object when it is
+speaker has no sysfs node at all. It is a BlueZ device that reports
+the A2DP Sink UUID, with an `org.bluez.MediaTransport1` object when it is
 connected, and a PipeWire node when the graph holds one. So the audio
 half reads D-Bus and the PipeWire graph, and it never reads sysfs.
 
@@ -185,11 +185,11 @@ graph:
 * the peer MAC address, unmodified,
 * the device's name as BlueZ reports it,
 * the codec in use,
-* the PipeWire node name of the sink, which is what the consumer's
-  environment carries.
+* the PipeWire node name of the sink, which the consumer's
+  environment holds.
 
 A paired speaker publishes whether or not it is switched on, the same
-as a paired controller, which is what milestone 58's "Paired, not
+as a paired controller, which milestone 58's "Paired, not
 connected" section already states and what milestone 56's deferred
 allocation makes useful. A speaker that disconnects takes milestone
 56's taint path. An `audio-sink` is untainted only while BlueZ
@@ -264,10 +264,9 @@ down, because it sets where a Bluetooth sound server can run at all.
   `hci_sec_filter` whitelist at `hci_sock.c:138` permits, so the
   `!capable(CAP_NET_RAW)` reject at `hci_sock.c:1885` is not reached.
 
-So the network namespace is what the headset profiles need, and no
-capability is. A design that put PipeWire anywhere except a pod in the
-host network namespace would give up HFP, and this one does not have
-to choose.
+So the headset profiles need the network namespace and no capability.
+A design that put PipeWire anywhere except a pod in the host network
+namespace would lose HFP, and this one does not have to choose.
 
 ## What a restart takes down
 
@@ -322,7 +321,7 @@ daemon that exits ends the container anyway.
   [Kryxan/Proxmox-Bluetooth](https://github.com/Kryxan/Proxmox-Bluetooth).
   It is set aside because of what it couples, not because of what it
   cannot do. Nothing schedules the audio operator onto the machine with
-  the adapter, so on a machine where the card and the radio live apart
+  the adapter, so on a machine where the card and the radio are apart
   the mount is empty and Bluetooth audio silently does not exist.
   Nothing orders the two pods. The bus daemon has no reconnect path, so
   restarting this pod would force a restart of the audio operator,
@@ -343,7 +342,7 @@ daemon that exits ends the container anyway.
   contract instead of around it: placement, ordering, and exclusivity
   all come from the claim, and an audio fault then restarts only the
   audio pod and leaves the controllers running. It costs a third
-  repository, a third image carrying PipeWire again, a third pod, and a
+  repository, a third image that ships PipeWire again, a third pod, and a
   published device whose whole meaning is permission to talk to another
   operator's daemon, which is not a thing `bluetoothd` holds. **This is
   the recorded fallback.** If the drill shows that an audio fault
@@ -382,7 +381,7 @@ and a real A2DP speaker.
   record is present only while PipeWire runs, which is the
   `a2dp_add_sep` behavior above, observed rather than read.
 * **The sink publishes.** The speaker appears in a ResourceSlice under
-  `bluetooth.liken.sh`, named by its MAC address, carrying
+  `bluetooth.liken.sh`, named by its MAC address, with
   `kind: audio-sink`, its codec, and its PipeWire node name. The
   pairing survives a restart of the operator's pod.
 * **A claim ahead of the connect.** Switch the speaker off, create a
@@ -399,12 +398,12 @@ and a real A2DP speaker.
   stream is a real fraction of the practical throughput and not close
   to all of it, and that the profile which reserves periodic slots and
   therefore starves an HID link is SCO, which is HFP and not A2DP. The
-  drill is what turns that argument into a number.
-* **2.4 GHz coexistence.** Repeat the previous test with the house's
+  drill turns that argument into a number.
+* **2.4 GHz coexistence.** Repeat the previous test with the local
   Wi-Fi busy. Record the difference.
 * **A PipeWire restart.** Kill PipeWire while a controller's consumer
-  pod runs. This is the cost this plan accepts, and the drill is what
-  prices it: record how long the controllers are gone and what their
+  pod runs. This is the cost this plan accepts, and the drill prices
+  it: record how long the controllers are gone and what their
   consumers do. The result sets whether the design stays here or moves
   to the stacked operator.
 * **A `bluetoothd` restart with a stream live.** Restart `bluetoothd`

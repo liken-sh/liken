@@ -2,7 +2,7 @@ package main
 
 // These tests cover the Adapter object's lifecycle: the operator
 // creates one for the radio it holds, adopts one that is already
-// there, carries spec.alias into the radio, refuses a deletion while
+// there, writes spec.alias into the radio, refuses a deletion while
 // the radio is present, and lets a deletion through once the radio is
 // gone.
 
@@ -32,7 +32,7 @@ func TestReconcileCreatesTheAdapterForTheRadioItHolds(t *testing.T) {
 		t.Errorf("status = %+v", adapter.Status)
 	}
 	// Nothing owns the Adapter. An owner reference binds to one UID,
-	// and a Node registered again after a reinstall carries a new one,
+	// and a Node registered again after a reinstall has a new one,
 	// which would sweep every bond under this radio.
 	if len(adapter.Metadata.OwnerReferences) != 0 {
 		t.Errorf("ownerReferences = %+v", adapter.Metadata.OwnerReferences)
@@ -67,10 +67,10 @@ func TestReconcileAdoptsAnAdapterThatIsAlreadyThere(t *testing.T) {
 	}
 }
 
-// An Adapter a person created by hand carries no finalizer, so the
-// pass patches one on and then writes the status. Both writes are
+// An Adapter a person created by hand has no finalizer, so the pass
+// patches one on and then writes the status. Both writes are
 // conditional on the object's version, and the patch moves it, so the
-// status write has to carry the version the patch produced.
+// status write has to include the version the patch produced.
 func TestReconcileHoldsAnAdapterThatCarriesNoFinalizer(t *testing.T) {
 	fixture := newAPIFixture()
 	fixture.put(t, testAdapterObjectPath(), &Adapter{
@@ -110,7 +110,7 @@ func TestReconcileCarriesTheAliasIntoTheRadio(t *testing.T) {
 	if !radio.called("SetAdapterAlias liken-1-living-room") {
 		t.Fatalf("the alias never reached the radio: %v", radio.calls)
 	}
-	// The radio carries the alias now, so the next pass has nothing
+	// The radio has the alias now, so the next pass has nothing
 	// to write.
 	radio.calls = nil
 	inventory.reconcile()

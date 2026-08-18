@@ -8,7 +8,8 @@ package main
 // ServiceAccount token beside it. The two do not share one copy,
 // because both programs are package main and Go cannot import a main
 // package. This copy stays as small as the one call it makes: a GET of
-// one Secret, with absence separated from failure.
+// the bond Secrets under one label, with absence separated from
+// failure.
 
 import (
 	"crypto/tls"
@@ -29,10 +30,11 @@ import (
 var serviceAccountDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 
 // errNotFound marks the difference between "this object does not
-// exist" and a real failure. For this program that difference is what
-// separates a start from a nonzero exit: an absent Secret is an
-// adapter that has paired nothing, and a failure is a Secret whose
-// contents are unknown.
+// exist" and a real failure. A list of one adapter's Secrets answers
+// with an empty list rather than a 404, and main.go reads that empty
+// list as an adapter that has paired nothing. Any other failure is a
+// set of keys this program could not read, and the pod must not start
+// bluetoothd on an empty tree after one.
 var errNotFound = errors.New("not found")
 
 type apiClient struct {
@@ -119,8 +121,8 @@ func (c *apiClient) get(path string, out any) error {
 }
 
 // maxDrain bounds the read below. The largest answer this program asks
-// for is one Secret, which the caller decodes into memory anyway, so
-// reading the tail costs nothing new.
+// for is one adapter's bond Secrets, which the caller decodes into
+// memory anyway, so reading the tail costs nothing new.
 const maxDrain = 4 << 20
 
 // drain reads whatever the caller left in the response body, then

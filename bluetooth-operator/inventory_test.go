@@ -5,7 +5,7 @@ package main
 // them, and a radio that records what the operator asked it to do.
 //
 // The API fixture keeps the two behaviors these controllers depend on.
-// A delete against an object that carries a finalizer stamps a
+// A delete against an object that has a finalizer stamps a
 // deletionTimestamp and keeps the object, and the object goes when the
 // last finalizer is patched off. A write to the status subresource
 // changes status and nothing else.
@@ -69,7 +69,7 @@ func (f *apiFixture) handler(t *testing.T) http.Handler {
 
 // collections names each list path and the kind it returns. A
 // namespaced resource is listed across every namespace, which is one
-// more path than the objects themselves live under.
+// more path than the objects themselves are under.
 var collections = map[string]string{
 	pairingBase + "/adapters":        adapterKind,
 	pairingBase + "/pairings":        pairingKind,
@@ -107,14 +107,14 @@ func (f *apiFixture) serveCreate(t *testing.T, w http.ResponseWriter, r *http.Re
 		w.WriteHeader(http.StatusConflict)
 		return
 	}
-	// The API server assigns these two, and both matter here: a UID is
-	// what an owner reference names, and a resourceVersion is what makes
-	// the next write conditional.
+	// The API server assigns these two, and both matter here: an owner
+	// reference names a UID, and a resourceVersion makes the next write
+	// conditional.
 	metadata["uid"] = "uid-" + name
 	f.version++
 	metadata["resourceVersion"] = strconv.Itoa(f.version)
 	// A resource with a status subresource drops any status a create
-	// carried.
+	// stated.
 	delete(object, "status")
 	f.objects[path] = object
 	writeJSON(t, w, object)
@@ -129,7 +129,7 @@ func (f *apiFixture) serveReplace(t *testing.T, w http.ResponseWriter, r *http.R
 	}
 	object := decodeBody(t, r)
 	if !currentVersion(stored, object) {
-		// Optimistic concurrency, which every write here carries: a
+		// Optimistic concurrency, which every write here states: a
 		// version from before somebody else's write is refused.
 		w.WriteHeader(http.StatusConflict)
 		return
@@ -174,7 +174,7 @@ func (f *apiFixture) servePatch(t *testing.T, w http.ResponseWriter, r *http.Req
 	writeJSON(t, w, stored)
 }
 
-// serveDelete stamps a deletionTimestamp on an object that carries a
+// serveDelete stamps a deletionTimestamp on an object that has a
 // finalizer, and removes one that does not.
 func (f *apiFixture) serveDelete(w http.ResponseWriter, r *http.Request) {
 	stored, found := f.objects[r.URL.Path]
@@ -230,7 +230,7 @@ func read[T any](t *testing.T, fixture *apiFixture, path string) *T {
 	return object
 }
 
-// currentVersion reports whether a write carries the version the
+// currentVersion reports whether a write states the version the
 // object holds now. A write with no version at all is accepted, which
 // is what the API server does.
 func currentVersion(stored, write map[string]any) bool {

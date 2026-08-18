@@ -1,6 +1,6 @@
 # The restore set is proven for one BR/EDR device
 
-Open problem. Everything the Secret carries was chosen by reading
+Open problem. Everything the Secret holds was chosen by reading
 BlueZ's source and proven with one DualSense over BR/EDR. Two edges of
 that work are unmeasured.
 
@@ -12,7 +12,7 @@ does not price the two below.
 
 The operator copies each paired device's `info` file and the matching
 `cache` entry. It copies nothing that belongs to the adapter itself,
-and one adapter file holds a key: `<adapter>/identity`, which carries
+and one adapter file holds a key: `<adapter>/identity`, which holds
 `[General] IdentityResolvingKey`. That is the adapter's own IRK, the
 key a peer uses to resolve this radio's rotating address back to one
 identity. `load_irk` in `src/adapter.c` reads it, and writes a fresh
@@ -26,7 +26,7 @@ reads or writes the file. The lab machine has no `identity` file at
 all.
 
 The gap opens the day somebody turns privacy on. The adapter then
-generates a new IRK after every restore, because the Secret carries no
+generates a new IRK after every restore, because the Secret holds no
 old one to restore, so it presents a new identity to each peer that
 had resolved the previous one.
 
@@ -49,9 +49,10 @@ than measured.
   `load_devices` reads `AddressType` first and interprets the rest of
   the file with it, so a snapshot taken too early loses the key and an
   LE device with a static random address loads as BR/EDR.
-* It carries the `cache` entry, which for an LE device holds the GATT
+* It includes the `cache` entry, which for an LE device holds the GATT
   database under `[Attributes]`.
 
-A DualSense pairs BR/EDR, so neither claim has met hardware. The drill
+A DualSense pairs BR/EDR, so neither claim has been tested on
+hardware. The drill
 that would settle both is small: pair one LE device, delete the
 operator pod, and reconnect it.
