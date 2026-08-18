@@ -26,7 +26,11 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # A warm-cache build takes 3 to 6 minutes, and a cold-cache build
+    # takes about 15, so 20 stops a hung run without killing a real
+    # one. A pin bump empties that pin's cache on purpose, so cold
+    # runs are routine, not rare.
+    timeout-minutes: 20
     steps:
       # This step checks out full history, because the build names
       # itself with git describe (version.mk): the most recent release

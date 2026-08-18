@@ -55,7 +55,9 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # A site build and publish takes under 10 minutes, so 15 stops a
+    # hung run without killing a real one.
+    timeout-minutes: 15
     steps:
       # The submodule is the brand theme, the presentation every
       # liken site shares; the site cannot build without it.

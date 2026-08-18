@@ -20,9 +20,22 @@ runs:
     # OVMF are the smoke drill's virtual hardware: the same packages,
     # at the same firmware path, that the dev-cluster Makefile
     # documents.
+    #
+    # A package mirror sometimes accepts the connection and then sends
+    # nothing, and apt's default has no transfer timeout, so the read
+    # blocks until the job's timeout-minutes ends the whole run. The
+    # Timeout option ends a silent transfer after 30 seconds, and the
+    # Retries option tries the fetch three more times, so a dead
+    # mirror costs about two minutes instead of the job ceiling. The
+    # https transport reads the http options as its defaults, so one
+    # pair of options covers both schemes. A composite action's steps
+    # accept no timeout-minutes of their own, so the limit must live
+    # in the command.
     - name: install host tools
       shell: bash
-      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cpio kmod qemu-system-x86 qemu-utils ovmf
+      run: |
+        sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+        sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y --no-install-recommends cpio kmod qemu-system-x86 qemu-utils ovmf
 
     # The runners expose /dev/kvm, but only to root. This is the
     # standard rule to open it to every user, which is fine on a

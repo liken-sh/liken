@@ -39,7 +39,11 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # A release runs the same build as the build workflow, so the same
+    # ceiling applies: a warm-cache run takes under 10 minutes, a
+    # cold-cache run about 15, and 20 stops a hung run without killing
+    # a real one.
+    timeout-minutes: 20
     steps:
       # This step checks out full history and tags: version.mk names
       # dev artifacts with git describe even during a release build,

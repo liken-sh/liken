@@ -34,7 +34,9 @@ concurrency:
 jobs:
   renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # A renewal takes about a minute, so 15 stops a hung run with
+    # wide margin for a slow DNS-01 challenge.
+    timeout-minutes: 15
     steps:
       # lego is a single static binary, and the runner needs nothing
       # else. So this workflow has no checkout step. This step pins
