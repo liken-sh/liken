@@ -1,0 +1,32 @@
+# The site's configuration. The shell comes from the brand theme, the
+# git submodule at themes/brand that every liken site shares: the
+# layouts, the nav, and the stylesheet arrive with it, so this file
+# only has to say what is particular to this site. The site's name is
+# the driver's DRA name, display.liken.sh, so the address a claim
+# names is also the address the manual answers on.
+baseURL: https://display.liken.sh/
+title: display.liken.sh
+theme: brand
+# No taxonomies and no feeds: the site is a manual, not a blog. The
+# sitemap stays, because it is free and crawlers use it.
+disableKinds: [taxonomy, term, rss]
+
+# The theme renders every page twice, once as HTML for people and
+# once as the authored Markdown for agents and scripts. The two files
+# land side by side, so the Markdown twin of / is /index.md. The
+# theme carries the templates, but a theme cannot declare output
+# formats, so this block is the site's part of the contract
+# (themes/brand/README.md states it).
+outputFormats:
+  markdown:
+    # text/markdown is a media type Hugo already has, with the md
+    # suffix. baseName index makes the output index.md, beside
+    # index.html in the same pretty-URL directory.
+    mediaType: text/markdown
+    baseName: index
+    isPlainText: true
+
+outputs:
+  home: [html, markdown]
+  section: [html, markdown]
+  page: [html, markdown]

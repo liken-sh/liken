@@ -4,6 +4,7 @@
 .git
 .github
 deploy
+docs
 testdata
 README.md
 LICENSE
