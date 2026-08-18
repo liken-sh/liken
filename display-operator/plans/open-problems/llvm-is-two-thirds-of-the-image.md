@@ -161,14 +161,13 @@ fourteen names, thirteen of them symlinks to `libdril_dri.so`, so the
 image runs on any card mesa supports. A build of `iris` alone chooses
 the cards the image runs on.
 
-The fleet this operator was written for is Intel throughout. The seven
-machines in `44stonypoint/cluster/machines` are an i5-8279U with Iris
-Plus 655, an i5-8257U with Iris Plus 645, three N100s, and two N95s.
-Five of them declare the `i915` kernel module. studio1 and utility1
-declare no graphics module at all, and say why: an undriven GPU stays
-out of the `ResourceSlice`, so no GPU claim lands there. liken's own
-testbed, `liken-1`, is an N95. Every one of those parts is Gen9 or
-newer. Mesa's `src/loader/pci_id_driver_map.h` sorts an Intel card into
+The fleet this operator was written for is Intel throughout: Coffee
+Lake i5 parts with Iris Plus graphics, and Alder Lake-N parts. liken's
+own testbed, `liken-1`, is an N95. A machine that declares no graphics
+module publishes no GPU, because an undriven GPU stays out of the
+`ResourceSlice` and no GPU claim lands there. Every part in the fleet
+is Gen9 or newer.
+Mesa's `src/loader/pci_id_driver_map.h` sorts an Intel card into
 `i915`, `crocus`, or `iris`: the first two have explicit chip-id
 lists, and `iris` takes everything its predicate accepts, which is Gen8
 and newer. So `iris` alone covers this fleet, and `crocus`, `i915`,
