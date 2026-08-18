@@ -7,7 +7,7 @@ toc: true
 <!-- Generated from testdata/sample-crd.yaml by docs/crdref. Do not edit. -->
 
 A Widget page can open with hand-written prose, with a
-[link](/docs/guides/install/) the schema itself cannot carry.
+[link](/docs/guides/install/) the schema itself cannot hold.
 
 A Widget describes one widget.
 

@@ -101,8 +101,8 @@ which versions exist without opening the front page.
 
 No machine reads this document. A cluster polls `channel.yaml`, which
 stays one small file however many releases exist. The digests here are
-a convenience, not an authority: a digest that the channel served
-vouches for nothing by itself, which is why you pin the digest in your
+a convenience, and not an authority. A digest that the channel served
+proves nothing by itself, which is why you pin the digest in your
 own Cluster.
 
 ## The notes
@@ -126,7 +126,7 @@ to copy, every artifact with its digest and its size, and the
 component versions in the release. The mirror at
 [sources/](https://releases.liken.sh/sources/) has a page too.
 
-These pages carry no information of their own. Each page is a view of
+These pages hold no information of their own. Each page is a view of
 the documents above, and no machine reads a page. A machine reads
 `channel.yaml` and `release.yaml`, and it verifies both.
 

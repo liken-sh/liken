@@ -7,7 +7,7 @@
 # The build has three inputs: the hand-written content here, the CRD
 # schemas in machine/ and cluster/ (which crdref turns into the
 # reference pages), and the brand theme, the git submodule at
-# themes/brand that carries the shared page shell, stylesheet, and
+# themes/brand that supplies the shared page shell, stylesheet, and
 # public brand files. Hugo assembles them into dist/site/, the tree
 # that CI publishes to GitHub Pages as liken.sh.
 #
@@ -18,7 +18,7 @@
 HUGO := go tool hugo
 
 # The reference pages for the two CRDs are generated, never edited:
-# the schemas carry every field's description, and crdref arranges
+# the schemas hold every field's description, and crdref arranges
 # them into pages, so the reference cannot drift from what the API
 # server enforces.
 GENERATED := content/docs/reference/machine.md content/docs/reference/cluster.md
@@ -28,7 +28,7 @@ GENERATED := content/docs/reference/machine.md content/docs/reference/cluster.md
 all: build
 
 # Each page opens with a hand-written preamble that the schema cannot
-# carry: how the page relates to the guides. The preamble lives beside
+# hold: how the page relates to the guides. The preamble is beside
 # the generator and passes as the third argument. crdref imports
 # linkcheck for the heading-id algorithm, so the linkcheck sources are
 # prerequisites too.
@@ -44,7 +44,7 @@ generate: $(GENERATED)
 # file, so an edit to any page, and a bump of the theme submodule,
 # rebuilds. go.mod is a prerequisite because it pins Hugo itself.
 # release.txt is the deploy marker: CI checks the served copy against
-# the commit it shipped. It lives in the output tree, never in
+# the commit it shipped. It is in the output tree, never in
 # content/, because it is not a page.
 dist/site/index.html: hugo.yaml go.mod go.sum $(GENERATED) $(shell find content layouts themes -type f)
 	$(HUGO) build --cleanDestinationDir --destination dist/site
@@ -53,8 +53,8 @@ dist/site/index.html: hugo.yaml go.mod go.sum $(GENERATED) $(shell find content 
 build: dist/site/index.html
 
 # The authoring loop: edit a page, and the browser refreshes. Hugo's
-# server injects a live-reload script in this mode, which is the one
-# place any JavaScript touches the site; the built tree has none.
+# server injects a live-reload script in this mode. That script is the
+# only JavaScript the site ever runs, and the built tree has none.
 # --renderToMemory keeps the preview out of the working tree; the
 # only rendered tree on disk is the one `build` writes to dist/site.
 # --disableFastRender makes every change rebuild every page: fast

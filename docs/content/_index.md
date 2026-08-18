@@ -56,6 +56,6 @@ straight from the channel: you catalog a release and set the
 version, and the machines reboot into it one turn at a time.
 
 [The manual](/docs/) tells you how to run your own cluster.
-[How liken works](/docs/concepts/how-liken-works/) explains the
+[How `liken` works](/docs/concepts/how-liken-works/) explains the
 model, and [Install a cluster](/docs/guides/install/) gives the
 steps from a downloaded release to `kubectl get nodes`.

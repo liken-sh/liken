@@ -114,10 +114,10 @@ command overwrites the device.
 
 ## 5. Boot each machine from the stick
 
-Connect the stick and boot the machine. For the first boot, it is
-possible that you must open the firmware's boot-device menu. The
-stick's menu appears. It has two entries for each machine, and it ends
-with one entry for the report:
+Connect the stick and boot the machine. For the first boot, you may
+have to open the firmware's boot-device menu. The stick's menu
+appears. It has two entries for each machine, and it ends with one
+entry for the report:
 
     install as big
     wipe and reinstall as big
@@ -151,9 +151,10 @@ you connect a cable, or to examine a change before you install.
 
 Take the stick to your workstation and read `hardware-report.yaml`. The
 file is a valid Machine manifest. Each line has a comment with the data
-that the report found: the drivers that each device needs, in load
-order; each disk's size, model, and path; each interface's name, MAC
-address, and link state. Copy the `spec.modules`, `spec.network`, and
+that the report found. The comments give the drivers that each device
+needs, in load order; each disk's size, model, and path; and each
+interface's name, MAC address, and link state. Copy the
+`spec.modules`, `spec.network`, and
 `spec.storage` sections into this machine's manifest in `mycluster/`.
 Edit the parts marked `CHANGE-ME`. Then build the stick again with step
 4, so that it contains the corrected manifest.
@@ -211,12 +212,12 @@ machine's disks, and holds:
 Correct the cause and boot the installation again. An installation is
 idempotent, so a second attempt is safe.
 
-### To reinstall a machine that liken installed
+### To reinstall a machine that `liken` installed
 
 `install as <name>` claims only blank disks. It refuses a disk that it
 does not recognize, so it does not erase data that it did not write.
 This protects your data, but it also prevents the plain installation
-from replacing an installation that liken made. To replace one, select
+from replacing an installation that `liken` made. To replace one, select
 `wipe and reinstall as <name>`. In one boot, it erases the disks that
 this machine's manifest declares, then it installs the machine. Your
 selection of the entry at the keyboard is the confirmation. It ends
@@ -233,7 +234,7 @@ A disk replacement is different. If you install a new blank system disk
 and select the plain `install as <name>`, the installation claims the
 blank disk and recognizes the data disk that it wrote before. Thus the
 cluster state on that disk stays. Only `wipe and reinstall` erases a
-disk that liken claimed.
+disk that `liken` claimed.
 
 If you reinstall with a different layout, the machine's document in the
 cluster continues to describe the old layout, and the two disagree.
@@ -242,7 +243,7 @@ Storage roles can only increase in size, so the machine reports
 the size that the disk now has. Correct this in this order. First, let
 the machine boot and publish its status. Then edit the Machine resource
 in the cluster to the layout that it now has. The rule compares your
-spec with the sizes that the machine last booted with, so the cluster
+spec with the sizes that the machine last booted with. So the cluster
 accepts the edit only after the machine reports them. Also change the
 machine's manifest in `mycluster/` to the same layout, because the next
 stick and the next reinstallation start from that copy.

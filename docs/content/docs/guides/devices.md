@@ -9,7 +9,7 @@ This guide gives a pod a piece of hardware: a GPU for a transcoder,
 and a USB adapter that one pod holds alone. No step here needs a
 privileged pod or a host path.
 
-[Devices](/docs/reference/devices/) describes what liken publishes and
+[Devices](/docs/reference/devices/) describes what `liken` publishes and
 why. The [hardware operators](/docs/concepts/hardware-operators/)
 publish devices the operating system does not: paired Bluetooth
 controllers, monitor outputs, and audio outputs.
@@ -68,13 +68,13 @@ This machine publishes three devices for one GPU.
   several workloads encode, decode, and compute on this GPU at the
   same time.
 * `pci-0000-00-02-0-display` delivers the card node,
-  `/dev/dri/card0`, which carries modesetting. One claim allocates it,
+  `/dev/dri/card0`, which provides modesetting. One claim allocates it,
   because one process at a time can drive a display.
 * `pci-0000-00-02-0-i2c-dev` delivers the i2c monitor-control buses
   that i915 registers for each display output. One claim allocates it,
   because those buses are raw wires.
 
-All three carry the same `address`, because they are one card. A claim
+All three have the same `address`, because they are one card. A claim
 uses that to ask for halves of the same GPU. See
 [Two requests, one card](#two-requests-one-card).
 
@@ -118,18 +118,18 @@ for each kind of device that your deployments ask for.
               device.driver == "liken.sh" &&
               has(device.attributes["liken.sh"].renderNode)
 
-liken publishes an attribute only when it is true of the hardware, so
+`liken` publishes an attribute only when it is true of the hardware, so
 `has()` is the complete test. Guard an attribute a device may lack
 with `has()` before you read it. The Kubernetes API treats an
 unguarded read of a missing attribute as an evaluation error, and an
 evaluation error aborts the whole allocation.
 
 Do not select on `driver` alone, and do not select on `subsystem`
-alone. Every device that liken publishes for one GPU carries the same
-`driver`, and the card node carries the same `subsystem: drm` as the
+alone. Every device that `liken` publishes for one GPU has the same
+`driver`, and the card node has the same `subsystem: drm` as the
 render node. A class that matches more than one of them can allocate
 the monitor buses, or the display, to your transcoder. `renderNode`
-is the fact that names the half you want, and only that half carries
+is the fact that names the half you want, and only that half has
 it.
 
 This class matches any GPU with a DRM render node, on any machine in
@@ -181,10 +181,10 @@ Check what the container received:
 
     kubectl exec deploy/transcoder -- ls -l /dev/dri
 
-A device that carries `allowMultipleAllocations: true` serves more
+A device that has `allowMultipleAllocations: true` serves more
 than one claim: a second deployment writes its own `ResourceClaim`
 against the same `DeviceClass`, and both deployments run. The
-integrated GPU above carries it, so more than one transcoder can
+integrated GPU above has it, so more than one transcoder can
 allocate the render node at once.
 
 Give a deployment that holds a claim like this the `Recreate`
@@ -241,7 +241,7 @@ wait for it.
 
 On a machine with two GPUs, the two requests above can allocate halves
 of different cards. A `constraints` block pairs them. Each constraint
-names the requests it applies to and one attribute, and the scheduler
+names the requests it applies to and one attribute. The scheduler
 then allocates devices whose value for that attribute is the same.
 The attribute to use is `address`, which is the device's address on
 its bus:
@@ -259,7 +259,7 @@ its bus:
           - requests: [render, display]
             matchAttribute: liken.sh/address
 
-Every device that liken publishes for one card carries that card's
+Every device that `liken` publishes for one card has that card's
 address, and two cards in a machine have different addresses. The
 render node and the card node the claim allocates are now halves of
 the same GPU.
@@ -270,7 +270,7 @@ own, so a constraint that included its request would never match.
 ## 5. Give one pod a device alone
 
 Most devices are not shareable. A USB adapter has one control
-endpoint, so liken publishes it as a device that allocates one time.
+endpoint, so `liken` publishes it as a device that allocates one time.
 Select the device by its identity:
 
     apiVersion: resource.k8s.io/v1
@@ -317,7 +317,7 @@ that one process must own.
 
 Do not point two pods at one `ResourceClaim` for a device of this
 kind. Both pods receive it. Kubernetes shares a claim with every pod
-that names it, by design, and liken does not refuse the second pod. A
+that names it, by design, and `liken` does not refuse the second pod. A
 device node does not grant exclusive access by itself. The kernel is
 what enforces exclusive access, through `O_EXCL` and the driver's own
 open path. Use a template to give the device to one pod only.

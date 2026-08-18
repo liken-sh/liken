@@ -42,7 +42,7 @@ The site root also serves the llms.txt convention
 twins, and `/llms-full.txt` is the whole manual in one file.
 
 The Markdown twin is the authored file without changes. Each page
-therefore carries its own top-level heading in its content, and the
+therefore has its own top-level heading in its content, and the
 HTML templates add no heading. A title that is only in front matter
 would not appear in the twin.
 
@@ -55,14 +55,14 @@ in Hugo's graph, and `go tool hugo` compiles and runs it from the
 module cache. The module is nested, apart from the repository's root
 module, so Hugo's large dependency graph stays out of the root
 `go.sum`. A release never redistributes the bytes of Hugo, so the
-licensing domain carries no entry for it. `latest.sh --bump` moves
+licensing domain has no entry for it. `latest.sh --bump` moves
 the pin; build the site after a bump before trusting it, because a
 Hugo release can change the template lookup rules the layouts depend
 on.
 
 The presentation is the brand theme, the git submodule at
 `themes/brand` (<https://github.com/liken-sh/brand>). The theme
-carries the page shell, the shared stylesheet that every page
+supplies the page shell, the shared stylesheet that every page
 inlines, the nav that every liken site renders from its
 `data/nav.yaml`, and the public brand files: `/favicon.ico`,
 `/icon.svg`, and the mark under `/brand/`. The theme's `voice.md` is
@@ -93,10 +93,10 @@ The name reaches Pages through DNS: the apex records in
 `liken.sh/terraform.tf` point liken.sh at GitHub's published Pages
 addresses, and www CNAMEs to the Pages hostname. GitHub issues and
 renews the site's TLS certificate. The Pages configuration itself
-(the workflow source and the custom domain) lives in the
+(the workflow source and the custom domain) is in the
 repository's settings, set once by hand, the same class of one-time
 act as delegating the zone.
 
-`dist/site/release.txt` carries the commit that the site was built
+`dist/site/release.txt` holds the commit that the site was built
 from. CI reads it back over https://liken.sh/release.txt to prove
 that the deploy landed.

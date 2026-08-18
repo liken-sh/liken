@@ -38,7 +38,7 @@ Export the engine manifest with the Flux CLI:
       > flux-system/gotk-components.yaml
 
 The repository holds the engine manifest, because the repository
-controls the engine. liken installs a pinned copy of these two
+controls the engine. `liken` installs a pinned copy of these two
 controllers one time, and only to make the first sync possible. After
 the first sync, the cluster runs the engine from your repository. To
 upgrade Flux, commit a change to this file. To add a controller,
@@ -60,7 +60,7 @@ keeps the marked documents, and you must remove the fleet
 deliberately.
 
 Do not add `GitRepository` or `Kustomization` objects to the
-repository. liken renders these two sync objects from the feature's
+repository. `liken` renders these two sync objects from the feature's
 parameters. A copy in the repository conflicts with the rendered
 object.
 
@@ -128,7 +128,7 @@ new catalog entry and `spec.version` in `liken/cluster.yaml`.
 
 ## Rules for safe operation
 
-* Never commit the sync objects. liken owns `GitRepository` and
+* Never commit the sync objects. `liken` owns `GitRepository` and
   `Kustomization`.
 * Keep the `prune: disabled` annotation on the Cluster and Machine
   documents.
@@ -165,7 +165,7 @@ If someone deletes the engine by accident, the cluster installs it
 again in about a minute, and the next sync restores the copy from the
 repository.
 
-## What liken owns
+## What `liken` owns
 
 Declaring the feature puts this annotation on the `flux-system`
 namespace:
@@ -174,18 +174,18 @@ namespace:
 
 The annotation is the record that this installation is `liken`'s. The
 teardown reads it before it deletes anything, and removes only what
-carries it.
+has it.
 
 A cluster that never declares the feature never gets the annotation.
 `liken` seeds nothing there, so a Flux that was running before `liken`
-arrived keeps running, and retracting a feature the document never
+arrived keeps running. Retracting a feature the document never
 declared deletes nothing. The Cluster says so:
 
     kubectl describe cluster
 
 The `FluxTeardown` condition names what the teardown declined. A
 cluster that `liken` founded before this record existed reports the
-same thing until its namespace carries the annotation.
+same thing until its namespace has the annotation.
 
 Declaring the feature is how you hand an existing installation to
 `liken`. The namespace does not have to be new: `liken` applies its

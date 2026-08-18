@@ -30,7 +30,7 @@ func TestGenerateMatchesGolden(t *testing.T) {
 	}
 }
 
-// A preamble is hand-written prose the schema cannot carry, such as a
+// A preamble is hand-written prose the schema cannot hold, such as a
 // link into the guides. It lands verbatim between the generated-from
 // comment and the schema's own description, so the page opens with
 // the words a person wrote for it.

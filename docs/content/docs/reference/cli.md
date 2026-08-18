@@ -26,7 +26,7 @@ Three terms occur on this page:
   [The release channel](/docs/reference/release-channel/) describes
   its layout.
 
-## liken new
+## `liken new`
 
     liken new <directory>
 
@@ -35,14 +35,14 @@ directory of manifests: `cluster.yaml` and one file for each machine.
 The comments in the files describe every field. The other commands
 use this directory.
 
-## liken mint
+## `liken mint`
 
     liken mint <identity-dir>
 
 Makes a new cluster identity: the certificate authorities and the
 join token that all the machines in one cluster share.
 
-## liken adopt
+## `liken adopt`
 
     liken adopt <harvest-dir> <identity-dir>
 
@@ -51,7 +51,7 @@ cluster, and arranges them as an identity directory. You can adopt
 the identity of any k3s cluster. [Adopt an existing k3s
 cluster](/docs/guides/adopt/) gives the steps.
 
-## liken kubeconfig
+## `liken kubeconfig`
 
     liken kubeconfig [-server URL] <deployment-dir>
 
@@ -61,7 +61,7 @@ uses to administer the cluster. The server address comes from the
 `endpoint:` in the deployment's `cluster.yaml`. Pass `-server` when
 your machine reaches the cluster at a different address.
 
-## liken approve-reboot
+## `liken approve-reboot`
 
     liken approve-reboot [-server URL] <deployment-dir> <machine>
 
@@ -73,8 +73,8 @@ machine's `status.pending`, prints each waiting change, and writes
 the `liken.sh/approve-disruption` annotation with the staged
 change's hash. The machine then takes the same path an `Auto`
 machine takes: it waits for the cluster's turn, drains, and applies
-the change with the smallest disruption it needs, which for a
-credentials change is a k3s restart, not a reboot.
+the change with the smallest disruption it needs. For a credentials
+change that disruption is a k3s restart, not a reboot.
 
 The grant is one-shot. Once the change applies, its hash is no
 longer pending, and the next change hashes differently, so a stale
@@ -83,14 +83,14 @@ same annotation. When two changes are pending, the command approves
 the reboot-class one, because a reboot applies every staged change.
 When nothing is pending, it reports that and writes nothing.
 
-## liken request-reboot
+## `liken request-reboot`
 
     liken request-reboot [-server URL] <deployment-dir> <machine>
 
 Asks a machine to reboot when no change asks it to. Every other
 reboot that `liken` performs applies a staged document, so a machine
 that agrees with every document it was given has no way to reboot,
-and it has no shell to be told from. Two cases need one anyway: a
+and it has no shell for a person to use. Two cases need one anyway: a
 kernel driver that bound the wrong device, which releases it only at
 boot, and a machine you are experimenting on. The command writes the
 `liken.sh/request-reboot` annotation, valued with the identity of the
@@ -100,7 +100,7 @@ The request skips none of the cluster's coordination. The machine
 waits for the cluster to grant it a reboot turn under
 [`spec.disruption`](/docs/reference/cluster/#specdisruption), cordons
 its node, and drains its workloads, the same as a machine applying a
-staged change. What the two policies decide is only the approval:
+staged change. The two policies control only the approval:
 
 * `rebootPolicy: Auto` needs nothing more. The machine takes its
   turn, drains, and reboots.
@@ -115,7 +115,7 @@ release.
 
 The request is one-shot, and nothing has to clear it. It names the
 boot it was written for, so the boot that comes back is a boot the
-annotation does not name, and the `RebootRequestHonored` condition
+annotation does not name. The `RebootRequestHonored` condition then
 reads `True` again. Run the command a second time and it names the
 new boot.
 
@@ -126,7 +126,7 @@ it. The machine reports the value to use in the same
     kubectl describe machine <name>
     kubectl annotate machine <name> liken.sh/request-reboot=<identity>
 
-## liken kubectl
+## `liken kubectl`
 
     liken kubectl [-server URL] <deployment-dir> [args...]
 
@@ -136,7 +136,7 @@ cluster. The command writes the admin kubeconfig (see
 hands the terminal to `kubectl`. Everything after the deployment
 directory goes to `kubectl` unchanged.
 
-## liken stern
+## `liken stern`
 
     liken stern [-server URL] <deployment-dir> [args...]
 
@@ -144,16 +144,16 @@ Runs the `stern` from your `PATH` against the deployment's cluster,
 the same way `liken kubectl` runs `kubectl`. `stern` tails the logs
 of many pods at once.
 
-## liken flux
+## `liken flux`
 
     liken flux [-server URL] <deployment-dir> [args...]
 
 Runs the `flux` from your `PATH` against the deployment's cluster,
-the same way `liken kubectl` runs `kubectl`. liken plants the Flux
+the same way `liken kubectl` runs `kubectl`. `liken` plants the Flux
 engine when the cluster declares the `flux` feature, so this is the
 command that inspects it.
 
-## liken layer
+## `liken layer`
 
     liken layer <manifests-dir> <identity-dir> <output.cpio>
 
@@ -161,7 +161,7 @@ Packs your cluster's part of the operating system into one small
 archive: your cluster manifest, your machine manifests, and your
 identity.
 
-## liken fetch
+## `liken fetch`
 
     liken fetch [-digest sha256:<hex>] <source-url> <version|latest> <channel-dir>
 
@@ -171,7 +171,7 @@ To take the version that the channel names as the newest, give
 `latest`. `-digest` pins the release document to a known digest,
 which completes the trust chain.
 
-## liken media
+## `liken media`
 
     liken media <release-dir> <deployment.cpio> <output.cpio>
 
@@ -179,7 +179,7 @@ Builds a bootable install image from a downloaded release and your
 deployment layer. Machines install themselves from it. Use this form
 for direct-kernel boots, for example QEMU or PXE.
 
-## liken stick
+## `liken stick`
 
     liken stick [-console ttyS0] <release-dir> <deployment.cpio> <output.img>
 
@@ -199,16 +199,16 @@ order of the machine names, and one entry for the stick itself:
 `install as <name>` uses blank disks only. `wipe and reinstall as
 <name>` erases every disk that the manifest of that machine declares,
 then installs. The report entry is last in the list because it
-applies to no machine: it describes the hardware of the machine in
-front of it and changes no disk. The menu has no time limit, because
-every entry writes to a disk or asks for a person. A machine that
+applies to no machine. It describes the hardware of the machine in
+front of it, and it changes no disk. The menu has no time limit,
+because every entry writes to a disk or asks for a person. A machine that
 stays at the menu does nothing until a person selects an entry.
 
 `-console` is repeatable. It adds a `console=` argument that the
 machines keep permanently. Use it to install a machine that has no
 screen: the menu and all the messages also go to that port.
 
-## liken bundle
+## `liken bundle`
 
     liken bundle [-slot-size 1Gi] <vmlinuz> <liken.sqfs> <boot.cpio> <microcode.cpio> <liken-cli> <systemd-boot.efi> <grub-boot.img> <grub-core.img> <licenses.md> <channel-dir> <version> [component=version ...]
 
@@ -217,14 +217,14 @@ writes the `release.yaml` that names each one by its digest. The
 project's own release workflow runs this command. A deployment does
 not need it.
 
-## liken serve
+## `liken serve`
 
     liken serve <channel-dir> [address]
 
 Shares a release channel over plain HTTP, and records each request in
 a log. The address defaults to `:8017`.
 
-## liken index
+## `liken index`
 
     liken index -source <url> <output-dir> < keys
 
@@ -244,7 +244,7 @@ The pages hold no information of their own. Each one is a view of a
 document that the channel already serves, and no machine reads a page.
 To repair a page, run the command again over the same channel.
 
-## liken version
+## `liken version`
 
     liken version
 

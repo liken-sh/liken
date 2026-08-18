@@ -12,24 +12,24 @@ The kernel ships a default for every one of them.
 
 Most Linux distributions do not run on those defaults. They ship a set
 of files under `/usr/lib/sysctl.d`, and systemd applies them at boot.
-liken runs no systemd. It applies its own set instead, listed below.
+`liken` runs no systemd. It applies its own set instead, listed below.
 
 ## How the values are applied
 
 Two programs apply kernel settings, and they apply them in the same
 order.
 
-1. liken's own values, listed on this page.
+1. `liken`'s own values, listed on this page.
 2. The values in the machine's
    [`spec.sysctls`](/docs/reference/machine/#spec--sysctls).
 
-Init applies both at boot, before k3s starts. The liken operator
+`init` applies both at boot, before k3s starts. The `liken` operator
 applies both again on every pass, about every ten seconds. Each pass
 writes the value and reads it back, so a setting that something else on
 the machine changed returns within one pass, without a reboot.
 
 Because `spec.sysctls` is applied second, a name there overrides
-liken's value for that parameter:
+`liken`'s value for that parameter:
 
 ```yaml
 apiVersion: liken.sh/v1alpha1
@@ -53,21 +53,21 @@ $ kubectl get machine node-1 -o jsonpath='{.status.sysctls}' | jq
 }
 ```
 
-A parameter liken could not write is missing from that map, because a
+A parameter `liken` could not write is missing from that map, because a
 failed write is never read back. So the map lists the parameters that
 currently hold, not the parameters somebody asked for.
 
 If a value in `spec.sysctls` fails to apply, the machine reports
-`SysctlsApplied` as false and becomes Degraded. If one of liken's own
+`SysctlsApplied` as false and becomes Degraded. If one of `liken`'s own
 values fails, the machine stays Ready and the condition reports
-`DefaultsIncomplete`. The reason for the difference is that liken's
+`DefaultsIncomplete`. The reason for the difference is that `liken`'s
 values ship with the release, so every machine running that release
 would report the same fault in the same pass, and degrading a whole
 fleet at once hides the one machine that has a real problem.
 
-## The values liken sets
+## The values `liken` sets
 
-This list holds only the parameters where liken differs from the
+This list holds only the parameters where `liken` differs from the
 kernel. Every other parameter keeps the kernel's own default.
 
 ### Memory
@@ -81,7 +81,7 @@ kernel. Every other parameter keeps the kernel's own default.
 
 | Parameter | Value | Why |
 | --- | --- | --- |
-| `fs.inotify.max_user_instances` | `8192` | Every program that watches files on the machine runs as root and draws on one quota: kubelet, containerd, k3s, init, and the liken operator. The kernel allows 128. |
+| `fs.inotify.max_user_instances` | `8192` | Every program that watches files on the machine runs as root and draws on one quota: kubelet, containerd, k3s, init, and the `liken` operator. The kernel allows 128. |
 | `fs.inotify.max_user_watches` | `524288` | The same quota, counted in watched files rather than watchers. |
 
 Both are ceilings. An unused ceiling costs no memory.
@@ -99,20 +99,20 @@ Both are ceilings. An unused ceiling costs no memory.
 | `net.ipv4.ip_forward` | `1` | A node that cannot forward packets cannot route pod traffic. |
 | `net.core.default_qdisc` | `fq_codel` | The queueing discipline a network interface gets when it comes up. The kernel's default puts every packet in one queue, so a large transfer delays every small request behind it. `fq_codel` gives each flow a queue of its own. |
 | `net.ipv4.tcp_slow_start_after_idle` | `0` | Stops a connection restarting slowly after every quiet moment. An API server watch stays open for hours and carries a burst, a silence, and another burst, which is the worst case for the kernel's default. |
-| `net.ipv4.tcp_mtu_probing` | `1` | Recovers from a network path that drops oversized packets without saying so. Pod-to-pod traffic inside VXLAN encapsulation travels such a path. |
+| `net.ipv4.tcp_mtu_probing` | `1` | Recovers from a network path that drops oversized packets and sends no ICMP message. Pod-to-pod traffic inside VXLAN encapsulation travels such a path. |
 | `net.unix.max_dgram_qlen` | `512` | The queue depth of a local datagram socket. The kernel allows 10, and a program that fills the queue blocks. |
 
 ### Reliability
 
 | Parameter | Value | Why |
 | --- | --- | --- |
-| `kernel.panic_on_oops` | `1` | A kernel bug that does not kill the machine outright leaves it running in a state it does not understand. liken has somewhere better to go: the machine reboots into the system slot it already proved, and the crash journal carries the log across the reboot, so the next boot reports the crash. |
+| `kernel.panic_on_oops` | `1` | A kernel bug that does not kill the machine outright leaves it running in an undefined state. A reboot is the better option: the machine reboots into the system slot it already proved, and the crash journal holds the log across the reboot, so the next boot reports the crash. |
 
 ### Hardening
 
 | Parameter | Value | Why |
 | --- | --- | --- |
-| `kernel.kptr_restrict` | `1` | Hides real kernel addresses, which are what an attack needs to work out where the kernel loaded. |
+| `kernel.kptr_restrict` | `1` | Hides real kernel addresses, which an attacker reads to work out where the kernel loaded. |
 | `fs.protected_symlinks` | `1` | Refuses to follow another user's symbolic link in a directory that anyone may write to. |
 | `fs.protected_hardlinks` | `1` | Refuses a hard link to a file the person making the link cannot read. |
 | `fs.protected_regular` | `2` | Refuses to create a file where another user already left one, in a directory that anyone may write to. |
@@ -123,9 +123,9 @@ Both are ceilings. An unused ceiling costs no memory.
 A network setting under `net.ipv4.conf` exists three times: once under
 `all`, once under `default`, and once for each interface. The kernel
 copies `default` into an interface when that interface appears, and the
-machine's own network card appears before these values are applied. So
+machine's own network card appears before `liken` applies these values. So
 `default` reaches the interfaces that Kubernetes creates later, and
-`all` is what reaches the network card. liken sets both.
+`all` is what reaches the network card. `liken` sets both.
 
 | Parameter | Value | Why |
 | --- | --- | --- |
@@ -139,23 +139,23 @@ Not every kernel setting is a sysctl. Four other kinds matter.
 
 **Resource limits** are ceilings the kernel puts on one process, such
 as how many files it may hold open. They are not files under
-`/proc/sys`, and no sysctl changes one. liken sets its own, and
+`/proc/sys`, and no sysctl changes one. `liken` sets its own, and
 `spec.rlimits` overrides them.
 [Resource limits](/docs/reference/rlimits/) describes both sets.
 
-**The kernel command line** is read once, at boot. It carries the
-settings the kernel needs before any program runs. liken builds this
+**The kernel command line** is read once, at boot. It holds the
+settings the kernel needs before any program runs. `liken` builds this
 line itself, and there is no field to add to it.
 [`status.boot.commandLine`](/docs/reference/machine/#statusboot--commandline)
 reports the line the machine booted with.
 
 **Kernel modules** are drivers and other kernel parts that load on
 demand. Some sysctls need one: `net.core.default_qdisc` cannot name
-`fq_codel` unless the `sch_fq_codel` module is loaded. liken loads a
+`fq_codel` unless the `sch_fq_codel` module is loaded. `liken` loads a
 fixed list at boot, and
 [`spec.modules`](/docs/reference/machine/#spec--modules) adds to it.
 
-**Compiled settings** are fixed when the kernel is built, and liken
+**Compiled settings** are fixed when the kernel is built, and `liken`
 does not build kernels. The build's own configuration ships in the
 image at `/lib/modules/<release>/config`. Read it to find out whether
 some kernel feature is built in, available as a module, or absent:

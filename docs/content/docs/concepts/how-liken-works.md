@@ -3,10 +3,10 @@ title: How liken works
 weight: 10
 ---
 
-# How liken works
+# How `liken` works
 
 This page gives the model in one read: what a machine runs, how a
-fleet changes, and where your part of the system lives. The guides
+fleet changes, and where your part of the system is. The guides
 assume this model.
 
 ## One image, plus your layer
@@ -15,7 +15,7 @@ Every machine runs the same operating system image. The image is a
 read-only squashfs file, built by the project and published in every
 release. Nothing on a machine edits it.
 
-Everything that makes a cluster yours lives in one small archive: the
+Everything that makes a cluster yours is in one small archive: the
 deployment layer. It holds your Cluster document, your Machine
 manifests, and the cluster's identity, which is its certificate
 authorities and its join token.

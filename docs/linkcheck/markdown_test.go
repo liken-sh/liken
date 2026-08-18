@@ -57,7 +57,7 @@ title: p
 }
 
 // internalLinks finds every link whose target starts with a slash:
-// inline links, image links, and links that carry a title. External
+// inline links, image links, and links with a title. External
 // links and links inside fenced code are not the manual's to check.
 func TestInternalLinksFindsAbsoluteTargets(t *testing.T) {
 	page := []byte(`Read [the guide](/docs/guides/install/) and

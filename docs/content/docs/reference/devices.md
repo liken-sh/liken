@@ -6,7 +6,7 @@ toc: true
 
 # Devices
 
-liken gives hardware to workloads with dynamic resource allocation,
+`liken` gives hardware to workloads with dynamic resource allocation,
 the Kubernetes API for devices. A pod asks for a device by its
 properties. The scheduler selects a node that has such a device, and
 the node gives that pod the device's `/dev` entries. The pod needs no
@@ -14,7 +14,7 @@ privilege, no host mounts, and no knowledge of the machine it runs
 on.
 
 [Give a workload a device](/docs/guides/devices/) gives the steps.
-This page describes what liken publishes, and why.
+This page describes what `liken` publishes, and why.
 
 ## The driver
 
@@ -24,7 +24,7 @@ reads sysfs and publishes what it finds. The other job answers the
 kubelet when a pod's claim comes to the node.
 
 Usually a cluster administrator installs a DRA driver as a DaemonSet.
-liken's driver is part of the operating system, because the operating
+`liken`'s driver is part of the operating system, because the operating
 system is the only thing that identifies the hardware before other
 software starts.
 
@@ -92,13 +92,13 @@ not have an attribute, the attribute is absent, not empty. Thus
 | Attribute | Type | What it is |
 |---|---|---|
 | `bus` | string | `pci` or `usb` |
-| `address` | string | the device's address on that bus: `0000:00:02.0` on PCI, the port path on USB. Every device liken publishes for one physical device carries the same address |
+| `address` | string | the device's address on that bus: `0000:00:02.0` on PCI, the port path on USB. Every device `liken` publishes for one physical device has the same address |
 | `driver` | string | the name of the bound driver, such as `i915` |
 | `class` | string | the type of device, in one word: `display`, `multimedia`, `serial-bus` |
 | `classCode` | string | the full class code that the bus published: six hex digits on PCI, two on USB |
-| `subsystem` | string | the kind of device that liken published: `drm`, `sound`, `tty`. It is absent when the delivery is a mix that liken does not know, and when the device delivers no node of its own, as a Bluetooth adapter does |
+| `subsystem` | string | the kind of device that `liken` published: `drm`, `sound`, `tty`. It is absent when the delivery is a mix `liken` has no name for, and when the device delivers no node of its own, as a Bluetooth adapter does |
 | `renderNode` | bool | the device supplies a DRM render node |
-| `displayNode` | bool | the device supplies a DRM card node, which carries modesetting |
+| `displayNode` | bool | the device supplies a DRM card node, which provides modesetting |
 | `name` | string | the name of the device in words, from its own strings or from the PCI database |
 | `modalias` | string | the identifier that the kernel uses to match drivers |
 | `serial` | string | the serial number of the hardware, when it has one |
@@ -112,14 +112,14 @@ give one model, and a DeviceClass that uses them stops working on the
 next machine that you buy.
 
 `address` is the attribute that pairs devices. Two cards in one
-machine have different addresses, and every device liken publishes for
-one card carries that card's address. So a claim with a request for a
+machine have different addresses, and every device `liken` publishes for
+one card has that card's address. So a claim with a request for a
 render node and a request for a card node constrains the two with
 `matchAttribute: liken.sh/address`, and both requests get halves of
 the same card. The
 [guide](/docs/guides/devices/#two-requests-one-card) has the claim.
 
-liken publishes no capability facts that need a driver stack to
+`liken` publishes no capability facts that need a driver stack to
 measure, for example the codecs that a GPU can encode. To read those
 facts, you must run libva and a vendor driver, which the image does
 not contain. A pod that holds a claim on the render node can measure
@@ -127,28 +127,28 @@ them for itself, so the operating system does not publish them.
 
 ## Sharing
 
-liken allocates a device to one claim, unless liken publishes
+`liken` allocates a device to one claim, unless `liken` publishes
 `allowMultipleAllocations` for that device. A device's subtree can
-deliver nodes of more than one kernel subsystem. When it does, liken
+deliver nodes of more than one kernel subsystem. When it does, `liken`
 can publish more than one device for it, one for each kind of node. A
 GPU splits again, because its render node and its card node give
 different authority over the same silicon. The name of each extra
 device is the primary device's name plus a suffix. A claim receives
 the nodes of the one published device it allocated, and no others.
 
-liken publishes `allowMultipleAllocations` for one kind of device:
+`liken` publishes `allowMultipleAllocations` for one kind of device:
 the graphics half of a GPU. A graphics device is one that delivers a
 DRM render node, and the published graphics device delivers that
-render node, `/dev/dri/renderD*`. It carries `renderNode: true`. The
+render node, `/dev/dri/renderD*`. It has `renderNode: true`. The
 driver arbitrates between concurrent clients on a render node, so
 more than one claim can hold it.
 
 An audio controller is a device that delivers ALSA's nodes, and no
-nodes except the ones a sound card holds. It carries
+nodes except the ones a sound card holds. It has
 `subsystem: sound`, and it is exclusive. In practice one sound server
 owns every PCM on a card and mixes its clients' streams through them,
 so the card belongs to one claim. A second claimant waits in the
-scheduler, where a person can see it wait, instead of meeting ALSA's
+scheduler, where a person can see it wait, instead of receiving ALSA's
 `EBUSY` at play time.
 
 A claim on an audio controller delivers the card's whole subtree,
@@ -161,7 +161,7 @@ device.
 
 A GPU publishes its card node, `/dev/dri/card*`, as a separate
 device. The name of that device is the primary name plus `-display`,
-and it carries `displayNode: true`. This device is exclusive, because
+and it has `displayNode: true`. This device is exclusive, because
 DRM master is one for each card: the kernel gives modesetting to one
 open card node, and a second display program on the same card fails
 when it starts. An exclusive device makes the second claim wait in
@@ -183,8 +183,8 @@ holding it grants display takeover, and no workload claims a bare
 framebuffer.
 
 A device that delivers one kind of node publishes as one device,
-unless it is a GPU. A device that delivers a mix that liken does not
-know publishes whole and exclusive, and names no `subsystem`. A
+unless it is a GPU. A device that delivers a mix `liken` has no name
+for publishes whole and exclusive, and names no `subsystem`. A
 Bluetooth adapter publishes the same way, whole and exclusive with no
 `subsystem`, because the only node it delivers is its usbfs node.
 
@@ -209,7 +209,7 @@ a device. It does not control how many **pods** can use one claim.
 
 Every pod that names a `ResourceClaim` shares that claim, and all of
 these pods receive the device. Kubernetes does this on purpose: it is
-how two pods share one allocation. liken does not refuse the second
+how two pods share one allocation. `liken` does not refuse the second
 pod. A refusal would be a race with no owner. Also, the delivery of a
 device node was never the mechanism that gave exclusive access. The
 kernel gives exclusive access, through `O_EXCL` and the driver's own
@@ -238,11 +238,11 @@ A claim on a USB device also delivers that device's usbfs node,
 `/dev/bus/usb/<busnum>/<devnum>`. A program that uses libusb, for
 example Network UPS Tools, reads sysfs to find the hardware and then
 opens this node to communicate with it. A node that a kernel driver
-registers, such as `hidraw`, carries that driver's protocol only, so
+registers, such as `hidraw`, supplies that driver's protocol only, so
 it cannot take the place of the usbfs node.
 
 A program that uses libusb cannot share an interface with a kernel
-driver, so it detaches the kernel driver while it runs. liken
+driver, so it detaches the kernel driver while it runs. `liken`
 publishes only devices that have a driver, so the device leaves the
 node's slice for as long as the pod runs. When the pod stops and its
 claim ends, the node binds a kernel driver to the interface again, and
@@ -264,14 +264,14 @@ these claims can communicate with the whole device.
 
 A claim on a Bluetooth adapter delivers the adapter's usbfs node, and
 nothing else. The adapter has no node of its own. A program reaches a
-radio through an `AF_BLUETOOTH` socket, which it binds to an adapter
-by index, so the kernel registers no `/dev` entry anywhere the adapter
-owns. The claim states which workload owns the radio, and it holds
-that workload on the machine the radio is in. A stack that drives the
+radio through an `AF_BLUETOOTH` socket, and it binds that socket to an
+adapter by index. The kernel registers no `/dev` entry anywhere the
+adapter owns. The claim states which workload owns the radio, and it
+holds that workload on the machine the radio is in. A stack that drives the
 radio through the kernel opens its socket with the capabilities of its
 own container, because a claim grants no privilege.
 
-liken stops the delivery walk at a `bluetooth` subtree. The kernel
+`liken` stops the delivery walk at a `bluetooth` subtree. The kernel
 puts the HID device of a connected peripheral under the adapter's own
 USB interface, so a game controller's `/dev/input/event*` and
 `/dev/hidraw*` nodes appear in the adapter's part of sysfs. Those
@@ -288,23 +288,23 @@ under one of the two arrangements.
 ## Limits
 
 * One slice for each node, with a maximum of 128 devices. If a node
-  has more devices, it prints the count of the devices it dropped on
-  its console, and no claim can reach those devices. It does not
-  divide the pool.
-* liken supplies no DeviceClasses. A DeviceClass states what a
+  has more devices, it prints its device count on its console and
+  drops the overflow, and no claim can reach the dropped devices. It
+  does not divide the pool.
+* `liken` supplies no DeviceClasses. A DeviceClass states what a
   deployment needs, so each deployment writes its own. The
   [guide](/docs/guides/devices/) has examples to start from.
 * Devices have no capacity and no taints at this time. If a device
   fails, it disappears from the slice at the next pass. This stops
   new allocations, but it does not change an allocation that is in
   use.
-* liken does not keep a claim across a reboot. The claim is a
+* `liken` does not keep a claim across a reboot. The claim is a
   Kubernetes object, and Kubernetes reschedules the pod that holds it
   together with the claim.
 
 ## Hardware that is not published
 
-You cannot claim hardware that has no driver bound to it. liken shows
+You cannot claim hardware that has no driver bound to it. `liken` shows
 this hardware in two other places:
 
 * The Machine's status lists it as unclaimed hardware, with the

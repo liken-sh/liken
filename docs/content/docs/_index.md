@@ -10,7 +10,7 @@ common tasks. The reference describes the API resources, the release
 channel, and the `liken` command.
 
 If `liken` is new to you, read
-[How liken works](/docs/concepts/how-liken-works/) first. It gives
+[How `liken` works](/docs/concepts/how-liken-works/) first. It gives
 the model in one read. Then read
 [Install a cluster](/docs/guides/install/): the steps from a
 downloaded release to `kubectl get nodes`.

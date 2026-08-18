@@ -51,5 +51,5 @@ printf '%s\t%s\t%s\t%s\n' hugo "$pinned" "${latest:-?}" \
 # digests cannot disagree the way a hand-edited pair could.
 (cd "$here" && go get -tool "github.com/gohugoio/hugo@v$latest" && go mod tidy)
 echo "hugo: $pinned -> $latest"
-echo "go.sum stands behind these bytes"
+echo "go.sum now pins the new digests"
 echo "next: make -C .. docs"

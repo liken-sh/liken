@@ -78,7 +78,7 @@ the cluster already runs Flux, and your `cluster.yaml` does not
 declare `flux`, that omission reads as a retraction.
 
 `liken` does not delete that Flux. It removes a Flux installation only
-when the `flux-system` namespace carries a `liken.sh/feature=flux`
+when the `flux-system` namespace has a `liken.sh/feature=flux`
 annotation, and that annotation arrives only when the document
 declares the feature. A document that never declared `flux` never put
 it there, so the teardown deletes nothing and the Cluster reports the
@@ -97,7 +97,7 @@ install the first machine:
   [Run the fleet from git](/docs/guides/gitops/) has the steps, and
   its last section covers an installation that already exists.
 
-## 4. Install the liken machines
+## 4. Install the `liken` machines
 
 Build the stick and install each machine as in
 [Install a cluster](/docs/guides/install/). Start with the first

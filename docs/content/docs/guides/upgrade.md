@@ -69,8 +69,8 @@ Each machine that runs a different version:
    that holds a DRA claim leaves before the pod that serves its
    driver. The driver stays to answer the kubelet's unprepare call.
 4. Reboots into the new slot one time, as a trial. The trial is a
-   success when the OS starts and rejoins the cluster, and the machine
-   then boots that slot from then on. If the trial fails, the machine
+   success when the OS starts and rejoins the cluster. From that time,
+   the machine boots that slot. If the trial fails, the machine
    returns to the other slot without help:
    [Roll back](/docs/guides/rollback/) describes this.
 

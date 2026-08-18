@@ -9,12 +9,12 @@
 baseURL: https://liken.sh/
 title: liken
 # The presentation is the brand theme, the git submodule at
-# themes/brand (github.com/liken-sh/brand). It carries the page
+# themes/brand (github.com/liken-sh/brand). It supplies the page
 # shell, the shared stylesheet, the nav, and the public brand files,
-# so every liken site reads as one place. The only layouts kept in
-# this site are the two llms.txt templates, because their prose is
-# about this manual; Hugo gives a site's layouts/ precedence over the
-# theme's.
+# so every liken site has the same presentation. The only layouts
+# kept in this site are the two llms.txt templates, because their
+# prose is about this manual; Hugo gives a site's layouts/ precedence
+# over the theme's.
 theme: brand
 # The repository this site documents. The theme's nav links its
 # "repository" entry to this URL, and the sidebar heading on every

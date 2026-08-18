@@ -43,15 +43,15 @@ and holds the console. Correct the cause and boot the installation
 again. An installation is idempotent, so a second attempt is safe.
 
 If the error says that a disk needs a driver the boot path does not
-carry, run the hardware report. The report names the driver and
+have, run the hardware report. The report names the driver and
 keeps that disk out of the proposed layout.
 [Install a cluster](/docs/guides/install/#first-run-the-hardware-report)
 describes the report.
 
 ## A machine does not join the cluster
 
-Install the first leader first. A follower that boots before any
-leader serves waits for one.
+Install the first leader first. If a follower boots before any leader
+serves, the follower waits for a leader.
 
 A declared network port with no cable delays each boot, because the
 machine waits a maximum of thirty seconds for that port. Remove the
@@ -80,16 +80,16 @@ is `False` names the reason:
   The condition's message gives the sizes.
   [Install a cluster](/docs/guides/install/#to-reinstall-a-machine-that-liken-installed)
   gives the order of the corrections.
-* `RejectedLastBoot`: the machine tried the change in a boot, and
+* `RejectedLastBoot`: the machine booted the change one time, and
   the boot failed. See the next section.
 
 ## A machine returned to the old version
 
-The machine tried the new version one time, the trial failed, and
-the machine fell back to the slot it had proved. Its conditions show
+The machine booted the new version one time, the trial failed, and
+the machine returned to the slot it had proved. Its conditions show
 `RejectedLastBoot`, and
 [`status.boot.systemRejection`](/docs/reference/machine/#statusbootsystemrejection)
-records what happened. The machine does not try that version again
+records what happened. The machine does not boot that version again
 until [`spec.version`](/docs/reference/cluster/#spec--version)
 points at a different release. [Roll back](/docs/guides/rollback/) describes the
 fallback and the correction.
@@ -110,8 +110,8 @@ column. For a machine that did not move, read its conditions:
   A slow link makes this step long. The machine retries a failed
   download on its own.
 * `AwaitingPodRefresh`: the machine runs the new release and waits
-  for its operator pod to be recreated from the new template, which
-  happens after a leader boots the release.
+  for the pod steward to replace its operator pod from the new
+  template. The steward does that after a leader boots the release.
 
 If the Cluster's `Progressing` condition is `False` with the reason
 `RolloutStalled`, a machine with a granted turn did not return. The

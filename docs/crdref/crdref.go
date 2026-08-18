@@ -1,7 +1,7 @@
 // The walker: from a CRD manifest to a Markdown reference page.
 //
 // The CRD schemas are the authority on liken's API. Every field
-// already carries a description in the schema itself, because the
+// already has a description in the schema itself, because the
 // schema is written to be read. This program arranges those
 // descriptions into a page, so the website's reference can never
 // drift from what the API server actually enforces. When a field
@@ -22,7 +22,7 @@ import (
 // the page knows where the words come from. The preamble is optional
 // hand-written prose that opens the page: the schema's descriptions
 // document the fields, but only a person can say how the page relates
-// to the guides, so that paragraph lives in a file beside this
+// to the guides, so that paragraph is in a file beside this
 // program and lands here verbatim.
 //
 // The walk uses yaml.v3 nodes rather than decoded maps, because
@@ -49,14 +49,15 @@ func Generate(crdYAML []byte, source string, preamble []byte) ([]byte, error) {
 
 	// liken serves one version of each CRD, so the first entry is
 	// the schema. A second served version would mean choosing which
-	// one the manual documents, and that day this lookup grows.
+	// one the manual documents, and this lookup would grow to make
+	// that choice.
 	versions := mapGet(spec, "versions")
 	if versions == nil || len(versions.Content) == 0 {
 		return nil, fmt.Errorf("%s declares no versions", source)
 	}
 	schema := mapGet(mapGet(versions.Content[0], "schema"), "openAPIV3Schema")
 	if schema == nil {
-		return nil, fmt.Errorf("%s carries no openAPIV3Schema", source)
+		return nil, fmt.Errorf("%s has no openAPIV3Schema", source)
 	}
 
 	var b strings.Builder
@@ -87,14 +88,14 @@ func Generate(crdYAML []byte, source string, preamble []byte) ([]byte, error) {
 // emitSection writes one object's heading, its description, a table
 // of its direct fields, and then, depth first and in declared order,
 // a section for each field that is itself an object. Every heading
-// carries the object's full dotted path, so every path is searchable
+// has the object's full dotted path, so every path is searchable
 // text. The heading level follows the depth, capped at four, so the
-// nesting reads as nesting; the cap keeps the deepest paths from
-// vanishing into fine print.
+// nesting reads as nesting. The cap stops the deepest paths from
+// becoming too small to read.
 //
-// intro stands in when the node has no description of its own: an
-// array's description lives on the array field, and the section that
-// describes one element should still carry it.
+// intro supplies the text when the node has no description of its
+// own: an array's description is on the array field, and the section
+// that describes one element should still have it.
 func emitSection(b *strings.Builder, path string, node *yaml.Node, depth int, intro string) {
 	heading := strings.Repeat("#", min(depth+1, 4))
 	fmt.Fprintf(b, "%s %s\n\n", heading, path)
@@ -207,7 +208,7 @@ func fieldType(node *yaml.Node) string {
 }
 
 // cellText renders one field's table cell: the description, then the
-// machine-checkable facts the schema also carries (the enum, the
+// machine-checkable facts the schema also holds (the enum, the
 // default, the pattern), folded onto one line and with pipes escaped
 // so the Markdown table survives.
 func cellText(node *yaml.Node) string {
@@ -278,7 +279,7 @@ func foldText(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-// displayPath strips the ../ prefixes a Makefile invocation carries,
+// displayPath strips the ../ prefixes a Makefile invocation adds,
 // so the generated comment names the file by its path in the
 // repository, which is the name a reader can find.
 func displayPath(p string) string {

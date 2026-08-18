@@ -19,7 +19,7 @@ var (
 	inlineLink = regexp.MustCompile(`!?\[([^\]]*)\]\([^)]*\)`)
 
 	// Underscore emphasis only opens and closes at a word's edge, so
-	// an underscore inside a word, which Anchor keeps, stays put.
+	// an underscore inside a word, which Anchor keeps, is unchanged.
 	underscoreEmphasis = regexp.MustCompile(`(^|[\s(])_+([^_]+?)_+($|[\s).,:;!?])`)
 
 	atxHeading = regexp.MustCompile(`^(#{1,6})\s+(.*?)\s*$`)
@@ -29,9 +29,9 @@ var (
 	// ids are link targets exactly like heading ids.
 	explicitID = regexp.MustCompile(`\bid="([^"]+)"`)
 
-	// A link's target sits at its end, so matching from the closing
+	// A link's target is at its end, so matching from the closing
 	// bracket finds a link whose text wraps across lines. The target
-	// may carry a quoted title. Only absolute targets match, which is
+	// may include a quoted title. Only absolute targets match, which is
 	// what makes this an internal-link scan: an external target
 	// starts with its scheme, not a slash.
 	absoluteTarget = regexp.MustCompile(`\]\(\s*(/[^)\s]*)(?:\s+"[^"]*")?\)`)
@@ -74,7 +74,7 @@ func proseLines(page []byte) []string {
 	return prose
 }
 
-// pageAnchors returns every heading id the rendered page carries.
+// pageAnchors returns every heading id the rendered page has.
 // When two headings render to the same id, the renderer numbers the
 // later ones, so both stay addressable and this map holds both.
 func pageAnchors(page []byte) map[string]bool {

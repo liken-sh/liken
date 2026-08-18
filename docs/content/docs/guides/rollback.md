@@ -27,7 +27,7 @@ phase shows Blocked, its conditions show `RejectedLastBoot`, and
 [`status.boot.systemRejection`](/docs/reference/machine/#statusbootsystemrejection)
 records what happened. The rejection stays until you point
 [`spec.version`](/docs/reference/cluster/#spec--version) at a
-different version, so the machine does not try the failed version
+different version, so the machine does not boot the failed version
 again.
 
 A bad release is never published again. To correct a bad release,
