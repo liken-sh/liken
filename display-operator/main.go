@@ -185,7 +185,7 @@ func main() {
 	//
 	// A client that was drawing before a restart keeps its screen.
 	// The taint clears about three seconds after this write, and the
-	// README recommends a tolerationSeconds of 30, so the restart
+	// manual recommends a tolerationSeconds of 30, so the restart
 	// never evicts the client.
 	if err := EnsureResourceSlice(client, nodeName, owner, compositorDown(sliceDevices(outputs))); err != nil {
 		fmt.Fprintf(os.Stderr, "publishing the outputs before the compositor starts: %v\n", err)

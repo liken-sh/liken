@@ -20,13 +20,18 @@ name: docs
 on:
   push:
     branches: [main]
+    # deploy/ is a source of the site, not only of the cluster: a
+    # module mount in docs/hugo.yaml serves the manifests as raw
+    # YAML under /deploy/, so a manifest change is a publish too.
     paths:
       - docs/**
+      - deploy/**
       - .github/workflows/docs.yaml
   pull_request:
     branches: [main]
     paths:
       - docs/**
+      - deploy/**
       - .github/workflows/docs.yaml
   # A dispatch republishes the current main with no docs change, for
   # the times the serving side needs a fresh deployment.
