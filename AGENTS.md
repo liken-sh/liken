@@ -17,24 +17,10 @@ repository and arrive with the theme submodule:
 
 @docs/themes/brand/voice.md
 
-Follow these rules for comments:
-
-* **Teach the domain, not the syntax.** Do not explain what `mkdir -p`
-  does. Explain why the kernel does not mount `/proc` on its own, why
-  k3s needs cgroups, and why an initramfs is a cpio archive. Assume that
-  the reader knows the tools already and reads this to learn how
-  systems boot.
-* **Explain why, then what.** The reason for a choice is more valuable
-  than a description of the choice. If the project chose one option
-  over an obvious alternative, state the choice and state the reason.
-* **Comments are timeless.** A comment describes the system as it is
-  now. It never describes how the system got that way. Do not write
-  "changed from X" or "used to be Y" in a comment. That history belongs
-  in commit messages. A reader can find that history there when it is
-  relevant, and skip it when it is not.
-* **Prose quality matters.** Comments here are writing for a public
-  audience. Use plain language and complete sentences. Do not add
-  filler words.
+The comment rules there say to teach the domain, not the syntax. In
+this repository, the domain is how a system boots. Do not explain what
+`mkdir -p` does. Explain why the kernel does not mount `/proc` on its
+own, why k3s needs cgroups, and why an initramfs is a cpio archive.
 
 Some explanations are too big for a comment: for example, a design
 decision that spans several files, or a survey of alternatives. Put
