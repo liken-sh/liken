@@ -21,7 +21,7 @@ spec:
         - name: controller
           exactly:
             deviceClassName: audio-controller
-            # Every sound controller on the node, not one. PipeWire spans
+            # Every sound controller on the node, not one. PipeWire serves
             # every ALSA card on the machine, and this operator keys each
             # output by card number, so one pod serves all the node's
             # cards. A consumer's own claim selects the card and output by
@@ -51,11 +51,10 @@ spec:
         app: audio-operator
     spec:
       serviceAccountName: audio-operator
-      # Four containers, one image, and the kubelet is what orders
-      # them. The declaration runs to completion, PipeWire and
-      # WirePlumber start in that order and stay up, and the operator
-      # starts last and stops first. Nothing in this pod supervises
-      # anything else.
+      # Four containers, one image, and the kubelet orders them. The
+      # declaration runs to completion, PipeWire and WirePlumber start
+      # in that order and stay up, and the operator starts last and
+      # stops first. Nothing in this pod supervises anything else.
       initContainers:
         # The node declarations, written into the volume that PipeWire
         # reads as a configuration drop-in directory. A plain init
@@ -88,8 +87,8 @@ spec:
         # restarts always, which the kubelet starts before the
         # operator and stops after it. Both halves of that order
         # matter. The socket this container serves is what the
-        # operator reads, and on the way out the operator ends first,
-        # so an ordinary pod deletion is a clean exit rather than the
+        # operator reads. On the way out the operator ends first, so an
+        # ordinary pod deletion is a clean exit rather than the
         # operator reporting that PipeWire is gone.
         - name: pipewire
           image: ghcr.io/liken-sh/audio-operator:latest
@@ -160,9 +159,9 @@ spec:
               value: /var/run/audio.liken.sh
           # wpctl connects to PipeWire, not to WirePlumber, so this
           # probe proves the socket is reachable from this container
-          # and nothing stronger. A WirePlumber that exits later is
-          # repaired by the kubelet's restart of this container, not
-          # noticed by a probe.
+          # and nothing stronger. The kubelet's restart of this
+          # container repairs a WirePlumber that exits later, and no
+          # probe reports it.
           startupProbe:
             exec:
               command: ["/usr/bin/wpctl", "status"]

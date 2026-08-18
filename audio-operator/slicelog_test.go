@@ -12,8 +12,8 @@ import (
 )
 
 // unusableTaint is this operator's NoSchedule taint, the one nothing
-// tolerates. Its key differs from operator to operator. What it
-// exercises here does not.
+// tolerates. Its key differs from operator to operator, and the
+// behavior these tests cover does not.
 const unusableTaint = noMonitorTaint
 
 // sliceLogCapture replaces the operator's reporter with one that
@@ -56,7 +56,7 @@ func (c *sliceLogCapture) only(t *testing.T) string {
 	return lines[0]
 }
 
-// loggedDevice is one device as the slice carries it, with the taint
+// loggedDevice is one device as the slice holds it, with the taint
 // keys the case needs.
 func loggedDevice(name string, keys ...string) SliceDevice {
 	device := SliceDevice{
@@ -150,16 +150,16 @@ func TestSliceLogCreateListsTheTaintedDevices(t *testing.T) {
 		loggedDevice("device-b", disconnectedTaint, unusableTaint),
 	})
 
-	want := "slice: created generation 1, 2 devices, 1 tainted: device-b carries " +
+	want := "slice: created generation 1, 2 devices, 1 tainted: device-b has " +
 		disconnectedTaint + ", " + unusableTaint
 	if got := capture.only(t); got != want {
 		t.Errorf("line = %q, want %q", got, want)
 	}
 }
 
-// The quiet line is what separates a live operator from a dead one, so
-// it has to arrive, and it has to arrive rarely enough that a fleet of
-// operators does not fill the log with it.
+// The quiet line separates an operator that still runs from one that
+// stopped. It has to arrive, and it has to arrive rarely enough that a
+// fleet of operators does not fill the log with it.
 func TestSliceLogRateLimitsTheUnchangedLine(t *testing.T) {
 	capture := captureSliceLog(t)
 	devices := []SliceDevice{loggedDevice("device-a"), loggedDevice("device-b", disconnectedTaint)}
@@ -188,8 +188,8 @@ func TestSliceLogRateLimitsTheUnchangedLine(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("got %d lines, want 2: %q", len(lines), lines)
 	}
-	// The pass count is what proves the loop ran the whole interval
-	// instead of once.
+	// The pass count proves the loop ran the whole interval instead of
+	// once.
 	want = "slice: unchanged at generation 4, 2 devices, 1 tainted (10 passes)"
 	if lines[1] != want {
 		t.Errorf("second line = %q, want %q", lines[1], want)

@@ -1,6 +1,6 @@
 # A sink can be shared and this one is not
 
-Open problem. PipeWire mixes streams, so one sink can carry several
+Open problem. PipeWire mixes streams, so one sink can serve several
 consumers at once. Every device this operator publishes is exclusive,
 so the second pod to claim a monitor's speakers parks Pending behind
 the first.
@@ -11,7 +11,7 @@ Milestone 59 chose it for two reasons, and both still hold. The first
 is that the other two operators are exclusive, and one owner for one
 piece of hardware is the clearest thing a claim can mean. The second
 is that a claim on a shared sink gives a workload no say over what
-else plays through it: a pod that holds the television's speakers has
+else plays through it. A pod that holds the television's speakers has
 no way to say that it holds them alone, and a video player sharing a
 sink with a notification sound is a worse default than a video player
 that waits.
@@ -39,7 +39,7 @@ publishes.
 
 ## What is not decided
 
-The obvious extension is a second DeviceClass over the same devices,
+The obvious extension is a second `DeviceClass` over the same devices,
 one exclusive and one shared, so a consumer states which it wants.
 That was named in milestone 59 and left out of it.
 
@@ -55,9 +55,9 @@ What nobody has decided:
 * Whether an exclusive claim and a shared claim on one device can
   coexist, and what the exclusive holder is entitled to expect if they
   can.
-* Whether anything has actually wanted this. No workload in the house
-  has asked for a second stream on one sink, so the cost of the
-  current answer is unmeasured.
+* Whether anything needs this. No workload in this deployment has
+  asked for a second stream on one sink, so the cost of the current
+  answer is unmeasured.
 
 Nothing here is urgent. It is written down because "exclusive" is a
 decision this operator made, and a reader of `slices.go` cannot tell a

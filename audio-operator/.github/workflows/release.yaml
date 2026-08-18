@@ -34,9 +34,9 @@ jobs:
     steps:
       # The tag names the version, so its shape is an input this
       # workflow must check before it spends anything on a build. A
-      # tag of any other shape is a mistake, and the run says so and
-      # stops before an image could ship under a name no machine can
-      # order against the others.
+      # tag of any other shape is a mistake. The run says so and stops,
+      # before an image can ship under a name no machine can order
+      # against the others.
       - name: Check the tag shape
         run: |
           echo "$GITHUB_REF_NAME" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3}$' || {
@@ -52,11 +52,10 @@ jobs:
           go-version-file: go.mod
 
       # The tests gate the build. ci.yaml already ran them on the
-      # tagged commit when it landed on main, but a tag can name any
+      # tagged commit when it landed on main. A tag can name any
       # commit, so the release proves the one it ships. An image that
-      # reaches the registry has passed them, and a rollback is a
-      # matter of naming an older tag and never of finding out which
-      # tag was good.
+      # reaches the registry has passed them. A rollback names an older
+      # tag, and never has to find out which tag was good.
       - run: go vet ./...
       - run: go test -race ./...
 
@@ -81,14 +80,14 @@ jobs:
 
       # The gate that makes a missing runtime load impossible to
       # ship. PipeWire and WirePlumber open every module by file name,
-      # so ldd reports none of them and go test sees none of them
+      # so ldd reports none of them and go test covers none of them
       # either. This step starts both daemons, reads what the running
       # processes mapped, and fails the release on any mapped file the
-      # image does not carry.
+      # image does not contain.
       #
       # The runner has no sound card and needs none. A cardless
       # PipeWire still loads every module its configuration names, and
-      # that is the set this image exists to carry. libspa-alsa.so is
+      # that is the set this image exists to ship. libspa-alsa.so is
       # the one load no cardless run reaches, so the check asserts it
       # by name instead.
       #
@@ -102,7 +101,7 @@ jobs:
           image="ghcr.io/liken-sh/audio-operator:$VERSION"
           runtime=/var/run/audio.liken.sh
 
-          # Every path the image carries, as the paths a process sees.
+          # Every path in the image, as the paths a process sees.
           container=$(docker create "$image")
           docker export "$container" | tar -t | sed 's|^|/|; s|/$||' | sort -u > image-files.txt
           docker rm "$container" > /dev/null
@@ -115,7 +114,7 @@ jobs:
             /usr/lib/x86_64-linux-gnu/spa-0.2/alsa/libspa-alsa.so
           do
             grep -qx "$path" image-files.txt \
-              || { echo "the image carries no $path"; exit 1; }
+              || { echo "the image has no $path"; exit 1; }
           done
 
           docker volume create audio-release > /dev/null
@@ -175,7 +174,7 @@ jobs:
             echo "$name mapped $(wc -l < "maps-$name.txt") files"
             [ -s "maps-$name.txt" ] || { echo "$name mapped nothing"; exit 1; }
             if comm -23 "maps-$name.txt" image-files.txt | grep .; then
-              echo "$name mapped files the image does not carry"
+              echo "$name mapped files the image does not contain"
               missing=1
             fi
           done

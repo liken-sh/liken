@@ -17,7 +17,7 @@ rules:
   # cannot say "only the slice named for your node": resourceNames
   # cannot be templated per pod. The program only ever writes its own,
   # whose name it builds from NODE_NAME. There is no delete, because
-  # the operator never retracts its slice: the Node owns it, and a
+  # the operator never retracts its slice. The Node owns it, and a
   # slice that left with the pod would strand every prepared consumer.
   # No list and no watch either: the name is deterministic, and
   # reading anyone else's inventory is the scheduler's job.
@@ -26,7 +26,7 @@ rules:
     verbs: [get, create, update]
   # The DRA plugin (dra.go): when the kubelet asks this driver to
   # prepare a claim, the request names the claim and nothing more. The
-  # allocation lives on the claim's status, so the driver reads it
+  # allocation is on the claim's status, so the driver reads it
   # back. This is read-only across every namespace, because claims
   # belong to workloads and the driver serves whichever namespace
   # claims an output. Still no list and no watch: prepare calls arrive
@@ -36,8 +36,8 @@ rules:
     verbs: [get]
   # This node, read once at startup for the UID that the slice's owner
   # reference needs. The Node owns the slice, so a Node that leaves
-  # the cluster takes the slice with it, and the garbage collector
-  # cleans up after an operator that exits without running any code.
+  # the cluster takes the slice with it. The garbage collector does
+  # that removal, so the operator runs no cleanup code at exit.
   - apiGroups: [""]
     resources: [nodes]
     verbs: [get]

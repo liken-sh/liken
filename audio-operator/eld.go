@@ -36,9 +36,9 @@ const (
 )
 
 // The two ELD versions the kernel accepts. Version 2 is CEA-861D or
-// below, and version 31 says the block carries the baseline fields
+// below, and version 31 says the block holds the baseline fields
 // only. snd_hdmi_parse_eld rejects every other value, and so does
-// this parser, because a version it does not know may lay the bytes
+// this parser, because a version it does not read may lay the bytes
 // out differently.
 const (
 	eldVersionCEA861D = 2
@@ -46,8 +46,7 @@ const (
 )
 
 // The connection types the two-bit field names. Values 2 and 3 are
-// reserved, and a block that carries one publishes no connection
-// type.
+// reserved, and a block that has one publishes no connection type.
 var eldConnectionTypes = map[byte]string{
 	0: "hdmi",
 	1: "displayport",
@@ -66,18 +65,18 @@ var eldSpeakerNames = []string{
 	"RLC/RRC",
 }
 
-// audioCodingTypeLPCM is the short audio descriptor format that
-// carries uncompressed stereo and multichannel audio. It is the only
+// audioCodingTypeLPCM is the short audio descriptor format for
+// uncompressed stereo and multichannel audio. It is the only
 // format whose channel count this operator publishes, because it is
 // the one a workload plays through a PipeWire sink.
 const audioCodingTypeLPCM = 1
 
 // eld holds what this operator publishes out of one block. The block
-// carries more, including the audio sync delay, the HDCP and AI
-// flags, and one descriptor for each compressed format the monitor
-// accepts. None of those select an output.
+// holds more, including the audio sync delay, the HDCP and AI flags,
+// and one descriptor for each compressed format the monitor accepts.
+// None of those select an output.
 //
-// The block carries no serial number. snd_hdmi_print_eld_info prints
+// The block has no serial number. snd_hdmi_print_eld_info prints
 // every field, and there is no EDID serial among them, so an audio
 // device says which model of monitor it plays into and cannot say
 // which unit. That limit is why the pairing attribute is built from
@@ -94,7 +93,7 @@ type eld struct {
 }
 
 // parseELD reads one raw block. A block that is too short, or that
-// carries a version this parser does not know, is an error: the
+// gives a version this parser does not read, is an error: the
 // caller treats the output as one whose monitor it cannot identify,
 // which is the same handling an absent monitor gets.
 func parseELD(raw []byte) (eld, error) {
@@ -131,7 +130,7 @@ func parseELD(raw []byte) (eld, error) {
 
 	// The channel count comes from the LPCM descriptor. A monitor may
 	// publish several descriptors, and the highest LPCM count is the
-	// one a workload can actually use.
+	// one a workload can use.
 	descriptors := int((raw[5] >> 4) & 0xf)
 	for i := range descriptors {
 		start := eldFixedBytes + monitorNameLength + 3*i

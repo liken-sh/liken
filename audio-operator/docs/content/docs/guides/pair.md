@@ -16,7 +16,7 @@ speakers on HDMI or DisplayPort.
 
 The two operators are separate
 [Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
-drivers, and each publishes its own reading of the same monitor: the
+drivers, and each publishes its own reading of the same monitor. The
 display operator reads the EDID (Extended Display Identification
 Data) through the graphics card, and this operator reads the ELD
 (EDID-Like Data), the block the graphics driver writes into the
@@ -133,12 +133,12 @@ runtime directory is not consulted.
 ## The grain of the pairing
 
 The pairing identity names a monitor's model, not a unit. The ELD
-carries no serial number, so two monitors of one model publish one
+has no serial number, so two monitors of one model publish one
 value, and the constraint is satisfied by either pairing.
 [Devices](/docs/reference/devices/#the-pairing-identity) gives the
 derivation. On a machine with two identical monitors, the screen and
 the speakers the scheduler picks can come from different units, and
-no selector can prevent that: a `serial` selector on the `screen`
+no selector can prevent that. A `serial` selector on the `screen`
 request pins the screen to one unit, but this operator publishes no
 serial for the constraint to hold the speakers to. The ELD offers
 nothing finer.

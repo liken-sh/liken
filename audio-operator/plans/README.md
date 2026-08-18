@@ -8,7 +8,7 @@ states the design that answers it, and states what was considered and
 set aside. It also states how the work was proved, and a proof runs on
 hardware.
 
-The pattern these documents build on lives in liken's repository:
+The pattern these documents follow is documented in liken's repository:
 [milestone 56, device operators](https://github.com/liken-sh/liken/blob/main/plans/completed/56-device-operators.md),
 and this operator's own instance,
 [milestone 59](https://github.com/liken-sh/liken/blob/main/plans/completed/59-the-audio-operator.md).
@@ -18,7 +18,7 @@ is built the way it is, and what it still owes an answer to.
 
 ## Designs
 
-* [01, The taints an output carries](completed/01-the-taints-an-output-carries.md).
+* [01, The taints on an output](completed/01-the-taints-an-output-carries.md).
   Built.
 * [02, A closure on scratch](completed/02-a-closure-on-scratch.md).
   Built, and drilled on liken-1 on 2026-08-17. The image becomes the
@@ -32,15 +32,15 @@ is built the way it is, and what it still owes an answer to.
   included. The pod becomes four containers: a declare init step, the
   two daemons as native sidecars with real-client probes, and the
   operator. The die-together guarantee survives as an all-devices
-  taint the operator publishes when it loses the graph, and the drill
+  taint the operator publishes when it loses the graph. The drill
   proved it end to end, from the cross-namespace access defect that
-  `config/51-access-rules.conf` answers to the eviction a sustained
-  outage carries.
+  `config/51-access-rules.conf` answers to the eviction that a
+  sustained outage causes.
 
 ## Open problems
 
 [`open-problems/`](open-problems/) holds the questions this operator
-owes an answer to. Those documents carry no number, because nobody has
+owes an answer to. Those documents have no number, because nobody has
 decided yet what work they become.
 
 * [A sink can be shared and this one is not](open-problems/a-sink-can-be-shared-and-this-one-is-not.md).

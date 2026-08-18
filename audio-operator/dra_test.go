@@ -19,7 +19,8 @@ import (
 // allocatedClaim is what the API server holds for a claim that the
 // scheduler allocated. The second result belongs to another driver,
 // which is what a claim that pairs a screen with its speakers looks
-// like, and this driver must leave it to that driver's own plugin.
+// like. This driver must leave that result to the other driver's own
+// plugin.
 const allocatedClaim = `{
   "metadata": {"name": "kitchen", "namespace": "media", "uid": "claim-1"},
   "status": {"allocation": {"devices": {"results": [
@@ -56,7 +57,7 @@ func prepare(t *testing.T, plugin *draPlugin, uid string) *drav1.NodePrepareReso
 	}
 	entry, answered := resp.Claims[uid]
 	if !answered {
-		t.Fatal("the response carries no entry for the claim, which the kubelet reads as a failure to retry")
+		t.Fatal("the response has no entry for the claim, which the kubelet reads as a failure to retry")
 	}
 	return entry
 }
@@ -106,7 +107,8 @@ func TestPrepareDeliversTheSocketAndTheSinkName(t *testing.T) {
 	}
 
 	// Unprepare takes the file back, and repeats of it succeed,
-	// because the kubelet repeats the call whenever it is not sure.
+	// because the kubelet repeats the call whenever it has no record
+	// that it succeeded.
 	for range 2 {
 		resp, err := plugin.NodeUnprepareResources(context.Background(), &drav1.NodeUnprepareResourcesRequest{
 			Claims: []*drav1.Claim{{Namespace: "media", Name: "kitchen", Uid: "claim-1"}},

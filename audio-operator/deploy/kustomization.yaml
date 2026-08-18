@@ -1,13 +1,13 @@
 # The kustomize base for the audio operator.
 #
-# This is an offer, not a mechanism. liken does not apply it and does
-# not name it. Take it through your own GitOps with patches of your
-# own, or read it and write your own manifests.
+# This base is for the cluster owner to take. liken does not apply it
+# and does not name it. Take it through your own GitOps with patches
+# of your own, or read it and write your own manifests.
 #
 # The base ships no DeviceClass. A class is cluster-scoped policy,
 # the cluster owner's to name and curate, the same convention a
-# StorageClass follows, so the owner creates the two classes before
-# this base applies and the install guide gives their YAML to copy.
+# StorageClass follows. The owner creates the two classes before this
+# base applies, and the install guide gives their YAML to copy.
 # The claim template in operator.yaml names audio-controller, so an
 # owner who picks another name patches the template to match.
 apiVersion: kustomize.config.k8s.io/v1beta1

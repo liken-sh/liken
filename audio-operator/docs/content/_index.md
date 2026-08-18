@@ -12,7 +12,7 @@ the analog jack, as a device on the cluster, through
 the Kubernetes API for devices. The operator runs
 [PipeWire](https://pipewire.org/) and
 [WirePlumber](https://pipewire.pages.freedesktop.org/wireplumber/)
-in its pod, so the machine's system image carries no sound server. A
+in its pod, so the machine's system image contains no sound server. A
 pod that claims an output receives the PipeWire socket and the name
 of the sink its streams must reach.
 

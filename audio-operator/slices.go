@@ -5,11 +5,11 @@ package main
 // A device operator publishes under its own driver name, in its own
 // slices, beside whatever liken publishes on the same node. The two
 // cannot collide: a device's identity is the triple
-// <driver>/<pool>/<device>, and the slice name carries the driver
-// name as a suffix, so this node's two slices are <node>-liken.sh and
+// <driver>/<pool>/<device>, and the slice name ends with the driver
+// name, so this node's two slices are <node>-liken.sh and
 // <node>-audio.liken.sh.
 //
-// Like liken's own client, these structs carry only the part of the
+// Like liken's own client, these structs hold only the part of the
 // upstream API that this program writes. The full ResourceSlice can
 // describe partitionable devices, shared counters, and per-device
 // node selection, and none of that changes what an output needs: a
@@ -30,12 +30,11 @@ import (
 
 // DriverName identifies this operator as a DRA driver. A driver name
 // is a DNS name so that drivers cannot collide, and a device
-// operator's name is <domain>.liken.sh. The name states which
-// contract family the operator implements, not which repository
-// builds it.
+// operator's name is <domain>.liken.sh. The name states the contract
+// the operator implements rather than the repository that builds it.
 const DriverName = "audio.liken.sh"
 
-// ResourceSlicesPath names the URL where DRA inventory lives. Slices
+// ResourceSlicesPath names the URL of the DRA inventory. Slices
 // are cluster-scoped, like Nodes, because hardware inventory belongs
 // to the machine and not to any tenant.
 const ResourceSlicesPath = "/apis/resource.k8s.io/v1/resourceslices"
@@ -63,15 +62,16 @@ const maxAttributeLength = 64
 //
 // noMonitorTaint says no monitor answers on this HDMI output, and
 // noSinkTaint says PipeWire holds no node for this PCM device. Either
-// one alone makes the output unusable, so both carry NoSchedule, and
-// no consumer should ever tolerate either. This is what makes a claim
-// ahead of a monitor park instead of loop: with only the NoExecute
-// taint, a consumer that tolerated it would be scheduled onto an
-// output that plays into nothing, get evicted when the toleration ran
-// out, and be scheduled again. An untolerated NoSchedule taint holds
-// the pod Unschedulable until the output can really play.
+// one alone makes the output unusable, so both have the NoSchedule
+// effect, and no consumer should ever tolerate either. This is what
+// makes a claim ahead of a monitor park instead of loop. With only
+// the NoExecute taint, a consumer that tolerated it would be
+// scheduled onto an output that plays into nothing. The pod would be
+// evicted when the toleration ran out, and scheduled again. An
+// untolerated NoSchedule taint holds the pod Unschedulable until the
+// output can play.
 //
-// The two reasons carry separate keys because they are separate facts
+// The two reasons have separate keys because they are separate facts
 // about the machine, and each one has its own repair. A missing
 // monitor is a cable, and somebody plugs it back in. A missing node is
 // an output PipeWire could not create, which the nofail flag on each
@@ -123,8 +123,7 @@ type ResourcePool struct {
 // unique within the pool. An attribute name left unqualified belongs
 // to the publishing driver's domain, so a selector reads these as
 // device.attributes["audio.liken.sh"].connectionType. The pairing
-// attribute is the one exception, and it carries its domain in its
-// own name.
+// attribute is the one exception: its own name includes the domain.
 type SliceDevice struct {
 	Name       string                     `json:"name"`
 	Attributes map[string]DeviceAttribute `json:"attributes,omitempty"`
@@ -169,10 +168,10 @@ func AttrInt(i int64) DeviceAttribute { return DeviceAttribute{Int: &i} }
 // monitor is unplugged is still a device a person can claim, and the
 // pod parks Unschedulable until somebody plugs the monitor back in.
 // What a monitor takes with it is the attributes it supplied and the
-// taints that follow it, never the device, because deleting a device
-// that a claim holds strands the next consumer: the allocation still
-// names the device, and the kubelet's prepare call retries against a
-// device that is in no slice, with no bound on the retry.
+// taints that follow it, never the device. Deleting a device that a
+// claim holds strands the next consumer: the allocation still names
+// the device, and the kubelet's prepare call retries against a device
+// that is in no slice, with no bound on the retry.
 func sliceDevices(outputs []alsaOutput, sinks map[pcmAddress]string) []SliceDevice {
 	devices := make([]SliceDevice, 0, len(outputs))
 	for _, output := range outputs {
@@ -180,10 +179,10 @@ func sliceDevices(outputs []alsaOutput, sinks map[pcmAddress]string) []SliceDevi
 		// The device name is not selectable. A DeviceClass and a claim
 		// select with CEL over device.driver, device.attributes,
 		// device.capacity, and device.allowMultipleAllocations, and
-		// there is no device.name among them, so an identity that lives
+		// there is no device.name among them, so an identity that exists
 		// only in the name is one a selector cannot read. The
-		// output attribute carries the same string, and card and pcm
-		// carry its two halves as numbers, so a claim can name one
+		// output attribute holds the same string, and card and pcm
+		// hold its two halves as numbers, so a claim can name one
 		// output and a claim can ask for every output of one card.
 		device := SliceDevice{
 			Name: output.Name(),
@@ -225,7 +224,7 @@ func sliceDevices(outputs []alsaOutput, sinks map[pcmAddress]string) []SliceDevi
 
 // publishSink writes what PipeWire holds for one output: the sink
 // node's name as an attribute, or the no-sink taint when there is no
-// node. One branch decides both, so no device can carry the name of a
+// node. One branch sets both, so no device can have the name of a
 // sink and the taint that says it has none. Those two would state
 // opposite facts about one output.
 //
@@ -248,7 +247,7 @@ func publishSink(device *SliceDevice, name string, hasSink bool) {
 
 // addMonitorAttributes publishes what the monitor's ELD block says.
 //
-// The pairing attribute carries its own domain, monitor.liken.sh/id,
+// The pairing attribute has its own domain, monitor.liken.sh/id,
 // because the display operator publishes the same name for the same
 // monitor and a matchAttribute constraint compares the two. An
 // attribute written without a domain belongs to the driver that
@@ -287,7 +286,7 @@ func attributeString(s string) string {
 // this pass would say.
 //
 // The comparison ignores TimeAdded, which the API server fills in on
-// every taint it stores. A plain comparison would see the stored
+// every taint it stores. A plain comparison would compare the stored
 // timestamp against an empty one, call every pass a change, and write
 // the slice on every pass. Each ResourceSlice write wakes every
 // DRA-pending pod in the cluster, so a needless write is a
@@ -320,8 +319,8 @@ func withoutTimeAdded(devices []SliceDevice) []SliceDevice {
 
 // ErrNoDevices refuses a write that would publish nothing.
 //
-// An empty inventory is never a fact about a machine that this
-// operator runs on. The operator holds an exclusive claim on a card,
+// An empty inventory is never a real state of a machine this operator
+// runs on. The operator holds an exclusive claim on a card,
 // and a card has playback PCM devices, so an empty list means the
 // enumeration failed. Publishing it would retract every device that a
 // prepared claim still names, which is the one thing a device
@@ -342,7 +341,7 @@ var ErrNoDevices = errors.New("refusing to publish an empty inventory")
 // operator relies on. A person who uninstalls the operator for good
 // deletes the slice by name.
 //
-// The write carries the resourceVersion from the read, so a
+// The write includes the resourceVersion from the read, so a
 // conflicting writer gets ErrConflict instead of losing its change.
 // The next pass reads again and writes again.
 func EnsureResourceSlice(c *Client, nodeName string, owner OwnerReference, devices []SliceDevice) error {
@@ -415,7 +414,7 @@ func sliceName(nodeName string) string {
 	return nodeName + "-" + DriverName
 }
 
-// nodeObject carries the one thing this operator reads from its Node:
+// nodeObject holds the one thing this operator reads from its Node:
 // the UID that the slice's owner reference needs.
 type nodeObject struct {
 	Metadata struct {

@@ -8,13 +8,14 @@ toc: true
 
 `audio-operator` publishes one
 [Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
-device for each **playback PCM device** on the sound card its pod
+device for each playback PCM device on the sound card its pod
 claims from [`liken`](https://liken.sh/docs/): each HDMI or
 DisplayPort output, and the analog jack. Membership follows the
-card, not the cables. An output whose monitor is unplugged stays in
-the slice, with taints, so a claim on it parks instead of failing.
+card's playback PCM devices, whether or not a cable is plugged into
+each one. An output whose monitor is unplugged stays in the slice,
+with taints, so a claim on it parks instead of failing.
 
-The devices live in one
+The operator publishes the devices into one
 [`ResourceSlice`](https://kubernetes.io/docs/reference/kubernetes-api/resource/resource-slice-v1/)
 per node, named `<node>-audio.liken.sh`, beside the slice `liken`
 itself publishes:
@@ -71,7 +72,7 @@ name one, add a selector on the attributes below, as
 [Play sound to an output](/docs/guides/claim/) shows.
 
 [Install the operator](/docs/guides/install/) also has you create
-`audio-controller`. That one is not for consumers: it selects the
+`audio-controller`. That one is not for consumers. It selects the
 raw sound card that `liken`'s own driver publishes, and the
 operator's pod claims every one on its node through it.
 [Devices](https://liken.sh/docs/reference/devices/) in the `liken`
@@ -81,7 +82,7 @@ manual describes those raw devices.
 
 The device name is the ALSA card and PCM number, `card0-pcm3`. The
 number comes from the codec's pin order, which the driver enumerates
-the same way at every boot on the same hardware and kernel; it is
+the same way at every boot on the same hardware and kernel. It is
 not stable across machines, and a claim that must survive a kernel
 change selects on the monitor attributes instead. The name repeats
 as the `output` attribute because a CEL selector reads attributes
@@ -132,20 +133,20 @@ allocation, so guard every attribute in the two bullets above:
 screen, which the [display operator](https://display.liken.sh)
 publishes from the same monitor's EDID. Both drivers build the value
 the same way, byte for byte, because the scheduler compares them
-under a `matchAttribute` constraint: the lowercase PNP id, the
-four-digit hexadecimal product code, then the lowercase monitor name
-with each run of spaces turned to one dash. An LG UltraWide reads
+under a `matchAttribute` constraint. The value is the lowercase PNP
+id, the four-digit hexadecimal product code, then the lowercase
+monitor name with each run of spaces turned to one dash. An LG UltraWide reads
 `gsm-5b09-lg-ultrawide`. A monitor with no name keeps the two-part
 form, `boe-095f`. The name is optional because one driver can read a
-name the other cannot; if a missing name dropped the whole value,
+name the other cannot. If a missing name dropped the whole value,
 one driver would publish the attribute and the other none, and a
 constraint across the two would park forever.
 
-The attribute carries its own domain because an unqualified name
+The attribute has its own domain because an unqualified name
 belongs to the driver that published it. A bare `monitorName` here
 and a bare `model` in the display driver's slice would never match.
 
-The ELD carries no serial number, so the identity names a model, not
+The ELD has no serial number, so the identity names a model, not
 a unit. Two monitors of one model publish one value, and a
 constraint is satisfied by either pairing.
 
@@ -165,17 +166,17 @@ leaves the slice only when the card does.
 The `NoExecute` taint ends the holder's pod after the claim's
 `tolerationSeconds`, so a consumer tolerates it to survive a short
 drop. A tolerated `NoExecute` taint still permits allocation, so one
-of the untolerated `NoSchedule` taints always stands beside it, and
-that one holds a new pod `Unschedulable` until the output can really
-play. The two reasons carry separate keys because they have separate
+of the untolerated `NoSchedule` taints is always present with it,
+and that one holds a new pod `Unschedulable` until the output can
+play. The two reasons have separate keys because they have separate
 repairs: `no-monitor` clears when the cable returns, and `no-sink`
 clears only when the pod is replaced and PipeWire declares its nodes
 again.
 
-The analog jack carries none of these while its sink is up. Most
-codecs report nothing about the socket, and no signal can prove that
-sound reaches anyone, so the operator publishes the port it can see
-and a person who wired something claims it.
+The analog jack has none of these while its sink is up. Most codecs
+report nothing about the socket, and no signal can prove that sound
+reaches anyone, so the operator publishes the port it reads and a
+person who wired something claims it.
 
 ## What a prepared claim delivers
 
@@ -190,7 +191,7 @@ holds every PCM device on the card.
 | `PIPEWIRE_REMOTE` | `/var/run/audio.liken.sh/pipewire-0` |
 | `PIPEWIRE_NODE` | the allocated output's sink name |
 
-Both variables are read by PipeWire's own client library: a
+PipeWire's own client library reads both variables. A
 `PIPEWIRE_REMOTE` that starts with a slash is used as an absolute
 socket path, and `PIPEWIRE_NODE` sets `target.object` on every
 stream. The mount is read-only because connecting to a Unix socket
@@ -215,7 +216,7 @@ same at every start on the same card:
     liken.audio.card0-pcm3
 
 Every PCM device is declared, monitor or not. PipeWire reads the
-declarations once, so the set is fixed for the daemon's life; a set
+declarations once, so the set is fixed while the daemon runs. A set
 that followed the cables would need a restart every time somebody
 moved one, and a card's PCM devices are fixed when its driver binds.
 A PCM device that appears or leaves after that publishes with the

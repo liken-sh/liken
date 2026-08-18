@@ -8,7 +8,7 @@ import (
 	"unsafe"
 )
 
-// The ioctl number carries the size of its argument, so a Go
+// The ioctl number encodes the size of its argument, so a Go
 // structure that disagrees with the kernel's builds a request the
 // kernel does not answer. These are the sizes from
 // include/uapi/sound/asound.h on a 64-bit kernel.
@@ -57,7 +57,7 @@ func TestElementName(t *testing.T) {
 		t.Errorf("name = %q", got)
 	}
 
-	// A name that fills the field carries no terminator.
+	// A name that fills the field has no terminator.
 	for i := range id.Name {
 		id.Name[i] = 'x'
 	}

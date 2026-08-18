@@ -11,7 +11,7 @@ import (
 // objects, each with its interface type and its properties. pw-dump
 // leaves a property whose value reads as a number unquoted, even
 // though every value in PipeWire's property list is a string, so the
-// fixture carries both forms.
+// fixture holds both forms.
 func TestParseSinks(t *testing.T) {
 	sinks, err := parseSinks(fixture(t, "pw-dump.json"))
 	if err != nil {
@@ -38,11 +38,11 @@ func TestParseSinks(t *testing.T) {
 	}
 }
 
-// The nodes this operator declares carry no alsa.card and no
+// The nodes this operator declares have no alsa.card and no
 // alsa.device, because those two come from the udev device that
 // WirePlumber's monitor builds and this graph has no monitor in it.
-// The operator's own two properties are what map a declared node back
-// to its PCM device.
+// The operator's own two properties map a declared node back to its
+// PCM device.
 func TestParseSinksMapsTheNodesTheOperatorDeclares(t *testing.T) {
 	sinks, err := parseSinks(fixture(t, "pw-dump-declared.json"))
 	if err != nil {

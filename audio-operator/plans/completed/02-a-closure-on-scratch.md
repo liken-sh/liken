@@ -16,7 +16,7 @@ was 608 MB as a distribution install. This operator ships a whole
 Debian userland to run two daemons and one static binary.
 
 A static build is not the answer here. PipeWire and WirePlumber both
-open their modules with `dlopen`, so a static daemon binary carries
+open their modules with `dlopen`, so a static daemon binary holds
 neither daemon's function. The work is a closure, the display
 operator's shape: name every file the daemons really use, resolve
 each one's libraries, and copy that set onto `scratch`.
@@ -38,7 +38,7 @@ Three findings from the measurement shape the script:
 
 * `libsystemd`, `libudev`, `libselinux`, and `libdbus` are mapped
   even though nothing here uses them, because Debian's builds link
-  them. The closure carries them; dropping them would mean building
+  them. The closure includes them; dropping them would mean building
   PipeWire ourselves, and they are small.
 * The maps miss files that are read and closed at startup: the
   WirePlumber scripts under `/usr/share/wireplumber`, the stock
@@ -46,7 +46,7 @@ Three findings from the measurement shape the script:
   `/usr/share/alsa`, and glibc's gconv table. The script names these
   data trees whole.
 * `libspa-alsa.so` loads only on a machine with a sound card, so no
-  check that runs without hardware sees it. The script names it
+  check that runs without hardware covers it. The script names it
   explicitly, and the release gate asserts it by name.
 
 ## The design
@@ -58,7 +58,7 @@ image is `FROM scratch` with that set and the operator binary.
 
 The script names four binaries: `pipewire`, `wireplumber`, `pw-dump`,
 and `wpctl`. `pw-dump` is how the operator reads the graph and the
-only debugging window a shell-less image offers, the way the display
+only diagnostic a shell-less image offers, the way the display
 operator keeps `wayland-info`. `wpctl` is the readiness probe for
 WirePlumber. Modules are named individually, from the measurement,
 because the distribution's module directories hold modules this
@@ -75,15 +75,15 @@ from the runner side, and fails the release if any mapped file is
 missing from the image.
 
 That gate closes the failure class the display operator's open
-problem "loads that `ldd` cannot see" names: a load added by a new
+problem "loads that `ldd` cannot report" names: a load added by a new
 daemon version passes silently today and fails only on hardware.
-Here it fails the release. The gate cannot see `libspa-alsa.so`, the
+Here it fails the release. The gate cannot cover `libspa-alsa.so`, the
 one hardware-only load, so it asserts that file and the four binaries
 by name.
 
 ## What was considered and set aside
 
-* **Static daemons.** The function of both daemons lives in modules
+* **Static daemons.** The function of both daemons is in modules
   they `dlopen`, so a static binary is the daemon without its
   function.
 * **Blanket module-directory copies.** Simpler to write, but the

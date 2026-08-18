@@ -1,6 +1,6 @@
 package main
 
-// The identity a published device carries.
+// The identity of a published device.
 //
 // An output's name is its ALSA card number and PCM device number,
 // such as card0-pcm3. The number comes from the codec's pin order,
@@ -14,10 +14,10 @@ package main
 // driver nor the display operator owns, so that one ResourceClaim can
 // hold a request against each driver and a matchAttribute constraint
 // across the two. The scheduler compares a fully qualified attribute
-// name across devices without regard to which driver published them,
-// and an attribute written without a domain is assumed to be in the
-// publishing driver's domain, so a bare monitorName from two drivers
-// is two different names that never match.
+// name across devices without regard to which driver published them.
+// An attribute written without a domain belongs to the publishing
+// driver's domain, so a bare monitorName from two drivers is two
+// different names that never match.
 
 import (
 	"fmt"
@@ -58,7 +58,7 @@ func outputFromDeviceName(name string) (card, pcm int, ok bool) {
 		return 0, 0, false
 	}
 	// A leading zero reads as a number and writes back as a different
-	// name, so the round trip is what rejects it.
+	// name, so the round trip rejects it.
 	if deviceName(card, pcm) != name {
 		return 0, 0, false
 	}
@@ -66,7 +66,7 @@ func outputFromDeviceName(name string) (card, pcm int, ok bool) {
 }
 
 // monitorID builds the pairing value from the facts that an ELD block
-// and an EDID block both carry: the manufacturer, the product code,
+// and an EDID block both hold: the manufacturer, the product code,
 // and the monitor name.
 //
 // The manufacturer and the product code are the whole of the value,

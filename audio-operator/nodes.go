@@ -8,8 +8,8 @@ package main
 // card it is told about, and creates the sink nodes from that device's
 // profile. liken runs no udevd, so udev answers with nothing, and the
 // whole chain produces no card, no device, and no sink. Every output
-// this operator publishes then carries the no-sink taint, and no pod
-// can play through a machine that has working speakers.
+// this operator publishes then has the no-sink taint, and no pod can
+// play through a machine that has working speakers.
 //
 // The operator needs no udev to find the hardware. readOutputs
 // enumerates the card's playback PCM devices from the nodes the claim
@@ -19,13 +19,12 @@ package main
 // declared in a PipeWire configuration drop-in.
 //
 // An init container writes the drop-in and exits, and the PipeWire
-// container starts after it, so the pod's own container order is what
-// puts the declaration on disk before PipeWire reads it.
+// container starts after it, so the pod's own container order puts
+// the declaration on disk before PipeWire reads it.
 //
 // This runs the same way on a machine that does have udevd, because
 // the drop-in declares the nodes and the image's WirePlumber
-// configuration turns the ALSA monitor off everywhere. One graph on
-// every host, built from one enumeration.
+// configuration turns the ALSA monitor off everywhere.
 
 import (
 	"encoding/json"
@@ -68,9 +67,9 @@ const dropInName = "60-liken-outputs.conf"
 // output checkable.
 const configPrefix = "context.objects = "
 
-// The property keys that carry an output's ALSA address on a node this
-// operator declared. A node that WirePlumber's ALSA monitor built
-// carries alsa.card and alsa.device, which come from the udev device
+// The property keys that hold an output's ALSA address on a node this
+// operator declared. A node that WirePlumber's ALSA monitor built has
+// alsa.card and alsa.device, which come from the udev device
 // this operator has none of, so it publishes the same two numbers
 // under its own names and readSinks reads those first.
 const (
@@ -79,7 +78,7 @@ const (
 )
 
 // nodeNamePrefix begins every node name this operator declares. The
-// name is what a consumer's PIPEWIRE_NODE carries, so it must not
+// name is the value a consumer's PIPEWIRE_NODE holds, so it must not
 // collide with a node that anything else in the graph created.
 const nodeNamePrefix = "liken.audio."
 
@@ -102,8 +101,8 @@ const nofail = "nofail"
 
 // sinkNodeName is the PipeWire node name for one output. It is derived
 // from the ALSA address and nothing else, so it is the same at every
-// start on the same card, which the sink name a monitor-built node
-// carries is not.
+// start on the same card, which the sink name of a monitor-built node
+// is not.
 func sinkNodeName(card, pcm int) string {
 	return nodeNamePrefix + deviceName(card, pcm)
 }
@@ -112,12 +111,12 @@ func sinkNodeName(card, pcm int) string {
 //
 // Every playback PCM device gets a node, including an HDMI PCM with no
 // monitor on it. The PCM device is what the card has, and a monitor is
-// what somebody plugs into it, so a node set that followed the cables
-// would change under a running graph and a node set that follows the
-// card does not. An HDMI output with no monitor still carries the
+// what somebody plugs into it. A node set that followed the cables
+// would change under a running graph, and a node set that follows the
+// card does not. An HDMI output with no monitor still has the
 // disconnected and no-monitor taints, because those two read the ELD
 // and not the node, so nothing schedules onto it while the cable is
-// out. Its node is there, so it carries no no-sink taint.
+// out. Its node is there, so it has no no-sink taint.
 func nodeConfig(outputs []alsaOutput) string {
 	sorted := slices.Clone(outputs)
 	slices.SortFunc(sorted, func(a, b alsaOutput) int {
@@ -173,14 +172,14 @@ const configHeader = `# The claimed card's playback outputs, written by the pod'
 // api.alsa.path is the ALSA device name the node opens, in the same
 // hw:<card>,<device> form that aplay -D takes. It is the whole of what
 // this node needs from ALSA, and it needs no udev device to resolve.
-// api.alsa.pcm.card carries the card number on its own, because the
+// api.alsa.pcm.card holds the card number on its own, because the
 // node opens the card's control interface for its mixer elements and
 // reads the number from that property rather than from the path.
 //
 // media.class is set here and nowhere else. The ALSA plugin keeps a
 // media class of its own inside the SPA node, and the adapter module
 // copies no default onto the PipeWire node, so a node declared without
-// it is a node that no client and no session manager sees as a sink.
+// it is a node that no client and no session manager treats as a sink.
 //
 // The channel layout is left unset. With audio.channels absent,
 // PipeWire's default_channels is 0, so the ALSA node reports the card's
@@ -200,7 +199,7 @@ func sinkObject(card, pcm int) staticNode {
 			"media.class": "Audio/Sink",
 			// The two numbers readSinks maps a node back to. The adapter
 			// module hands the whole args dictionary to the node it
-			// creates, and a node's info block carries its whole property
+			// creates, and a node's info block holds its whole property
 			// list, so a property PipeWire does not recognize still
 			// arrives in pw-dump's output.
 			//

@@ -76,12 +76,12 @@ explains why the pairing attribute reads under its own domain,
 
 Tolerate `audio.liken.sh/disconnected` and nothing else. Its effect
 is `NoExecute`, and `tolerationSeconds` says how long your pod may
-hold a silent output before it is evicted. Thirty seconds means a
-reseated cable costs nothing, and it also carries the pod across a
-restart of the operator itself. Leave `audio.liken.sh/no-monitor`
-and `audio.liken.sh/no-sink` untolerated: they hold a new pod
-`Pending` until the output can really play, and the pod starts on
-its own when it can.
+hold a silent output before the eviction controller ends it. Thirty
+seconds means a reseated cable costs nothing, and it also keeps the
+pod through a restart of the operator itself. Leave
+`audio.liken.sh/no-monitor` and `audio.liken.sh/no-sink`
+untolerated: they hold a new pod `Pending` until the output can
+play, and the pod starts on its own when it can.
 
 ## 3. Reference the claim from a `Deployment`
 
@@ -116,8 +116,8 @@ its own when it can.
                 claims:
                   - name: output
 
-One line carries the whole arrangement: `resources.claims` gives the
-container the claim. That is what places the pod and delivers the
+One line makes this work: `resources.claims` gives the container
+the claim. That is what places the pod and delivers the
 socket. No flag hands over the sink, because PipeWire's client
 library reads the two delivered environment variables itself:
 `PIPEWIRE_REMOTE` names the socket, and `PIPEWIRE_NODE` sets
@@ -129,7 +129,7 @@ The image is yours, with two requirements:
   does. A client on the PulseAudio protocol or the ALSA
   compatibility plugin selects its sink another way, which the
   delivered variables do not set.
-* The image must carry PipeWire's client configuration. `libpipewire`
+* The image must contain PipeWire's client configuration. `libpipewire`
   does not open a client context without
   `/usr/share/pipewire/client.conf`. Debian ships that file in
   `pipewire-bin`, the daemon package, not in the library package
@@ -138,7 +138,7 @@ The image is yours, with two requirements:
   client.conf: No such file or directory`.
 
 `strategy: Recreate` matters. Pods that share one `ResourceClaim`
-share its output, and PipeWire mixes streams: during a rolling
+share its output, and PipeWire mixes streams. During a rolling
 update, the old and the new pod would both play through the one
 sink. `Recreate` ends the old pod first.
 
@@ -156,7 +156,7 @@ holds every PCM device on the card.
 
 The mount is read-only because connecting to a Unix socket needs
 write permission on the socket itself, not on the directory that
-carries it.
+holds it.
 
 **One container holds at most one output.** `PIPEWIRE_REMOTE` and
 `PIPEWIRE_NODE` each hold one value, so two allocations delivered to
@@ -164,7 +164,7 @@ one container overwrite, and the last wins. A pod that plays into
 two outputs runs two containers, each naming its own request in the
 claim.
 
-## Unplugs, restarts, and a second claim
+## Unplugged monitors, restarts, and a second claim
 
 **A monitor unplugged.** The device keeps its place in the slice and
 gains the `disconnected` taint. After your `tolerationSeconds`, the

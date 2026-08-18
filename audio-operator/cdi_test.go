@@ -85,8 +85,8 @@ func TestRefreshRewritesASinkThatCameBackUnderANewName(t *testing.T) {
 
 func TestRefreshKeepsTheNameWhenTheSinkIsGone(t *testing.T) {
 	// An empty PIPEWIRE_NODE would start the next pod against
-	// PipeWire's default sink with no error, while the taints on the
-	// device hold that pod back until the output can play again.
+	// PipeWire's default sink with no error. The taints on the device
+	// hold that pod back until the output can play again.
 	dir := specDirectory(t)
 	if err := writeCDISpec("claim-1", []cdiDevice{{
 		Name:           "claim-1-card0-pcm3",
@@ -123,8 +123,8 @@ func TestRefreshLeavesAnotherDriversSpecAlone(t *testing.T) {
 }
 
 func TestRemoveCDISpecIsIdempotent(t *testing.T) {
-	// The kubelet repeats unprepare whenever it is not sure the call
-	// succeeded.
+	// The kubelet repeats unprepare whenever it has no record that the
+	// call succeeded.
 	specDirectory(t)
 	if err := writeCDISpec("claim-1", []cdiDevice{{Name: "claim-1-card0-pcm3"}}); err != nil {
 		t.Fatal(err)

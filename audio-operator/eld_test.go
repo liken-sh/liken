@@ -1,7 +1,7 @@
 package main
 
 // The blocks in testdata are laid out the way sound/pci/hda/hda_eld.c
-// lays them out, and they carry the field values of two monitors: an
+// lays them out, and they hold the field values of two monitors: an
 // LG UltraWide on HDMI, and a Dell U2415 on DisplayPort. A machine
 // with no monitor connected reports no block at all, so these are
 // assembled rather than captured.
@@ -111,7 +111,7 @@ func withByte(raw []byte, index int, value byte) []byte {
 }
 
 func TestParseKeepsWhatItReadBeforeATruncatedDescriptor(t *testing.T) {
-	// A descriptor that runs past the end is an error, and the fields
+	// A descriptor that runs past the end is an error. The fields
 	// ahead of it are still the monitor's, and the caller handles the
 	// pair.
 	truncated := fixture(t, "eld-hdmi-lg-ultrawide.bin")[:34]

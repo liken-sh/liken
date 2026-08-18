@@ -1,4 +1,4 @@
-# The taints an output carries
+# The taints on an output
 
 Plan 01. Built. The operator publishes three taints on an output: one
 that says what happens to the pod holding the claim now, and two that
@@ -12,9 +12,8 @@ An output that cannot play stays in the slice. Deleting it strands the
 next consumer, because the allocation still names the device, the
 kubelet's prepare call retries against a device that is in no slice,
 and nothing bounds that retry. So the operator taints the device
-instead, and the taint has to carry two different pieces of
-information: what happens to the pod that holds the output, and why the
-output cannot play.
+instead, and the taint has to say two different things: what happens to
+the pod that holds the output, and why the output cannot play.
 
 ## The design
 
@@ -34,10 +33,10 @@ somebody unplugs for a moment. No consumer tolerates either
 
 The allocator treats a tolerated taint as allocatable. With only the
 `NoExecute` taint, a consumer that tolerated it would be scheduled onto
-an output that plays into nothing, fail, be evicted when the toleration
-ran out, and be scheduled again. An untolerated `NoSchedule` taint
-holds the pod Unschedulable until the output can really play, which is
-what makes a claim created ahead of the monitor park instead of loop.
+an output that plays into nothing. The pod would fail, be evicted when
+the toleration ran out, and be scheduled again. An untolerated
+`NoSchedule` taint holds the pod `Unschedulable` until the output can
+play, so a claim created ahead of the monitor parks instead of looping.
 
 ## The bug that produced the third key
 
@@ -59,7 +58,7 @@ which one to believe.
 ## How it was confirmed
 
 On `liken-1`, `card0-pcm8` and `card0-pcm9` are HDMI ports with nothing
-plugged into them. Both carried `sinkName=liken.audio.card0-pcm8` and
+plugged into them. Both had `sinkName=liken.audio.card0-pcm8` and
 `sinkName=liken.audio.card0-pcm9` together with the `no-sink` taint. A
 `pw-dump` showed all four declared nodes present in the graph.
 
@@ -76,10 +75,10 @@ plugged into them. Both carried `sinkName=liken.audio.card0-pcm8` and
 
 ## The fix
 
-Each reason carries its own key. The unplugged monitor and the missing
+Each reason has its own key. The unplugged monitor and the missing
 node are separate conditions in `sliceDevices`, and one function,
 `publishSink`, writes either the `sinkName` attribute or the `no-sink`
-taint. A device cannot carry both.
+taint. A device cannot have both.
 
 The reasons stay separate facts because each one has its own repair. A
 missing monitor is a cable, and somebody plugs it back in. A missing

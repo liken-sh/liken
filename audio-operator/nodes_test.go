@@ -28,7 +28,7 @@ func declaredObjects(t *testing.T, document string) []staticNode {
 }
 
 // Every playback PCM device on the card gets one sink node, and each
-// one carries the ALSA device it opens and the two properties that map
+// one holds the ALSA device it opens and the two properties that map
 // it back to the output the operator publishes.
 func TestNodeConfigDeclaresOneSinkForEachPlaybackPCM(t *testing.T) {
 	outputs := []alsaOutput{

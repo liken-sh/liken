@@ -9,8 +9,8 @@ package main
 // already delivers, so this file opens /dev/snd and nothing else.
 //
 // The ELD comes from the control element named ELD, and not from
-// /proc/asound/card<N>/eld#<codec>.<pin>. The two carry the same
-// bytes. The control element carries the PCM device number with them,
+// /proc/asound/card<N>/eld#<codec>.<pin>. The two hold the same
+// bytes. The control element holds the PCM device number with them,
 // in the element's own identifier, and the proc file's second number
 // is a pin index instead. The pin index is not the PCM device, so a
 // proc file alone cannot say which output a block describes.
@@ -18,8 +18,8 @@ package main
 // The kernel's control interface is three ioctls on
 // /dev/snd/controlC<N>. Their argument structures are in
 // include/uapi/sound/asound.h, and the Go structures below mirror
-// them field for field. controls_test.go asserts every size, because
-// a size that disagrees with the kernel's builds an ioctl number the
+// them field for field. alsa_test.go asserts every size, because a
+// size that disagrees with the kernel's builds an ioctl number the
 // kernel does not answer.
 
 import (
@@ -39,12 +39,12 @@ var sndDir = "/dev/snd"
 
 // playbackPCMPattern matches an ALSA playback PCM node,
 // pcmC<card>D<device>p. The trailing letter is the stream direction,
-// p for playback and c for capture, so the pattern is what keeps a
-// microphone out of a list of outputs.
+// p for playback and c for capture, so the pattern excludes a
+// microphone from a list of outputs.
 var playbackPCMPattern = regexp.MustCompile(`^pcmC(\d+)D(\d+)p$`)
 
 // The control interface's structure sizes, in bytes, on a 64-bit
-// kernel. The ioctl number carries the size of its argument, so these
+// kernel. The ioctl number encodes the size of its argument, so these
 // are part of the protocol and not an implementation detail.
 const (
 	ctlElemIDSize    = 64
@@ -71,8 +71,8 @@ func iowr(number, size uintptr) uintptr {
 
 // ctlElemIfacePCM is the interface a control element belongs to. The
 // ELD element is registered against the PCM interface, and its
-// element identifier carries the PCM device number, which is the
-// whole reason this operator reads elements instead of proc files.
+// element identifier holds the PCM device number, which is the whole
+// reason this operator reads elements instead of proc files.
 const ctlElemIfacePCM = 3
 
 // ctlElemTypeBytes is the element type of a block of bytes. The ELD
@@ -80,7 +80,7 @@ const ctlElemIfacePCM = 3
 const ctlElemTypeBytes = 4
 
 // eldElementName is the name the HDA driver gives the element that
-// carries an ELD block.
+// holds an ELD block.
 const eldElementName = "ELD"
 
 type ctlElemID struct {
@@ -119,7 +119,7 @@ type ctlElemInfo struct {
 	Reserved [56]byte
 }
 
-// ctlElemValue carries one element's value. The value field is a
+// ctlElemValue holds one element's value. The value field is a
 // union in the kernel's header, and its largest member is an array of
 // 128 longs, which is what sets the field's size here. A bytes
 // element reads the first maxBytesElement of it.
@@ -133,9 +133,9 @@ type ctlElemValue struct {
 
 // maxBytesElement is how many bytes one element of type bytes can
 // hold inline. The union's bytes member is 512 bytes, and an element
-// longer than that carries a pointer instead, which this operator
-// does not read. An ELD block is at most 256 bytes, so no block
-// reaches the limit.
+// longer than that holds a pointer instead, which this operator does
+// not read. An ELD block is at most 256 bytes, so no block reaches
+// the limit.
 const maxBytesElement = 512
 
 // name reads an element's name out of its fixed-length field.
@@ -167,7 +167,7 @@ type alsaOutput struct {
 // Name is the DRA device name this output publishes under.
 func (o alsaOutput) Name() string { return deviceName(o.Card, o.PCM) }
 
-// connectionType is what the device's attribute carries. An output
+// connectionType is the value of the device's attribute. An output
 // with no ELD element is the analog jack. An output whose ELD block
 // is absent or unreadable publishes no connection type, because the
 // operator cannot tell an HDMI cable from a DisplayPort one without
@@ -188,8 +188,8 @@ func (o alsaOutput) connectionType() string {
 // The membership of this list does not depend on PipeWire. A card's
 // playback PCM devices are the physical outputs it has, whether a
 // monitor is connected to one or not and whether a sound server holds
-// one or not, so the published inventory stays still while monitors
-// and sinks come and go.
+// one or not, so the published inventory does not change while
+// monitors and sinks come and go.
 func readOutputs() ([]alsaOutput, error) {
 	entries, err := os.ReadDir(sndDir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -308,8 +308,8 @@ func listControlElements(control *os.File) ([]ctlElemID, error) {
 
 // readBytesElement reads the value of one element of type bytes. It
 // asks for the element's information first, because the information
-// carries the current length, and an ELD element's length changes
-// with the monitor.
+// holds the current length, and an ELD element's length changes with
+// the monitor.
 func readBytesElement(control *os.File, id ctlElemID) ([]byte, error) {
 	info := ctlElemInfo{ID: id}
 	if err := ioctl(control, ctlIoctlElemInfo, unsafe.Pointer(&info)); err != nil {
@@ -322,7 +322,7 @@ func readBytesElement(control *os.File, id ctlElemID) ([]byte, error) {
 		return nil, nil
 	}
 	if info.Count > maxBytesElement {
-		return nil, fmt.Errorf("the element holds %d bytes, and a bytes element carries %d inline",
+		return nil, fmt.Errorf("the element holds %d bytes, and a bytes element holds %d inline",
 			info.Count, maxBytesElement)
 	}
 

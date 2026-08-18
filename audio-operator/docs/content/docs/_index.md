@@ -24,7 +24,7 @@ them.
 
 This manual is small on purpose. The
 [repository](https://github.com/liken-sh/audio-operator) is written
-to be read: the Go files and the manifests carry comments that
+to be read: the Go files and the manifests have comments that
 explain how the operator works. The manual tells you how to operate
 it; the
 [design documents](https://github.com/liken-sh/audio-operator/tree/main/plans)

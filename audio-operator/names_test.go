@@ -64,7 +64,7 @@ func TestPNPID(t *testing.T) {
 	}
 }
 
-// The pairing vectors. The display operator's suite carries the same
+// The pairing vectors. The display operator's suite holds the same
 // table, because the two operators must publish the same value for
 // the same monitor. A change to either derivation that broke the
 // parity fails a test in both repositories.

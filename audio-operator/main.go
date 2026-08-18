@@ -7,8 +7,8 @@
 // claims the machine's audio controller through an ordinary liken.sh
 // claim, reads the PipeWire that runs beside it in the same pod, and
 // publishes what PipeWire holds under its own driver name,
-// audio.liken.sh. The operator uses no private interface into liken:
-// the raw claim, the slices it writes, and the CDI files it leaves
+// audio.liken.sh. The operator uses no private interface into liken.
+// The raw claim, the slices it writes, and the CDI files it leaves
 // for the runtime are the public contracts that any DRA driver on any
 // Kubernetes cluster gets.
 //
@@ -22,7 +22,7 @@
 // Which PCM device plays into which monitor is the fact this operator
 // exists to publish. It comes from the ELD block that the graphics
 // driver writes into the audio driver, so only a running driver makes
-// it true, and it changes whenever somebody moves a cable.
+// it true. It changes whenever somebody moves a cable.
 package main
 
 import (
@@ -39,18 +39,18 @@ const (
 	// settleWindow is how long the loop waits for quiet after the last
 	// event before it writes. A monitor that a person plugs in
 	// produces a burst of jack events, and PipeWire needs a moment
-	// after them to build the sink, so the whole burst deserves one
-	// write.
+	// after them to build the sink, so one write must cover the whole
+	// burst.
 	//
 	// Every ResourceSlice write wakes every DRA-pending pod in the
 	// cluster, because the scheduler event that a slice change raises
-	// carries no queueing hint. Hardware that flaps must not turn into
+	// includes no queueing hint. Hardware that flaps must not turn into
 	// a cluster-wide scheduling storm.
 	settleWindow = 1500 * time.Millisecond
 
 	// settleLimit bounds the wait. A cable that somebody wiggles
 	// restarts the quiet window forever, and the state it settles on
-	// may never arrive, so the loop publishes what it can see at this
+	// may never arrive, so the loop publishes what it reads at this
 	// interval regardless.
 	settleLimit = 10 * time.Second
 
@@ -62,16 +62,16 @@ const (
 	backstopInterval = 60 * time.Second
 
 	// maxSinkFailures is how many graph reads may fail in a row before
-	// the operator gives up and exits.
+	// the operator exits.
 	//
 	// One failure skips the write, because a slice that tainted every
 	// output would evict every consumer for a pw-dump that timed out
-	// once. A run of them is a different state: the published slice
-	// still says every output has a sink and carries no taint, while
-	// every prepare call fails because the driver cannot read a sink
-	// name, and nothing in the cluster bounds that. Three in a row make
-	// it a restart, which is the one repair that reaches a PipeWire
-	// that has stopped answering.
+	// once. A run of them is a different state. The published slice
+	// still says every output has a sink and no taint, while every
+	// prepare call fails because the driver cannot read a sink name,
+	// and nothing in the cluster bounds that. Three in a row make it a
+	// restart, which is the one repair that reaches a PipeWire that
+	// has stopped answering.
 	maxSinkFailures = 3
 
 	// writeRetryDelay is how long the loop waits before it repeats a
@@ -153,14 +153,14 @@ func operate() {
 	// PipeWire creates the declared nodes while it loads its
 	// configuration, so they are there as soon as it answers. The wait
 	// costs one graph read in that case, and it covers the case where
-	// they are not: without it the first pass would taint every output,
+	// they are not. Without it the first pass would taint every output,
 	// and a NoExecute taint ends the pods that the previous operator's
 	// prepared claims left running.
 	waitForNodes(ctx, readSinks, outputs, nodeReadyTimeout)
 
 	// The plugin registers with the kubelet only after PipeWire
-	// answers, so the driver appears when it can actually answer a
-	// prepare call.
+	// answers, so the driver appears when it can answer a prepare
+	// call.
 	go func() {
 		if err := serveDRAPlugin(ctx, client); err != nil {
 			fatal("the DRA plugin is not serving: %v", err)
@@ -298,10 +298,10 @@ func (r *reconciler) reconcile(ctx context.Context) error {
 		return nil
 	}
 	// A PCM device that appeared or left since PipeWire started has no
-	// node in the running graph, and PipeWire reads context.objects
-	// only while it loads its configuration, so nothing this operator
-	// does gives that output a sink. Only the init container writes
-	// the declaration, and an init container runs once per pod, so an
+	// node in the running graph. PipeWire reads context.objects only
+	// while it loads its configuration, so nothing this operator does
+	// gives that output a sink. Only the init container writes the
+	// declaration, and an init container runs once per pod, so an
 	// operator restart would re-read the same file and find the same
 	// divergence. The report goes out once, the pass continues, and
 	// every output with no node publishes with the no-sink taint.
@@ -372,8 +372,8 @@ func (r *reconciler) publish(ctx context.Context, devices []SliceDevice) {
 }
 
 // wakes turns the jack events and the backstop tick into one channel.
-// Neither carries state that the loop uses, so the merge loses
-// nothing: both say to look again.
+// Neither holds state that the loop uses, so the merge loses nothing:
+// both say to look again.
 func wakes(ctx context.Context, jacks <-chan jackEvent) <-chan struct{} {
 	out := make(chan struct{}, 1)
 	wake := func() {
@@ -408,8 +408,8 @@ func wakes(ctx context.Context, jacks <-chan jackEvent) <-chan struct{} {
 // the input has been quiet for window, or after limit has passed
 // since the first event of the burst, whichever comes first.
 //
-// The limit is what keeps a flapping cable publishing. Without it,
-// hardware that changes faster than the quiet window would restart
+// The limit keeps the loop publishing under a flapping cable. Without
+// it, hardware that changes faster than the quiet window would restart
 // the wait on every event and the loop would never write.
 func settle(ctx context.Context, in <-chan struct{}, window, limit time.Duration) <-chan struct{} {
 	out := make(chan struct{}, 1)

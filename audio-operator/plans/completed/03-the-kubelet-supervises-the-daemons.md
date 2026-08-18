@@ -15,8 +15,8 @@ The cost is that the operator does a job the kubelet already does,
 worse. A crashed daemon has no restart count of its own, no
 per-container log stream, and no probe; the whole pod restarts to
 repair one process. The bluetooth operator already runs its daemons
-as sibling containers, so this operator is the odd one out for no
-reason its design states.
+as sibling containers, so this operator is the only one that
+supervises its own daemons, for no reason its design states.
 
 ## The design
 
@@ -30,8 +30,8 @@ operator.
    supervisor used to provide, expressed as an init step.
 2. **`pipewire`, a native sidecar** (an init container with
    `restartPolicy: Always`). Its startup probe execs `pw-dump`
-   against the socket, so readiness is a real client connecting, not
-   a file existing.
+   against the socket, so readiness means a real client connected,
+   and not that a file exists.
 3. **`wireplumber`, a second native sidecar**, started after
    PipeWire's probe passes, probed with `wpctl status`.
 4. **The operator, the only regular container**, serving DRA. The
@@ -57,17 +57,17 @@ the same reason: while nothing serves, the slice must say so.
   crashlooping daemon leaves a slice that says nothing plays.
 
 The window where the slice is wrong is the moment between a daemon
-dying and the operator noticing its connection is gone, which is the
-same event. Under the supervisor the window was the pod's own
+dying and the operator reporting that its connection is gone, which
+is the same event. Under the supervisor the window was the pod's own
 teardown. Neither is zero; both are honest within a second.
 
 ## What was considered and set aside
 
 * **Keeping the supervisor.** It duplicates the kubelet with fewer
   features, and its one guarantee is a taint the operator already
-  knows how to write.
+  writes.
 * **A separate image per daemon.** The closure is one set of files
-  that the daemons share almost entirely; two images would carry the
+  that the daemons share almost entirely; two images would hold the
   same libraries twice and version-skew against each other.
 * **WirePlumber or PipeWire as the pod's main container.** Sidecars
   start before regular containers, so a daemon in the main slot
@@ -90,7 +90,7 @@ policy lowered every client to read-only, WirePlumber's own client
 included, and a read-only session manager cannot create a link, so
 streams parked silently against healthy sinks. In the supervisor pod
 WirePlumber shared PipeWire's PID namespace, so it never restricted
-itself, and consumers limped along on the read-only grant because
+itself, and consumers still played on the read-only grant, because
 playing needs no more. The fix is `config/51-access-rules.conf`: the
 server's grant stands, because the CDI mount is the access control.
 The release gate could not have caught this, because no cardless run
@@ -98,13 +98,13 @@ links a stream; a linking check is a candidate addition.
 
 The fault drill killed PipeWire two ways. A single kill is repaired
 in about two seconds: the kubelet restarts the PipeWire and
-WirePlumber containers alone, and recovery beats the operator's
-detection, so no taint goes out. That is correct, because by the
+WirePlumber containers alone, and the recovery finishes before the
+operator's detection, so no taint goes out. That is correct, because by the
 time anything could taint, the outputs play again. The cost of a
-fast bounce is the documented one: a connected client strands
-silent and has to restart, on the new pod exactly as on the old.
+fast restart is the documented one: a connected client goes silent
+and has to restart, on the new pod exactly as on the old.
 
-A sustained kill, held down by repeated murders until the kubelet's
+A sustained kill, held down by repeated kills until the kubelet's
 crashloop backoff stretched the downtime past the detection window,
 ran the whole contract: three failed graph reads in a row, one
 write with every device tainted, a nonzero exit, and the kubelet
@@ -115,10 +115,10 @@ second toleration. When the kills stopped, the backoff expired and
 the pod converged unattended: ordered restart, honest slice, a
 fresh consumer claiming and playing.
 
-The drill also showed what the taint write actually buys. The
-kubelet deletes a driver's ResourceSlices when the plugin
-deregisters, which the operator's exit causes, so a sustained
-outage's steady state is an absent slice, and a claim pends against
-nothing rather than reading a lie. The all-tainted write covers the
+The drill also showed what the taint write provides. The kubelet
+deletes a driver's `ResourceSlices` when the plugin deregisters,
+which the operator's exit causes. A sustained outage's steady state
+is then an absent slice, and a claim pends against nothing rather
+than against a slice that is wrong. The all-tainted write covers the
 gap between losing the graph and that deregistration, and it is
-what carries the eviction.
+what causes the eviction.

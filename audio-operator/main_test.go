@@ -22,7 +22,7 @@ func TestSettleCollapsesABurst(t *testing.T) {
 	out := settle(ctx, in, testWindow, testLimit)
 
 	// A monitor that a person plugs in produces a burst of jack
-	// events, and the whole burst deserves one write.
+	// events, and one write must cover the whole burst.
 	for range 8 {
 		in <- struct{}{}
 		time.Sleep(testWindow / 4)
@@ -56,8 +56,8 @@ func TestSettleEmitsUnderAConstantFlap(t *testing.T) {
 	out := settle(ctx, in, testWindow, testLimit)
 
 	// A cable that somebody wiggles changes the jack faster than the
-	// quiet window, which would restart the wait forever. The limit is
-	// what still publishes.
+	// quiet window, which would restart the wait forever. The limit
+	// keeps the loop publishing.
 	stop := make(chan struct{})
 	defer close(stop)
 	go func() {

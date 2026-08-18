@@ -8,6 +8,6 @@ as a git submodule at `themes/brand`.
 
 Write all site prose in Simplified Technical English (ASD-STE100):
 short sentences, active voice, one instruction per sentence. The
-voice rules imported above add what that standard does not carry, and
+voice rules imported above add what that standard does not state, and
 they govern every word this site publishes. Scan a page against them
 before you commit it.

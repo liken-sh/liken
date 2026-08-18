@@ -28,7 +28,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// inputDir holds the evdev nodes. Every node the operator can see
+// inputDir holds the evdev nodes. Every node the operator reads
 // there belongs to the claimed card, because CDI delivers the claim's
 // nodes and no others. It is a variable so the tests can point it at
 // a directory they control.
@@ -88,9 +88,9 @@ func watchJacks(ctx context.Context) (<-chan jackEvent, error) {
 		// A card whose claim delivered no input node has no jack the
 		// kernel can sense, which is an older codec or a card with the
 		// jack detection turned off. That is a card this operator still
-		// publishes, so it is not a failure to start over: the backstop
-		// tick becomes the only wake, and a monitor takes up to one tick
-		// to appear in the slice.
+		// publishes, so a missing directory is not a startup failure:
+		// the backstop tick becomes the only wake, and a monitor takes
+		// up to one tick to appear in the slice.
 		fmt.Fprintf(os.Stderr, "%s does not exist, so no jack event will arrive; the backstop tick every %s is the only wake\n",
 			inputDir, backstopInterval)
 		go func() {
@@ -208,9 +208,9 @@ func (w *jackWatcher) close() {
 func (w *jackWatcher) wait() { w.readers.Wait() }
 
 // openEventNode opens one evdev node so that a close can end a read
-// that is waiting for an event. The descriptor is non-blocking, which
-// is what makes the Go runtime poll it instead of blocking a thread
-// in the kernel, and a poll is what a Close interrupts.
+// that is waiting for an event. The descriptor is non-blocking, so
+// the Go runtime polls it instead of blocking a thread in the kernel,
+// and a Close interrupts a poll.
 func openEventNode(path string) (*os.File, error) {
 	descriptor, err := unix.Open(path, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if err != nil {

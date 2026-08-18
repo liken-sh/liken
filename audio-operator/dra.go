@@ -13,10 +13,10 @@ package main
 // permissions on the kubelet's directories are the authentication.
 //
 // The prepare protocol tells the driver almost nothing: a claim's
-// namespace, name, and UID. What was allocated lives on the claim's
+// namespace, name, and UID. What was allocated is on the claim's
 // status in the API server, so the driver reads that back, reads
 // PipeWire's graph again, and hands the claim the name the allocated
-// output's sink carries now. A call signals that something happened,
+// output's sink has now. A call signals that something happened,
 // and the driver acts on the durable record instead of on data
 // carried in the call.
 //
@@ -42,8 +42,8 @@ import (
 
 // The kubelet's plugin directories. The registry is where the kubelet
 // discovers plugins, and the plugin's own directory holds the socket
-// that does the real work. These are variables so the tests can
-// substitute them.
+// that answers the prepare calls. These are variables so the tests
+// can substitute them.
 var (
 	draRegistryDir = "/var/lib/kubelet/plugins_registry"
 	draPluginDir   = "/var/lib/kubelet/plugins/" + DriverName
@@ -130,7 +130,7 @@ func serveDRAPlugin(ctx context.Context, client *Client) error {
 }
 
 // NodePrepareResources prepares every claim in the request. The
-// response must carry one entry for each claim, because the kubelet
+// response must include one entry for each claim, because the kubelet
 // treats a missing entry as a failure to retry. Each entry is
 // independent, so trouble with one claim never blocks another
 // claim's pod.
@@ -164,8 +164,8 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 	}
 
 	// One graph read answers every result in the claim, and it is the
-	// same read that publishes the slice, so the two can never
-	// disagree about which sink an output has.
+	// same read that publishes the slice, so the two always report the
+	// same sink for an output.
 	sinks, err := p.sinks(ctx)
 	if err != nil {
 		return fail("reading PipeWire's graph: %v", err)
@@ -230,9 +230,9 @@ func (p *draPlugin) NodeUnprepareResources(ctx context.Context, req *drav1.NodeU
 
 // draHealth is the device-health stream. The driver keeps it open and
 // sends nothing on it. The service is optional in the DRA protocol,
-// and the kubelet does not treat it that way in practice: an
+// and the kubelet does not treat it that way in practice. An
 // unregistered service produces an Unimplemented error and a retry
-// every few seconds, forever, in the kubelet's log. This operator
+// in the kubelet's log every few seconds, with no end. This operator
 // reports health through the device taints instead, which is the
 // mechanism that evicts a pod when an output goes silent.
 type draHealth struct {

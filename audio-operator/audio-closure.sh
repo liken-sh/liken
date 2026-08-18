@@ -9,18 +9,19 @@ set -eu
 
 out=$1
 
-# The multiarch directory every library below lives in, read from
+# The multiarch directory that holds every library below, read from
 # dpkg so that no architecture is written down here.
 lib=$(dirname "$(dpkg -L libpipewire-0.3-modules | grep '/pipewire-0.3$')")
 
 # ldd reports the DT_NEEDED graph and nothing about a file a program
 # opens by name at runtime. Every module below is such a file. Each
 # one is named because the running daemons mapped it, and the module
-# directories hold many more that this operator never loads, whose
-# dependency walk is where the image size would come back.
+# directories hold many more that this operator never loads. The
+# dependency walk of those modules is where the image size would come
+# back.
 #
 # pipewire loads the eleven modules its packaged pipewire.conf names,
-# minus the four that carry the ifexists flag (rt, portal, x11-bell,
+# minus the four that have the ifexists flag (rt, portal, x11-bell,
 # jackdbus-detect), which it skips when the file is absent.
 #
 # wireplumber's main-embedded profile loads these nine, and the
@@ -32,8 +33,8 @@ lib=$(dirname "$(dpkg -L libpipewire-0.3-modules | grep '/pipewire-0.3$')")
 # for the client libraries that ask for a bus.
 #
 # libspa-alsa.so opens no card on a machine that has none, so no
-# runtime check sees it load. It is named here because a machine with
-# speakers is the machine this image is for, and the release gate
+# runtime check reports it loading. It is named here because a machine
+# with speakers is the machine this image is for, and the release gate
 # asserts it by name for the same reason.
 #
 # pw-dump is how the operator reads the graph, and wpctl is the
@@ -117,8 +118,8 @@ needed() {
 
 # /lib and /lib64 are symlinks into /usr. ldd reports every library
 # under the name it resolved through them, and the loader's own path
-# names /lib64, so the two links go in first and every copy below
-# writes the path exactly as it was resolved.
+# names /lib64. The two links go in first, so every copy below writes
+# the path exactly as it was resolved.
 mkdir -p "$out$lib" "$out/usr/lib64" "$out/usr/bin"
 for link in /lib /lib64; do
 	if [ -L "$link" ]; then
@@ -143,7 +144,7 @@ done
 
 # Without a cache the loader searches its built-in directory list on
 # every open, and that list does not name the multiarch directory
-# every library above lives in.
+# that holds every library above.
 mkdir -p "$out/etc"
 printf '%s\n' "$lib" >"$out/etc/ld.so.conf"
 ldconfig -r "$out"

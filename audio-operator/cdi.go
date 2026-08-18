@@ -17,7 +17,7 @@ package main
 // PIPEWIRE_NODE sets target.object on every stream the client
 // creates, which takes a node name.
 //
-// The file name carries this driver's own prefix,
+// The file name starts with this driver's own prefix,
 // audio.liken.sh-<claimUID>.json. liken writes
 // liken.sh-<claimUID>.json in the same directory and reads back only
 // the files whose names start with its own prefix, so the two drivers
@@ -25,10 +25,10 @@ package main
 //
 // A file also has to stay correct for the whole boot. The kubelet
 // prepares a claim once and reuses the answer for every later pod
-// that names it, and a sink's name moves under it: WirePlumber builds
-// the name from the card's profile, so a profile change renames the
-// sink. The reconcile pass rewrites every prepared claim's file from
-// the same graph read that publishes the slice.
+// that names it, and a sink's name can change after that: WirePlumber
+// builds the name from the card's profile, so a profile change
+// renames the sink. The reconcile pass rewrites every prepared
+// claim's file from the same graph read that publishes the slice.
 
 import (
 	"encoding/json"
@@ -65,7 +65,7 @@ const (
 )
 
 // cdiSpec holds the part of the CDI spec schema that this operator
-// writes. The delivery carries no device node, so the struct omits
+// writes. The delivery includes no device node, so the struct omits
 // the field for them.
 type cdiSpec struct {
 	Version string      `json:"cdiVersion"`
@@ -95,7 +95,7 @@ type cdiMount struct {
 //
 // The mount is read-only. Connecting to a Unix socket needs write
 // permission on the socket itself and not on the file system that
-// carries it, so a read-only mount still connects, and a consumer has
+// holds it, so a read-only mount still connects, and a consumer has
 // no reason to create anything in this directory.
 func outputEdits(sink string) cdiEdits {
 	return cdiEdits{
@@ -142,7 +142,8 @@ func writeSpecFile(claimUID string, devices []cdiDevice) error {
 
 // removeCDISpec deletes a claim's spec file. An already absent file
 // counts as success, because unprepare must be idempotent: the
-// kubelet repeats it whenever it is not sure the call succeeded.
+// kubelet repeats it whenever it has no record that the call
+// succeeded.
 func removeCDISpec(claimUID string) error {
 	cdiWrites.Lock()
 	defer cdiWrites.Unlock()
@@ -183,7 +184,7 @@ func claimUIDFromSpecName(name string) (string, bool) {
 // applies the edits when it creates the container, and a variable
 // that changes under a running container stays wrong until the pod
 // restarts. What it prevents is a stale file that every later pod
-// would receive: an output whose sink came back under a different
+// would receive. An output whose sink came back under a different
 // name would give the next pod a PIPEWIRE_NODE that names nothing,
 // and its streams would play into whichever sink PipeWire chose by
 // default.
@@ -209,8 +210,8 @@ func refreshCDISpecs(sinks map[pcmAddress]string) {
 //
 // An output whose sink is gone keeps the name it had. An empty
 // PIPEWIRE_NODE would start the next pod against PipeWire's default
-// sink with no error, while the taints on the device are what
-// actually hold that pod back until the output can play again.
+// sink with no error. The taints on the device hold that pod back
+// until the output can play again.
 func refreshCDISpec(claimUID string, sinks map[pcmAddress]string) error {
 	cdiWrites.Lock()
 	defer cdiWrites.Unlock()

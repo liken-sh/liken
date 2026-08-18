@@ -3,7 +3,7 @@ package main
 // These tests cover two decisions: what one output publishes as a
 // device, and when the operator writes the slice at all. The second
 // set runs against a small API server that holds one ResourceSlice
-// and remembers the requests it received.
+// and records the requests it received.
 
 import (
 	"encoding/json"
@@ -50,7 +50,7 @@ func TestSliceDevicesPublishesEachOutput(t *testing.T) {
 		t.Fatalf("got %d devices, want 2", len(devices))
 	}
 	// The list is sorted, so the same hardware always makes the same
-	// slice and the change detection sees real changes only.
+	// slice and the change detection reports real changes only.
 	if devices[0].Name != "card0-pcm0" || devices[1].Name != "card0-pcm3" {
 		t.Fatalf("names = %q, %q", devices[0].Name, devices[1].Name)
 	}
@@ -74,7 +74,7 @@ func TestSliceDevicesPublishesEachOutput(t *testing.T) {
 		t.Error("the analog output published a pairing attribute")
 	}
 	if len(analog.Taints) != 0 {
-		t.Errorf("the analog output carries taints: %+v", analog.Taints)
+		t.Errorf("the analog output has taints: %+v", analog.Taints)
 	}
 
 	hdmi := devices[1]
@@ -105,12 +105,12 @@ func TestSliceDevicesPublishesEachOutput(t *testing.T) {
 		t.Errorf("pcm = %d, want 3", got)
 	}
 	if len(hdmi.Taints) != 0 {
-		t.Errorf("the HDMI output carries taints: %+v", hdmi.Taints)
+		t.Errorf("the HDMI output has taints: %+v", hdmi.Taints)
 	}
 }
 
 func TestSliceDevicesTaintsAnOutputThatCannotPlay(t *testing.T) {
-	// Each case names the taints the output must carry, in the order
+	// Each case names the taints the output must have, in the order
 	// the slice publishes them. The NoExecute taint says the output
 	// cannot serve a stream now, and each NoSchedule taint names one
 	// reason, so the set states the whole condition.
@@ -273,7 +273,7 @@ func TestSameDevicesSeesRealChanges(t *testing.T) {
 }
 
 // slicePublishFixture is a small API server that holds at most one
-// ResourceSlice. It remembers the requests it received.
+// ResourceSlice. It records the requests it received.
 type slicePublishFixture struct {
 	existing *ResourceSlice
 	requests []string
@@ -371,7 +371,7 @@ func TestEnsureReplacesAChangedSliceAndBumpsTheGeneration(t *testing.T) {
 	}
 }
 
-// An empty list is never a fact about a machine this operator runs
+// An empty list is never a real state of a machine this operator runs
 // on, because the pod holds an exclusive claim on a card and a card
 // has playback PCM devices. Publishing one would retract devices that
 // prepared claims still name.
@@ -400,8 +400,8 @@ func publishedSlice(devices []SliceDevice, generation int64) *ResourceSlice {
 }
 
 // The next three tests read the line the publisher prints for each
-// outcome. A slice that nobody rewrites and a slice that an operator
-// died and left behind hold the same resourceVersion and the same pool
+// outcome. A slice that nobody rewrites and a slice that a stopped
+// operator left behind hold the same resourceVersion and the same pool
 // generation, so the log is the only place the two come apart.
 
 func TestEnsureLogsTheSliceItCreated(t *testing.T) {
@@ -409,12 +409,13 @@ func TestEnsureLogsTheSliceItCreated(t *testing.T) {
 	api := &slicePublishFixture{}
 	client := testClient(t, api.handler(t))
 
-	// PipeWire holds no node for the output, so it publishes silent.
+	// PipeWire holds no node for the output, so the device publishes
+	// tainted.
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(),
 		sliceDevices([]alsaOutput{{Card: 0, PCM: 3}}, nil)); err != nil {
 		t.Fatal(err)
 	}
-	want := "slice: created generation 1, 1 device, 1 tainted: card0-pcm3 carries " +
+	want := "slice: created generation 1, 1 device, 1 tainted: card0-pcm3 has " +
 		disconnectedTaint + ", " + noSinkTaint
 	if got := capture.only(t); got != want {
 		t.Errorf("line = %q, want %q", got, want)
@@ -429,8 +430,8 @@ func TestEnsureLogsTheSliceItWrote(t *testing.T) {
 	client := testClient(t, api.handler(t))
 
 	// PipeWire lost the node. The device count does not move, so the
-	// taints are the whole event, and they are what evicts the pod that
-	// held the claim.
+	// taints are the whole event, and they evict the pod that held the
+	// claim.
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(), sliceDevices(outputs, nil)); err != nil {
 		t.Fatal(err)
 	}

@@ -13,7 +13,7 @@ RUN go mod download
 COPY *.go ./
 # CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
 # static binary with no paths from the build machine in it. The binary
-# runs beside a closure that carries a loader and a libc, and it needs
+# runs beside a closure that holds a loader and a libc, and it needs
 # neither.
 RUN CGO_ENABLED=0 go build -trimpath -o /audio-operator .
 
@@ -22,12 +22,12 @@ RUN CGO_ENABLED=0 go build -trimpath -o /audio-operator .
 # this build, which is the report that the module set needs reading
 # again.
 FROM debian:trixie-slim AS closure
-# pipewire-bin carries the daemon, pw-dump, which is how the operator
+# pipewire-bin provides the daemon, pw-dump, which is how the operator
 # reads the graph, and pw-cli's family. The daemon creates every sink,
 # from the node declarations the declare container writes before it
 # starts, because WirePlumber's ALSA monitor needs udev and a liken
 # machine runs no udevd. wireplumber links each client's stream to the
-# sink it names, and carries wpctl.
+# sink it names, and provides wpctl.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         pipewire \

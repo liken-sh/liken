@@ -9,17 +9,17 @@ package main
 //
 // The operator needs one fact from PipeWire that ALSA cannot give it:
 // the node name of the sink that plays through each PCM device. That
-// name is what a consumer's PIPEWIRE_NODE carries, and WirePlumber
+// name is the value a consumer's PIPEWIRE_NODE holds, and WirePlumber
 // builds it from the card and the profile, so the name exists only in
 // the running graph.
 //
-// The graph is read by running pw-dump, which ships with PipeWire in
-// the same image, and parsing the JSON it prints. The alternative is
-// to speak PipeWire's native protocol, which means implementing its
-// binary POD encoding for every message the graph walk needs. The
-// exec costs one process for each reconcile pass, at most one every
-// settle window, and it reads a format that the PipeWire release in
-// this image defines.
+// The operator reads the graph by running pw-dump, which ships with
+// PipeWire in the same image, and parsing the JSON it prints. The
+// alternative is to speak PipeWire's native protocol, which means
+// implementing its binary POD encoding for every message the graph
+// walk needs. The exec costs one process for each reconcile pass, at
+// most one every settle window, and it reads a format that the
+// PipeWire release in this image defines.
 
 import (
 	"context"
@@ -82,15 +82,15 @@ type pcmAddress struct {
 	PCM  int
 }
 
-// The property keys that carry a sink's ALSA address, in the order
+// The property keys that hold a sink's ALSA address, in the order
 // this operator reads them.
 //
 // The first key of each list is the one the operator writes itself,
-// which is the only pair it can rely on: it declares every sink node
-// in a configuration drop-in (see nodes.go), and a declared node
-// carries no alsa.card and no alsa.device, because those two come from
-// the udev device that WirePlumber's ALSA monitor builds and this
-// graph has no monitor in it.
+// which is the only pair it can rely on. It declares every sink node
+// in a configuration drop-in (see nodes.go), and a declared node has
+// no alsa.card and no alsa.device, because those two come from the
+// udev device that WirePlumber's ALSA monitor builds and this graph
+// has no monitor in it.
 //
 // The rest are kept so that a sink from any other source still maps.
 // alsa.card and alsa.device are what the card profile code puts on a
@@ -103,8 +103,8 @@ var (
 )
 
 // pwObject is the part of pw-dump's output this operator reads. Every
-// object in the dump carries a type and, for the ones that came from
-// a remote interface, an info block with its properties.
+// object in the dump has a type and, for the ones that came from a
+// remote interface, an info block with its properties.
 type pwObject struct {
 	Type string `json:"type"`
 	Info struct {
@@ -230,7 +230,7 @@ func waitForPipeWire(ctx context.Context, read func(context.Context) (map[pcmAdd
 // until the timeout passes. It reports what it found and never fails.
 //
 // An output whose node PipeWire could not create is a fact the slice
-// carries as the no-sink taint, so the operator publishes it rather
+// reports as the no-sink taint, so the operator publishes it rather
 // than refusing to start. Failing here instead would restart the pod
 // over one PCM device that cannot open, and take the card's working
 // outputs down with it on every attempt.

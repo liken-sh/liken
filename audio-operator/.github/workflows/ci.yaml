@@ -1,6 +1,6 @@
 # Every push to main and every pull request runs the tests. Nothing
-# here releases: a release is a pushed tag, and release.yaml answers
-# to those. Because of the split, docs and intermediate work land on
+# here releases: a release is a pushed tag, and release.yaml owns
+# that. Because of the split, docs and intermediate work land on
 # main freely, and every image in the registry traces to a tag
 # somebody chose to push.
 #

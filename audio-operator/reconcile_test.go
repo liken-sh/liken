@@ -1,7 +1,7 @@
 package main
 
 // These tests cover the reconcile pass's decisions: what it publishes,
-// what it refuses to publish, and when it gives up and lets the
+// what it refuses to publish, and when it stops and lets the
 // kubelet restart the pod.
 
 import (
@@ -26,7 +26,7 @@ func testReconciler(t *testing.T, api *slicePublishFixture, sinks func(context.C
 	specDirectory(t)
 	// The init container declares the card's outputs to PipeWire before
 	// PipeWire starts, and every later pass compares against that
-	// document, so a reconciler starts life agreeing with the card it
+	// document, so a reconciler starts out agreeing with the card it
 	// was built over.
 	outputs, err := readOutputs()
 	if err != nil {
@@ -49,7 +49,7 @@ func TestReconcileSkipsTheWriteWhenPipeWireDoesNotAnswer(t *testing.T) {
 	operator := testReconciler(t, api, failingSinks, "pcmC0D0p", "pcmC0D3p")
 
 	if err := operator.reconcile(context.Background()); err != nil {
-		t.Fatalf("one failed graph read gave up: %v", err)
+		t.Fatalf("one failed graph read stopped the operator: %v", err)
 	}
 	if len(api.requests) != 0 {
 		t.Errorf("a failed graph read reached the API server: %v", api.requests)
@@ -58,7 +58,7 @@ func TestReconcileSkipsTheWriteWhenPipeWireDoesNotAnswer(t *testing.T) {
 
 // A run of failed graph reads is a different state from one. The
 // published slice still says every output has a sink, every prepare
-// call fails, and nothing bounds it, so the operator gives up and the
+// call fails, and nothing bounds it, so the operator exits and the
 // kubelet's restart is the repair.
 func TestReconcileGivesUpAfterARunOfFailedGraphReads(t *testing.T) {
 	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
@@ -66,11 +66,11 @@ func TestReconcileGivesUpAfterARunOfFailedGraphReads(t *testing.T) {
 
 	for pass := 1; pass < maxSinkFailures; pass++ {
 		if err := operator.reconcile(context.Background()); err != nil {
-			t.Fatalf("pass %d of %d gave up early: %v", pass, maxSinkFailures, err)
+			t.Fatalf("pass %d of %d stopped early: %v", pass, maxSinkFailures, err)
 		}
 	}
 	if err := operator.reconcile(context.Background()); err == nil {
-		t.Fatalf("%d failed graph reads in a row did not make the operator give up", maxSinkFailures)
+		t.Fatalf("%d failed graph reads in a row did not stop the operator", maxSinkFailures)
 	}
 }
 
@@ -85,14 +85,14 @@ func TestReconcileForgetsFailuresAfterAGoodRead(t *testing.T) {
 
 	for pass := 1; pass < maxSinkFailures; pass++ {
 		if err := operator.reconcile(context.Background()); err != nil {
-			t.Fatalf("pass %d gave up early: %v", pass, err)
+			t.Fatalf("pass %d stopped early: %v", pass, err)
 		}
 	}
 	sinks = func(context.Context) (map[pcmAddress]string, error) {
 		return map[pcmAddress]string{{Card: 0, PCM: 0}: "alsa_output.test"}, nil
 	}
 	if err := operator.reconcile(context.Background()); err != nil {
-		t.Fatalf("a good read gave up: %v", err)
+		t.Fatalf("a good read stopped the operator: %v", err)
 	}
 	sinks = failingSinks
 	for pass := 1; pass < maxSinkFailures; pass++ {
@@ -102,8 +102,9 @@ func TestReconcileForgetsFailuresAfterAGoodRead(t *testing.T) {
 	}
 }
 
-// An empty enumeration is never a fact about a machine this operator
-// runs on, so the pass publishes nothing and does not read the graph.
+// An empty enumeration is never a real state of a machine this
+// operator runs on, so the pass publishes nothing and does not read
+// the graph.
 func TestReconcileSkipsTheWriteWhenTheCardHasNoOutput(t *testing.T) {
 	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
 	read := false
@@ -150,7 +151,7 @@ func TestReconcilePublishesWhatItReads(t *testing.T) {
 		{Key: noSinkTaint, Effect: "NoSchedule"},
 	}
 	if got := devices[1].Taints; !reflect.DeepEqual(got, noSink) {
-		t.Errorf("the output with no sink node carries %+v, want %+v", got, noSink)
+		t.Errorf("the output with no sink node has %+v, want %+v", got, noSink)
 	}
 }
 
@@ -181,7 +182,7 @@ func TestReconcilePublishesWhenTheCardsPCMDevicesChange(t *testing.T) {
 		{Key: noSinkTaint, Effect: "NoSchedule"},
 	}
 	if got := devices[1].Taints; !reflect.DeepEqual(got, noSink) {
-		t.Errorf("the undeclared output carries %+v, want %+v", got, noSink)
+		t.Errorf("the undeclared output has %+v, want %+v", got, noSink)
 	}
 }
 
@@ -199,7 +200,7 @@ func TestTaintEverythingTaintsEveryOutput(t *testing.T) {
 	}
 	for _, device := range api.updated.Spec.Devices {
 		if len(device.Taints) != 2 {
-			t.Errorf("%s carries %+v, want the disconnected and no-sink taints",
+			t.Errorf("%s has %+v, want the disconnected and no-sink taints",
 				device.Name, device.Taints)
 		}
 	}
@@ -216,7 +217,7 @@ func wakesFor(passes int) <-chan struct{} {
 }
 
 // The operator loses its connection to PipeWire when a run of graph
-// reads fails. The pod's PipeWire container is what died, and this
+// reads fails. The pod's PipeWire container died, and this
 // container cannot restart it, so the slice has to say that nothing
 // plays before the process ends. Otherwise the consumers of that card
 // hold a dead socket until somebody notices.
@@ -233,7 +234,7 @@ func TestRunTaintsAndStopsWhenPipeWireStopsAnswering(t *testing.T) {
 	}
 	for _, device := range api.updated.Spec.Devices {
 		if len(device.Taints) != 2 {
-			t.Errorf("%s carries %+v, want the disconnected and no-sink taints",
+			t.Errorf("%s has %+v, want the disconnected and no-sink taints",
 				device.Name, device.Taints)
 		}
 	}
@@ -256,14 +257,14 @@ func TestAwaitPipeWireTaintsEveryOutputWhenItNeverAnswers(t *testing.T) {
 	}
 	for _, device := range api.updated.Spec.Devices {
 		if len(device.Taints) != 2 {
-			t.Errorf("%s carries %+v, want the disconnected and no-sink taints",
+			t.Errorf("%s has %+v, want the disconnected and no-sink taints",
 				device.Name, device.Taints)
 		}
 	}
 }
 
 // A PipeWire that answers publishes nothing and taints nothing. The
-// first reconcile pass is what writes the slice.
+// first reconcile pass writes the slice.
 func TestAwaitPipeWireWritesNothingWhenPipeWireAnswers(t *testing.T) {
 	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
 	operator := testReconciler(t, api, func(context.Context) (map[pcmAddress]string, error) {

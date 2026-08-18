@@ -32,7 +32,7 @@ that node's `liken.sh` `ResourceSlice`:
 
     kubectl get resourceslice <node>-liken.sh -o yaml
 
-If no device carries `subsystem: {string: sound}`, the operator's
+If no device has `subsystem: {string: sound}`, the operator's
 own claim will park and its pod will stay `Pending`. The
 [hardware operators](https://liken.sh/docs/concepts/hardware-operators/)
 page describes this layering: `liken` publishes the card, and this
@@ -86,9 +86,9 @@ A class is the cluster's vocabulary for a kind of device, and you
 choose its grain. `audio-output` above is generic: it matches every
 audio output, it keeps the class list short, and it leaves the
 choice of output to each claim's CEL selector. A specific class
-bakes the selector into the class itself, so a claim names the
-class and carries no CEL, and the choice is made once, in cluster
-policy, where you control it:
+holds the selector itself. A claim then names the class and writes
+no CEL, and you make the choice once, in cluster policy you
+control:
 
     apiVersion: resource.k8s.io/v1
     kind: DeviceClass
@@ -106,9 +106,9 @@ A class that names one monitor's speakers through
 `monitor.liken.sh/id` works the same way, with the same `has()`
 guard on the attribute.
 
-Start generic. Mint a specific class when several workloads keep
-writing the same selector, or when you want the choice to live in
-cluster policy rather than in each workload's manifest.
+Start generic. When several workloads repeat the same selector, or
+when you want the choice in cluster policy rather than in each
+workload's manifest, create a specific class.
 
 ## 3. Apply the manifests
 
@@ -162,8 +162,7 @@ slice it wrote:
     slice: created generation 1, 3 devices, 0 tainted
 
 The image is a file closure on `scratch`: no shell, no package
-manager. `pw-dump` is the debugging window into the running sound
-server:
+manager. `pw-dump` is the way to inspect the running sound server:
 
     kubectl -n liken-system exec ds/audio-operator -c operator -- pw-dump
 
@@ -175,17 +174,17 @@ the claimed card, into a `ResourceSlice` named
 
     kubectl get resourceslice <node>-audio.liken.sh -o yaml
 
-An output whose monitor answers carries the monitor's attributes. An
-HDMI output with no monitor publishes too, with taints, so a claim
-on it parks until a monitor arrives.
+An output whose monitor answers publishes the monitor's attributes.
+An HDMI output with no monitor publishes too, with taints, so a
+claim on it parks until a monitor arrives.
 [Devices](/docs/reference/devices/) describes every attribute.
 
 Now [play sound to an output](/docs/guides/claim/).
 
 ## Remove the operator
 
-Delete the manifests, then the slice on each node that published
-one:
+Delete the manifests. Then delete the slice on each node that
+published one:
 
     kubectl delete -n liken-system \
       -f https://audio.liken.sh/deploy/rbac.yaml \
@@ -199,5 +198,5 @@ Delete them when no other claim names them:
 
 The second step is yours because the operator never deletes its
 slice. A device that leaves the inventory while a claim still names
-it strands the kubelet's prepare call, so the operator taints
+it strands the kubelet's prepare call. So the operator taints
 devices instead of removing them, and the slice outlives every pod.
