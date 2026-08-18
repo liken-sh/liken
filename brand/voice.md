@@ -32,6 +32,12 @@ source file. Four more rules apply to comments:
 - Do not write "best practices", "leverage", "comprehensive",
   "robust", "seamless", or "root cause".
 - Do not use an em-dash. Use a period or a comma.
+- Set every technical identifier in the code face, always: a
+  Kubernetes kind or API name (`PairingRequest`, `ResourceClaim`,
+  `Secret`, `Deployment`), a command, a file name, a field name, a
+  label or attribute key, a device class name, and a hostname that
+  names software. Write "the `Secret` holds the deploy key", not
+  "the secret holds the deploy key".
 - Write `liken` in the code face everywhere it appears, because it
   names the code.
 
