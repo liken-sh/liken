@@ -19,6 +19,15 @@ operator publishes what that hardware serves, at the grain a
 workload asks for: a paired controller, a monitor output, an audio
 output.
 
+A device can also take parameters from the claim. A `ResourceClaim`
+carries an opaque config block per driver, the operator reads it
+when it prepares the claim, and it puts the device into the state
+the block asks for before the pod starts. The audio operator takes
+`codec` on a Bluetooth speaker, and the display operator takes
+`mode` on a monitor output. A `DeviceClass` can carry the same
+block as cluster policy, and the claim's own block wins. Each
+operator's manual documents its parameters beside its attributes.
+
 The name of an operator's device class is also the hostname of its
 manual. Each manual gives the install steps and the claims for its
 devices:
