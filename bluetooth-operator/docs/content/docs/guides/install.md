@@ -28,36 +28,41 @@ is in one `kustomize` base, and nothing here touches a machine over SSH.
 A [`DeviceClass`](https://kubernetes.io/docs/reference/kubernetes-api/resource/device-class-v1/)
 is cluster-scoped policy, the same convention a `StorageClass`
 follows: the cluster owner names and curates the classes workloads
-may ask for. The base ships this operator's two generic classes,
-served at [`deviceclasses.yaml`](/deploy/deviceclasses.yaml),
-because their selectors name only the drivers' own vocabulary and
-carry no cluster's choice. If the DRA objects are new to you, read
+may ask for. The classes split by owner. If the DRA objects are new
+to you, read
 [How the pieces fit](/docs/guides/#how-the-pieces-fit) first.
 
-* `bluetooth-adapter` is the bootstrap class. The operator's own
-  pod claims the raw radio through it, its selector picks the
-  `btusb` adapter that `liken` publishes, and the claim template in
-  [`operator.yaml`](/deploy/operator.yaml) names it literally, so
-  the operator cannot start without it. If you rename that class,
-  patch the template to match.
-* `bluetooth-controller` is the class your workloads claim. Its
-  selector covers every device this operator publishes, and it is
-  yours to rename or narrow as your cluster's policy asks:
+* `bluetooth-adapter` is wiring, and the base ships it, served at
+  [`deviceclasses.yaml`](/deploy/deviceclasses.yaml). The
+  operator's own pod claims the raw radio through it, its selector
+  picks the `btusb` adapter that `liken` publishes, and the claim
+  template in [`operator.yaml`](/deploy/operator.yaml) names it
+  literally, so the operator cannot start without it. Do not
+  delete it.
+* The class your workloads claim through is yours to create,
+  because it is your cluster's vocabulary, and the base ships no
+  policy. `bluetooth-input` is the one to start with. Its selector
+  covers the paired input devices and only them, because the driver
+  also publishes devices no workload should hold, such as a paired
+  speaker's bond record:
 
         apiVersion: resource.k8s.io/v1
         kind: DeviceClass
         metadata:
-          name: bluetooth-controller
+          name: bluetooth-input
         spec:
           selectors:
             - cel:
-                expression: device.driver == "bluetooth.liken.sh"
+                expression: |
+                  device.driver == "bluetooth.liken.sh" &&
+                  has(device.attributes["bluetooth.liken.sh"].input) &&
+                  device.attributes["bluetooth.liken.sh"].input
 
 ### Generic or specific
 
 A class is the cluster's vocabulary for a kind of device, and you
-choose its grain. A generic class such as `bluetooth-controller`
-matches every paired controller: the class list stays short, and
+choose its grain. A generic class such as `bluetooth-input`
+matches every paired input device: the class list stays short, and
 each claim picks its controller with a CEL selector. A specific
 class holds the selector itself. This one matches exactly one
 controller, so a claim names the class and writes no CEL, and you
@@ -120,8 +125,9 @@ to the same version:
 
 Whichever path you take, the manifests contain:
 
-* The two generic `DeviceClasses`, `bluetooth-adapter` and
-  `bluetooth-controller`.
+* The `bluetooth-adapter` `DeviceClass`, the wiring the operator's
+  own claim names. Your consumer class, such as `bluetooth-input`
+  above, is not in the manifests: you create it.
 * The three `CustomResourceDefinitions` of the pairing API:
   `Adapter`, `Pairing`, and `PairingRequest`. The operator records
   every bond as a `Pairing` and stores its keys in a `Secret` that

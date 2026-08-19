@@ -21,9 +21,10 @@ with their attributes. The slices are the inventory the scheduler
 reads.
 
 A `DeviceClass` names a kind of device a workload can ask for. The
-classes are yours to create, and
+deploy base ships only the operator's own `bluetooth-adapter`; the
+class your workloads claim through is yours to create, and
 [Install the operator](/docs/guides/install/) gives the YAML:
-`bluetooth-controller` names a paired controller. A class can be
+`bluetooth-input` names a paired input device. A class can be
 generic like that one, or specific down to a single device;
 [Generic or specific](/docs/guides/install/#generic-or-specific)
 weighs the choice. A workload asks

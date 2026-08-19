@@ -4,15 +4,13 @@
 # your own GitOps with patches of your own, or read it and write your
 # own manifests.
 #
-# The base ships this operator's two generic DeviceClasses:
-# bluetooth-adapter, which the claim template in operator.yaml names
-# and the operator's own pod cannot start without, and
-# bluetooth-controller, which workloads claim. Their selectors name
-# only the drivers' own vocabulary, so there is no cluster policy in
-# them. A class that encodes a cluster's choice, such as one
-# controller, is the cluster owner's to create, and the install
-# guide gives an example. An owner who renames bluetooth-adapter
-# patches both the class and the template.
+# The base ships one DeviceClass, bluetooth-adapter, because the
+# claim template in operator.yaml names it and the operator's own
+# pod cannot start without it: it is wiring, not policy. The class
+# workloads claim through is the cluster owner's to create, because
+# it is cluster policy, and the install guide gives the YAML for
+# bluetooth-input, the one to start with. An owner who renames
+# bluetooth-adapter patches both the class and the template.
 #
 # Everything here except the CustomResourceDefinitions is namespaced.
 # The CRDs are cluster-scoped, and kustomize reads that from the

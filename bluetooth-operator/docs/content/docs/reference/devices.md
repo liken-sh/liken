@@ -109,9 +109,8 @@ skipping the device. So a selector on anything past `address` and
     device.attributes["bluetooth.liken.sh"].name.startsWith("DualSense")
 
 A selector that reads only `address` or `connected` needs no guard,
-because the `bluetooth-controller` class already limits the
-candidates to this driver's devices, and both attributes are always
-on them.
+because the `bluetooth-input` class already limits the candidates
+to this driver's devices, and both attributes are always on them.
 
 ## The taints
 
@@ -137,20 +136,26 @@ off.
 
 The operator takes two
 [`DeviceClasses`](https://kubernetes.io/docs/reference/kubernetes-api/resource/device-class-v1/),
-and the deploy base ships both, because their selectors name only
-this driver's own vocabulary and a release must be able to change a
-selector. [Install the operator](/docs/guides/install/) shows their
-YAML. `bluetooth-controller` is the one your workloads claim:
+and they split by owner:
 
 | `DeviceClass` | Selector | Who claims it |
 |---|---|---|
-| `bluetooth-controller` | `device.driver == "bluetooth.liken.sh"` | your workloads, one paired controller each |
+| `bluetooth-input` | `device.driver == "bluetooth.liken.sh"` and the `input` attribute, guarded | your workloads, one paired input device each |
 | `bluetooth-adapter` | `device.driver == "liken.sh" && device.attributes["liken.sh"].driver == "btusb"` | the operator's own pod, for the raw radio |
+
+`bluetooth-adapter` ships with the deploy base, because the
+operator's own claim template names it and the pod cannot start
+without it. `bluetooth-input` is yours to create, because a class a
+workload claims through is cluster policy, and
+[Install the operator](/docs/guides/install/) gives its YAML. It
+selects the `input` attribute rather than the whole driver, because
+the driver publishes more than input devices: a paired speaker
+publishes as its bond record, and no workload should hold one.
 
 ## The claim
 
 A [`ResourceClaim`](https://kubernetes.io/docs/reference/kubernetes-api/resource/resource-claim-v1/)
-against `bluetooth-controller` alone allocates any paired controller.
+against `bluetooth-input` alone allocates any paired input device.
 To name one, add a selector on its address:
 
     spec:
@@ -158,7 +163,7 @@ To name one, add a selector on its address:
         requests:
           - name: controller
             exactly:
-              deviceClassName: bluetooth-controller
+              deviceClassName: bluetooth-input
               selectors:
                 - cel:
                     expression: |

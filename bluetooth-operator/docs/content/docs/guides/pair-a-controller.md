@@ -106,7 +106,7 @@ that selects the controller by its address:
         requests:
           - name: controller
             exactly:
-              deviceClassName: bluetooth-controller
+              deviceClassName: bluetooth-input
               selectors:
                 - cel:
                     expression: |
