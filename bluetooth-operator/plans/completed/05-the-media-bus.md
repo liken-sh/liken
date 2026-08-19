@@ -3,12 +3,12 @@
 Built. The drill on liken-1 runs with release 2026.08.19-004.
 
 This plan is this operator's half of liken's
-[milestone 60, Bluetooth audio](https://github.com/liken-sh/liken/blob/main/plans/60-bluetooth-audio.md).
+[milestone 60, Bluetooth audio](https://github.com/liken-sh/liken/blob/main/plans/completed/60-bluetooth-audio.md).
 That document is the design record: why the sound server stays out of
 this pod, why the permission to do Bluetooth audio is a claimable
 device, and how the audio operator's claim spans two drivers. This
 document records only what this repository decided while it built its
-share. It supersedes [plan 01](01-bluetooth-audio.md), whose "How
+share. It supersedes [plan 01](../01-bluetooth-audio.md), whose "How
 A2DP works" section remains the citation record.
 
 ## The problem

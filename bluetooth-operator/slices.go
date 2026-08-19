@@ -5,7 +5,7 @@ package main
 // The slice holds two kinds of device: one for each paired
 // controller, and one media bus for the adapter itself. The media bus
 // is the claimable permission to connect a sound server to this pod's
-// bluetoothd, and plans/05-the-media-bus.md records the design.
+// bluetoothd, and plans/completed/05-the-media-bus.md records the design.
 //
 // A device operator publishes under its own driver name, in its own
 // slices, beside whatever liken publishes on the same node. The two

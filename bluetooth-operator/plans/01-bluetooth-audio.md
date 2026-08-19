@@ -1,8 +1,8 @@
 # Bluetooth audio
 
 Plan 01, Superseded.
-[liken's milestone 60](https://github.com/liken-sh/liken/blob/main/plans/60-bluetooth-audio.md)
-replaces this design, and [plan 05](05-the-media-bus.md) builds this
+[liken's milestone 60](https://github.com/liken-sh/liken/blob/main/plans/completed/60-bluetooth-audio.md)
+replaces this design, and [plan 05](completed/05-the-media-bus.md) builds this
 operator's half of the replacement. The "How A2DP works" and "The
 privilege does not change" sections remain the citation record.
 

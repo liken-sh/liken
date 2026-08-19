@@ -32,7 +32,7 @@ decided yet what work they become.
   owned by the operator, and a PairingRequest a person opens and
   approves with kubectl. Answers and replaces the open problem "Who
   owns the pairing UX".
-* [05, The media bus](05-the-media-bus.md). Built. The adapter's
+* [05, The media bus](completed/05-the-media-bus.md). Built. The adapter's
   media bus as an exclusive DRA device, the hostPath behind the bus
   socket, and the mount-and-variable delivery. This operator's half
   of liken's milestone 60.
