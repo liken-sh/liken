@@ -193,6 +193,39 @@ func TestInventoryPublishesAnAudioControllerExclusively(t *testing.T) {
 	}
 }
 
+func TestInventoryStampsSupportsSoundOnASoundDevice(t *testing.T) {
+	devices := inventoryDevices([]hardware.Device{
+		{Bus: "pci", Address: "0000:00:1f.3", Driver: "snd_hda_intel", Class: "multimedia",
+			Name: "Alder Lake-N PCH High Definition Audio"},
+	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{
+		{Path: "/dev/snd/controlC0", Subsystem: "sound"},
+		{Path: "/dev/snd/pcmC0D3p", Subsystem: "sound"},
+	}}), nil)
+
+	if len(devices) != 1 {
+		t.Fatalf("devices = %+v, want the controller", devices)
+	}
+	got := devices[0].Attributes["sound.liken.sh/supportsSound"].Bool
+	if got == nil || !*got {
+		t.Errorf("sound.liken.sh/supportsSound = %v, want true", got)
+	}
+}
+
+func TestInventoryStampsSupportsSoundOnNothingElse(t *testing.T) {
+	devices := inventoryDevices([]hardware.Device{
+		{Bus: "pci", Address: "0000:00:02.0", Driver: "i915", Class: "display"},
+	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{
+		{Path: "/dev/dri/card0", Subsystem: "drm"},
+	}}), nil)
+
+	if len(devices) != 1 {
+		t.Fatalf("devices = %+v, want the card device", devices)
+	}
+	if _, ok := devices[0].Attributes["sound.liken.sh/supportsSound"]; ok {
+		t.Error("a display device supports no sound server")
+	}
+}
+
 func TestInventoryRefusesToShareARenderNodeBesideSomethingElse(t *testing.T) {
 	// A render node beside a node from outside the graphics stack is
 	// hardware liken has not met. It stays exclusive until somebody

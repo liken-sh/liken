@@ -84,10 +84,11 @@ constrain two requests to one physical device.
 
 ## Attributes
 
-Every attribute belongs to the driver's domain, so a selector reads
-it as `device.attributes["liken.sh"].<name>`. If the hardware does
-not have an attribute, the attribute is absent, not empty. Thus
-`has(device.attributes["liken.sh"].serial)` gives a correct result.
+Every attribute except the last belongs to the driver's domain, so a
+selector reads it as `device.attributes["liken.sh"].<name>`. If the
+hardware does not have an attribute, the attribute is absent, not
+empty. Thus `has(device.attributes["liken.sh"].serial)` gives a
+correct result.
 
 | Attribute | Type | What it is |
 |---|---|---|
@@ -104,6 +105,7 @@ not have an attribute, the attribute is absent, not empty. Thus
 | `serial` | string | the serial number of the hardware, when it has one |
 | `vendor` | string | the vendor ID, lowercase hex with no prefix |
 | `product` | string | the product ID, lowercase hex with no prefix |
+| `sound.liken.sh/supportsSound` | bool | a sound server can run against this device. The attribute carries its own domain, so a selector reads it as `device.attributes["sound.liken.sh"].supportsSound`. The domain belongs to no single driver, so a DeviceClass that selects the attribute names no driver, and any driver may stamp it on a device that supports a sound server |
 
 Use the attribute that describes what you need. `renderNode` and
 `classCode` describe a capability of the hardware, and they stay
@@ -145,7 +147,8 @@ more than one claim can hold it.
 
 An audio controller is a device that delivers ALSA's nodes, and no
 nodes except the ones a sound card holds. It has
-`subsystem: sound`, and it is exclusive. In practice one sound server
+`subsystem: sound` and `sound.liken.sh/supportsSound: true`, and it
+is exclusive. In practice one sound server
 owns every PCM on a card and mixes its clients' streams through them,
 so the card belongs to one claim. A second claimant waits in the
 scheduler, where a person can see it wait, instead of receiving ALSA's

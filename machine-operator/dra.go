@@ -220,6 +220,17 @@ func inventoryDevices(discovered []hardware.Device,
 			if p.DisplayNode {
 				attrs["displayNode"] = kubernetes.AttrBool(true)
 			}
+			// The sound attribute states that a sound server can run
+			// against this device. It is qualified where every other
+			// attribute here is bare, because sound.liken.sh belongs to
+			// no single driver: any driver may stamp the attribute, and
+			// a DeviceClass that selects it names no driver, so a device
+			// that supports a sound server joins that class by stamping
+			// this one field. monitor.liken.sh/id takes the same form
+			// for pairing a monitor's outputs.
+			if p.Subsystem == "sound" {
+				attrs["sound.liken.sh/supportsSound"] = kubernetes.AttrBool(true)
+			}
 			device := kubernetes.SliceDevice{
 				Name:       deviceName(d) + p.Suffix,
 				Attributes: attrs,
