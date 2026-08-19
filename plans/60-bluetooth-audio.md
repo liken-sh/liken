@@ -120,12 +120,12 @@ repository. The OS still publishes raw hardware and nothing refined.
   change would replace a volume and not an address.
 * Writes the CDI file that delivers the mount and
   `DBUS_SYSTEM_BUS_ADDRESS` to the claim holder.
-* Narrows the `bluetooth-controller` class so it stops matching the
-  media bus. The class selects everything driver
-  `bluetooth.liken.sh` publishes, and the media bus is exclusive, so
-  without the narrowing a workload claim could allocate the bus away
-  from the audio operator. The deploy base ships the class, so the
-  new selector arrives with the release.
+* Stays out of workload classes with the media bus. This landed
+  ahead of the milestone, with the device enrichment of plan 61:
+  the consumer class is the cluster owner's, and the manual's
+  example, `bluetooth-input`, selects the `input` attribute, so it
+  never matches the bus. The old `bluetooth-controller` class,
+  which matched everything the driver publishes, is gone.
 * Keeps everything it owns today: the adapter claim, `bluetoothd`, the
   pairing API of its plan 04, the bond Secrets, and the `input`
   devices. It never runs PipeWire. This design supersedes its plan 01,
@@ -134,12 +134,12 @@ repository. The OS still publishes raw hardware and nothing refined.
 
 ### The audio operator
 
-* Selects on the shared attribute: the class stops naming
-  `device.driver == "liken.sh"` and starts naming
-  `sound.liken.sh/supportsSound`. The claim template keeps
-  `allocationMode: All`. The deploy base ships the `sound-card`
-  class, so an upgrade applies the new selector with the release,
-  and no cluster owner edits a class by hand.
+* Selects on the shared attribute. This landed with plan 61's
+  enrichment release: the `sound-card` class names
+  `sound.liken.sh/supportsSound` and no driver, and the claim
+  template keeps `allocationMode: All`. The deploy base ships the
+  class, because the operator's own claim names it, so the media
+  bus joins the claim with no further class change anywhere.
 * Enables WirePlumber's Bluetooth monitor when a claim delivers a bus,
   pointed at the delivered `DBUS_SYSTEM_BUS_ADDRESS`. The ALSA side is
   untouched on machines with no radio.
