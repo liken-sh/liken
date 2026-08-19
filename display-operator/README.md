@@ -48,12 +48,12 @@ their YAML):
       -f https://display.liken.sh/deploy/operator.yaml
 
 [`deploy/`](deploy/) is the source of those files: a `kustomize` base
-with the three generic `DeviceClasses`, the RBAC, and the `DaemonSet`
-whose pod claims the card on its own node. The base ships
-`display-gpu` and `display-render`, which the claim template names
-and the operator cannot start without, and `display-output`, which
-your workloads claim. A class that picks one monitor is cluster
-policy, yours to create; the install guide gives an example.
+with the RBAC, the `DaemonSet` whose pod claims the card on its own
+node, and two `DeviceClasses`, `display-gpu` and `display-render`,
+which that claim names and the operator cannot start without. The
+class your workloads claim through is cluster policy, yours to
+create; the install guide gives the YAML for `display-output`, the
+one to start with.
 
 ## The design
 

@@ -4,15 +4,14 @@
 # and does not name it. Take it through your own GitOps with patches
 # of your own, or read it and write your own manifests.
 #
-# The base ships this operator's three generic DeviceClasses: the
-# two bootstrap classes the operator's own claim names, display-gpu
-# and display-render, and display-output, which workloads claim.
-# Their selectors name only the drivers' own vocabulary, so there is
-# no cluster policy in them. A class that encodes a cluster's
-# choice, such as one monitor, is the cluster owner's to create, and
-# the install guide at https://display.liken.sh/docs/guides/install/
-# gives an example. An owner who renames a bootstrap class patches
-# both the class and the template.
+# The base ships two DeviceClasses, display-gpu and display-render,
+# because the claim template in operator.yaml names them and the
+# operator's own pod cannot start without them: they are wiring, not
+# policy. The class workloads claim through is the cluster owner's
+# to create, because it is cluster policy, and the install guide at
+# https://display.liken.sh/docs/guides/install/ gives the YAML for
+# display-output, the one to start with. An owner who renames a
+# wiring class patches both the class and the template.
 #
 # kustomize stamps the namespace below onto the DeviceClasses too,
 # because resource.k8s.io/v1 is not in its compiled OpenAPI schema

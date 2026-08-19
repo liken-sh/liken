@@ -51,7 +51,9 @@ itself publishes:
 
 A consumer claims through a
 [`DeviceClass`](https://kubernetes.io/docs/reference/kubernetes-api/resource/device-class-v1/)
-that selects this driver. The base ships it as `display-output`:
+that selects this driver. You create it, because a class a
+workload claims through is cluster policy, and this manual calls
+it `display-output`:
 
     apiVersion: resource.k8s.io/v1
     kind: DeviceClass
@@ -65,7 +67,8 @@ that selects this driver. The base ships it as `display-output`:
 The class is yours to rename or narrow, the way a `StorageClass`
 is;
 [Install the operator](/docs/guides/install/#2-the-device-classes)
-explains each shipped class, and its
+explains the split between the shipped wiring classes and this
+one, and its
 [Generic or specific](/docs/guides/install/#generic-or-specific)
 section shows a class that names one screen. This generic class
 alone allocates any output that has a monitor. To name one screen

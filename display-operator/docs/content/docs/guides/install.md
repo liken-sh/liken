@@ -40,60 +40,32 @@ operator refines it into outputs.
 ## 2. The device classes
 
 A `DeviceClass` is cluster-scoped policy: you name and curate the
-classes, the same convention as a `StorageClass`. The base ships
-this operator's three generic classes, served at
-[`deviceclasses.yaml`](/deploy/deviceclasses.yaml), because their
-selectors name only the drivers' own vocabulary and carry no
-cluster's choice:
+classes, the same convention as a `StorageClass`. The classes split
+by owner:
 
-    apiVersion: resource.k8s.io/v1
-    kind: DeviceClass
-    metadata:
-      name: display-gpu
-    spec:
-      selectors:
-        - cel:
-            expression: |
-              device.driver == "liken.sh" &&
-              has(device.attributes["liken.sh"].displayNode)
-    ---
-    apiVersion: resource.k8s.io/v1
-    kind: DeviceClass
-    metadata:
-      name: display-render
-    spec:
-      selectors:
-        - cel:
-            expression: |
-              device.driver == "liken.sh" &&
-              has(device.attributes["liken.sh"].renderNode)
-    ---
-    apiVersion: resource.k8s.io/v1
-    kind: DeviceClass
-    metadata:
-      name: display-output
-    spec:
-      selectors:
-        - cel:
-            expression: device.driver == "display.liken.sh"
+* `display-gpu` and `display-render` are wiring, and the base ships
+  them, served at
+  [`deviceclasses.yaml`](/deploy/deviceclasses.yaml). The
+  operator's own pod claims the graphics card's card node and
+  render node through them, from the devices `liken` publishes, and
+  the `ResourceClaimTemplate` in
+  [`operator.yaml`](/deploy/operator.yaml) names them literally, so
+  the operator cannot start without them. Do not delete them. The
+  classes select on the `displayNode` and `renderNode` attributes
+  rather than on a vendor and a product id, so they stay correct
+  across a fleet of different machines.
+* The class your workloads claim through is yours to create,
+  because it is your cluster's vocabulary, and the base ships no
+  policy. `display-output` is the one to start with:
 
-The three classes do two different jobs:
-
-* `display-gpu` and `display-render` are bootstrap. The operator's
-  own pod claims the graphics card's card node and render node
-  through them, from the devices `liken` publishes, so without them
-  the operator cannot start. The classes select on the `displayNode`
-  and `renderNode` attributes rather than on a vendor and a product
-  id, so they stay correct across a fleet of different machines.
-* `display-output` is what workloads claim: this operator's monitor
-  outputs.
-
-The names are yours to choose, with one consequence: the operator's
-`ResourceClaimTemplate` in [`operator.yaml`](/deploy/operator.yaml)
-names `display-gpu` and `display-render` literally, so different
-names there mean patching the template. A different name for
-`display-output` costs nothing; your claims name it in
-`deviceClassName`.
+        apiVersion: resource.k8s.io/v1
+        kind: DeviceClass
+        metadata:
+          name: display-output
+        spec:
+          selectors:
+            - cel:
+                expression: device.driver == "display.liken.sh"
 
 ### Generic or specific
 
