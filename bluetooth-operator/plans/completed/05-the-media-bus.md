@@ -8,7 +8,7 @@ That document is the design record: why the sound server stays out of
 this pod, why the permission to do Bluetooth audio is a claimable
 device, and how the audio operator's claim spans two drivers. This
 document records only what this repository decided while it built its
-share. It supersedes [plan 01](../01-bluetooth-audio.md), whose "How
+share. It supersedes [plan 01](../rejected/01-bluetooth-audio.md), whose "How
 A2DP works" section remains the citation record.
 
 ## The problem

@@ -17,9 +17,13 @@ and this operator's own instance,
 owes an answer to. Those documents have no number, because nobody has
 decided yet what work they become.
 
+[`rejected/`](rejected/) holds the designs that were set aside,
+superseded or removed. Each document stays as the record of what was
+considered and why.
+
 ## The designs
 
-* [01, Bluetooth audio](01-bluetooth-audio.md). Superseded by
+* [01, Bluetooth audio](rejected/01-bluetooth-audio.md). Superseded by
   liken's milestone 60 and plan 05. Its source reading remains the
   citation record.
 * [02, The two-container pod](completed/02-the-two-container-pod.md). Built, and
