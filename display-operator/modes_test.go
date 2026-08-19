@@ -186,6 +186,149 @@ func TestClaimModesRefusesParametersItCannotRead(t *testing.T) {
 	}
 }
 
+func TestParseModeReadsTheRefresh(t *testing.T) {
+	cases := []struct {
+		mode        string
+		wantName    string
+		wantRefresh int
+	}{
+		{mode: "1280x720", wantName: "1280x720"},
+		{mode: "3840x1600@24", wantName: "3840x1600", wantRefresh: 24},
+		{mode: "1920x1080@60", wantName: "1920x1080", wantRefresh: 60},
+	}
+	for _, c := range cases {
+		t.Run(c.mode, func(t *testing.T) {
+			parsed, err := parseMode(c.mode)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if parsed.Name != c.wantName || parsed.Refresh != c.wantRefresh {
+				t.Errorf("parseMode(%q) = %+v, want %s at %d", c.mode, parsed, c.wantName, c.wantRefresh)
+			}
+		})
+	}
+}
+
+// Weston parses the refresh as an integer, so @59.94 would read as
+// 59, match nothing, and fall back to preferred with nothing said.
+// The parse is where that claim must fail.
+func TestParseModeRefusesARefreshThatIsNotAWholeNumber(t *testing.T) {
+	cases := []string{"3840x1600@59.94", "1280x720@sixty", "1280x720@", "1280x720@0", "1280x720@-60"}
+	for _, mode := range cases {
+		t.Run(mode, func(t *testing.T) {
+			if _, err := parseMode(mode); err == nil {
+				t.Fatalf("parseMode accepted %q", mode)
+			}
+		})
+	}
+}
+
+func TestModeMatchesTheReadback(t *testing.T) {
+	cases := []struct {
+		name      string
+		requested string
+		current   string
+		want      bool
+	}{
+		{name: "a name against the refresh the card reports", requested: "1920x1080", current: "1920x1080@60", want: true},
+		{name: "the same name and refresh", requested: "1920x1080@60", current: "1920x1080@60", want: true},
+		{name: "another refresh of the same name", requested: "1920x1080@50", current: "1920x1080@60"},
+		{name: "another name", requested: "1280x720", current: "1920x1080@60"},
+		{name: "an output that runs nothing", requested: "1920x1080", current: ""},
+		{name: "a card that reports no refresh", requested: "1920x1080", current: "1920x1080", want: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := modeMatches(c.requested, c.current); got != c.want {
+				t.Errorf("modeMatches(%q, %q) = %v, want %v", c.requested, c.current, got, c.want)
+			}
+		})
+	}
+}
+
+// PortableModes is what GETCONNECTOR answers for the lab's portable
+// panel: one entry per timing, so a name with two refreshes appears
+// twice, and an aspect-ratio variant appears again under the same
+// name and refresh.
+func portableModes() []drmMode {
+	return []drmMode{
+		{Name: "1920x1080", Refresh: 60},
+		{Name: "1920x1080", Refresh: 50},
+		{Name: "1280x720", Refresh: 60},
+		{Name: "1280x720", Refresh: 60},
+		{Name: "1280x720", Refresh: 24},
+		{Name: "640x480", Refresh: 60},
+	}
+}
+
+func TestValidateModeAcceptsWhatTheConnectorOffers(t *testing.T) {
+	cases := []struct {
+		name string
+		mode string
+	}{
+		{name: "a name with no refresh", mode: "1920x1080"},
+		{name: "a name and the refresh it runs", mode: "1920x1080@60"},
+		{name: "a second refresh of the same name", mode: "1920x1080@50"},
+		{name: "a name that appears under several entries", mode: "1280x720@24"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if err := validateMode("HDMI-A-2", portableModes(), c.mode); err != nil {
+				t.Errorf("validateMode refused %q: %v", c.mode, err)
+			}
+		})
+	}
+}
+
+func TestValidateModeRefusesWhatTheConnectorDoesNotOffer(t *testing.T) {
+	cases := []struct {
+		name  string
+		modes []drmMode
+		mode  string
+		says  []string
+	}{
+		{
+			name:  "a name the connector does not carry",
+			modes: portableModes(),
+			mode:  "1234x567",
+			says:  []string{"1234x567", "1920x1080 1280x720 640x480"},
+		},
+		{
+			// The refusal names the refreshes that do exist, because
+			// no attribute publishes them and the error is the one
+			// place a person reads them.
+			name:  "a refresh the connector does not carry",
+			modes: portableModes(),
+			mode:  "1920x1080@24",
+			says:  []string{"1920x1080@24", "60", "50"},
+		},
+		{
+			name:  "a refresh that is not a whole number",
+			modes: portableModes(),
+			mode:  "1920x1080@59.94",
+			says:  []string{"59.94"},
+		},
+		{
+			name: "a connector the card reports no modes for",
+			mode: "1920x1080",
+			says: []string{"HDMI-A-2"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := validateMode("HDMI-A-2", c.modes, c.mode)
+			if err == nil {
+				t.Fatalf("validateMode accepted %q", c.mode)
+			}
+			for _, want := range c.says {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %q, want it to say %q", err, want)
+				}
+			}
+		})
+	}
+}
+
 func TestReadModeRecordOfAFileThatIsNotThere(t *testing.T) {
 	// A pod whose declare container never ran leaves no record, and a
 	// claim that states a mode must still be able to write one.

@@ -42,6 +42,32 @@ func TestCrtcModeReadsTheKernelsOwnName(t *testing.T) {
 	}
 }
 
+func TestCrtcModeCarriesTheRefreshTheCardReports(t *testing.T) {
+	// The readback speaks the claim's vocabulary, and the kernel's
+	// vrefresh is the whole number weston matches against.
+	crtc := crtcWithMode("3840x1600", 1)
+	crtc.Mode.Vrefresh = 24
+	if got := crtcMode(crtc); got != "3840x1600@24" {
+		t.Errorf("mode = %q, want %q", got, "3840x1600@24")
+	}
+}
+
+func TestCrtcModeWithoutARefresh(t *testing.T) {
+	// A card that states no vrefresh answers the name alone, because
+	// "1280x720@0" names a mode nothing accepts.
+	if got := crtcMode(crtcWithMode("1280x720", 1)); got != "1280x720" {
+		t.Errorf("mode = %q, want %q", got, "1280x720")
+	}
+}
+
+func TestModeNameStopsAtTheNulByte(t *testing.T) {
+	info := drmModeInfo{Vrefresh: 60}
+	copy(info.Name[:], "1920x1080")
+	if got := modeName(info); got != "1920x1080" {
+		t.Errorf("name = %q", got)
+	}
+}
+
 func TestCrtcModeReportsNothingForACrtcThatDrivesNothing(t *testing.T) {
 	// The kernel sets mode_valid only while the crtc is enabled, and
 	// the mode it leaves beside it means nothing then. An output that

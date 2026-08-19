@@ -59,12 +59,14 @@ func allocatedClaim(t *testing.T, results []AllocatedDevice, config string) *Cli
 // record states, unless the test says it declines them, which is what
 // a mode weston cannot match does.
 type fakeCompositor struct {
-	mu       sync.Mutex
-	record   string
-	current  map[string]string
-	kills    int
-	declines bool
-	readErr  error
+	mu          sync.Mutex
+	record      string
+	current     map[string]string
+	offers      map[string][]drmMode
+	kills       int
+	republishes int
+	declines    bool
+	readErr     error
 }
 
 // modes is the GETCRTC readback: what each connector runs right now.
@@ -81,6 +83,30 @@ func (f *fakeCompositor) modes() (map[string]string, error) {
 	return current, nil
 }
 
+// Connectors stands in for the GETCONNECTOR read: every mode each
+// connector offers now, with the kernel's vrefresh beside its name.
+func (f *fakeCompositor) connectors() (map[string][]drmMode, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	offered := map[string][]drmMode{}
+	for connector, modes := range f.offers {
+		offered[connector] = append([]drmMode{}, modes...)
+	}
+	return offered, nil
+}
+
+// Applied is what the card reports after weston takes the record's
+// entry: the connector's first timing that matches it, with its
+// refresh.
+func (f *fakeCompositor) applied(connector, mode string) string {
+	for _, offered := range f.offers[connector] {
+		if modeMatches(mode, fmt.Sprintf("%s@%d", offered.Name, offered.Refresh)) {
+			return fmt.Sprintf("%s@%d", offered.Name, offered.Refresh)
+		}
+	}
+	return mode
+}
+
 // end is the SIGTERM and the kubelet's restart in one step.
 func (f *fakeCompositor) end() error {
 	f.mu.Lock()
@@ -94,7 +120,7 @@ func (f *fakeCompositor) end() error {
 		return err
 	}
 	for connector, mode := range record {
-		f.current[connector] = mode
+		f.current[connector] = f.applied(connector, mode)
 	}
 	return nil
 }
@@ -103,6 +129,21 @@ func (f *fakeCompositor) ended() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.kills
+}
+
+// Republish stands in for the operator's own reconcile pass, which
+// re-reads the connectors and writes the slice on divergence. The
+// tests count calls, because the pass itself is main's wiring.
+func (f *fakeCompositor) republish() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.republishes++
+}
+
+func (f *fakeCompositor) republished() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.republishes
 }
 
 // labPlugin is the driver as it runs on the lab machine: an ultrawide
@@ -126,9 +167,10 @@ func labPluginWithConfig(t *testing.T, results []AllocatedDevice, config string)
 	compositor := &fakeCompositor{
 		record: filepath.Join(configDir, "modes.json"),
 		current: map[string]string{
-			"HDMI-A-1": "3840x1600",
-			"HDMI-A-2": "1920x1080",
+			"HDMI-A-1": "3840x1600@60",
+			"HDMI-A-2": "1920x1080@60",
 		},
+		offers: labConnectorModes(),
 	}
 	plugin := &draPlugin{
 		client:     allocatedClaim(t, results, config),
@@ -141,11 +183,38 @@ func labPluginWithConfig(t *testing.T, results []AllocatedDevice, config string)
 		// with the bounds shortened so that a test that must reach the
 		// timeout reaches it at once.
 		currentModes:   compositor.modes,
+		connectorModes: compositor.connectors,
 		endCompositor:  compositor.end,
+		republish:      compositor.republish,
 		switchTimeout:  200 * time.Millisecond,
 		switchInterval: time.Millisecond,
 	}
 	return plugin, compositor
+}
+
+// LabConnectorModes is what the kernel answers for the lab
+// machine's connectors: the names its sysfs lists, with the
+// refreshes each name carries.
+func labConnectorModes() map[string][]drmMode {
+	return map[string][]drmMode{
+		"HDMI-A-1": {
+			{Name: "3840x1600", Refresh: 60},
+			{Name: "3840x1600", Refresh: 24},
+			{Name: "3840x2160", Refresh: 30},
+			{Name: "1920x1080", Refresh: 60},
+		},
+		"HDMI-A-2": {
+			{Name: "1920x1080", Refresh: 60},
+			{Name: "1600x900", Refresh: 60},
+			{Name: "1280x800", Refresh: 60},
+			{Name: "1280x720", Refresh: 60},
+			{Name: "1280x720", Refresh: 24},
+			{Name: "1024x768", Refresh: 60},
+			{Name: "800x600", Refresh: 60},
+			{Name: "720x480", Refresh: 60},
+			{Name: "640x480", Refresh: 60},
+		},
+	}
 }
 
 // modeRecord reads the record the plugin keeps beside weston.ini.
@@ -423,6 +492,124 @@ func TestPrepareSwitchesTheModeAndWaitsForTheReadback(t *testing.T) {
 		if !strings.Contains(config, want) {
 			t.Errorf("the config does not contain %q:\n%s", want, config)
 		}
+	}
+}
+
+func TestPrepareSwitchesToAModeWithARefresh(t *testing.T) {
+	// The whole WIDTHxHEIGHT@REFRESH string passes through to
+	// weston's mode= line, which already reads that form.
+	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1280x720@24"}`))
+
+	claim := prepare(t, plugin)
+	if claim.Error != "" {
+		t.Fatalf("prepare refused a refresh the connector offers: %s", claim.Error)
+	}
+	if compositor.ended() != 1 {
+		t.Errorf("the compositor was ended %d times, want once", compositor.ended())
+	}
+	if got := modeRecord(t, plugin); got["HDMI-A-2"] != "1280x720@24" {
+		t.Errorf("record = %v", got)
+	}
+	if got := westonINI(t, plugin); !strings.Contains(got, "name=HDMI-A-2\nmode=1280x720@24\n") {
+		t.Errorf("the config does not state the refresh:\n%s", got)
+	}
+}
+
+func TestPrepareDeliversARefreshTheScreenAlreadyRuns(t *testing.T) {
+	// The readback speaks the same vocabulary, so a claim that names
+	// the refresh already on screen delivers with no restart.
+	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1920x1080@60"}`))
+
+	claim := prepare(t, plugin)
+	if claim.Error != "" {
+		t.Fatalf("prepare refused the refresh the screen runs: %s", claim.Error)
+	}
+	if compositor.ended() != 0 {
+		t.Errorf("the compositor was ended %d times for a mode it already runs", compositor.ended())
+	}
+}
+
+func TestPrepareRefusesARefreshTheConnectorDoesNotOffer(t *testing.T) {
+	// Weston falls back silently for a refresh no timing carries, so
+	// the refusal must name the refreshes that do exist.
+	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1280x720@100"}`))
+
+	claim := prepare(t, plugin)
+	if claim.Error == "" {
+		t.Fatal("prepare accepted a refresh the connector does not offer")
+	}
+	for _, want := range []string{"1280x720@100", "60", "24"} {
+		if !strings.Contains(claim.Error, want) {
+			t.Errorf("error = %q, want it to say %q", claim.Error, want)
+		}
+	}
+	if compositor.ended() != 0 {
+		t.Error("the compositor was ended for a refresh that never passed validation")
+	}
+}
+
+func TestPrepareRefusesARefreshThatIsNotAWholeNumber(t *testing.T) {
+	// Weston parses the refresh as an integer, so 59.94 would read
+	// as 59, match nothing, and fall back silently.
+	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1920x1080@59.94"}`))
+
+	claim := prepare(t, plugin)
+	if claim.Error == "" {
+		t.Fatal("prepare accepted a refresh weston reads as another number")
+	}
+	if !strings.Contains(claim.Error, "59.94") {
+		t.Errorf("error = %q, want it to name the refresh", claim.Error)
+	}
+	if compositor.ended() != 0 {
+		t.Error("the compositor was ended for a mode that never parsed")
+	}
+}
+
+func TestPrepareRepublishesTheSliceAfterTheReadback(t *testing.T) {
+	// The compositor probes the link on its way up and the mode list
+	// grows with no uevent, so the pass after the readback is what
+	// takes the list the kernel holds now.
+	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1280x720"}`))
+
+	if claim := prepare(t, plugin); claim.Error != "" {
+		t.Fatal(claim.Error)
+	}
+
+	if compositor.republished() != 1 {
+		t.Errorf("the slice was republished %d times, want once", compositor.republished())
+	}
+}
+
+func TestPrepareRepublishesTheSliceWithNoRestart(t *testing.T) {
+	// The case the folded open problem measured had no restart at
+	// all, so a prepare that delivers a mode already on screen must
+	// look again too. It just read the kernel, and the write costs
+	// nothing when nothing moved.
+	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1920x1080"}`))
+
+	if claim := prepare(t, plugin); claim.Error != "" {
+		t.Fatal(claim.Error)
+	}
+
+	if compositor.ended() != 0 {
+		t.Fatalf("the compositor was ended %d times for a mode it already runs", compositor.ended())
+	}
+	if compositor.republished() != 1 {
+		t.Errorf("the slice was republished %d times, want once", compositor.republished())
+	}
+}
+
+func TestPrepareRepublishesNothingForAModeItRefused(t *testing.T) {
+	// A prepare that failed validation never reached the card, so it
+	// read no list and has nothing to republish.
+	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1234x567"}`))
+
+	if claim := prepare(t, plugin); claim.Error == "" {
+		t.Fatal("prepare accepted a mode the connector does not offer")
+	}
+
+	if compositor.republished() != 0 {
+		t.Errorf("the slice was republished %d times, want none", compositor.republished())
 	}
 }
 

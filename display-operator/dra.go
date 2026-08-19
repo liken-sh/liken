@@ -67,12 +67,19 @@ type draPlugin struct {
 	// compositor reads.
 	configPath string
 	recordPath string
-	// CurrentModes reads what each output runs, and
-	// endCompositor is the restart that makes a new mode take. Both are
-	// fields rather than calls to the functions themselves, so a test
+	// CurrentModes reads what each output runs, connectorModes
+	// reads what each connector offers, and endCompositor is the
+	// restart that makes a new mode take. All three are fields
+	// rather than calls to the functions themselves, so a test
 	// drives a prepare with no card node and no compositor behind it.
-	currentModes  func() (map[string]string, error)
-	endCompositor func() error
+	currentModes   func() (map[string]string, error)
+	connectorModes func() (map[string][]drmMode, error)
+	endCompositor  func() error
+	// Republish is the operator's own reconcile pass, run after a
+	// prepare that read the kernel, so the slice follows what the
+	// prepare read. It is nil until the operator wires it, and a nil
+	// seam republishes nothing.
+	republish func()
 	// The bounds of the wait for the socket and the mode to come
 	// back.
 	switchTimeout  time.Duration
@@ -104,6 +111,9 @@ func newDRAPlugin(client *Client, card, socketDir string) *draPlugin {
 		recordPath: modeRecordPath,
 		currentModes: func() (map[string]string, error) {
 			return readCurrentModes(filepath.Join(driRoot, card))
+		},
+		connectorModes: func() (map[string][]drmMode, error) {
+			return readConnectorModes(filepath.Join(driRoot, card))
 		},
 		endCompositor:  func() error { return endCompositor(procRoot) },
 		switchTimeout:  modeSwitchTimeout,

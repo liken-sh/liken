@@ -200,11 +200,6 @@ func operate() {
 	// refused with a reason, and an unregistered driver answers with
 	// nothing at all.
 	plugin := newDRAPlugin(client, card, socketDir)
-	go func() {
-		if err := serveDRAPlugin(ctx, plugin); err != nil {
-			fatal("the DRA plugin is not serving: %v", err)
-		}
-	}()
 
 	uevents, err := listenForUevents(ctx)
 	if err != nil {
@@ -226,6 +221,18 @@ func operate() {
 			})
 		}
 	}
+
+	// A prepare republishes through the same pass every event takes,
+	// so the mode list it read reaches the slice without waiting for
+	// a wake. The seam is assigned before the plugin serves, because
+	// the kubelet calls into the plugin from its own goroutine and a
+	// later write would race it.
+	plugin.republish = publish
+	go func() {
+		if err := serveDRAPlugin(ctx, plugin); err != nil {
+			fatal("the DRA plugin is not serving: %v", err)
+		}
+	}()
 	settled := settle(ctx, wakes(ctx, uevents, retries, watchSocket(ctx, socketPath)), settleWindow, settleLimit)
 
 	// The first pass runs before any event. It replaces the slice the

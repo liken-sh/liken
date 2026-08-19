@@ -92,8 +92,10 @@ const (
 // westonConfig builds the weston.ini for one set of outputs.
 //
 // Modes is the record of what the claims on this machine asked
-// for, keyed by connector. A connector with an entry gets that mode by
-// name, and every other connector gets the one its monitor prefers.
+// for, keyed by connector. A connector with an entry gets that
+// mode, name or name@refresh exactly as the claim spelled it,
+// because weston's mode= line reads both forms. Every other
+// connector gets the one its monitor prefers.
 // The config is always built from a fresh connector walk and the
 // record, and never parsed back, so this function is the only thing
 // that knows the file's shape.

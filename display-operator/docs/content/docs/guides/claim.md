@@ -156,7 +156,9 @@ A claim can state the resolution its screen runs. The operator
 writes it into the compositor's config, restarts the compositor,
 and delivers the screen only after the card reports the mode. The
 name is one of the values in the `modes` attribute, spelled as the
-kernel spells it.
+kernel spells it, and it can carry a refresh: `3840x1600@24` runs
+a 24 fps film without the 3:2 cadence a 60 Hz mode forces on it.
+The refresh is a whole number of hertz.
 
     apiVersion: resource.k8s.io/v1
     kind: ResourceClaim
@@ -196,9 +198,11 @@ compositor restarted dies `Completed` and stays dead. A
 what keeps the pod scheduled through the restart.
 
 A claim that asks for the mode the screen already runs delivers at
-once, with no restart. Releasing the claim restarts nothing either:
-the screen keeps the mode until the next compositor start, and the
-slice's `currentMode` says what it runs.
+once, with no restart, and a claim that states no refresh matches
+whatever rate the screen runs under that name. Releasing the claim
+restarts nothing either: the screen keeps the mode until the next
+compositor start, and the slice's `currentMode` says what it runs,
+refresh included.
 
 ## Unplugged monitors, moved monitors, and second screens
 

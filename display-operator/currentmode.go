@@ -27,6 +27,11 @@ package main
 // The first pass answers how many connectors and crtcs the card has,
 // and the second pass fills the arrays the caller allocated for them.
 
+// This file answers two questions from that same walk: the mode
+// each output runs now, and the modes each connector offers. The
+// second uses GETCONNECTOR's own counting protocol, one call to
+// count and one to fill, the same shape GETRESOURCES takes.
+
 import (
 	"fmt"
 	"runtime"
@@ -44,9 +49,10 @@ const (
 	drmGetConnector = 0xC05064A7
 )
 
-// Drm_mode_modeinfo, the timings of one mode. Only Name is read
-// here, because the name is the vocabulary a claim, the sysfs list,
-// and weston.ini all speak.
+// Drm_mode_modeinfo, the timings of one mode. Two fields are read
+// here. The name is the vocabulary a claim, the sysfs list, and
+// weston.ini all speak. Vrefresh is the kernel's rounded rate, the
+// integer weston compares a claim's @refresh against.
 type drmModeInfo struct {
 	Clock                                         uint32
 	Hdisplay, HsyncStart, HsyncEnd, Htotal, Hskew uint16
@@ -113,21 +119,103 @@ func connectorName(connectorType, typeID uint32) string {
 	return fmt.Sprintf("%s-%d", name, typeID)
 }
 
-// CrtcMode is the mode name a crtc drives, and nothing while it
-// drives none. The kernel sets ModeValid only while the crtc is
-// enabled, and it leaves whatever the caller sent in the Mode field
-// otherwise.
+// CrtcMode is the mode a crtc drives, as NAME@REFRESH, the same
+// vocabulary a claim states, and nothing while it drives none. The
+// name stands alone when the card reports no refresh, because
+// 1280x720@0 names a mode nothing accepts. The kernel sets
+// ModeValid only while the crtc is enabled, and it leaves whatever
+// the caller sent in the Mode field otherwise.
 func crtcMode(crtc drmCrtc) string {
 	if crtc.ModeValid == 0 {
 		return ""
 	}
-	name := crtc.Mode.Name[:]
+	name := modeName(crtc.Mode)
+	if name == "" || crtc.Mode.Vrefresh == 0 {
+		return name
+	}
+	return fmt.Sprintf("%s@%d", name, crtc.Mode.Vrefresh)
+}
+
+// ModeName reads the kernel's fixed 32-byte name field. The name
+// ends at a NUL unless it fills the whole array, so the copy stops
+// at the first zero and takes all 32 bytes when there is none.
+func modeName(info drmModeInfo) string {
+	name := info.Name[:]
 	for i, b := range name {
 		if b == 0 {
 			return string(name[:i])
 		}
 	}
 	return string(name)
+}
+
+// A drmMode is one timing a connector offers right now: the name
+// every mode list here speaks, and the kernel's rounded vrefresh.
+// Sysfs publishes the same names with no refresh beside them, which
+// is why validation reads these and not the file.
+type drmMode struct {
+	Name    string
+	Refresh int
+}
+
+// ReadConnectorModes answers what each connector offers right now,
+// keyed by the connector name sysfs uses. This is the list a
+// claim's mode is validated against.
+func readConnectorModes(cardPath string) (map[string][]drmMode, error) {
+	fd, err := unix.Open(cardPath, unix.O_RDWR|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, fmt.Errorf("opening %s: %w", cardPath, err)
+	}
+	defer unix.Close(fd)
+
+	connectors, err := cardConnectors(fd)
+	if err != nil {
+		return nil, err
+	}
+	offered := map[string][]drmMode{}
+	for _, id := range connectors {
+		name, modes, err := connectorModeList(fd, id)
+		if err != nil || name == "" || len(modes) == 0 {
+			continue
+		}
+		offered[name] = modes
+	}
+	return offered, nil
+}
+
+// ConnectorModeList runs the counting protocol for one connector's
+// modes: the first call answers how many there are, and the second
+// fills the array the caller sized from the count. A list that grew
+// between the two calls answers nothing, and the next pass reads it
+// whole.
+func connectorModeList(fd int, id uint32) (string, []drmMode, error) {
+	counted := drmConnector{ConnectorID: id}
+	if err := drmIoctl(fd, drmGetConnector, unsafe.Pointer(&counted)); err != nil {
+		return "", nil, err
+	}
+	name := connectorName(counted.ConnectorType, counted.ConnectorTypeID)
+	if counted.CountModes == 0 {
+		return name, nil, nil
+	}
+	infos := make([]drmModeInfo, counted.CountModes)
+	filled := drmConnector{
+		ConnectorID: id,
+		ModesPtr:    uint64(uintptr(unsafe.Pointer(&infos[0]))),
+		CountModes:  counted.CountModes,
+	}
+	err := drmIoctl(fd, drmGetConnector, unsafe.Pointer(&filled))
+	runtime.KeepAlive(infos)
+	if err != nil {
+		return name, nil, err
+	}
+	if filled.CountModes > counted.CountModes {
+		return name, nil, nil
+	}
+	modes := make([]drmMode, 0, filled.CountModes)
+	for _, info := range infos[:filled.CountModes] {
+		modes = append(modes, drmMode{Name: modeName(info), Refresh: int(info.Vrefresh)})
+	}
+	return name, modes, nil
 }
 
 // ReadCurrentModes answers the mode each of the card's outputs

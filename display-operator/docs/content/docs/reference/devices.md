@@ -161,15 +161,21 @@ whole recipe and the warning.
 
 `mode` is the only parameter this driver reads, and a key it does
 not read fails the prepare, so a typo stops the pod instead of
-running a mode nobody asked for. The value is a bare resolution
-name with no refresh rate, spelled exactly as the kernel spells
-it.
+running a mode nobody asked for. The value is a resolution name,
+spelled exactly as the kernel spells it, with an optional refresh
+after an `@`: `1280x720` takes whatever rate the compositor picks
+for that name, and `3840x1600@24` asks for the 24 Hz timing. The
+refresh is a whole number of hertz. `@59.94` fails the prepare,
+because the compositor reads a refresh as an integer and a
+fraction would fall back silently.
 
-The name is validated against the connector's own kernel mode list
+The mode is validated against the connector's own kernel mode list
 and never against this attribute, so a mode the attribute's
 64-character cut dropped is still a mode a claim can ask for. A
 name the connector does not offer fails the prepare, and the
-failure names the whole list.
+failure names the whole list. A refresh the connector does not
+offer for that name also fails the prepare, and the failure names
+the refreshes that exist.
 
 A `DeviceClass` can carry the same block as cluster policy. The
 scheduler resolves the class's config and the claim's into one list
@@ -179,10 +185,12 @@ listed in.
 
 ## The current mode
 
-`currentMode` is the mode the output runs right now, read from the
-card itself with the DRM `GETCRTC` ioctl on every reconcile pass.
-It follows a claim's mode, and it is what shows the mode a released
-claim left behind, because releasing a claim restarts nothing.
+`currentMode` is the mode the output runs right now, with its
+refresh: `3840x1600@24`. It is read from the card itself with the
+DRM `GETCRTC` ioctl on every reconcile pass, and the name stands
+alone when the card reports no refresh. It follows a claim's mode,
+and it is what shows the mode a released claim left behind, because
+releasing a claim restarts nothing.
 
 The attribute is absent while the output drives nothing, which
 covers a connector with no monitor and one the compositor left

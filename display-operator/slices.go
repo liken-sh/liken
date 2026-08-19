@@ -181,11 +181,13 @@ func sliceDevices(outputs []Output) []SliceDevice {
 			// attribute, so it advertises and the connector's own sysfs
 			// list is what a claim is validated against.
 			addAttribute(device.Attributes, "modes", attributeList(output.Modes))
-			// The mode this output runs right now, read from the
-			// card and not from sysfs. It follows a claim's mode, and
-			// it is what makes a mode a released claim left behind
-			// visible instead of hidden. It is absent while the output
-			// drives nothing and when the card could not answer.
+			// The mode this output runs right now, with its refresh,
+			// 3840x1600@24, read from the card and not from sysfs.
+			// The modes list above stays name-only. It follows a
+			// claim's mode, and it is what makes a mode a released
+			// claim left behind visible instead of hidden. It is
+			// absent while the output drives nothing and when the
+			// card could not answer.
 			addAttribute(device.Attributes, "currentMode", output.CurrentMode)
 		}
 		if !output.Connected {

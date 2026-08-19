@@ -32,15 +32,16 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
 
 // The one key this driver reads out of a claim's opaque
-// parameters. The value is a bare resolution name, and refresh
-// selection stays out until somebody asks for it: weston's @refresh
-// syntax parses integers only and interacts with the aspect-ratio
-// flags.
+// parameters. The value is a resolution name, with a refresh after
+// an @ when the claim cares which rate the name runs at: 1280x720,
+// or 3840x1600@24. The refresh is a whole number of hertz, because
+// weston parses it as an integer.
 const modeParameter = "mode"
 
 // What weston.ini states for a connector the record says
@@ -212,6 +213,95 @@ func modeParameters(raw json.RawMessage) (string, error) {
 	return mode, nil
 }
 
+// A requestedMode is a claim's mode taken apart: the name every
+// mode list here speaks, and the refresh. A refresh of zero means
+// the claim stated none, and any refresh of that name will do.
+type requestedMode struct {
+	Name    string
+	Refresh int
+}
+
+// ParseMode takes a claim's mode apart. A refresh that is not a
+// whole number is refused here, because weston reads 59.94 as 59,
+// matches nothing, and falls back with no log line and no failed
+// exit, so this refusal is the only signal a person would get.
+func parseMode(mode string) (requestedMode, error) {
+	name, refresh, stated := strings.Cut(mode, "@")
+	if !stated {
+		return requestedMode{Name: mode}, nil
+	}
+	value, err := strconv.Atoi(refresh)
+	if err != nil || value <= 0 {
+		return requestedMode{}, fmt.Errorf(
+			"the mode %q states the refresh %q, and a refresh is a whole number of hertz", mode, refresh)
+	}
+	return requestedMode{Name: name, Refresh: value}, nil
+}
+
+// ModeMatches compares a claim's mode against the card's readback.
+// A claim that stated no refresh matches whichever refresh the card
+// runs under that name, because the claim left that choice to
+// weston.
+func modeMatches(requested, current string) bool {
+	if current == "" {
+		return false
+	}
+	if requested == current {
+		return true
+	}
+	name, _, stated := strings.Cut(requested, "@")
+	if stated {
+		return false
+	}
+	currentName, _, _ := strings.Cut(current, "@")
+	return name == currentName
+}
+
+// ValidateMode compares a claim's mode against the connector's
+// live list from the kernel, never against the published attribute:
+// the attribute stops at 64 characters and carries no refresh, so
+// it advertises and the ioctl is the truth. One name can appear in
+// several entries, split apart by the kernel's aspect-ratio flags,
+// and the claim passes when any of them matches. The failure names
+// what does exist, refreshes when the name was right and names when
+// it was not, because the error is the one place a person reads the
+// list.
+func validateMode(connector string, offered []drmMode, mode string) error {
+	requested, err := parseMode(mode)
+	if err != nil {
+		return err
+	}
+	if len(offered) == 0 {
+		return fmt.Errorf("the card reports no modes for %s right now", connector)
+	}
+	var names []string
+	var refreshes []string
+	for _, entry := range offered {
+		if !slices.Contains(names, entry.Name) {
+			names = append(names, entry.Name)
+		}
+		if entry.Name != requested.Name {
+			continue
+		}
+		if entry.Refresh == requested.Refresh {
+			return nil
+		}
+		refresh := strconv.Itoa(entry.Refresh)
+		if !slices.Contains(refreshes, refresh) {
+			refreshes = append(refreshes, refresh)
+		}
+	}
+	if requested.Refresh == 0 && slices.Contains(names, requested.Name) {
+		return nil
+	}
+	if len(refreshes) > 0 {
+		return fmt.Errorf("%s does not offer the mode %q; it offers %s at %s",
+			connector, mode, requested.Name, strings.Join(refreshes, " "))
+	}
+	return fmt.Errorf("%s does not offer the mode %q; it offers %s",
+		connector, mode, strings.Join(names, " "))
+}
+
 // ReadModeRecord reads the modes the claims on this machine
 // have stated, keyed by the connector name sysfs uses.
 //
@@ -269,20 +359,24 @@ func (p *draPlugin) applyMode(ctx context.Context, output Output, mode, socketPa
 	p.modeSwitches.Lock()
 	defer p.modeSwitches.Unlock()
 
-	// Validation reads the connector's own sysfs list, never the
-	// published attribute. The attribute stops at 64 characters and
-	// drops real modes, so the attribute is the advertisement and sysfs
-	// is the truth. The failure names the whole list, which is the one
-	// place a person sees the names the attribute could not carry.
-	if !slices.Contains(output.Modes, mode) {
-		return fmt.Errorf("%s does not offer the mode %q; it offers %s",
-			output.Connector, mode, strings.Join(output.Modes, " "))
+	// Validation reads the connector's own kernel list through the
+	// ioctl, never the published attribute and never sysfs. The
+	// attribute stops at 64 characters and drops real modes, and
+	// sysfs prints names with no refresh beside them, so only the
+	// ioctl can judge an @refresh.
+	offered, err := p.connectorModes()
+	if err != nil {
+		return fmt.Errorf("reading the modes %s offers: %w", output.Connector, err)
+	}
+	if err := validateMode(output.Connector, offered[output.Connector], mode); err != nil {
+		return err
 	}
 	current, err := p.currentModes()
 	if err != nil {
 		return fmt.Errorf("reading the mode %s runs: %w", output.Connector, err)
 	}
-	if current[output.Connector] == mode {
+	if modeMatches(mode, current[output.Connector]) {
+		p.republishSlice()
 		return nil
 	}
 
@@ -313,7 +407,25 @@ func (p *draPlugin) applyMode(ctx context.Context, output Output, mode, socketPa
 		p.restarted = map[string]string{}
 	}
 	p.restarted[output.Connector] = mode
-	return p.awaitMode(ctx, output.Connector, mode, socketPath)
+	if err := p.awaitMode(ctx, output.Connector, mode, socketPath); err != nil {
+		return err
+	}
+	p.republishSlice()
+	return nil
+}
+
+// RepublishSlice runs the operator's own reconcile pass, on every
+// prepare that reached the card. The compositor probes the link on
+// its way up, and a mode list that grows in that probe raises no
+// uevent, so the slice can hold a short list until something reads
+// again. A prepare has just read the kernel, which makes it the
+// moment to look, and the pass writes only on divergence, so the
+// common case costs one read.
+func (p *draPlugin) republishSlice() {
+	if p.republish == nil {
+		return
+	}
+	p.republish()
 }
 
 // RewriteConfig writes the record and regenerates weston.ini
@@ -344,7 +456,7 @@ func (p *draPlugin) awaitMode(ctx context.Context, connector, mode, socketPath s
 	for {
 		if compositorServing(socketPath) {
 			current, err := p.currentModes()
-			if err == nil && current[connector] == mode {
+			if err == nil && modeMatches(mode, current[connector]) {
 				return nil
 			}
 		}

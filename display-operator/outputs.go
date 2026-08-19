@@ -61,11 +61,12 @@ type Output struct {
 	// name is a resolution with no refresh rate, so a resolution the
 	// monitor accepts at several rates appears once.
 	Modes []string
-	// CurrentMode is the mode this output runs right now, in
-	// the same vocabulary as Modes. It comes from the card node, not
-	// from sysfs: sysfs publishes what a connector accepts and never
-	// what it drives. It is empty when the output drives nothing and
-	// when the card could not answer.
+	// CurrentMode is the mode this output runs right now, with the
+	// refresh the card reports: 3840x1600@24, the vocabulary a claim
+	// states, while Modes stays name-only. It comes from the card
+	// node, not from sysfs: sysfs publishes what a connector accepts
+	// and never what it drives. It is empty when the output drives
+	// nothing and when the card could not answer.
 	CurrentMode string
 }
 
