@@ -6,7 +6,7 @@ the movie demo played through the b06+ speaker for hours, across
 codec switches and operator restarts.
 
 This plan is this operator's half of liken's
-[milestone 60, Bluetooth audio](https://github.com/liken-sh/liken/blob/main/plans/60-bluetooth-audio.md).
+[milestone 60, Bluetooth audio](https://github.com/liken-sh/liken/blob/main/plans/completed/60-bluetooth-audio.md).
 That document is the design record: why one sound server serves the
 card and the radio, why the bus is a claimable device, and why the
 consumer contract does not change. The Bluetooth operator's plan 05
