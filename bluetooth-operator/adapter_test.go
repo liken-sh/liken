@@ -119,6 +119,45 @@ func TestReconcileCarriesTheAliasIntoTheRadio(t *testing.T) {
 	}
 }
 
+// A fresh bluetoothd starts the adapter with page scan off, and a
+// radio that is not connectable answers no bonded device's reconnect.
+// The pass asserts the setting on, and only when it diverges.
+func TestReconcileMakesTheAdapterConnectable(t *testing.T) {
+	fixture := newAPIFixture()
+	radio := testRadio(t)
+	radio.snapshot.Adapter.Connectable = false
+	inventory := testInventory(t, fixture, radio)
+
+	inventory.reconcile()
+
+	if !radio.called("SetAdapterConnectable true") {
+		t.Fatalf("the radio was left unconnectable: %v", radio.calls)
+	}
+	// The radio is connectable now, so the next pass writes nothing.
+	radio.calls = nil
+	inventory.reconcile()
+	if radio.called("SetAdapterConnectable") {
+		t.Errorf("connectable was written again: %v", radio.calls)
+	}
+}
+
+// An unpowered adapter takes no connectable write. bluetoothd refuses
+// property writes on a downed adapter, and AutoEnable is what powers
+// it, so the pass waits for that instead of writing into the refusal.
+func TestReconcileLeavesADownedAdapterAlone(t *testing.T) {
+	fixture := newAPIFixture()
+	radio := testRadio(t)
+	radio.snapshot.Adapter.Powered = false
+	radio.snapshot.Adapter.Connectable = false
+	inventory := testInventory(t, fixture, radio)
+
+	inventory.reconcile()
+
+	if radio.called("SetAdapterConnectable") {
+		t.Errorf("a downed adapter took a connectable write: %v", radio.calls)
+	}
+}
+
 // A delete against live hardware would cascade to every Pairing under
 // this Adapter and to every bond Secret under those, which is a mass
 // unpair of controllers that are working.

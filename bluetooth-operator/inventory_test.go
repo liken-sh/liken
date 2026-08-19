@@ -336,6 +336,12 @@ func (r *fakeRadio) SetAdapterAlias(alias string) error {
 	return nil
 }
 
+func (r *fakeRadio) SetAdapterConnectable(connectable bool) error {
+	r.record("SetAdapterConnectable %t", connectable)
+	r.snapshot.Adapter.Connectable = connectable
+	return nil
+}
+
 func (r *fakeRadio) SetDeviceAlias(device bonds.Address, alias string) error {
 	r.record("SetDeviceAlias %s %s", device.Key(), alias)
 	r.update(device, func(state *deviceState) { state.Alias = alias })
@@ -403,7 +409,7 @@ func (r *fakeRadio) update(device bonds.Address, change func(*deviceState)) {
 func testRadio(t *testing.T, devices ...deviceState) *fakeRadio {
 	t.Helper()
 	return &fakeRadio{snapshot: radioSnapshot{
-		Adapter: adapterState{Address: testAdapterAddress(t), Powered: true, Alias: "liken-1"},
+		Adapter: adapterState{Address: testAdapterAddress(t), Powered: true, Connectable: true, Alias: "liken-1"},
 		Devices: devices,
 	}}
 }

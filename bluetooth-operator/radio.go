@@ -75,10 +75,16 @@ const (
 var ErrNoDevice = errors.New("bluetoothd holds no object for that device")
 
 // adapterState is the radio itself, as bluetoothd reports it.
+//
+// Connectable is whether the radio answers a page: the inbound
+// connection a bonded controller's reconnect button or a speaker's
+// own connect loop makes. It is separate from Discoverable, which
+// only controls the inquiry scan a pairing needs.
 type adapterState struct {
 	Address      bonds.Address
 	Alias        string
 	Powered      bool
+	Connectable  bool
 	Discovering  bool
 	Discoverable bool
 	Pairable     bool
@@ -126,6 +132,13 @@ type radio interface {
 	Snapshot() (radioSnapshot, error)
 
 	SetAdapterAlias(alias string) error
+
+	// SetAdapterConnectable turns the page scan on or off. A fresh
+	// bluetoothd starts the adapter with it off, and a radio that is
+	// not connectable answers no bonded device, so the reconcile pass
+	// asserts it on.
+	SetAdapterConnectable(connectable bool) error
+
 	SetDeviceAlias(device bonds.Address, alias string) error
 	SetDeviceTrusted(device bonds.Address, trusted bool) error
 
@@ -202,6 +215,7 @@ func snapshotFrom(objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant
 		}
 		alias, _ := properties["Alias"].Value().(string)
 		powered, _ := properties["Powered"].Value().(bool)
+		connectable, _ := properties["Connectable"].Value().(bool)
 		discovering, _ := properties["Discovering"].Value().(bool)
 		discoverable, _ := properties["Discoverable"].Value().(bool)
 		pairable, _ := properties["Pairable"].Value().(bool)
@@ -209,6 +223,7 @@ func snapshotFrom(objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant
 			Address:      parsed,
 			Alias:        alias,
 			Powered:      powered,
+			Connectable:  connectable,
 			Discovering:  discovering,
 			Discoverable: discoverable,
 			Pairable:     pairable,
@@ -312,6 +327,14 @@ func (r *blueZRadio) SetAdapterAlias(alias string) error {
 		return err
 	}
 	return r.setProperty(path, adapterInterface, "Alias", alias)
+}
+
+func (r *blueZRadio) SetAdapterConnectable(connectable bool) error {
+	path, err := r.adapterPath()
+	if err != nil {
+		return err
+	}
+	return r.setProperty(path, adapterInterface, "Connectable", connectable)
 }
 
 func (r *blueZRadio) SetDeviceAlias(device bonds.Address, alias string) error {

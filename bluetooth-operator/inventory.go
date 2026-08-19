@@ -133,6 +133,21 @@ func (i *inventory) reconcile() inventoryPass {
 
 	i.releaseDepartedAdapters(snapshot.Adapter.Address)
 
+	// A radio that is not connectable answers no bonded device: page
+	// scan is off, so a controller's reconnect button and a speaker's
+	// own connect loop reach nothing, and no error appears anywhere. A
+	// fresh bluetoothd starts the adapter that way, so every pass
+	// asserts the setting instead of trusting the startup state, the
+	// same write-on-divergence rule the rest of the reconcile follows.
+	// It runs before the API-server writes below, because the radio's
+	// health must not wait on them.
+	if snapshot.Adapter.Powered && !snapshot.Adapter.Connectable {
+		if err := i.radio.SetAdapterConnectable(true); err != nil {
+			fmt.Fprintf(os.Stderr, "making the adapter connectable: %v\n", err)
+			pass.ok = false
+		}
+	}
+
 	adapter, err := i.ensureAdapter(snapshot.Adapter)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "reconciling the Adapter for %s: %v\n", snapshot.Adapter.Address, err)
