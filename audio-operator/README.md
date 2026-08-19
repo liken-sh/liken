@@ -44,18 +44,20 @@ and ends there:
   attributes, the taints, and what a claim delivers
 
 The short version, on a cluster whose machine publishes its sound
-card, after the two `DeviceClasses` the install guide has you
-create:
+card:
 
     kubectl apply -n liken-system \
+      -f https://audio.liken.sh/deploy/deviceclasses.yaml \
       -f https://audio.liken.sh/deploy/rbac.yaml \
       -f https://audio.liken.sh/deploy/operator.yaml
 
 [`deploy/`](deploy/) is the source of those files: a `kustomize` base
-with the RBAC and the `DaemonSet` whose pod claims every audio
-controller on its own node. The base ships no `DeviceClass`,
-because a class is cluster policy, yours to name and curate; the
-install guide gives both classes as YAML to copy.
+with the two generic `DeviceClasses`, the RBAC, and the `DaemonSet`
+whose pod claims every sound card on its own node. The base ships
+`sound-card`, which the claim template names and the operator cannot
+start without, and `audio-output`, which your workloads claim. A
+class that picks one output or one monitor is cluster policy, yours
+to create; the install guide gives examples.
 
 ## The design
 

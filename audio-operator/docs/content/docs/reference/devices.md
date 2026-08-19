@@ -65,16 +65,15 @@ that selects every device this driver publishes:
         - cel:
             expression: device.driver == "audio.liken.sh"
 
-A class is cluster-scoped policy, so it is yours to name and create;
-the base ships none, and this manual calls the class `audio-output`
-throughout. The class alone allocates any output on the card. To
-name one, add a selector on the attributes below, as
+The base ships this class, and this manual calls it `audio-output`
+throughout; it is yours to rename or narrow, the way a
+`StorageClass` is. The class alone allocates any output on the
+card. To name one, add a selector on the attributes below, as
 [Play sound to an output](/docs/guides/claim/) shows.
 
-[Install the operator](/docs/guides/install/) also has you create
-`audio-controller`. That one is not for consumers. It selects the
-raw sound card that `liken`'s own driver publishes, and the
-operator's pod claims every one on its node through it.
+The base also ships `sound-card`. That one is not for consumers.
+It selects the raw sound card that `liken`'s own driver publishes,
+and the operator's pod claims every one on its node through it.
 [Devices](https://liken.sh/docs/reference/devices/) in the `liken`
 manual describes those raw devices.
 

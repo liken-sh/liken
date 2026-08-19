@@ -38,47 +38,32 @@ own claim will park and its pod will stay `Pending`. The
 page describes this layering: `liken` publishes the card, and this
 operator refines it into outputs.
 
-## 2. Create the device classes
+## 2. The device classes
 
 A `DeviceClass` is cluster-scoped policy, yours to name and curate,
-the same convention a `StorageClass` follows. The base ships none,
-so you create both classes before you apply it.
+the same convention a `StorageClass` follows. The base ships this
+operator's two generic classes, served at
+[`deviceclasses.yaml`](/deploy/deviceclasses.yaml), because their
+selectors name only the drivers' own vocabulary and carry no
+cluster's choice:
 
-`audio-controller` is the bootstrap class. The operator's own pod
-claims the machine's audio controller through it, from the devices
-`liken` publishes, so without this class the operator cannot start.
-The `has()` guard matters: `subsystem` is absent on some of
-`liken`'s devices, and a selector that reads a missing attribute
-fails the whole allocation.
+* `sound-card` is the bootstrap class. The operator's own pod claims
+  the machine's sound card through it, from the devices `liken`
+  publishes, and the claim template in the served
+  [`operator.yaml`](/deploy/operator.yaml) names it literally, so
+  the operator cannot start without it. If you give that class
+  another name, patch the template to match.
+* `audio-output` is the class your workloads claim. It covers every
+  device this driver publishes:
 
-    apiVersion: resource.k8s.io/v1
-    kind: DeviceClass
-    metadata:
-      name: audio-controller
-    spec:
-      selectors:
-        - cel:
-            expression: |
-              device.driver == "liken.sh" &&
-              has(device.attributes["liken.sh"].subsystem) &&
-              device.attributes["liken.sh"].subsystem == "sound"
-
-`audio-output` is the class your workloads claim. It covers every
-device this driver publishes:
-
-    apiVersion: resource.k8s.io/v1
-    kind: DeviceClass
-    metadata:
-      name: audio-output
-    spec:
-      selectors:
-        - cel:
-            expression: device.driver == "audio.liken.sh"
-
-The claim template in the served
-[`operator.yaml`](/deploy/operator.yaml) names `audio-controller`
-literally. If you give that class another name, patch the template
-to match.
+        apiVersion: resource.k8s.io/v1
+        kind: DeviceClass
+        metadata:
+          name: audio-output
+        spec:
+          selectors:
+            - cel:
+                expression: device.driver == "audio.liken.sh"
 
 ### Generic or specific
 
@@ -114,26 +99,29 @@ workload's manifest, create a specific class.
 
 This site serves the repository's
 [`deploy/`](/deploy/kustomization.yaml) directory as raw YAML, so
-the install needs no clone. Two files are the rest of the install:
+the install needs no clone. Three files are the rest of the install:
 
     kubectl apply -n liken-system \
+      -f https://audio.liken.sh/deploy/deviceclasses.yaml \
       -f https://audio.liken.sh/deploy/rbac.yaml \
       -f https://audio.liken.sh/deploy/operator.yaml
 
 The `-n` flag places the `ServiceAccount` and the `DaemonSet` in
 `liken-system`, the namespace every `liken` cluster has. The
 `ClusterRoleBinding`'s subject names that namespace, so the binding
-only works there.
+only works there. `DeviceClass` is cluster-scoped, so the flag
+leaves it alone.
 
-For GitOps, put your two classes in a file of your own and point a
-`Kustomization` at it and at the served URLs. `kustomize` takes a
-raw YAML URL as a resource:
+For GitOps, put your specific classes in a file of your own and
+point a `Kustomization` at it and at the served URLs. `kustomize`
+takes a raw YAML URL as a resource:
 
     apiVersion: kustomize.config.k8s.io/v1beta1
     kind: Kustomization
     namespace: liken-system
     resources:
-      - deviceclasses.yaml
+      - classes.yaml
+      - https://audio.liken.sh/deploy/deviceclasses.yaml
       - https://audio.liken.sh/deploy/rbac.yaml
       - https://audio.liken.sh/deploy/operator.yaml
 
@@ -194,7 +182,7 @@ published one:
 The two `DeviceClasses` are yours, so this leaves them in place.
 Delete them when no other claim names them:
 
-    kubectl delete deviceclass audio-controller audio-output
+    kubectl delete deviceclass sound-card audio-output
 
 The second step is yours because the operator never deletes its
 slice. A device that leaves the inventory while a claim still names

@@ -13,14 +13,14 @@
 apiVersion: resource.k8s.io/v1
 kind: ResourceClaimTemplate
 metadata:
-  name: audio-controller
+  name: sound-card
 spec:
   spec:
     devices:
       requests:
         - name: controller
           exactly:
-            deviceClassName: audio-controller
+            deviceClassName: sound-card
             # Every sound controller on the node, not one. PipeWire serves
             # every ALSA card on the machine, and this operator keys each
             # output by card number, so one pod serves all the node's
@@ -251,7 +251,7 @@ spec:
               mountPath: /etc/pipewire/pipewire.conf.d
       resourceClaims:
         - name: controller
-          resourceClaimTemplateName: audio-controller
+          resourceClaimTemplateName: sound-card
       volumes:
         # DirectoryOrCreate on all four, because a node that has never
         # run this operator or any DRA driver has none of these paths.
