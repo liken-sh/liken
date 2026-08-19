@@ -1,0 +1,40 @@
+# The two generic classes of this operator: the raw radio its own
+# pod claims from liken, and the refined devices it publishes for
+# everybody else. Both ship with the base because their selectors
+# name only the drivers' own vocabulary, so there is no cluster
+# policy in them, and a release can change a selector when the
+# devices change. A class that encodes a cluster's choice, such as
+# one controller, is the cluster owner's to create, and the install
+# guide gives an example.
+---
+# The adapter, as liken publishes it. The selector picks the btusb
+# kernel driver, which covers the plug-in dongles and the radios
+# built into a board. The claim does two jobs. It places the pod,
+# because only a machine with a radio publishes one, so no node
+# selector has to name that machine. And it arbitrates, because the
+# adapter allocates once, so the claim holder is the only Bluetooth
+# stack on that radio.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: bluetooth-adapter
+spec:
+  selectors:
+    - cel:
+        expression: |
+          device.driver == "liken.sh" &&
+          device.attributes["liken.sh"].driver == "btusb"
+---
+# One paired controller, as this operator publishes it. A claim
+# against this class alone allocates any controller on the machine.
+# To name one, add a selector on its attributes, and the claim guide
+# shows the forms. The class is yours to rename or narrow, the way
+# a StorageClass is.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: bluetooth-controller
+spec:
+  selectors:
+    - cel:
+        expression: device.driver == "bluetooth.liken.sh"

@@ -34,12 +34,16 @@ system image ships no BlueZ and no D-Bus.
 
 ## Install
 
-Create the two `DeviceClasses` first. A class is cluster policy,
-yours to name and curate, so the base ships none;
-[Install the operator](docs/content/docs/guides/install.md) gives
-their YAML. Then apply the base:
+Apply the base:
 
     kubectl apply -k deploy/
+
+It ships the two generic classes: `bluetooth-adapter`, which the
+operator's own claim names, and `bluetooth-controller`, which your
+workloads claim. A class that picks one controller is cluster
+policy, yours to create;
+[Install the operator](docs/content/docs/guides/install.md) gives
+an example.
 
 The base is a `kustomize` directory you can also reference from your
 own GitOps. The guide gives the steps, the verification, and the

@@ -23,47 +23,35 @@ is in one `kustomize` base, and nothing here touches a machine over SSH.
   radios built into a board. You do not have to say which machine has
   the radio: the claim places the pod where the radio is.
 
-## Create the device classes
+## The device classes
 
 A [`DeviceClass`](https://kubernetes.io/docs/reference/kubernetes-api/resource/device-class-v1/)
 is cluster-scoped policy, the same convention a `StorageClass`
 follows: the cluster owner names and curates the classes workloads
-may ask for. So the base ships none, and you create the two this
-operator needs. Create them first, because the operator's own pod
-claims the radio through one of them and cannot start without it. If
-the DRA objects are new to you, read
+may ask for. The base ships this operator's two generic classes,
+served at [`deviceclasses.yaml`](/deploy/deviceclasses.yaml),
+because their selectors name only the drivers' own vocabulary and
+carry no cluster's choice. If the DRA objects are new to you, read
 [How the pieces fit](/docs/guides/#how-the-pieces-fit) first.
 
-    kubectl apply -f - <<'EOF'
-    apiVersion: resource.k8s.io/v1
-    kind: DeviceClass
-    metadata:
-      name: bluetooth-adapter
-    spec:
-      selectors:
-        - cel:
-            expression: |
-              device.driver == "liken.sh" &&
-              device.attributes["liken.sh"].driver == "btusb"
-    ---
-    apiVersion: resource.k8s.io/v1
-    kind: DeviceClass
-    metadata:
-      name: bluetooth-controller
-    spec:
-      selectors:
-        - cel:
-            expression: device.driver == "bluetooth.liken.sh"
-    EOF
+* `bluetooth-adapter` is the bootstrap class. The operator's own
+  pod claims the raw radio through it, its selector picks the
+  `btusb` adapter that `liken` publishes, and the claim template in
+  [`operator.yaml`](/deploy/operator.yaml) names it literally, so
+  the operator cannot start without it. If you rename that class,
+  patch the template to match.
+* `bluetooth-controller` is the class your workloads claim. Its
+  selector covers every device this operator publishes, and it is
+  yours to rename or narrow as your cluster's policy asks:
 
-`bluetooth-adapter` is the bootstrap class. The operator's own pod
-claims the raw radio through it, and the selector picks the `btusb`
-adapter that `liken` publishes. `bluetooth-controller` is the class
-your workloads claim, and its selector covers every device this
-operator publishes. Both are yours: rename them, or narrow their
-selectors, as your cluster's policy asks. The claim template in
-[`operator.yaml`](/deploy/operator.yaml) names `bluetooth-adapter`
-literally, so if you rename that class, patch the template to match.
+        apiVersion: resource.k8s.io/v1
+        kind: DeviceClass
+        metadata:
+          name: bluetooth-controller
+        spec:
+          selectors:
+            - cel:
+                expression: device.driver == "bluetooth.liken.sh"
 
 ### Generic or specific
 
@@ -132,6 +120,8 @@ to the same version:
 
 Whichever path you take, the manifests contain:
 
+* The two generic `DeviceClasses`, `bluetooth-adapter` and
+  `bluetooth-controller`.
 * The three `CustomResourceDefinitions` of the pairing API:
   `Adapter`, `Pairing`, and `PairingRequest`. The operator records
   every bond as a `Pairing` and stores its keys in a `Secret` that

@@ -4,13 +4,15 @@
 # your own GitOps with patches of your own, or read it and write your
 # own manifests.
 #
-# The base ships no DeviceClass. A DeviceClass is cluster-scoped
-# policy, the cluster owner's to name and curate, the same convention
-# a StorageClass follows. The install guide gives copyable YAML for
-# the two classes this operator needs: bluetooth-adapter, which the
-# claim template in operator.yaml names, and bluetooth-controller,
-# which consumers claim. Create them before this base, because the
-# operator's own pod cannot start without the adapter class.
+# The base ships this operator's two generic DeviceClasses:
+# bluetooth-adapter, which the claim template in operator.yaml names
+# and the operator's own pod cannot start without, and
+# bluetooth-controller, which workloads claim. Their selectors name
+# only the drivers' own vocabulary, so there is no cluster policy in
+# them. A class that encodes a cluster's choice, such as one
+# controller, is the cluster owner's to create, and the install
+# guide gives an example. An owner who renames bluetooth-adapter
+# patches both the class and the template.
 #
 # Everything here except the CustomResourceDefinitions is namespaced.
 # The CRDs are cluster-scoped, and kustomize reads that from the
@@ -21,7 +23,14 @@ kind: Kustomization
 
 namespace: liken-system
 
+# kustomize stamps the namespace below onto the DeviceClass too,
+# because resource.k8s.io/v1 is not in its compiled OpenAPI schema
+# and an unknown kind is treated as namespaced. The stamp is
+# harmless: the API server ignores a namespace on a cluster-scoped
+# object, and kubectl routes the request by the scope it reads from
+# discovery, not from the object.
 resources:
+  - deviceclasses.yaml
   - crds.yaml
   - rbac.yaml
   - operator.yaml
