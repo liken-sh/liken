@@ -3,10 +3,20 @@ package main
 // Finding the card's outputs in sysfs.
 //
 // The kernel registers one directory for each connector a graphics
-// card has, named <card>-<connector> under /sys/class/drm. Two files
+// card has, named <card>-<connector> under /sys/class/drm. Three files
 // in it answer everything this operator publishes: `status` says
-// connected, disconnected, or unknown, and `edid` holds the monitor's
-// EDID while a monitor is attached and nothing while none is.
+// connected, disconnected, or unknown, `edid` holds the monitor's
+// EDID while a monitor is attached and nothing while none is, and
+// `modes` lists the modes the connector can drive.
+//
+// The mode list is the kernel's, not ours, on purpose. An EDID
+// states its modes in four encodings spread over the base block and
+// the extensions, and DRM decodes all four. DRM also drops every
+// mode the connector's hardware cannot carry, a judgment no EDID
+// parse could make, because the EDID only says what the monitor
+// accepts. The file holds the survivors, so reading it beats
+// growing our parser by three encodings and still publishing modes
+// the card cannot drive.
 //
 // The compositor is not the source. Weston reports the same facts
 // only over its private IPC, and reading a file needs no protocol, no
@@ -46,6 +56,11 @@ type Output struct {
 	// attribute on Connected for that reason, and every other reader
 	// must do the same.
 	Monitor EDID
+	// Modes holds the mode names the connector can drive, in the
+	// kernel's order: the preferred mode first, then descending. A
+	// name is a resolution with no refresh rate, so a resolution the
+	// monitor accepts at several rates appears once.
+	Modes []string
 }
 
 // discoverOutputs lists every connector on one card, sorted by
@@ -74,6 +89,7 @@ func discoverOutputs(sysRoot, card string) []Output {
 		output := Output{
 			Connector: connector,
 			Connected: strings.TrimSpace(readFile(filepath.Join(dir, "status"))) == "connected",
+			Modes:     readModes(filepath.Join(dir, "modes")),
 		}
 		if edid, err := ParseEDID([]byte(readFile(filepath.Join(dir, "edid")))); err == nil {
 			output.Monitor = edid
@@ -122,6 +138,30 @@ func cardNode(driRoot string) ([]string, error) {
 	}
 	slices.Sort(cards)
 	return cards, nil
+}
+
+// readModes reads the connector's mode list and returns each name
+// once, in the order the kernel listed it.
+//
+// The file holds one name per line and one line per timing, so a
+// resolution the monitor accepts at several refresh rates repeats
+// once per rate. The name states no rate, which makes the repeats
+// one fact, and the preferred mode's rate already publishes as the
+// refreshMillihertz attribute.
+//
+// A connector with nothing on it has an empty file, and a connector
+// that is going away has no file at all. Both answer no modes, which
+// the slice publishes as an absent attribute.
+func readModes(path string) []string {
+	var modes []string
+	for _, line := range strings.Split(readFile(path), "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" || slices.Contains(modes, name) {
+			continue
+		}
+		modes = append(modes, name)
+	}
+	return modes
 }
 
 // readFile reads a small sysfs file and returns an empty string when

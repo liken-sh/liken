@@ -38,6 +38,7 @@ itself publishes:
             refreshMillihertz: {int: 59999}
             widthMillimeters: {int: 879}
             heightMillimeters: {int: 366}
+            modes: {string: "3840x1600 3840x2160 3440x1440 1920x1080 1680x1050 1600x900"}
             monitor.liken.sh/id: {string: "gsm-7716-lg-hdr-wqhd"}
         - name: dp-1
           attributes:
@@ -100,6 +101,7 @@ sysfs.
 | `widthPixels`, `heightPixels` | int | the preferred mode, which is the mode the compositor drives |
 | `refreshMillihertz` | int | the preferred mode's refresh rate, in millihertz: a selector that wants 60 Hz exactly asks for `60000`, and a real monitor may answer `59999` |
 | `widthMillimeters`, `heightMillimeters` | int | the panel's physical size |
+| `modes` | string | the resolutions the monitor accepts, described below |
 | `monitor.liken.sh/id` | string | the pairing identity, described below |
 
 A selector reads an unqualified attribute through the driver's
@@ -113,6 +115,35 @@ monitor attribute first:
 
     has(device.attributes["display.liken.sh"].model) &&
     device.attributes["display.liken.sh"].model == "LG HDR WQHD"
+
+## The modes
+
+`modes` holds the resolutions the kernel says the connector can
+drive, space joined, with the preferred mode first and the rest in
+descending order. A name carries no refresh rate, so a resolution
+the monitor accepts at both 60 Hz and 30 Hz appears once. The
+preferred mode is the same one `widthPixels`, `heightPixels`, and
+`refreshMillihertz` describe, and it is the only mode the
+compositor drives.
+
+The list is one string because a device attribute holds one bool,
+int, string, or version, and no array. A selector asks with
+`.contains()`:
+
+    has(device.attributes["display.liken.sh"].modes) &&
+    device.attributes["display.liken.sh"].modes.contains("3840x2160")
+
+The list can be shorter than the monitor's. The API stops a string
+attribute at 64 characters, so the value ends on the last whole
+resolution that fits, and the descending order makes the dropped
+tail the smallest ones. A monitor that accepts sixteen resolutions
+publishes about six. Read the attribute as the large modes the
+monitor accepts, never as the whole list.
+
+Nothing selects a mode. The compositor serves every output on the
+machine and changes a mode only by restarting, so one claim's
+choice would blank the other screens. The inventory shows the
+choice, and no claim makes it.
 
 ## The pairing identity
 

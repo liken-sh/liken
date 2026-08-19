@@ -175,6 +175,13 @@ func sliceDevices(outputs []Output) []SliceDevice {
 			addSize(device.Attributes, "refreshMillihertz", monitor.RefreshMillihertz)
 			addSize(device.Attributes, "widthMillimeters", monitor.WidthMillimeters)
 			addSize(device.Attributes, "heightMillimeters", monitor.HeightMillimeters)
+			// The modes list shows the alternatives to the preferred
+			// mode, and nothing selects one. The compositor serves
+			// every output on the machine and changes a mode only by
+			// restarting, so one claim's choice would blank the other
+			// screens. The inventory states the choice; no API makes
+			// it.
+			addAttribute(device.Attributes, "modes", attributeList(output.Modes))
 		}
 		if !output.Connected {
 			device.Taints = unservableTaints()
@@ -242,16 +249,49 @@ func addSize(attributes map[string]DeviceAttribute, name string, value int) {
 	attributes[name] = AttrInt(value)
 }
 
-// attributeString limits a free-text value to the API's 64-character
-// limit on attribute strings. A monitor writes at most 13 characters
-// into a descriptor, so nothing from an EDID reaches the limit, and
-// the limit is what keeps a malformed answer from failing the whole
-// write.
+// maxAttributeLength is the API's limit on the length of a string
+// attribute's value. A write that exceeds it fails the whole slice,
+// so every string this operator publishes is cut to fit first.
+const maxAttributeLength = 64
+
+// attributeString limits a free-text value to the API's limit on
+// attribute strings. A monitor writes at most 13 characters into a
+// descriptor, so nothing from an EDID reaches the limit, and the limit
+// is what keeps a malformed answer from failing the whole write.
 func attributeString(s string) string {
-	if len(s) <= 64 {
+	if len(s) <= maxAttributeLength {
 		return s
 	}
-	return s[:64]
+	return s[:maxAttributeLength]
+}
+
+// attributeList joins a list of values into the one string that
+// carries it, and ends the string on the last whole value that fits
+// under the API's limit.
+//
+// A list is a string because the attribute language has no array
+// type: a device attribute holds one bool, int, string, or version.
+// So a list publishes space joined and a selector asks with
+// .contains(), the same convention the audio operator's
+// lpcmBitDepths follows.
+//
+// The cut keeps whole values only. Half a mode name names a mode no
+// monitor accepts, and .contains() on the fragment would match the
+// wrong modes. The caller passes values best first, so the cut drops
+// the tail nobody selects on.
+func attributeList(values []string) string {
+	var joined string
+	for _, value := range values {
+		next := value
+		if joined != "" {
+			next = joined + " " + value
+		}
+		if len(next) > maxAttributeLength {
+			break
+		}
+		joined = next
+	}
+	return joined
 }
 
 // sameDevices reports whether the published devices already say what

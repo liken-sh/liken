@@ -8,6 +8,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -108,6 +109,61 @@ func TestSliceDevicesPublishesTheMonitorsFacts(t *testing.T) {
 	}
 }
 
+// attributeText reads one string attribute, and fails the test when
+// the device published none.
+func attributeText(t *testing.T, device SliceDevice, name string) string {
+	t.Helper()
+	attribute, ok := device.Attributes[name]
+	if !ok || attribute.String == nil {
+		t.Fatalf("%s publishes no %s: %+v", device.Name, name, device.Attributes)
+	}
+	return *attribute.String
+}
+
+func TestSliceDevicesPublishesTheModesTheMonitorAccepts(t *testing.T) {
+	// Both lists run past the API's 64-character limit, so each ends
+	// on the last whole name that fits, and the kernel's descending
+	// order makes the dropped tail the smallest modes. The ultrawide
+	// names sixteen resolutions and publishes six; the portable panel
+	// names eight and drops only 640x480.
+	devices := sliceDevices(testOutputs(t))
+
+	want := "3840x1600 3840x2160 3440x1440 1920x1080 1680x1050 1600x900"
+	if got := attributeText(t, devices[1], "modes"); got != want {
+		t.Errorf("hdmi-a-1 modes = %q, want %q", got, want)
+	}
+	want = "1920x1080 1600x900 1280x800 1280x720 1024x768 800x600 720x480"
+	if got := attributeText(t, devices[2], "modes"); got != want {
+		t.Errorf("hdmi-a-2 modes = %q, want %q", got, want)
+	}
+}
+
+// attributeListCase is one list and the string the limit leaves of it.
+type attributeListCase struct {
+	values []string
+	want   string
+}
+
+func TestAttributeListEndsOnTheLastWholeEntryThatFits(t *testing.T) {
+	// A name cut in half names a mode no monitor accepts, so the cut
+	// falls between entries and never inside one.
+	fits := []string{"1920x1080", "1440x1080", "1600x900", "1280x800", "1280x720", "1024x768", "1152x864"}
+	oneMore := []string{"1920x1080", "1440x1080", "1600x900", "1280x800", "1280x720", "1024x768", "1152x864", "640x480"}
+	filled := "1920x1080 1440x1080 1600x900 1280x800 1280x720 1024x768 1152x864"
+	cases := map[string]attributeListCase{
+		"a list under the limit":       {[]string{"1920x1080", "800x600"}, "1920x1080 800x600"},
+		"a list that fills it exactly": {fits, filled},
+		"the entry that would pass it": {oneMore, filled},
+		"no entries at all":            {nil, ""},
+		"one entry past the limit":     {[]string{strings.Repeat("1920x1080", 8)}, ""},
+	}
+	for name, tc := range cases {
+		if got := attributeList(tc.values); got != tc.want {
+			t.Errorf("%s: attributeList = %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
 func TestSliceDevicesTaintsAnOutputThatServesNobody(t *testing.T) {
 	devices := sliceDevices(testOutputs(t))
 	dark := devices[0]
@@ -121,7 +177,7 @@ func TestSliceDevicesTaintsAnOutputThatServesNobody(t *testing.T) {
 	if _, ok := dark.Attributes["connector"]; !ok {
 		t.Errorf("the connector attribute is missing: %+v", dark.Attributes)
 	}
-	for _, name := range []string{"manufacturer", "model", "serial", pairingAttribute, "widthPixels", "refreshMillihertz"} {
+	for _, name := range []string{"manufacturer", "model", "serial", pairingAttribute, "widthPixels", "refreshMillihertz", "modes"} {
 		if _, ok := dark.Attributes[name]; ok {
 			t.Errorf("%s publishes for an output with no monitor: %+v", name, dark.Attributes)
 		}
