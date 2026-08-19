@@ -97,6 +97,11 @@ jobs:
       # it opens none of them, and a pod that has both opens all
       # three.
       #
+      # pw-top, pw-cli, and pw-metadata are asserted by name too.
+      # No daemon maps them, because a person runs each one with
+      # kubectl exec during a debugging session, so the map check
+      # reports nothing when one drops out of the closure.
+      #
       # The two daemons run as separate containers sharing one volume,
       # the same shape the pod uses. The image has no shell, so every
       # container names a binary directly.
@@ -117,6 +122,9 @@ jobs:
             /usr/bin/wireplumber \
             /usr/bin/pw-dump \
             /usr/bin/wpctl \
+            /usr/bin/pw-top \
+            /usr/bin/pw-cli \
+            /usr/bin/pw-metadata \
             /usr/lib/x86_64-linux-gnu/spa-0.2/alsa/libspa-alsa.so \
             /usr/lib/x86_64-linux-gnu/spa-0.2/bluez5/libspa-bluez5.so \
             /usr/lib/x86_64-linux-gnu/spa-0.2/bluez5/libspa-codec-bluez5-sbc.so \
@@ -161,6 +169,21 @@ jobs:
           start wireplumber /usr/bin/wireplumber --profile=main-embedded
           answers /usr/bin/wpctl status \
             || { docker logs wireplumber; echo "wpctl never connected"; exit 1; }
+
+          # Each of the three runs once against the live graph. The
+          # listing above proves the binary is in the image, and
+          # this proves every library it opens is there too: pw-top
+          # needs libncursesw and libtinfo, and pw-cli needs
+          # libreadline over the same libtinfo. pw-top's -b writes
+          # plain lines and calls no terminfo routine, so it runs
+          # with no terminal and no TERM, and -n 1 stops it after
+          # one reading.
+          probe /usr/bin/pw-top -b -n 1 \
+            || { echo "pw-top did not read the graph"; exit 1; }
+          probe /usr/bin/pw-cli info 0 \
+            || { echo "pw-cli did not read the core"; exit 1; }
+          probe /usr/bin/pw-metadata -n settings \
+            || { echo "pw-metadata did not read the settings"; exit 1; }
 
           # wpctl connects to PipeWire, not to WirePlumber, so it
           # answers even when the session manager has left. Both

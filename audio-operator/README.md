@@ -90,9 +90,12 @@ and this operator's own design in
     go test ./...
     docker build -t audio-operator .
 
-The image is a file closure on `scratch`: the four binaries the pod
-runs, the modules the daemons load, and their libraries, with no
-shell and no package manager. The Kubernetes libraries and the Go
+The image is a file closure on `scratch`: the four binaries the
+pod runs (`pipewire`, `wireplumber`, `pw-dump`, `wpctl`), three
+more for a person with `kubectl exec` (`pw-top`, `pw-cli`,
+`pw-metadata`), the modules the daemons load, and their libraries,
+with no shell and no package manager. The Kubernetes libraries and
+the Go
 version are pinned to what `liken` builds against, because the two
 drivers serve the same kubelet on the same node. The ELD fixtures in
 `testdata` are assembled the way the kernel's `hda_eld.c` lays the

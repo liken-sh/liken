@@ -46,6 +46,24 @@ lib=$(dirname "$(dpkg -L libpipewire-0.3-modules | grep '/pipewire-0.3$')")
 # wireplumber container's probe. kubectl exec runs both by name,
 # which is the only way to run anything in an image with no shell.
 #
+# Three more binaries are for a person with kubectl exec, and no
+# daemon runs them. pw-top -b -n 1 prints one reading of every node
+# with its xrun count, which is the dropout measurement; without
+# it, the only reading is a debug environment variable that costs
+# two pod rolls to place. pw-cli lists any object in the graph and
+# writes a parameter on one with set-param, so a device's profile
+# changes with no restart of the daemon. pw-metadata reads and
+# writes the settings the graph keeps in its metadata object, for
+# example clock.force-quantum. The three cost 1,022,763 bytes on a
+# 24,599,703-byte closure: pw-top brings libncursesw and libtinfo,
+# pw-cli brings libreadline over the same libtinfo, and pw-metadata
+# brings nothing new.
+#
+# pw-cat and its pw-play and pw-record links stay out. Each is the
+# same 125,240-byte binary, but libsndfile with FLAC, vorbis, opus,
+# ogg, mpg123, and mp3lame under it adds 2,733,960 bytes, which is
+# 11 percent of the closure for a file player.
+#
 # The bluez5 plugin loads by name when the declare container
 # enables WirePlumber's Bluetooth monitor. The codec plugins beside
 # it are dlopened one at a time as bluez5/libspa-codec-bluez5-
@@ -56,6 +74,9 @@ seeds="
 /usr/bin/wireplumber
 /usr/bin/pw-dump
 /usr/bin/wpctl
+/usr/bin/pw-top
+/usr/bin/pw-cli
+/usr/bin/pw-metadata
 $lib/pipewire-0.3/libpipewire-module-access.so
 $lib/pipewire-0.3/libpipewire-module-adapter.so
 $lib/pipewire-0.3/libpipewire-module-client-device.so

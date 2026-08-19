@@ -160,6 +160,19 @@ manager. `pw-dump` is the way to inspect the running sound server:
 
     kubectl -n liken-system exec ds/audio-operator -c operator -- pw-dump
 
+Three more tools ship in the same image, for the times the graph
+reads correct and the sound does not. Each runs as its own
+`kubectl exec`, with no shell between. `pw-top -b -n 1` prints one
+reading of every node, and its `ERR` column counts the dropouts.
+`pw-cli` lists any object in the graph and writes a parameter on
+one with `set-param`, with no restart of the daemon. `pw-metadata`
+reads and writes the graph's settings, for example
+`clock.force-quantum`.
+
+    kubectl -n liken-system exec ds/audio-operator -c operator -- pw-top -b -n 1
+    kubectl -n liken-system exec ds/audio-operator -c operator -- pw-cli info 0
+    kubectl -n liken-system exec ds/audio-operator -c operator -- pw-metadata -n settings
+
 ## 5. See the devices
 
 The operator publishes one device for each playback PCM device on
