@@ -141,11 +141,16 @@ and the media bus, three devices across the two drivers.
 ### The audio operator
 
 The second, third, and fourth items landed with that operator's
-release 2026.08.19-004, recorded as its plan 04 and drilled
-hands-free on liken-1 on 2026-08-19: the fragment wrote, six
-A2DPSink endpoints registered over the delivered bus, and
-`studio-pa` published tainted beside the card's sinks. The playback
-drills wait for hands.
+releases 2026.08.19-004 and -005, recorded as its plan 04 and
+drilled on liken-1 on 2026-08-19. The -004 drill proved the fragment
+and the cross-pod bus, and caught two defects the -005 pair fixed:
+the fragment named the receiving role (`a2dp_sink`) where playing
+into a speaker takes `a2dp_source`, and a fresh `bluetoothd` starts
+the adapter with page scan off, which the Bluetooth operator now
+asserts back on every pass. With both live, `studio-pa` connected
+from its own retry loop, and its device published untainted with
+the `aptx` codec and its sink name. The playback drills wait for
+hands.
 
 * Selects on the shared attribute. This landed with plan 61's
   enrichment release: the `sound-card` class names
