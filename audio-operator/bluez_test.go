@@ -248,7 +248,7 @@ func TestMonitorConfigStatesTheProfileAndTheRoles(t *testing.T) {
 		"hardware.bluetooth = required",
 		"monitor.bluez = required",
 		"monitor.bluez-midi = disabled",
-		"bluez5.roles = [ a2dp_sink ]",
+		"bluez5.roles = [ a2dp_source ]",
 		`bluez5.hfphsp-backend = "none"`,
 	}
 	for _, line := range lines {

@@ -278,15 +278,21 @@ wireplumber.settings = {
   bluetooth.use-persistent-storage = false
 }
 
-# bluez5.roles is the A2DP-only rule. The monitor intersects its
-# known roles with this list, so a2dp_sink alone leaves the LE Audio
-# and ASHA roles off, and the HFP and HSP backend reads the same
-# list, finds no headset role, and enables nothing. hfphsp-backend
-# states the same choice where a reader can see it: the headset
-# profiles need an SCO socket in the host's network namespace, and
-# this pod has no host network.
+# bluez5.roles is the A2DP-only rule, and it names the roles THIS
+# machine plays, not the peer's. a2dp_source is the role that plays
+# into a speaker: PipeWire registers /MediaEndpoint/A2DPSource
+# endpoints, the radio advertises AudioSource, and a speaker's own
+# sink connects to them. Do not write a2dp_sink here because "the
+# speaker is a sink": that is the role of receiving audio, it turns
+# this machine into a speaker for phones, and a real speaker's card
+# then offers no playback profile at all. The single role also
+# leaves the LE Audio and ASHA roles off, and the HFP and HSP
+# backend reads the same list, finds no headset role, and enables
+# nothing. hfphsp-backend states that choice where a reader can see
+# it: the headset profiles need an SCO socket in the host's network
+# namespace, and this pod has no host network.
 monitor.bluez.properties = {
-  bluez5.roles = [ a2dp_sink ]
+  bluez5.roles = [ a2dp_source ]
   bluez5.hfphsp-backend = "none"
 }
 `

@@ -55,7 +55,12 @@ The decisions this repository made:
   paired set, and a bus that stopped answering says nothing about
   who is paired. The last-known speakers publish tainted instead.
 * **A2DP only, stated twice.** The fragment restricts the monitor's
-  roles to `a2dp_sink` and names no headset backend. HFP and HSP
+  roles to `a2dp_source`, the role that plays into a speaker, and
+  names no headset backend. The role names what this machine does,
+  not what the peer is: the first release named `a2dp_sink` and made
+  the machine a receiver for phones, and the liken-1 drill caught
+  the inversion when the speaker's card offered no playback profile.
+  HFP and HSP
   would need an SCO socket in the host's network namespace, and this
   pod has no host network. Milestone 60 keeps the headset profiles
   out of scope until a real use appears.
