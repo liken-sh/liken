@@ -28,19 +28,20 @@ say why it is built the way it is.
   hotplug subscription to the kernel's own netlink group, so a monitor
   that arrives on a dark connector routes without a restart. Answers
   and replaces the open problem "Routing is narrower than inventory".
-* [03, The modes a monitor accepts](03-the-modes-a-monitor-accepts.md).
+* [03, The modes a monitor accepts](completed/03-the-modes-a-monitor-accepts.md).
   Built, and adopted on liken-1 on 2026-08-19. Each connected output
   publishes a `modes` attribute: the kernel's list, deduplicated, cut
   to whole names under the API's 64-character limit.
-* [04, The kubelet supervises the compositor](04-the-kubelet-supervises-the-compositor.md).
-  Built on 2026-08-19. Weston moves to a container of its own, the
+* [04, The kubelet supervises the compositor](completed/04-the-kubelet-supervises-the-compositor.md).
+  Built and drilled on liken-1 on 2026-08-19. Weston moves to a container of its own, the
   kubelet restarts it alone, and the operator taints every output
   while nothing answers on the compositor's socket. The prerequisite
   for a claim that selects a mode.
-* [05, Choosing the mode](05-choosing-the-mode.md). In build. A
-  claim's opaque config states a resolution, and the operator
-  rewrites the compositor's config, restarts it, and delivers only
-  after the readback reports the mode.
+* [05, Choosing the mode](completed/05-choosing-the-mode.md). Built
+  and drilled on liken-1 on 2026-08-19. A claim's opaque config
+  states a resolution, and the operator rewrites the compositor's
+  config, restarts it, and delivers only after the readback reports
+  the mode.
 * [06, Matching the refresh](06-matching-the-refresh.md). Queued
   behind plan 05. The mode grows an integer refresh, validated
   against the kernel's own mode list, so a 24 fps film runs on a

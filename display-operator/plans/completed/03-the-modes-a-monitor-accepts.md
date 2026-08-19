@@ -1,6 +1,6 @@
 # 03, The modes a monitor accepts
 
-Planned on 2026-08-19. Inventory only: this plan publishes what
+Built and adopted on liken-1 on 2026-08-19. Inventory only: this plan publishes what
 each monitor accepts and changes nothing about what the compositor
 drives.
 

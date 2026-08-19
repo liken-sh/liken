@@ -1,6 +1,8 @@
 # 04, The kubelet supervises the compositor
 
-Planned on 2026-08-19. This plan moves Weston out of the operator's
+Built and drilled on liken-1 on 2026-08-19: the kubelet restarted a
+killed compositor alone in about a second while the operator kept
+its uptime. This plan moves Weston out of the operator's
 process and into its own container, the shape the audio operator's
 plan 03 built for PipeWire and WirePlumber. It is the prerequisite
 for plan 05, which will restart the compositor to change a mode.

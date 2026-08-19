@@ -1,6 +1,8 @@
 # 05, Choosing the mode
 
-Planned on 2026-08-19, on top of plan 04. A claim asks for a
+Built and drilled on liken-1 on 2026-08-19, on top of plan 04: the
+movie ran at 720x480 by claim alone, and the refusal event named
+the full kernel list. Planned the same day. A claim asks for a
 resolution, and the operator restarts the compositor to honor it.
 The audio operator's plan 05 built the same claim shape for A2DP
 codecs; this plan is the display analogue, with a bigger blast and
