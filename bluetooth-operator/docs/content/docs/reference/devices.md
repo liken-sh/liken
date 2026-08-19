@@ -30,6 +30,12 @@ per node, named `<node>-bluetooth.liken.sh`, beside `liken`'s own
             address: {string: "A0:AB:51:33:B7:12"}
             connected: {bool: true}
             name: {string: "DualSense Wireless Controller"}
+            classOfDevice: {int: 9480}
+            majorClass: {string: peripheral}
+            minorClass: {string: gamepad}
+            addressType: {string: public}
+            icon: {string: input-gaming}
+            input: {bool: true}
 
 The slice holds one device for each paired controller. The list
 follows the paired set, whether or not each controller is connected.
@@ -50,20 +56,54 @@ allocate different hardware after a reboot.
 A selector reads these as
 `device.attributes["bluetooth.liken.sh"].<name>`.
 
-| Attribute | Type | Present | What it is |
-|---|---|---|---|
-| `address` | string | always | the controller's MAC, uppercase with colons: `A0:AB:51:33:B7:12` |
-| `connected` | bool | always | whether bluetoothd holds a connection to it now |
-| `name` | string | when the controller reports a name | the controller's alias in BlueZ, cut to 64 characters |
+Two attributes are on every device this operator publishes, in every
+state, the departed-adapter republish included:
 
-The Present column is a contract. `address` and `connected` are on
-every device this operator publishes, in every state, the
-departed-adapter republish included. `name` is not: the operator
+| Attribute | Type | What it is |
+|---|---|---|
+| `address` | string | the controller's MAC, uppercase with colons: `A0:AB:51:33:B7:12` |
+| `connected` | bool | whether `bluetoothd` holds a connection to it now |
+
+Every other attribute is present only when BlueZ reports the fact.
+The identity facts publish in two layers: the raw code, and the
+names and flags unpacked from it, so a selector never does bit
+arithmetic:
+
+| Attribute | Type | What it is |
+|---|---|---|
+| `name` | string | the controller's alias in BlueZ, cut to 64 characters |
+| `classOfDevice` | int | the raw 24-bit class word from the inquiry response |
+| `appearance` | int | the LE appearance value; an LE-only device often reports this and no class word |
+| `modalias` | string | the PnP vendor and product, as in `bluetooth:v000ApFFFFdFFFF`, cut to 64 characters |
+| `icon` | string | BlueZ's own class-to-icon name, such as `audio-headphones` or `input-gaming` |
+| `addressType` | string | `public` or `random` |
+| `majorClass` | string | class bits 12 to 8 as a name: `audio-video`, `peripheral`, `phone`, and the other assigned majors |
+| `minorClass` | string | class bits 7 to 2, read under the major: `headphones`, `gamepad`, `smartphone` |
+| `servicePositioning`, `serviceNetworking`, `serviceRendering`, `serviceCapturing`, `serviceObjectTransfer`, `serviceAudio`, `serviceTelephony`, `serviceInformation` | bool | one flag per service bit the class word sets, bits 16 to 23 |
+
+The profile flags come from the service UUIDs the device advertised
+when it paired. Each one is `true` when the profile is advertised
+and absent otherwise, and a UUID outside this vocabulary publishes
+nothing:
+
+| Attribute | The profile |
+|---|---|
+| `audioSink` | A2DP sink: the device plays audio |
+| `audioSource` | A2DP source: the device sends audio |
+| `avrcpTarget` | the device takes play, pause, and volume |
+| `avrcpController` | the device sends play, pause, and volume |
+| `handsfree` | HFP, the hands-free microphone profile |
+| `headset` | HSP, the headset microphone profile |
+| `input` | HID, classic or over GATT: the device is an input device |
+| `battery` | the device reports a battery level |
+| `serialPort` | raw RFCOMM serial |
+
+The split between always and absent is a contract. The operator
 omits an attribute it has no value for, rather than publishing it
-empty, so a controller whose name is empty publishes no `name`. A
-selector's read of an absent attribute does not evaluate to false;
-it fails, and the failure can abort the allocation instead of
-skipping the device. So a selector on `name` must guard the read:
+empty. A selector's read of an absent attribute does not evaluate to
+false; it fails, and the failure can abort the allocation instead of
+skipping the device. So a selector on anything past `address` and
+`connected` must guard the read:
 
     has(device.attributes["bluetooth.liken.sh"].name) &&
     device.attributes["bluetooth.liken.sh"].name.startsWith("DualSense")
@@ -97,10 +137,10 @@ off.
 
 The operator takes two
 [`DeviceClasses`](https://kubernetes.io/docs/reference/kubernetes-api/resource/device-class-v1/),
-and you create both: a class is cluster policy, so the base ships
-none, and [Install the operator](/docs/guides/install/) gives their
-YAML. The names below are that guide's defaults, and
-`bluetooth-controller` is the one your workloads claim:
+and the deploy base ships both, because their selectors name only
+this driver's own vocabulary and a release must be able to change a
+selector. [Install the operator](/docs/guides/install/) shows their
+YAML. `bluetooth-controller` is the one your workloads claim:
 
 | `DeviceClass` | Selector | Who claims it |
 |---|---|---|

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -78,6 +79,72 @@ func TestControllersFromKeepsThePairedSet(t *testing.T) {
 	two, ok := controllers["b4:8c:9d:11:22:33"]
 	if !ok || two.Connected {
 		t.Errorf("controller = %+v, present = %v", two, ok)
+	}
+}
+
+// The class facts arrive in the inquiry response and the UUIDs
+// arrive from the SDP browse after pairing, but by the time this
+// parse runs they are all plain Device1 properties, read in one
+// GetManagedObjects answer.
+func TestControllersFromReadsTheDeviceProperties(t *testing.T) {
+	objects := managedObjects{}.
+		adapter("/org/bluez/hci0").
+		device("/org/bluez/hci0/dev_E3_28_E9_23_21_6F", map[string]any{
+			"Address":     "E3:28:E9:23:21:6F",
+			"AddressType": "public",
+			"Alias":       "studio-pa",
+			"Paired":      true,
+			"Connected":   false,
+			"Class":       uint32(0x2c0418),
+			"Appearance":  uint16(0x0941),
+			"Icon":        "audio-headphones",
+			"Modalias":    "bluetooth:v000ApFFFFdFFFF",
+			"UUIDs": []string{
+				"0000110b-0000-1000-8000-00805f9b34fb",
+				"0000110a-0000-1000-8000-00805f9b34fb",
+			},
+		})
+
+	controllers, err := controllersFrom(objects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := controllers["e3:28:e9:23:21:6f"]
+	want := controller{
+		Name:        "studio-pa",
+		Connected:   false,
+		Class:       0x2c0418,
+		Appearance:  0x0941,
+		Icon:        "audio-headphones",
+		Modalias:    "bluetooth:v000ApFFFFdFFFF",
+		AddressType: "public",
+		UUIDs: []string{
+			"0000110b-0000-1000-8000-00805f9b34fb",
+			"0000110a-0000-1000-8000-00805f9b34fb",
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("controller = %+v, want %+v", got, want)
+	}
+}
+
+// A device that reports none of the identity properties parses to
+// zero values, which is what the publisher reads as "publish
+// nothing".
+func TestControllersFromLeavesAnAbsentPropertyZero(t *testing.T) {
+	objects := managedObjects{}.
+		adapter("/org/bluez/hci0").
+		device("/org/bluez/hci0/dev_A0_AB_51_33_B7_12", map[string]any{
+			"Address": "A0:AB:51:33:B7:12",
+			"Paired":  true,
+		})
+
+	controllers, err := controllersFrom(objects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := controllers["a0:ab:51:33:b7:12"]; !reflect.DeepEqual(got, controller{}) {
+		t.Fatalf("controller = %+v, want the zero value", got)
 	}
 }
 

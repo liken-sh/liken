@@ -13,8 +13,8 @@ package main
 // upstream API that this program writes. The full ResourceSlice can
 // describe partitionable devices, shared counters, and per-device
 // node selection, and none of that changes what a paired controller
-// needs: a name, three attributes, and a taint when the radio is
-// silent.
+// needs: a name, its identity attributes, and a taint when the radio
+// is silent.
 //
 // One slice holds the whole inventory, so the pool protocol reduces
 // to a version counter: bump the generation on every change, and one
@@ -148,6 +148,9 @@ func AttrString(s string) DeviceAttribute { return DeviceAttribute{String: &s} }
 // AttrBool builds a boolean attribute value.
 func AttrBool(b bool) DeviceAttribute { return DeviceAttribute{Bool: &b} }
 
+// AttrInt builds an integer attribute value.
+func AttrInt(i int64) DeviceAttribute { return DeviceAttribute{Int: &i} }
+
 // sliceDevices turns the paired set into the devices the slice
 // publishes, one for each controller, sorted by name so that the same
 // hardware always produces the same slice.
@@ -178,6 +181,40 @@ func sliceDevices(controllers map[string]controller, nodes map[string][]string) 
 		}
 		if name := attributeString(c.Name); name != "" {
 			device.Attributes["name"] = AttrString(name)
+		}
+		// The identity facts publish in two layers: the raw code, so
+		// no unforeseen question is lost, and the unpacked names and
+		// flags, so a selector never does bit arithmetic. classify.go
+		// holds the decode. Every layer is absent when BlueZ reported
+		// nothing. The class gate matters most: a class word of zero
+		// decodes to miscellaneous, and publishing that would turn a
+		// device's silence into an answer it never gave.
+		if c.Appearance != 0 {
+			device.Attributes["appearance"] = AttrInt(int64(c.Appearance))
+		}
+		for name, value := range map[string]string{
+			"modalias":    c.Modalias,
+			"icon":        c.Icon,
+			"addressType": c.AddressType,
+		} {
+			if value := attributeString(value); value != "" {
+				device.Attributes[name] = AttrString(value)
+			}
+		}
+		if c.Class != 0 {
+			device.Attributes["classOfDevice"] = AttrInt(int64(c.Class))
+			if major := majorClass(c.Class); major != "" {
+				device.Attributes["majorClass"] = AttrString(major)
+			}
+			if minor := minorClass(c.Class); minor != "" {
+				device.Attributes["minorClass"] = AttrString(minor)
+			}
+			for _, flag := range serviceClassFlags(c.Class) {
+				device.Attributes[flag] = AttrBool(true)
+			}
+		}
+		for _, flag := range profileFlags(c.UUIDs) {
+			device.Attributes[flag] = AttrBool(true)
 		}
 		usable := len(nodes[mac]) > 0
 		if !c.Connected || !usable {

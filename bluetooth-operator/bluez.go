@@ -53,9 +53,22 @@ var ErrNoAdapter = errors.New("bluetoothd published no adapter")
 // controller is one paired controller, as bluetoothd reports it. The
 // address is the map key that pairedControllers returns it under, in
 // the one normalized form this program keys on.
+//
+// The fields past Connected are the identity facts BlueZ carries
+// for a device: the class word from the inquiry response, the LE
+// appearance, and the profile UUIDs from the SDP browse that runs
+// after pairing. Each one keeps its zero value when bluetoothd
+// reports no such property, and the publisher reads zero as
+// "publish nothing".
 type controller struct {
-	Name      string
-	Connected bool
+	Name        string
+	Connected   bool
+	Class       uint32
+	Appearance  uint16
+	Icon        string
+	Modalias    string
+	AddressType string
+	UUIDs       []string
 }
 
 // pairedControllers reads every paired device from bluetoothd, keyed
@@ -104,7 +117,22 @@ func controllersFrom(objects map[dbus.ObjectPath]map[string]map[string]dbus.Vari
 		}
 		connected, _ := properties["Connected"].Value().(bool)
 		name, _ := properties["Alias"].Value().(string)
-		controllers[mac] = controller{Name: name, Connected: connected}
+		class, _ := properties["Class"].Value().(uint32)
+		appearance, _ := properties["Appearance"].Value().(uint16)
+		icon, _ := properties["Icon"].Value().(string)
+		modalias, _ := properties["Modalias"].Value().(string)
+		addressType, _ := properties["AddressType"].Value().(string)
+		uuids, _ := properties["UUIDs"].Value().([]string)
+		controllers[mac] = controller{
+			Name:        name,
+			Connected:   connected,
+			Class:       class,
+			Appearance:  appearance,
+			Icon:        icon,
+			Modalias:    modalias,
+			AddressType: addressType,
+			UUIDs:       uuids,
+		}
 	}
 	if adapters == 0 {
 		return nil, ErrNoAdapter

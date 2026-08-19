@@ -89,6 +89,139 @@ func TestSliceDevicesDerivesTheTwoTaints(t *testing.T) {
 	}
 }
 
+// publishedAttributes flattens one device's typed attributes into a
+// plain map, so a test states its expectation as one literal.
+func publishedAttributes(device SliceDevice) map[string]any {
+	flat := map[string]any{}
+	for name, value := range device.Attributes {
+		switch {
+		case value.String != nil:
+			flat[name] = *value.String
+		case value.Bool != nil:
+			flat[name] = *value.Bool
+		case value.Int != nil:
+			flat[name] = *value.Int
+		}
+	}
+	return flat
+}
+
+// The controller here is a real device: a B06+ Bluetooth audio
+// receiver, publishing the exact class word and profile UUIDs it
+// reported when it paired. It exercises every layer at once: the
+// raw word, both unpacked class names, three service flags, and
+// five profile flags.
+func TestSliceDevicesPublishesTheClassAndProfileFacts(t *testing.T) {
+	devices := sliceDevices(map[string]controller{
+		"e3:28:e9:23:21:6f": {
+			Name:        "studio-pa",
+			Class:       0x2c0418,
+			Modalias:    "bluetooth:v000ApFFFFdFFFF",
+			Icon:        "audio-headphones",
+			AddressType: "public",
+			UUIDs: []string{
+				fullUUID("110b"), fullUUID("110a"), fullUUID("110c"),
+				fullUUID("110f"), fullUUID("1101"),
+			},
+		},
+	}, nil)
+
+	want := map[string]any{
+		"address":          "E3:28:E9:23:21:6F",
+		"name":             "studio-pa",
+		"connected":        false,
+		"classOfDevice":    int64(2884632),
+		"modalias":         "bluetooth:v000ApFFFFdFFFF",
+		"icon":             "audio-headphones",
+		"addressType":      "public",
+		"majorClass":       "audio-video",
+		"minorClass":       "headphones",
+		"serviceAudio":     true,
+		"serviceRendering": true,
+		"serviceCapturing": true,
+		"audioSink":        true,
+		"audioSource":      true,
+		"avrcpTarget":      true,
+		"avrcpController":  true,
+		"serialPort":       true,
+	}
+	if got := publishedAttributes(devices[0]); !reflect.DeepEqual(got, want) {
+		t.Fatalf("attributes = %+v, want %+v", got, want)
+	}
+}
+
+// A DualSense's class word sets no service flags at all, so a
+// gamepad proves the flags stay absent while the major and minor
+// still publish. Its input flag comes from the HID-over-GATT UUID,
+// the LE transport, which must land as the same input attribute the
+// classic UUID yields.
+func TestSliceDevicesPublishesAGamepad(t *testing.T) {
+	devices := sliceDevices(map[string]controller{
+		"a0:ab:51:33:b7:12": {
+			Name:      "DualSense Wireless Controller",
+			Connected: true,
+			Class:     0x002508,
+			UUIDs:     []string{fullUUID("1812")},
+		},
+	}, map[string][]string{"a0:ab:51:33:b7:12": {"/dev/input/event5"}})
+
+	want := map[string]any{
+		"address":       "A0:AB:51:33:B7:12",
+		"name":          "DualSense Wireless Controller",
+		"connected":     true,
+		"classOfDevice": int64(0x002508),
+		"majorClass":    "peripheral",
+		"minorClass":    "gamepad",
+		"input":         true,
+	}
+	if got := publishedAttributes(devices[0]); !reflect.DeepEqual(got, want) {
+		t.Fatalf("attributes = %+v, want %+v", got, want)
+	}
+}
+
+// Absent, never empty: a controller that reported no identity
+// facts publishes only the three attributes every device has.
+func TestSliceDevicesPublishesNothingForAnUnreportedFact(t *testing.T) {
+	devices := sliceDevices(
+		map[string]controller{"a0:ab:51:33:b7:12": {Connected: true}},
+		map[string][]string{"a0:ab:51:33:b7:12": {"/dev/input/event5"}},
+	)
+
+	want := map[string]any{
+		"address":   "A0:AB:51:33:B7:12",
+		"connected": true,
+	}
+	if got := publishedAttributes(devices[0]); !reflect.DeepEqual(got, want) {
+		t.Fatalf("attributes = %+v, want %+v", got, want)
+	}
+}
+
+// Appearance is the LE counterpart of the class word, and an
+// LE-only device often reports it with no class at all, so it
+// publishes outside the class gate.
+func TestSliceDevicesPublishesAppearance(t *testing.T) {
+	devices := sliceDevices(
+		map[string]controller{"a0:ab:51:33:b7:12": {Appearance: 0x03C4}},
+		nil,
+	)
+	if got := *devices[0].Attributes["appearance"].Int; got != 0x03C4 {
+		t.Fatalf("appearance = %d, want %d", got, 0x03C4)
+	}
+}
+
+// The API rejects an attribute string past 64 characters, and one
+// oversized value would fail the whole slice write, so a long
+// modalias takes the same cut the name takes.
+func TestSliceDevicesTruncatesALongModalias(t *testing.T) {
+	devices := sliceDevices(
+		map[string]controller{"a0:ab:51:33:b7:12": {Modalias: strings.Repeat("x", 100)}},
+		nil,
+	)
+	if got := len(*devices[0].Attributes["modalias"].String); got != 64 {
+		t.Fatalf("modalias length = %d, want 64", got)
+	}
+}
+
 func TestSliceDevicesTruncatesALongName(t *testing.T) {
 	devices := sliceDevices(
 		map[string]controller{"a0:ab:51:33:b7:12": {Name: strings.Repeat("x", 100)}},
