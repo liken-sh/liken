@@ -29,7 +29,7 @@ Each device is one playback PCM device of the card, with the
 attached monitor's facts as attributes. Write a CEL selector against
 them. If the Dynamic Resource Allocation (DRA) objects are new to
 you, read [How the pieces fit](/docs/guides/#how-the-pieces-fit)
-first. Three useful forms:
+first. Four useful forms:
 
     # by output
     device.attributes["audio.liken.sh"].output == "card0-pcm3"
@@ -42,11 +42,22 @@ first. Three useful forms:
     has(device.attributes["monitor.liken.sh"].id) &&
     device.attributes["monitor.liken.sh"].id == "gsm-5b09-lg-ultrawide"
 
+    # one Bluetooth speaker, by the address on its label
+    has(device.attributes["audio.liken.sh"].address) &&
+    device.attributes["audio.liken.sh"].address == "A0:AB:51:33:B7:12"
+
+On a machine whose radio the pod claimed a media bus from, a device
+is also one paired Bluetooth speaker. A speaker carries its
+address, the name BlueZ reports, its connection state, and its
+codec, and a claim selects it the same way it selects an output.
+
 Guard `connectionType` and `monitor.liken.sh/id` with `has()`, as
 above. On an HDMI or DisplayPort output both come from the monitor,
 so an output with no monitor publishes neither, and a selector that
 reads a missing attribute fails the whole allocation. `output` needs
-no guard, because every device publishes it.
+no guard, because every device publishes it. Guard `address` the
+same way: only a Bluetooth speaker publishes it, so an unguarded
+read fails the allocation on every one of the card's outputs.
 [Devices](/docs/reference/devices/) lists every attribute, and
 explains why the pairing attribute reads under its own domain,
 `monitor.liken.sh`.

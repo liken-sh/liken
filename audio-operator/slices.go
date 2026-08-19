@@ -42,8 +42,9 @@ const ResourceSlicesPath = "/apis/resource.k8s.io/v1/resourceslices"
 // maxSliceDevices is the API's limit on devices in one slice. The
 // limit is 128 for a slice with no taints and 64 for a slice that
 // taints any device, and this operator taints every output that
-// cannot play, so 64 is the number that applies. One card has far
-// fewer PCM devices than that.
+// cannot play, so 64 is the number that applies. One card's PCM
+// devices and one adapter's paired speakers together stay far under
+// that in practice.
 const maxSliceDevices = 64
 
 // maxAttributeLength is the API's limit on the length of a string
@@ -61,7 +62,7 @@ const maxAttributeLength = 64
 // because a monitor that a person unplugs for a moment is not a loss.
 //
 // noMonitorTaint says no monitor answers on this HDMI output, and
-// noSinkTaint says PipeWire holds no node for this PCM device. Either
+// noSinkTaint says PipeWire holds no node for this device. Either
 // one alone makes the output unusable, so both have the NoSchedule
 // effect, and no consumer should ever tolerate either. This is what
 // makes a claim ahead of a monitor park instead of loop. With only
@@ -73,9 +74,13 @@ const maxAttributeLength = 64
 //
 // The two reasons have separate keys because they are separate facts
 // about the machine, and each one has its own repair. A missing
-// monitor is a cable, and somebody plugs it back in. A missing node is
-// an output PipeWire could not create, which the nofail flag on each
-// declared object leaves possible, and only a restart creates it.
+// monitor is a cable, and somebody plugs it back in. A missing node
+// has one repair for each kind of device: on an ALSA output it is a
+// node PipeWire could not create, which the nofail flag on each
+// declared object leaves possible, and only a replacement pod
+// creates it; on a Bluetooth speaker it is a speaker that is not
+// connected, and WirePlumber builds the node when somebody switches
+// the speaker on.
 const (
 	disconnectedTaint = DriverName + "/disconnected"
 	noMonitorTaint    = DriverName + "/no-monitor"
@@ -160,6 +165,14 @@ func AttrString(s string) DeviceAttribute { return DeviceAttribute{String: &s} }
 // AttrInt builds a number attribute value.
 func AttrInt(i int64) DeviceAttribute { return DeviceAttribute{Int: &i} }
 
+// AttrBool builds a boolean attribute value.
+func AttrBool(b bool) DeviceAttribute { return DeviceAttribute{Bool: &b} }
+
+// bluetoothConnection is the connectionType a speaker publishes,
+// beside the hdmi, displayport, and analog forms an ALSA output
+// takes.
+const bluetoothConnection = "bluetooth"
+
 // sliceDevices turns the card's outputs into the devices the slice
 // publishes, one for each output, sorted by name so that the same
 // hardware always produces the same slice.
@@ -172,10 +185,16 @@ func AttrInt(i int64) DeviceAttribute { return DeviceAttribute{Int: &i} }
 // claim holds strands the next consumer: the allocation still names
 // the device, and the kubelet's prepare call retries against a device
 // that is in no slice, with no bound on the retry.
-func sliceDevices(outputs []alsaOutput, sinks map[pcmAddress]string) []SliceDevice {
-	devices := make([]SliceDevice, 0, len(outputs))
+//
+// A paired Bluetooth speaker is a device of this driver too,
+// published beside the card's outputs and named by its peer MAC.
+// Membership there is the paired set, so a speaker that is switched
+// off still publishes, tainted, and leaves the slice only when
+// somebody unpairs it.
+func sliceDevices(outputs []alsaOutput, speakers map[string]speaker, graph pwGraph) []SliceDevice {
+	devices := make([]SliceDevice, 0, len(outputs)+len(speakers))
 	for _, output := range outputs {
-		sink, hasSink := sinks[pcmAddress{Card: output.Card, PCM: output.PCM}]
+		sink, hasSink := graph.Outputs[pcmAddress{Card: output.Card, PCM: output.PCM}]
 		// The device name is not selectable. A DeviceClass and a claim
 		// select with CEL over device.driver, device.attributes,
 		// device.capacity, and device.allowMultipleAllocations, and
@@ -216,9 +235,50 @@ func sliceDevices(outputs []alsaOutput, sinks map[pcmAddress]string) []SliceDevi
 		publishSink(&device, sink, hasSink)
 		devices = append(devices, device)
 	}
+	devices = append(devices, speakerDevices(speakers, graph.Speakers)...)
 	slices.SortFunc(devices, func(a, b SliceDevice) int {
 		return strings.Compare(a.Name, b.Name)
 	})
+	return devices
+}
+
+// speakerDevices turns the paired set into the devices the slice
+// publishes, one for each speaker.
+//
+// The connected attribute reports what bluetoothd says. The taints
+// report the stricter fact, which is what a claim on the device
+// would actually deliver: the two differ for the moment between the
+// connection and WirePlumber's build of the sink node.
+//
+// The taints reuse this driver's own keys, because the states are
+// the same ones an ALSA output has: the device cannot serve a stream
+// now, and no node exists for a prepare call to name.
+func speakerDevices(speakers map[string]speaker, sinks map[string]bluezSink) []SliceDevice {
+	devices := make([]SliceDevice, 0, len(speakers))
+	for address, paired := range speakers {
+		sink, hasSink := sinks[address]
+		device := SliceDevice{
+			Name: speakerName(address),
+			Attributes: map[string]DeviceAttribute{
+				"output":         AttrString(speakerName(address)),
+				"address":        AttrString(publishedMAC(address)),
+				"connectionType": AttrString(bluetoothConnection),
+				"connected":      AttrBool(paired.Connected),
+			},
+		}
+		if name := attributeString(paired.Name); name != "" {
+			device.Attributes["name"] = AttrString(name)
+		}
+		if hasSink && sink.Codec != "" {
+			device.Attributes["codec"] = AttrString(attributeString(sink.Codec))
+		}
+		if !paired.Connected || !hasSink {
+			device.Taints = append(device.Taints,
+				DeviceTaint{Key: disconnectedTaint, Effect: "NoExecute"})
+		}
+		publishSink(&device, sink.Node, hasSink)
+		devices = append(devices, device)
+	}
 	return devices
 }
 
@@ -281,9 +341,9 @@ func addMonitorAttributes(attributes map[string]DeviceAttribute, block eld) {
 }
 
 // attributeString limits a value to the API's limit on the length of
-// a string attribute. The monitor name is the only value here that a
-// manufacturer can make long, and the ELD block holds at most 16
-// characters of it.
+// a string attribute. The ELD block holds at most 16 characters of
+// a monitor's name, so the values that can reach the limit are a
+// speaker's alias, which a person types, and a sink node's name.
 func attributeString(s string) string {
 	if len(s) <= maxAttributeLength {
 		return s

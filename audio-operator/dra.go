@@ -55,10 +55,10 @@ var (
 type draPlugin struct {
 	drav1.UnimplementedDRAPluginServer
 	client *Client
-	// sinks reads PipeWire's graph. It is a field rather than a call
-	// to readSinks, so a test drives a prepare without a PipeWire
+	// graph reads PipeWire's graph. It is a field rather than a call
+	// to readGraph, so a test drives a prepare without a PipeWire
 	// behind it.
-	sinks func(context.Context) (map[pcmAddress]string, error)
+	graph func(context.Context) (pwGraph, error)
 }
 
 // draRegistrar answers the kubelet's plugin-watcher handshake.
@@ -104,7 +104,7 @@ func serveDRAPlugin(ctx context.Context, client *Client) error {
 		return fmt.Errorf("the plugin socket: %w", err)
 	}
 	pluginServer := grpc.NewServer()
-	drav1.RegisterDRAPluginServer(pluginServer, &draPlugin{client: client, sinks: readSinks})
+	drav1.RegisterDRAPluginServer(pluginServer, &draPlugin{client: client, graph: readGraph})
 	healthv1alpha1.RegisterDRAResourceHealthServer(pluginServer, &draHealth{})
 
 	registrationSocket := filepath.Join(draRegistryDir, DriverName+"-reg.sock")
@@ -166,7 +166,7 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 	// One graph read answers every result in the claim, and it is the
 	// same read that publishes the slice, so the two always report the
 	// same sink for an output.
-	sinks, err := p.sinks(ctx)
+	graph, err := p.graph(ctx)
 	if err != nil {
 		return fail("reading PipeWire's graph: %v", err)
 	}
@@ -180,22 +180,18 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 			// screen with its speakers holds one of each.
 			continue
 		}
-		card, pcm, ok := outputFromDeviceName(result.Device)
-		if !ok {
-			return fail("%q does not name an output of this driver", result.Device)
-		}
-		sink, ok := sinks[pcmAddress{Card: card, PCM: pcm}]
-		if !ok {
-			// The output has no sink right now, so there is no name to
-			// give the consumer. The pod waits in ContainerCreating, and
-			// the device's taints are what the scheduler and the eviction
-			// controller act on.
-			return fail("output %s has no PipeWire sink right now", result.Device)
+		// A device with no sink right now leaves no name to give the
+		// consumer. The pod waits in ContainerCreating, and the device's
+		// taints are what the scheduler and the eviction controller act
+		// on.
+		sink, err := deliveredSink(result.Device, graph)
+		if err != nil {
+			return fail("%v", err)
 		}
 		name := claim.Uid + "-" + result.Device
 		specDevices = append(specDevices, cdiDevice{
 			Name:           name,
-			ContainerEdits: outputEdits(sink),
+			ContainerEdits: sinkEdits(sink),
 		})
 		devices = append(devices, &drav1.Device{
 			PoolName:     result.Pool,
@@ -210,6 +206,31 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 		}
 	}
 	return &drav1.NodePrepareResourceResponse{Devices: devices}
+}
+
+// deliveredSink resolves one allocated device name to the PipeWire
+// node a consumer's streams must target. The name is the whole of
+// what a prepare call carries, so its shape decides which half of
+// the graph answers: card<n>-pcm<n> is an ALSA output, and six
+// dashed hexadecimal octets are a Bluetooth speaker. The two shapes
+// cannot collide, because an output's name always holds the word
+// card and a MAC never does.
+func deliveredSink(device string, graph pwGraph) (string, error) {
+	if card, pcm, ok := outputFromDeviceName(device); ok {
+		sink, ok := graph.Outputs[pcmAddress{Card: card, PCM: pcm}]
+		if !ok {
+			return "", fmt.Errorf("output %s has no PipeWire sink right now", device)
+		}
+		return sink, nil
+	}
+	if address, ok := speakerFromDeviceName(device); ok {
+		sink, ok := graph.Speakers[address]
+		if !ok {
+			return "", fmt.Errorf("speaker %s has no PipeWire sink right now", device)
+		}
+		return sink.Node, nil
+	}
+	return "", fmt.Errorf("%q does not name a device of this driver", device)
 }
 
 // NodeUnprepareResources removes each claim's CDI spec. As with

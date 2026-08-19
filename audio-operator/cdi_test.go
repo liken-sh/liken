@@ -17,8 +17,8 @@ func specDirectory(t *testing.T) string {
 	return dir
 }
 
-func TestOutputEdits(t *testing.T) {
-	edits := outputEdits("alsa_output.pci-0000_00_1f.3.hdmi-stereo")
+func TestSinkEdits(t *testing.T) {
+	edits := sinkEdits("alsa_output.pci-0000_00_1f.3.hdmi-stereo")
 
 	want := []string{
 		"PIPEWIRE_REMOTE=/var/run/audio.liken.sh/pipewire-0",
@@ -69,12 +69,12 @@ func TestRefreshRewritesASinkThatCameBackUnderANewName(t *testing.T) {
 	dir := specDirectory(t)
 	if err := writeCDISpec("claim-1", []cdiDevice{{
 		Name:           "claim-1-card0-pcm3",
-		ContainerEdits: outputEdits("alsa_output.old-name"),
+		ContainerEdits: sinkEdits("alsa_output.old-name"),
 	}}); err != nil {
 		t.Fatal(err)
 	}
 
-	refreshCDISpecs(map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.new-name"})
+	refreshCDISpecs(outputGraph(map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.new-name"}))
 
 	spec := readSpec(t, filepath.Join(dir, "audio.liken.sh-claim-1.json"))
 	want := "PIPEWIRE_NODE=alsa_output.new-name"
@@ -90,15 +90,38 @@ func TestRefreshKeepsTheNameWhenTheSinkIsGone(t *testing.T) {
 	dir := specDirectory(t)
 	if err := writeCDISpec("claim-1", []cdiDevice{{
 		Name:           "claim-1-card0-pcm3",
-		ContainerEdits: outputEdits("alsa_output.old-name"),
+		ContainerEdits: sinkEdits("alsa_output.old-name"),
 	}}); err != nil {
 		t.Fatal(err)
 	}
 
-	refreshCDISpecs(map[pcmAddress]string{})
+	refreshCDISpecs(outputGraph(map[pcmAddress]string{}))
 
 	spec := readSpec(t, filepath.Join(dir, "audio.liken.sh-claim-1.json"))
 	want := "PIPEWIRE_NODE=alsa_output.old-name"
+	if !slices.Contains(spec.Devices[0].ContainerEdits.Env, want) {
+		t.Fatalf("env = %v, want %q", spec.Devices[0].ContainerEdits.Env, want)
+	}
+}
+
+// WirePlumber names a Bluetooth sink with the SPA object id on
+// the end, and that id changes when the speaker reconnects, so a
+// speaker's node renames more often than an output's does.
+func TestRefreshRewritesASpeakersNodeAfterAReconnect(t *testing.T) {
+	dir := specDirectory(t)
+	if err := writeCDISpec("claim-1", []cdiDevice{{
+		Name:           "claim-1-" + testSpeakerName,
+		ContainerEdits: sinkEdits("bluez_output.A0_AB_51_33_B7_12.1"),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	refreshCDISpecs(speakerGraph(map[string]bluezSink{
+		testSpeakerAddress: {Node: "bluez_output.A0_AB_51_33_B7_12.7", Codec: "sbc"},
+	}))
+
+	spec := readSpec(t, filepath.Join(dir, "audio.liken.sh-claim-1.json"))
+	want := "PIPEWIRE_NODE=bluez_output.A0_AB_51_33_B7_12.7"
 	if !slices.Contains(spec.Devices[0].ContainerEdits.Env, want) {
 		t.Fatalf("env = %v, want %q", spec.Devices[0].ContainerEdits.Env, want)
 	}
@@ -111,7 +134,7 @@ func TestRefreshLeavesAnotherDriversSpecAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	refreshCDISpecs(map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.new-name"})
+	refreshCDISpecs(outputGraph(map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.new-name"}))
 
 	raw, err := os.ReadFile(other)
 	if err != nil {

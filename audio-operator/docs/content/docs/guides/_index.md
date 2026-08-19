@@ -21,6 +21,11 @@ device for each physical output, named like `card0-pcm3`, with the
 facts about it as attributes, such as the sink a stream targets and
 the monitor-pairing identity `monitor.liken.sh/id`.
 
+On a machine whose radio the Bluetooth operator publishes a media
+bus for, the same slice holds one device for each paired Bluetooth
+speaker, named by its MAC address. Everything below applies to a
+speaker unchanged.
+
 A `DeviceClass` names a kind of device a workload can ask for. A
 class is cluster policy, so you create it yourself: `audio-output`,
 the class that covers every device this driver publishes.

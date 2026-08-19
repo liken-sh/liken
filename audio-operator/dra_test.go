@@ -29,9 +29,19 @@ const allocatedClaim = `{
   ]}}}
 }`
 
+// A claim on one Bluetooth speaker. The device name is the peer
+// MAC, and the driver is the same one that publishes the card's
+// outputs, so the delivery is the same delivery.
+const speakerClaim = `{
+  "metadata": {"name": "kitchen", "namespace": "media", "uid": "claim-1"},
+  "status": {"allocation": {"devices": {"results": [
+    {"request": "speaker", "driver": "audio.liken.sh", "pool": "liken-1", "device": "a0-ab-51-33-b7-12"}
+  ]}}}
+}`
+
 // testPlugin builds a DRA plugin over an API server that holds one
-// claim, and over a fixed set of sinks.
-func testPlugin(t *testing.T, claim string, sinks map[pcmAddress]string) *draPlugin {
+// claim, and over a fixed graph.
+func testPlugin(t *testing.T, claim string, graph pwGraph) *draPlugin {
 	t.Helper()
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -39,12 +49,7 @@ func testPlugin(t *testing.T, claim string, sinks map[pcmAddress]string) *draPlu
 		}
 		_, _ = w.Write([]byte(claim))
 	}))
-	return &draPlugin{
-		client: client,
-		sinks: func(context.Context) (map[pcmAddress]string, error) {
-			return sinks, nil
-		},
-	}
+	return &draPlugin{client: client, graph: staticGraph(graph)}
 }
 
 func prepare(t *testing.T, plugin *draPlugin, uid string) *drav1.NodePrepareResourceResponse {
@@ -64,9 +69,9 @@ func prepare(t *testing.T, plugin *draPlugin, uid string) *drav1.NodePrepareReso
 
 func TestPrepareDeliversTheSocketAndTheSinkName(t *testing.T) {
 	dir := specDirectory(t)
-	plugin := testPlugin(t, allocatedClaim, map[pcmAddress]string{
+	plugin := testPlugin(t, allocatedClaim, outputGraph(map[pcmAddress]string{
 		{Card: 0, PCM: 3}: "alsa_output.pci-0000_00_1f.3.hdmi-stereo",
-	})
+	}))
 
 	entry := prepare(t, plugin, "claim-1")
 	if entry.Error != "" {
@@ -125,12 +130,45 @@ func TestPrepareDeliversTheSocketAndTheSinkName(t *testing.T) {
 	}
 }
 
+// A Bluetooth speaker receives what an HDMI output receives.
+// The node name is the one WirePlumber's bluez monitor built, and
+// nothing else in the delivery changes.
+func TestPrepareDeliversASpeakersNodeName(t *testing.T) {
+	dir := specDirectory(t)
+	plugin := testPlugin(t, speakerClaim, speakerGraph(map[string]bluezSink{
+		testSpeakerAddress: {Node: testSpeakerNode, Codec: "sbc"},
+	}))
+
+	entry := prepare(t, plugin, "claim-1")
+	if entry.Error != "" {
+		t.Fatalf("prepare failed: %s", entry.Error)
+	}
+	if len(entry.Devices) != 1 {
+		t.Fatalf("devices = %+v, want one", entry.Devices)
+	}
+	if got := entry.Devices[0].DeviceName; got != testSpeakerName {
+		t.Errorf("device = %q, want %q", got, testSpeakerName)
+	}
+
+	spec := readSpec(t, filepath.Join(dir, "audio.liken.sh-claim-1.json"))
+	env := []string{
+		"PIPEWIRE_REMOTE=/var/run/audio.liken.sh/pipewire-0",
+		"PIPEWIRE_NODE=" + testSpeakerNode,
+	}
+	if got := spec.Devices[0].ContainerEdits.Env; !slices.Equal(got, env) {
+		t.Errorf("env = %v, want %v", got, env)
+	}
+	if mounts := spec.Devices[0].ContainerEdits.Mounts; len(mounts) != 1 || mounts[0].HostPath != runtimeDir {
+		t.Errorf("mounts = %+v", mounts)
+	}
+}
+
 func TestPrepareRefusesWhatItCannotDeliver(t *testing.T) {
 	cases := []struct {
 		name  string
 		claim string
 		uid   string
-		sinks map[pcmAddress]string
+		graph pwGraph
 		says  string
 	}{
 		{
@@ -146,7 +184,7 @@ func TestPrepareRefusesWhatItCannotDeliver(t *testing.T) {
 			name:  "the claim has no allocation yet",
 			claim: `{"metadata": {"name": "kitchen", "namespace": "media", "uid": "claim-1"}}`,
 			uid:   "claim-1",
-			sinks: map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.test"},
+			graph: outputGraph(map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.test"}),
 			says:  "the claim has no allocation yet",
 		},
 		{
@@ -156,26 +194,35 @@ func TestPrepareRefusesWhatItCannotDeliver(t *testing.T) {
 			name:  "the claim was recreated",
 			claim: allocatedClaim,
 			uid:   "claim-2",
-			sinks: map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.test"},
+			graph: outputGraph(map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.test"}),
 			says:  "the claim's UID changed",
+		},
+		{
+			// The speaker is paired and switched off, so the slice
+			// carries its two taints and no pod should reach this call.
+			name:  "the speaker has no sink",
+			claim: speakerClaim,
+			uid:   "claim-1",
+			graph: outputGraph(map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.test"}),
+			says:  "speaker " + testSpeakerName + " has no PipeWire sink right now",
 		},
 		{
 			name: "the allocation names something this driver did not publish",
 			claim: `{
 			  "metadata": {"name": "kitchen", "namespace": "media", "uid": "claim-1"},
 			  "status": {"allocation": {"devices": {"results": [
-			    {"request": "speakers", "driver": "audio.liken.sh", "pool": "liken-1", "device": "a0-ab-51-33-b7-12"}
+			    {"request": "speakers", "driver": "audio.liken.sh", "pool": "liken-1", "device": "card0-hdmi-a-1"}
 			  ]}}}
 			}`,
 			uid:   "claim-1",
-			sinks: map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.test"},
-			says:  "does not name an output of this driver",
+			graph: outputGraph(map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.test"}),
+			says:  "does not name a device of this driver",
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			dir := specDirectory(t)
-			plugin := testPlugin(t, c.claim, c.sinks)
+			plugin := testPlugin(t, c.claim, c.graph)
 
 			entry := prepare(t, plugin, c.uid)
 			if entry.Error == "" {

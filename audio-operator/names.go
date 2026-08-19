@@ -65,6 +65,60 @@ func outputFromDeviceName(name string) (card, pcm int, ok bool) {
 	return card, pcm, true
 }
 
+// speakerName builds a speaker's device name from its peer MAC, the
+// one identity BlueZ carries that survives a reboot, in the same
+// dashed lowercase form the Bluetooth operator names a controller
+// with.
+func speakerName(address string) string {
+	return strings.ReplaceAll(normalizeMAC(address), ":", "-")
+}
+
+// speakerFromDeviceName inverts speakerName. A prepare call carries
+// the allocated device's name and nothing else.
+func speakerFromDeviceName(name string) (string, bool) {
+	address := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(name)), "-", ":")
+	if !validMAC(address) {
+		return "", false
+	}
+	return address, true
+}
+
+// normalizeMAC is the one form this operator keys a speaker on:
+// lowercase with colons. BlueZ prints AA:BB:CC:DD:EE:FF over D-Bus
+// and pw-dump prints the same string on the node, so one lowering
+// makes the two sources agree.
+func normalizeMAC(address string) string {
+	return strings.ToLower(strings.TrimSpace(address))
+}
+
+// publishedMAC is the uppercase colon form. The label on a speaker
+// shows it and bluetoothctl prints it, so it is the form a person
+// already has the address written down in.
+func publishedMAC(address string) string {
+	return strings.ToUpper(normalizeMAC(address))
+}
+
+// validMAC accepts six colon-separated pairs of hexadecimal digits
+// and nothing else, so an ALSA output's name never decodes as a
+// speaker.
+func validMAC(address string) bool {
+	octets := strings.Split(normalizeMAC(address), ":")
+	if len(octets) != 6 {
+		return false
+	}
+	for _, octet := range octets {
+		if len(octet) != 2 {
+			return false
+		}
+		for _, c := range octet {
+			if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // monitorID builds the pairing value from the facts that an ELD block
 // and an EDID block both hold: the manufacturer, the product code,
 // and the monitor name.

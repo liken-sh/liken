@@ -20,6 +20,11 @@ You need:
 * A machine in that cluster with a sound card: a monitor with
   speakers on HDMI or DisplayPort, or something wired to the analog
   jack.
+* For Bluetooth speakers, the
+  [`bluetooth-operator`](https://bluetooth.liken.sh) on the same
+  machine. Its media bus is what puts the sound server on
+  `bluetoothd`'s bus, and it is optional: a machine with a card and
+  no radio installs nothing extra.
 * `kubectl` with cluster-admin access. You create two cluster-scoped
   [`DeviceClasses`](https://kubernetes.io/docs/reference/kubernetes-api/resource/device-class-v1/)
   yourself, and the base creates a `ClusterRole`.
@@ -167,6 +172,11 @@ An output whose monitor answers publishes the monitor's attributes.
 An HDMI output with no monitor publishes too, with taints, so a
 claim on it parks until a monitor arrives.
 [Devices](/docs/reference/devices/) describes every attribute.
+
+When the pod's claim also allocated a Bluetooth media bus, the same
+slice holds one device for each paired Bluetooth speaker. A speaker
+that is switched off publishes with taints, the same way an HDMI
+output with no monitor does.
 
 Now [play sound to an output](/docs/guides/claim/).
 

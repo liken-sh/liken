@@ -28,11 +28,17 @@ FROM debian:trixie-slim AS closure
 # starts, because WirePlumber's ALSA monitor needs udev and a liken
 # machine runs no udevd. wireplumber links each client's stream to the
 # sink it names, and provides wpctl.
+#
+# libspa-0.2-bluetooth carries the bluez5 SPA plugin and the A2DP
+# codec plugins beside it. The plugin registers the media endpoint
+# with bluetoothd, holds the transport descriptor, and encodes the
+# samples, so Bluetooth playback takes nothing else from the host.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         pipewire \
         pipewire-bin \
         wireplumber \
+        libspa-0.2-bluetooth \
     && rm -rf /var/lib/apt/lists/*
 COPY audio-closure.sh /
 RUN sh /audio-closure.sh /out
@@ -45,10 +51,17 @@ COPY --from=closure /out /
 # manages every sound card its claim allocated, so every hardware
 # monitor is off, including the ALSA one that finds nothing without
 # udev. The file says why.
-COPY config/50-audio-operator.conf /etc/wireplumber/wireplumber.conf.d/
+#
+# Both files go under /usr/share, because the pod mounts an emptyDir
+# over /etc/wireplumber/wireplumber.conf.d and that mount would hide
+# anything placed there. WirePlumber merges the fragments of
+# /usr/share first and /etc second, so the declare container's
+# fragment in the emptyDir is read after these two and overrides
+# them.
+COPY config/50-audio-operator.conf /usr/share/wireplumber/wireplumber.conf.d/
 # The access rule beside it stops WirePlumber's default policy from
 # restricting this pod's clients, itself included. The file says why.
-COPY config/51-access-rules.conf /etc/wireplumber/wireplumber.conf.d/
+COPY config/51-access-rules.conf /usr/share/wireplumber/wireplumber.conf.d/
 
 # PipeWire's access mode is baked in for the same reason. It goes
 # under /usr/share because the pod mounts an emptyDir over
@@ -61,6 +74,11 @@ COPY config/50-pipewire-access.conf /usr/share/pipewire/pipewire.conf.d/
 # container generates them from the cards the claim allocated and
 # writes them into /etc/pipewire/pipewire.conf.d/, an emptyDir the
 # PipeWire container mounts at the same path.
+#
+# WirePlumber's Bluetooth monitor is not baked in either. The same
+# declare container writes the fragment that turns it on into
+# /etc/wireplumber/wireplumber.conf.d/, and only when the claim
+# delivered a Bluetooth media bus.
 
 COPY --from=build /audio-operator /usr/local/bin/audio-operator
 

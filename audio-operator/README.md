@@ -17,6 +17,15 @@ claim names the output, by monitor or by jack. The scheduler finds
 the machine, and the container receives the socket. This needs no
 SSH, no configuration on the host, and no privileged pod.
 
+A paired Bluetooth speaker is one more such output, on a machine
+that also runs the
+[`bluetooth-operator`](https://bluetooth.liken.sh). That operator
+publishes each radio's media bus as a device, this pod's claim
+allocates it, and WirePlumber registers the A2DP endpoint with
+`bluetoothd` over it. Each paired speaker then publishes as an
+`audio.liken.sh` device named by its MAC address, and a consumer
+claims it exactly like an HDMI output.
+
 The operator is one of `liken`'s
 [hardware operators](https://liken.sh/docs/concepts/hardware-operators/):
 optional workloads, installed like any other manifest, that a
@@ -28,6 +37,12 @@ per playback PCM device under `audio.liken.sh`. It uses no private
 interface into `liken`: the claim, the `ResourceSlices`, and the
 Container Device Interface (CDI) files are the public contracts any
 DRA driver gets.
+
+It reaches a sibling operator the same way. Its class selects on
+`sound.liken.sh/supportsSound` and names no driver, so one claim
+collects the sound card `liken` publishes and the media bus the
+`bluetooth-operator` publishes. Nothing private passes between the
+two operators.
 
 ## The manual
 

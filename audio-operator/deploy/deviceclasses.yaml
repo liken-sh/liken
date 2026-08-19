@@ -6,7 +6,8 @@
 # and the install guide gives the YAML.
 ---
 # Any device that supports a sound server. Today that is the sound
-# card liken publishes. The operator's own pod claims every such
+# card liken publishes and the media bus the Bluetooth operator
+# publishes for each adapter. The operator's own pod claims every such
 # device on its node, and the claim does two jobs. It places the
 # pod, because only a machine with such a device publishes one, so
 # no node selector has to name the machine with the speakers. And it
@@ -19,12 +20,12 @@
 #
 # The selector names no driver. supportsSound is a qualified
 # attribute in a domain no single driver owns: liken stamps it on
-# the sound card, and the Bluetooth operator will stamp it on the
-# media bus it publishes for Bluetooth audio, so that bus joins this
-# class by stamping the one field and the pod's allocationMode: All
-# claim takes the card and the bus together. The has() guard is
-# what keeps an unguarded read from aborting the allocation on a
-# device that does not carry the attribute.
+# the sound card, and the Bluetooth operator stamps it on the media
+# bus, so the pod's allocationMode: All claim takes the card and
+# the bus together, and a future driver joins by stamping the one
+# field. The has() guard is what keeps an unguarded read from
+# aborting the allocation on a device that does not carry the
+# attribute.
 apiVersion: resource.k8s.io/v1
 kind: DeviceClass
 metadata:

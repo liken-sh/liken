@@ -11,6 +11,7 @@ module github.com/liken-sh/audio-operator
 go 1.26.5
 
 require (
+	github.com/godbus/dbus/v5 v5.2.2
 	golang.org/x/sys v0.47.0
 	google.golang.org/grpc v1.82.1
 	k8s.io/kubelet v0.36.2

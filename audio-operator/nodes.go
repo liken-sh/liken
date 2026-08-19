@@ -225,6 +225,10 @@ const declareMode = "declare"
 // reads a fragment that arrives later. An init container that runs to
 // completion before the PipeWire sidecar starts is the kubelet's own
 // expression of that order, so no code here waits for anything.
+//
+// The same container is the switch for the Bluetooth monitor,
+// because its environment is where the claim's delivery states
+// whether a media bus came with it (bluez.go).
 func declare() {
 	outputs, err := readOutputs()
 	if err != nil {
@@ -232,6 +236,9 @@ func declare() {
 	}
 	if _, err := writeNodeConfig(outputs); err != nil {
 		fatal("declaring the card's outputs to PipeWire: %v", err)
+	}
+	if _, err := writeMonitorConfig(); err != nil {
+		fatal("enabling WirePlumber's Bluetooth monitor: %v", err)
 	}
 }
 

@@ -12,13 +12,17 @@ import (
 // leaves a property whose value reads as a number unquoted, even
 // though every value in PipeWire's property list is a string, so the
 // fixture holds both forms.
-func TestParseSinks(t *testing.T) {
-	sinks, err := parseSinks(fixture(t, "pw-dump.json"))
+func TestParseGraph(t *testing.T) {
+	graph, err := parseGraph(fixture(t, "pw-dump.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	sinks := graph.Outputs
 	if len(sinks) != 2 {
 		t.Fatalf("sinks = %v, want two", sinks)
+	}
+	if len(graph.Speakers) != 0 {
+		t.Errorf("a graph with no radio in it holds %v", graph.Speakers)
 	}
 
 	// The HDMI sink names its card and device as numbers, and two
@@ -43,11 +47,12 @@ func TestParseSinks(t *testing.T) {
 // WirePlumber's monitor builds and this graph has no monitor in it.
 // The operator's own two properties map a declared node back to its
 // PCM device.
-func TestParseSinksMapsTheNodesTheOperatorDeclares(t *testing.T) {
-	sinks, err := parseSinks(fixture(t, "pw-dump-declared.json"))
+func TestParseGraphMapsTheNodesTheOperatorDeclares(t *testing.T) {
+	graph, err := parseGraph(fixture(t, "pw-dump-declared.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	sinks := graph.Outputs
 	if len(sinks) != 2 {
 		t.Fatalf("sinks = %v, want two", sinks)
 	}
@@ -59,9 +64,67 @@ func TestParseSinksMapsTheNodesTheOperatorDeclares(t *testing.T) {
 	}
 }
 
-func TestParseSinksReportsBrokenOutput(t *testing.T) {
-	if _, err := parseSinks([]byte("this is not JSON")); err == nil {
+func TestParseGraphReportsBrokenOutput(t *testing.T) {
+	if _, err := parseGraph([]byte("this is not JSON")); err == nil {
 		t.Fatal("a document that is not JSON did not report an error")
+	}
+}
+
+// The peer this file's Bluetooth fixtures name, in the three
+// forms the operator uses: the key it maps on, the device name it
+// publishes, and the node name WirePlumber builds.
+const (
+	testSpeakerAddress = "a0:ab:51:33:b7:12"
+	testSpeakerName    = "a0-ab-51-33-b7-12"
+	testSpeakerNode    = "bluez_output.A0_AB_51_33_B7_12.1"
+)
+
+// outputGraph is a graph with the card's sinks in it and no
+// Bluetooth speaker, which is what a machine with no radio holds.
+func outputGraph(sinks map[pcmAddress]string) pwGraph {
+	return pwGraph{Outputs: sinks, Speakers: map[string]bluezSink{}}
+}
+
+// speakerGraph is the other half: a graph with Bluetooth sinks in
+// it and no card.
+func speakerGraph(speakers map[string]bluezSink) pwGraph {
+	return pwGraph{Outputs: map[pcmAddress]string{}, Speakers: speakers}
+}
+
+// staticGraph reads back one fixed graph, so a test drives a pass
+// with no PipeWire behind it.
+func staticGraph(graph pwGraph) func(context.Context) (pwGraph, error) {
+	return func(context.Context) (pwGraph, error) { return graph, nil }
+}
+
+// The fixture is assembled from the property names the bluez5 SPA
+// plugin sets in pipewire 1.4.2 and the node name WirePlumber 0.5.8
+// builds from them. It was not captured from a machine with a
+// speaker on it; the drill supplies that capture.
+func TestParseGraphReadsABluetoothSink(t *testing.T) {
+	graph, err := parseGraph(fixture(t, "pw-dump-bluez.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(graph.Speakers) != 1 {
+		t.Fatalf("speakers = %v, want one", graph.Speakers)
+	}
+	// The address is the key, in the lowercase colon form, whatever
+	// case BlueZ printed it in.
+	sink := graph.Speakers[testSpeakerAddress]
+	if sink.Node != testSpeakerNode {
+		t.Errorf("node = %q, want %q", sink.Node, testSpeakerNode)
+	}
+	if sink.Codec != "sbc" {
+		t.Errorf("codec = %q, want sbc", sink.Codec)
+	}
+	// The card's own sink is in the same document, and a Bluetooth
+	// node has no ALSA address for it to be mistaken for.
+	if got := graph.Outputs[pcmAddress{Card: 0, PCM: 0}]; got != sinkNodeName(0, 0) {
+		t.Errorf("the analog sink = %q, want %q", got, sinkNodeName(0, 0))
+	}
+	if len(graph.Outputs) != 1 {
+		t.Errorf("outputs = %v, want one", graph.Outputs)
 	}
 }
 
@@ -81,9 +144,9 @@ func testSinks() map[pcmAddress]string {
 // configuration, so the usual case is one graph read and no wait.
 func TestWaitForNodesReturnsAsSoonAsEveryOutputHasASink(t *testing.T) {
 	reads := 0
-	read := func(context.Context) (map[pcmAddress]string, error) {
+	read := func(context.Context) (pwGraph, error) {
 		reads++
-		return testSinks(), nil
+		return outputGraph(testSinks()), nil
 	}
 
 	start := time.Now()
@@ -101,8 +164,8 @@ func TestWaitForNodesReturnsAsSoonAsEveryOutputHasASink(t *testing.T) {
 // no-sink taint. Waiting past the timeout would leave the card's
 // working outputs unpublished over the one that is broken.
 func TestWaitForNodesGivesUpAtTheTimeout(t *testing.T) {
-	read := func(context.Context) (map[pcmAddress]string, error) {
-		return map[pcmAddress]string{{Card: 0, PCM: 0}: sinkNodeName(0, 0)}, nil
+	read := func(context.Context) (pwGraph, error) {
+		return outputGraph(map[pcmAddress]string{{Card: 0, PCM: 0}: sinkNodeName(0, 0)}), nil
 	}
 
 	start := time.Now()
@@ -115,8 +178,8 @@ func TestWaitForNodesGivesUpAtTheTimeout(t *testing.T) {
 
 // A graph that never reads is the same bounded wait, and not a hang.
 func TestWaitForNodesGivesUpWhenTheGraphNeverReads(t *testing.T) {
-	read := func(context.Context) (map[pcmAddress]string, error) {
-		return nil, errors.New("running pw-dump: no such file or directory")
+	read := func(context.Context) (pwGraph, error) {
+		return pwGraph{}, errors.New("running pw-dump: no such file or directory")
 	}
 
 	start := time.Now()
@@ -130,8 +193,8 @@ func TestWaitForNodesGivesUpWhenTheGraphNeverReads(t *testing.T) {
 func TestWaitForNodesStopsWithItsContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	read := func(context.Context) (map[pcmAddress]string, error) {
-		return nil, errors.New("running pw-dump: no such file or directory")
+	read := func(context.Context) (pwGraph, error) {
+		return pwGraph{}, errors.New("running pw-dump: no such file or directory")
 	}
 
 	start := time.Now()

@@ -134,11 +134,39 @@ func operate() {
 		fatal("reading the declaration PipeWire loaded: %v", err)
 	}
 
+	// When the claim delivered a Bluetooth media bus, the operator
+	// reads bluetoothd's paired set over it. A pod whose claim
+	// delivered none never opens a bus and publishes the card's
+	// outputs alone.
+	//
+	// A bus that never answers ends the process, like every other
+	// setup failure here: the kubelet's restart with backoff is this
+	// operator's only retry, and the failure shows in kubectl instead
+	// of hiding in a log. Plan 60 accepts the coupling this creates,
+	// because the pod could not prepare its claim without the
+	// Bluetooth operator either.
+	var speakers func() (map[string]speaker, error)
+	var bluez <-chan struct{}
+	if bluetoothEnabled() {
+		conn, err := waitForBus(ctx, busReadyTimeout)
+		if err != nil {
+			fatal("connecting to the delivered Bluetooth media bus: %v", err)
+		}
+		speakers = func() (map[string]speaker, error) { return pairedSpeakers(conn) }
+		bluez, err = watchBlueZ(ctx, conn)
+		if err != nil {
+			fatal("watching bluetoothd: %v", err)
+		}
+		fmt.Printf("%s: the claim delivered a Bluetooth media bus at %s\n",
+			DriverName, os.Getenv(busAddressVariable))
+	}
+
 	operator := &reconciler{
 		client:   client,
 		nodeName: nodeName,
 		owner:    owner,
-		sinks:    readSinks,
+		graph:    readGraph,
+		speakers: speakers,
 		declared: declared,
 	}
 
@@ -156,7 +184,7 @@ func operate() {
 	// they are not. Without it the first pass would taint every output,
 	// and a NoExecute taint ends the pods that the previous operator's
 	// prepared claims left running.
-	waitForNodes(ctx, readSinks, outputs, nodeReadyTimeout)
+	waitForNodes(ctx, readGraph, outputs, nodeReadyTimeout)
 
 	// The plugin registers with the kubelet only after PipeWire
 	// answers, so the driver appears when it can answer a prepare
@@ -172,7 +200,7 @@ func operate() {
 		fatal("watching the jack nodes: %v", err)
 	}
 
-	settled := settle(ctx, wakes(ctx, jacks), settleWindow, settleLimit)
+	settled := settle(ctx, wakes(ctx, jacks, bluez), settleWindow, settleLimit)
 
 	// The first pass runs before any event, because the operator
 	// starts with monitors already connected, and a restart must
@@ -226,7 +254,22 @@ type reconciler struct {
 	client   *Client
 	nodeName string
 	owner    OwnerReference
-	sinks    func(context.Context) (map[pcmAddress]string, error)
+	graph    func(context.Context) (pwGraph, error)
+
+	// speakers reads bluetoothd's paired set. It is nil on a pod
+	// whose claim delivered no media bus.
+	speakers func() (map[string]speaker, error)
+
+	// lastSpeakers is the newest paired set that read returned. A
+	// bluetoothd that stops answering costs the speakers their sink
+	// and their attributes, never their place in the slice:
+	// membership is the paired set, and a read that fails says
+	// nothing about who is paired.
+	lastSpeakers map[string]speaker
+
+	// speakerFailure keeps the report of a bluetoothd that does not
+	// answer to one line for each run of failures.
+	speakerFailure bool
 
 	// declared is the drop-in the init container wrote before PipeWire
 	// started. PipeWire reads its configuration once, so this is what
@@ -265,7 +308,7 @@ func (r *reconciler) pass(ctx context.Context) error {
 // published, and that slice says every output plays. The taint is
 // what ends the sessions of the consumers that slice still holds.
 func (r *reconciler) awaitPipeWire(ctx context.Context, timeout time.Duration) error {
-	if err := waitForPipeWire(ctx, r.sinks, timeout); err != nil {
+	if err := waitForPipeWire(ctx, r.graph, timeout); err != nil {
 		r.taintEverything()
 		return err
 	}
@@ -311,7 +354,7 @@ func (r *reconciler) reconcile(ctx context.Context) error {
 		fmt.Fprintf(os.Stderr, "the card's playback PCM devices have changed since PipeWire started; "+
 			"the outputs with no declared node publish with the no-sink taint until this pod is replaced\n")
 	}
-	sinks, err := r.sinks(ctx)
+	graph, err := r.graph(ctx)
 	if err != nil {
 		r.sinkFailures++
 		fmt.Fprintf(os.Stderr, "reading PipeWire's graph, %d in a row: %v\n", r.sinkFailures, err)
@@ -321,10 +364,38 @@ func (r *reconciler) reconcile(ctx context.Context) error {
 		return nil
 	}
 	r.sinkFailures = 0
-	refreshCDISpecs(sinks)
+	refreshCDISpecs(graph)
 
-	r.publish(ctx, sliceDevices(outputs, sinks))
+	r.publish(ctx, sliceDevices(outputs, r.pairedSpeakers(), graph))
 	return nil
+}
+
+// pairedSpeakers reads bluetoothd's paired set, and gives back the
+// newest set it read when bluetoothd does not answer.
+//
+// A failed read must not shrink the slice. Unpairing is the one
+// thing that removes a speaker, and a bus that went away is not an
+// unpairing. The speakers keep their place, their sink is gone from
+// the graph, and the taints say they cannot play.
+func (r *reconciler) pairedSpeakers() map[string]speaker {
+	if r.speakers == nil {
+		return nil
+	}
+	speakers, err := r.speakers()
+	if err != nil {
+		if !r.speakerFailure {
+			r.speakerFailure = true
+			fmt.Fprintf(os.Stderr, "reading bluetoothd's paired set: %v; "+
+				"the %d speaker(s) it last reported publish tainted\n", err, len(r.lastSpeakers))
+		}
+		return r.lastSpeakers
+	}
+	if r.speakerFailure {
+		r.speakerFailure = false
+		fmt.Fprintf(os.Stderr, "bluetoothd answers again with %d speaker(s)\n", len(speakers))
+	}
+	r.lastSpeakers = speakers
+	return speakers
 }
 
 // taintEverything publishes the card's outputs with every one of them
@@ -346,7 +417,12 @@ func (r *reconciler) taintEverything() {
 	// An empty set of sinks is what makes sliceDevices taint every
 	// device, and an empty set is also the truth: the sound server that
 	// held them is gone.
-	if err := EnsureResourceSlice(r.client, r.nodeName, r.owner, sliceDevices(outputs, nil)); err != nil {
+	//
+	// The paired speakers stay in the list, tainted with the rest,
+	// because the sound server is what ended and the pairings did
+	// not.
+	devices := sliceDevices(outputs, r.pairedSpeakers(), pwGraph{})
+	if err := EnsureResourceSlice(r.client, r.nodeName, r.owner, devices); err != nil {
 		fmt.Fprintf(os.Stderr, "tainting the outputs on the way out: %v\n", err)
 	}
 }
@@ -371,10 +447,19 @@ func (r *reconciler) publish(ctx context.Context, devices []SliceDevice) {
 	}
 }
 
-// wakes turns the jack events and the backstop tick into one channel.
-// Neither holds state that the loop uses, so the merge loses nothing:
-// both say to look again.
-func wakes(ctx context.Context, jacks <-chan jackEvent) <-chan struct{} {
+// wakes turns the jack events, the BlueZ signals, and the backstop
+// tick into one channel. None of them holds state that the loop uses,
+// so the merge loses nothing: all three say to look again.
+//
+// bluez is nil on a pod whose claim delivered no media bus. A
+// receive on a nil channel blocks forever, so the merge needs no
+// branch for that pod.
+//
+// A closed bluez channel ends the merge, the same way a closed jack
+// channel does. The relay closes it when the connection to the bus
+// is lost, and a lost bus is a bluetoothd this operator can no
+// longer read, so the loop stops and the kubelet restarts the pod.
+func wakes(ctx context.Context, jacks <-chan jackEvent, bluez <-chan struct{}) <-chan struct{} {
 	out := make(chan struct{}, 1)
 	wake := func() {
 		select {
@@ -395,6 +480,11 @@ func wakes(ctx context.Context, jacks <-chan jackEvent) <-chan struct{} {
 					return
 				}
 				fmt.Printf("jack: %s\n", event)
+				wake()
+			case _, ok := <-bluez:
+				if !ok {
+					return
+				}
 				wake()
 			case <-tick.C:
 				wake()

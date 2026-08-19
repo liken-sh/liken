@@ -28,6 +28,11 @@ lib=$(dirname "$(dpkg -L libpipewire-0.3-modules | grep '/pipewire-0.3$')")
 # operator's own configuration turns off the monitors whose modules
 # are not here.
 #
+# The bluez monitor is a Lua script under /usr/share/wireplumber,
+# not a module, and the pipewire modules it uses are the adapter,
+# client-device, and client-node already named below, so enabling
+# it adds no wireplumber module to this list.
+#
 # The SPA plugins are the media layer: audioconvert and audiomixer
 # for every adapter node, support for the loop and the logger, dbus
 # for the client libraries that ask for a bus.
@@ -40,6 +45,12 @@ lib=$(dirname "$(dpkg -L libpipewire-0.3-modules | grep '/pipewire-0.3$')")
 # pw-dump is how the operator reads the graph, and wpctl is the
 # wireplumber container's probe. kubectl exec runs both by name,
 # which is the only way to run anything in an image with no shell.
+#
+# The bluez5 plugin loads by name when the declare container
+# enables WirePlumber's Bluetooth monitor. The codec plugins beside
+# it are dlopened one at a time as bluez5/libspa-codec-bluez5-
+# <name>.so, so each one has to be named here to be offered. Every
+# one of them ships in libspa-0.2-bluetooth; none is an extra pack.
 seeds="
 /usr/bin/pipewire
 /usr/bin/wireplumber
@@ -61,6 +72,15 @@ $lib/spa-0.2/audioconvert/libspa-audioconvert.so
 $lib/spa-0.2/audiomixer/libspa-audiomixer.so
 $lib/spa-0.2/support/libspa-dbus.so
 $lib/spa-0.2/support/libspa-support.so
+$lib/spa-0.2/bluez5/libspa-bluez5.so
+$lib/spa-0.2/bluez5/libspa-codec-bluez5-aptx.so
+$lib/spa-0.2/bluez5/libspa-codec-bluez5-faststream.so
+$lib/spa-0.2/bluez5/libspa-codec-bluez5-g722.so
+$lib/spa-0.2/bluez5/libspa-codec-bluez5-lc3.so
+$lib/spa-0.2/bluez5/libspa-codec-bluez5-ldac.so
+$lib/spa-0.2/bluez5/libspa-codec-bluez5-opus-g.so
+$lib/spa-0.2/bluez5/libspa-codec-bluez5-opus.so
+$lib/spa-0.2/bluez5/libspa-codec-bluez5-sbc.so
 $lib/wireplumber-0.5/libwireplumber-module-default-nodes-api.so
 $lib/wireplumber-0.5/libwireplumber-module-log-settings.so
 $lib/wireplumber-0.5/libwireplumber-module-lua-scripting.so
@@ -83,10 +103,15 @@ $lib/wireplumber-0.5/libwireplumber-module-standard-event-source.so
 # iconv_open. The charset modules beside them stay behind, because
 # the conversions this pod runs are between UTF-8 and glibc's
 # internal form, and both are built into libc.
+#
+# /usr/share/spa-0.2 holds bluez5/bluez-hardware.conf, the quirks
+# database the bluez5 plugin opens by that path at startup. It maps
+# known adapters and speakers to the features each one may use.
 data="
 /usr/share/pipewire
 /usr/share/wireplumber
 /usr/share/alsa
+/usr/share/spa-0.2
 $lib/gconv/gconv-modules
 $lib/gconv/gconv-modules.cache
 $lib/gconv/gconv-modules.d

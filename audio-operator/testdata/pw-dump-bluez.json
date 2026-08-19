@@ -1,0 +1,77 @@
+[
+  {
+    "id": 32,
+    "type": "PipeWire:Interface:Core",
+    "info": {
+      "props": {
+        "core.name": "pipewire-0"
+      }
+    }
+  },
+  {
+    "id": 49,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "factory.name": "api.alsa.pcm.sink",
+        "media.class": "Audio/Sink",
+        "node.name": "liken.audio.card0-pcm0",
+        "node.description": "liken audio output, ALSA card 0 device 0",
+        "api.alsa.path": "hw:0,0",
+        "api.alsa.pcm.card": "0",
+        "liken.audio.card": "0",
+        "liken.audio.pcm": "0",
+        "object.serial": 49
+      }
+    }
+  },
+  {
+    "id": 62,
+    "type": "PipeWire:Interface:Device",
+    "info": {
+      "props": {
+        "device.api": "bluez5",
+        "device.name": "bluez_card.A0_AB_51_33_B7_12",
+        "device.description": "Kitchen Speaker",
+        "api.bluez5.address": "A0:AB:51:33:B7:12",
+        "api.bluez5.connection": "connected",
+        "api.bluez5.path": "/org/bluez/hci0/dev_A0_AB_51_33_B7_12",
+        "object.serial": 62
+      }
+    }
+  },
+  {
+    "id": 63,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "factory.name": "api.bluez5.media.sink",
+        "media.class": "Audio/Sink",
+        "node.name": "bluez_output.A0_AB_51_33_B7_12.1",
+        "node.description": "Kitchen Speaker",
+        "device.api": "bluez5",
+        "device.id": 62,
+        "api.bluez5.address": "A0:AB:51:33:B7:12",
+        "api.bluez5.codec": "sbc",
+        "api.bluez5.profile": "a2dp-sink",
+        "api.bluez5.transport": "pointer:0x55d0a3c1f2a0",
+        "card.profile.device": "0",
+        "device.routes": "1",
+        "audio.channels": "2",
+        "audio.position": "FL,FR",
+        "object.serial": 63
+      }
+    }
+  },
+  {
+    "id": 70,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "media.class": "Audio/Sink",
+        "node.name": "auto_null",
+        "node.description": "Dummy Output"
+      }
+    }
+  }
+]

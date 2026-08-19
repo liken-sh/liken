@@ -28,7 +28,9 @@ Sound you can run this way:
 * a video's sound on the same monitor that shows its picture, paired
   with the [display operator](https://display.liken.sh),
 * music from a player pod to the amplifier on the analog jack,
-* an announcement to the speakers of a named monitor.
+* an announcement to the speakers of a named monitor,
+* music to a paired Bluetooth speaker, claimed by its MAC address
+  like any other output.
 
 Start here:
 
@@ -52,6 +54,13 @@ publish [monitor outputs](https://display.liken.sh) and
 [Bluetooth controllers](https://bluetooth.liken.sh). A monitor's
 speakers pair with its screen through `monitor.liken.sh/id`, the
 identity both drivers read from the same monitor.
+
+The [Bluetooth operator](https://bluetooth.liken.sh) publishes one
+more thing this operator claims: the media bus of each radio. With
+that bus in its claim, this pod runs the sound server for Bluetooth
+audio as well, and each paired speaker publishes as an
+`audio.liken.sh` device beside the card's outputs. One PipeWire and
+one socket serve both.
 
 * [The repository](https://github.com/liken-sh/audio-operator)
 * [The `liken` manual](https://liken.sh/docs/)

@@ -13,6 +13,9 @@ package main
 // builds it from the card and the profile, so the name exists only in
 // the running graph.
 //
+// A Bluetooth speaker's sink node is in the same graph, built by
+// WirePlumber's bluez monitor, so one read yields both kinds.
+//
 // The operator reads the graph by running pw-dump, which ships with
 // PipeWire in the same image, and parsing the JSON it prints. The
 // alternative is to speak PipeWire's native protocol, which means
@@ -82,6 +85,29 @@ type pcmAddress struct {
 	PCM  int
 }
 
+// pwGraph is what one pw-dump read yields: the sink node of each
+// PCM device, and the sink node of each Bluetooth speaker, keyed by
+// its peer MAC in the lowercase colon form.
+type pwGraph struct {
+	Outputs  map[pcmAddress]string
+	Speakers map[string]bluezSink
+}
+
+// bluezSink is one Bluetooth sink node: the name a consumer's
+// PIPEWIRE_NODE holds, and the codec the transport negotiated.
+type bluezSink struct {
+	Node  string
+	Codec string
+}
+
+// The node properties the bluez5 SPA plugin sets on every node it
+// emits (spa/plugins/bluez5/bluez5-device.c in the pipewire this
+// image ships). The address is BlueZ's own uppercase colon form.
+const (
+	bluezAddressProperty = "api.bluez5.address"
+	bluezCodecProperty   = "api.bluez5.codec"
+)
+
 // The property keys that hold a sink's ALSA address, in the order
 // this operator reads them.
 //
@@ -112,9 +138,11 @@ type pwObject struct {
 	} `json:"info"`
 }
 
-// readSinks runs pw-dump and returns the node name of the sink for
-// each PCM device that has one.
-func readSinks(ctx context.Context) (map[pcmAddress]string, error) {
+// readGraph runs pw-dump and returns the sinks it holds, both the
+// card's and the radio's. One read answers every question a pass
+// asks, so the slice and a prepare call can never report different
+// node names for one device.
+func readGraph(ctx context.Context) (pwGraph, error) {
 	ctx, cancel := context.WithTimeout(ctx, pwDumpTimeout)
 	defer cancel()
 
@@ -125,28 +153,36 @@ func readSinks(ctx context.Context) (map[pcmAddress]string, error) {
 	command.WaitDelay = time.Second
 	raw, err := command.Output()
 	if err != nil {
-		return nil, fmt.Errorf("running pw-dump: %w", err)
+		return pwGraph{}, fmt.Errorf("running pw-dump: %w", err)
 	}
-	return parseSinks(raw)
+	return parseGraph(raw)
 }
 
-// parseSinks reads the sinks out of one pw-dump document.
+// parseGraph reads the sinks out of one pw-dump document.
 //
-// A sink with no ALSA address is not an error. PipeWire publishes
-// sinks that no card backs, such as a null sink or a network stream,
-// and this operator publishes only the outputs the claimed card has.
+// A sink with no ALSA address and no Bluetooth address is not an
+// error. PipeWire publishes sinks that no hardware backs, such as a
+// null sink or a network stream, and this operator publishes only the
+// outputs its claim delivered.
 //
 // When two sinks name one PCM device, the first name in alphabetical
 // order wins. The pair is what a profile change makes for a moment,
 // and a stable choice keeps the operator from writing the slice twice
 // for one event.
-func parseSinks(document []byte) (map[pcmAddress]string, error) {
+//
+// A Bluetooth speaker's node carries api.bluez5.address and no ALSA
+// address at all, so the address decides which of the two maps a
+// sink joins.
+func parseGraph(document []byte) (pwGraph, error) {
 	var objects []pwObject
 	if err := json.Unmarshal(document, &objects); err != nil {
-		return nil, fmt.Errorf("reading pw-dump's output: %w", err)
+		return pwGraph{}, fmt.Errorf("reading pw-dump's output: %w", err)
 	}
 
-	sinks := map[pcmAddress]string{}
+	graph := pwGraph{
+		Outputs:  map[pcmAddress]string{},
+		Speakers: map[string]bluezSink{},
+	}
 	for _, object := range objects {
 		if object.Type != "PipeWire:Interface:Node" {
 			continue
@@ -158,6 +194,16 @@ func parseSinks(document []byte) (map[pcmAddress]string, error) {
 		if name == "" {
 			continue
 		}
+		if address := normalizeMAC(property(object.Info.Props, bluezAddressProperty)); validMAC(address) {
+			if existing, taken := graph.Speakers[address]; taken && existing.Node < name {
+				continue
+			}
+			graph.Speakers[address] = bluezSink{
+				Node:  name,
+				Codec: property(object.Info.Props, bluezCodecProperty),
+			}
+			continue
+		}
 		card, ok := numericProperty(object.Info.Props, sinkCardKeys)
 		if !ok {
 			continue
@@ -166,13 +212,13 @@ func parseSinks(document []byte) (map[pcmAddress]string, error) {
 		if !ok {
 			continue
 		}
-		address := pcmAddress{Card: card, PCM: pcm}
-		if existing, taken := sinks[address]; taken && existing < name {
+		output := pcmAddress{Card: card, PCM: pcm}
+		if existing, taken := graph.Outputs[output]; taken && existing < name {
 			continue
 		}
-		sinks[address] = name
+		graph.Outputs[output] = name
 	}
-	return sinks, nil
+	return graph, nil
 }
 
 // property reads one property as a string. pw-dump prints a property
@@ -205,7 +251,7 @@ func numericProperty(props map[string]json.RawMessage, keys []string) (int, bool
 
 // waitForPipeWire blocks until PipeWire answers a graph read, or
 // until the timeout passes.
-func waitForPipeWire(ctx context.Context, read func(context.Context) (map[pcmAddress]string, error), timeout time.Duration) error {
+func waitForPipeWire(ctx context.Context, read func(context.Context) (pwGraph, error), timeout time.Duration) error {
 	deadline := time.After(timeout)
 	tick := time.NewTicker(pipewireReadyInterval)
 	defer tick.Stop()
@@ -234,17 +280,17 @@ func waitForPipeWire(ctx context.Context, read func(context.Context) (map[pcmAdd
 // than refusing to start. Failing here instead would restart the pod
 // over one PCM device that cannot open, and take the card's working
 // outputs down with it on every attempt.
-func waitForNodes(ctx context.Context, read func(context.Context) (map[pcmAddress]string, error), outputs []alsaOutput, timeout time.Duration) {
+func waitForNodes(ctx context.Context, read func(context.Context) (pwGraph, error), outputs []alsaOutput, timeout time.Duration) {
 	deadline := time.After(timeout)
 	tick := time.NewTicker(pipewireReadyInterval)
 	defer tick.Stop()
 	var report string
 	for {
-		sinks, err := read(ctx)
+		graph, err := read(ctx)
 		if err != nil {
 			report = fmt.Sprintf("PipeWire's graph did not read: %v", err)
 		} else {
-			missing := missingNodes(outputs, sinks)
+			missing := missingNodes(outputs, graph.Outputs)
 			if len(missing) == 0 {
 				return
 			}

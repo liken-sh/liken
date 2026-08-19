@@ -36,6 +36,11 @@ is built the way it is, and what it still owes an answer to.
   proved it end to end, from the cross-namespace access defect that
   `config/51-access-rules.conf` answers to the eviction that a
   sustained outage causes.
+* [04, Bluetooth sinks](04-bluetooth-sinks.md). Built. The audio
+  half of liken's milestone 60: the declare container enables
+  WirePlumber's bluez monitor when the claim delivered a media bus,
+  and each paired speaker publishes as an `audio.liken.sh` device
+  beside the card's outputs.
 
 ## Open problems
 

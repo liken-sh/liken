@@ -83,6 +83,13 @@ spec:
           volumeMounts:
             - name: pipewire-config
               mountPath: /etc/pipewire/pipewire.conf.d
+            # WirePlumber's drop-in directory, where this container
+            # writes the fragment that turns the Bluetooth monitor
+            # on. It writes the fragment only when the claim
+            # delivered a media bus, which it reads from
+            # DBUS_SYSTEM_BUS_ADDRESS in its own environment.
+            - name: wireplumber-config
+              mountPath: /etc/wireplumber/wireplumber.conf.d
         # PipeWire, as a native sidecar: an init container that
         # restarts always, which the kubelet starts before the
         # operator and stops after it. Both halves of that order
@@ -184,6 +191,13 @@ spec:
           volumeMounts:
             - name: runtime
               mountPath: /var/run/audio.liken.sh
+            # The same drop-in directory the declare container
+            # wrote. WirePlumber reads its configuration once at
+            # startup, and the declare container ran to completion
+            # first, so the fragment is on disk before this container
+            # starts.
+            - name: wireplumber-config
+              mountPath: /etc/wireplumber/wireplumber.conf.d
       containers:
         - name: operator
           image: ghcr.io/liken-sh/audio-operator:latest
@@ -278,4 +292,13 @@ spec:
         # volume that outlived the pod would let a stale one reach the
         # next PipeWire.
         - name: pipewire-config
+          emptyDir: {}
+        # WirePlumber's configuration drop-in directory, shared
+        # between the declare container that writes it and the
+        # WirePlumber container that reads it. The image bakes its
+        # own two fragments under /usr/share/wireplumber, which this
+        # mount does not hide, and WirePlumber merges /usr/share
+        # first and /etc second, so the generated fragment overrides
+        # them.
+        - name: wireplumber-config
           emptyDir: {}

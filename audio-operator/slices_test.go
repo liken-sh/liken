@@ -45,7 +45,7 @@ func TestSliceDevicesPublishesEachOutput(t *testing.T) {
 		{Card: 0, PCM: 3}: "alsa_output.pci-0000_00_1f.3.hdmi-stereo",
 	}
 
-	devices := sliceDevices(outputs, sinks)
+	devices := sliceDevices(outputs, nil, outputGraph(sinks))
 	if len(devices) != 2 {
 		t.Fatalf("got %d devices, want 2", len(devices))
 	}
@@ -195,7 +195,7 @@ func TestSliceDevicesTaintsAnOutputThatCannotPlay(t *testing.T) {
 				sinks[pcmAddress{Card: c.output.Card, PCM: c.output.PCM}] = "alsa_output.test"
 			}
 
-			devices := sliceDevices([]alsaOutput{c.output}, sinks)
+			devices := sliceDevices([]alsaOutput{c.output}, nil, outputGraph(sinks))
 			if got := devices[0].Taints; !reflect.DeepEqual(got, c.taints) {
 				t.Fatalf("taints = %+v, want %+v", got, c.taints)
 			}
@@ -222,7 +222,7 @@ func TestSliceDevicesNeverPublishesASinkNameAndTheNoSinkTaint(t *testing.T) {
 		sinks[pcmAddress{Card: output.Card, PCM: output.PCM}] = sinkNodeName(output.Card, output.PCM)
 	}
 
-	for _, device := range sliceDevices(outputs, sinks) {
+	for _, device := range sliceDevices(outputs, nil, outputGraph(sinks)) {
 		name, named := device.Attributes["sinkName"]
 		if !named {
 			t.Errorf("%s published no sink name for a node in the graph", device.Name)
@@ -246,13 +246,147 @@ func TestSliceDevicesOmitsASinkNameTooLongToPublish(t *testing.T) {
 	}
 	devices := sliceDevices(
 		[]alsaOutput{{Card: 0, PCM: 0}},
-		map[pcmAddress]string{{Card: 0, PCM: 0}: long},
+		nil,
+		outputGraph(map[pcmAddress]string{{Card: 0, PCM: 0}: long}),
 	)
 	if _, published := devices[0].Attributes["sinkName"]; published {
 		t.Fatal("a name past the attribute limit published anyway")
 	}
 	if len(devices[0].Taints) != 0 {
 		t.Fatalf("an output with a sink was tainted: %+v", devices[0].Taints)
+	}
+}
+
+// One paired speaker, connected, with WirePlumber's node for it in
+// the graph.
+func testSpeakers() map[string]speaker {
+	return map[string]speaker{
+		testSpeakerAddress: {Name: "Kitchen Speaker", Connected: true},
+	}
+}
+
+// A mixed slice: the card's two outputs and one paired speaker,
+// which is what a machine with a radio publishes.
+func TestSliceDevicesPublishesSpeakersBesideTheCardsOutputs(t *testing.T) {
+	outputs := []alsaOutput{{Card: 0, PCM: 0}, hdmiOutput(t, 0, 3)}
+	graph := pwGraph{
+		Outputs: map[pcmAddress]string{
+			{Card: 0, PCM: 0}: sinkNodeName(0, 0),
+			{Card: 0, PCM: 3}: sinkNodeName(0, 3),
+		},
+		Speakers: map[string]bluezSink{
+			testSpeakerAddress: {Node: testSpeakerNode, Codec: "sbc"},
+		},
+	}
+
+	devices := sliceDevices(outputs, testSpeakers(), graph)
+	if len(devices) != 3 {
+		t.Fatalf("devices = %d, want three", len(devices))
+	}
+	// The list is sorted by name, so the speaker's dashed MAC sorts
+	// ahead of the card's outputs.
+	names := []string{testSpeakerName, "card0-pcm0", "card0-pcm3"}
+	for i, want := range names {
+		if devices[i].Name != want {
+			t.Fatalf("devices[%d] = %q, want %q", i, devices[i].Name, want)
+		}
+	}
+
+	// The card's outputs publish exactly what they published without a
+	// radio on the machine.
+	if got := sliceDevices(outputs, nil, outputGraph(graph.Outputs)); !sameDevices(got, devices[1:]) {
+		t.Errorf("the card's outputs changed beside a speaker:\n%+v\n%+v", got, devices[1:])
+	}
+
+	speaker := devices[0]
+	attributes := map[string]string{
+		"output":         testSpeakerName,
+		"address":        "A0:AB:51:33:B7:12",
+		"connectionType": "bluetooth",
+		"name":           "Kitchen Speaker",
+		"codec":          "sbc",
+		"sinkName":       testSpeakerNode,
+	}
+	for name, want := range attributes {
+		if got := stringAttribute(t, speaker, name); got != want {
+			t.Errorf("%s = %q, want %q", name, got, want)
+		}
+	}
+	if connected := speaker.Attributes["connected"]; connected.Bool == nil || !*connected.Bool {
+		t.Errorf("connected = %+v, want true", connected)
+	}
+	if len(speaker.Taints) != 0 {
+		t.Errorf("a connected speaker with a node is tainted: %+v", speaker.Taints)
+	}
+}
+
+// A paired speaker that is switched off publishes with both taints,
+// so a consumer's claim on it parks instead of failing prepare, and
+// the claim allocates when somebody turns the speaker on.
+func TestSliceDevicesTaintsASpeakerThatCannotPlay(t *testing.T) {
+	cases := []struct {
+		name    string
+		speaker speaker
+		sink    bool
+		taints  []DeviceTaint
+	}{
+		{
+			name:    "connected, with a node",
+			speaker: speaker{Name: "Kitchen Speaker", Connected: true},
+			sink:    true,
+		},
+		{
+			name:    "paired and switched off",
+			speaker: speaker{Name: "Kitchen Speaker"},
+			taints: []DeviceTaint{
+				{Key: disconnectedTaint, Effect: "NoExecute"},
+				{Key: noSinkTaint, Effect: "NoSchedule"},
+			},
+		},
+		{
+			// bluetoothd reports the connection before WirePlumber has
+			// built the node, and the taints report the stricter fact.
+			name:    "connected, with no node yet",
+			speaker: speaker{Name: "Kitchen Speaker", Connected: true},
+			taints: []DeviceTaint{
+				{Key: disconnectedTaint, Effect: "NoExecute"},
+				{Key: noSinkTaint, Effect: "NoSchedule"},
+			},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sinks := map[string]bluezSink{}
+			if c.sink {
+				sinks[testSpeakerAddress] = bluezSink{Node: testSpeakerNode, Codec: "sbc"}
+			}
+
+			devices := speakerDevices(map[string]speaker{testSpeakerAddress: c.speaker}, sinks)
+			if got := devices[0].Taints; !reflect.DeepEqual(got, c.taints) {
+				t.Fatalf("taints = %+v, want %+v", got, c.taints)
+			}
+			// The sink name and the codec are what the graph holds, so a
+			// speaker with no node publishes neither.
+			for _, name := range []string{"sinkName", "codec"} {
+				if _, published := devices[0].Attributes[name]; published != c.sink {
+					t.Errorf("%s published = %v, want %v", name, published, c.sink)
+				}
+			}
+		})
+	}
+}
+
+// Unpairing is the one thing that removes a speaker from the slice.
+// Any other removal would strand a claim that holds it: the
+// allocation still names the device, and the kubelet retries its
+// prepare against a device in no slice, with no bound.
+func TestSliceDevicesDropsAnUnpairedSpeaker(t *testing.T) {
+	outputs := []alsaOutput{{Card: 0, PCM: 0}}
+	graph := outputGraph(map[pcmAddress]string{{Card: 0, PCM: 0}: sinkNodeName(0, 0)})
+
+	devices := sliceDevices(outputs, nil, graph)
+	if len(devices) != 1 || devices[0].Name != "card0-pcm0" {
+		t.Fatalf("devices = %+v, want the card's output alone", devices)
 	}
 }
 
@@ -435,7 +569,7 @@ func TestEnsureLogsTheSliceItCreated(t *testing.T) {
 	// PipeWire holds no node for the output, so the device publishes
 	// tainted.
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(),
-		sliceDevices([]alsaOutput{{Card: 0, PCM: 3}}, nil)); err != nil {
+		sliceDevices([]alsaOutput{{Card: 0, PCM: 3}}, nil, pwGraph{})); err != nil {
 		t.Fatal(err)
 	}
 	want := "slice: created generation 1, 1 device, 1 tainted: card0-pcm3 has " +
@@ -448,14 +582,14 @@ func TestEnsureLogsTheSliceItCreated(t *testing.T) {
 func TestEnsureLogsTheSliceItWrote(t *testing.T) {
 	capture := captureSliceLog(t)
 	outputs := []alsaOutput{{Card: 0, PCM: 3}}
-	playing := sliceDevices(outputs, map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.test"})
+	playing := sliceDevices(outputs, nil, outputGraph(map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.test"}))
 	api := &slicePublishFixture{existing: publishedSlice(playing, 3)}
 	client := testClient(t, api.handler(t))
 
 	// PipeWire lost the node. The device count does not move, so the
 	// taints are the whole event, and they evict the pod that held the
 	// claim.
-	if err := EnsureResourceSlice(client, "liken-1", testOwner(), sliceDevices(outputs, nil)); err != nil {
+	if err := EnsureResourceSlice(client, "liken-1", testOwner(), sliceDevices(outputs, nil, pwGraph{})); err != nil {
 		t.Fatal(err)
 	}
 	want := "slice: wrote generation 4, 1 device, 1 tainted: card0-pcm3 gained " +

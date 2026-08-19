@@ -89,15 +89,17 @@ type cdiMount struct {
 	Options       []string `json:"options,omitempty"`
 }
 
-// outputEdits builds what one allocated output grants a container:
+// sinkEdits builds what one allocated device grants a container:
 // the directory that holds PipeWire's socket, the absolute path to
-// that socket, and the name of the sink the claim allocated.
+// that socket, and the name of the sink the claim allocated. A
+// Bluetooth speaker and an HDMI output deliver the identical three
+// things.
 //
 // The mount is read-only. Connecting to a Unix socket needs write
 // permission on the socket itself and not on the file system that
 // holds it, so a read-only mount still connects, and a consumer has
 // no reason to create anything in this directory.
-func outputEdits(sink string) cdiEdits {
+func sinkEdits(sink string) cdiEdits {
 	return cdiEdits{
 		Env: []string{
 			remoteVariable + "=" + socketPath,
@@ -188,7 +190,7 @@ func claimUIDFromSpecName(name string) (string, bool) {
 // name would give the next pod a PIPEWIRE_NODE that names nothing,
 // and its streams would play into whichever sink PipeWire chose by
 // default.
-func refreshCDISpecs(sinks map[pcmAddress]string) {
+func refreshCDISpecs(graph pwGraph) {
 	entries, err := os.ReadDir(cdiDir)
 	if err != nil {
 		// No directory means no claim has been prepared on this boot.
@@ -199,7 +201,7 @@ func refreshCDISpecs(sinks map[pcmAddress]string) {
 		if !ok {
 			continue
 		}
-		if err := refreshCDISpec(claimUID, sinks); err != nil {
+		if err := refreshCDISpec(claimUID, graph); err != nil {
 			fmt.Fprintf(os.Stderr, "refreshing the spec for claim %s: %v\n", claimUID, err)
 		}
 	}
@@ -212,7 +214,7 @@ func refreshCDISpecs(sinks map[pcmAddress]string) {
 // PIPEWIRE_NODE would start the next pod against PipeWire's default
 // sink with no error. The taints on the device hold that pod back
 // until the output can play again.
-func refreshCDISpec(claimUID string, sinks map[pcmAddress]string) error {
+func refreshCDISpec(claimUID string, graph pwGraph) error {
 	cdiWrites.Lock()
 	defer cdiWrites.Unlock()
 
@@ -238,15 +240,14 @@ func refreshCDISpec(claimUID string, sinks map[pcmAddress]string) error {
 		if !ok {
 			continue
 		}
-		card, pcm, ok := outputFromDeviceName(allocated)
-		if !ok {
+		// A device this pass cannot resolve keeps the name the file
+		// already holds, which is the same rule a sink that is gone
+		// gets.
+		sink, err := deliveredSink(allocated, graph)
+		if err != nil {
 			continue
 		}
-		sink, ok := sinks[pcmAddress{Card: card, PCM: pcm}]
-		if !ok {
-			continue
-		}
-		edits := outputEdits(sink)
+		edits := sinkEdits(sink)
 		if slices.Equal(edits.Env, device.ContainerEdits.Env) {
 			continue
 		}

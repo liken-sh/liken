@@ -14,13 +14,13 @@ import (
 )
 
 // failingSinks stands in for a PipeWire that does not answer.
-func failingSinks(context.Context) (map[pcmAddress]string, error) {
-	return nil, errors.New("running pw-dump: no such file or directory")
+func failingSinks(context.Context) (pwGraph, error) {
+	return pwGraph{}, errors.New("running pw-dump: no such file or directory")
 }
 
 // testReconciler builds a reconciler over a fake API server and a
 // fake set of delivered nodes.
-func testReconciler(t *testing.T, api *slicePublishFixture, sinks func(context.Context) (map[pcmAddress]string, error), nodes ...string) *reconciler {
+func testReconciler(t *testing.T, api *slicePublishFixture, graph func(context.Context) (pwGraph, error), nodes ...string) *reconciler {
 	t.Helper()
 	sndDir = deliveredNodes(t, nodes...)
 	specDirectory(t)
@@ -36,7 +36,7 @@ func testReconciler(t *testing.T, api *slicePublishFixture, sinks func(context.C
 		client:   testClient(t, api.handler(t)),
 		nodeName: "liken-1",
 		owner:    testOwner(),
-		sinks:    sinks,
+		graph:    graph,
 		declared: nodeConfig(outputs),
 	}
 }
@@ -79,7 +79,7 @@ func TestReconcileGivesUpAfterARunOfFailedGraphReads(t *testing.T) {
 func TestReconcileForgetsFailuresAfterAGoodRead(t *testing.T) {
 	api := &slicePublishFixture{}
 	sinks := failingSinks
-	operator := testReconciler(t, api, func(ctx context.Context) (map[pcmAddress]string, error) {
+	operator := testReconciler(t, api, func(ctx context.Context) (pwGraph, error) {
 		return sinks(ctx)
 	}, "pcmC0D0p")
 
@@ -88,9 +88,7 @@ func TestReconcileForgetsFailuresAfterAGoodRead(t *testing.T) {
 			t.Fatalf("pass %d stopped early: %v", pass, err)
 		}
 	}
-	sinks = func(context.Context) (map[pcmAddress]string, error) {
-		return map[pcmAddress]string{{Card: 0, PCM: 0}: "alsa_output.test"}, nil
-	}
+	sinks = staticGraph(outputGraph(map[pcmAddress]string{{Card: 0, PCM: 0}: "alsa_output.test"}))
 	if err := operator.reconcile(context.Background()); err != nil {
 		t.Fatalf("a good read stopped the operator: %v", err)
 	}
@@ -108,9 +106,9 @@ func TestReconcileForgetsFailuresAfterAGoodRead(t *testing.T) {
 func TestReconcileSkipsTheWriteWhenTheCardHasNoOutput(t *testing.T) {
 	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
 	read := false
-	operator := testReconciler(t, api, func(context.Context) (map[pcmAddress]string, error) {
+	operator := testReconciler(t, api, func(context.Context) (pwGraph, error) {
 		read = true
-		return map[pcmAddress]string{}, nil
+		return outputGraph(map[pcmAddress]string{}), nil
 	}, "controlC0", "pcmC0D0c")
 
 	if err := operator.reconcile(context.Background()); err != nil {
@@ -126,9 +124,8 @@ func TestReconcileSkipsTheWriteWhenTheCardHasNoOutput(t *testing.T) {
 
 func TestReconcilePublishesWhatItReads(t *testing.T) {
 	api := &slicePublishFixture{}
-	operator := testReconciler(t, api, func(context.Context) (map[pcmAddress]string, error) {
-		return map[pcmAddress]string{{Card: 0, PCM: 0}: "alsa_output.analog"}, nil
-	}, "pcmC0D0p", "pcmC0D3p")
+	operator := testReconciler(t, api, staticGraph(outputGraph(
+		map[pcmAddress]string{{Card: 0, PCM: 0}: "alsa_output.analog"})), "pcmC0D0p", "pcmC0D3p")
 
 	if err := operator.reconcile(context.Background()); err != nil {
 		t.Fatal(err)
@@ -162,9 +159,8 @@ func TestReconcilePublishesWhatItReads(t *testing.T) {
 // the no-sink taint.
 func TestReconcilePublishesWhenTheCardsPCMDevicesChange(t *testing.T) {
 	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
-	operator := testReconciler(t, api, func(context.Context) (map[pcmAddress]string, error) {
-		return map[pcmAddress]string{{Card: 0, PCM: 0}: sinkNodeName(0, 0)}, nil
-	}, "pcmC0D0p")
+	operator := testReconciler(t, api, staticGraph(outputGraph(
+		map[pcmAddress]string{{Card: 0, PCM: 0}: sinkNodeName(0, 0)})), "pcmC0D0p")
 
 	sndDir = deliveredNodes(t, "pcmC0D0p", "pcmC0D3p")
 	if err := operator.reconcile(context.Background()); err != nil {
@@ -183,6 +179,84 @@ func TestReconcilePublishesWhenTheCardsPCMDevicesChange(t *testing.T) {
 	}
 	if got := devices[1].Taints; !reflect.DeepEqual(got, noSink) {
 		t.Errorf("the undeclared output has %+v, want %+v", got, noSink)
+	}
+}
+
+// A pass on a machine with a radio publishes the card's outputs and
+// the paired speakers in one slice.
+func TestReconcilePublishesTheSpeakersBluetoothdReports(t *testing.T) {
+	api := &slicePublishFixture{}
+	operator := testReconciler(t, api, staticGraph(pwGraph{
+		Outputs: map[pcmAddress]string{{Card: 0, PCM: 0}: sinkNodeName(0, 0)},
+		Speakers: map[string]bluezSink{
+			testSpeakerAddress: {Node: testSpeakerNode, Codec: "sbc"},
+		},
+	}), "pcmC0D0p")
+	operator.speakers = func() (map[string]speaker, error) { return testSpeakers(), nil }
+
+	if err := operator.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	devices := api.created.Spec.Devices
+	if len(devices) != 2 {
+		t.Fatalf("devices = %+v, want the output and the speaker", devices)
+	}
+	if devices[0].Name != testSpeakerName || devices[1].Name != "card0-pcm0" {
+		t.Fatalf("names = %q, %q", devices[0].Name, devices[1].Name)
+	}
+	if len(devices[0].Taints) != 0 {
+		t.Errorf("a connected speaker with a node is tainted: %+v", devices[0].Taints)
+	}
+}
+
+// A bluetoothd that stops answering says nothing about who is
+// paired, so the speakers keep their place in the slice and the
+// taints say they cannot play. Retracting one would strand the
+// claim that names it.
+func TestReconcileKeepsTheSpeakersWhenBluetoothdStopsAnswering(t *testing.T) {
+	api := &slicePublishFixture{}
+	graph := pwGraph{
+		Outputs: map[pcmAddress]string{{Card: 0, PCM: 0}: sinkNodeName(0, 0)},
+		Speakers: map[string]bluezSink{
+			testSpeakerAddress: {Node: testSpeakerNode, Codec: "sbc"},
+		},
+	}
+	answering := true
+	operator := testReconciler(t, api, func(context.Context) (pwGraph, error) {
+		if answering {
+			return graph, nil
+		}
+		return outputGraph(graph.Outputs), nil
+	}, "pcmC0D0p")
+	operator.speakers = func() (map[string]speaker, error) {
+		if answering {
+			return testSpeakers(), nil
+		}
+		return nil, ErrNoAdapter
+	}
+
+	if err := operator.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	api.existing = api.created
+
+	answering = false
+	if err := operator.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	devices := api.updated.Spec.Devices
+	if len(devices) != 2 {
+		t.Fatalf("devices = %+v, want the output and the speaker", devices)
+	}
+	tainted := []DeviceTaint{
+		{Key: disconnectedTaint, Effect: "NoExecute"},
+		{Key: noSinkTaint, Effect: "NoSchedule"},
+	}
+	if got := devices[0].Taints; !reflect.DeepEqual(got, tainted) {
+		t.Errorf("the speaker has %+v, want %+v", got, tainted)
+	}
+	if len(devices[1].Taints) != 0 {
+		t.Errorf("the card's output was tainted by a lost bus: %+v", devices[1].Taints)
 	}
 }
 
@@ -267,9 +341,8 @@ func TestAwaitPipeWireTaintsEveryOutputWhenItNeverAnswers(t *testing.T) {
 // first reconcile pass writes the slice.
 func TestAwaitPipeWireWritesNothingWhenPipeWireAnswers(t *testing.T) {
 	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
-	operator := testReconciler(t, api, func(context.Context) (map[pcmAddress]string, error) {
-		return map[pcmAddress]string{{Card: 0, PCM: 0}: sinkNodeName(0, 0)}, nil
-	}, "pcmC0D0p")
+	operator := testReconciler(t, api, staticGraph(outputGraph(
+		map[pcmAddress]string{{Card: 0, PCM: 0}: sinkNodeName(0, 0)})), "pcmC0D0p")
 
 	if err := operator.awaitPipeWire(context.Background(), time.Minute); err != nil {
 		t.Fatalf("a PipeWire that answered failed the wait: %v", err)

@@ -15,6 +15,20 @@ card's playback PCM devices, whether or not a cable is plugged into
 each one. An output whose monitor is unplugged stays in the slice,
 with taints, so a claim on it parks instead of failing.
 
+On a machine whose pod also claimed a Bluetooth media bus from the
+`bluetooth.liken.sh` driver, the operator publishes one more device
+for each paired Bluetooth speaker. Membership there is the paired
+set: a speaker that is switched off stays in the slice with taints,
+and a speaker leaves it only when somebody unpairs it.
+
+To a consumer, a speaker and an HDMI output are the same kind of
+device. Both publish under `audio.liken.sh`, both select the same
+way, and both deliver the same socket and a node name.
+
+The operator publishes only A2DP sinks. HFP and HSP, the headset
+profiles that add a microphone, would need a socket in the host's
+network namespace, and this pod has no host network.
+
 The operator publishes the devices into one
 [`ResourceSlice`](https://kubernetes.io/docs/reference/kubernetes-api/resource/resource-slice-v1/)
 per node, named `<node>-audio.liken.sh`, beside the slice `liken`
@@ -25,6 +39,15 @@ itself publishes:
       driver: audio.liken.sh
       nodeName: kitchen
       devices:
+        - name: a0-ab-51-33-b7-12
+          attributes:
+            output: {string: a0-ab-51-33-b7-12}
+            address: {string: "A0:AB:51:33:B7:12"}
+            name: {string: Kitchen Speaker}
+            connectionType: {string: bluetooth}
+            connected: {bool: true}
+            codec: {string: sbc}
+            sinkName: {string: bluez_output.A0_AB_51_33_B7_12.1}
         - name: card0-pcm3
           attributes:
             output: {string: card0-pcm3}
@@ -91,13 +114,18 @@ change selects on the monitor attributes instead. The name repeats
 as the `output` attribute because a CEL selector reads attributes
 and never the device's name.
 
+A Bluetooth speaker's name is its peer MAC address in lowercase
+with dashes, `a0-ab-51-33-b7-12`, because a DRA device name must be
+a DNS label and a colon is not legal in one. The MAC is the one
+identity BlueZ carries that survives a reboot.
+
 | Attribute | Type | What it is |
 |---|---|---|
-| `output` | string | the device's name: `card0-pcm3` |
+| `output` | string | the device's name: `card0-pcm3` or `a0-ab-51-33-b7-12` |
+| `connectionType` | string | `hdmi`, `displayport`, `analog`, or `bluetooth` |
+| `sinkName` | string | the PipeWire node name a consumer's streams target |
 | `card` | int | the ALSA card number |
 | `pcm` | int | the PCM device number on that card |
-| `connectionType` | string | `hdmi`, `displayport`, or `analog` |
-| `sinkName` | string | the PipeWire node name a consumer's streams target |
 | `manufacturer` | string | the monitor's three-letter PNP id, from the ELD: `GSM` is LG |
 | `product` | string | the monitor's product code, four lowercase hexadecimal digits |
 | `monitorName` | string | the monitor's name, the same EDID descriptor the display operator publishes as `model` |
@@ -106,28 +134,37 @@ and never the device's name.
 | `lpcmBitDepths` | string | the uncompressed depths the monitor accepts, ascending: `16 20 24` |
 | `speakers` | string | the speaker allocation, in the kernel's names: `FL/FR` |
 | `monitor.liken.sh/id` | string | the pairing identity, described below |
+| `address` | string | the speaker's peer MAC, uppercase with colons: `A0:AB:51:33:B7:12` |
+| `name` | string | the speaker's name, the alias BlueZ reports |
+| `connected` | bool | whether `bluetoothd` has the speaker connected right now |
+| `codec` | string | the A2DP codec the transport negotiated: `sbc`, `aptx`, `ldac` |
 
 A selector reads an unqualified attribute through the driver's
 domain: `device.attributes["audio.liken.sh"].output`. The pairing
 attribute is the one exception; it reads as the key `id` under the
 domain `monitor.liken.sh`.
 
-Only `output`, `card`, and `pcm` are always present:
+Only `output` is always present. The rest divide by the kind of
+device that carries them: `card`, `pcm`, and the monitor attributes
+are an ALSA output's, and `address`, `name`, `connected`, and
+`codec` are a speaker's.
 
 * The monitor attributes, `manufacturer` through
   `monitor.liken.sh/id`, are present on an HDMI or DisplayPort
   output whose monitor answers, and absent otherwise. They come from
   the ELD (EDID-Like Data), the block the graphics driver writes
   into the audio driver when a monitor answers.
-* `connectionType` is `analog` on the jack. On an HDMI or
-  DisplayPort output it comes from the ELD block, so an output with
-  no monitor publishes no connection type.
-* `sinkName` is present while PipeWire holds a sink for the output,
+* `connectionType` is `analog` on the jack and `bluetooth` on a
+  speaker. On an HDMI or DisplayPort output it comes from the ELD
+  block, so an output with no monitor publishes no connection type.
+* `sinkName` is present while PipeWire holds a sink for the device,
   and left out when the name passes the API's 64-character limit on
   a string attribute.
+* `codec` is present only while the speaker is connected, because a
+  codec is a property of a live transport, not of a pairing.
 
 A selector that reads a missing attribute fails the whole
-allocation, so guard every attribute in the two bullets above:
+allocation, so guard every attribute in the bullets above:
 
     has(device.attributes["monitor.liken.sh"].id) &&
     device.attributes["monitor.liken.sh"].id == "gsm-5b09-lg-ultrawide"
@@ -162,11 +199,20 @@ would strand the claim that names it: the kubelet retries its
 prepare call against a device in no slice, with no bound. A device
 leaves the slice only when the card does.
 
+A speaker leaves the slice only when somebody unpairs it.
+
 | Key | Effect | When it appears | Who tolerates it |
 |---|---|---|---|
 | `audio.liken.sh/disconnected` | `NoExecute` | the output cannot play now | the consumer, with its own `tolerationSeconds` |
 | `audio.liken.sh/no-monitor` | `NoSchedule` | no monitor answers on this HDMI or DisplayPort output | nobody |
-| `audio.liken.sh/no-sink` | `NoSchedule` | PipeWire holds no node for this PCM device | nobody |
+| `audio.liken.sh/no-sink` | `NoSchedule` | PipeWire holds no node for this device | nobody |
+
+A paired speaker that is switched off carries the `disconnected`
+and `no-sink` taints, which is what lets a consumer claim it before
+it exists to play into. The pod parks Unschedulable, somebody
+switches the speaker on, WirePlumber builds the node, the operator
+drops the taints, and the pod starts.
+
 
 The `NoExecute` taint ends the holder's pod after the claim's
 `tolerationSeconds`, so a consumer tolerates it to survive a short
@@ -194,7 +240,13 @@ holds every PCM device on the card.
 |---|---|
 | mount | `/var/run/audio.liken.sh`, read-only, the directory that holds PipeWire's socket |
 | `PIPEWIRE_REMOTE` | `/var/run/audio.liken.sh/pipewire-0` |
-| `PIPEWIRE_NODE` | the allocated output's sink name |
+| `PIPEWIRE_NODE` | the allocated device's sink name |
+
+A Bluetooth speaker delivers the same three things. One PipeWire
+holds the card's sinks and the radio's, so a pod that claims an
+HDMI output and a speaker at once receives one socket and two node
+names.
+
 
 PipeWire's own client library reads both variables. A
 `PIPEWIRE_REMOTE` that starts with a slash is used as an absolute
@@ -231,6 +283,39 @@ This path gives some things up. The card-profile machinery needs the
 ALSA monitor, so there is no hardware mixer volume and no profile
 switching: volume is PipeWire's software volume, and the channel
 layout comes from what is connected when PipeWire starts.
+
+## The Bluetooth sinks
+
+A Bluetooth sink is built the other way round from an ALSA sink:
+WirePlumber's bluez monitor is its source, because a Bluetooth
+speaker creates nothing in the kernel. The audio exists only while
+a sound server holds `bluetoothd`'s D-Bus socket, registers a media
+endpoint, negotiates the codec, encodes the samples, and writes to
+the L2CAP socket `bluetoothd` passes it as a file descriptor.
+
+The pod reaches that socket through its claim. The
+`bluetooth.liken.sh` driver publishes its media bus as a device,
+this operator's class selects every device that stamps
+`sound.liken.sh/supportsSound`, and the claim's `allocationMode` of
+`All` takes the sound card and the media bus together. The delivery
+is a read-only mount of the bus socket's directory and
+`DBUS_SYSTEM_BUS_ADDRESS`. The pod's `declare` init container reads
+that variable, and writes the WirePlumber fragment that turns the
+bluez monitor on only when the variable is set.
+
+WirePlumber names the node from `bluez_output`, the peer MAC with
+underscores, and an object id, so the name can change when the
+speaker reconnects. The operator republishes the name and rewrites
+every prepared claim's file from the same graph read, the same way
+it does for a sink that a profile change renamed.
+
+    bluez_output.A0_AB_51_33_B7_12.1
+
+A2DP is advertised on the radio exactly while this pod holds the
+media bus, because BlueZ advertises the profile only when an
+endpoint is registered. Pairing a speaker therefore works only
+while this pod runs and holds the bus.
+
 
 ## The slice's lifetime
 

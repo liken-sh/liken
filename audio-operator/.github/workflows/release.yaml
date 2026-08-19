@@ -91,6 +91,12 @@ jobs:
       # the one load no cardless run reaches, so the check asserts it
       # by name instead.
       #
+      # The bluez5 plugin, its SBC codec, and its quirks database
+      # are asserted by name for the same reason. This run's
+      # WirePlumber has no Bluetooth fragment and no media bus, so
+      # it opens none of them, and a pod that has both opens all
+      # three.
+      #
       # The two daemons run as separate containers sharing one volume,
       # the same shape the pod uses. The image has no shell, so every
       # container names a binary directly.
@@ -111,7 +117,10 @@ jobs:
             /usr/bin/wireplumber \
             /usr/bin/pw-dump \
             /usr/bin/wpctl \
-            /usr/lib/x86_64-linux-gnu/spa-0.2/alsa/libspa-alsa.so
+            /usr/lib/x86_64-linux-gnu/spa-0.2/alsa/libspa-alsa.so \
+            /usr/lib/x86_64-linux-gnu/spa-0.2/bluez5/libspa-bluez5.so \
+            /usr/lib/x86_64-linux-gnu/spa-0.2/bluez5/libspa-codec-bluez5-sbc.so \
+            /usr/share/spa-0.2/bluez5/bluez-hardware.conf
           do
             grep -qx "$path" image-files.txt \
               || { echo "the image has no $path"; exit 1; }
