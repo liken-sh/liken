@@ -14,7 +14,7 @@ A document's directory states its status:
   built yet.
 
 The numbers run in one sequence across all three directories. The next
-milestone is 61.
+milestone is 62.
 
 [`open-problems/`](open-problems/) holds the questions that liken owes
 an answer to. Those documents have no number, because nobody has
@@ -154,6 +154,11 @@ decided yet what work they become.
   `/etc/hosts` and an `/etc/nsswitch.conf` that pins the hosts file
   ahead of DNS at every boot, and the operator reconciles the file
   live, writing only on divergence.
+* **54.** [The system-pod template lag](completed/54-system-pod-template-lag.md).
+  A follower that reboots first runs the new binary in the old pod
+  spec: the machine operator reports that lag as `UpdatePending`
+  instead of a fault, and the conductor sends a leader first while
+  the applied template is behind the target.
 * **56.** [Device operators](completed/56-device-operators.md). The
   pattern milestones 57, 58, and 59 build: an operator claims raw
   hardware through an ordinary `liken.sh` claim, runs the daemon that
@@ -179,6 +184,17 @@ decided yet what work they become.
   holding the monitor identity its ELD block names. Its delivery is
   the PipeWire socket and a target sink, and one claim pairs a screen
   with that screen's speakers across the two drivers.
+* **60.** [Bluetooth audio](completed/60-bluetooth-audio.md). A paired speaker
+  publishes as an ordinary `audio.liken.sh` sink. The Bluetooth
+  operator publishes its media bus as an exclusive DRA device, and the
+  audio operator claims it through a shared `sound.liken.sh` attribute
+  and plays every sink the machine has from one graph.
+* **61.** [Device enrichment](completed/61-device-enrichment.md). The
+  three device operators publish the durable facts their sources
+  already report, in two layers: the raw code and the unpacked flags,
+  so a CEL selector never does bit arithmetic. A Bluetooth device
+  carries its class and service flags, a monitor its refresh rates,
+  and an audio output its LPCM rates.
 
 ## Rejected
 
@@ -212,21 +228,11 @@ decided yet what work they become.
   The netbooted report posts to the cluster as an `Enrollment`, and
   approval is applying the proposed `Machine`, with a CLI verb as
   sugar.
-* **54.** [The system-pod template lag](54-system-pod-template-lag.md).
-  A follower that reboots first runs the new binary in the old pod
-  spec: the machine operator reports that lag as `UpdatePending`
-  instead of a fault, and the conductor sends a leader first while
-  the applied template is behind the target.
 * **55.** [Kernel module parameters](55-kernel-module-parameters.md).
   `spec.moduleParameters` maps `<module>.<parameter>` to the value
   init passes to `finit_module`; a parameter on a loaded module is a
   reboot-class change, and the status reads the result back from
   `/sys/module` without comparing it.
-* **60.** [Bluetooth audio](60-bluetooth-audio.md). A paired speaker
-  publishes as an ordinary `audio.liken.sh` sink. The Bluetooth
-  operator publishes its media bus as an exclusive DRA device, and the
-  audio operator claims it through a shared `sound.liken.sh` attribute
-  and plays every sink the machine has from one graph.
 
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.
