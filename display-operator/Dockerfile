@@ -71,10 +71,10 @@ COPY --from=shim /udev-kernel-group.so /usr/lib/liken/udev-kernel-group.so
 ENTRYPOINT ["/usr/bin/weston"]
 
 FROM weston
-# The operator is the container's only entrypoint. It writes
-# weston.ini from the outputs it enumerates, so it has to run before
-# the compositor does, and it starts the compositor itself. The
-# container ends when either of them ends.
+# The operator's binary is the entrypoint of all three of the pod's
+# containers. The argument the manifest passes selects the role: the
+# config write, the compositor it execs, or, with no argument, the
+# DRA driver.
 COPY --from=build /display-operator /usr/local/bin/display-operator
 
 ENTRYPOINT ["/usr/local/bin/display-operator"]

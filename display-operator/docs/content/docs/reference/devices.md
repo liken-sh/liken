@@ -172,11 +172,13 @@ on this attribute with `has()`, like every other monitor attribute.
 
 `display.liken.sh/disconnected`, with effect `NoExecute`, is the one
 taint a device has, and it means the output can serve nobody
-right now. It appears in three cases:
+right now. It appears in two cases:
 
 * the connector has no monitor,
-* the operator has started and its compositor is not up yet,
-* the compositor exited, in the moment before the pod restarts.
+* nothing answers on the compositor's socket, which covers the
+  moment before the compositor's container is up and every restart
+  of that container. The kubelet restarts a dead compositor alone,
+  and the taint lifts on the pass that finds the socket answering.
 
 A consumer tolerates it with a `tolerationSeconds`, which is how
 long the pod may hold a dark screen before the eviction controller

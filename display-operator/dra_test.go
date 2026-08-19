@@ -47,7 +47,8 @@ func allocatedClaim(t *testing.T, results []AllocatedDevice) *Client {
 }
 
 // labPlugin is the driver as it runs on the lab machine: an ultrawide
-// on HDMI-A-1, a portable monitor on HDMI-A-2, and an empty DP-1.
+// on HDMI-A-1, a portable monitor on HDMI-A-2, and an empty DP-1, with
+// a compositor serving its socket in the pod's runtime directory.
 func labPlugin(t *testing.T, results []AllocatedDevice) *draPlugin {
 	t.Helper()
 	cdiDir = t.TempDir()
@@ -55,8 +56,18 @@ func labPlugin(t *testing.T, results []AllocatedDevice) *draPlugin {
 		client:    allocatedClaim(t, results),
 		sysRoot:   labSysfs(t),
 		card:      "card1",
-		socketDir: defaultSocketDir,
+		socketDir: servedSocketDir(t),
 	}
+}
+
+// servedSocketDir is a runtime directory with a compositor answering
+// in it. The socket is the delivery, so prepare answers only while a
+// compositor is on the other end of it.
+func servedSocketDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	servingSocket(t, dir)
+	return dir
 }
 
 func prepare(t *testing.T, plugin *draPlugin) *drav1.NodePrepareResourceResponse {
@@ -139,7 +150,7 @@ func TestPrepareDeliversTheSocketAndTheAppID(t *testing.T) {
 	}
 	edits := spec.Devices[0].ContainerEdits
 	for _, want := range []string{
-		"XDG_RUNTIME_DIR=" + defaultSocketDir,
+		"XDG_RUNTIME_DIR=" + plugin.socketDir,
 		"WAYLAND_DISPLAY=" + socketName,
 		"DISPLAY_APP_ID=hdmi-a-1",
 	} {
@@ -147,8 +158,31 @@ func TestPrepareDeliversTheSocketAndTheAppID(t *testing.T) {
 			t.Errorf("env = %v, want %q in it", edits.Env, want)
 		}
 	}
-	if len(edits.Mounts) != 1 || edits.Mounts[0].ContainerPath != defaultSocketDir {
+	if len(edits.Mounts) != 1 || edits.Mounts[0].ContainerPath != plugin.socketDir {
 		t.Errorf("mounts = %+v", edits.Mounts)
+	}
+}
+
+func TestPrepareRefusesWhileNoCompositorServes(t *testing.T) {
+	// The compositor died and left its socket file behind, and its
+	// container is restarting. The screen is real and the allocation
+	// stands, and a delivery now would hand the client a path that
+	// refuses it, so the kubelet holds the pod and retries.
+	plugin := labPlugin(t, []AllocatedDevice{
+		{Request: "screen", Driver: DriverName, Pool: "liken-1", Device: "hdmi-a-1"},
+	})
+	plugin.socketDir = t.TempDir()
+	staleSocket(t, plugin.socketDir)
+
+	claim := prepare(t, plugin)
+	if claim.Error == "" {
+		t.Fatal("prepare delivered a socket that no compositor serves")
+	}
+	if !strings.Contains(claim.Error, "compositor") {
+		t.Errorf("error = %q, want it to say %q", claim.Error, "compositor")
+	}
+	if got := specFiles(t); len(got) != 0 {
+		t.Errorf("a refused claim left %v behind", got)
 	}
 }
 

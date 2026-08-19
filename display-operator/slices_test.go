@@ -253,9 +253,9 @@ func TestTheFirstReconcileFreesTheScreensThatCameBack(t *testing.T) {
 	}
 }
 
-// The operator publishes compositorDown devices at startup and again
-// as the compositor exits. At both moments every device has the
-// one NoExecute taint, because no compositor serves this node.
+// The operator publishes this form on every pass that finds no
+// compositor answering, and every device carries the one NoExecute
+// taint, because no output on this node can serve a client.
 func TestCompositorDownTaintsEveryOutput(t *testing.T) {
 	devices := compositorDown(sliceDevices(testOutputs(t)))
 
@@ -278,11 +278,11 @@ func TestCompositorDownTaintsEveryOutput(t *testing.T) {
 }
 
 func TestPublishingCompositorDownEvictsTheClients(t *testing.T) {
-	// This is the write the operator makes as the compositor dies. It
-	// is the only thing that ends the clients that are drawing into a
-	// socket that is gone: the pod the kubelet starts next publishes
-	// the same devices again, and a slice that does not change raises
-	// no scheduler event at all.
+	// This is the write the operator makes on the pass that finds the
+	// compositor gone, and it is the only thing that ends the clients
+	// whose connections died with it: the restarted compositor serves
+	// the same devices again, and a slice that never changed would
+	// raise no scheduler event.
 	fixture := &slicePublishFixture{existing: &ResourceSlice{
 		Metadata: ResourceSliceMeta{Name: "liken-1-display.liken.sh", ResourceVersion: "7"},
 		Spec: ResourceSliceSpec{

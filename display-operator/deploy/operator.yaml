@@ -65,27 +65,49 @@ spec:
       # must stop quickly on SIGTERM. While it is down, every monitor
       # it drives is black.
       terminationGracePeriodSeconds: 5
-      containers:
-        - name: operator
-          # One container, because the operator writes weston.ini and
-          # then runs weston as its own child, and a weston that exits
-          # has to end this process. Two containers in one pod restart
-          # on their own, and nothing in a pod spec binds one
-          # container's life to another's.
-          #
-          # The image holds the operator's binary, weston, and the
-          # libraries weston loads. It holds no shell, so kubectl exec
-          # can run only a binary the image contains, by name, such as
-          # wayland-info.
+      # Three containers from one image, ordered by the kubelet: the
+      # declare container writes weston.ini and exits, the weston
+      # container runs the compositor, and the operator container
+      # serves DRA and the slice. The kubelet restarts a dead
+      # compositor alone, the operator taints every output for as long
+      # as nothing answers on the socket, and no process in this pod
+      # supervises another.
+      initContainers:
+        # The connector enumeration and the config write run as an
+        # init step, because the compositor parses weston.ini once at
+        # startup, and the kubelet starts the container that reads the
+        # file only after this one exits.
+        - name: declare
           image: ghcr.io/liken-sh/display-operator:latest
-          env:
-            # A ResourceSlice names the node whose hardware it
-            # describes, and the downward API is where a pod reads
-            # that.
-            - name: NODE_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: spec.nodeName
+          args: ["declare"]
+          securityContext:
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+            # The claim is named here because the card node this
+            # container enumerates arrives with the claim's delivery.
+            claims:
+              - name: gpu
+          volumeMounts:
+            - name: weston-config
+              mountPath: /etc/weston
+        # The compositor is a native sidecar: an init container whose
+        # restartPolicy is Always. The kubelet starts it before the
+        # operator container and stops it after, and the argument runs
+        # the image's binary in the mode that execs weston, so weston
+        # is this container's one process and its exit is what the
+        # kubelet acts on.
+        - name: weston
+          image: ghcr.io/liken-sh/display-operator:latest
+          args: ["weston"]
+          restartPolicy: Always
           securityContext:
             # No privilege and no capability. libseat's noop backend
             # opens the card node with a plain open(), and the kernel
@@ -105,6 +127,48 @@ spec:
             # The card node and the render node, claimed from liken.
             # This is the placement: the scheduler puts the pod where
             # the hardware is.
+            claims:
+              - name: gpu
+          volumeMounts:
+            # The config the declare container wrote, and the
+            # directory the compositor creates its socket in, which is
+            # the same hostPath a consumer's container mounts.
+            - name: weston-config
+              mountPath: /etc/weston
+            - name: socket
+              mountPath: /var/run/display.liken.sh
+      containers:
+        - name: operator
+          # The image holds the operator's binary, weston, and the
+          # libraries weston loads. It holds no shell, so kubectl exec
+          # can run only a binary the image contains, by name, such as
+          # wayland-info.
+          image: ghcr.io/liken-sh/display-operator:latest
+          env:
+            # A ResourceSlice names the node whose hardware it
+            # describes, and the downward API is where a pod reads
+            # that.
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          securityContext:
+            # No privilege and no capability. This container reads
+            # sysfs, writes CDI files, and serves a socket to the
+            # kubelet, and none of that needs either.
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 30m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+            # The claim is named here too, because the card node is
+            # how this container learns which card's connectors it
+            # publishes.
             claims:
               - name: gpu
           volumeMounts:
@@ -151,3 +215,11 @@ spec:
           hostPath:
             path: /var/run/display.liken.sh
             type: DirectoryOrCreate
+        # The compositor's configuration directory, shared between
+        # the declare container that writes it and the weston
+        # container that reads it. The volume is the pod's own,
+        # because the file states the connectors this pod enumerated,
+        # and a volume that outlived the pod would hand the next
+        # compositor an old set.
+        - name: weston-config
+          emptyDir: {}

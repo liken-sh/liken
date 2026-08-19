@@ -15,11 +15,10 @@ package main
 // writes it: one [output] section for each connector, whose app-id is
 // the published device's name.
 //
-// The operator starts weston rather than the entrypoint, because the
-// config file has to exist first and the operator is what writes it.
-// The two exit together in both directions: weston that exits ends the
-// operator, and an operator that exits ends the container, which ends
-// weston.
+// This file holds two of the pod's three roles: declare, which
+// writes the config, and the compositor role, which execs weston so
+// that weston replaces the process, weston's exit is the container's
+// exit, and the kubelet is the supervision.
 //
 // The flags match what the lab machine runs today, weston 14.0.2 with
 // LIBSEAT_BACKEND=noop. That backend opens the device path with a
@@ -29,13 +28,15 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // hotplugShim is the path of the preload library in the image. The
@@ -44,16 +45,47 @@ import (
 // hotplug/udev-kernel-group.c explains why.
 const hotplugShim = "/usr/lib/liken/udev-kernel-group.so"
 
-// socketWaitTimeout bounds the wait for weston's Wayland socket at
-// startup. Weston that never creates it is a failure to report, and
-// the pod's restart is the retry.
-const socketWaitTimeout = 30 * time.Second
+// westonBinary is weston's own path in the image, in full because
+// exec resolves no PATH.
+const westonBinary = "/usr/bin/weston"
 
-// socketPollInterval is how often the wait looks for the socket. A
+// configWaitTimeout bounds the compositor role's wait for the
+// config the declare container writes. A config that never arrives
+// is a failure to report, and the container's restart is the
+// retry.
+const configWaitTimeout = 30 * time.Second
+
+// socketPollInterval is how often a wait looks for a file. A
 // new file raises no event that a program can wait on without
-// another dependency. So this is the one place that polls, and it
-// polls for a bounded time on one path.
+// another dependency.
+//
+// The compositor role's wait for its config is this interval's one
+// reader, and that wait ends within a tick or two, because the
+// declare container exits before this one starts.
 const socketPollInterval = 100 * time.Millisecond
+
+// socketDialTimeout is how long a check waits for the compositor to
+// accept the connection. Accepting a client is the first thing an
+// event loop does, so a compositor that cannot answer in half a
+// second is not serving anybody.
+const socketDialTimeout = 500 * time.Millisecond
+
+// socketWatchInterval is how often the operator connects to the
+// compositor's socket. A connect and a close once a second costs the
+// compositor what any Wayland tool costs it, and the watch runs for
+// the life of the pod, so it stays gentle where the config wait is
+// quick.
+const socketWatchInterval = 1 * time.Second
+
+// declareMode and compositorMode are the arguments that select the
+// pod's other two roles.
+//
+// One image, three containers: the manifest passes one of these as
+// the argument, and no argument at all runs the operator.
+const (
+	declareMode    = "declare"
+	compositorMode = "weston"
+)
 
 // westonConfig builds the weston.ini for one set of outputs.
 //
@@ -101,8 +133,10 @@ app-ids=%s
 }
 
 // writeWestonConfig writes the compositor's config where weston reads
-// it. The directory is the pod's own, not a mount, because the file
-// describes the monitors this pod found and no deployment supplies it.
+// it.
+//
+// The file describes the monitors this pod found, so the volume is
+// the pod's own and the declare container is its only writer.
 func writeWestonConfig(path string, outputs []Output) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -110,25 +144,106 @@ func writeWestonConfig(path string, outputs []Output) error {
 	return os.WriteFile(path, []byte(westonConfig(outputs)), 0o644)
 }
 
-// startWeston starts the compositor on one card and returns a channel
-// that reports its exit.
+// declare enumerates the card's connectors, writes the compositor's
+// config, and ends the process.
 //
-// The channel is the supervision. Weston holds the screens and the
-// socket. An operator that outlived it would advertise outputs it
-// can no longer drive, and every client that was drawing has already
-// lost its connection. main ends the process on that channel, with a
-// nonzero status, and the kubelet restarts the pair.
-func startWeston(ctx context.Context, card, configPath, socketDir, socketName string) (<-chan error, error) {
-	if err := os.MkdirAll(socketDir, 0o755); err != nil {
-		return nil, err
+// The enumeration and the write are one init container, so the
+// config is on disk before the compositor's container starts, and
+// the ordering is the kubelet's, not a wait either role holds.
+func declare() {
+	card := claimedCard()
+
+	// The outputs are enumerated once, here, and the config the
+	// compositor reads is written from that enumeration. Every
+	// connector gets an [output] section, dark or lit. The compositor
+	// parses the file once, so the section for a connector must exist
+	// before a monitor arrives on it.
+	outputs := discoverOutputs(sysRoot, card)
+	if len(outputs) == 0 {
+		fatal("%s registers no connectors under %s/class/drm", card, sysRoot)
 	}
-	weston := exec.CommandContext(ctx, "weston",
+	live := connected(outputs)
+	if len(live) == 0 {
+		// Every connector still publishes, tainted, so a person can
+		// claim a screen that is cabled and asleep and the pod parks
+		// until somebody wakes it. The operator does not test whether
+		// the compositor starts with no output: a compositor that
+		// refuses exits, and that exit is the report.
+		fmt.Fprintf(os.Stderr, "%s has no monitor on any of its %d connectors\n", card, len(outputs))
+	}
+	for _, output := range live {
+		monitor := monitorID(output.Monitor)
+		if monitor == "" {
+			monitor = "a monitor with no readable EDID"
+		}
+		fmt.Printf("%s: %s has %s, app-id %s\n",
+			DriverName, output.Connector, monitor, appID(output.Connector))
+	}
+	if err := writeWestonConfig(westonConfigPath, outputs); err != nil {
+		fatal("writing %s: %v", westonConfigPath, err)
+	}
+}
+
+// compose runs the compositor in place of this process.
+//
+// The binary finds the card the claim delivered, which no manifest
+// can name, then execs weston, so the container holds one process
+// and its exit is the exit the kubelet acts on.
+func compose() {
+	card := claimedCard()
+	socketDir := envOr("SOCKET_DIR", defaultSocketDir)
+
+	// The declare container has already exited when this one starts,
+	// so the config is normally there on the first look. The bound is
+	// for the file that never arrives, which is a failure to report,
+	// not a wait to hold.
+	if err := waitForFile(context.Background(), westonConfigPath, configWaitTimeout); err != nil {
+		fatal("%v", err)
+	}
+	if err := os.MkdirAll(socketDir, 0o755); err != nil {
+		fatal("making %s: %v", socketDir, err)
+	}
+
+	// libwayland creates the socket with the process umask and never
+	// chmods it. A umask of 022 leaves the socket 0755, and connect()
+	// needs write permission, so a client running under another uid is
+	// refused.
+	//
+	// The umask survives the exec, and this process creates nothing
+	// else before it, so nothing needs to restore it.
+	unix.Umask(0)
+	fmt.Printf("%s: the compositor takes %s\n", DriverName, card)
+	if err := syscall.Exec(westonBinary, westonArgv(card, westonConfigPath, socketName),
+		westonEnvironment(os.Environ(), socketDir)); err != nil {
+		fatal("running %s: %v", westonBinary, err)
+	}
+}
+
+// westonArgv builds the compositor's command line.
+//
+// The card is the name the claim delivered, not a path, because
+// weston's --drm-device takes the card's name and looks it up
+// itself. The card and the socket name come from this binary rather
+// than the manifest, because neither is a fact a deployment can
+// know.
+func westonArgv(card, configPath, socketName string) []string {
+	return []string{
+		westonBinary,
 		"--backend=drm",
-		"--drm-device="+card,
-		"--config="+configPath,
-		"--socket="+socketName,
-	)
-	weston.Env = append(os.Environ(),
+		"--drm-device=" + card,
+		"--config=" + configPath,
+		"--socket=" + socketName,
+	}
+}
+
+// westonEnvironment builds the compositor's environment from the
+// container's own.
+//
+// The compositor needs three settings the container's environment
+// does not carry: the launcher backend, the hotplug shim, and the
+// socket directory. The comments below say why each exists.
+func westonEnvironment(environ []string, socketDir string) []string {
+	return append(append([]string{}, environ...),
 		// Weston's only launcher is libseat, and noop is the only
 		// libseat backend that needs neither seatd, nor logind, nor a
 		// VT. It opens the device path with a plain open(), which is
@@ -148,39 +263,15 @@ func startWeston(ctx context.Context, card, configPath, socketDir, socketName st
 		// the directory a consumer's container mounts.
 		"XDG_RUNTIME_DIR="+socketDir,
 	)
-	weston.Stdout = os.Stdout
-	weston.Stderr = os.Stderr
-	if err := weston.Start(); err != nil {
-		return nil, err
-	}
-	exited := make(chan error, 1)
-	go func() {
-		err := weston.Wait()
-		if err == nil {
-			// A compositor that ends by itself ends every screen, and a
-			// zero status does not make that a success. The channel
-			// delivers a reason either way, so no reader has to treat a
-			// nil error as an exit.
-			err = errors.New("exit status 0")
-		}
-		exited <- err
-	}()
-	return exited, nil
 }
 
-// waitForSocket blocks until the compositor's socket accepts
-// connections, until the compositor exits, or until the timeout runs
-// out.
+// waitForFile blocks until the file exists, until the context ends, or
+// until the timeout runs out.
 //
-// Nothing may publish before this returns. The delivery a consumer
-// receives is the socket, so an output published while the socket is
-// missing offers a screen a client cannot connect to. The consumer's
-// pod would start and fail rather than wait.
-//
-// The exited channel is what turns a compositor that refuses to start
-// into an error now instead of a wait for the whole timeout. A machine
-// with no monitor plugged in is the case that meets it.
-func waitForSocket(ctx context.Context, path string, timeout time.Duration, exited <-chan error) error {
+// A new file raises no event a program can wait on without another
+// dependency, so this is a bounded poll on one path, and the startup
+// ordering already makes it short.
+func waitForFile(ctx context.Context, path string, timeout time.Duration) error {
 	deadline := time.After(timeout)
 	tick := time.NewTicker(socketPollInterval)
 	defer tick.Stop()
@@ -191,11 +282,27 @@ func waitForSocket(ctx context.Context, path string, timeout time.Duration, exit
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case err := <-exited:
-			return fmt.Errorf("the compositor exited before it created a socket at %s: %v", path, err)
 		case <-deadline:
-			return fmt.Errorf("the compositor created no socket at %s within %s", path, timeout)
+			return fmt.Errorf("nothing created %s within %s", path, timeout)
 		case <-tick.C:
 		}
 	}
+}
+
+// compositorServing reports whether a compositor accepts connections
+// on the socket.
+//
+// The check connects and closes rather than stats. A compositor
+// that died uncleanly leaves its socket file behind, and a file
+// nothing listens on refuses every client, so the refused connect is
+// the truth a stat would miss. The socket is the whole delivery, so
+// what a client would meet is what the operator answers prepare
+// calls and taints the slice by.
+func compositorServing(socketPath string) bool {
+	connection, err := net.DialTimeout("unix", socketPath, socketDialTimeout)
+	if err != nil {
+		return false
+	}
+	_ = connection.Close()
+	return true
 }

@@ -4,7 +4,8 @@ A Kubernetes
 [Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
 driver that publishes each monitor output of a graphics card as a
 claimable device on a [`liken`](https://github.com/liken-sh/liken)
-cluster. It runs the Weston compositor in its pod. A pod that claims
+cluster. Its pod runs the Weston compositor in a container of its
+own, supervised by the kubelet. A pod that claims
 an output receives the Wayland socket and the app-id that puts its
 window, fullscreen, on that screen.
 

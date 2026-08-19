@@ -4,13 +4,17 @@
 // Wayland socket and the app-id that put its window on that screen.
 //
 // It is an instance of liken's device operator pattern. The operator
-// claims the card's display device through an ordinary liken.sh claim,
-// runs Weston with the kiosk shell beside itself in the same pod, and
-// publishes what the compositor drives under its own driver name,
-// display.liken.sh. The operator uses no private interface into
-// liken. The raw claim, the slices it writes, and the CDI files it
-// leaves for the runtime are the public contracts that any DRA
-// driver on any cluster gets.
+// claims the card's display device through an ordinary liken.sh claim
+// and publishes what the compositor drives under its own driver name,
+// display.liken.sh.
+//
+// Weston with the kiosk shell runs in a container of its own in the
+// same pod. The kubelet starts it, restarts it when it dies, and
+// stops it, so no process in this pod supervises another.
+//
+// The operator uses no private interface into liken. The raw claim,
+// the slices it writes, and the CDI files it leaves for the runtime
+// are the public contracts that any DRA driver on any cluster gets.
 //
 // The claim does two jobs that a person would otherwise write down. It
 // places the pod, because only a machine that has a graphics card
@@ -32,8 +36,6 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-
-	"golang.org/x/sys/unix"
 )
 
 const (
@@ -72,11 +74,14 @@ const (
 	writeRetryDelay = 2 * time.Second
 )
 
-// westonConfigPath is where the operator writes the compositor's
-// config. It is the pod's own filesystem, not a mount: the file
-// describes the monitors this pod found, so no deployment supplies it
-// and no edit to it survives a restart.
-const westonConfigPath = "/run/weston/weston.ini"
+// westonConfigPath is where the declare container writes the
+// compositor's config and where the compositor's container reads it.
+//
+// The volume the two containers share is the pod's own: the file
+// describes the monitors this pod found, so no deployment supplies
+// it, and no edit to it survives the pod. It is a variable so the
+// tests can point it at a directory they control.
+var westonConfigPath = "/etc/weston/weston.ini"
 
 // defaultSocketDir is where the compositor listens and where a
 // consumer's container mounts. The path is the same on the host, in
@@ -103,7 +108,46 @@ var sysRoot = "/sys"
 // because the kernel renumbers cards across a reboot.
 var driRoot = "/dev/dri"
 
+// main selects the role from the command line.
+//
+// The pod runs this one image three times. The declare init
+// container and the compositor's container each name their role in
+// an argument, and the operator container runs with none.
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case declareMode:
+			declare()
+			return
+		case compositorMode:
+			compose()
+			return
+		}
+	}
+	operate()
+}
+
+// claimedCard names the one card node the pod's claim delivered.
+//
+// All three roles read the same directory rather than taking a
+// device path from anywhere, because the kernel renumbers cards
+// across a reboot and no manifest can name one.
+func claimedCard() string {
+	cards, err := cardNode(driRoot)
+	if err != nil {
+		fatal("reading %s: %v", driRoot, err)
+	}
+	switch len(cards) {
+	case 1:
+	case 0:
+		fatal("no card node in %s; does this pod claim a display device?", driRoot)
+	default:
+		fatal("this pod holds %d card nodes (%v); one compositor drives one card", len(cards), cards)
+	}
+	return cards[0]
+}
+
+func operate() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -131,85 +175,13 @@ func main() {
 		fatal("reading node %s: %v", nodeName, err)
 	}
 
-	cards, err := cardNode(driRoot)
-	if err != nil {
-		fatal("reading %s: %v", driRoot, err)
-	}
-	switch len(cards) {
-	case 1:
-	case 0:
-		fatal("no card node in %s; does this pod claim a display device?", driRoot)
-	default:
-		fatal("this pod holds %d card nodes (%v); one compositor drives one card", len(cards), cards)
-	}
-	card := cards[0]
+	card := claimedCard()
+	socketPath := socketDir + "/" + socketName
 
-	// The outputs are enumerated once, here, and the config the
-	// compositor reads is written from that enumeration. Every
-	// connector gets an [output] section, dark or lit. The compositor
-	// parses the file once, so the section for a connector must exist
-	// before a monitor arrives on it.
-	outputs := discoverOutputs(sysRoot, card)
-	if len(outputs) == 0 {
-		fatal("%s registers no connectors under %s/class/drm", card, sysRoot)
-	}
-	live := connected(outputs)
-	if len(live) == 0 {
-		// Every connector still publishes, tainted, so a person can
-		// claim a screen that is cabled and asleep and the pod parks
-		// until somebody wakes it. The operator does not test whether
-		// the compositor starts with no output: a compositor that
-		// refuses exits, and that exit is the report.
-		fmt.Fprintf(os.Stderr, "%s has no monitor on any of its %d connectors\n", card, len(outputs))
-	}
-	for _, output := range live {
-		monitor := monitorID(output.Monitor)
-		if monitor == "" {
-			monitor = "a monitor with no readable EDID"
-		}
-		fmt.Printf("%s: %s has %s, app-id %s\n",
-			DriverName, output.Connector, monitor, appID(output.Connector))
-	}
-	if err := writeWestonConfig(westonConfigPath, outputs); err != nil {
-		fatal("writing %s: %v", westonConfigPath, err)
-	}
-
-	// The inventory publishes before the compositor runs, with every
-	// device tainted, because no compositor serves any screen yet.
-	// sysfs and the EDID say what is plugged in without a compositor,
-	// so the attributes are complete. This write replaces the slice
-	// the previous pod left. The first reconcile after the socket
-	// appears removes the taint from every screen that has a monitor.
-	// If the compositor never starts, the taint stays, and a claim
-	// parks instead of taking a screen that no compositor drives.
-	//
-	// A client that was drawing before a restart keeps its screen.
-	// The taint clears about three seconds after this write, and the
-	// manual recommends a tolerationSeconds of 30, so the restart
-	// never evicts the client.
-	if err := EnsureResourceSlice(client, nodeName, owner, compositorDown(sliceDevices(outputs))); err != nil {
-		fmt.Fprintf(os.Stderr, "publishing the outputs before the compositor starts: %v\n", err)
-	}
-
-	// libwayland creates the socket with the process umask and never
-	// chmods it. A umask of 022 leaves the socket 0755, and connect()
-	// needs write permission, so a client running under another uid is
-	// refused. The compositor inherits the umask at start, and the
-	// operator restores its own directly after, so nothing else this
-	// process creates is world-writable.
-	unix.Umask(0)
-	westonExit, err := startWeston(ctx, card, westonConfigPath, socketDir, socketName)
-	unix.Umask(0o022)
-	if err != nil {
-		fatal("starting the compositor: %v", err)
-	}
-	if err := waitForSocket(ctx, socketDir+"/"+socketName, socketWaitTimeout, westonExit); err != nil {
-		fatal("%v", err)
-	}
-
-	// The plugin registers with the kubelet only after the socket
-	// exists, so the driver appears when it can actually answer a
-	// prepare call. What a prepared claim delivers is that socket.
+	// The plugin registers whether or not a compositor serves. A
+	// prepare call that arrives while the socket is gone must be
+	// refused with a reason, and an unregistered driver answers with
+	// nothing at all.
 	plugin := &draPlugin{
 		client:    client,
 		sysRoot:   sysRoot,
@@ -232,7 +204,7 @@ func main() {
 	// time and takes the same settle window.
 	retries := make(chan struct{}, 1)
 	publish := func() {
-		if err := reconcile(client, nodeName, owner, card); err != nil {
+		if err := reconcile(client, nodeName, owner, card, socketPath); err != nil {
 			fmt.Fprintf(os.Stderr, "publishing the slice: %v; retrying in %s\n", err, writeRetryDelay)
 			time.AfterFunc(writeRetryDelay, func() {
 				select {
@@ -242,12 +214,11 @@ func main() {
 			})
 		}
 	}
-	settled := settle(ctx, wakes(ctx, uevents, retries), settleWindow, settleLimit)
+	settled := settle(ctx, wakes(ctx, uevents, retries, watchSocket(ctx, socketPath)), settleWindow, settleLimit)
 
-	// The first pass runs before any event. It removes the taint that
-	// the startup publish put on every screen that has a monitor. It
-	// also catches a monitor that arrived while the compositor was
-	// starting, before this process listened on the kernel's socket.
+	// The first pass runs before any event. It replaces the slice the
+	// previous pod left and states whether a compositor serves right
+	// now, tainted if the socket is not up yet.
 	publish()
 
 	for {
@@ -260,23 +231,6 @@ func main() {
 			// the slice, so a node that leaves the cluster is what
 			// takes it away.
 			return
-		case err := <-westonExit:
-			if ctx.Err() != nil {
-				// The compositor ended because this process is ending.
-				return
-			}
-			// The compositor holds the screens and the socket, so its
-			// death ends every client's Wayland connection at once.
-			// Taint every output before this process ends, because
-			// that write is the only thing that evicts those clients:
-			// the replacement pod publishes the same devices again,
-			// and a slice that does not change raises no scheduler
-			// event.
-			if writeErr := EnsureResourceSlice(client, nodeName, owner,
-				compositorDown(sliceDevices(discoverOutputs(sysRoot, card)))); writeErr != nil {
-				fmt.Fprintf(os.Stderr, "tainting the outputs after the compositor exited: %v\n", writeErr)
-			}
-			fatal("the compositor exited: %v", err)
 		case _, ok := <-settled:
 			if !ok {
 				if err := eventsEnded(ctx); err != nil {
@@ -304,27 +258,78 @@ func eventsEnded(ctx context.Context) error {
 }
 
 // reconcile makes the published slice agree with what sysfs says about
-// the card's connectors right now. The caller schedules another pass
-// when this one returns an error.
+// the card's connectors right now, and with whether a compositor
+// serves them. The caller schedules another pass when this one returns
+// an error.
 //
 // A pass that finds no connector writes nothing. The card registers
 // its connectors when the driver binds and keeps them until the card
 // leaves, so an empty answer means the card is going away or the walk
 // read the wrong path, and publishing it would delete every device a
 // consumer holds.
-func reconcile(client *Client, nodeName string, owner OwnerReference, card string) error {
+//
+// Every pass reads the connectors again, so the pass that follows a
+// compositor's return carries the mode list the kernel re-probed on
+// the way up. A list read too early stays stale only until the next
+// wake.
+func reconcile(client *Client, nodeName string, owner OwnerReference, card, socketPath string) error {
 	outputs := discoverOutputs(sysRoot, card)
 	if len(outputs) == 0 {
 		return fmt.Errorf("%s registers no connectors, so the published slice stays as it is", card)
 	}
-	return EnsureResourceSlice(client, nodeName, owner, sliceDevices(outputs))
+	devices := sliceDevices(outputs)
+	if !compositorServing(socketPath) {
+		// No compositor holds the screens, so every output says it
+		// serves nobody, and the NoExecute taint is what ends the
+		// clients whose connections died with the socket.
+		devices = compositorDown(devices)
+	}
+	return EnsureResourceSlice(client, nodeName, owner, devices)
 }
 
-// wakes turns the kernel's drm events and the write retries into one
-// channel of wakes, with a backstop tick in it. Nothing on any of them
-// holds state that the loop uses: each wake means look again, and the
-// look is a fresh read of sysfs.
-func wakes(ctx context.Context, uevents <-chan drmEvent, retries <-chan struct{}) <-chan struct{} {
+// watchSocket wakes the loop when a compositor starts answering on the
+// socket and when it stops.
+//
+// A compositor that comes or goes raises no event a program can
+// wait on, so the watch connects on a tick, and the change from one
+// reading to the next is the whole signal. The pass it wakes is what
+// taints or frees the screens.
+func watchSocket(ctx context.Context, socketPath string) <-chan struct{} {
+	out := make(chan struct{}, 1)
+	// The first reading is taken before the ticker starts, so it is
+	// the same state the caller's first pass publishes, and no change
+	// falls between the two.
+	serving := compositorServing(socketPath)
+	go func() {
+		defer close(out)
+		tick := time.NewTicker(socketWatchInterval)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				now := compositorServing(socketPath)
+				if now == serving {
+					continue
+				}
+				serving = now
+				fmt.Printf("the compositor's socket at %s: serving=%v\n", socketPath, serving)
+				select {
+				case out <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}()
+	return out
+}
+
+// wakes turns the kernel's drm events, the write retries, and the
+// compositor's socket into one channel of wakes, with a backstop tick
+// in it. Nothing on any of them holds state that the loop uses: each
+// wake means look again, and the look is a fresh read of sysfs.
+func wakes(ctx context.Context, uevents <-chan drmEvent, retries, sockets <-chan struct{}) <-chan struct{} {
 	out := make(chan struct{}, 1)
 	wake := func() {
 		select {
@@ -347,6 +352,11 @@ func wakes(ctx context.Context, uevents <-chan drmEvent, retries <-chan struct{}
 				fmt.Printf("drm %s: %s\n", event.Action, event.DevPath)
 				wake()
 			case _, ok := <-retries:
+				if !ok {
+					return
+				}
+				wake()
+			case _, ok := <-sockets:
 				if !ok {
 					return
 				}

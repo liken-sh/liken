@@ -28,6 +28,15 @@ say why it is built the way it is.
   hotplug subscription to the kernel's own netlink group, so a monitor
   that arrives on a dark connector routes without a restart. Answers
   and replaces the open problem "Routing is narrower than inventory".
+* [03, The modes a monitor accepts](03-the-modes-a-monitor-accepts.md).
+  Built, and adopted on liken-1 on 2026-08-19. Each connected output
+  publishes a `modes` attribute: the kernel's list, deduplicated, cut
+  to whole names under the API's 64-character limit.
+* [04, The kubelet supervises the compositor](04-the-kubelet-supervises-the-compositor.md).
+  Built on 2026-08-19. Weston moves to a container of its own, the
+  kubelet restarts it alone, and the operator taints every output
+  while nothing answers on the compositor's socket. The prerequisite
+  for a claim that selects a mode.
 
 ## Open problems
 

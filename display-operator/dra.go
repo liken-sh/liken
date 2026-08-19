@@ -145,6 +145,15 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 		return &drav1.NodePrepareResourceResponse{Error: message}
 	}
 
+	// The delivery is the compositor's socket, so a claim prepared
+	// while the compositor is restarting would hand a client a path
+	// with nothing behind it. The kubelet holds the pod in
+	// ContainerCreating and asks again, and the retry is the wait.
+	socketPath := filepath.Join(p.socketDir, socketName)
+	if !compositorServing(socketPath) {
+		return fail("no compositor is serving %s right now", socketPath)
+	}
+
 	allocated, err := GetResourceClaim(p.client, claim.Namespace, claim.Name)
 	if err != nil {
 		return fail("reading the claim: %v", err)

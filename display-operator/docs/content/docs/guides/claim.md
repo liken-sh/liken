@@ -75,7 +75,8 @@ Tolerate `display.liken.sh/disconnected`, the taint a dark connector
 has. Its effect is `NoExecute`, and `tolerationSeconds` says how
 long your pod may hold a dark screen before the eviction controller
 ends it. Thirty seconds means a reseated cable costs nothing, and it
-also keeps the pod through a restart of the operator itself. A claim on a
+also keeps the pod through a restart of the compositor's container,
+which is a restart of every screen on that machine. A claim on a
 connector with no monitor parks the pod `Pending`, visibly, and the
 pod starts on its own when a monitor is plugged in.
 

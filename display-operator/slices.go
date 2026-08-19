@@ -202,22 +202,24 @@ func unservableTaints() []DeviceTaint {
 	}
 }
 
-// compositorDown taints every device, whatever is plugged in. The
-// operator publishes this form at the two moments when it runs no
-// compositor: at startup, before the compositor starts, and again as
-// the compositor exits.
+// compositorDown taints every device, whatever is plugged in.
 //
-// The taint is a fact at both moments. No compositor holds the
-// screens, so no output can serve a client. At startup this write
-// replaces the slice the previous pod left. The first reconcile after
-// the socket appears removes the taint from every screen that has a
-// monitor. If the compositor never starts, the taint stays, and a
-// claim parks instead of taking a screen that no compositor drives.
+// The operator publishes this form on every pass that finds no
+// compositor answering on the socket, which covers the start before
+// the compositor's container creates it and every restart of that
+// container after.
 //
-// At exit this write is the only thing that ends the clients. Each
-// client has already lost its connection to the socket. A replacement
-// pod that published the same untainted devices would raise no
-// scheduler event, so nothing would ever evict those clients.
+// No compositor holds the screens, so no output can serve a client.
+// The first reconcile after the socket appears removes the taint from
+// every screen that has a monitor. If the compositor never starts, the
+// taint stays, and a claim parks instead of taking a screen that no
+// compositor drives.
+//
+// This write is also what ends the clients that were drawing. Each
+// one already lost its Wayland connection when the compositor died,
+// and the restarted compositor serves the same devices again, so a
+// slice that never changed would raise no event and nothing else
+// would ever evict them.
 func compositorDown(devices []SliceDevice) []SliceDevice {
 	out := make([]SliceDevice, len(devices))
 	for i, device := range devices {
