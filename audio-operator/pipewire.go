@@ -23,6 +23,10 @@ package main
 // walk needs. The exec costs one process for each reconcile pass, at
 // most one every settle window, and it reads a format that the
 // PipeWire release in this image defines.
+//
+// The writes take the same path for the same reason: pw-cli
+// set-param is one process per write, changing one property on an
+// object the same dump named.
 
 import (
 	"context"
@@ -41,6 +45,14 @@ import (
 // that stops answering would otherwise hold the reconcile pass
 // forever.
 const pwDumpTimeout = 10 * time.Second
+
+// pwCLITimeout bounds one property write.
+//
+// A set-param connects to the same socket, writes one pod, and
+// exits. The bound guards the same failure the dump's bound
+// guards: a socket that accepts the connection and then answers
+// nothing.
+const pwCLITimeout = 10 * time.Second
 
 // runtimeDir is where PipeWire creates its socket. It is a hostPath
 // mount, so that a consumer's CDI spec can bind the same directory
@@ -94,10 +106,37 @@ type pwGraph struct {
 }
 
 // bluezSink is one Bluetooth sink node: the name a consumer's
-// PIPEWIRE_NODE holds, and the codec the transport negotiated.
+// PIPEWIRE_NODE holds, the codec the transport negotiated, and what
+// a codec switch needs to write.
+//
+// The name is all a delivery carries, but a codec switch needs
+// the rest: the device id to write the codec on, the node id and
+// channel count for the unity write, and the offered set to
+// validate a claim against.
+//
+// Device is the bluez5 Device object's id, not the node's,
+// because the codec choice is the device's property: the node
+// dies in a switch and the device survives it.
 type bluezSink struct {
-	Node  string
-	Codec string
+	Node    string
+	NodeID  int
+	Codec   string
+	Volumes []float64
+	Device  int
+	Codecs  []bluezCodec
+}
+
+// bluez5Device is the part of a bluez5 Device object this operator
+// reads: its own object id, and the codecs it offers. The name says
+// bluez5 because bluez_test.go's bluezDevice is the other thing with
+// that name, the D-Bus object bluetoothd publishes.
+//
+// The device object is read separately from the node and joined
+// to it by peer address, because PipeWire publishes them as two
+// objects and the address is the one property both carry.
+type bluez5Device struct {
+	ID     int
+	Codecs []bluezCodec
 }
 
 // The node properties the bluez5 SPA plugin sets on every node it
@@ -131,11 +170,52 @@ var (
 // pwObject is the part of pw-dump's output this operator reads. Every
 // object in the dump has a type and, for the ones that came from a
 // remote interface, an info block with its properties.
+//
+// The id is how a write names its object. Beside the properties,
+// params holds the object's parameters: Props is current state,
+// and PropInfo is what the object would accept.
 type pwObject struct {
+	ID   int    `json:"id"`
 	Type string `json:"type"`
 	Info struct {
-		Props map[string]json.RawMessage `json:"props"`
+		Props  map[string]json.RawMessage `json:"props"`
+		Params pwParams                   `json:"params"`
 	} `json:"info"`
+}
+
+// pwParams holds the two parameter lists this operator reads. Every
+// value in either one is a SPA POD that pw-dump printed as JSON.
+//
+// PropInfo describes the properties an object accepts, and Props
+// holds their current values. Every other parameter stays
+// unparsed, because parsing it would couple this struct to pod
+// shapes nothing here reads.
+type pwParams struct {
+	PropInfo []pwPropInfo      `json:"PropInfo"`
+	Props    []json.RawMessage `json:"Props"`
+}
+
+// pwPropInfo describes one property an object accepts: its name, the
+// values it takes, and a display label for each one.
+//
+// type and labels stay raw because their shape depends on the
+// property: a choice prints an object of alternatives, a plain
+// property prints a bare value, and only the codec reader knows
+// which one it is looking at.
+type pwPropInfo struct {
+	ID     string          `json:"id"`
+	Type   json.RawMessage `json:"type"`
+	Labels json.RawMessage `json:"labels"`
+}
+
+// pwProps is the part of a node's current Props this operator reads.
+//
+// channelVolumes is the per-channel linear gain the node applies.
+// The single volume value beside it is a separate multiplier: the
+// lab's sink carried its 40 percent default in channelVolumes,
+// cubed to 0.064, while volume read 1.0.
+type pwProps struct {
+	ChannelVolumes []float64 `json:"channelVolumes"`
 }
 
 // readGraph runs pw-dump and returns the sinks it holds, both the
@@ -183,7 +263,18 @@ func parseGraph(document []byte) (pwGraph, error) {
 		Outputs:  map[pcmAddress]string{},
 		Speakers: map[string]bluezSink{},
 	}
+	devices := map[string]bluez5Device{}
 	for _, object := range objects {
+		if object.Type == "PipeWire:Interface:Device" {
+			address := normalizeMAC(property(object.Info.Props, bluezAddressProperty))
+			if validMAC(address) {
+				devices[address] = bluez5Device{
+					ID:     object.ID,
+					Codecs: codecOptions(object.Info.Params.PropInfo),
+				}
+			}
+			continue
+		}
 		if object.Type != "PipeWire:Interface:Node" {
 			continue
 		}
@@ -199,8 +290,10 @@ func parseGraph(document []byte) (pwGraph, error) {
 				continue
 			}
 			graph.Speakers[address] = bluezSink{
-				Node:  name,
-				Codec: property(object.Info.Props, bluezCodecProperty),
+				Node:    name,
+				NodeID:  object.ID,
+				Codec:   property(object.Info.Props, bluezCodecProperty),
+				Volumes: channelVolumes(object.Info.Params.Props),
 			}
 			continue
 		}
@@ -218,7 +311,61 @@ func parseGraph(document []byte) (pwGraph, error) {
 		}
 		graph.Outputs[output] = name
 	}
+	// The device's facts join after the loop because the dump's
+	// order is not a contract: a device may print after its node.
+	for address, device := range devices {
+		sink, hasSink := graph.Speakers[address]
+		if !hasSink {
+			continue
+		}
+		sink.Device = device.ID
+		sink.Codecs = device.Codecs
+		graph.Speakers[address] = sink
+	}
 	return graph, nil
+}
+
+// channelVolumes reads the per-channel levels out of a node's current
+// Props.
+//
+// The first entry that carries channelVolumes is the answer,
+// because a node prints one current-values block. A node that
+// reports none leaves the channel count unknown, and the unity
+// write assumes stereo.
+func channelVolumes(params []json.RawMessage) []float64 {
+	for _, raw := range params {
+		var props pwProps
+		if err := json.Unmarshal(raw, &props); err != nil {
+			continue
+		}
+		if len(props.ChannelVolumes) > 0 {
+			return props.ChannelVolumes
+		}
+	}
+	return nil
+}
+
+// setParam writes one object's Props through pw-cli.
+//
+// The write is an exec of pw-cli rather than a protocol message,
+// for readGraph's reason: one short-lived process per action, no
+// client library, no long-lived connection to keep healthy.
+//
+// The props argument is a SPA object literal, pw-cli's own input
+// form: { bluetoothAudioCodec: 1 } names an enum value by its
+// integer id.
+func setParam(ctx context.Context, object int, props string) error {
+	ctx, cancel := context.WithTimeout(ctx, pwCLITimeout)
+	defer cancel()
+
+	command := exec.CommandContext(ctx, "pw-cli", "set-param", strconv.Itoa(object), "Props", props)
+	command.WaitDelay = time.Second
+	output, err := command.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("running pw-cli set-param %d Props %s: %w: %s",
+			object, props, err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 
 // property reads one property as a string. pw-dump prints a property

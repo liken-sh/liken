@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -117,6 +118,29 @@ func TestParseGraphReadsABluetoothSink(t *testing.T) {
 	}
 	if sink.Codec != "sbc" {
 		t.Errorf("codec = %q, want sbc", sink.Codec)
+	}
+	// The node's own object id and its channel volumes, which a codec
+	// switch needs: the switch destroys this node and builds another
+	// one, born at PipeWire's own level rather than this one.
+	if sink.NodeID != 63 {
+		t.Errorf("node id = %d, want 63", sink.NodeID)
+	}
+	if want := []float64{0.064, 0.064}; !reflect.DeepEqual(sink.Volumes, want) {
+		t.Errorf("volumes = %v, want %v", sink.Volumes, want)
+	}
+	// The codec set comes from the bluez5 Device object, not from the
+	// node, and the write that switches the codec names that object.
+	if sink.Device != 62 {
+		t.Errorf("device id = %d, want 62", sink.Device)
+	}
+	codecs := []bluezCodec{
+		{ID: 1, Name: "sbc"},
+		{ID: 6, Name: "aptx"},
+		{ID: 2, Name: "sbc_xq"},
+		{ID: 9, Name: "aptx_ll"},
+	}
+	if !reflect.DeepEqual(sink.Codecs, codecs) {
+		t.Errorf("codecs = %+v, want %+v", sink.Codecs, codecs)
 	}
 	// The card's own sink is in the same document, and a Bluetooth
 	// node has no ALSA address for it to be mistaken for.

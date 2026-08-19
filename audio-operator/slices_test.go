@@ -275,7 +275,7 @@ func TestSliceDevicesPublishesSpeakersBesideTheCardsOutputs(t *testing.T) {
 			{Card: 0, PCM: 3}: sinkNodeName(0, 3),
 		},
 		Speakers: map[string]bluezSink{
-			testSpeakerAddress: {Node: testSpeakerNode, Codec: "sbc"},
+			testSpeakerAddress: {Node: testSpeakerNode, Codec: "sbc", Codecs: twoCodecs()},
 		},
 	}
 
@@ -305,6 +305,7 @@ func TestSliceDevicesPublishesSpeakersBesideTheCardsOutputs(t *testing.T) {
 		"connectionType": "bluetooth",
 		"name":           "Kitchen Speaker",
 		"codec":          "sbc",
+		"codecs":         "sbc aptx",
 		"sinkName":       testSpeakerNode,
 	}
 	for name, want := range attributes {
@@ -358,21 +359,43 @@ func TestSliceDevicesTaintsASpeakerThatCannotPlay(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			sinks := map[string]bluezSink{}
 			if c.sink {
-				sinks[testSpeakerAddress] = bluezSink{Node: testSpeakerNode, Codec: "sbc"}
+				sinks[testSpeakerAddress] = bluezSink{
+					Node:   testSpeakerNode,
+					Codec:  "sbc",
+					Codecs: twoCodecs(),
+				}
 			}
 
 			devices := speakerDevices(map[string]speaker{testSpeakerAddress: c.speaker}, sinks)
 			if got := devices[0].Taints; !reflect.DeepEqual(got, c.taints) {
 				t.Fatalf("taints = %+v, want %+v", got, c.taints)
 			}
-			// The sink name and the codec are what the graph holds, so a
-			// speaker with no node publishes neither.
-			for _, name := range []string{"sinkName", "codec"} {
+			// The sink name, the codec, and the codec set are what the
+			// graph holds, so a speaker with no node publishes none of
+			// them.
+			for _, name := range []string{"sinkName", "codec", "codecs"} {
 				if _, published := devices[0].Attributes[name]; published != c.sink {
 					t.Errorf("%s published = %v, want %v", name, published, c.sink)
 				}
 			}
 		})
+	}
+}
+
+// A device that answers no codec choice publishes no list, and the
+// speaker is claimable all the same. The negotiated codec is a
+// separate fact and still publishes.
+func TestSliceDevicesPublishesNoCodecListWithoutOne(t *testing.T) {
+	sinks := map[string]bluezSink{
+		testSpeakerAddress: {Node: testSpeakerNode, Codec: "sbc"},
+	}
+
+	devices := speakerDevices(testSpeakers(), sinks)
+	if _, published := devices[0].Attributes["codecs"]; published {
+		t.Errorf("codecs = %+v, want none", devices[0].Attributes["codecs"])
+	}
+	if got := stringAttribute(t, devices[0], "codec"); got != "sbc" {
+		t.Errorf("codec = %q, want sbc", got)
 	}
 }
 

@@ -240,6 +240,12 @@ func declare() {
 	if _, err := writeMonitorConfig(); err != nil {
 		fatal("enabling WirePlumber's Bluetooth monitor: %v", err)
 	}
+	// The volume fragment is written on every machine, where the
+	// Bluetooth one follows the delivered bus, because the unity
+	// default is policy for the card's sinks as much as a radio's.
+	if err := writeVolumeConfig(); err != nil {
+		fatal("setting WirePlumber's default sink volume: %v", err)
+	}
 }
 
 // writeNodeConfig generates the drop-in and writes it where PipeWire

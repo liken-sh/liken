@@ -47,6 +47,7 @@ itself publishes:
             connectionType: {string: bluetooth}
             connected: {bool: true}
             codec: {string: sbc}
+            codecs: {string: "sbc aptx sbc_xq aptx_ll"}
             sinkName: {string: bluez_output.A0_AB_51_33_B7_12.1}
         - name: card0-pcm3
           attributes:
@@ -138,6 +139,7 @@ identity BlueZ carries that survives a reboot.
 | `name` | string | the speaker's name, the alias BlueZ reports |
 | `connected` | bool | whether `bluetoothd` has the speaker connected right now |
 | `codec` | string | the A2DP codec the transport negotiated: `sbc`, `aptx`, `ldac` |
+| `codecs` | string | every codec the speaker and this image both support, space separated, the one playing first, in the same spelling as `codec` |
 
 A selector reads an unqualified attribute through the driver's
 domain: `device.attributes["audio.liken.sh"].output`. The pairing
@@ -162,6 +164,14 @@ are an ALSA output's, and `address`, `name`, `connected`, and
   a string attribute.
 * `codec` is present only while the speaker is connected, because a
   codec is a property of a live transport, not of a pairing.
+* `codecs` is present under the same condition as `codec`, and
+  absent when the device answers no choice. It holds whole names
+  only, so a selector reads it with `.contains()`.
+
+A selector on the list asks for a name inside a string:
+
+    has(device.attributes["audio.liken.sh"].codecs) &&
+    device.attributes["audio.liken.sh"].codecs.contains("aptx")
 
 A selector that reads a missing attribute fails the whole
 allocation, so guard every attribute in the bullets above:
@@ -316,6 +326,75 @@ media bus, because BlueZ advertises the profile only when an
 endpoint is registered. Pairing a speaker therefore works only
 while this pod runs and holds the bus.
 
+
+## Choosing the codec
+
+WirePlumber picks the codec when a speaker connects. The `codecs`
+attribute says what else the speaker offers, and a claim states the
+one it wants in an opaque config block, the channel DRA gives a
+driver for its own parameters:
+
+    apiVersion: resource.k8s.io/v1
+    kind: ResourceClaim
+    metadata:
+      name: kitchen-speakers
+      namespace: media
+    spec:
+      devices:
+        config:
+          - opaque:
+              driver: audio.liken.sh
+              parameters:
+                codec: sbc
+        requests:
+          - name: speaker
+            exactly:
+              deviceClassName: audio-output
+
+`codec` is the only parameter this driver reads, and an unknown
+key fails the prepare, so a typo stops the pod instead of playing
+something nobody asked for. A block with no `requests` list applies
+to every request in the claim, and a `requests` list narrows it to
+the requests it names.
+
+A `DeviceClass` can carry the same opaque block, which makes a
+codec cluster policy for every claim that allocates through the
+class. The scheduler resolves the class's config and the claim's
+into one list on the allocation and marks each entry's source, and
+that list is what the driver reads. The claim's own choice wins
+over the class's, whichever order the two are listed in.
+
+When the requested codec is not the one playing, the prepare call
+writes it on the speaker's PipeWire device, waits for the rebuilt
+sink to report the new codec, and only then delivers
+`PIPEWIRE_NODE`. The wait is bounded at ten seconds, and the
+renegotiation itself takes one to four.
+
+Three things refuse. A codec stated for an output that is not a
+Bluetooth speaker fails, because a sound card has no air codec. A
+codec the speaker does not offer fails, and the message names the
+offered list. A switch the graph never reports fails at the
+ten-second bound. Each failure holds the pod in `ContainerCreating`,
+and the claim's events carry the message.
+
+Releasing the claim renegotiates nothing. The choice stands until
+the next claim states one, or until the speaker reconnects, which
+hands the pick back to WirePlumber.
+
+## The sink's volume
+
+Every sink this pod builds is born at unity. The pod stores no
+volumes, and WirePlumber's own default for an unstored sink is 40
+percent, a desktop guard that would cost resolution on a machine
+that plays only what a claim delivers. Loudness belongs to the
+consumer's stream volume and to the hardware behind the jack.
+
+A prepare on a Bluetooth speaker also writes unity on every
+channel of the sink it delivers, switch or no switch. A speaker
+allocates to one claim at a time, so any level a prepare finds is a
+leftover from an earlier tenant or a hand-run tool, never the
+arriving consumer's choice. The card's own outputs take no such
+write.
 
 ## The slice's lifetime
 

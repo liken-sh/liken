@@ -33,6 +33,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"google.golang.org/grpc"
 	healthv1alpha1 "k8s.io/kubelet/pkg/apis/dra-health/v1alpha1"
@@ -59,6 +60,30 @@ type draPlugin struct {
 	// to readGraph, so a test drives a prepare without a PipeWire
 	// behind it.
 	graph func(context.Context) (pwGraph, error)
+	// setCodec and setVolumes are the two writes a codec switch makes,
+	// fields for the same reason.
+	setCodec   func(ctx context.Context, device, codec int) error
+	setVolumes func(ctx context.Context, node int, volumes []float64) error
+	// codecTimeout and codecInterval bound the wait for the rebuilt
+	// node.
+	codecTimeout  time.Duration
+	codecInterval time.Duration
+}
+
+// newDRAPlugin builds the plugin the kubelet talks to.
+//
+// Every seam takes its real implementation here and a stand-in
+// only in a test, so this is the one place the production graph
+// read and the two writes are named together.
+func newDRAPlugin(client *Client) *draPlugin {
+	return &draPlugin{
+		client:        client,
+		graph:         readGraph,
+		setCodec:      setDeviceCodec,
+		setVolumes:    setNodeVolumes,
+		codecTimeout:  codecSwitchTimeout,
+		codecInterval: codecSwitchInterval,
+	}
 }
 
 // draRegistrar answers the kubelet's plugin-watcher handshake.
@@ -104,7 +129,7 @@ func serveDRAPlugin(ctx context.Context, client *Client) error {
 		return fmt.Errorf("the plugin socket: %w", err)
 	}
 	pluginServer := grpc.NewServer()
-	drav1.RegisterDRAPluginServer(pluginServer, &draPlugin{client: client, graph: readGraph})
+	drav1.RegisterDRAPluginServer(pluginServer, newDRAPlugin(client))
 	healthv1alpha1.RegisterDRAResourceHealthServer(pluginServer, &draHealth{})
 
 	registrationSocket := filepath.Join(draRegistryDir, DriverName+"-reg.sock")
@@ -163,6 +188,15 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 		return fail("the claim has no allocation yet")
 	}
 
+	// The allocation's config is the resolved list: the claim's own
+	// blocks and the DeviceClass's, each marked with its source. The
+	// scheduler passed every opaque block through unread, so this is
+	// the first code anywhere that reads this driver's parameters.
+	selection, err := claimCodecs(allocated.Status.Allocation.Devices.Config)
+	if err != nil {
+		return fail("%v", err)
+	}
+
 	// One graph read answers every result in the claim, and it is the
 	// same read that publishes the slice, so the two always report the
 	// same sink for an output.
@@ -180,6 +214,16 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 			// screen with its speakers holds one of each.
 			continue
 		}
+		// A codec on anything but a Bluetooth speaker fails before
+		// the graph is asked for a sink: a sound card has no air
+		// codec, and failing here names the real mistake instead of
+		// whatever the graph happens to lack.
+		codec := selection.forRequest(result.Request)
+		address, isSpeaker := speakerFromDeviceName(result.Device)
+		if codec != "" && !isSpeaker {
+			return fail("the claim states the codec %s for %s, which is not a Bluetooth speaker",
+				codec, result.Device)
+		}
 		// A device with no sink right now leaves no name to give the
 		// consumer. The pod waits in ContainerCreating, and the device's
 		// taints are what the scheduler and the eviction controller act
@@ -187,6 +231,29 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 		sink, err := deliveredSink(result.Device, graph)
 		if err != nil {
 			return fail("%v", err)
+		}
+		if isSpeaker {
+			speakerSink := graph.Speakers[address]
+			if codec != "" {
+				// The delivery waits for the switch. The rebuilt node
+				// keeps its name, but between the write and the
+				// rebuild the name names nothing, and a delivery that
+				// raced it could start the consumer against a sink
+				// still playing the old codec.
+				switched, err := p.selectCodec(ctx, address, codec, speakerSink)
+				if err != nil {
+					return fail("%v", err)
+				}
+				speakerSink = switched
+				sink = switched.Node
+			}
+			// The unity write sits on the delivery path, not inside
+			// the switch, so a claim that states no codec and a claim
+			// that states the codec already playing deliver the same
+			// sink in the same state.
+			if err := p.deliverAtUnity(ctx, address, speakerSink); err != nil {
+				return fail("%v", err)
+			}
 		}
 		name := claim.Uid + "-" + result.Device
 		specDevices = append(specDevices, cdiDevice{
@@ -206,6 +273,29 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 		}
 	}
 	return &drav1.NodePrepareResourceResponse{Devices: devices}
+}
+
+// deliverAtUnity sets every channel of one speaker's sink to 1.0.
+//
+// A failed write fails the whole prepare: the kubelet retries and
+// a retry converges, where a delivery that went ahead would play
+// at a level nobody chose.
+//
+// Object 0 is the PipeWire core, never a node, so a graph read
+// that reported no id for this sink reported nothing to write to,
+// and the prepare proceeds without the write.
+//
+// The card's own outputs take no such write: their level lives on
+// a device route, which is a different write with different
+// semantics.
+func (p *draPlugin) deliverAtUnity(ctx context.Context, address string, sink bluezSink) error {
+	if sink.NodeID == 0 {
+		return nil
+	}
+	if err := p.setVolumes(ctx, sink.NodeID, unityLevels(sink)); err != nil {
+		return fmt.Errorf("setting speaker %s's sink to unity: %w", speakerName(address), err)
+	}
+	return nil
 }
 
 // deliveredSink resolves one allocated device name to the PipeWire
@@ -277,8 +367,14 @@ type ResourceClaim struct {
 	} `json:"metadata"`
 	Status struct {
 		Allocation *struct {
+			// The driver reads the allocation's config and never the
+			// claim's own spec. The scheduler resolves the
+			// DeviceClass's blocks and the claim's into this one
+			// list and marks each entry's source, so cluster policy
+			// is visible here and nowhere else.
 			Devices struct {
 				Results []AllocatedDevice `json:"results"`
+				Config  []AllocatedConfig `json:"config"`
 			} `json:"devices"`
 		} `json:"allocation"`
 	} `json:"status"`

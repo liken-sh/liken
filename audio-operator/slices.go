@@ -272,6 +272,12 @@ func speakerDevices(speakers map[string]speaker, sinks map[string]bluezSink) []S
 		if hasSink && sink.Codec != "" {
 			device.Attributes["codec"] = AttrString(attributeString(sink.Codec))
 		}
+		// The set the speaker offers publishes beside the codec it
+		// negotiated, so a reader of the slice can see a choice
+		// exists, and a claim can name one the driver will accept.
+		if list := codecList(sink.Codecs); hasSink && list != "" {
+			device.Attributes["codecs"] = AttrString(list)
+		}
 		if !paired.Connected || !hasSink {
 			device.Taints = append(device.Taints,
 				DeviceTaint{Key: disconnectedTaint, Effect: "NoExecute"})

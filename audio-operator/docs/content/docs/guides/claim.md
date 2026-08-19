@@ -175,6 +175,57 @@ one container overwrite, and the last wins. A pod that plays into
 two outputs runs two containers, each naming its own request in the
 claim.
 
+## Choose the codec on a Bluetooth speaker
+
+A speaker's `codecs` attribute lists the A2DP codecs it offers,
+and a claim can state which one to play. The driver switches the
+transport before your pod starts. The case that wants this: on a
+busy radio, aptX holds its bitrate and chops, and SBC lowers its
+bitrate and holds together.
+
+    spec:
+      devices:
+        config:
+          - opaque:
+              driver: audio.liken.sh
+              parameters:
+                codec: sbc
+        requests:
+          - name: speaker
+            exactly:
+              deviceClassName: audio-output
+              selectors:
+                - cel:
+                    expression: |
+                      has(device.attributes["audio.liken.sh"].address) &&
+                      device.attributes["audio.liken.sh"].address == "A0:AB:51:33:B7:12"
+
+Read the list the speaker offers before you name one:
+
+    kubectl get resourceslice <node>-audio.liken.sh \
+      -o jsonpath='{.spec.devices[?(@.name=="a0-ab-51-33-b7-12")].attributes.codecs}'
+
+A codec the speaker does not offer holds the pod in
+`ContainerCreating`, and the claim's events name the offered list.
+A codec stated for one of the card's own outputs fails the same
+way, because only a Bluetooth transport has a codec to choose.
+
+A config block with no `requests` list applies to every request
+in the claim, and a `requests` list narrows it. `codec` is the only
+parameter this driver reads, and a key it does not read fails the
+prepare rather than playing something nobody asked for.
+
+A `DeviceClass` can carry the same opaque block, which makes a
+codec cluster policy for every claim that allocates through that
+class. A claim that states its own codec wins over the class's.
+Write the block in the claim when one workload needs a codec, and
+in the class when every workload through it does.
+
+The switch takes a second or two, and the pod's start waits for
+it. The speaker's sink arrives at unity volume on every prepare, so
+set loudness in your player's own stream volume, never by leaving a
+level on the sink.
+
 ## Unplugged monitors, restarts, and a second claim
 
 **A monitor unplugged.** The device keeps its place in the slice and

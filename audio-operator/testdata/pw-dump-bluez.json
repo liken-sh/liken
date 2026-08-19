@@ -37,6 +37,26 @@
         "api.bluez5.connection": "connected",
         "api.bluez5.path": "/org/bluez/hci0/dev_A0_AB_51_33_B7_12",
         "object.serial": 62
+      },
+      "params": {
+        "PropInfo": [
+          {
+            "id": "mute",
+            "description": "Mute",
+            "type": false
+          },
+          {
+            "id": "bluetoothAudioCodec",
+            "description": "Air codec",
+            "type": { "default": 1, "alt1": 1, "alt2": 6, "alt3": 2, "alt4": 9 },
+            "labels": [ 1, "SBC", 6, "aptX", 2, "SBC-XQ", 9, "aptX-LL" ]
+          }
+        ],
+        "Props": [
+          {
+            "bluetoothAudioCodec": "sbc"
+          }
+        ]
       }
     }
   },
@@ -60,6 +80,16 @@
         "audio.channels": "2",
         "audio.position": "FL,FR",
         "object.serial": 63
+      },
+      "params": {
+        "Props": [
+          {
+            "volume": 0.4,
+            "mute": false,
+            "channelVolumes": [ 0.064, 0.064 ],
+            "channelMap": [ "FL", "FR" ]
+          }
+        ]
       }
     }
   },

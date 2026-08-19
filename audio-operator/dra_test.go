@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
 )
@@ -49,7 +50,22 @@ func testPlugin(t *testing.T, claim string, graph pwGraph) *draPlugin {
 		}
 		_, _ = w.Write([]byte(claim))
 	}))
-	return &draPlugin{client: client, graph: staticGraph(graph)}
+	return &draPlugin{
+		client: client,
+		graph:  staticGraph(graph),
+		// A claim that states no codec must reach no codec write. The
+		// stand-in fails the test rather than panic, so a prepare that
+		// writes one names itself. The volume write is a stand-in that
+		// takes what it is given, because every prepare of a speaker
+		// makes one; codecs_test.go is where its levels are asserted.
+		setCodec: func(context.Context, int, int) error {
+			t.Error("the driver wrote a codec for a claim that stated none")
+			return nil
+		},
+		setVolumes:    func(context.Context, int, []float64) error { return nil },
+		codecTimeout:  200 * time.Millisecond,
+		codecInterval: time.Millisecond,
+	}
 }
 
 func prepare(t *testing.T, plugin *draPlugin, uid string) *drav1.NodePrepareResourceResponse {
