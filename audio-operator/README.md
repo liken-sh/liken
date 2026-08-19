@@ -52,12 +52,12 @@ card:
       -f https://audio.liken.sh/deploy/operator.yaml
 
 [`deploy/`](deploy/) is the source of those files: a `kustomize` base
-with the two generic `DeviceClasses`, the RBAC, and the `DaemonSet`
-whose pod claims every sound card on its own node. The base ships
-`sound-card`, which the claim template names and the operator cannot
-start without, and `audio-output`, which your workloads claim. A
-class that picks one output or one monitor is cluster policy, yours
-to create; the install guide gives examples.
+with the RBAC, the `DaemonSet` whose pod claims every sound device
+on its own node, and one `DeviceClass`, `sound-card`, which that
+claim names and the operator cannot start without. The class your
+workloads claim through is cluster policy, yours to create; the
+install guide gives the YAML for `audio-output`, the one to start
+with.
 
 ## The design
 

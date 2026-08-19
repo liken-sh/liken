@@ -27,12 +27,14 @@ You need:
 ## 1. Check that the card publishes
 
 The machine with the speakers must publish its audio controller as a
-device. Look for a device whose `subsystem` attribute is `sound` in
-that node's `liken.sh` `ResourceSlice`:
+device. Look for a device stamped
+`sound.liken.sh/supportsSound: {bool: true}` in that node's
+`liken.sh` `ResourceSlice`, which is the fact the operator's
+`sound-card` class selects:
 
     kubectl get resourceslice <node>-liken.sh -o yaml
 
-If no device has `subsystem: {string: sound}`, the operator's
+If no device carries the stamp, the operator's
 own claim will park and its pod will stay `Pending`. The
 [hardware operators](https://liken.sh/docs/concepts/hardware-operators/)
 page describes this layering: `liken` publishes the card, and this
@@ -41,19 +43,18 @@ operator refines it into outputs.
 ## 2. The device classes
 
 A `DeviceClass` is cluster-scoped policy, yours to name and curate,
-the same convention a `StorageClass` follows. The base ships this
-operator's two generic classes, served at
-[`deviceclasses.yaml`](/deploy/deviceclasses.yaml), because their
-selectors name only the drivers' own vocabulary and carry no
-cluster's choice:
+the same convention a `StorageClass` follows. The classes split by
+owner:
 
-* `sound-card` is the bootstrap class. The operator's own pod claims
-  the machine's sound card through it, from the devices `liken`
-  publishes, and the claim template in the served
+* `sound-card` is wiring, and the base ships it, served at
+  [`deviceclasses.yaml`](/deploy/deviceclasses.yaml). The
+  operator's own pod claims every sound device on its node through
+  it, and the claim template in the served
   [`operator.yaml`](/deploy/operator.yaml) names it literally, so
-  the operator cannot start without it. If you give that class
-  another name, patch the template to match.
-* `audio-output` is the class your workloads claim. It covers every
+  the operator cannot start without it. Do not delete it.
+* The class your workloads claim through is yours to create,
+  because it is your cluster's vocabulary, and the base ships no
+  policy. `audio-output` is the one to start with. It covers every
   device this driver publishes:
 
         apiVersion: resource.k8s.io/v1
@@ -179,8 +180,9 @@ published one:
       -f https://audio.liken.sh/deploy/operator.yaml
     kubectl delete resourceslice <node>-audio.liken.sh
 
-The two `DeviceClasses` are yours, so this leaves them in place.
-Delete them when no other claim names them:
+This leaves the `DeviceClasses` in place: `sound-card` from the
+base, and the consumer class you created. Delete them when no
+other claim names them:
 
     kubectl delete deviceclass sound-card audio-output
 

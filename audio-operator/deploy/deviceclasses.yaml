@@ -1,28 +1,30 @@
-# The two generic classes of this operator: the raw device its own
-# pod claims from liken, and the refined device it publishes for
-# everybody else. Both ship with the base because their selectors
-# name only the drivers' own vocabulary, so there is no cluster
-# policy in them, and a release can change a selector when the
-# devices change. A class that encodes a cluster's choice, such as
-# one output or one monitor, is the cluster owner's to create, and
-# the install guide gives examples.
+# The class this operator's own pod claims through. It ships with
+# the base because the claim template in operator.yaml names it
+# literally: it is wiring, not policy, and the operator cannot
+# start without it. The classes your workloads claim through, such
+# as an output class, are the cluster owner's vocabulary to create,
+# and the install guide gives the YAML.
 ---
-# The sound card, as liken publishes it. The operator's own pod
-# claims one of these, and that claim does two jobs. It places the
-# pod, because only a machine with a sound card publishes one, so no
-# node selector has to name the machine with the speakers. And it
-# arbitrates, because liken publishes the card as a device that
-# allocates once, so the claim holder is the only sound server on
-# that card. ALSA gives each PCM subdevice to one opener and refuses
-# a second open with EBUSY, and two claims sharing a card have no
-# contract over which claim gets which output, so that refusal would
-# arrive at play time on whichever pod opened second.
+# Any device that supports a sound server. Today that is the sound
+# card liken publishes. The operator's own pod claims every such
+# device on its node, and the claim does two jobs. It places the
+# pod, because only a machine with such a device publishes one, so
+# no node selector has to name the machine with the speakers. And it
+# arbitrates, because each device allocates once, so the claim
+# holder is the only sound server on it. ALSA gives each PCM
+# subdevice to one opener and refuses a second open with EBUSY, and
+# two claims sharing a card have no contract over which claim gets
+# which output, so that refusal would arrive at play time on
+# whichever pod opened second.
 #
-# subsystem is the fact that names a sound card. liken publishes it
-# for a device whose subtree delivers ALSA's nodes and no others,
-# and it is absent on a device that delivers a mix, so the has()
-# guard is what keeps an unguarded read from aborting the
-# allocation.
+# The selector names no driver. supportsSound is a qualified
+# attribute in a domain no single driver owns: liken stamps it on
+# the sound card, and the Bluetooth operator will stamp it on the
+# media bus it publishes for Bluetooth audio, so that bus joins this
+# class by stamping the one field and the pod's allocationMode: All
+# claim takes the card and the bus together. The has() guard is
+# what keeps an unguarded read from aborting the allocation on a
+# device that does not carry the attribute.
 apiVersion: resource.k8s.io/v1
 kind: DeviceClass
 metadata:
@@ -31,41 +33,5 @@ spec:
   selectors:
     - cel:
         expression: |
-          device.driver == "liken.sh" &&
-          has(device.attributes["liken.sh"].subsystem) &&
-          device.attributes["liken.sh"].subsystem == "sound"
----
-# One physical output, as this operator publishes it. A claim
-# against this class alone allocates any output on the card. To name
-# one, add a selector on its attributes:
-#
-#     device.attributes["audio.liken.sh"].output == "card0-pcm3"
-#
-#     device.attributes["audio.liken.sh"].connectionType == "analog"
-#
-#     has(device.attributes["monitor.liken.sh"].id) &&
-#     device.attributes["monitor.liken.sh"].id == "gsm-5b09-lg-ultrawide"
-#
-# The pairing attribute is present only on an HDMI or DisplayPort
-# output whose monitor answers, so a selector on it guards it first:
-# a selector that reads a missing attribute fails the whole
-# allocation. output and connectionType need no guard, because every
-# output publishes both.
-#
-# A selector reads attributes and never the device's name, because
-# CEL is given device.driver, device.attributes, device.capacity,
-# and device.allowMultipleAllocations, and no device.name. The map
-# is two levels deep and splits on the domain, so the pairing
-# attribute, whose full name is monitor.liken.sh/id, reads as the
-# key id under the domain monitor.liken.sh.
-#
-# The README has the whole claim, including the one that pairs a
-# screen with that screen's speakers.
-apiVersion: resource.k8s.io/v1
-kind: DeviceClass
-metadata:
-  name: audio-output
-spec:
-  selectors:
-    - cel:
-        expression: device.driver == "audio.liken.sh"
+          has(device.attributes["sound.liken.sh"].supportsSound) &&
+          device.attributes["sound.liken.sh"].supportsSound
