@@ -37,11 +37,14 @@ park and its pod will stay `Pending`. The
 page describes this layering: `liken` publishes the card, and this
 operator refines it into outputs.
 
-## 2. Create the device classes
+## 2. The device classes
 
 A `DeviceClass` is cluster-scoped policy: you name and curate the
-classes, the same convention as a `StorageClass`, so the base ships
-none. Save this as `deviceclasses.yaml`. Then apply it:
+classes, the same convention as a `StorageClass`. The base ships
+this operator's three generic classes, served at
+[`deviceclasses.yaml`](/deploy/deviceclasses.yaml), because their
+selectors name only the drivers' own vocabulary and carry no
+cluster's choice:
 
     apiVersion: resource.k8s.io/v1
     kind: DeviceClass
@@ -73,8 +76,6 @@ none. Save this as `deviceclasses.yaml`. Then apply it:
       selectors:
         - cel:
             expression: device.driver == "display.liken.sh"
-
-    kubectl apply -f deviceclasses.yaml
 
 The three classes do two different jobs:
 
@@ -130,31 +131,34 @@ reads a missing attribute fails the whole allocation.
 ## 3. Apply the manifests
 
 This site serves the repository's [`deploy/`](/deploy/kustomization.yaml)
-directory as raw YAML, so the install needs no clone. Two files are
-the rest of the install:
+directory as raw YAML, so the install needs no clone. Three files
+are the rest of the install:
 
     kubectl apply -n liken-system \
+      -f https://display.liken.sh/deploy/deviceclasses.yaml \
       -f https://display.liken.sh/deploy/rbac.yaml \
       -f https://display.liken.sh/deploy/operator.yaml
 
 The `-n` flag places the `ServiceAccount` and the `DaemonSet` in
 `liken-system`, the namespace every `liken` cluster has. The
 `ClusterRoleBinding`'s subject names that namespace, so the binding
-only works there.
+only works there. `DeviceClass` is cluster-scoped, so the flag
+leaves it alone.
 
-For GitOps, point a `Kustomization` at your classes and the same
-URLs. `kustomize` takes a raw YAML URL as a resource:
+For GitOps, point a `Kustomization` at your specific classes and the
+same URLs. `kustomize` takes a raw YAML URL as a resource:
 
     apiVersion: kustomize.config.k8s.io/v1beta1
     kind: Kustomization
     namespace: liken-system
     resources:
-      - deviceclasses.yaml
+      - classes.yaml
+      - https://display.liken.sh/deploy/deviceclasses.yaml
       - https://display.liken.sh/deploy/rbac.yaml
       - https://display.liken.sh/deploy/operator.yaml
 
-A clone works too: after step 2, `kubectl apply -k deploy/` from the
-repository applies the same base through
+A clone works too: `kubectl apply -k deploy/` from the repository
+applies the same base through
 [`deploy/kustomization.yaml`](/deploy/kustomization.yaml).
 
 ## 4. Watch the operator find the screens

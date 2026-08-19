@@ -4,19 +4,29 @@
 # and does not name it. Take it through your own GitOps with patches
 # of your own, or read it and write your own manifests.
 #
-# The base ships no DeviceClass. A DeviceClass is cluster-scoped
-# policy, the cluster owner's to name and curate, the same convention
-# as a StorageClass, so this base creates none. The install guide at
-# https://display.liken.sh/docs/guides/install/ gives copyable YAML
-# for the three classes this operator involves: the two bootstrap
-# classes the operator's own claim names, and the class consumers
-# claim outputs through.
+# The base ships this operator's three generic DeviceClasses: the
+# two bootstrap classes the operator's own claim names, display-gpu
+# and display-render, and display-output, which workloads claim.
+# Their selectors name only the drivers' own vocabulary, so there is
+# no cluster policy in them. A class that encodes a cluster's
+# choice, such as one monitor, is the cluster owner's to create, and
+# the install guide at https://display.liken.sh/docs/guides/install/
+# gives an example. An owner who renames a bootstrap class patches
+# both the class and the template.
+#
+# kustomize stamps the namespace below onto the DeviceClasses too,
+# because resource.k8s.io/v1 is not in its compiled OpenAPI schema
+# and an unknown kind is treated as namespaced. The stamp is
+# harmless: the API server ignores a namespace on a cluster-scoped
+# object, and kubectl routes the request by the scope it reads from
+# discovery, not from the object.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 namespace: liken-system
 
 resources:
+  - deviceclasses.yaml
   - rbac.yaml
   - operator.yaml
 

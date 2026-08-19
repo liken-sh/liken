@@ -43,14 +43,17 @@ card, after you create the device classes (the install guide gives
 their YAML):
 
     kubectl apply -n liken-system \
+      -f https://display.liken.sh/deploy/deviceclasses.yaml \
       -f https://display.liken.sh/deploy/rbac.yaml \
       -f https://display.liken.sh/deploy/operator.yaml
 
 [`deploy/`](deploy/) is the source of those files: a `kustomize` base
-with the RBAC and the `DaemonSet` whose pod claims the card on its
-own node. It ships no `DeviceClass`, because a class is cluster
-policy, the cluster owner's to name and curate, like a
-`StorageClass`.
+with the three generic `DeviceClasses`, the RBAC, and the `DaemonSet`
+whose pod claims the card on its own node. The base ships
+`display-gpu` and `display-render`, which the claim template names
+and the operator cannot start without, and `display-output`, which
+your workloads claim. A class that picks one monitor is cluster
+policy, yours to create; the install guide gives an example.
 
 ## The design
 

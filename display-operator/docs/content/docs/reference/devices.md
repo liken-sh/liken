@@ -50,7 +50,7 @@ itself publishes:
 
 A consumer claims through a
 [`DeviceClass`](https://kubernetes.io/docs/reference/kubernetes-api/resource/device-class-v1/)
-that selects this driver. The conventional name is `display-output`:
+that selects this driver. The base ships it as `display-output`:
 
     apiVersion: resource.k8s.io/v1
     kind: DeviceClass
@@ -61,10 +61,10 @@ that selects this driver. The conventional name is `display-output`:
         - cel:
             expression: device.driver == "display.liken.sh"
 
-The class is yours. A `DeviceClass` is cluster-scoped policy, the
-cluster owner's to name and curate, so the base ships none;
-[Install the operator](/docs/guides/install/#2-create-the-device-classes)
-gives the YAML, and its
+The class is yours to rename or narrow, the way a `StorageClass`
+is;
+[Install the operator](/docs/guides/install/#2-the-device-classes)
+explains each shipped class, and its
 [Generic or specific](/docs/guides/install/#generic-or-specific)
 section shows a class that names one screen. This generic class
 alone allocates any output that has a monitor. To name one screen

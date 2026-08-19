@@ -1,0 +1,53 @@
+# The three generic classes of this operator: the two raw device
+# nodes its own pod claims from liken, and the refined outputs it
+# publishes for everybody else. All three ship with the base because
+# their selectors name only the drivers' own vocabulary, so there is
+# no cluster policy in them, and a release can change a selector
+# when the devices change. A class that encodes a cluster's choice,
+# such as one monitor, is the cluster owner's to create, and the
+# install guide gives an example.
+---
+# The graphics card's card node, as liken publishes it. The card
+# node allocates once, which is what makes the claim holder the only
+# program setting a mode on it. The selector reads the displayNode
+# attribute rather than a vendor and a product id, so it stays
+# correct across a fleet of different machines.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: display-gpu
+spec:
+  selectors:
+    - cel:
+        expression: |
+          device.driver == "liken.sh" &&
+          has(device.attributes["liken.sh"].displayNode)
+---
+# The graphics card's render node, as liken publishes it. The render
+# node is shareable, so the operator's hold takes nothing away from
+# the transcoders that use the same GPU. The selector reads the
+# renderNode attribute for the same fleet reason as the card node's.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: display-render
+spec:
+  selectors:
+    - cel:
+        expression: |
+          device.driver == "liken.sh" &&
+          has(device.attributes["liken.sh"].renderNode)
+---
+# One monitor output, as this operator publishes it. A claim against
+# this class alone allocates any output on the machine. To name one
+# monitor, add a selector on its attributes, and the claim guide
+# shows the forms. The class is yours to rename or narrow, the way a
+# StorageClass is.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: display-output
+spec:
+  selectors:
+    - cel:
+        expression: device.driver == "display.liken.sh"

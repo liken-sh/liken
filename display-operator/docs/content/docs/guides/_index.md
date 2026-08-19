@@ -22,11 +22,12 @@ attributes: `connector`, `model`, `serial`, and the rest.
 
 A [`DeviceClass`](https://kubernetes.io/docs/reference/kubernetes-api/resource/device-class-v1/)
 names a kind of device a workload can ask for: `display-output` for
-this operator's monitor outputs. The classes are yours to create,
-because a class is cluster policy; the
-[install guide](/docs/guides/install/#2-create-the-device-classes)
-gives the YAML. A class can be generic, matching every output, or
-specific to one screen;
+this operator's monitor outputs. The base ships the generic
+classes, and a class that picks one screen is cluster policy, yours
+to create; the
+[install guide](/docs/guides/install/#2-the-device-classes)
+explains each one. A class can be generic, matching every output,
+or specific to one screen;
 [Generic or specific](/docs/guides/install/#generic-or-specific)
 says how to choose.
 
