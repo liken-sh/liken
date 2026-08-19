@@ -50,6 +50,25 @@ func macFromDeviceName(name string) string {
 	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(name)), "-", ":")
 }
 
+// mediaBusSuffix ends the media bus device's name. The bus is named
+// for the adapter's own address in the controllers' MAC form, plus
+// this suffix, so it can never collide with a peer's device name: a
+// controller's name is six octets and nothing more.
+const mediaBusSuffix = "-media"
+
+// mediaBusName builds the media bus device's name from the adapter's
+// address.
+func mediaBusName(address string) string {
+	return deviceName(address) + mediaBusSuffix
+}
+
+// isMediaBusName reports whether an allocated device name is the
+// media bus. The prepare and refresh paths read the allocated name
+// and nothing else, so the suffix is the whole distinction.
+func isMediaBusName(name string) bool {
+	return strings.HasSuffix(name, mediaBusSuffix)
+}
+
 // validMAC reports whether a string is six colon-separated pairs of
 // hexadecimal digits. HID_UNIQ is empty on a HID device that has no
 // peer address, and a device name from a prepare call is whatever the

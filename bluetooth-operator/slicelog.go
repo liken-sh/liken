@@ -69,11 +69,12 @@ func (r *sliceReport) wrote(generation int64, published, current []SliceDevice) 
 		generation, sliceSummary(current), tail(sliceChanges(published, current)))
 }
 
-// deletedSlice reports the one removal this operator makes, which is
-// the last controller being unpaired. Nothing is left to count, so the
-// line has no summary.
+// deletedSlice reports the one removal this operator makes: no
+// adapter has answered and no controller is paired, so the node
+// offers nothing. Nothing is left to count, so the line has no
+// summary.
 func (r *sliceReport) deletedSlice() {
-	r.line("slice: deleted, the last paired controller is gone")
+	r.line("slice: deleted, no adapter answered and nothing is paired")
 }
 
 // unchangedSlice reports a pass that wrote nothing, at most once per

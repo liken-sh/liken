@@ -1,15 +1,17 @@
 package main
 
-// Writing CDI specs: how a prepared claim becomes evdev nodes in a
-// consumer's container.
+// Writing CDI specs: how a prepared claim becomes evdev nodes, or the
+// bus socket of this pod's bluetoothd, in a consumer's container.
 //
 // The Container Device Interface connects two things: which device to
 // use, and what appears inside the container. A JSON file in a
 // well-known directory names devices and the edits that grant one to
-// a container. Here those edits are device nodes only. CDI also
-// defines mounts and environment variables, and a controller needs
-// neither: a program reads a gamepad by opening /dev/input/eventN,
-// and nothing about the device is configuration.
+// a container. A controller's edits are device nodes only, because a
+// program reads a gamepad by opening /dev/input/eventN, and nothing
+// about the device is configuration. The media bus takes the other
+// two kinds of edit and no device node: a mount of the bus directory,
+// and DBUS_SYSTEM_BUS_ADDRESS, the variable a sound server reads to
+// find the bus.
 //
 // The file name starts with this driver's own prefix,
 // bluetooth.liken.sh-<claimUID>.json. liken writes
@@ -52,15 +54,36 @@ var cdiDir = "/var/run/cdi"
 // cdiKind identifies this driver's CDI devices, the same way the
 // driver name identifies its slices. A CDI device ID has the form
 // "<kind>=<name>".
+//
+// The media bus takes the same kind. A CDI kind namespaces one
+// writer's device IDs. It is not a taxonomy of the devices, and a
+// second kind would rename every ID this driver has already written.
 const cdiKind = DriverName + "/controller"
+
+// busDir is the directory that holds bluetoothd's bus socket, on the
+// host and inside every container that mounts it. The one constant is
+// both ends of the claim holder's mount, because the pod's own bus
+// volume is a hostPath at this same path. A CDI mount names a host
+// path, which is why that volume is not an emptyDir.
+const busDir = "/var/run/bluetooth.liken.sh/dbus"
+
+// The address a sound server dials, and the environment variable it
+// reads the address from. DBUS_SYSTEM_BUS_ADDRESS is D-Bus's own
+// standard variable, so PipeWire finds this bus with no configuration
+// of its own.
+const (
+	busVariable = "DBUS_SYSTEM_BUS_ADDRESS"
+	busAddress  = "unix:path=" + busDir + "/system_bus_socket"
+)
 
 // cdiPrefix separates this driver's spec files from liken's in the
 // shared directory.
 const cdiPrefix = DriverName + "-"
 
 // cdiSpec holds the part of the CDI spec schema that this operator
-// writes. The delivery is device nodes only, so the struct omits the
-// fields for mounts and environment variables.
+// writes: device nodes for a controller, a mount and an environment
+// variable for the media bus. Each field is omitted when a device
+// grants nothing of its kind.
 type cdiSpec struct {
 	Version string      `json:"cdiVersion"`
 	Kind    string      `json:"kind"`
@@ -73,11 +96,42 @@ type cdiDevice struct {
 }
 
 type cdiEdits struct {
-	DeviceNodes []cdiDeviceNode `json:"deviceNodes"`
+	Env         []string        `json:"env,omitempty"`
+	DeviceNodes []cdiDeviceNode `json:"deviceNodes,omitempty"`
+	Mounts      []cdiMount      `json:"mounts,omitempty"`
 }
 
 type cdiDeviceNode struct {
 	Path string `json:"path"`
+}
+
+type cdiMount struct {
+	HostPath      string   `json:"hostPath"`
+	ContainerPath string   `json:"containerPath"`
+	Options       []string `json:"options,omitempty"`
+}
+
+// busEdits builds what an allocated media bus grants a container: the
+// directory that holds bluetoothd's socket, and the address of the
+// socket inside it.
+//
+// The mount is read-only. Connecting to a Unix socket needs write
+// permission on the socket itself, not on the file system that holds
+// it, so a read-only mount still connects, and the holder has no
+// reason to create anything in this directory.
+//
+// The edits are the same on every pass, because the socket's path is
+// fixed. Only a controller's evdev nodes move, so only they need the
+// refresh.
+func busEdits() cdiEdits {
+	return cdiEdits{
+		Env: []string{busVariable + "=" + busAddress},
+		Mounts: []cdiMount{{
+			HostPath:      busDir,
+			ContainerPath: busDir,
+			Options:       []string{"ro", "rbind", "rprivate", "nosuid", "nodev"},
+		}},
+	}
 }
 
 // deviceNodes turns the paths one controller delivers into the
@@ -211,6 +265,12 @@ func refreshCDISpec(claimUID string, nodes map[string][]string) error {
 		// refresh needs no call to the API server.
 		allocated, ok := strings.CutPrefix(device.Name, claimUID+"-")
 		if !ok {
+			continue
+		}
+		// A media bus entry stays as prepare wrote it: its delivery
+		// names a fixed path. Its name is not a MAC either, so the
+		// lookup below would derive a key that names nothing.
+		if isMediaBusName(allocated) {
 			continue
 		}
 		current, ok := nodes[macFromDeviceName(allocated)]

@@ -1,6 +1,12 @@
 # Bluetooth audio
 
-Plan 01, Proposed. It would publish each paired Bluetooth speaker as
+Plan 01, Superseded.
+[liken's milestone 60](https://github.com/liken-sh/liken/blob/main/plans/60-bluetooth-audio.md)
+replaces this design, and [plan 05](05-the-media-bus.md) builds this
+operator's half of the replacement. The "How A2DP works" and "The
+privilege does not change" sections remain the citation record.
+
+This plan would publish each paired Bluetooth speaker as
 its own DRA device, so a pod claims one speaker by its MAC address and
 receives a PipeWire socket and the name of the sink its streams must
 reach. The operator already claims the adapter and runs `bluetoothd`.

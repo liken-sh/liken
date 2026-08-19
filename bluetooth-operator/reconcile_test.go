@@ -10,7 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"testing"
+
+	"github.com/liken-sh/bluetooth-operator/bonds"
 )
 
 // pairedSet returns a reader that answers with these controllers.
@@ -45,6 +48,33 @@ func reconcileFixture(t *testing.T, sysfs string, devices ...fakeHID) (*publishe
 	return &publisher{client: client, nodeName: "liken-1", owner: testOwner()}, fixture
 }
 
+// testBus is the media bus device of the adapter these tests run
+// against.
+const testBus = "14-b4-57-91-2f-c8-media"
+
+// deviceNamed picks one device out of a published slice.
+func deviceNamed(t *testing.T, slice *ResourceSlice, name string) SliceDevice {
+	t.Helper()
+	if slice == nil {
+		t.Fatalf("no slice was published, so it holds no %s", name)
+	}
+	for _, device := range slice.Spec.Devices {
+		if device.Name == name {
+			return device
+		}
+	}
+	t.Fatalf("the slice holds no %s: %+v", name, slice.Spec.Devices)
+	return SliceDevice{}
+}
+
+func sliceNames(slice *ResourceSlice) []string {
+	names := make([]string, 0, len(slice.Spec.Devices))
+	for _, device := range slice.Spec.Devices {
+		names = append(names, device.Name)
+	}
+	return names
+}
+
 func TestReconcilePublishesAConnectedController(t *testing.T) {
 	publish, fixture := reconcileFixture(t, "",
 		dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"))
@@ -55,10 +85,98 @@ func TestReconcilePublishesAConnectedController(t *testing.T) {
 	if fixture.created == nil {
 		t.Fatal("no slice was created")
 	}
-	device := fixture.created.Spec.Devices[0]
-	if device.Name != "a0-ab-51-33-b7-12" || len(device.Taints) != 0 {
+	device := deviceNamed(t, fixture.created, "a0-ab-51-33-b7-12")
+	if len(device.Taints) != 0 {
 		t.Fatalf("device = %+v", device)
 	}
+}
+
+// The media bus is the adapter's own device: the claimable permission
+// to run a sound server on this radio. It publishes as soon as
+// bluetoothd names the adapter, beside the paired controllers.
+func TestReconcilePublishesTheMediaBus(t *testing.T) {
+	publish, fixture := reconcileFixture(t, "",
+		dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"))
+
+	if !publish.reconcile(pairedSet(connectedController()), adapterIs(t), nil) {
+		t.Fatal("the pass reported a failure")
+	}
+	bus := deviceNamed(t, fixture.created, testBus)
+
+	want := map[string]any{
+		"sound.liken.sh/supportsSound": true,
+		"kind":                         "mediaBus",
+		"address":                      "14:B4:57:91:2F:C8",
+	}
+	if got := publishedAttributes(bus); !reflect.DeepEqual(got, want) {
+		t.Fatalf("attributes = %+v, want %+v", got, want)
+	}
+	// The cluster's input class selects has(input) && input, so an input
+	// attribute on the bus would put a sound server's claim on the same
+	// device a gamepad's claim reads.
+	if _, ok := bus.Attributes["input"]; ok {
+		t.Error("the media bus published an input attribute")
+	}
+	if len(bus.Taints) != 0 {
+		t.Errorf("taints = %+v, want none", bus.Taints)
+	}
+}
+
+// The bus alone is a slice worth publishing: an adapter with nothing
+// paired to it can still serve a sound server, and the pairing itself
+// needs that sound server registered first.
+func TestReconcilePublishesTheBusWithNoControllers(t *testing.T) {
+	publish, fixture := reconcileFixture(t, "")
+
+	if !publish.reconcile(pairedSet(map[string]controller{}), adapterIs(t), nil) {
+		t.Fatal("the pass reported a failure")
+	}
+	if fixture.deleted {
+		t.Fatal("a node with an adapter and no controller deleted its slice")
+	}
+	if got := sliceNames(fixture.created); len(got) != 1 || got[0] != testBus {
+		t.Fatalf("devices = %v, want [%s]", got, testBus)
+	}
+}
+
+// A slice with nothing in it at all reaches the delete path, which is
+// the node whose bluetoothd has never named an adapter.
+func TestReconcileDeletesTheSliceWhileTheAdapterIsUnknown(t *testing.T) {
+	publish, fixture := reconcileFixture(t, "")
+	noAdapter := func() (bonds.Address, error) { return bonds.Address{}, ErrNoAdapter }
+	fixture.existing = &ResourceSlice{
+		Metadata: ResourceSliceMeta{Name: "liken-1-bluetooth.liken.sh"},
+		Spec:     ResourceSliceSpec{Devices: []SliceDevice{publishedDevice()}},
+	}
+
+	if !publish.reconcile(pairedSet(map[string]controller{}), noAdapter, nil) {
+		t.Fatal("the pass reported a failure")
+	}
+	if !fixture.deleted {
+		t.Fatal("a node with no adapter and no controller kept its slice")
+	}
+}
+
+// The overflow truncation drops controllers, never the media bus. One
+// radio has one bus, and dropping it would take the machine's
+// Bluetooth audio away to publish one more gamepad.
+func TestReconcileNeverDropsTheBusInTheOverflow(t *testing.T) {
+	publish, fixture := reconcileFixture(t, "")
+
+	// Every one of these sorts ahead of the bus by name, so a bus that
+	// took its place in the sorted list would be the device the
+	// truncation dropped.
+	controllers := map[string]controller{}
+	for i := range maxSliceDevices + 10 {
+		controllers[fmt.Sprintf("00:ab:51:33:%02x:%02x", i/256, i%256)] = controller{}
+	}
+	if !publish.reconcile(pairedSet(controllers), adapterIs(t), nil) {
+		t.Fatal("the pass reported a failure")
+	}
+	if got := len(fixture.created.Spec.Devices); got != maxSliceDevices {
+		t.Fatalf("devices = %d, want %d", got, maxSliceDevices)
+	}
+	deviceNamed(t, fixture.created, testBus)
 }
 
 // TestReconcileNeverDeletesWhenTheAdapterIsGone is the regression test
@@ -93,26 +211,73 @@ func TestReconcileNeverDeletesWhenTheAdapterIsGone(t *testing.T) {
 	// Every published controller is out of reach, so every one of them
 	// has both taints: NoExecute ends the sessions that are
 	// running, and NoSchedule keeps the next claim parked.
-	for _, device := range fixture.updated.Spec.Devices {
-		keys := map[string]string{}
-		for _, taint := range device.Taints {
-			keys[taint.Key] = taint.Effect
-		}
-		if keys[disconnectedTaint] != "NoExecute" || keys[noInputNodeTaint] != "NoSchedule" {
-			t.Errorf("device %s taints = %+v", device.Name, device.Taints)
-		}
-		if *device.Attributes["connected"].Bool {
-			t.Errorf("device %s still says it is connected", device.Name)
-		}
+	device := deviceNamed(t, fixture.updated, "a0-ab-51-33-b7-12")
+	keys := map[string]string{}
+	for _, taint := range device.Taints {
+		keys[taint.Key] = taint.Effect
+	}
+	if keys[disconnectedTaint] != "NoExecute" || keys[noInputNodeTaint] != "NoSchedule" {
+		t.Errorf("device %s taints = %+v", device.Name, device.Taints)
+	}
+	if *device.Attributes["connected"].Bool {
+		t.Errorf("device %s still says it is connected", device.Name)
+	}
+}
+
+// A departed adapter takes the bus with it, and the bus is tainted
+// NoSchedule and never NoExecute. Evicting the claim holder would end
+// that machine's other audio too, and that audio has nothing to do
+// with the radio.
+func TestReconcileTaintsTheBusWhenTheAdapterIsGone(t *testing.T) {
+	publish, fixture := reconcileFixture(t, "",
+		dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"))
+
+	if !publish.reconcile(pairedSet(connectedController()), adapterIs(t), nil) {
+		t.Fatal("the first pass reported a failure")
+	}
+	fixture.existing = fixture.created
+
+	if publish.reconcile(failing(ErrNoAdapter), adapterIs(t), nil) {
+		t.Fatal("a departed adapter reported a finished pass")
+	}
+	bus := deviceNamed(t, fixture.updated, testBus)
+	want := []DeviceTaint{{Key: disconnectedTaint, Effect: "NoSchedule"}}
+	if !reflect.DeepEqual(bus.Taints, want) {
+		t.Fatalf("taints = %+v, want %+v", bus.Taints, want)
+	}
+}
+
+// An adapter can depart with nothing paired to it. The last publish
+// offered an untainted bus, so this pass must not be mistaken for the
+// startup window: the startup window is over once bluetoothd has
+// named the adapter, and the bus takes its taint.
+func TestReconcileTaintsTheBusWhenTheAdapterIsGoneWithNothingPaired(t *testing.T) {
+	publish, fixture := reconcileFixture(t, "")
+	if !publish.reconcile(pairedSet(map[string]controller{}), adapterIs(t), nil) {
+		t.Fatal("the first pass reported a failure")
+	}
+	fixture.existing = fixture.created
+
+	if publish.reconcile(failing(ErrNoAdapter), adapterIs(t), nil) {
+		t.Fatal("a departed adapter reported a finished pass")
+	}
+	bus := deviceNamed(t, fixture.updated, testBus)
+	want := []DeviceTaint{{Key: disconnectedTaint, Effect: "NoSchedule"}}
+	if !reflect.DeepEqual(bus.Taints, want) {
+		t.Fatalf("taints = %+v, want %+v", bus.Taints, want)
 	}
 }
 
 func TestReconcileWritesNothingBeforeBluetoothdPublishesAnAdapter(t *testing.T) {
 	publish, fixture := reconcileFixture(t, "")
 
-	// The startup window: no successful read has happened, so there is
-	// no last-known set to taint and nothing true to say.
-	if publish.reconcile(failing(ErrNoAdapter), adapterIs(t), nil) {
+	// The startup window: no read of any kind has succeeded yet. Both
+	// readers answer from the same bluetoothd object tree, so before
+	// bluetoothd publishes the adapter, both fail together. There is no
+	// last-known set to taint, no adapter to name a media bus for, and
+	// nothing true to say.
+	noAdapter := func() (bonds.Address, error) { return bonds.Address{}, ErrNoAdapter }
+	if publish.reconcile(failing(ErrNoAdapter), noAdapter, nil) {
 		t.Fatal("the startup window reported a finished pass")
 	}
 	if len(fixture.requests) != 0 {
@@ -131,20 +296,23 @@ func TestReconcileLeavesTheSliceAloneOnAReadFailure(t *testing.T) {
 	}
 }
 
-func TestReconcileDeletesTheSliceWhenTheLastControllerIsUnpaired(t *testing.T) {
+// Unpairing the last controller removes that one device and leaves the
+// slice, because the adapter's media bus is still there to claim.
+func TestReconcileKeepsTheSliceWhenTheLastControllerIsUnpaired(t *testing.T) {
 	publish, fixture := reconcileFixture(t, "")
 	if !publish.reconcile(pairedSet(connectedController()), adapterIs(t), nil) {
 		t.Fatal("the first pass reported a failure")
 	}
 	fixture.existing = fixture.created
 
-	// An adapter that answers with no paired devices is the one
-	// sanctioned removal.
 	if !publish.reconcile(pairedSet(map[string]controller{}), adapterIs(t), nil) {
 		t.Fatal("the unpair pass reported a failure")
 	}
-	if !fixture.deleted {
-		t.Fatal("unpairing the last controller did not delete the slice")
+	if fixture.deleted {
+		t.Fatal("unpairing the last controller deleted the slice")
+	}
+	if got := sliceNames(fixture.updated); len(got) != 1 || got[0] != testBus {
+		t.Fatalf("devices = %v, want [%s]", got, testBus)
 	}
 }
 

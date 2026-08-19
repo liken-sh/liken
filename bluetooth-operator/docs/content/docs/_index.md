@@ -17,13 +17,20 @@ device. A workload claims an input device through the
 [Give a workload a device](https://liken.sh/docs/guides/devices/)
 shows for `liken`'s own devices.
 
+One published device is not a paired peer: the adapter's [media
+bus](/docs/reference/devices/#the-media-bus), which the machine's
+sound server claims to serve Bluetooth speakers.
+
 This site also serves the deployment manifests the guides apply, as
 raw YAML under [`/deploy/`](/deploy/kustomization.yaml): the
 [CRDs](/deploy/crds.yaml), the [RBAC](/deploy/rbac.yaml), and the
 [workload](/deploy/operator.yaml). They are the repository's own
-files, published with the manual that describes them. The two
-`DeviceClasses` are not among them: they are cluster policy, yours
-to create, and the install guide gives their YAML.
+files, published with the manual that describes them. The
+[`bluetooth-adapter` class](/deploy/deviceclasses.yaml) ships among
+them, because the operator's own claim template names it. The
+`bluetooth-input` class does not: a class workloads claim through is
+cluster policy, yours to create, and the install guide gives its
+YAML.
 
 This manual is small on purpose. The
 [repository](https://github.com/liken-sh/bluetooth-operator) is

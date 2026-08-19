@@ -58,6 +58,11 @@ to you, read
                   has(device.attributes["bluetooth.liken.sh"].input) &&
                   device.attributes["bluetooth.liken.sh"].input
 
+The guard on the `input` attribute also keeps the adapter's [media
+bus](/docs/reference/devices/#the-media-bus) out of this class. The
+bus is the audio operator's to claim, through a class of its own that
+names the shared `sound.liken.sh/supportsSound` attribute.
+
 ### Generic or specific
 
 A class is the cluster's vocabulary for a kind of device, and you
@@ -177,6 +182,13 @@ because it is the Bluetooth stack. The `operator` and `bondfetch`
 containers drop every capability. The comments in
 [`deploy/operator.yaml`](/deploy/operator.yaml) state the kernel or
 daemon check behind each grant.
+
+The pod mounts four host paths: the two kubelet plugin directories
+every DRA driver takes, `/var/run/cdi`, and
+`/var/run/bluetooth.liken.sh/dbus`, which holds the D-Bus socket a
+claim on the [media bus](/docs/reference/devices/#the-media-bus)
+delivers. The bus directory is a host path so that a prepared claim
+names the same socket across a restart of this pod.
 
 ## Uninstall
 

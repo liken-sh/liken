@@ -1,7 +1,8 @@
 package main
 
 // The DRA driver's kubelet half: the plugin the kubelet calls before
-// it starts a pod that holds a claim on a controller.
+// it starts a pod that holds a claim on a controller or on the
+// adapter's media bus.
 //
 // The wire arrangement is the opposite of what the word "plugin"
 // suggests. The driver runs two gRPC servers and the kubelet is the
@@ -15,8 +16,9 @@ package main
 // The prepare protocol tells the driver almost nothing: a claim's
 // namespace, name, and UID. What was allocated is on the claim's
 // status in the API server, so the driver reads that back, walks
-// sysfs again, and hands the claim the nodes the named controller
-// registers now. A call signals that something happened, and the
+// sysfs again, and hands the claim what the named device grants: the
+// evdev nodes a controller registers now, or the bus mount and its
+// address variable. A call signals that something happened, and the
 // driver acts on the durable record instead of on data carried in the
 // call.
 //
@@ -182,18 +184,30 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 			// That driver's own plugin prepares it.
 			continue
 		}
-		mac := macFromDeviceName(result.Device)
-		current := nodes[mac]
-		if len(current) == 0 {
-			// The controller is paired and off the air. The pod waits in
-			// ContainerCreating, and the scheduler and the eviction
-			// controller act on the device's NoExecute taint.
-			return fail("controller %s registers no input node right now", publishedMAC(mac))
+		// The allocated name is all the prepare call carries, and the
+		// -media suffix is the whole distinction between the media bus
+		// and a paired controller. The bus grants a mount and a
+		// variable, it registers no evdev node, and it is ready
+		// whenever bluetoothd serves, so the sysfs walk above does not
+		// apply to it.
+		var edits cdiEdits
+		if isMediaBusName(result.Device) {
+			edits = busEdits()
+		} else {
+			mac := macFromDeviceName(result.Device)
+			current := nodes[mac]
+			if len(current) == 0 {
+				// The controller is paired and off the air. The pod waits in
+				// ContainerCreating, and the scheduler and the eviction
+				// controller act on the device's NoExecute taint.
+				return fail("controller %s registers no input node right now", publishedMAC(mac))
+			}
+			edits = cdiEdits{DeviceNodes: deviceNodes(current)}
 		}
 		name := claim.Uid + "-" + result.Device
 		specDevices = append(specDevices, cdiDevice{
 			Name:           name,
-			ContainerEdits: cdiEdits{DeviceNodes: deviceNodes(current)},
+			ContainerEdits: edits,
 		})
 		devices = append(devices, &drav1.Device{
 			PoolName:     result.Pool,

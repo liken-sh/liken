@@ -2,6 +2,11 @@ package main
 
 // Publishing paired controllers as this operator's own ResourceSlice.
 //
+// The slice holds two kinds of device: one for each paired
+// controller, and one media bus for the adapter itself. The media bus
+// is the claimable permission to connect a sound server to this pod's
+// bluetoothd, and plans/05-the-media-bus.md records the design.
+//
 // A device operator publishes under its own driver name, in its own
 // slices, beside whatever liken publishes on the same node. The two
 // cannot collide: a device's identity is the triple
@@ -108,7 +113,8 @@ type ResourcePool struct {
 	ResourceSliceCount int64  `json:"resourceSliceCount"`
 }
 
-// SliceDevice is one claimable controller. The name must be a DNS
+// SliceDevice is one claimable device: a paired controller, or the
+// adapter's media bus. The name must be a DNS
 // label, unique within the pool. An attribute name left unqualified
 // belongs to the publishing driver's domain, so a selector reads
 // these as device.attributes["bluetooth.liken.sh"].address.
@@ -237,6 +243,53 @@ func sliceDevices(controllers map[string]controller, nodes map[string][]string) 
 	return devices
 }
 
+// supportsSoundAttribute is the one attribute this driver publishes
+// in a domain it does not own. liken stamps the same attribute on
+// each sound card it publishes, and the audio operator's class
+// selects the attribute and names no driver, so one claim collects
+// every device on a node that can serve a sound server.
+const supportsSoundAttribute = "sound.liken.sh/supportsSound"
+
+// mediaBusKind is the kind attribute's value on the media bus. The
+// attribute gives a selector a direct name for the bus, instead of a
+// test on the attributes the bus lacks.
+const mediaBusKind = "mediaBus"
+
+// mediaBusDevice builds the one device that is not a peer: the
+// claimable permission to connect to this pod's bluetoothd over its
+// private D-Bus. A Bluetooth speaker creates no kernel device, so its
+// audio exists only while a sound server holds this bus and keeps a
+// media endpoint registered with bluetoothd.
+//
+// The device is exclusive, which is resource.k8s.io/v1's default and
+// takes no field here: one radio serves one sound server, because two
+// media endpoints registered on one bluetoothd have no contract over
+// the streams.
+//
+// The bus never publishes an input attribute. The cluster's input
+// class guards on that attribute, and a bus that matched it could be
+// allocated to a workload's input claim.
+//
+// reachable is false when the adapter has departed. The taint's
+// effect is NoSchedule, never NoExecute: the holder is the machine's
+// one sound server, so an eviction would end its ALSA playback too,
+// and that playback does not need the radio. NoSchedule parks the
+// next claim and leaves the running one alone.
+func mediaBusDevice(address string, reachable bool) SliceDevice {
+	device := SliceDevice{
+		Name: mediaBusName(address),
+		Attributes: map[string]DeviceAttribute{
+			supportsSoundAttribute: AttrBool(true),
+			"kind":                 AttrString(mediaBusKind),
+			"address":              AttrString(publishedMAC(address)),
+		},
+	}
+	if !reachable {
+		device.Taints = []DeviceTaint{{Key: disconnectedTaint, Effect: "NoSchedule"}}
+	}
+	return device
+}
+
 // attributeString limits a free-text value to the API's 64-character
 // limit on attribute strings. A controller's alias is the only value
 // here that a person can make long, and a truncated alias still
@@ -279,16 +332,16 @@ func withoutTimeAdded(devices []SliceDevice) []SliceDevice {
 	return out
 }
 
-// EnsureResourceSlice makes this operator's published slice match the
-// paired set. It creates the slice when the first controller is
-// paired, replaces the slice when anything changed, deletes the slice
-// when the last controller is unpaired, and writes nothing when
+// EnsureResourceSlice makes this operator's published slice match
+// what the node offers now. It creates the slice on the first
+// publish, replaces the slice when anything changed, deletes the
+// slice when the device list is empty, and writes nothing when
 // nothing moved.
 //
-// The empty case reaches here only from an answer that bluetoothd
-// gave with an adapter present (bluez.go's ErrNoAdapter covers the
-// rest), so an empty set means every controller was unpaired.
-// Unpairing is the one sanctioned removal.
+// The device list is empty only while no adapter has answered and no
+// controller is paired. An adapter that answered once keeps its media
+// bus in the slice, so unpairing the last controller shrinks the
+// slice to the bus instead of deleting it.
 //
 // The Node owns the slice. The operator's pod does not, deliberately:
 // the pod restarts while claims stay prepared, and a slice that left
@@ -374,8 +427,8 @@ func EnsureResourceSlice(c *Client, nodeName string, owner OwnerReference, devic
 }
 
 // DeleteResourceSlice removes this operator's whole offer. The
-// operator calls it in one case only: the last controller was
-// unpaired, so the slice has nothing left to publish.
+// operator calls it in one case only: no adapter has answered and no
+// controller is paired, so there is nothing to publish.
 //
 // It does not run at shutdown. An operator's pod restarts for
 // ordinary reasons, such as a new image or a node drain, while a

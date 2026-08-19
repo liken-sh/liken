@@ -282,7 +282,7 @@ func TestEnsureLogsTheSliceItDeleted(t *testing.T) {
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(), nil); err != nil {
 		t.Fatal(err)
 	}
-	want := "slice: deleted, the last paired controller is gone"
+	want := "slice: deleted, no adapter answered and nothing is paired"
 	if got := capture.only(t); got != want {
 		t.Errorf("line = %q, want %q", got, want)
 	}

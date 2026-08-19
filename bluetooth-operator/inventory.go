@@ -175,8 +175,10 @@ func (pass *inventoryPass) runAgainIn(after time.Duration) {
 	}
 }
 
-// claimedDevices names the controllers a prepared claim holds on this
-// node right now.
+// claimedDevices names the devices the prepared claims on this node
+// hold right now, by their published device names. The media bus can
+// be among them. The one caller looks up controllers by their own
+// names, and a controller's name never equals the bus's.
 //
 // The record is the CDI spec files this driver wrote. The kubelet
 // prepares a claim before the consumer's container starts and

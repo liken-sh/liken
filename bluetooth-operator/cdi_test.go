@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -113,6 +114,65 @@ func TestRefreshCDISpecsFollowsAMovedNode(t *testing.T) {
 	raw, err := os.ReadFile(likenSpec)
 	if err != nil || string(raw) != `{"cdiVersion":"0.6.0"}` {
 		t.Errorf("liken's spec changed: %q, %v", raw, err)
+	}
+}
+
+// The bus delivers a fixed socket path, so nothing about it can move
+// and the refresh must leave it exactly as prepare wrote it. Its name
+// is not a MAC either, so a refresh that read it would look up a key
+// that names nothing.
+func TestRefreshCDISpecsLeavesTheMediaBusAlone(t *testing.T) {
+	cdiTempDir(t)
+	const uid = "0f8b1a2c-3d4e-5f60-8172-93a4b5c6d7e8"
+
+	if err := writeCDISpec(uid, []cdiDevice{{
+		Name:           uid + "-" + testBus,
+		ContainerEdits: busEdits(),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(cdiSpecPath(uid))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A controller reconnected on a different event number, which is the
+	// pass that rewrites a controller's spec.
+	refreshCDISpecs(map[string][]string{"a0:ab:51:33:b7:12": {"/dev/input/event9"}})
+
+	after, err := os.ReadFile(cdiSpecPath(uid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("the spec changed:\n%s\n%s", before, after)
+	}
+}
+
+// A moved controller in a mixed spec rewrites the file, and the bus
+// entry beside it comes through the rewrite unchanged.
+func TestRefreshCDISpecsKeepsTheBusThroughAControllersMove(t *testing.T) {
+	cdiTempDir(t)
+	const uid = "0f8b1a2c-3d4e-5f60-8172-93a4b5c6d7e8"
+
+	if err := writeCDISpec(uid, []cdiDevice{
+		{
+			Name:           uid + "-a0-ab-51-33-b7-12",
+			ContainerEdits: cdiEdits{DeviceNodes: deviceNodes([]string{"/dev/input/event5"})},
+		},
+		{Name: uid + "-" + testBus, ContainerEdits: busEdits()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	refreshCDISpecs(map[string][]string{"a0:ab:51:33:b7:12": {"/dev/input/event9"}})
+
+	spec := readSpec(t, cdiSpecPath(uid))
+	if spec.Devices[0].ContainerEdits.DeviceNodes[0].Path != "/dev/input/event9" {
+		t.Errorf("the controller's node = %+v", spec.Devices[0].ContainerEdits.DeviceNodes)
+	}
+	if !reflect.DeepEqual(spec.Devices[1].ContainerEdits, busEdits()) {
+		t.Errorf("the bus's edits = %+v", spec.Devices[1].ContainerEdits)
 	}
 }
 

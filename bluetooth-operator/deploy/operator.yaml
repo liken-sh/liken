@@ -28,11 +28,11 @@ spec:
 # the discovery are both scoped to this operator's own adapter.
 #
 # Nothing in this pod is storage, so no StatefulSet. The bonds are in
-# one Secret for each bond, labelled with the adapter, an init
-# container writes them into an emptyDir, and the pod claims no volume
-# that outlives it. The one
-# thing a StatefulSet adds is a volume for each pod, and a link key
-# belongs to an adapter's address, not to a pod.
+# one Secret for each bond, labelled with the adapter, and an init
+# container writes them into an emptyDir that goes when the pod goes.
+# The bus volume is a hostPath, but it holds a socket, not state. The
+# one thing a StatefulSet adds is a volume for each pod, and a link
+# key belongs to an adapter's address, not to a pod.
 #
 # RollingUpdate with maxSurge 0, because an adapter allocates to one
 # claim at a time. A second pod that claimed the same adapter would
@@ -252,8 +252,8 @@ spec:
         - name: adapter
           resourceClaimTemplateName: bluetooth-adapter
       volumes:
-        # DirectoryOrCreate on all three, because a node that has
-        # never run a DRA driver has none of these paths.
+        # DirectoryOrCreate on all four host paths, because a node
+        # that has never run a DRA driver has none of them.
         - name: kubelet-plugin
           hostPath:
             path: /var/lib/kubelet/plugins/bluetooth.liken.sh
@@ -266,18 +266,23 @@ spec:
           hostPath:
             path: /var/run/cdi
             type: DirectoryOrCreate
-        # The D-Bus socket the two containers share. The bus serves
-        # this pod alone, so the volume is the pod's own and it goes
-        # when the pod goes. dbus-daemon unlinks and recreates the
-        # socket at every start, which is why the directory is the
-        # mount and never the socket file: a mount of the file would
-        # pin the inode the daemon deleted.
+        # The D-Bus socket every container of this pod shares, and the
+        # one a claim on the media bus mounts into a sound server's
+        # pod. dbus-daemon unlinks and recreates the socket at every
+        # start, which is why the directory is the mount and never the
+        # socket file: a mount of the file would pin the inode the
+        # daemon deleted.
         #
-        # A later capability that has to reach this bluetoothd over
-        # its bus, such as a PipeWire that handles Bluetooth audio,
-        # runs in this pod and mounts this volume.
+        # A hostPath rather than an emptyDir, because the claim's CDI
+        # mount names a host path, and a prepared claim stays correct
+        # for the whole boot. An emptyDir lives under
+        # /var/lib/kubelet/pods/<uid>, so its host path changes with
+        # every restart of this pod, and every prepared claim would go
+        # stale with it.
         - name: bus
-          emptyDir: {}
+          hostPath:
+            path: /var/run/bluetooth.liken.sh/dbus
+            type: DirectoryOrCreate
         # The link keys and the device cache, which is kilobytes.
         # bondfetch fills this directory from the adapter's bond
         # Secrets before bluetoothd starts, and the operator writes

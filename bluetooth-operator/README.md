@@ -17,6 +17,13 @@ in a `Secret`, so after a pod restart or a reboot the controller
 reconnects with one button. This needs no SSH, no host configuration,
 and no shell in any pod.
 
+The operator publishes one more device beside the paired
+controllers: the media bus, the claimable permission to connect a
+sound server to this radio. The audio operator claims it to serve
+Bluetooth speakers.
+[The media bus](https://bluetooth.liken.sh/docs/reference/devices/#the-media-bus)
+in the manual has the attributes and the delivery.
+
 ## What it needs from `liken`
 
 `liken`'s own DRA driver publishes the raw hardware: the Bluetooth

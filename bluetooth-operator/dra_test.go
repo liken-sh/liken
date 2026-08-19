@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
@@ -105,6 +106,96 @@ func TestPrepareClaimDeliversOneControllersInputNodes(t *testing.T) {
 		if paths[i] != path {
 			t.Fatalf("nodes = %v, want %v", paths, want)
 		}
+	}
+}
+
+// busAllocation is the media bus as the scheduler allocates it.
+func busAllocation() AllocatedDevice {
+	return AllocatedDevice{
+		Request: "sound",
+		Driver:  DriverName,
+		Pool:    "liken-1",
+		Device:  testBus,
+	}
+}
+
+// The bus grants a mount and a variable, and no device node. It is
+// also ready whenever bluetoothd is serving, so a prepare on a machine
+// with no controller on the air still succeeds: the sysfs walk that
+// gates a controller does not apply to it.
+func TestPrepareClaimDeliversTheMediaBus(t *testing.T) {
+	plugin := preparePlugin(t, allocatedClaim(t, busAllocation()))
+
+	resp := plugin.prepareClaim(testClaim())
+	if resp.Error != "" {
+		t.Fatalf("prepare failed: %s", resp.Error)
+	}
+	wantID := "bluetooth.liken.sh/controller=" + testClaimUID + "-" + testBus
+	if len(resp.Devices) != 1 || resp.Devices[0].CdiDeviceIds[0] != wantID {
+		t.Fatalf("devices = %+v, want one with %s", resp.Devices, wantID)
+	}
+
+	spec := readSpec(t, cdiSpecPath(testClaimUID))
+	if len(spec.Devices) != 1 {
+		t.Fatalf("spec devices = %+v", spec.Devices)
+	}
+	edits := spec.Devices[0].ContainerEdits
+	wantEnv := []string{"DBUS_SYSTEM_BUS_ADDRESS=unix:path=/var/run/bluetooth.liken.sh/dbus/system_bus_socket"}
+	if !reflect.DeepEqual(edits.Env, wantEnv) {
+		t.Errorf("env = %v, want %v", edits.Env, wantEnv)
+	}
+	wantMounts := []cdiMount{{
+		HostPath:      "/var/run/bluetooth.liken.sh/dbus",
+		ContainerPath: "/var/run/bluetooth.liken.sh/dbus",
+		Options:       []string{"ro", "rbind", "rprivate", "nosuid", "nodev"},
+	}}
+	if !reflect.DeepEqual(edits.Mounts, wantMounts) {
+		t.Errorf("mounts = %+v, want %+v", edits.Mounts, wantMounts)
+	}
+	if len(edits.DeviceNodes) != 0 {
+		t.Errorf("deviceNodes = %+v, want none", edits.DeviceNodes)
+	}
+}
+
+// One claim can allocate both kinds of device from this driver, and
+// each entry in the one spec file carries its own kind of edit.
+func TestPrepareClaimDeliversAControllerAndTheBusTogether(t *testing.T) {
+	plugin := preparePlugin(t,
+		allocatedClaim(t,
+			AllocatedDevice{
+				Request: "controller",
+				Driver:  DriverName,
+				Pool:    "liken-1",
+				Device:  "a0-ab-51-33-b7-12",
+			},
+			busAllocation(),
+		),
+		dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"),
+	)
+
+	resp := plugin.prepareClaim(testClaim())
+	if resp.Error != "" {
+		t.Fatalf("prepare failed: %s", resp.Error)
+	}
+	if len(resp.Devices) != 2 {
+		t.Fatalf("devices = %+v, want two", resp.Devices)
+	}
+
+	spec := readSpec(t, cdiSpecPath(testClaimUID))
+	edits := map[string]cdiEdits{}
+	for _, device := range spec.Devices {
+		edits[device.Name] = device.ContainerEdits
+	}
+	controller := edits[testClaimUID+"-a0-ab-51-33-b7-12"]
+	if len(controller.DeviceNodes) != 1 || controller.DeviceNodes[0].Path != "/dev/input/event5" {
+		t.Errorf("the controller's edits = %+v", controller)
+	}
+	if len(controller.Env) != 0 || len(controller.Mounts) != 0 {
+		t.Errorf("the controller received the bus edits: %+v", controller)
+	}
+	bus := edits[testClaimUID+"-"+testBus]
+	if len(bus.Env) != 1 || len(bus.Mounts) != 1 || len(bus.DeviceNodes) != 0 {
+		t.Errorf("the bus's edits = %+v", bus)
 	}
 }
 

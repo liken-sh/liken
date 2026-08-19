@@ -8,8 +8,9 @@ package main
 // every prepared claim's CDI spec current, and writes the
 // ResourceSlice when any of that moved.
 //
-// Nothing here treats a controller as gone. Membership in the slice is
-// the paired set, and a controller that is switched off or a radio that
+// Nothing here treats a device as gone. Membership in the slice is
+// the paired set, plus the media bus once bluetoothd has named the
+// adapter, and a controller that is switched off or a radio that
 // is unplugged is published with taints instead, because a device that
 // leaves the slice while a claim names it strands the consumer. The
 // one removal that does not follow from the paired set comes from the
@@ -41,7 +42,8 @@ type publisher struct {
 	known    map[string]controller
 
 	// adapter is the radio this pod serves. It scopes discovery to the
-	// controllers on this operator's own adapter. It is read from
+	// controllers on this operator's own adapter, and it names the
+	// media bus device the slice publishes. It is read from
 	// bluetoothd the first time bluetoothd replies, and then it is fixed
 	// for the life of the process, because a pod serves one adapter and
 	// re-reading it could point the filter at a different radio.
@@ -77,12 +79,19 @@ func (p *publisher) reconcile(readPairedSet pairedSetReader, readAdapter adapter
 	nodes := nodesByMAC(discoverHIDDevices(draSysfsRoot, p.adapter))
 	refreshCDISpecs(nodes)
 
+	// busReachable is false only when the adapter has departed: the bus
+	// socket still exists, but the radio behind it is gone.
+	busReachable := true
+
 	controllers, err := readPairedSet()
 	switch {
-	case errors.Is(err, ErrNoAdapter) && len(p.known) == 0:
+	case errors.Is(err, ErrNoAdapter) && len(p.known) == 0 && p.adapter.IsZero():
 		// The startup window. bluetoothd has not published its object
 		// tree yet, so there is no last-known set to taint and nothing
-		// true to publish about this node.
+		// true to publish about this node. Once bluetoothd has named
+		// the adapter, an ErrNoAdapter is a departure and takes the
+		// branch below even with nothing paired, so the media bus
+		// picks up its taint.
 		fmt.Fprintf(os.Stderr, "waiting for bluetoothd to publish an adapter\n")
 		return false
 
@@ -95,8 +104,8 @@ func (p *publisher) reconcile(readPairedSet pairedSetReader, readAdapter adapter
 		// running and the next claim parks instead of failing in
 		// prepare. Passing no nodes derives both taints, which is the
 		// same rule a single controller going quiet takes.
-		fmt.Fprintf(os.Stderr, "the adapter is gone; tainting all %d published controllers\n", len(p.known))
-		controllers, nodes = unreachable(p.known), nil
+		fmt.Fprintf(os.Stderr, "the adapter is gone; tainting the media bus and all %d published controllers\n", len(p.known))
+		controllers, nodes, busReachable = unreachable(p.known), nil, false
 
 	case err != nil:
 		fmt.Fprintf(os.Stderr, "reading the paired set: %v\n", err)
@@ -107,8 +116,21 @@ func (p *publisher) reconcile(readPairedSet pairedSetReader, readAdapter adapter
 	}
 
 	devices := sliceDevices(without(controllers, keepOut), nodes)
+	// The media bus joins every slice this pass publishes, as soon as
+	// bluetoothd has named the adapter. It goes at the front of the
+	// list so the overflow truncation below can only drop controllers:
+	// the bus is one device for the whole radio, and dropping it would
+	// remove the machine's Bluetooth audio to make room for one more
+	// controller.
+	//
+	// With the bus in the list, a node that has an adapter always has
+	// a slice, and the delete path runs only while the adapter is
+	// still unknown.
+	if !p.adapter.IsZero() {
+		devices = append([]SliceDevice{mediaBusDevice(p.adapter.String(), busReachable)}, devices...)
+	}
 	if len(devices) > maxSliceDevices {
-		fmt.Fprintf(os.Stderr, "%d paired controllers exceed one slice's capacity of %d; dropping the overflow\n",
+		fmt.Fprintf(os.Stderr, "%d devices exceed one slice's capacity of %d; dropping the overflow\n",
 			len(devices), maxSliceDevices)
 		devices = devices[:maxSliceDevices]
 	}

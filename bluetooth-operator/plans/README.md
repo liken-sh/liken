@@ -19,7 +19,9 @@ decided yet what work they become.
 
 ## The designs
 
-* [01, Bluetooth audio](01-bluetooth-audio.md). Proposed.
+* [01, Bluetooth audio](01-bluetooth-audio.md). Superseded by
+  liken's milestone 60 and plan 05. Its source reading remains the
+  citation record.
 * [02, The two-container pod](completed/02-the-two-container-pod.md). Built, and
   drilled on liken-1 on 2026-08-17.
 * [03, A Secret for each adapter](completed/03-a-secret-for-each-adapter.md).
@@ -30,6 +32,10 @@ decided yet what work they become.
   owned by the operator, and a PairingRequest a person opens and
   approves with kubectl. Answers and replaces the open problem "Who
   owns the pairing UX".
+* [05, The media bus](05-the-media-bus.md). Built. The adapter's
+  media bus as an exclusive DRA device, the hostPath behind the bus
+  socket, and the mount-and-variable delivery. This operator's half
+  of liken's milestone 60.
 
 ## Open problems
 

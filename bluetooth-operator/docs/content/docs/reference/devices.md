@@ -36,16 +36,31 @@ per node, named `<node>-bluetooth.liken.sh`, beside `liken`'s own
             addressType: {string: public}
             icon: {string: input-gaming}
             input: {bool: true}
+        - name: 04-4a-69-66-92-27-media
+          attributes:
+            address: {string: "04:4A:69:66:92:27"}
+            kind: {string: mediaBus}
+            sound.liken.sh/supportsSound: {bool: true}
 
-The slice holds one device for each paired controller. The list
+The slice holds two kinds of device: one for each paired controller,
+and one [media bus](#the-media-bus) for the adapter itself.
+
+The controller list
 follows the paired set, whether or not each controller is connected.
 A paired controller that is switched off still publishes, so a pod
 can claim it and start when somebody turns it on.
-A device leaves the slice only when it is unpaired, which is a
+A controller leaves the slice only when it is unpaired, which is a
 `kubectl delete pairing`.
 
+The media bus publishes as soon as `bluetoothd` names the adapter, so
+the slice exists on a machine with a radio and nothing paired to it.
+The whole slice is deleted only while no adapter has answered and
+nothing is paired.
+
 The device name is the controller's MAC in lowercase with dashes,
-because a DRA device name must be a DNS label. The MAC is the only
+because a DRA device name must be a DNS label. The media bus takes
+the adapter's own MAC in the same form, with a `-media` suffix. The
+MAC is the only
 identity on the machine that survives a reboot: the HID instance
 suffix in sysfs counts up from zero each boot, and the `hci0:N`
 handle changes on every reconnect, so a claim against either would
@@ -53,11 +68,15 @@ allocate different hardware after a reboot.
 
 ## The attributes
 
+This section covers the paired controllers. [The media
+bus](#the-media-bus) carries its own three attributes, listed in its
+section.
+
 A selector reads these as
 `device.attributes["bluetooth.liken.sh"].<name>`.
 
-Two attributes are on every device this operator publishes, in every
-state, the departed-adapter republish included:
+Two attributes are on every controller this operator publishes, in
+every state, the departed-adapter republish included:
 
 | Attribute | Type | What it is |
 |---|---|---|
@@ -110,17 +129,32 @@ skipping the device. So a selector on anything past `address` and
 
 A selector that reads only `address` or `connected` needs no guard,
 because the `bluetooth-input` class already limits the candidates
-to this driver's devices, and both attributes are always on them.
+to this driver's paired input devices, and both attributes are always
+on them. Outside that class, the media bus carries `address` and no
+`connected`, so `connected` takes a guard like any other attribute.
 
 ## The taints
 
-Two taints go on a device that cannot serve a claim, and they answer
-two different questions:
+Two taints go on a controller that cannot serve a claim, and they
+answer two different questions:
 
 | Taint | Effect | When |
 |---|---|---|
 | `bluetooth.liken.sh/disconnected` | `NoExecute` | bluetoothd reports the controller disconnected, or it registers no evdev node, or the adapter itself has departed |
 | `bluetooth.liken.sh/no-input-node` | `NoSchedule` | the controller registers no evdev node, or the adapter itself has departed |
+
+The media bus takes one taint, and only when the adapter has
+departed:
+
+| Taint | Effect | When |
+|---|---|---|
+| `bluetooth.liken.sh/disconnected` | `NoSchedule` | the adapter has departed, so nothing answers on the bus |
+
+The effect differs from the controllers' `NoExecute` on purpose. The
+pod that holds the bus is the machine's one sound server, so an
+eviction would end its other playback too, and that playback does not
+need the radio. `NoSchedule` parks the next claim and leaves the
+running holder alone.
 
 **Tolerate `/disconnected` only.** The `NoExecute` taint evicts a
 claim holder after its `tolerationSeconds`, so tolerating it sets how
@@ -131,6 +165,47 @@ scheduler allocates a controller with no evdev node,
 `NodePrepareResources` fails, and the pod churns between
 `ContainerCreating` and eviction for as long as the controller stays
 off.
+
+## The media bus
+
+The media bus is one device per adapter: the claimable permission to
+connect to this pod's `bluetoothd` over its private D-Bus. A
+Bluetooth speaker creates no kernel device. Its audio exists only
+while a sound server holds this bus and keeps a media endpoint
+registered, and BlueZ advertises no A2DP until an endpoint registers.
+
+The audio operator claims the bus through
+`sound.liken.sh/supportsSound`, the attribute `liken` also stamps on
+each sound card it publishes. That operator's class names the
+attribute and no driver, so one claim collects every device on a node
+that can serve a sound server. This operator ships no class for the
+bus and runs no sound server itself.
+
+| Attribute | Type | What it is |
+|---|---|---|
+| `address` | string | the adapter's own MAC, uppercase with colons |
+| `kind` | string | `mediaBus` |
+| `sound.liken.sh/supportsSound` | bool | always `true` |
+
+`sound.liken.sh/supportsSound` is the one qualified name in this
+driver's attributes. It lives in a domain neither driver owns, so a
+selector reads it as
+`device.attributes["sound.liken.sh"].supportsSound`, where every
+other attribute here reads under `bluetooth.liken.sh`.
+
+The bus never carries `input`, so the `bluetooth-input` class, which
+guards on that attribute, never matches it.
+
+The device is exclusive, which is `resource.k8s.io/v1`'s default: one
+radio serves one sound server, because two media endpoints registered
+on one `bluetoothd` have no contract over the streams.
+
+A claim on the bus delivers a read-only mount of
+`/var/run/bluetooth.liken.sh/dbus` at the same path inside the
+container, and one environment variable that names the socket in it.
+No device node, no privilege, and no other host path.
+
+    DBUS_SYSTEM_BUS_ADDRESS=unix:path=/var/run/bluetooth.liken.sh/dbus/system_bus_socket
 
 ## The device classes
 
@@ -150,7 +225,8 @@ workload claims through is cluster policy, and
 [Install the operator](/docs/guides/install/) gives its YAML. It
 selects the `input` attribute rather than the whole driver, because
 the driver publishes more than input devices: a paired speaker
-publishes as its bond record, and no workload should hold one.
+publishes as its bond record, no workload should hold one, and the
+media bus belongs to the machine's sound server.
 
 ## The claim
 
@@ -182,11 +258,16 @@ allocation across an eviction.
 
 ## What a claim delivers
 
-Device nodes, and nothing else: `/dev/input/event*` for the one
-controller the claim allocated, injected through the Container Device
-Interface (CDI) at container creation. No privilege, no host mount,
-no environment variable. The container's user must be able to open
-the nodes.
+What a claim delivers depends on the device it allocated. Both kinds
+arrive the same way, through the Container Device Interface (CDI) at
+container creation, and neither delivers any privilege.
+
+A claim on a controller delivers device nodes, and nothing else:
+`/dev/input/event*` for the one controller the claim allocated. No
+host mount, no environment variable. The container's
+user must be able to open the nodes. A claim on the media bus
+delivers the mount and the variable that [The media
+bus](#the-media-bus) lists, and no device node.
 
 The legacy `/dev/input/jsN` interface stays out. `liken`'s kernel may
 not enable `CONFIG_INPUT_JOYDEV` at all, and joydev publishes a
@@ -209,11 +290,18 @@ now.
 * **A departed adapter taints everything.** When the radio itself is
   unplugged, the operator republishes the last paired set fully
   tainted and `connected: false`, so no allocation is stranded. The
-  slice is deleted only when an adapter is present and its paired set
-  is empty, which means every controller was unpaired.
+  media bus republishes on the same pass with its own `NoSchedule`
+  taint. The slice is deleted only while no adapter has answered and
+  nothing is paired, which is the window before `bluetoothd` starts.
+  Unpairing the last controller empties the paired set, not the
+  slice: the media bus stays in it.
 * **The operator's pod can restart under a live claim.** The prepared
   CDI files survive on the host, so a running consumer keeps its
-  device across the restart.
+  device across the restart. The bus socket's directory is a host
+  path for the same reason: a claim prepared against it names the
+  same directory after the restart, where an emptyDir's host path is
+  under `/var/lib/kubelet/pods/`, keyed by the pod's UID, and changes
+  with the replacement pod.
 
 ## The pairing API
 
