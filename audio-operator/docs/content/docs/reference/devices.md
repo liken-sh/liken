@@ -35,6 +35,8 @@ itself publishes:
             product: {string: "5b09"}
             monitorName: {string: LG ULTRAWIDE}
             lpcmChannels: {int: 2}
+            lpcmMaxRateHz: {int: 48000}
+            lpcmBitDepths: {string: "16 20 24"}
             speakers: {string: FL/FR}
             sinkName: {string: liken.audio.card0-pcm3}
             monitor.liken.sh/id: {string: gsm-5b09-lg-ultrawide}
@@ -98,6 +100,8 @@ and never the device's name.
 | `product` | string | the monitor's product code, four lowercase hexadecimal digits |
 | `monitorName` | string | the monitor's name, the same EDID descriptor the display operator publishes as `model` |
 | `lpcmChannels` | int | the highest uncompressed channel count the monitor accepts |
+| `lpcmMaxRateHz` | int | the highest uncompressed sample rate the monitor accepts, in hertz |
+| `lpcmBitDepths` | string | the uncompressed depths the monitor accepts, ascending: `16 20 24` |
 | `speakers` | string | the speaker allocation, in the kernel's names: `FL/FR` |
 | `monitor.liken.sh/id` | string | the pairing identity, described below |
 

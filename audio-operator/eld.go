@@ -25,6 +25,7 @@ package main
 import (
 	"encoding/binary"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -71,6 +72,16 @@ var eldSpeakerNames = []string{
 // the one a workload plays through a PipeWire sink.
 const audioCodingTypeLPCM = 1
 
+// eldSampleRates maps a descriptor's rate bits to hertz, in
+// CEA-861's bit order: bit 0 is 32 kHz and bit 6 is 192 kHz.
+var eldSampleRates = []int{32000, 44100, 48000, 88200, 96000, 176400, 192000}
+
+// eldBitDepths maps the third byte's depth bits, which CEA-861
+// defines only for LPCM. A compressed format uses that byte for its
+// bitrate instead, which is why the parser reads it under the format
+// check below.
+var eldBitDepths = []int{16, 20, 24}
+
 // eld holds what this operator publishes out of one block. The block
 // holds more, including the audio sync delay, the HDCP and AI flags,
 // and one descriptor for each compressed format the monitor accepts.
@@ -88,8 +99,15 @@ type eld struct {
 	Product        uint16
 	MonitorName    string
 	LPCMChannels   int
-	Speakers       string
-	PortID         uint64
+	// LPCMMaxRateHz is the highest sample rate any LPCM descriptor
+	// names. LPCMDepths is the union of their depth bits, held as
+	// the raw mask because the parser keeps what it read when it
+	// stops at a truncated descriptor; bitDepths renders the mask
+	// at the publish site.
+	LPCMMaxRateHz int
+	LPCMDepths    byte
+	Speakers      string
+	PortID        uint64
 }
 
 // parseELD reads one raw block. A block that is too short, or that
@@ -144,6 +162,15 @@ func parseELD(raw []byte) (eld, error) {
 		if channels := int(descriptor[0]&0x7) + 1; channels > parsed.LPCMChannels {
 			parsed.LPCMChannels = channels
 		}
+		// A monitor can state LPCM more than once, one descriptor
+		// per channel layout, each with its own rates and depths.
+		// The slice answers for the monitor at its best, so the rate
+		// takes the maximum and the depths take the union, the same
+		// way the channel count above takes the maximum.
+		if rate := maxSampleRate(descriptor[1]); rate > parsed.LPCMMaxRateHz {
+			parsed.LPCMMaxRateHz = rate
+		}
+		parsed.LPCMDepths |= descriptor[2] & 0x7
 	}
 	return parsed, nil
 }
@@ -156,6 +183,31 @@ func speakerNames(allocation byte) string {
 	for bit, name := range eldSpeakerNames {
 		if allocation&(1<<bit) != 0 {
 			names = append(names, name)
+		}
+	}
+	return strings.Join(names, " ")
+}
+
+// maxSampleRate reads the highest rate one descriptor's bitmap
+// names, or zero when it names none.
+func maxSampleRate(rates byte) int {
+	highest := 0
+	for bit, rate := range eldSampleRates {
+		if rates&(1<<bit) != 0 {
+			highest = max(highest, rate)
+		}
+	}
+	return highest
+}
+
+// bitDepths renders the depth mask as ascending names joined by
+// spaces, "16 20 24", the list form the speakers attribute already
+// uses.
+func (e eld) bitDepths() string {
+	var names []string
+	for bit, depth := range eldBitDepths {
+		if e.LPCMDepths&(1<<bit) != 0 {
+			names = append(names, strconv.Itoa(depth))
 		}
 	}
 	return strings.Join(names, " ")

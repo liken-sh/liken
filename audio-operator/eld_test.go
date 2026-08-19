@@ -40,6 +40,12 @@ func TestParseHDMIBlock(t *testing.T) {
 	if block.LPCMChannels != 2 {
 		t.Errorf("LPCM channels = %d, want 2", block.LPCMChannels)
 	}
+	if block.LPCMMaxRateHz != 48000 {
+		t.Errorf("LPCM maximum rate = %d, want 48000", block.LPCMMaxRateHz)
+	}
+	if got := block.bitDepths(); got != "16 20 24" {
+		t.Errorf("LPCM bit depths = %q, want \"16 20 24\"", got)
+	}
 	if block.Speakers != "FL/FR" {
 		t.Errorf("speakers = %q", block.Speakers)
 	}
@@ -70,6 +76,12 @@ func TestParseDisplayPortBlock(t *testing.T) {
 	}
 	if block.LPCMChannels != 8 {
 		t.Errorf("LPCM channels = %d, want 8", block.LPCMChannels)
+	}
+	if block.LPCMMaxRateHz != 48000 {
+		t.Errorf("LPCM maximum rate = %d, want 48000", block.LPCMMaxRateHz)
+	}
+	if got := block.bitDepths(); got != "16 20 24" {
+		t.Errorf("LPCM bit depths = %q, want \"16 20 24\"", got)
 	}
 	if block.Speakers != "FL/FR FC" {
 		t.Errorf("speakers = %q", block.Speakers)
@@ -121,6 +133,76 @@ func TestParseKeepsWhatItReadBeforeATruncatedDescriptor(t *testing.T) {
 	}
 	if block.MonitorName != "LG ULTRAWIDE" {
 		t.Errorf("monitor name = %q", block.MonitorName)
+	}
+}
+
+func TestParseTakesTheHighestRateAndTheUnionOfTheDepths(t *testing.T) {
+	full := fixture(t, "eld-hdmi-lg-ultrawide.bin")
+	twoDescriptors := append(withByte(full, 5, full[5]&0x0f|0x20)[:35], 0x09, 0x18, 0x02)
+
+	block, err := parseELD(twoDescriptors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if block.LPCMMaxRateHz != 96000 {
+		t.Errorf("LPCM maximum rate = %d, want 96000", block.LPCMMaxRateHz)
+	}
+	if got := block.bitDepths(); got != "16 20 24" {
+		t.Errorf("LPCM bit depths = %q, want \"16 20 24\"", got)
+	}
+}
+
+func TestParseReportsNoRateOrDepthWithoutAnLPCMDescriptor(t *testing.T) {
+	full := fixture(t, "eld-hdmi-lg-ultrawide.bin")
+
+	block, err := parseELD(withByte(full, 32, 0x11))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if block.LPCMChannels != 0 {
+		t.Errorf("LPCM channels = %d, want 0", block.LPCMChannels)
+	}
+	if block.LPCMMaxRateHz != 0 {
+		t.Errorf("LPCM maximum rate = %d, want 0", block.LPCMMaxRateHz)
+	}
+	if got := block.bitDepths(); got != "" {
+		t.Errorf("LPCM bit depths = %q, want the empty string", got)
+	}
+}
+
+func TestMaxSampleRate(t *testing.T) {
+	cases := []struct {
+		rates byte
+		want  int
+	}{
+		{rates: 0x00, want: 0},
+		{rates: 0x01, want: 32000},
+		{rates: 0x07, want: 48000},
+		{rates: 0x1f, want: 96000},
+		{rates: 0x40, want: 192000},
+		{rates: 0x7f, want: 192000},
+	}
+	for _, c := range cases {
+		if got := maxSampleRate(c.rates); got != c.want {
+			t.Errorf("maxSampleRate(%#02x) = %d, want %d", c.rates, got, c.want)
+		}
+	}
+}
+
+func TestBitDepths(t *testing.T) {
+	cases := []struct {
+		depths byte
+		want   string
+	}{
+		{depths: 0x00, want: ""},
+		{depths: 0x01, want: "16"},
+		{depths: 0x05, want: "16 24"},
+		{depths: 0x07, want: "16 20 24"},
+	}
+	for _, c := range cases {
+		if got := (eld{LPCMDepths: c.depths}).bitDepths(); got != c.want {
+			t.Errorf("bitDepths(%#02x) = %q, want %q", c.depths, got, c.want)
+		}
 	}
 }
 

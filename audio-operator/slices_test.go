@@ -85,6 +85,7 @@ func TestSliceDevicesPublishesEachOutput(t *testing.T) {
 		"product":        "5b09",
 		"monitorName":    "LG ULTRAWIDE",
 		"speakers":       "FL/FR",
+		"lpcmBitDepths":  "16 20 24",
 		"sinkName":       "alsa_output.pci-0000_00_1f.3.hdmi-stereo",
 		PairingAttribute: "gsm-5b09-lg-ultrawide",
 	}
@@ -101,11 +102,33 @@ func TestSliceDevicesPublishesEachOutput(t *testing.T) {
 	if got := intAttribute(t, hdmi, "lpcmChannels"); got != 2 {
 		t.Errorf("lpcmChannels = %d, want 2", got)
 	}
+	if got := intAttribute(t, hdmi, "lpcmMaxRateHz"); got != 48000 {
+		t.Errorf("lpcmMaxRateHz = %d, want 48000", got)
+	}
 	if got := intAttribute(t, hdmi, "pcm"); got != 3 {
 		t.Errorf("pcm = %d, want 3", got)
 	}
 	if len(hdmi.Taints) != 0 {
 		t.Errorf("the HDMI output has taints: %+v", hdmi.Taints)
+	}
+}
+
+func TestMonitorAttributesOmitTheLPCMFactsWithoutAnLPCMDescriptor(t *testing.T) {
+	block, err := parseELD(withByte(fixture(t, "eld-hdmi-lg-ultrawide.bin"), 32, 0x11))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	attributes := map[string]DeviceAttribute{}
+	addMonitorAttributes(attributes, block)
+
+	for _, name := range []string{"lpcmChannels", "lpcmMaxRateHz", "lpcmBitDepths"} {
+		if _, published := attributes[name]; published {
+			t.Errorf("a block with no LPCM descriptor published %s", name)
+		}
+	}
+	if got := *attributes["monitorName"].String; got != "LG ULTRAWIDE" {
+		t.Errorf("monitor name = %q", got)
 	}
 }
 

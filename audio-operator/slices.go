@@ -263,6 +263,15 @@ func addMonitorAttributes(attributes map[string]DeviceAttribute, block eld) {
 	if block.LPCMChannels > 0 {
 		attributes["lpcmChannels"] = AttrInt(int64(block.LPCMChannels))
 	}
+	// The rate and the depths bound what a stream can ask of this
+	// output. A claim that needs high-rate playback selects
+	// lpcmMaxRateHz >= 96000 instead of naming a monitor model.
+	if block.LPCMMaxRateHz > 0 {
+		attributes["lpcmMaxRateHz"] = AttrInt(int64(block.LPCMMaxRateHz))
+	}
+	if depths := block.bitDepths(); depths != "" {
+		attributes["lpcmBitDepths"] = AttrString(attributeString(depths))
+	}
 	if block.Speakers != "" {
 		attributes["speakers"] = AttrString(attributeString(block.Speakers))
 	}
