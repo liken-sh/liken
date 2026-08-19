@@ -150,6 +150,56 @@ workloads off one screen is the allocation: the second pod cannot
 claim an output the first holds, so it parks until the first
 releases it.
 
+## Ask for a mode
+
+A claim can state the resolution its screen runs. The operator
+writes it into the compositor's config, restarts the compositor,
+and delivers the screen only after the card reports the mode. The
+name is one of the values in the `modes` attribute, spelled as the
+kernel spells it.
+
+    apiVersion: resource.k8s.io/v1
+    kind: ResourceClaim
+    metadata:
+      name: kitchen-screen
+      namespace: house
+    spec:
+      devices:
+        requests:
+          - name: screen
+            exactly:
+              deviceClassName: display-output
+              selectors:
+                - cel:
+                    expression: |
+                      device.attributes["display.liken.sh"].connector == "HDMI-A-1"
+              tolerations:
+                - key: display.liken.sh/disconnected
+                  operator: Exists
+                  effect: NoExecute
+                  tolerationSeconds: 30
+        config:
+          - opaque:
+              driver: display.liken.sh
+              parameters:
+                mode: "1280x720"
+
+Do not state a mode casually. One compositor drives every output
+of the card, and it reads its config once at startup, so a mode on
+one connector restarts it and ends every Wayland client on every
+screen of that machine. The lab measured about 1.3 seconds of
+dark, plus whatever each client takes to come back.
+
+Run every display consumer under a controller. A bare `Pod` whose
+compositor restarted dies `Completed` and stays dead. A
+`Deployment` brings it back, and the `tolerationSeconds` above is
+what keeps the pod scheduled through the restart.
+
+A claim that asks for the mode the screen already runs delivers at
+once, with no restart. Releasing the claim restarts nothing either:
+the screen keeps the mode until the next compositor start, and the
+slice's `currentMode` says what it runs.
+
 ## Unplugged monitors, moved monitors, and second screens
 
 **A monitor unplugged.** The device keeps its place in the slice and

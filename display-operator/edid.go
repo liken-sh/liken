@@ -21,6 +21,10 @@ package main
 // the operator writes into weston.ini as mode=preferred, so the
 // published pixel size is the size the compositor drives.
 //
+// One exception qualifies that: a connector whose claim states a
+// mode runs that mode instead. weston.ini names it, and the
+// currentMode attribute says which mode the output runs now.
+//
 // A monitor may state its physical size twice. Bytes 21 and 22 give
 // it in whole centimeters, and the detailed timing gives it in
 // millimeters. The millimeters win where they exist: the portable

@@ -98,10 +98,11 @@ sysfs.
 | `manufacturer` | string | the EDID's three-letter PNP id: `GSM` is LG |
 | `model` | string | the monitor name the EDID states |
 | `serial` | string | the serial the EDID states |
-| `widthPixels`, `heightPixels` | int | the preferred mode, which is the mode the compositor drives |
+| `widthPixels`, `heightPixels` | int | the preferred mode, which the compositor drives unless a claim states another |
 | `refreshMillihertz` | int | the preferred mode's refresh rate, in millihertz: a selector that wants 60 Hz exactly asks for `60000`, and a real monitor may answer `59999` |
 | `widthMillimeters`, `heightMillimeters` | int | the panel's physical size |
 | `modes` | string | the resolutions the monitor accepts, described below |
+| `currentMode` | string | the mode the output runs right now, described below |
 | `monitor.liken.sh/id` | string | the pairing identity, described below |
 
 A selector reads an unqualified attribute through the driver's
@@ -123,8 +124,11 @@ drive, space joined, with the preferred mode first and the rest in
 descending order. A name carries no refresh rate, so a resolution
 the monitor accepts at both 60 Hz and 30 Hz appears once. The
 preferred mode is the same one `widthPixels`, `heightPixels`, and
-`refreshMillihertz` describe, and it is the only mode the
-compositor drives.
+`refreshMillihertz` describe.
+
+The preferred mode is the same one `widthPixels`, `heightPixels`,
+and `refreshMillihertz` describe, and it is what an output runs
+until a claim states another one.
 
 The list is one string because a device attribute holds one bool,
 int, string, or version, and no array. A selector asks with
@@ -140,10 +144,50 @@ tail the smallest ones. A monitor that accepts sixteen resolutions
 publishes about six. Read the attribute as the large modes the
 monitor accepts, never as the whole list.
 
-Nothing selects a mode. The compositor serves every output on the
-machine and changes a mode only by restarting, so one claim's
-choice would blank the other screens. The inventory shows the
-choice, and no claim makes it.
+A claim selects one of these names with an opaque parameter this
+driver reads. The operator writes the name into the compositor's
+config and restarts the compositor, which is why every Wayland
+client on every output of that card ends when a claim states a
+mode. [Ask for a mode](/docs/guides/claim/#ask-for-a-mode) has the
+whole recipe and the warning.
+
+    spec:
+      devices:
+        config:
+          - opaque:
+              driver: display.liken.sh
+              parameters:
+                mode: "1280x720"
+
+`mode` is the only parameter this driver reads, and a key it does
+not read fails the prepare, so a typo stops the pod instead of
+running a mode nobody asked for. The value is a bare resolution
+name with no refresh rate, spelled exactly as the kernel spells
+it.
+
+The name is validated against the connector's own kernel mode list
+and never against this attribute, so a mode the attribute's
+64-character cut dropped is still a mode a claim can ask for. A
+name the connector does not offer fails the prepare, and the
+failure names the whole list.
+
+A `DeviceClass` can carry the same block as cluster policy. The
+scheduler resolves the class's config and the claim's into one list
+on the allocation and marks each entry's source, and the claim's
+own choice wins over the class's, whichever order the two are
+listed in.
+
+## The current mode
+
+`currentMode` is the mode the output runs right now, read from the
+card itself with the DRM `GETCRTC` ioctl on every reconcile pass.
+It follows a claim's mode, and it is what shows the mode a released
+claim left behind, because releasing a claim restarts nothing.
+
+The attribute is absent while the output drives nothing, which
+covers a connector with no monitor and one the compositor left
+disabled, and absent when the card could not answer the ioctl.
+Guard it with `has()`, like every other monitor attribute.
 
 ## The pairing identity
 

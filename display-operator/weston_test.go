@@ -12,17 +12,20 @@ import (
 )
 
 // compositorFixture points the pod's three roles at one machine: the
-// lab's sysfs, a /dev/dri holding one card node, and a weston.ini in a
-// directory the test owns. It returns the config path.
+// lab's sysfs, a /dev/dri holding one card node, and a weston.ini and
+// a mode record in a directory the test owns. It returns the config
+// path.
 func compositorFixture(t *testing.T) string {
 	t.Helper()
 	dri := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dri, "card1"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	config := t.TempDir()
 	swapPath(t, &sysRoot, labSysfs(t))
 	swapPath(t, &driRoot, dri)
-	swapPath(t, &westonConfigPath, filepath.Join(t.TempDir(), "weston", "weston.ini"))
+	swapPath(t, &westonConfigPath, filepath.Join(config, "weston", "weston.ini"))
+	swapPath(t, &modeRecordPath, filepath.Join(config, "weston", "modes.json"))
 	return westonConfigPath
 }
 
@@ -36,7 +39,7 @@ func swapPath(t *testing.T, target *string, value string) {
 }
 
 func TestWestonConfigNamesEachOutputAndItsAppID(t *testing.T) {
-	config := westonConfig(discoverOutputs(labSysfs(t), "card1"))
+	config := westonConfig(discoverOutputs(labSysfs(t), "card1"), nil)
 
 	// The kiosk shell reads app-ids= and matches it against the app-id
 	// a client sets. The app-id is the device name, so a claim on
@@ -64,10 +67,40 @@ func TestWestonConfigNamesEachOutputAndItsAppID(t *testing.T) {
 	}
 }
 
+func TestWestonConfigNamesTheModeTheRecordStates(t *testing.T) {
+	// The record is the operator's own, and the config is derived from
+	// the connector walk plus the record on every write. A connector
+	// with no entry keeps the mode the monitor prefers.
+	config := westonConfig(discoverOutputs(labSysfs(t), "card1"), map[string]string{"HDMI-A-2": "1280x720"})
+
+	for _, want := range []string{
+		"name=HDMI-A-1\nmode=preferred\napp-ids=hdmi-a-1",
+		"name=HDMI-A-2\nmode=1280x720\napp-ids=hdmi-a-2",
+		"name=DP-1\nmode=preferred\napp-ids=dp-1",
+	} {
+		if !strings.Contains(config, want) {
+			t.Errorf("the config does not contain %q:\n%s", want, config)
+		}
+	}
+}
+
+func TestWestonConfigIgnoresARecordEntryForAConnectorTheCardDoesNotHave(t *testing.T) {
+	// The record outlives a monitor and the walk is the truth about
+	// what the card has, so an entry with no connector adds no section.
+	config := westonConfig(discoverOutputs(labSysfs(t), "card1"), map[string]string{"HDMI-A-9": "1280x720"})
+
+	if strings.Contains(config, "HDMI-A-9") {
+		t.Errorf("the config names a connector the card does not have:\n%s", config)
+	}
+	if got := strings.Count(config, "[output]"); got != 3 {
+		t.Errorf("got %d output sections, want 3:\n%s", got, config)
+	}
+}
+
 func TestWriteWestonConfigCreatesTheDirectory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "weston", "weston.ini")
 
-	if err := writeWestonConfig(path, discoverOutputs(labSysfs(t), "card1")); err != nil {
+	if err := writeWestonConfig(path, discoverOutputs(labSysfs(t), "card1"), nil); err != nil {
 		t.Fatal(err)
 	}
 	written, err := os.ReadFile(path)
@@ -98,6 +131,115 @@ func TestDeclareWritesTheConfigWhereTheCompositorWaitsForIt(t *testing.T) {
 	}
 	if got := strings.Count(string(written), "[output]"); got != 3 {
 		t.Fatalf("got %d output sections, want 3:\n%s", got, written)
+	}
+}
+
+func TestDeclareWritesAnEmptyModeRecord(t *testing.T) {
+	// The record lives in the pod's own volume beside the config, so a
+	// pod that restarts starts with no mode stated and every screen at
+	// the mode its monitor prefers. The file exists from the start, so
+	// a prepare that reads it before any claim stated a mode reads an
+	// empty record rather than a missing file.
+	compositorFixture(t)
+
+	declare()
+
+	record, err := readModeRecord(modeRecordPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(record) != 0 {
+		t.Fatalf("record = %v", record)
+	}
+}
+
+func TestDeclareKeepsAModeRecordThatIsAlreadyThere(t *testing.T) {
+	// The kubelet runs an init container again when it restarts the
+	// pod's containers, and the config it writes must carry whatever
+	// mode a claim already stated.
+	compositorFixture(t)
+	if err := writeModeRecord(modeRecordPath, map[string]string{"HDMI-A-2": "1280x720"}); err != nil {
+		t.Fatal(err)
+	}
+
+	declare()
+
+	record, err := readModeRecord(modeRecordPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record["HDMI-A-2"] != "1280x720" {
+		t.Fatalf("record = %v", record)
+	}
+	written, err := os.ReadFile(westonConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(written), "name=HDMI-A-2\nmode=1280x720") {
+		t.Fatalf("the file holds:\n%s", written)
+	}
+}
+
+// fakeProc builds the part of /proc that the compositor search reads:
+// one directory per process, with an exe symlink to the binary it
+// runs. The links dangle, which is what a readlink of a real
+// /proc/<pid>/exe answers from a container that does not have the
+// binary at that path.
+func fakeProc(t *testing.T, processes map[string]string) string {
+	t.Helper()
+	root := t.TempDir()
+	for pid, binary := range processes {
+		dir := filepath.Join(root, pid)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if binary == "" {
+			continue
+		}
+		if err := os.Symlink(binary, filepath.Join(dir, "exe")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+func TestCompositorProcessesFindsTheCompositor(t *testing.T) {
+	// The pod shares one process namespace, so this operator sees the
+	// compositor's own process and finds it by the binary it runs.
+	// Nothing else in the pod runs weston.
+	proc := fakeProc(t, map[string]string{
+		"1":    "/usr/bin/display-operator",
+		"14":   westonBinary,
+		"29":   "/usr/bin/display-operator",
+		"self": westonBinary,
+	})
+
+	if got := compositorProcesses(proc); !slices.Equal(got, []int{14}) {
+		t.Errorf("pids = %v, want [14]", got)
+	}
+}
+
+func TestCompositorProcessesFindsNoneWhileTheContainerRestarts(t *testing.T) {
+	proc := fakeProc(t, map[string]string{
+		"1":  "/usr/bin/display-operator",
+		"30": "",
+	})
+
+	if got := compositorProcesses(proc); len(got) != 0 {
+		t.Errorf("pids = %v, want none", got)
+	}
+}
+
+func TestEndCompositorReportsThatItFoundNone(t *testing.T) {
+	// A restart the operator ordered has to be an ordered restart or a
+	// failure. A search that found nothing and said nothing would leave
+	// a prepare waiting for a mode change that nothing started.
+	err := endCompositor(fakeProc(t, map[string]string{"1": "/usr/bin/display-operator"}))
+	if err == nil {
+		t.Fatal("the search found no compositor and reported no error")
+	}
+	if !strings.Contains(err.Error(), westonBinary) {
+		t.Errorf("error = %q, want it to name %q", err, westonBinary)
 	}
 }
 

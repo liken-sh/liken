@@ -32,6 +32,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -89,6 +91,13 @@ const (
 
 // westonConfig builds the weston.ini for one set of outputs.
 //
+// Modes is the record of what the claims on this machine asked
+// for, keyed by connector. A connector with an entry gets that mode by
+// name, and every other connector gets the one its monitor prefers.
+// The config is always built from a fresh connector walk and the
+// record, and never parsed back, so this function is the only thing
+// that knows the file's shape.
+//
 // Every setting here is a requirement of a compositor in a pod on a
 // machine with no keyboard. No setting is a deployment's preference,
 // so the operator writes the file instead of taking one.
@@ -97,7 +106,7 @@ const (
 // file once, at startup. It enables only the heads whose connector
 // reports a monitor, so a dark section does nothing at first. When a
 // monitor arrives, that section configures and routes the new output.
-func westonConfig(outputs []Output) string {
+func westonConfig(outputs []Output, modes map[string]string) string {
 	var config strings.Builder
 	config.WriteString(`# Written by display.liken.sh at startup. Every edit is lost on the
 # next restart of the operator.
@@ -122,12 +131,16 @@ require-input=false
 idle-time=0
 `)
 	for _, output := range outputs {
+		mode := preferredMode
+		if stated := modes[output.Connector]; stated != "" {
+			mode = stated
+		}
 		fmt.Fprintf(&config, `
 [output]
 name=%s
-mode=preferred
+mode=%s
 app-ids=%s
-`, output.Connector, appID(output.Connector))
+`, output.Connector, mode, appID(output.Connector))
 	}
 	return config.String()
 }
@@ -136,12 +149,18 @@ app-ids=%s
 // it.
 //
 // The file describes the monitors this pod found, so the volume is
-// the pod's own and the declare container is its only writer.
-func writeWestonConfig(path string, outputs []Output) error {
+// the pod's own.
+//
+// Two roles write it. The declare container writes it at
+// startup from the record it finds, and the operator container writes
+// it again whenever a claim states a mode. Both build the whole file
+// from a connector walk and the record, so neither has to read what
+// the other wrote.
+func writeWestonConfig(path string, outputs []Output, modes map[string]string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(westonConfig(outputs)), 0o644)
+	return os.WriteFile(path, []byte(westonConfig(outputs, modes)), 0o644)
 }
 
 // declare enumerates the card's connectors, writes the compositor's
@@ -179,9 +198,83 @@ func declare() {
 		fmt.Printf("%s: %s has %s, app-id %s\n",
 			DriverName, output.Connector, monitor, appID(output.Connector))
 	}
-	if err := writeWestonConfig(westonConfigPath, outputs); err != nil {
+	// The record states the modes the claims on this machine
+	// asked for. It is empty on a pod that has just started, because
+	// the volume is the pod's own, and a machine with no consumer left
+	// comes up with every screen at the mode its monitor prefers. It
+	// carries entries when the kubelet restarts the pod's containers
+	// under claims that are still held.
+	record, err := readModeRecord(modeRecordPath)
+	if err != nil {
+		fatal("%v", err)
+	}
+	if err := writeModeRecord(modeRecordPath, record); err != nil {
+		fatal("writing %s: %v", modeRecordPath, err)
+	}
+	if err := writeWestonConfig(westonConfigPath, outputs, record); err != nil {
 		fatal("writing %s: %v", westonConfigPath, err)
 	}
+}
+
+// CompositorProcesses lists the processes running weston under
+// one /proc.
+//
+// The pod shares one process namespace, so this operator sees
+// the compositor's container and finds its process by the binary it
+// runs. Nothing else in the pod runs weston, and the operator's own
+// binary is a different path, so the exe link is the whole test. The
+// root is a parameter so a test drives the search over a directory it
+// built.
+func compositorProcesses(procRoot string) []int {
+	entries, err := os.ReadDir(procRoot)
+	if err != nil {
+		return nil
+	}
+	var pids []int
+	for _, entry := range entries {
+		// /proc holds the kernel's own files beside the numbered
+		// directories, and self is a link to the caller's own. A name
+		// that is not a number names no process.
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			continue
+		}
+		// The link resolves to the path the process execed, so a
+		// container that does not have weston at that path still reads
+		// the name. A process that exits between the listing and the
+		// read answers an error and counts as gone.
+		binary, err := os.Readlink(filepath.Join(procRoot, entry.Name(), "exe"))
+		if err != nil || binary != westonBinary {
+			continue
+		}
+		pids = append(pids, pid)
+	}
+	slices.Sort(pids)
+	return pids
+}
+
+// EndCompositor sends SIGTERM to the compositor and lets the
+// kubelet restart it.
+//
+// The signal is the whole mechanism. The compositor's container
+// holds one process, its exit is the container's exit, and the kubelet
+// restarts a container that exited. Nothing in this pod supervises
+// another process.
+//
+// A search that found nothing is a failure to report. A prepare
+// that waited for a mode change nothing started would hold the pod
+// until its timeout with no reason a person can read.
+func endCompositor(procRoot string) error {
+	pids := compositorProcesses(procRoot)
+	if len(pids) == 0 {
+		return fmt.Errorf("no process under %s runs %s", procRoot, westonBinary)
+	}
+	for _, pid := range pids {
+		if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+			return fmt.Errorf("signaling %s at pid %d: %w", westonBinary, pid, err)
+		}
+	}
+	return nil
 }
 
 // compose runs the compositor in place of this process.

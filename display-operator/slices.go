@@ -176,12 +176,17 @@ func sliceDevices(outputs []Output) []SliceDevice {
 			addSize(device.Attributes, "widthMillimeters", monitor.WidthMillimeters)
 			addSize(device.Attributes, "heightMillimeters", monitor.HeightMillimeters)
 			// The modes list shows the alternatives to the preferred
-			// mode, and nothing selects one. The compositor serves
-			// every output on the machine and changes a mode only by
-			// restarting, so one claim's choice would blank the other
-			// screens. The inventory states the choice; no API makes
-			// it.
+			// mode, and a claim's mode parameter selects one of them.
+			// The list is cut to fit the API's limit on a string
+			// attribute, so it advertises and the connector's own sysfs
+			// list is what a claim is validated against.
 			addAttribute(device.Attributes, "modes", attributeList(output.Modes))
+			// The mode this output runs right now, read from the
+			// card and not from sysfs. It follows a claim's mode, and
+			// it is what makes a mode a released claim left behind
+			// visible instead of hidden. It is absent while the output
+			// drives nothing and when the card could not answer.
+			addAttribute(device.Attributes, "currentMode", output.CurrentMode)
 		}
 		if !output.Connected {
 			device.Taints = unservableTaints()

@@ -83,6 +83,23 @@ const (
 // tests can point it at a directory they control.
 var westonConfigPath = "/etc/weston/weston.ini"
 
+// ModeRecordPath is where the operator records the mode each
+// claim asked for, in the same volume as the config.
+//
+// The record is the operator's own file, and weston.ini is
+// derived from it and the connector walk on every write. The record is
+// what the declare container reads to build the config the compositor
+// starts from, so a compositor that restarts comes back at the modes
+// the held claims stated. The volume dies with the pod, so a machine
+// with no consumer left comes up at every monitor's preferred mode.
+var modeRecordPath = "/etc/weston/modes.json"
+
+// ProcRoot is the process tree this operator reads to find the
+// compositor. The pod shares one process namespace, so the
+// compositor's process is in this one. It is a variable so the tests
+// can point it at a directory they control.
+var procRoot = "/proc"
+
 // defaultSocketDir is where the compositor listens and where a
 // consumer's container mounts. The path is the same on the host, in
 // this pod, and in the consumer's container, because the CDI mount
@@ -182,12 +199,7 @@ func operate() {
 	// prepare call that arrives while the socket is gone must be
 	// refused with a reason, and an unregistered driver answers with
 	// nothing at all.
-	plugin := &draPlugin{
-		client:    client,
-		sysRoot:   sysRoot,
-		card:      card,
-		socketDir: socketDir,
-	}
+	plugin := newDRAPlugin(client, card, socketDir)
 	go func() {
 		if err := serveDRAPlugin(ctx, plugin); err != nil {
 			fatal("the DRA plugin is not serving: %v", err)
@@ -204,7 +216,7 @@ func operate() {
 	// time and takes the same settle window.
 	retries := make(chan struct{}, 1)
 	publish := func() {
-		if err := reconcile(client, nodeName, owner, card, socketPath); err != nil {
+		if err := reconcile(client, nodeName, owner, card, socketPath, plugin.currentModes); err != nil {
 			fmt.Fprintf(os.Stderr, "publishing the slice: %v; retrying in %s\n", err, writeRetryDelay)
 			time.AfterFunc(writeRetryDelay, func() {
 				select {
@@ -272,12 +284,27 @@ func eventsEnded(ctx context.Context) error {
 // compositor's return carries the mode list the kernel re-probed on
 // the way up. A list read too early stays stale only until the next
 // wake.
-func reconcile(client *Client, nodeName string, owner OwnerReference, card, socketPath string) error {
+//
+// CurrentModes is the card's own answer about what each output
+// runs right now. The pass publishes it as an attribute, so the slice
+// always says what a claim's mode did and what a mode a claim left
+// behind is still doing. It is the same read the prepare path makes,
+// so the slice and a delivery never disagree.
+//
+// A read that fails costs the attribute and nothing else. The
+// rest of the slice is what sysfs says, and a card that cannot answer
+// the ioctl still has connectors, monitors, and a compositor.
+func reconcile(client *Client, nodeName string, owner OwnerReference, card, socketPath string,
+	currentModes func() (map[string]string, error)) error {
 	outputs := discoverOutputs(sysRoot, card)
 	if len(outputs) == 0 {
 		return fmt.Errorf("%s registers no connectors, so the published slice stays as it is", card)
 	}
-	devices := sliceDevices(outputs)
+	modes, err := currentModes()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reading the mode each output runs: %v\n", err)
+	}
+	devices := sliceDevices(withCurrentModes(outputs, modes))
 	if !compositorServing(socketPath) {
 		// No compositor holds the screens, so every output says it
 		// serves nobody, and the NoExecute taint is what ends the

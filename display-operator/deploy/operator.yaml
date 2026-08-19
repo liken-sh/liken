@@ -65,6 +65,13 @@ spec:
       # must stop quickly on SIGTERM. While it is down, every monitor
       # it drives is black.
       terminationGracePeriodSeconds: 5
+      # One process namespace for the pod, so the operator
+      # container can find the compositor's process and send it
+      # SIGTERM. That signal is how a mode a claim states takes
+      # effect: weston parses weston.ini once at startup, so the
+      # operator rewrites the file and ends the compositor, and the
+      # kubelet starts it again on the new config.
+      shareProcessNamespace: true
       # Three containers from one image, ordered by the kubelet: the
       # declare container writes weston.ini and exits, the weston
       # container runs the compositor, and the operator container
@@ -193,6 +200,13 @@ spec:
             # has to be somewhere both pods can name.
             - name: socket
               mountPath: /var/run/display.liken.sh
+            # The compositor's configuration directory, which
+            # this container writes when a claim states a mode: the
+            # record of what each claim asked for, and the weston.ini
+            # regenerated from it. The compositor reads the file at its
+            # next start, which the operator's SIGTERM brings on.
+            - name: weston-config
+              mountPath: /etc/weston
       resourceClaims:
         - name: gpu
           resourceClaimTemplateName: display-gpu
@@ -215,11 +229,16 @@ spec:
           hostPath:
             path: /var/run/display.liken.sh
             type: DirectoryOrCreate
-        # The compositor's configuration directory, shared between
-        # the declare container that writes it and the weston
-        # container that reads it. The volume is the pod's own,
+        # The compositor's configuration directory, shared by the
+        # declare container that writes it, the weston container that
+        # reads it, and the operator container that rewrites it for a
+        # claim that states a mode. The volume is the pod's own,
         # because the file states the connectors this pod enumerated,
         # and a volume that outlived the pod would hand the next
         # compositor an old set.
+        # The mode record lives here too, so a mode a claim
+        # stated survives a restart of the compositor's container and
+        # dies with the pod. A machine that comes up with no consumer
+        # left runs every screen at the mode its monitor prefers.
         - name: weston-config
           emptyDir: {}

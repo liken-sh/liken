@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -188,7 +189,7 @@ func TestReconcileTaintsEveryOutputWhileNoCompositorServes(t *testing.T) {
 
 	// The socket file is there and nothing answers on it, which is what
 	// a compositor killed uncleanly leaves.
-	err := reconcile(client, "liken-1", testOwner(), "card1", staleSocket(t, t.TempDir()))
+	err := reconcile(client, "liken-1", testOwner(), "card1", staleSocket(t, t.TempDir()), noCurrentModes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +219,7 @@ func TestReconcileFreesTheScreensWhenTheSocketReturns(t *testing.T) {
 	}}
 	client := testClient(t, fixture.handler(t))
 
-	if err := reconcile(client, "liken-1", testOwner(), "card1", socket); err != nil {
+	if err := reconcile(client, "liken-1", testOwner(), "card1", socket, noCurrentModes); err != nil {
 		t.Fatal(err)
 	}
 	if fixture.updated == nil {
@@ -230,6 +231,70 @@ func TestReconcileFreesTheScreensWhenTheSocketReturns(t *testing.T) {
 			t.Errorf("%s: taints = %+v, want %d of them",
 				device.Name, device.Taints, wantTaints[device.Name])
 		}
+	}
+}
+
+// noCurrentModes is the readback of a card that reports no mode on any
+// connector, which is what a machine whose compositor is down answers.
+func noCurrentModes() (map[string]string, error) {
+	return nil, nil
+}
+
+// publishedModes runs one pass and answers what currentMode each
+// device carries, with the devices that publish none left out.
+func publishedModes(t *testing.T, current func() (map[string]string, error)) map[string]string {
+	t.Helper()
+	compositorFixture(t)
+	fixture := &slicePublishFixture{}
+	client := testClient(t, fixture.handler(t))
+
+	socket := servingSocket(t, t.TempDir())
+	if err := reconcile(client, "liken-1", testOwner(), "card1", socket, current); err != nil {
+		t.Fatal(err)
+	}
+	if fixture.created == nil {
+		t.Fatal("nothing published")
+	}
+	published := map[string]string{}
+	for _, device := range fixture.created.Spec.Devices {
+		attribute, stated := device.Attributes["currentMode"]
+		if !stated {
+			continue
+		}
+		published[device.Name] = *attribute.String
+	}
+	return published
+}
+
+func TestReconcilePublishesTheModeEachScreenRunsNow(t *testing.T) {
+	// The slice says what each output runs right now, which is what
+	// makes a mode a claim left behind visible instead of hidden.
+	// DP-1 has no monitor, so a mode read for it publishes nothing, and
+	// HDMI-A-2 answered no mode at all.
+	published := publishedModes(t, func() (map[string]string, error) {
+		return map[string]string{"HDMI-A-1": "3840x1600", "DP-1": "1920x1080"}, nil
+	})
+
+	if published["hdmi-a-1"] != "3840x1600" {
+		t.Errorf("currentMode = %v, want hdmi-a-1 at 3840x1600", published)
+	}
+	if _, dark := published["dp-1"]; dark {
+		t.Errorf("a connector with no monitor published a currentMode: %v", published)
+	}
+	if _, stated := published["hdmi-a-2"]; stated {
+		t.Errorf("a connector the readback skipped published a currentMode: %v", published)
+	}
+}
+
+func TestReconcilePublishesNoCurrentModeWhenTheCardCannotAnswer(t *testing.T) {
+	// The attribute is absent rather than wrong when the read fails,
+	// and the pass still publishes everything else the slice carries.
+	published := publishedModes(t, func() (map[string]string, error) {
+		return nil, errors.New("the card node is not there")
+	})
+
+	if len(published) != 0 {
+		t.Errorf("currentMode = %v, want none", published)
 	}
 }
 

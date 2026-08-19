@@ -61,6 +61,27 @@ type Output struct {
 	// name is a resolution with no refresh rate, so a resolution the
 	// monitor accepts at several rates appears once.
 	Modes []string
+	// CurrentMode is the mode this output runs right now, in
+	// the same vocabulary as Modes. It comes from the card node, not
+	// from sysfs: sysfs publishes what a connector accepts and never
+	// what it drives. It is empty when the output drives nothing and
+	// when the card could not answer.
+	CurrentMode string
+}
+
+// WithCurrentModes puts the card's readback beside what sysfs
+// said about each connector.
+//
+// The two reads are separate because they answer different
+// questions and can fail apart. A connector the readback skipped keeps
+// an empty CurrentMode, and the slice publishes no attribute for it.
+func withCurrentModes(outputs []Output, modes map[string]string) []Output {
+	out := make([]Output, len(outputs))
+	for i, output := range outputs {
+		out[i] = output
+		out[i].CurrentMode = modes[output.Connector]
+	}
+	return out
 }
 
 // discoverOutputs lists every connector on one card, sorted by

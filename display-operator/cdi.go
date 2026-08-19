@@ -47,6 +47,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -147,6 +148,47 @@ func writeCDISpec(claimUID string, devices []cdiDevice) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// PreparedDevices names the outputs one claim's spec granted.
+//
+// Unprepare carries a claim's UID and nothing else, and the
+// mode record is keyed by connector, so this file is what ties the two
+// together. It is the durable record: it outlives a restart of the
+// operator's container, where a map in this process would not, and it
+// dies with the pod, exactly as the mode record does.
+//
+// A spec that is not there answers no devices. The kubelet
+// repeats an unprepare whenever it has no record that the call
+// succeeded, so the second call finds the file gone and has nothing
+// left to release.
+func preparedDevices(claimUID string) ([]string, error) {
+	cdiWrites.Lock()
+	defer cdiWrites.Unlock()
+
+	raw, err := os.ReadFile(cdiSpecPath(claimUID))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var spec cdiSpec
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		return nil, err
+	}
+	var devices []string
+	for _, device := range spec.Devices {
+		// The claim's UID prefixes every device name in the
+		// file, so the device is what is left when the prefix comes
+		// off.
+		name, named := strings.CutPrefix(device.Name, claimUID+"-")
+		if !named {
+			continue
+		}
+		devices = append(devices, name)
+	}
+	return devices, nil
 }
 
 // removeCDISpec deletes a claim's spec file. An already absent file

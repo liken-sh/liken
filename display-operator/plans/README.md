@@ -37,6 +37,14 @@ say why it is built the way it is.
   kubelet restarts it alone, and the operator taints every output
   while nothing answers on the compositor's socket. The prerequisite
   for a claim that selects a mode.
+* [05, Choosing the mode](05-choosing-the-mode.md). In build. A
+  claim's opaque config states a resolution, and the operator
+  rewrites the compositor's config, restarts it, and delivers only
+  after the readback reports the mode.
+* [06, Matching the refresh](06-matching-the-refresh.md). Queued
+  behind plan 05. The mode grows an integer refresh, validated
+  against the kernel's own mode list, so a 24 fps film runs on a
+  24 Hz mode.
 
 ## Open problems
 

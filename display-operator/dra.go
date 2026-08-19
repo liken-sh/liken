@@ -29,6 +29,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 	healthv1alpha1 "k8s.io/kubelet/pkg/apis/dra-health/v1alpha1"
@@ -49,12 +51,64 @@ var (
 // the card whose connectors it publishes, and the directory of the
 // socket a consumer receives. Everything else it derives again on each
 // call, from the claim and from sysfs.
+//
+// The mode fields are what a claim that states a resolution
+// touches: the compositor's config and the record beside it, the two
+// seams a switch acts through, and the bounds of the wait for the
+// screen to come back.
 type draPlugin struct {
 	drav1.UnimplementedDRAPluginServer
 	client    *Client
 	sysRoot   string
 	card      string
 	socketDir string
+	// The two files in the pod's config volume. The operator
+	// mounts the same volume the declare container writes and the
+	// compositor reads.
+	configPath string
+	recordPath string
+	// CurrentModes reads what each output runs, and
+	// endCompositor is the restart that makes a new mode take. Both are
+	// fields rather than calls to the functions themselves, so a test
+	// drives a prepare with no card node and no compositor behind it.
+	currentModes  func() (map[string]string, error)
+	endCompositor func() error
+	// The bounds of the wait for the socket and the mode to come
+	// back.
+	switchTimeout  time.Duration
+	switchInterval time.Duration
+	// ModeSwitches serializes the whole switch. The record is
+	// one file for every connector, and two prepares that rewrote it at
+	// once would restart the compositor twice for one config.
+	modeSwitches sync.Mutex
+	// Restarted remembers the restart this process already
+	// ordered for a connector, which is the restart budget: a readback
+	// that still disagrees after one restart means weston declined the
+	// mode, and a second restart would blank every screen for the same
+	// wrong answer.
+	restarted map[string]string
+}
+
+// NewDRAPlugin builds the plugin the kubelet talks to.
+//
+// Every seam takes its real implementation here and a stand-in
+// only in a test, so this is the one place the card readback and the
+// compositor's restart are named together.
+func newDRAPlugin(client *Client, card, socketDir string) *draPlugin {
+	return &draPlugin{
+		client:     client,
+		sysRoot:    sysRoot,
+		card:       card,
+		socketDir:  socketDir,
+		configPath: westonConfigPath,
+		recordPath: modeRecordPath,
+		currentModes: func() (map[string]string, error) {
+			return readCurrentModes(filepath.Join(driRoot, card))
+		},
+		endCompositor:  func() error { return endCompositor(procRoot) },
+		switchTimeout:  modeSwitchTimeout,
+		switchInterval: modeSwitchInterval,
+	}
 }
 
 // draRegistrar answers the kubelet's plugin-watcher handshake.
@@ -133,12 +187,12 @@ func serveDRAPlugin(ctx context.Context, plugin *draPlugin) error {
 func (p *draPlugin) NodePrepareResources(ctx context.Context, req *drav1.NodePrepareResourcesRequest) (*drav1.NodePrepareResourcesResponse, error) {
 	resp := &drav1.NodePrepareResourcesResponse{Claims: map[string]*drav1.NodePrepareResourceResponse{}}
 	for _, claim := range req.Claims {
-		resp.Claims[claim.Uid] = p.prepareClaim(claim)
+		resp.Claims[claim.Uid] = p.prepareClaim(ctx, claim)
 	}
 	return resp, nil
 }
 
-func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceResponse {
+func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1.NodePrepareResourceResponse {
 	fail := func(format string, args ...any) *drav1.NodePrepareResourceResponse {
 		message := fmt.Sprintf(format, args...)
 		fmt.Fprintf(os.Stderr, "dra: preparing claim %s/%s: %s\n", claim.Namespace, claim.Name, message)
@@ -168,12 +222,21 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 		return fail("the claim has no allocation yet")
 	}
 
+	// The allocation's config is the resolved list: the claim's
+	// own blocks and the DeviceClass's, each marked with its source.
+	// The scheduler passed every opaque block through unread, so this
+	// is the first code anywhere that reads this driver's parameters.
+	selection, err := claimModes(allocated.Status.Allocation.Devices.Config)
+	if err != nil {
+		return fail("%v", err)
+	}
+
 	// One walk answers every result in the claim, and it is the same
 	// walk that publishes the slice, so the two always report the same
 	// set of outputs with a monitor on them.
-	live := map[string]bool{}
+	live := map[string]Output{}
 	for _, output := range connected(discoverOutputs(p.sysRoot, p.card)) {
-		live[deviceName(output.Connector)] = true
+		live[deviceName(output.Connector)] = output
 	}
 
 	var specDevices []cdiDevice
@@ -186,11 +249,25 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 			// results, and each driver answers for its own.
 			continue
 		}
-		if !live[result.Device] {
+		output, lit := live[result.Device]
+		if !lit {
 			// The monitor left between the allocation and this call.
 			// The pod waits in ContainerCreating, and the output's
 			// NoExecute taint is what the eviction controller acts on.
+			//
+			// A mode on a connector with nothing on it fails
+			// here too. There is no mode list to validate against and
+			// no screen to light.
 			return fail("output %s has no monitor on it right now", result.Device)
+		}
+		// The delivery waits for the switch. Between the restart
+		// and the readback the screen runs the mode the claim replaced,
+		// and a delivery that raced it would start the consumer against
+		// a screen that is about to go dark.
+		if mode := selection.forRequest(result.Request); mode != "" {
+			if err := p.applyMode(ctx, output, mode, socketPath); err != nil {
+				return fail("%v", err)
+			}
 		}
 		name := claim.Uid + "-" + result.Device
 		specDevices = append(specDevices, cdiDevice{
@@ -212,20 +289,44 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 	return &drav1.NodePrepareResourceResponse{Devices: devices}
 }
 
-// NodeUnprepareResources removes each claim's CDI spec. As with
-// prepare, every claim gets an answer and failures stay specific to
-// each claim. Nothing else has to be given back: the compositor keeps
-// the screen, and the next claim receives the same socket.
+// NodeUnprepareResources removes each claim's CDI spec and takes the
+// modes it stated out of the record. As with prepare, every claim gets
+// an answer and failures stay specific to each claim. The socket needs
+// nothing given back: the compositor keeps the screen, and the next
+// claim receives the same socket.
+//
+// Nothing restarts here, so the screen keeps the mode until the
+// next compositor start. The record is what the next start reads, so
+// dropping the entry is what returns the screen to the mode its
+// monitor prefers.
 func (p *draPlugin) NodeUnprepareResources(ctx context.Context, req *drav1.NodeUnprepareResourcesRequest) (*drav1.NodeUnprepareResourcesResponse, error) {
 	resp := &drav1.NodeUnprepareResourcesResponse{Claims: map[string]*drav1.NodeUnprepareResourceResponse{}}
 	for _, claim := range req.Claims {
-		if err := removeCDISpec(claim.Uid); err != nil {
+		if err := p.unprepareClaim(claim.Uid); err != nil {
+			fmt.Fprintf(os.Stderr, "dra: unpreparing claim %s/%s: %v\n", claim.Namespace, claim.Name, err)
 			resp.Claims[claim.Uid] = &drav1.NodeUnprepareResourceResponse{Error: err.Error()}
 			continue
 		}
 		resp.Claims[claim.Uid] = &drav1.NodeUnprepareResourceResponse{}
 	}
 	return resp, nil
+}
+
+// UnprepareClaim gives back what one claim held.
+//
+// The record is released before the spec is removed, because
+// the spec is what names the claim's outputs. A failure between the
+// two leaves the spec in place, and the kubelet's next unprepare
+// reads it again and releases what is left.
+func (p *draPlugin) unprepareClaim(claimUID string) error {
+	devices, err := preparedDevices(claimUID)
+	if err != nil {
+		return err
+	}
+	if err := p.releaseModes(devices); err != nil {
+		return err
+	}
+	return removeCDISpec(claimUID)
 }
 
 // draHealth is the device-health stream. The driver keeps it open and
@@ -256,8 +357,14 @@ type ResourceClaim struct {
 	} `json:"metadata"`
 	Status struct {
 		Allocation *struct {
+			// The driver reads the allocation's config and never
+			// the claim's own spec. The scheduler resolves the
+			// DeviceClass's blocks and the claim's into this one list
+			// and marks each entry's source, so cluster policy is
+			// visible here and nowhere else.
 			Devices struct {
 				Results []AllocatedDevice `json:"results"`
+				Config  []AllocatedConfig `json:"config"`
 			} `json:"devices"`
 		} `json:"allocation"`
 	} `json:"status"`

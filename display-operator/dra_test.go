@@ -14,7 +14,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
 )
@@ -26,16 +28,18 @@ const (
 )
 
 // allocatedClaim answers the one GET the driver makes, with the
-// allocation the scheduler would have written on the claim's status.
-func allocatedClaim(t *testing.T, results []AllocatedDevice) *Client {
+// allocation the scheduler would have written on the claim's status:
+// the results, and the config the scheduler resolved from the claim's
+// own blocks and the DeviceClass's.
+func allocatedClaim(t *testing.T, results []AllocatedDevice, config string) *Client {
 	t.Helper()
 	encoded, err := json.Marshal(results)
 	if err != nil {
 		t.Fatal(err)
 	}
 	body := fmt.Sprintf(
-		`{"metadata":{"name":%q,"namespace":%q,"uid":%q},"status":{"allocation":{"devices":{"results":%s}}}}`,
-		testClaimName, testClaimNamespace, testClaimUID, encoded)
+		`{"metadata":{"name":%q,"namespace":%q,"uid":%q},"status":{"allocation":{"devices":{"results":%s,"config":[%s]}}}}`,
+		testClaimName, testClaimNamespace, testClaimUID, encoded, config)
 
 	return testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		want := "/apis/resource.k8s.io/v1/namespaces/" + testClaimNamespace + "/resourceclaims/" + testClaimName
@@ -46,18 +50,127 @@ func allocatedClaim(t *testing.T, results []AllocatedDevice) *Client {
 	}))
 }
 
+// fakeCompositor stands in for the two things a mode switch touches
+// outside this process: the current mode the card reports, and the
+// signal that ends the compositor.
+//
+// The kubelet is what restarts the container, so the restart is
+// modeled here: an ended compositor comes back with the modes the
+// record states, unless the test says it declines them, which is what
+// a mode weston cannot match does.
+type fakeCompositor struct {
+	mu       sync.Mutex
+	record   string
+	current  map[string]string
+	kills    int
+	declines bool
+	readErr  error
+}
+
+// modes is the GETCRTC readback: what each connector runs right now.
+func (f *fakeCompositor) modes() (map[string]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.readErr != nil {
+		return nil, f.readErr
+	}
+	current := map[string]string{}
+	for connector, mode := range f.current {
+		current[connector] = mode
+	}
+	return current, nil
+}
+
+// end is the SIGTERM and the kubelet's restart in one step.
+func (f *fakeCompositor) end() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.kills++
+	if f.declines {
+		return nil
+	}
+	record, err := readModeRecord(f.record)
+	if err != nil {
+		return err
+	}
+	for connector, mode := range record {
+		f.current[connector] = mode
+	}
+	return nil
+}
+
+func (f *fakeCompositor) ended() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.kills
+}
+
 // labPlugin is the driver as it runs on the lab machine: an ultrawide
 // on HDMI-A-1, a portable monitor on HDMI-A-2, and an empty DP-1, with
 // a compositor serving its socket in the pod's runtime directory.
 func labPlugin(t *testing.T, results []AllocatedDevice) *draPlugin {
 	t.Helper()
+	plugin, _ := labPluginWithConfig(t, results, "")
+	return plugin
+}
+
+// labPluginWithConfig is the same driver, with the resolved config
+// entries a claim and its DeviceClass produced, and with the
+// compositor the switch acts on. The ultrawide runs its preferred
+// mode and the portable panel runs 1920x1080, which is what both
+// monitors come up at.
+func labPluginWithConfig(t *testing.T, results []AllocatedDevice, config string) (*draPlugin, *fakeCompositor) {
+	t.Helper()
 	cdiDir = t.TempDir()
-	return &draPlugin{
-		client:    allocatedClaim(t, results),
-		sysRoot:   labSysfs(t),
-		card:      "card1",
-		socketDir: servedSocketDir(t),
+	configDir := t.TempDir()
+	compositor := &fakeCompositor{
+		record: filepath.Join(configDir, "modes.json"),
+		current: map[string]string{
+			"HDMI-A-1": "3840x1600",
+			"HDMI-A-2": "1920x1080",
+		},
 	}
+	plugin := &draPlugin{
+		client:     allocatedClaim(t, results, config),
+		sysRoot:    labSysfs(t),
+		card:       "card1",
+		socketDir:  servedSocketDir(t),
+		configPath: filepath.Join(configDir, "weston.ini"),
+		recordPath: compositor.record,
+		// The wait is the same wait the operator runs on the machine,
+		// with the bounds shortened so that a test that must reach the
+		// timeout reaches it at once.
+		currentModes:   compositor.modes,
+		endCompositor:  compositor.end,
+		switchTimeout:  200 * time.Millisecond,
+		switchInterval: time.Millisecond,
+	}
+	return plugin, compositor
+}
+
+// modeRecord reads the record the plugin keeps beside weston.ini.
+func modeRecord(t *testing.T, plugin *draPlugin) map[string]string {
+	t.Helper()
+	record, err := readModeRecord(plugin.recordPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return record
+}
+
+// westonINI reads the config the plugin regenerates on every change.
+// A pod whose claims stated no mode has no file here at all, because
+// the declare container writes it in a volume of the pod's own.
+func westonINI(t *testing.T, plugin *draPlugin) string {
+	t.Helper()
+	written, err := os.ReadFile(plugin.configPath)
+	if os.IsNotExist(err) {
+		return ""
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(written)
 }
 
 // servedSocketDir is a runtime directory with a compositor answering
@@ -250,12 +363,194 @@ func TestPrepareLeavesAnotherDriversAllocationAlone(t *testing.T) {
 	}
 }
 
-func TestUnprepareRemovesTheSpec(t *testing.T) {
-	plugin := labPlugin(t, []AllocatedDevice{
-		{Request: "screen", Driver: DriverName, Pool: "liken-1", Device: "hdmi-a-1"},
-	})
-	prepare(t, plugin)
+// screenRequest is the one allocation result a claim on the lab's
+// portable panel holds.
+func screenRequest() []AllocatedDevice {
+	return []AllocatedDevice{
+		{Request: "screen", Driver: DriverName, Pool: "liken-1", Device: "hdmi-a-2"},
+	}
+}
 
+func TestPrepareDeliversAModeTheScreenAlreadyRuns(t *testing.T) {
+	// The readback is what decides, so a claim that asks for the mode
+	// on the screen right now delivers at once. This is what makes the
+	// kubelet's retry free and the whole flow idempotent: nothing is
+	// written and nothing restarts.
+	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1920x1080"}`))
+
+	claim := prepare(t, plugin)
+	if claim.Error != "" {
+		t.Fatalf("prepare refused the mode the screen runs: %s", claim.Error)
+	}
+	if len(claim.Devices) != 1 {
+		t.Fatalf("devices = %+v", claim.Devices)
+	}
+	if compositor.ended() != 0 {
+		t.Errorf("the compositor was ended %d times for a mode it already runs", compositor.ended())
+	}
+	if got := modeRecord(t, plugin); len(got) != 0 {
+		t.Errorf("record = %v, want nothing written", got)
+	}
+	if got := westonINI(t, plugin); got != "" {
+		t.Errorf("the config was rewritten for a mode already up:\n%s", got)
+	}
+}
+
+func TestPrepareSwitchesTheModeAndWaitsForTheReadback(t *testing.T) {
+	// The whole flow: the record takes the mode, the config regenerates
+	// from the connector walk and the record, the compositor ends once,
+	// and the delivery waits for GETCRTC to report the mode.
+	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1280x720"}`))
+
+	claim := prepare(t, plugin)
+	if claim.Error != "" {
+		t.Fatalf("prepare refused a mode the connector offers: %s", claim.Error)
+	}
+	if len(claim.Devices) != 1 || claim.Devices[0].DeviceName != "hdmi-a-2" {
+		t.Fatalf("devices = %+v", claim.Devices)
+	}
+	if compositor.ended() != 1 {
+		t.Errorf("the compositor was ended %d times, want once", compositor.ended())
+	}
+	if got := modeRecord(t, plugin); got["HDMI-A-2"] != "1280x720" {
+		t.Errorf("record = %v", got)
+	}
+	config := westonINI(t, plugin)
+	for _, want := range []string{
+		"name=HDMI-A-2\nmode=1280x720\napp-ids=hdmi-a-2",
+		"name=HDMI-A-1\nmode=preferred\napp-ids=hdmi-a-1",
+	} {
+		if !strings.Contains(config, want) {
+			t.Errorf("the config does not contain %q:\n%s", want, config)
+		}
+	}
+}
+
+func TestPrepareRefusesAModeTheConnectorDoesNotOffer(t *testing.T) {
+	// Validation reads the connector's own sysfs list, never the
+	// published attribute, and the failure names the whole list. The
+	// attribute stops at 64 characters, so it is the one place a person
+	// sees the names the attribute could not carry.
+	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1234x567"}`))
+
+	claim := prepare(t, plugin)
+	if claim.Error == "" {
+		t.Fatal("prepare accepted a mode the connector does not offer")
+	}
+	for _, want := range []string{"1234x567", "1920x1080 1600x900 1280x800 1280x720"} {
+		if !strings.Contains(claim.Error, want) {
+			t.Errorf("error = %q, want it to say %q", claim.Error, want)
+		}
+	}
+	if compositor.ended() != 0 {
+		t.Errorf("the compositor was ended for a mode that never passed validation")
+	}
+	if got := specFiles(t); len(got) != 0 {
+		t.Errorf("a refused claim left %v behind", got)
+	}
+}
+
+func TestPrepareRefusesAModeOnAConnectorWithNoMonitor(t *testing.T) {
+	// DP-1 has nothing on it, so there is no mode list to validate
+	// against and no screen to light. The pod waits in
+	// ContainerCreating, and the failure says why.
+	plugin, compositor := labPluginWithConfig(t, []AllocatedDevice{
+		{Request: "screen", Driver: DriverName, Pool: "liken-1", Device: "dp-1"},
+	}, claimMode(`{"mode": "1280x720"}`))
+
+	claim := prepare(t, plugin)
+	if claim.Error == "" {
+		t.Fatal("prepare accepted a mode on a connector with no monitor")
+	}
+	if !strings.Contains(claim.Error, "no monitor") {
+		t.Errorf("error = %q, want it to say %q", claim.Error, "no monitor")
+	}
+	if compositor.ended() != 0 {
+		t.Error("the compositor was ended for a connector with no monitor")
+	}
+}
+
+func TestPrepareRefusesParametersItCannotRead(t *testing.T) {
+	// A key this driver does not read fails the prepare rather than
+	// being dropped, whichever source wrote it. A dropped typo would
+	// drive the wrong mode with nothing said anywhere.
+	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"resolution": "1280x720"}`))
+
+	claim := prepare(t, plugin)
+	if claim.Error == "" {
+		t.Fatal("prepare accepted parameters it cannot read")
+	}
+	if !strings.Contains(claim.Error, "resolution") {
+		t.Errorf("error = %q, want it to name the key", claim.Error)
+	}
+	if compositor.ended() != 0 {
+		t.Error("the compositor was ended for a claim that never parsed")
+	}
+}
+
+func TestPrepareRefusesToRestartTwiceForAModeTheCompositorDeclined(t *testing.T) {
+	// Weston falls back to the preferred mode silently when it cannot
+	// match what the config asks for, with no log line and no failed
+	// exit. The readback is what catches that, and a second restart
+	// would blank every screen on the machine for the same wrong
+	// answer.
+	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1280x720"}`))
+	compositor.declines = true
+
+	first := prepare(t, plugin)
+	if first.Error == "" {
+		t.Fatal("prepare delivered a screen that never took the mode")
+	}
+	if !strings.Contains(first.Error, "1280x720") {
+		t.Errorf("error = %q, want it to name the mode", first.Error)
+	}
+	if compositor.ended() != 1 {
+		t.Fatalf("the compositor was ended %d times, want once", compositor.ended())
+	}
+
+	// The kubelet retries the prepare it holds a pod for. The config
+	// already asks for this mode and a restart already happened, so the
+	// answer is the failure and not another dark machine.
+	second := prepare(t, plugin)
+	if second.Error == "" {
+		t.Fatal("the retry delivered a screen that never took the mode")
+	}
+	if !strings.Contains(second.Error, "declined") {
+		t.Errorf("error = %q, want it to say the compositor declined the mode", second.Error)
+	}
+	if compositor.ended() != 1 {
+		t.Errorf("the compositor was ended %d times, want the one restart", compositor.ended())
+	}
+}
+
+func TestUnprepareTakesTheModeOutOfTheRecord(t *testing.T) {
+	// A claim that ends restarts nothing: the device allocates to one
+	// claim at a time, and a revert would restart every screen on the
+	// machine to serve nobody. The record and the config lose the
+	// entry, so the next compositor start comes up at the mode the
+	// monitor prefers.
+	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1280x720"}`))
+	if claim := prepare(t, plugin); claim.Error != "" {
+		t.Fatal(claim.Error)
+	}
+
+	unprepare(t, plugin)
+
+	if got := modeRecord(t, plugin); len(got) != 0 {
+		t.Errorf("record = %v, want nothing left", got)
+	}
+	if got := westonINI(t, plugin); !strings.Contains(got, "name=HDMI-A-2\nmode=preferred") {
+		t.Errorf("the config still states a mode:\n%s", got)
+	}
+	if compositor.ended() != 1 {
+		t.Errorf("the compositor was ended %d times, want only the switch's restart", compositor.ended())
+	}
+}
+
+// unprepare runs the kubelet's own call for the one claim these tests
+// use, and fails when the driver answers with anything but success.
+func unprepare(t *testing.T, plugin *draPlugin) {
+	t.Helper()
 	resp, err := plugin.NodeUnprepareResources(context.Background(), &drav1.NodeUnprepareResourcesRequest{
 		Claims: []*drav1.Claim{{Namespace: testClaimNamespace, Name: testClaimName, Uid: testClaimUID}},
 	})
@@ -265,6 +560,16 @@ func TestUnprepareRemovesTheSpec(t *testing.T) {
 	if answer := resp.Claims[testClaimUID]; answer == nil || answer.Error != "" {
 		t.Fatalf("unprepare = %+v", resp.Claims)
 	}
+}
+
+func TestUnprepareRemovesTheSpec(t *testing.T) {
+	plugin := labPlugin(t, []AllocatedDevice{
+		{Request: "screen", Driver: DriverName, Pool: "liken-1", Device: "hdmi-a-1"},
+	})
+	prepare(t, plugin)
+
+	unprepare(t, plugin)
+
 	if got := specFiles(t); len(got) != 0 {
 		t.Errorf("unprepare left %v behind", got)
 	}
