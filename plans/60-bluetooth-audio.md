@@ -140,6 +140,13 @@ and the media bus, three devices across the two drivers.
 
 ### The audio operator
 
+The second, third, and fourth items landed with that operator's
+release 2026.08.19-004, recorded as its plan 04 and drilled
+hands-free on liken-1 on 2026-08-19: the fragment wrote, six
+A2DPSink endpoints registered over the delivered bus, and
+`studio-pa` published tainted beside the card's sinks. The playback
+drills wait for hands.
+
 * Selects on the shared attribute. This landed with plan 61's
   enrichment release: the `sound-card` class names
   `sound.liken.sh/supportsSound` and no driver, and the claim
@@ -283,14 +290,19 @@ the release these operators pin, in
 
 ## The costs
 
-**A Bluetooth pod restart still restarts the audio pod.** PipeWire's
+**A Bluetooth pod restart still ends Bluetooth audio.** PipeWire's
 `bluez5` plugin survives a `bluetoothd` restart, but it has no
 reconnect path after the bus daemon itself exits, and the bus daemon
-runs in the Bluetooth pod. So a Bluetooth pod restart ends Bluetooth
-audio, and the audio pod must restart to get it back, which also
-interrupts HDMI audio on that machine. A restart of WirePlumber
-alone, with the PipeWire daemon and its ALSA sinks left up, may
-repair it; drill 7 answers that.
+runs in the Bluetooth pod. The plan 04 drill measured the shape on
+2026-08-19: the audio operator's container notices the closed bus
+and restarts within 3 seconds, but WirePlumber notices nothing,
+keeps running, and never re-registers the endpoints, so A2DP stays
+dead while every pod reports Ready. The repair today is a delete of
+the audio pod, which also interrupts HDMI audio on that machine. A
+restart of WirePlumber alone, with the PipeWire daemon and its ALSA
+sinks left up, may repair it; drill 7 answers that, and the audio
+operator's open problem "A2DP does not survive a Bluetooth pod
+restart" records the missing trigger.
 
 **A new adapter takes a manual pod roll.** A claim is allocated when
 the pod schedules, and an `All` allocation does not grow afterward. A
@@ -371,6 +383,9 @@ and a real A2DP speaker.
   are in WirePlumber and the ALSA sinks are in the PipeWire daemon,
   a WirePlumber-only restart may repair a lost bus without an
   interruption to HDMI playback. Drill 7 answers it, and the answer
-  sets the real cost of the restart coupling.
+  sets the real cost of the restart coupling. The plan 04 drill
+  added one fact on 2026-08-19: WirePlumber does not notice a lost
+  bus on its own, so any repair needs a trigger before it needs a
+  restart path.
 * **Where the headset profiles land** if a microphone use ever
   arrives: `hostNetwork` on the audio operator, or a narrower place.
