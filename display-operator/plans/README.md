@@ -42,10 +42,12 @@ say why it is built the way it is.
   states a resolution, and the operator rewrites the compositor's
   config, restarts it, and delivers only after the readback reports
   the mode.
-* [06, Matching the refresh](06-matching-the-refresh.md). Queued
-  behind plan 05. The mode grows an integer refresh, validated
-  against the kernel's own mode list, so a 24 fps film runs on a
-  24 Hz mode.
+* [06, Matching the refresh](completed/06-matching-the-refresh.md).
+  Built, and drilled on liken-1 on 2026-08-19. The mode grows an
+  integer refresh, validated against the kernel's own mode list, so
+  a 24 fps film runs on a 24 Hz mode. Absorbs and replaces the open
+  problem "A mode list read too early goes stale": every prepare
+  that reached the card republishes the slice.
 
 ## Open problems
 

@@ -1,8 +1,9 @@
 # 06, Matching the refresh
 
-Queued on 2026-08-19, behind plan 05. A claim's `mode` grows a
-refresh: `mode: "3840x1600@24"` runs a 24 fps film without the
-3:2 cadence a 60 Hz mode forces on it.
+Built, and drilled on liken-1 on 2026-08-19 with release
+2026.08.19-007. A claim's `mode` grows a refresh:
+`mode: "3840x1600@24"` runs a 24 fps film without the 3:2 cadence
+a 60 Hz mode forces on it.
 
 ## What plan 05 already carries
 
@@ -104,3 +105,18 @@ drives.
    slice's mode list matches the kernel's own file for that
    connector, so the republish on prepare holds against the case
    the folded problem measured.
+
+## What the lab measured
+
+The drill ran on liken-1 on 2026-08-19, on release 2026.08.19-007.
+The LG widescreen offers `3840x1600` at 60, 75, and 30, and the
+claim `3840x1600@30` restarted the compositor exactly once and read
+back `3840x1600@30`. The refusals named what exists:
+`HDMI-A-2 does not offer the mode "1280x720@100"; it offers
+1280x720 at 60`. A bare `3840x1600` claim against the screen
+running 30 Hz delivered with no restart. After a delete of the
+operator's pod with that claim in place, the consumer pod stayed
+`Running`, the prepare republished the slice, and both connectors'
+mode lists matched the kernel's own files exactly up to the
+64-character cut: `HDMI-A-1`'s seventh name would need 68
+characters and `HDMI-A-2`'s eighth would need 69.
