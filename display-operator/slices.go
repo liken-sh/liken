@@ -169,6 +169,10 @@ func sliceDevices(outputs []Output) []SliceDevice {
 			addAttribute(device.Attributes, pairingAttribute, monitorID(monitor))
 			addSize(device.Attributes, "widthPixels", monitor.WidthPixels)
 			addSize(device.Attributes, "heightPixels", monitor.HeightPixels)
+			// The refresh is in millihertz. A selector that wants 60 Hz
+			// exactly must ask for 60000, and a real monitor may answer
+			// 59999.
+			addSize(device.Attributes, "refreshMillihertz", monitor.RefreshMillihertz)
 			addSize(device.Attributes, "widthMillimeters", monitor.WidthMillimeters)
 			addSize(device.Attributes, "heightMillimeters", monitor.HeightMillimeters)
 		}

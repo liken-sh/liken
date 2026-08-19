@@ -76,6 +76,10 @@ type EDID struct {
 	// area.
 	WidthPixels  int
 	HeightPixels int
+	// RefreshMillihertz is the preferred mode's refresh rate, in
+	// millihertz, or zero when the timing states no raster. See
+	// refreshMillihertz for why the unit is not hertz.
+	RefreshMillihertz int
 	// WidthMillimeters and HeightMillimeters are the panel's physical
 	// size.
 	WidthMillimeters  int
@@ -135,6 +139,7 @@ func ParseEDID(raw []byte) (EDID, error) {
 			preferred = false
 			edid.WidthPixels = int(descriptor[2]) | int(descriptor[4]>>4)<<8
 			edid.HeightPixels = int(descriptor[5]) | int(descriptor[7]>>4)<<8
+			edid.RefreshMillihertz = refreshMillihertz(descriptor)
 			width := int(descriptor[12]) | int(descriptor[14]>>4)<<8
 			height := int(descriptor[13]) | int(descriptor[14]&0x0f)<<8
 			if width > 0 && height > 0 {
@@ -146,6 +151,28 @@ func ParseEDID(raw []byte) (EDID, error) {
 	}
 	edid.readExtensions(raw, int(block[126]))
 	return edid, nil
+}
+
+// refreshMillihertz computes the preferred mode's refresh rate from
+// its detailed timing. The rate is not a field of the descriptor: a
+// monitor states a pixel clock and a raster, and the refresh is the
+// clock divided by the whole raster, blanking included. The unit is
+// millihertz because real modes land near a round number and not on
+// it. This repository's own fixtures run at 59.999 and 59.998 Hz,
+// and an attribute in whole hertz would erase the difference.
+//
+// A zero clock or a zero total is a descriptor that states no mode,
+// so the answer is zero and the caller publishes nothing.
+func refreshMillihertz(descriptor []byte) int {
+	pixelClockHz := (int(descriptor[0]) | int(descriptor[1])<<8) * 10_000
+	horizontalTotal := int(descriptor[2]) | int(descriptor[4]>>4)<<8
+	horizontalTotal += int(descriptor[3]) | int(descriptor[4]&0x0f)<<8
+	verticalTotal := int(descriptor[5]) | int(descriptor[7]>>4)<<8
+	verticalTotal += int(descriptor[6]) | int(descriptor[7]&0x0f)<<8
+	if pixelClockHz == 0 || horizontalTotal == 0 || verticalTotal == 0 {
+		return 0
+	}
+	return pixelClockHz * 1_000 / (horizontalTotal * verticalTotal)
 }
 
 // readDescriptor takes the text out of one display descriptor. A

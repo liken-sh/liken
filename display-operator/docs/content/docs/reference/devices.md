@@ -35,6 +35,7 @@ itself publishes:
             serial: {string: "202NTRLCC070"}
             widthPixels: {int: 3840}
             heightPixels: {int: 1600}
+            refreshMillihertz: {int: 59999}
             widthMillimeters: {int: 879}
             heightMillimeters: {int: 366}
             monitor.liken.sh/id: {string: "gsm-7716-lg-hdr-wqhd"}
@@ -94,6 +95,7 @@ sysfs.
 | `model` | string | the monitor name the EDID states |
 | `serial` | string | the serial the EDID states |
 | `widthPixels`, `heightPixels` | int | the preferred mode, which is the mode the compositor drives |
+| `refreshMillihertz` | int | the preferred mode's refresh rate, in millihertz: a selector that wants 60 Hz exactly asks for `60000`, and a real monitor may answer `59999` |
 | `widthMillimeters`, `heightMillimeters` | int | the panel's physical size |
 | `monitor.liken.sh/id` | string | the pairing identity, described below |
 

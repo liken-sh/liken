@@ -49,6 +49,7 @@ func TestParseEDIDReadsRealMonitors(t *testing.T) {
 				ModelName:         "LG HDR WQHD",
 				WidthPixels:       3840,
 				HeightPixels:      1600,
+				RefreshMillihertz: 59999,
 				WidthMillimeters:  879,
 				HeightMillimeters: 366,
 			},
@@ -62,6 +63,7 @@ func TestParseEDIDReadsRealMonitors(t *testing.T) {
 				ModelName:         "Display",
 				WidthPixels:       1920,
 				HeightPixels:      1080,
+				RefreshMillihertz: 60000,
 				WidthMillimeters:  344,
 				HeightMillimeters: 196,
 			},
@@ -73,6 +75,7 @@ func TestParseEDIDReadsRealMonitors(t *testing.T) {
 				ProductCode:       0x095f,
 				WidthPixels:       2256,
 				HeightPixels:      1504,
+				RefreshMillihertz: 59998,
 				WidthMillimeters:  285,
 				HeightMillimeters: 190,
 			},
@@ -86,6 +89,40 @@ func TestParseEDIDReadsRealMonitors(t *testing.T) {
 			}
 			if edid != c.want {
 				t.Errorf("got  %+v\nwant %+v", edid, c.want)
+			}
+		})
+	}
+}
+
+func TestParseEDIDPublishesNoRefreshWithoutARasterTotal(t *testing.T) {
+	// A descriptor can state a clock and no raster. The parser must
+	// answer zero for the refresh, not divide by it, and the rest of
+	// the block must survive.
+	cases := []struct {
+		name  string
+		zeros []int
+	}{
+		{name: "no horizontal total", zeros: []int{2, 3, 4}},
+		{name: "no vertical total", zeros: []int{5, 6, 7}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			raw := append([]byte(nil), loadEDID(t, "portable-display")...)
+			timing := raw[54:72]
+			for _, index := range c.zeros {
+				timing[index] = 0
+			}
+			fixChecksum(raw[:blockSize])
+
+			edid, err := ParseEDID(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if edid.RefreshMillihertz != 0 {
+				t.Fatalf("RefreshMillihertz = %d, want 0", edid.RefreshMillihertz)
+			}
+			if edid.Manufacturer != "BOE" {
+				t.Errorf("the rest of the block did not survive: %+v", edid)
 			}
 		})
 	}

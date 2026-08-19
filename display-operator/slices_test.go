@@ -90,6 +90,7 @@ func TestSliceDevicesPublishesTheMonitorsFacts(t *testing.T) {
 	sizes := map[string]int64{
 		"widthPixels":       3840,
 		"heightPixels":      1600,
+		"refreshMillihertz": 59999,
 		"widthMillimeters":  879,
 		"heightMillimeters": 366,
 	}
@@ -120,7 +121,7 @@ func TestSliceDevicesTaintsAnOutputThatServesNobody(t *testing.T) {
 	if _, ok := dark.Attributes["connector"]; !ok {
 		t.Errorf("the connector attribute is missing: %+v", dark.Attributes)
 	}
-	for _, name := range []string{"manufacturer", "model", "serial", pairingAttribute, "widthPixels"} {
+	for _, name := range []string{"manufacturer", "model", "serial", pairingAttribute, "widthPixels", "refreshMillihertz"} {
 		if _, ok := dark.Attributes[name]; ok {
 			t.Errorf("%s publishes for an output with no monitor: %+v", name, dark.Attributes)
 		}
