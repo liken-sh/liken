@@ -111,6 +111,12 @@ repository. The OS still publishes raw hardware and nothing refined.
 
 ### The Bluetooth operator
 
+The first three items landed with that operator's release
+2026.08.19-004, drilled on liken-1 on 2026-08-19 and recorded as its
+plan 05. The drill also proved this plan's drill 1 on liken-1: the
+audio pod's fresh claim allocated the sound card, a USB audio device,
+and the media bus, three devices across the two drivers.
+
 * Publishes the media bus device, one per adapter, exclusive, with
   `sound.liken.sh/supportsSound` and a kind attribute, beside the
   controllers it already publishes.
