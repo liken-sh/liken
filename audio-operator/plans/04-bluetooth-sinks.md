@@ -1,7 +1,7 @@
 # 04, Bluetooth sinks
 
-Built. The drill on liken-1 runs with the release that carries this
-plan.
+Built, and the hands-free half drilled on liken-1 on 2026-08-19 with
+release 2026.08.19-004. The playback drills wait for hands.
 
 This plan is this operator's half of liken's
 [milestone 60, Bluetooth audio](https://github.com/liken-sh/liken/blob/main/plans/60-bluetooth-audio.md).
@@ -105,3 +105,15 @@ The parts that need hands and ears are milestone 60's own drills:
 the speaker switches on and the parked pod starts, playback through
 the speaker, the mixed HDMI-and-speaker claim, and the coexistence
 measurements with the pad.
+
+The hands-free drill ran on 2026-08-19. Items 1 through 4 held
+exactly as written: the fragment wrote, the monitor connected, six
+A2DPSink endpoints registered, and `studio-pa` published with both
+taints beside the card's sinks. Item 5 measured the coupling and
+found a gap. The operator container notices the closed bus and
+restarts within 3 seconds, but WirePlumber notices nothing: it keeps
+running, logs nothing, and never re-registers the endpoints, so
+A2DP stays dead while every pod reports Ready. The repair today is
+a delete of the audio pod.
+[The open problem](open-problems/a2dp-does-not-survive-a-bluetooth-pod-restart.md)
+records what a fix must decide.

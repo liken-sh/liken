@@ -36,11 +36,13 @@ is built the way it is, and what it still owes an answer to.
   proved it end to end, from the cross-namespace access defect that
   `config/51-access-rules.conf` answers to the eviction that a
   sustained outage causes.
-* [04, Bluetooth sinks](04-bluetooth-sinks.md). Built. The audio
-  half of liken's milestone 60: the declare container enables
+* [04, Bluetooth sinks](04-bluetooth-sinks.md). Built, and the
+  hands-free half drilled on liken-1 on 2026-08-19. The audio half
+  of liken's milestone 60: the declare container enables
   WirePlumber's bluez monitor when the claim delivered a media bus,
   and each paired speaker publishes as an `audio.liken.sh` device
-  beside the card's outputs.
+  beside the card's outputs. The drill opened the open problem
+  "A2DP does not survive a Bluetooth pod restart".
 
 ## Open problems
 
