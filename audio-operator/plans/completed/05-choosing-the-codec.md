@@ -1,7 +1,9 @@
 # 05, Choosing the codec
 
-Planned on 2026-08-19. The mechanism is proven by hand on liken-1;
-this plan makes it inventory and API.
+Built and drilled on liken-1 on 2026-08-19, in release
+2026.08.19-007: the movie demo ran on sbc and on aptx with the
+claim's parameters as the only edit, and an ldac request parked the
+pod with the offered list in the event.
 
 ## The problem
 

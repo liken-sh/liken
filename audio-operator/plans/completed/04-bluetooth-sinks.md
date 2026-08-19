@@ -1,7 +1,9 @@
 # 04, Bluetooth sinks
 
-Built, and the hands-free half drilled on liken-1 on 2026-08-19 with
-release 2026.08.19-004. The playback drills wait for hands.
+Built and drilled on liken-1 on 2026-08-19. The hands-free half ran
+with release 2026.08.19-004, and the playback half ran the same day:
+the movie demo played through the b06+ speaker for hours, across
+codec switches and operator restarts.
 
 This plan is this operator's half of liken's
 [milestone 60, Bluetooth audio](https://github.com/liken-sh/liken/blob/main/plans/60-bluetooth-audio.md).
