@@ -155,10 +155,17 @@ spec:
           securityContext:
             # NET_ADMIN is what the kernel checks: the Bluetooth
             # management channel's privileged commands test for
-            # CAP_NET_ADMIN. NET_RAW looked like a companion
-            # requirement and proved unnecessary, because bluetoothd
-            # uses the management channel and seqpacket L2CAP sockets,
-            # not raw HCI, so it stays off. NET_BIND_SERVICE is for
+            # CAP_NET_ADMIN. bluetoothd itself uses no NET_RAW: it
+            # drives the management channel and seqpacket L2CAP
+            # sockets, never a raw HCI socket. btmon does, because
+            # hci_sock_bind tests capable(CAP_NET_RAW) before it
+            # binds HCI_CHANNEL_MONITOR, and with NET_ADMIN alone
+            # btmon prints "Failed to bind channel: Operation not
+            # permitted". The capability is on so that a person can
+            # read the HCI trace during an incident, with no patch
+            # and no roll, and it widens nothing: a container that
+            # already holds NET_ADMIN in the host network namespace
+            # holds the stronger grant. NET_BIND_SERVICE is for
             # bluetoothd's SDP and GATT servers, which bind L2CAP
             # PSMs 1 and 31, both below the kernel's 0x1001 privilege
             # line. dbus-daemon drops to its messagebus user at
@@ -166,7 +173,7 @@ spec:
             # CAP_SETGID. Everything else drops.
             capabilities:
               drop: ["ALL"]
-              add: ["NET_ADMIN", "NET_BIND_SERVICE", "SETUID", "SETGID"]
+              add: ["NET_ADMIN", "NET_RAW", "NET_BIND_SERVICE", "SETUID", "SETGID"]
             privileged: false
             allowPrivilegeEscalation: false
           resources:

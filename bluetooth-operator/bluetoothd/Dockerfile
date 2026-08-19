@@ -1,5 +1,7 @@
-# The bluetoothd image: three static binaries, their configuration,
-# and nothing else.
+# The bluetoothd image: the three static programs the pod runs
+# (bluetoothd, dbus-daemon, and the Go entrypoint), four more that a
+# person runs with kubectl exec (bluetoothctl, btmgmt, btmon, and
+# dbus-send), their configuration, and nothing else.
 #
 # bluetoothd ships here, in a workload's image, and not in the
 # read-only root that every liken machine boots. That is why the
@@ -7,6 +9,17 @@
 # it is why this image builds BlueZ rather than installing a
 # distribution's package: a package brings a package manager, a shell,
 # and a base filesystem, and this container runs three programs.
+#
+# The BlueZ shells have one limit in this image. BlueZ parses each
+# command's argument specification with wordexp(3), musl implements
+# wordexp by running /bin/sh, and this image has none, so the call
+# returns WRDE_SYNTAX and bluetoothctl and btmgmt refuse every
+# command that takes an argument ("Unable to parse mandatory
+# command arguments"). A command whose specification is empty skips
+# the call and works: bluetoothctl list, and btmgmt info, extinfo,
+# con, keys, and ltks. dbus-send parses with getopt and calls no
+# shell, so it reaches every org.bluez method and property the two
+# shells cannot.
 #
 # The binaries are statically linked against musl, so the image is the
 # programs and their configuration with no loader and no shared
@@ -59,11 +72,18 @@ RUN meson setup build \
     && meson install -C build
 
 # BlueZ. The disabled parts are the ones no controller on this bus
-# needs: the CUPS printer backend, the OBEX file-transfer daemon, the
-# btmon tracer, and the hciconfig-era tools. bluetoothctl stays,
-# because a kubectl exec session with it is how a person inspects the
-# running daemon by hand. Pairing itself is the operator's job, over
-# D-Bus, from a PairingRequest.
+# needs: the CUPS printer backend and the OBEX file-transfer daemon.
+# bluetoothctl stays, because a kubectl exec session with it is how a
+# person inspects the running daemon by hand. Pairing itself is the
+# operator's job, over D-Bus, from a PairingRequest.
+#
+# The monitor and the tools build, and the install step below takes
+# btmon out of monitor/ and btmgmt out of tools/, and leaves every
+# other program the two directories produce. --enable-deprecated
+# stays off, so the hciconfig-era tools never build: they drive the
+# raw HCI socket while bluetoothd drives the management channel, so
+# a command from one of them and the state the daemon holds
+# disagree.
 #
 # LIBS includes -lncursesw because readline's pkg-config file names no
 # terminal library, and a static bluetoothctl then has no tputs.
@@ -75,20 +95,48 @@ WORKDIR /build/bluez-${BLUEZ_VERSION}
 RUN ./configure \
         --prefix=/usr --sysconfdir=/etc --localstatedir=/var --libexecdir=/usr/libexec \
         --enable-client --enable-datafiles \
-        --disable-manpages --disable-cups --disable-obex --disable-monitor \
-        --disable-tools --disable-systemd \
+        --enable-monitor --enable-tools \
+        --disable-manpages --disable-cups --disable-obex --disable-systemd \
     && make -j"$(nproc)" LDFLAGS="-all-static" LIBS="-lncursesw" \
     && make install DESTDIR=/staging
 
 # Every file the image ships, named. install -D fails on a path that
 # moved, so a BlueZ or dbus release that relocates one of these stops
 # the build rather than shipping an image without it.
+#
+# The four person-run tools each answer a question nothing else in
+# the pod can. btmgmt reads the kernel's management settings, and
+# btmgmt info is the only reading of Connectable, Discoverable, and
+# the rest this image can take. btmon traces the HCI link, the
+# layer under D-Bus and under the daemon, which is the only reading
+# of what the controller and the remote device exchanged; the bind
+# it makes tests CAP_NET_RAW, which the pod's bluetoothd container
+# adds for it. dbus-send calls any method on org.bluez, so a person
+# starts one connection or reads one property with no shell.
+#
+# The three additions cost 3,042,456 bytes on a 7,851,292-byte
+# image: btmgmt 500,008, btmon 2,114,552, and dbus-send 427,896,
+# each after strip. btmon is the largest because its decoder tables
+# name every HCI command, event, and profile. dbus-monitor stays
+# out: it costs 415,608 bytes and watches the same events btmon
+# already reports, one layer up.
+#
+# btmgmt is a noinst_PROGRAMS entry in Makefile.tools, so make
+# install leaves it in the build tree, and the copy below takes it
+# from there. A BlueZ release that moves it stops the build.
 RUN set -eux; \
     install -D -m 0755 /staging/usr/libexec/bluetooth/bluetoothd /out/usr/libexec/bluetooth/bluetoothd; \
     install -D -m 0755 /staging/usr/bin/bluetoothctl /out/usr/bin/bluetoothctl; \
+    install -D -m 0755 /staging/usr/bin/btmon /out/usr/bin/btmon; \
+    install -D -m 0755 "/build/bluez-${BLUEZ_VERSION}/tools/btmgmt" /out/usr/bin/btmgmt; \
     install -D -m 0755 /staging/usr/bin/dbus-daemon /out/usr/bin/dbus-daemon; \
-    strip /out/usr/libexec/bluetooth/bluetoothd /out/usr/bin/bluetoothctl /out/usr/bin/dbus-daemon; \
-    for binary in /out/usr/libexec/bluetooth/bluetoothd /out/usr/bin/bluetoothctl /out/usr/bin/dbus-daemon; do \
+    install -D -m 0755 /staging/usr/bin/dbus-send /out/usr/bin/dbus-send; \
+    strip /out/usr/libexec/bluetooth/bluetoothd /out/usr/bin/bluetoothctl \
+        /out/usr/bin/btmon /out/usr/bin/btmgmt \
+        /out/usr/bin/dbus-daemon /out/usr/bin/dbus-send; \
+    for binary in /out/usr/libexec/bluetooth/bluetoothd /out/usr/bin/bluetoothctl \
+        /out/usr/bin/btmon /out/usr/bin/btmgmt \
+        /out/usr/bin/dbus-daemon /out/usr/bin/dbus-send; do \
         file "$binary" | grep -q "statically linked" || { file "$binary"; exit 1; }; \
     done
 

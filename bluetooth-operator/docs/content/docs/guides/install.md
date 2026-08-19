@@ -173,12 +173,48 @@ controllers appears when the first controller is paired:
 [Pair a controller and give it to a pod](/docs/guides/pair-a-controller/) is
 the next step.
 
+## Look inside the stack
+
+The `bluetoothd` image holds four tools for a person. Each runs as
+a direct `kubectl exec`, with no shell between, and every one of
+them needs the `-i` flag: BlueZ's shells attach to their standard
+input, and with stdin closed the attach fails and the command never
+runs, with nothing printed.
+
+`btmgmt info` prints the adapter's management settings, and its
+`current settings` line is where `Connectable`, `Discoverable`, and
+`Bondable` read. `btmon` traces the HCI link live, the layer under
+D-Bus and under `bluetoothd`: it shows a disconnect reason or a
+retransmission that no higher layer reports. `dbus-send` calls any
+method on `org.bluez`. `bluetoothctl list` names what the daemon
+holds.
+
+    kubectl -n liken-system exec -i ds/bluetooth-operator -c bluetoothd -- btmgmt info
+    kubectl -n liken-system exec -i ds/bluetooth-operator -c bluetoothd -- btmon
+    kubectl -n liken-system exec -i ds/bluetooth-operator -c bluetoothd -- bluetoothctl list
+
+One limit: the image has no shell, and BlueZ's argument parser
+runs one, so `bluetoothctl` and `btmgmt` refuse every command that
+takes an argument ("Unable to parse mandatory command arguments").
+Only their no-argument commands work: `bluetoothctl list`, and
+`btmgmt info`, `extinfo`, `con`, `keys`, and `ltks`. `dbus-send`
+has no such limit, so it is the way to reach anything else. This is
+how you connect one device by hand:
+
+    kubectl -n liken-system exec -i ds/bluetooth-operator -c bluetoothd -- \
+      dbus-send --system --print-reply --dest=org.bluez \
+      /org/bluez/hci0/dev_A0_AB_51_33_B7_12 org.bluez.Device1.Connect
+
 ## The privilege it takes
 
 The pod is three containers, and the privilege is confined to one of
-them. The `bluetoothd` container takes `hostNetwork` and four
-capabilities (`NET_ADMIN`, `NET_BIND_SERVICE`, `SETUID`, `SETGID`),
-because it is the Bluetooth stack. The `operator` and `bondfetch`
+them.
+`NET_RAW` is the one capability `bluetoothd` itself does not use:
+it is there for `btmon`, whose bind of the kernel's HCI monitor
+channel tests `CAP_NET_RAW`.
+The `bluetoothd` container takes `hostNetwork` and five
+capabilities (`NET_ADMIN`, `NET_RAW`, `NET_BIND_SERVICE`, `SETUID`,
+`SETGID`), because it is the Bluetooth stack. The `operator` and `bondfetch`
 containers drop every capability. The comments in
 [`deploy/operator.yaml`](/deploy/operator.yaml) state the kernel or
 daemon check behind each grant.
