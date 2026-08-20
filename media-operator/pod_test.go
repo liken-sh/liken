@@ -102,6 +102,22 @@ func TestBuildPodRunsThePlayerOnTheResolvedList(t *testing.T) {
 	}
 }
 
+// A declared start rides into the pod as one more variable, and an
+// ordinary run's pod carries nothing extra.
+func TestBuildPodCarriesTheDeclaredStart(t *testing.T) {
+	play := testPlay()
+	play.Spec.Start = "0:10:00"
+	claim := buildClaim(play, testPlayer())
+	pod := buildPod(play, claim, testResolution(t), testImage, testToken, testOperatorURL)
+
+	env := pod.Spec.Containers[0].Env
+	last := env[len(env)-1]
+	want := EnvVar{Name: playStartVariable, Value: "0:10:00"}
+	if last != want {
+		t.Errorf("last env = %+v, want %+v", last, want)
+	}
+}
+
 // The pod names the claim once and the container repeats that name
 // for each role, which is what keeps the roles separate inside one
 // claim.

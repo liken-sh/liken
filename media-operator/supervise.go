@@ -121,6 +121,13 @@ func mpvArguments(items []string) []string {
 	if applicationID := os.Getenv(displayAppIDVariable); applicationID != "" {
 		arguments = append(arguments, "--wayland-app-id="+applicationID)
 	}
+	// The declared start applies to the first file mpv loads and to
+	// no later playlist entry, which is exactly what spec.start
+	// means: the run begins here, and later items begin at their
+	// own start.
+	if start := os.Getenv(playStartVariable); start != "" {
+		arguments = append(arguments, "--start="+start)
+	}
 	arguments = append(arguments, "--")
 	return append(arguments, items...)
 }

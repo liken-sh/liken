@@ -97,10 +97,12 @@ type Play struct {
 
 // Players is a list of one today, because the carriage layer will
 // let one Play reach several and a grown list is no migration. The
-// URIs play in order.
+// URIs play in order, and Start is where in the first item the run
+// begins.
 type PlaySpec struct {
 	Players []string `json:"players"`
 	URIs    []string `json:"uris"`
+	Start   string   `json:"start,omitempty"`
 }
 
 // The status the operator alone writes: the phase, the paused flag,

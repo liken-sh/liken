@@ -102,6 +102,15 @@ spec:
                     to a mount on the playback pod. A URI whose
                     scheme the operator does not know fails the Play
                     before any pod exists.
+                start:
+                  type: string
+                  description: >-
+                    Where in the first item the run begins, as a
+                    time the player accepts, such as 0:10:00 or
+                    600. Omitted, the run begins at the start. Later
+                    items always begin at their own start. This is
+                    also how a run resumes: a new Play with the
+                    position a finished or deleted one reported.
             status:
               type: object
               description: >-

@@ -22,6 +22,7 @@ func TestMPVArguments(t *testing.T) {
 	cases := []struct {
 		name          string
 		applicationID string
+		start         string
 		items         []string
 		want          []string
 	}{
@@ -45,11 +46,25 @@ func TestMPVArguments(t *testing.T) {
 				"--", "https://media.example.net/one.mkv", "/media/0/two.mkv",
 			},
 		},
+		{
+			// The declared start becomes --start ahead of the
+			// items, so the first file begins where the spec says.
+			name:  "the spec declares a start",
+			start: "0:10:00",
+			items: []string{"/media/0/film.mkv"},
+			want: []string{
+				"--vo=gpu", "--gpu-context=wayland", "--hwdec=vaapi", "--fullscreen",
+				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
+				"--start=0:10:00",
+				"--", "/media/0/film.mkv",
+			},
+		},
 	}
 
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
 			t.Setenv(displayAppIDVariable, each.applicationID)
+			t.Setenv(playStartVariable, each.start)
 			mustMatchAll(t, mpvArguments(each.items), each.want)
 		})
 	}

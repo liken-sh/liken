@@ -44,4 +44,9 @@ const (
 	playNameVariable      = "MEDIA_PLAY_NAME"
 	playTokenVariable     = "MEDIA_PLAY_TOKEN"
 	operatorURLVariable   = "MEDIA_OPERATOR_URL"
+
+	// playStartVariable carries spec.start when the Play declares
+	// one. The supervisor turns it into mpv's --start, so the run
+	// begins where the spec says instead of at zero.
+	playStartVariable = "MEDIA_PLAY_START"
 )

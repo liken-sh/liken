@@ -46,6 +46,12 @@ func buildPod(play *Play, claim *ResourceClaim, resolved resolution, image, toke
 		},
 		VolumeMounts: resolved.Mounts,
 	}
+	// The start rides beside them only when the spec declares one,
+	// so an ordinary run's pod carries nothing extra.
+	if play.Spec.Start != "" {
+		container.Env = append(container.Env,
+			EnvVar{Name: playStartVariable, Value: play.Spec.Start})
+	}
 	// One entry per request, so the container holds every device
 	// the player needs, and a later plan can keep a role out of a
 	// container that must not hold it by naming fewer.
