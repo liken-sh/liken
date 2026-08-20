@@ -61,14 +61,15 @@ func tolerateBriefly(taint string) []DeviceToleration {
 }
 
 // tolerateForever has no tolerationSeconds, so the toleration never
-// expires. A controller sleeps whenever a person puts it down, and
-// an input device that went away must never evict the pod that
-// plays the film.
+// expires, and no effect, so it matches every effect the taint
+// carries. A controller sleeps whenever a person puts it down. The
+// missing effect is what lets the claim allocate while it sleeps,
+// so a film starts without it, and the missing seconds are what
+// keep a sleeping controller from evicting the film later.
 func tolerateForever(taint string) []DeviceToleration {
 	return []DeviceToleration{{
 		Key:      taint,
 		Operator: "Exists",
-		Effect:   "NoExecute",
 	}}
 }
 

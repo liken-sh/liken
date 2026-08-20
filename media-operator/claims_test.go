@@ -310,8 +310,10 @@ func TestBuildClaimAsksForOneRequestPerBoundRemote(t *testing.T) {
 	}
 }
 
-// A toleration with no tolerationSeconds never expires. A controller
-// sleeps for an hour and the film keeps playing.
+// A toleration with no tolerationSeconds never expires, and one with
+// no effect matches every effect. A controller asleep at create time
+// must not park the claim, and one that sleeps for an hour must not
+// evict the film.
 func TestBuildClaimToleratesASleepingRemoteWithNoTimeLimit(t *testing.T) {
 	claim := buildClaim(testPlay(), testPlayer(), testBoundRemotes())
 
@@ -319,7 +321,6 @@ func TestBuildClaimToleratesASleepingRemoteWithNoTimeLimit(t *testing.T) {
 	want := []DeviceToleration{{
 		Key:      "bluetooth.liken.sh/disconnected",
 		Operator: "Exists",
-		Effect:   "NoExecute",
 	}}
 	if !reflect.DeepEqual(armchair.Exactly.Tolerations, want) {
 		t.Fatalf("tolerations = %+v, want %+v", armchair.Exactly.Tolerations, want)
@@ -328,8 +329,10 @@ func TestBuildClaimToleratesASleepingRemoteWithNoTimeLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(written), "tolerationSeconds") {
-		t.Errorf("request = %s, want no tolerationSeconds key", written)
+	for _, absent := range []string{"tolerationSeconds", "effect"} {
+		if strings.Contains(string(written), absent) {
+			t.Errorf("request = %s, want no %s key", written, absent)
+		}
 	}
 }
 
