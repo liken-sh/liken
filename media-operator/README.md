@@ -31,7 +31,7 @@ arrives by URI: `https://` streams, and `nfs://` mounts. Media
 library management is a separate concern, and this project does
 none of it.
 
-Nothing here is built yet. The repository holds the design,
-[`plans/00-design.md`](plans/00-design.md): the resources, what was
-considered and set aside, and what the design still owes an answer
-to.
+The operator is not built yet. [`plans/00-design.md`](plans/00-design.md)
+is the design: the resources, what was considered and set aside, and
+what the design still owes an answer to.
+[`plans/README.md`](plans/README.md) indexes the plans that build it.

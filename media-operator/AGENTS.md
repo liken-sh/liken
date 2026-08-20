@@ -14,5 +14,5 @@ The voice rules imported above govern all prose in this repository,
 comments included, and they arrive with the brand theme submodule at
 `docs/themes/brand`.
 
-Nothing is built yet. `plans/00-design.md` is the design, and no
-code exists until a plan calls for it.
+`plans/00-design.md` is the design, and `plans/README.md` indexes
+the plans that build it. Code exists only where a plan calls for it.
