@@ -183,11 +183,27 @@ func (o *operator) reconcile(play *Play) error {
 		return writePlayStatus(o.client, play, derivePlayStatus(play, player, resolveErr, nil, nil))
 	}
 
-	claim := buildClaim(play, player)
+	// A Remote that will not resolve fails the Play only while there
+	// is still no pod. Once the pod exists, its container set is
+	// fixed and no edit to a Remote or a Keymap can reach this run,
+	// so a Keymap broken mid-film must not fail the film.
+	remotes, remoteErr := gatherRemotes(o.client, namespace, playerName(play))
+	if remoteErr != nil {
+		_, err := GetPod(o.client, namespace, podName(name))
+		if errors.Is(err, ErrNotFound) {
+			return writePlayStatus(o.client, play, derivePlayStatus(play, player, remoteErr, nil, nil))
+		}
+		if err != nil {
+			return err
+		}
+		remotes = nil
+	}
+
+	claim := buildClaim(play, player, remotes)
 	if err := ensureClaim(o.client, claim); err != nil {
 		return err
 	}
-	pod, err := o.ensurePod(play, claim, resolved)
+	pod, err := o.ensurePod(play, claim, resolved, remotes)
 	if err != nil {
 		return err
 	}
@@ -222,7 +238,7 @@ func ensureClaim(c *Client, claim *ResourceClaim) error {
 // operator left it running, in which case the token is adopted from
 // the pod's own environment, so the pod's reports stay accepted
 // across an operator restart.
-func (o *operator) ensurePod(play *Play, claim *ResourceClaim, resolved resolution) (*Pod, error) {
+func (o *operator) ensurePod(play *Play, claim *ResourceClaim, resolved resolution, remotes []boundRemote) (*Pod, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	pod, err := GetPod(o.client, namespace, podName(name))
 	if err == nil {
@@ -237,7 +253,7 @@ func (o *operator) ensurePod(play *Play, claim *ResourceClaim, resolved resoluti
 	if err != nil {
 		return nil, err
 	}
-	created, err := CreatePod(o.client, buildPod(play, claim, resolved, o.image, token, o.operatorURL))
+	created, err := CreatePod(o.client, buildPod(play, claim, resolved, o.image, token, o.operatorURL, remotes))
 	if errors.Is(err, ErrConflict) {
 		// The pod already existed, so the token this pass minted
 		// never reached it. The pod's own environment carries the

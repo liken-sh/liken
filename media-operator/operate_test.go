@@ -18,6 +18,8 @@ import (
 type fakeCluster struct {
 	plays    map[string]*Play
 	players  map[string]*Player
+	remotes  map[string]*Remote
+	keymaps  map[string]*Keymap
 	claims   map[string]*ResourceClaim
 	pods     map[string]*Pod
 	requests []string
@@ -27,6 +29,8 @@ func newFakeCluster() *fakeCluster {
 	return &fakeCluster{
 		plays:   map[string]*Play{},
 		players: map[string]*Player{},
+		remotes: map[string]*Remote{},
+		keymaps: map[string]*Keymap{},
 		claims:  map[string]*ResourceClaim{},
 		pods:    map[string]*Pod{},
 	}
@@ -54,6 +58,14 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 			answer(w, f.plays[name])
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/players/"):
 			answer(w, f.players[name])
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/remotes"):
+			list := RemoteList{Metadata: ListMeta{ResourceVersion: "1"}}
+			for _, key := range sortedNames(f.remotes) {
+				list.Items = append(list.Items, *f.remotes[key])
+			}
+			_ = json.NewEncoder(w).Encode(list)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/keymaps/"):
+			answer(w, f.keymaps[name])
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/resourceclaims/"):
 			answer(w, f.claims[name])
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/resourceclaims"):
@@ -308,12 +320,12 @@ func TestTheOperatorAdoptsTheTokenOfAPodItDidNotCreate(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
 	cluster.players["theater"] = housePlayer()
-	running := buildPod(cluster.plays["movie"], buildClaim(cluster.plays["movie"], housePlayer()),
+	running := buildPod(cluster.plays["movie"], buildClaim(cluster.plays["movie"], housePlayer(), nil),
 		resolution{Items: []string{"https://nas/film.mkv"}},
-		"registry.example/player:test", "3333333333333333333333333333ffff", "http://media-operator.media.svc:8080")
+		"registry.example/player:test", "3333333333333333333333333333ffff", "http://media-operator.media.svc:8080", nil)
 	running.Status.Phase = podRunning
 	cluster.pods["movie-playback"] = running
-	cluster.claims["movie-devices"] = buildClaim(cluster.plays["movie"], housePlayer())
+	cluster.claims["movie-devices"] = buildClaim(cluster.plays["movie"], housePlayer(), nil)
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
 	media.pass()
@@ -325,6 +337,109 @@ func TestTheOperatorAdoptsTheTokenOfAPodItDidNotCreate(t *testing.T) {
 		Namespace: "house", Name: "movie", Token: "3333333333333333333333333333ffff", Item: 1,
 	}) {
 		t.Error("the operator refused the token it adopted")
+	}
+}
+
+// A Remote in the namespace, bound to the house player.
+func houseRemote(keymap string) *Remote {
+	return &Remote{
+		Metadata: ObjectMeta{Name: "sofa", Namespace: "house"},
+		Spec: RemoteSpec{
+			Device:   RemoteDevice{Class: "gamepad"},
+			Keymap:   keymap,
+			Bindings: []RemoteBinding{{Player: "theater"}},
+		},
+	}
+}
+
+// The whole wiring in one pass: the claim carries the controller, the
+// pod carries the sidecar, and the sidecar holds the request the
+// player container does not.
+func TestAPassWiresABoundRemoteIntoTheClaimAndThePod(t *testing.T) {
+	mintedToken(t, "5555555555555555555555555555ffff")
+	cluster := newFakeCluster()
+	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
+	cluster.players["theater"] = housePlayer()
+	cluster.remotes["sofa"] = houseRemote("gamepad")
+	cluster.keymaps["gamepad"] = testKeymap()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.pass()
+
+	claim, held := cluster.claims["movie-devices"]
+	if !held {
+		t.Fatalf("no claim was created: %v", cluster.requests)
+	}
+	if got := claimRequests(claim); strings.Join(got, ",") != "screen,audio0,render,remote-sofa" {
+		t.Fatalf("requests = %v", got)
+	}
+	controller := claim.Spec.Devices.Requests[3]
+	if controller.Exactly.Tolerations[0].TolerationSeconds != nil {
+		t.Errorf("the controller's toleration expires: %+v", controller.Exactly.Tolerations[0])
+	}
+	pod := cluster.pods["movie-playback"]
+	if len(pod.Spec.InitContainers) != 1 || pod.Spec.InitContainers[0].Name != "remote-sofa" {
+		t.Fatalf("initContainers = %+v", pod.Spec.InitContainers)
+	}
+	if got := pod.Spec.InitContainers[0].Env[0].Name; got != "MEDIA_KEYMAP" {
+		t.Errorf("env = %+v", pod.Spec.InitContainers[0].Env)
+	}
+	player := pod.Spec.Containers[0].Resources.Claims
+	if len(player) != 3 {
+		t.Errorf("the player container holds %+v, want the player's three roles", player)
+	}
+}
+
+// A Remote that names a Keymap nobody wrote fails the Play, and no
+// pod is created for it.
+func TestAPlayWhoseKeymapIsAbsentFailsBeforeItsPod(t *testing.T) {
+	cluster := newFakeCluster()
+	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
+	cluster.players["theater"] = housePlayer()
+	cluster.remotes["sofa"] = houseRemote("nowhere")
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.pass()
+
+	status := cluster.plays["movie"].Status
+	if status.Phase != phaseFailed {
+		t.Errorf("phase = %q, want Failed", status.Phase)
+	}
+	want := "the Remote sofa names the Keymap nowhere, which does not exist in this namespace"
+	if status.Message != want {
+		t.Errorf("message = %q, want %q", status.Message, want)
+	}
+	if len(cluster.pods) != 0 {
+		t.Errorf("a broken Remote created a pod: %v", cluster.pods)
+	}
+}
+
+// The container set is fixed once the pod runs, so a Keymap broken
+// after the film started changes nothing and the run keeps its
+// status.
+func TestARemoteBrokenAfterTheRunStartedLeavesThePlayAlone(t *testing.T) {
+	mintedToken(t, "6666666666666666666666666666ffff")
+	cluster := newFakeCluster()
+	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
+	cluster.players["theater"] = housePlayer()
+	cluster.remotes["sofa"] = houseRemote("gamepad")
+	cluster.keymaps["gamepad"] = testKeymap()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.pass()
+	cluster.pods["movie-playback"].Status.Phase = podRunning
+	cluster.keymaps["gamepad"] = &Keymap{
+		Metadata: ObjectMeta{Name: "gamepad", Namespace: "house"},
+		Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_NOPE", Action: actionPause}}},
+	}
+	media.pass()
+
+	status := cluster.plays["movie"].Status
+	if status.Phase != phaseRunning {
+		t.Errorf("phase = %q, want Running", status.Phase)
+	}
+	if status.Message != "" {
+		t.Errorf("message = %q, want none", status.Message)
 	}
 }
 

@@ -8,6 +8,7 @@ package main
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
 )
 
 // The request names are the roles, and they are the names the
@@ -15,25 +16,61 @@ import (
 // requests beats one claim per device because the set allocates as a
 // unit: the scheduler finds one machine that satisfies every
 // request, or the pod parks Pending with one story to read.
+//
+// A remote's request is named for the Remote it claims, behind a
+// prefix no player role starts with. The prefix is what separates
+// the player's own requests from the remotes' when the pod is built,
+// so a controller's input nodes never land in the player container.
 const (
-	screenRequest      = "screen"
-	renderRequest      = "render"
-	audioRequestPrefix = "audio"
+	screenRequest       = "screen"
+	renderRequest       = "render"
+	audioRequestPrefix  = "audio"
+	remoteRequestPrefix = "remote-"
 )
 
 // The two taints the hardware operators set when equipment goes
 // away, tolerated for thirty seconds: that long is a cable being
 // moved, and longer is equipment that left, which ends the pod so
 // the play fails rather than freezing.
+//
+// The controller's taint is the third, and it is tolerated with no
+// limit at all, because a controller that sleeps is normal and a
+// film must keep playing without it.
 const (
 	displayDisconnectedTaint = "display.liken.sh/disconnected"
 	audioDisconnectedTaint   = "audio.liken.sh/disconnected"
+	remoteDisconnectedTaint  = "bluetooth.liken.sh/disconnected"
 	disconnectedTolerance    = 30
 )
 
-// The render node takes no toleration, because a GPU does not come
-// and go while the machine runs.
-const noTaint = ""
+func remoteRequestName(remote string) string {
+	return remoteRequestPrefix + remote
+}
+
+// tolerateBriefly survives a cable being moved: thirty seconds of
+// absence keeps the pod, and longer evicts it, so the play fails
+// rather than freezing on equipment that left.
+func tolerateBriefly(taint string) []DeviceToleration {
+	seconds := int64(disconnectedTolerance)
+	return []DeviceToleration{{
+		Key:               taint,
+		Operator:          "Exists",
+		Effect:            "NoExecute",
+		TolerationSeconds: &seconds,
+	}}
+}
+
+// tolerateForever has no tolerationSeconds, so the toleration never
+// expires. A controller sleeps whenever a person puts it down, and
+// an input device that went away must never evict the pod that
+// plays the film.
+func tolerateForever(taint string) []DeviceToleration {
+	return []DeviceToleration{{
+		Key:      taint,
+		Operator: "Exists",
+		Effect:   "NoExecute",
+	}}
+}
 
 // claimName is the Play's name plus its job, so a person reading
 // either object finds the other.
@@ -59,7 +96,11 @@ func playOwner(play *Play) OwnerReference {
 // without a render node yields a claim without that request, and the
 // player program plays without one, which is what an audio-only unit
 // is.
-func buildClaim(play *Play, player *Player) *ResourceClaim {
+//
+// The remotes bound to the player follow the roles, one request
+// each, so one claim still holds everything the pod needs and the
+// set still allocates as a unit on one machine.
+func buildClaim(play *Play, player *Player, remotes []boundRemote) *ResourceClaim {
 	claim := &ResourceClaim{
 		APIVersion: claimAPIVersion,
 		Kind:       "ResourceClaim",
@@ -70,13 +111,24 @@ func buildClaim(play *Play, player *Player) *ResourceClaim {
 		},
 	}
 	if player.Spec.Display != nil {
-		claim.add(screenRequest, *player.Spec.Display, displayDisconnectedTaint)
+		claim.add(screenRequest, *player.Spec.Display, tolerateBriefly(displayDisconnectedTaint))
 	}
 	for index, sink := range player.Spec.Sinks {
-		claim.add(audioRequestPrefix+strconv.Itoa(index), sink, audioDisconnectedTaint)
+		claim.add(audioRequestPrefix+strconv.Itoa(index), sink, tolerateBriefly(audioDisconnectedTaint))
 	}
 	if player.Spec.Render != nil {
-		claim.add(renderRequest, *player.Spec.Render, noTaint)
+		// The render node takes no toleration, because a GPU does not
+		// come and go while the machine runs.
+		claim.add(renderRequest, *player.Spec.Render, nil)
+	}
+	// A controller's request carries no parameter block, because
+	// nothing prepares an input device the way a codec prepares a
+	// sink: the driver publishes the nodes and the sidecar reads
+	// them as they are.
+	for _, remote := range remotes {
+		claim.add(remoteRequestName(remote.Name),
+			PlayerDevice{Class: remote.Device.Class, Selector: remote.Device.Selector},
+			tolerateForever(remoteDisconnectedTaint))
 	}
 	return claim
 }
@@ -84,7 +136,7 @@ func buildClaim(play *Play, player *Player) *ResourceClaim {
 // add turns one device into a request and, when the Player states
 // parameters for it, one opaque config block aimed at that request
 // alone, so a codec never lands on a screen.
-func (c *ResourceClaim) add(name string, device PlayerDevice, taint string) {
+func (c *ResourceClaim) add(name string, device PlayerDevice, tolerations []DeviceToleration) {
 	request := DeviceRequest{
 		Name: name,
 		Exactly: &ExactDeviceRequest{
@@ -102,15 +154,7 @@ func (c *ResourceClaim) add(name string, device PlayerDevice, taint string) {
 	if device.Selector != "" {
 		request.Exactly.Selectors = []DeviceSelector{{CEL: &CELDeviceSelector{Expression: device.Selector}}}
 	}
-	if taint != noTaint {
-		seconds := int64(disconnectedTolerance)
-		request.Exactly.Tolerations = []DeviceToleration{{
-			Key:               taint,
-			Operator:          "Exists",
-			Effect:            "NoExecute",
-			TolerationSeconds: &seconds,
-		}}
-	}
+	request.Exactly.Tolerations = tolerations
 	c.Spec.Devices.Requests = append(c.Spec.Devices.Requests, request)
 
 	if device.Parameters == nil {
@@ -138,6 +182,22 @@ func claimRequests(claim *ResourceClaim) []string {
 	names := make([]string, 0, len(claim.Spec.Devices.Requests))
 	for _, request := range claim.Spec.Devices.Requests {
 		names = append(names, request.Name)
+	}
+	return names
+}
+
+// playerRequests is claimRequests without the remotes: the roles the
+// player container repeats. The player container holds the player's
+// own devices and no controller's, because the process that decodes
+// media from the network must not also read an input device; each
+// sidecar names its own request instead.
+func playerRequests(claim *ResourceClaim) []string {
+	names := make([]string, 0, len(claim.Spec.Devices.Requests))
+	for _, request := range claimRequests(claim) {
+		if strings.HasPrefix(request, remoteRequestPrefix) {
+			continue
+		}
+		names = append(names, request)
 	}
 	return names
 }

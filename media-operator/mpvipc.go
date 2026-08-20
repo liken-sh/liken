@@ -26,7 +26,7 @@ import (
 // same string appears in mpv's --input-ipc-server argument: one
 // value is what makes the two ends meet, and a test moves both at
 // once.
-var mpvSocketPath = "/tmp/mpv.sock"
+var mpvSocketPath = ipcSocketPath
 
 // mpv creates the socket a moment after it starts, so the first dial
 // nearly always fails. This budget is how long the supervisor waits

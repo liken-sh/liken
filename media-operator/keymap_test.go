@@ -1,0 +1,248 @@
+package main
+
+// These tests cover the compile from evdev names to the numbers the
+// sidecar matches, and the gather that finds the Remotes bound to
+// one Player.
+
+import (
+	"reflect"
+	"strings"
+	"testing"
+)
+
+// A Keymap for one controller model: two face buttons, both bumpers,
+// and the hat in both directions.
+func testKeymap() *Keymap {
+	return &Keymap{
+		Metadata: ObjectMeta{Name: "gamepad", Namespace: "house"},
+		Spec: KeymapSpec{
+			Buttons: []KeymapButton{
+				{Press: "BTN_SOUTH", Action: actionPause},
+				{Press: "BTN_EAST", Action: actionMute},
+				{Press: "BTN_TL", Action: actionSeek, Amount: -30},
+				{Press: "BTN_TR", Action: actionSeek, Amount: 30},
+			},
+			Axes: []KeymapAxis{
+				{Axis: "ABS_HAT0Y", Value: -1, Action: actionVolume, Amount: 5},
+				{Axis: "ABS_HAT0Y", Value: 1, Action: actionVolume, Amount: -5},
+				{Axis: "ABS_HAT0X", Value: 1, Action: actionChapter, Amount: 1},
+			},
+		},
+	}
+}
+
+// The buttons compile to EV_KEY presses and the axes to EV_ABS
+// values, in that order, so the sidecar carries numbers alone.
+func TestCompileKeymapTurnsEveryNameIntoItsCode(t *testing.T) {
+	bindings, err := compileKeymap(testKeymap())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []compiledBinding{
+		{EventType: evKey, Code: 0x130, Value: 1, Action: actionPause},
+		{EventType: evKey, Code: 0x131, Value: 1, Action: actionMute},
+		{EventType: evKey, Code: 0x136, Value: 1, Action: actionSeek, Amount: -30},
+		{EventType: evKey, Code: 0x137, Value: 1, Action: actionSeek, Amount: 30},
+		{EventType: evAbs, Code: 0x11, Value: -1, Action: actionVolume, Amount: 5},
+		{EventType: evAbs, Code: 0x11, Value: 1, Action: actionVolume, Amount: -5},
+		{EventType: evAbs, Code: 0x10, Value: 1, Action: actionChapter, Amount: 1},
+	}
+	if !reflect.DeepEqual(bindings, want) {
+		t.Errorf("bindings = %+v, want %+v", bindings, want)
+	}
+}
+
+// A compile error becomes the Play's status message, so each one
+// must name the Keymap, the entry, and the rule it broke.
+func TestCompileKeymapRefusesWhatItCannotCompile(t *testing.T) {
+	cases := []struct {
+		name   string
+		keymap *Keymap
+		says   []string
+	}{{
+		name: "a button name no Linux driver reports",
+		keymap: &Keymap{
+			Metadata: ObjectMeta{Name: "gamepad"},
+			Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_MIDDLE", Action: actionPause}}},
+		},
+		says: []string{"gamepad", "BTN_MIDDLE"},
+	}, {
+		name: "an axis outside the two hat axes",
+		keymap: &Keymap{
+			Metadata: ObjectMeta{Name: "gamepad"},
+			Spec:     KeymapSpec{Axes: []KeymapAxis{{Axis: "ABS_X", Value: 1, Action: actionPause}}},
+		},
+		says: []string{"gamepad", "ABS_X"},
+	}, {
+		name: "an action outside the vocabulary",
+		keymap: &Keymap{
+			Metadata: ObjectMeta{Name: "gamepad"},
+			Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_SOUTH", Action: "eject"}}},
+		},
+		says: []string{"gamepad", "BTN_SOUTH", "eject"},
+	}, {
+		name: "an amount on an action that is complete alone",
+		keymap: &Keymap{
+			Metadata: ObjectMeta{Name: "gamepad"},
+			Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_SOUTH", Action: actionPause, Amount: 3}}},
+		},
+		says: []string{"gamepad", "BTN_SOUTH", actionPause},
+	}, {
+		name: "an amount action with no amount",
+		keymap: &Keymap{
+			Metadata: ObjectMeta{Name: "gamepad"},
+			Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_TL", Action: actionSeek}}},
+		},
+		says: []string{"gamepad", "BTN_TL", actionSeek},
+	}, {
+		name: "an amount action whose amount is zero",
+		keymap: &Keymap{
+			Metadata: ObjectMeta{Name: "gamepad"},
+			Spec:     KeymapSpec{Axes: []KeymapAxis{{Axis: "ABS_HAT0X", Value: 1, Action: actionChapter, Amount: 0}}},
+		},
+		says: []string{"gamepad", "ABS_HAT0X", actionChapter},
+	}, {
+		name:   "a Keymap that binds nothing at all",
+		keymap: &Keymap{Metadata: ObjectMeta{Name: "gamepad"}},
+		says:   []string{"gamepad"},
+	}}
+
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			bindings, err := compileKeymap(one.keymap)
+			if err == nil {
+				t.Fatalf("bindings = %+v, want an error", bindings)
+			}
+			for _, word := range one.says {
+				if !strings.Contains(err.Error(), word) {
+					t.Errorf("err = %q, want it to name %q", err, word)
+				}
+			}
+		})
+	}
+}
+
+// A remote bound to one player and pointed at a keymap.
+func testRemote(name, player, keymap string) Remote {
+	return Remote{
+		Metadata: ObjectMeta{Name: name, Namespace: "house"},
+		Spec: RemoteSpec{
+			Device:   RemoteDevice{Class: "gamepad", Selector: `device.attributes["bluetooth.liken.sh"].address == "04:4A"`},
+			Keymap:   keymap,
+			Bindings: []RemoteBinding{{Player: player}},
+		},
+	}
+}
+
+const (
+	remotesURL = "/apis/media.liken.sh/v1alpha1/namespaces/house/remotes"
+	keymapURL  = "/apis/media.liken.sh/v1alpha1/namespaces/house/keymaps/gamepad"
+)
+
+// The remotes bound to this player, in name order whatever order the
+// API server listed them in, because the pod spec they become must
+// not change between passes.
+func TestGatherRemotesKeepsWhatIsBoundToThePlayerInNameOrder(t *testing.T) {
+	api := &cannedAPI{answers: map[string]any{
+		"GET " + remotesURL: RemoteList{Items: []Remote{
+			testRemote("sofa", "theater", "gamepad"),
+			testRemote("kitchen", "galley", "gamepad"),
+			testRemote("armchair", "theater", "gamepad"),
+		}},
+		"GET " + keymapURL: *testKeymap(),
+	}}
+
+	remotes, err := gatherRemotes(testAPIClient(t, api.handler()), "house", "theater")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	names := []string{}
+	for _, remote := range remotes {
+		names = append(names, remote.Name)
+	}
+	if !reflect.DeepEqual(names, []string{"armchair", "sofa"}) {
+		t.Errorf("remotes = %v, want [armchair sofa]", names)
+	}
+}
+
+// Each bound remote carries its device selection and its compiled
+// table, which is everything the claim and the sidecar need.
+func TestGatherRemotesCarriesTheDeviceAndTheCompiledTable(t *testing.T) {
+	api := &cannedAPI{answers: map[string]any{
+		"GET " + remotesURL: RemoteList{Items: []Remote{testRemote("sofa", "theater", "gamepad")}},
+		"GET " + keymapURL:  *testKeymap(),
+	}}
+
+	remotes, err := gatherRemotes(testAPIClient(t, api.handler()), "house", "theater")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remotes) != 1 {
+		t.Fatalf("remotes = %+v, want one", remotes)
+	}
+	device := RemoteDevice{
+		Class:    "gamepad",
+		Selector: `device.attributes["bluetooth.liken.sh"].address == "04:4A"`,
+	}
+	if remotes[0].Device != device {
+		t.Errorf("device = %+v, want %+v", remotes[0].Device, device)
+	}
+	first := compiledBinding{EventType: evKey, Code: 0x130, Value: 1, Action: actionPause}
+	if len(remotes[0].Bindings) != 7 || remotes[0].Bindings[0] != first {
+		t.Errorf("bindings = %+v", remotes[0].Bindings)
+	}
+}
+
+func TestGatherRemotesFindsNoneWhenNothingIsBoundToThePlayer(t *testing.T) {
+	api := &cannedAPI{answers: map[string]any{
+		"GET " + remotesURL: RemoteList{Items: []Remote{testRemote("kitchen", "galley", "gamepad")}},
+	}}
+
+	remotes, err := gatherRemotes(testAPIClient(t, api.handler()), "house", "theater")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remotes) != 0 {
+		t.Errorf("remotes = %+v, want none", remotes)
+	}
+}
+
+// A Remote that names a Keymap nobody wrote is a failure the person
+// who wrote the Remote can read.
+func TestGatherRemotesFailsWhenTheKeymapIsAbsent(t *testing.T) {
+	api := &cannedAPI{answers: map[string]any{
+		"GET " + remotesURL: RemoteList{Items: []Remote{testRemote("sofa", "theater", "gamepad")}},
+	}}
+
+	_, err := gatherRemotes(testAPIClient(t, api.handler()), "house", "theater")
+	if err == nil {
+		t.Fatal("a missing Keymap produced no error")
+	}
+	for _, word := range []string{"sofa", "gamepad"} {
+		if !strings.Contains(err.Error(), word) {
+			t.Errorf("err = %q, want it to name %q", err, word)
+		}
+	}
+}
+
+// A keymap that will not compile fails the gather, and the message is
+// the compiler's own.
+func TestGatherRemotesFailsOnAKeymapThatWillNotCompile(t *testing.T) {
+	api := &cannedAPI{answers: map[string]any{
+		"GET " + remotesURL: RemoteList{Items: []Remote{testRemote("sofa", "theater", "gamepad")}},
+		"GET " + keymapURL: Keymap{
+			Metadata: ObjectMeta{Name: "gamepad", Namespace: "house"},
+			Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_NOPE", Action: actionPause}}},
+		},
+	}}
+
+	_, err := gatherRemotes(testAPIClient(t, api.handler()), "house", "theater")
+	if err == nil {
+		t.Fatal("a keymap that will not compile produced no error")
+	}
+	if !strings.Contains(err.Error(), "BTN_NOPE") {
+		t.Errorf("err = %q, want it to name BTN_NOPE", err)
+	}
+}

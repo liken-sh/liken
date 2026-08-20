@@ -172,6 +172,17 @@ func playerPath(namespace, name string) string {
 	return mediaPrefix + namespace + "/players/" + name
 }
 
+// Remotes are listed per namespace, because a Play binds only to
+// Remotes beside it; a Keymap is read one at a time, by the name a
+// Remote carries.
+func remotesPath(namespace string) string {
+	return mediaPrefix + namespace + "/remotes"
+}
+
+func keymapPath(namespace, name string) string {
+	return mediaPrefix + namespace + "/keymaps/" + name
+}
+
 func claimsPath(namespace string) string {
 	return claimPrefix + namespace + "/resourceclaims"
 }
@@ -220,6 +231,25 @@ func PutPlayStatus(c *Client, play *Play) (*Play, error) {
 		return nil, err
 	}
 	return written, nil
+}
+
+// ListRemotes reads the whole namespace's remotes in one request,
+// because nothing indexes a Remote by the player it binds and the
+// filter runs here.
+func ListRemotes(c *Client, namespace string) (*RemoteList, error) {
+	list := &RemoteList{}
+	if err := c.RequestJSON(http.MethodGet, remotesPath(namespace), nil, list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+func GetKeymap(c *Client, namespace, name string) (*Keymap, error) {
+	keymap := &Keymap{}
+	if err := c.RequestJSON(http.MethodGet, keymapPath(namespace, name), nil, keymap); err != nil {
+		return nil, err
+	}
+	return keymap, nil
 }
 
 func GetResourceClaim(c *Client, namespace, name string) (*ResourceClaim, error) {

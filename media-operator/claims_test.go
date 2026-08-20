@@ -37,7 +37,7 @@ func testPlayer() *Player {
 }
 
 func TestBuildClaimTurnsEveryRoleIntoARequest(t *testing.T) {
-	claim := buildClaim(testPlay(), testPlayer())
+	claim := buildClaim(testPlay(), testPlayer(), nil)
 
 	requests := claim.Spec.Devices.Requests
 	if len(requests) != 4 {
@@ -82,7 +82,7 @@ func TestBuildClaimCarriesOnlyTheSelectorsThePlayerWrote(t *testing.T) {
 	player := testPlayer()
 	player.Spec.Display.Selector = expression
 
-	claim := buildClaim(testPlay(), player)
+	claim := buildClaim(testPlay(), player, nil)
 
 	screen := claim.Spec.Devices.Requests[0]
 	selectors := []DeviceSelector{{CEL: &CELDeviceSelector{Expression: expression}}}
@@ -107,7 +107,7 @@ func TestBuildClaimCarriesOnlyTheSelectorsThePlayerWrote(t *testing.T) {
 // thirty seconds is the window that survives a cable being moved. A
 // render node never leaves, so it takes no toleration.
 func TestBuildClaimToleratesTheDisconnectTaintsForThirtySeconds(t *testing.T) {
-	claim := buildClaim(testPlay(), testPlayer())
+	claim := buildClaim(testPlay(), testPlayer(), nil)
 
 	seconds := int64(30)
 	cases := []struct {
@@ -168,7 +168,7 @@ func TestBuildClaimConfiguresOnlyTheDevicesWithParameters(t *testing.T) {
 	player := testPlayer()
 	player.Spec.Display.Parameters = &DeviceParameters{Driver: "display.liken.sh", Values: mode}
 
-	claim := buildClaim(testPlay(), player)
+	claim := buildClaim(testPlay(), player, nil)
 
 	config := claim.Spec.Devices.Config
 	if len(config) != 1 {
@@ -199,7 +199,7 @@ func TestBuildClaimConfiguresEachDeviceSeparately(t *testing.T) {
 		Values: json.RawMessage(`{"node":"renderD128"}`),
 	}
 
-	claim := buildClaim(testPlay(), player)
+	claim := buildClaim(testPlay(), player, nil)
 
 	config := claim.Spec.Devices.Config
 	if len(config) != 2 {
@@ -222,7 +222,7 @@ func TestBuildClaimConfiguresEachDeviceSeparately(t *testing.T) {
 // The claim's name and its owner are what make deleting the Play the
 // whole teardown.
 func TestBuildClaimNamesTheClaimForThePlayThatOwnsIt(t *testing.T) {
-	claim := buildClaim(testPlay(), testPlayer())
+	claim := buildClaim(testPlay(), testPlayer(), nil)
 
 	if claim.APIVersion != claimAPIVersion || claim.Kind != "ResourceClaim" {
 		t.Errorf("apiVersion = %q, kind = %q", claim.APIVersion, claim.Kind)
@@ -252,7 +252,7 @@ func TestBuildClaimAsksForNothingAPlayerDoesNotHold(t *testing.T) {
 	player.Spec.Display = nil
 	player.Spec.Render = nil
 
-	claim := buildClaim(testPlay(), player)
+	claim := buildClaim(testPlay(), player, nil)
 
 	want := []string{"audio0", "audio1"}
 	if got := claimRequests(claim); !reflect.DeepEqual(got, want) {
@@ -261,10 +261,95 @@ func TestBuildClaimAsksForNothingAPlayerDoesNotHold(t *testing.T) {
 }
 
 func TestClaimRequestsReadsTheNamesInClaimOrder(t *testing.T) {
-	claim := buildClaim(testPlay(), testPlayer())
+	claim := buildClaim(testPlay(), testPlayer(), nil)
 
 	want := []string{"screen", "audio0", "audio1", "render"}
 	if got := claimRequests(claim); !reflect.DeepEqual(got, want) {
+		t.Errorf("requests = %v, want %v", got, want)
+	}
+}
+
+// Two remotes bound to the player, as the gather hands them to the
+// builders.
+func testBoundRemotes() []boundRemote {
+	return []boundRemote{{
+		Name: "armchair",
+		Device: RemoteDevice{
+			Class:    "gamepad",
+			Selector: `device.attributes["bluetooth.liken.sh"].address == "04:4A"`,
+		},
+		Bindings: []compiledBinding{{EventType: evKey, Code: 0x130, Value: 1, Action: actionPause}},
+	}, {
+		Name:     "sofa",
+		Device:   RemoteDevice{Class: "gamepad"},
+		Bindings: []compiledBinding{{EventType: evAbs, Code: 0x11, Value: -1, Action: actionVolume, Amount: 5}},
+	}}
+}
+
+// The remotes follow the player's own roles, one request each, named
+// for the Remote they claim.
+func TestBuildClaimAsksForOneRequestPerBoundRemote(t *testing.T) {
+	claim := buildClaim(testPlay(), testPlayer(), testBoundRemotes())
+
+	want := []string{"screen", "audio0", "audio1", "render", "remote-armchair", "remote-sofa"}
+	if got := claimRequests(claim); !reflect.DeepEqual(got, want) {
+		t.Fatalf("requests = %v, want %v", got, want)
+	}
+	armchair := claim.Spec.Devices.Requests[4]
+	if armchair.Exactly.DeviceClassName != "gamepad" {
+		t.Errorf("deviceClassName = %q, want gamepad", armchair.Exactly.DeviceClassName)
+	}
+	selectors := []DeviceSelector{{CEL: &CELDeviceSelector{
+		Expression: `device.attributes["bluetooth.liken.sh"].address == "04:4A"`,
+	}}}
+	if !reflect.DeepEqual(armchair.Exactly.Selectors, selectors) {
+		t.Errorf("selectors = %+v, want %+v", armchair.Exactly.Selectors, selectors)
+	}
+	if len(claim.Spec.Devices.Requests[5].Exactly.Selectors) != 0 {
+		t.Errorf("a remote with no selector carried one: %+v", claim.Spec.Devices.Requests[5])
+	}
+}
+
+// A toleration with no tolerationSeconds never expires. A controller
+// sleeps for an hour and the film keeps playing.
+func TestBuildClaimToleratesASleepingRemoteWithNoTimeLimit(t *testing.T) {
+	claim := buildClaim(testPlay(), testPlayer(), testBoundRemotes())
+
+	armchair := claim.Spec.Devices.Requests[4]
+	want := []DeviceToleration{{
+		Key:      "bluetooth.liken.sh/disconnected",
+		Operator: "Exists",
+		Effect:   "NoExecute",
+	}}
+	if !reflect.DeepEqual(armchair.Exactly.Tolerations, want) {
+		t.Fatalf("tolerations = %+v, want %+v", armchair.Exactly.Tolerations, want)
+	}
+	written, err := json.Marshal(armchair)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(written), "tolerationSeconds") {
+		t.Errorf("request = %s, want no tolerationSeconds key", written)
+	}
+}
+
+// Nothing prepares an input device, so a remote's request carries no
+// opaque config at all.
+func TestBuildClaimConfiguresNothingForARemote(t *testing.T) {
+	claim := buildClaim(testPlay(), testPlayer(), testBoundRemotes())
+
+	if len(claim.Spec.Devices.Config) != 0 {
+		t.Errorf("config = %+v, want none", claim.Spec.Devices.Config)
+	}
+}
+
+// The player container holds the player's devices; each remote's
+// request belongs to its own sidecar.
+func TestPlayerRequestsLeavesTheRemoteRequestsOut(t *testing.T) {
+	claim := buildClaim(testPlay(), testPlayer(), testBoundRemotes())
+
+	want := []string{"screen", "audio0", "audio1", "render"}
+	if got := playerRequests(claim); !reflect.DeepEqual(got, want) {
 		t.Errorf("requests = %v, want %v", got, want)
 	}
 }

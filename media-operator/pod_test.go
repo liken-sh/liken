@@ -5,6 +5,7 @@ package main
 // and carries the four values that let it report back.
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 )
@@ -32,8 +33,17 @@ func testResolution(t *testing.T) resolution {
 func testPod(t *testing.T) *Pod {
 	t.Helper()
 	play := testPlay()
-	claim := buildClaim(play, testPlayer())
-	return buildPod(play, claim, testResolution(t), testImage, testToken, testOperatorURL)
+	claim := buildClaim(play, testPlayer(), nil)
+	return buildPod(play, claim, testResolution(t), testImage, testToken, testOperatorURL, nil)
+}
+
+// The same pod, with two controllers bound to the player.
+func testPodWithRemotes(t *testing.T) *Pod {
+	t.Helper()
+	play := testPlay()
+	remotes := testBoundRemotes()
+	claim := buildClaim(play, testPlayer(), remotes)
+	return buildPod(play, claim, testResolution(t), testImage, testToken, testOperatorURL, remotes)
 }
 
 // restartPolicy is Never, because a finished film is not a failure
@@ -107,8 +117,8 @@ func TestBuildPodRunsThePlayerOnTheResolvedList(t *testing.T) {
 func TestBuildPodCarriesTheDeclaredStart(t *testing.T) {
 	play := testPlay()
 	play.Spec.Start = "0:10:00"
-	claim := buildClaim(play, testPlayer())
-	pod := buildPod(play, claim, testResolution(t), testImage, testToken, testOperatorURL)
+	claim := buildClaim(play, testPlayer(), nil)
+	pod := buildPod(play, claim, testResolution(t), testImage, testToken, testOperatorURL, nil)
 
 	env := pod.Spec.Containers[0].Env
 	last := env[len(env)-1]
@@ -140,17 +150,104 @@ func TestBuildPodHoldsEveryRequestTheClaimAsksFor(t *testing.T) {
 }
 
 // The volume belongs to the pod and the mount belongs to the
-// container, so the resolution splits across the two.
+// container, so the resolution splits across the two. The IPC volume
+// follows the media in both lists.
 func TestBuildPodCarriesTheResolvedVolumesAndMounts(t *testing.T) {
 	resolved := testResolution(t)
 	play := testPlay()
-	pod := buildPod(play, buildClaim(play, testPlayer()), resolved, testImage, testToken, testOperatorURL)
+	pod := buildPod(play, buildClaim(play, testPlayer(), nil), resolved, testImage, testToken, testOperatorURL, nil)
 
-	if !reflect.DeepEqual(pod.Spec.Volumes, resolved.Volumes) {
-		t.Errorf("volumes = %+v, want %+v", pod.Spec.Volumes, resolved.Volumes)
+	volumes := append(append([]Volume{}, resolved.Volumes...),
+		Volume{Name: "ipc", EmptyDir: &EmptyDirVolumeSource{}})
+	if !reflect.DeepEqual(pod.Spec.Volumes, volumes) {
+		t.Errorf("volumes = %+v, want %+v", pod.Spec.Volumes, volumes)
 	}
-	if got := pod.Spec.Containers[0].VolumeMounts; !reflect.DeepEqual(got, resolved.Mounts) {
-		t.Errorf("volumeMounts = %+v, want %+v", got, resolved.Mounts)
+	mounts := append(append([]VolumeMount{}, resolved.Mounts...),
+		VolumeMount{Name: "ipc", MountPath: "/ipc"})
+	if got := pod.Spec.Containers[0].VolumeMounts; !reflect.DeepEqual(got, mounts) {
+		t.Errorf("volumeMounts = %+v, want %+v", got, mounts)
+	}
+	// The resolution keeps what it resolved; the pod builder appends
+	// into a copy.
+	if len(resolved.Mounts) != 1 || len(resolved.Volumes) != 1 {
+		t.Errorf("the builder wrote into the resolution: %+v", resolved)
+	}
+}
+
+// A pod with no remotes at all still carries the volume, because the
+// supervisor serves mpv's socket at one path either way.
+func TestBuildPodAlwaysCarriesTheIPCVolume(t *testing.T) {
+	pod := testPod(t)
+
+	last := pod.Spec.Volumes[len(pod.Spec.Volumes)-1]
+	want := Volume{Name: "ipc", EmptyDir: &EmptyDirVolumeSource{}}
+	if !reflect.DeepEqual(last, want) {
+		t.Fatalf("volume = %+v, want %+v", last, want)
+	}
+	written, err := json.Marshal(last)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(written) != `{"name":"ipc","emptyDir":{}}` {
+		t.Errorf("volume = %s", written)
+	}
+	if len(pod.Spec.InitContainers) != 0 {
+		t.Errorf("initContainers = %+v, want none", pod.Spec.InitContainers)
+	}
+}
+
+// One sidecar per remote: the same image in its remote mode, holding
+// its own controller and its own compiled table.
+func TestBuildPodRunsOneSidecarPerBoundRemote(t *testing.T) {
+	pod := testPodWithRemotes(t)
+
+	if len(pod.Spec.InitContainers) != 2 {
+		t.Fatalf("initContainers = %+v, want two", pod.Spec.InitContainers)
+	}
+	want := Container{
+		Name:    "remote-armchair",
+		Image:   testImage,
+		Command: []string{"/media-operator", "remote"},
+		Env: []EnvVar{{
+			Name:  "MEDIA_KEYMAP",
+			Value: `[{"type":1,"code":304,"value":1,"action":"pause"}]`,
+		}},
+		Resources: ResourceRequirements{Claims: []ContainerClaim{
+			{Name: "devices", Request: "remote-armchair"},
+		}},
+		VolumeMounts:  []VolumeMount{{Name: "ipc", MountPath: "/ipc"}},
+		RestartPolicy: "Always",
+	}
+	if !reflect.DeepEqual(pod.Spec.InitContainers[0], want) {
+		t.Errorf("sidecar = %+v, want %+v", pod.Spec.InitContainers[0], want)
+	}
+	second := pod.Spec.InitContainers[1]
+	if second.Name != "remote-sofa" {
+		t.Errorf("name = %q, want remote-sofa", second.Name)
+	}
+	value := `[{"type":3,"code":17,"value":-1,"action":"volume","amount":5}]`
+	if second.Env[0].Value != value {
+		t.Errorf("keymap = %s, want %s", second.Env[0].Value, value)
+	}
+}
+
+// The controller's input nodes stay out of the container that decodes
+// media from the network.
+func TestBuildPodKeepsTheRemoteRequestsOutOfThePlayer(t *testing.T) {
+	pod := testPodWithRemotes(t)
+
+	held := []ContainerClaim{
+		{Name: "devices", Request: "screen"},
+		{Name: "devices", Request: "audio0"},
+		{Name: "devices", Request: "audio1"},
+		{Name: "devices", Request: "render"},
+	}
+	if got := pod.Spec.Containers[0].Resources.Claims; !reflect.DeepEqual(got, held) {
+		t.Errorf("resources.claims = %+v, want %+v", got, held)
+	}
+	claims := []PodResourceClaim{{Name: "devices", ResourceClaimName: "movie-devices"}}
+	if !reflect.DeepEqual(pod.Spec.ResourceClaims, claims) {
+		t.Errorf("resourceClaims = %+v, want %+v", pod.Spec.ResourceClaims, claims)
 	}
 }
 

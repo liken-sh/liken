@@ -1,0 +1,103 @@
+# The Remote API. A Remote is one physical controller: the device it
+# is, the Keymap for its model, and the player it drives. The device
+# is selected the way a Player's display is, by class and CEL over
+# the attributes a hardware operator publishes. The spec is mutable,
+# unlike a Play's, because a Remote is read only when a playback pod
+# is built: an edit changes the next Play and never a running one.
+# Where the reader runs is not part of this API. Today it is a
+# sidecar in the playback pod; the input bus in the founding design
+# moves it into a standing pod and keeps this resource unchanged.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: remotes.media.liken.sh
+spec:
+  group: media.liken.sh
+  names:
+    kind: Remote
+    listKind: RemoteList
+    plural: remotes
+    singular: remote
+    categories: [media]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      # The operator reports nothing on a Remote yet, so there is no
+      # status subresource. A Remote whose Keymap will not compile
+      # shows the failure on the Play that tried to use it.
+      additionalPrinterColumns:
+        - name: Keymap
+          type: string
+          jsonPath: .spec.keymap
+        - name: Player
+          type: string
+          jsonPath: .spec.bindings[0].player
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            One physical controller, bound to the player it drives.
+            Creating a Remote changes every Play that starts after
+            it: their playback pods claim the controller and answer
+            its buttons.
+          properties:
+            spec:
+              type: object
+              required: [device, keymap, bindings]
+              description: >-
+                The controller, the Keymap for its model, and the
+                player it drives.
+              properties:
+                device:
+                  type: object
+                  required: [class]
+                  description: >-
+                    The controller itself, selected out of the
+                    devices the hardware operators publish. There
+                    are no parameters: nothing prepares an input
+                    device, and its nodes are read as they are.
+                  properties:
+                    class:
+                      type: string
+                      description: >-
+                        The DeviceClass the claim allocates through.
+                        Consumer classes are the cluster owner's
+                        vocabulary, so the name is whatever this
+                        cluster calls its controllers.
+                    selector:
+                      type: string
+                      description: >-
+                        A CEL expression over device.attributes that
+                        picks this one controller, such as a match
+                        on its address.
+                keymap:
+                  type: string
+                  minLength: 1
+                  description: >-
+                    The Keymap for this controller's model, by name,
+                    in this namespace.
+                bindings:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  minItems: 1
+                  # One player for now, the same limit spec.players
+                  # carries: a list of one means no remote drives
+                  # two players, so nothing arbitrates focus yet.
+                  maxItems: 1
+                  description: >-
+                    The players this Remote drives, one entry today.
+                  items:
+                    type: object
+                    required: [player]
+                    properties:
+                      player:
+                        type: string
+                        minLength: 1
+                        description: >-
+                          The Player this Remote drives, by name, in
+                          this namespace.

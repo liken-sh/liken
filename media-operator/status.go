@@ -18,14 +18,15 @@ import (
 // player process runs, and it cannot lie about an exit; only mpv
 // knows where the playhead is, and it can only say so through the
 // supervisor's reports. Each argument may be absent: a nil player is
-// a Player not yet declared, a resolveErr is a URI no pod could ever
-// play, a nil pod is a run not yet started, and a nil report is a
+// a Player not yet declared, a buildErr is a run no pod could ever
+// perform, a nil pod is a run not yet started, and a nil report is a
 // pod that has not spoken yet.
-func derivePlayStatus(play *Play, player *Player, resolveErr error, pod *Pod, latest *playReport) PlayStatus {
-	if resolveErr != nil {
-		// A URI the resolver refuses fails the Play before any
-		// object exists, because no pod could ever play it.
-		return PlayStatus{Phase: phaseFailed, Message: resolveErr.Error()}
+func derivePlayStatus(play *Play, player *Player, buildErr error, pod *Pod, latest *playReport) PlayStatus {
+	if buildErr != nil {
+		// A URI the resolver refuses, or a Remote whose Keymap will
+		// not compile, fails the Play before any object exists,
+		// because the pod it describes could never be built.
+		return PlayStatus{Phase: phaseFailed, Message: buildErr.Error()}
 	}
 	if player == nil {
 		// An absent Player is Pending rather than Failed. The Player

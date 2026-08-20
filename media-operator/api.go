@@ -142,6 +142,84 @@ type PlayList struct {
 	Items    []Play   `json:"items"`
 }
 
+// A Remote is one physical controller: the device it is, the Keymap
+// for its model, and the player it drives. This operator only reads
+// it, and only at the moment a Play's pod is built.
+type Remote struct {
+	APIVersion string     `json:"apiVersion,omitempty"`
+	Kind       string     `json:"kind,omitempty"`
+	Metadata   ObjectMeta `json:"metadata"`
+	Spec       RemoteSpec `json:"spec"`
+}
+
+// Bindings is a list of one today, the same trade spec.players
+// makes: a grown list is no migration, and a list of one means no
+// remote drives two players, so nothing arbitrates focus yet.
+type RemoteSpec struct {
+	Device   RemoteDevice    `json:"device"`
+	Keymap   string          `json:"keymap"`
+	Bindings []RemoteBinding `json:"bindings"`
+}
+
+// The controller is selected the way a Player's display is, by a
+// DeviceClass and a CEL expression. There is no parameters field,
+// because nothing prepares an input device the way a codec prepares
+// a sink.
+type RemoteDevice struct {
+	Class    string `json:"class"`
+	Selector string `json:"selector,omitempty"`
+}
+
+// One binding names one Player. It is an object rather than a bare
+// name because a later plan adds per-binding keymap overrides, and
+// growing an object costs nothing where replacing a string is a
+// migration.
+type RemoteBinding struct {
+	Player string `json:"player"`
+}
+
+type RemoteList struct {
+	Metadata ListMeta `json:"metadata"`
+	Items    []Remote `json:"items"`
+}
+
+// A Keymap is one controller model's table from buttons and axes to
+// named actions, written once per model and shared by every Remote
+// of that model.
+type Keymap struct {
+	APIVersion string     `json:"apiVersion,omitempty"`
+	Kind       string     `json:"kind,omitempty"`
+	Metadata   ObjectMeta `json:"metadata"`
+	Spec       KeymapSpec `json:"spec"`
+}
+
+// Buttons and axes are separate lists because they bind differently:
+// a button is a press, and an axis entry names a direction as well.
+// The CRD requires at least one entry across the two.
+type KeymapSpec struct {
+	Buttons []KeymapButton `json:"buttons,omitempty"`
+	Axes    []KeymapAxis   `json:"axes,omitempty"`
+}
+
+// Press is an evdev key name out of buttonCodes, Action is a word
+// from the vocabulary in input.go, and Amount belongs only to the
+// three actions that move by one: seek, volume, and chapter.
+type KeymapButton struct {
+	Press  string `json:"press"`
+	Action string `json:"action"`
+	Amount int    `json:"amount,omitempty"`
+}
+
+// An axis entry adds the value, because a hat axis reports -1 and 1
+// as its two presses and 0 as the release: one axis is two bindable
+// directions.
+type KeymapAxis struct {
+	Axis   string `json:"axis"`
+	Value  int    `json:"value"`
+	Action string `json:"action"`
+	Amount int    `json:"amount,omitempty"`
+}
+
 // A ResourceClaim is the request for hardware. The operator writes
 // only the spec; the scheduler writes an allocation into the status,
 // and nothing here reads it, because the pod's own phase already
@@ -229,10 +307,15 @@ type Pod struct {
 // The pod spec's few fields: restartPolicy Never because the pod's
 // end is the play's end, and the short grace period because mpv
 // exits promptly on SIGTERM.
+//
+// initContainers is where a native sidecar goes: an init container
+// with restartPolicy Always starts before the ordinary containers,
+// runs beside them, and restarts alone, without ending the pod.
 type PodSpec struct {
 	RestartPolicy                 string             `json:"restartPolicy,omitempty"`
 	TerminationGracePeriodSeconds *int64             `json:"terminationGracePeriodSeconds,omitempty"`
 	ResourceClaims                []PodResourceClaim `json:"resourceClaims,omitempty"`
+	InitContainers                []Container        `json:"initContainers,omitempty"`
 	Containers                    []Container        `json:"containers"`
 	Volumes                       []Volume           `json:"volumes,omitempty"`
 }
@@ -245,13 +328,18 @@ type PodResourceClaim struct {
 	ResourceClaimName string `json:"resourceClaimName,omitempty"`
 }
 
+// Command replaces the image's entrypoint, which is how one image
+// runs the playback pod's two roles. RestartPolicy is set only on an
+// init container, where Always is what makes it a sidecar.
 type Container struct {
-	Name         string               `json:"name"`
-	Image        string               `json:"image"`
-	Args         []string             `json:"args,omitempty"`
-	Env          []EnvVar             `json:"env,omitempty"`
-	Resources    ResourceRequirements `json:"resources"`
-	VolumeMounts []VolumeMount        `json:"volumeMounts,omitempty"`
+	Name          string               `json:"name"`
+	Image         string               `json:"image"`
+	Command       []string             `json:"command,omitempty"`
+	Args          []string             `json:"args,omitempty"`
+	Env           []EnvVar             `json:"env,omitempty"`
+	Resources     ResourceRequirements `json:"resources"`
+	VolumeMounts  []VolumeMount        `json:"volumeMounts,omitempty"`
+	RestartPolicy string               `json:"restartPolicy,omitempty"`
 }
 
 // resources.claims is how a container holds one of the pod's
@@ -280,8 +368,9 @@ type VolumeMount struct {
 // The kubelet mounts it with the kernel's NFS client, through the
 // mount helper liken's image carries.
 type Volume struct {
-	Name string           `json:"name"`
-	NFS  *NFSVolumeSource `json:"nfs,omitempty"`
+	Name     string                `json:"name"`
+	NFS      *NFSVolumeSource      `json:"nfs,omitempty"`
+	EmptyDir *EmptyDirVolumeSource `json:"emptyDir,omitempty"`
 }
 
 type NFSVolumeSource struct {
@@ -289,6 +378,12 @@ type NFSVolumeSource struct {
 	Path     string `json:"path"`
 	ReadOnly bool   `json:"readOnly,omitempty"`
 }
+
+// An emptyDir is a directory the kubelet creates with the pod and
+// deletes with it, which is all two containers need to share one
+// socket. The struct is empty because every emptyDir option has a
+// default this pod accepts, and it must still marshal as {}.
+type EmptyDirVolumeSource struct{}
 
 // The pod status fields the phase derivation reads. The container's
 // terminated state is the specific half of a failure message,

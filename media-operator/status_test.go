@@ -44,18 +44,25 @@ func TestDerivePlayStatus(t *testing.T) {
 	unschedulable.Status.Message = "no machine holds every claimed device"
 
 	cases := []struct {
-		name       string
-		player     *Player
-		resolveErr error
-		pod        *Pod
-		report     *playReport
-		want       PlayStatus
+		name     string
+		player   *Player
+		buildErr error
+		pod      *Pod
+		report   *playReport
+		want     PlayStatus
 	}{{
-		name:       "a refused URI fails the play before anything exists",
-		resolveErr: errors.New("the scheme rtsp:// is not one the operator resolves; it resolves https:// and nfs://"),
+		name:     "a refused URI fails the play before anything exists",
+		buildErr: errors.New("the scheme rtsp:// is not one the operator resolves; it resolves https:// and nfs://"),
 		want: PlayStatus{
 			Phase:   phaseFailed,
 			Message: "the scheme rtsp:// is not one the operator resolves; it resolves https:// and nfs://",
+		},
+	}, {
+		name:     "a Keymap that will not compile fails the play the same way",
+		buildErr: errors.New("the Keymap gamepad binds BTN_NOPE, which is not an evdev button name this operator knows"),
+		want: PlayStatus{
+			Phase:   phaseFailed,
+			Message: "the Keymap gamepad binds BTN_NOPE, which is not an evdev button name this operator knows",
 		},
 	}, {
 		name: "an absent Player is Pending, not Failed",
@@ -150,7 +157,7 @@ func TestDerivePlayStatus(t *testing.T) {
 
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			got := derivePlayStatus(statusTestPlay(), one.player, one.resolveErr, one.pod, one.report)
+			got := derivePlayStatus(statusTestPlay(), one.player, one.buildErr, one.pod, one.report)
 			if !reflect.DeepEqual(got, one.want) {
 				t.Errorf("status = %+v, want %+v", got, one.want)
 			}

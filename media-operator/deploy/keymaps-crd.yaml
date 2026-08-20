@@ -1,0 +1,142 @@
+# The Keymap API. A Keymap is one controller model's table from
+# buttons and axes to named actions, written once per model and
+# shared by every Remote of that model. The left side uses evdev's
+# names, because every Linux controller driver reports the south
+# face button as BTN_SOUTH whatever the glyph on the plastic. The
+# right side names what a person means, pause or seek, never an mpv
+# command, so a different player program can implement the same
+# table later. The operator compiles each table before it builds a
+# pod, and a name it cannot compile fails the Play with a message
+# instead of reaching a container.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: keymaps.media.liken.sh
+spec:
+  group: media.liken.sh
+  names:
+    kind: Keymap
+    listKind: KeymapList
+    plural: keymaps
+    singular: keymap
+    categories: [media]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      # A Keymap is a table a person writes and nothing reports on,
+      # so there is no status subresource and the listing shows
+      # nothing but its age.
+      additionalPrinterColumns:
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            One controller model's table from buttons and axes to
+            named actions. Write one Keymap per model, and share it
+            through every Remote of that model.
+          properties:
+            spec:
+              type: object
+              description: >-
+                The table itself, in two lists: buttons for key
+                presses, and axes for the d-pad's hat directions.
+              # A Keymap that binds nothing would compile to a
+              # sidecar that answers no press, so at least one entry
+              # is required across the two lists.
+              x-kubernetes-validations:
+                - rule: >-
+                    (has(self.buttons) && size(self.buttons) > 0) ||
+                    (has(self.axes) && size(self.axes) > 0)
+                  message: a Keymap must bind at least one button or axis
+              properties:
+                buttons:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  description: >-
+                    Button entries. Each one answers the press alone:
+                    a held button's autorepeat and its release do
+                    nothing.
+                  items:
+                    type: object
+                    required: [press, action]
+                    # Three actions move by an amount and need one;
+                    # the rest are complete alone and refuse one.
+                    x-kubernetes-validations:
+                      - rule: >-
+                          (self.action in ['seek','volume','chapter']) == has(self.amount)
+                        message: seek, volume, and chapter need an amount; the other actions take none
+                    properties:
+                      press:
+                        type: string
+                        minLength: 1
+                        description: >-
+                          The button, by its evdev key name, such as
+                          BTN_SOUTH. Every Linux controller driver
+                          reports the same position under the same
+                          name, so the name works across models.
+                      action:
+                        type: string
+                        enum: [pause, mute, seek, volume, chapter, subtitles, audio, info]
+                        description: >-
+                          What the press does, in this operator's
+                          vocabulary. The words name what a person
+                          means, never a player program's own
+                          command.
+                      amount:
+                        type: integer
+                        description: >-
+                          How far the action moves: seconds for
+                          seek, a step for volume and chapter. The
+                          sign is the direction, so one action
+                          serves both bumpers.
+                axes:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  description: >-
+                    Axis entries. A gamepad's d-pad arrives as the
+                    two hat axes rather than as buttons, so each
+                    d-pad direction is one entry here.
+                  items:
+                    type: object
+                    required: [axis, value, action]
+                    x-kubernetes-validations:
+                      - rule: >-
+                          (self.action in ['seek','volume','chapter']) == has(self.amount)
+                        message: seek, volume, and chapter need an amount; the other actions take none
+                    properties:
+                      axis:
+                        type: string
+                        enum: [ABS_HAT0X, ABS_HAT0Y]
+                        description: >-
+                          One of the two hat axes, X across and Y
+                          down. The analog sticks are not bindable:
+                          a resting thumb reports hundreds of times
+                          a second, and no action wants an analog
+                          value.
+                      value:
+                        type: integer
+                        enum: [-1, 1]
+                        description: >-
+                          Which direction of the axis this entry
+                          binds. The hat reports -1 and 1 as its two
+                          presses and 0 as the release, and the
+                          release does nothing.
+                      action:
+                        type: string
+                        enum: [pause, mute, seek, volume, chapter, subtitles, audio, info]
+                        description: >-
+                          What the press does, in this operator's
+                          vocabulary. The words name what a person
+                          means, never a player program's own
+                          command.
+                      amount:
+                        type: integer
+                        description: >-
+                          How far the action moves: seconds for
+                          seek, a step for volume and chapter. The
+                          sign is the direction.

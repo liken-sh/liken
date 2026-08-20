@@ -16,6 +16,8 @@ namespace: liken-system
 resources:
   - players-crd.yaml
   - plays-crd.yaml
+  - keymaps-crd.yaml
+  - remotes-crd.yaml
   - rbac.yaml
   - operator.yaml
 
