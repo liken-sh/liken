@@ -43,17 +43,18 @@ A `DeviceClass` is cluster-scoped policy: you name and curate the
 classes, the same convention as a `StorageClass`. The classes split
 by owner:
 
-* `display-gpu` and `display-render` are wiring, and the base ships
-  them, served at
+* `display-gpu`, `display-render`, and `display-i2c` are wiring,
+  and the base ships them, served at
   [`deviceclasses.yaml`](/deploy/deviceclasses.yaml). The
-  operator's own pod claims the graphics card's card node and
-  render node through them, from the devices `liken` publishes, and
-  the `ResourceClaimTemplate` in
+  operator's own pod claims the graphics card's card node, its
+  render node, and its monitor-control wires through them, from the
+  devices `liken` publishes, and the `ResourceClaimTemplate` in
   [`operator.yaml`](/deploy/operator.yaml) names them literally, so
   the operator cannot start without them. Do not delete them. The
   classes select on the `displayNode` and `renderNode` attributes
-  rather than on a vendor and a product id, so they stay correct
-  across a fleet of different machines.
+  and on the i2c companion's `subsystem`, rather than on a vendor
+  and a product id, so they stay correct across a fleet of
+  different machines.
 * The class your workloads claim through is yours to create,
   because it is your cluster's vocabulary, and the base ships no
   policy. `display-output` is the one to start with:

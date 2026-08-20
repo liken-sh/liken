@@ -82,9 +82,10 @@ alone allocates any output that has a monitor. To name one screen
 from a claim instead, add a selector on the attributes below, as
 [Put a window on a screen](/docs/guides/claim/) shows.
 
-The other two classes from the install guide, `display-gpu` and
-`display-render`, are not for consumers. They select the raw card
-node and render node that `liken`'s own driver publishes, and the
+The other three classes from the install guide, `display-gpu`,
+`display-render`, and `display-i2c`, are not for consumers. They
+select the raw card node, the render node, and the card's
+monitor-control wires that `liken`'s own driver publishes, and the
 operator's own pod claims one of each. The pod cannot start without
 them.
 [Devices](https://liken.sh/docs/reference/devices/) in the `liken`

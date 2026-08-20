@@ -295,9 +295,10 @@ type supportedControls struct {
 
 // A controlBus is one i2c-dev node, opened around a single exchange
 // and closed after it. The nodes arrive in the operator's own pod
-// with its GPU claim, because liken's delivery walk collects every
-// device node under the card's PCI device, and the gmbus adapters are
-// among them.
+// with its claim on the card's i2c companion device, the wires
+// request in the claim template. liken publishes those wires apart
+// from the card node, exclusively, because raw wire access has one
+// writer, and this operator is that writer.
 type controlBus interface {
 	i2cBus
 	Close() error

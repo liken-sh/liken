@@ -35,3 +35,24 @@ spec:
         expression: |
           device.driver == "liken.sh" &&
           has(device.attributes["liken.sh"].renderNode)
+---
+# The graphics card's monitor-control wires. liken publishes the
+# card's i2c buses as one exclusive companion device, apart from the
+# card node, because raw wire access has one writer and no
+# arbitration contract. This operator is that writer: it claims the
+# companion, probes each panel over DDC/CI, and re-publishes the
+# wires at the per-connector grain as its control devices. The
+# selector reads the subsystem and the class, so it stays correct
+# across a fleet of different cards.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: display-i2c
+spec:
+  selectors:
+    - cel:
+        expression: |
+          device.driver == "liken.sh" &&
+          has(device.attributes["liken.sh"].subsystem) &&
+          device.attributes["liken.sh"].subsystem == "i2c-dev" &&
+          device.attributes["liken.sh"].class == "display"
