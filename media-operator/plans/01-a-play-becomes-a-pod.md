@@ -79,9 +79,10 @@ built-in speakers, in release 2026.08.20-001. A `Player` named
 `lab-portable` selected the monitor and its speakers by
 `monitor.liken.sh/id` through the cluster's `display-output` and
 `audio-output` classes, and the render node through
-`display-render`. A `Play` named one `nfs://` URI on the NAS, with
-the path's spaces and brackets percent-encoded, because a URI's
-path is encoded by definition and the resolver refuses a raw space.
+`display-render`. A `Play` named one `nfs://` URI on the NAS. The
+path holds spaces and brackets, in either the raw name or its
+percent-encoded form: the resolver parses the URI and reads the
+decoded path, so both reach the mount as the same bytes.
 
 The claims allocated, the pod scheduled, and the phase reached
 `Running` about forty seconds after the create, most of it the
