@@ -24,6 +24,11 @@ is built the way it is, and what it still owes an answer to.
   and the repository scaffolding. A film played from a `kubectl
   create`, its position advanced in `kubectl get plays`, and the
   delete tore everything down through the owner references.
+* [02, A remote drives the play](02-a-remote-drives-the-play.md).
+  Proposed. `Remote` and `Keymap`, with the reader as a sidecar in
+  the playback pod: the smallest proof of input, taken knowingly
+  ahead of the bus. A gamepad pauses a film and `status.paused`
+  follows.
 
 ## Open problems
 
