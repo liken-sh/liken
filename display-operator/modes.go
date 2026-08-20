@@ -202,9 +202,16 @@ func modeParameters(raw json.RawMessage) (string, error) {
 	}
 	mode := ""
 	for key, value := range parameters {
+		if !slices.Contains(claimParameterNames, key) {
+			return "", unknownParameter(key)
+		}
+		// A control parameter is this block's too, and
+		// controlParameters is the parser that reads it. Both parsers
+		// judge an unknown key against the one list of what this
+		// driver reads, so a typo fails from either side and a real
+		// key is never mistaken for one.
 		if key != modeParameter {
-			return "", fmt.Errorf("the claim's %s parameters name %q, and this driver reads only %q",
-				DriverName, key, modeParameter)
+			continue
 		}
 		if err := json.Unmarshal(value, &mode); err != nil {
 			return "", fmt.Errorf("the claim's %s parameter is not a string: %s", modeParameter, value)

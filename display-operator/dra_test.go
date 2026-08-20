@@ -762,6 +762,232 @@ func TestUnprepareRemovesTheSpec(t *testing.T) {
 	}
 }
 
+// labPluginWithClaim is the driver on the lab machine with the panels
+// wired to the i2c nodes their connectors name, for whatever
+// allocation the claim holds. The control device's delivery is a node
+// path, so these tests need the `ddc` links that benchPanels writes.
+func labPluginWithClaim(t *testing.T, results []AllocatedDevice, config string,
+	monitors map[string]*fakeMonitor) (*draPlugin, *panelBench) {
+	t.Helper()
+	plugin, _ := labPluginWithConfig(t, results, config)
+	controls, bench := benchPanels(t, plugin.sysRoot, plugin.card, monitors)
+	plugin.controls = controls
+	plugin.powerPath = filepath.Join(t.TempDir(), "power.json")
+	return plugin, bench
+}
+
+// controlRequest allocates the control device of the lab's portable
+// panel, the second device HDMI-A-2 publishes.
+func controlRequest() []AllocatedDevice {
+	return []AllocatedDevice{
+		{Request: "panel", Driver: DriverName, Pool: "liken-1", Device: "hdmi-a-2-control"},
+	}
+}
+
+// preparedSpec reads the one file prepare left for the container
+// runtime.
+func preparedSpec(t *testing.T) cdiSpec {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(cdiDir, cdiPrefix+testClaimUID+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec cdiSpec
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		t.Fatal(err)
+	}
+	return spec
+}
+
+func TestPrepareDeliversTheControlNodeAndItsPath(t *testing.T) {
+	panel := newFakeMonitor()
+	plugin, bench := labPluginWithClaim(t, controlRequest(), "", claimedPanel(panel))
+
+	claim := prepare(t, plugin)
+	if claim.Error != "" {
+		t.Fatalf("prepare refused a panel that answers DDC/CI: %s", claim.Error)
+	}
+	if len(claim.Devices) != 1 || claim.Devices[0].DeviceName != "hdmi-a-2-control" {
+		t.Fatalf("devices = %+v", claim.Devices)
+	}
+	wantID := cdiKind + "=" + testClaimUID + "-hdmi-a-2-control"
+	if got := claim.Devices[0].CdiDeviceIds; len(got) != 1 || got[0] != wantID {
+		t.Errorf("cdiDeviceIds = %v, want %q", got, wantID)
+	}
+
+	spec := preparedSpec(t)
+	if len(spec.Devices) != 1 {
+		t.Fatalf("spec devices = %+v", spec.Devices)
+	}
+	edits := spec.Devices[0].ContainerEdits
+	// HDMI-A-2 reaches its panel on i2c-2 in this fixture, and the
+	// kernel's numbering is why the path also travels as a variable.
+	if len(edits.DeviceNodes) != 1 || edits.DeviceNodes[0].Path != "/dev/i2c-2" {
+		t.Fatalf("deviceNodes = %+v", edits.DeviceNodes)
+	}
+	if edits.DeviceNodes[0].Permissions != "rw" {
+		t.Errorf("permissions = %q", edits.DeviceNodes[0].Permissions)
+	}
+	if !containsString(edits.Env, "DISPLAY_CONTROL_BUS=/dev/i2c-2") {
+		t.Errorf("env = %v", edits.Env)
+	}
+	// The consumer holds the wire and makes every write on it, so this
+	// prepare puts nothing on the bus and never wakes the panel.
+	if bench.opens != 0 {
+		t.Errorf("prepare opened %d buses for a control device", bench.opens)
+	}
+	if len(panel.sets) != 0 {
+		t.Errorf("prepare wrote %+v to the panel", panel.sets)
+	}
+}
+
+func TestPrepareDeliversAScreenAndItsControlChannel(t *testing.T) {
+	// The two requests of one claim: the screen, whose brightness this
+	// operator sets at prepare, and the control channel, which the
+	// consumer drives itself. The block names the screen's request,
+	// because a block that names none applies to every request.
+	panel := newFakeMonitor()
+	results := append(screenRequest(), controlRequest()...)
+	plugin, _ := labPluginWithClaim(t, results,
+		configEntry(configFromClaim, `"screen"`, `{"brightness": 40}`), claimedPanel(panel))
+
+	claim := prepare(t, plugin)
+	if claim.Error != "" {
+		t.Fatalf("prepare refused a claim on a screen and its controls: %s", claim.Error)
+	}
+	if len(claim.Devices) != 2 {
+		t.Fatalf("devices = %+v", claim.Devices)
+	}
+
+	// One kind and one file for the whole claim, so an unprepare has
+	// one file to remove however many devices the claim held.
+	if got := specFiles(t); len(got) != 1 {
+		t.Fatalf("the spec files are %v", got)
+	}
+	spec := preparedSpec(t)
+	if spec.Kind != cdiKind || len(spec.Devices) != 2 {
+		t.Fatalf("spec = %+v", spec)
+	}
+	screen, control := spec.Devices[0], spec.Devices[1]
+	if screen.Name != testClaimUID+"-hdmi-a-2" || control.Name != testClaimUID+"-hdmi-a-2-control" {
+		t.Fatalf("spec devices = %+v", spec.Devices)
+	}
+	if len(screen.ContainerEdits.Mounts) != 1 || len(screen.ContainerEdits.DeviceNodes) != 0 {
+		t.Errorf("the screen's edits = %+v", screen.ContainerEdits)
+	}
+	if len(control.ContainerEdits.DeviceNodes) != 1 || len(control.ContainerEdits.Mounts) != 0 {
+		t.Errorf("the control device's edits = %+v", control.ContainerEdits)
+	}
+	// The screen's own request still sets what it states.
+	if got := panel.took(vcpBrightness); len(got) != 1 || got[0] != 40 {
+		t.Errorf("the panel took %v, want the brightness the screen's request states", got)
+	}
+}
+
+func TestPrepareRefusesParametersOnAControlRequest(t *testing.T) {
+	// A control device is the opposite bargain: the consumer holds the
+	// wire and makes every write. A parameter that resolved onto its
+	// request named the wrong request, and a silent drop would leave a
+	// person waiting for a brightness that no code was ever going to
+	// set.
+	cases := []struct {
+		name   string
+		config string
+		says   string
+	}{
+		{name: "a mode", config: claimMode(`{"mode": "1280x720"}`), says: modeParameter},
+		{name: "a brightness", config: claimControl(`{"brightness": 40}`), says: brightnessParameter},
+		{name: "a power", config: claimControl(`{"power": "on"}`), says: powerParameter},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			panel := newFakeMonitor()
+			plugin, bench := labPluginWithClaim(t, controlRequest(), c.config, claimedPanel(panel))
+
+			claim := prepare(t, plugin)
+			if claim.Error == "" {
+				t.Fatal("prepare accepted a parameter on a control request")
+			}
+			for _, want := range []string{c.says, "hdmi-a-2-control"} {
+				if !strings.Contains(claim.Error, want) {
+					t.Errorf("error = %q, want it to say %q", claim.Error, want)
+				}
+			}
+			if bench.opens != 0 {
+				t.Errorf("a refused claim opened %d buses", bench.opens)
+			}
+			if got := specFiles(t); len(got) != 0 {
+				t.Errorf("a refused claim left %v behind", got)
+			}
+		})
+	}
+}
+
+func TestPrepareRefusesAControlOnAConnectorWithNoDDCChannel(t *testing.T) {
+	// The fixture wires the portable panel only, so HDMI-A-1 has no
+	// `ddc` link, which is what a DisplayPort connector behind an MST
+	// hub also has: its DDC travels inside the AUX stream, where no
+	// i2c-dev node reaches it.
+	plugin, _ := labPluginWithClaim(t, []AllocatedDevice{
+		{Request: "panel", Driver: DriverName, Pool: "liken-1", Device: "hdmi-a-1-control"},
+	}, "", claimedPanel(newFakeMonitor()))
+
+	claim := prepare(t, plugin)
+	if claim.Error == "" {
+		t.Fatal("prepare delivered a control device with no node behind it")
+	}
+	for _, want := range []string{"HDMI-A-1", "DDC/CI"} {
+		if !strings.Contains(claim.Error, want) {
+			t.Errorf("error = %q, want it to say %q", claim.Error, want)
+		}
+	}
+	if got := specFiles(t); len(got) != 0 {
+		t.Errorf("a refused claim left %v behind", got)
+	}
+}
+
+func TestPrepareRefusesAControlOnAConnectorWithNoMonitor(t *testing.T) {
+	// The panel that answered the probe is gone, so the wire behind
+	// the node answers nothing. The pod waits in ContainerCreating and
+	// the output's NoExecute taint is what ends it.
+	plugin, _ := labPluginWithClaim(t, []AllocatedDevice{
+		{Request: "panel", Driver: DriverName, Pool: "liken-1", Device: "dp-1-control"},
+	}, "", claimedPanel(newFakeMonitor()))
+
+	claim := prepare(t, plugin)
+	if claim.Error == "" {
+		t.Fatal("prepare accepted a control device on a connector with nothing on it")
+	}
+	for _, want := range []string{"dp-1", "no monitor"} {
+		if !strings.Contains(claim.Error, want) {
+			t.Errorf("error = %q, want it to say %q", claim.Error, want)
+		}
+	}
+}
+
+func TestUnprepareOfAControlWritesNothingToThePanel(t *testing.T) {
+	// Nothing powers a panel on or off for a control device, at either
+	// end of the claim. The operator wrote no VCP code at prepare, so
+	// it owes the panel nothing when the claim ends.
+	panel := newFakeMonitor()
+	plugin, bench := labPluginWithClaim(t, controlRequest(), "", claimedPanel(panel))
+	if claim := prepare(t, plugin); claim.Error != "" {
+		t.Fatal(claim.Error)
+	}
+
+	unprepare(t, plugin)
+
+	if len(panel.sets) != 0 {
+		t.Errorf("unprepare wrote %+v to the panel", panel.sets)
+	}
+	if bench.opens != 0 {
+		t.Errorf("unprepare opened %d buses", bench.opens)
+	}
+	if got := specFiles(t); len(got) != 0 {
+		t.Errorf("unprepare left %v behind", got)
+	}
+}
+
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

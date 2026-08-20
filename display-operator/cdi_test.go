@@ -39,6 +39,114 @@ func TestOutputEditsDeliverTheSocketAndTheAppID(t *testing.T) {
 	}
 }
 
+func TestControlEditsDeliverTheNodeAndItsPath(t *testing.T) {
+	edits := controlEdits("/dev/i2c-4")
+
+	// The node is the DDC/CI wire, and the variable is the path,
+	// because the kernel numbers i2c adapters in the order it
+	// registers them and a consumer cannot guess the number.
+	if !slices.Equal(edits.Env, []string{"DISPLAY_CONTROL_BUS=/dev/i2c-4"}) {
+		t.Errorf("env = %v", edits.Env)
+	}
+	if len(edits.DeviceNodes) != 1 {
+		t.Fatalf("deviceNodes = %+v", edits.DeviceNodes)
+	}
+	node := edits.DeviceNodes[0]
+	// rw, because every DDC/CI exchange writes a request before it
+	// reads the reply.
+	if node.Path != "/dev/i2c-4" || node.Permissions != "rw" {
+		t.Errorf("deviceNodes[0] = %+v", node)
+	}
+	// A control device grants the wire and nothing else. The socket
+	// belongs to a claim on the output.
+	if len(edits.Mounts) != 0 {
+		t.Errorf("mounts = %+v", edits.Mounts)
+	}
+}
+
+// cdiDocument is the CDI 0.6.0 schema's own spelling of the fields
+// this driver writes. It is declared apart from the operator's own
+// structs so that a field renamed on one side fails here instead of
+// agreeing with itself.
+type cdiDocument struct {
+	CDIVersion string `json:"cdiVersion"`
+	Kind       string `json:"kind"`
+	Devices    []struct {
+		Name           string `json:"name"`
+		ContainerEdits struct {
+			Env         []string `json:"env"`
+			DeviceNodes []struct {
+				Path        string `json:"path"`
+				Permissions string `json:"permissions"`
+			} `json:"deviceNodes"`
+			Mounts []struct {
+				HostPath      string `json:"hostPath"`
+				ContainerPath string `json:"containerPath"`
+			} `json:"mounts"`
+		} `json:"containerEdits"`
+	} `json:"devices"`
+}
+
+func TestWriteCDISpecCarriesBothDeliveriesUnderOneKind(t *testing.T) {
+	cdiDir = t.TempDir()
+
+	// A claim that holds a screen and that screen's control channel
+	// gets one file, because a spec file states one kind and one file
+	// is one thing for an unprepare to remove.
+	devices := []cdiDevice{
+		{
+			Name:           "claim-uid-hdmi-a-1",
+			ContainerEdits: outputEdits("/var/run/display.liken.sh", "wayland-0", "hdmi-a-1"),
+		},
+		{
+			Name:           "claim-uid-hdmi-a-1-control",
+			ContainerEdits: controlEdits("/dev/i2c-4"),
+		},
+	}
+	if err := writeCDISpec("claim-uid", devices); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(cdiDir, "display.liken.sh-claim-uid.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document cdiDocument
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	if document.CDIVersion != "0.6.0" || document.Kind != "display.liken.sh/output" {
+		t.Errorf("document = %+v", document)
+	}
+	if len(document.Devices) != 2 {
+		t.Fatalf("devices = %+v", document.Devices)
+	}
+	screen, control := document.Devices[0], document.Devices[1]
+	if len(screen.ContainerEdits.Mounts) != 1 || len(screen.ContainerEdits.DeviceNodes) != 0 {
+		t.Errorf("the screen's edits = %+v", screen.ContainerEdits)
+	}
+	if control.Name != "claim-uid-hdmi-a-1-control" {
+		t.Errorf("the control device is named %q", control.Name)
+	}
+	if len(control.ContainerEdits.DeviceNodes) != 1 {
+		t.Fatalf("the control device's edits = %+v", control.ContainerEdits)
+	}
+	node := control.ContainerEdits.DeviceNodes[0]
+	if node.Path != "/dev/i2c-4" || node.Permissions != "rw" {
+		t.Errorf("deviceNodes[0] = %+v", node)
+	}
+
+	// Unprepare names a claim's UID and nothing else, so the file is
+	// what says which devices the claim held.
+	held, err := preparedDevices("claim-uid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(held, []string{"hdmi-a-1", "hdmi-a-1-control"}) {
+		t.Errorf("preparedDevices = %v", held)
+	}
+}
+
 func TestWriteCDISpecLeavesTheFileTheRuntimeReads(t *testing.T) {
 	cdiDir = t.TempDir()
 

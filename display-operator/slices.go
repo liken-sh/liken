@@ -45,6 +45,10 @@ const ResourceSlicesPath = "/apis/resource.k8s.io/v1/resourceslices"
 // taints any device, and this operator taints every dark output, so 64
 // is the number that applies. A graphics card registers far fewer
 // connectors than that.
+//
+// A connector whose panel answers DDC/CI publishes two devices, so
+// the number to compare against 64 is twice the connector count at
+// most, and still far under the limit.
 const maxSliceDevices = 64
 
 // disconnectedTaint is the one a consumer tolerates. Its NoExecute
@@ -132,6 +136,10 @@ func AttrString(s string) DeviceAttribute { return DeviceAttribute{String: &s} }
 // AttrInt builds an integer attribute value.
 func AttrInt(i int) DeviceAttribute { v := int64(i); return DeviceAttribute{Int: &v} }
 
+// AttrBool builds a boolean attribute value, so a selector can ask
+// with has() and with a plain comparison.
+func AttrBool(b bool) DeviceAttribute { return DeviceAttribute{Bool: &b} }
+
 // sliceDevices turns the card's connectors into the devices the slice
 // publishes, one for each connector.
 //
@@ -189,16 +197,72 @@ func sliceDevices(outputs []Output) []SliceDevice {
 			// absent while the output drives nothing and when the
 			// card could not answer.
 			addAttribute(device.Attributes, "currentMode", output.CurrentMode)
+			// Each control attribute promises one thing: the panel
+			// answered the VCP code behind it when the operator asked.
+			// A claim that states the matching parameter has something
+			// to set. The scheduler reads no opaque parameter, so a
+			// selector on this attribute is how a workload that needs
+			// the control lands on a screen that carries it.
+			addControl(device.Attributes, "controlsBrightness", output.Controls.Brightness)
+			addControl(device.Attributes, "controlsPower", output.Controls.Power)
 		}
 		if !output.Connected {
 			device.Taints = unservableTaints()
 		}
 		devices = append(devices, device)
+		if control, carried := controlDevice(output, device.Taints); carried {
+			devices = append(devices, control)
+		}
 	}
 	slices.SortFunc(devices, func(a, b SliceDevice) int {
 		return strings.Compare(a.Name, b.Name)
 	})
 	return devices
+}
+
+// ControlDevice is the connector's second device: the panel's own
+// control channel, for a pod that drives the controls while it runs
+// rather than stating them at prepare. Its claim delivers the
+// connector's i2c node itself, so the pod can run its own ddcutil,
+// change the brightness live, or switch the panel's input, and it
+// needs no Wayland connection to do any of it.
+//
+// Two facts decide that the device exists: a monitor on the
+// connector, and a probe that answered at least one control. A panel
+// that refuses DDC/CI publishes no control device, so a claim on the
+// class waits unallocated instead of receiving a node that answers
+// nothing.
+//
+// The attributes are the connector, the monitor identity, and the
+// same two control booleans the output publishes. The identity is on
+// both devices because one claim asks for a screen and its controls
+// with a matchAttribute constraint on monitor.liken.sh/id, and the
+// constraint compares an attribute both devices publish.
+//
+// The taints are the output device's own, whatever they are, so a
+// control device is never claimable while the screen beside it can
+// serve nobody.
+func controlDevice(output Output, taints []DeviceTaint) (SliceDevice, bool) {
+	if !output.Connected || (!output.Controls.Brightness && !output.Controls.Power) {
+		return SliceDevice{}, false
+	}
+	attributes := map[string]DeviceAttribute{
+		"connector": AttrString(output.Connector),
+		// The marker a class selects on. Without it, the only way to
+		// tell a control device from its output is the absence of
+		// appId, and a class written around an absence breaks the day
+		// the output gains an attribute. Present and true, like the
+		// control booleans.
+		"control": AttrBool(true),
+	}
+	addAttribute(attributes, pairingAttribute, monitorID(output.Monitor))
+	addControl(attributes, "controlsBrightness", output.Controls.Brightness)
+	addControl(attributes, "controlsPower", output.Controls.Power)
+	return SliceDevice{
+		Name:       controlName(output.Connector),
+		Attributes: attributes,
+		Taints:     taints,
+	}, true
 }
 
 // unservableTaints is the taint set of an output that can serve
@@ -246,6 +310,18 @@ func addAttribute(attributes map[string]DeviceAttribute, name, value string) {
 		return
 	}
 	attributes[name] = AttrString(attributeString(value))
+}
+
+// AddControl publishes a control only when the panel answered its
+// code. The attribute is present and true or absent, never present
+// and false: a false would read as a fact about a panel that was
+// never asked, and a selector for the control would have to test
+// presence and value both.
+func addControl(attributes map[string]DeviceAttribute, name string, carried bool) {
+	if !carried {
+		return
+	}
+	attributes[name] = AttrBool(true)
 }
 
 // addSize publishes a measurement, and publishes nothing when the

@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -67,6 +68,14 @@ type draPlugin struct {
 	// compositor reads.
 	configPath string
 	recordPath string
+	// PowerPath is the third file in that volume: the record of which
+	// panels a claim promised to put back to standby.
+	powerPath string
+	// Controls speaks DDC/CI to the panels themselves. The same
+	// instance publishes the slice's control attributes, so the probe
+	// cache serves both paths and a prepare after a publish costs
+	// nothing on the wire.
+	controls *panelControls
 	// CurrentModes reads what each output runs, connectorModes
 	// reads what each connector offers, and endCompositor is the
 	// restart that makes a new mode take. All three are fields
@@ -88,6 +97,10 @@ type draPlugin struct {
 	// one file for every connector, and two prepares that rewrote it at
 	// once would restart the compositor twice for one config.
 	modeSwitches sync.Mutex
+	// PowerRecords guards the power record the way modeSwitches
+	// guards the mode record. It is a second lock because a power-down
+	// on the wire must not wait behind a compositor restart.
+	powerRecords sync.Mutex
 	// Restarted remembers the restart this process already
 	// ordered for a connector, which is the restart budget: a readback
 	// that still disagrees after one restart means weston declined the
@@ -109,6 +122,8 @@ func newDRAPlugin(client *Client, card, socketDir string) *draPlugin {
 		socketDir:  socketDir,
 		configPath: westonConfigPath,
 		recordPath: modeRecordPath,
+		powerPath:  powerRecordPath,
+		controls:   newPanelControls(sysRoot, card),
 		currentModes: func() (map[string]string, error) {
 			return readCurrentModes(filepath.Join(driRoot, card))
 		},
@@ -240,6 +255,10 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 	if err != nil {
 		return fail("%v", err)
 	}
+	controls, err := claimControls(allocated.Status.Allocation.Devices.Config)
+	if err != nil {
+		return fail("%v", err)
+	}
 
 	// One walk answers every result in the claim, and it is the same
 	// walk that publishes the slice, so the two always report the same
@@ -259,7 +278,11 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 			// results, and each driver answers for its own.
 			continue
 		}
-		output, lit := live[result.Device]
+		// A connector publishes up to two devices, the output and its
+		// control channel, and the name is what tells them apart. Both
+		// resolve against the same walk and the same connector.
+		device, control := outputOfControl(result.Device)
+		output, lit := live[device]
 		if !lit {
 			// The monitor left between the allocation and this call.
 			// The pod waits in ContainerCreating, and the output's
@@ -268,21 +291,50 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 			// A mode on a connector with nothing on it fails
 			// here too. There is no mode list to validate against and
 			// no screen to light.
-			return fail("output %s has no monitor on it right now", result.Device)
+			return fail("output %s has no monitor on it right now", device)
 		}
-		// The delivery waits for the switch. Between the restart
-		// and the readback the screen runs the mode the claim replaced,
-		// and a delivery that raced it would start the consumer against
-		// a screen that is about to go dark.
-		if mode := selection.forRequest(result.Request); mode != "" {
-			if err := p.applyMode(ctx, output, mode, socketPath); err != nil {
+		var edits cdiEdits
+		if control {
+			// A control result prepares nothing on the wire. The
+			// consumer holds the node and drives the panel itself, so
+			// this operator writes no VCP code for it, at prepare or at
+			// any time after.
+			if err := controlTakesNoParameters(result.Device,
+				selection.forRequest(result.Request), controls.forRequest(result.Request)); err != nil {
 				return fail("%v", err)
 			}
+			// The node is read here rather than published as an
+			// attribute, because the kernel numbers i2c adapters in the
+			// order it registers them. The number holds for this boot
+			// only, and the delivery is the one place it is read fresh.
+			node := connectorBus(p.sysRoot, p.card, output.Connector)
+			if node == "" {
+				return fail("%s carries no DDC/CI channel this operator can hand over", output.Connector)
+			}
+			edits = controlEdits(node)
+		} else {
+			// The panel's own controls are set before the mode. A
+			// panel in standby drives no mode, so a switch that waited
+			// for the card to report one would wait on a screen nobody
+			// woke.
+			if err := p.applyControls(output, controls.forRequest(result.Request)); err != nil {
+				return fail("%v", err)
+			}
+			// The delivery waits for the switch. Between the restart
+			// and the readback the screen runs the mode the claim replaced,
+			// and a delivery that raced it would start the consumer against
+			// a screen that is about to go dark.
+			if mode := selection.forRequest(result.Request); mode != "" {
+				if err := p.applyMode(ctx, output, mode, socketPath); err != nil {
+					return fail("%v", err)
+				}
+			}
+			edits = outputEdits(p.socketDir, socketName, appID(device))
 		}
 		name := claim.Uid + "-" + result.Device
 		specDevices = append(specDevices, cdiDevice{
 			Name:           name,
-			ContainerEdits: outputEdits(p.socketDir, socketName, appID(result.Device)),
+			ContainerEdits: edits,
 		})
 		devices = append(devices, &drav1.Device{
 			PoolName:     result.Pool,
@@ -299,6 +351,37 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 	return &drav1.NodePrepareResourceResponse{Devices: devices}
 }
 
+// ControlTakesNoParameters refuses a claim whose parameters resolved
+// onto a control request. A mode, a brightness, and a power are all
+// things this operator does to an output, and a control device is the
+// opposite arrangement: the consumer holds the wire and makes every
+// write itself. Such a claim either named the wrong request or
+// expected this operator to act, and both deserve a failure the
+// person can read, not a parameter silently dropped.
+//
+// The common way to hit this: a block that names no request applies
+// to every request in the claim, so a claim that asks for a screen
+// and its control channel together must name the screen's request on
+// the block that states the parameters.
+func controlTakesNoParameters(device, mode string, want requestedControls) error {
+	var stated []string
+	if mode != "" {
+		stated = append(stated, modeParameter)
+	}
+	if want.Brightness.Stated {
+		stated = append(stated, brightnessParameter)
+	}
+	if want.Power != "" {
+		stated = append(stated, powerParameter)
+	}
+	if len(stated) == 0 {
+		return nil
+	}
+	return fmt.Errorf("the claim states %s for %s, and a control device takes no parameters:"+
+		" name the request that holds the output on the block that states them",
+		strings.Join(stated, " and "), device)
+}
+
 // NodeUnprepareResources removes each claim's CDI spec and takes the
 // modes it stated out of the record. As with prepare, every claim gets
 // an answer and failures stay specific to each claim. The socket needs
@@ -309,6 +392,10 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 // next compositor start. The record is what the next start reads, so
 // dropping the entry is what returns the screen to the mode its
 // monitor prefers.
+//
+// The panel's power goes back the same way: a claim that stated
+// onWhileClaimed powers its panel down here, and a claim that stated
+// on leaves the panel as it is.
 func (p *draPlugin) NodeUnprepareResources(ctx context.Context, req *drav1.NodeUnprepareResourcesRequest) (*drav1.NodeUnprepareResourcesResponse, error) {
 	resp := &drav1.NodeUnprepareResourcesResponse{Claims: map[string]*drav1.NodeUnprepareResourceResponse{}}
 	for _, claim := range req.Claims {
@@ -336,6 +423,11 @@ func (p *draPlugin) unprepareClaim(claimUID string) error {
 	if err := p.releaseModes(devices); err != nil {
 		return err
 	}
+	// The power-down runs before the spec goes, for the reason the
+	// mode release does: the spec is what names the claim's devices,
+	// and an unprepare that ran again after it was gone would have
+	// nothing left to read.
+	p.releasePower(devices)
 	return removeCDISpec(claimUID)
 }
 

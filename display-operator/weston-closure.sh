@@ -1,6 +1,7 @@
 #!/bin/sh
-# Collects weston and everything it loads into one directory tree, so
-# that the image ships that tree and nothing else.
+# Collects weston, everything it loads, and the two diagnostic
+# programs into one directory tree, so that the image ships that tree
+# and nothing else.
 #
 # Debian puts every libweston backend in one package, so apt cannot
 # express what this image needs. Installing weston pulls FreeRDP,
@@ -40,13 +41,21 @@ lib=$(dirname "$(dpkg -L libweston-14-0 | grep '/libweston-14$')")
 # set costs one file plus thirteen links, and the image runs on any
 # card mesa supports rather than on the card this was built for.
 #
-# wayland-info is the one program here that the compositor does not
-# open. It is the diagnostic: it lists every global the compositor
-# advertises, and kubectl exec runs it by name in an image that has no
-# shell to run it from.
+# Two programs here are ones the compositor does not open. They are
+# the diagnostics, and kubectl exec runs each by name in an image that
+# has no shell to run them from. wayland-info answers for the
+# compositor: it lists every global the compositor advertises, and it
+# is the first thing to read when a client connects and draws nothing.
+# ddcutil answers for the panels: it reads a panel's whole
+# capabilities string and every VCP code, where the operator asks for
+# two, so it says whether the panel or the operator is the part that
+# is wrong when a monitor publishes no control attribute. A consumer
+# pod that holds a control device runs its own copy; this one is for
+# the person reading the operator's own node.
 seeds="
 /usr/bin/weston
 /usr/bin/wayland-info
+/usr/bin/ddcutil
 $lib/libweston-14/drm-backend.so
 $lib/libweston-14/headless-backend.so
 $lib/libweston-14/gl-renderer.so

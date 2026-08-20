@@ -1,17 +1,18 @@
 package main
 
 // Writing CDI specs: how a prepared claim becomes a Wayland
-// connection in a consumer's container.
+// connection, or a control channel, in a consumer's container.
 //
 // The Container Device Interface connects two things: which device to
 // use, and what appears inside the container. A JSON file in a
-// well-known directory names devices and the edits that grant one to a
-// container. liken's own driver writes device nodes there and nothing
-// else, and that is a decision about what an operating system
-// delivers, not a limit in CDI. A Wayland client needs no device node
-// at all. It needs the compositor's socket and the app-id that the
-// compositor routes to the output the claim allocated, so this
-// driver's edits are a mount and three environment variables.
+// well-known directory names devices and the edits that grant one to
+// a container. What the edits hold depends on which of this driver's
+// two device types the claim allocated. A Wayland client needs no
+// device node at all: it needs the compositor's socket and the app-id
+// that the compositor routes to the allocated output, so an output's
+// edits are a mount and three environment variables. A control
+// device's client is the opposite case: it needs exactly one device
+// node, the connector's i2c wire, and the variable that names it.
 //
 //   - The mount grants the socket directory, at the same path inside
 //     the container as on the host.
@@ -63,6 +64,15 @@ var cdiDir = "/var/run/cdi"
 // cdiKind identifies this driver's CDI devices, the same way the
 // driver name identifies its slices. A CDI device ID has the form
 // "<kind>=<name>".
+//
+// One kind carries both device types. A spec file states one kind, so
+// a second kind would mean a second file for the same claim: a second
+// write to fail halfway, and a second thing an unprepare must remove
+// while staying idempotent. The claim's UID and the device's own name
+// already make every device ID unique, so a control kind would buy
+// nothing the name does not carry. The cost is the word "output" in a
+// control device's ID, which is a name, not a claim about what it
+// delivers.
 const cdiKind = DriverName + "/output"
 
 // cdiPrefix is what separates this driver's spec files from liken's in
@@ -70,8 +80,8 @@ const cdiKind = DriverName + "/output"
 const cdiPrefix = DriverName + "-"
 
 // cdiSpec holds the part of the CDI spec schema that this operator
-// writes. The delivery is a mount and environment variables, so the
-// struct omits the field for device nodes.
+// writes: environment, mounts, and device nodes, because a control
+// device's whole delivery is a node.
 type cdiSpec struct {
 	Version string      `json:"cdiVersion"`
 	Kind    string      `json:"kind"`
@@ -84,14 +94,26 @@ type cdiDevice struct {
 }
 
 type cdiEdits struct {
-	Env    []string   `json:"env,omitempty"`
-	Mounts []cdiMount `json:"mounts,omitempty"`
+	Env         []string        `json:"env,omitempty"`
+	Mounts      []cdiMount      `json:"mounts,omitempty"`
+	DeviceNodes []cdiDeviceNode `json:"deviceNodes,omitempty"`
 }
 
 type cdiMount struct {
 	HostPath      string   `json:"hostPath"`
 	ContainerPath string   `json:"containerPath"`
 	Options       []string `json:"options,omitempty"`
+}
+
+// A device node entry does two things at once: the runtime creates
+// the node inside the container, and it adds the node's major and
+// minor numbers to the container's device cgroup, which is what makes
+// an open of it succeed. The path is the host's path, because the
+// runtime reads the node there to learn its numbers, and it is the
+// container's path too when the entry names no hostPath of its own.
+type cdiDeviceNode struct {
+	Path        string `json:"path"`
+	Permissions string `json:"permissions,omitempty"`
 }
 
 // outputEdits builds what one allocated output delivers.
@@ -123,6 +145,24 @@ func outputEdits(socketDir, socketName, id string) cdiEdits {
 			// directory on the host and not a filesystem to mount.
 			Options: []string{"rw", "bind"},
 		}},
+	}
+}
+
+// ControlEdits builds what one allocated control delivers, which is
+// two things. The node is the DDC/CI wire itself, and a container
+// that holds it speaks to the panel with no operator in the path. The
+// environment variable is the node's path, because the kernel numbers
+// i2c adapters in the order it registers them, and a consumer that
+// guessed a number would read another card's bus, or a system
+// management bus.
+//
+// The permissions are rw because every DDC/CI exchange writes a
+// request before it reads the reply, so a read-only node answers
+// nothing.
+func controlEdits(node string) cdiEdits {
+	return cdiEdits{
+		Env:         []string{"DISPLAY_CONTROL_BUS=" + node},
+		DeviceNodes: []cdiDeviceNode{{Path: node, Permissions: "rw"}},
 	}
 }
 

@@ -65,7 +65,15 @@ by owner:
         spec:
           selectors:
             - cel:
-                expression: device.driver == "display.liken.sh"
+                expression: |
+                  device.driver == "display.liken.sh" &&
+                  has(device.attributes["display.liken.sh"].appId)
+
+  The `appId` guard is what keeps the class on outputs. The driver
+  also publishes each panel's
+  [control device](/docs/reference/devices/#the-control-device),
+  which carries no `appId`, and a class that matched the whole
+  driver would allocate either.
 
 ### Generic or specific
 
@@ -87,14 +95,16 @@ policy you control:
         - cel:
             expression: |
               device.driver == "display.liken.sh" &&
+              has(device.attributes["display.liken.sh"].appId) &&
               device.attributes["display.liken.sh"].connector == "HDMI-A-1"
 
 Start generic. When several workloads repeat the same selector, or
 when you want the choice of screen in cluster policy rather than in
 each workload's manifest, create a specific class.
 
-The example selects by `connector`, the one attribute every output
-always publishes. A specific class that selects by a monitor
+The example selects by `connector`, an attribute every output
+always publishes; the `appId` guard is there because the panel's
+control device publishes `connector` too. A specific class that selects by a monitor
 attribute, such as `model`, must guard the read with `has()`, the
 way [Put a window on a screen](/docs/guides/claim/) shows. Those
 attributes are absent on a dark connector, and a selector that

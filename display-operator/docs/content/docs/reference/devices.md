@@ -63,7 +63,13 @@ it `display-output`:
     spec:
       selectors:
         - cel:
-            expression: device.driver == "display.liken.sh"
+            expression: |
+              device.driver == "display.liken.sh" &&
+              has(device.attributes["display.liken.sh"].appId)
+
+The `appId` guard keeps the class on outputs, because the driver
+also publishes each panel's
+[control device](#the-control-device), which carries no `appId`.
 
 The class is yours to rename or narrow, the way a `StorageClass`
 is;
@@ -104,6 +110,8 @@ sysfs.
 | `modes` | string | the resolutions the monitor accepts, described below |
 | `currentMode` | string | the mode the output runs right now, described below |
 | `monitor.liken.sh/id` | string | the pairing identity, described below |
+| `controlsBrightness` | bool | the panel answered the brightness control over DDC/CI, described below |
+| `controlsPower` | bool | the panel answered the power control over DDC/CI, described below |
 
 A selector reads an unqualified attribute through the driver's
 domain: `device.attributes["display.liken.sh"].model`.
@@ -159,9 +167,10 @@ whole recipe and the warning.
               parameters:
                 mode: "1280x720"
 
-`mode` is the only parameter this driver reads, and a key it does
-not read fails the prepare, so a typo stops the pod instead of
-running a mode nobody asked for. The value is a resolution name,
+This driver reads three parameters, `mode`, `brightness`, and
+`power`, and a key it does not read fails the prepare, so a typo
+stops the pod instead of running a mode nobody asked for. The value
+of `mode` is a resolution name,
 spelled exactly as the kernel spells it, with an optional refresh
 after an `@`: `1280x720` takes whatever rate the compositor picks
 for that name, and `3840x1600@24` asks for the 24 Hz timing. The
@@ -220,6 +229,129 @@ even while it is connected. A value without the manufacturer would
 match every other monitor that also states none. Guard a selector
 on this attribute with `has()`, like every other monitor attribute.
 
+## The panel's controls
+
+A monitor's brightness and power live in the panel, not in the
+graphics card, and DDC/CI is the channel that reaches them: a slow
+serial protocol on two wires of the display cable, speaking to the
+same settings as the buttons on the monitor's bezel. Support is per
+panel. Of two monitors on one lab machine, one answers the protocol
+and one refuses it, and a panel that answers at all may still carry
+only some controls.
+
+So the operator asks instead of assuming. At inventory it probes each
+connected panel, read-only, for the two controls it can set, and it
+publishes what the panel answered:
+
+* `controlsBrightness`: the panel answered VCP code `0x10`.
+* `controlsPower`: the panel answered VCP code `0xD6`.
+
+Each attribute is present and true, or absent. The probe runs once
+per monitor and its answer is cached against the monitor's EDID, so
+steady hardware costs no bus traffic.
+
+A claim states what it wants with two opaque parameters, beside
+`mode`:
+
+    spec:
+      devices:
+        config:
+          - opaque:
+              driver: display.liken.sh
+              parameters:
+                brightness: 87
+                power: onWhileClaimed
+
+`brightness` is a whole number from 0 to 100, a percentage of the
+panel's own maximum, because one panel counts its scale to 100 and
+another to 255. The operator sets it at prepare and reads it back,
+and a readback that disagrees fails the claim, because a panel
+acknowledges a write whether it applies the value or not.
+
+`power` takes two values. `on` powers the panel on at prepare and
+never touches it again. `onWhileClaimed` also powers the panel back
+down when the claim ends, for a claimant that owns the screen
+outright. The two exist apart because a `Deployment` that replaces
+its pod ends one claim and makes another, and a power-down between
+them would blink the screen on every rollout. The power-down writes
+standby first and falls back to off, because some panels implement
+only a subset of the power values.
+
+The operator writes to a panel only when a claim states one of these
+parameters. A claim with no parameters changes nothing, at prepare or
+after.
+
+The scheduler reads no opaque parameter, so a selector is what keeps
+a claim off a panel that cannot serve it. Select on the attribute
+that matches the parameter you state:
+
+    has(device.attributes["display.liken.sh"].controlsBrightness) &&
+    device.attributes["display.liken.sh"].controlsBrightness
+
+A claim that states a parameter anyway, on a panel with no matching
+attribute, fails at prepare with the missing capability named.
+
+## The control device
+
+A connector whose panel answered at least one control publishes a
+second device, named after the output with a `-control` suffix:
+`hdmi-a-2` and `hdmi-a-2-control`. Its claim is for a pod that drives
+the panel itself while it runs, live brightness, the panel's input
+source, its own `ddcutil`, rather than a value stated once at
+prepare.
+
+The control device's attributes are `connector`, the
+`monitor.liken.sh/id` pairing identity, the two control booleans, and
+`control`, a marker that is always true. A class selects on the
+marker:
+
+    apiVersion: resource.k8s.io/v1
+    kind: DeviceClass
+    metadata:
+      name: display-control
+    spec:
+      selectors:
+        - cel:
+            expression: |
+              device.driver == "display.liken.sh" &&
+              has(device.attributes["display.liken.sh"].control)
+
+Like `display-output`, this class is yours to create and to narrow;
+the operator ships no consumer class. The pairing identity is on both
+of the connector's devices, so one claim takes a screen and its
+control channel with a `matchAttribute` constraint across its two
+requests.
+
+A prepared control claim delivers two things and performs no write:
+
+| What | Value |
+|---|---|
+| device node | the connector's `/dev/i2c-N`, read-write |
+| `DISPLAY_CONTROL_BUS` | that node's path |
+
+Read the bus from the variable, never guess the number: the kernel
+numbers i2c adapters in the order it registers them, and the number
+holds for one boot only.
+
+The three parameters above act on outputs, and a control request
+takes none of them. A config block that names no request applies to
+every request in a claim, so a claim that asks for a screen and its
+control channel together must name the screen's request on the block
+that states the parameters, or the prepare fails.
+
+**Do not write to any i2c address other than `0x37`, the DDC/CI
+address.** The node is the connector's whole i2c bus, and the
+monitor's EDID EEPROM answers on the same bus at address `0x50`. On
+some panels that EEPROM accepts writes, and a write corrupts the
+monitor's identity block on every machine it ever plugs into, until
+someone reprograms the chip. Tools built for DDC/CI, such as
+`ddcutil`, stay on the right address.
+
+The control device carries the output device's taints, whatever they
+are, so it is never claimable while the screen beside it can serve
+nobody. That includes the compositor-down case: a control claim today
+waits for the compositor even though the wire does not need one.
+
 ## The taint
 
 `display.liken.sh/disconnected`, with effect `NoExecute`, is the one
@@ -241,9 +373,11 @@ from the slice would strand the kubelet's prepare retries.
 
 ## What a prepared claim delivers
 
-The delivery is a mount and three environment variables, which the
-runtime applies to the container. There is no device node, because a
-Wayland client draws through the compositor, which holds the card.
+An output's delivery is a mount and three environment variables,
+which the runtime applies to the container. It has no device node,
+because a Wayland client draws through the compositor, which holds
+the card. A control device's delivery is the node and the variable
+the [control device](#the-control-device) section lists.
 
 | What | Value |
 |---|---|

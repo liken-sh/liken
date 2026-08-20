@@ -44,6 +44,28 @@ func deviceName(connector string) string {
 	return strings.ToLower(strings.TrimSpace(connector))
 }
 
+// A connector whose panel answers DDC/CI publishes a second device,
+// named after the output device with this suffix. The suffix carries
+// the tie between the two, because an allocation result names a
+// device and nothing else, so the name is all a prepare has to work
+// out which of the connector's two devices the claim holds.
+const controlSuffix = "-control"
+
+// ControlName names the control device beside one output, built from
+// the same connector, so the two names always agree.
+func controlName(connector string) string {
+	return deviceName(connector) + controlSuffix
+}
+
+// OutputOfControl answers which output a device name belongs to, and
+// whether it named the control. The answer is unambiguous because the
+// kernel names a connector after its physical type and its index, so
+// no connector name ends in -control, and no output device's name can
+// read as a control device's.
+func outputOfControl(device string) (string, bool) {
+	return strings.CutSuffix(device, controlSuffix)
+}
+
 // appID is the string the compositor routes a client's surface by.
 // Version 0 uses the device name, and the operator writes it into
 // weston.ini as the output's app-ids= line, so a claim on hdmi-a-1

@@ -211,7 +211,7 @@ func operate() {
 	// time and takes the same settle window.
 	retries := make(chan struct{}, 1)
 	publish := func() {
-		if err := reconcile(client, nodeName, owner, card, socketPath, plugin.currentModes); err != nil {
+		if err := reconcile(client, nodeName, owner, card, socketPath, plugin.currentModes, plugin.controls); err != nil {
 			fmt.Fprintf(os.Stderr, "publishing the slice: %v; retrying in %s\n", err, writeRetryDelay)
 			time.AfterFunc(writeRetryDelay, func() {
 				select {
@@ -302,7 +302,7 @@ func eventsEnded(ctx context.Context) error {
 // rest of the slice is what sysfs says, and a card that cannot answer
 // the ioctl still has connectors, monitors, and a compositor.
 func reconcile(client *Client, nodeName string, owner OwnerReference, card, socketPath string,
-	currentModes func() (map[string]string, error)) error {
+	currentModes func() (map[string]string, error), controls *panelControls) error {
 	outputs := discoverOutputs(sysRoot, card)
 	if len(outputs) == 0 {
 		return fmt.Errorf("%s registers no connectors, so the published slice stays as it is", card)
@@ -311,7 +311,11 @@ func reconcile(client *Client, nodeName string, owner OwnerReference, card, sock
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "reading the mode each output runs: %v\n", err)
 	}
-	devices := sliceDevices(withCurrentModes(outputs, modes))
+	// The pass asks each panel what controls it carries. The answer
+	// is cached against the monitor's EDID, so a pass over unchanged
+	// hardware sends nothing on any i2c wire, and a panel that refuses
+	// DDC/CI publishes no control attribute and no control device.
+	devices := sliceDevices(withControls(withCurrentModes(outputs, modes), controls))
 	if !compositorServing(socketPath) {
 		// No compositor holds the screens, so every output says it
 		// serves nobody, and the NoExecute taint is what ends the

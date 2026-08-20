@@ -189,7 +189,7 @@ func TestReconcileTaintsEveryOutputWhileNoCompositorServes(t *testing.T) {
 
 	// The socket file is there and nothing answers on it, which is what
 	// a compositor killed uncleanly leaves.
-	err := reconcile(client, "liken-1", testOwner(), "card1", staleSocket(t, t.TempDir()), noCurrentModes)
+	err := reconcile(client, "liken-1", testOwner(), "card1", staleSocket(t, t.TempDir()), noCurrentModes, noPanelControls)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestReconcileFreesTheScreensWhenTheSocketReturns(t *testing.T) {
 	}}
 	client := testClient(t, fixture.handler(t))
 
-	if err := reconcile(client, "liken-1", testOwner(), "card1", socket, noCurrentModes); err != nil {
+	if err := reconcile(client, "liken-1", testOwner(), "card1", socket, noCurrentModes, noPanelControls); err != nil {
 		t.Fatal(err)
 	}
 	if fixture.updated == nil {
@@ -233,6 +233,11 @@ func TestReconcileFreesTheScreensWhenTheSocketReturns(t *testing.T) {
 		}
 	}
 }
+
+// noPanelControls is a pass with no probe wired: it publishes no
+// control attribute and puts nothing on any i2c wire, which is what
+// every pass in this file runs.
+var noPanelControls *panelControls
 
 // noCurrentModes is the readback of a card that reports no mode on any
 // connector, which is what a machine whose compositor is down answers.
@@ -249,7 +254,7 @@ func publishedModes(t *testing.T, current func() (map[string]string, error)) map
 	client := testClient(t, fixture.handler(t))
 
 	socket := servingSocket(t, t.TempDir())
-	if err := reconcile(client, "liken-1", testOwner(), "card1", socket, current); err != nil {
+	if err := reconcile(client, "liken-1", testOwner(), "card1", socket, current, noPanelControls); err != nil {
 		t.Fatal(err)
 	}
 	if fixture.created == nil {

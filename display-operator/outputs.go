@@ -61,6 +61,12 @@ type Output struct {
 	// name is a resolution with no refresh rate, so a resolution the
 	// monitor accepts at several rates appears once.
 	Modes []string
+	// Controls is what the panel itself answered when the operator
+	// probed its DDC/CI wire. Nothing in sysfs holds it, and it is the
+	// zero value until withControls has run. The probe behind it is
+	// cached against the monitor, so carrying this costs a walk
+	// nothing.
+	Controls supportedControls
 	// CurrentMode is the mode this output runs right now, with the
 	// refresh the card reports: 3840x1600@24, the vocabulary a claim
 	// states, while Modes stays name-only. It comes from the card

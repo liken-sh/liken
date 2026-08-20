@@ -8,6 +8,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -161,6 +162,136 @@ func TestAttributeListEndsOnTheLastWholeEntryThatFits(t *testing.T) {
 		if got := attributeList(tc.values); got != tc.want {
 			t.Errorf("%s: attributeList = %q, want %q", name, got, tc.want)
 		}
+	}
+}
+
+// controlledPanel is a connector whose panel answered the DDC/CI
+// probe, which is the only state in which one connector publishes two
+// devices.
+func controlledPanel(controls supportedControls) Output {
+	output := litOutput("HDMI-A-1", labMonitor())
+	output.Controls = controls
+	return output
+}
+
+// deviceNames lists what one pass published, in the order the slice
+// carries them.
+func deviceNames(devices []SliceDevice) []string {
+	names := make([]string, len(devices))
+	for i, device := range devices {
+		names[i] = device.Name
+	}
+	return names
+}
+
+func TestSliceDevicesPublishesAControlDeviceBesideTheOutput(t *testing.T) {
+	devices := sliceDevices([]Output{controlledPanel(supportedControls{Brightness: true, Power: true})})
+
+	if got := deviceNames(devices); !slices.Equal(got, []string{"hdmi-a-1", "hdmi-a-1-control"}) {
+		t.Fatalf("devices = %v", got)
+	}
+	output, control := devices[0], devices[1]
+	// The monitor identity is the attribute both devices publish, so
+	// one claim holds a screen and its control channel through a
+	// matchAttribute constraint across its two requests.
+	if got, want := attributeText(t, control, pairingAttribute), attributeText(t, output, pairingAttribute); got != want {
+		t.Errorf("%s = %q, want %q", pairingAttribute, got, want)
+	}
+	if got := attributeText(t, control, "connector"); got != "HDMI-A-1" {
+		t.Errorf("connector = %q", got)
+	}
+	for _, name := range []string{"controlsBrightness", "controlsPower"} {
+		attribute, published := control.Attributes[name]
+		if !published || attribute.Bool == nil || !*attribute.Bool {
+			t.Errorf("%s = %+v, want it published and true", name, attribute)
+		}
+	}
+	// The delivery is the i2c node, so a control device promises no
+	// Wayland connection and publishes no app-id.
+	if _, published := control.Attributes["appId"]; published {
+		t.Errorf("the control device publishes an appId: %+v", control.Attributes)
+	}
+	// The marker is what a device class selects on, and only the
+	// control device carries it.
+	if attribute, published := control.Attributes["control"]; !published || attribute.Bool == nil || !*attribute.Bool {
+		t.Errorf("control = %+v, want it published and true", attribute)
+	}
+	if _, published := output.Attributes["control"]; published {
+		t.Errorf("the output device publishes the control marker: %+v", output.Attributes)
+	}
+	if len(control.Taints) != 0 {
+		t.Errorf("taints = %+v", control.Taints)
+	}
+}
+
+func TestSliceDevicesPublishesAControlDeviceOnlyForAPanelThatAnswered(t *testing.T) {
+	cases := []struct {
+		name      string
+		output    Output
+		published bool
+	}{
+		{
+			name:      "a panel that carries both controls",
+			output:    controlledPanel(supportedControls{Brightness: true, Power: true}),
+			published: true,
+		},
+		{
+			// A display implements the subset of the standard it
+			// chooses, and one control is enough to be worth handing over.
+			name:      "a panel that carries only the brightness",
+			output:    controlledPanel(supportedControls{Brightness: true}),
+			published: true,
+		},
+		{
+			name:      "a panel that carries only the power",
+			output:    controlledPanel(supportedControls{Power: true}),
+			published: true,
+		},
+		{
+			// The node would answer nothing, so a claim on it parks
+			// instead of receiving a wire with no panel behind it.
+			name:   "a panel that answers no DDC/CI",
+			output: controlledPanel(supportedControls{}),
+		},
+		{
+			name:   "a connector with nothing on it",
+			output: Output{Connector: "HDMI-A-1", Controls: supportedControls{Brightness: true, Power: true}},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			published := deviceNames(sliceDevices([]Output{c.output}))
+			if got := slices.Contains(published, "hdmi-a-1-control"); got != c.published {
+				t.Errorf("the control device published = %v, want %v: %v", got, c.published, published)
+			}
+		})
+	}
+}
+
+func TestControlDeviceCarriesTheOutputsTaints(t *testing.T) {
+	// A control device is never claimable while the screen beside it
+	// serves nobody, so it takes the output device's taints and never a
+	// set of its own.
+	control, published := controlDevice(controlledPanel(supportedControls{Power: true}), unservableTaints())
+
+	if !published {
+		t.Fatal("a panel that answers the power control published no control device")
+	}
+	if len(control.Taints) != 1 || control.Taints[0].Key != disconnectedTaint {
+		t.Errorf("taints = %+v", control.Taints)
+	}
+}
+
+func TestCompositorDownTaintsTheControlDeviceToo(t *testing.T) {
+	// The pass that finds no compositor taints every device it
+	// publishes, and the control device is in that list.
+	devices := compositorDown(sliceDevices([]Output{controlledPanel(supportedControls{Brightness: true})}))
+
+	if got := deviceNames(devices); !slices.Equal(got, []string{"hdmi-a-1", "hdmi-a-1-control"}) {
+		t.Fatalf("devices = %v", got)
+	}
+	if len(devices[1].Taints) != 1 || devices[1].Taints[0].Effect != "NoExecute" {
+		t.Errorf("taints = %+v", devices[1].Taints)
 	}
 }
 

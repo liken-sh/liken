@@ -204,6 +204,105 @@ restarts nothing either: the screen keeps the mode until the next
 compositor start, and the slice's `currentMode` says what it runs,
 refresh included.
 
+## Set the panel's brightness and power
+
+A claim can state the panel's own brightness and power the way it
+states a mode, with two more parameters in the same opaque block:
+
+    config:
+      - opaque:
+          driver: display.liken.sh
+          parameters:
+            brightness: 87
+            power: onWhileClaimed
+
+`brightness` is a percentage from 0 to 100 of the panel's own
+maximum. `power: on` powers the panel on at prepare. `power:
+onWhileClaimed` also powers it back down when the claim ends, so a
+movie pod that ends leaves a dark screen. Use `on` for a workload a
+`Deployment` replaces on rollouts, because each replacement pod is a
+new claim, and `onWhileClaimed` would blink the screen on every
+rollout.
+
+Not every panel takes these. The operator asks each panel what it
+carries and publishes the answers as the `controlsBrightness` and
+`controlsPower` attributes, so add the matching attribute to your
+selector:
+
+    selectors:
+      - cel:
+          expression: |
+            device.attributes["display.liken.sh"].connector == "HDMI-A-1" &&
+            has(device.attributes["display.liken.sh"].controlsBrightness)
+
+Without the selector, the scheduler can place the claim on a panel
+that refuses the protocol, and the prepare fails with the missing
+capability named. Some panels also ship with DDC/CI switched off in
+their on-screen menu; turning it on there is what makes the
+attributes appear.
+
+Neither parameter restarts the compositor. A claim that states only
+these delivers without the dark second a mode costs.
+
+## Hold the panel's control channel
+
+The parameters above are set once, at prepare. A pod that changes
+the panel while it runs, live brightness, the panel's input source,
+claims the connector's control device instead, and receives the raw
+i2c node. One claim can take a screen and its control channel
+together, with a `matchAttribute` constraint tying the two requests
+to one monitor:
+
+    apiVersion: resource.k8s.io/v1
+    kind: ResourceClaim
+    metadata:
+      name: movie-screen
+    spec:
+      devices:
+        requests:
+          - name: screen
+            exactly:
+              deviceClassName: display-output
+              selectors:
+                - cel:
+                    expression: |
+                      has(device.attributes["monitor.liken.sh"].id) &&
+                      device.attributes["monitor.liken.sh"].id == "boe-1080-display"
+          - name: control
+            exactly:
+              deviceClassName: display-control
+        constraints:
+          - requests: ["screen", "control"]
+            matchAttribute: monitor.liken.sh/id
+
+The `display-control` class is yours to create, like
+`display-output`;
+[Devices](/docs/reference/devices/#the-control-device) gives its
+YAML. The container that names the `control` request receives
+`/dev/i2c-N` and `DISPLAY_CONTROL_BUS` holding that path. An init
+container that sets the brightness to 87 before the player starts,
+using the `ddcutil` the operator image carries:
+
+    initContainers:
+      - name: brightness
+        image: ghcr.io/liken-sh/display-operator:latest
+        command: ["ddcutil"]
+        args: ["setvcp", "10", "87"]
+        resources:
+          claims:
+            - name: control
+
+`ddcutil` finds the bus itself from the one `/dev/i2c-*` node the
+claim delivered, so the command needs no bus number. A config block
+that states `mode`, `brightness`, or `power` must name the `screen`
+request when the claim also holds a control request, because those
+parameters act on outputs and a control request takes none.
+
+Do not write to any i2c address other than `0x37`. The
+[reference](/docs/reference/devices/#the-control-device) explains
+what lives at `0x50` and why a write there follows the monitor to
+every machine it ever plugs into.
+
 ## Unplugged monitors, moved monitors, and second screens
 
 **A monitor unplugged.** The device keeps its place in the slice and

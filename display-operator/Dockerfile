@@ -50,11 +50,19 @@ FROM debian:trixie-slim AS closure
 # compositor advertises and is the first thing to read when a client
 # connects and draws nothing. kubectl exec runs it by name, which is
 # the only way to run anything in an image with no shell.
+# ddcutil is the diagnostic for the panels. It reads a panel's whole
+# capabilities string and every VCP code over the same i2c node this
+# operator writes two codes on, so it answers whether the panel or
+# the operator is the part that is wrong when a monitor publishes no
+# control attribute. It lands in both images because one closure
+# builds one tree, and separating it would cost the operator image a
+# second copy of the mesa libraries for 1.5 MB saved on the other.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         weston \
         libgl1-mesa-dri \
         wayland-utils \
+        ddcutil \
     && rm -rf /var/lib/apt/lists/*
 COPY weston-closure.sh /
 RUN sh /weston-closure.sh /out

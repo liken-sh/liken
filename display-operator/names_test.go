@@ -26,6 +26,40 @@ func TestDeviceNameIsTheConnectorAsADNSLabel(t *testing.T) {
 	}
 }
 
+func TestControlNameIsTheOutputsNameWithASuffix(t *testing.T) {
+	cases := []struct {
+		connector string
+		want      string
+	}{
+		{connector: "HDMI-A-1", want: "hdmi-a-1-control"},
+		{connector: "DP-2", want: "dp-2-control"},
+		{connector: "eDP-1", want: "edp-1-control"},
+	}
+	for _, c := range cases {
+		t.Run(c.connector, func(t *testing.T) {
+			if got := controlName(c.connector); got != c.want {
+				t.Fatalf("controlName = %q, want %q", got, c.want)
+			}
+			// An allocation result carries a device name and nothing
+			// else, so prepare works the connector's two devices apart
+			// with this one read.
+			output, control := outputOfControl(c.want)
+			if !control || output != deviceName(c.connector) {
+				t.Fatalf("outputOfControl(%q) = %q, %v", c.want, output, control)
+			}
+		})
+	}
+}
+
+func TestOutputOfControlLeavesAnOutputsNameAlone(t *testing.T) {
+	// The kernel names a connector after its type and its index, so no
+	// output device's name ends in the suffix.
+	output, control := outputOfControl("hdmi-a-1")
+	if control || output != "hdmi-a-1" {
+		t.Fatalf("outputOfControl = %q, %v", output, control)
+	}
+}
+
 // These are the pairing vectors. The audio operator holds this same
 // table against its own derivation from the ELD, and the two suites
 // together prove the drivers produce the same values. A
