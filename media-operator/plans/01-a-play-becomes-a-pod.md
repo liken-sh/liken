@@ -1,10 +1,10 @@
 # A play becomes a pod
 
-Plan 01. Built; the drill below has not run yet. The first slice of
-the design: `Player` and `Play`, the operator that reconciles them,
-and the player image. No input, no carriage. The proof is a film on
-`liken-1`, started by `kubectl create` and stopped by `kubectl
-delete`.
+Plan 01. Built, and drilled on `liken-1` on 2026-08-20, in release
+2026.08.20-001. The first slice of the design: `Player` and `Play`,
+the operator that reconciles them, and the player image. No input,
+no carriage. The proof was a film on `liken-1`, started by `kubectl
+create` and stopped by `kubectl delete`.
 
 ## The problem
 
@@ -72,12 +72,27 @@ already carries.
   whatever the compositor shows.
 * Multiple players per `Play`, and every part of the carriage layer.
 
-## How it will be proved
+## How it was proved
 
-On `liken-1`, with the portable monitor and its built-in speakers.
-Declare a `Player` for that monitor, its speakers, and the render
-node. Create a `Play` with one `nfs://` URI. The phase reaches
-`Running`, the film shows on the monitor with sound from its
-speakers, and the position in `kubectl get plays` advances. Delete
-the `Play`; the pod ends and the claims release. The drill record
-lands in this document when it runs.
+On `liken-1` on 2026-08-20, with the portable BOE monitor and its
+built-in speakers, in release 2026.08.20-001. A `Player` named
+`lab-portable` selected the monitor and its speakers by
+`monitor.liken.sh/id` through the cluster's `display-output` and
+`audio-output` classes, and the render node through
+`display-render`. A `Play` named one `nfs://` URI on the NAS, with
+the path's spaces and brackets percent-encoded, because a URI's
+path is encoded by definition and the resolver refuses a raw space.
+
+The claims allocated, the pod scheduled, and the phase reached
+`Running` about forty seconds after the create, most of it the
+first pull of the player image. `kubectl get plays` showed item 1
+of 1 and the position advanced from 0:00:15 to 0:00:25 across two
+reads ten seconds apart, against a reported duration of 2:28:49.
+mpv's own log carried the three delivery paths: hardware decoding
+with vaapi, `VO: [gpu] 3840x1744 vaapi[p010]`, and `AO: [pipewire]
+48000Hz 5.1(side) 6ch`.
+
+Deleting the `Play` ended the run and the garbage collector took
+the rest: twenty seconds later the playback pod and the
+`space-odyssey-devices` claim were gone, and nothing of the run
+remained in the namespace.

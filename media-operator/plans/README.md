@@ -18,11 +18,12 @@ is built the way it is, and what it still owes an answer to.
   design: the `Player`, `Play`, `Remote`, and `Keymap` resources,
   the playback pod, the input bus, and the carriage layer that
   comes later.
-* [01, A play becomes a pod](01-a-play-becomes-a-pod.md). Built; the
-  drill has not run yet. The first slice: `Player` and `Play`, the
-  operator, the player image, and the repository scaffolding. Proved
-  when a film plays on `liken-1` from a `kubectl create` and stops
-  on the delete.
+* [01, A play becomes a pod](01-a-play-becomes-a-pod.md). Built, and
+  drilled on `liken-1` on 2026-08-20 in release 2026.08.20-001. The
+  first slice: `Player` and `Play`, the operator, the player image,
+  and the repository scaffolding. A film played from a `kubectl
+  create`, its position advanced in `kubectl get plays`, and the
+  delete tore everything down through the owner references.
 
 ## Open problems
 
