@@ -1,0 +1,30 @@
+# The kustomize base for the media operator.
+#
+# This base is for the cluster owner to take. liken does not apply it
+# and does not name it. Take it through your own GitOps with patches
+# of your own, or read it and write your own manifests.
+#
+# The base ships no DeviceClass. This operator claims nothing for
+# itself, and the classes a Player names are the cluster owner's
+# vocabulary, the same classes a hand-written claim would use; each
+# hardware operator's manual gives the YAML for its class.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: liken-system
+
+resources:
+  - players-crd.yaml
+  - plays-crd.yaml
+  - rbac.yaml
+  - operator.yaml
+
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/name: media-operator
+      app.kubernetes.io/part-of: liken
+
+images:
+  - name: ghcr.io/liken-sh/media-operator
+    newTag: latest

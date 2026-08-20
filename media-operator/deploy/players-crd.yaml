@@ -1,0 +1,201 @@
+# The Player API, declared to Kubernetes.
+#
+# A Player is one named unit of equipment at one spot, for one
+# purpose: a lone speaker, a TV with its built-in speakers, a TV with
+# a receiver. The spec selects the unit's devices out of what the
+# hardware operators publish, with the same CEL selectors a
+# hand-written ResourceClaim would use. The media operator turns a
+# Player into claims only while a Play runs on it; an idle Player
+# holds nothing.
+#
+# The resource is namespaced, unlike liken's own Machine, because
+# everything a Player becomes is namespaced: the claims, the playback
+# pod, and the Play that names it all live in one namespace, and RBAC
+# on that namespace covers the set.
+#
+# The device entry repeats inline under display, sinks, and render,
+# because a CRD's structural schema allows no $ref. Each entry names
+# a DeviceClass, an optional CEL selector, and optional opaque
+# parameters for the driver that prepares the device.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: players.media.liken.sh
+spec:
+  group: media.liken.sh
+  names:
+    kind: Player
+    listKind: PlayerList
+    plural: players
+    singular: player
+    # `kubectl get media` shows the whole layer at once: every
+    # player and every play, the way `kubectl get liken` shows the
+    # OS layer.
+    categories: [media]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      # The status subresource splits spec and status into two write
+      # paths. People declare the spec; only the operator writes
+      # status. The API server enforces the split.
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Zone
+          type: string
+          jsonPath: .spec.zone
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            A Player is one named unit of equipment at one spot, for
+            one purpose. A Play names a Player to run media on it,
+            and the media operator claims the Player's devices for
+            exactly as long as that Play exists.
+          properties:
+            spec:
+              type: object
+              description: >-
+                The devices that form the unit, each selected from
+                what a hardware operator publishes. All of a Player's
+                devices must be reachable from one machine, because a
+                Play becomes one pod and the scheduler places that
+                pod on the machine that owns every claimed device. A
+                Player whose devices span machines produces Plays
+                that stay Pending.
+              # A Player with no display and no sinks plays nothing
+              # anywhere, so the spec must select at least one of the
+              # two. Render alone is not a Player.
+              x-kubernetes-validations:
+                - rule: >-
+                    has(self.display) ||
+                    (has(self.sinks) && size(self.sinks) > 0)
+                  message: >-
+                    a Player needs a display or at least one sink;
+                    render alone plays nothing
+              properties:
+                zone:
+                  type: string
+                  description: >-
+                    The area this Player is in, such as living-room.
+                    A word for grouping and display; nothing acts on
+                    it yet.
+                display:
+                  type: object
+                  required: [class]
+                  description: >-
+                    The display this Player shows video on. Omit it
+                    for an audio-only Player.
+                  properties:
+                    class:
+                      type: string
+                      description: >-
+                        The DeviceClass the claim allocates through.
+                        Consumer classes are the cluster owner's
+                        vocabulary; each hardware operator's manual
+                        gives the YAML for its class.
+                    selector:
+                      type: string
+                      description: >-
+                        A CEL expression over device.attributes, the
+                        same expression a hand-written claim would
+                        carry. Omitted, the class alone chooses,
+                        which fits a class that already names one
+                        kind of device.
+                    parameters:
+                      type: object
+                      required: [driver]
+                      description: >-
+                        Opaque configuration for the driver that
+                        prepares the device, carried onto the claim
+                        unread. The display operator's manual
+                        documents its parameters, such as mode and
+                        brightness.
+                      properties:
+                        driver:
+                          type: string
+                          description: >-
+                            The driver the parameters are for, such
+                            as display.liken.sh.
+                        values:
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                          description: >-
+                            The parameters themselves. The driver
+                            defines them; this operator carries them.
+                sinks:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  description: >-
+                    The audio outputs this Player plays sound
+                    through.
+                  items:
+                    type: object
+                    required: [class]
+                    properties:
+                      class:
+                        type: string
+                        description: >-
+                          The DeviceClass the claim allocates
+                          through. Consumer classes are the cluster
+                          owner's vocabulary; each hardware
+                          operator's manual gives the YAML for its
+                          class.
+                      selector:
+                        type: string
+                        description: >-
+                          A CEL expression over device.attributes,
+                          the same expression a hand-written claim
+                          would carry.
+                      parameters:
+                        type: object
+                        required: [driver]
+                        description: >-
+                          Opaque configuration for the driver that
+                          prepares the device, carried onto the
+                          claim unread. The audio operator's manual
+                          documents its parameters, such as codec.
+                        properties:
+                          driver:
+                            type: string
+                            description: >-
+                              The driver the parameters are for,
+                              such as audio.liken.sh.
+                          values:
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                            description: >-
+                              The parameters themselves. The driver
+                              defines them; this operator carries
+                              them.
+                render:
+                  type: object
+                  required: [class]
+                  description: >-
+                    The GPU render node the player program decodes
+                    and draws with. Omit it only for an audio-only
+                    Player; mpv needs a GPU to put video on a
+                    display.
+                  properties:
+                    class:
+                      type: string
+                      description: >-
+                        The DeviceClass the claim allocates through.
+                        A render class usually needs no selector,
+                        because it already names one kind of device.
+                    selector:
+                      type: string
+                      description: >-
+                        A CEL expression over device.attributes, for
+                        a machine with more than one GPU.
+            status:
+              type: object
+              description: >-
+                Reserved. The operator reports nothing on a Player
+                yet; a Play that cannot schedule reports the fact on
+                its own status.

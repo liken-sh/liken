@@ -1,0 +1,57 @@
+# The operator's identity in the cluster, and deliberately nothing
+# more. It reads plays and players, writes play statuses, and creates
+# the claims and pods a play becomes. It deletes nothing: every claim
+# and pod carries an ownerReference to its Play, so the garbage
+# collector is the teardown, and deleting the Play is the whole stop.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: media-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: media-operator
+rules:
+  # The plays, across every namespace, because a household runs its
+  # media in whatever namespace it likes and the operator is one
+  # Deployment for the cluster. The watch is the wake signal; every
+  # pass re-reads with a list.
+  - apiGroups: [media.liken.sh]
+    resources: [plays]
+    verbs: [get, list, watch]
+  # Only the status half. The API server's subresource split is what
+  # keeps this operator from ever rewriting a spec a person declared.
+  - apiGroups: [media.liken.sh]
+    resources: [plays/status]
+    verbs: [update]
+  # Players are read one at a time, by the name a play carries. No
+  # list and no watch: a player that appears later is caught by the
+  # next pass, and reading the whole inventory is nobody's job here.
+  - apiGroups: [media.liken.sh]
+    resources: [players]
+    verbs: [get]
+  # The claims a play becomes. Created once per play, read back on
+  # every pass, never deleted: the Play owns them and the garbage
+  # collector takes them with it.
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceclaims]
+    verbs: [get, create]
+  # The playback pods, on the same terms as the claims.
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: media-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: media-operator
+subjects:
+  - kind: ServiceAccount
+    name: media-operator
+    namespace: liken-system

@@ -1,0 +1,81 @@
+# The operator itself: one unprivileged Deployment, in the shape of
+# liken's cluster operator rather than the hardware operators'
+# DaemonSets. Those run a pod per node because they hold that node's
+# hardware; this one holds no hardware at all. It watches plays,
+# creates claims and pods, and writes statuses, and the scheduler
+# places the playback pods wherever the claimed devices are.
+#
+# There is no volume for state. The operator re-derives everything
+# from the API server on every pass, and the one thing it mints, the
+# report token in each playback pod's environment, it recovers by
+# reading the pod back.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: media-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: media-operator
+  # Recreate, so two copies never reconcile at once. Two operators
+  # would agree on every derived status, but each pod create they
+  # raced would surface as a conflict for one of them to report.
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: media-operator
+    spec:
+      serviceAccountName: media-operator
+      containers:
+        - name: operator
+          image: ghcr.io/liken-sh/media-operator:latest
+          env:
+            # The image the playback pods run: mpv under this same
+            # binary as supervisor. The operator stamps it into
+            # every pod it creates. It is an environment variable
+            # rather than a constant so a cluster pins the pair of
+            # images together with one patch.
+            - name: PLAYER_IMAGE
+              value: ghcr.io/liken-sh/media-operator-player:latest
+            # The address the playback pods report to: the Service
+            # below, as the pods across the cluster reach it. The
+            # operator cannot derive its own Service name, so the
+            # manifest states it, and the operator passes it into
+            # every playback pod under this same variable name.
+            - name: MEDIA_OPERATOR_URL
+              value: http://media-operator.liken-system.svc:8080
+          ports:
+            - name: report
+              containerPort: 8080
+          securityContext:
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+---
+# Where the supervisors report. Every playback pod POSTs its
+# observations here, and the operator folds them into play statuses.
+# The reports are the one path in this system that does not go
+# through the API server, because the playback pods hold no API
+# credentials.
+apiVersion: v1
+kind: Service
+metadata:
+  name: media-operator
+spec:
+  selector:
+    app: media-operator
+  ports:
+    - name: report
+      port: 8080
+      targetPort: report

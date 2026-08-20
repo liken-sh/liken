@@ -18,7 +18,21 @@ is built the way it is, and what it still owes an answer to.
   design: the `Player`, `Play`, `Remote`, and `Keymap` resources,
   the playback pod, the input bus, and the carriage layer that
   comes later.
-* [01, A play becomes a pod](01-a-play-becomes-a-pod.md). Not built.
-  The first slice: `Player` and `Play`, the operator, the player
-  image, and the repository scaffolding. Proved when a film plays on
-  `liken-1` from a `kubectl create` and stops on the delete.
+* [01, A play becomes a pod](01-a-play-becomes-a-pod.md). Built; the
+  drill has not run yet. The first slice: `Player` and `Play`, the
+  operator, the player image, and the repository scaffolding. Proved
+  when a film plays on `liken-1` from a `kubectl create` and stops
+  on the delete.
+
+## Open problems
+
+[`open-problems/`](open-problems/) holds the questions this operator
+owes an answer to. Those documents have no number, because nobody
+has decided yet what work they become.
+
+* [The player image is still Debian](open-problems/the-player-image-is-still-debian.md).
+  The operator image is one binary on `scratch`; the player image is
+  a distribution base, because `mpv`'s runtime closure is wide. The
+  audio operator's closure-on-scratch treatment applies, with the
+  complication that `mpv` loads its GPU drivers only on real
+  hardware.

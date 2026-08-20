@@ -1,6 +1,7 @@
 # A pushed tag cuts a release. This workflow runs the tests, builds
-# the operator image, and pushes it to ghcr.io under the tag's name
-# and :latest. A push to main releases nothing: ci.yaml tests it and
+# the operator image and the player image, proves the player image
+# can run mpv, and pushes both to ghcr.io under the tag's name and
+# :latest. A push to main releases nothing: ci.yaml tests it and
 # stops. The tag is the release act, as in the main liken repository,
 # so main takes docs and intermediate work freely and every image in
 # the registry traces to a version somebody chose to name.
@@ -9,9 +10,9 @@
 # release cadences of the operators do not couple, and reading one
 # version beside another still tells you when each one was cut.
 #
-# The player image, mpv under its supervisor, is plan 01's build, and
-# it will release from this workflow with a runtime gate of its own,
-# the way the sibling operators prove their images before the push.
+# The two images release together, always. The operator stamps the
+# player image into every playback pod, and a pair that could drift
+# apart would put the report contract at two versions at once.
 name: release
 
 on:
@@ -64,11 +65,46 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push the image
+      # Both images build here and push nothing yet. The player gate
+      # below has to pass first, and a push that happened first would
+      # leave a broken :latest behind when the gate failed.
+      - name: Build the operator image
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
+          load: true
           tags: |
             ghcr.io/liken-sh/media-operator:${{ env.VERSION }}
             ghcr.io/liken-sh/media-operator:latest
+
+      - name: Build the player image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.player
+          load: true
+          tags: |
+            ghcr.io/liken-sh/media-operator-player:${{ env.VERSION }}
+            ghcr.io/liken-sh/media-operator-player:latest
+
+      # The gate on the player image. The runner has no GPU, no
+      # Wayland, and no PipeWire, so nothing here plays; what can
+      # break invisibly is the closure. mpv proves it can load its
+      # libraries by printing its version, and the supervisor binary
+      # must be present at the path the entrypoint names.
+      - name: Prove the player image
+        run: |
+          set -eu
+          image="ghcr.io/liken-sh/media-operator-player:$VERSION"
+          docker run --rm --entrypoint /usr/bin/mpv "$image" --version
+          container=$(docker create "$image")
+          docker export "$container" | tar -t | grep -qx 'media-operator' \
+            || { echo "the player image has no /media-operator"; exit 1; }
+          docker rm "$container" > /dev/null
+
+      - name: Push the images
+        run: |
+          docker push "ghcr.io/liken-sh/media-operator:$VERSION"
+          docker push "ghcr.io/liken-sh/media-operator:latest"
+          docker push "ghcr.io/liken-sh/media-operator-player:$VERSION"
+          docker push "ghcr.io/liken-sh/media-operator-player:latest"

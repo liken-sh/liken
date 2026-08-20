@@ -1,9 +1,10 @@
 # A play becomes a pod
 
-Plan 01. Not built. The first slice of the design: `Player` and
-`Play`, the operator that reconciles them, and the player image. No
-input, no carriage. The proof is a film on `liken-1`, started by
-`kubectl create` and stopped by `kubectl delete`.
+Plan 01. Built; the drill below has not run yet. The first slice of
+the design: `Player` and `Play`, the operator that reconciles them,
+and the player image. No input, no carriage. The proof is a film on
+`liken-1`, started by `kubectl create` and stopped by `kubectl
+delete`.
 
 ## The problem
 

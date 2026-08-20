@@ -1,0 +1,158 @@
+# The Play API, declared to Kubernetes.
+#
+# A Play is one run of media on a Player, with a lifecycle analogous
+# to a Job: it runs once to completion and stays for its status until
+# deleted. The media operator reconciles a Play into one playback pod
+# and the claims that pod needs, all owned by the Play, so deleting
+# the Play is the whole teardown: the garbage collector takes the pod
+# and the claims with it.
+#
+# The spec is immutable, like a Job's template. A Play whose player
+# or media changed mid-run would describe a different run; delete the
+# Play and create another.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: plays.media.liken.sh
+spec:
+  group: media.liken.sh
+  names:
+    kind: Play
+    listKind: PlayList
+    plural: plays
+    singular: play
+    categories: [media]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      # The status subresource splits spec and status into two write
+      # paths. People declare the spec; only the operator writes
+      # status. The API server enforces the split.
+      subresources:
+        status: {}
+      # `kubectl get plays` is the house's now-playing listing, so
+      # the columns show the run itself: where it plays, what state
+      # it is in, and how far along it is.
+      additionalPrinterColumns:
+        - name: Player
+          type: string
+          jsonPath: .spec.players[0]
+        - name: Status
+          type: string
+          jsonPath: .status.phase
+        - name: Item
+          type: integer
+          jsonPath: .status.item
+        - name: Position
+          type: string
+          jsonPath: .status.position
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            A Play is one run of media on a Player: a film, an album,
+            or a season of episodes, played in order. Create a Play
+            to start it; delete the Play to stop it early.
+          properties:
+            spec:
+              type: object
+              required: [players, uris]
+              description: >-
+                What to play and where. The spec is immutable: a
+                different film or a different player is a different
+                Play.
+              x-kubernetes-validations:
+                - rule: self == oldSelf
+                  message: >-
+                    a Play's spec is immutable; delete the Play and
+                    create another
+              properties:
+                players:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  minItems: 1
+                  # One player for now. The carriage layer will let
+                  # one Play reach several players in sync, and a
+                  # list that grows a second element changes no
+                  # field name when it does.
+                  maxItems: 1
+                  items:
+                    type: string
+                    minLength: 1
+                  description: >-
+                    The Players this Play runs on, by name, in this
+                    namespace. One entry today; the carriage layer
+                    lifts the limit.
+                uris:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  minItems: 1
+                  items:
+                    type: string
+                    minLength: 1
+                  description: >-
+                    The media, in play order. Each item is a URI.
+                    The operator resolves https:// to a stream the
+                    player reads directly, and nfs://host/export/path
+                    to a mount on the playback pod. A URI whose
+                    scheme the operator does not know fails the Play
+                    before any pod exists.
+            status:
+              type: object
+              description: >-
+                What the playback pod reports, written only by the
+                media operator. The playback pod itself holds no API
+                credentials; it reports to the operator, and the
+                operator writes here.
+              properties:
+                phase:
+                  type: string
+                  enum: [Pending, Running, Finished, Failed]
+                  description: >-
+                    Where the run is in its life, in the words Jobs
+                    and Pods use. Pending is declared but not yet
+                    performing, Running is the pod performing the
+                    play, paused or not, and Finished and Failed are
+                    the two ends. The word is Running rather than
+                    Playing because a phase moves forward only, and
+                    a paused film would force Playing to flap; the
+                    paused field beside this one says the rest.
+                paused:
+                  type: boolean
+                  description: >-
+                    True while the player holds the current item
+                    still. The phase stays Running; pausing is a
+                    state of the performance, not a step in the
+                    lifecycle.
+                item:
+                  type: integer
+                  description: >-
+                    Which URI plays now, counting from 1 in spec
+                    order. The third of five episodes shows 3.
+                position:
+                  type: string
+                  description: >-
+                    The playhead inside the current item, as
+                    H:MM:SS.
+                duration:
+                  type: string
+                  description: >-
+                    The length of the current item, as H:MM:SS, once
+                    the player has read it.
+                pod:
+                  type: string
+                  description: >-
+                    The playback pod's name, for kubectl describe
+                    and logs. The pod is owned by this Play and
+                    leaves with it.
+                message:
+                  type: string
+                  description: >-
+                    Why the phase is what it is, when a word is not
+                    enough: the resolver refused a URI, the Player
+                    does not exist, the pod failed.
