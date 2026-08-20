@@ -1,9 +1,10 @@
 # A remote drives the play
 
-Plan 02. Proposed. The second slice of the design: `Remote` and
+Plan 02. Built, and drilled on `liken-1` on 2026-08-20, in release
+2026.08.20-004. The second slice of the design: `Remote` and
 `Keymap`, and one controller in a person's hands controlling a
-running play. No bus, no standing remote pod. The proof is a paired
-gamepad pausing a film, and `status.paused` following it.
+running play. No bus, no standing remote pod. The proof was a paired
+DualSense pausing a film, and `status.paused` following it.
 
 ## The problem
 
@@ -98,13 +99,33 @@ needed.
 * Input that starts playback. A sidecar exists only while a `Play`
   does, so this plan cannot even express it.
 
-## How it will be proved
+## How it was proved
 
-On a lab machine, with a paired gamepad and a film already `Running`.
-A `Keymap` for the gamepad's model, a `Remote` selecting it by
-address and bound to the player, and then hands on the controller:
-pause flips `status.paused` within one report, seek moves the
-position, volume and chapter answer on the d-pad. The controller
-then sleeps and wakes, and the film never stops: the sidecar
-restarts, the pod stays, and the next press lands. The hand-written
-driver manifests this replaces are retired the same day.
+On `liken-1` on 2026-08-20, with the portable BOE monitor and a
+paired DualSense, in release 2026.08.20-004. A `Keymap` named
+`dualsense` mapped the face buttons and the hat to the action
+vocabulary, and a `Remote` selected the controller by its
+`bluetooth.liken.sh` address and bound it to the `lab-portable`
+player. The same film from plan 01 played, with the sidecar beside
+`mpv`.
+
+The pod scheduled with two containers, `player` and
+`remote-player-one-pad`, and both reached ready. A press of the X
+button flipped `status.paused` from absent to `true` inside one
+report, at position `0:17:40`, and a second press cleared it. The
+sidecar's own log stayed empty, which is the quiet it reports on a
+run with no error.
+
+One fact the drill taught, absent from the design: a sleeping
+controller carries two device taints, not one. The
+`bluetooth.liken.sh/disconnected` taint is `NoExecute`, and the
+operator tolerates it with no time limit so a mid-film sleep never
+evicts the pod. A sleeping controller also carries
+`bluetooth.liken.sh/no-input-node`, a `NoSchedule` taint the
+operator does not tolerate, because a controller with no input node
+has nothing to deliver into the container. So a `Play` bound to a
+controller starts only once that controller is awake, and it keeps
+playing through every sleep after. The film waited `Pending` until
+the DualSense connected, then scheduled at once.
+
+The hand-written driver manifests this replaces are retired.
