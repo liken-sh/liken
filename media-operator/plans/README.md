@@ -43,3 +43,8 @@ has decided yet what work they become.
   audio operator's closure-on-scratch treatment applies, with the
   complication that `mpv` loads its GPU drivers only on real
   hardware.
+* [The playback pod reports over plain HTTP](open-problems/the-playback-pod-reports-over-plain-http.md).
+  The supervisor POSTs its status to an HTTP endpoint the operator
+  serves, proven by a token held in memory. The trust boundary that
+  keeps the pod credential-free should stay; the transport should
+  move onto the input plane's message bus when that plan lands.
