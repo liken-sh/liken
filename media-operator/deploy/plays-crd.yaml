@@ -42,6 +42,9 @@ spec:
         - name: Status
           type: string
           jsonPath: .status.phase
+        - name: Activity
+          type: string
+          jsonPath: .status.activity
         - name: Item
           type: integer
           jsonPath: .status.item
@@ -131,6 +134,16 @@ spec:
                     Playing because a phase moves forward only, and
                     a paused film would force Playing to flap; the
                     paused field beside this one says the rest.
+                activity:
+                  type: string
+                  enum: [Starting, Playing, Paused, Finished, Failed]
+                  description: >-
+                    The one word for what the Play does right now,
+                    the phase and the paused flag folded together.
+                    Starting is Pending, Playing and Paused are the
+                    two faces of Running, and Finished and Failed
+                    match the phase. The phase is the lifecycle; the
+                    activity is what a person reads at a glance.
                 paused:
                   type: boolean
                   description: >-

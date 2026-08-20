@@ -46,6 +46,12 @@ spec:
         - name: Zone
           type: string
           jsonPath: .spec.zone
+        - name: Activity
+          type: string
+          jsonPath: .status.activity
+        - name: Play
+          type: string
+          jsonPath: .status.play
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -196,6 +202,19 @@ spec:
             status:
               type: object
               description: >-
-                Reserved. The operator reports nothing on a Player
-                yet; a Play that cannot schedule reports the fact on
-                its own status.
+                What plays on this Player now, written only by the
+                media operator. It is derived from the Plays that
+                name the Player, so it is empty until one does.
+              properties:
+                activity:
+                  type: string
+                  enum: [Playing, Starting, Idle]
+                  description: >-
+                    Whether the Player performs a run now. Playing
+                    is a Play running on it, Starting is a Play whose
+                    pod has not begun, and Idle is no Play at all.
+                play:
+                  type: string
+                  description: >-
+                    The name of the Play on this Player, in the same
+                    namespace. Empty while the Player is Idle.

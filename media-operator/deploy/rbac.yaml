@@ -26,12 +26,19 @@ rules:
   - apiGroups: [media.liken.sh]
     resources: [plays/status]
     verbs: [update]
-  # Players are read one at a time, by the name a play carries. No
-  # list and no watch: a player that appears later is caught by the
-  # next pass, and reading the whole inventory is nobody's job here.
+  # Players are read one at a time by the name a play carries, and
+  # listed once a pass to write each one's status. No watch: a
+  # player that appears is caught by the next pass, and its status
+  # follows the Plays this operator already watches.
   - apiGroups: [media.liken.sh]
     resources: [players]
-    verbs: [get]
+    verbs: [get, list]
+  # Only the status half, the same subresource split the plays use:
+  # the operator writes what plays on a player, never the equipment
+  # a person declared.
+  - apiGroups: [media.liken.sh]
+    resources: [players/status]
+    verbs: [update]
   # The remotes bound to a player, and their keymaps. Remotes are
   # listed, because nothing indexes a Remote by the player it binds;
   # a keymap is read one at a time, by the name a Remote carries.

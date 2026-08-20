@@ -49,11 +49,22 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 				list.Items = append(list.Items, *f.plays[key])
 			}
 			_ = json.NewEncoder(w).Encode(list)
+		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/players/") && strings.HasSuffix(r.URL.Path, "/status"):
+			var written Player
+			_ = json.NewDecoder(r.Body).Decode(&written)
+			f.players[written.Metadata.Name] = &written
+			_ = json.NewEncoder(w).Encode(written)
 		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/status"):
 			var written Play
 			_ = json.NewDecoder(r.Body).Decode(&written)
 			f.plays[written.Metadata.Name] = &written
 			_ = json.NewEncoder(w).Encode(written)
+		case r.Method == http.MethodGet && r.URL.Path == playersPath:
+			list := PlayerList{Metadata: ListMeta{ResourceVersion: "1"}}
+			for _, key := range sortedNames(f.players) {
+				list.Items = append(list.Items, *f.players[key])
+			}
+			_ = json.NewEncoder(w).Encode(list)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/plays/"):
 			answer(w, f.plays[name])
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/players/"):
@@ -140,6 +151,48 @@ func housePlayer() *Player {
 			Sinks:   []PlayerDevice{{Class: "audio-sink"}},
 			Render:  &PlayerDevice{Class: "gpu-render"},
 		},
+	}
+}
+
+// A pass writes each Player's status from the Plays it read. A
+// player with a running play reads Playing and names the play.
+func TestAPassWritesThePlayerStatusFromItsRunningPlay(t *testing.T) {
+	cluster := newFakeCluster()
+	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
+	cluster.players["theater"] = housePlayer()
+	// A running pod and its claim already exist, so the pass derives
+	// a Running play, and the player reads Playing off it.
+	running := buildPod(cluster.plays["movie"], buildClaim(cluster.plays["movie"], housePlayer(), nil),
+		resolution{Items: []string{"https://nas/film.mkv"}},
+		"registry.example/player:test", "4444444444444444444444444444ffff",
+		"http://media-operator.media.svc:8080", nil)
+	running.Status.Phase = podRunning
+	cluster.pods["movie-playback"] = running
+	cluster.claims["movie-devices"] = buildClaim(cluster.plays["movie"], housePlayer(), nil)
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.pass()
+
+	got := cluster.players["theater"].Status
+	want := PlayerStatus{Activity: playerPlaying, Play: "movie"}
+	if got != want {
+		t.Errorf("player status = %+v, want %+v", got, want)
+	}
+}
+
+// A Player no Play names reads Idle, and the pass writes it, so an
+// idle unit is not blank in kubectl.
+func TestAPassMarksAPlayerWithNoPlayIdle(t *testing.T) {
+	cluster := newFakeCluster()
+	cluster.players["theater"] = housePlayer()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.pass()
+
+	got := cluster.players["theater"].Status
+	want := PlayerStatus{Activity: playerIdle}
+	if got != want {
+		t.Errorf("player status = %+v, want %+v", got, want)
 	}
 }
 
@@ -248,7 +301,8 @@ func TestAPlayWithAnUnknownSchemeFailsAndCreatesNothing(t *testing.T) {
 }
 
 // A Play that reached a terminal phase is read and left alone; the
-// pass asks the API server for nothing else about it.
+// pass makes no request about the play itself, only the two list
+// reads every pass makes.
 func TestATerminalPlayIsReadAndLeftAlone(t *testing.T) {
 	cluster := newFakeCluster()
 	finished := housePlay("https://nas/film.mkv")
@@ -258,8 +312,9 @@ func TestATerminalPlayIsReadAndLeftAlone(t *testing.T) {
 
 	media.pass()
 
-	if len(cluster.requests) != 1 || cluster.requests[0] != "GET "+playsPath {
-		t.Errorf("requests = %v, want the list alone", cluster.requests)
+	want := "GET " + playsPath + "," + "GET " + playersPath
+	if strings.Join(cluster.requests, ",") != want {
+		t.Errorf("requests = %v, want the two list reads alone", cluster.requests)
 	}
 }
 
@@ -288,6 +343,7 @@ func TestARunningPodFoldsTheLatestReportIntoTheStatus(t *testing.T) {
 	status := cluster.plays["movie"].Status
 	want := PlayStatus{
 		Phase:    phaseRunning,
+		Activity: activityPlaying,
 		Pod:      "movie-playback",
 		Item:     1,
 		Position: "0:03:20",

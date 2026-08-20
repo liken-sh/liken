@@ -13,7 +13,17 @@ import (
 	"fmt"
 )
 
-// derivePlayStatus takes the phase from the pod and the numbers from
+// derivePlayStatus builds the phase-and-numbers status and stamps
+// the activity word onto it, so every path through the derivation
+// carries the one word a person reads without a second rule
+// deciding it later.
+func derivePlayStatus(play *Play, player *Player, buildErr error, pod *Pod, latest *playReport) PlayStatus {
+	status := buildPlayStatus(play, player, buildErr, pod, latest)
+	status.Activity = playActivity(status.Phase, status.Paused)
+	return status
+}
+
+// buildPlayStatus takes the phase from the pod and the numbers from
 // the pod's reports. The kubelet is the authority for whether the
 // player process runs, and it cannot lie about an exit; only mpv
 // knows where the playhead is, and it can only say so through the
@@ -21,7 +31,7 @@ import (
 // a Player not yet declared, a buildErr is a run no pod could ever
 // perform, a nil pod is a run not yet started, and a nil report is a
 // pod that has not spoken yet.
-func derivePlayStatus(play *Play, player *Player, buildErr error, pod *Pod, latest *playReport) PlayStatus {
+func buildPlayStatus(play *Play, player *Player, buildErr error, pod *Pod, latest *playReport) PlayStatus {
 	if buildErr != nil {
 		// A URI the resolver refuses, or a Remote whose Keymap will
 		// not compile, fails the Play before any object exists,

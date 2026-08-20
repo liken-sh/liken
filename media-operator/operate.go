@@ -155,6 +155,28 @@ func (o *operator) pass() {
 		}
 	}
 	o.reports.retain(live)
+	o.reconcilePlayers(list.Items)
+}
+
+// reconcilePlayers writes every Player's status from the same Plays
+// the pass just read. A Player's status is relational, so it is a
+// second read and a write on the same pass rather than a loop of its
+// own: nothing watches Players, and the derivation needs every Play,
+// which the pass already holds.
+func (o *operator) reconcilePlayers(plays []Play) {
+	players, err := ListPlayers(o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing players: %v\n", err)
+		return
+	}
+	for index := range players.Items {
+		player := &players.Items[index]
+		desired := derivePlayerStatus(player, plays)
+		if err := writePlayerStatus(o.client, player, desired); err != nil {
+			fmt.Fprintf(os.Stderr, "writing player %s/%s status: %v\n",
+				player.Metadata.Namespace, player.Metadata.Name, err)
+		}
+	}
 }
 
 // reconcile takes one Play from the Player it names to the status it

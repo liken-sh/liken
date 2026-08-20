@@ -50,12 +50,39 @@ type ListMeta struct {
 }
 
 // A Player is equipment, not a running thing. It holds no claims of
-// its own, and this operator only reads it.
+// its own. The operator reads the spec and writes the status: the
+// spec is the equipment a person declared, and the status is what
+// plays on it now.
 type Player struct {
-	APIVersion string     `json:"apiVersion,omitempty"`
-	Kind       string     `json:"kind,omitempty"`
-	Metadata   ObjectMeta `json:"metadata"`
-	Spec       PlayerSpec `json:"spec"`
+	APIVersion string       `json:"apiVersion,omitempty"`
+	Kind       string       `json:"kind,omitempty"`
+	Metadata   ObjectMeta   `json:"metadata"`
+	Spec       PlayerSpec   `json:"spec"`
+	Status     PlayerStatus `json:"status"`
+}
+
+// The status the operator writes onto a Player: whether it plays
+// anything now, and the name of the Play that does. Both are
+// omitempty, so an idle Player with no activity word yet shows blank
+// rather than a zero.
+type PlayerStatus struct {
+	Activity string `json:"activity,omitempty"`
+	Play     string `json:"play,omitempty"`
+}
+
+// A Player's activity is the coarse state a person scans for: it
+// plays a Play now, a Play is starting on it, or it is free. The
+// Play name beside it says which run, so the two columns together
+// read as one sentence.
+const (
+	playerPlaying  = "Playing"
+	playerStarting = "Starting"
+	playerIdle     = "Idle"
+)
+
+type PlayerList struct {
+	Metadata ListMeta `json:"metadata"`
+	Items    []Player `json:"items"`
 }
 
 // The three device roles. Display and render are single because one
@@ -105,13 +132,14 @@ type PlaySpec struct {
 	Start   string   `json:"start,omitempty"`
 }
 
-// The status the operator alone writes: the phase, the paused flag,
-// the item counting from 1, the playhead, the pod's name, and the
-// message that says why when a word is not enough. Every field is
-// omitempty so a column with nothing to say shows blank in kubectl
-// rather than a zero.
+// The status the operator alone writes: the phase, the activity
+// word, the paused flag, the item counting from 1, the playhead, the
+// pod's name, and the message that says why when a word is not
+// enough. Every field is omitempty so a column with nothing to say
+// shows blank in kubectl rather than a zero.
 type PlayStatus struct {
 	Phase    string `json:"phase,omitempty"`
+	Activity string `json:"activity,omitempty"`
 	Paused   bool   `json:"paused,omitempty"`
 	Item     int    `json:"item,omitempty"`
 	Position string `json:"position,omitempty"`
@@ -129,6 +157,38 @@ const (
 	phaseFinished = "Finished"
 	phaseFailed   = "Failed"
 )
+
+// The activity is the one word a person reads to know what the Play
+// is doing right now. The phase is the lifecycle, which never goes
+// backward; the activity folds the paused flag into that lifecycle,
+// so a paused run reads Paused where the phase still reads Running.
+const (
+	activityStarting = "Starting"
+	activityPlaying  = "Playing"
+	activityPaused   = "Paused"
+	activityFinished = "Finished"
+	activityFailed   = "Failed"
+)
+
+// playActivity is the phase and the paused flag folded into one
+// word. A Play with no phase yet has no activity either, so an
+// unwritten status stays blank.
+func playActivity(phase string, paused bool) string {
+	switch phase {
+	case phasePending:
+		return activityStarting
+	case phaseRunning:
+		if paused {
+			return activityPaused
+		}
+		return activityPlaying
+	case phaseFinished:
+		return activityFinished
+	case phaseFailed:
+		return activityFailed
+	}
+	return ""
+}
 
 // A Play in a terminal phase gets no further reconcile. Its pod and
 // claim stay for reading until the Play is deleted, and the garbage

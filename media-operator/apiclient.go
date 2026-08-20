@@ -159,6 +159,7 @@ func drain(body io.ReadCloser) {
 // kinds this operator writes live under their own groups' paths.
 const (
 	playsPath   = "/apis/" + mediaAPIVersion + "/plays"
+	playersPath = "/apis/" + mediaAPIVersion + "/players"
 	mediaPrefix = "/apis/" + mediaAPIVersion + "/namespaces/"
 	claimPrefix = "/apis/" + claimAPIVersion + "/namespaces/"
 	podPrefix   = "/api/v1/namespaces/"
@@ -207,6 +208,33 @@ func GetPlay(c *Client, namespace, name string) (*Play, error) {
 		return nil, err
 	}
 	return play, nil
+}
+
+// ListPlayers answers a pass with one request across every
+// namespace, the same shape as ListPlays, because a Player's status
+// is derived from the Plays that name it and the pass already holds
+// every Play.
+func ListPlayers(c *Client) (*PlayerList, error) {
+	list := &PlayerList{}
+	if err := c.RequestJSON(http.MethodGet, playersPath, nil, list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// PutPlayerStatus writes the Player's status subresource, the one
+// write path this operator has onto a Player.
+func PutPlayerStatus(c *Client, player *Player) (*Player, error) {
+	body, err := json.Marshal(player)
+	if err != nil {
+		return nil, err
+	}
+	written := &Player{}
+	path := playerPath(player.Metadata.Namespace, player.Metadata.Name) + "/status"
+	if err := c.RequestJSON(http.MethodPut, path, body, written); err != nil {
+		return nil, err
+	}
+	return written, nil
 }
 
 func GetPlayer(c *Client, namespace, name string) (*Player, error) {

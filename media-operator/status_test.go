@@ -157,9 +157,40 @@ func TestDerivePlayStatus(t *testing.T) {
 
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
+			// Every status carries the activity word its phase and
+			// paused flag earn. TestPlayActivity pins that mapping on
+			// its own; here it rides along so the table need not
+			// repeat it.
+			one.want.Activity = playActivity(one.want.Phase, one.want.Paused)
 			got := derivePlayStatus(statusTestPlay(), one.player, one.buildErr, one.pod, one.report)
 			if !reflect.DeepEqual(got, one.want) {
 				t.Errorf("status = %+v, want %+v", got, one.want)
+			}
+		})
+	}
+}
+
+// The activity word a person reads is the phase and the paused flag
+// folded into one.
+func TestPlayActivity(t *testing.T) {
+	cases := []struct {
+		name   string
+		phase  string
+		paused bool
+		want   string
+	}{
+		{name: "pending is starting", phase: phasePending, want: activityStarting},
+		{name: "running and not paused is playing", phase: phaseRunning, want: activityPlaying},
+		{name: "running and paused is paused", phase: phaseRunning, paused: true, want: activityPaused},
+		{name: "finished stays finished", phase: phaseFinished, want: activityFinished},
+		{name: "failed stays failed", phase: phaseFailed, want: activityFailed},
+		{name: "an unwritten phase has no activity", phase: "", want: ""},
+		{name: "paused matters only while running", phase: phaseFinished, paused: true, want: activityFinished},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			if got := playActivity(one.phase, one.paused); got != one.want {
+				t.Errorf("playActivity(%q, %v) = %q, want %q", one.phase, one.paused, got, one.want)
 			}
 		})
 	}
