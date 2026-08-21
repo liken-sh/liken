@@ -146,6 +146,7 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		focus:           newFocusDesk(wake),
 		positionWrites:  map[string]time.Time{},
 		keymapPublished: map[string]string{},
+		playReclaim:     map[string]time.Time{},
 	}
 }
 
@@ -759,6 +760,52 @@ func TestAPlayWhosePlayerNamesAMissingRemoteFailsBeforeItsPod(t *testing.T) {
 	}
 	if _, held := cluster.pods["movie-playback"]; held {
 		t.Errorf("a missing remote created the playback pod: %v", cluster.pods)
+	}
+}
+
+// A deleted Play's retained status and availability are cleared, but only
+// after the grace: for a short while the operator holds them so a
+// subscriber that reads just after the delete still sees the final state,
+// then it empties both topics.
+func TestADeletedPlayIsReclaimedAfterTheGrace(t *testing.T) {
+	bus, brokers, connected := startBus(t, 1, nil, nil)
+	waitForConnect(t, connected)
+	broker := brokers[0]
+	wake := make(chan struct{}, 1)
+	media := &operator{
+		topicBase:   defaultTopicBase,
+		bus:         bus,
+		reports:     newReports(wake),
+		playReclaim: map[string]time.Time{},
+	}
+
+	// The desk has seen the run, and the collection no longer holds it.
+	media.reports.availability("den", "old-film", false)
+	live := map[string]bool{}
+
+	// Inside the grace, nothing is cleared.
+	media.reclaimPlays(live)
+	select {
+	case got := <-broker.pubs:
+		t.Fatalf("a Play was reclaimed inside the grace: %+v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// Past the grace, the status and the availability are both cleared.
+	media.playReclaim[runKey("den", "old-film")] = time.Now().Add(-2 * playReclaimGrace)
+	media.reclaimPlays(live)
+
+	cleared := map[string]bool{}
+	for range 2 {
+		published := waitForPublish(t, broker.pubs)
+		if len(published.payload) != 0 || !published.retained {
+			t.Errorf("reclaim published %+v, want an empty retained clear", published)
+		}
+		cleared[published.topic] = true
+	}
+	if !cleared[playStatusTopic(defaultTopicBase, "den", "old-film")] ||
+		!cleared[playAvailabilityTopic(defaultTopicBase, "den", "old-film")] {
+		t.Errorf("cleared topics = %v, want the status and the availability", cleared)
 	}
 }
 

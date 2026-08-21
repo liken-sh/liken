@@ -113,6 +113,11 @@ has decided yet what work they become.
   topic, so the trust boundary is the whole cluster. Acceptable for one
   home the owner controls, and it owes broker ACLs once a cluster runs
   a workload the owner does not trust.
+* [A release does not reach a running pod](open-problems/a-release-does-not-reach-a-running-pod.md).
+  The operator stamps the player image into a pod once and never again,
+  so a new release reaches only the pods that start after it. A running
+  playback pod and the standing remote pods keep their old image until
+  something recreates them, which is a person's job today.
 
 ## Rejected
 

@@ -54,6 +54,17 @@ const backstopInterval = 10 * time.Second
 // writes on every tick.
 const positionWriteInterval = 8 * time.Second
 
+// playReclaimGrace is how long a deleted Play's retained status and
+// availability stay on the bus before the operator clears them. The
+// command sidecar clears its own status on a clean exit but marks the
+// availability offline and never clears it, and an unclean exit leaves
+// both, so without this a deleted Play's gravestone would sit on the
+// broker forever. The grace is short but not zero: a subscriber that
+// reads the topic in the moment after the delete still sees the run's
+// final state, and then the retained topics go empty. It is a variable so
+// a test drives the reclaim without waiting minutes.
+var playReclaimGrace = 2 * time.Minute
+
 // operator holds what every pass needs. The report desk and the bus
 // are fields rather than globals so a test builds an operator around a
 // desk it can inspect.
@@ -81,6 +92,11 @@ type operator struct {
 	// pass find a topic whose Keymap no longer exists and clear its
 	// retained value. Only the pass goroutine touches it.
 	keymapPublished map[string]string
+
+	// playReclaim stamps when the operator first saw a deleted Play whose
+	// retained topics still stand, so it clears them once the grace has
+	// passed. Only the pass goroutine touches it.
+	playReclaim map[string]time.Time
 }
 
 func operate() {
@@ -123,6 +139,7 @@ func operate() {
 		focus:           focusDesk,
 		positionWrites:  map[string]time.Time{},
 		keymapPublished: map[string]string{},
+		playReclaim:     map[string]time.Time{},
 	}
 
 	// The bus handler is the only path the control plane takes a report or
@@ -228,6 +245,7 @@ func (o *operator) pass() {
 			delete(o.positionWrites, key)
 		}
 	}
+	o.reclaimPlays(live)
 	players, err := ListPlayers(o.client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing players: %v\n", err)
@@ -237,6 +255,35 @@ func (o *operator) pass() {
 	}
 	o.reconcileRemotes()
 	o.reconcileKeymaps()
+}
+
+// reclaimPlays clears the retained topics a deleted Play leaves on the
+// bus. The desk reports the runs it has seen a message for that no longer
+// exist; the operator holds each for playReclaimGrace, so a subscriber
+// that reads just after the delete still sees the final state, then it
+// clears the status and the availability with an empty retained publish
+// and forgets the run. A run that reappears before the grace passes, a
+// Play recreated under the same name, drops its timer and is not cleared.
+func (o *operator) reclaimPlays(live map[string]bool) {
+	now := time.Now()
+	for _, key := range o.reports.stale(live) {
+		if _, tracked := o.playReclaim[key]; !tracked {
+			o.playReclaim[key] = now
+		}
+		if now.Sub(o.playReclaim[key]) < playReclaimGrace {
+			continue
+		}
+		namespace, name := splitRunKey(key)
+		o.bus.Publish(playStatusTopic(o.topicBase, namespace, name), nil, true)
+		o.bus.Publish(playAvailabilityTopic(o.topicBase, namespace, name), nil, true)
+		o.reports.forget(key)
+		delete(o.playReclaim, key)
+	}
+	for key := range o.playReclaim {
+		if live[key] {
+			delete(o.playReclaim, key)
+		}
+	}
 }
 
 // reconcileKeymaps compiles every Keymap and publishes it to its keymap

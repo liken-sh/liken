@@ -159,3 +159,23 @@ func TestTheDeskForgetsARunThatIsGoneAndKeepsTheOneThatIsNot(t *testing.T) {
 		t.Errorf("the gone run's report = %+v, want none", *stored)
 	}
 }
+
+// The desk remembers every run it has taken a message for, online or
+// offline, so the operator can find a deleted Play's retained topics.
+// stale returns the seen runs the live set no longer holds, and forget
+// drops one for good.
+func TestTheDeskReportsSeenRunsAsStaleUntilForgotten(t *testing.T) {
+	desk, _ := reportDesk(t)
+	desk.fold("house", "movie", runningReport())
+	desk.availability("attic", "radio", false)
+
+	stale := desk.stale(map[string]bool{runKey("house", "movie"): true})
+	if len(stale) != 1 || stale[0] != runKey("attic", "radio") {
+		t.Fatalf("stale = %v, want [attic/radio]", stale)
+	}
+
+	desk.forget(runKey("attic", "radio"))
+	if got := desk.stale(map[string]bool{}); len(got) != 1 || got[0] != runKey("house", "movie") {
+		t.Errorf("after forget, stale = %v, want [house/movie]", got)
+	}
+}
