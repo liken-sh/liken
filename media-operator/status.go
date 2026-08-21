@@ -167,6 +167,23 @@ func writePlayStatus(c *Client, play *Play, desired PlayStatus) error {
 	return err
 }
 
+// onlyPositionChanged reports whether the desired status differs from the
+// current one in nothing but the position and the duration. The operator
+// throttles a change that is only a position advance, because the bridge
+// publishes a live position to the bus every second, and each write to
+// the resource wakes the operator's own plays watch, so an unthrottled
+// position write would spin the loop against the API server.
+func onlyPositionChanged(current, desired PlayStatus) bool {
+	same, err := sameStatus(current, desired)
+	if err != nil || same {
+		return false
+	}
+	current.Position, desired.Position = "", ""
+	current.Duration, desired.Duration = "", ""
+	rest, err := sameStatus(current, desired)
+	return err == nil && rest
+}
+
 // sameStatus compares the marshaled form, because that is what the
 // API server stores and what a field's omitempty decides: two
 // statuses that marshal alike write alike.

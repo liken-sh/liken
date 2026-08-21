@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The fake cluster: one map per kind, and the list of requests a pass
@@ -120,11 +121,12 @@ func sortedNames[T any](objects map[string]*T) []string {
 func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *operator {
 	t.Helper()
 	return &operator{
-		client:     testAPIClient(t, cluster.handler(t)),
-		image:      "registry.example/player:test",
-		busAddress: "bus.media.svc:1883",
-		topicBase:  defaultTopicBase,
-		reports:    newReports(wake),
+		client:         testAPIClient(t, cluster.handler(t)),
+		image:          "registry.example/player:test",
+		busAddress:     "bus.media.svc:1883",
+		topicBase:      defaultTopicBase,
+		reports:        newReports(wake),
+		positionWrites: map[string]time.Time{},
 	}
 }
 
@@ -345,6 +347,70 @@ func TestAPodThatSucceededFinishesThePlay(t *testing.T) {
 
 	if got := cluster.plays["movie"].Status.Phase; got != phaseFinished {
 		t.Errorf("phase = %q, want Finished", got)
+	}
+}
+
+// The bridge publishes a live position to the bus every second, but the
+// operator writes a bare position advance to the resource no more than
+// once per positionWriteInterval, so a status write does not wake the
+// operator's own watch a second later and spin the loop.
+func TestABarePositionAdvanceIsThrottled(t *testing.T) {
+	cluster := newFakeCluster()
+	running := PlayStatus{
+		Phase: phaseRunning, Activity: activityPlaying, Pod: "movie-playback",
+		Item: 1, Position: "0:01:00", Duration: "1:30:00",
+	}
+	play := housePlay("https://nas/film.mkv")
+	play.Status = running
+	cluster.plays["movie"] = play
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	key := runKey("house", "movie")
+
+	// A position write just happened, so the next second's advance waits.
+	media.positionWrites[key] = time.Now()
+	advanced := running
+	advanced.Position = "0:01:01"
+	if err := media.writePlay(play, advanced); err != nil {
+		t.Fatal(err)
+	}
+	if got := cluster.plays["movie"].Status.Position; got != "0:01:00" {
+		t.Errorf("a bare advance wrote through the throttle: %q", got)
+	}
+
+	// Past the interval, the advance writes.
+	media.positionWrites[key] = time.Now().Add(-2 * positionWriteInterval)
+	advanced.Position = "0:01:12"
+	if err := media.writePlay(play, advanced); err != nil {
+		t.Fatal(err)
+	}
+	if got := cluster.plays["movie"].Status.Position; got != "0:01:12" {
+		t.Errorf("position = %q, want the advance to write past the interval", got)
+	}
+}
+
+// A pause is what a person waits to see, so it writes at once even when a
+// position write just happened.
+func TestAPauseWritesThroughTheThrottle(t *testing.T) {
+	cluster := newFakeCluster()
+	running := PlayStatus{
+		Phase: phaseRunning, Activity: activityPlaying, Pod: "movie-playback",
+		Item: 1, Position: "0:01:00", Duration: "1:30:00",
+	}
+	play := housePlay("https://nas/film.mkv")
+	play.Status = running
+	cluster.plays["movie"] = play
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	media.positionWrites[runKey("house", "movie")] = time.Now()
+
+	paused := running
+	paused.Paused = true
+	paused.Activity = activityPaused
+	paused.Position = "0:01:01"
+	if err := media.writePlay(play, paused); err != nil {
+		t.Fatal(err)
+	}
+	if !cluster.plays["movie"].Status.Paused {
+		t.Error("a pause did not write through the throttle")
 	}
 }
 

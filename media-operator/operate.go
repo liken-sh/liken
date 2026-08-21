@@ -36,6 +36,15 @@ const (
 // changed phase, and a Player that appeared after its Play.
 const backstopInterval = 10 * time.Second
 
+// positionWriteInterval bounds how often a bare position advance reaches
+// a Play's status. The bridge publishes a live position to the bus every
+// second, but a status write wakes the operator's own plays watch, so
+// writing the position every second would spin the loop and the API
+// server. A pause, an item change, or a phase change writes at once; a
+// position that advanced alone waits this interval, and the bus carries
+// the live value in between.
+const positionWriteInterval = 10 * time.Second
+
 // operator holds what every pass needs. The report desk and the bus
 // are fields rather than globals so a test builds an operator around a
 // desk it can inspect.
@@ -46,6 +55,11 @@ type operator struct {
 	topicBase  string
 	bus        *Bus
 	reports    *reports
+
+	// positionWrites stamps when each run last wrote its position, so a
+	// bare position advance writes no more than once per
+	// positionWriteInterval. Only the pass goroutine touches it.
+	positionWrites map[string]time.Time
 }
 
 func operate() {
@@ -79,11 +93,12 @@ func operate() {
 	wake := make(chan struct{}, 1)
 	desk := newReports(wake)
 	media := &operator{
-		client:     client,
-		image:      image,
-		busAddress: busAddress,
-		topicBase:  topicBase,
-		reports:    desk,
+		client:         client,
+		image:          image,
+		busAddress:     busAddress,
+		topicBase:      topicBase,
+		reports:        desk,
+		positionWrites: map[string]time.Time{},
 	}
 
 	// The bus handler is the only path a report takes to the control
@@ -164,6 +179,11 @@ func (o *operator) pass() {
 		}
 	}
 	o.reports.retain(live)
+	for key := range o.positionWrites {
+		if !live[key] {
+			delete(o.positionWrites, key)
+		}
+	}
 	o.reconcilePlayers(list.Items)
 	o.reconcileRemotes()
 }
@@ -264,8 +284,26 @@ func (o *operator) reconcile(play *Play) error {
 	if err != nil {
 		return err
 	}
-	return writePlayStatus(o.client, play,
+	return o.writePlay(play,
 		derivePlayStatus(play, player, nil, pod, o.reports.latestFor(namespace, name)))
+}
+
+// writePlay writes a Play's status through the position throttle. A
+// change in phase, pause, item, or message writes at once. A change that
+// is only a position advance waits positionWriteInterval, so the resource
+// keeps a coarse clock while the bus carries the live one, and a position
+// write does not wake the operator's own watch a second later.
+func (o *operator) writePlay(play *Play, desired PlayStatus) error {
+	key := runKey(play.Metadata.Namespace, play.Metadata.Name)
+	if onlyPositionChanged(play.Status, desired) &&
+		time.Since(o.positionWrites[key]) < positionWriteInterval {
+		return nil
+	}
+	if err := writePlayStatus(o.client, play, desired); err != nil {
+		return err
+	}
+	o.positionWrites[key] = time.Now()
+	return nil
 }
 
 // ensureClaim creates the claim once and never updates it. A Play's
