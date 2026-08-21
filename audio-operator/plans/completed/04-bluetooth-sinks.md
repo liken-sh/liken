@@ -120,10 +120,10 @@ taints beside the card's sinks. Item 5 measured the coupling and
 found a gap. The operator container notices the closed bus and
 restarts within 3 seconds, but WirePlumber notices nothing: it keeps
 running, logs nothing, and never re-registers the endpoints, so
-A2DP stays dead while every pod reports Ready. The repair today is
-a delete of the audio pod.
-[The open problem](open-problems/a2dp-does-not-survive-a-bluetooth-pod-restart.md)
-records what a fix must decide.
+A2DP stays dead while every pod reports Ready. The repair that day
+was a delete of the audio pod.
+[Plan 06](06-restarting-wireplumber-when-the-bus-dies.md) answers it
+with a liveness probe that restarts the WirePlumber container alone.
 
 The same drill day caught the role inversion described above and a
 second defect in the Bluetooth operator: a fresh `bluetoothd` starts

@@ -4,8 +4,8 @@ A liveness probe on the WirePlumber container that reads whether the
 adapter still advertises a media profile, so the kubelet restarts the
 one container whose registration is gone.
 
-This answers the open problem
-[A2DP does not survive a Bluetooth pod restart](open-problems/a2dp-does-not-survive-a-bluetooth-pod-restart.md).
+This answers the open problem "A2DP does not survive a Bluetooth pod
+restart", which [plan 04](04-bluetooth-sinks.md) opened.
 
 ## The problem
 
@@ -137,18 +137,27 @@ instead of repeating that.
 
 ## The drill
 
-Run on `liken-1`.
+Run on `liken-1` on 2026-08-21, in release `2026.08.21-002`, against
+the `studio-pa` speaker. Nobody acted after the first step.
 
-1. Read `Adapter1.UUIDs` while a speaker plays. The media profile is
-   there.
-2. Delete the Bluetooth operator's pod. The audio operator's own
-   container restarts, WirePlumber does not, and the media profile
-   leaves `Adapter1.UUIDs`.
-3. Wait. The liveness probe fails three times, the kubelet restarts
-   the WirePlumber container alone, and `kubectl describe` names the
-   state the probe found.
-4. Read `Adapter1.UUIDs` again. The media profile is back, the
-   speaker reconnects, and the `audio.liken.sh` slice publishes it
-   with no taint.
-5. Read the PipeWire container's restart count. It is unchanged, and
-   the card's ALSA sinks never left the graph.
+| time | WirePlumber restarts | `110a` on the adapter | the speaker |
+| --- | --- | --- | --- |
+| 18:11:43 | 0 | present | connected, no taint |
+| 18:11:44 | delete the Bluetooth operator's pod | | |
+| 18:11:53 | 0 | absent | disconnected |
+| 18:12:28 | 1 | present | disconnected |
+| 18:13:12 | 1 | present | connected, no taint |
+
+The kubelet restarted the WirePlumber container 35 seconds after the
+registration was lost, and the speaker was playable again 89 seconds
+after the pod was deleted. PipeWire's restart count stayed 0 through
+all of it, and the card's five ALSA sinks never left the graph.
+
+The event the kubelet recorded states the whole finding:
+
+    Liveness probe failed: the adapter advertises none of the 2 media
+    profile(s) bluetoothd hosts; WirePlumber's endpoints are gone and
+    only a restart of this container registers them again
+
+Before this release the same failure was permanent, and the repair
+was a person deleting the audio pod.

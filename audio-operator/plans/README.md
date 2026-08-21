@@ -48,12 +48,15 @@ is built the way it is, and what it still owes an answer to.
   2026.08.19-007. Each connected speaker publishes its codecs, a
   claim states one through opaque config resolved on the
   allocation, and every delivered sink arrives at unity volume.
-* [06, Restarting WirePlumber when the bus dies](06-restarting-wireplumber-when-the-bus-dies.md).
-  A liveness probe on the WirePlumber container reads whether the
-  adapter still advertises a media profile that bluetoothd hosts, so
-  the kubelet restarts the one container whose registration is gone.
-  Answers the open problem "A2DP does not survive a Bluetooth pod
-  restart".
+* [06, Restarting WirePlumber when the bus dies](completed/06-restarting-wireplumber-when-the-bus-dies.md).
+  Built, and drilled on liken-1 on 2026-08-21, in release
+  2026.08.21-002. A liveness probe on the WirePlumber container reads
+  whether the adapter still advertises a media profile that
+  bluetoothd hosts, so the kubelet restarts the one container whose
+  registration is gone. The drill measured 35 seconds from the loss
+  to the restart, with PipeWire and the card's sinks left running.
+  Answers and removes the open problem "A2DP does not survive a
+  Bluetooth pod restart".
 
 ## Open problems
 
