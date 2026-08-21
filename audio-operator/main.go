@@ -248,7 +248,7 @@ func run(ctx context.Context, operator *reconciler, settled <-chan struct{}) err
 // reconciler holds what every pass needs, and the one piece of state
 // that outlives a pass: how many graph reads have failed in a row.
 //
-// The graph read is a field rather than a call to readSinks, so a
+// The graph read is a field rather than a call to readGraph, so a
 // test drives the failure paths without a PipeWire to break.
 type reconciler struct {
 	client   *Client

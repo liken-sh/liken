@@ -341,6 +341,15 @@ func addMonitorAttributes(attributes map[string]DeviceAttribute, block eld) {
 	if block.Speakers != "" {
 		attributes["speakers"] = AttrString(attributeString(block.Speakers))
 	}
+	// The ELD version is the format version of the block. parseELD
+	// rejects any value it cannot read, so a published block always
+	// carries one of the versions this operator reads.
+	attributes["eldVersion"] = AttrInt(int64(block.Version))
+	// The Port_ID the graphics driver stamps into the ELD block ties
+	// this audio sink to the display connector it plays into.
+	if block.PortID != 0 {
+		attributes["portID"] = AttrInt(int64(block.PortID))
+	}
 	if id := block.monitorID(); id != "" {
 		attributes[PairingAttribute] = AttrString(attributeString(id))
 	}

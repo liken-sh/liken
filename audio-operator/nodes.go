@@ -71,7 +71,7 @@ const configPrefix = "context.objects = "
 // operator declared. A node that WirePlumber's ALSA monitor built has
 // alsa.card and alsa.device, which come from the udev device
 // this operator has none of, so it publishes the same two numbers
-// under its own names and readSinks reads those first.
+// under its own names and parseGraph reads those first.
 const (
 	nodeCardProperty = "liken.audio.card"
 	nodePCMProperty  = "liken.audio.pcm"
@@ -197,7 +197,7 @@ func sinkObject(card, pcm int) staticNode {
 			"node.description": fmt.Sprintf("liken audio output, ALSA card %d device %d",
 				card, pcm),
 			"media.class": "Audio/Sink",
-			// The two numbers readSinks maps a node back to. The adapter
+			// The two numbers parseGraph maps a node back to. The adapter
 			// module hands the whole args dictionary to the node it
 			// creates, and a node's info block holds its whole property
 			// list, so a property PipeWire does not recognize still

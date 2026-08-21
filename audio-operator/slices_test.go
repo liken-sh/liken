@@ -108,6 +108,12 @@ func TestSliceDevicesPublishesEachOutput(t *testing.T) {
 	if got := intAttribute(t, hdmi, "pcm"); got != 3 {
 		t.Errorf("pcm = %d, want 3", got)
 	}
+	if got := intAttribute(t, hdmi, "eldVersion"); got != 2 {
+		t.Errorf("eldVersion = %d, want 2", got)
+	}
+	if got := intAttribute(t, hdmi, "portID"); got != 0x800 {
+		t.Errorf("portID = %#x, want 0x800", got)
+	}
 	if len(hdmi.Taints) != 0 {
 		t.Errorf("the HDMI output has taints: %+v", hdmi.Taints)
 	}
