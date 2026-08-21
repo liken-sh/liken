@@ -1,6 +1,7 @@
 # The player owns its remotes
 
-Plan 04. It moves the binding between a controller and a unit from the
+Plan 04. Built, and drilled on `liken-1` on 2026-08-21, in release
+2026.08.21-005. It moves the binding between a controller and a unit from the
 `Remote` onto the `Player`, and it makes a `Player` edit reshape a
 running `Play` without losing the film's place. When this plan lands,
 a `Player` is the whole description of a unit of equipment, controllers

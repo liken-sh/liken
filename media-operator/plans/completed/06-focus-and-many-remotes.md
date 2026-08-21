@@ -1,6 +1,7 @@
 # Focus and many remotes
 
-Plan 06. It lets a `Player` name several controllers and a `Remote`
+Plan 06. Built, and drilled on `liken-1` on 2026-08-21, in release
+2026.08.21-005. It lets a `Player` name several controllers and a `Remote`
 drive several units, gives each unit a per-controller keymap override,
 and arbitrates the one press that would otherwise reach two plays.
 When this plan lands, one controller can drive the theater and the

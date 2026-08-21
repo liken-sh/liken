@@ -1,6 +1,7 @@
 # Keymaps onto the bus
 
-Plan 05. It gives every `Play` an abstract command topic, splits the
+Plan 05. Built, and drilled on `liken-1` on 2026-08-21, in release
+2026.08.21-005. It gives every `Play` an abstract command topic, splits the
 playback pod's one bridge into a command sidecar and a translator
 sidecar per controller, and moves the keymap off an environment
 variable and onto the bus as retained state. When this plan lands, any

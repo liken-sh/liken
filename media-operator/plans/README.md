@@ -22,27 +22,11 @@ is built the way it is, and what it still owes an answer to.
 
 ## Planned
 
-These plans are designed. Each keeps its number and moves to
-[`completed/`](completed/) when it is built and drilled. Plans 04
-through 06 form one chain that reworks the `Remote`, in order. Plan 07
-draws the display that the reworked `Remote` navigates. Each is
-provable on hardware alone.
+This plan is designed. It keeps its number and moves to
+[`completed/`](completed/) when it is built and drilled. It draws the
+display that the reworked `Remote` from plans 04 through 06 navigates,
+and it is provable on hardware alone.
 
-* [04, The player owns its remotes](04-the-player-owns-its-remotes.md).
-  The binding moves from the `Remote` onto the `Player`, so a `Player`
-  is the whole description of a unit, controllers included. A `Player`
-  edit recreates a running `Play`'s pod at the film's position. Every
-  reference stays same-namespace, and the namespace is the room.
-* [05, Keymaps onto the bus](05-keymaps-onto-the-bus.md). Each `Play`
-  gains a command topic that any program may publish, the playback
-  pod's bridge splits into a command sidecar and a translator sidecar
-  per controller, and the keymap moves off an environment variable onto
-  the bus as retained state. The `Keymap` becomes cluster-scoped.
-* [06, Focus and many remotes](06-focus-and-many-remotes.md). A
-  `Player` names several controllers and a `Remote` drives several
-  units. A per-unit keymap override, a retained focus mark the operator
-  writes, and a source-button cycle arbitrate the one press that would
-  otherwise reach two plays.
 * [07, The player draws its own display](07-the-player-draws-its-own-display.md).
   `liken` writes its own on-screen display as one `mpv` script, drawn
   through `libass` and `overlay-add`. A `Play` gains a `presentation`
@@ -74,6 +58,27 @@ provable on hardware alone.
   supervisor, and closed the plain-HTTP open problem. A film played,
   a DualSense paused and scrubbed it over the bus, and the position
   kept advancing across an operator restart.
+* [04, The player owns its remotes](completed/04-the-player-owns-its-remotes.md).
+  Built, and drilled on `liken-1` on 2026-08-21 in release
+  2026.08.21-005. The binding moved from the `Remote` onto the
+  `Player`, so a `Player` is the whole description of a unit,
+  controllers included, and a `Player` edit recreates a running
+  `Play`'s pod at the film's position. Every reference stays
+  same-namespace.
+* [05, Keymaps onto the bus](completed/05-keymaps-onto-the-bus.md).
+  Built, and drilled on `liken-1` on 2026-08-21 in release
+  2026.08.21-005. The playback pod's one bridge split into a command
+  sidecar and a translator sidecar per controller, and the keymap moved
+  onto the bus as retained state, so a `Keymap` edit reaches a running
+  film with no restart. The `Keymap` went cluster-scoped. A film paused
+  from a `play-pause` published by hand, with no controller in the loop.
+* [06, Focus and many remotes](completed/06-focus-and-many-remotes.md).
+  Built, and drilled on `liken-1` on 2026-08-21 in release
+  2026.08.21-005. One `Player` names several controllers and one
+  `Remote` drives several units, and a retained focus mark decides which
+  film a press reaches. Two films ran on two monitors from one
+  DualSense: the cross paused only the film that held focus, and the
+  source button cycled the focus to the other.
 
 ## Open problems
 
