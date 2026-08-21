@@ -20,6 +20,29 @@ is built the way it is, and what it still owes an answer to.
   the playback pod, the input bus, and the carriage layer that
   comes later.
 
+## Planned
+
+These plans are designed and not yet built. Each keeps its number and
+moves to [`completed/`](completed/) when it is built and drilled. The
+three form one chain that reworks the `Remote`, in order, and each is
+provable on hardware alone.
+
+* [04, The player owns its remotes](04-the-player-owns-its-remotes.md).
+  The binding moves from the `Remote` onto the `Player`, so a `Player`
+  is the whole description of a unit, controllers included. A `Player`
+  edit recreates a running `Play`'s pod at the film's position. Every
+  reference stays same-namespace, and the namespace is the room.
+* [05, Keymaps onto the bus](05-keymaps-onto-the-bus.md). Each `Play`
+  gains a command topic that any program may publish, the playback
+  pod's bridge splits into a command sidecar and a translator sidecar
+  per controller, and the keymap moves off an environment variable onto
+  the bus as retained state. The `Keymap` becomes cluster-scoped.
+* [06, Focus and many remotes](06-focus-and-many-remotes.md). A
+  `Player` names several controllers and a `Remote` drives several
+  units. A per-unit keymap override, a retained focus mark the operator
+  writes, and a source-button cycle arbitrate the one press that would
+  otherwise reach two plays.
+
 ## Completed
 
 * [01, A play becomes a pod](completed/01-a-play-becomes-a-pod.md). Built, and
@@ -77,3 +100,22 @@ has decided yet what work they become.
   codes. Nothing outside can command a player in media terms over the
   bus. A cousin of the focus question: both reach the same arbitration
   when more than one thing controls a player.
+* [The bus authorizes nothing](open-problems/the-bus-authorizes-nothing.md).
+  Any client that reaches the broker can publish or subscribe to any
+  topic, so the trust boundary is the whole cluster. Acceptable for one
+  home the owner controls, and it owes broker ACLs once a cluster runs
+  a workload the owner does not trust.
+
+## Rejected
+
+[`rejected/`](rejected/) holds the designs the project considered and
+chose not to build, with the reason. A rejected document is the record
+that saves the next person from proposing the same thing again.
+
+* [A pre-flight co-location condition on a Player](rejected/pre-flight-co-location-condition.md).
+  The design asked for a `Player` condition that reports before a
+  `Play` whether one machine can hold every claimed device. The
+  scheduler already reports it one step later, through the `Play` that
+  parks `Pending`, and answering early would make the operator
+  re-derive an allocation the scheduler owns. Not worth the watch, the
+  permission, and the drift.
