@@ -30,6 +30,13 @@ is built the way it is, and what it still owes an answer to.
   sidecar in the playback pod: the smallest proof of input, taken
   knowingly ahead of the bus. A DualSense paused a film and
   `status.paused` followed within one report.
+* [03, The bus carries input and reports](03-the-bus-carries-input-and-reports.md).
+  Designed, not built. Mosquitto as the message bus, the remote
+  reader moved to its own standing pod, and the playback pod rebuilt
+  as `mpv` with one bus-bridge sidecar and no supervisor. The report
+  moves off plain HTTP and onto the bus. It retires plan 02's sidecar
+  and the plan-01 supervisor, and closes the plain-HTTP open problem
+  when it drills.
 
 ## Open problems
 
@@ -47,4 +54,21 @@ has decided yet what work they become.
   The supervisor POSTs its status to an HTTP endpoint the operator
   serves, proven by a token held in memory. The trust boundary that
   keeps the pod credential-free should stay; the transport should
-  move onto the input plane's message bus when that plan lands.
+  move onto the input plane's message bus when that plan lands. Plan
+  03 closes this when it drills.
+* [The broker is always in-cluster](open-problems/the-broker-is-always-in-cluster.md).
+  Plan 03 stands up its own MQTT broker. A home that already runs one,
+  for Home Assistant or zigbee2mqtt, should be able to point the
+  operator at it instead.
+* [One broker for many clusters](open-problems/one-broker-for-many-clusters.md).
+  The topic base is one string, `liken/media`. Two clusters sharing
+  one broker collide until the base carries a cluster's name.
+* [The player is not a Home Assistant entity](open-problems/the-player-is-not-a-home-assistant-entity.md).
+  MQTT was chosen for Home Assistant, but nothing publishes the
+  discovery configs that make a `Player` a `media_player`. It also
+  gives each `Player` its own retained status.
+* [Two operators can run at once](open-problems/two-operators-can-run-at-once.md).
+  The operator is a cluster singleton, but `replicas: 1` does not
+  enforce one instance across a rollout or a partition. A `Lease` in
+  `coordination.k8s.io` makes it a true singleton, and opens a
+  quasi-HA path.

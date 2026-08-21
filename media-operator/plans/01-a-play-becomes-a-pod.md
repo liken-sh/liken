@@ -13,7 +13,7 @@ design](00-design.md) names four resources, and the smallest set that
 proves the idea is two: a `Player` that names the equipment, and a
 `Play` that runs media on it. Everything later, remotes, keymaps, the
 bus, carriage, drives or extends the pod this plan creates. So the
-first bite is the pod.
+pod comes first.
 
 ## The resources
 
