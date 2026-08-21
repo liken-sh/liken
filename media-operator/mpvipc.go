@@ -28,13 +28,10 @@ import (
 // once.
 var mpvSocketPath = ipcSocketPath
 
-// mpv creates the socket a moment after it starts, so the first dial
-// nearly always fails. This budget is how long the supervisor waits
-// before it decides mpv will never serve one.
-var (
-	mpvDialAttempts = 10
-	mpvDialDelay    = time.Second
-)
+// mpv creates the socket a moment after it starts, so a dial retries.
+// mpvDialDelay is the pause between tries, a variable so a test drives
+// the retry in milliseconds.
+var mpvDialDelay = time.Second
 
 // observedProperties are the four properties the Play's status is
 // made of. The supervisor asks for no others, because every event
@@ -78,24 +75,24 @@ func (c propertyChange) known() bool {
 	return string(c.Data) != "null" && len(c.Data) > 0
 }
 
-// dialMPV retries through the ordinary case, an mpv still starting,
-// and returns the last error when the budget runs out, because that
-// error names what actually kept the socket from answering.
+// dialMPV retries until it connects or the context ends. The bridge is
+// a native sidecar that the kubelet starts before mpv, so the socket can
+// be minutes away, and the wait has no deadline of its own: nothing but
+// mpv appearing or the kubelet's SIGTERM ends it. Waiting is the whole
+// job when mpv is not up yet, so a wall-clock limit would only quit early
+// on a slow image pull or a display claim that is not ready.
 func dialMPV(ctx context.Context, path string) (net.Conn, error) {
-	var lastError error
-	for range mpvDialAttempts {
+	for ctx.Err() == nil {
 		connection, err := net.Dial("unix", path)
 		if err == nil {
 			return connection, nil
 		}
-		lastError = err
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
 		case <-time.After(mpvDialDelay):
 		}
 	}
-	return nil, fmt.Errorf("mpv served no socket at %s after %d attempts: %w", path, mpvDialAttempts, lastError)
+	return nil, ctx.Err()
 }
 
 // observeProperties gives each property its own observe id because

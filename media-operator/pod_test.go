@@ -1,8 +1,8 @@
 package main
 
-// These tests cover what a Play becomes at run time: one pod that
-// holds the claim's every role, plays the resolved list in order,
-// and carries the four values that let it report back.
+// These tests cover what a Play becomes at run time: one pod that runs
+// mpv on the resolved list, holds the claim's every role, and carries
+// one bridge sidecar that speaks to the bus.
 
 import (
 	"encoding/json"
@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	testImage       = "ghcr.io/liken-sh/media-operator:test"
-	testToken       = "s3cret-token"
-	testOperatorURL = "http://media-operator.media.svc:8080"
+	testImage      = "ghcr.io/liken-sh/media-operator:test"
+	testBusAddress = "bus.media.svc:1883"
+	testTopicBase  = "liken/media"
 )
 
 // One playlist that costs a volume, so the pod under test carries a
@@ -33,22 +33,21 @@ func testResolution(t *testing.T) resolution {
 func testPod(t *testing.T) *Pod {
 	t.Helper()
 	play := testPlay()
-	claim := buildClaim(play, testPlayer(), nil)
-	return buildPod(play, claim, testResolution(t), testImage, testToken, testOperatorURL, nil)
+	claim := buildClaim(play, testPlayer())
+	return buildPod(play, claim, testResolution(t), testImage, testBusAddress, testTopicBase, nil)
 }
 
 // The same pod, with two controllers bound to the player.
 func testPodWithRemotes(t *testing.T) *Pod {
 	t.Helper()
 	play := testPlay()
-	remotes := testBoundRemotes()
-	claim := buildClaim(play, testPlayer(), remotes)
-	return buildPod(play, claim, testResolution(t), testImage, testToken, testOperatorURL, remotes)
+	claim := buildClaim(play, testPlayer())
+	return buildPod(play, claim, testResolution(t), testImage, testBusAddress, testTopicBase, testBoundRemotes())
 }
 
-// restartPolicy is Never, because a finished film is not a failure
-// to restart, and the Play owns the pod so deleting the Play takes
-// it away.
+// restartPolicy is Never, because a finished film is not a failure to
+// restart, and the Play owns the pod so deleting the Play takes it
+// away.
 func TestBuildPodNamesThePodForThePlayThatOwnsIt(t *testing.T) {
 	pod := testPod(t)
 
@@ -82,8 +81,8 @@ func TestBuildPodNamesThePodForThePlayThatOwnsIt(t *testing.T) {
 	}
 }
 
-// The four variables are the whole of what the pod knows about the
-// control plane: who it is, what proves it, and where to report.
+// mpv is the pod's own process, so the player container carries only
+// the resolved list and, with no declared start, no environment.
 func TestBuildPodRunsThePlayerOnTheResolvedList(t *testing.T) {
 	pod := testPod(t)
 
@@ -101,36 +100,29 @@ func TestBuildPodRunsThePlayerOnTheResolvedList(t *testing.T) {
 	if !reflect.DeepEqual(container.Args, args) {
 		t.Errorf("args = %v, want %v", container.Args, args)
 	}
-	env := []EnvVar{
-		{Name: playNamespaceVariable, Value: "house"},
-		{Name: playNameVariable, Value: "movie"},
-		{Name: playTokenVariable, Value: testToken},
-		{Name: operatorURLVariable, Value: testOperatorURL},
-	}
-	if !reflect.DeepEqual(container.Env, env) {
-		t.Errorf("env = %+v, want %+v", container.Env, env)
+	if len(container.Env) != 0 {
+		t.Errorf("env = %+v, want none", container.Env)
 	}
 }
 
-// A declared start rides into the pod as one more variable, and an
-// ordinary run's pod carries nothing extra.
+// A declared start reaches the player container as one variable, and an
+// ordinary run's player container carries nothing extra.
 func TestBuildPodCarriesTheDeclaredStart(t *testing.T) {
 	play := testPlay()
 	play.Spec.Start = "0:10:00"
-	claim := buildClaim(play, testPlayer(), nil)
-	pod := buildPod(play, claim, testResolution(t), testImage, testToken, testOperatorURL, nil)
+	claim := buildClaim(play, testPlayer())
+	pod := buildPod(play, claim, testResolution(t), testImage, testBusAddress, testTopicBase, nil)
 
 	env := pod.Spec.Containers[0].Env
-	last := env[len(env)-1]
-	want := EnvVar{Name: playStartVariable, Value: "0:10:00"}
-	if last != want {
-		t.Errorf("last env = %+v, want %+v", last, want)
+	want := []EnvVar{{Name: playStartVariable, Value: "0:10:00"}}
+	if !reflect.DeepEqual(env, want) {
+		t.Errorf("env = %+v, want %+v", env, want)
 	}
 }
 
-// The pod names the claim once and the container repeats that name
-// for each role, which is what keeps the roles separate inside one
-// claim.
+// The pod names the claim once and the player container repeats that
+// name for each role, because the playback claim holds the player's
+// roles alone.
 func TestBuildPodHoldsEveryRequestTheClaimAsksFor(t *testing.T) {
 	pod := testPod(t)
 
@@ -155,7 +147,7 @@ func TestBuildPodHoldsEveryRequestTheClaimAsksFor(t *testing.T) {
 func TestBuildPodCarriesTheResolvedVolumesAndMounts(t *testing.T) {
 	resolved := testResolution(t)
 	play := testPlay()
-	pod := buildPod(play, buildClaim(play, testPlayer(), nil), resolved, testImage, testToken, testOperatorURL, nil)
+	pod := buildPod(play, buildClaim(play, testPlayer()), resolved, testImage, testBusAddress, testTopicBase, nil)
 
 	volumes := append(append([]Volume{}, resolved.Volumes...),
 		Volume{Name: "ipc", EmptyDir: &EmptyDirVolumeSource{}})
@@ -174,9 +166,10 @@ func TestBuildPodCarriesTheResolvedVolumesAndMounts(t *testing.T) {
 	}
 }
 
-// A pod with no remotes at all still carries the volume, because the
-// supervisor serves mpv's socket at one path either way.
-func TestBuildPodAlwaysCarriesTheIPCVolume(t *testing.T) {
+// A pod with no remotes still carries the IPC volume, because mpv
+// serves its socket at one path either way, and it still carries the
+// bridge sidecar, its one bus client.
+func TestBuildPodAlwaysCarriesTheIPCVolumeAndTheBridge(t *testing.T) {
 	pod := testPod(t)
 
 	last := pod.Spec.Volumes[len(pod.Spec.Volumes)-1]
@@ -191,101 +184,64 @@ func TestBuildPodAlwaysCarriesTheIPCVolume(t *testing.T) {
 	if string(written) != `{"name":"ipc","emptyDir":{}}` {
 		t.Errorf("volume = %s", written)
 	}
-	if len(pod.Spec.InitContainers) != 0 {
-		t.Errorf("initContainers = %+v, want none", pod.Spec.InitContainers)
+	if len(pod.Spec.InitContainers) != 1 || pod.Spec.InitContainers[0].Name != "bridge" {
+		t.Errorf("initContainers = %+v, want one bridge", pod.Spec.InitContainers)
 	}
 }
 
-// One sidecar per remote: the same image in its remote mode, holding
-// its own controller and its own compiled table.
-func TestBuildPodRunsOneSidecarPerBoundRemote(t *testing.T) {
+// The bridge sidecar is the player image in its bridge mode, holding no
+// device claim, carrying the play's identity, the bus, the base, and
+// the set of bound remotes.
+func TestBuildPodRunsOneBridgeSidecar(t *testing.T) {
 	pod := testPodWithRemotes(t)
 
-	if len(pod.Spec.InitContainers) != 2 {
-		t.Fatalf("initContainers = %+v, want two", pod.Spec.InitContainers)
+	if len(pod.Spec.InitContainers) != 1 {
+		t.Fatalf("initContainers = %+v, want one bridge", pod.Spec.InitContainers)
+	}
+	bridge := pod.Spec.InitContainers[0]
+
+	remotes, err := json.Marshal([]remoteBindings{
+		{EventsTopic: "liken/media/remotes/house/armchair/events", Bindings: testBoundRemotes()[0].Bindings},
+		{EventsTopic: "liken/media/remotes/house/sofa/events", Bindings: testBoundRemotes()[1].Bindings},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	want := Container{
-		Name:    "remote-armchair",
+		Name:    "bridge",
 		Image:   testImage,
-		Command: []string{"/media-operator", "remote"},
-		Env: []EnvVar{{
-			Name:  "MEDIA_KEYMAP",
-			Value: `[{"type":1,"code":304,"value":1,"action":"pause"}]`,
-		}},
-		Resources: ResourceRequirements{Claims: []ContainerClaim{
-			{Name: "devices", Request: "remote-armchair"},
-		}},
+		Command: []string{"/media-operator", "bridge"},
+		Env: []EnvVar{
+			{Name: playNamespaceVariable, Value: "house"},
+			{Name: playNameVariable, Value: "movie"},
+			{Name: busAddressVariable, Value: testBusAddress},
+			{Name: topicBaseVariable, Value: testTopicBase},
+			{Name: remotesVariable, Value: string(remotes)},
+		},
 		VolumeMounts:  []VolumeMount{{Name: "ipc", MountPath: "/ipc"}},
 		RestartPolicy: "Always",
 	}
-	if !reflect.DeepEqual(pod.Spec.InitContainers[0], want) {
-		t.Errorf("sidecar = %+v, want %+v", pod.Spec.InitContainers[0], want)
+	if !reflect.DeepEqual(bridge, want) {
+		t.Errorf("bridge = %+v, want %+v", bridge, want)
 	}
-	second := pod.Spec.InitContainers[1]
-	if second.Name != "remote-sofa" {
-		t.Errorf("name = %q, want remote-sofa", second.Name)
-	}
-	value := `[{"type":3,"code":17,"value":-1,"action":"volume","amount":5}]`
-	if second.Env[0].Value != value {
-		t.Errorf("keymap = %s, want %s", second.Env[0].Value, value)
+	if len(bridge.Resources.Claims) != 0 {
+		t.Errorf("the bridge holds a device claim: %+v", bridge.Resources.Claims)
 	}
 }
 
-// The controller's input nodes stay out of the container that decodes
-// media from the network.
-func TestBuildPodKeepsTheRemoteRequestsOutOfThePlayer(t *testing.T) {
-	pod := testPodWithRemotes(t)
+// A pod with no bound remotes still carries the bridge, and its
+// MEDIA_REMOTES is an empty JSON array rather than null.
+func TestBuildPodBridgeCarriesAnEmptyRemoteSetWhenNoneBind(t *testing.T) {
+	pod := testPod(t)
 
-	held := []ContainerClaim{
-		{Name: "devices", Request: "screen"},
-		{Name: "devices", Request: "audio0"},
-		{Name: "devices", Request: "audio1"},
-		{Name: "devices", Request: "render"},
+	bridge := pod.Spec.InitContainers[0]
+	var value string
+	for _, variable := range bridge.Env {
+		if variable.Name == remotesVariable {
+			value = variable.Value
+		}
 	}
-	if got := pod.Spec.Containers[0].Resources.Claims; !reflect.DeepEqual(got, held) {
-		t.Errorf("resources.claims = %+v, want %+v", got, held)
-	}
-	claims := []PodResourceClaim{{Name: "devices", ResourceClaimName: "movie-devices"}}
-	if !reflect.DeepEqual(pod.Spec.ResourceClaims, claims) {
-		t.Errorf("resourceClaims = %+v, want %+v", pod.Spec.ResourceClaims, claims)
-	}
-}
-
-// The minted token survives an operator restart in the pod spec
-// alone, so reading it back out is how the next pass adopts a pod it
-// did not create.
-func TestTokenFromPodReadsBackTheTokenItWasBuiltWith(t *testing.T) {
-	if got := tokenFromPod(testPod(t)); got != testToken {
-		t.Errorf("token = %q, want %q", got, testToken)
-	}
-}
-
-func TestTokenFromPodReadsNoTokenThatIsNotThere(t *testing.T) {
-	cases := []struct {
-		name string
-		pod  *Pod
-	}{
-		{name: "a pod with no containers at all", pod: &Pod{}},
-		{
-			name: "a pod with no player container",
-			pod: &Pod{Spec: PodSpec{Containers: []Container{{
-				Name: "sidecar",
-				Env:  []EnvVar{{Name: playTokenVariable, Value: testToken}},
-			}}}},
-		},
-		{
-			name: "a player container with no token variable",
-			pod: &Pod{Spec: PodSpec{Containers: []Container{{
-				Name: playerContainer,
-				Env:  []EnvVar{{Name: playNameVariable, Value: "movie"}},
-			}}}},
-		},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := tokenFromPod(c.pod); got != "" {
-				t.Errorf("token = %q, want empty", got)
-			}
-		})
+	if value != "[]" {
+		t.Errorf("%s = %q, want []", remotesVariable, value)
 	}
 }

@@ -31,12 +31,12 @@ is built the way it is, and what it still owes an answer to.
   knowingly ahead of the bus. A DualSense paused a film and
   `status.paused` followed within one report.
 * [03, The bus carries input and reports](03-the-bus-carries-input-and-reports.md).
-  Designed, not built. Mosquitto as the message bus, the remote
-  reader moved to its own standing pod, and the playback pod rebuilt
-  as `mpv` with one bus-bridge sidecar and no supervisor. The report
-  moves off plain HTTP and onto the bus. It retires plan 02's sidecar
-  and the plan-01 supervisor, and closes the plain-HTTP open problem
-  when it drills.
+  Built, not yet drilled on hardware. Mosquitto as the message bus,
+  the remote reader moved to its own standing pod, and the playback
+  pod rebuilt as `mpv` with one bus-bridge sidecar and no supervisor.
+  The report moves off plain HTTP and onto the bus. It retires plan
+  02's sidecar and the plan-01 supervisor, and closes the plain-HTTP
+  open problem when it drills on `liken-1`.
 
 ## Open problems
 

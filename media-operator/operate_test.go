@@ -1,8 +1,8 @@
 package main
 
 // These tests run whole passes against a small API server that holds
-// the four kinds this operator reads and writes, so a pass is proved
-// by what it left behind.
+// the kinds this operator reads and writes, so a pass is proved by what
+// it left behind.
 
 import (
 	"encoding/json"
@@ -13,8 +13,8 @@ import (
 	"testing"
 )
 
-// The fake cluster: one map per kind, and the list of requests a
-// pass made.
+// The fake cluster: one map per kind, and the list of requests a pass
+// made.
 type fakeCluster struct {
 	plays    map[string]*Play
 	players  map[string]*Player
@@ -42,8 +42,8 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 		name := path.Base(r.URL.Path)
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == playsPath:
-			// The list is sorted so one pass reads the collection
-			// in one order every time.
+			// The list is sorted so one pass reads the collection in one
+			// order every time.
 			list := PlayList{Metadata: ListMeta{ResourceVersion: "1"}}
 			for _, key := range sortedNames(f.plays) {
 				list.Items = append(list.Items, *f.plays[key])
@@ -98,8 +98,8 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 	})
 }
 
-// An object the cluster does not hold is a 404, which is the answer
-// the operator creates against.
+// An object the cluster does not hold is a 404, which is the answer the
+// operator creates against.
 func answer[T any](w http.ResponseWriter, held *T) {
 	if held == nil {
 		w.WriteHeader(http.StatusNotFound)
@@ -120,19 +120,12 @@ func sortedNames[T any](objects map[string]*T) []string {
 func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *operator {
 	t.Helper()
 	return &operator{
-		client:      testAPIClient(t, cluster.handler(t)),
-		image:       "registry.example/player:test",
-		operatorURL: "http://media-operator.media.svc:8080",
-		reports:     newReports(wake),
+		client:     testAPIClient(t, cluster.handler(t)),
+		image:      "registry.example/player:test",
+		busAddress: "bus.media.svc:1883",
+		topicBase:  defaultTopicBase,
+		reports:    newReports(wake),
 	}
-}
-
-// A token the test can name, so a report can be posted with it.
-func mintedToken(t *testing.T, token string) {
-	t.Helper()
-	previous := mintToken
-	mintToken = func() (string, error) { return token, nil }
-	t.Cleanup(func() { mintToken = previous })
 }
 
 func housePlay(uris ...string) *Play {
@@ -154,21 +147,25 @@ func housePlayer() *Player {
 	}
 }
 
-// A pass writes each Player's status from the Plays it read. A
-// player with a running play reads Playing and names the play.
+// housePlaybackPod builds the pod a running Play already has, the way a
+// previous pass or a previous operator left it.
+func housePlaybackPod() *Pod {
+	play := housePlay("https://nas/film.mkv")
+	pod := buildPod(play, buildClaim(play, housePlayer()),
+		resolution{Items: []string{"https://nas/film.mkv"}},
+		"registry.example/player:test", "bus.media.svc:1883", defaultTopicBase, nil)
+	pod.Status.Phase = podRunning
+	return pod
+}
+
+// A pass writes each Player's status from the Plays it read. A player
+// with a running play reads Playing and names the play.
 func TestAPassWritesThePlayerStatusFromItsRunningPlay(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
 	cluster.players["theater"] = housePlayer()
-	// A running pod and its claim already exist, so the pass derives
-	// a Running play, and the player reads Playing off it.
-	running := buildPod(cluster.plays["movie"], buildClaim(cluster.plays["movie"], housePlayer(), nil),
-		resolution{Items: []string{"https://nas/film.mkv"}},
-		"registry.example/player:test", "4444444444444444444444444444ffff",
-		"http://media-operator.media.svc:8080", nil)
-	running.Status.Phase = podRunning
-	cluster.pods["movie-playback"] = running
-	cluster.claims["movie-devices"] = buildClaim(cluster.plays["movie"], housePlayer(), nil)
+	cluster.pods["movie-playback"] = housePlaybackPod()
+	cluster.claims["movie-devices"] = buildClaim(cluster.plays["movie"], housePlayer())
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
 	media.pass()
@@ -180,8 +177,8 @@ func TestAPassWritesThePlayerStatusFromItsRunningPlay(t *testing.T) {
 	}
 }
 
-// A Player no Play names reads Idle, and the pass writes it, so an
-// idle unit is not blank in kubectl.
+// A Player no Play names reads Idle, and the pass writes it, so an idle
+// unit is not blank in kubectl.
 func TestAPassMarksAPlayerWithNoPlayIdle(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.players["theater"] = housePlayer()
@@ -197,7 +194,6 @@ func TestAPassMarksAPlayerWithNoPlayIdle(t *testing.T) {
 }
 
 func TestAPassCreatesTheClaimAndThePodAndReportsPending(t *testing.T) {
-	mintedToken(t, "cafef00dcafef00dcafef00dcafef00d")
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("nfs://nas/movies/film.mkv")
 	cluster.players["theater"] = housePlayer()
@@ -219,24 +215,15 @@ func TestAPassCreatesTheClaimAndThePodAndReportsPending(t *testing.T) {
 	if got := pod.Spec.Containers[0].Args; len(got) != 1 || got[0] != "/media/1/film.mkv" {
 		t.Errorf("args = %v", got)
 	}
-	if got := tokenFromPod(pod); got != "cafef00dcafef00dcafef00dcafef00d" {
-		t.Errorf("token = %q", got)
-	}
-	// The operator remembers what it minted, so the pod's first
-	// report is accepted.
-	if got := media.reports.token("house", "movie"); got != "cafef00dcafef00dcafef00dcafef00d" {
-		t.Errorf("remembered token = %q", got)
-	}
 	status := cluster.plays["movie"].Status
 	if status.Phase != phasePending || status.Pod != "movie-playback" {
 		t.Errorf("status = %+v", status)
 	}
 }
 
-// A second pass over the same Play creates nothing; the claim and
-// the pod are already there.
+// A second pass over the same Play creates nothing; the claim and the
+// pod are already there.
 func TestASecondPassCreatesNothingNew(t *testing.T) {
-	mintedToken(t, "0000000000000000000000000000cafe")
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
 	cluster.players["theater"] = housePlayer()
@@ -276,9 +263,8 @@ func TestAPlayWhosePlayerIsAbsentStaysPending(t *testing.T) {
 	}
 }
 
-// The resolver refuses before any object exists, so a Play that
-// names a scheme this operator does not resolve leaves nothing
-// behind.
+// The resolver refuses before any object exists, so a Play that names a
+// scheme this operator does not resolve leaves nothing behind.
 func TestAPlayWithAnUnknownSchemeFailsAndCreatesNothing(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("rtsp://camera/front")
@@ -300,9 +286,9 @@ func TestAPlayWithAnUnknownSchemeFailsAndCreatesNothing(t *testing.T) {
 	}
 }
 
-// A Play that reached a terminal phase is read and left alone; the
-// pass makes no request about the play itself, only the two list
-// reads every pass makes.
+// A Play that reached a terminal phase is read and left alone; the pass
+// makes no request about the play itself, only the three list reads
+// every pass makes.
 func TestATerminalPlayIsReadAndLeftAlone(t *testing.T) {
 	cluster := newFakeCluster()
 	finished := housePlay("https://nas/film.mkv")
@@ -312,14 +298,13 @@ func TestATerminalPlayIsReadAndLeftAlone(t *testing.T) {
 
 	media.pass()
 
-	want := "GET " + playsPath + "," + "GET " + playersPath
+	want := "GET " + playsPath + ",GET " + playersPath + ",GET " + remotesAllPath
 	if strings.Join(cluster.requests, ",") != want {
-		t.Errorf("requests = %v, want the two list reads alone", cluster.requests)
+		t.Errorf("requests = %v, want the three list reads alone", cluster.requests)
 	}
 }
 
 func TestARunningPodFoldsTheLatestReportIntoTheStatus(t *testing.T) {
-	mintedToken(t, "1111111111111111111111111111ffff")
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
 	cluster.players["theater"] = housePlayer()
@@ -327,17 +312,11 @@ func TestARunningPodFoldsTheLatestReportIntoTheStatus(t *testing.T) {
 
 	media.pass()
 	cluster.pods["movie-playback"].Status.Phase = podRunning
-	accepted := media.reports.accept(playReport{
-		Namespace: "house",
-		Name:      "movie",
-		Token:     "1111111111111111111111111111ffff",
-		Item:      1,
-		Position:  "0:03:20",
-		Duration:  "1:58:00",
+	media.reports.fold("house", "movie", playReport{
+		Item:     1,
+		Position: "0:03:20",
+		Duration: "1:58:00",
 	})
-	if !accepted {
-		t.Fatal("the operator refused the token it minted")
-	}
 	media.pass()
 
 	status := cluster.plays["movie"].Status
@@ -355,7 +334,6 @@ func TestARunningPodFoldsTheLatestReportIntoTheStatus(t *testing.T) {
 }
 
 func TestAPodThatSucceededFinishesThePlay(t *testing.T) {
-	mintedToken(t, "2222222222222222222222222222ffff")
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
 	cluster.players["theater"] = housePlayer()
@@ -370,29 +348,16 @@ func TestAPodThatSucceededFinishesThePlay(t *testing.T) {
 	}
 }
 
-// An operator that restarted holds no tokens; the pod it finds is
-// where the minted token survived.
-func TestTheOperatorAdoptsTheTokenOfAPodItDidNotCreate(t *testing.T) {
+// A Play that left the cluster leaves nothing on the report desk.
+func TestAPassForgetsAPlayThatIsGone(t *testing.T) {
 	cluster := newFakeCluster()
-	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
-	cluster.players["theater"] = housePlayer()
-	running := buildPod(cluster.plays["movie"], buildClaim(cluster.plays["movie"], housePlayer(), nil),
-		resolution{Items: []string{"https://nas/film.mkv"}},
-		"registry.example/player:test", "3333333333333333333333333333ffff", "http://media-operator.media.svc:8080", nil)
-	running.Status.Phase = podRunning
-	cluster.pods["movie-playback"] = running
-	cluster.claims["movie-devices"] = buildClaim(cluster.plays["movie"], housePlayer(), nil)
 	media := testOperator(t, cluster, make(chan struct{}, 1))
+	media.reports.fold("house", "movie", runningReport())
 
 	media.pass()
 
-	if got := media.reports.token("house", "movie"); got != "3333333333333333333333333333ffff" {
-		t.Errorf("adopted token = %q", got)
-	}
-	if !media.reports.accept(playReport{
-		Namespace: "house", Name: "movie", Token: "3333333333333333333333333333ffff", Item: 1,
-	}) {
-		t.Error("the operator refused the token it adopted")
+	if got := media.reports.latestFor("house", "movie"); got != nil {
+		t.Errorf("report = %+v, want the desk to have forgotten it", *got)
 	}
 }
 
@@ -408,11 +373,34 @@ func houseRemote(keymap string) *Remote {
 	}
 }
 
-// The whole wiring in one pass: the claim carries the controller, the
-// pod carries the sidecar, and the sidecar holds the request the
-// player container does not.
-func TestAPassWiresABoundRemoteIntoTheClaimAndThePod(t *testing.T) {
-	mintedToken(t, "5555555555555555555555555555ffff")
+// bridgeRemotes reads the compiled remote set the operator wrote into
+// the bridge sidecar's environment, so a test reads what the bridge
+// subscribes to without a broker.
+func bridgeRemotes(t *testing.T, pod *Pod) []remoteBindings {
+	t.Helper()
+	for _, container := range pod.Spec.InitContainers {
+		if container.Name != bridgeContainer {
+			continue
+		}
+		for _, env := range container.Env {
+			if env.Name != remotesVariable {
+				continue
+			}
+			var remotes []remoteBindings
+			if err := json.Unmarshal([]byte(env.Value), &remotes); err != nil {
+				t.Fatalf("%s does not decode: %v", remotesVariable, err)
+			}
+			return remotes
+		}
+	}
+	t.Fatalf("the playback pod has no bridge sidecar carrying %s", remotesVariable)
+	return nil
+}
+
+// A bound Remote reconciles into its own standing pod, and the playback
+// pod's bridge sidecar names the same events topic the standing pod
+// publishes to, so the two meet on the bus.
+func TestAPassWiresABoundRemote(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
 	cluster.players["theater"] = housePlayer()
@@ -422,32 +410,42 @@ func TestAPassWiresABoundRemoteIntoTheClaimAndThePod(t *testing.T) {
 
 	media.pass()
 
-	claim, held := cluster.claims["movie-devices"]
+	// The standing remote pod and its claim, one reader owned by the
+	// Remote and pinned to the controller by the claim.
+	remotePod, held := cluster.pods["sofa-remote"]
 	if !held {
-		t.Fatalf("no claim was created: %v", cluster.requests)
+		t.Fatalf("no standing remote pod was created: %v", cluster.requests)
 	}
-	if got := claimRequests(claim); strings.Join(got, ",") != "screen,audio0,render,remote-sofa" {
-		t.Fatalf("requests = %v", got)
+	if got := remotePod.Spec.Containers[0].Command; len(got) != 2 || got[1] != remoteMode {
+		t.Errorf("standing pod command = %v, want the reader mode", got)
 	}
-	controller := claim.Spec.Devices.Requests[3]
-	if controller.Exactly.Tolerations[0].TolerationSeconds != nil {
-		t.Errorf("the controller's toleration expires: %+v", controller.Exactly.Tolerations[0])
+	if _, held := cluster.claims["sofa-remote-devices"]; !held {
+		t.Errorf("no standing remote claim was created: %v", cluster.requests)
 	}
-	pod := cluster.pods["movie-playback"]
-	if len(pod.Spec.InitContainers) != 1 || pod.Spec.InitContainers[0].Name != "remote-sofa" {
-		t.Fatalf("initContainers = %+v", pod.Spec.InitContainers)
+
+	// The playback pod's bridge sidecar carries the remote's events topic
+	// and the compiled keymap, so it subscribes to what the standing pod
+	// publishes and maps each press.
+	playback, held := cluster.pods["movie-playback"]
+	if !held {
+		t.Fatalf("no playback pod was created: %v", cluster.requests)
 	}
-	if got := pod.Spec.InitContainers[0].Env[0].Name; got != "MEDIA_KEYMAP" {
-		t.Errorf("env = %+v", pod.Spec.InitContainers[0].Env)
+	remotes := bridgeRemotes(t, playback)
+	if len(remotes) != 1 {
+		t.Fatalf("bridge %s = %v, want one entry", remotesVariable, remotes)
 	}
-	player := pod.Spec.Containers[0].Resources.Claims
-	if len(player) != 3 {
-		t.Errorf("the player container holds %+v, want the player's three roles", player)
+	if want := remoteEventsTopic(defaultTopicBase, "house", "sofa"); remotes[0].EventsTopic != want {
+		t.Errorf("events topic = %q, want %q", remotes[0].EventsTopic, want)
+	}
+	if len(remotes[0].Bindings) == 0 {
+		t.Error("the bridge carries no compiled bindings for the remote")
 	}
 }
 
-// A Remote that names a Keymap nobody wrote fails the Play, and no
-// pod is created for it.
+// A Remote that names a Keymap nobody wrote fails the Play before the
+// playback pod, because the bridge sidecar needs the compiled keymap and
+// the compile runs before the pod. The Remote's own standing pod still
+// runs: the reader needs no keymap.
 func TestAPlayWhoseKeymapIsAbsentFailsBeforeItsPod(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
@@ -465,16 +463,14 @@ func TestAPlayWhoseKeymapIsAbsentFailsBeforeItsPod(t *testing.T) {
 	if status.Message != want {
 		t.Errorf("message = %q, want %q", status.Message, want)
 	}
-	if len(cluster.pods) != 0 {
-		t.Errorf("a broken Remote created a pod: %v", cluster.pods)
+	if _, held := cluster.pods["movie-playback"]; held {
+		t.Errorf("a broken Remote created the playback pod: %v", cluster.pods)
 	}
 }
 
-// The container set is fixed once the pod runs, so a Keymap broken
-// after the film started changes nothing and the run keeps its
-// status.
+// The container set is fixed once the pod runs, so a Keymap broken after
+// the film started changes nothing and the run keeps its status.
 func TestARemoteBrokenAfterTheRunStartedLeavesThePlayAlone(t *testing.T) {
-	mintedToken(t, "6666666666666666666666666666ffff")
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
 	cluster.players["theater"] = housePlayer()
@@ -496,18 +492,5 @@ func TestARemoteBrokenAfterTheRunStartedLeavesThePlayAlone(t *testing.T) {
 	}
 	if status.Message != "" {
 		t.Errorf("message = %q, want none", status.Message)
-	}
-}
-
-// A Play that left the cluster leaves nothing on the report desk.
-func TestAPassForgetsAPlayThatIsGone(t *testing.T) {
-	cluster := newFakeCluster()
-	media := testOperator(t, cluster, make(chan struct{}, 1))
-	media.reports.remember("house", "movie", "4444444444444444444444444444ffff")
-
-	media.pass()
-
-	if got := media.reports.token("house", "movie"); got != "" {
-		t.Errorf("token = %q, want the desk to have forgotten it", got)
 	}
 }

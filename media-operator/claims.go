@@ -8,19 +8,17 @@ package main
 import (
 	"encoding/json"
 	"strconv"
-	"strings"
 )
 
 // The request names are the roles, and they are the names the
 // container's resources.claims refer to. One claim with named
 // requests beats one claim per device because the set allocates as a
-// unit: the scheduler finds one machine that satisfies every
-// request, or the pod parks Pending with one story to read.
+// unit: the scheduler finds one machine that satisfies every request,
+// or the pod parks Pending with one story to read.
 //
 // A remote's request is named for the Remote it claims, behind a
-// prefix no player role starts with. The prefix is what separates
-// the player's own requests from the remotes' when the pod is built,
-// so a controller's input nodes never land in the player container.
+// prefix no player role starts with. The standing remote pod's claim
+// uses the name, because that pod holds the controller now.
 const (
 	screenRequest       = "screen"
 	renderRequest       = "render"
@@ -92,16 +90,16 @@ func playOwner(play *Play) OwnerReference {
 	}
 }
 
-// buildClaim turns one Player into one claim, requests in role
-// order: screen, sinks, render. A Player without a display or
-// without a render node yields a claim without that request, and the
-// player program plays without one, which is what an audio-only unit
-// is.
+// buildClaim turns one Player into one claim, requests in role order:
+// screen, sinks, render. A Player without a display or without a render
+// node yields a claim without that request, and the player program
+// plays without one, which is what an audio-only unit is.
 //
-// The remotes bound to the player follow the roles, one request
-// each, so one claim still holds everything the pod needs and the
-// set still allocates as a unit on one machine.
-func buildClaim(play *Play, player *Player, remotes []boundRemote) *ResourceClaim {
+// The playback claim holds the player's own devices and no controller.
+// A Remote reconciles into its own standing pod, which holds the
+// controller's claim, so a controller on one machine and a display on
+// another still pair.
+func buildClaim(play *Play, player *Player) *ResourceClaim {
 	claim := &ResourceClaim{
 		APIVersion: claimAPIVersion,
 		Kind:       "ResourceClaim",
@@ -121,15 +119,6 @@ func buildClaim(play *Play, player *Player, remotes []boundRemote) *ResourceClai
 		// The render node takes no toleration, because a GPU does not
 		// come and go while the machine runs.
 		claim.add(renderRequest, *player.Spec.Render, nil)
-	}
-	// A controller's request carries no parameter block, because
-	// nothing prepares an input device the way a codec prepares a
-	// sink: the driver publishes the nodes and the sidecar reads
-	// them as they are.
-	for _, remote := range remotes {
-		claim.add(remoteRequestName(remote.Name),
-			PlayerDevice{Class: remote.Device.Class, Selector: remote.Device.Selector},
-			tolerateForever(remoteDisconnectedTaint))
 	}
 	return claim
 }
@@ -177,28 +166,14 @@ func (c *ResourceClaim) add(name string, device PlayerDevice, tolerations []Devi
 	})
 }
 
-// claimRequests lists the request names in claim order, which is
-// what the container's resources.claims list repeats.
+// claimRequests lists the request names in claim order, which is what
+// the container's resources.claims list repeats. The playback claim
+// holds the player's roles alone, so every request is the player
+// container's.
 func claimRequests(claim *ResourceClaim) []string {
 	names := make([]string, 0, len(claim.Spec.Devices.Requests))
 	for _, request := range claim.Spec.Devices.Requests {
 		names = append(names, request.Name)
-	}
-	return names
-}
-
-// playerRequests is claimRequests without the remotes: the roles the
-// player container repeats. The player container holds the player's
-// own devices and no controller's, because the process that decodes
-// media from the network must not also read an input device; each
-// sidecar names its own request instead.
-func playerRequests(claim *ResourceClaim) []string {
-	names := make([]string, 0, len(claim.Spec.Devices.Requests))
-	for _, request := range claimRequests(claim) {
-		if strings.HasPrefix(request, remoteRequestPrefix) {
-			continue
-		}
-		names = append(names, request)
 	}
 	return names
 }

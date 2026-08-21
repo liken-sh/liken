@@ -1,29 +1,20 @@
 package main
 
-// The report contract between the supervisor and the operator. The
-// supervisor POSTs this JSON to the operator's /report endpoint on
-// every change and every few seconds while position advances; the
-// operator folds it into the Play's status. This is the whole of
-// what the playback pod can say to the control plane, and it
-// carries no API object: the operator decides what any report means
-// for the phase.
+// The report contract between the playback pod's sidecar and the
+// operator. The sidecar publishes this JSON to the Play's status
+// topic, retained, on every change and every few seconds while the
+// position advances. The operator subscribes and folds each report
+// into the Play's status. This is the whole of what the playback pod
+// says to the control plane, and it carries no API object: the Play a
+// report belongs to is named by the topic, not by the body, and the
+// operator decides what any report means for the phase.
 
-// playReport is one observation of the run, as the supervisor sees
-// it through mpv's IPC socket.
+// playReport is one observation of the run, as the sidecar sees it
+// through mpv's IPC socket. The Play's namespace and name are in the
+// topic path, so the body carries only the playback numbers.
 type playReport struct {
-	// Namespace and Name identify the Play. The operator trusts
-	// them only together with Token.
-	Namespace string `json:"namespace"`
-	Name      string `json:"name"`
-
-	// Token proves the report comes from the pod the operator
-	// created for this Play. The operator mints it into the pod's
-	// environment, so only that pod and readers of the pod spec
-	// hold it.
-	Token string `json:"token"`
-
-	// Paused is the player holding the current item still. The
-	// phase stays Running.
+	// Paused is the player holding the current item still. The phase
+	// stays Running.
 	Paused bool `json:"paused"`
 
 	// Item is the URI now playing, counting from 1 in spec order.
@@ -36,17 +27,35 @@ type playReport struct {
 	Duration string `json:"duration"`
 }
 
-// Environment variable names in the playback pod. The operator sets
-// them on the pod it creates; the supervisor reads them. They are
-// constants here so the two modes of this binary cannot drift.
+// Environment variable names the operator sets on the pods it creates.
+// The playback pod's sidecar and the standing remote pod read them.
+// They are constants here so the modes of this binary cannot drift.
 const (
+	// The playback pod's identity, which its sidecar turns into the
+	// status and availability topics it publishes.
 	playNamespaceVariable = "MEDIA_PLAY_NAMESPACE"
 	playNameVariable      = "MEDIA_PLAY_NAME"
-	playTokenVariable     = "MEDIA_PLAY_TOKEN"
-	operatorURLVariable   = "MEDIA_OPERATOR_URL"
 
-	// playStartVariable carries spec.start when the Play declares
-	// one. The supervisor turns it into mpv's --start, so the run
-	// begins where the spec says instead of at zero.
+	// playStartVariable carries spec.start when the Play declares one.
+	// The player shim turns it into mpv's --start, so the run begins
+	// where the spec says instead of at zero.
 	playStartVariable = "MEDIA_PLAY_START"
+
+	// The bus every pod connects to, and the base every topic extends.
+	// The operator holds both and passes them down, because a pod
+	// cannot read the address of the broker in front of it or the base
+	// a cluster chose.
+	busAddressVariable = "MEDIA_BUS_ADDRESS"
+	topicBaseVariable  = "MEDIA_TOPIC_BASE"
+
+	// The standing remote pod's identity, which it turns into the
+	// events topic it publishes.
+	remoteNamespaceVariable = "MEDIA_REMOTE_NAMESPACE"
+	remoteNameVariable      = "MEDIA_REMOTE_NAME"
+
+	// remotesVariable carries the set of remotes bound to a player, as
+	// a JSON array of remoteBindings. The playback pod's sidecar
+	// subscribes to each entry's events topic and matches events
+	// against that entry's bindings.
+	remotesVariable = "MEDIA_REMOTES"
 )

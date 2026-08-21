@@ -1,0 +1,104 @@
+# The message bus: one Mosquitto broker as its own Deployment, Service,
+# and ConfigMap, all named bus, beside the operator's own Deployment and
+# never inside it. The two are separate so the operator restarts without
+# dropping a message. The broker and the pods that use it stay up, and a
+# button press reaches mpv while the operator is down.
+#
+# Every pod and the operator speak MQTT to this broker. The standing
+# remote pods publish button events, the playback pods publish their
+# reports, and the operator subscribes to both. MQTT is the choice over
+# NATS because it is the native protocol of home automation, so a Remote,
+# a Player, and a Play that already speak MQTT are one wiring step from a
+# home's Home Assistant.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bus
+  # Recreate, so two brokers never bind the same Service at once. The
+  # broker holds no volume, so a restart loses only the retained set,
+  # which the next report from each running Play refills within seconds.
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: bus
+    spec:
+      containers:
+        - name: bus
+          # eclipse-mosquitto 2.0.22, the current 2.0 release. Pinned to
+          # a version rather than latest so a broker restart runs the
+          # same broker the manifest was read with.
+          image: eclipse-mosquitto:2.0.22
+          ports:
+            - name: mqtt
+              containerPort: 1883
+          # The ConfigMap below, mounted where the image reads its
+          # configuration. The image's own default config forbids an
+          # anonymous client and listens on no network port, so the
+          # mount is what makes the broker reachable at all.
+          volumeMounts:
+            - name: config
+              mountPath: /mosquitto/config/mosquitto.conf
+              subPath: mosquitto.conf
+          securityContext:
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          # The broker's runtime memory is a few megabytes, so its cost
+          # on a one-gigabyte machine is noise beside k3s.
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
+      volumes:
+        - name: config
+          configMap:
+            name: bus
+---
+# The broker's configuration.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bus
+data:
+  # listener 1883 opens the MQTT port. The image's default config binds
+  # no listener, so without this line the broker accepts no client.
+  #
+  # allow_anonymous true accepts a client that presents no credentials.
+  # The in-cluster network is the trust boundary, and the broker accepts
+  # the cluster's own pods, so anonymous is correct here. A bring-your-own
+  # broker outside the cluster states its own credentials instead.
+  #
+  # persistence false keeps no volume. Input events are momentary and
+  # want no persistence, and reports are published retained, so the
+  # broker holds the last report per Play in memory and refills that set
+  # from each running Play within seconds of a restart.
+  mosquitto.conf: |
+    listener 1883
+    allow_anonymous true
+    persistence false
+---
+# Where every pod and the operator reach the broker. The operator cannot
+# derive this name, so it reads bus.liken-system.svc:1883 from its own
+# environment and passes the address into every pod it creates.
+apiVersion: v1
+kind: Service
+metadata:
+  name: bus
+spec:
+  selector:
+    app: bus
+  ports:
+    - name: mqtt
+      port: 1883
+      targetPort: mqtt

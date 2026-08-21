@@ -1,13 +1,20 @@
 package main
 
-// The input contract between the operator and the remote sidecar.
-// The operator compiles a Keymap into the bindings below and passes
-// them to the sidecar in one environment variable, the same way the
-// play's identity travels in wire.go. The sidecar matches raw evdev
-// events against the bindings and turns each action into an mpv
-// command. The split keeps each vocabulary on its own side: only the
-// operator reads the Keymap resource, and only the pod knows what an
-// action means to mpv.
+// The input contract between the operator, the standing remote pod,
+// and the playback pod's sidecar. The standing remote pod reads a
+// controller and publishes each raw evdev event to the Remote's events
+// topic. The operator compiles each bound Keymap into the bindings
+// below and passes the set to the playback pod's sidecar in one
+// environment variable. The sidecar subscribes to each remote's events
+// topic, matches events against that remote's bindings, and turns each
+// action into an mpv command. The split keeps each vocabulary on its
+// own side: only the operator reads the Keymap resource, and only the
+// sidecar knows what an action means to mpv.
+
+import (
+	"encoding/json"
+	"io"
+)
 
 // The action vocabulary. These are the words a Keymap's right side
 // may use, and they are named for what a person means, not for what
@@ -56,12 +63,27 @@ type compiledBinding struct {
 	Amount    int    `json:"amount,omitempty"`
 }
 
-// keymapVariable carries the compiled bindings, as a JSON array,
-// into the sidecar's environment. An environment variable rather
-// than a mounted ConfigMap, because the map must be as immutable as
-// the container set around it: a Keymap edited mid-run changes the
-// next Play, not this one.
-const keymapVariable = "MEDIA_KEYMAP"
+// remoteBindings is one bound Remote as the playback pod's sidecar
+// needs it: the events topic to subscribe to, and the compiled table
+// to match its events against. The operator builds one per bound
+// Remote and passes the set in remotesVariable, so the map is as
+// immutable as the container set around it and the pod reads nothing
+// from the API server.
+type remoteBindings struct {
+	EventsTopic string            `json:"events"`
+	Bindings    []compiledBinding `json:"bindings"`
+}
+
+// remoteEvent is one controller event on the bus: the evdev type,
+// code, and value the standing remote pod read from the node. The
+// standing pod publishes it and the playback pod's sidecar decodes it,
+// so the keymap stays off the wire and one Remote can feed two players
+// that map it differently.
+type remoteEvent struct {
+	Type  uint16 `json:"type"`
+	Code  uint16 `json:"code"`
+	Value int32  `json:"value"`
+}
 
 // The two evdev event types a keymap can bind. Buttons arrive as
 // EV_KEY presses with value 1; the d-pad on a gamepad arrives not as
@@ -104,13 +126,61 @@ var axisCodes = map[string]uint16{
 }
 
 // The IPC socket's home. mpv serves its JSON IPC socket on an
-// emptyDir the playback pod always carries, rather than in the
-// player container's private /tmp, because the remote sidecar drives
-// the same socket and a volume is the only thing two containers
-// share. The volume is unconditional so the supervisor needs no
-// second path for a pod with no remotes.
+// emptyDir the playback pod always carries, rather than in the player
+// container's private /tmp, because the bridge sidecar drives the same
+// socket and a volume is the only thing two containers share. The
+// volume is unconditional, so mpv serves its socket at one path
+// whether or not the play binds a remote.
 const (
 	ipcVolumeName = "ipc"
 	ipcMountPath  = "/ipc"
 	ipcSocketPath = "/ipc/mpv.sock"
 )
+
+// matchBinding compares type, code, and value, all three exactly. The
+// exactness is the debounce: a key's autorepeat arrives as value 2 and
+// its release as 0, a hat's return to center as 0, and none of them
+// equals the 1, -1, or 1 a binding states, so a held button fires
+// once.
+func matchBinding(bindings []compiledBinding, event inputEvent) (compiledBinding, bool) {
+	for _, binding := range bindings {
+		if binding.EventType == event.Type && binding.Code == event.Code && binding.Value == event.Value {
+			return binding, true
+		}
+	}
+	return compiledBinding{}, false
+}
+
+// commandFor is where the action vocabulary becomes mpv's words, and
+// the only place in the system that holds both. The osd-auto prefix
+// makes mpv show each press on the screen, which is the viewer's proof
+// the controller works. An action this build has no case for sends
+// nothing, so a newer operator's keymap degrades to fewer buttons
+// rather than a crash.
+func commandFor(binding compiledBinding) []any {
+	switch binding.Action {
+	case actionPause:
+		return []any{"osd-auto", "cycle", "pause"}
+	case actionMute:
+		return []any{"osd-auto", "cycle", "mute"}
+	case actionSeek:
+		return []any{"osd-auto", "seek", binding.Amount}
+	case actionVolume:
+		return []any{"osd-auto", "add", "volume", binding.Amount}
+	case actionChapter:
+		return []any{"osd-auto", "add", "chapter", binding.Amount}
+	case actionSubtitles:
+		return []any{"osd-auto", "cycle", "sub"}
+	case actionAudio:
+		return []any{"osd-auto", "cycle", "audio"}
+	case actionInfo:
+		return []any{"expand-properties", "show-text", "${filename}\n${time-pos} / ${duration}", 4000}
+	}
+	return nil
+}
+
+// sendCommand writes one newline-delimited JSON command, the shape
+// mpv's IPC socket accepts.
+func sendCommand(writer io.Writer, command []any) error {
+	return json.NewEncoder(writer).Encode(mpvCommand{Command: command})
+}

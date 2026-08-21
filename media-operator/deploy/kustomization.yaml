@@ -20,6 +20,7 @@ resources:
   - remotes-crd.yaml
   - rbac.yaml
   - operator.yaml
+  - bus.yaml
 
 labels:
   - includeSelectors: false

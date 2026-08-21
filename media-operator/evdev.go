@@ -11,10 +11,11 @@ package main
 // three: the buttons and sticks, the touchpad, and the motion
 // sensors, and only the first is worth reading. The node's name is
 // per-model trivia, but the kernel also publishes each node's
-// capability bitmaps, one bit per event code it can report, and the
-// node that can report a bound button is the node the keymap is
-// for. That is the whole selection rule, and it needs no model
-// knowledge at all.
+// capability bitmaps, one bit per event code it can report. The
+// standing remote pod carries no keymap, so the node it keeps is the
+// one that reports any button or hat axis a Keymap could bind, and the
+// buttonCodes and axisCodes tables are that whole vocabulary. That
+// selection rule needs no model knowledge at all.
 
 import (
 	"encoding/binary"
@@ -88,34 +89,35 @@ func bitmapHasCode(bitmap []byte, code uint16) bool {
 	return bitmap[index]&(1<<(code%8)) != 0
 }
 
-// bitmapsMatch is the selection rule: a node that can report any
-// bound code is worth reading. One code is enough, because a keymap
-// is written for one model and that model's button node reports
-// every button the keymap names; the touchpad and the motion
-// sensors report none of them.
-func bitmapsMatch(bindings []compiledBinding, keys, axes []byte) bool {
-	for _, binding := range bindings {
-		switch binding.EventType {
-		case evKey:
-			if bitmapHasCode(keys, binding.Code) {
-				return true
-			}
-		case evAbs:
-			if bitmapHasCode(axes, binding.Code) {
-				return true
-			}
+// reportsAnyCode reports whether the node's bitmap sets a bit for any
+// code in the table. One code is enough, because a controller's button
+// node reports every button in buttonCodes, and its d-pad node reports
+// every hat axis in axisCodes, while the touchpad and the motion
+// sensors report none of either.
+func reportsAnyCode(bitmap []byte, codes map[string]uint16) bool {
+	for _, code := range codes {
+		if bitmapHasCode(bitmap, code) {
+			return true
 		}
 	}
 	return false
 }
 
-// deviceMatches asks the node for its key and axis bitmaps and
-// applies the selection rule. The claim already narrowed /dev/input
-// to one controller's nodes, but one controller is still several
-// nodes, and this test picks the one that carries the buttons. A
-// node that refuses the ioctl is not an event device and matches
-// nothing.
-func deviceMatches(descriptor int, bindings []compiledBinding) bool {
+// controllerBitmaps is the selection rule: a node is a controller when
+// it reports any button in buttonCodes or any hat axis in axisCodes.
+// The reader has no keymap, so it keeps every node that could carry a
+// bound code rather than the node one keymap needs, and one standing
+// pod then feeds two players that map the controller differently.
+func controllerBitmaps(keys, axes []byte) bool {
+	return reportsAnyCode(keys, buttonCodes) || reportsAnyCode(axes, axisCodes)
+}
+
+// isController asks the node for its key and axis bitmaps and applies
+// the selection rule. The claim already narrowed /dev/input to one
+// controller's nodes, but one controller is still several nodes, and
+// this test picks the one that carries the buttons. A node that
+// refuses the ioctl is not an event device and matches nothing.
+func isController(descriptor int) bool {
 	keys, err := deviceBitmap(descriptor, evKey, keyBitmapBytes)
 	if err != nil {
 		return false
@@ -124,7 +126,7 @@ func deviceMatches(descriptor int, bindings []compiledBinding) bool {
 	if err != nil {
 		return false
 	}
-	return bitmapsMatch(bindings, keys, axes)
+	return controllerBitmaps(keys, axes)
 }
 
 // deviceBitmap fetches one event type's capability bitmap. The

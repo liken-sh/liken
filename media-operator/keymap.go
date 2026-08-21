@@ -14,13 +14,17 @@ import (
 	"sort"
 )
 
-// A boundRemote is one Remote as the pod builder needs it: the name
-// that names its request and its container, the device to claim,
-// and the compiled table its sidecar carries.
+// A boundRemote is one Remote as the pod builders need it: the name
+// that names its request and its standing pod, the device to claim,
+// the compiled table the playback pod's sidecar matches events
+// against, and the events topic the sidecar subscribes to. The
+// operator fills EventsTopic when it builds the sidecar's environment,
+// because the topic base lives with the operator and not the gather.
 type boundRemote struct {
-	Name     string
-	Device   RemoteDevice
-	Bindings []compiledBinding
+	Name        string
+	Device      RemoteDevice
+	Bindings    []compiledBinding
+	EventsTopic string
 }
 
 // compileKeymap turns one Keymap into the sidecar's table. A button

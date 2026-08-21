@@ -158,11 +158,12 @@ func drain(body io.ReadCloser) {
 // namespace and read back per namespace, and the two Kubernetes
 // kinds this operator writes live under their own groups' paths.
 const (
-	playsPath   = "/apis/" + mediaAPIVersion + "/plays"
-	playersPath = "/apis/" + mediaAPIVersion + "/players"
-	mediaPrefix = "/apis/" + mediaAPIVersion + "/namespaces/"
-	claimPrefix = "/apis/" + claimAPIVersion + "/namespaces/"
-	podPrefix   = "/api/v1/namespaces/"
+	playsPath      = "/apis/" + mediaAPIVersion + "/plays"
+	playersPath    = "/apis/" + mediaAPIVersion + "/players"
+	remotesAllPath = "/apis/" + mediaAPIVersion + "/remotes"
+	mediaPrefix    = "/apis/" + mediaAPIVersion + "/namespaces/"
+	claimPrefix    = "/apis/" + claimAPIVersion + "/namespaces/"
+	podPrefix      = "/api/v1/namespaces/"
 )
 
 func playPath(namespace, name string) string {
@@ -267,6 +268,18 @@ func PutPlayStatus(c *Client, play *Play) (*Play, error) {
 func ListRemotes(c *Client, namespace string) (*RemoteList, error) {
 	list := &RemoteList{}
 	if err := c.RequestJSON(http.MethodGet, remotesPath(namespace), nil, list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// ListAllRemotes reads every Remote in the cluster in one request, the
+// same shape as ListPlays, because the operator reconciles a standing
+// pod for each Remote whatever namespace it lives in, and the list's
+// resourceVersion is where the remotes watch resumes from.
+func ListAllRemotes(c *Client) (*RemoteList, error) {
+	list := &RemoteList{}
+	if err := c.RequestJSON(http.MethodGet, remotesAllPath, nil, list); err != nil {
 		return nil, err
 	}
 	return list, nil

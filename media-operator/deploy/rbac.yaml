@@ -39,14 +39,16 @@ rules:
   - apiGroups: [media.liken.sh]
     resources: [players/status]
     verbs: [update]
-  # The remotes bound to a player, and their keymaps. Remotes are
-  # listed, because nothing indexes a Remote by the player it binds;
-  # a keymap is read one at a time, by the name a Remote carries.
-  # Read-only, like the players above: a person writes these, and
-  # the operator compiles them into pods.
+  # The remotes bound to a player, and their keymaps. A Remote is
+  # watched like a Play, because each Remote reconciles into one
+  # standing pod, and the watch is the wake signal for that pod.
+  # Nothing indexes a Remote by the player it binds, so every pass
+  # re-reads with a list; a keymap is read one at a time, by the name
+  # a Remote carries. Read-only: a person writes these, and the
+  # operator compiles them into pods.
   - apiGroups: [media.liken.sh]
     resources: [remotes]
-    verbs: [get, list]
+    verbs: [get, list, watch]
   - apiGroups: [media.liken.sh]
     resources: [keymaps]
     verbs: [get]

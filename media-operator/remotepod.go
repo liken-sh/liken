@@ -1,0 +1,140 @@
+package main
+
+// Each Remote reconciles into one standing pod, owned by the Remote
+// through an owner reference, so deleting the Remote tears the pod
+// down. The pod holds the controller's device claim, which pins it to
+// the machine that owns the radio and runs it whether or not anything
+// plays. The container is the player image in its reader mode, which
+// reads the claim's event nodes and publishes each event to the
+// Remote's events topic.
+
+import "errors"
+
+// The one container in the standing pod. The pod runs a single reader,
+// so its name is the job it does.
+const remoteReaderContainer = "reader"
+
+// remotePodName is the name of a Remote's standing pod, the Remote's
+// name plus its job, so a person reading either object finds the other.
+func remotePodName(remote string) string {
+	return remote + "-remote"
+}
+
+// remoteClaimName is the standing pod's claim, the pod's name plus the
+// suffix the playback claim uses, so a person reading either object
+// finds the other.
+func remoteClaimName(remote string) string {
+	return remotePodName(remote) + "-devices"
+}
+
+// remoteOwner is the ownerReference that makes deleting the Remote the
+// whole teardown: the garbage collector deletes the claim and the pod
+// the Remote owns, and this operator carries no delete verb.
+func remoteOwner(remote *Remote) OwnerReference {
+	return OwnerReference{
+		APIVersion: mediaAPIVersion,
+		Kind:       "Remote",
+		Name:       remote.Metadata.Name,
+		UID:        remote.Metadata.UID,
+		Controller: true,
+	}
+}
+
+// buildRemoteClaim turns one Remote into the standing claim for its
+// controller: one request, named for the Remote behind the remote
+// prefix, for the device the Remote's spec selects.
+//
+// The claim tolerates bluetooth.liken.sh/disconnected with no limit, so
+// a controller that sleeps keeps its allocation and the pod keeps
+// running. It does not tolerate bluetooth.liken.sh/no-input-node, which
+// is NoSchedule, so the pod stays Pending until the controller first
+// connects, then runs across every sleep after.
+func buildRemoteClaim(remote *Remote) *ResourceClaim {
+	claim := &ResourceClaim{
+		APIVersion: claimAPIVersion,
+		Kind:       "ResourceClaim",
+		Metadata: ObjectMeta{
+			Name:            remoteClaimName(remote.Metadata.Name),
+			Namespace:       remote.Metadata.Namespace,
+			OwnerReferences: []OwnerReference{remoteOwner(remote)},
+		},
+	}
+	claim.add(
+		remoteRequestName(remote.Metadata.Name),
+		PlayerDevice{Class: remote.Spec.Device.Class, Selector: remote.Spec.Device.Selector},
+		tolerateForever(remoteDisconnectedTaint),
+	)
+	return claim
+}
+
+// buildRemotePod writes the standing pod: the player image in its
+// reader mode, holding the controller's claim, publishing to the bus.
+// restartPolicy is Always because the pod is a service and not a job: a
+// crash restarts it, and the pod ends only when the Remote is deleted.
+// It carries no IPC volume, because the reader drives no mpv socket.
+func buildRemotePod(remote *Remote, claim *ResourceClaim, image, busAddress, topicBase string) *Pod {
+	container := Container{
+		Name:    remoteReaderContainer,
+		Image:   image,
+		Command: []string{"/media-operator", remoteMode},
+		Env: []EnvVar{
+			{Name: remoteNamespaceVariable, Value: remote.Metadata.Namespace},
+			{Name: remoteNameVariable, Value: remote.Metadata.Name},
+			{Name: busAddressVariable, Value: busAddress},
+			{Name: topicBaseVariable, Value: topicBase},
+		},
+	}
+	// The one container holds the claim's one request, the controller
+	// this Remote selects.
+	for _, request := range claimRequests(claim) {
+		container.Resources.Claims = append(container.Resources.Claims,
+			ContainerClaim{Name: podClaimName, Request: request})
+	}
+
+	return &Pod{
+		APIVersion: podAPIVersion,
+		Kind:       "Pod",
+		Metadata: ObjectMeta{
+			Name:            remotePodName(remote.Metadata.Name),
+			Namespace:       remote.Metadata.Namespace,
+			OwnerReferences: []OwnerReference{remoteOwner(remote)},
+		},
+		Spec: PodSpec{
+			RestartPolicy: "Always",
+			ResourceClaims: []PodResourceClaim{{
+				Name:              podClaimName,
+				ResourceClaimName: claim.Metadata.Name,
+			}},
+			Containers: []Container{container},
+		},
+	}
+}
+
+// reconcileRemote reconciles one Remote into its standing claim and
+// pod, both owned by the Remote. It creates each once and never
+// rebuilds it: a Remote edited later changes the next reconcile's
+// object, not this run's, and the pod holds no state a rebuild would
+// recover.
+//
+// A 409 on either create means another pass, or another copy of this
+// operator, created the object first, which is success.
+func (o *operator) reconcileRemote(remote *Remote) error {
+	claim := buildRemoteClaim(remote)
+	if err := ensureClaim(o.client, claim); err != nil {
+		return err
+	}
+
+	namespace, name := remote.Metadata.Namespace, remote.Metadata.Name
+	_, err := GetPod(o.client, namespace, remotePodName(name))
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	_, err = CreatePod(o.client, buildRemotePod(remote, claim, o.image, o.busAddress, o.topicBase))
+	if errors.Is(err, ErrConflict) {
+		return nil
+	}
+	return err
+}

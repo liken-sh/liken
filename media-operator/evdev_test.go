@@ -72,12 +72,10 @@ func TestBitmapCarriesOneBitPerCode(t *testing.T) {
 	}
 }
 
-func TestBitmapsMatchTheBoundCodes(t *testing.T) {
-	bindings := []compiledBinding{
-		{EventType: evKey, Code: 0x130, Value: 1, Action: actionPause},
-		{EventType: evAbs, Code: 0x11, Value: -1, Action: actionVolume, Amount: 5},
-	}
-
+// The reader keeps a node that reports any bindable button or hat
+// axis, with no keymap to narrow it. A node that reports codes outside
+// buttonCodes and axisCodes, as a touchpad does, is not a controller.
+func TestControllerBitmapsKeepTheNodeThatCarriesInput(t *testing.T) {
 	cases := []struct {
 		name string
 		keys []byte
@@ -85,27 +83,27 @@ func TestBitmapsMatchTheBoundCodes(t *testing.T) {
 		want bool
 	}{
 		{
-			name: "a gamepad with the button and the hat",
+			name: "a gamepad with buttons and the hat",
 			keys: bitmapOf(keyBitmapBytes, 0x130, 0x131),
 			axes: bitmapOf(absBitmapBytes, 0x10, 0x11),
 			want: true,
 		},
 		{
-			name: "a node with the button alone",
+			name: "a node with one button alone",
 			keys: bitmapOf(keyBitmapBytes, 0x130),
 			axes: bitmapOf(absBitmapBytes),
 			want: true,
 		},
 		{
-			name: "a node with the hat alone",
+			name: "a node with one hat axis alone",
 			keys: bitmapOf(keyBitmapBytes),
 			axes: bitmapOf(absBitmapBytes, 0x11),
 			want: true,
 		},
 		{
-			name: "a node with neither",
-			keys: bitmapOf(keyBitmapBytes, 0x1c),
-			axes: bitmapOf(absBitmapBytes, 0x10),
+			name: "a touchpad that reports neither",
+			keys: bitmapOf(keyBitmapBytes, 0x14a),
+			axes: bitmapOf(absBitmapBytes, 0x35),
 			want: false,
 		},
 		{
@@ -118,13 +116,9 @@ func TestBitmapsMatchTheBoundCodes(t *testing.T) {
 
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
-			mustMatch(t, bitmapsMatch(bindings, each.keys, each.axes), each.want)
+			mustMatch(t, controllerBitmaps(each.keys, each.axes), each.want)
 		})
 	}
-}
-
-func TestBitmapsMatchNothingWithoutBindings(t *testing.T) {
-	mustMatch(t, bitmapsMatch(nil, bitmapOf(keyBitmapBytes, 0x130), bitmapOf(absBitmapBytes, 0x11)), false)
 }
 
 func TestBitmapRequestNumbers(t *testing.T) {

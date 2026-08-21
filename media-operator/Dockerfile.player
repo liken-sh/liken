@@ -1,8 +1,10 @@
 # The player image: mpv, the libraries that decode on a real
-# machine, and the same binary the operator image carries, here in
-# its supervise mode. The operator's image cannot serve this role,
-# because it is one static binary on scratch and mpv needs a video
-# and audio stack under it.
+# machine, and the same binary the operator image carries. In this
+# image the binary runs as the player shim, and the operator also
+# overrides the entrypoint to run it in the bridge and remote modes.
+# The operator's image cannot serve this role, because it is one
+# static binary on scratch and mpv needs a video and audio stack
+# under it.
 
 # The build stage repeats the operator image's, so both images carry
 # the same binary from the same source at the same commit.
@@ -42,8 +44,11 @@ RUN apt-get update \
 
 COPY --from=build /media-operator /media-operator
 
-# The entrypoint names the mode and the pod supplies only the media.
-# No shell wrapper stands between the two: the supervisor reads
-# DISPLAY_APP_ID itself, and it must be PID 1 to relay the kubelet's
-# signal to mpv.
-ENTRYPOINT ["/media-operator", "supervise"]
+# The entrypoint is the player shim, and mpv is the container's own
+# process. The display operator writes DISPLAY_APP_ID into the
+# environment at run time, after the pod spec is fixed, so the shim
+# reads that one variable, appends it as --wayland-app-id, and execs
+# mpv. Because it execs, no supervisor wraps mpv, and the kubelet
+# drives mpv directly: the kubelet sends the signal, reaps the
+# children, and carries mpv's exit code out as the pod's outcome.
+ENTRYPOINT ["/media-operator", "player"]

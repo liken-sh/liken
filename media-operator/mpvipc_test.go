@@ -73,7 +73,7 @@ func TestReadEventsDeliversOnlyWhatWasObserved(t *testing.T) {
 }
 
 func TestDialMPVWaitsForTheSocketMPVHasNotMadeYet(t *testing.T) {
-	useDialBudget(t, 40, 10*time.Millisecond)
+	useDialDelay(t, 10*time.Millisecond)
 	path := filepath.Join(t.TempDir(), "mpv.sock")
 
 	// The first dial nearly always fails in production, because mpv
@@ -86,14 +86,19 @@ func TestDialMPVWaitsForTheSocketMPVHasNotMadeYet(t *testing.T) {
 	connection.Close()
 }
 
-func TestDialMPVGivesUpOnASocketThatNeverArrives(t *testing.T) {
-	useDialBudget(t, 3, time.Millisecond)
-	_, err := dialMPV(context.Background(), filepath.Join(t.TempDir(), "absent.sock"))
+// A socket that never arrives ends the dial only when the context does,
+// because waiting for mpv is the whole job and the dial has no deadline
+// of its own.
+func TestDialMPVWaitsForASocketUntilItsContextEnds(t *testing.T) {
+	useDialDelay(t, time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	_, err := dialMPV(ctx, filepath.Join(t.TempDir(), "absent.sock"))
 	mustFail(t, err)
 }
 
 func TestDialMPVStopsWithItsContext(t *testing.T) {
-	useDialBudget(t, 1_000, 10*time.Millisecond)
+	useDialDelay(t, 10*time.Millisecond)
 	ctx, stop := context.WithCancel(context.Background())
 	stop()
 
@@ -139,9 +144,9 @@ func listenAfter(t *testing.T, path string, delay time.Duration) {
 	}()
 }
 
-func useDialBudget(t *testing.T, attempts int, delay time.Duration) {
+func useDialDelay(t *testing.T, delay time.Duration) {
 	t.Helper()
-	attemptsWere, delayWas := mpvDialAttempts, mpvDialDelay
-	t.Cleanup(func() { mpvDialAttempts, mpvDialDelay = attemptsWere, delayWas })
-	mpvDialAttempts, mpvDialDelay = attempts, delay
+	was := mpvDialDelay
+	t.Cleanup(func() { mpvDialDelay = was })
+	mpvDialDelay = delay
 }

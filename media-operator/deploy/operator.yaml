@@ -5,10 +5,13 @@
 # creates claims and pods, and writes statuses, and the scheduler
 # places the playback pods wherever the claimed devices are.
 #
+# The operator serves no HTTP. It subscribes to the bus for each
+# playback pod's report instead of hearing it over an endpoint of its
+# own. The reports are the one path in this system that does not go
+# through the API server, because the pods hold no API credentials.
+#
 # There is no volume for state. The operator re-derives everything
-# from the API server on every pass, and the one thing it mints, the
-# report token in each playback pod's environment, it recovers by
-# reading the pod back.
+# from the API server on every pass.
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -35,22 +38,18 @@ spec:
           image: ghcr.io/liken-sh/media-operator:latest
           env:
             # The image the playback pods run: mpv under this same
-            # binary as supervisor. The operator stamps it into
+            # binary as the argument shim. The operator stamps it into
             # every pod it creates. It is an environment variable
             # rather than a constant so a cluster pins the pair of
             # images together with one patch.
             - name: PLAYER_IMAGE
               value: ghcr.io/liken-sh/media-operator-player:latest
-            # The address the playback pods report to: the Service
-            # below, as the pods across the cluster reach it. The
-            # operator cannot derive its own Service name, so the
-            # manifest states it, and the operator passes it into
-            # every playback pod under this same variable name.
-            - name: MEDIA_OPERATOR_URL
-              value: http://media-operator.liken-system.svc:8080
-          ports:
-            - name: report
-              containerPort: 8080
+            # The broker the operator and every pod reach: the bus
+            # Service in this namespace. The operator cannot derive the
+            # Service name, so the manifest states it, and the operator
+            # passes the address into every pod it creates.
+            - name: MEDIA_BUS_ADDRESS
+              value: bus.liken-system.svc:1883
           securityContext:
             capabilities:
               drop: ["ALL"]
@@ -62,20 +61,3 @@ spec:
               memory: 32Mi
             limits:
               memory: 64Mi
----
-# Where the supervisors report. Every playback pod POSTs its
-# observations here, and the operator folds them into play statuses.
-# The reports are the one path in this system that does not go
-# through the API server, because the playback pods hold no API
-# credentials.
-apiVersion: v1
-kind: Service
-metadata:
-  name: media-operator
-spec:
-  selector:
-    app: media-operator
-  ports:
-    - name: report
-      port: 8080
-      targetPort: report

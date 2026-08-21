@@ -12,78 +12,59 @@ package main
 // replay.
 
 import (
-	"crypto/rand"
-	"encoding/hex"
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"time"
 )
 
 // The operator's own environment: the player image it stamps into
-// every playback pod, and the address it hears reports on. The
-// Deployment must set PLAYER_IMAGE and MEDIA_OPERATOR_URL, because
-// neither is discoverable from inside the pod: the image pair is a
-// release decision, and a pod cannot read the name of the Service in
-// front of it. REPORT_ADDRESS has a default, because a container's
-// own listen address is nobody's policy.
+// every playback pod, the broker every pod connects to, and the base
+// every topic extends. The Deployment sets PLAYER_IMAGE and
+// MEDIA_BUS_ADDRESS, because neither is discoverable from inside a pod:
+// the image is a release decision, and a pod cannot read the address of
+// the broker in front of it. MEDIA_TOPIC_BASE has a default, because a
+// cluster that runs one bus needs no policy for the base.
 const (
-	playerImageVariable   = "PLAYER_IMAGE"
-	reportAddressVariable = "REPORT_ADDRESS"
+	playerImageVariable = "PLAYER_IMAGE"
 )
 
-const defaultReportAddress = ":8080"
-
 // backstopInterval is how often the loop reconciles with nothing to
-// prompt it. The tick is what recovers a lost watch event, a pod
-// that changed phase, and a Player that appeared after its Play.
+// prompt it. The tick is what recovers a lost watch event, a pod that
+// changed phase, and a Player that appeared after its Play.
 const backstopInterval = 10 * time.Second
 
-// tokenBytes is sixteen random bytes, printed as thirty-two
-// hexadecimal characters. The token proves a report comes from the
-// pod the operator created for that Play, and it grants nothing
-// else: a stolen token can misreport one play's position, never
-// touch the API.
-const tokenBytes = 16
-
-// mintToken is a package variable so a test can mint a token it can
-// predict.
-var mintToken = func() (string, error) {
-	raw := make([]byte, tokenBytes)
-	if _, err := rand.Read(raw); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(raw), nil
-}
-
-// operator holds what every pass needs. The report desk is a field
-// rather than a global so a test builds an operator around a desk it
-// can inspect.
+// operator holds what every pass needs. The report desk and the bus
+// are fields rather than globals so a test builds an operator around a
+// desk it can inspect.
 type operator struct {
-	client      *Client
-	image       string
-	operatorURL string
-	reports     *reports
+	client     *Client
+	image      string
+	busAddress string
+	topicBase  string
+	bus        *Bus
+	reports    *reports
 }
 
 func operate() {
-	// Setup failures end the process on purpose. The kubelet
-	// restarts the pod with backoff, and the failure shows in
-	// kubectl instead of hiding in a retry loop.
+	// Setup failures end the process on purpose. The kubelet restarts
+	// the pod with backoff, and the failure shows in kubectl instead of
+	// hiding in a retry loop.
 	image := os.Getenv(playerImageVariable)
 	if image == "" {
 		fmt.Fprintf(os.Stderr, "%s is unset; the Deployment must name the player image\n", playerImageVariable)
 		os.Exit(1)
 	}
-	operatorURL := os.Getenv(operatorURLVariable)
-	if operatorURL == "" {
-		fmt.Fprintf(os.Stderr, "%s is unset; the Deployment must name the Service a playback pod reports to\n", operatorURLVariable)
+	busAddress := os.Getenv(busAddressVariable)
+	if busAddress == "" {
+		fmt.Fprintf(os.Stderr, "%s is unset; the Deployment must name the broker\n", busAddressVariable)
 		os.Exit(1)
 	}
-	address := os.Getenv(reportAddressVariable)
-	if address == "" {
-		address = defaultReportAddress
+	topicBase := os.Getenv(topicBaseVariable)
+	if topicBase == "" {
+		topicBase = defaultTopicBase
 	}
 
 	client, err := InClusterClient()
@@ -92,33 +73,60 @@ func operate() {
 		os.Exit(1)
 	}
 
-	// One wake channel serves the watch and the report desk both,
-	// because a wake carries no information beyond "read the
-	// collection again".
+	// One wake channel serves the two watches and the bus handler,
+	// because a wake carries no information beyond "read the collection
+	// again".
 	wake := make(chan struct{}, 1)
 	desk := newReports(wake)
-	media := &operator{client: client, image: image, operatorURL: operatorURL, reports: desk}
+	media := &operator{
+		client:     client,
+		image:      image,
+		busAddress: busAddress,
+		topicBase:  topicBase,
+		reports:    desk,
+	}
 
-	go func() {
-		// An endpoint that cannot listen leaves every Play's
-		// position frozen, so the process ends instead of running an
-		// operator that hears nothing.
-		if err := http.ListenAndServe(address, reportHandler(desk)); err != nil {
-			fmt.Fprintf(os.Stderr, "serving reports on %s: %v\n", address, err)
-			os.Exit(1)
+	// The bus handler is the only path a report takes to the control
+	// plane. It maps each message's topic back to a Play, folds a status
+	// report into the desk, and drops a Play's report when its
+	// availability goes offline.
+	media.bus = newBus(busAddress, "media-operator", nil, nil, func(topic string, payload []byte) {
+		namespace, name, kind, ok := parsePlayTopic(topicBase, topic)
+		if !ok {
+			return
 		}
-	}()
+		switch kind {
+		case playStatusKind:
+			var report playReport
+			if err := json.Unmarshal(payload, &report); err != nil {
+				return
+			}
+			desk.fold(namespace, name, report)
+		case playAvailabilityKind:
+			desk.availability(namespace, name, string(payload) == availabilityOnline)
+		}
+	})
+	media.bus.Subscribe(playStatusFilter(topicBase))
+	media.bus.Subscribe(playAvailabilityFilter(topicBase))
+	go media.bus.Run(context.Background())
 
-	// The first list does two jobs: it proves the operator can read
-	// plays at all, and its resourceVersion is where the watch
-	// starts.
-	list, err := ListPlays(client)
+	// The first lists do two jobs: they prove the operator can read the
+	// collections, and their resourceVersions are where the watches
+	// start.
+	plays, err := ListPlays(client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing plays: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("media.liken.sh: operating %d plays, reports on %s\n", len(list.Items), address)
-	go watchPlays(client, list.Metadata.ResourceVersion, wake)
+	remotes, err := ListAllRemotes(client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing remotes: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("media.liken.sh: operating %d plays and %d remotes over %s\n",
+		len(plays.Items), len(remotes.Items), busAddress)
+	go watchPlays(client, plays.Metadata.ResourceVersion, wake)
+	go watchRemotes(client, remotes.Metadata.ResourceVersion, wake)
 
 	ticker := time.NewTicker(backstopInterval)
 	for {
@@ -130,9 +138,10 @@ func operate() {
 	}
 }
 
-// pass runs one reconcile over every Play in the cluster. A failure
-// on one Play is reported and the pass continues, because one
-// namespace's broken run must not freeze every other room's status.
+// pass runs one reconcile over every Play and every Remote in the
+// cluster. A failure on one object is reported and the pass continues,
+// because one namespace's broken run must not freeze every other room's
+// status.
 func (o *operator) pass() {
 	list, err := ListPlays(o.client)
 	if err != nil {
@@ -143,9 +152,9 @@ func (o *operator) pass() {
 	for index := range list.Items {
 		play := &list.Items[index]
 		live[runKey(play.Metadata.Namespace, play.Metadata.Name)] = true
-		// A Play in a terminal phase is done. Its pod and claims
-		// stay until the Play is deleted, and the garbage collector
-		// takes them then, through the ownerReferences they carry.
+		// A Play in a terminal phase is done. Its pod and claims stay
+		// until the Play is deleted, and the garbage collector takes
+		// them then, through the ownerReferences they carry.
 		if terminalPhase(play.Status.Phase) {
 			continue
 		}
@@ -156,13 +165,14 @@ func (o *operator) pass() {
 	}
 	o.reports.retain(live)
 	o.reconcilePlayers(list.Items)
+	o.reconcileRemotes()
 }
 
-// reconcilePlayers writes every Player's status from the same Plays
-// the pass just read. A Player's status is relational, so it is a
-// second read and a write on the same pass rather than a loop of its
-// own: nothing watches Players, and the derivation needs every Play,
-// which the pass already holds.
+// reconcilePlayers writes every Player's status from the same Plays the
+// pass just read. A Player's status is relational, so it is a second
+// read and a write on the same pass rather than a loop of its own:
+// nothing watches Players, and the derivation needs every Play, which
+// the pass already holds.
 func (o *operator) reconcilePlayers(plays []Play) {
 	players, err := ListPlayers(o.client)
 	if err != nil {
@@ -179,10 +189,29 @@ func (o *operator) reconcilePlayers(plays []Play) {
 	}
 }
 
+// reconcileRemotes reconciles a standing pod for every Remote in the
+// cluster. A Remote's pod runs whether or not anything plays, so this
+// pass is its own read of the whole collection and not derived from the
+// Plays.
+func (o *operator) reconcileRemotes() {
+	list, err := ListAllRemotes(o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing remotes: %v\n", err)
+		return
+	}
+	for index := range list.Items {
+		remote := &list.Items[index]
+		if err := o.reconcileRemote(remote); err != nil {
+			fmt.Fprintf(os.Stderr, "reconciling remote %s/%s: %v\n",
+				remote.Metadata.Namespace, remote.Metadata.Name, err)
+		}
+	}
+}
+
 // reconcile takes one Play from the Player it names to the status it
-// earns. The order matters: nothing is created until the Player is
-// read and every URI resolves, so a Play that can never run leaves
-// no half-built objects behind.
+// earns. The order matters: nothing is created until the Player is read
+// and every URI resolves, so a Play that can never run leaves no
+// half-built objects behind.
 func (o *operator) reconcile(play *Play) error {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	if playerName(play) == "" {
@@ -205,10 +234,10 @@ func (o *operator) reconcile(play *Play) error {
 		return writePlayStatus(o.client, play, derivePlayStatus(play, player, resolveErr, nil, nil))
 	}
 
-	// A Remote that will not resolve fails the Play only while there
-	// is still no pod. Once the pod exists, its container set is
-	// fixed and no edit to a Remote or a Keymap can reach this run,
-	// so a Keymap broken mid-film must not fail the film.
+	// A Remote that will not resolve fails the Play only while there is
+	// still no pod. Once the pod exists, its container set is fixed and
+	// no edit to a Remote or a Keymap can reach this run, so a Keymap
+	// broken mid-film must not fail the film.
 	remotes, remoteErr := gatherRemotes(o.client, namespace, playerName(play))
 	if remoteErr != nil {
 		_, err := GetPod(o.client, namespace, podName(name))
@@ -220,8 +249,14 @@ func (o *operator) reconcile(play *Play) error {
 		}
 		remotes = nil
 	}
+	// The events topic each bound remote publishes on is what the bridge
+	// sidecar subscribes to. The operator fills it here, because the
+	// topic base lives with the operator.
+	for index := range remotes {
+		remotes[index].EventsTopic = remoteEventsTopic(o.topicBase, namespace, remotes[index].Name)
+	}
 
-	claim := buildClaim(play, player, remotes)
+	claim := buildClaim(play, player)
 	if err := ensureClaim(o.client, claim); err != nil {
 		return err
 	}
@@ -254,51 +289,29 @@ func ensureClaim(c *Client, claim *ResourceClaim) error {
 	return nil
 }
 
-// ensurePod creates the pod once per Play and never rebuilds it.
-// There are two ways to hold a pod: this pass created it, in which
-// case the freshly minted token goes to the desk, or a previous
-// operator left it running, in which case the token is adopted from
-// the pod's own environment, so the pod's reports stay accepted
-// across an operator restart.
+// ensurePod creates the pod once per Play and never rebuilds it. The
+// pod holds no credential and reports over the bus, so an operator that
+// restarted reads a running Play's position back from the broker's
+// retained status and adopts nothing from the pod.
+//
+// A 409 on the create means another pass, or another copy of this
+// operator, created the pod first, so the pod is read back and kept.
 func (o *operator) ensurePod(play *Play, claim *ResourceClaim, resolved resolution, remotes []boundRemote) (*Pod, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	pod, err := GetPod(o.client, namespace, podName(name))
 	if err == nil {
-		o.adoptToken(play, pod)
 		return pod, nil
 	}
 	if !errors.Is(err, ErrNotFound) {
 		return nil, err
 	}
 
-	token, err := mintToken()
-	if err != nil {
-		return nil, err
-	}
-	created, err := CreatePod(o.client, buildPod(play, claim, resolved, o.image, token, o.operatorURL, remotes))
+	created, err := CreatePod(o.client, buildPod(play, claim, resolved, o.image, o.busAddress, o.topicBase, remotes))
 	if errors.Is(err, ErrConflict) {
-		// The pod already existed, so the token this pass minted
-		// never reached it. The pod's own environment carries the
-		// token its container holds, so that is the one to keep.
-		created, err = GetPod(o.client, namespace, podName(name))
-		if err != nil {
-			return nil, err
-		}
-		o.adoptToken(play, created)
-		return created, nil
+		return GetPod(o.client, namespace, podName(name))
 	}
 	if err != nil {
 		return nil, err
 	}
-	o.reports.remember(namespace, name, token)
 	return created, nil
-}
-
-// adoptToken reads the token out of a running pod's environment,
-// which is where a minted token survives an operator restart. A pod
-// with no token in it leaves the desk as it was.
-func (o *operator) adoptToken(play *Play, pod *Pod) {
-	if token := tokenFromPod(pod); token != "" {
-		o.reports.remember(play.Metadata.Namespace, play.Metadata.Name, token)
-	}
 }
