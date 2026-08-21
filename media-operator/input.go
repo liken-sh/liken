@@ -61,6 +61,15 @@ type compiledBinding struct {
 	Value     int32  `json:"value"`
 	Action    string `json:"action"`
 	Amount    int    `json:"amount,omitempty"`
+
+	// RepeatDelay and RepeatInterval are milliseconds. A RepeatInterval
+	// above zero makes the binding repeat while the control is held: the
+	// bridge fires the action on the press, waits RepeatDelay, then
+	// re-fires every RepeatInterval until the release. Both are zero on a
+	// binding that fires once. The operator compiles the Keymap's
+	// durations to these milliseconds, so the bridge parses nothing.
+	RepeatDelay    int `json:"repeatDelay,omitempty"`
+	RepeatInterval int `json:"repeatInterval,omitempty"`
 }
 
 // remoteBindings is one bound Remote as the playback pod's sidecar

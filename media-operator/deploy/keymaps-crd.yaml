@@ -58,9 +58,9 @@ spec:
                   type: array
                   x-kubernetes-list-type: atomic
                   description: >-
-                    Button entries. Each one answers the press alone:
-                    a held button's autorepeat and its release do
-                    nothing.
+                    Button entries. Each one answers the press. A held
+                    button fires once unless it names a repeat, and the
+                    release stops a repeat the press started.
                   items:
                     type: object
                     required: [press, action]
@@ -94,6 +94,31 @@ spec:
                           seek, a step for volume and chapter. The
                           sign is the direction, so one action
                           serves both bumpers.
+                      repeat:
+                        type: object
+                        description: >-
+                          When present, the action repeats while the
+                          button is held. The player pod fires it on the
+                          press, waits the delay, then re-fires it every
+                          interval until the release. Omit it and the
+                          button fires once per press. A repeat works on
+                          any action, so a held seek scrubs and a held
+                          volume ramps.
+                        properties:
+                          delay:
+                            type: string
+                            pattern: '^[0-9]+(\.[0-9]+)?(ms|s)$'
+                            description: >-
+                              How long to hold before the repeat starts,
+                              as a duration like 400ms. A tap shorter than
+                              this does not repeat. Defaults to 400ms.
+                          interval:
+                            type: string
+                            pattern: '^[0-9]+(\.[0-9]+)?(ms|s)$'
+                            description: >-
+                              How often to re-run the action while the
+                              button is held, as a duration like 300ms.
+                              Defaults to 300ms.
                 axes:
                   type: array
                   x-kubernetes-list-type: atomic
@@ -124,8 +149,8 @@ spec:
                         description: >-
                           Which direction of the axis this entry
                           binds. The hat reports -1 and 1 as its two
-                          presses and 0 as the release, and the
-                          release does nothing.
+                          presses and 0 as the release, and the release
+                          stops a repeat the press started.
                       action:
                         type: string
                         enum: [pause, mute, seek, volume, chapter, subtitles, audio, info]
@@ -140,3 +165,26 @@ spec:
                           How far the action moves: seconds for
                           seek, a step for volume and chapter. The
                           sign is the direction.
+                      repeat:
+                        type: object
+                        description: >-
+                          When present, the action repeats while the hat
+                          direction is held. The player pod fires it on
+                          the press, waits the delay, then re-fires it
+                          every interval until the release. Omit it and
+                          the direction fires once per press.
+                        properties:
+                          delay:
+                            type: string
+                            pattern: '^[0-9]+(\.[0-9]+)?(ms|s)$'
+                            description: >-
+                              How long to hold before the repeat starts,
+                              as a duration like 400ms. A tap shorter than
+                              this does not repeat. Defaults to 400ms.
+                          interval:
+                            type: string
+                            pattern: '^[0-9]+(\.[0-9]+)?(ms|s)$'
+                            description: >-
+                              How often to re-run the action while the hat
+                              direction is held, as a duration like 300ms.
+                              Defaults to 300ms.

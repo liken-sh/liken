@@ -261,23 +261,36 @@ type KeymapSpec struct {
 	Axes    []KeymapAxis   `json:"axes,omitempty"`
 }
 
+// A KeymapRepeat makes a binding repeat while the control is held. The
+// player pod fires the action on the press, waits the delay, then
+// re-fires it every interval until the reader publishes the release. The
+// delay and the interval are durations, like 400ms or 1s, and each takes
+// a default when it is empty. A binding with no repeat block fires once
+// per press, whatever the action is.
+type KeymapRepeat struct {
+	Delay    string `json:"delay,omitempty"`
+	Interval string `json:"interval,omitempty"`
+}
+
 // Press is an evdev key name out of buttonCodes, Action is a word
 // from the vocabulary in input.go, and Amount belongs only to the
 // three actions that move by one: seek, volume, and chapter.
 type KeymapButton struct {
-	Press  string `json:"press"`
-	Action string `json:"action"`
-	Amount int    `json:"amount,omitempty"`
+	Press  string        `json:"press"`
+	Action string        `json:"action"`
+	Amount int           `json:"amount,omitempty"`
+	Repeat *KeymapRepeat `json:"repeat,omitempty"`
 }
 
 // An axis entry adds the value, because a hat axis reports -1 and 1
 // as its two presses and 0 as the release: one axis is two bindable
 // directions.
 type KeymapAxis struct {
-	Axis   string `json:"axis"`
-	Value  int    `json:"value"`
-	Action string `json:"action"`
-	Amount int    `json:"amount,omitempty"`
+	Axis   string        `json:"axis"`
+	Value  int           `json:"value"`
+	Action string        `json:"action"`
+	Amount int           `json:"amount,omitempty"`
+	Repeat *KeymapRepeat `json:"repeat,omitempty"`
 }
 
 // A ResourceClaim is the request for hardware. The operator writes

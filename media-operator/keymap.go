@@ -12,6 +12,15 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
+)
+
+// The repeat defaults, applied when a binding sets a repeat block but
+// leaves a field empty. The delay is long enough that a tap does not
+// repeat; the interval is a middling rate a keymap tunes per binding.
+const (
+	defaultRepeatDelay    = 400 * time.Millisecond
+	defaultRepeatInterval = 300 * time.Millisecond
 )
 
 // A boundRemote is one Remote as the pod builders need it: the name
@@ -47,13 +56,17 @@ func compileKeymap(keymap *Keymap) ([]compiledBinding, error) {
 		if err := checkAction(name, button.Press, button.Action, button.Amount); err != nil {
 			return nil, err
 		}
-		bindings = append(bindings, compiledBinding{
+		binding := compiledBinding{
 			EventType: evKey,
 			Code:      code,
 			Value:     1,
 			Action:    button.Action,
 			Amount:    button.Amount,
-		})
+		}
+		if err := applyRepeat(&binding, name, button.Press, button.Repeat); err != nil {
+			return nil, err
+		}
+		bindings = append(bindings, binding)
 	}
 
 	for _, axis := range keymap.Spec.Axes {
@@ -67,13 +80,17 @@ func compileKeymap(keymap *Keymap) ([]compiledBinding, error) {
 		if err := checkAction(name, entry, axis.Action, axis.Amount); err != nil {
 			return nil, err
 		}
-		bindings = append(bindings, compiledBinding{
+		binding := compiledBinding{
 			EventType: evAbs,
 			Code:      code,
 			Value:     int32(axis.Value),
 			Action:    axis.Action,
 			Amount:    axis.Amount,
-		})
+		}
+		if err := applyRepeat(&binding, name, entry, axis.Repeat); err != nil {
+			return nil, err
+		}
+		bindings = append(bindings, binding)
 	}
 
 	if len(bindings) == 0 {
@@ -104,6 +121,48 @@ func checkAction(keymap, entry, action string, amount int) error {
 			keymap, entry, action)
 	}
 	return nil
+}
+
+// applyRepeat folds a Keymap's repeat block into the compiled binding. A
+// binding with no block fires once. A block turns repeat on, whatever the
+// action is, and an empty delay or interval takes the default. The
+// operator parses the durations here, so the bridge carries milliseconds
+// and parses nothing.
+func applyRepeat(binding *compiledBinding, keymap, entry string, repeat *KeymapRepeat) error {
+	if repeat == nil {
+		return nil
+	}
+	delay, err := repeatDuration(keymap, entry, "delay", repeat.Delay, defaultRepeatDelay)
+	if err != nil {
+		return err
+	}
+	interval, err := repeatDuration(keymap, entry, "interval", repeat.Interval, defaultRepeatInterval)
+	if err != nil {
+		return err
+	}
+	binding.RepeatDelay = int(delay / time.Millisecond)
+	binding.RepeatInterval = int(interval / time.Millisecond)
+	return nil
+}
+
+// repeatDuration reads one repeat field, an empty value taking the
+// default. The compile is the gate a bad duration hits, so a Keymap with
+// a value like "soon" fails the Play with a message instead of reaching a
+// pod that cannot parse it.
+func repeatDuration(keymap, entry, field, value string, fallback time.Duration) (time.Duration, error) {
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("the Keymap %s sets the repeat %s on %s to %q, which is not a duration like 400ms",
+			keymap, field, entry, value)
+	}
+	if parsed <= 0 {
+		return 0, fmt.Errorf("the Keymap %s sets the repeat %s on %s to %q, which is not a positive duration",
+			keymap, field, entry, value)
+	}
+	return parsed, nil
 }
 
 // gatherRemotes reads every Remote bound to one player and compiles

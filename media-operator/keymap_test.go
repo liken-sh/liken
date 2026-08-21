@@ -246,3 +246,56 @@ func TestGatherRemotesFailsOnAKeymapThatWillNotCompile(t *testing.T) {
 		t.Errorf("err = %q, want it to name BTN_NOPE", err)
 	}
 }
+
+// A repeat block compiles to milliseconds, an empty field takes the
+// default, and a binding with no block carries no repeat.
+func TestCompileRepeatSetsMillisecondsAndDefaults(t *testing.T) {
+	keymap := &Keymap{
+		Metadata: ObjectMeta{Name: "pad", Namespace: "house"},
+		Spec: KeymapSpec{
+			Buttons: []KeymapButton{
+				{Press: "BTN_TR", Action: actionSeek, Amount: 10, Repeat: &KeymapRepeat{Delay: "500ms", Interval: "200ms"}},
+				{Press: "BTN_TL", Action: actionSeek, Amount: -10, Repeat: &KeymapRepeat{}},
+				{Press: "BTN_SOUTH", Action: actionPause},
+			},
+		},
+	}
+
+	bindings, err := compileKeymap(keymap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bindings[0].RepeatDelay != 500 || bindings[0].RepeatInterval != 200 {
+		t.Errorf("explicit repeat = %d/%d, want 500/200", bindings[0].RepeatDelay, bindings[0].RepeatInterval)
+	}
+	if bindings[1].RepeatDelay != 400 || bindings[1].RepeatInterval != 300 {
+		t.Errorf("default repeat = %d/%d, want 400/300", bindings[1].RepeatDelay, bindings[1].RepeatInterval)
+	}
+	if bindings[2].RepeatInterval != 0 {
+		t.Errorf("a binding with no repeat carries interval %d, want 0", bindings[2].RepeatInterval)
+	}
+}
+
+// A repeat compiles on any action, a toggle included, and a duration that
+// does not parse fails the compile with a message.
+func TestCompileRepeatAllowsAToggleAndRejectsABadDuration(t *testing.T) {
+	toggle := &Keymap{
+		Metadata: ObjectMeta{Name: "pad", Namespace: "house"},
+		Spec: KeymapSpec{
+			Buttons: []KeymapButton{{Press: "BTN_SOUTH", Action: actionPause, Repeat: &KeymapRepeat{Interval: "500ms"}}},
+		},
+	}
+	if _, err := compileKeymap(toggle); err != nil {
+		t.Errorf("a repeat on a toggle should compile: %v", err)
+	}
+
+	bad := &Keymap{
+		Metadata: ObjectMeta{Name: "pad", Namespace: "house"},
+		Spec: KeymapSpec{
+			Buttons: []KeymapButton{{Press: "BTN_TR", Action: actionSeek, Amount: 10, Repeat: &KeymapRepeat{Interval: "soon"}}},
+		},
+	}
+	if _, err := compileKeymap(bad); err == nil {
+		t.Error("a duration that does not parse should fail the compile")
+	}
+}

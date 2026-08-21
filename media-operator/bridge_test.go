@@ -1,11 +1,70 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"net"
+	"sync"
 	"testing"
 	"time"
 )
+
+// A held control repeats until its release, and the release stops it.
+// mpv is a pipe here, so the test counts the commands the bridge would
+// send it.
+func TestARepeatFiresUntilTheReleaseStopsIt(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+
+	var mu sync.Mutex
+	commands := 0
+	go func() {
+		buffer := make([]byte, 4096)
+		for {
+			read, err := server.Read(buffer)
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			commands += bytes.Count(buffer[:read], []byte("\n"))
+			mu.Unlock()
+		}
+	}()
+	count := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return commands
+	}
+
+	br := &bridge{
+		mpv:       client,
+		repeatCtx: context.Background(),
+		repeats:   map[uint16]context.CancelFunc{},
+	}
+
+	command := []any{"osd-auto", "seek", 10}
+	br.command(command)
+	br.startRepeat(0x137, command, 1, 5)
+
+	time.Sleep(50 * time.Millisecond)
+	br.stopRepeat(0x137)
+	time.Sleep(20 * time.Millisecond)
+
+	held := count()
+	if held < 3 {
+		t.Fatalf("the repeat fired %d times while held, want several", held)
+	}
+	if _, present := br.repeats[0x137]; present {
+		t.Error("the release left the code in the repeats map")
+	}
+
+	time.Sleep(30 * time.Millisecond)
+	if after := count(); after != held {
+		t.Errorf("the repeat kept firing after the release: %d then %d", held, after)
+	}
+}
 
 func TestFormatPosition(t *testing.T) {
 	cases := []struct {

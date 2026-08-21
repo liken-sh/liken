@@ -67,7 +67,23 @@ type bridge struct {
 	reportMutex sync.Mutex
 	lastReport  []byte
 	haveReport  bool
+
+	// repeats holds one cancel per held control that repeats, keyed by
+	// its evdev code, so the release stops the repeat the press started.
+	// repeatCtx is the run's context, so every repeat ends when the
+	// bridge does. Only the bus reader goroutine mutates the map, but a
+	// repeat goroutine reads through its own cancel, so repeatMu covers
+	// it.
+	repeatCtx context.Context
+	repeatMu  sync.Mutex
+	repeats   map[uint16]context.CancelFunc
 }
+
+// maxRepeatWindow caps one synthesized repeat. A controller that sleeps
+// mid-hold publishes no release, so without this cap the repeat would
+// fire until the film ended. A person does not hold a control this long,
+// so the cap ends a repeat a lost release left running.
+var maxRepeatWindow = 30 * time.Second
 
 // runBridge connects to the bus, drives mpv's IPC socket, and reports
 // the run. It returns when mpv's socket closes or the kubelet's grace
@@ -90,10 +106,20 @@ func runBridge() {
 		}
 	}
 
+	// The kernel runs no default action for a signal sent to PID 1, and
+	// the bridge is its container's PID 1. The signal context ends the
+	// report side on the kubelet's SIGTERM, which is the same end mpv's
+	// closed socket gives. It is built before the bus, so a repeat that a
+	// press starts the moment the bus connects has a context to end on.
+	runCtx, stopRun := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stopRun()
+
 	br := &bridge{
 		statusTopic:       playStatusTopic(base, namespace, name),
 		availabilityTopic: playAvailabilityTopic(base, namespace, name),
 		remotes:           remotes,
+		repeatCtx:         runCtx,
+		repeats:           map[uint16]context.CancelFunc{},
 	}
 
 	// The bus runs on its own context, not the signal context, so the
@@ -110,13 +136,6 @@ func runBridge() {
 		br.bus.Subscribe(remote.EventsTopic)
 	}
 	go br.bus.Run(busCtx)
-
-	// The kernel runs no default action for a signal sent to PID 1, and
-	// the bridge is its container's PID 1. The signal context ends the
-	// report side on the kubelet's SIGTERM, which is the same end mpv's
-	// closed socket gives.
-	runCtx, stopRun := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
-	defer stopRun()
 
 	br.report(runCtx)
 
@@ -149,6 +168,10 @@ func (br *bridge) onConnect(bus *Bus) {
 // matches the topic to a bound remote, decodes the event, and matches
 // it against that remote's compiled table. A press that no binding
 // names, or an action this build has no command for, writes nothing.
+//
+// A release stops a repeat the press started. The reader publishes value
+// 0 when a button lifts or a hat re-centers, and a binding matches only
+// the press, so a release reaches mpv as nothing but this stop.
 func (br *bridge) handle(topic string, payload []byte) {
 	entry, ok := br.remoteFor(topic)
 	if !ok {
@@ -156,6 +179,10 @@ func (br *bridge) handle(topic string, payload []byte) {
 	}
 	var event remoteEvent
 	if err := json.Unmarshal(payload, &event); err != nil {
+		return
+	}
+	if event.Value == 0 {
+		br.stopRepeat(event.Code)
 		return
 	}
 	binding, ok := matchBinding(entry.Bindings, inputEvent{Type: event.Type, Code: event.Code, Value: event.Value})
@@ -167,6 +194,70 @@ func (br *bridge) handle(topic string, payload []byte) {
 		return
 	}
 	br.command(command)
+	// A binding that repeats fires again while the control is held. The
+	// press fired once above, so the repeat carries the same command until
+	// the release stops it.
+	if binding.RepeatInterval > 0 {
+		br.startRepeat(event.Code, command, binding.RepeatDelay, binding.RepeatInterval)
+	}
+}
+
+// startRepeat runs one held control's repeat. A press of the same code
+// while a repeat runs replaces it, because a second press means the first
+// release was missed or the direction changed, and one control drives one
+// repeat.
+func (br *bridge) startRepeat(code uint16, command []any, delayMillis, intervalMillis int) {
+	ctx, cancel := context.WithCancel(br.repeatCtx)
+	br.repeatMu.Lock()
+	if previous, ok := br.repeats[code]; ok {
+		previous()
+	}
+	br.repeats[code] = cancel
+	br.repeatMu.Unlock()
+	go br.repeatLoop(ctx, command,
+		time.Duration(delayMillis)*time.Millisecond,
+		time.Duration(intervalMillis)*time.Millisecond)
+}
+
+// stopRepeat ends the repeat a release names. A release for a code with
+// no repeat is the ordinary case of a control that does not repeat, and
+// it does nothing.
+func (br *bridge) stopRepeat(code uint16) {
+	br.repeatMu.Lock()
+	if cancel, ok := br.repeats[code]; ok {
+		cancel()
+		delete(br.repeats, code)
+	}
+	br.repeatMu.Unlock()
+}
+
+// repeatLoop re-fires one held control's command. The press already fired
+// once, so the loop waits the delay, which is what separates a tap from a
+// hold, then fires every interval. It ends on the release, on the bridge
+// shutting down, or on the safety window. It leaves the map alone: a
+// stopRepeat or a replacing startRepeat clears the entry, and a window
+// that ends first leaves a cancelled entry the next press or release
+// clears.
+func (br *bridge) repeatLoop(ctx context.Context, command []any, delay, interval time.Duration) {
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(delay):
+	}
+	window := time.NewTimer(maxRepeatWindow)
+	defer window.Stop()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-window.C:
+			return
+		case <-ticker.C:
+			br.command(command)
+		}
+	}
 }
 
 // remoteFor finds the bound remote a message belongs to by its events
