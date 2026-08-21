@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync/atomic"
 	"time"
 )
 
@@ -97,6 +98,13 @@ type operator struct {
 	// retained topics still stand, so it clears them once the grace has
 	// passed. Only the pass goroutine touches it.
 	playReclaim map[string]time.Time
+
+	// busReconnected is set on the bus goroutine when a session reaches a
+	// CONNACK, and read on the pass goroutine. A fresh broker session
+	// holds none of the retained state the operator owns, so the next pass
+	// re-establishes it. It is atomic because the two goroutines share it
+	// with no other lock between them.
+	busReconnected atomic.Bool
 }
 
 func operate() {
@@ -142,10 +150,19 @@ func operate() {
 		playReclaim:     map[string]time.Time{},
 	}
 
+	// onConnect marks that a fresh broker session began, so the next pass
+	// re-establishes the retained state the operator owns. The broker holds
+	// none of it on a new session, whether the operator or the broker
+	// restarted, so without this the keymaps and focus marks would stay
+	// missing until a person edited one.
+	onConnect := func(bus *Bus) {
+		media.busReconnected.Store(true)
+		poke(wake)
+	}
 	// The bus handler is the only path the control plane takes a report or
 	// a focus signal. It reads each message's topic to learn which it is,
 	// and folds it into the report desk or the focus desk.
-	media.bus = newBus(busAddress, "media-operator", nil, nil, func(topic string, payload []byte) {
+	media.bus = newBus(busAddress, "media-operator", nil, onConnect, func(topic string, payload []byte) {
 		if namespace, name, kind, ok := parsePlayTopic(topicBase, topic); ok {
 			switch kind {
 			case playStatusKind:
@@ -219,6 +236,9 @@ func operate() {
 // because one namespace's broken run must not freeze every other room's
 // status.
 func (o *operator) pass() {
+	if o.busReconnected.Swap(false) {
+		o.reestablishRetained()
+	}
 	list, err := ListPlays(o.client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing plays: %v\n", err)
@@ -255,6 +275,20 @@ func (o *operator) pass() {
 	}
 	o.reconcileRemotes()
 	o.reconcileKeymaps()
+}
+
+// reestablishRetained rewrites everything the operator publishes retained
+// after a fresh broker session, because the broker holds none of it. It
+// clears the record of published keymaps, so reconcileKeymaps writes every
+// keymap again this pass, and it republishes each focus mark, so a
+// controller keeps its owning Play across a broker or operator restart.
+// The command sidecar re-establishes a Play's status and availability the
+// same way from its own connect, so those need no help here.
+func (o *operator) reestablishRetained() {
+	o.keymapPublished = map[string]string{}
+	for key, play := range o.focus.snapshot() {
+		o.publishFocus(key, play)
+	}
 }
 
 // reclaimPlays clears the retained topics a deleted Play leaves on the

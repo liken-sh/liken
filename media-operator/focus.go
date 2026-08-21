@@ -59,6 +59,19 @@ func (f *focusDesk) markFor(key string) string {
 	return f.marks[key]
 }
 
+// snapshot copies the current marks, so the operator republishes them
+// after a fresh broker session without holding the desk lock while it
+// writes the bus.
+func (f *focusDesk) snapshot() map[string]string {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	marks := make(map[string]string, len(f.marks))
+	for key, play := range f.marks {
+		marks[key] = play
+	}
+	return marks
+}
+
 // requestCycle records that a source press asked to cycle one controller
 // and wakes the loop to arbitrate it. The cycle is an event, so a request
 // the operator misses while it is down is lost, and a later press asks

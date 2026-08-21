@@ -809,6 +809,37 @@ func TestADeletedPlayIsReclaimedAfterTheGrace(t *testing.T) {
 	}
 }
 
+// A fresh broker session holds none of the operator's retained state, so
+// a reconnect clears the record of published keymaps, which makes the
+// next reconcile write them again, and republishes each focus mark, so a
+// controller keeps its owner across a broker restart.
+func TestAReconnectReestablishesTheRetainedState(t *testing.T) {
+	bus, brokers, connected := startBus(t, 1, nil, nil)
+	waitForConnect(t, connected)
+	broker := brokers[0]
+	wake := make(chan struct{}, 1)
+	media := &operator{
+		topicBase: defaultTopicBase,
+		bus:       bus,
+		focus:     newFocusDesk(wake),
+		keymapPublished: map[string]string{
+			keymapTopic(defaultTopicBase, "gamepad"): "already-published",
+		},
+	}
+	media.focus.setMark(controllerKey("den", "sofa"), "movie")
+
+	media.reestablishRetained()
+
+	if len(media.keymapPublished) != 0 {
+		t.Errorf("keymapPublished still holds %v, want it cleared for a rewrite", media.keymapPublished)
+	}
+	published := waitForPublish(t, broker.pubs)
+	if published.topic != remoteFocusTopic(defaultTopicBase, "den", "sofa") ||
+		string(published.payload) != "movie" || !published.retained {
+		t.Errorf("focus republish = %+v, want the retained movie mark", published)
+	}
+}
+
 // keymapOperator wires an operator with a bus to a fake broker, so a test
 // reads what the keymap reconcile publishes.
 func keymapOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker) {
