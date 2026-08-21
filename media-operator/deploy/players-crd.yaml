@@ -199,6 +199,31 @@ spec:
                       description: >-
                         A CEL expression over device.attributes, for
                         a machine with more than one GPU.
+                remotes:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  # One controller for now, the same limit spec.players
+                  # carries. Plan 06 lifts the count.
+                  maxItems: 1
+                  description: >-
+                    The controllers this unit owns, each naming a
+                    Remote in the same namespace. The Play's pod builds
+                    one bridge sidecar per entry.
+                  items:
+                    type: object
+                    required: [name]
+                    properties:
+                      name:
+                        type: string
+                        minLength: 1
+                        description: >-
+                          The Remote this unit owns, by name, in this
+                          namespace.
+                      keymap:
+                        type: string
+                        description: >-
+                          A per-unit Keymap override, reserved and
+                          unread until a later plan reads it.
             status:
               type: object
               description: >-

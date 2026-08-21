@@ -165,28 +165,31 @@ func repeatDuration(keymap, entry, field, value string, fallback time.Duration) 
 	return parsed, nil
 }
 
-// gatherRemotes reads every Remote bound to one player and compiles
-// each one's Keymap. The list is sorted by name because it becomes a
-// pod spec, and a pod spec built twice from the same resources must
-// be the same spec, request for request and container for container.
-func gatherRemotes(c *Client, namespace, player string) ([]boundRemote, error) {
-	list, err := ListRemotes(c, namespace)
-	if err != nil {
-		return nil, err
-	}
+// gatherRemotes compiles the Keymap of every Remote a Player owns. It
+// reads spec.remotes in name order, because the result becomes a pod
+// spec, and a pod spec built twice from the same resources must be the
+// same spec, request for request and container for container. A named
+// Remote or its Keymap that does not exist fails the gather, and the
+// message names the missing resource.
+func gatherRemotes(c *Client, player *Player) ([]boundRemote, error) {
+	namespace := player.Metadata.Namespace
 
-	var chosen []Remote
-	for _, remote := range list.Items {
-		if bindsPlayer(remote, player) {
-			chosen = append(chosen, remote)
+	names := make([]string, 0, len(player.Spec.Remotes))
+	for _, entry := range player.Spec.Remotes {
+		names = append(names, entry.Name)
+	}
+	sort.Strings(names)
+
+	bound := make([]boundRemote, 0, len(names))
+	for _, name := range names {
+		remote, err := GetRemote(c, namespace, name)
+		if errors.Is(err, ErrNotFound) {
+			return nil, fmt.Errorf("the Player %s names the Remote %s, which does not exist in this namespace",
+				player.Metadata.Name, name)
 		}
-	}
-	sort.Slice(chosen, func(first, second int) bool {
-		return chosen[first].Metadata.Name < chosen[second].Metadata.Name
-	})
-
-	bound := make([]boundRemote, 0, len(chosen))
-	for _, remote := range chosen {
+		if err != nil {
+			return nil, err
+		}
 		keymap, err := GetKeymap(c, namespace, remote.Spec.Keymap)
 		if errors.Is(err, ErrNotFound) {
 			return nil, fmt.Errorf("the Remote %s names the Keymap %s, which does not exist in this namespace",
@@ -206,13 +209,4 @@ func gatherRemotes(c *Client, namespace, player string) ([]boundRemote, error) {
 		})
 	}
 	return bound, nil
-}
-
-func bindsPlayer(remote Remote, player string) bool {
-	for _, binding := range remote.Spec.Bindings {
-		if binding.Player == player {
-			return true
-		}
-	}
-	return false
 }

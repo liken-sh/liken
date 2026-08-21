@@ -89,11 +89,26 @@ type PlayerList struct {
 // pod drives one screen through one GPU; sinks is a list because a
 // unit plays through however many outputs it has. The CRD requires a
 // display or at least one sink.
+//
+// Remotes names the controllers the unit owns. Each entry names a
+// Remote in the same namespace, and the Play's pod runs one bridge
+// sidecar for each, so a unit's controllers belong to its spec beside
+// its display and its sinks.
 type PlayerSpec struct {
 	Zone    string         `json:"zone,omitempty"`
 	Display *PlayerDevice  `json:"display,omitempty"`
 	Sinks   []PlayerDevice `json:"sinks,omitempty"`
 	Render  *PlayerDevice  `json:"render,omitempty"`
+	Remotes []PlayerRemote `json:"remotes,omitempty"`
+}
+
+// One controller the Player owns. Name is the Remote in the same
+// namespace. Keymap is a per-unit override of that Remote's own
+// Keymap, and nothing reads it yet: a later plan reads it so one
+// controller maps one way on one unit and another way on another.
+type PlayerRemote struct {
+	Name   string `json:"name"`
+	Keymap string `json:"keymap,omitempty"`
 }
 
 // One device selection. The three fields become a DeviceClass name,
@@ -212,13 +227,13 @@ type Remote struct {
 	Spec       RemoteSpec `json:"spec"`
 }
 
-// Bindings is a list of one today, the same trade spec.players
-// makes: a grown list is no migration, and a list of one means no
-// remote drives two players, so nothing arbitrates focus yet.
+// A Remote holds its device selector and the Keymap for its model,
+// and it names no player. A Player names the Remotes it owns through
+// spec.remotes, so the unit that owns a controller is the one that
+// lists it.
 type RemoteSpec struct {
-	Device   RemoteDevice    `json:"device"`
-	Keymap   string          `json:"keymap"`
-	Bindings []RemoteBinding `json:"bindings"`
+	Device RemoteDevice `json:"device"`
+	Keymap string       `json:"keymap"`
 }
 
 // The controller is selected the way a Player's display is, by a
@@ -228,14 +243,6 @@ type RemoteSpec struct {
 type RemoteDevice struct {
 	Class    string `json:"class"`
 	Selector string `json:"selector,omitempty"`
-}
-
-// One binding names one Player. It is an object rather than a bare
-// name because a later plan adds per-binding keymap overrides, and
-// growing an object costs nothing where replacing a string is a
-// migration.
-type RemoteBinding struct {
-	Player string `json:"player"`
 }
 
 type RemoteList struct {

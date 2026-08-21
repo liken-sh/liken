@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"time"
 )
 
@@ -146,10 +147,16 @@ func operate() {
 		fmt.Fprintf(os.Stderr, "listing remotes: %v\n", err)
 		os.Exit(1)
 	}
+	players, err := ListPlayers(client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing players: %v\n", err)
+		os.Exit(1)
+	}
 	fmt.Printf("media.liken.sh: operating %d plays and %d remotes over %s\n",
 		len(plays.Items), len(remotes.Items), busAddress)
 	go watchPlays(client, plays.Metadata.ResourceVersion, wake)
 	go watchRemotes(client, remotes.Metadata.ResourceVersion, wake)
+	go watchPlayers(client, players.Metadata.ResourceVersion, wake)
 
 	ticker := time.NewTicker(backstopInterval)
 	for {
@@ -266,7 +273,7 @@ func (o *operator) reconcile(play *Play) error {
 	// still no pod. Once the pod exists, its container set is fixed and
 	// no edit to a Remote or a Keymap can reach this run, so a Keymap
 	// broken mid-film must not fail the film.
-	remotes, remoteErr := gatherRemotes(o.client, namespace, playerName(play))
+	remotes, remoteErr := gatherRemotes(o.client, player)
 	if remoteErr != nil {
 		_, err := GetPod(o.client, namespace, podName(name))
 		if errors.Is(err, ErrNotFound) {
@@ -285,10 +292,7 @@ func (o *operator) reconcile(play *Play) error {
 	}
 
 	claim := buildClaim(play, player)
-	if err := ensureClaim(o.client, claim); err != nil {
-		return err
-	}
-	pod, err := o.ensurePod(play, claim, resolved, remotes)
+	pod, err := o.ensurePlayback(play, claim, resolved, remotes, remoteErr != nil)
 	if err != nil {
 		return err
 	}
@@ -314,13 +318,11 @@ func (o *operator) writePlay(play *Play, desired PlayStatus) error {
 	return nil
 }
 
-// ensureClaim creates the claim once and never updates it. A Play's
-// spec is immutable, and the Player it names is read at the start of
-// the run, so the claim a run starts with is the claim it keeps: a
-// Player edited mid-run changes the next Play, not this one.
-//
-// A 409 on the create is success, because it means another pass, or
-// another copy of this operator, created the same claim first.
+// ensureClaim creates the playback claim when none exists and keeps an
+// existing one. A 409 on the create is success, because another pass,
+// or another copy of this operator, created the same claim first. The
+// graceful recreate deletes a claim a Player reshaped before it calls
+// this, so ensureClaim never updates a claim in place.
 func ensureClaim(c *Client, claim *ResourceClaim) error {
 	_, err := GetResourceClaim(c, claim.Metadata.Namespace, claim.Metadata.Name)
 	if err == nil {
@@ -335,23 +337,69 @@ func ensureClaim(c *Client, claim *ResourceClaim) error {
 	return nil
 }
 
-// ensurePod creates the pod once per Play and never rebuilds it. The
-// pod holds no credential and reports over the bus, so an operator that
-// restarted reads a running Play's position back from the broker's
-// retained status and adopts nothing from the pod.
-//
-// A 409 on the create means another pass, or another copy of this
-// operator, created the pod first, so the pod is read back and kept.
-func (o *operator) ensurePod(play *Play, claim *ResourceClaim, resolved resolution, remotes []boundRemote) (*Pod, error) {
+// ensurePlayback brings the running pod into line with the pod the
+// current Player would produce. A Play with no pod yet gets its claim
+// and its pod. A gather that failed keeps an existing pod as it is,
+// because the container set is fixed once it runs and a Keymap broken
+// mid-film must not fail the film. A running pod its Player reshaped is
+// recreated at the film's place, and a running pod its Player left
+// alone is kept.
+func (o *operator) ensurePlayback(play *Play, claim *ResourceClaim, resolved resolution, remotes []boundRemote, keepExisting bool) (*Pod, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
-	pod, err := GetPod(o.client, namespace, podName(name))
-	if err == nil {
-		return pod, nil
+	running, err := GetPod(o.client, namespace, podName(name))
+	if errors.Is(err, ErrNotFound) {
+		if err := ensureClaim(o.client, claim); err != nil {
+			return nil, err
+		}
+		return o.createPod(play, claim, resolved, remotes)
 	}
-	if !errors.Is(err, ErrNotFound) {
+	if err != nil {
 		return nil, err
 	}
+	if keepExisting {
+		return running, nil
+	}
 
+	claimChanged, err := o.claimDiverged(claim)
+	if err != nil {
+		return nil, err
+	}
+	desired := buildPod(play, claim, resolved, o.image, o.busAddress, o.topicBase, remotes)
+	if !claimChanged && sameRemoteSet(running, desired) {
+		return running, nil
+	}
+	return o.recreate(play, claim, resolved, remotes, claimChanged)
+}
+
+// recreate replaces a running pod its Player reshaped and keeps the
+// film's place. It reads the position, deletes the pod, deletes and
+// recreates the claim only when the claim itself diverged, and creates
+// the replacement so mpv starts where the film was. The image is
+// already on the machine, so the film resumes within about a second.
+func (o *operator) recreate(play *Play, claim *ResourceClaim, resolved resolution, remotes []boundRemote, claimChanged bool) (*Pod, error) {
+	namespace, name := play.Metadata.Namespace, play.Metadata.Name
+	start := o.stashedPosition(play)
+	if err := DeletePod(o.client, namespace, podName(name)); err != nil {
+		return nil, err
+	}
+	if claimChanged {
+		if err := DeleteResourceClaim(o.client, namespace, claimName(name)); err != nil {
+			return nil, err
+		}
+		if err := ensureClaim(o.client, claim); err != nil {
+			return nil, err
+		}
+	}
+	resume := *play
+	resume.Spec.Start = start
+	return o.createPod(&resume, claim, resolved, remotes)
+}
+
+// createPod creates one playback pod and reads it back on a 409,
+// because another pass, or another copy of this operator, created the
+// pod first.
+func (o *operator) createPod(play *Play, claim *ResourceClaim, resolved resolution, remotes []boundRemote) (*Pod, error) {
+	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	created, err := CreatePod(o.client, buildPod(play, claim, resolved, o.image, o.busAddress, o.topicBase, remotes))
 	if errors.Is(err, ErrConflict) {
 		return GetPod(o.client, namespace, podName(name))
@@ -360,4 +408,88 @@ func (o *operator) ensurePod(play *Play, claim *ResourceClaim, resolved resoluti
 		return nil, err
 	}
 	return created, nil
+}
+
+// stashedPosition reads the film's place for a recreate. It prefers
+// the retained bus status the operator holds, then the position last
+// written to the Play, then the Play's own spec.start for a pod that
+// never reported a position before a startup edit reshaped it.
+func (o *operator) stashedPosition(play *Play) string {
+	namespace, name := play.Metadata.Namespace, play.Metadata.Name
+	if report := o.reports.latestFor(namespace, name); report != nil && report.Position != "" {
+		return report.Position
+	}
+	if play.Status.Position != "" {
+		return play.Status.Position
+	}
+	return play.Spec.Start
+}
+
+// claimDiverged reports whether the claim the current Player produces
+// differs from the one in the cluster. An absent claim counts as
+// diverged, so the recreate creates it.
+func (o *operator) claimDiverged(desired *ResourceClaim) (bool, error) {
+	current, err := GetResourceClaim(o.client, desired.Metadata.Namespace, desired.Metadata.Name)
+	if errors.Is(err, ErrNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	same, err := sameClaimSpec(current.Spec, desired.Spec)
+	if err != nil {
+		return false, err
+	}
+	return !same, nil
+}
+
+// sameClaimSpec compares two claim specs by their marshaled form. It
+// reads only the fields this operator's own types model, because the
+// client drops every field it does not know when it reads the stored
+// claim, so a field the API server adds does not read as a change.
+func sameClaimSpec(current, desired ResourceClaimSpec) (bool, error) {
+	was, err := json.Marshal(current)
+	if err != nil {
+		return false, err
+	}
+	wants, err := json.Marshal(desired)
+	if err != nil {
+		return false, err
+	}
+	return string(was) == string(wants), nil
+}
+
+// sameRemoteSet reports whether two pods carry the same bridge
+// sidecars, by the events topics they subscribe to. It does not
+// compare the compiled keymap, so an edit to a Keymap is not a shape
+// change and recreates no pod. Only what the Player controls, the
+// claim and the set of controllers, reshapes a running film.
+func sameRemoteSet(current, desired *Pod) bool {
+	return slices.Equal(podRemoteTopics(current), podRemoteTopics(desired))
+}
+
+// podRemoteTopics reads the events topics the bridge sidecar
+// subscribes to, in order, from the remote set the operator wrote into
+// the sidecar's environment.
+func podRemoteTopics(pod *Pod) []string {
+	for _, container := range pod.Spec.InitContainers {
+		if container.Name != bridgeContainer {
+			continue
+		}
+		for _, variable := range container.Env {
+			if variable.Name != remotesVariable {
+				continue
+			}
+			var entries []remoteBindings
+			if err := json.Unmarshal([]byte(variable.Value), &entries); err != nil {
+				return nil
+			}
+			topics := make([]string, 0, len(entries))
+			for _, entry := range entries {
+				topics = append(topics, entry.EventsTopic)
+			}
+			return topics
+		}
+	}
+	return nil
 }

@@ -83,6 +83,34 @@ func watchRemotes(c *Client, resourceVersion string, wake chan<- struct{}) {
 	}
 }
 
+// watchPlayers wakes the loop on a Player change, the way watchPlays
+// and watchRemotes wake it on theirs. The wake carries no object, so
+// the pass it triggers re-reconciles every Play, and a Play whose
+// Player reshaped its pod is recreated then. A dropped stream or a 410
+// Gone recovers the same way: list the collection, wake the loop, and
+// resume the watch from the list's version.
+func watchPlayers(c *Client, resourceVersion string, wake chan<- struct{}) {
+	for {
+		path := playersPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
+		resp, err := c.Do(http.MethodGet, path, nil)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			resourceVersion = readWatchStream(resp, resourceVersion, wake)
+		}
+		if resp != nil {
+			drain(resp.Body)
+		}
+
+		time.Sleep(watchRetryPause)
+		list, err := ListPlayers(c)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "listing players to resume the watch: %v\n", err)
+			continue
+		}
+		resourceVersion = list.Metadata.ResourceVersion
+		poke(wake)
+	}
+}
+
 // readWatchStream reads one connection's worth of events. The
 // returned version is where the next watch resumes.
 func readWatchStream(resp *http.Response, resourceVersion string, wake chan<- struct{}) string {

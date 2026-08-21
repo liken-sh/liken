@@ -174,9 +174,6 @@ func playerPath(namespace, name string) string {
 	return mediaPrefix + namespace + "/players/" + name
 }
 
-// Remotes are listed per namespace, because a Play binds only to
-// Remotes beside it; a Keymap is read one at a time, by the name a
-// Remote carries.
 func remotesPath(namespace string) string {
 	return mediaPrefix + namespace + "/remotes"
 }
@@ -262,15 +259,14 @@ func PutPlayStatus(c *Client, play *Play) (*Play, error) {
 	return written, nil
 }
 
-// ListRemotes reads the whole namespace's remotes in one request,
-// because nothing indexes a Remote by the player it binds and the
-// filter runs here.
-func ListRemotes(c *Client, namespace string) (*RemoteList, error) {
-	list := &RemoteList{}
-	if err := c.RequestJSON(http.MethodGet, remotesPath(namespace), nil, list); err != nil {
+// GetRemote reads one Remote by name in a namespace, the name a
+// Player's spec.remotes entry carries.
+func GetRemote(c *Client, namespace, name string) (*Remote, error) {
+	remote := &Remote{}
+	if err := c.RequestJSON(http.MethodGet, remotesPath(namespace)+"/"+name, nil, remote); err != nil {
 		return nil, err
 	}
-	return list, nil
+	return remote, nil
 }
 
 // ListAllRemotes reads every Remote in the cluster in one request, the
@@ -331,4 +327,28 @@ func CreatePod(c *Client, pod *Pod) (*Pod, error) {
 		return nil, err
 	}
 	return created, nil
+}
+
+// DeletePod removes one playback pod. An already-absent pod is
+// success, because the graceful recreate deletes the pod before it
+// creates the replacement, and a delete that races another pass must
+// not fail.
+func DeletePod(c *Client, namespace, name string) error {
+	err := c.RequestJSON(http.MethodDelete, podsPath(namespace)+"/"+name, nil, nil)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
+// DeleteResourceClaim removes one playback claim. The operator deletes
+// a claim only when a Player reshaped it, so the recreate builds the
+// claim the current Player produces. An already-absent claim is
+// success.
+func DeleteResourceClaim(c *Client, namespace, name string) error {
+	err := c.RequestJSON(http.MethodDelete, claimsPath(namespace)+"/"+name, nil, nil)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
 }

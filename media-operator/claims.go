@@ -78,8 +78,9 @@ func claimName(play string) string {
 }
 
 // playOwner is the ownerReference that makes deleting the Play the
-// whole teardown: the garbage collector deletes what the Play owns,
-// and this operator carries no delete verb at all.
+// whole teardown: the garbage collector deletes the claim and the pod
+// the Play owns. The operator deletes a pod or a claim itself only to
+// recreate a running Play's pod after its Player reshaped it.
 func playOwner(play *Play) OwnerReference {
 	return OwnerReference{
 		APIVersion: mediaAPIVersion,

@@ -76,6 +76,8 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 				list.Items = append(list.Items, *f.remotes[key])
 			}
 			_ = json.NewEncoder(w).Encode(list)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/remotes/"):
+			answer(w, f.remotes[name])
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/keymaps/"):
 			answer(w, f.keymaps[name])
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/resourceclaims/"):
@@ -92,6 +94,12 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 			_ = json.NewDecoder(r.Body).Decode(pod)
 			f.pods[pod.Metadata.Name] = pod
 			_ = json.NewEncoder(w).Encode(pod)
+		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/pods/"):
+			delete(f.pods, name)
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/resourceclaims/"):
+			delete(f.claims, name)
+			w.WriteHeader(http.StatusOK)
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -427,16 +435,24 @@ func TestAPassForgetsAPlayThatIsGone(t *testing.T) {
 	}
 }
 
-// A Remote in the namespace, bound to the house player.
+// A Remote in the namespace, named by the house player through its
+// spec.remotes.
 func houseRemote(keymap string) *Remote {
 	return &Remote{
 		Metadata: ObjectMeta{Name: "sofa", Namespace: "house"},
 		Spec: RemoteSpec{
-			Device:   RemoteDevice{Class: "gamepad"},
-			Keymap:   keymap,
-			Bindings: []RemoteBinding{{Player: "theater"}},
+			Device: RemoteDevice{Class: "gamepad"},
+			Keymap: keymap,
 		},
 	}
+}
+
+// The house player, naming the "sofa" Remote, so a Play on it wires
+// that controller.
+func housePlayerWithRemote() *Player {
+	player := housePlayer()
+	player.Spec.Remotes = []PlayerRemote{{Name: "sofa"}}
+	return player
 }
 
 // bridgeRemotes reads the compiled remote set the operator wrote into
@@ -469,7 +485,7 @@ func bridgeRemotes(t *testing.T, pod *Pod) []remoteBindings {
 func TestAPassWiresABoundRemote(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
-	cluster.players["theater"] = housePlayer()
+	cluster.players["theater"] = housePlayerWithRemote()
 	cluster.remotes["sofa"] = houseRemote("gamepad")
 	cluster.keymaps["gamepad"] = testKeymap()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
@@ -515,7 +531,7 @@ func TestAPassWiresABoundRemote(t *testing.T) {
 func TestAPlayWhoseKeymapIsAbsentFailsBeforeItsPod(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
-	cluster.players["theater"] = housePlayer()
+	cluster.players["theater"] = housePlayerWithRemote()
 	cluster.remotes["sofa"] = houseRemote("nowhere")
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
@@ -539,7 +555,7 @@ func TestAPlayWhoseKeymapIsAbsentFailsBeforeItsPod(t *testing.T) {
 func TestARemoteBrokenAfterTheRunStartedLeavesThePlayAlone(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
-	cluster.players["theater"] = housePlayer()
+	cluster.players["theater"] = housePlayerWithRemote()
 	cluster.remotes["sofa"] = houseRemote("gamepad")
 	cluster.keymaps["gamepad"] = testKeymap()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
@@ -558,5 +574,226 @@ func TestARemoteBrokenAfterTheRunStartedLeavesThePlayAlone(t *testing.T) {
 	}
 	if status.Message != "" {
 		t.Errorf("message = %q, want none", status.Message)
+	}
+}
+
+// A Player edit that reshapes the pod reaches a running Play. The
+// container set is immutable, so the operator recreates the pod, and it
+// recreates gracefully so the film keeps its place. These tests seed a
+// running Play with the pod and claim a previous pass built, change the
+// Player, and prove what the reconcile does.
+
+// runningCluster seeds a Play already running on the given Player: the
+// play, the player, and the pod and claim a previous pass built from it.
+func runningCluster(player *Player) *fakeCluster {
+	cluster := newFakeCluster()
+	play := housePlay("https://nas/film.mkv")
+	play.Status = PlayStatus{Phase: phaseRunning, Activity: activityPlaying, Pod: "movie-playback"}
+	cluster.plays["movie"] = play
+	cluster.players["theater"] = player
+	pod := buildPod(play, buildClaim(play, player),
+		resolution{Items: []string{"https://nas/film.mkv"}},
+		"registry.example/player:test", "bus.media.svc:1883", defaultTopicBase, nil)
+	pod.Status.Phase = podRunning
+	cluster.pods["movie-playback"] = pod
+	cluster.claims["movie-devices"] = buildClaim(play, player)
+	return cluster
+}
+
+// brightPlayer is the house player with a display parameter the house
+// player does not carry, so the claim it produces diverges.
+func brightPlayer() *Player {
+	player := housePlayer()
+	player.Spec.Display = &PlayerDevice{
+		Class: "display-output",
+		Parameters: &DeviceParameters{
+			Driver: "display.liken.sh",
+			Values: json.RawMessage(`{"brightness":80}`),
+		},
+	}
+	return player
+}
+
+// podStart reads the start the player container carries, which is empty
+// on an ordinary run and set to the stashed position on a recreate.
+func podStart(pod *Pod) string {
+	for _, variable := range pod.Spec.Containers[0].Env {
+		if variable.Name == playStartVariable {
+			return variable.Value
+		}
+	}
+	return ""
+}
+
+// countMethod counts the requests that used one HTTP method.
+func countMethod(requests []string, method string) int {
+	count := 0
+	for _, request := range requests {
+		if strings.HasPrefix(request, method) {
+			count++
+		}
+	}
+	return count
+}
+
+// A changed device parameter reshapes the claim, so the operator
+// recreates the pod, and it starts mpv at the position the bus reported.
+func TestAPlayerParameterChangeRecreatesThePodAtTheStashedPosition(t *testing.T) {
+	cluster := runningCluster(housePlayer())
+	cluster.players["theater"] = brightPlayer()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	media.reports.fold("house", "movie", playReport{Item: 1, Position: "0:15:00", Duration: "1:58:00"})
+
+	media.pass()
+
+	pod, held := cluster.pods["movie-playback"]
+	if !held {
+		t.Fatalf("the pod is gone: %v", cluster.requests)
+	}
+	if got := podStart(pod); got != "0:15:00" {
+		t.Errorf("recreated start = %q, want the stashed 0:15:00", got)
+	}
+	if got := countMethod(cluster.requests, http.MethodDelete); got == 0 {
+		t.Errorf("the pod was not recreated: no delete in %v", cluster.requests)
+	}
+	claim := cluster.claims["movie-devices"]
+	if len(claim.Spec.Devices.Config) == 0 {
+		t.Errorf("the recreated claim carries no parameters: %+v", claim.Spec.Devices)
+	}
+}
+
+// The recreate reads the film's place from the first source that has it:
+// the retained bus status, then the last written status, then the Play's
+// own spec.start when a pod that never reported is reshaped at startup.
+func TestARecreatePreservesTheFilmsPlaceFromEachSource(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(*fakeCluster, *operator)
+		want  string
+	}{{
+		name: "the retained bus status",
+		setup: func(c *fakeCluster, o *operator) {
+			c.plays["movie"].Status.Position = "0:02:00"
+			o.reports.fold("house", "movie", playReport{Item: 1, Position: "0:15:00"})
+		},
+		want: "0:15:00",
+	}, {
+		name: "the last written status",
+		setup: func(c *fakeCluster, o *operator) {
+			c.plays["movie"].Status.Position = "0:20:00"
+		},
+		want: "0:20:00",
+	}, {
+		name: "the spec start when nothing reported",
+		setup: func(c *fakeCluster, o *operator) {
+			c.plays["movie"].Spec.Start = "0:05:00"
+			c.pods["movie-playback"].Status.Phase = podPending
+		},
+		want: "0:05:00",
+	}}
+
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			cluster := runningCluster(housePlayer())
+			cluster.players["theater"] = brightPlayer()
+			media := testOperator(t, cluster, make(chan struct{}, 1))
+			one.setup(cluster, media)
+
+			media.pass()
+
+			if got := podStart(cluster.pods["movie-playback"]); got != one.want {
+				t.Errorf("recreated start = %q, want %q", got, one.want)
+			}
+		})
+	}
+}
+
+// A Player edit that changes neither the claim nor the remote set, a
+// spec.zone rename, recreates nothing.
+func TestANonShapingPlayerEditRecreatesNothing(t *testing.T) {
+	cluster := runningCluster(housePlayer())
+	zoned := housePlayer()
+	zoned.Spec.Zone = "den"
+	cluster.players["theater"] = zoned
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.pass()
+
+	if got := countMethod(cluster.requests, http.MethodDelete); got != 0 {
+		t.Errorf("a non-shaping edit deleted %d objects: %v", got, cluster.requests)
+	}
+	if got := podStart(cluster.pods["movie-playback"]); got != "" {
+		t.Errorf("the pod was recreated: start = %q, want none", got)
+	}
+}
+
+// A Player that now names a different controller reshapes the remote set,
+// so the operator recreates the pod at the film's place with the new
+// controller's sidecar wiring.
+func TestAPlayerRemoteChangeRecreatesThePodOnTheChangedRemoteSet(t *testing.T) {
+	cluster := newFakeCluster()
+	play := housePlay("https://nas/film.mkv")
+	play.Status = PlayStatus{Phase: phaseRunning, Activity: activityPlaying, Pod: "movie-playback"}
+	cluster.plays["movie"] = play
+
+	player := housePlayerWithRemote()
+	cluster.players["theater"] = player
+	cluster.remotes["sofa"] = houseRemote("gamepad")
+	cluster.remotes["armchair"] = &Remote{
+		Metadata: ObjectMeta{Name: "armchair", Namespace: "house"},
+		Spec:     RemoteSpec{Device: RemoteDevice{Class: "gamepad"}, Keymap: "gamepad"},
+	}
+	cluster.keymaps["gamepad"] = testKeymap()
+
+	sofa := []boundRemote{{
+		Name:        "sofa",
+		Device:      RemoteDevice{Class: "gamepad"},
+		EventsTopic: remoteEventsTopic(defaultTopicBase, "house", "sofa"),
+	}}
+	pod := buildPod(play, buildClaim(play, player),
+		resolution{Items: []string{"https://nas/film.mkv"}},
+		"registry.example/player:test", "bus.media.svc:1883", defaultTopicBase, sofa)
+	pod.Status.Phase = podRunning
+	cluster.pods["movie-playback"] = pod
+	cluster.claims["movie-devices"] = buildClaim(play, player)
+
+	player.Spec.Remotes = []PlayerRemote{{Name: "armchair"}}
+
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	media.reports.fold("house", "movie", playReport{Item: 1, Position: "0:30:00"})
+	media.pass()
+
+	topics := podRemoteTopics(cluster.pods["movie-playback"])
+	want := remoteEventsTopic(defaultTopicBase, "house", "armchair")
+	if strings.Join(topics, ",") != want {
+		t.Errorf("recreated remote set = %v, want [%s]", topics, want)
+	}
+	if got := podStart(cluster.pods["movie-playback"]); got != "0:30:00" {
+		t.Errorf("recreated start = %q, want the stashed 0:30:00", got)
+	}
+}
+
+// A Player that names a Remote nobody wrote fails the Play before any pod
+// exists, and the message names the Player and the missing Remote.
+func TestAPlayWhosePlayerNamesAMissingRemoteFailsBeforeItsPod(t *testing.T) {
+	cluster := newFakeCluster()
+	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
+	player := housePlayer()
+	player.Spec.Remotes = []PlayerRemote{{Name: "ghost"}}
+	cluster.players["theater"] = player
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.pass()
+
+	status := cluster.plays["movie"].Status
+	if status.Phase != phaseFailed {
+		t.Errorf("phase = %q, want Failed", status.Phase)
+	}
+	want := "the Player theater names the Remote ghost, which does not exist in this namespace"
+	if status.Message != want {
+		t.Errorf("message = %q, want %q", status.Message, want)
+	}
+	if _, held := cluster.pods["movie-playback"]; held {
+		t.Errorf("a missing remote created the playback pod: %v", cluster.pods)
 	}
 }

@@ -1,12 +1,8 @@
-# The Remote API. A Remote is one physical controller: the device it
-# is, the Keymap for its model, and the player it drives. The device
-# is selected the way a Player's display is, by class and CEL over
-# the attributes a hardware operator publishes. The spec is mutable,
-# unlike a Play's, because a Remote is read only when a playback pod
-# is built: an edit changes the next Play and never a running one.
-# Where the reader runs is not part of this API. Today it is a
-# sidecar in the playback pod; the input bus in the founding design
-# moves it into a standing pod and keeps this resource unchanged.
+# The Remote API. A Remote is one physical controller: its device
+# selector and the Keymap for its model. It names no player; a Player
+# names the Remote through spec.remotes. The device is selected the way
+# a Player's display is, by class and CEL over the attributes a
+# hardware operator publishes.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -31,9 +27,6 @@ spec:
         - name: Keymap
           type: string
           jsonPath: .spec.keymap
-        - name: Player
-          type: string
-          jsonPath: .spec.bindings[0].player
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -41,17 +34,15 @@ spec:
         openAPIV3Schema:
           type: object
           description: >-
-            One physical controller, bound to the player it drives.
-            Creating a Remote changes every Play that starts after
-            it: their playback pods claim the controller and answer
-            its buttons.
+            One physical controller, selected by its device and mapped
+            by its Keymap. A Player names the Remotes it owns; the
+            Remote names no player.
           properties:
             spec:
               type: object
-              required: [device, keymap, bindings]
+              required: [device, keymap]
               description: >-
-                The controller, the Keymap for its model, and the
-                player it drives.
+                The controller and the Keymap for its model.
               properties:
                 device:
                   type: object
@@ -81,23 +72,3 @@ spec:
                   description: >-
                     The Keymap for this controller's model, by name,
                     in this namespace.
-                bindings:
-                  type: array
-                  x-kubernetes-list-type: atomic
-                  minItems: 1
-                  # One player for now, the same limit spec.players
-                  # carries: a list of one means no remote drives
-                  # two players, so nothing arbitrates focus yet.
-                  maxItems: 1
-                  description: >-
-                    The players this Remote drives, one entry today.
-                  items:
-                    type: object
-                    required: [player]
-                    properties:
-                      player:
-                        type: string
-                        minLength: 1
-                        description: >-
-                          The Player this Remote drives, by name, in
-                          this namespace.

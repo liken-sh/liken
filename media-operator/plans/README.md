@@ -22,9 +22,9 @@ is built the way it is, and what it still owes an answer to.
 
 ## Planned
 
-These plans are designed and not yet built. Each keeps its number and
-moves to [`completed/`](completed/) when it is built and drilled. The
-three form one chain that reworks the `Remote`, in order, and each is
+These plans are designed. Each keeps its number and moves to
+[`completed/`](completed/) when it is built and drilled. The three
+form one chain that reworks the `Remote`, in order, and each is
 provable on hardware alone.
 
 * [04, The player owns its remotes](04-the-player-owns-its-remotes.md).

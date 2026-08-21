@@ -21,8 +21,7 @@ func standingRemote() *Remote {
 				Class:    "gamepad",
 				Selector: `device.attributes["bluetooth.liken.sh"].address == "04:4A"`,
 			},
-			Keymap:   "dualsense",
-			Bindings: []RemoteBinding{{Player: "theater"}},
+			Keymap: "dualsense",
 		},
 	}
 }

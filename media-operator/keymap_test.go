@@ -123,37 +123,46 @@ func TestCompileKeymapRefusesWhatItCannotCompile(t *testing.T) {
 	}
 }
 
-// A remote bound to one player and pointed at a keymap.
-func testRemote(name, player, keymap string) Remote {
+// A remote with a device selector and a keymap, named by a Player.
+func testRemote(name, keymap string) Remote {
 	return Remote{
 		Metadata: ObjectMeta{Name: name, Namespace: "house"},
 		Spec: RemoteSpec{
-			Device:   RemoteDevice{Class: "gamepad", Selector: `device.attributes["bluetooth.liken.sh"].address == "04:4A"`},
-			Keymap:   keymap,
-			Bindings: []RemoteBinding{{Player: player}},
+			Device: RemoteDevice{Class: "gamepad", Selector: `device.attributes["bluetooth.liken.sh"].address == "04:4A"`},
+			Keymap: keymap,
 		},
 	}
 }
 
-const (
-	remotesURL = "/apis/media.liken.sh/v1alpha1/namespaces/house/remotes"
-	keymapURL  = "/apis/media.liken.sh/v1alpha1/namespaces/house/keymaps/gamepad"
-)
+// A Player that names the given Remotes in its spec.remotes.
+func gatherPlayer(remotes ...string) *Player {
+	entries := make([]PlayerRemote, 0, len(remotes))
+	for _, name := range remotes {
+		entries = append(entries, PlayerRemote{Name: name})
+	}
+	return &Player{
+		Metadata: ObjectMeta{Name: "theater", Namespace: "house"},
+		Spec:     PlayerSpec{Remotes: entries},
+	}
+}
 
-// The remotes bound to this player, in name order whatever order the
-// API server listed them in, because the pod spec they become must
-// not change between passes.
-func TestGatherRemotesKeepsWhatIsBoundToThePlayerInNameOrder(t *testing.T) {
+const keymapURL = "/apis/media.liken.sh/v1alpha1/namespaces/house/keymaps/gamepad"
+
+func remoteURL(name string) string {
+	return "/apis/media.liken.sh/v1alpha1/namespaces/house/remotes/" + name
+}
+
+// The Player's remotes compile in name order whatever order the spec
+// lists them in, because the pod spec they become must not change
+// between passes.
+func TestGatherRemotesReadsThePlayersRemotesInNameOrder(t *testing.T) {
 	api := &cannedAPI{answers: map[string]any{
-		"GET " + remotesURL: RemoteList{Items: []Remote{
-			testRemote("sofa", "theater", "gamepad"),
-			testRemote("kitchen", "galley", "gamepad"),
-			testRemote("armchair", "theater", "gamepad"),
-		}},
-		"GET " + keymapURL: *testKeymap(),
+		"GET " + remoteURL("sofa"):     testRemote("sofa", "gamepad"),
+		"GET " + remoteURL("armchair"): testRemote("armchair", "gamepad"),
+		"GET " + keymapURL:             *testKeymap(),
 	}}
 
-	remotes, err := gatherRemotes(testAPIClient(t, api.handler()), "house", "theater")
+	remotes, err := gatherRemotes(testAPIClient(t, api.handler()), gatherPlayer("sofa", "armchair"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,15 +176,15 @@ func TestGatherRemotesKeepsWhatIsBoundToThePlayerInNameOrder(t *testing.T) {
 	}
 }
 
-// Each bound remote carries its device selection and its compiled
+// Each named remote carries its device selection and its compiled
 // table, which is everything the claim and the sidecar need.
 func TestGatherRemotesCarriesTheDeviceAndTheCompiledTable(t *testing.T) {
 	api := &cannedAPI{answers: map[string]any{
-		"GET " + remotesURL: RemoteList{Items: []Remote{testRemote("sofa", "theater", "gamepad")}},
-		"GET " + keymapURL:  *testKeymap(),
+		"GET " + remoteURL("sofa"): testRemote("sofa", "gamepad"),
+		"GET " + keymapURL:         *testKeymap(),
 	}}
 
-	remotes, err := gatherRemotes(testAPIClient(t, api.handler()), "house", "theater")
+	remotes, err := gatherRemotes(testAPIClient(t, api.handler()), gatherPlayer("sofa"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,12 +204,8 @@ func TestGatherRemotesCarriesTheDeviceAndTheCompiledTable(t *testing.T) {
 	}
 }
 
-func TestGatherRemotesFindsNoneWhenNothingIsBoundToThePlayer(t *testing.T) {
-	api := &cannedAPI{answers: map[string]any{
-		"GET " + remotesURL: RemoteList{Items: []Remote{testRemote("kitchen", "galley", "gamepad")}},
-	}}
-
-	remotes, err := gatherRemotes(testAPIClient(t, api.handler()), "house", "theater")
+func TestGatherRemotesFindsNoneWhenThePlayerNamesNoRemote(t *testing.T) {
+	remotes, err := gatherRemotes(testAPIClient(t, (&cannedAPI{}).handler()), gatherPlayer())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,14 +214,28 @@ func TestGatherRemotesFindsNoneWhenNothingIsBoundToThePlayer(t *testing.T) {
 	}
 }
 
+// A Player that names a Remote nobody wrote is a failure the person
+// who wrote the Player can read.
+func TestGatherRemotesFailsWhenTheRemoteIsAbsent(t *testing.T) {
+	_, err := gatherRemotes(testAPIClient(t, (&cannedAPI{}).handler()), gatherPlayer("ghost"))
+	if err == nil {
+		t.Fatal("a missing Remote produced no error")
+	}
+	for _, word := range []string{"theater", "ghost"} {
+		if !strings.Contains(err.Error(), word) {
+			t.Errorf("err = %q, want it to name %q", err, word)
+		}
+	}
+}
+
 // A Remote that names a Keymap nobody wrote is a failure the person
 // who wrote the Remote can read.
 func TestGatherRemotesFailsWhenTheKeymapIsAbsent(t *testing.T) {
 	api := &cannedAPI{answers: map[string]any{
-		"GET " + remotesURL: RemoteList{Items: []Remote{testRemote("sofa", "theater", "gamepad")}},
+		"GET " + remoteURL("sofa"): testRemote("sofa", "gamepad"),
 	}}
 
-	_, err := gatherRemotes(testAPIClient(t, api.handler()), "house", "theater")
+	_, err := gatherRemotes(testAPIClient(t, api.handler()), gatherPlayer("sofa"))
 	if err == nil {
 		t.Fatal("a missing Keymap produced no error")
 	}
@@ -231,14 +250,14 @@ func TestGatherRemotesFailsWhenTheKeymapIsAbsent(t *testing.T) {
 // the compiler's own.
 func TestGatherRemotesFailsOnAKeymapThatWillNotCompile(t *testing.T) {
 	api := &cannedAPI{answers: map[string]any{
-		"GET " + remotesURL: RemoteList{Items: []Remote{testRemote("sofa", "theater", "gamepad")}},
+		"GET " + remoteURL("sofa"): testRemote("sofa", "gamepad"),
 		"GET " + keymapURL: Keymap{
 			Metadata: ObjectMeta{Name: "gamepad", Namespace: "house"},
 			Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_NOPE", Action: actionPause}}},
 		},
 	}}
 
-	_, err := gatherRemotes(testAPIClient(t, api.handler()), "house", "theater")
+	_, err := gatherRemotes(testAPIClient(t, api.handler()), gatherPlayer("sofa"))
 	if err == nil {
 		t.Fatal("a keymap that will not compile produced no error")
 	}
