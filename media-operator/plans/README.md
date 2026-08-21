@@ -72,3 +72,8 @@ has decided yet what work they become.
   enforce one instance across a rollout or a partition. A `Lease` in
   `coordination.k8s.io` makes it a true singleton, and opens a
   quasi-HA path.
+* [A player takes no outside control](open-problems/a-player-takes-no-outside-control.md).
+  A player is driven only by a `Remote`, which publishes raw evdev
+  codes. Nothing outside can command a player in media terms over the
+  bus. A cousin of the focus question: both reach the same arbitration
+  when more than one thing controls a player.
