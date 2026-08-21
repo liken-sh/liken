@@ -54,9 +54,9 @@ func runPlayer(items []string) {
 // --vo=dmabuf-wayland. VAAPI, because the render claim delivers the
 // node that decodes. The PipeWire audio output, because Wayland
 // carries no audio and the sink claim delivers that socket. The IPC
-// server stays, because the bridge sidecar drives that same socket to
-// carry input and read the report. The window's app-id routes it to
-// the allocated output when the display claim delivered one.
+// server stays because the command sidecar drives that same socket to
+// run each named command and read the report. The window's app-id routes
+// it to the allocated output when the display claim delivered one.
 //
 // The list ends with -- because a media path that starts with a dash
 // would otherwise read as a flag.

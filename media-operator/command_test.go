@@ -1,68 +1,77 @@
 package main
 
+// These tests cover the command sidecar: a named command on the commands
+// topic becomes the right mpv command, and the report side folds mpv's
+// property changes and throttles the position.
+
 import (
-	"bytes"
-	"context"
+	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
-	"sync"
 	"testing"
 	"time"
 )
 
-// A held control repeats until its release, and the release stops it.
-// mpv is a pipe here, so the test counts the commands the bridge would
-// send it.
-func TestARepeatFiresUntilTheReleaseStopsIt(t *testing.T) {
+// A named command on the commands topic becomes mpv's own command words.
+// mpv is a pipe here, so the test reads the line the command sidecar
+// writes.
+func TestACommandOnTheCommandsTopicBecomesAnMpvCommand(t *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close()
 
-	var mu sync.Mutex
-	commands := 0
+	lines := make(chan string, 4)
 	go func() {
-		buffer := make([]byte, 4096)
-		for {
-			read, err := server.Read(buffer)
-			if err != nil {
-				return
-			}
-			mu.Lock()
-			commands += bytes.Count(buffer[:read], []byte("\n"))
-			mu.Unlock()
+		scanner := bufio.NewScanner(server)
+		for scanner.Scan() {
+			lines <- scanner.Text()
 		}
 	}()
-	count := func() int {
-		mu.Lock()
-		defer mu.Unlock()
-		return commands
+
+	c := &commander{mpv: client}
+	payload, err := json.Marshal(mediaCommand{Action: actionSeek, Amount: 30})
+	if err != nil {
+		t.Fatal(err)
 	}
+	c.handle(c.commandsTopic, payload)
 
-	br := &bridge{
-		mpv:       client,
-		repeatCtx: context.Background(),
-		repeats:   map[uint16]context.CancelFunc{},
+	select {
+	case line := <-lines:
+		if line != `{"command":["osd-auto","seek",30]}` {
+			t.Errorf("mpv command = %q", line)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no command reached mpv")
 	}
+}
 
-	command := []any{"osd-auto", "seek", 10}
-	br.command(command)
-	br.startRepeat(0x137, command, 1, 5)
+// A payload that does not decode, and an action the sidecar has no case
+// for, write nothing to mpv.
+func TestACommandThatDoesNotDecodeOrHasNoCaseWritesNothing(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
 
-	time.Sleep(50 * time.Millisecond)
-	br.stopRepeat(0x137)
-	time.Sleep(20 * time.Millisecond)
+	wrote := make(chan struct{}, 1)
+	go func() {
+		buffer := make([]byte, 256)
+		if _, err := server.Read(buffer); err == nil {
+			wrote <- struct{}{}
+		}
+	}()
 
-	held := count()
-	if held < 3 {
-		t.Fatalf("the repeat fired %d times while held, want several", held)
+	c := &commander{mpv: client}
+	c.handle(c.commandsTopic, []byte("not json"))
+	newer, err := json.Marshal(mediaCommand{Action: "brightness", Amount: 1})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, present := br.repeats[0x137]; present {
-		t.Error("the release left the code in the repeats map")
-	}
+	c.handle(c.commandsTopic, newer)
 
-	time.Sleep(30 * time.Millisecond)
-	if after := count(); after != held {
-		t.Errorf("the repeat kept firing after the release: %d then %d", held, after)
+	select {
+	case <-wrote:
+		t.Error("a command with no mpv translation wrote to the socket")
+	case <-time.After(100 * time.Millisecond):
 	}
 }
 
@@ -156,7 +165,7 @@ func TestApplyOnePropertyChange(t *testing.T) {
 			want:   playbackState{item: 1},
 		},
 		{
-			name:   "a property the bridge does not fold",
+			name:   "a property the command sidecar does not fold",
 			start:  playing,
 			change: changeOf("volume", "70"),
 			want:   playing,

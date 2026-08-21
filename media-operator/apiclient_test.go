@@ -139,6 +139,50 @@ func TestPutPlayStatusWritesTheStatusSubresource(t *testing.T) {
 	}
 }
 
+// A Keymap is cluster-scoped, so its path carries no namespace.
+func TestGetKeymapReadsOneClusterScopedObject(t *testing.T) {
+	api := &cannedAPI{answers: map[string]any{
+		"GET /apis/media.liken.sh/v1alpha1/keymaps/gamepad": Keymap{
+			Metadata: ObjectMeta{Name: "gamepad"},
+			Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_SOUTH", Action: actionPause}}},
+		},
+	}}
+
+	keymap, err := GetKeymap(testAPIClient(t, api.handler()), "gamepad")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keymap.Metadata.Name != "gamepad" {
+		t.Errorf("name = %q", keymap.Metadata.Name)
+	}
+	if api.requests[0].Path != "/apis/media.liken.sh/v1alpha1/keymaps/gamepad" {
+		t.Errorf("path = %s", api.requests[0].Path)
+	}
+}
+
+func TestListKeymapsReadsTheClusterScopedCollection(t *testing.T) {
+	api := &cannedAPI{answers: map[string]any{
+		"GET /apis/media.liken.sh/v1alpha1/keymaps": KeymapList{
+			Metadata: ListMeta{ResourceVersion: "88"},
+			Items:    []Keymap{{Metadata: ObjectMeta{Name: "gamepad"}}},
+		},
+	}}
+
+	list, err := ListKeymaps(testAPIClient(t, api.handler()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list.Metadata.ResourceVersion != "88" {
+		t.Errorf("resourceVersion = %q, want 88", list.Metadata.ResourceVersion)
+	}
+	if len(list.Items) != 1 || list.Items[0].Metadata.Name != "gamepad" {
+		t.Fatalf("items = %+v", list.Items)
+	}
+	if api.requests[0].Path != "/apis/media.liken.sh/v1alpha1/keymaps" {
+		t.Errorf("path = %s", api.requests[0].Path)
+	}
+}
+
 func TestCreatePodPostsToTheNamespacesCollection(t *testing.T) {
 	api := &cannedAPI{answers: map[string]any{
 		"POST /api/v1/namespaces/house/pods": Pod{Metadata: ObjectMeta{Name: "movie-playback"}},

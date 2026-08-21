@@ -270,21 +270,20 @@ func TestClaimRequestsReadsTheNamesInClaimOrder(t *testing.T) {
 }
 
 // Two remotes bound to the player, as the gather hands them to the pod
-// builder. The operator fills EventsTopic before it builds the bridge
-// sidecar, so the fixture carries the topics too.
+// builder. The operator fills the three topics before it builds the
+// translator sidecars, so the fixture carries them too.
 func testBoundRemotes() []boundRemote {
 	return []boundRemote{{
-		Name: "armchair",
-		Device: RemoteDevice{
-			Class:    "gamepad",
-			Selector: `device.attributes["bluetooth.liken.sh"].address == "04:4A"`,
-		},
-		Bindings:    []compiledBinding{{EventType: evKey, Code: 0x130, Value: 1, Action: actionPause}},
+		Name:        "armchair",
+		Keymap:      "gamepad",
 		EventsTopic: "liken/media/remotes/house/armchair/events",
+		KeymapTopic: "liken/media/keymaps/gamepad",
+		FocusTopic:  "liken/media/remotes/house/armchair/focus",
 	}, {
 		Name:        "sofa",
-		Device:      RemoteDevice{Class: "gamepad"},
-		Bindings:    []compiledBinding{{EventType: evAbs, Code: 0x11, Value: -1, Action: actionVolume, Amount: 5}},
+		Keymap:      "gamepad",
 		EventsTopic: "liken/media/remotes/house/sofa/events",
+		KeymapTopic: "liken/media/keymaps/gamepad",
+		FocusTopic:  "liken/media/remotes/house/sofa/focus",
 	}}
 }

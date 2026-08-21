@@ -17,6 +17,8 @@ func TestTopicBuildersExtendTheBase(t *testing.T) {
 		{name: "remote focus", got: remoteFocusTopic(base, "house", "sofa"), want: "liken/media/remotes/house/sofa/focus"},
 		{name: "play status", got: playStatusTopic(base, "house", "movie"), want: "liken/media/plays/house/movie/status"},
 		{name: "play availability", got: playAvailabilityTopic(base, "house", "movie"), want: "liken/media/plays/house/movie/availability"},
+		{name: "play commands", got: playCommandsTopic(base, "house", "movie"), want: "liken/media/plays/house/movie/commands"},
+		{name: "keymap", got: keymapTopic(base, "gamepad"), want: "liken/media/keymaps/gamepad"},
 		{name: "status filter", got: playStatusFilter(base), want: "liken/media/plays/+/+/status"},
 		{name: "availability filter", got: playAvailabilityFilter(base), want: "liken/media/plays/+/+/availability"},
 	}

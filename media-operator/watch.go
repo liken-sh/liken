@@ -111,6 +111,34 @@ func watchPlayers(c *Client, resourceVersion string, wake chan<- struct{}) {
 	}
 }
 
+// watchKeymaps wakes the loop on a Keymap change, so the pass it
+// triggers recompiles and republishes every Keymap, and an edit reaches
+// a running translator within one pass rather than one backstop tick.
+// The recovery mirrors the other watchers: a dropped stream or a 410
+// Gone lists the collection, wakes the loop, and resumes the watch from
+// the list's version.
+func watchKeymaps(c *Client, resourceVersion string, wake chan<- struct{}) {
+	for {
+		path := keymapsPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
+		resp, err := c.Do(http.MethodGet, path, nil)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			resourceVersion = readWatchStream(resp, resourceVersion, wake)
+		}
+		if resp != nil {
+			drain(resp.Body)
+		}
+
+		time.Sleep(watchRetryPause)
+		list, err := ListKeymaps(c)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "listing keymaps to resume the watch: %v\n", err)
+			continue
+		}
+		resourceVersion = list.Metadata.ResourceVersion
+		poke(wake)
+	}
+}
+
 // readWatchStream reads one connection's worth of events. The
 // returned version is where the next watch resumes.
 func readWatchStream(resp *http.Response, resourceVersion string, wake chan<- struct{}) string {

@@ -208,7 +208,7 @@ spec:
                   description: >-
                     The controllers this unit owns, each naming a
                     Remote in the same namespace. The Play's pod builds
-                    one bridge sidecar per entry.
+                    one translator sidecar per entry.
                   items:
                     type: object
                     required: [name]

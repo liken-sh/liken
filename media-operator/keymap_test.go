@@ -146,20 +146,17 @@ func gatherPlayer(remotes ...string) *Player {
 	}
 }
 
-const keymapURL = "/apis/media.liken.sh/v1alpha1/namespaces/house/keymaps/gamepad"
-
 func remoteURL(name string) string {
 	return "/apis/media.liken.sh/v1alpha1/namespaces/house/remotes/" + name
 }
 
-// The Player's remotes compile in name order whatever order the spec
-// lists them in, because the pod spec they become must not change
-// between passes.
+// The Player's remotes gather in name order whatever order the spec lists
+// them in, because the pod spec they become must not change between
+// passes.
 func TestGatherRemotesReadsThePlayersRemotesInNameOrder(t *testing.T) {
 	api := &cannedAPI{answers: map[string]any{
 		"GET " + remoteURL("sofa"):     testRemote("sofa", "gamepad"),
 		"GET " + remoteURL("armchair"): testRemote("armchair", "gamepad"),
-		"GET " + keymapURL:             *testKeymap(),
 	}}
 
 	remotes, err := gatherRemotes(testAPIClient(t, api.handler()), gatherPlayer("sofa", "armchair"))
@@ -176,12 +173,12 @@ func TestGatherRemotesReadsThePlayersRemotesInNameOrder(t *testing.T) {
 	}
 }
 
-// Each named remote carries its device selection and its compiled
-// table, which is everything the claim and the sidecar need.
-func TestGatherRemotesCarriesTheDeviceAndTheCompiledTable(t *testing.T) {
+// Each named remote carries its name and the Keymap name its model
+// resolves to. The gather reads no Keymap, so a broken or absent Keymap
+// does not fail it: the operator compiles and publishes the table.
+func TestGatherRemotesCarriesTheKeymapName(t *testing.T) {
 	api := &cannedAPI{answers: map[string]any{
 		"GET " + remoteURL("sofa"): testRemote("sofa", "gamepad"),
-		"GET " + keymapURL:         *testKeymap(),
 	}}
 
 	remotes, err := gatherRemotes(testAPIClient(t, api.handler()), gatherPlayer("sofa"))
@@ -191,16 +188,8 @@ func TestGatherRemotesCarriesTheDeviceAndTheCompiledTable(t *testing.T) {
 	if len(remotes) != 1 {
 		t.Fatalf("remotes = %+v, want one", remotes)
 	}
-	device := RemoteDevice{
-		Class:    "gamepad",
-		Selector: `device.attributes["bluetooth.liken.sh"].address == "04:4A"`,
-	}
-	if remotes[0].Device != device {
-		t.Errorf("device = %+v, want %+v", remotes[0].Device, device)
-	}
-	first := compiledBinding{EventType: evKey, Code: 0x130, Value: 1, Action: actionPause}
-	if len(remotes[0].Bindings) != 7 || remotes[0].Bindings[0] != first {
-		t.Errorf("bindings = %+v", remotes[0].Bindings)
+	if remotes[0].Name != "sofa" || remotes[0].Keymap != "gamepad" {
+		t.Errorf("remote = %+v, want name sofa and keymap gamepad", remotes[0])
 	}
 }
 
@@ -225,44 +214,6 @@ func TestGatherRemotesFailsWhenTheRemoteIsAbsent(t *testing.T) {
 		if !strings.Contains(err.Error(), word) {
 			t.Errorf("err = %q, want it to name %q", err, word)
 		}
-	}
-}
-
-// A Remote that names a Keymap nobody wrote is a failure the person
-// who wrote the Remote can read.
-func TestGatherRemotesFailsWhenTheKeymapIsAbsent(t *testing.T) {
-	api := &cannedAPI{answers: map[string]any{
-		"GET " + remoteURL("sofa"): testRemote("sofa", "gamepad"),
-	}}
-
-	_, err := gatherRemotes(testAPIClient(t, api.handler()), gatherPlayer("sofa"))
-	if err == nil {
-		t.Fatal("a missing Keymap produced no error")
-	}
-	for _, word := range []string{"sofa", "gamepad"} {
-		if !strings.Contains(err.Error(), word) {
-			t.Errorf("err = %q, want it to name %q", err, word)
-		}
-	}
-}
-
-// A keymap that will not compile fails the gather, and the message is
-// the compiler's own.
-func TestGatherRemotesFailsOnAKeymapThatWillNotCompile(t *testing.T) {
-	api := &cannedAPI{answers: map[string]any{
-		"GET " + remoteURL("sofa"): testRemote("sofa", "gamepad"),
-		"GET " + keymapURL: Keymap{
-			Metadata: ObjectMeta{Name: "gamepad", Namespace: "house"},
-			Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_NOPE", Action: actionPause}}},
-		},
-	}}
-
-	_, err := gatherRemotes(testAPIClient(t, api.handler()), gatherPlayer("sofa"))
-	if err == nil {
-		t.Fatal("a keymap that will not compile produced no error")
-	}
-	if !strings.Contains(err.Error(), "BTN_NOPE") {
-		t.Errorf("err = %q, want it to name BTN_NOPE", err)
 	}
 }
 

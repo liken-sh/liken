@@ -55,6 +55,25 @@ func remoteFocusTopic(base, namespace, name string) string {
 	return base + "/remotes/" + namespace + "/" + name + "/focus"
 }
 
+// playCommandsTopic carries the named media commands any program may
+// publish to drive one Play: play-pause, a seek, a volume step, and the
+// rest of the vocabulary in input.go. It is not retained, because a
+// command is an event and not a state. This is the one open surface a
+// program joins a Play on in media terms, so a translator, a phone, or a
+// Home Assistant integration all reach the Play the same way.
+func playCommandsTopic(base, namespace, name string) string {
+	return base + "/plays/" + namespace + "/" + name + "/commands"
+}
+
+// keymapTopic carries one Keymap's compiled table. It drops the
+// namespace segment because a Keymap is cluster-scoped. The operator
+// publishes the table here retained, so a translator sidecar reads the
+// current table the instant it connects and a Keymap edit reaches every
+// translator with no pod restart.
+func keymapTopic(base, name string) string {
+	return base + "/keymaps/" + name
+}
+
 // playStatusTopic carries one Play's report: the paused flag, the
 // item, the position, and the duration. The playback pod's sidecar
 // publishes it retained, so a restarted operator reads the current

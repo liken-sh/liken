@@ -1,14 +1,47 @@
 package main
 
 // These tests cover what a Play becomes at run time: one pod that runs
-// mpv on the resolved list, holds the claim's every role, and carries
-// one bridge sidecar that speaks to the bus.
+// mpv on the resolved list, holds the claim's every role, carries one
+// command sidecar that owns the mpv socket, and carries one translator
+// sidecar per bound remote.
 
 import (
 	"encoding/json"
 	"reflect"
 	"testing"
 )
+
+// initContainer finds one of the pod's init containers by name.
+func initContainer(t *testing.T, pod *Pod, name string) Container {
+	t.Helper()
+	for _, container := range pod.Spec.InitContainers {
+		if container.Name == name {
+			return container
+		}
+	}
+	t.Fatalf("the pod has no init container named %q: %+v", name, pod.Spec.InitContainers)
+	return Container{}
+}
+
+// envValue reads one environment variable off a container.
+func envValue(container Container, name string) string {
+	for _, variable := range container.Env {
+		if variable.Name == name {
+			return variable.Value
+		}
+	}
+	return ""
+}
+
+// mountsIPC reports whether a container mounts the shared IPC volume.
+func mountsIPC(container Container) bool {
+	for _, mount := range container.VolumeMounts {
+		if mount.Name == ipcVolumeName {
+			return true
+		}
+	}
+	return false
+}
 
 const (
 	testImage      = "ghcr.io/liken-sh/media-operator:test"
@@ -166,10 +199,10 @@ func TestBuildPodCarriesTheResolvedVolumesAndMounts(t *testing.T) {
 	}
 }
 
-// A pod with no remotes still carries the IPC volume, because mpv
-// serves its socket at one path either way, and it still carries the
-// bridge sidecar, its one bus client.
-func TestBuildPodAlwaysCarriesTheIPCVolumeAndTheBridge(t *testing.T) {
+// A pod with no remotes still carries the IPC volume, because mpv serves
+// its socket at one path either way, and its only sidecar is the command
+// sidecar.
+func TestBuildPodWithNoRemotesCarriesOnlyTheCommandSidecar(t *testing.T) {
 	pod := testPod(t)
 
 	last := pod.Spec.Volumes[len(pod.Spec.Volumes)-1]
@@ -184,64 +217,78 @@ func TestBuildPodAlwaysCarriesTheIPCVolumeAndTheBridge(t *testing.T) {
 	if string(written) != `{"name":"ipc","emptyDir":{}}` {
 		t.Errorf("volume = %s", written)
 	}
-	if len(pod.Spec.InitContainers) != 1 || pod.Spec.InitContainers[0].Name != "bridge" {
-		t.Errorf("initContainers = %+v, want one bridge", pod.Spec.InitContainers)
+	if len(pod.Spec.InitContainers) != 1 || pod.Spec.InitContainers[0].Name != commandContainer {
+		t.Errorf("initContainers = %+v, want one command sidecar", pod.Spec.InitContainers)
 	}
 }
 
-// The bridge sidecar is the player image in its bridge mode, holding no
-// device claim, carrying the play's identity, the bus, the base, and
-// the set of bound remotes.
-func TestBuildPodRunsOneBridgeSidecar(t *testing.T) {
+// The command sidecar is the player image in its command mode, holding
+// no device claim, mounting the IPC socket, and carrying the play's
+// identity, the bus, and the base.
+func TestBuildPodRunsOneCommandSidecar(t *testing.T) {
 	pod := testPodWithRemotes(t)
 
-	if len(pod.Spec.InitContainers) != 1 {
-		t.Fatalf("initContainers = %+v, want one bridge", pod.Spec.InitContainers)
-	}
-	bridge := pod.Spec.InitContainers[0]
-
-	remotes, err := json.Marshal([]remoteBindings{
-		{EventsTopic: "liken/media/remotes/house/armchair/events", Bindings: testBoundRemotes()[0].Bindings},
-		{EventsTopic: "liken/media/remotes/house/sofa/events", Bindings: testBoundRemotes()[1].Bindings},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	command := initContainer(t, pod, commandContainer)
 	want := Container{
-		Name:    "bridge",
+		Name:    commandContainer,
 		Image:   testImage,
-		Command: []string{"/media-operator", "bridge"},
+		Command: []string{"/media-operator", "command"},
 		Env: []EnvVar{
 			{Name: playNamespaceVariable, Value: "house"},
 			{Name: playNameVariable, Value: "movie"},
 			{Name: busAddressVariable, Value: testBusAddress},
 			{Name: topicBaseVariable, Value: testTopicBase},
-			{Name: remotesVariable, Value: string(remotes)},
 		},
 		VolumeMounts:  []VolumeMount{{Name: "ipc", MountPath: "/ipc"}},
 		RestartPolicy: "Always",
 	}
-	if !reflect.DeepEqual(bridge, want) {
-		t.Errorf("bridge = %+v, want %+v", bridge, want)
+	if !reflect.DeepEqual(command, want) {
+		t.Errorf("command = %+v, want %+v", command, want)
 	}
-	if len(bridge.Resources.Claims) != 0 {
-		t.Errorf("the bridge holds a device claim: %+v", bridge.Resources.Claims)
+	if len(command.Resources.Claims) != 0 {
+		t.Errorf("the command sidecar holds a device claim: %+v", command.Resources.Claims)
 	}
 }
 
-// A pod with no bound remotes still carries the bridge, and its
-// MEDIA_REMOTES is an empty JSON array rather than null.
-func TestBuildPodBridgeCarriesAnEmptyRemoteSetWhenNoneBind(t *testing.T) {
-	pod := testPod(t)
+// One translator sidecar runs per bound remote. Each is the player image
+// in its translate mode, holding no device claim, mounting no IPC socket,
+// and carrying the remote's name and its three topics.
+func TestBuildPodRunsOneTranslatorPerRemote(t *testing.T) {
+	pod := testPodWithRemotes(t)
 
-	bridge := pod.Spec.InitContainers[0]
-	var value string
-	for _, variable := range bridge.Env {
-		if variable.Name == remotesVariable {
-			value = variable.Value
-		}
+	// The command sidecar first, then one translator per remote, in order.
+	names := []string{}
+	for _, container := range pod.Spec.InitContainers {
+		names = append(names, container.Name)
 	}
-	if value != "[]" {
-		t.Errorf("%s = %q, want []", remotesVariable, value)
+	if !reflect.DeepEqual(names, []string{"command", "translate-armchair", "translate-sofa"}) {
+		t.Fatalf("init containers = %v, want the command sidecar and one translator per remote", names)
+	}
+
+	sofa := initContainer(t, pod, "translate-sofa")
+	want := Container{
+		Name:    "translate-sofa",
+		Image:   testImage,
+		Command: []string{"/media-operator", "translate"},
+		Env: []EnvVar{
+			{Name: playNamespaceVariable, Value: "house"},
+			{Name: playNameVariable, Value: "movie"},
+			{Name: busAddressVariable, Value: testBusAddress},
+			{Name: topicBaseVariable, Value: testTopicBase},
+			{Name: remoteNameVariable, Value: "sofa"},
+			{Name: remoteEventsVariable, Value: "liken/media/remotes/house/sofa/events"},
+			{Name: keymapTopicVariable, Value: "liken/media/keymaps/gamepad"},
+			{Name: focusTopicVariable, Value: "liken/media/remotes/house/sofa/focus"},
+		},
+		RestartPolicy: "Always",
+	}
+	if !reflect.DeepEqual(sofa, want) {
+		t.Errorf("translator = %+v, want %+v", sofa, want)
+	}
+	if mountsIPC(sofa) {
+		t.Error("the translator mounts the IPC socket, which only the command sidecar owns")
+	}
+	if len(sofa.Resources.Claims) != 0 {
+		t.Errorf("the translator holds a device claim: %+v", sofa.Resources.Claims)
 	}
 }

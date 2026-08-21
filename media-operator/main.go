@@ -5,15 +5,18 @@
 // on the hardware operators' devices, the pods that perform the work,
 // and the statuses a person reads.
 //
-// One binary, four modes, the way the audio operator's one image runs
+// One binary, five roles, the way the audio operator's one image runs
 // in several roles. With no argument it is the operator: a Deployment
-// that watches Plays and Remotes, creates claims and pods, subscribes
-// to the bus, and writes every status. As `player` it is the playback
-// pod's entrypoint shim: it appends the display's app-id flag and
-// execs mpv. As `remote` it is the standing remote pod: it reads a
-// controller's input nodes and publishes each event to the bus. As
-// `bridge` it is the playback pod's sidecar: it subscribes to the bus,
-// applies each remote's keymap, and drives mpv's local IPC socket.
+// that watches Plays, Remotes, Players, and Keymaps, creates claims and
+// pods, publishes the compiled keymaps, and writes every status. As
+// `player` it is the playback pod's entrypoint shim: it appends the
+// display's app-id flag and execs mpv. As `remote` it is the standing
+// remote pod: it reads a controller's input nodes and publishes each
+// event to the bus. As `command` it is the playback pod's command
+// sidecar: it owns mpv's IPC socket, runs each named command from the
+// commands topic, and publishes the report. As `translate` it is a
+// per-controller sidecar: it turns a controller's evdev events into
+// named commands on the bus.
 //
 // The split is the trust boundary. The playback pod decodes media
 // pulled off the network, so it is the least trusted process in the
@@ -24,13 +27,14 @@ package main
 
 import "os"
 
-// The arguments that select the three pod roles. The operator writes
-// each into a container's command, over the image's entrypoint. The
-// operator itself runs with no argument.
+// The arguments that select the pod roles. The operator writes each
+// into a container's command, over the image's entrypoint. The operator
+// itself runs with no argument.
 const (
-	playerMode = "player"
-	remoteMode = "remote"
-	bridgeMode = "bridge"
+	playerMode    = "player"
+	remoteMode    = "remote"
+	commandMode   = "command"
+	translateMode = "translate"
 )
 
 func main() {
@@ -42,8 +46,11 @@ func main() {
 		case remoteMode:
 			runReader()
 			return
-		case bridgeMode:
-			runBridge()
+		case commandMode:
+			runCommand()
+			return
+		case translateMode:
+			runTranslator()
 			return
 		}
 	}

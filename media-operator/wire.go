@@ -53,9 +53,13 @@ const (
 	remoteNamespaceVariable = "MEDIA_REMOTE_NAMESPACE"
 	remoteNameVariable      = "MEDIA_REMOTE_NAME"
 
-	// remotesVariable carries the set of remotes bound to a player, as
-	// a JSON array of remoteBindings. The playback pod's sidecar
-	// subscribes to each entry's events topic and matches events
-	// against that entry's bindings.
-	remotesVariable = "MEDIA_REMOTES"
+	// The three topics the operator hands each translator sidecar:
+	// remoteEventsVariable is the controller's events topic to subscribe
+	// to, keymapTopicVariable is the retained keymap topic it reads the
+	// table from, and focusTopicVariable is the focus topic it will honor
+	// in a later plan. The translator reuses remoteNameVariable for its
+	// client id.
+	remoteEventsVariable = "MEDIA_REMOTE_EVENTS"
+	keymapTopicVariable  = "MEDIA_KEYMAP_TOPIC"
+	focusTopicVariable   = "MEDIA_FOCUS_TOPIC"
 )

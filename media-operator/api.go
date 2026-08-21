@@ -90,10 +90,10 @@ type PlayerList struct {
 // unit plays through however many outputs it has. The CRD requires a
 // display or at least one sink.
 //
-// Remotes names the controllers the unit owns. Each entry names a
-// Remote in the same namespace, and the Play's pod runs one bridge
-// sidecar for each, so a unit's controllers belong to its spec beside
-// its display and its sinks.
+// Remotes names the controllers the unit owns. Each entry names a Remote
+// in the same namespace, and the Play's pod runs one translator sidecar
+// for each, so a unit's controllers belong to its spec beside its
+// display and its sinks.
 type PlayerSpec struct {
 	Zone    string         `json:"zone,omitempty"`
 	Display *PlayerDevice  `json:"display,omitempty"`
@@ -266,6 +266,14 @@ type Keymap struct {
 type KeymapSpec struct {
 	Buttons []KeymapButton `json:"buttons,omitempty"`
 	Axes    []KeymapAxis   `json:"axes,omitempty"`
+}
+
+// KeymapList is the cluster-scoped collection the operator lists and
+// watches, so a Keymap edit wakes the loop that recompiles and
+// republishes it.
+type KeymapList struct {
+	Metadata ListMeta `json:"metadata"`
+	Items    []Keymap `json:"items"`
 }
 
 // A KeymapRepeat makes a binding repeat while the control is held. The

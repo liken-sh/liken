@@ -58,11 +58,11 @@ func TestDerivePlayStatus(t *testing.T) {
 			Message: "the scheme rtsp:// is not one the operator resolves; it resolves https:// and nfs://",
 		},
 	}, {
-		name:     "a Keymap that will not compile fails the play the same way",
-		buildErr: errors.New("the Keymap gamepad binds BTN_NOPE, which is not an evdev button name this operator knows"),
+		name:     "a missing Remote fails the play the same way",
+		buildErr: errors.New("the Player theater names the Remote ghost, which does not exist in this namespace"),
 		want: PlayStatus{
 			Phase:   phaseFailed,
-			Message: "the Keymap gamepad binds BTN_NOPE, which is not an evdev button name this operator knows",
+			Message: "the Player theater names the Remote ghost, which does not exist in this namespace",
 		},
 	}, {
 		name: "an absent Player is Pending, not Failed",

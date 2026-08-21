@@ -23,17 +23,17 @@ const (
 	defaultRepeatInterval = 300 * time.Millisecond
 )
 
-// A boundRemote is one Remote as the pod builders need it: the name
-// that names its request and its standing pod, the device to claim,
-// the compiled table the playback pod's sidecar matches events
-// against, and the events topic the sidecar subscribes to. The
-// operator fills EventsTopic when it builds the sidecar's environment,
+// A boundRemote is one Remote as the pod builders need it: the name that
+// names its translator sidecar, the Keymap name its model resolves to,
+// and the three topics the translator subscribes to. The gather sets
+// Name and Keymap; the operator fills the three topics in reconcile,
 // because the topic base lives with the operator and not the gather.
 type boundRemote struct {
 	Name        string
-	Device      RemoteDevice
-	Bindings    []compiledBinding
+	Keymap      string
 	EventsTopic string
+	KeymapTopic string
+	FocusTopic  string
 }
 
 // compileKeymap turns one Keymap into the sidecar's table. A button
@@ -126,8 +126,8 @@ func checkAction(keymap, entry, action string, amount int) error {
 // applyRepeat folds a Keymap's repeat block into the compiled binding. A
 // binding with no block fires once. A block turns repeat on, whatever the
 // action is, and an empty delay or interval takes the default. The
-// operator parses the durations here, so the bridge carries milliseconds
-// and parses nothing.
+// operator parses the durations here, so the translator carries
+// milliseconds and parses nothing.
 func applyRepeat(binding *compiledBinding, keymap, entry string, repeat *KeymapRepeat) error {
 	if repeat == nil {
 		return nil
@@ -165,12 +165,13 @@ func repeatDuration(keymap, entry, field, value string, fallback time.Duration) 
 	return parsed, nil
 }
 
-// gatherRemotes compiles the Keymap of every Remote a Player owns. It
-// reads spec.remotes in name order, because the result becomes a pod
-// spec, and a pod spec built twice from the same resources must be the
-// same spec, request for request and container for container. A named
-// Remote or its Keymap that does not exist fails the gather, and the
-// message names the missing resource.
+// gatherRemotes reads every Remote a Player owns. It reads spec.remotes
+// in name order, because the result becomes a pod spec, and a pod spec
+// built twice from the same resources must be the same spec, container
+// for container. A named Remote that does not exist fails the gather,
+// and the message names it. The Keymap is not read here: the operator
+// compiles and publishes it in the keymap reconcile, and the translator
+// reads the table off the bus.
 func gatherRemotes(c *Client, player *Player) ([]boundRemote, error) {
 	namespace := player.Metadata.Namespace
 
@@ -190,22 +191,9 @@ func gatherRemotes(c *Client, player *Player) ([]boundRemote, error) {
 		if err != nil {
 			return nil, err
 		}
-		keymap, err := GetKeymap(c, namespace, remote.Spec.Keymap)
-		if errors.Is(err, ErrNotFound) {
-			return nil, fmt.Errorf("the Remote %s names the Keymap %s, which does not exist in this namespace",
-				remote.Metadata.Name, remote.Spec.Keymap)
-		}
-		if err != nil {
-			return nil, err
-		}
-		bindings, err := compileKeymap(keymap)
-		if err != nil {
-			return nil, err
-		}
 		bound = append(bound, boundRemote{
-			Name:     remote.Metadata.Name,
-			Device:   remote.Spec.Device,
-			Bindings: bindings,
+			Name:   remote.Metadata.Name,
+			Keymap: remote.Spec.Keymap,
 		})
 	}
 	return bound, nil

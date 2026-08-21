@@ -161,6 +161,7 @@ const (
 	playsPath      = "/apis/" + mediaAPIVersion + "/plays"
 	playersPath    = "/apis/" + mediaAPIVersion + "/players"
 	remotesAllPath = "/apis/" + mediaAPIVersion + "/remotes"
+	keymapsPath    = "/apis/" + mediaAPIVersion + "/keymaps"
 	mediaPrefix    = "/apis/" + mediaAPIVersion + "/namespaces/"
 	claimPrefix    = "/apis/" + claimAPIVersion + "/namespaces/"
 	podPrefix      = "/api/v1/namespaces/"
@@ -178,8 +179,11 @@ func remotesPath(namespace string) string {
 	return mediaPrefix + namespace + "/remotes"
 }
 
-func keymapPath(namespace, name string) string {
-	return mediaPrefix + namespace + "/keymaps/" + name
+// keymapPath reads one Keymap by name. A Keymap is cluster-scoped, so
+// the path carries no namespace, the way a StorageClass path carries
+// none.
+func keymapPath(name string) string {
+	return keymapsPath + "/" + name
 }
 
 func claimsPath(namespace string) string {
@@ -281,12 +285,23 @@ func ListAllRemotes(c *Client) (*RemoteList, error) {
 	return list, nil
 }
 
-func GetKeymap(c *Client, namespace, name string) (*Keymap, error) {
+func GetKeymap(c *Client, name string) (*Keymap, error) {
 	keymap := &Keymap{}
-	if err := c.RequestJSON(http.MethodGet, keymapPath(namespace, name), nil, keymap); err != nil {
+	if err := c.RequestJSON(http.MethodGet, keymapPath(name), nil, keymap); err != nil {
 		return nil, err
 	}
 	return keymap, nil
+}
+
+// ListKeymaps reads every Keymap in the cluster in one request, because
+// the operator compiles and publishes each one on every pass, and the
+// list's resourceVersion is where the keymaps watch resumes from.
+func ListKeymaps(c *Client) (*KeymapList, error) {
+	list := &KeymapList{}
+	if err := c.RequestJSON(http.MethodGet, keymapsPath, nil, list); err != nil {
+		return nil, err
+	}
+	return list, nil
 }
 
 func GetResourceClaim(c *Client, namespace, name string) (*ResourceClaim, error) {

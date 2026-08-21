@@ -78,6 +78,12 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 			_ = json.NewEncoder(w).Encode(list)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/remotes/"):
 			answer(w, f.remotes[name])
+		case r.Method == http.MethodGet && r.URL.Path == keymapsPath:
+			list := KeymapList{Metadata: ListMeta{ResourceVersion: "1"}}
+			for _, key := range sortedNames(f.keymaps) {
+				list.Items = append(list.Items, *f.keymaps[key])
+			}
+			_ = json.NewEncoder(w).Encode(list)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/keymaps/"):
 			answer(w, f.keymaps[name])
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/resourceclaims/"):
@@ -129,12 +135,16 @@ func sortedNames[T any](objects map[string]*T) []string {
 func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *operator {
 	t.Helper()
 	return &operator{
-		client:         testAPIClient(t, cluster.handler(t)),
-		image:          "registry.example/player:test",
-		busAddress:     "bus.media.svc:1883",
-		topicBase:      defaultTopicBase,
+		client:     testAPIClient(t, cluster.handler(t)),
+		image:      "registry.example/player:test",
+		busAddress: "bus.media.svc:1883",
+		topicBase:  defaultTopicBase,
+		// The bus is never Run, so a publish finds a nil write queue and
+		// drops, which is what a pass wants with no broker under the test.
+		bus:            newBus("bus.media.svc:1883", "media-operator-test", nil, nil, nil),
 		reports:        newReports(wake),
 		positionWrites: map[string]time.Time{},
+		keymapTopics:   map[string]bool{},
 	}
 }
 
@@ -308,9 +318,9 @@ func TestATerminalPlayIsReadAndLeftAlone(t *testing.T) {
 
 	media.pass()
 
-	want := "GET " + playsPath + ",GET " + playersPath + ",GET " + remotesAllPath
+	want := "GET " + playsPath + ",GET " + playersPath + ",GET " + remotesAllPath + ",GET " + keymapsPath
 	if strings.Join(cluster.requests, ",") != want {
-		t.Errorf("requests = %v, want the three list reads alone", cluster.requests)
+		t.Errorf("requests = %v, want the four list reads alone", cluster.requests)
 	}
 }
 
@@ -358,10 +368,10 @@ func TestAPodThatSucceededFinishesThePlay(t *testing.T) {
 	}
 }
 
-// The bridge publishes a live position to the bus every second, but the
-// operator writes a bare position advance to the resource no more than
-// once per positionWriteInterval, so a status write does not wake the
-// operator's own watch a second later and spin the loop.
+// The command sidecar publishes a live position to the bus every second,
+// but the operator writes a bare position advance to the resource no
+// more than once per positionWriteInterval, so a status write does not
+// wake the operator's own watch a second later and spin the loop.
 func TestABarePositionAdvanceIsThrottled(t *testing.T) {
 	cluster := newFakeCluster()
 	running := PlayStatus{
@@ -455,32 +465,8 @@ func housePlayerWithRemote() *Player {
 	return player
 }
 
-// bridgeRemotes reads the compiled remote set the operator wrote into
-// the bridge sidecar's environment, so a test reads what the bridge
-// subscribes to without a broker.
-func bridgeRemotes(t *testing.T, pod *Pod) []remoteBindings {
-	t.Helper()
-	for _, container := range pod.Spec.InitContainers {
-		if container.Name != bridgeContainer {
-			continue
-		}
-		for _, env := range container.Env {
-			if env.Name != remotesVariable {
-				continue
-			}
-			var remotes []remoteBindings
-			if err := json.Unmarshal([]byte(env.Value), &remotes); err != nil {
-				t.Fatalf("%s does not decode: %v", remotesVariable, err)
-			}
-			return remotes
-		}
-	}
-	t.Fatalf("the playback pod has no bridge sidecar carrying %s", remotesVariable)
-	return nil
-}
-
 // A bound Remote reconciles into its own standing pod, and the playback
-// pod's bridge sidecar names the same events topic the standing pod
+// pod's translator sidecar names the same events topic the standing pod
 // publishes to, so the two meet on the bus.
 func TestAPassWiresABoundRemote(t *testing.T) {
 	cluster := newFakeCluster()
@@ -505,54 +491,29 @@ func TestAPassWiresABoundRemote(t *testing.T) {
 		t.Errorf("no standing remote claim was created: %v", cluster.requests)
 	}
 
-	// The playback pod's bridge sidecar carries the remote's events topic
-	// and the compiled keymap, so it subscribes to what the standing pod
-	// publishes and maps each press.
+	// The playback pod's translator sidecar carries the remote's events,
+	// keymap, and focus topics, so it subscribes to what the standing pod
+	// publishes and to the retained keymap.
 	playback, held := cluster.pods["movie-playback"]
 	if !held {
 		t.Fatalf("no playback pod was created: %v", cluster.requests)
 	}
-	remotes := bridgeRemotes(t, playback)
-	if len(remotes) != 1 {
-		t.Fatalf("bridge %s = %v, want one entry", remotesVariable, remotes)
+	translator := initContainer(t, playback, "translate-sofa")
+	if got, want := envValue(translator, remoteEventsVariable), remoteEventsTopic(defaultTopicBase, "house", "sofa"); got != want {
+		t.Errorf("events topic = %q, want %q", got, want)
 	}
-	if want := remoteEventsTopic(defaultTopicBase, "house", "sofa"); remotes[0].EventsTopic != want {
-		t.Errorf("events topic = %q, want %q", remotes[0].EventsTopic, want)
+	if got, want := envValue(translator, keymapTopicVariable), keymapTopic(defaultTopicBase, "gamepad"); got != want {
+		t.Errorf("keymap topic = %q, want %q", got, want)
 	}
-	if len(remotes[0].Bindings) == 0 {
-		t.Error("the bridge carries no compiled bindings for the remote")
-	}
-}
-
-// A Remote that names a Keymap nobody wrote fails the Play before the
-// playback pod, because the bridge sidecar needs the compiled keymap and
-// the compile runs before the pod. The Remote's own standing pod still
-// runs: the reader needs no keymap.
-func TestAPlayWhoseKeymapIsAbsentFailsBeforeItsPod(t *testing.T) {
-	cluster := newFakeCluster()
-	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
-	cluster.players["theater"] = housePlayerWithRemote()
-	cluster.remotes["sofa"] = houseRemote("nowhere")
-	media := testOperator(t, cluster, make(chan struct{}, 1))
-
-	media.pass()
-
-	status := cluster.plays["movie"].Status
-	if status.Phase != phaseFailed {
-		t.Errorf("phase = %q, want Failed", status.Phase)
-	}
-	want := "the Remote sofa names the Keymap nowhere, which does not exist in this namespace"
-	if status.Message != want {
-		t.Errorf("message = %q, want %q", status.Message, want)
-	}
-	if _, held := cluster.pods["movie-playback"]; held {
-		t.Errorf("a broken Remote created the playback pod: %v", cluster.pods)
+	if got, want := envValue(translator, focusTopicVariable), remoteFocusTopic(defaultTopicBase, "house", "sofa"); got != want {
+		t.Errorf("focus topic = %q, want %q", got, want)
 	}
 }
 
-// The container set is fixed once the pod runs, so a Keymap broken after
-// the film started changes nothing and the run keeps its status.
-func TestARemoteBrokenAfterTheRunStartedLeavesThePlayAlone(t *testing.T) {
+// A Keymap edit is bus state, not pod shape. The container set is fixed
+// once the pod runs, so a Keymap changed after the film started recreates
+// no pod and the run keeps its status.
+func TestAKeymapEditAfterTheRunStartedLeavesThePlayAlone(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
 	cluster.players["theater"] = housePlayerWithRemote()
@@ -562,18 +523,18 @@ func TestARemoteBrokenAfterTheRunStartedLeavesThePlayAlone(t *testing.T) {
 
 	media.pass()
 	cluster.pods["movie-playback"].Status.Phase = podRunning
-	cluster.keymaps["gamepad"] = &Keymap{
-		Metadata: ObjectMeta{Name: "gamepad", Namespace: "house"},
-		Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_NOPE", Action: actionPause}}},
-	}
+	edited := testKeymap()
+	edited.Spec.Buttons[0].Action = actionMute
+	cluster.keymaps["gamepad"] = edited
+	created := len(cluster.requests)
 	media.pass()
 
 	status := cluster.plays["movie"].Status
 	if status.Phase != phaseRunning {
 		t.Errorf("phase = %q, want Running", status.Phase)
 	}
-	if status.Message != "" {
-		t.Errorf("message = %q, want none", status.Message)
+	if got := countMethod(cluster.requests[created:], http.MethodDelete); got != 0 {
+		t.Errorf("a keymap edit recreated the pod: %d deletes in %v", got, cluster.requests[created:])
 	}
 }
 
@@ -747,8 +708,10 @@ func TestAPlayerRemoteChangeRecreatesThePodOnTheChangedRemoteSet(t *testing.T) {
 
 	sofa := []boundRemote{{
 		Name:        "sofa",
-		Device:      RemoteDevice{Class: "gamepad"},
+		Keymap:      "gamepad",
 		EventsTopic: remoteEventsTopic(defaultTopicBase, "house", "sofa"),
+		KeymapTopic: keymapTopic(defaultTopicBase, "gamepad"),
+		FocusTopic:  remoteFocusTopic(defaultTopicBase, "house", "sofa"),
 	}}
 	pod := buildPod(play, buildClaim(play, player),
 		resolution{Items: []string{"https://nas/film.mkv"}},
@@ -795,5 +758,73 @@ func TestAPlayWhosePlayerNamesAMissingRemoteFailsBeforeItsPod(t *testing.T) {
 	}
 	if _, held := cluster.pods["movie-playback"]; held {
 		t.Errorf("a missing remote created the playback pod: %v", cluster.pods)
+	}
+}
+
+// keymapOperator wires an operator with a bus to a fake broker, so a test
+// reads what the keymap reconcile publishes.
+func keymapOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker) {
+	t.Helper()
+	bus, brokers, connected := startBus(t, 1, nil, nil)
+	waitForConnect(t, connected)
+	return &operator{
+		client:       testAPIClient(t, cluster.handler(t)),
+		topicBase:    defaultTopicBase,
+		bus:          bus,
+		keymapTopics: map[string]bool{},
+	}, brokers[0]
+}
+
+// The keymap reconcile compiles each Keymap and publishes the table to
+// its topic, retained, so a translator reads the current keymap the
+// instant it connects. When the Keymap is deleted, the next reconcile
+// clears the retained value.
+func TestReconcileKeymapsPublishesAndClearsARetainedTable(t *testing.T) {
+	cluster := newFakeCluster()
+	cluster.keymaps["gamepad"] = testKeymap()
+	media, broker := keymapOperator(t, cluster)
+
+	media.reconcileKeymaps()
+
+	published := waitForPublish(t, broker.pubs)
+	if published.topic != keymapTopic(defaultTopicBase, "gamepad") {
+		t.Errorf("topic = %q", published.topic)
+	}
+	if !published.retained {
+		t.Error("the compiled keymap was not retained")
+	}
+	var bindings []compiledBinding
+	if err := json.Unmarshal(published.payload, &bindings); err != nil {
+		t.Fatalf("payload does not decode: %v", err)
+	}
+	if len(bindings) != 7 {
+		t.Errorf("bindings = %+v, want the seven of the test keymap", bindings)
+	}
+
+	delete(cluster.keymaps, "gamepad")
+	media.reconcileKeymaps()
+
+	cleared := waitForPublish(t, broker.pubs)
+	if cleared.topic != keymapTopic(defaultTopicBase, "gamepad") || len(cleared.payload) != 0 || !cleared.retained {
+		t.Errorf("clear = %+v, want an empty retained publish", cleared)
+	}
+}
+
+// A Keymap that will not compile publishes nothing, so the last-good
+// retained value stays in place.
+func TestReconcileKeymapsPublishesNothingForAKeymapThatWillNotCompile(t *testing.T) {
+	cluster := newFakeCluster()
+	cluster.keymaps["broken"] = &Keymap{
+		Metadata: ObjectMeta{Name: "broken"},
+		Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_NOPE", Action: actionPause}}},
+	}
+	media, broker := keymapOperator(t, cluster)
+
+	media.reconcileKeymaps()
+
+	select {
+	case got := <-broker.pubs:
+		t.Fatalf("a keymap that will not compile published %+v", got)
+	case <-time.After(50 * time.Millisecond):
 	}
 }

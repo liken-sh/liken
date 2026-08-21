@@ -5,9 +5,11 @@
 # face button as BTN_SOUTH whatever the glyph on the plastic. The
 # right side names what a person means, pause or seek, never an mpv
 # command, so a different player program can implement the same
-# table later. The operator compiles each table before it builds a
-# pod, and a name it cannot compile fails the Play with a message
-# instead of reaching a container.
+# table later. The operator compiles each table and publishes it to
+# the bus retained, so a translator reads the current table the
+# instant it connects and an edit reaches a running film with no pod
+# restart. A table the operator cannot compile is logged and
+# publishes nothing, leaving the last-good table in place.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -20,7 +22,11 @@ spec:
     plural: keymaps
     singular: keymap
     categories: [media]
-  scope: Namespaced
+  # A Keymap is cluster-scoped because it is one controller model's
+  # vocabulary, written once and shared across every room, the way a
+  # DeviceClass and a StorageClass are cluster-scoped. A Remote in any
+  # namespace names it without a namespace qualifier.
+  scope: Cluster
   versions:
     - name: v1alpha1
       served: true

@@ -39,19 +39,20 @@ rules:
   - apiGroups: [media.liken.sh]
     resources: [players/status]
     verbs: [update]
-  # The remotes bound to a player, and their keymaps. A Remote is
-  # watched like a Play, because each Remote reconciles into one
-  # standing pod, and the watch is the wake signal for that pod.
-  # Nothing indexes a Remote by the player it binds, so every pass
-  # re-reads with a list; a keymap is read one at a time, by the name
-  # a Remote carries. Read-only: a person writes these, and the
-  # operator compiles them into pods.
+  # The remotes bound to a player. A Remote is watched like a Play,
+  # because each Remote reconciles into one standing pod, and the watch
+  # is the wake signal for that pod. Nothing indexes a Remote by the
+  # player it binds, so every pass re-reads with a list.
   - apiGroups: [media.liken.sh]
     resources: [remotes]
     verbs: [get, list, watch]
+  # The keymaps, cluster-scoped now. The operator lists them to compile
+  # every Keymap and publish its table to the bus retained on each pass,
+  # and the watch is the wake signal for a keymap edit. Read-only,
+  # because a person writes these and the operator only reads them.
   - apiGroups: [media.liken.sh]
     resources: [keymaps]
-    verbs: [get]
+    verbs: [get, list, watch]
   # The claims a play becomes. Created once per play, read back on
   # every pass, never deleted: the Play owns them and the garbage
   # collector takes them with it.

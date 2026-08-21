@@ -70,5 +70,6 @@ spec:
                   type: string
                   minLength: 1
                   description: >-
-                    The Keymap for this controller's model, by name,
-                    in this namespace.
+                    The Keymap for this controller's model, by name. A
+                    Keymap is cluster-scoped, so the name carries no
+                    namespace.

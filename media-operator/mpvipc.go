@@ -75,12 +75,12 @@ func (c propertyChange) known() bool {
 	return string(c.Data) != "null" && len(c.Data) > 0
 }
 
-// dialMPV retries until it connects or the context ends. The bridge is
-// a native sidecar that the kubelet starts before mpv, so the socket can
-// be minutes away, and the wait has no deadline of its own: nothing but
-// mpv appearing or the kubelet's SIGTERM ends it. Waiting is the whole
-// job when mpv is not up yet, so a wall-clock limit would only quit early
-// on a slow image pull or a display claim that is not ready.
+// dialMPV retries until it connects or the context ends. The command
+// sidecar is a native sidecar the kubelet starts before mpv, so the
+// socket can be minutes away, and the wait has no deadline of its own:
+// nothing but mpv appearing or the kubelet's SIGTERM ends it. Waiting is
+// the whole job when mpv is not up yet, so a wall-clock limit would only
+// quit early on a slow image pull or a display claim that is not ready.
 func dialMPV(ctx context.Context, path string) (net.Conn, error) {
 	for ctx.Err() == nil {
 		connection, err := net.Dial("unix", path)

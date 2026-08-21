@@ -169,10 +169,10 @@ func writePlayStatus(c *Client, play *Play, desired PlayStatus) error {
 
 // onlyPositionChanged reports whether the desired status differs from the
 // current one in nothing but the position and the duration. The operator
-// throttles a change that is only a position advance, because the bridge
-// publishes a live position to the bus every second, and each write to
-// the resource wakes the operator's own plays watch, so an unthrottled
-// position write would spin the loop against the API server.
+// throttles a change that is only a position advance, because the
+// command sidecar publishes a live position to the bus every second, and
+// each write to the resource wakes the operator's own plays watch, so an
+// unthrottled position write would spin the loop against the API server.
 func onlyPositionChanged(current, desired PlayStatus) bool {
 	same, err := sameStatus(current, desired)
 	if err != nil || same {

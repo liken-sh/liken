@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -38,10 +39,11 @@ const (
 const backstopInterval = 10 * time.Second
 
 // positionWriteInterval bounds how often a bare position advance reaches
-// a Play's status. The bridge publishes a live position to the bus every
-// second, but a status write wakes the operator's own plays watch, so
-// writing the position every second would spin the loop and the API
-// server. A pause, an item change, or a phase change writes at once; a
+// a Play's status. The command sidecar publishes a live position to the
+// bus every second, but a status write wakes the operator's own plays
+// watch, so writing the position every second would spin the loop and
+// the API server. A pause, an item change, or a phase change writes at
+// once; a
 // position that advanced alone waits this interval, and the bus carries
 // the live value in between.
 //
@@ -69,6 +71,12 @@ type operator struct {
 	// bare position advance writes no more than once per
 	// positionWriteInterval. Only the pass goroutine touches it.
 	positionWrites map[string]time.Time
+
+	// keymapTopics is the set of keymap topics the operator has published
+	// a compiled table on. It lets a later pass find a topic whose Keymap
+	// no longer exists and clear its retained value. Only the pass
+	// goroutine touches it.
+	keymapTopics map[string]bool
 }
 
 func operate() {
@@ -108,6 +116,7 @@ func operate() {
 		topicBase:      topicBase,
 		reports:        desk,
 		positionWrites: map[string]time.Time{},
+		keymapTopics:   map[string]bool{},
 	}
 
 	// The bus handler is the only path a report takes to the control
@@ -152,11 +161,17 @@ func operate() {
 		fmt.Fprintf(os.Stderr, "listing players: %v\n", err)
 		os.Exit(1)
 	}
+	keymaps, err := ListKeymaps(client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing keymaps: %v\n", err)
+		os.Exit(1)
+	}
 	fmt.Printf("media.liken.sh: operating %d plays and %d remotes over %s\n",
 		len(plays.Items), len(remotes.Items), busAddress)
 	go watchPlays(client, plays.Metadata.ResourceVersion, wake)
 	go watchRemotes(client, remotes.Metadata.ResourceVersion, wake)
 	go watchPlayers(client, players.Metadata.ResourceVersion, wake)
+	go watchKeymaps(client, keymaps.Metadata.ResourceVersion, wake)
 
 	ticker := time.NewTicker(backstopInterval)
 	for {
@@ -201,6 +216,47 @@ func (o *operator) pass() {
 	}
 	o.reconcilePlayers(list.Items)
 	o.reconcileRemotes()
+	o.reconcileKeymaps()
+}
+
+// reconcileKeymaps compiles every Keymap and publishes it to its keymap
+// topic, retained, so a translator reads the current table the instant
+// it subscribes and a Keymap edit reaches a running film with no pod
+// restart. A Keymap that does not compile publishes nothing and leaves
+// the last-good retained value in place, so a broken edit does not empty
+// a running translation. A topic whose Keymap no longer exists has its
+// retained value cleared with an empty publish, so a deleted Keymap
+// leaves nothing behind on the bus.
+func (o *operator) reconcileKeymaps() {
+	list, err := ListKeymaps(o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing keymaps: %v\n", err)
+		return
+	}
+	present := make(map[string]bool, len(list.Items))
+	for index := range list.Items {
+		keymap := &list.Items[index]
+		topic := keymapTopic(o.topicBase, keymap.Metadata.Name)
+		bindings, err := compileKeymap(keymap)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "compiling keymap %s: %v\n", keymap.Metadata.Name, err)
+			continue
+		}
+		payload, err := json.Marshal(bindings)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "marshaling keymap %s: %v\n", keymap.Metadata.Name, err)
+			continue
+		}
+		o.bus.Publish(topic, payload, true)
+		o.keymapTopics[topic] = true
+		present[topic] = true
+	}
+	for topic := range o.keymapTopics {
+		if !present[topic] {
+			o.bus.Publish(topic, nil, true)
+			delete(o.keymapTopics, topic)
+		}
+	}
 }
 
 // reconcilePlayers writes every Player's status from the same Plays the
@@ -269,10 +325,12 @@ func (o *operator) reconcile(play *Play) error {
 		return writePlayStatus(o.client, play, derivePlayStatus(play, player, resolveErr, nil, nil))
 	}
 
-	// A Remote that will not resolve fails the Play only while there is
-	// still no pod. Once the pod exists, its container set is fixed and
-	// no edit to a Remote or a Keymap can reach this run, so a Keymap
-	// broken mid-film must not fail the film.
+	// A missing Remote fails the Play only while there is still no pod.
+	// Once the pod exists, its container set is fixed and no edit to the
+	// Player's remotes can reach this run, so a Remote deleted mid-film
+	// must not fail the film. A Keymap never reaches this gather: it is
+	// compiled and published on the bus by reconcileKeymaps, and a broken
+	// Keymap edit leaves the last-good table in place instead.
 	remotes, remoteErr := gatherRemotes(o.client, player)
 	if remoteErr != nil {
 		_, err := GetPod(o.client, namespace, podName(name))
@@ -284,11 +342,15 @@ func (o *operator) reconcile(play *Play) error {
 		}
 		remotes = nil
 	}
-	// The events topic each bound remote publishes on is what the bridge
-	// sidecar subscribes to. The operator fills it here, because the
-	// topic base lives with the operator.
+	// The operator fills each remote's three topics here, because the
+	// topic base lives with the operator and not the gather. The events
+	// and focus topics carry the Remote's namespace and name; the keymap
+	// topic carries the Keymap name alone, because a Keymap is
+	// cluster-scoped.
 	for index := range remotes {
 		remotes[index].EventsTopic = remoteEventsTopic(o.topicBase, namespace, remotes[index].Name)
+		remotes[index].KeymapTopic = keymapTopic(o.topicBase, remotes[index].Keymap)
+		remotes[index].FocusTopic = remoteFocusTopic(o.topicBase, namespace, remotes[index].Name)
 	}
 
 	claim := buildClaim(play, player)
@@ -459,37 +521,30 @@ func sameClaimSpec(current, desired ResourceClaimSpec) (bool, error) {
 	return string(was) == string(wants), nil
 }
 
-// sameRemoteSet reports whether two pods carry the same bridge
-// sidecars, by the events topics they subscribe to. It does not
-// compare the compiled keymap, so an edit to a Keymap is not a shape
-// change and recreates no pod. Only what the Player controls, the
-// claim and the set of controllers, reshapes a running film.
+// sameRemoteSet reports whether two pods carry the same translator
+// sidecars, by the events topics they subscribe to. It reads no keymap,
+// so a Keymap edit is bus state and not a shape change and recreates no
+// pod. Only what the Player controls, the claim and the set of
+// controllers, reshapes a running film.
 func sameRemoteSet(current, desired *Pod) bool {
 	return slices.Equal(podRemoteTopics(current), podRemoteTopics(desired))
 }
 
-// podRemoteTopics reads the events topics the bridge sidecar
-// subscribes to, in order, from the remote set the operator wrote into
-// the sidecar's environment.
+// podRemoteTopics reads the events topics the translator sidecars
+// subscribe to, in order, from each translator container's environment.
+// Adding or removing a controller changes this set, and the recreate
+// follows.
 func podRemoteTopics(pod *Pod) []string {
+	var topics []string
 	for _, container := range pod.Spec.InitContainers {
-		if container.Name != bridgeContainer {
+		if !strings.HasPrefix(container.Name, translatorContainer("")) {
 			continue
 		}
 		for _, variable := range container.Env {
-			if variable.Name != remotesVariable {
-				continue
+			if variable.Name == remoteEventsVariable {
+				topics = append(topics, variable.Value)
 			}
-			var entries []remoteBindings
-			if err := json.Unmarshal([]byte(variable.Value), &entries); err != nil {
-				return nil
-			}
-			topics := make([]string, 0, len(entries))
-			for _, entry := range entries {
-				topics = append(topics, entry.EventsTopic)
-			}
-			return topics
 		}
 	}
-	return nil
+	return topics
 }

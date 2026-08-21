@@ -54,28 +54,28 @@ func TestMatchBinding(t *testing.T) {
 func TestCommandFor(t *testing.T) {
 	cases := []struct {
 		name    string
-		binding compiledBinding
+		command mediaCommand
 		want    []any
 	}{
-		{name: "pause", binding: compiledBinding{Action: actionPause}, want: []any{"osd-auto", "cycle", "pause"}},
-		{name: "mute", binding: compiledBinding{Action: actionMute}, want: []any{"osd-auto", "cycle", "mute"}},
-		{name: "seek forward", binding: compiledBinding{Action: actionSeek, Amount: 30}, want: []any{"osd-auto", "seek", 30}},
-		{name: "seek back", binding: compiledBinding{Action: actionSeek, Amount: -10}, want: []any{"osd-auto", "seek", -10}},
-		{name: "volume", binding: compiledBinding{Action: actionVolume, Amount: 5}, want: []any{"osd-auto", "add", "volume", 5}},
-		{name: "chapter", binding: compiledBinding{Action: actionChapter, Amount: -1}, want: []any{"osd-auto", "add", "chapter", -1}},
-		{name: "subtitles", binding: compiledBinding{Action: actionSubtitles}, want: []any{"osd-auto", "cycle", "sub"}},
-		{name: "audio", binding: compiledBinding{Action: actionAudio}, want: []any{"osd-auto", "cycle", "audio"}},
+		{name: "pause", command: mediaCommand{Action: actionPause}, want: []any{"osd-auto", "cycle", "pause"}},
+		{name: "mute", command: mediaCommand{Action: actionMute}, want: []any{"osd-auto", "cycle", "mute"}},
+		{name: "seek forward", command: mediaCommand{Action: actionSeek, Amount: 30}, want: []any{"osd-auto", "seek", 30}},
+		{name: "seek back", command: mediaCommand{Action: actionSeek, Amount: -10}, want: []any{"osd-auto", "seek", -10}},
+		{name: "volume", command: mediaCommand{Action: actionVolume, Amount: 5}, want: []any{"osd-auto", "add", "volume", 5}},
+		{name: "chapter", command: mediaCommand{Action: actionChapter, Amount: -1}, want: []any{"osd-auto", "add", "chapter", -1}},
+		{name: "subtitles", command: mediaCommand{Action: actionSubtitles}, want: []any{"osd-auto", "cycle", "sub"}},
+		{name: "audio", command: mediaCommand{Action: actionAudio}, want: []any{"osd-auto", "cycle", "audio"}},
 		{
 			name:    "info",
-			binding: compiledBinding{Action: actionInfo},
+			command: mediaCommand{Action: actionInfo},
 			want:    []any{"expand-properties", "show-text", "${filename}\n${time-pos} / ${duration}", 4000},
 		},
-		{name: "an action from a newer operator", binding: compiledBinding{Action: "brightness", Amount: 1}, want: nil},
+		{name: "an action from a newer operator", command: mediaCommand{Action: "brightness", Amount: 1}, want: nil},
 	}
 
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
-			got := commandFor(each.binding)
+			got := commandFor(each.command)
 			if len(got) != len(each.want) {
 				t.Fatalf("command = %v, want %v", got, each.want)
 			}
