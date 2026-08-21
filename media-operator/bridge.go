@@ -28,12 +28,15 @@ import (
 	"time"
 )
 
-// reportInterval is the ceiling on how often the bridge reports while
-// the position advances. mpv sends a time-pos event several times a
-// second, and each report becomes one status write in the operator, so
-// an unthrottled run would rewrite the Play as fast as the player
-// counts.
-var reportInterval = 5 * time.Second
+// reportInterval is the ceiling on how often the bridge publishes a
+// position while it advances. mpv sends a time-pos event several times a
+// second, and one report is a small QoS 0 message, so the bus carries a
+// live position at one report a second. The Play resource does not move
+// that fast: the operator wakes its reconcile loop only on a pause or an
+// item change, and a bare position advance rides the backstop tick. So
+// the bus is the live plane and the resource is the throttled one, and a
+// consumer that wants a smooth position reads the bus.
+var reportInterval = 1 * time.Second
 
 // busFlushGrace is how long the bridge holds the bus open after it
 // publishes the two closing messages, so the writer goroutine drains

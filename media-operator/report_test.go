@@ -62,6 +62,39 @@ func TestFoldStoresTheReportAndWakesTheLoop(t *testing.T) {
 	waitForReportWake(t, wake)
 }
 
+// A position that only advances updates the desk but wakes nothing, so a
+// one-second bus cadence does not become a one-second write. The bare
+// position rides the operator's backstop tick instead.
+func TestFoldOnAPositionAdvanceStoresButDoesNotWake(t *testing.T) {
+	desk, wake := reportDesk(t)
+	desk.fold("house", "movie", runningReport())
+	waitForReportWake(t, wake)
+
+	advanced := runningReport()
+	advanced.Position = "0:01:05"
+	desk.fold("house", "movie", advanced)
+
+	stored := desk.latestFor("house", "movie")
+	if stored == nil || stored.Position != "0:01:05" {
+		t.Errorf("stored report = %+v, want the advanced position", stored)
+	}
+	expectNoReportWake(t, wake)
+}
+
+// A pause is what a person waits to see, so a report that flips it wakes
+// the loop even when the item has not changed.
+func TestFoldOnAPauseChangeWakes(t *testing.T) {
+	desk, wake := reportDesk(t)
+	desk.fold("house", "movie", runningReport())
+	waitForReportWake(t, wake)
+
+	paused := runningReport()
+	paused.Paused = true
+	desk.fold("house", "movie", paused)
+
+	waitForReportWake(t, wake)
+}
+
 func TestTheNewestReportIsTheOneTheDeskHolds(t *testing.T) {
 	desk, wake := reportDesk(t)
 

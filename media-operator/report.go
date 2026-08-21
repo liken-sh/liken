@@ -32,15 +32,25 @@ func runKey(namespace, name string) string {
 	return namespace + "/" + name
 }
 
-// fold records the newest report for a run and wakes the loop. A report
-// is a whole observation, so the newest one says everything an older
-// one did. The wake is because the position moved, so the status the
-// operator published is already behind.
+// fold records the newest report for a run. A report is a whole
+// observation, so the newest one says everything an older one did.
+//
+// A pause or an item change is what a person waits to see, so it wakes
+// the loop at once. A position that only advances updates the desk and
+// wakes nothing: the reconcile pass reads the current position off the
+// desk on its next backstop tick, so a steadily playing film writes its
+// resource on that interval and not on every report. This is the
+// throttle that keeps a one-second bus cadence from becoming a
+// one-second write to etcd.
 func (r *reports) fold(namespace, name string, report playReport) {
+	key := runKey(namespace, name)
 	r.mutex.Lock()
-	r.latest[runKey(namespace, name)] = report
+	previous, had := r.latest[key]
+	r.latest[key] = report
 	r.mutex.Unlock()
-	poke(r.wake)
+	if !had || report.Paused != previous.Paused || report.Item != previous.Item {
+		poke(r.wake)
+	}
 }
 
 // availability marks a Play online or offline. A Play marked offline
