@@ -231,7 +231,7 @@ func TestSecretTreeReturnsWhatNewBondSecretStored(t *testing.T) {
 
 	secret := NewBondSecret("bluetooth", address(t, testAdapter), address(t, testDevice),
 		tree[address(t, testDevice)], testOwner)
-	if again := secret.Tree(); !tree.Same(again) {
+	if again := secret.Tree(); !equalTrees(tree, again) {
 		t.Fatalf("the tree changed on the way through a Secret: %v, want %v", again, tree)
 	}
 }

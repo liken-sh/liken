@@ -61,13 +61,6 @@ func newDevpathMACs() *devpathMACs {
 	return &devpathMACs{macs: map[string]string{}}
 }
 
-// record stores the address an add event reported for a DEVPATH.
-func (d *devpathMACs) record(devpath, mac string) {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
-	d.macs[devpath] = mac
-}
-
 // resolve names the controller behind one event. It returns an empty
 // string when neither the datagram nor the map has a valid address,
 // which happens for every HID device that is not a Bluetooth

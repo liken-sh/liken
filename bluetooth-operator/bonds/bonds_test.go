@@ -1,6 +1,7 @@
 package bonds
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"testing"
@@ -92,7 +93,14 @@ func files(info, cache string) Files {
 	return Files{Info: []byte(info), Cache: []byte(cache)}
 }
 
-func TestTreeSame(t *testing.T) {
+// equalTrees reports whether two trees hold the same devices with the
+// same files. It compares each device with Files.Equal, so a round-trip
+// test measures the same equality the operator uses.
+func equalTrees(a, b Tree) bool {
+	return maps.EqualFunc(a, b, Files.Equal)
+}
+
+func TestEqualTrees(t *testing.T) {
 	one, two := address(t, testDevice), address(t, testNeighbour)
 	cases := []struct {
 		name string
@@ -140,8 +148,8 @@ func TestTreeSame(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := c.a.Same(c.b); got != c.want {
-				t.Errorf("Same = %v, want %v", got, c.want)
+			if got := equalTrees(c.a, c.b); got != c.want {
+				t.Errorf("equalTrees = %v, want %v", got, c.want)
 			}
 		})
 	}

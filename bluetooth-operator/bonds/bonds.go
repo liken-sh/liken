@@ -27,7 +27,6 @@ package bonds
 
 import (
 	"bytes"
-	"maps"
 )
 
 // Tree is one adapter's stored bonds: each paired device's files,
@@ -70,13 +69,4 @@ func (t Tree) Merge(other Tree) {
 	for device, files := range other {
 		t[device] = files
 	}
-}
-
-// Same reports whether two trees hold the same devices with the same
-// contents. The operator writes the Secret only when this says no,
-// because bluetoothd rewrites its tree for reasons that change no key,
-// and a write on every pass would be a write to the API server on
-// every pass.
-func (t Tree) Same(other Tree) bool {
-	return maps.EqualFunc(t, other, Files.Equal)
 }

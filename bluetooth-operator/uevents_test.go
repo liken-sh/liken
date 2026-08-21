@@ -117,7 +117,8 @@ func TestHIDRemoveResolvesThroughTheMap(t *testing.T) {
 func TestDevpathMACsPrefersTheDatagram(t *testing.T) {
 	const devpath = "/devices/virtual/misc/uhid/0005:054C:0CE6.0001"
 	macs := newDevpathMACs()
-	macs.record(devpath, "a0:ab:51:33:b7:12")
+	// An earlier add stored one controller's address for this path.
+	macs.resolve("add", devpath, "A0:AB:51:33:B7:12")
 
 	// The same sysfs path now holds a different controller, and the
 	// datagram says so.

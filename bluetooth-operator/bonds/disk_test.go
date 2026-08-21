@@ -247,7 +247,7 @@ func TestWriteTreeThenReadTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadTree: %v", err)
 	}
-	if !tree.Same(again) {
+	if !equalTrees(tree, again) {
 		t.Fatalf("the tree changed on the way through disk: %v, want %v", again, tree)
 	}
 }
