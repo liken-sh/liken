@@ -23,8 +23,9 @@ is built the way it is, and what it still owes an answer to.
 ## Planned
 
 These plans are designed. Each keeps its number and moves to
-[`completed/`](completed/) when it is built and drilled. The three
-form one chain that reworks the `Remote`, in order, and each is
+[`completed/`](completed/) when it is built and drilled. Plans 04
+through 06 form one chain that reworks the `Remote`, in order. Plan 07
+draws the display that the reworked `Remote` navigates. Each is
 provable on hardware alone.
 
 * [04, The player owns its remotes](04-the-player-owns-its-remotes.md).
@@ -42,6 +43,13 @@ provable on hardware alone.
   units. A per-unit keymap override, a retained focus mark the operator
   writes, and a source-button cycle arbitrate the one press that would
   otherwise reach two plays.
+* [07, The player draws its own display](07-the-player-draws-its-own-display.md).
+  `liken` writes its own on-screen display as one `mpv` script, drawn
+  through `libass` and `overlay-add`. A `Play` gains a `presentation`
+  block that states the media type, a hint, and the art beside the
+  media, and the display renders that declaration and tunes the layout
+  by type. The command bus from plans 04 through 06 navigates it, so a
+  remote or a gamepad moves the menus.
 
 ## Completed
 
