@@ -43,7 +43,15 @@ const backstopInterval = 10 * time.Second
 // server. A pause, an item change, or a phase change writes at once; a
 // position that advanced alone waits this interval, and the bus carries
 // the live value in between.
-const positionWriteInterval = 10 * time.Second
+//
+// The backstop tick is what drives a bare position write, because a
+// position advance wakes nothing on its own. So this interval sits below
+// backstopInterval on purpose: a write stamps a moment after the tick
+// that made it, so an interval equal to the tick would miss the next tick
+// by that moment and write every second tick, at twice the period. Two
+// seconds of headroom absorbs that skew, so a steadily playing film
+// writes on every tick.
+const positionWriteInterval = 8 * time.Second
 
 // operator holds what every pass needs. The report desk and the bus
 // are fields rather than globals so a test builds an operator around a
