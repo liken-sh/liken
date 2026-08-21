@@ -160,31 +160,8 @@ func operate() {
 		poke(wake)
 	}
 	// The bus handler is the only path the control plane takes a report or
-	// a focus signal. It reads each message's topic to learn which it is,
-	// and folds it into the report desk or the focus desk.
-	media.bus = newBus(busAddress, "media-operator", nil, onConnect, func(topic string, payload []byte) {
-		if namespace, name, kind, ok := parsePlayTopic(topicBase, topic); ok {
-			switch kind {
-			case playStatusKind:
-				var report playReport
-				if err := json.Unmarshal(payload, &report); err != nil {
-					return
-				}
-				desk.fold(namespace, name, report)
-			case playAvailabilityKind:
-				desk.availability(namespace, name, string(payload) == availabilityOnline)
-			}
-			return
-		}
-		if namespace, name, ok := parseRemoteFocusTopic(topicBase, topic); ok {
-			focusDesk.setMark(controllerKey(namespace, name), string(payload))
-			return
-		}
-		if namespace, name, ok := parseRemoteFocusCycleTopic(topicBase, topic); ok {
-			focusDesk.requestCycle(controllerKey(namespace, name))
-			return
-		}
-	})
+	// a focus signal.
+	media.bus = newBus(busAddress, "media-operator", nil, onConnect, media.handleBusMessage)
 	media.bus.Subscribe(playStatusFilter(topicBase))
 	media.bus.Subscribe(playAvailabilityFilter(topicBase))
 	media.bus.Subscribe(remoteFocusFilter(topicBase))
@@ -275,6 +252,39 @@ func (o *operator) pass() {
 	}
 	o.reconcileRemotes()
 	o.reconcileKeymaps()
+}
+
+// handleBusMessage folds one bus message into the report desk or the
+// focus desk by its topic. An empty payload on a status or availability
+// topic is a cleared retained value, not a live signal, so it is ignored:
+// the operator publishes that empty value itself when it reclaims a
+// deleted Play, and reading its own clear back as an offline signal would
+// mark the run seen again and reclaim it forever.
+func (o *operator) handleBusMessage(topic string, payload []byte) {
+	if namespace, name, kind, ok := parsePlayTopic(o.topicBase, topic); ok {
+		if len(payload) == 0 {
+			return
+		}
+		switch kind {
+		case playStatusKind:
+			var report playReport
+			if err := json.Unmarshal(payload, &report); err != nil {
+				return
+			}
+			o.reports.fold(namespace, name, report)
+		case playAvailabilityKind:
+			o.reports.availability(namespace, name, string(payload) == availabilityOnline)
+		}
+		return
+	}
+	if namespace, name, ok := parseRemoteFocusTopic(o.topicBase, topic); ok {
+		o.focus.setMark(controllerKey(namespace, name), string(payload))
+		return
+	}
+	if namespace, name, ok := parseRemoteFocusCycleTopic(o.topicBase, topic); ok {
+		o.focus.requestCycle(controllerKey(namespace, name))
+		return
+	}
 }
 
 // reestablishRetained rewrites everything the operator publishes retained

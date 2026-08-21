@@ -809,6 +809,31 @@ func TestADeletedPlayIsReclaimedAfterTheGrace(t *testing.T) {
 	}
 }
 
+// An empty availability payload is a cleared retained topic, not an
+// offline signal, so the operator does not mark the run seen for it. The
+// operator publishes that empty value itself when it reclaims a deleted
+// Play, so reading it back as offline would make the run stale again and
+// reclaim it forever. A real offline payload still marks the run seen.
+func TestAnEmptyAvailabilityDoesNotMarkARunSeen(t *testing.T) {
+	wake := make(chan struct{}, 1)
+	media := &operator{
+		topicBase: defaultTopicBase,
+		reports:   newReports(wake),
+		focus:     newFocusDesk(wake),
+	}
+	topic := playAvailabilityTopic(defaultTopicBase, "den", "old")
+
+	media.handleBusMessage(topic, nil)
+	if got := media.reports.stale(map[string]bool{}); len(got) != 0 {
+		t.Errorf("an empty availability marked runs seen: %v", got)
+	}
+
+	media.handleBusMessage(topic, []byte(availabilityOffline))
+	if got := media.reports.stale(map[string]bool{}); len(got) != 1 || got[0] != runKey("den", "old") {
+		t.Errorf("a real offline signal did not mark the run seen: %v", got)
+	}
+}
+
 // A fresh broker session holds none of the operator's retained state, so
 // a reconnect clears the record of published keymaps, which makes the
 // next reconcile write them again, and republishes each focus mark, so a
