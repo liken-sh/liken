@@ -248,3 +248,7 @@ one yet. Each one has a document in [`open-problems/`](open-problems/).
 * [A system pod's new mount wedges a follower-first rollout](open-problems/system-pod-mounts-wedge-follower-first-rollouts.md).
   The follower runs the new binary inside the old pod spec, and the
   new template only arrives when a leader boots the new release.
+* [Two cluster operators can run at once](open-problems/two-cluster-operators-can-run-at-once.md).
+  `replicas: 1` does not bound the cluster operator to one instance
+  under a partition or a `replicas` patch. A leader `Lease` in the
+  operator code makes a second instance harmless.
