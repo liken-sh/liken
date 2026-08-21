@@ -11,26 +11,30 @@ hardware. The pattern is documented in liken's repository:
 
 The README states what the operator is. These documents state why it
 is built the way it is, and what it still owes an answer to.
+[`completed/`](completed/) holds the plans that are built and drilled.
 
-## Designs
+## The design
 
 * [00, The media-operator design](00-design.md). The founding
   design: the `Player`, `Play`, `Remote`, and `Keymap` resources,
   the playback pod, the input bus, and the carriage layer that
   comes later.
-* [01, A play becomes a pod](01-a-play-becomes-a-pod.md). Built, and
+
+## Completed
+
+* [01, A play becomes a pod](completed/01-a-play-becomes-a-pod.md). Built, and
   drilled on `liken-1` on 2026-08-20 in release 2026.08.20-001. The
   first slice: `Player` and `Play`, the operator, the player image,
   and the repository scaffolding. A film played from a `kubectl
   create`, its position advanced in `kubectl get plays`, and the
   delete tore everything down through the owner references.
-* [02, A remote drives the play](02-a-remote-drives-the-play.md).
+* [02, A remote drives the play](completed/02-a-remote-drives-the-play.md).
   Built, and drilled on `liken-1` on 2026-08-20 in release
   2026.08.20-004. `Remote` and `Keymap`, with the reader as a
   sidecar in the playback pod: the smallest proof of input, taken
   knowingly ahead of the bus. A DualSense paused a film and
   `status.paused` followed within one report.
-* [03, The bus carries input and reports](03-the-bus-carries-input-and-reports.md).
+* [03, The bus carries input and reports](completed/03-the-bus-carries-input-and-reports.md).
   Built, and drilled on `liken-1` on 2026-08-20 in release
   2026.08.20-010. Mosquitto as the message bus, the remote reader moved
   to its own standing pod, and the playback pod rebuilt as `mpv` with
