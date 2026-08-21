@@ -9,10 +9,14 @@ package main
 //
 // The split keeps each vocabulary on its own side. Only the translator
 // reads a controller's evdev codes and a Keymap's table; only the
-// command sidecar turns a named command into mpv's own words. It
-// subscribes to the focus topic too and acts on every press for now,
-// because a unit names one controller and there is no focus to honor.
-// Plan 06 makes the focus gate live.
+// command sidecar turns a named command into mpv's own words.
+//
+// One controller can drive several units, so it has a translator in each
+// of their pods, all reading its one events topic. The translator
+// subscribes to the controller's focus topic and gates on the retained
+// mark: it acts on a press only when the mark names its own Play, and
+// stays quiet otherwise. A source press it holds asks the operator to
+// move the mark to the next unit.
 
 import (
 	"context"
@@ -44,15 +48,21 @@ type translator struct {
 
 	bus *Bus
 
+	// playName is this translator's own Play. The focus mark must hold this
+	// value for a press to act, so it is the gate.
+	playName string
+	// focusCycleTopic is where a cycle-focus press publishes its request for
+	// the operator to arbitrate.
+	focusCycleTopic string
+
 	tableMu sync.Mutex
 	table   []compiledBinding
 
-	// focus is the latest payload from the focus topic. Nothing reads it
-	// yet: plan 06 makes the focus gate live, and for now the translator
-	// acts on every press. The subscription is made from the start so the
-	// mark can arrive in a later plan without a pod restart.
-	focusMu sync.Mutex
-	focus   []byte
+	// focusOwner is the Play the retained mark names. The gate compares it
+	// against playName, and focusMu guards it because the bus reader writes
+	// it while an event read holds it.
+	focusMu    sync.Mutex
+	focusOwner string
 
 	// repeats holds one cancel per held control that repeats, keyed by
 	// its evdev code, so the release stops the repeat the press started.
@@ -87,12 +97,14 @@ func runTranslator() {
 	defer stopRun()
 
 	tr := &translator{
-		commandsTopic: playCommandsTopic(base, playNamespace, playName),
-		eventsTopic:   eventsTopic,
-		keymapTopicID: keymapTopicID,
-		focusTopicID:  focusTopicID,
-		repeatCtx:     runCtx,
-		repeats:       map[uint16]context.CancelFunc{},
+		commandsTopic:   playCommandsTopic(base, playNamespace, playName),
+		eventsTopic:     eventsTopic,
+		keymapTopicID:   keymapTopicID,
+		focusTopicID:    focusTopicID,
+		playName:        playName,
+		focusCycleTopic: remoteFocusCycleTopic(base, playNamespace, remoteName),
+		repeatCtx:       runCtx,
+		repeats:         map[uint16]context.CancelFunc{},
 	}
 	tr.bus = newBus(busAddress, "translate-"+playNamespace+"-"+playName+"-"+remoteName, nil, nil, tr.handle)
 	// The three subscriptions are made once. The Bus remembers each
@@ -134,19 +146,24 @@ func (tr *translator) setTable(payload []byte) {
 	tr.tableMu.Unlock()
 }
 
-// setFocus stores the latest focus payload. Nothing reads it yet; plan
-// 06 makes the focus gate live.
+// setFocus records the new mark. When focus leaves this Play, it stops
+// every repeat, so a control held as focus moves away does not keep
+// firing on a film this translator no longer drives.
 func (tr *translator) setFocus(payload []byte) {
+	owner := string(payload)
 	tr.focusMu.Lock()
-	tr.focus = append(tr.focus[:0], payload...)
+	tr.focusOwner = owner
 	tr.focusMu.Unlock()
+	if owner != tr.playName {
+		tr.stopAllRepeats()
+	}
 }
 
-// event matches one controller event against the held table and
-// publishes the named command. A release, value 0, stops any repeat the
-// press started and matches no binding. A press that no binding names,
-// or a press that arrives before any keymap has been delivered,
-// publishes nothing.
+// event turns one controller event into a command. A release stops any
+// repeat and returns, focused or not, so a held control always cleans up.
+// A press acts only when the mark names this Play. A cycle-focus binding
+// asks the operator to move the mark and never reaches mpv; any other
+// binding publishes its named command.
 func (tr *translator) event(payload []byte) {
 	var event remoteEvent
 	if err := json.Unmarshal(payload, &event); err != nil {
@@ -156,11 +173,21 @@ func (tr *translator) event(payload []byte) {
 		tr.stopRepeat(event.Code)
 		return
 	}
+	tr.focusMu.Lock()
+	owner := tr.focusOwner
+	tr.focusMu.Unlock()
+	if owner != tr.playName {
+		return
+	}
 	tr.tableMu.Lock()
 	table := tr.table
 	tr.tableMu.Unlock()
 	binding, ok := matchBinding(table, inputEvent{Type: event.Type, Code: event.Code, Value: event.Value})
 	if !ok {
+		return
+	}
+	if binding.Action == actionCycleFocus {
+		tr.publishCycle()
 		return
 	}
 	command := mediaCommand{Action: binding.Action, Amount: binding.Amount}
@@ -171,6 +198,23 @@ func (tr *translator) event(payload []byte) {
 	if binding.RepeatInterval > 0 {
 		tr.startRepeat(event.Code, command, binding.RepeatDelay, binding.RepeatInterval)
 	}
+}
+
+// publishCycle sends the cycle request the operator arbitrates. It is not
+// retained, because a cycle is an event and not a state.
+func (tr *translator) publishCycle() {
+	tr.bus.Publish(tr.focusCycleTopic, nil, false)
+}
+
+// stopAllRepeats cancels every held-control repeat at once, so no repeat
+// outlives the focus that started it when the mark moves to another Play.
+func (tr *translator) stopAllRepeats() {
+	tr.repeatMu.Lock()
+	for code, cancel := range tr.repeats {
+		cancel()
+		delete(tr.repeats, code)
+	}
+	tr.repeatMu.Unlock()
 }
 
 // publish encodes one named command and sends it to the commands topic,

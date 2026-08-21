@@ -17,8 +17,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"slices"
-	"strings"
 	"time"
 )
 
@@ -66,6 +64,10 @@ type operator struct {
 	topicBase  string
 	bus        *Bus
 	reports    *reports
+	// focus is the desk for the retained focus mark, built on the same
+	// wake as the report desk: a cycle request on the bus wakes the pass
+	// that arbitrates it.
+	focus *focusDesk
 
 	// positionWrites stamps when each run last wrote its position, so a
 	// bare position advance writes no more than once per
@@ -109,38 +111,48 @@ func operate() {
 	// again".
 	wake := make(chan struct{}, 1)
 	desk := newReports(wake)
+	focusDesk := newFocusDesk(wake)
 	media := &operator{
 		client:         client,
 		image:          image,
 		busAddress:     busAddress,
 		topicBase:      topicBase,
 		reports:        desk,
+		focus:          focusDesk,
 		positionWrites: map[string]time.Time{},
 		keymapTopics:   map[string]bool{},
 	}
 
-	// The bus handler is the only path a report takes to the control
-	// plane. It maps each message's topic back to a Play, folds a status
-	// report into the desk, and drops a Play's report when its
-	// availability goes offline.
+	// The bus handler is the only path the control plane takes a report or
+	// a focus signal. It reads each message's topic to learn which it is,
+	// and folds it into the report desk or the focus desk.
 	media.bus = newBus(busAddress, "media-operator", nil, nil, func(topic string, payload []byte) {
-		namespace, name, kind, ok := parsePlayTopic(topicBase, topic)
-		if !ok {
+		if namespace, name, kind, ok := parsePlayTopic(topicBase, topic); ok {
+			switch kind {
+			case playStatusKind:
+				var report playReport
+				if err := json.Unmarshal(payload, &report); err != nil {
+					return
+				}
+				desk.fold(namespace, name, report)
+			case playAvailabilityKind:
+				desk.availability(namespace, name, string(payload) == availabilityOnline)
+			}
 			return
 		}
-		switch kind {
-		case playStatusKind:
-			var report playReport
-			if err := json.Unmarshal(payload, &report); err != nil {
-				return
-			}
-			desk.fold(namespace, name, report)
-		case playAvailabilityKind:
-			desk.availability(namespace, name, string(payload) == availabilityOnline)
+		if namespace, name, ok := parseRemoteFocusTopic(topicBase, topic); ok {
+			focusDesk.setMark(controllerKey(namespace, name), string(payload))
+			return
+		}
+		if namespace, name, ok := parseRemoteFocusCycleTopic(topicBase, topic); ok {
+			focusDesk.requestCycle(controllerKey(namespace, name))
+			return
 		}
 	})
 	media.bus.Subscribe(playStatusFilter(topicBase))
 	media.bus.Subscribe(playAvailabilityFilter(topicBase))
+	media.bus.Subscribe(remoteFocusFilter(topicBase))
+	media.bus.Subscribe(remoteFocusCycleFilter(topicBase))
 	go media.bus.Run(context.Background())
 
 	// The first lists do two jobs: they prove the operator can read the
@@ -214,7 +226,13 @@ func (o *operator) pass() {
 			delete(o.positionWrites, key)
 		}
 	}
-	o.reconcilePlayers(list.Items)
+	players, err := ListPlayers(o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing players: %v\n", err)
+	} else {
+		o.reconcilePlayers(players.Items, list.Items)
+		o.reconcileFocus(list.Items, players.Items)
+	}
 	o.reconcileRemotes()
 	o.reconcileKeymaps()
 }
@@ -259,19 +277,13 @@ func (o *operator) reconcileKeymaps() {
 	}
 }
 
-// reconcilePlayers writes every Player's status from the same Plays the
-// pass just read. A Player's status is relational, so it is a second
-// read and a write on the same pass rather than a loop of its own:
-// nothing watches Players, and the derivation needs every Play, which
-// the pass already holds.
-func (o *operator) reconcilePlayers(plays []Play) {
-	players, err := ListPlayers(o.client)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing players: %v\n", err)
-		return
-	}
-	for index := range players.Items {
-		player := &players.Items[index]
+// reconcilePlayers writes every Player's status from the Players and
+// Plays the pass already read. A Player's status is relational, derived
+// from the Plays that name it, so the pass lists the Players once and
+// hands the slice here and to reconcileFocus rather than listing twice.
+func (o *operator) reconcilePlayers(players []Player, plays []Play) {
+	for index := range players {
+		player := &players[index]
 		desired := derivePlayerStatus(player, plays)
 		if err := writePlayerStatus(o.client, player, desired); err != nil {
 			fmt.Fprintf(os.Stderr, "writing player %s/%s status: %v\n",
@@ -354,9 +366,15 @@ func (o *operator) reconcile(play *Play) error {
 	}
 
 	claim := buildClaim(play, player)
-	pod, err := o.ensurePlayback(play, claim, resolved, remotes, remoteErr != nil)
+	pod, fresh, err := o.ensurePlayback(play, claim, resolved, remotes, remoteErr != nil)
 	if err != nil {
 		return err
+	}
+	// A genuinely new Play steals its controllers, the most-recent-steals
+	// default. A graceful recreate resumes the same Play, so it steals
+	// nothing and the mark stays where a person left it.
+	if fresh && len(remotes) > 0 {
+		o.stealFocus(play, remotes)
 	}
 	return o.writePlay(play,
 		derivePlayStatus(play, player, nil, pod, o.reports.latestFor(namespace, name)))
@@ -380,25 +398,6 @@ func (o *operator) writePlay(play *Play, desired PlayStatus) error {
 	return nil
 }
 
-// ensureClaim creates the playback claim when none exists and keeps an
-// existing one. A 409 on the create is success, because another pass,
-// or another copy of this operator, created the same claim first. The
-// graceful recreate deletes a claim a Player reshaped before it calls
-// this, so ensureClaim never updates a claim in place.
-func ensureClaim(c *Client, claim *ResourceClaim) error {
-	_, err := GetResourceClaim(c, claim.Metadata.Namespace, claim.Metadata.Name)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, ErrNotFound) {
-		return err
-	}
-	if _, err := CreateResourceClaim(c, claim); err != nil && !errors.Is(err, ErrConflict) {
-		return err
-	}
-	return nil
-}
-
 // ensurePlayback brings the running pod into line with the pod the
 // current Player would produce. A Play with no pod yet gets its claim
 // and its pod. A gather that failed keeps an existing pod as it is,
@@ -406,31 +405,37 @@ func ensureClaim(c *Client, claim *ResourceClaim) error {
 // mid-film must not fail the film. A running pod its Player reshaped is
 // recreated at the film's place, and a running pod its Player left
 // alone is kept.
-func (o *operator) ensurePlayback(play *Play, claim *ResourceClaim, resolved resolution, remotes []boundRemote, keepExisting bool) (*Pod, error) {
+//
+// The bool reports a genuinely new pod, true only in the no-existing-pod
+// branch. A fresh Play uses it to steal its controllers, and a recreate,
+// which returns false, leaves the focus mark alone.
+func (o *operator) ensurePlayback(play *Play, claim *ResourceClaim, resolved resolution, remotes []boundRemote, keepExisting bool) (*Pod, bool, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	running, err := GetPod(o.client, namespace, podName(name))
 	if errors.Is(err, ErrNotFound) {
 		if err := ensureClaim(o.client, claim); err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		return o.createPod(play, claim, resolved, remotes)
+		pod, err := o.createPod(play, claim, resolved, remotes)
+		return pod, true, err
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if keepExisting {
-		return running, nil
+		return running, false, nil
 	}
 
 	claimChanged, err := o.claimDiverged(claim)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	desired := buildPod(play, claim, resolved, o.image, o.busAddress, o.topicBase, remotes)
 	if !claimChanged && sameRemoteSet(running, desired) {
-		return running, nil
+		return running, false, nil
 	}
-	return o.recreate(play, claim, resolved, remotes, claimChanged)
+	pod, err := o.recreate(play, claim, resolved, remotes, claimChanged)
+	return pod, false, err
 }
 
 // recreate replaces a running pod its Player reshaped and keeps the
@@ -485,66 +490,4 @@ func (o *operator) stashedPosition(play *Play) string {
 		return play.Status.Position
 	}
 	return play.Spec.Start
-}
-
-// claimDiverged reports whether the claim the current Player produces
-// differs from the one in the cluster. An absent claim counts as
-// diverged, so the recreate creates it.
-func (o *operator) claimDiverged(desired *ResourceClaim) (bool, error) {
-	current, err := GetResourceClaim(o.client, desired.Metadata.Namespace, desired.Metadata.Name)
-	if errors.Is(err, ErrNotFound) {
-		return true, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	same, err := sameClaimSpec(current.Spec, desired.Spec)
-	if err != nil {
-		return false, err
-	}
-	return !same, nil
-}
-
-// sameClaimSpec compares two claim specs by their marshaled form. It
-// reads only the fields this operator's own types model, because the
-// client drops every field it does not know when it reads the stored
-// claim, so a field the API server adds does not read as a change.
-func sameClaimSpec(current, desired ResourceClaimSpec) (bool, error) {
-	was, err := json.Marshal(current)
-	if err != nil {
-		return false, err
-	}
-	wants, err := json.Marshal(desired)
-	if err != nil {
-		return false, err
-	}
-	return string(was) == string(wants), nil
-}
-
-// sameRemoteSet reports whether two pods carry the same translator
-// sidecars, by the events topics they subscribe to. It reads no keymap,
-// so a Keymap edit is bus state and not a shape change and recreates no
-// pod. Only what the Player controls, the claim and the set of
-// controllers, reshapes a running film.
-func sameRemoteSet(current, desired *Pod) bool {
-	return slices.Equal(podRemoteTopics(current), podRemoteTopics(desired))
-}
-
-// podRemoteTopics reads the events topics the translator sidecars
-// subscribe to, in order, from each translator container's environment.
-// Adding or removing a controller changes this set, and the recreate
-// follows.
-func podRemoteTopics(pod *Pod) []string {
-	var topics []string
-	for _, container := range pod.Spec.InitContainers {
-		if !strings.HasPrefix(container.Name, translatorContainer("")) {
-			continue
-		}
-		for _, variable := range container.Env {
-			if variable.Name == remoteEventsVariable {
-				topics = append(topics, variable.Value)
-			}
-		}
-	}
-	return topics
 }

@@ -45,14 +45,72 @@ func remoteEventsTopic(base, namespace, name string) string {
 	return base + "/remotes/" + namespace + "/" + name + "/events"
 }
 
-// remoteFocusTopic carries the mark that says which binding is active.
-// It is retained control-plane state the operator writes. This plan
-// publishes nothing to it, because a binding list of length one leaves
-// no focus to arbitrate. The topic is named now so the sidecar can
-// subscribe to it from the start and the mark can arrive in a later
-// plan without a pod restart.
+// remoteFocusTopic carries the retained focus mark, the name of the Play
+// that owns this controller now. The operator writes it, and every
+// translator for the controller reads it and gates on it. It is retained,
+// so a press reaches the owning film with the operator up or down.
 func remoteFocusTopic(base, namespace, name string) string {
 	return base + "/remotes/" + namespace + "/" + name + "/focus"
+}
+
+// remoteFocusCycleTopic carries the cycle request a source press
+// publishes. Only the translator that holds focus publishes it, and the
+// operator reads it to advance the mark. It is not retained, because a
+// cycle is an event and not a state.
+func remoteFocusCycleTopic(base, namespace, name string) string {
+	return base + "/remotes/" + namespace + "/" + name + "/focus/cycle"
+}
+
+// remoteFocusFilter is the operator's subscription that reaches every
+// controller's focus mark. The operator is the only writer of a mark, so
+// this subscription reads its own retained writes back and recovers the
+// current marks after a restart.
+func remoteFocusFilter(base string) string {
+	return base + "/remotes/+/+/focus"
+}
+
+// remoteFocusCycleFilter is the operator's subscription that reaches every
+// controller's cycle request. Each plus matches one level, so this filter
+// covers the five-level cycle topics alone and stays disjoint from the
+// four-level focus filter.
+func remoteFocusCycleFilter(base string) string {
+	return base + "/remotes/+/+/focus/cycle"
+}
+
+// parseRemoteFocusTopic maps a focus topic back to the controller it
+// names. It matches only the three-segment focus mark, so a cycle topic,
+// which carries a fourth segment, does not read as a mark.
+func parseRemoteFocusTopic(base, topic string) (namespace, name string, ok bool) {
+	prefix := base + "/remotes/"
+	if !strings.HasPrefix(topic, prefix) {
+		return "", "", false
+	}
+	parts := strings.Split(strings.TrimPrefix(topic, prefix), "/")
+	if len(parts) != 3 || parts[2] != "focus" {
+		return "", "", false
+	}
+	if parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
+// parseRemoteFocusCycleTopic maps a cycle topic back to the controller it
+// names. It matches only the four-segment cycle request, so a plain focus
+// mark does not read as a cycle.
+func parseRemoteFocusCycleTopic(base, topic string) (namespace, name string, ok bool) {
+	prefix := base + "/remotes/"
+	if !strings.HasPrefix(topic, prefix) {
+		return "", "", false
+	}
+	parts := strings.Split(strings.TrimPrefix(topic, prefix), "/")
+	if len(parts) != 4 || parts[2] != "focus" || parts[3] != "cycle" {
+		return "", "", false
+	}
+	if parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }
 
 // playCommandsTopic carries the named media commands any program may

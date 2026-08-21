@@ -193,6 +193,37 @@ func TestGatherRemotesCarriesTheKeymapName(t *testing.T) {
 	}
 }
 
+// A Player's per-unit keymap override wins for that unit, and an entry
+// with no override falls back to the Remote's own keymap. Several remotes
+// gather in name order.
+func TestGatherRemotesResolvesThePerUnitKeymapOverride(t *testing.T) {
+	api := &cannedAPI{answers: map[string]any{
+		"GET " + remoteURL("sofa"):     testRemote("sofa", "gamepad"),
+		"GET " + remoteURL("armchair"): testRemote("armchair", "gamepad"),
+	}}
+	player := &Player{
+		Metadata: ObjectMeta{Name: "theater", Namespace: "house"},
+		Spec: PlayerSpec{Remotes: []PlayerRemote{
+			{Name: "sofa", Keymap: "sofa-map"},
+			{Name: "armchair"},
+		}},
+	}
+
+	remotes, err := gatherRemotes(testAPIClient(t, api.handler()), player)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remotes) != 2 {
+		t.Fatalf("remotes = %+v, want two", remotes)
+	}
+	if remotes[0].Name != "armchair" || remotes[0].Keymap != "gamepad" {
+		t.Errorf("armchair = %+v, want the Remote's own gamepad keymap", remotes[0])
+	}
+	if remotes[1].Name != "sofa" || remotes[1].Keymap != "sofa-map" {
+		t.Errorf("sofa = %+v, want the sofa-map override", remotes[1])
+	}
+}
+
 func TestGatherRemotesFindsNoneWhenThePlayerNamesNoRemote(t *testing.T) {
 	remotes, err := gatherRemotes(testAPIClient(t, (&cannedAPI{}).handler()), gatherPlayer())
 	if err != nil {

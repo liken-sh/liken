@@ -17,19 +17,22 @@ import (
 	"io"
 )
 
-// The action vocabulary. These are the words a Keymap's right side
-// may use, and they are named for what a person means, not for what
-// mpv runs, so a different player program can implement them later.
-// Three of them take an amount; the rest are complete alone.
+// The action vocabulary a Keymap's right side may use. These are named
+// for what a person means, not for what mpv runs, so a different player
+// program can implement them later. Most are media commands; cycle-focus
+// alone switches which unit a shared controller drives and reaches no
+// player program. Three of the media commands take an amount; the rest
+// are complete alone.
 const (
-	actionPause     = "pause"
-	actionMute      = "mute"
-	actionSeek      = "seek"
-	actionVolume    = "volume"
-	actionChapter   = "chapter"
-	actionSubtitles = "subtitles"
-	actionAudio     = "audio"
-	actionInfo      = "info"
+	actionPause      = "pause"
+	actionMute       = "mute"
+	actionSeek       = "seek"
+	actionVolume     = "volume"
+	actionChapter    = "chapter"
+	actionSubtitles  = "subtitles"
+	actionAudio      = "audio"
+	actionInfo       = "info"
+	actionCycleFocus = "cycle-focus"
 )
 
 // amountActions are the actions that move by an amount: seconds for
@@ -43,11 +46,12 @@ var amountActions = map[string]bool{
 
 // wordActions are the actions that are complete without an amount.
 var wordActions = map[string]bool{
-	actionPause:     true,
-	actionMute:      true,
-	actionSubtitles: true,
-	actionAudio:     true,
-	actionInfo:      true,
+	actionPause:      true,
+	actionMute:       true,
+	actionSubtitles:  true,
+	actionAudio:      true,
+	actionInfo:       true,
+	actionCycleFocus: true,
 }
 
 // A compiledBinding is one row of the table a translator matches events

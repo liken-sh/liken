@@ -1,8 +1,10 @@
 # The operator's identity in the cluster, and deliberately nothing
 # more. It reads plays and players, writes play statuses, and creates
-# the claims and pods a play becomes. It deletes nothing: every claim
-# and pod carries an ownerReference to its Play, so the garbage
-# collector is the teardown, and deleting the Play is the whole stop.
+# the claims and pods a play becomes. It deletes a pod or a claim only
+# to recreate a running Play's pod after its Player reshaped it.
+# Otherwise the teardown is the garbage collector's, through the
+# ownerReference every claim and pod carries, and deleting the Play is
+# the whole stop.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -54,15 +56,17 @@ rules:
     resources: [keymaps]
     verbs: [get, list, watch]
   # The claims a play becomes. Created once per play, read back on
-  # every pass, never deleted: the Play owns them and the garbage
-  # collector takes them with it.
+  # every pass, and deleted only to rebuild a claim a Player reshaped.
+  # The Play still owns them, so deleting the Play is the ordinary
+  # teardown.
   - apiGroups: [resource.k8s.io]
     resources: [resourceclaims]
-    verbs: [get, create]
-  # The playback pods, on the same terms as the claims.
+    verbs: [get, create, delete]
+  # The playback pods, on the same terms as the claims: created per
+  # play, and deleted to recreate one at the film's place.
   - apiGroups: [""]
     resources: [pods]
-    verbs: [get, create]
+    verbs: [get, create, delete]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

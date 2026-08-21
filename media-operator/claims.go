@@ -7,6 +7,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"strconv"
 )
 
@@ -177,4 +178,57 @@ func claimRequests(claim *ResourceClaim) []string {
 		names = append(names, request.Name)
 	}
 	return names
+}
+
+// ensureClaim creates the playback claim when none exists and keeps an
+// existing one. A 409 on the create is success, because another pass,
+// or another copy of this operator, created the same claim first. The
+// graceful recreate deletes a claim a Player reshaped before it calls
+// this, so ensureClaim never updates a claim in place.
+func ensureClaim(c *Client, claim *ResourceClaim) error {
+	_, err := GetResourceClaim(c, claim.Metadata.Namespace, claim.Metadata.Name)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if _, err := CreateResourceClaim(c, claim); err != nil && !errors.Is(err, ErrConflict) {
+		return err
+	}
+	return nil
+}
+
+// claimDiverged reports whether the claim the current Player produces
+// differs from the one in the cluster. An absent claim counts as
+// diverged, so the recreate creates it.
+func (o *operator) claimDiverged(desired *ResourceClaim) (bool, error) {
+	current, err := GetResourceClaim(o.client, desired.Metadata.Namespace, desired.Metadata.Name)
+	if errors.Is(err, ErrNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	same, err := sameClaimSpec(current.Spec, desired.Spec)
+	if err != nil {
+		return false, err
+	}
+	return !same, nil
+}
+
+// sameClaimSpec compares two claim specs by their marshaled form. It
+// reads only the fields this operator's own types model, because the
+// client drops every field it does not know when it reads the stored
+// claim, so a field the API server adds does not read as a change.
+func sameClaimSpec(current, desired ResourceClaimSpec) (bool, error) {
+	was, err := json.Marshal(current)
+	if err != nil {
+		return false, err
+	}
+	wants, err := json.Marshal(desired)
+	if err != nil {
+		return false, err
+	}
+	return string(was) == string(wants), nil
 }

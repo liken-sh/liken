@@ -15,6 +15,9 @@ func TestTopicBuildersExtendTheBase(t *testing.T) {
 	}{
 		{name: "remote events", got: remoteEventsTopic(base, "house", "sofa"), want: "liken/media/remotes/house/sofa/events"},
 		{name: "remote focus", got: remoteFocusTopic(base, "house", "sofa"), want: "liken/media/remotes/house/sofa/focus"},
+		{name: "remote focus cycle", got: remoteFocusCycleTopic(base, "house", "sofa"), want: "liken/media/remotes/house/sofa/focus/cycle"},
+		{name: "focus filter", got: remoteFocusFilter(base), want: "liken/media/remotes/+/+/focus"},
+		{name: "focus cycle filter", got: remoteFocusCycleFilter(base), want: "liken/media/remotes/+/+/focus/cycle"},
 		{name: "play status", got: playStatusTopic(base, "house", "movie"), want: "liken/media/plays/house/movie/status"},
 		{name: "play availability", got: playAvailabilityTopic(base, "house", "movie"), want: "liken/media/plays/house/movie/availability"},
 		{name: "play commands", got: playCommandsTopic(base, "house", "movie"), want: "liken/media/plays/house/movie/commands"},
@@ -77,5 +80,34 @@ func TestParsePlayTopicNamesThePlayAndTheKind(t *testing.T) {
 					namespace, play, kind, each.namespace, each.play, each.kind)
 			}
 		})
+	}
+}
+
+// The focus parser matches only a focus mark and the cycle parser only a
+// cycle request. Neither matches the other or the events topic.
+func TestTheFocusParsersDoNotCrossMatch(t *testing.T) {
+	base := defaultTopicBase
+	focus := remoteFocusTopic(base, "house", "sofa")
+	cycle := remoteFocusCycleTopic(base, "house", "sofa")
+	events := remoteEventsTopic(base, "house", "sofa")
+
+	if ns, name, ok := parseRemoteFocusTopic(base, focus); !ok || ns != "house" || name != "sofa" {
+		t.Errorf("focus parse of %q = (%q, %q, %v), want house/sofa true", focus, ns, name, ok)
+	}
+	if _, _, ok := parseRemoteFocusTopic(base, cycle); ok {
+		t.Errorf("the focus parser matched the cycle topic %q", cycle)
+	}
+	if _, _, ok := parseRemoteFocusTopic(base, events); ok {
+		t.Errorf("the focus parser matched the events topic %q", events)
+	}
+
+	if ns, name, ok := parseRemoteFocusCycleTopic(base, cycle); !ok || ns != "house" || name != "sofa" {
+		t.Errorf("cycle parse of %q = (%q, %q, %v), want house/sofa true", cycle, ns, name, ok)
+	}
+	if _, _, ok := parseRemoteFocusCycleTopic(base, focus); ok {
+		t.Errorf("the cycle parser matched the focus topic %q", focus)
+	}
+	if _, _, ok := parseRemoteFocusCycleTopic(base, events); ok {
+		t.Errorf("the cycle parser matched the events topic %q", events)
 	}
 }

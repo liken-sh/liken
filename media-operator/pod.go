@@ -8,6 +8,11 @@ package main
 // is the pod's bus client, and everything the pod says goes over the
 // bus, which the operator alone reads onto a Play's status.
 
+import (
+	"slices"
+	"strings"
+)
+
 // The container names, and the claim's pod-local name the container's
 // resources.claims entries repeat.
 const (
@@ -138,9 +143,9 @@ func commandSidecar(play *Play, image, busAddress, topicBase string) Container {
 // translatorSidecar is one controller's translator: the player image in
 // its translate mode, holding no device claim and no IPC mount. Its
 // environment carries the play identity plus the three topics it works
-// between, the remote's events topic in, the keymap topic it reads the
-// table from, and the focus topic it will honor in a later plan. It
-// mounts no volume, because it only moves messages on the bus.
+// between: the events topic it reads, the keymap topic it reads the table
+// from, and the focus topic it gates on. It builds the cycle topic it
+// publishes to from the same identity.
 func translatorSidecar(play *Play, image, busAddress, topicBase string, remote boundRemote) Container {
 	return Container{
 		Name:    translatorContainer(remote.Name),
@@ -162,4 +167,32 @@ func translatorSidecar(play *Play, image, busAddress, topicBase string, remote b
 
 func ipcMount() VolumeMount {
 	return VolumeMount{Name: ipcVolumeName, MountPath: ipcMountPath}
+}
+
+// sameRemoteSet reports whether two pods carry the same translator
+// sidecars, by the events topics they subscribe to. It reads no keymap,
+// so a Keymap edit is bus state and not a shape change and recreates no
+// pod. Only what the Player controls, the claim and the set of
+// controllers, reshapes a running film.
+func sameRemoteSet(current, desired *Pod) bool {
+	return slices.Equal(podRemoteTopics(current), podRemoteTopics(desired))
+}
+
+// podRemoteTopics reads the events topics the translator sidecars
+// subscribe to, in order, from each translator container's environment.
+// Adding or removing a controller changes this set, and the recreate
+// follows.
+func podRemoteTopics(pod *Pod) []string {
+	var topics []string
+	for _, container := range pod.Spec.InitContainers {
+		if !strings.HasPrefix(container.Name, translatorContainer("")) {
+			continue
+		}
+		for _, variable := range container.Env {
+			if variable.Name == remoteEventsVariable {
+				topics = append(topics, variable.Value)
+			}
+		}
+	}
+	return topics
 }

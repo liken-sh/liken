@@ -143,6 +143,7 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		// drops, which is what a pass wants with no broker under the test.
 		bus:            newBus("bus.media.svc:1883", "media-operator-test", nil, nil, nil),
 		reports:        newReports(wake),
+		focus:          newFocusDesk(wake),
 		positionWrites: map[string]time.Time{},
 		keymapTopics:   map[string]bool{},
 	}

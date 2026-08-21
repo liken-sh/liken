@@ -24,10 +24,11 @@ const (
 )
 
 // A boundRemote is one Remote as the pod builders need it: the name that
-// names its translator sidecar, the Keymap name its model resolves to,
-// and the three topics the translator subscribes to. The gather sets
-// Name and Keymap; the operator fills the three topics in reconcile,
-// because the topic base lives with the operator and not the gather.
+// names its translator sidecar, the resolved Keymap name, and the three
+// topics the translator subscribes to. The Keymap name is the Player
+// entry's per-unit override when it sets one, and the Remote's own Keymap
+// otherwise, so one controller can map two ways on two units. The gather
+// sets Name and Keymap; the operator fills the three topics in reconcile.
 type boundRemote struct {
 	Name        string
 	Keymap      string
@@ -168,32 +169,36 @@ func repeatDuration(keymap, entry, field, value string, fallback time.Duration) 
 // gatherRemotes reads every Remote a Player owns. It reads spec.remotes
 // in name order, because the result becomes a pod spec, and a pod spec
 // built twice from the same resources must be the same spec, container
-// for container. A named Remote that does not exist fails the gather,
-// and the message names it. The Keymap is not read here: the operator
-// compiles and publishes it in the keymap reconcile, and the translator
-// reads the table off the bus.
+// for container. Each unit's keymap is the entry's own override when it
+// sets one, and the Remote's base keymap otherwise, so one controller can
+// map one way on one unit and another way on another. A named Remote that
+// does not exist fails the gather, and the message names it. The Keymap
+// itself is not read here: the operator compiles and publishes it in the
+// keymap reconcile, and the translator reads the table off the bus.
 func gatherRemotes(c *Client, player *Player) ([]boundRemote, error) {
 	namespace := player.Metadata.Namespace
 
-	names := make([]string, 0, len(player.Spec.Remotes))
-	for _, entry := range player.Spec.Remotes {
-		names = append(names, entry.Name)
-	}
-	sort.Strings(names)
+	entries := make([]PlayerRemote, len(player.Spec.Remotes))
+	copy(entries, player.Spec.Remotes)
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
 
-	bound := make([]boundRemote, 0, len(names))
-	for _, name := range names {
-		remote, err := GetRemote(c, namespace, name)
+	bound := make([]boundRemote, 0, len(entries))
+	for _, entry := range entries {
+		remote, err := GetRemote(c, namespace, entry.Name)
 		if errors.Is(err, ErrNotFound) {
 			return nil, fmt.Errorf("the Player %s names the Remote %s, which does not exist in this namespace",
-				player.Metadata.Name, name)
+				player.Metadata.Name, entry.Name)
 		}
 		if err != nil {
 			return nil, err
 		}
+		keymap := entry.Keymap
+		if keymap == "" {
+			keymap = remote.Spec.Keymap
+		}
 		bound = append(bound, boundRemote{
 			Name:   remote.Metadata.Name,
-			Keymap: remote.Spec.Keymap,
+			Keymap: keymap,
 		})
 	}
 	return bound, nil

@@ -103,9 +103,10 @@ type PlayerSpec struct {
 }
 
 // One controller the Player owns. Name is the Remote in the same
-// namespace. Keymap is a per-unit override of that Remote's own
-// Keymap, and nothing reads it yet: a later plan reads it so one
-// controller maps one way on one unit and another way on another.
+// namespace. Keymap is a per-unit override of that Remote's own Keymap:
+// set it, and this controller maps one way on this unit and its base
+// keymap's way on another, so one gamepad's cross is play-pause on the
+// theater and something else on the gaming unit.
 type PlayerRemote struct {
 	Name   string `json:"name"`
 	Keymap string `json:"keymap,omitempty"`

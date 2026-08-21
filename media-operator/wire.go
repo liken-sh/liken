@@ -53,12 +53,11 @@ const (
 	remoteNamespaceVariable = "MEDIA_REMOTE_NAMESPACE"
 	remoteNameVariable      = "MEDIA_REMOTE_NAME"
 
-	// The three topics the operator hands each translator sidecar:
-	// remoteEventsVariable is the controller's events topic to subscribe
-	// to, keymapTopicVariable is the retained keymap topic it reads the
-	// table from, and focusTopicVariable is the focus topic it will honor
-	// in a later plan. The translator reuses remoteNameVariable for its
-	// client id.
+	// The three topics the operator hands each translator sidecar: the
+	// controller's events topic it reads, the retained keymap topic it
+	// reads the table from, and the focus topic it gates on. The translator
+	// builds the cycle topic from its identity, and reuses
+	// remoteNameVariable for its client id.
 	remoteEventsVariable = "MEDIA_REMOTE_EVENTS"
 	keymapTopicVariable  = "MEDIA_KEYMAP_TOPIC"
 	focusTopicVariable   = "MEDIA_FOCUS_TOPIC"

@@ -87,12 +87,14 @@ spec:
                           name, so the name works across models.
                       action:
                         type: string
-                        enum: [pause, mute, seek, volume, chapter, subtitles, audio, info]
+                        enum: [pause, mute, seek, volume, chapter, subtitles, audio, info, cycle-focus]
                         description: >-
                           What the press does, in this operator's
                           vocabulary. The words name what a person
-                          means, never a player program's own
-                          command.
+                          means, never a player program's own command.
+                          Most actions command the player; cycle-focus
+                          alone switches which unit a shared controller
+                          holds.
                       amount:
                         type: integer
                         description: >-
@@ -159,12 +161,14 @@ spec:
                           stops a repeat the press started.
                       action:
                         type: string
-                        enum: [pause, mute, seek, volume, chapter, subtitles, audio, info]
+                        enum: [pause, mute, seek, volume, chapter, subtitles, audio, info, cycle-focus]
                         description: >-
                           What the press does, in this operator's
                           vocabulary. The words name what a person
-                          means, never a player program's own
-                          command.
+                          means, never a player program's own command.
+                          Most actions command the player; cycle-focus
+                          alone switches which unit a shared controller
+                          holds.
                       amount:
                         type: integer
                         description: >-
