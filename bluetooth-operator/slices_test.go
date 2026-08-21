@@ -67,7 +67,6 @@ func TestSliceDevicesDerivesTheTwoTaints(t *testing.T) {
 			name:      "connected with no input node yet",
 			connected: true,
 			want: []DeviceTaint{
-				{Key: "bluetooth.liken.sh/disconnected", Effect: "NoExecute"},
 				{Key: "bluetooth.liken.sh/no-input-node", Effect: "NoSchedule"},
 			},
 		},

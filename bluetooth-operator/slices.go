@@ -170,11 +170,14 @@ func AttrInt(i int64) DeviceAttribute { return DeviceAttribute{Int: &i} }
 // no slice, with no bound on the retry. A device leaves
 // the slice only when it is unpaired.
 //
-// The connected attribute reports what bluetoothd says. The taints
-// report what a claim on the device would actually deliver, which is
-// the stricter fact: the two differ for the moment between the
-// connection and the HID device's registration, and for a controller
-// that connects without its HID driver bound.
+// The `connected` attribute and the `disconnected` taint report the
+// same fact. The taint is present exactly when bluetoothd reports the
+// device is not connected. The `no-input-node` taint reports a
+// stricter fact the `connected` attribute does not carry: whether an
+// input claim would deliver anything. A controller can be connected
+// and still have no input node. This happens in two moments: between
+// the connection and the HID device's registration, and when a
+// controller connects without its HID driver bound.
 func sliceDevices(controllers map[string]controller, nodes map[string][]string) []SliceDevice {
 	devices := make([]SliceDevice, 0, len(controllers))
 	for mac, c := range controllers {
@@ -223,7 +226,7 @@ func sliceDevices(controllers map[string]controller, nodes map[string][]string) 
 			device.Attributes[flag] = AttrBool(true)
 		}
 		usable := len(nodes[mac]) > 0
-		if !c.Connected || !usable {
+		if !c.Connected {
 			device.Taints = append(device.Taints, DeviceTaint{
 				Key:    disconnectedTaint,
 				Effect: "NoExecute",
