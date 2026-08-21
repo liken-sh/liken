@@ -30,12 +30,25 @@ spec:
       labels:
         app: bus
     spec:
+      # The mosquitto user the image builds, uid 1883. The pod runs as
+      # that user from the start, so the broker never runs as root and
+      # never drops privileges. The image's own entrypoint would chown
+      # its directories and setuid away from root, and both fail once the
+      # pod drops every capability, so the container runs mosquitto
+      # directly instead of through that entrypoint.
+      securityContext:
+        runAsUser: 1883
+        runAsGroup: 1883
+        runAsNonRoot: true
       containers:
         - name: bus
           # eclipse-mosquitto 2.0.22, the current 2.0 release. Pinned to
           # a version rather than latest so a broker restart runs the
           # same broker the manifest was read with.
           image: eclipse-mosquitto:2.0.22
+          # Run the broker directly, not through the image's entrypoint,
+          # which chowns and drops privileges the locked-down pod cannot.
+          command: ["/usr/sbin/mosquitto", "-c", "/mosquitto/config/mosquitto.conf"]
           ports:
             - name: mqtt
               containerPort: 1883
