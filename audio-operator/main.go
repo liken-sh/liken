@@ -88,10 +88,20 @@ const (
 // passes the declare argument and writes PipeWire's node
 // declarations, the PipeWire and WirePlumber containers name their
 // own binary, and the operator container runs with no argument.
+//
+// The WirePlumber container runs the image a fifth way, as its own
+// probe: the same binary is already there, so the endpoints check
+// needs no second image and no shell.
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == declareMode {
-		declare()
-		return
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case declareMode:
+			declare()
+			return
+		case endpointsMode:
+			endpointsRegistered()
+			return
+		}
 	}
 	operate()
 }

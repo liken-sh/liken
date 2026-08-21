@@ -164,16 +164,47 @@ spec:
               value: /var/run/audio.liken.sh
             - name: XDG_RUNTIME_DIR
               value: /var/run/audio.liken.sh
-          # wpctl connects to PipeWire, not to WirePlumber, so this
-          # probe proves the socket is reachable from this container
-          # and nothing stronger. The kubelet's restart of this
-          # container repairs a WirePlumber that exits later, and no
-          # probe reports it.
+          # Both probes ask the same question: does the adapter
+          # advertise a media profile that bluetoothd hosts, which is
+          # true only while this WirePlumber holds the endpoints it
+          # registered. endpoints.go states why that is the fact to
+          # read and why every other state passes. The check runs the
+          # operator's own binary, which this container already has,
+          # so the probe needs no shell and no second image.
+          #
+          # The startup probe gates the liveness probe, which the
+          # kubelet disables until startup succeeds. Registration
+          # takes a few seconds after WirePlumber opens the bus, so
+          # this ordering is what keeps the liveness probe from
+          # ending a container that is still doing the work. 60
+          # seconds is the allowance.
+          #
+          # PipeWire's own startup probe already proves the socket
+          # answers before this container starts, because the kubelet
+          # starts native sidecars in order and waits for each one's
+          # startup probe. So this probe reads WirePlumber's own work
+          # instead of repeating that.
           startupProbe:
             exec:
-              command: ["/usr/bin/wpctl", "status"]
+              command: ["/usr/local/bin/audio-operator", "endpoints-registered"]
             periodSeconds: 2
             failureThreshold: 30
+            timeoutSeconds: 10
+          # A failure here restarts this container alone, and that is
+          # the whole repair: a new WirePlumber opens the bus that
+          # replaced the one it lost and registers its endpoints
+          # again. PipeWire keeps running, so the card's own sinks
+          # play through the restart.
+          #
+          # The period is 20 seconds because the condition it finds
+          # lasts until somebody acts. A radio that advertises no
+          # audio stays that way, so the check costs one D-Bus call
+          # per period and repairs within a minute of the loss.
+          livenessProbe:
+            exec:
+              command: ["/usr/local/bin/audio-operator", "endpoints-registered"]
+            periodSeconds: 20
+            failureThreshold: 3
             timeoutSeconds: 10
           securityContext:
             capabilities:
