@@ -31,12 +31,14 @@ is built the way it is, and what it still owes an answer to.
   knowingly ahead of the bus. A DualSense paused a film and
   `status.paused` followed within one report.
 * [03, The bus carries input and reports](03-the-bus-carries-input-and-reports.md).
-  Built, not yet drilled on hardware. Mosquitto as the message bus,
-  the remote reader moved to its own standing pod, and the playback
-  pod rebuilt as `mpv` with one bus-bridge sidecar and no supervisor.
-  The report moves off plain HTTP and onto the bus. It retires plan
-  02's sidecar and the plan-01 supervisor, and closes the plain-HTTP
-  open problem when it drills on `liken-1`.
+  Built, and drilled on `liken-1` on 2026-08-20 in release
+  2026.08.20-010. Mosquitto as the message bus, the remote reader moved
+  to its own standing pod, and the playback pod rebuilt as `mpv` with
+  one bus-bridge sidecar and no supervisor. The report moved off plain
+  HTTP and onto the bus. It retired plan 02's sidecar and the plan-01
+  supervisor, and closed the plain-HTTP open problem. A film played,
+  a DualSense paused and scrubbed it over the bus, and the position
+  kept advancing across an operator restart.
 
 ## Open problems
 
@@ -50,12 +52,6 @@ has decided yet what work they become.
   audio operator's closure-on-scratch treatment applies, with the
   complication that `mpv` loads its GPU drivers only on real
   hardware.
-* [The playback pod reports over plain HTTP](open-problems/the-playback-pod-reports-over-plain-http.md).
-  The supervisor POSTs its status to an HTTP endpoint the operator
-  serves, proven by a token held in memory. The trust boundary that
-  keeps the pod credential-free should stay; the transport should
-  move onto the input plane's message bus when that plan lands. Plan
-  03 closes this when it drills.
 * [The broker is always in-cluster](open-problems/the-broker-is-always-in-cluster.md).
   Plan 03 stands up its own MQTT broker. A home that already runs one,
   for Home Assistant or zigbee2mqtt, should be able to point the
