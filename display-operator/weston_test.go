@@ -119,7 +119,7 @@ func TestDeclareWritesTheConfigWhereTheCompositorWaitsForIt(t *testing.T) {
 
 	declare()
 
-	if err := waitForFile(context.Background(), westonConfigPath, socketPollInterval); err != nil {
+	if err := waitForFile(context.Background(), westonConfigPath, filePollInterval); err != nil {
 		t.Fatalf("the compositor role waited on %s: %v", westonConfigPath, err)
 	}
 	written, err := os.ReadFile(path)
@@ -281,7 +281,7 @@ func TestWestonEnvironmentSetsWhatTheCompositorNeeds(t *testing.T) {
 func TestWaitForFileReturnsWhenItAppears(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "weston.ini")
 	go func() {
-		time.Sleep(2 * socketPollInterval)
+		time.Sleep(2 * filePollInterval)
 		_ = os.WriteFile(path, nil, 0o644)
 	}()
 
@@ -291,7 +291,7 @@ func TestWaitForFileReturnsWhenItAppears(t *testing.T) {
 }
 
 func TestWaitForFileGivesUp(t *testing.T) {
-	err := waitForFile(context.Background(), filepath.Join(t.TempDir(), "weston.ini"), 2*socketPollInterval)
+	err := waitForFile(context.Background(), filepath.Join(t.TempDir(), "weston.ini"), 2*filePollInterval)
 	if err == nil {
 		t.Fatal("the wait succeeded with no file")
 	}

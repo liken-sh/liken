@@ -50,8 +50,9 @@ their YAML):
 
 [`deploy/`](deploy/) is the source of those files: a `kustomize` base
 with the RBAC, the `DaemonSet` whose pod claims the card on its own
-node, and two `DeviceClasses`, `display-gpu` and `display-render`,
-which that claim names and the operator cannot start without. The
+node, and three `DeviceClasses`, `display-gpu`, `display-render`,
+and `display-i2c`, which that claim names and the operator cannot
+start without. The
 class your workloads claim through is cluster policy, yours to
 create; the install guide gives the YAML for `display-output`, the
 one to start with.

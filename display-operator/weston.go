@@ -57,14 +57,14 @@ const westonBinary = "/usr/bin/weston"
 // retry.
 const configWaitTimeout = 30 * time.Second
 
-// socketPollInterval is how often a wait looks for a file. A
+// filePollInterval is how often waitForFile checks for the file. A
 // new file raises no event that a program can wait on without
 // another dependency.
 //
 // The compositor role's wait for its config is this interval's one
 // reader, and that wait ends within a tick or two, because the
 // declare container exits before this one starts.
-const socketPollInterval = 100 * time.Millisecond
+const filePollInterval = 100 * time.Millisecond
 
 // socketDialTimeout is how long a check waits for the compositor to
 // accept the connection. Accepting a client is the first thing an
@@ -368,7 +368,7 @@ func westonEnvironment(environ []string, socketDir string) []string {
 // ordering already makes it short.
 func waitForFile(ctx context.Context, path string, timeout time.Duration) error {
 	deadline := time.After(timeout)
-	tick := time.NewTicker(socketPollInterval)
+	tick := time.NewTicker(filePollInterval)
 	defer tick.Stop()
 	for {
 		if _, err := os.Stat(path); err == nil {
