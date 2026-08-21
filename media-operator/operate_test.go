@@ -141,11 +141,11 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		topicBase:  defaultTopicBase,
 		// The bus is never Run, so a publish finds a nil write queue and
 		// drops, which is what a pass wants with no broker under the test.
-		bus:            newBus("bus.media.svc:1883", "media-operator-test", nil, nil, nil),
-		reports:        newReports(wake),
-		focus:          newFocusDesk(wake),
-		positionWrites: map[string]time.Time{},
-		keymapTopics:   map[string]bool{},
+		bus:             newBus("bus.media.svc:1883", "media-operator-test", nil, nil, nil),
+		reports:         newReports(wake),
+		focus:           newFocusDesk(wake),
+		positionWrites:  map[string]time.Time{},
+		keymapPublished: map[string]string{},
 	}
 }
 
@@ -769,10 +769,10 @@ func keymapOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker)
 	bus, brokers, connected := startBus(t, 1, nil, nil)
 	waitForConnect(t, connected)
 	return &operator{
-		client:       testAPIClient(t, cluster.handler(t)),
-		topicBase:    defaultTopicBase,
-		bus:          bus,
-		keymapTopics: map[string]bool{},
+		client:          testAPIClient(t, cluster.handler(t)),
+		topicBase:       defaultTopicBase,
+		bus:             bus,
+		keymapPublished: map[string]string{},
 	}, brokers[0]
 }
 
@@ -808,6 +808,34 @@ func TestReconcileKeymapsPublishesAndClearsARetainedTable(t *testing.T) {
 	cleared := waitForPublish(t, broker.pubs)
 	if cleared.topic != keymapTopic(defaultTopicBase, "gamepad") || len(cleared.payload) != 0 || !cleared.retained {
 		t.Errorf("clear = %+v, want an empty retained publish", cleared)
+	}
+}
+
+// The keymap topic is retained, so an unchanged Keymap republishes
+// nothing on a later pass. The broker still holds the table, and a new
+// subscriber reads it from there, so a steady film does not churn the bus
+// with a table nobody edited. A change to the Keymap does publish.
+func TestReconcileKeymapsRepublishesOnlyOnChange(t *testing.T) {
+	cluster := newFakeCluster()
+	cluster.keymaps["gamepad"] = testKeymap()
+	media, broker := keymapOperator(t, cluster)
+
+	media.reconcileKeymaps()
+	waitForPublish(t, broker.pubs)
+
+	media.reconcileKeymaps()
+	select {
+	case got := <-broker.pubs:
+		t.Fatalf("an unchanged keymap republished %+v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	keymap := cluster.keymaps["gamepad"]
+	keymap.Spec.Buttons = keymap.Spec.Buttons[:1]
+	media.reconcileKeymaps()
+	changed := waitForPublish(t, broker.pubs)
+	if changed.topic != keymapTopic(defaultTopicBase, "gamepad") {
+		t.Errorf("changed topic = %q, want the gamepad keymap", changed.topic)
 	}
 }
 

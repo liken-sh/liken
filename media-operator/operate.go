@@ -74,11 +74,13 @@ type operator struct {
 	// positionWriteInterval. Only the pass goroutine touches it.
 	positionWrites map[string]time.Time
 
-	// keymapTopics is the set of keymap topics the operator has published
-	// a compiled table on. It lets a later pass find a topic whose Keymap
-	// no longer exists and clear its retained value. Only the pass
-	// goroutine touches it.
-	keymapTopics map[string]bool
+	// keymapPublished maps each keymap topic to the compiled table the
+	// operator last published there. The topic is retained, so the broker
+	// serves the current table to any new subscriber, and the operator
+	// republishes only when the table changes. The map also lets a later
+	// pass find a topic whose Keymap no longer exists and clear its
+	// retained value. Only the pass goroutine touches it.
+	keymapPublished map[string]string
 }
 
 func operate() {
@@ -113,14 +115,14 @@ func operate() {
 	desk := newReports(wake)
 	focusDesk := newFocusDesk(wake)
 	media := &operator{
-		client:         client,
-		image:          image,
-		busAddress:     busAddress,
-		topicBase:      topicBase,
-		reports:        desk,
-		focus:          focusDesk,
-		positionWrites: map[string]time.Time{},
-		keymapTopics:   map[string]bool{},
+		client:          client,
+		image:           image,
+		busAddress:      busAddress,
+		topicBase:       topicBase,
+		reports:         desk,
+		focus:           focusDesk,
+		positionWrites:  map[string]time.Time{},
+		keymapPublished: map[string]string{},
 	}
 
 	// The bus handler is the only path the control plane takes a report or
@@ -265,14 +267,21 @@ func (o *operator) reconcileKeymaps() {
 			fmt.Fprintf(os.Stderr, "marshaling keymap %s: %v\n", keymap.Metadata.Name, err)
 			continue
 		}
-		o.bus.Publish(topic, payload, true)
-		o.keymapTopics[topic] = true
 		present[topic] = true
+		// The topic is retained, so republishing an unchanged table is
+		// churn a new subscriber does not need: it reads the current value
+		// from the broker. Publish only when the compiled table differs
+		// from the last one this operator wrote.
+		if o.keymapPublished[topic] == string(payload) {
+			continue
+		}
+		o.bus.Publish(topic, payload, true)
+		o.keymapPublished[topic] = string(payload)
 	}
-	for topic := range o.keymapTopics {
+	for topic := range o.keymapPublished {
 		if !present[topic] {
 			o.bus.Publish(topic, nil, true)
-			delete(o.keymapTopics, topic)
+			delete(o.keymapPublished, topic)
 		}
 	}
 }
