@@ -33,7 +33,26 @@ and it is provable on hardware alone.
   block that states the media type, a hint, and the art beside the
   media, and the display renders that declaration and tunes the layout
   by type. The command bus from plans 04 through 06 navigates it, so a
-  remote or a gamepad moves the menus.
+  remote or a gamepad drives it. The design is large, so it builds in
+  slices, each usable when it lands:
+    * [07-a, The scrubber a remote summons](07-a-the-scrubber-a-remote-summons.md).
+      The script over `mpv`, the fine scrubber from `mpv`'s properties,
+      the summon, and the navigation actions on the bus.
+    * [07-b, The stack and the choosers](07-b-the-stack-and-the-choosers.md).
+      The vertical focus stack, the chapter scrubber, and the audio and
+      subtitle choosers, all from `mpv`'s properties.
+    * [07-c, The presentation contract](07-c-the-presentation-contract.md).
+      `spec.items` with a `presentation` block, three-tier field
+      resolution, per-item switching, and text tuning by type.
+    * [07-d, Art on screen](07-d-art-on-screen.md). The bridge decodes
+      art to `bgra`, and the display places the `logo`, `clearart`, and
+      `backdrop`.
+    * [07-e, Trickplay on the seekbar](07-e-trickplay-on-the-seekbar.md).
+      The scrub cursor shows a thumbnail cropped from a Jellyfin sprite
+      sheet.
+    * [07-f, The music experience](07-f-the-music-experience.md). The
+      music layout blanks the video and composes the album art, the
+      track list, and the queue.
 
 ## Completed
 
