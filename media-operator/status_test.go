@@ -170,6 +170,39 @@ func TestDerivePlayStatus(t *testing.T) {
 	}
 }
 
+// A position, once reported, survives a pass that finds no report. The
+// report desk drops a run's report when the pod goes offline, so a
+// recreate reads the place from the status. A blank there restarts the
+// film from the top.
+func TestDerivePlayStatusCarriesTheLastPositionForward(t *testing.T) {
+	player := &Player{Metadata: ObjectMeta{Name: "theater", Namespace: "house"}}
+	play := statusTestPlay()
+	play.Status = PlayStatus{
+		Phase:    phaseRunning,
+		Pod:      "movie-playback",
+		Item:     2,
+		Position: "0:12:30",
+		Duration: "1:45:00",
+	}
+
+	cases := []struct {
+		name string
+		pod  *Pod
+	}{
+		{name: "a running pod whose report is gone", pod: playbackPod(podRunning)},
+		{name: "a failed pod keeps the place for a resume", pod: playbackPod(podFailed)},
+		{name: "the pod is gone while the recreate waits out its backoff", pod: nil},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			got := derivePlayStatus(play, player, nil, one.pod, nil)
+			if got.Position != "0:12:30" {
+				t.Errorf("position = %q, want it carried forward as 0:12:30", got.Position)
+			}
+		})
+	}
+}
+
 // The activity word a person reads is the phase and the paused flag
 // folded into one.
 func TestPlayActivity(t *testing.T) {

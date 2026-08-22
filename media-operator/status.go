@@ -48,10 +48,24 @@ func buildPlayStatus(play *Play, player *Player, buildErr error, pod *Pod, lates
 		}
 	}
 	if pod == nil {
-		return PlayStatus{Phase: phasePending}
+		return PlayStatus{
+			Phase:    phasePending,
+			Item:     play.Status.Item,
+			Position: play.Status.Position,
+			Duration: play.Status.Duration,
+		}
 	}
 
-	status := PlayStatus{Pod: pod.Metadata.Name}
+	// A position, once reported, stays in the status until a fresher
+	// report advances it. The report desk drops a run's report when the
+	// pod goes offline, and the resume reads the place from the status,
+	// so a blank here would restart the film from the top.
+	status := PlayStatus{
+		Pod:      pod.Metadata.Name,
+		Item:     play.Status.Item,
+		Position: play.Status.Position,
+		Duration: play.Status.Duration,
+	}
 	switch pod.Status.Phase {
 	case podRunning:
 		// Running covers a paused film too. The phase moves forward
