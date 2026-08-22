@@ -65,10 +65,6 @@ decided yet what work they become.
 * [The compositor drives one card](open-problems/the-compositor-drives-one-card.md).
   One Weston binds one DRM device, so a node with two graphics cards
   serves only the card the claim took.
-* [A blinked output loses its surface](open-problems/a-blinked-output-loses-its-surface.md).
-  When a monitor's link drops and returns, kiosk-shell moves the
-  fullscreen surface to a surviving output and never moves it back, so
-  the movie stays on the wrong screen.
 * [A control claim waits for the compositor](open-problems/a-control-claim-waits-for-the-compositor.md).
   DDC/CI runs to the panel with no compositor, but `prepareClaim` and a
   second gate hold every claim on Weston's socket, so a control-only pod
