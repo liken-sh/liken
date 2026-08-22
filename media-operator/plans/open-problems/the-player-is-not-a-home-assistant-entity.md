@@ -41,4 +41,4 @@ needs is already published from the sidecar's Last Will. One
 prerequisite is outside this repository. Home Assistant sees these
 entities only on the broker it already reads, so a tight integration
 needs `liken` to publish onto that broker. That is
-`the-broker-is-always-in-cluster.md`.
+`the-broker-is-not-configurable.md`.

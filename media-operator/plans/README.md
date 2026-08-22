@@ -92,13 +92,11 @@ has decided yet what work they become.
   audio operator's closure-on-scratch treatment applies, with the
   complication that `mpv` loads its GPU drivers only on real
   hardware.
-* [The broker is always in-cluster](open-problems/the-broker-is-always-in-cluster.md).
-  Plan 03 stands up its own MQTT broker. A home that already runs one,
-  for Home Assistant or zigbee2mqtt, should be able to point the
-  operator at it instead.
-* [One broker for many clusters](open-problems/one-broker-for-many-clusters.md).
-  The topic base is one string, `liken/media`. Two clusters sharing
-  one broker collide until the base carries a cluster's name.
+* [The broker is not configurable](open-problems/the-broker-is-not-configurable.md).
+  Plan 03 stands up its own MQTT broker and fixes the topic base. A
+  home that already runs a broker, for Home Assistant or zigbee2mqtt,
+  should be able to point the operator at it, and two clusters sharing
+  that broker need a cluster's name in the base to stay apart.
 * [The player is not a Home Assistant entity](open-problems/the-player-is-not-a-home-assistant-entity.md).
   MQTT was chosen for Home Assistant, but nothing publishes the
   discovery configs that make a `Player` a `media_player`. It also

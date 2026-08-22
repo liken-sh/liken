@@ -51,7 +51,7 @@ Many homes
 already run one MQTT broker for Home Assistant and its devices, and a
 second broker beside it is waste. Pointing the operator at an existing
 broker is a mode this plan does not build. It is an open problem,
-`open-problems/the-broker-is-always-in-cluster.md`, and the topic and
+`open-problems/the-broker-is-not-configurable.md`, and the topic and
 auth choices below are made so that mode stays reachable.
 
 MQTT is the choice over the one real alternative, NATS, for a reason
@@ -82,7 +82,7 @@ base, and Home Assistant's own discovery topics stay under
 `homeassistant/`, so neither tree constrains the other. A base that
 includes a cluster's name, so several clusters can share one broker
 without collision, is a later refinement the string already allows.
-That refinement is `open-problems/one-broker-for-many-clusters.md`.
+That refinement is `open-problems/the-broker-is-not-configurable.md`.
 
 * `liken/media/remotes/<namespace>/<name>/events` carries one
   `Remote`'s raw button and axis events. The standing remote pod
@@ -239,13 +239,11 @@ position keeps advancing across the restart.
   orphans. A scheme that needs a subprocess later, such as a
   downloader, reopens the question of a minimal init in the player
   image.
-* **A broker outside the cluster.** This plan stands up the in-cluster
-  `bus` and points every pod at it. A broker a home already runs is
-  `open-problems/the-broker-is-always-in-cluster.md`.
-* **One broker for many clusters.** The base topic is one string, so a
-  cluster's name can join it later. Until then two clusters on one
-  broker collide, and that is
-  `open-problems/one-broker-for-many-clusters.md`.
+* **A configurable broker.** This plan stands up the in-cluster `bus`,
+  points every pod at it, and roots every topic under one fixed base.
+  A broker a home already runs, and the cluster name in the base that
+  keeps two clusters on that broker apart, are
+  `open-problems/the-broker-is-not-configurable.md`.
 * **TLS on the bus.** The in-cluster network is the boundary, and the
   playback pod holds no credential a TLS session would protect.
 * **Home Assistant discovery.** The topic tree and the availability

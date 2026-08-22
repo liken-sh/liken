@@ -34,4 +34,4 @@ An answer looks like broker ACLs keyed to a credential per role:
 The shape is known. The work waits until a cluster runs something the
 owner does not already trust, or until a second tenant shares one
 broker, whichever comes first. It shares that trigger with
-[one broker for many clusters](one-broker-for-many-clusters.md).
+[the broker is not configurable](the-broker-is-not-configurable.md).
