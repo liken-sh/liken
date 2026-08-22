@@ -139,6 +139,68 @@ func watchKeymaps(c *Client, resourceVersion string, wake chan<- struct{}) {
 	}
 }
 
+// watchPods wakes the loop when k8s removes a playback pod or when one turns
+// Failed, so an eviction or a crash reaches the reconcile at once instead of
+// waiting for the backstop tick. Its recovery matches the other watchers.
+func watchPods(c *Client, resourceVersion string, wake chan<- struct{}) {
+	for {
+		path := podsAllPath + "?watch=true&allowWatchBookmarks=true&" + playbackPodsQuery +
+			"&resourceVersion=" + resourceVersion
+		resp, err := c.Do(http.MethodGet, path, nil)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			resourceVersion = readPodWatchStream(resp, resourceVersion, wake)
+		}
+		if resp != nil {
+			drain(resp.Body)
+		}
+
+		time.Sleep(watchRetryPause)
+		list, err := ListPlaybackPods(c)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "listing playback pods to resume the watch: %v\n", err)
+			continue
+		}
+		resourceVersion = list.Metadata.ResourceVersion
+		poke(wake)
+	}
+}
+
+// readPodWatchStream reads one connection's pod events. It wakes the loop on
+// a delete and on a change to the Failed phase, and on nothing else, because
+// a routine update to a running pod needs no pass. The returned version is
+// where the next watch resumes.
+func readPodWatchStream(resp *http.Response, resourceVersion string, wake chan<- struct{}) string {
+	decoder := json.NewDecoder(resp.Body)
+	for {
+		var event struct {
+			Type   string `json:"type"`
+			Object struct {
+				Metadata ObjectMeta `json:"metadata"`
+				Status   struct {
+					Phase string `json:"phase"`
+				} `json:"status"`
+			} `json:"object"`
+		}
+		if err := decoder.Decode(&event); err != nil {
+			return resourceVersion
+		}
+		if event.Type == "ERROR" {
+			return resourceVersion
+		}
+		if event.Object.Metadata.ResourceVersion != "" {
+			resourceVersion = event.Object.Metadata.ResourceVersion
+		}
+		switch event.Type {
+		case "DELETED":
+			poke(wake)
+		case "MODIFIED":
+			if event.Object.Status.Phase == podFailed {
+				poke(wake)
+			}
+		}
+	}
+}
+
 // readWatchStream reads one connection's worth of events. The
 // returned version is where the next watch resumes.
 func readWatchStream(resp *http.Response, resourceVersion string, wake chan<- struct{}) string {

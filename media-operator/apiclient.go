@@ -165,7 +165,12 @@ const (
 	mediaPrefix    = "/apis/" + mediaAPIVersion + "/namespaces/"
 	claimPrefix    = "/apis/" + claimAPIVersion + "/namespaces/"
 	podPrefix      = "/api/v1/namespaces/"
+	podsAllPath    = "/api/v1/pods"
 )
+
+// playbackPodsQuery narrows a pod list or a pod watch to the operator's own
+// playback pods, by the label buildPod stamps on each one.
+const playbackPodsQuery = "labelSelector=" + playbackLabelKey + "%3D" + playbackLabelValue
 
 func playPath(namespace, name string) string {
 	return mediaPrefix + namespace + "/plays/" + name
@@ -322,6 +327,16 @@ func CreateResourceClaim(c *Client, claim *ResourceClaim) (*ResourceClaim, error
 		return nil, err
 	}
 	return created, nil
+}
+
+// ListPlaybackPods reads the operator's playback pods across every
+// namespace. The list's resourceVersion is where the pod watch begins.
+func ListPlaybackPods(c *Client) (*PodList, error) {
+	list := &PodList{}
+	if err := c.RequestJSON(http.MethodGet, podsAllPath+"?"+playbackPodsQuery, nil, list); err != nil {
+		return nil, err
+	}
+	return list, nil
 }
 
 func GetPod(c *Client, namespace, name string) (*Pod, error) {

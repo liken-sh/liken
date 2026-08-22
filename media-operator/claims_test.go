@@ -103,60 +103,18 @@ func TestBuildClaimCarriesOnlyTheSelectorsThePlayerWrote(t *testing.T) {
 	}
 }
 
-// A display and a speaker come and go while a machine runs, and
-// thirty seconds is the window that survives a cable being moved. A
-// render node never leaves, so it takes no toleration.
-func TestBuildClaimToleratesTheDisconnectTaintsForThirtySeconds(t *testing.T) {
+// The playback claim carries no disconnected toleration on any request.
+// A display or a speaker that a taint marks gone evicts the playback pod,
+// and the operator recreates it at the film's place, so the film resumes
+// rather than freezes on a device that left.
+func TestBuildClaimCarriesNoDisconnectedTolerations(t *testing.T) {
 	claim := buildClaim(testPlay(), testPlayer())
 
-	seconds := int64(30)
-	cases := []struct {
-		request string
-		index   int
-		taints  []DeviceToleration
-	}{
-		{
-			request: "screen",
-			index:   0,
-			taints: []DeviceToleration{{
-				Key:               "display.liken.sh/disconnected",
-				Operator:          "Exists",
-				Effect:            "NoExecute",
-				TolerationSeconds: &seconds,
-			}},
-		},
-		{
-			request: "audio0",
-			index:   1,
-			taints: []DeviceToleration{{
-				Key:               "audio.liken.sh/disconnected",
-				Operator:          "Exists",
-				Effect:            "NoExecute",
-				TolerationSeconds: &seconds,
-			}},
-		},
-		{
-			request: "audio1",
-			index:   2,
-			taints: []DeviceToleration{{
-				Key:               "audio.liken.sh/disconnected",
-				Operator:          "Exists",
-				Effect:            "NoExecute",
-				TolerationSeconds: &seconds,
-			}},
-		},
-		{request: "render", index: 3},
-	}
-	for _, c := range cases {
-		t.Run(c.request, func(t *testing.T) {
-			request := claim.Spec.Devices.Requests[c.index]
-			if request.Name != c.request {
-				t.Fatalf("requests[%d] = %q, want %q", c.index, request.Name, c.request)
-			}
-			if !reflect.DeepEqual(request.Exactly.Tolerations, c.taints) {
-				t.Errorf("tolerations = %+v, want %+v", request.Exactly.Tolerations, c.taints)
-			}
-		})
+	for _, request := range claim.Spec.Devices.Requests {
+		if len(request.Exactly.Tolerations) != 0 {
+			t.Errorf("request %q carries tolerations %+v, want none",
+				request.Name, request.Exactly.Tolerations)
+		}
 	}
 }
 

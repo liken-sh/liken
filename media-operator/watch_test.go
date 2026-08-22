@@ -189,6 +189,75 @@ func expectNoWatchWake(t *testing.T, wake <-chan struct{}) {
 	}
 }
 
+// One line of a pod watch stream, carrying the phase the pod reports so
+// the reader can tell a failed pod from a running one.
+func podWatchEvent(kind, version, phase string) string {
+	return `{"type":"` + kind + `","object":{"metadata":{"resourceVersion":"` + version +
+		`"},"status":{"phase":"` + phase + `"}}}`
+}
+
+func startPodWatch(t *testing.T, api *watchAPI, from string) chan struct{} {
+	t.Helper()
+	server := httptest.NewServer(api.handler())
+	wake := make(chan struct{}, 1)
+	go watchPods(NewClient(server.URL, server.Client(), ""), from, wake)
+	return wake
+}
+
+// A device-taint eviction or a lost node deletes the playback pod, and the
+// pod watch wakes the loop for the pass that recreates it. The watch
+// resumes from its version and narrows to the operator's own playback
+// pods by label.
+func TestThePodWatchWakesTheLoopOnADelete(t *testing.T) {
+	useWatchRetryPause(t)
+	api := newWatchAPI()
+	api.answersWatches(watchTurn{events: []string{podWatchEvent("DELETED", "50", "Running")}, hold: api.parked})
+
+	wake := startPodWatch(t, api, "42")
+
+	first := nextWatchRequest(t, api)
+	if got := first.Get("resourceVersion"); got != "42" {
+		t.Errorf("the first watch resumed from %q, want 42", got)
+	}
+	if got := first.Get("labelSelector"); got != "media.liken.sh/component=playback" {
+		t.Errorf("labelSelector = %q, want the playback selector", got)
+	}
+	waitForWatchWake(t, wake)
+}
+
+// A failed pod is a crashed player, which the operator recreates, so it
+// wakes the loop. A running pod's routine update needs no pass, so it
+// wakes nothing and the backstop tick is the only thing that would read
+// it.
+func TestThePodWatchWakesOnFailedButNotOnRunning(t *testing.T) {
+	cases := []struct {
+		name  string
+		phase string
+		wakes bool
+	}{
+		{name: "a running update wakes nothing", phase: "Running", wakes: false},
+		{name: "a failed update wakes the loop", phase: "Failed", wakes: true},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			useWatchRetryPause(t)
+			api := newWatchAPI()
+			api.answersWatches(watchTurn{
+				events: []string{podWatchEvent("MODIFIED", "50", one.phase)},
+				hold:   api.parked,
+			})
+
+			wake := startPodWatch(t, api, "42")
+			nextWatchRequest(t, api)
+			if one.wakes {
+				waitForWatchWake(t, wake)
+			} else {
+				expectNoWatchWake(t, wake)
+			}
+		})
+	}
+}
+
 func TestAChangedPlayOnTheStreamWakesTheLoopOnce(t *testing.T) {
 	useWatchRetryPause(t)
 	api := newWatchAPI()

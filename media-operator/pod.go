@@ -21,6 +21,13 @@ const (
 	podClaimName     = "devices"
 )
 
+// Every playback pod carries this label, so the pod watch selects the
+// operator's own pods and nothing else on the node.
+const (
+	playbackLabelKey   = "media.liken.sh/component"
+	playbackLabelValue = "playback"
+)
+
 // translatorContainer names one controller's translator sidecar. The
 // name carries the Remote's name, so the container set changes when a
 // controller is added or removed, and the operator reads the set back to
@@ -103,6 +110,7 @@ func buildPod(play *Play, claim *ResourceClaim, resolved resolution, image, busA
 		Metadata: ObjectMeta{
 			Name:            podName(play.Metadata.Name),
 			Namespace:       play.Metadata.Namespace,
+			Labels:          map[string]string{playbackLabelKey: playbackLabelValue},
 			OwnerReferences: []OwnerReference{playOwner(play)},
 		},
 		Spec: PodSpec{

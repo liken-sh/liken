@@ -19,15 +19,17 @@ const (
 	podAPIVersion   = "v1"
 )
 
-// ObjectMeta carries five fields and they are enough: name and
-// namespace for the URL, resourceVersion for the conditional write,
-// and uid with ownerReferences for garbage collection.
+// ObjectMeta carries what this operator reads or writes: name and
+// namespace for the URL, resourceVersion for the conditional write, uid
+// with ownerReferences for garbage collection, and labels so a watch
+// selects the operator's own playback pods.
 type ObjectMeta struct {
-	Name            string           `json:"name,omitempty"`
-	Namespace       string           `json:"namespace,omitempty"`
-	UID             string           `json:"uid,omitempty"`
-	ResourceVersion string           `json:"resourceVersion,omitempty"`
-	OwnerReferences []OwnerReference `json:"ownerReferences,omitempty"`
+	Name            string            `json:"name,omitempty"`
+	Namespace       string            `json:"namespace,omitempty"`
+	UID             string            `json:"uid,omitempty"`
+	ResourceVersion string            `json:"resourceVersion,omitempty"`
+	Labels          map[string]string `json:"labels,omitempty"`
+	OwnerReferences []OwnerReference  `json:"ownerReferences,omitempty"`
 }
 
 // An ownerReference ties an object's life to its owner's: the
@@ -213,6 +215,14 @@ func terminalPhase(phase string) bool {
 	return phase == phaseFinished || phase == phaseFailed
 }
 
+// finishedPhase reports the one terminal phase the pass acts on. Only a
+// Finished Play is done, so the pass skips it. A Failed Play resumes, so the
+// pass reconciles it. terminalPhase still counts both, for the focus rule
+// that a crashed run holds no controller.
+func finishedPhase(phase string) bool {
+	return phase == phaseFinished
+}
+
 type PlayList struct {
 	Metadata ListMeta `json:"metadata"`
 	Items    []Play   `json:"items"`
@@ -391,6 +401,13 @@ type Pod struct {
 	Metadata   ObjectMeta `json:"metadata"`
 	Spec       PodSpec    `json:"spec"`
 	Status     PodStatus  `json:"status"`
+}
+
+// PodList is the pod collection ListPlaybackPods returns. Its
+// resourceVersion is where the pod watch begins.
+type PodList struct {
+	Metadata ListMeta `json:"metadata"`
+	Items    []Pod    `json:"items"`
 }
 
 // The pod spec's few fields: restartPolicy Never because the pod's

@@ -147,6 +147,8 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		positionWrites:  map[string]time.Time{},
 		keymapPublished: map[string]string{},
 		playReclaim:     map[string]time.Time{},
+		recreateBackoff: map[string]backoffState{},
+		wake:            wake,
 	}
 }
 
@@ -735,6 +737,198 @@ func TestAPlayerRemoteChangeRecreatesThePodOnTheChangedRemoteSet(t *testing.T) {
 	}
 	if got := podStart(cluster.pods["movie-playback"]); got != "0:30:00" {
 		t.Errorf("recreated start = %q, want the stashed 0:30:00", got)
+	}
+}
+
+// Kubernetes removed the playback pod of a running Play: a device taint
+// evicted it, or its node was lost. The Play is not Finished, so the
+// operator recreates the pod at the film's saved place.
+func TestAMissingPodForALiveRunIsRecreatedAtTheStashedPosition(t *testing.T) {
+	cluster := runningCluster(housePlayer())
+	cluster.plays["movie"].Status.Position = "0:41:00"
+	delete(cluster.pods, "movie-playback")
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.pass()
+
+	pod, held := cluster.pods["movie-playback"]
+	if !held {
+		t.Fatalf("the evicted pod was not recreated: %v", cluster.requests)
+	}
+	if got := podStart(pod); got != "0:41:00" {
+		t.Errorf("recreated start = %q, want the stashed 0:41:00", got)
+	}
+}
+
+// mpv exited non-zero and the pod is Failed. The operator recreates it at
+// the film's place, the way a Job restarts a failed pod.
+func TestAFailedPodIsRecreatedAtTheStashedPosition(t *testing.T) {
+	cluster := runningCluster(housePlayer())
+	cluster.pods["movie-playback"].Status.Phase = podFailed
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	media.reports.fold("house", "movie", playReport{Item: 1, Position: "0:22:00"})
+
+	media.pass()
+
+	if got := countMethod(cluster.requests, http.MethodDelete); got == 0 {
+		t.Errorf("the failed pod was not recreated: no delete in %v", cluster.requests)
+	}
+	if got := podStart(cluster.pods["movie-playback"]); got != "0:22:00" {
+		t.Errorf("recreated start = %q, want the stashed 0:22:00", got)
+	}
+}
+
+// mpv exited zero and the pod Succeeded: the film ended. A finished film
+// is terminal, so the operator recreates nothing and the Play reads
+// Finished.
+func TestASucceededPodIsNotRecreated(t *testing.T) {
+	cluster := runningCluster(housePlayer())
+	cluster.pods["movie-playback"].Status.Phase = podSucceeded
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.pass()
+
+	if got := countMethod(cluster.requests, http.MethodDelete); got != 0 {
+		t.Errorf("a finished film recreated its pod: %d deletes in %v", got, cluster.requests)
+	}
+	if got := cluster.plays["movie"].Status.Phase; got != phaseFinished {
+		t.Errorf("phase = %q, want Finished", got)
+	}
+}
+
+// A Finished Play whose pod the garbage collector already took is left
+// alone. The film ended, so the operator does not bring the pod back.
+func TestAMissingPodForAFinishedPlayIsNotRecreated(t *testing.T) {
+	cluster := newFakeCluster()
+	finished := housePlay("https://nas/film.mkv")
+	finished.Status = PlayStatus{Phase: phaseFinished, Pod: "movie-playback", Position: "1:58:00"}
+	cluster.plays["movie"] = finished
+	cluster.players["theater"] = housePlayer()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.pass()
+
+	if _, held := cluster.pods["movie-playback"]; held {
+		t.Errorf("a finished play's pod was recreated: %v", cluster.pods)
+	}
+	if got := countMethod(cluster.requests, http.MethodPost); got != 0 {
+		t.Errorf("a finished play created objects: %d posts in %v", got, cluster.requests)
+	}
+}
+
+// A genuinely new run steals its controllers, the most-recent-steals
+// default. A resume holds them already, so it steals nothing. The fresh
+// bool ensurePlayback returns is what the steal keys on, and only a run
+// with a resume point is a resume.
+func TestOnlyANewRunStealsAndAResumeDoesNot(t *testing.T) {
+	cases := []struct {
+		name      string
+		position  string
+		wantFresh bool
+	}{
+		{name: "a new run steals", position: "", wantFresh: true},
+		{name: "a resume does not steal", position: "0:10:00", wantFresh: false},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			play := housePlay("https://nas/film.mkv")
+			play.Status.Position = one.position
+			cluster.plays["movie"] = play
+			cluster.players["theater"] = housePlayer()
+			media := testOperator(t, cluster, make(chan struct{}, 1))
+			claim := buildClaim(play, housePlayer())
+
+			_, fresh, err := media.ensurePlayback(play, claim,
+				resolution{Items: []string{"https://nas/film.mkv"}}, nil, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fresh != one.wantFresh {
+				t.Errorf("fresh = %v, want %v", fresh, one.wantFresh)
+			}
+		})
+	}
+}
+
+// The recreate backoff bounds how fast a pod that keeps failing comes
+// back. The first recreate is immediate, a rapid second one is blocked,
+// and the delay doubles from the base up to the cap and stays there.
+func TestTheBackoffBoundsTheRecreateRate(t *testing.T) {
+	media := testOperator(t, newFakeCluster(), make(chan struct{}, 1))
+	key := runKey("house", "movie")
+
+	if !media.mayResume(key) {
+		t.Fatal("the first recreate was blocked, want it immediate")
+	}
+	if media.mayResume(key) {
+		t.Error("a rapid second recreate was allowed, want it blocked by backoff")
+	}
+
+	// Each recreate after its deadline grows the count, and the delay
+	// doubles to the cap and holds there.
+	for range 10 {
+		state := media.recreateBackoff[key]
+		state.next = time.Now().Add(-time.Millisecond)
+		media.recreateBackoff[key] = state
+		if !media.mayResume(key) {
+			t.Fatal("a recreate past its deadline was blocked")
+		}
+	}
+	if got := backoffDelay(media.recreateBackoff[key].count); got != recreateBackoffCap {
+		t.Errorf("delay after a long loop = %v, want the cap %v", got, recreateBackoffCap)
+	}
+
+	// A run that stayed up past the reset window starts over at once.
+	state := media.recreateBackoff[key]
+	state.last = time.Now().Add(-2 * recreateBackoffReset)
+	media.recreateBackoff[key] = state
+	if !media.mayResume(key) {
+		t.Error("a recreate after a stable run was blocked, want it immediate")
+	}
+	if got := media.recreateBackoff[key].count; got != 1 {
+		t.Errorf("count after the reset = %d, want it started over at 1", got)
+	}
+}
+
+func TestBackoffDelayDoublesToTheCap(t *testing.T) {
+	cases := []struct {
+		count int
+		want  time.Duration
+	}{
+		{count: 1, want: recreateBackoffBase},
+		{count: 2, want: 2 * recreateBackoffBase},
+		{count: 3, want: 4 * recreateBackoffBase},
+		{count: 100, want: recreateBackoffCap},
+	}
+	for _, one := range cases {
+		if got := backoffDelay(one.count); got != one.want {
+			t.Errorf("backoffDelay(%d) = %v, want %v", one.count, got, one.want)
+		}
+	}
+}
+
+// The command sidecar clears the retained status on termination and marks
+// the run offline, which drops the desk's latest report. The Play's own
+// status still carries the last position, so a resume after an eviction
+// starts where the film was and does not fall back to the start.
+func TestStashedPositionFallsBackToTheStatusWhenTheReportIsCleared(t *testing.T) {
+	cluster := newFakeCluster()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	play := housePlay("https://nas/film.mkv")
+	play.Status.Position = "0:41:00"
+
+	media.reports.availability("house", "movie", false)
+
+	if got := media.reports.latestFor("house", "movie"); got != nil {
+		t.Fatalf("the desk still holds a report: %+v", *got)
+	}
+	position, ok := media.resumePoint(play)
+	if !ok || position != "0:41:00" {
+		t.Errorf("resumePoint = %q, %v, want 0:41:00, true", position, ok)
+	}
+	if got := media.stashedPosition(play); got != "0:41:00" {
+		t.Errorf("stashedPosition = %q, want the status position 0:41:00", got)
 	}
 }
 

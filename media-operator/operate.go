@@ -99,6 +99,16 @@ type operator struct {
 	// passed. Only the pass goroutine touches it.
 	playReclaim map[string]time.Time
 
+	// recreateBackoff holds one run's recreate count and the earliest time it
+	// may recreate again, so a pod that keeps failing recreates slower up to a
+	// cap. Only the pass goroutine touches it.
+	recreateBackoff map[string]backoffState
+
+	// wake is the loop's own wake channel. The operator schedules one wake at
+	// a backoff deadline, so a run waiting out its backoff resumes when the
+	// wait ends rather than on the next backstop tick.
+	wake chan<- struct{}
+
 	// busReconnected is set on the bus goroutine when a session reaches a
 	// CONNACK, and read on the pass goroutine. A fresh broker session
 	// holds none of the retained state the operator owns, so the next pass
@@ -148,6 +158,8 @@ func operate() {
 		positionWrites:  map[string]time.Time{},
 		keymapPublished: map[string]string{},
 		playReclaim:     map[string]time.Time{},
+		recreateBackoff: map[string]backoffState{},
+		wake:            wake,
 	}
 
 	// onConnect marks that a fresh broker session began, so the next pass
@@ -191,12 +203,18 @@ func operate() {
 		fmt.Fprintf(os.Stderr, "listing keymaps: %v\n", err)
 		os.Exit(1)
 	}
+	pods, err := ListPlaybackPods(client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing playback pods: %v\n", err)
+		os.Exit(1)
+	}
 	fmt.Printf("media.liken.sh: operating %d plays and %d remotes over %s\n",
 		len(plays.Items), len(remotes.Items), busAddress)
 	go watchPlays(client, plays.Metadata.ResourceVersion, wake)
 	go watchRemotes(client, remotes.Metadata.ResourceVersion, wake)
 	go watchPlayers(client, players.Metadata.ResourceVersion, wake)
 	go watchKeymaps(client, keymaps.Metadata.ResourceVersion, wake)
+	go watchPods(client, pods.Metadata.ResourceVersion, wake)
 
 	ticker := time.NewTicker(backstopInterval)
 	for {
@@ -225,10 +243,11 @@ func (o *operator) pass() {
 	for index := range list.Items {
 		play := &list.Items[index]
 		live[runKey(play.Metadata.Namespace, play.Metadata.Name)] = true
-		// A Play in a terminal phase is done. Its pod and claims stay
-		// until the Play is deleted, and the garbage collector takes
-		// them then, through the ownerReferences they carry.
-		if terminalPhase(play.Status.Phase) {
+		// A Finished Play is over. Its pod and claims stay until the Play is
+		// deleted, when the garbage collector takes them through the
+		// ownerReferences they carry. A Failed Play is not over here, because
+		// the reconcile below resumes it, so only a Finished Play is skipped.
+		if finishedPhase(play.Status.Phase) {
 			continue
 		}
 		if err := o.reconcile(play); err != nil {
@@ -240,6 +259,11 @@ func (o *operator) pass() {
 	for key := range o.positionWrites {
 		if !live[key] {
 			delete(o.positionWrites, key)
+		}
+	}
+	for key := range o.recreateBackoff {
+		if !live[key] {
+			delete(o.recreateBackoff, key)
 		}
 	}
 	o.reclaimPlays(live)
@@ -476,8 +500,16 @@ func (o *operator) reconcile(play *Play) error {
 	if fresh && len(remotes) > 0 {
 		o.stealFocus(play, remotes)
 	}
-	return o.writePlay(play,
-		derivePlayStatus(play, player, nil, pod, o.reports.latestFor(namespace, name)))
+	status := derivePlayStatus(play, player, nil, pod, o.reports.latestFor(namespace, name))
+	// A run that keeps failing reads the backoff note in place of the pod's
+	// own failure message, but only once the recreates repeat and only while
+	// the pod is Failed, so a run that recovers reads a clean status.
+	if status.Phase == phaseFailed {
+		if note, backing := o.backoffNote(runKey(namespace, name)); backing {
+			status.Message = note
+		}
+	}
+	return o.writePlay(play, status)
 }
 
 // writePlay writes a Play's status through the position throttle. A
@@ -511,19 +543,38 @@ func (o *operator) writePlay(play *Play, desired PlayStatus) error {
 // which returns false, leaves the focus mark alone.
 func (o *operator) ensurePlayback(play *Play, claim *ResourceClaim, resolved resolution, remotes []boundRemote, keepExisting bool) (*Pod, bool, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
+	key := runKey(namespace, name)
 	running, err := GetPod(o.client, namespace, podName(name))
 	if errors.Is(err, ErrNotFound) {
+		// Nothing answers for the pod: a taint evicted it, its node was lost,
+		// or the Play never had one. A run with a saved place resumes without
+		// stealing its controllers back, and a run with no saved place starts
+		// at spec.start and steals them. Both wait out the recreate backoff.
+		_, resuming := o.resumePoint(play)
+		if !o.mayResume(key) {
+			return nil, false, nil
+		}
 		if err := ensureClaim(o.client, claim); err != nil {
 			return nil, false, err
 		}
-		pod, err := o.createPod(play, claim, resolved, remotes)
-		return pod, true, err
+		pod, err := o.createPodAtStash(play, claim, resolved, remotes)
+		return pod, !resuming, err
 	}
 	if err != nil {
 		return nil, false, err
 	}
 	if keepExisting {
 		return running, false, nil
+	}
+	if running.Status.Phase == podFailed {
+		// mpv exited non-zero. Recreate the pod at the film's place the way a
+		// Job restarts a failed pod, bounded by the recreate backoff so a
+		// file that crashes at the same place does not recreate without end.
+		if !o.mayResume(key) {
+			return running, false, nil
+		}
+		pod, err := o.recreateForResume(play, claim, resolved, remotes)
+		return pod, false, err
 	}
 
 	claimChanged, err := o.claimDiverged(claim)
@@ -539,13 +590,12 @@ func (o *operator) ensurePlayback(play *Play, claim *ResourceClaim, resolved res
 }
 
 // recreate replaces a running pod its Player reshaped and keeps the
-// film's place. It reads the position, deletes the pod, deletes and
-// recreates the claim only when the claim itself diverged, and creates
-// the replacement so mpv starts where the film was. The image is
-// already on the machine, so the film resumes within about a second.
+// film's place. It deletes the pod, deletes and recreates the claim only
+// when the claim itself diverged, and creates the replacement so mpv
+// starts where the film was. The image is already on the machine, so the
+// film resumes within about a second.
 func (o *operator) recreate(play *Play, claim *ResourceClaim, resolved resolution, remotes []boundRemote, claimChanged bool) (*Pod, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
-	start := o.stashedPosition(play)
 	if err := DeletePod(o.client, namespace, podName(name)); err != nil {
 		return nil, err
 	}
@@ -557,8 +607,29 @@ func (o *operator) recreate(play *Play, claim *ResourceClaim, resolved resolutio
 			return nil, err
 		}
 	}
+	return o.createPodAtStash(play, claim, resolved, remotes)
+}
+
+// recreateForResume replaces a pod that failed and keeps the film's place.
+// The claim outlives the pod, so this ensures the claim, deletes the dead
+// pod, and creates the replacement at the film's place.
+func (o *operator) recreateForResume(play *Play, claim *ResourceClaim, resolved resolution, remotes []boundRemote) (*Pod, error) {
+	namespace, name := play.Metadata.Namespace, play.Metadata.Name
+	if err := ensureClaim(o.client, claim); err != nil {
+		return nil, err
+	}
+	if err := DeletePod(o.client, namespace, podName(name)); err != nil {
+		return nil, err
+	}
+	return o.createPodAtStash(play, claim, resolved, remotes)
+}
+
+// createPodAtStash creates the playback pod with mpv's start set to the
+// film's saved place. A genuinely new run has no saved place, so the start
+// falls back to spec.start.
+func (o *operator) createPodAtStash(play *Play, claim *ResourceClaim, resolved resolution, remotes []boundRemote) (*Pod, error) {
 	resume := *play
-	resume.Spec.Start = start
+	resume.Spec.Start = o.stashedPosition(play)
 	return o.createPod(&resume, claim, resolved, remotes)
 }
 
@@ -577,17 +648,108 @@ func (o *operator) createPod(play *Play, claim *ResourceClaim, resolved resoluti
 	return created, nil
 }
 
-// stashedPosition reads the film's place for a recreate. It prefers
-// the retained bus status the operator holds, then the position last
-// written to the Play, then the Play's own spec.start for a pod that
-// never reported a position before a startup edit reshaped it.
+// stashedPosition reads the film's place for a recreate. It prefers the
+// run's own resume point, and falls back to the Play's spec.start for a
+// run that never reported a position, which a startup edit reshaped or a
+// brand-new Play that just started.
 func (o *operator) stashedPosition(play *Play) string {
-	namespace, name := play.Metadata.Namespace, play.Metadata.Name
-	if report := o.reports.latestFor(namespace, name); report != nil && report.Position != "" {
-		return report.Position
-	}
-	if play.Status.Position != "" {
-		return play.Status.Position
+	if position, ok := o.resumePoint(play); ok {
+		return position
 	}
 	return play.Spec.Start
+}
+
+// resumePoint reads the place a run reached, from the retained bus status
+// first and the Play's status second, and reports whether it found one. A
+// spec.start is not a resume point, so a run that never reported a position
+// starts fresh rather than resumes.
+func (o *operator) resumePoint(play *Play) (string, bool) {
+	namespace, name := play.Metadata.Namespace, play.Metadata.Name
+	if report := o.reports.latestFor(namespace, name); report != nil && report.Position != "" {
+		return report.Position, true
+	}
+	if play.Status.Position != "" {
+		return play.Status.Position, true
+	}
+	return "", false
+}
+
+// backoffState holds one run's recreate count and the two times that bound
+// its rate: last is when it last recreated, and next is the earliest it may
+// recreate again.
+type backoffState struct {
+	count int
+	last  time.Time
+	next  time.Time
+}
+
+// The recreate backoff follows the kubelet's CrashLoopBackOff: the first
+// recreate is immediate, and each recreate after it doubles the wait from
+// the base to the cap. A run that stays up for the reset window starts the
+// count over. They are variables so a test drives them in milliseconds.
+var (
+	recreateBackoffBase  = 10 * time.Second
+	recreateBackoffCap   = 5 * time.Minute
+	recreateBackoffReset = 10 * time.Minute
+)
+
+// backoffNoteThreshold is how many recreates a run reaches before its status
+// reads the repeated-failure note in place of the pod's own message.
+const backoffNoteThreshold = 2
+
+// mayResume reports whether a run may recreate its dead pod now, and
+// advances the backoff when it may. On a yes it schedules one wake at the
+// deadline, so the loop resumes when the wait ends rather than on a backstop
+// tick. On a no a wake from the last yes is already pending, so the caller
+// waits for it.
+func (o *operator) mayResume(key string) bool {
+	now := time.Now()
+	state := o.recreateBackoff[key]
+	if !state.last.IsZero() && now.Sub(state.last) > recreateBackoffReset {
+		state = backoffState{}
+	}
+	if now.Before(state.next) {
+		return false
+	}
+	state.count++
+	state.last = now
+	state.next = now.Add(backoffDelay(state.count))
+	o.recreateBackoff[key] = state
+	o.requeueAfter(time.Until(state.next))
+	return true
+}
+
+// backoffDelay returns the wait after the count-th recreate: the base
+// doubled once per recreate, up to the cap. The doubling runs in a loop and
+// stops at the cap, so a long run of failures never overflows the duration.
+func backoffDelay(count int) time.Duration {
+	delay := recreateBackoffBase
+	for range count - 1 {
+		delay *= 2
+		if delay >= recreateBackoffCap {
+			return recreateBackoffCap
+		}
+	}
+	return delay
+}
+
+// backoffNote returns the status message for a run that keeps failing, and
+// reports whether the count reached the threshold. The caller shows it only
+// while the pod is Failed.
+func (o *operator) backoffNote(key string) (string, bool) {
+	if o.recreateBackoff[key].count < backoffNoteThreshold {
+		return "", false
+	}
+	return "the playback pod keeps failing; the operator is retrying with a growing delay", true
+}
+
+// requeueAfter schedules one wake at delay from now, the requeue-after
+// idiom: the timer fires once and pokes the shared wake, which coalesces
+// with any queued wake, so a run waiting out its backoff wakes when the wait
+// ends.
+func (o *operator) requeueAfter(delay time.Duration) {
+	if o.wake == nil {
+		return
+	}
+	time.AfterFunc(delay, func() { poke(o.wake) })
 }

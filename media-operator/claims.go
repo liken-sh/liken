@@ -2,8 +2,8 @@ package main
 
 // This file writes the manifest the design says nobody should have
 // to write again: one claim that holds the whole player, request by
-// request, with the tolerations and parameter blocks a person wrote
-// by hand in the days of the demo.
+// request, with the parameter blocks a person wrote by hand in the
+// days of the demo.
 
 import (
 	"encoding/json"
@@ -27,36 +27,18 @@ const (
 	remoteRequestPrefix = "remote-"
 )
 
-// The two taints the hardware operators set when equipment goes
-// away, tolerated for thirty seconds: that long is a cable being
-// moved, and longer is equipment that left, which ends the pod so
-// the play fails rather than freezing.
-//
-// The controller's taint is the third, and it is tolerated with no
-// limit at all, because a controller that sleeps is normal and a
-// film must keep playing without it.
+// remoteDisconnectedTaint is the taint the hardware operator sets when a
+// controller disconnects. The standing remote reader pod tolerates it
+// forever, because a controller sleeps whenever a person puts it down and
+// the reader must wait for it. The playback claim tolerates no disconnect
+// taint at all, so a display or a speaker that leaves evicts the playback
+// pod, and the operator recreates it at the film's place.
 const (
-	displayDisconnectedTaint = "display.liken.sh/disconnected"
-	audioDisconnectedTaint   = "audio.liken.sh/disconnected"
-	remoteDisconnectedTaint  = "bluetooth.liken.sh/disconnected"
-	disconnectedTolerance    = 30
+	remoteDisconnectedTaint = "bluetooth.liken.sh/disconnected"
 )
 
 func remoteRequestName(remote string) string {
 	return remoteRequestPrefix + remote
-}
-
-// tolerateBriefly survives a cable being moved: thirty seconds of
-// absence keeps the pod, and longer evicts it, so the play fails
-// rather than freezing on equipment that left.
-func tolerateBriefly(taint string) []DeviceToleration {
-	seconds := int64(disconnectedTolerance)
-	return []DeviceToleration{{
-		Key:               taint,
-		Operator:          "Exists",
-		Effect:            "NoExecute",
-		TolerationSeconds: &seconds,
-	}}
 }
 
 // tolerateForever has no tolerationSeconds, so the toleration never
@@ -112,10 +94,10 @@ func buildClaim(play *Play, player *Player) *ResourceClaim {
 		},
 	}
 	if player.Spec.Display != nil {
-		claim.add(screenRequest, *player.Spec.Display, tolerateBriefly(displayDisconnectedTaint))
+		claim.add(screenRequest, *player.Spec.Display, nil)
 	}
 	for index, sink := range player.Spec.Sinks {
-		claim.add(audioRequestPrefix+strconv.Itoa(index), sink, tolerateBriefly(audioDisconnectedTaint))
+		claim.add(audioRequestPrefix+strconv.Itoa(index), sink, nil)
 	}
 	if player.Spec.Render != nil {
 		// The render node takes no toleration, because a GPU does not
