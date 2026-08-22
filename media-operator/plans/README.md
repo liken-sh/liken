@@ -108,21 +108,11 @@ has decided yet what work they become.
   enforce one instance across a rollout or a partition. A `Lease` in
   `coordination.k8s.io` makes it a true singleton, and opens a
   quasi-HA path.
-* [A player takes no outside control](open-problems/a-player-takes-no-outside-control.md).
-  A player is driven only by a `Remote`, which publishes raw evdev
-  codes. Nothing outside can command a player in media terms over the
-  bus. A cousin of the focus question: both reach the same arbitration
-  when more than one thing controls a player.
 * [The bus authorizes nothing](open-problems/the-bus-authorizes-nothing.md).
   Any client that reaches the broker can publish or subscribe to any
   topic, so the trust boundary is the whole cluster. Acceptable for one
   home the owner controls, and it owes broker ACLs once a cluster runs
   a workload the owner does not trust.
-* [A release does not reach a running pod](open-problems/a-release-does-not-reach-a-running-pod.md).
-  The operator stamps the player image into a pod once and never again,
-  so a new release reaches only the pods that start after it. A running
-  playback pod and the standing remote pods keep their old image until
-  something recreates them, which is a person's job today.
 
 ## Rejected
 

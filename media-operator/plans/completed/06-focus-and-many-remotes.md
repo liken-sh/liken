@@ -126,10 +126,9 @@ control plane.
   the first sliver of a frontend, out of scope until the frontend is
   designed.
 * **Arbitration between a press and an outside command.** A `Remote`
-  and a phone can both command one `Play` at once. That is the cousin
-  of focus in
-  `open-problems/a-player-takes-no-outside-control.md`, and it reaches
-  the same arbitration.
+  and a phone can both command one `Play` at once. Focus arbitrates
+  between controllers, and nothing arbitrates between a press and a
+  command that a program publishes.
 * **Broker access control.** A translator publishes only its own
   commands by convention, not by an ACL. That is
   `open-problems/the-bus-authorizes-nothing.md`.
