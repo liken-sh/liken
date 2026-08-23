@@ -38,18 +38,12 @@ local want = nil
 -- or its position changes.
 local placed = nil
 
--- Read how the canvas maps to the real screen, the way the header does. libass
--- stretches the 1920x1080 canvas to the window, so a window that is not 16:9
--- stretches the two axes by different amounts. sx maps a canvas x to real
--- pixels, sy maps a canvas y, and overlay-add places in real pixels, so the
--- tile must use both to sit where the ass playhead draws. w clamps the tile on
--- screen. It is nil until mpv reports a size.
+-- Read how the canvas maps to the real screen, the way the header does. sx maps
+-- a canvas x to real pixels, sy maps a canvas y, and overlay-add places in real
+-- pixels, so the tile must use both to sit where the ass playhead draws. w
+-- clamps the tile on screen.
 local function osd_metrics()
-  local d = mp.get_property_native("osd-dimensions")
-  if not d or not d.w or d.w <= 0 or not d.h or d.h <= 0 then
-    return nil
-  end
-  return { sx = d.w / theme.canvas.w, sy = d.h / theme.canvas.h, w = d.w }
+  return theme.osd_scale()
 end
 
 -- Ask the bridge for the tile at the target time and pixel box. Quantize the

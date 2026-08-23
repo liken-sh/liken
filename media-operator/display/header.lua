@@ -102,19 +102,13 @@ local function second_line()
   return table.concat(segs, "  \194\183  ")
 end
 
--- osd_metrics reads how the canvas maps to the real screen. mpv stretches the
--- ass overlay across the whole output window, so a window that is not 16:9
--- stretches the two axes by different amounts. sx maps a canvas x to real
--- pixels, and sy maps a canvas y, and overlay-add places in real pixels, so the
--- logo must use both to sit where the ass text draws. The osd-dimensions margins
--- describe where the video letterboxes, not where the overlay draws, so they
--- take no part here. It is nil until a frame has rendered and mpv reports a size.
+-- osd_metrics reads how the canvas maps to the real screen. sx maps a canvas x
+-- to real pixels, and sy maps a canvas y, and overlay-add places in real
+-- pixels, so the logo must use both to sit where the ass text draws. The
+-- osd-dimensions margins describe where the video letterboxes, not where the
+-- overlay draws, so they take no part here.
 local function osd_metrics()
-  local d = mp.get_property_native("osd-dimensions")
-  if not d or not d.w or d.w <= 0 or not d.h or d.h <= 0 then
-    return nil
-  end
-  return { sx = d.w / theme.canvas.w, sy = d.h / theme.canvas.h }
+  return theme.osd_scale()
 end
 
 -- request asks the bridge for the current logo at the pixel size the screen

@@ -7,6 +7,18 @@ local theme = {}
 -- with no branch.
 theme.canvas = { w = 1920, h = 1080 }
 
+-- osd_scale reads how the canvas maps to the real screen. mpv stretches the ass
+-- overlay across the whole output window, so a window that is not 16:9 stretches
+-- the two axes by different amounts. sx maps a canvas x to real pixels, and sy
+-- maps a canvas y. It is nil until a frame has rendered and mpv reports a size.
+function theme.osd_scale()
+  local d = mp.get_property_native("osd-dimensions")
+  if not d or not d.w or d.w <= 0 or not d.h or d.h <= 0 then
+    return nil
+  end
+  return { sx = d.w / theme.canvas.w, sy = d.h / theme.canvas.h, w = d.w, h = d.h }
+end
+
 -- An ASS color is BGR hex, the byte order libass reads, not RGB. The values
 -- are liken brand tokens from the brand theme's liken.css. The accent fill is
 -- the dark-scheme lichen green --link, the text is --ink, and the muted grey
@@ -154,16 +166,20 @@ end
 -- A pointy-top regular hexagon in a 2r box, center at (r, r). r is the
 -- distance from the center to a vertex. The 0.866 is cos(30 degrees), the
 -- half-width of a pointy-top hexagon.
-local function hexagon_path(r)
-  local a = 0.8660254 * r
+-- xscale narrows the hexagon in x. The half-width term takes the factor, so a
+-- caller pre-compresses the shape to counter the canvas stretch. The top and
+-- bottom vertices sit on the center column at x = r, so they hold still.
+local function hexagon_path(r, xscale)
+  xscale = xscale or 1
+  local a = 0.8660254 * r * xscale
   return string.format(
     "m %.2f 0 l %.2f %.2f l %.2f %.2f l %.2f %.2f l %.2f %.2f l %.2f %.2f",
     r, r + a, 0.5 * r, r + a, 1.5 * r, r, 2 * r, r - a, 1.5 * r, r - a, 0.5 * r
   )
 end
 
-function theme.hexagon(x, y, r, color, alpha, bord, bordcolor)
-  return drawing(x, y, color, alpha, hexagon_path(r), bord, bordcolor)
+function theme.hexagon(x, y, r, color, alpha, bord, bordcolor, xscale)
+  return drawing(x, y, color, alpha, hexagon_path(r, xscale), bord, bordcolor)
 end
 
 -- The scrim holds the contrast, so the label draws flat, with no outline.

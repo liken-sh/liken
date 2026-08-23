@@ -273,9 +273,18 @@ function scrubber.draw(axis)
     parts[#parts + 1] = theme.rect(livex - 1, top - 6, 2, BAR_H + 12, theme.color.text, theme.alpha.subdued)
   end
 
+  -- The playhead must read as a regular hexagon at any window shape. libass
+  -- stretches the canvas by sx across and sy down, so a wide window widens the
+  -- shape. A pre-compression by sy/sx in canvas x cancels the stretch. Before
+  -- the first frame the scale is not known, so k stays 1.
+  local osd = theme.osd_scale()
+  local k = 1
+  if osd then
+    k = osd.sy / osd.sx
+  end
   parts[#parts + 1] = theme.hexagon(
     knobx - KNOB_R, BAR_Y - KNOB_R, KNOB_R, theme.color.playhead, pos_a,
-    KNOB_BORDER, theme.color.shadow
+    KNOB_BORDER, theme.color.shadow, k
   )
 
   -- The current time rides above the playhead and moves with it, so the eye
