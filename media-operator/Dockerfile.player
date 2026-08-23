@@ -34,12 +34,19 @@ FROM debian:stable-slim
 # pipewire-bin is not optional: libpipewire refuses to build a
 # client context without /usr/share/pipewire/client.conf, that file
 # ships in pipewire-bin, and --ao=pipewire fails without it.
+#
+# The display draws its text in Source Sans 3, so fonts-adobe-sourcesans3
+# installs that family. fonts-noto-core covers the glyphs Source Sans 3 does
+# not carry, such as a foreign title or a subtitle track name, so no glyph
+# drops to a blank box.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         mpv \
         intel-media-va-driver \
         libgl1-mesa-dri \
         pipewire-bin \
+        fonts-adobe-sourcesans3 \
+        fonts-noto-core \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /media-operator /media-operator

@@ -56,6 +56,11 @@ theme.margin = {
   x = 140,
 }
 
+-- The whole display draws in one family. libass resolves it through fontconfig,
+-- and the player image installs the font, so the text renders the same on every
+-- machine. With no installed match, libass falls back and the look drifts.
+theme.font = "Source Sans 3"
+
 -- Place a shape at its top-left with an7 and pos, so the path points are the
 -- shape's own local box. p1 is the ASS vector drawing mode.
 -- The border is off by default, so a shape draws its fill alone. A shape that
@@ -186,8 +191,8 @@ end
 function theme.text(x, y, s, size, color, an, alpha)
   alpha = alpha or theme.alpha.opaque
   return string.format(
-    "{\\an%d\\pos(%.2f,%.2f)\\fs%d\\bord0\\shad0\\1c%s\\1a%s}%s",
-    an, x, y, size, color, alpha, s
+    "{\\an%d\\pos(%.2f,%.2f)\\fn%s\\fs%d\\bord0\\shad0\\1c%s\\1a%s}%s",
+    an, x, y, theme.font, size, color, alpha, s
   )
 end
 
