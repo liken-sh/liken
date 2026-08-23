@@ -9,7 +9,7 @@ local subtitles = require("subtitles")
 local strip = {}
 
 local LEFT = theme.margin.x
-local Y = 970
+local Y = 960
 -- The spacing between two control cells, wide enough for a track label.
 local CELL_GAP = 560
 

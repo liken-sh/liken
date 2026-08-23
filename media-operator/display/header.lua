@@ -102,18 +102,19 @@ local function second_line()
   return table.concat(segs, "  \194\183  ")
 end
 
--- osd_metrics reads how the canvas maps to the real screen. mpv scales the ass
--- overlay across the whole output window, so the canvas maps to the full width
--- by height with no offset, and one scale converts a canvas coordinate to the
--- real pixels overlay-add places. The osd-dimensions margins describe where the
--- video letterboxes, not where the overlay draws, so they take no part here. It
--- is nil until a frame has rendered and mpv reports a size.
+-- osd_metrics reads how the canvas maps to the real screen. mpv stretches the
+-- ass overlay across the whole output window, so a window that is not 16:9
+-- stretches the two axes by different amounts. sx maps a canvas x to real
+-- pixels, and sy maps a canvas y, and overlay-add places in real pixels, so the
+-- logo must use both to sit where the ass text draws. The osd-dimensions margins
+-- describe where the video letterboxes, not where the overlay draws, so they
+-- take no part here. It is nil until a frame has rendered and mpv reports a size.
 local function osd_metrics()
   local d = mp.get_property_native("osd-dimensions")
-  if not d or not d.w or d.w <= 0 then
+  if not d or not d.w or d.w <= 0 or not d.h or d.h <= 0 then
     return nil
   end
-  return { scale = d.w / theme.canvas.w }
+  return { sx = d.w / theme.canvas.w, sy = d.h / theme.canvas.h }
 end
 
 -- request asks the bridge for the current logo at the pixel size the screen
@@ -127,8 +128,8 @@ local function request()
   if not m then
     return
   end
-  local w = math.floor(LOGO_MAX_W * m.scale + 0.5)
-  local h = math.floor(LOGO_MAX_H * m.scale + 0.5)
+  local w = math.floor(LOGO_MAX_W * m.sx + 0.5)
+  local h = math.floor(LOGO_MAX_H * m.sy + 0.5)
   if w <= 0 or h <= 0 then
     return
   end
@@ -183,8 +184,8 @@ function header.sync(visible)
     if not m then
       return
     end
-    local x = math.floor(LEFT * m.scale + 0.5)
-    local y = math.floor(TOP_Y * m.scale + 0.5)
+    local x = math.floor(LEFT * m.sx + 0.5)
+    local y = math.floor(TOP_Y * m.sy + 0.5)
     local sig = table.concat({ blob.path, x, y, blob.w, blob.h, blob.stride }, ":")
     if sig ~= placed then
       mp.command_native({ "overlay-add", OVERLAY_ID, x, y, blob.path, 0, "bgra", blob.w, blob.h, blob.stride })
@@ -203,7 +204,7 @@ local function second_y()
   if blob then
     local m = osd_metrics()
     if m then
-      return TOP_Y + math.floor(blob.h / m.scale + 0.5) + SECOND_GAP
+      return TOP_Y + math.floor(blob.h / m.sy + 0.5) + SECOND_GAP
     end
   end
   return SECOND_Y

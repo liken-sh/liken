@@ -31,10 +31,13 @@ const mediaMountPrefix = "/media/"
 // Logos is the resolved logo for each item, in spec order. An item with no
 // logo has an empty string.
 type resolution struct {
-	Items   []string
-	Logos   []string
-	Volumes []Volume
-	Mounts  []VolumeMount
+	Items []string
+	Logos []string
+	// Trickplays is the resolved trickplay reference for each item, in spec
+	// order. An item with no trickplay has an empty string.
+	Trickplays []string
+	Volumes    []Volume
+	Mounts     []VolumeMount
 }
 
 // nfsRef is one parsed nfs:// URI: the server it names, and the path segments
@@ -63,6 +66,7 @@ type resolvedRef struct {
 func resolvePlay(items []PlayItem) (resolution, error) {
 	mediaRefs := make([]resolvedRef, len(items))
 	logoRefs := make([]resolvedRef, len(items))
+	trickRefs := make([]resolvedRef, len(items))
 
 	var serverOrder []string
 	seen := map[string]bool{}
@@ -85,20 +89,30 @@ func resolvePlay(items []PlayItem) (resolution, error) {
 			register(media.nfs)
 		}
 
-		logo := ""
+		logo, trickplay := "", ""
 		if item.Presentation != nil {
 			logo = item.Presentation.Logo
+			trickplay = item.Presentation.Trickplay
 		}
-		if logo == "" {
-			continue
+		if logo != "" {
+			art, err := parseRef(logo)
+			if err != nil {
+				return resolution{}, err
+			}
+			logoRefs[index] = art
+			if art.nfs != nil {
+				register(art.nfs)
+			}
 		}
-		art, err := parseRef(logo)
-		if err != nil {
-			return resolution{}, err
-		}
-		logoRefs[index] = art
-		if art.nfs != nil {
-			register(art.nfs)
+		if trickplay != "" {
+			trick, err := parseRef(trickplay)
+			if err != nil {
+				return resolution{}, err
+			}
+			trickRefs[index] = trick
+			if trick.nfs != nil {
+				register(trick.nfs)
+			}
 		}
 	}
 
@@ -133,9 +147,11 @@ func resolvePlay(items []PlayItem) (resolution, error) {
 	}
 	resolved.Items = make([]string, len(items))
 	resolved.Logos = make([]string, len(items))
+	resolved.Trickplays = make([]string, len(items))
 	for index := range items {
 		resolved.Items[index] = rewrite(mediaRefs[index])
 		resolved.Logos[index] = rewrite(logoRefs[index])
+		resolved.Trickplays[index] = rewrite(trickRefs[index])
 	}
 	return resolved, nil
 }

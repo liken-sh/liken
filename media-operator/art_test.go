@@ -14,26 +14,26 @@ import (
 
 func TestParseArtRequest(t *testing.T) {
 	cases := []struct {
-		name string
-		args []string
-		kind string
-		w    int
-		h    int
-		ok   bool
+		name    string
+		args    []string
+		request artRequest
+		ok      bool
 	}{
-		{name: "a logo request", args: []string{"liken-art-request", "logo", "280", "96"}, kind: "logo", w: 280, h: 96, ok: true},
+		{name: "a logo request", args: []string{"liken-art-request", "logo", "280", "96"}, request: artRequest{kind: "logo", width: 280, height: 96}, ok: true},
+		{name: "a trickplay request", args: []string{"liken-art-request", "trickplay", "125000", "240", "136"}, request: artRequest{kind: "trickplay", timeMs: 125000, width: 240, height: 136}, ok: true},
 		{name: "another script's broadcast", args: []string{"someone-else", "logo", "280", "96"}},
+		{name: "an unknown kind", args: []string{"liken-art-request", "poster", "280", "96"}},
 		{name: "too few arguments", args: []string{"liken-art-request", "logo", "280"}},
+		{name: "a trickplay with no box", args: []string{"liken-art-request", "trickplay", "125000", "240"}},
+		{name: "a trickplay time that is not a number", args: []string{"liken-art-request", "trickplay", "soon", "240", "136"}},
 		{name: "a width that is not a number", args: []string{"liken-art-request", "logo", "wide", "96"}},
 		{name: "a height of zero", args: []string{"liken-art-request", "logo", "280", "0"}},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
-			kind, w, h, ok := parseArtRequest(each.args)
+			request, ok := parseArtRequest(each.args)
 			mustMatch(t, ok, each.ok)
-			mustMatch(t, kind, each.kind)
-			mustMatch(t, w, each.w)
-			mustMatch(t, h, each.h)
+			mustMatch(t, request, each.request)
 		})
 	}
 }

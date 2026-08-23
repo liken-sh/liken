@@ -47,6 +47,12 @@ const (
 	// live while the film plays.
 	presentationsVariable = "MEDIA_PRESENTATIONS"
 
+	// Carries a Play's trickplayInterval to the bridge. The tile width, the
+	// grid, and the tile height are on the sheets, so the bridge reads them.
+	// The interval is not on the sheets, so the Play declares it and the pod
+	// passes it here.
+	trickplayIntervalVariable = "MEDIA_TRICKPLAY_INTERVAL"
+
 	// The bus every pod connects to, and the base every topic extends.
 	// The operator holds both and passes them down, because a pod
 	// cannot read the address of the broker in front of it or the base

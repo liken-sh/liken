@@ -20,10 +20,14 @@ local BAR_H = 14
 -- The gap between two segments, so the divisions read as separate chapters.
 local SEG_GAP = 4
 local SEG_R = 3
+-- The time sits this far above the bar center, and the line below sits this far
+-- under it. The gaps are named, so the vertical spacing is one place to tune.
+local TIME_ABOVE = 18
+local BELOW_GAP = 18
 -- The current time rides above the bar; the chapter title and the time left
 -- sit below it.
-local TOP_Y = 880
-local BELOW_Y = 928
+local TOP_Y = BAR_Y - TIME_ABOVE
+local BELOW_Y = BAR_Y + BELOW_GAP
 -- The playhead stands proud of the bar, so its points read against the video
 -- above and below the green fill it rides on.
 local KNOB_R = 15
@@ -31,10 +35,10 @@ local KNOB_R = 15
 -- so the head reads against the fill.
 local KNOB_BORDER = 2
 
--- seek and acceleration
--- The seek is time based, not press based, so the speed does not depend on
--- the keyboard or the controller repeat rate. The first press of a gesture
--- nudges TAP_STEP seconds. A hold ramps the speed from MIN_RATE to MAX_RATE
+-- scan and acceleration
+-- The scan is time based, not press based, so the speed does not depend on the
+-- keyboard or the controller repeat rate. The first press of a gesture moves
+-- the cursor TAP_STEP seconds. A hold ramps the speed from MIN_RATE to MAX_RATE
 -- seconds of film per second of hold, reaching MAX_RATE after RAMP seconds.
 local TAP_STEP = 5
 local MIN_RATE = 30
@@ -43,33 +47,18 @@ local RAMP = 4
 -- A gap longer than this ends the gesture, so the next press is a tap and
 -- the ramp starts again.
 local GAP = 0.25
--- Playback follows the cursor on this interval while scrubbing, so the
--- frames track the playhead instead of jumping only at the end.
-local COMMIT_INTERVAL = 0.1
--- After this idle the cursor drops and the display tracks time-pos again.
-local RESET_IDLE = 0.4
 
 local cursor = nil
 local last_dir = 0
 local last_event = 0
 local hold_start = 0
-local commit_timer = nil
-local reset_timer = nil
 
-local function kill(t)
-  if t then
-    t:kill()
-  end
-end
-
--- A keyframe seek while scrubbing is fast, so the frames keep up with the
--- cursor. The settle at the end of the gesture lands on the exact frame.
-local function commit(mode)
-  if cursor then
-    mp.commandv("seek", cursor, "absolute+" .. mode)
-  end
-end
-
+-- A fine scan previews a target without moving the video. left and right move
+-- the cursor, and the thumbnail shows the frame there, while the video plays on
+-- at its own position. So the preview is the only thing that moves, and the
+-- scan costs one crop per tile and no seek. A select commits the seek, and a
+-- cancel drops the cursor. Without this the video would chase the cursor, and
+-- the thumbnail would show the frame already on screen.
 function scrubber.seek(dir)
   local dur = mp.get_property_number("duration")
   if not dur or dur <= 0 then
@@ -94,23 +83,34 @@ function scrubber.seek(dir)
   last_event = now
   cursor = math.max(0, math.min(dur, cursor))
 
-  if not commit_timer then
-    commit_timer = mp.add_timeout(COMMIT_INTERVAL, function()
-      commit_timer = nil
-      commit("keyframes")
-    end)
-  end
-
-  kill(reset_timer)
-  reset_timer = mp.add_timeout(RESET_IDLE, function()
-    reset_timer = nil
-    commit("exact")
-    last_dir = 0
-    cursor = nil
-    redraw_cb()
-  end)
-
   redraw_cb()
+end
+
+-- scanning reports whether a scan is in flight, so the router sends select and
+-- back to the scan, and the display shows the thumbnail only then.
+function scrubber.scanning()
+  return cursor ~= nil
+end
+
+-- commit lands the seek on the previewed frame, so a select ends the scan at
+-- the target. The exact seek lands the frame the thumbnail showed.
+function scrubber.commit()
+  if cursor then
+    mp.commandv("seek", cursor, "absolute+exact")
+    cursor = nil
+    last_dir = 0
+    redraw_cb()
+  end
+end
+
+-- cancel drops the preview with no seek, so a back leaves the video where it
+-- plays. Leaving the fine stop cancels the scan the same way.
+function scrubber.cancel()
+  if cursor then
+    cursor = nil
+    last_dir = 0
+    redraw_cb()
+  end
 end
 
 -- Stepping a chapter moves the playback position, so the fine playhead
@@ -191,6 +191,38 @@ local function segments(dur)
   return out
 end
 
+-- Draw from the cursor while a seek is in flight, so the playhead leads the
+-- debounced seek. Fall back to time-pos after the reset. Without this the
+-- playhead stutters behind the seeks.
+local function displayed_pos(dur)
+  local pos = cursor or mp.get_property_number("time-pos") or 0
+  return math.max(0, math.min(dur, pos))
+end
+
+local function pos_to_x(dur, pos)
+  return LEFT + BAR_W * (pos / dur)
+end
+
+-- The displayed position in seconds, the in-flight cursor or time-pos, and nil
+-- with no duration. The thumbnail reads it to pick the frame to show.
+function scrubber.cursor_time()
+  local dur = mp.get_property_number("duration")
+  if not dur or dur <= 0 then
+    return nil
+  end
+  return displayed_pos(dur)
+end
+
+-- The playhead x in canvas coordinates, the same value draw computes, and nil
+-- with no duration. The thumbnail centers on it.
+function scrubber.cursor_x()
+  local dur = mp.get_property_number("duration")
+  if not dur or dur <= 0 then
+    return nil
+  end
+  return pos_to_x(dur, displayed_pos(dur))
+end
+
 function scrubber.draw(axis)
   local dur = mp.get_property_number("duration")
   if not dur or dur <= 0 then
@@ -198,12 +230,8 @@ function scrubber.draw(axis)
   end
   local pos_a, chap_a = brightness(axis)
 
-  -- Draw from the cursor while a seek is in flight, so the playhead leads the
-  -- debounced seek. Fall back to time-pos after the reset. Without this the
-  -- playhead stutters behind the seeks.
-  local pos = cursor or mp.get_property_number("time-pos") or 0
-  pos = math.max(0, math.min(dur, pos))
-  local knobx = LEFT + BAR_W * (pos / dur)
+  local pos = displayed_pos(dur)
+  local knobx = pos_to_x(dur, pos)
 
   local chs = chapter_list()
   local cur = mp.get_property_number("chapter") or 0
@@ -234,6 +262,15 @@ function scrubber.draw(axis)
         seg.x0, top, seg.w, BAR_H, SEG_R, theme.color.fill, chap_a
       )
     end
+  end
+
+  -- During a scan the video plays on while the cursor previews elsewhere, so a
+  -- thin tick marks where playback is. The playhead draws after it, so the two
+  -- read apart when they overlap.
+  if cursor then
+    local live = math.max(0, math.min(dur, mp.get_property_number("time-pos") or 0))
+    local livex = pos_to_x(dur, live)
+    parts[#parts + 1] = theme.rect(livex - 1, top - 6, 2, BAR_H + 12, theme.color.text, theme.alpha.subdued)
   end
 
   parts[#parts + 1] = theme.hexagon(

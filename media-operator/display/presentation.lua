@@ -86,4 +86,13 @@ function presentation.logo()
   return nil
 end
 
+-- The trickplay reference, the sprite-sheet directory the bridge crops tiles
+-- from. The display never opens it, and nil means the item shows no thumbnail.
+function presentation.trickplay()
+  if block.trickplay and block.trickplay ~= "" then
+    return block.trickplay
+  end
+  return nil
+end
+
 return presentation

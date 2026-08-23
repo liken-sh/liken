@@ -7,6 +7,7 @@ local strip = require("strip")
 local images = require("images")
 local presentation = require("presentation")
 local header = require("header")
+local trickplay = require("trickplay")
 
 -- The remote reaches this client by its directory basename. The log names it
 -- once, so a wrong name shows in the player log.
@@ -26,6 +27,21 @@ local function redraw()
   -- draws over the ASS layer, so a logo left in place would sit on top of the
   -- dim rather than under it.
   header.sync(focus.visible() and not focus.capturing())
+  -- The thumbnail shows only while a fine scan is in flight, for an item that
+  -- declares trickplay. At rest the video shows the frame the thumbnail would,
+  -- so the tile appears only when the scan previews another position. It hides
+  -- while a chooser captures, the way the logo does, because overlay-add draws
+  -- over the ass layer and would sit on the chooser's dim.
+  local show_trickplay = focus.visible()
+    and not focus.capturing()
+    and focus.focused_stop() == "fine"
+    and scrubber.scanning()
+    and presentation.trickplay() ~= nil
+  if show_trickplay then
+    trickplay.sync(true, scrubber.cursor_time(), scrubber.cursor_x())
+  else
+    trickplay.sync(false)
+  end
   local parts = {}
   if focus.visible() then
     local h = header.draw()
@@ -101,6 +117,7 @@ strip.set_redraw(request_redraw)
 images.set_redraw(request_redraw)
 presentation.set_redraw(request_redraw)
 header.set_redraw(request_redraw)
+trickplay.set_redraw(request_redraw)
 
 -- mpv pushes each property once when the script observes it, then on every
 -- change, so the display runs no timer of its own for these values.
@@ -141,6 +158,7 @@ end)
 -- the bridge for the logo again at the new size.
 mp.observe_property("osd-dimensions", "native", function()
   header.on_resize()
+  trickplay.on_resize()
   request_redraw()
 end)
 mp.observe_property("pause", "bool", function(_, value)
@@ -153,11 +171,19 @@ end)
 mp.register_script_message("presentation", function(text)
   presentation.receive(text)
   header.on_item()
+  trickplay.on_item()
 end)
 
--- The bridge answers a logo request over this script-message, carrying the
--- decoded bitmap the header places.
-mp.register_script_message("liken-art", header.on_art)
+-- The bridge answers an art request over this script-message, and the logo and
+-- the trickplay tile share the one reply. Read the kind, and route the reply to
+-- the header for a logo and to the thumbnail for a tile.
+mp.register_script_message("liken-art", function(kind, path, w, h, stride)
+  if kind == "logo" then
+    header.on_art(kind, path, w, h, stride)
+  elseif kind == "trickplay" then
+    trickplay.on_art(kind, path, w, h, stride)
+  end
+end)
 
 -- The six navigation actions the command bus carries. A Keymap binds a
 -- controller's buttons to them.

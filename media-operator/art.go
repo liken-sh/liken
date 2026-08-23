@@ -31,34 +31,81 @@ type artBlob struct {
 	stride int
 }
 
-// parseArtRequest reads a client-message as a request for art. The first
-// argument names the request, so the bridge drops any other script's
-// broadcast. The rest name the kind and the pixel box.
-func parseArtRequest(args []string) (kind string, w, h int, ok bool) {
-	if len(args) < 4 || args[0] != artRequestMessage {
-		return "", 0, 0, false
-	}
-	w, err := strconv.Atoi(args[2])
-	if err != nil || w <= 0 {
-		return "", 0, 0, false
-	}
-	h, err = strconv.Atoi(args[3])
-	if err != nil || h <= 0 {
-		return "", 0, 0, false
-	}
-	return args[1], w, h, true
+// One parsed art request. timeMs carries the scrub time for a trickplay
+// request, and stays zero for a logo request, which needs only the box.
+type artRequest struct {
+	kind   string
+	timeMs int
+	width  int
+	height int
 }
 
-// serveArt answers one art request. It decodes the current item's logo to the
-// box the display asks for, caches the blob by size, and replies. A size
-// already decoded for the current item replies from the cache and decodes
-// nothing.
+// parseArtRequest reads a client-message as a request for art. The first
+// argument names the request, so the bridge drops another script's broadcast.
+// The rest depends on the kind: a logo carries a box, a trickplay carries a
+// time and a box.
+func parseArtRequest(args []string) (artRequest, bool) {
+	if len(args) < 4 || args[0] != artRequestMessage {
+		return artRequest{}, false
+	}
+	switch args[1] {
+	case artKindLogo:
+		w, h, ok := parseBox(args[2], args[3])
+		if !ok {
+			return artRequest{}, false
+		}
+		return artRequest{kind: artKindLogo, width: w, height: h}, true
+	case artKindTrickplay:
+		if len(args) < 5 {
+			return artRequest{}, false
+		}
+		timeMs, err := strconv.Atoi(args[2])
+		if err != nil || timeMs < 0 {
+			return artRequest{}, false
+		}
+		w, h, ok := parseBox(args[3], args[4])
+		if !ok {
+			return artRequest{}, false
+		}
+		return artRequest{kind: artKindTrickplay, timeMs: timeMs, width: w, height: h}, true
+	}
+	return artRequest{}, false
+}
+
+// parseBox reads a width and a height from two arguments. A value that is not
+// a positive number fails the request, so a bad box decodes nothing.
+func parseBox(widthArg, heightArg string) (w, h int, ok bool) {
+	w, err := strconv.Atoi(widthArg)
+	if err != nil || w <= 0 {
+		return 0, 0, false
+	}
+	h, err = strconv.Atoi(heightArg)
+	if err != nil || h <= 0 {
+		return 0, 0, false
+	}
+	return w, h, true
+}
+
+// serveArt answers one art request. It dispatches by kind, the logo to
+// serveLogo and the trickplay tile to serveTrickplay.
 func (c *commander) serveArt(args []string) {
-	kind, w, h, ok := parseArtRequest(args)
-	if !ok || kind != artKindLogo {
+	request, ok := parseArtRequest(args)
+	if !ok {
 		return
 	}
+	switch request.kind {
+	case artKindLogo:
+		c.serveLogo(request)
+	case artKindTrickplay:
+		c.serveTrickplay(request)
+	}
+}
 
+// serveLogo decodes the current item's logo to the box the display asks for,
+// caches the blob by size, and replies. A size already decoded for the current
+// item replies from the cache and decodes nothing.
+func (c *commander) serveLogo(request artRequest) {
+	kind, w, h := request.kind, request.width, request.height
 	key := kind + ":" + strconv.Itoa(w) + "x" + strconv.Itoa(h)
 	c.artMutex.Lock()
 	item := c.artItem
@@ -166,8 +213,16 @@ func scaleToBGRA(reader io.Reader, boxW, boxH int) (pixels []byte, w, h, stride 
 	if err != nil {
 		return nil, 0, 0, 0, err
 	}
-	bounds := source.Bounds()
-	sw, sh := bounds.Dx(), bounds.Dy()
+	return scaleRegionToBGRA(source, source.Bounds(), boxW, boxH)
+}
+
+// scaleRegionToBGRA scales one rectangle of a decoded image to fit within boxW
+// by boxH, keeping the aspect ratio. It returns premultiplied bgra with stride
+// 4*w, the one format overlay-add reads. A logo passes the image's full bounds.
+// A trickplay passes one cell of a sprite sheet, so the crop and the scale are
+// one step.
+func scaleRegionToBGRA(source image.Image, region image.Rectangle, boxW, boxH int) (pixels []byte, w, h, stride int, err error) {
+	sw, sh := region.Dx(), region.Dy()
 	if sw <= 0 || sh <= 0 {
 		return nil, 0, 0, 0, fmt.Errorf("the image has no pixels")
 	}
@@ -184,7 +239,7 @@ func scaleToBGRA(reader io.Reader, boxW, boxH int) (pixels []byte, w, h, stride 
 		fy := (float64(y)+0.5)/scale - 0.5
 		for x := 0; x < outW; x++ {
 			fx := (float64(x)+0.5)/scale - 0.5
-			r, g, b, a := sampleBilinear(source, bounds, fx, fy)
+			r, g, b, a := sampleBilinear(source, region, fx, fy)
 			offset := y*stride + x*4
 			pixels[offset+0] = b
 			pixels[offset+1] = g

@@ -241,6 +241,7 @@ func TestBuildPodRunsOneCommandSidecar(t *testing.T) {
 			{Name: busAddressVariable, Value: testBusAddress},
 			{Name: topicBaseVariable, Value: testTopicBase},
 			{Name: presentationsVariable, Value: "[{}]"},
+			{Name: trickplayIntervalVariable, Value: defaultTrickplayInterval},
 		},
 		VolumeMounts:  []VolumeMount{{Name: "ipc", MountPath: "/ipc"}, {Name: "art", MountPath: "/art"}},
 		RestartPolicy: "Always",

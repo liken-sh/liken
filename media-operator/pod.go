@@ -100,7 +100,7 @@ func buildPod(play *Play, claim *ResourceClaim, resolved resolution, image, busA
 	// order, and the operator reads the translator set back off it to tell
 	// whether a Player reshaped this pod.
 	initContainers := make([]Container, 0, len(remotes)+1)
-	initContainers = append(initContainers, commandSidecar(play, resolved.Logos, image, busAddress, topicBase))
+	initContainers = append(initContainers, commandSidecar(play, resolved.Logos, resolved.Trickplays, image, busAddress, topicBase))
 	for _, remote := range remotes {
 		initContainers = append(initContainers, translatorSidecar(play, image, busAddress, topicBase, remote))
 	}
@@ -133,7 +133,11 @@ func buildPod(play *Play, claim *ResourceClaim, resolved resolution, image, busA
 // subscribes to the Play's commands topic, drives mpv through the shared
 // socket, and publishes the Play's status. It mounts the IPC volume,
 // because it is the one container besides mpv that reaches the socket.
-func commandSidecar(play *Play, logos []string, image, busAddress, topicBase string) Container {
+func commandSidecar(play *Play, logos, trickplays []string, image, busAddress, topicBase string) Container {
+	interval := play.Spec.TrickplayInterval
+	if interval == "" {
+		interval = defaultTrickplayInterval
+	}
 	return Container{
 		Name:    commandContainer,
 		Image:   image,
@@ -143,7 +147,8 @@ func commandSidecar(play *Play, logos []string, image, busAddress, topicBase str
 			{Name: playNameVariable, Value: play.Metadata.Name},
 			{Name: busAddressVariable, Value: busAddress},
 			{Name: topicBaseVariable, Value: topicBase},
-			{Name: presentationsVariable, Value: presentationBlocks(play.Spec.Items, logos)},
+			{Name: presentationsVariable, Value: presentationBlocks(play.Spec.Items, logos, trickplays)},
+			{Name: trickplayIntervalVariable, Value: interval},
 		},
 		// The command sidecar reads mpv's socket on the IPC volume and writes
 		// decoded art on the art volume, so it mounts both. mpv reads the art
@@ -160,7 +165,7 @@ func commandSidecar(play *Play, logos []string, image, busAddress, topicBase str
 //
 // Each block carries the resolved logo for its item, so the bridge reads an
 // nfs logo by an in-pod path and mpv fetches an https logo by its URL.
-func presentationBlocks(items []PlayItem, logos []string) string {
+func presentationBlocks(items []PlayItem, logos, trickplays []string) string {
 	blocks := make([]json.RawMessage, len(items))
 	for index, item := range items {
 		if item.Presentation == nil {
@@ -170,6 +175,9 @@ func presentationBlocks(items []PlayItem, logos []string) string {
 		block := *item.Presentation
 		if index < len(logos) {
 			block.Logo = logos[index]
+		}
+		if index < len(trickplays) {
+			block.Trickplay = trickplays[index]
 		}
 		encoded, err := json.Marshal(block)
 		if err != nil {

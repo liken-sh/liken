@@ -149,6 +149,11 @@ type PlaySpec struct {
 	Players []string   `json:"players"`
 	Items   []PlayItem `json:"items"`
 	Start   string     `json:"start,omitempty"`
+	// The seconds one trickplay tile covers, as a Go duration like 10s.
+	// Jellyfin writes no manifest beside the sheets, and the last sheet is
+	// padded, so the tile count cannot be read back. The Play declares the
+	// interval, and it defaults to 10s when this is empty.
+	TrickplayInterval string `json:"trickplayInterval,omitempty"`
 }
 
 // A PlayItem is one entry in the list: the media URI and an optional
@@ -163,9 +168,10 @@ type PlayItem struct {
 // display renders an item the way the library that fed liken describes
 // it, not the way a container's tags happen to read.
 //
-// It carries the text fields and the logo, the one art field the display draws
-// today. The resolver rewrites the logo the way it rewrites the media URI, so
-// an nfs logo shares the media's mount and an https logo stays a URL.
+// It carries the text fields and two art references, the logo and the
+// trickplay directory. The resolver rewrites each the way it rewrites the
+// media URI, so an nfs reference shares the media's mount and an https
+// reference stays a URL.
 type Presentation struct {
 	Type         string `json:"type,omitempty"`
 	Hint         string `json:"hint,omitempty"`
@@ -177,6 +183,10 @@ type Presentation struct {
 	Year         int    `json:"year,omitempty"`
 	Date         string `json:"date,omitempty"`
 	Logo         string `json:"logo,omitempty"`
+	// A reference to the item's X.trickplay directory, resolved the way the
+	// logo is. The display shows a tile from its sprite sheets on the scrub
+	// cursor.
+	Trickplay string `json:"trickplay,omitempty"`
 }
 
 // The status the operator alone writes: the phase, the activity

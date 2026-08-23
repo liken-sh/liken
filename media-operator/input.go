@@ -208,7 +208,13 @@ const (
 	artRequestMessage = "liken-art-request"
 	artReplyMessage   = "liken-art"
 	artKindLogo       = "logo"
+	artKindTrickplay  = "trickplay"
 )
+
+// The interval one trickplay tile covers, used when a Play sets no
+// trickplayInterval. Jellyfin generates the sheets at this spacing by
+// default, and the library keeps that default.
+const defaultTrickplayInterval = "10s"
 
 // An item with no presentation, and an index the sidecar holds no block
 // for, forward this empty object. The display reads it as no declared

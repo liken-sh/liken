@@ -175,6 +175,12 @@ spec:
                               The logo art URI, nfs:// or https://, resolved
                               the way the media URI is. The display shows it in
                               the header in place of the title.
+                          trickplay:
+                            type: string
+                            description: >-
+                              The X.trickplay directory URI, nfs:// or https://,
+                              resolved the way the media URI is. The display
+                              shows a tile from it on the scrub cursor.
                 start:
                   type: string
                   description: >-
@@ -184,6 +190,13 @@ spec:
                     items always begin at their own start. This is
                     also how a run resumes: a new Play with the
                     position a finished or deleted one reported.
+                trickplayInterval:
+                  type: string
+                  description: >-
+                    The seconds one trickplay tile covers, as a Go
+                    duration like 10s. Jellyfin writes no manifest beside
+                    the sheets, so the Play declares it. Omitted, it
+                    defaults to 10s, the Jellyfin default.
             status:
               type: object
               description: >-

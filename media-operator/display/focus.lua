@@ -81,7 +81,13 @@ local function move(dir)
     end
   end
   at = math.max(1, math.min(#p, at + dir))
-  focused = p[at]
+  local next_stop = p[at]
+  -- Leaving the fine stop drops a scan in flight, so a preview does not outlive
+  -- the move to another control.
+  if focused == "fine" and next_stop ~= "fine" and scrubber.scanning() then
+    scrubber.cancel()
+  end
+  focused = next_stop
 end
 
 -- Route the horizontal and select presses to the focused stop. The fine and
@@ -93,6 +99,8 @@ local function route(action)
       scrubber.seek(-1)
     elseif action == "right" then
       scrubber.seek(1)
+    elseif action == "select" then
+      scrubber.commit()
     end
     return nil
   elseif focused == "chapter" then
@@ -168,15 +176,20 @@ function focus.on_pause(p)
   redraw_cb()
 end
 
--- back has two meanings, and the open chooser decides which. An open
--- chooser takes back to close itself. Everywhere else back dismisses the
--- OSD. A chooser is the only state that captures input, so it is the only
--- place back means "close me".
+-- back has three meanings, one per state. An open chooser takes back to close
+-- itself. A fine scan takes back to cancel the preview. With neither open, back
+-- dismisses the OSD. The chooser and the scan each hold something to close, so
+-- they take back before the OSD does.
 function focus.nav(action)
   if action == "back" then
     if capturing then
       capturing.close()
       capturing = nil
+      redraw_cb()
+    elseif focused == "fine" and scrubber.scanning() then
+      -- A scan is in flight, so back cancels the preview and leaves the video
+      -- where it plays. With no scan, back dismisses the OSD.
+      scrubber.cancel()
       redraw_cb()
     else
       focus.dismiss()

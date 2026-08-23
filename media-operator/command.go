@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
 	"math"
 	"net"
 	"os"
@@ -86,6 +87,19 @@ type commander struct {
 	artMutex sync.Mutex
 	artItem  int
 	artCache map[string]artBlob
+
+	// The one decoded sheet the bridge holds. A scrub within one sheet crops
+	// every tile from this image, so it reads no new file.
+	trickSheet    image.Image
+	trickSheetKey string
+
+	// The last tile written for the current item. A request that maps to the
+	// same tile replies with this blob and crops nothing, so the overlay does
+	// not churn.
+	trickHave bool
+	trickItem int
+	trickIdx  int
+	trickBlob artBlob
 }
 
 // runCommand connects to the bus, drives mpv's IPC socket, and reports
@@ -308,6 +322,12 @@ func (c *commander) swapArt(item int) {
 		os.Remove(blob.path)
 	}
 	c.artCache = nil
+	if c.trickHave {
+		os.Remove(c.trickBlob.path)
+	}
+	c.trickHave = false
+	c.trickSheet = nil
+	c.trickSheetKey = ""
 	c.artItem = item
 }
 
