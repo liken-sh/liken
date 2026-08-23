@@ -5,7 +5,7 @@
 // on the hardware operators' devices, the pods that perform the work,
 // and the statuses a person reads.
 //
-// One binary, five roles, the way the audio operator's one image runs
+// One binary, six roles, the way the audio operator's one image runs
 // in several roles. With no argument it is the operator: a Deployment
 // that watches Plays, Remotes, Players, and Keymaps, creates claims and
 // pods, publishes the compiled keymaps, and writes every status. As
@@ -17,6 +17,10 @@
 // commands topic, and publishes the report. As `translate` it is a
 // per-controller sidecar: it turns a controller's evdev events into
 // named commands on the bus.
+//
+// As `serve-art` it is the command sidecar's decode side alone, run against a
+// plain mpv socket for local display work with no cluster and no bus. It runs
+// the same decode code the sidecar runs.
 //
 // The split is the trust boundary. The playback pod decodes media
 // pulled off the network, so it is the least trusted process in the
@@ -35,6 +39,7 @@ const (
 	remoteMode    = "remote"
 	commandMode   = "command"
 	translateMode = "translate"
+	artServeMode  = "serve-art"
 )
 
 func main() {
@@ -51,6 +56,9 @@ func main() {
 			return
 		case translateMode:
 			runTranslator()
+			return
+		case artServeMode:
+			runArtServe()
 			return
 		}
 	}

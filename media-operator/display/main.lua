@@ -20,6 +20,10 @@ overlay.res_y = theme.canvas.h
 -- owns two focus stops but draws one bar, told which axis is focused. The
 -- chooser covers the two while it captures input, so it draws on top.
 local function redraw()
+  -- The logo overlay tracks the OSD. It shows while the OSD is up and is
+  -- removed when the OSD hides, so a corner logo never lingers over a plain
+  -- frame.
+  header.sync(focus.visible())
   local parts = {}
   if focus.visible() then
     local h = header.draw()
@@ -80,6 +84,7 @@ scrubber.set_redraw(request_redraw)
 strip.set_redraw(request_redraw)
 images.set_redraw(request_redraw)
 presentation.set_redraw(request_redraw)
+header.set_redraw(request_redraw)
 
 -- mpv pushes each property once when the script observes it, then on every
 -- change, so the display runs no timer of its own for these values.
@@ -116,13 +121,27 @@ end)
 mp.observe_property("playlist-count", "number", function()
   request_redraw()
 end)
+-- A screen resize changes the pixel size the logo needs, so the header asks
+-- the bridge for the logo again at the new size.
+mp.observe_property("osd-dimensions", "native", function()
+  header.on_resize()
+  request_redraw()
+end)
 mp.observe_property("pause", "bool", function(_, value)
   focus.on_pause(value == true)
 end)
 
 -- The command sidecar hands the current item's presentation block to the
 -- display over this script-message, as one JSON string.
-mp.register_script_message("presentation", presentation.receive)
+-- A new block is a new item, so the header swaps its logo with it.
+mp.register_script_message("presentation", function(text)
+  presentation.receive(text)
+  header.on_item()
+end)
+
+-- The bridge answers a logo request over this script-message, carrying the
+-- decoded bitmap the header places.
+mp.register_script_message("liken-art", header.on_art)
 
 -- The six navigation actions the command bus carries. A Keymap binds a
 -- controller's buttons to them.

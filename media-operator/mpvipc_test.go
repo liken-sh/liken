@@ -106,13 +106,38 @@ func TestDialMPVStopsWithItsContext(t *testing.T) {
 	mustFail(t, err)
 }
 
+// The display asks for a logo by broadcasting a script-message, which
+// mpv delivers to the bridge as a client-message event, and readEvents hands
+// its arguments through untouched.
+func TestReadEventsDeliversClientMessages(t *testing.T) {
+	changes := make(chan propertyChange, 8)
+	messages := make(chan clientMessage, 8)
+	lines := []string{
+		`{"event":"property-change","id":1,"name":"pause","data":true}`,
+		`{"event":"client-message","args":["liken-art-request","logo","280","96"]}`,
+		`{"event":"client-message","args":["someone-elses-broadcast"]}`,
+	}
+	stream := strings.NewReader(strings.Join(lines, "\n") + "\n")
+	mustSucceed(t, readEvents(context.Background(), stream, changes, messages))
+	close(changes)
+	close(messages)
+
+	var got []string
+	for message := range messages {
+		got = append(got, strings.Join(message.Args, ","))
+	}
+	mustMatchAll(t, got, []string{"liken-art-request,logo,280,96", "someone-elses-broadcast"})
+	mustMatch(t, len(changes), 1)
+}
+
 // collectChanges runs readEvents over a scripted stream and renders
 // each delivered change as name=data. The rendering makes a failure
 // message readable, where raw JSON diffs are not.
 func collectChanges(t *testing.T, lines []string) []string {
 	t.Helper()
 	changes := make(chan propertyChange, 64)
-	mustSucceed(t, readEvents(context.Background(), strings.NewReader(strings.Join(lines, "\n")+"\n"), changes))
+	messages := make(chan clientMessage, 64)
+	mustSucceed(t, readEvents(context.Background(), strings.NewReader(strings.Join(lines, "\n")+"\n"), changes, messages))
 	close(changes)
 
 	var rendered []string

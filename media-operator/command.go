@@ -74,6 +74,18 @@ type commander struct {
 	reportMutex sync.Mutex
 	lastReport  []byte
 	haveReport  bool
+
+	// Where the bridge writes decoded bgra. It is the shared art volume in the
+	// pod, and a local directory under the harness.
+	artDir string
+
+	// artItem is the item the shared art volume holds art for. artCache maps a
+	// decoded size to its blob. Both sit under artMutex, because the reporter
+	// goroutine swaps the item while the art goroutine reads and writes the
+	// cache.
+	artMutex sync.Mutex
+	artItem  int
+	artCache map[string]artBlob
 }
 
 // runCommand connects to the bus, drives mpv's IPC socket, and reports
@@ -101,6 +113,7 @@ func runCommand() {
 		availabilityTopic: playAvailabilityTopic(base, namespace, name),
 		commandsTopic:     playCommandsTopic(base, namespace, name),
 		presentations:     parsePresentations(os.Getenv(presentationsVariable)),
+		artDir:            artMountPath,
 	}
 
 	// The bus runs on its own context, not the signal context, so the
@@ -176,6 +189,16 @@ func (c *commander) report(ctx context.Context) {
 	// context ends. A running mpv ends the read by closing its own end.
 	defer context.AfterFunc(ctx, func() { conn.Close() })()
 
+	c.drive(ctx, conn, c.send)
+}
+
+// drive is the socket loop the reporter and the standalone art server share.
+// It observes the properties, reads the events, folds each into a report
+// through send, forwards the current item's block, and answers each logo
+// request. The reporter passes its bus-backed send. The art server passes a
+// send that reports nothing, so the same decode code runs with or without a
+// bus.
+func (c *commander) drive(ctx context.Context, conn net.Conn, send reportSender) {
 	// observeProperties writes the socket, and so does the commands
 	// handler, so the observe runs under the same mutex the handler
 	// takes. The connection is set first, so a command that arrives
@@ -187,17 +210,33 @@ func (c *commander) report(ctx context.Context) {
 	defer c.detach()
 
 	changes := make(chan propertyChange, 16)
+	messages := make(chan clientMessage, 16)
 	reading := make(chan struct{})
 	go func() {
 		defer close(reading)
 		defer close(changes)
-		if err := readEvents(ctx, conn, changes); err != nil && ctx.Err() == nil {
+		defer close(messages)
+		if err := readEvents(ctx, conn, changes, messages); err != nil && ctx.Err() == nil {
 			fmt.Fprintf(os.Stderr, "command: mpv's socket: %v\n", err)
 		}
 	}()
 
-	runReporter(ctx, changes, c.send, c.present)
+	// The art goroutine answers the display's logo requests off the same
+	// socket the reporter reads. It ends when the socket closes and the reader
+	// closes the messages channel.
+	go c.serveArtMessages(messages)
+
+	runReporter(ctx, changes, send, c.present)
 	<-reading
+}
+
+// serveArtMessages decodes each logo the display asks for, beside the
+// reporter, so a slow decode or a network fetch never holds up the position
+// reports.
+func (c *commander) serveArtMessages(messages <-chan clientMessage) {
+	for message := range messages {
+		c.serveArt(message.Args)
+	}
 }
 
 // attach sets the mpv connection and observes the properties under one
@@ -248,8 +287,28 @@ func parsePresentations(value string) []json.RawMessage {
 
 // present hands the current item's block to the display over the mpv
 // socket.
+//
+// It clears the previous item's art first, so the shared volume holds only
+// what the current item can show.
 func (c *commander) present(item int) {
+	c.swapArt(item)
 	c.command(presentationCommand(c.blockForItem(item)))
+}
+
+// swapArt drops the previous item's decoded art when the playlist reaches a
+// new item, so one item's logo never lingers on the next and the shared volume
+// holds only the current item's blobs.
+func (c *commander) swapArt(item int) {
+	c.artMutex.Lock()
+	defer c.artMutex.Unlock()
+	if item == c.artItem {
+		return
+	}
+	for _, blob := range c.artCache {
+		os.Remove(blob.path)
+	}
+	c.artCache = nil
+	c.artItem = item
 }
 
 // blockForItem returns one item's block, or the empty object when the

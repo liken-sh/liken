@@ -161,8 +161,11 @@ type PlayItem struct {
 
 // A Presentation declares what mpv cannot read from the file, so the
 // display renders an item the way the library that fed liken describes
-// it, not the way a container's tags happen to read. It carries the
-// text fields. The art and trickplay fields are not defined yet.
+// it, not the way a container's tags happen to read.
+//
+// It carries the text fields and the logo, the one art field the display draws
+// today. The resolver rewrites the logo the way it rewrites the media URI, so
+// an nfs logo shares the media's mount and an https logo stays a URL.
 type Presentation struct {
 	Type         string `json:"type,omitempty"`
 	Hint         string `json:"hint,omitempty"`
@@ -173,6 +176,7 @@ type Presentation struct {
 	EpisodeTitle string `json:"episodeTitle,omitempty"`
 	Year         int    `json:"year,omitempty"`
 	Date         string `json:"date,omitempty"`
+	Logo         string `json:"logo,omitempty"`
 }
 
 // The status the operator alone writes: the phase, the activity
@@ -512,9 +516,13 @@ type NFSVolumeSource struct {
 
 // An emptyDir is a directory the kubelet creates with the pod and
 // deletes with it, which is all two containers need to share one
-// socket. The struct is empty because every emptyDir option has a
-// default this pod accepts, and it must still marshal as {}.
-type EmptyDirVolumeSource struct{}
+// socket.
+//
+// SizeLimit caps the volume. The IPC volume leaves it empty, so it marshals as
+// {}. The art volume sets it, so a runaway decode cannot fill the node disk.
+type EmptyDirVolumeSource struct {
+	SizeLimit string `json:"sizeLimit,omitempty"`
+}
 
 // The pod status fields the phase derivation reads. The container's
 // terminated state is the specific half of a failure message,

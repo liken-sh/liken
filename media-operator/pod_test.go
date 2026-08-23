@@ -53,10 +53,10 @@ const (
 // mount as well as arguments.
 func testResolution(t *testing.T) resolution {
 	t.Helper()
-	resolved, err := resolveURIs([]string{
+	resolved, err := resolvePlay(mediaItems(
 		"https://films.example/trailer.mkv",
 		"nfs://nas.example/export/films/film.mkv",
-	})
+	))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,11 +183,13 @@ func TestBuildPodCarriesTheResolvedVolumesAndMounts(t *testing.T) {
 	pod := buildPod(play, buildClaim(play, testPlayer()), resolved, testImage, testBusAddress, testTopicBase, nil)
 
 	volumes := append(append([]Volume{}, resolved.Volumes...),
+		Volume{Name: "art", EmptyDir: &EmptyDirVolumeSource{SizeLimit: artSizeLimit}},
 		Volume{Name: "ipc", EmptyDir: &EmptyDirVolumeSource{}})
 	if !reflect.DeepEqual(pod.Spec.Volumes, volumes) {
 		t.Errorf("volumes = %+v, want %+v", pod.Spec.Volumes, volumes)
 	}
 	mounts := append(append([]VolumeMount{}, resolved.Mounts...),
+		VolumeMount{Name: "art", MountPath: "/art"},
 		VolumeMount{Name: "ipc", MountPath: "/ipc"})
 	if got := pod.Spec.Containers[0].VolumeMounts; !reflect.DeepEqual(got, mounts) {
 		t.Errorf("volumeMounts = %+v, want %+v", got, mounts)
@@ -240,7 +242,7 @@ func TestBuildPodRunsOneCommandSidecar(t *testing.T) {
 			{Name: topicBaseVariable, Value: testTopicBase},
 			{Name: presentationsVariable, Value: "[{}]"},
 		},
-		VolumeMounts:  []VolumeMount{{Name: "ipc", MountPath: "/ipc"}},
+		VolumeMounts:  []VolumeMount{{Name: "ipc", MountPath: "/ipc"}, {Name: "art", MountPath: "/art"}},
 		RestartPolicy: "Always",
 	}
 	if !reflect.DeepEqual(command, want) {

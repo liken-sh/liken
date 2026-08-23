@@ -167,6 +167,16 @@ const (
 	ipcSocketPath = "/ipc/mpv.sock"
 )
 
+// The decoded-art volume the command sidecar and mpv share. The bridge writes
+// each logo as raw bgra here, and mpv reads it back by path through
+// overlay-add. It is disk-backed, so the art never counts against the pod's
+// memory, and its sizeLimit caps how much the bridge can write.
+const (
+	artVolumeName = "art"
+	artMountPath  = "/art"
+	artSizeLimit  = "16Mi"
+)
+
 // matchBinding compares type, code, and value, all three exactly. The
 // exactness is the debounce: a key's autorepeat arrives as value 2 and
 // its release as 0, a hat's return to center as 0, and none of them
@@ -189,6 +199,16 @@ const displayClientName = "display"
 // presentation block. It sits beside the six navigation actions the
 // display already answers.
 const presentationMessage = "presentation"
+
+// The two script-message names the display and the bridge agree on for art.
+// The display broadcasts artRequestMessage to ask for a decoded blob at a
+// pixel size. The bridge answers with artReplyMessage, addressed to the
+// display, carrying the ready blob. artKindLogo is the one art kind today.
+const (
+	artRequestMessage = "liken-art-request"
+	artReplyMessage   = "liken-art"
+	artKindLogo       = "logo"
+)
 
 // An item with no presentation, and an index the sidecar holds no block
 // for, forward this empty object. The display reads it as no declared

@@ -169,6 +169,12 @@ spec:
                               The air date of an episode, shown on its line.
                               Give it as an ISO date like 2017-03-05, and the
                               display formats it.
+                          logo:
+                            type: string
+                            description: >-
+                              The logo art URI, nfs:// or https://, resolved
+                              the way the media URI is. The display shows it in
+                              the header in place of the title.
                 start:
                   type: string
                   description: >-

@@ -76,4 +76,14 @@ function presentation.date()
   return block.date
 end
 
+-- The logo is a resolved reference: an in-pod path the bridge reads, or an
+-- https URL the bridge fetches. The header asks the bridge to decode it, and
+-- the display never opens the file itself.
+function presentation.logo()
+  if block.logo and block.logo ~= "" then
+    return block.logo
+  end
+  return nil
+end
+
 return presentation

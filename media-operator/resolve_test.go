@@ -1,16 +1,27 @@
 package main
 
-// These tests cover the two schemes the resolver knows and what each
+// These tests cover the two schemes the resolver handles and what each
 // one costs the playback pod: an https URI costs an argument, and an
-// nfs URI costs a volume, a mount, and a rewritten argument.
+// nfs URI costs a share of a mount, a rewritten argument, and a
+// rewritten logo when the presentation carries one.
 
 import (
 	"reflect"
 	"testing"
 )
 
-func TestResolveURIsPassesAnHTTPSURIThrough(t *testing.T) {
-	resolved, err := resolveURIs([]string{"https://films.example/movies/film.mkv"})
+// mediaItems builds a PlayItem list from bare media URIs, for the cases
+// that carry no presentation.
+func mediaItems(uris ...string) []PlayItem {
+	items := make([]PlayItem, len(uris))
+	for i, uri := range uris {
+		items[i] = PlayItem{URI: uri}
+	}
+	return items
+}
+
+func TestResolvePassesAnHTTPSURIThrough(t *testing.T) {
+	resolved, err := resolvePlay(mediaItems("https://films.example/movies/film.mkv"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,8 +39,8 @@ func TestResolveURIsPassesAnHTTPSURIThrough(t *testing.T) {
 
 // An nfs URI names a file, and the pod mounts the directory that
 // holds it, read-only in both places.
-func TestResolveURIsMountsTheDirectoryThatHoldsTheFile(t *testing.T) {
-	resolved, err := resolveURIs([]string{"nfs://nas.example/export/dir/film.mkv"})
+func TestResolveMountsTheDirectoryThatHoldsTheFile(t *testing.T) {
+	resolved, err := resolvePlay(mediaItems("nfs://nas.example/export/dir/film.mkv"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,11 +62,13 @@ func TestResolveURIsMountsTheDirectoryThatHoldsTheFile(t *testing.T) {
 	}
 }
 
-func TestResolveURIsMountsOneDirectoryOnce(t *testing.T) {
-	resolved, err := resolveURIs([]string{
+// Two files in one directory share one mount of that directory, and
+// each keeps its own name under it.
+func TestResolveCommonAncestorOfTwoFilesInOneDirectory(t *testing.T) {
+	resolved, err := resolvePlay(mediaItems(
 		"nfs://nas.example/export/dir/first.mkv",
 		"nfs://nas.example/export/dir/second.mkv",
-	})
+	))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,25 +77,50 @@ func TestResolveURIsMountsOneDirectoryOnce(t *testing.T) {
 	if !reflect.DeepEqual(resolved.Items, want) {
 		t.Errorf("items = %v, want %v", resolved.Items, want)
 	}
-	if len(resolved.Volumes) != 1 {
-		t.Fatalf("volumes = %+v, want one", resolved.Volumes)
+	volumes := []Volume{{
+		Name: "media-1",
+		NFS:  &NFSVolumeSource{Server: "nas.example", Path: "/export/dir", ReadOnly: true},
+	}}
+	if !reflect.DeepEqual(resolved.Volumes, volumes) {
+		t.Errorf("volumes = %+v, want %+v", resolved.Volumes, volumes)
+	}
+}
+
+// Files in sibling directories share one mount of the parent, and each
+// carries its own subdirectory under it.
+func TestResolveMountsTheParentOfSiblingDirectories(t *testing.T) {
+	resolved, err := resolvePlay(mediaItems(
+		"nfs://nas.example/export/films/film.mkv",
+		"nfs://nas.example/export/shows/episode.mkv",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"/media/1/films/film.mkv", "/media/1/shows/episode.mkv"}
+	if !reflect.DeepEqual(resolved.Items, want) {
+		t.Errorf("items = %v, want %v", resolved.Items, want)
+	}
+	volumes := []Volume{{
+		Name: "media-1",
+		NFS:  &NFSVolumeSource{Server: "nas.example", Path: "/export", ReadOnly: true},
+	}}
+	if !reflect.DeepEqual(resolved.Volumes, volumes) {
+		t.Errorf("volumes = %+v, want %+v", resolved.Volumes, volumes)
 	}
 	if len(resolved.Mounts) != 1 {
 		t.Fatalf("mounts = %+v, want one", resolved.Mounts)
 	}
-	if resolved.Volumes[0].Name != "media-1" || resolved.Mounts[0].MountPath != "/media/1" {
-		t.Errorf("volume = %+v, mount = %+v", resolved.Volumes[0], resolved.Mounts[0])
-	}
 }
 
-// The numbering is by first appearance, so the same playlist always
-// builds the same pod.
-func TestResolveURIsNumbersDirectoriesByFirstAppearance(t *testing.T) {
-	resolved, err := resolveURIs([]string{
-		"nfs://nas.example/export/films/film.mkv",
-		"nfs://nas.example/export/shows/episode.mkv",
-		"nfs://nas.example/export/films/other.mkv",
-	})
+// Two servers cost two mounts, one common ancestor each, numbered by
+// first appearance.
+func TestResolveMountsOneCommonAncestorPerServer(t *testing.T) {
+	resolved, err := resolvePlay(mediaItems(
+		"nfs://films.example/export/films/film.mkv",
+		"nfs://shows.example/export/shows/episode.mkv",
+		"nfs://films.example/export/films/other.mkv",
+	))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,8 +130,8 @@ func TestResolveURIsNumbersDirectoriesByFirstAppearance(t *testing.T) {
 		t.Errorf("items = %v, want %v", resolved.Items, items)
 	}
 	volumes := []Volume{
-		{Name: "media-1", NFS: &NFSVolumeSource{Server: "nas.example", Path: "/export/films", ReadOnly: true}},
-		{Name: "media-2", NFS: &NFSVolumeSource{Server: "nas.example", Path: "/export/shows", ReadOnly: true}},
+		{Name: "media-1", NFS: &NFSVolumeSource{Server: "films.example", Path: "/export/films", ReadOnly: true}},
+		{Name: "media-2", NFS: &NFSVolumeSource{Server: "shows.example", Path: "/export/shows", ReadOnly: true}},
 	}
 	if !reflect.DeepEqual(resolved.Volumes, volumes) {
 		t.Errorf("volumes = %+v, want %+v", resolved.Volumes, volumes)
@@ -109,12 +147,12 @@ func TestResolveURIsNumbersDirectoriesByFirstAppearance(t *testing.T) {
 
 // The playlist plays in spec order, so a mixed list keeps its order
 // however each item resolves.
-func TestResolveURIsKeepsAMixedListInSpecOrder(t *testing.T) {
-	resolved, err := resolveURIs([]string{
+func TestResolveKeepsAMixedListInSpecOrder(t *testing.T) {
+	resolved, err := resolvePlay(mediaItems(
 		"https://films.example/trailer.mkv",
 		"nfs://nas.example/export/films/film.mkv",
 		"https://films.example/credits.mkv",
-	})
+	))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,11 +170,90 @@ func TestResolveURIsKeepsAMixedListInSpecOrder(t *testing.T) {
 	}
 }
 
+// A lone https media item mounts nothing and rewrites nothing.
+func TestResolveALoneHTTPSItemMountsNothing(t *testing.T) {
+	resolved, err := resolvePlay(mediaItems("https://films.example/film.mkv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resolved.Volumes) != 0 || len(resolved.Mounts) != 0 {
+		t.Errorf("volumes = %+v, mounts = %+v, want none", resolved.Volumes, resolved.Mounts)
+	}
+	if len(resolved.Logos) != 1 || resolved.Logos[0] != "" {
+		t.Errorf("logos = %v, want one empty", resolved.Logos)
+	}
+}
+
+// A logo beside the media shares the media's mount, because the common
+// ancestor covers them both, and its path rewrites under that mount.
+func TestResolveALogoBesideTheMediaSharesTheMount(t *testing.T) {
+	resolved, err := resolvePlay([]PlayItem{{
+		URI: "nfs://nas.example/export/film/film.mkv",
+		Presentation: &Presentation{
+			Logo: "nfs://nas.example/export/film/logo.png",
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if want := []string{"/media/1/film.mkv"}; !reflect.DeepEqual(resolved.Items, want) {
+		t.Errorf("items = %v, want %v", resolved.Items, want)
+	}
+	if want := []string{"/media/1/logo.png"}; !reflect.DeepEqual(resolved.Logos, want) {
+		t.Errorf("logos = %v, want %v", resolved.Logos, want)
+	}
+	if len(resolved.Volumes) != 1 || len(resolved.Mounts) != 1 {
+		t.Fatalf("volumes = %+v, mounts = %+v, want one of each", resolved.Volumes, resolved.Mounts)
+	}
+	volume := Volume{Name: "media-1", NFS: &NFSVolumeSource{Server: "nas.example", Path: "/export/film", ReadOnly: true}}
+	if !reflect.DeepEqual(resolved.Volumes[0], volume) {
+		t.Errorf("volume = %+v, want %+v", resolved.Volumes[0], volume)
+	}
+}
+
+// An https logo stays a URL for the bridge to fetch, and the media
+// beside it still mounts.
+func TestResolveAnHTTPSLogoStaysAURL(t *testing.T) {
+	resolved, err := resolvePlay([]PlayItem{{
+		URI: "nfs://nas.example/export/film/film.mkv",
+		Presentation: &Presentation{
+			Logo: "https://art.example/logo.png",
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if want := []string{"/media/1/film.mkv"}; !reflect.DeepEqual(resolved.Items, want) {
+		t.Errorf("items = %v, want %v", resolved.Items, want)
+	}
+	if want := []string{"https://art.example/logo.png"}; !reflect.DeepEqual(resolved.Logos, want) {
+		t.Errorf("logos = %v, want %v", resolved.Logos, want)
+	}
+}
+
+// An item with no presentation, and an item whose presentation carries
+// no logo, both resolve to an empty logo.
+func TestResolveLeavesAnAbsentLogoEmpty(t *testing.T) {
+	resolved, err := resolvePlay([]PlayItem{
+		{URI: "nfs://nas.example/export/film/film.mkv"},
+		{URI: "nfs://nas.example/export/film/other.mkv", Presentation: &Presentation{Title: "Other"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"", ""}
+	if !reflect.DeepEqual(resolved.Logos, want) {
+		t.Errorf("logos = %v, want %v", resolved.Logos, want)
+	}
+}
+
 // An unresolvable scheme's error names the two the operator does
 // resolve, because the reader is writing a Play and needs the
 // vocabulary.
-func TestResolveURIsNamesTheSchemesItResolves(t *testing.T) {
-	_, err := resolveURIs([]string{"rtsp://camera.example/stream"})
+func TestResolveNamesTheSchemesItResolves(t *testing.T) {
+	_, err := resolvePlay(mediaItems("rtsp://camera.example/stream"))
 	if err == nil {
 		t.Fatal("an unknown scheme resolved")
 	}
@@ -146,7 +263,7 @@ func TestResolveURIsNamesTheSchemesItResolves(t *testing.T) {
 	}
 }
 
-func TestResolveURIsRefusesAURIItCannotMount(t *testing.T) {
+func TestResolveRefusesAURIItCannotMount(t *testing.T) {
 	cases := []struct {
 		name string
 		uri  string
@@ -158,7 +275,7 @@ func TestResolveURIsRefusesAURIItCannotMount(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			resolved, err := resolveURIs([]string{c.uri})
+			resolved, err := resolvePlay(mediaItems(c.uri))
 			if err == nil {
 				t.Fatalf("%q resolved to %+v", c.uri, resolved)
 			}
@@ -168,5 +285,17 @@ func TestResolveURIsRefusesAURIItCannotMount(t *testing.T) {
 				t.Errorf("a refused list resolved %+v", resolved)
 			}
 		})
+	}
+}
+
+// A logo URI the resolver cannot mount fails the Play the same way a
+// media URI does, because both share the mount.
+func TestResolveRefusesALogoItCannotMount(t *testing.T) {
+	_, err := resolvePlay([]PlayItem{{
+		URI:          "nfs://nas.example/export/film/film.mkv",
+		Presentation: &Presentation{Logo: "rtsp://camera.example/logo"},
+	}})
+	if err == nil {
+		t.Fatal("a logo with an unresolvable scheme resolved")
 	}
 }

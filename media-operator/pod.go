@@ -65,9 +65,9 @@ func buildPod(play *Play, claim *ResourceClaim, resolved resolution, image, busA
 	// path whether or not this pod binds a remote. The mount list is
 	// built fresh rather than appended to resolved.Mounts, so the
 	// resolution's own slice is never written through.
-	mounts := make([]VolumeMount, 0, len(resolved.Mounts)+1)
+	mounts := make([]VolumeMount, 0, len(resolved.Mounts)+2)
 	mounts = append(mounts, resolved.Mounts...)
-	mounts = append(mounts, ipcMount())
+	mounts = append(mounts, artMount(), ipcMount())
 
 	container := Container{
 		Name:  playerContainer,
@@ -91,16 +91,16 @@ func buildPod(play *Play, claim *ResourceClaim, resolved resolution, image, busA
 			ContainerClaim{Name: podClaimName, Request: request})
 	}
 
-	volumes := make([]Volume, 0, len(resolved.Volumes)+1)
+	volumes := make([]Volume, 0, len(resolved.Volumes)+2)
 	volumes = append(volumes, resolved.Volumes...)
-	volumes = append(volumes, Volume{Name: ipcVolumeName, EmptyDir: &EmptyDirVolumeSource{}})
+	volumes = append(volumes, artVolume(), Volume{Name: ipcVolumeName, EmptyDir: &EmptyDirVolumeSource{}})
 
 	// The pod's sidecars are one command sidecar that owns the mpv socket
 	// and one translator per bound remote. The list is built in that
 	// order, and the operator reads the translator set back off it to tell
 	// whether a Player reshaped this pod.
 	initContainers := make([]Container, 0, len(remotes)+1)
-	initContainers = append(initContainers, commandSidecar(play, image, busAddress, topicBase))
+	initContainers = append(initContainers, commandSidecar(play, resolved.Logos, image, busAddress, topicBase))
 	for _, remote := range remotes {
 		initContainers = append(initContainers, translatorSidecar(play, image, busAddress, topicBase, remote))
 	}
@@ -133,7 +133,7 @@ func buildPod(play *Play, claim *ResourceClaim, resolved resolution, image, busA
 // subscribes to the Play's commands topic, drives mpv through the shared
 // socket, and publishes the Play's status. It mounts the IPC volume,
 // because it is the one container besides mpv that reaches the socket.
-func commandSidecar(play *Play, image, busAddress, topicBase string) Container {
+func commandSidecar(play *Play, logos []string, image, busAddress, topicBase string) Container {
 	return Container{
 		Name:    commandContainer,
 		Image:   image,
@@ -143,9 +143,12 @@ func commandSidecar(play *Play, image, busAddress, topicBase string) Container {
 			{Name: playNameVariable, Value: play.Metadata.Name},
 			{Name: busAddressVariable, Value: busAddress},
 			{Name: topicBaseVariable, Value: topicBase},
-			{Name: presentationsVariable, Value: presentationBlocks(play.Spec.Items)},
+			{Name: presentationsVariable, Value: presentationBlocks(play.Spec.Items, logos)},
 		},
-		VolumeMounts:  []VolumeMount{ipcMount()},
+		// The command sidecar reads mpv's socket on the IPC volume and writes
+		// decoded art on the art volume, so it mounts both. mpv reads the art
+		// back through the same art volume.
+		VolumeMounts:  []VolumeMount{ipcMount(), artMount()},
 		RestartPolicy: sidecarRestartPolicy,
 	}
 }
@@ -154,14 +157,21 @@ func commandSidecar(play *Play, image, busAddress, topicBase string) Container {
 // spec order, so playlist position i indexes item i's block. An item
 // with no presentation becomes an empty object, so every position has a
 // definite value the sidecar forwards as it is.
-func presentationBlocks(items []PlayItem) string {
+//
+// Each block carries the resolved logo for its item, so the bridge reads an
+// nfs logo by an in-pod path and mpv fetches an https logo by its URL.
+func presentationBlocks(items []PlayItem, logos []string) string {
 	blocks := make([]json.RawMessage, len(items))
 	for index, item := range items {
 		if item.Presentation == nil {
 			blocks[index] = json.RawMessage(emptyPresentation)
 			continue
 		}
-		encoded, err := json.Marshal(item.Presentation)
+		block := *item.Presentation
+		if index < len(logos) {
+			block.Logo = logos[index]
+		}
+		encoded, err := json.Marshal(block)
 		if err != nil {
 			blocks[index] = json.RawMessage(emptyPresentation)
 			continue
@@ -202,6 +212,17 @@ func translatorSidecar(play *Play, image, busAddress, topicBase string, remote b
 
 func ipcMount() VolumeMount {
 	return VolumeMount{Name: ipcVolumeName, MountPath: ipcMountPath}
+}
+
+func artMount() VolumeMount {
+	return VolumeMount{Name: artVolumeName, MountPath: artMountPath}
+}
+
+// artVolume is disk-backed, not memory, so a decoded logo never counts against
+// the pod's memory. Its sizeLimit caps it, because the bridge writes into it
+// and a runaway decode must not fill the node disk.
+func artVolume() Volume {
+	return Volume{Name: artVolumeName, EmptyDir: &EmptyDirVolumeSource{SizeLimit: artSizeLimit}}
 }
 
 // sameRemoteSet reports whether two pods carry the same translator

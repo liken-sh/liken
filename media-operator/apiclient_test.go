@@ -92,6 +92,7 @@ func TestListPlaysCarriesItemPresentations(t *testing.T) {
 		EpisodeTitle: "The Pilot",
 		Year:         2017,
 		Date:         "2017-03-05",
+		Logo:         "nfs://nas/export/s02/logo.png",
 	}
 	api := &cannedAPI{answers: map[string]any{
 		"GET /apis/media.liken.sh/v1alpha1/plays": PlayList{

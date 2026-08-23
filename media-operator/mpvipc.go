@@ -38,10 +38,14 @@ var mpvDialDelay = time.Second
 // mpv sends costs a decode and nothing else reaches the status.
 var observedProperties = []string{"pause", "playlist-pos", "time-pos", "duration"}
 
-// propertyChangeEvent is the one event name that matters here. mpv
-// sends many others through the same socket, and readEvents drops
-// them.
-const propertyChangeEvent = "property-change"
+// propertyChangeEvent carries an observed property's new value.
+// clientMessageEvent carries a script-message any client broadcast, which is
+// how the display asks the bridge to decode a logo. mpv sends many other
+// events through the same socket, and readEvents drops them.
+const (
+	propertyChangeEvent = "property-change"
+	clientMessageEvent  = "client-message"
+)
 
 // mpvCommand is the shape mpv accepts: an array of the command name
 // followed by its arguments.
@@ -57,6 +61,14 @@ type mpvMessage struct {
 	ID    int             `json:"id"`
 	Name  string          `json:"name"`
 	Data  json.RawMessage `json:"data"`
+	Args  []string        `json:"args"`
+}
+
+// clientMessage is one script-message the display broadcast, as its arguments
+// reach the bridge over the socket. The first argument names the request, so
+// the bridge tells its own requests from any other script's traffic.
+type clientMessage struct {
+	Args []string
 }
 
 // propertyChange is one observed property's new value. The data
@@ -113,13 +125,12 @@ func observeProperties(writer io.Writer, names []string) error {
 // the four observed properties produce.
 const maxEventLine = 1 << 20
 
-// readEvents delivers the observed property changes and drops
-// everything else: replies, other events, and any line that does not
-// decode, because mpv's protocol grows new events and an event the
-// supervisor cannot read is not a reason to stop reporting the ones
-// it can. It ends when the socket closes, which is how mpv says the
-// run is over.
-func readEvents(ctx context.Context, reader io.Reader, out chan<- propertyChange) error {
+// readEvents delivers the observed property changes and the client messages,
+// and drops everything else: replies, other events, and any line that does not
+// decode. mpv's protocol grows new events, and one the supervisor cannot read
+// is no reason to stop reporting the ones it can. It ends when the socket
+// closes, which is how mpv says the run is over.
+func readEvents(ctx context.Context, reader io.Reader, changes chan<- propertyChange, messages chan<- clientMessage) error {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, bufio.MaxScanTokenSize), maxEventLine)
 	for scanner.Scan() {
@@ -127,16 +138,22 @@ func readEvents(ctx context.Context, reader io.Reader, out chan<- propertyChange
 		if err := json.Unmarshal(scanner.Bytes(), &message); err != nil {
 			continue
 		}
-		if message.Event != propertyChangeEvent {
-			continue
-		}
-		if !slices.Contains(observedProperties, message.Name) {
-			continue
-		}
-		select {
-		case out <- propertyChange{Name: message.Name, Data: message.Data}:
-		case <-ctx.Done():
-			return ctx.Err()
+		switch message.Event {
+		case propertyChangeEvent:
+			if !slices.Contains(observedProperties, message.Name) {
+				continue
+			}
+			select {
+			case changes <- propertyChange{Name: message.Name, Data: message.Data}:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		case clientMessageEvent:
+			select {
+			case messages <- clientMessage{Args: message.Args}:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}
 	}
 	return scanner.Err()
