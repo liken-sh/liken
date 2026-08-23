@@ -55,7 +55,9 @@ Each control follows the module contract from the parent design:
 `available` decides whether it appears, `draw` returns its icon and
 status, `activate` opens its chooser, and `handle` consumes presses
 while the chooser captures. A chooser is the one state that captures
-input, and it always closes on `back`.
+input. `up` and `down` move its selection, `select` picks, and `back`
+closes it.
+
 
 The icon font arrives in this slice, because the controls are the first
 elements that draw an icon. It is an open-licensed font in the player

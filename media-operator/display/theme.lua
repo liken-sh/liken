@@ -7,14 +7,15 @@ local theme = {}
 -- with no branch.
 theme.canvas = { w = 1920, h = 1080 }
 
--- An ASS color is BGR hex, the byte order libass reads, not RGB. The
--- values are the liken brand tokens from the brand theme's liken.css,
--- dark scheme, because the display draws over video. The accent is the
--- lichen green --link, the text is --ink, and the track is --ink-muted.
+-- An ASS color is BGR hex, the byte order libass reads, not RGB. The values
+-- are liken brand tokens from the brand theme's liken.css. The accent fill is
+-- the dark-scheme lichen green --link, the text is --ink, and the muted grey
+-- is --ink-muted. The bar track is the light-scheme --link, a deep green dark
+-- enough that the bright elapsed fill reads over it.
 theme.color = {
   text = "&HE8E8E8&",
   fill = "&H9AC4B4&",
-  track = "&HADA6A0&",
+  track = "&H3A5D4A&",
   muted = "&HADA6A0&",
   playhead = "&H9AC4B4&",
   shadow = "&H000000&",
@@ -23,15 +24,19 @@ theme.color = {
 -- An ASS alpha runs from 00, opaque, to FF, transparent.
 theme.alpha = {
   opaque = "&H00&",
-  track = "&H90&",
+  subdued = "&H80&",
+  track = "&H50&",
   scrim = "&H60&",
+  dim = "&HA8&",
+  panel = "&H14&",
+  highlight = "&H30&",
 }
 
 -- The type scale, in canvas pixels. The sizes are large enough to read from
 -- a couch at 1080.
 theme.type = {
-  label = 44,
-  small = 36,
+  label = 40,
+  small = 34,
 }
 
 theme.margin = {
@@ -40,10 +45,15 @@ theme.margin = {
 
 -- Place a shape at its top-left with an7 and pos, so the path points are the
 -- shape's own local box. p1 is the ASS vector drawing mode.
-local function drawing(x, y, color, alpha, path)
+-- The border is off by default, so a shape draws its fill alone. A shape that
+-- passes a width and a color draws an outline whose alpha matches the fill
+-- alpha, so the border and the fill dim together.
+local function drawing(x, y, color, alpha, path, bord, bordcolor)
+  bord = bord or 0
+  bordcolor = bordcolor or color
   return string.format(
-    "{\\an7\\pos(%.2f,%.2f)\\bord0\\shad0\\1c%s\\1a%s\\p1}%s{\\p0}",
-    x, y, color, alpha, path
+    "{\\an7\\pos(%.2f,%.2f)\\bord%.2f\\3c%s\\3a%s\\shad0\\1c%s\\1a%s\\p1}%s{\\p0}",
+    x, y, bord, bordcolor, alpha, color, alpha, path
   )
 end
 
@@ -96,8 +106,8 @@ local function hexagon_path(r)
   )
 end
 
-function theme.hexagon(x, y, r, color, alpha)
-  return drawing(x, y, color, alpha, hexagon_path(r))
+function theme.hexagon(x, y, r, color, alpha, bord, bordcolor)
+  return drawing(x, y, color, alpha, hexagon_path(r), bord, bordcolor)
 end
 
 -- The black outline keeps a white label legible over any frame.

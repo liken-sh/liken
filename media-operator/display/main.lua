@@ -2,7 +2,8 @@
 -- share one z order instead of two overlays racing on it.
 local theme = require("theme")
 local focus = require("focus")
-local seekbar = require("seekbar")
+local scrubber = require("scrubber")
+local strip = require("strip")
 
 -- The remote reaches this client by its directory basename. The log names it
 -- once, so a wrong name shows in the player log.
@@ -12,12 +13,33 @@ local overlay = mp.create_osd_overlay("ass-events")
 overlay.res_x = theme.canvas.w
 overlay.res_y = theme.canvas.h
 
+-- Draw the scrubber, then the strip, then the open chooser last. The scrubber
+-- owns two focus stops but draws one bar, told which axis is focused. The
+-- chooser covers the two while it captures input, so it draws on top.
 local function redraw()
   local parts = {}
-  if focus.scrubber_visible() then
-    local s = seekbar.draw()
+  if focus.visible() then
+    local stop = focus.focused_stop()
+    local axis = nil
+    if stop == "fine" then
+      axis = "fine"
+    elseif stop == "chapter" then
+      axis = "chapter"
+    end
+    local s = scrubber.draw(axis)
     if s then
       parts[#parts + 1] = s
+    end
+    local t = strip.draw(stop == "strip")
+    if t then
+      parts[#parts + 1] = t
+    end
+    local capturing = focus.capturing()
+    if capturing then
+      -- A chooser is open. Dim the whole frame under it, so the list reads
+      -- as the one thing in focus and the scrubber and strip recede.
+      parts[#parts + 1] = theme.rect(0, 0, theme.canvas.w, theme.canvas.h, theme.color.shadow, theme.alpha.dim)
+      parts[#parts + 1] = capturing.draw_chooser()
     end
   end
   overlay.data = table.concat(parts, "\n")
@@ -39,7 +61,8 @@ local function request_redraw()
 end
 
 focus.set_redraw(request_redraw)
-seekbar.set_redraw(request_redraw)
+scrubber.set_redraw(request_redraw)
+strip.set_redraw(request_redraw)
 
 -- mpv pushes each property once when the script observes it, then on every
 -- change, so the display runs no timer of its own for these values.
@@ -50,6 +73,21 @@ mp.observe_property("time-pos", "number", function()
   request_redraw()
 end)
 mp.observe_property("percent-pos", "number", function()
+  request_redraw()
+end)
+mp.observe_property("chapter", "number", function()
+  request_redraw()
+end)
+mp.observe_property("chapter-list", "native", function()
+  request_redraw()
+end)
+mp.observe_property("track-list", "native", function()
+  request_redraw()
+end)
+mp.observe_property("aid", "string", function()
+  request_redraw()
+end)
+mp.observe_property("sid", "string", function()
   request_redraw()
 end)
 mp.observe_property("pause", "bool", function(_, value)

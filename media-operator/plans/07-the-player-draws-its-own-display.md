@@ -300,9 +300,10 @@ A control's chooser is tailored to what it picks, not a generic list.
 The subtitle chooser is built for choosing a subtitle track, the audio
 chooser for an audio track. This is why the strip is per-domain modules
 and not one menu: a single boxy list serves none of them as well as a
-purpose-built chooser serves each. A chooser captures `left`, `right`,
+purpose-built chooser serves each. A chooser captures `up`, `down`,
 and `select` while it is open, and returns focus to the strip on
 `back`.
+
 
 ## The time cluster shows five flavors
 
