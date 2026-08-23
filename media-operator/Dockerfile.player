@@ -24,9 +24,12 @@ RUN CGO_ENABLED=0 go build -trimpath -o /media-operator .
 # A distribution base, unlike the operator's scratch. mpv opens a
 # wide dynamic closure at run time, the GL and EGL stack, the VA-API
 # driver, and the PipeWire client libraries, and the closure comes
-# soundest from the distribution that built mpv against it. The open
-# problem "The player image is still Debian" holds the path out.
-FROM debian:stable-slim
+# soundest from the distribution that built mpv against it.
+#
+# The digest pins the base to one exact image, so a rebuild starts from the
+# same bytes after Ubuntu republishes the 26.04 tag. To move to a newer base,
+# read the new digest with docker inspect and replace it here.
+FROM ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea2648d2c0e09b
 
 # mpv plays. intel-media-va-driver decodes on the Intel iGPUs these
 # machines have. libgl1-mesa-dri renders the gpu video output.
@@ -39,14 +42,33 @@ FROM debian:stable-slim
 # installs that family. fonts-noto-core covers the glyphs Source Sans 3 does
 # not carry, such as a foreign title or a subtitle track name, so no glyph
 # drops to a blank box.
+#
+# fonts-droid-fallback is one small file that draws Chinese, Japanese, and
+# Korean, so a CJK title or subtitle track name renders instead of a blank box.
+# The full Noto CJK family reads better but is far larger, and this face is
+# enough to read.
+#
+# The Snapshot line pins apt to the archive as it stood at one instant, so the
+# versions below stay fetchable after Ubuntu publishes newer ones. To move the
+# image forward, set a later serial and refresh the seven versions from a build
+# at that serial. snapshot.ubuntu.com serves over HTTPS, and the base carries
+# no certificate store, so the build installs ca-certificates from the default
+# archive first, then purges it after the pinned install so it leaves no trace
+# in the runtime.
 RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && sed -i '/^Signed-By:/a Snapshot: 20260822T000000Z' /etc/apt/sources.list.d/ubuntu.sources \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
-        mpv \
-        intel-media-va-driver \
-        libgl1-mesa-dri \
-        pipewire-bin \
-        fonts-adobe-sourcesans3 \
-        fonts-noto-core \
+        mpv=0.41.0-2ubuntu4 \
+        intel-media-va-driver=26.1.2+dfsg1-1 \
+        libgl1-mesa-dri=26.0.8-1ubuntu0.3 \
+        pipewire-bin=1.6.2-1ubuntu1.1 \
+        fonts-adobe-sourcesans3=3.052+dfsg-2 \
+        fonts-noto-core=20201225-2build1 \
+        fonts-droid-fallback=1:8.1.0r7-1~1.gbp36536bbuild1 \
+    && apt-get purge -y ca-certificates \
+    && apt-get autoremove -y --purge \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /media-operator /media-operator
