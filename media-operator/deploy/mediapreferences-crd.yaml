@@ -73,7 +73,7 @@ spec:
                     pattern: '^[a-z]{2,3}(-[A-Za-z]{2,4})?$'
                 subtitles:
                   type: string
-                  enum: [on, off, auto]
+                  enum: ["on", "off", "auto"]
                   description: >-
                     When subtitles show; on always, off never, auto
                     only when the audio that played is not the first choice.

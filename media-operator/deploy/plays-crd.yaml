@@ -220,7 +220,7 @@ spec:
                     pattern: '^[a-z]{2,3}(-[A-Za-z]{2,4})?$'
                 subtitles:
                   type: string
-                  enum: [on, off, auto]
+                  enum: ["on", "off", "auto"]
                   description: >-
                     A per-Play override of when subtitles show, the
                     most specific tier; omit it to inherit the Player.

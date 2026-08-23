@@ -251,7 +251,7 @@ spec:
                     pattern: '^[a-z]{2,3}(-[A-Za-z]{2,4})?$'
                 subtitles:
                   type: string
-                  enum: [on, off, auto]
+                  enum: ["on", "off", "auto"]
                   description: >-
                     A per-Player override of when subtitles show;
                     omit it to inherit the default MediaPreferences.
