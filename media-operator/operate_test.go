@@ -153,9 +153,13 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 }
 
 func housePlay(uris ...string) *Play {
+	items := make([]PlayItem, len(uris))
+	for index, uri := range uris {
+		items[index] = PlayItem{URI: uri}
+	}
 	return &Play{
 		Metadata: ObjectMeta{Name: "movie", Namespace: "house", UID: "play-uid", ResourceVersion: "9"},
-		Spec:     PlaySpec{Players: []string{"theater"}, URIs: uris},
+		Spec:     PlaySpec{Players: []string{"theater"}, Items: items},
 	}
 }
 

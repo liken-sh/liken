@@ -55,7 +55,7 @@ func boundSofa() []boundRemote {
 func remotePlay(name, player string) *Play {
 	return &Play{
 		Metadata: ObjectMeta{Name: name, Namespace: "house", UID: name + "-uid", ResourceVersion: "9"},
-		Spec:     PlaySpec{Players: []string{player}, URIs: []string{"https://nas/film.mkv"}},
+		Spec:     PlaySpec{Players: []string{player}, Items: []PlayItem{{URI: "https://nas/film.mkv"}}},
 	}
 }
 

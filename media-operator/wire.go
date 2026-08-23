@@ -41,6 +41,12 @@ const (
 	// where the spec says instead of at zero.
 	playStartVariable = "MEDIA_PLAY_START"
 
+	// The command sidecar carries every item's presentation block, baked
+	// into the pod when the operator creates it. The sidecar swaps to the
+	// current item's block as the playlist advances, so no block travels
+	// live while the film plays.
+	presentationsVariable = "MEDIA_PRESENTATIONS"
+
 	// The bus every pod connects to, and the base every topic extends.
 	// The operator holds both and passes them down, because a pod
 	// cannot read the address of the broker in front of it or the base

@@ -456,7 +456,11 @@ func (o *operator) reconcile(play *Play) error {
 		return err
 	}
 
-	resolved, resolveErr := resolveURIs(play.Spec.URIs)
+	uris := make([]string, len(play.Spec.Items))
+	for index := range play.Spec.Items {
+		uris[index] = play.Spec.Items[index].URI
+	}
+	resolved, resolveErr := resolveURIs(uris)
 	if resolveErr != nil {
 		return writePlayStatus(o.client, play, derivePlayStatus(play, player, resolveErr, nil, nil))
 	}

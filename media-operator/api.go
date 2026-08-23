@@ -140,14 +140,39 @@ type Play struct {
 	Status     PlayStatus `json:"status"`
 }
 
-// Players is a list of one today, because the carriage layer will
-// let one Play reach several and a grown list is no migration. The
-// URIs play in order, and Start is where in the first item the run
-// begins.
+// A Play names the players it runs on and the items to play in order,
+// and Start is where in the first item the run begins. Players is a
+// list of one today, because the carriage layer will let one Play
+// reach several players in sync, and a list that grows a second
+// element changes no field name when it does.
 type PlaySpec struct {
-	Players []string `json:"players"`
-	URIs    []string `json:"uris"`
-	Start   string   `json:"start,omitempty"`
+	Players []string   `json:"players"`
+	Items   []PlayItem `json:"items"`
+	Start   string     `json:"start,omitempty"`
+}
+
+// A PlayItem is one entry in the list: the media URI and an optional
+// Presentation. The block is optional because a loose file needs only
+// its URI, and the display falls back to what mpv reads from the file.
+type PlayItem struct {
+	URI          string        `json:"uri"`
+	Presentation *Presentation `json:"presentation,omitempty"`
+}
+
+// A Presentation declares what mpv cannot read from the file, so the
+// display renders an item the way the library that fed liken describes
+// it, not the way a container's tags happen to read. It carries the
+// text fields. The art and trickplay fields are not defined yet.
+type Presentation struct {
+	Type         string `json:"type,omitempty"`
+	Hint         string `json:"hint,omitempty"`
+	Title        string `json:"title,omitempty"`
+	Series       string `json:"series,omitempty"`
+	Season       int    `json:"season,omitempty"`
+	Episode      int    `json:"episode,omitempty"`
+	EpisodeTitle string `json:"episodeTitle,omitempty"`
+	Year         int    `json:"year,omitempty"`
+	Date         string `json:"date,omitempty"`
 }
 
 // The status the operator alone writes: the phase, the activity

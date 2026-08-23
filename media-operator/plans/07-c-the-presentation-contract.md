@@ -4,15 +4,15 @@ Plan 07-c, the third slice of [plan 07](07-the-player-draws-its-own-display.md).
 It gives a `Play` a way to declare how each item should look, and the
 display renders that declaration. When this slice lands, a `Play`
 carries `spec.items`, each with a `presentation` block, the display
-fills each field from the `Play` before the file, and a `tv` item shows
-its show, season, and episode.
+fills each field from the `Play` before the file, and a `series` item shows
+its series, season, and episode.
 
 ## The problem
 
 07-a and 07-b draw the display from what `mpv` reads out of the file.
 That is enough for a scrubber and the track choosers, but it cannot
 tune the display by media type, cannot correct a wrong title, and
-cannot carry the hierarchy a `tv` item needs, because none of that is
+cannot carry the hierarchy a `series` item needs, because none of that is
 in the file. A `Play` needs a way to declare it, and the display needs
 a rule for when to trust the declaration over the file. This slice adds
 both, for the fields that are text. The art fields wait for 07-d.
@@ -38,12 +38,13 @@ The block carries only what `mpv` cannot already read from the file.
 This slice defines its text fields:
 
 * `type`, one of `video`, `music`, or `image`, and `hint`, one of
-  `movie`, `tv`, or `album`. `mpv` cannot infer these, and the display
+  `movie`, `series`, or `album`. `mpv` cannot infer these, and the display
   must not guess them from a file name.
-* The `tv` hierarchy: the show, the season number, the episode number,
+* The `series` hierarchy: the series name, the season number, the episode number,
   and the episode title.
 * A `title` override, for the item's name when the file's tag is wrong
   or absent.
+* A `year`, the release year, and a `date`, the air date of an episode.
 
 The art and trickplay fields are named in the parent design and added
 in 07-d and 07-e, so the schema this slice writes leaves room for them.
@@ -62,21 +63,25 @@ container's tags. The tags are the fallback for a loose file no library
 described. There is no fourth tier that parses a file name, because
 that parsing is the library's job.
 
-## The block travels per item over the socket
+## The blocks travel in the pod, and the sidecar swaps them
 
-The operator writes the block for the item that plays now into the pod,
-the command sidecar reads it, and it hands it to the display over the
-IPC socket. When `mpv`'s `playlist-pos` advances, the operator sends
-the next item's block, and the display swaps its presentation. The
-block travels as text in this slice, so it needs no decode. This is the
-path a later live queue reuses, so building it per item now is not extra
-work.
+The operator writes every item's block into the pod when it creates the
+pod, because the blocks are known then, the same as the playlist. The
+command sidecar already watches `mpv`'s `playlist-pos`, so it holds the
+current item on its own. It hands that item's block to the display over
+the IPC socket, and on an advance it hands the next. The block travels
+as text, so it needs no decode.
+
+A live queue that changes the list while it plays is the case this does
+not cover, because a pod cannot gain an item without a restart. The
+live queue adds a channel from the operator when it arrives. Nothing
+changes the list mid-run today, so that channel is not built now.
 
 ## The header tunes by type
 
 `header.lua`, the top-left region, arrives in this slice and draws from
-the resolved fields. A `movie` shows the title. A `tv` item shows the
-show, and a line beneath it with the season, the episode number, and
+the resolved fields. A `movie` shows the title. A `series` item shows the
+series name, and a line beneath it with the season, the episode number, and
 the episode title. The header draws text only here; the `logo` art that
 replaces the title for a `movie` waits for 07-d.
 
@@ -96,12 +101,12 @@ is the first use of the multi-item list for navigation.
 ## How it will be proved
 
 On `liken-1`, with a studio monitor as the `Player` and a paired
-DualSense. A `Play` runs with two items, a `movie` and a `tv` episode,
+DualSense. A `Play` runs with two items, a `movie` and a `series` episode,
 each with a `presentation` block.
 
 The drill checks each claim:
 
-* The `tv` item shows its show, season, and episode from the block, not
+* The `series` item shows its series, season, and episode from the block, not
   from the file. The header tunes by type.
 * An item whose block gives a `title` shows that title, and an item with
   no block shows the file's own title. The three-tier resolution holds.

@@ -35,6 +35,7 @@ theme.alpha = {
 -- The type scale, in canvas pixels. The sizes are large enough to read from
 -- a couch at 1080.
 theme.type = {
+  title = 64,
   label = 40,
   small = 34,
 }

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 )
 
@@ -60,7 +61,7 @@ func TestListPlaysReadsTheCollectionAcrossNamespaces(t *testing.T) {
 			Metadata: ListMeta{ResourceVersion: "77"},
 			Items: []Play{{
 				Metadata: ObjectMeta{Name: "movie", Namespace: "house"},
-				Spec:     PlaySpec{Players: []string{"theater"}, URIs: []string{"https://nas/film.mkv"}},
+				Spec:     PlaySpec{Players: []string{"theater"}, Items: []PlayItem{{URI: "https://nas/film.mkv"}}},
 			}},
 		},
 	}}
@@ -77,6 +78,50 @@ func TestListPlaysReadsTheCollectionAcrossNamespaces(t *testing.T) {
 	}
 	if list.Items[0].Spec.Players[0] != "theater" {
 		t.Errorf("players = %v", list.Items[0].Spec.Players)
+	}
+}
+
+func TestListPlaysCarriesItemPresentations(t *testing.T) {
+	full := &Presentation{
+		Type:         "video",
+		Hint:         "series",
+		Title:        "The Pilot",
+		Series:       "Example Series",
+		Season:       2,
+		Episode:      5,
+		EpisodeTitle: "The Pilot",
+		Year:         2017,
+		Date:         "2017-03-05",
+	}
+	api := &cannedAPI{answers: map[string]any{
+		"GET /apis/media.liken.sh/v1alpha1/plays": PlayList{
+			Metadata: ListMeta{ResourceVersion: "88"},
+			Items: []Play{{
+				Metadata: ObjectMeta{Name: "season", Namespace: "house"},
+				Spec: PlaySpec{
+					Players: []string{"theater"},
+					Items: []PlayItem{
+						{URI: "nfs://nas/export/s02e05.mkv", Presentation: full},
+						{URI: "https://nas/loose.mkv"},
+					},
+				},
+			}},
+		},
+	}}
+
+	list, err := ListPlays(testAPIClient(t, api.handler()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := list.Items[0].Spec.Items
+	if len(items) != 2 {
+		t.Fatalf("items = %+v", items)
+	}
+	if !reflect.DeepEqual(items[0].Presentation, full) {
+		t.Errorf("presentation = %+v, want %+v", items[0].Presentation, full)
+	}
+	if items[1].Presentation != nil {
+		t.Errorf("bare item presentation = %+v, want nil", items[1].Presentation)
 	}
 }
 

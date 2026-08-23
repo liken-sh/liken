@@ -98,8 +98,8 @@ that draws for everything and no `state.lua` that holds everyone's
 state, because a change to the seekbar would then touch every such
 file. Instead one module owns one thing on screen, whole:
 
-- `header.lua` draws the corner logo or the title, and for a `tv` item
-  the show, season, and episode line.
+- `header.lua` draws the corner logo or the title, and for a `series` item
+  the series, season, and episode line.
 - `seekbar.lua` owns the fine scrubber: its geometry, its time labels,
   the playhead, and the trickplay tile it floats above the cursor while
   scrubbing.
@@ -146,13 +146,13 @@ The `presentation` block carries only what `mpv` cannot already read
 from the file:
 
 - The type, `video`, `music`, or `image`, and a hint within the type,
-  `movie`, `tv`, or `album`. `mpv` cannot infer this, and the display
+  `movie`, `series`, or `album`. `mpv` cannot infer this, and the display
   must not guess it from a file name.
 - The art, as `uri` references: `logo`, `clearart`, `backdrop`, and
   `poster`.
 - The trickplay: the sprite-sheet `uri`, the tile size, the grid, and
   the interval. None of this is derivable from the JPEG.
-- The `tv` hierarchy: the show, the season number, the episode number,
+- The `series` hierarchy: the series name, the season number, the episode number,
   and the episode title. A Matroska file rarely carries these.
 
 The art and the trickplay are URIs, resolved the same way the media
@@ -327,7 +327,7 @@ differs.
 
 - **movie** shows the `logo` in a corner, the three-region stack, and
   `clearart` or `backdrop` on the pause screen.
-- **tv** is the movie layout with the show, season, and episode added
+- **series** is the movie layout with the series, season, and episode added
   to the header.
 - **image** shows the photo, which is `mpv`'s video track, in a minimal
   frame with no scrubber. Its `left` and `right` move across the items.

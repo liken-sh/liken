@@ -15,7 +15,7 @@ import (
 func testPlay() *Play {
 	return &Play{
 		Metadata: ObjectMeta{Name: "movie", Namespace: "house", UID: "play-1"},
-		Spec:     PlaySpec{Players: []string{"theater"}, URIs: []string{"https://films.example/film.mkv"}},
+		Spec:     PlaySpec{Players: []string{"theater"}, Items: []PlayItem{{URI: "https://films.example/film.mkv"}}},
 	}
 }
 

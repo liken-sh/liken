@@ -185,6 +185,23 @@ func matchBinding(bindings []compiledBinding, event inputEvent) (compiledBinding
 // every script-message-to that carries a navigation action to the display.
 const displayClientName = "display"
 
+// The script-message name the sidecar and the display agree on for a
+// presentation block. It sits beside the six navigation actions the
+// display already answers.
+const presentationMessage = "presentation"
+
+// An item with no presentation, and an index the sidecar holds no block
+// for, forward this empty object. The display reads it as no declared
+// fields and falls back to what mpv reads from the file.
+const emptyPresentation = "{}"
+
+// presentationCommand hands the display one item's block. The block is
+// one string argument, so the display reads it as text and needs no
+// decode.
+func presentationCommand(block json.RawMessage) []any {
+	return []any{"script-message-to", displayClientName, presentationMessage, string(block)}
+}
+
 // commandFor is where the action vocabulary becomes mpv's words, and the
 // only place in the system that holds both. The osd-auto prefix makes
 // mpv show each command on the screen, which is the viewer's proof the

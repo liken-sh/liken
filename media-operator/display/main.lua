@@ -4,6 +4,9 @@ local theme = require("theme")
 local focus = require("focus")
 local scrubber = require("scrubber")
 local strip = require("strip")
+local images = require("images")
+local presentation = require("presentation")
+local header = require("header")
 
 -- The remote reaches this client by its directory basename. The log names it
 -- once, so a wrong name shows in the player log.
@@ -19,6 +22,10 @@ overlay.res_y = theme.canvas.h
 local function redraw()
   local parts = {}
   if focus.visible() then
+    local h = header.draw()
+    if h then
+      parts[#parts + 1] = h
+    end
     local stop = focus.focused_stop()
     local axis = nil
     if stop == "fine" then
@@ -26,9 +33,17 @@ local function redraw()
     elseif stop == "chapter" then
       axis = "chapter"
     end
-    local s = scrubber.draw(axis)
-    if s then
-      parts[#parts + 1] = s
+    if presentation.type() ~= "image" then
+      local s = scrubber.draw(axis)
+      if s then
+        parts[#parts + 1] = s
+      end
+    end
+    if images.available() then
+      local im = images.draw()
+      if im then
+        parts[#parts + 1] = im
+      end
     end
     local t = strip.draw(stop == "strip")
     if t then
@@ -63,6 +78,8 @@ end
 focus.set_redraw(request_redraw)
 scrubber.set_redraw(request_redraw)
 strip.set_redraw(request_redraw)
+images.set_redraw(request_redraw)
+presentation.set_redraw(request_redraw)
 
 -- mpv pushes each property once when the script observes it, then on every
 -- change, so the display runs no timer of its own for these values.
@@ -87,12 +104,25 @@ end)
 mp.observe_property("aid", "string", function()
   request_redraw()
 end)
+mp.observe_property("media-title", "string", function()
+  request_redraw()
+end)
 mp.observe_property("sid", "string", function()
+  request_redraw()
+end)
+mp.observe_property("playlist-pos", "number", function()
+  request_redraw()
+end)
+mp.observe_property("playlist-count", "number", function()
   request_redraw()
 end)
 mp.observe_property("pause", "bool", function(_, value)
   focus.on_pause(value == true)
 end)
+
+-- The command sidecar hands the current item's presentation block to the
+-- display over this script-message, as one JSON string.
+mp.register_script_message("presentation", presentation.receive)
 
 -- The six navigation actions the command bus carries. A Keymap binds a
 -- controller's buttons to them.

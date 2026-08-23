@@ -238,6 +238,7 @@ func TestBuildPodRunsOneCommandSidecar(t *testing.T) {
 			{Name: playNameVariable, Value: "movie"},
 			{Name: busAddressVariable, Value: testBusAddress},
 			{Name: topicBaseVariable, Value: testTopicBase},
+			{Name: presentationsVariable, Value: "[{}]"},
 		},
 		VolumeMounts:  []VolumeMount{{Name: "ipc", MountPath: "/ipc"}},
 		RestartPolicy: "Always",
@@ -247,6 +248,37 @@ func TestBuildPodRunsOneCommandSidecar(t *testing.T) {
 	}
 	if len(command.Resources.Claims) != 0 {
 		t.Errorf("the command sidecar holds a device claim: %+v", command.Resources.Claims)
+	}
+}
+
+// The command sidecar carries every item's presentation block as one JSON
+// array in item order. An item with no presentation is an empty object, and
+// an item with a presentation is its block, so the sidecar forwards index i
+// for playlist-pos i.
+func TestBuildPodBakesThePresentationBlocks(t *testing.T) {
+	play := testPlay()
+	play.Spec.Items = []PlayItem{
+		{URI: "https://films.example/loose.mkv"},
+		{
+			URI: "nfs://nas.example/export/shows/ep.mkv",
+			Presentation: &Presentation{
+				Type:         "video",
+				Hint:         "series",
+				Series:       "The Show",
+				Season:       2,
+				Episode:      5,
+				EpisodeTitle: "The Pilot",
+			},
+		},
+	}
+	claim := buildClaim(play, testPlayer())
+	pod := buildPod(play, claim, testResolution(t), testImage, testBusAddress, testTopicBase, nil)
+
+	command := initContainer(t, pod, commandContainer)
+	got := envValue(command, presentationsVariable)
+	want := `[{},{"type":"video","hint":"series","series":"The Show","season":2,"episode":5,"episodeTitle":"The Pilot"}]`
+	if got != want {
+		t.Errorf("%s = %s, want %s", presentationsVariable, got, want)
 	}
 }
 

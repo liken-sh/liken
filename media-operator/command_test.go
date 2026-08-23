@@ -75,6 +75,85 @@ func TestACommandThatDoesNotDecodeOrHasNoCaseWritesNothing(t *testing.T) {
 	}
 }
 
+// The command sidecar forwards the current item's presentation block to
+// the display over the mpv socket: on the first item it knows and again
+// on every advance. The block is the one baked for that playlist
+// position, and it travels as one string argument.
+func TestTheSidecarForwardsThePresentationOnEachItem(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+
+	lines := make(chan string, 4)
+	go func() {
+		scanner := bufio.NewScanner(server)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+	}()
+
+	c := &commander{
+		mpv: client,
+		presentations: []json.RawMessage{
+			json.RawMessage(`{"title":"First"}`),
+			json.RawMessage(`{"title":"Second"}`),
+		},
+	}
+
+	changes := make(chan propertyChange, 8)
+	go feedChanges(changes,
+		changeOf("playlist-pos", "0"),
+		changeOf("time-pos", "1.0"),
+		changeOf("playlist-pos", "1"),
+	)
+	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present)
+
+	want := []string{
+		`{"command":["script-message-to","display","presentation","{\"title\":\"First\"}"]}`,
+		`{"command":["script-message-to","display","presentation","{\"title\":\"Second\"}"]}`,
+	}
+	for _, each := range want {
+		select {
+		case line := <-lines:
+			if line != each {
+				t.Errorf("presentation = %q, want %q", line, each)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("no presentation reached mpv, want %q", each)
+		}
+	}
+}
+
+// An item the sidecar has no baked block for forwards {}, so the display
+// always receives a definite value.
+func TestTheSidecarForwardsEmptyForAMissingBlock(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+
+	lines := make(chan string, 4)
+	go func() {
+		scanner := bufio.NewScanner(server)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+	}()
+
+	c := &commander{mpv: client}
+
+	changes := make(chan propertyChange, 8)
+	go feedChanges(changes, changeOf("playlist-pos", "0"))
+	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present)
+
+	want := `{"command":["script-message-to","display","presentation","{}"]}`
+	select {
+	case line := <-lines:
+		if line != want {
+			t.Errorf("presentation = %q, want %q", line, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no presentation reached mpv")
+	}
+}
+
 func TestFormatPosition(t *testing.T) {
 	cases := []struct {
 		seconds float64
@@ -201,7 +280,7 @@ func TestReporterSendsChangesAtOnceAndThrottlesThePosition(t *testing.T) {
 			changeOf("time-pos", "1.0"),
 			changeOf("playlist-pos", "1"),
 		)
-		runReporter(t.Context(), changes, send)
+		runReporter(t.Context(), changes, send, func(int) {})
 
 		mustMatchAll(t, itemsAndPauses(sent()), []string{"1 playing", "1 paused", "2 paused"})
 	})
@@ -218,7 +297,7 @@ func TestReporterSendsChangesAtOnceAndThrottlesThePosition(t *testing.T) {
 			changes <- changeOf("time-pos", "2.0")
 			close(changes)
 		}()
-		runReporter(t.Context(), changes, send)
+		runReporter(t.Context(), changes, send, func(int) {})
 
 		mustMatchAll(t, positions(sent()), []string{"", "0:00:02"})
 	})
@@ -233,7 +312,7 @@ func TestReporterSendsChangesAtOnceAndThrottlesThePosition(t *testing.T) {
 			changeOf("time-pos", "1.0"),
 			changeOf("duration", "60.0"),
 		)
-		runReporter(t.Context(), changes, send)
+		runReporter(t.Context(), changes, send, func(int) {})
 
 		mustMatch(t, len(sent()), 0)
 	})
@@ -252,7 +331,7 @@ func TestReporterSendsChangesAtOnceAndThrottlesThePosition(t *testing.T) {
 			changeOf("time-pos", "1.0"),
 			changeOf("time-pos", "2.0"),
 		)
-		runReporter(t.Context(), changes, send)
+		runReporter(t.Context(), changes, send, func(int) {})
 
 		mustMatch(t, attempts, 3)
 	})

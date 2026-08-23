@@ -15,7 +15,7 @@ import (
 func statusTestPlay() *Play {
 	return &Play{
 		Metadata: ObjectMeta{Name: "movie", Namespace: "house", ResourceVersion: "12"},
-		Spec:     PlaySpec{Players: []string{"theater"}, URIs: []string{"https://nas/film.mkv"}},
+		Spec:     PlaySpec{Players: []string{"theater"}, Items: []PlayItem{{URI: "https://nas/film.mkv"}}},
 	}
 }
 

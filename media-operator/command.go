@@ -63,6 +63,11 @@ type commander struct {
 
 	bus *Bus
 
+	// The items' presentation blocks in playlist order, baked into the
+	// pod. Index i is item i's block text, which the sidecar forwards to
+	// the display as the playlist reaches each item.
+	presentations []json.RawMessage
+
 	mpvMutex sync.Mutex
 	mpv      net.Conn
 
@@ -95,6 +100,7 @@ func runCommand() {
 		statusTopic:       playStatusTopic(base, namespace, name),
 		availabilityTopic: playAvailabilityTopic(base, namespace, name),
 		commandsTopic:     playCommandsTopic(base, namespace, name),
+		presentations:     parsePresentations(os.Getenv(presentationsVariable)),
 	}
 
 	// The bus runs on its own context, not the signal context, so the
@@ -190,7 +196,7 @@ func (c *commander) report(ctx context.Context) {
 		}
 	}()
 
-	runReporter(ctx, changes, c.send)
+	runReporter(ctx, changes, c.send, c.present)
 	<-reading
 }
 
@@ -224,6 +230,37 @@ func (c *commander) command(command []any) {
 	if err := sendCommand(c.mpv, command); err != nil {
 		fmt.Fprintf(os.Stderr, "command: mpv command: %v\n", err)
 	}
+}
+
+// parsePresentations reads the baked array into an indexed slice. An
+// unset or malformed value leaves no blocks, so every item forwards the
+// empty object and the display falls back to the file.
+func parsePresentations(value string) []json.RawMessage {
+	if value == "" {
+		return nil
+	}
+	var blocks []json.RawMessage
+	if err := json.Unmarshal([]byte(value), &blocks); err != nil {
+		return nil
+	}
+	return blocks
+}
+
+// present hands the current item's block to the display over the mpv
+// socket.
+func (c *commander) present(item int) {
+	c.command(presentationCommand(c.blockForItem(item)))
+}
+
+// blockForItem returns one item's block, or the empty object when the
+// item falls outside the baked list. The item counts from one, so its
+// index is one less.
+func (c *commander) blockForItem(item int) json.RawMessage {
+	index := item - 1
+	if index < 0 || index >= len(c.presentations) {
+		return json.RawMessage(emptyPresentation)
+	}
+	return c.presentations[index]
 }
 
 // send publishes one report to the status topic, retained, and holds it
@@ -332,14 +369,19 @@ func formatPosition(seconds float64) string {
 // with no broker at all.
 type reportSender func(playReport) error
 
+// itemPresenter is how a forwarded block leaves the loop, a function
+// like reportSender, so a test catches the forward with no mpv socket.
+type itemPresenter func(item int)
+
 // runReporter is the whole reporting rule in one loop: fold the change,
 // send it now when it is one of the two that matter, and otherwise send
 // no more than one report per interval. A send that fails is logged and
 // the run goes on, because the loss is the operator's view of the film
 // and not a reason to stop playing.
-func runReporter(ctx context.Context, changes <-chan propertyChange, send reportSender) {
+func runReporter(ctx context.Context, changes <-chan propertyChange, send reportSender, present itemPresenter) {
 	var state playbackState
 	var sent time.Time
+	var presented int
 	for {
 		select {
 		case <-ctx.Done():
@@ -351,6 +393,14 @@ func runReporter(ctx context.Context, changes <-chan propertyChange, send report
 			atOnce := state.apply(change)
 			if !state.reportable() {
 				continue
+			}
+			// Forward the block on the first item and on every advance,
+			// keyed on the item and not the throttled position, so the
+			// display swaps its presentation the moment the playlist
+			// reaches a new item.
+			if state.item != presented {
+				presented = state.item
+				present(state.item)
 			}
 			if !atOnce && time.Since(sent) < reportInterval {
 				continue

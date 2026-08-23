@@ -64,7 +64,7 @@ spec:
           properties:
             spec:
               type: object
-              required: [players, uris]
+              required: [players, items]
               description: >-
                 What to play and where. The spec is immutable: a
                 different film or a different player is a different
@@ -91,20 +91,84 @@ spec:
                     The Players this Play runs on, by name, in this
                     namespace. One entry today; the carriage layer
                     lifts the limit.
-                uris:
+                items:
                   type: array
                   x-kubernetes-list-type: atomic
                   minItems: 1
-                  items:
-                    type: string
-                    minLength: 1
                   description: >-
-                    The media, in play order. Each item is a URI.
-                    The operator resolves https:// to a stream the
-                    player reads directly, and nfs://host/export/path
-                    to a mount on the playback pod. A URI whose
-                    scheme the operator does not know fails the Play
-                    before any pod exists.
+                    The media to play in order. Each entry is a URI and
+                    an optional presentation that declares how the
+                    display should render it.
+                  items:
+                    type: object
+                    required: [uri]
+                    description: >-
+                      One entry in the playlist: the URI to play and,
+                      optionally, how it should look.
+                    properties:
+                      uri:
+                        type: string
+                        minLength: 1
+                        description: >-
+                          The operator resolves https:// to a stream the
+                          player reads directly, and nfs://host/export/path
+                          to a mount on the playback pod. A URI whose
+                          scheme the operator does not know fails the Play
+                          before any pod exists.
+                      presentation:
+                        type: object
+                        description: >-
+                          How the item should look, for the fields the
+                          display cannot read from the file. The library
+                          that feeds liken supplies these, and the
+                          display trusts them over the container's tags.
+                          Omit the block for a loose file, and the
+                          display falls back to the file's own tags.
+                        properties:
+                          type:
+                            type: string
+                            enum: [video, music, image]
+                            description: >-
+                              The media type the display tunes its layout
+                              by. mpv cannot infer this, and the display
+                              must not guess it from a file name.
+                          hint:
+                            type: string
+                            enum: [movie, series, album]
+                            description: >-
+                              The finer kind within the type. A video is a
+                              movie or a series, and music is an album. It
+                              selects the layout the display draws.
+                          title:
+                            type: string
+                            description: >-
+                              The item's name, which overrides the file's
+                              own tag. Set it when the tag is wrong or
+                              absent.
+                          series:
+                            type: string
+                            description: The series this episode belongs to.
+                          season:
+                            type: integer
+                            minimum: 0
+                            description: The season number of the episode.
+                          episode:
+                            type: integer
+                            minimum: 0
+                            description: The episode number within its season.
+                          episodeTitle:
+                            type: string
+                            description: The title of the episode.
+                          year:
+                            type: integer
+                            minimum: 0
+                            description: The release year, shown under a movie's title.
+                          date:
+                            type: string
+                            description: >-
+                              The air date of an episode, shown on its line.
+                              Give it as an ISO date like 2017-03-05, and the
+                              display formats it.
                 start:
                   type: string
                   description: >-

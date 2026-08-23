@@ -3,13 +3,15 @@
 -- module. It draws no pixels.
 local scrubber = require("scrubber")
 local strip = require("strip")
+local images = require("images")
+local presentation = require("presentation")
 
 local focus = {}
 
 -- The focus stops, top to bottom. The scrubber owns two of them, fine and
 -- chapter, on one bar. up and down walk the stops present for the current
 -- file and skip the rest, so the list is flat and dynamic.
-local STOPS = { "fine", "chapter", "strip" }
+local STOPS = { "fine", "chapter", "images", "strip" }
 
 -- Hide the OSD after this many idle seconds of play. A pause does not start
 -- the countdown.
@@ -30,9 +32,11 @@ end
 
 local function stop_available(stop)
   if stop == "fine" then
-    return scrubber.fine_available()
+    return presentation.type() ~= "image" and scrubber.fine_available()
   elseif stop == "chapter" then
-    return scrubber.chapter_available()
+    return presentation.type() ~= "image" and scrubber.chapter_available()
+  elseif stop == "images" then
+    return images.available()
   elseif stop == "strip" then
     return strip.available()
   end
@@ -98,6 +102,8 @@ local function route(action)
       scrubber.chapter_step(1)
     end
     return nil
+  elseif focused == "images" then
+    return images.press(action)
   elseif focused == "strip" then
     return strip.press(action)
   end

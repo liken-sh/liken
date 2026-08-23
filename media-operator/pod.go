@@ -9,6 +9,7 @@ package main
 // bus, which the operator alone reads onto a Play's status.
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 )
@@ -142,10 +143,36 @@ func commandSidecar(play *Play, image, busAddress, topicBase string) Container {
 			{Name: playNameVariable, Value: play.Metadata.Name},
 			{Name: busAddressVariable, Value: busAddress},
 			{Name: topicBaseVariable, Value: topicBase},
+			{Name: presentationsVariable, Value: presentationBlocks(play.Spec.Items)},
 		},
 		VolumeMounts:  []VolumeMount{ipcMount()},
 		RestartPolicy: sidecarRestartPolicy,
 	}
+}
+
+// presentationBlocks bakes every item's block into one JSON array in
+// spec order, so playlist position i indexes item i's block. An item
+// with no presentation becomes an empty object, so every position has a
+// definite value the sidecar forwards as it is.
+func presentationBlocks(items []PlayItem) string {
+	blocks := make([]json.RawMessage, len(items))
+	for index, item := range items {
+		if item.Presentation == nil {
+			blocks[index] = json.RawMessage(emptyPresentation)
+			continue
+		}
+		encoded, err := json.Marshal(item.Presentation)
+		if err != nil {
+			blocks[index] = json.RawMessage(emptyPresentation)
+			continue
+		}
+		blocks[index] = encoded
+	}
+	array, err := json.Marshal(blocks)
+	if err != nil {
+		return "[]"
+	}
+	return string(array)
 }
 
 // translatorSidecar is one controller's translator: the player image in
