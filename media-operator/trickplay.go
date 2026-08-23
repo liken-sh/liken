@@ -101,10 +101,21 @@ func (c *commander) serveTrickplay(request artRequest) {
 		os.Remove(blob.path)
 		return
 	}
-	// The volume holds one tile per item. A new tile replaces the previous one,
-	// so remove the file the previous tile wrote.
+	// Remove a tile file one step late. A reply tells mpv to map a tile on a
+	// later turn, so removing the file the last reply named races that map and
+	// drops the frame. The current tile becomes the prior tile, and only the
+	// tile two steps back is removed. The guards skip the removal when the new
+	// tile or the prior tile still names that file, so a scrub that reverses
+	// never deletes a file in use.
+	var stale artBlob
+	haveStale := false
 	if c.trickHave && c.trickItem == item && c.trickBlob.path != blob.path {
-		os.Remove(c.trickBlob.path)
+		if c.trickHavePrev && c.trickPrev.path != blob.path && c.trickPrev.path != c.trickBlob.path {
+			stale = c.trickPrev
+			haveStale = true
+		}
+		c.trickPrev = c.trickBlob
+		c.trickHavePrev = true
 	}
 	c.trickHave = true
 	c.trickItem = item
@@ -112,6 +123,9 @@ func (c *commander) serveTrickplay(request artRequest) {
 	c.trickBlob = blob
 	c.artMutex.Unlock()
 
+	if haveStale {
+		os.Remove(stale.path)
+	}
 	c.replyArt(artKindTrickplay, blob)
 }
 

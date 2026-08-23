@@ -137,6 +137,48 @@ func TestServeTrickplayCoalescesOnIdx(t *testing.T) {
 	mustMatch(t, second, first)
 }
 
+// A new tile keeps the file the previous reply named, so mpv can still map it
+// for overlay-add. The bridge removes a tile only after a later tile replaces
+// it, and holds at most two tile files at once.
+func TestServeTrickplayKeepsThePriorTileFile(t *testing.T) {
+	root := writeSheet(t, map[int]color.RGBA{0: {R: 200, A: 255}, 1: {G: 200, A: 255}, 2: {B: 200, A: 255}, 3: {A: 255}})
+	artDir := t.TempDir()
+	t.Setenv(trickplayIntervalVariable, "10s")
+
+	server, client := net.Pipe()
+	defer server.Close()
+	lines := make(chan string, 4)
+	go func() {
+		scanner := bufio.NewScanner(server)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+	}()
+
+	c := &commander{
+		mpv:           client,
+		artDir:        artDir,
+		artItem:       1,
+		presentations: []json.RawMessage{trickBlock(root)},
+	}
+
+	go c.serveTrickplay(artRequest{kind: artKindTrickplay, timeMs: 5_000, width: 24, height: 24})
+	first, _, _, _ := parseArtReply(t, waitForLine(t, lines))
+
+	go c.serveTrickplay(artRequest{kind: artKindTrickplay, timeMs: 15_000, width: 24, height: 24})
+	second, _, _, _ := parseArtReply(t, waitForLine(t, lines))
+
+	mustExist(t, first)
+	mustExist(t, second)
+
+	go c.serveTrickplay(artRequest{kind: artKindTrickplay, timeMs: 25_000, width: 24, height: 24})
+	third, _, _, _ := parseArtReply(t, waitForLine(t, lines))
+
+	mustExist(t, third)
+	mustExist(t, second)
+	mustNotExist(t, first)
+}
+
 // A block with no trickplay reference writes nothing to the socket.
 func TestServeTrickplayRepliesNothingWithoutADirectory(t *testing.T) {
 	server, client := net.Pipe()
@@ -186,6 +228,20 @@ func writeSheet(t *testing.T, cells map[int]color.RGBA) string {
 	defer file.Close()
 	mustSucceed(t, jpeg.Encode(file, sheet, &jpeg.Options{Quality: 100}))
 	return root
+}
+
+func mustExist(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("wanted %q to exist, got %v", path, err)
+	}
+}
+
+func mustNotExist(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("wanted %q removed, got %v", path, err)
+	}
 }
 
 func trickBlock(dir string) json.RawMessage {

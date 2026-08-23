@@ -100,6 +100,13 @@ type commander struct {
 	trickItem int
 	trickIdx  int
 	trickBlob artBlob
+
+	// The prior tile file, kept one step longer than the current one. mpv places
+	// a tile on a later turn than the reply that named it, so that file must
+	// still exist when mpv maps it. The bridge removes a tile only once a second,
+	// newer tile has replaced it.
+	trickHavePrev bool
+	trickPrev     artBlob
 }
 
 // runCommand connects to the bus, drives mpv's IPC socket, and reports
@@ -325,7 +332,11 @@ func (c *commander) swapArt(item int) {
 	if c.trickHave {
 		os.Remove(c.trickBlob.path)
 	}
+	if c.trickHavePrev && c.trickPrev.path != c.trickBlob.path {
+		os.Remove(c.trickPrev.path)
+	}
 	c.trickHave = false
+	c.trickHavePrev = false
 	c.trickSheet = nil
 	c.trickSheetKey = ""
 	c.artItem = item
