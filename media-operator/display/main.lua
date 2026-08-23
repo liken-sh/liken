@@ -20,14 +20,19 @@ overlay.res_y = theme.canvas.h
 -- owns two focus stops but draws one bar, told which axis is focused. The
 -- chooser covers the two while it captures input, so it draws on top.
 local function redraw()
-  -- The logo overlay tracks the OSD. It shows while the OSD is up and is
-  -- removed when the OSD hides, so a corner logo never lingers over a plain
-  -- frame.
-  header.sync(focus.visible())
+  -- The logo overlay tracks the OSD. It shows while the OSD is up, and it hides
+  -- when the OSD hides and while a chooser captures, so a corner logo never
+  -- lingers over a plain frame or floats above the chooser's dim. overlay-add
+  -- draws over the ASS layer, so a logo left in place would sit on top of the
+  -- dim rather than under it.
+  header.sync(focus.visible() and not focus.capturing())
   local parts = {}
   if focus.visible() then
     local h = header.draw()
     if h then
+      -- The top scrim backs the header, drawn before it so the header text is
+      -- on top.
+      parts[#parts + 1] = theme.scrim(0, 0, theme.canvas.w, theme.scrim_top_h, "top")
       parts[#parts + 1] = h
     end
     local stop = focus.focused_stop()
@@ -37,21 +42,32 @@ local function redraw()
     elseif stop == "chapter" then
       axis = "chapter"
     end
+    local bottom = {}
     if presentation.type() ~= "image" then
       local s = scrubber.draw(axis)
       if s then
-        parts[#parts + 1] = s
+        bottom[#bottom + 1] = s
       end
     end
     if images.available() then
       local im = images.draw()
       if im then
-        parts[#parts + 1] = im
+        bottom[#bottom + 1] = im
       end
     end
     local t = strip.draw(stop == "strip")
     if t then
-      parts[#parts + 1] = t
+      bottom[#bottom + 1] = t
+    end
+    if #bottom > 0 then
+      -- The bottom scrim backs the scrubber and the strip, drawn before them
+      -- so their text is on top.
+      parts[#parts + 1] = theme.scrim(
+        0, theme.canvas.h - theme.scrim_bottom_h, theme.canvas.w, theme.scrim_bottom_h, "bottom"
+      )
+      for _, b in ipairs(bottom) do
+        parts[#parts + 1] = b
+      end
     end
     local capturing = focus.capturing()
     if capturing then

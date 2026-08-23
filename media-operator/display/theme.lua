@@ -26,7 +26,6 @@ theme.alpha = {
   opaque = "&H00&",
   subdued = "&H80&",
   track = "&H50&",
-  scrim = "&H60&",
   dim = "&HA8&",
   panel = "&H14&",
   highlight = "&H30&",
@@ -49,18 +48,60 @@ theme.margin = {
 -- The border is off by default, so a shape draws its fill alone. A shape that
 -- passes a width and a color draws an outline whose alpha matches the fill
 -- alpha, so the border and the fill dim together.
-local function drawing(x, y, color, alpha, path, bord, bordcolor)
+local function drawing(x, y, color, alpha, path, bord, bordcolor, blur)
   bord = bord or 0
   bordcolor = bordcolor or color
+  blur = blur or 0
   return string.format(
-    "{\\an7\\pos(%.2f,%.2f)\\bord%.2f\\3c%s\\3a%s\\shad0\\1c%s\\1a%s\\p1}%s{\\p0}",
-    x, y, bord, bordcolor, alpha, color, alpha, path
+    "{\\an7\\pos(%.2f,%.2f)\\bord%.2f\\3c%s\\3a%s\\shad0\\blur%.2f\\1c%s\\1a%s\\p1}%s{\\p0}",
+    x, y, bord, bordcolor, alpha, blur, color, alpha, path
   )
 end
 
 function theme.rect(x, y, w, h, color, alpha)
   local path = string.format("m 0 0 l %.2f 0 l %.2f %.2f l 0 %.2f", w, w, h, h)
   return drawing(x, y, color, alpha, path)
+end
+
+-- The heights of the scrim's top band and bottom band, in canvas pixels.
+theme.scrim_top_h = 410
+theme.scrim_bottom_h = 480
+-- The scrim's dark plateau, as an ASS alpha. 0 is opaque, 255 is clear.
+theme.scrim_edge_alpha = 0x34
+-- The dark plateau covers this fraction of the scrim height, at the screen
+-- edge, over the text. The blur softens its inner edge.
+theme.scrim_solid = 0.66
+-- How far the blur carries the fade inward, as a fraction of the scrim height.
+theme.scrim_reach = 0.3
+
+-- theme.scrim draws the dark gradient behind a cluster of text, so the text
+-- reads against one background whatever the frame behind it. edge names the
+-- dark side, top or bottom, and the far side fades to clear.
+--
+-- The scrim is one blurred shape, not a stack of translucent bands. Tiled bands
+-- meet at shared edges, and a wide film that squishes the tall canvas lands
+-- those edges sub-pixel, where they alias into fine lines. One blurred shape has
+-- no interior edges, so it stays smooth at any output scale. A dark plateau
+-- covers the text at the screen edge, and the blur carries its inner edge to
+-- clear. The rectangle bleeds past the screen on every side but the inner one
+-- by the blur width, so the blur there falls off the screen. Only the inner
+-- edge fades, and the very edge stays fully dark.
+function theme.scrim(x, y, w, h, edge)
+  local solid = h * theme.scrim_solid
+  local blur = h * theme.scrim_reach
+  local ry
+  if edge == "bottom" then
+    ry = y + h - solid
+  else
+    ry = y - blur
+  end
+  local rh = solid + blur
+  local rx = x - blur
+  local rw = w + 2 * blur
+  local path = string.format("m 0 0 l %.2f 0 l %.2f %.2f l 0 %.2f", rw, rw, rh, rh)
+  return drawing(
+    rx, ry, theme.color.shadow, string.format("&H%02X&", theme.scrim_edge_alpha), path, 0, nil, blur
+  )
 end
 
 function theme.rounded_rect(x, y, w, h, r, color, alpha)
@@ -111,17 +152,13 @@ function theme.hexagon(x, y, r, color, alpha, bord, bordcolor)
   return drawing(x, y, color, alpha, hexagon_path(r), bord, bordcolor)
 end
 
--- The black outline keeps a white label legible over any frame.
+-- The scrim holds the contrast, so the label draws flat, with no outline.
 function theme.text(x, y, s, size, color, an, alpha)
   alpha = alpha or theme.alpha.opaque
   return string.format(
-    "{\\an%d\\pos(%.2f,%.2f)\\fs%d\\bord2\\3c%s\\shad0\\1c%s\\1a%s}%s",
-    an, x, y, size, theme.shadow_color(), color, alpha, s
+    "{\\an%d\\pos(%.2f,%.2f)\\fs%d\\bord0\\shad0\\1c%s\\1a%s}%s",
+    an, x, y, size, color, alpha, s
   )
-end
-
-function theme.shadow_color()
-  return theme.color.shadow
 end
 
 return theme
