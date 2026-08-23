@@ -51,17 +51,15 @@ local function selected(ts)
   return nil
 end
 
--- The focused cell draws full brightness with a green caption. The other
--- cells draw subdued, so brightness alone marks which control has focus.
-function subtitles.draw(x, y, focused)
+function subtitles.value()
   local cur = selected(tracks())
-  local status = cur and (cur.lang and cur.lang:upper() or label_for(cur)) or "off"
+  return cur and (cur.lang and cur.lang:upper() or label_for(cur)) or "off"
+end
+
+function subtitles.draw(x, y, focused)
+  local color = focused and theme.color.fill or theme.color.text
   local alpha = focused and theme.alpha.opaque or theme.alpha.subdued
-  local caption = focused and theme.color.fill or theme.color.muted
-  local parts = {}
-  parts[#parts + 1] = theme.text(x, y, "SUBS", theme.type.small, caption, 7, alpha)
-  parts[#parts + 1] = theme.text(x, y + 40, status, theme.type.label, theme.color.text, 7, alpha)
-  return table.concat(parts, "\n")
+  return theme.text(x, y, subtitles.value(), theme.type.tiny, color, 4, alpha)
 end
 
 -- Off is the first entry, ahead of the tracks, so a viewer can always turn
@@ -117,7 +115,7 @@ function subtitles.handle(action)
 end
 
 function subtitles.draw_chooser()
-  return chooser.draw("Subtitles", entries(), sel)
+  return chooser.draw(entries(), sel)
 end
 
 return subtitles

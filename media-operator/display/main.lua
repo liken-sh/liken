@@ -8,6 +8,7 @@ local images = require("images")
 local presentation = require("presentation")
 local header = require("header")
 local trickplay = require("trickplay")
+local clock = require("clock")
 
 -- The remote reaches this client by its directory basename. The log names it
 -- once, so a wrong name shows in the player log.
@@ -45,11 +46,17 @@ local function redraw()
   local parts = {}
   if focus.visible() then
     local h = header.draw()
-    if h then
-      -- The top scrim backs the header, drawn before it so the header text is
-      -- on top.
+    local ck = clock.draw()
+    if h or ck then
+      -- The top scrim backs the header and the clock, drawn before them so their
+      -- text is on top.
       parts[#parts + 1] = theme.scrim(0, 0, theme.canvas.w, theme.scrim_top_h, "top")
-      parts[#parts + 1] = h
+      if h then
+        parts[#parts + 1] = h
+      end
+      if ck then
+        parts[#parts + 1] = ck
+      end
     end
     local stop = focus.focused_stop()
     local axis = nil

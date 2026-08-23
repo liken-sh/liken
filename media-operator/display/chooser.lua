@@ -1,7 +1,6 @@
--- The chooser panel. A control opens one to pick a track. It draws a
--- titled vertical list, bottom-anchored above the control strip, with the
--- focused entry marked. It is the one element that captures input, so it
--- draws on top of every region.
+-- The chooser panel. A control opens one to pick a track. It draws a vertical
+-- list, bottom-anchored above the control strip, with the focused entry marked.
+-- It is the one element that captures input, so it draws on top of every region.
 local theme = require("theme")
 
 local chooser = {}
@@ -10,13 +9,12 @@ local X = theme.margin.x
 local W = 1180
 local ROW_H = 58
 local PAD = 24
-local TITLE_H = 54
 -- The panel grows upward from this baseline, so it floats over the regions
 -- above the strip.
 local BOTTOM = 876
--- A subtitle list can run to dozens of tracks, more than fit on screen.
--- The panel shows a window of rows around the selection, so the current
--- entry stays in view however long the list.
+-- A subtitle list can run to dozens of tracks, more than fit on screen. The
+-- panel shows a window of rows around the selection, so the current entry stays
+-- in view however long the list.
 local MAX_ROWS = 8
 local MAX_CHARS = 56
 
@@ -27,7 +25,7 @@ local function clip(text)
   return text
 end
 
-function chooser.draw(title, entries, sel)
+function chooser.draw(entries, sel)
   local n = #entries
   local visible = math.min(n, MAX_ROWS)
   local first = 1
@@ -35,19 +33,13 @@ function chooser.draw(title, entries, sel)
     first = math.max(1, math.min(sel - math.floor(MAX_ROWS / 2), n - MAX_ROWS + 1))
   end
 
-  local h = TITLE_H + visible * ROW_H + PAD * 2
+  local h = visible * ROW_H + PAD * 2
   local top = BOTTOM - h
 
-  local heading = title
-  if n > MAX_ROWS then
-    heading = string.format("%s   %d of %d", title, sel, n)
-  end
-
   local parts = {}
-  parts[#parts + 1] = theme.rounded_rect(X, top, W, h, 14, theme.color.shadow, theme.alpha.panel)
-  parts[#parts + 1] = theme.text(X + PAD, top + PAD, heading, theme.type.small, theme.color.muted, 7)
+  parts[#parts + 1] = theme.panel(X, top, W, h)
 
-  local row0 = top + PAD + TITLE_H
+  local row0 = top + PAD
   for i = first, first + visible - 1 do
     local y = row0 + (i - first) * ROW_H
     local here = i == sel

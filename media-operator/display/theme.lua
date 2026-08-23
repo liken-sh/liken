@@ -37,6 +37,7 @@ theme.type = {
   title = 64,
   label = 40,
   small = 34,
+  tiny = 28,
 }
 
 theme.margin = {
@@ -104,9 +105,9 @@ function theme.scrim(x, y, w, h, edge)
   )
 end
 
-function theme.rounded_rect(x, y, w, h, r, color, alpha)
+local function rounded_path(w, h, r)
   r = math.min(r, w / 2, h / 2)
-  local path = string.format(
+  return string.format(
     "m %.2f 0 l %.2f 0 b %.2f 0 %.2f 0 %.2f %.2f l %.2f %.2f "
       .. "b %.2f %.2f %.2f %.2f %.2f %.2f l %.2f %.2f "
       .. "b 0 %.2f 0 %.2f 0 %.2f l 0 %.2f b 0 0 0 0 %.2f 0",
@@ -114,7 +115,20 @@ function theme.rounded_rect(x, y, w, h, r, color, alpha)
     w, h, w, h, w - r, h, r, h,
     h, h, h - r, r, r
   )
-  return drawing(x, y, color, alpha, path)
+end
+
+function theme.rounded_rect(x, y, w, h, r, color, alpha)
+  return drawing(x, y, color, alpha, rounded_path(w, h, r))
+end
+
+-- A menu panel: a faint dark fill inside a solid green border, so a chooser or
+-- an adjuster reads as one surface over the video. The border is liken's green,
+-- and the fill dims the video behind the text without hiding it.
+function theme.panel(x, y, w, h)
+  return string.format(
+    "{\\an7\\pos(%.2f,%.2f)\\bord2\\3c%s\\3a&H00&\\shad0\\1c%s\\1a%s\\p1}%s{\\p0}",
+    x, y, theme.color.fill, theme.color.shadow, theme.alpha.panel, rounded_path(w, h, 14)
+  )
 end
 
 -- A circle from four cubic beziers. 0.5523 is the control-point offset that

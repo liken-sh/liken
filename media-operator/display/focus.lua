@@ -207,11 +207,18 @@ function focus.nav(action)
     return
   end
 
-  -- A chooser is a vertical list, so up and down move its selection and
-  -- select applies. left and right do nothing while it captures, and back,
-  -- handled above, closes it.
+  -- A captured widget receives up, down, left, right, and select. A chooser is
+  -- a vertical list, so it moves on up and down, applies on select, and ignores
+  -- left and right. The A/V sync adjuster uses left and right to nudge a delay.
+  -- back, handled above, closes the widget.
   if capturing then
-    if action == "up" or action == "down" or action == "select" then
+    if
+      action == "up"
+      or action == "down"
+      or action == "select"
+      or action == "left"
+      or action == "right"
+    then
       capturing.handle(action)
       if not capturing.is_open() then
         capturing = nil
