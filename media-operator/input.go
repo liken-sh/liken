@@ -19,8 +19,9 @@ import (
 
 // The action vocabulary a Keymap's right side may use. These are named
 // for what a person means, not for what mpv runs, so a different player
-// program can implement them later. Most are media commands; cycle-focus
-// alone switches which unit a shared controller drives and reaches no
+// program can implement them later. Most are media commands. The
+// navigation actions below drive the on-screen display, and cycle-focus
+// switches which unit a shared controller drives; neither reaches a
 // player program. Three of the media commands take an amount; the rest
 // are complete alone.
 const (

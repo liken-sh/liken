@@ -87,14 +87,15 @@ spec:
                           name, so the name works across models.
                       action:
                         type: string
-                        enum: [pause, mute, seek, volume, chapter, subtitles, audio, info, cycle-focus]
+                        enum: [pause, mute, seek, volume, chapter, subtitles, audio, info, cycle-focus, up, down, left, right, select, back]
                         description: >-
                           What the press does, in this operator's
                           vocabulary. The words name what a person
                           means, never a player program's own command.
-                          Most actions command the player; cycle-focus
-                          alone switches which unit a shared controller
-                          holds.
+                          Most actions command the player. The navigation
+                          actions, up, down, left, right, select, and back,
+                          drive the on-screen display. cycle-focus switches
+                          which unit a shared controller holds.
                       amount:
                         type: integer
                         description: >-
@@ -161,14 +162,15 @@ spec:
                           stops a repeat the press started.
                       action:
                         type: string
-                        enum: [pause, mute, seek, volume, chapter, subtitles, audio, info, cycle-focus]
+                        enum: [pause, mute, seek, volume, chapter, subtitles, audio, info, cycle-focus, up, down, left, right, select, back]
                         description: >-
                           What the press does, in this operator's
                           vocabulary. The words name what a person
                           means, never a player program's own command.
-                          Most actions command the player; cycle-focus
-                          alone switches which unit a shared controller
-                          holds.
+                          Most actions command the player. The navigation
+                          actions, up, down, left, right, select, and back,
+                          drive the on-screen display. cycle-focus switches
+                          which unit a shared controller holds.
                       amount:
                         type: integer
                         description: >-

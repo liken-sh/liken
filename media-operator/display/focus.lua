@@ -137,6 +137,12 @@ local function arm_hide()
   end)
 end
 
+-- Toggle mpv's pause. The pause observer calls on_pause, which summons the OSD,
+-- so a pause from select needs no separate summon.
+local function toggle_pause()
+  mp.commandv("cycle", "pause")
+end
+
 function focus.summon()
   if not summoned then
     summoned = true
@@ -176,6 +182,34 @@ function focus.on_pause(p)
   redraw_cb()
 end
 
+-- select carries the main action and play/pause on one button. It acts on an
+-- open chooser, the focused strip control, or a fine scan in flight, and
+-- otherwise toggles play/pause. So the button confirms a choice when the OSD
+-- has one to make, and plays or pauses the film when it does not.
+function focus.select()
+  if capturing then
+    capturing.handle("select")
+    if not capturing.is_open() then
+      capturing = nil
+    end
+    redraw_cb()
+    return
+  end
+  if focus.visible() then
+    if focused == "strip" then
+      capturing = route("select")
+      redraw_cb()
+      return
+    end
+    if focused == "fine" and scrubber.scanning() then
+      scrubber.commit()
+      redraw_cb()
+      return
+    end
+  end
+  toggle_pause()
+end
+
 -- back has three meanings, one per state. An open chooser takes back to close
 -- itself. A fine scan takes back to cancel the preview. With neither open, back
 -- dismisses the OSD. The chooser and the scan each hold something to close, so
@@ -194,6 +228,11 @@ function focus.nav(action)
     else
       focus.dismiss()
     end
+    return
+  end
+
+  if action == "select" then
+    focus.select()
     return
   end
 
