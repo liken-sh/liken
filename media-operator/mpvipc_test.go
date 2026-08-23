@@ -19,6 +19,8 @@ func TestObservePropertiesAsksForEachPropertyOnce(t *testing.T) {
 		`{"command":["observe_property",2,"playlist-pos"]}`,
 		`{"command":["observe_property",3,"time-pos"]}`,
 		`{"command":["observe_property",4,"duration"]}`,
+		`{"command":["observe_property",5,"current-tracks/audio/lang"]}`,
+		`{"command":["observe_property",6,"current-tracks/sub/lang"]}`,
 	})
 }
 

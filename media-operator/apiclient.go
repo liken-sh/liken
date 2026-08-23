@@ -162,6 +162,7 @@ const (
 	playersPath    = "/apis/" + mediaAPIVersion + "/players"
 	remotesAllPath = "/apis/" + mediaAPIVersion + "/remotes"
 	keymapsPath    = "/apis/" + mediaAPIVersion + "/keymaps"
+	mediaPrefsPath = "/apis/" + mediaAPIVersion + "/mediapreferences"
 	mediaPrefix    = "/apis/" + mediaAPIVersion + "/namespaces/"
 	claimPrefix    = "/apis/" + claimAPIVersion + "/namespaces/"
 	podPrefix      = "/api/v1/namespaces/"
@@ -304,6 +305,27 @@ func GetKeymap(c *Client, name string) (*Keymap, error) {
 func ListKeymaps(c *Client) (*KeymapList, error) {
 	list := &KeymapList{}
 	if err := c.RequestJSON(http.MethodGet, keymapsPath, nil, list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// GetMediaPreferences reads the household default by name. MediaPreferences is
+// cluster-scoped, so the path carries no namespace. A missing default is
+// ErrNotFound, which the resolver reads as a skipped tier.
+func GetMediaPreferences(c *Client, name string) (*MediaPreferences, error) {
+	prefs := &MediaPreferences{}
+	if err := c.RequestJSON(http.MethodGet, mediaPrefsPath+"/"+name, nil, prefs); err != nil {
+		return nil, err
+	}
+	return prefs, nil
+}
+
+// ListMediaPreferences reads every MediaPreferences in one request. The list's
+// resourceVersion is where the watch resumes from.
+func ListMediaPreferences(c *Client) (*MediaPreferencesList, error) {
+	list := &MediaPreferencesList{}
+	if err := c.RequestJSON(http.MethodGet, mediaPrefsPath, nil, list); err != nil {
 		return nil, err
 	}
 	return list, nil

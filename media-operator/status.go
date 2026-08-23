@@ -17,9 +17,14 @@ import (
 // the activity word onto it, so every path through the derivation
 // carries the one word a person reads without a second rule
 // deciding it later.
-func derivePlayStatus(play *Play, player *Player, buildErr error, pod *Pod, latest *playReport) PlayStatus {
+func derivePlayStatus(play *Play, player *Player, buildErr error, pod *Pod, latest *playReport, prefs resolvedPreferences) PlayStatus {
 	status := buildPlayStatus(play, player, buildErr, pod, latest)
 	status.Activity = playActivity(status.Phase, status.Paused)
+	// Report the resolved preferences on every status, the console-parity record
+	// of what the three tiers settled on.
+	status.AudioLanguages = prefs.AudioLanguages
+	status.SubtitleLanguages = prefs.SubtitleLanguages
+	status.Subtitles = prefs.Subtitles
 	return status
 }
 
@@ -65,6 +70,10 @@ func buildPlayStatus(play *Play, player *Player, buildErr error, pod *Pod, lates
 		Item:     play.Status.Item,
 		Position: play.Status.Position,
 		Duration: play.Status.Duration,
+		// Carry the chosen track languages forward like the position, so a dropped
+		// report does not blank them.
+		AudioLanguage:    play.Status.AudioLanguage,
+		SubtitleLanguage: play.Status.SubtitleLanguage,
 	}
 	switch pod.Status.Phase {
 	case podRunning:
@@ -106,6 +115,8 @@ func foldReport(status *PlayStatus, latest *playReport) {
 	status.Item = latest.Item
 	status.Position = latest.Position
 	status.Duration = latest.Duration
+	status.AudioLanguage = latest.AudioLanguage
+	status.SubtitleLanguage = latest.SubtitleLanguage
 }
 
 // podFailureMessage prefers the container's terminated state,

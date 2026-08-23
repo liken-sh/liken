@@ -367,6 +367,11 @@ type playbackState struct {
 	item     int
 	position string
 	duration string
+
+	// The language of the audio track and the subtitle track mpv chose. Each stays
+	// set once mpv reports it.
+	audioLanguage    string
+	subtitleLanguage string
 }
 
 // reportable holds reports back until mpv has said which item plays.
@@ -379,10 +384,12 @@ func (s playbackState) reportable() bool {
 
 func (s playbackState) report() playReport {
 	return playReport{
-		Paused:   s.paused,
-		Item:     s.item,
-		Position: s.position,
-		Duration: s.duration,
+		Paused:           s.paused,
+		Item:             s.item,
+		Position:         s.position,
+		Duration:         s.duration,
+		AudioLanguage:    s.audioLanguage,
+		SubtitleLanguage: s.subtitleLanguage,
 	}
 }
 
@@ -427,6 +434,22 @@ func (s *playbackState) apply(change propertyChange) bool {
 		}
 		s.duration = formatPosition(seconds)
 		return false
+	case audioLanguageProperty:
+		var lang string
+		if err := json.Unmarshal(change.Data, &lang); err != nil {
+			return false
+		}
+		changed := lang != s.audioLanguage
+		s.audioLanguage = lang
+		return changed
+	case subtitleLanguageProperty:
+		var lang string
+		if err := json.Unmarshal(change.Data, &lang); err != nil {
+			return false
+		}
+		changed := lang != s.subtitleLanguage
+		s.subtitleLanguage = lang
+		return changed
 	}
 	return false
 }

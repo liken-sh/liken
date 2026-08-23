@@ -244,6 +244,32 @@ func TestApplyOnePropertyChange(t *testing.T) {
 			want:   playbackState{item: 1},
 		},
 		{
+			name:   "the chosen audio track's language the operator must see",
+			start:  playing,
+			change: changeOf("current-tracks/audio/lang", `"eng"`),
+			want:   playbackState{item: 1, position: "0:00:10", duration: "0:30:00", audioLanguage: "eng"},
+			atOnce: true,
+		},
+		{
+			name:   "the chosen subtitle track's language",
+			start:  playing,
+			change: changeOf("current-tracks/sub/lang", `"jpn"`),
+			want:   playbackState{item: 1, position: "0:00:10", duration: "0:30:00", subtitleLanguage: "jpn"},
+			atOnce: true,
+		},
+		{
+			name:   "the same audio language repeats what is already known",
+			start:  playbackState{item: 1, audioLanguage: "eng"},
+			change: changeOf("current-tracks/audio/lang", `"eng"`),
+			want:   playbackState{item: 1, audioLanguage: "eng"},
+		},
+		{
+			name:   "a track with no language leaves the last one",
+			start:  playbackState{item: 1, audioLanguage: "eng"},
+			change: changeOf("current-tracks/audio/lang", "null"),
+			want:   playbackState{item: 1, audioLanguage: "eng"},
+		},
+		{
 			name:   "a property the command sidecar does not fold",
 			start:  playing,
 			change: changeOf("volume", "70"),

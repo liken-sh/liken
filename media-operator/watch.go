@@ -139,6 +139,31 @@ func watchKeymaps(c *Client, resourceVersion string, wake chan<- struct{}) {
 	}
 }
 
+// watchMediaPreferences wakes the loop on a MediaPreferences edit, so the
+// resolved fields on a running Play's status refresh within one pass. Recovery
+// mirrors the other watchers.
+func watchMediaPreferences(c *Client, resourceVersion string, wake chan<- struct{}) {
+	for {
+		path := mediaPrefsPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
+		resp, err := c.Do(http.MethodGet, path, nil)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			resourceVersion = readWatchStream(resp, resourceVersion, wake)
+		}
+		if resp != nil {
+			drain(resp.Body)
+		}
+
+		time.Sleep(watchRetryPause)
+		list, err := ListMediaPreferences(c)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "listing media preferences to resume the watch: %v\n", err)
+			continue
+		}
+		resourceVersion = list.Metadata.ResourceVersion
+		poke(wake)
+	}
+}
+
 // watchPods wakes the loop when k8s removes a playback pod or when one turns
 // Failed, so an eviction or a crash reaches the reconcile at once instead of
 // waiting for the backstop tick. Its recovery matches the other watchers.

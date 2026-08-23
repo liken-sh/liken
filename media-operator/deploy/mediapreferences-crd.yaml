@@ -1,0 +1,79 @@
+# The MediaPreferences API. One cluster-scoped resource holds the household
+# default for audio and subtitle languages, the lowest of the three tiers a
+# Play resolves.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: mediapreferences.media.liken.sh
+spec:
+  group: media.liken.sh
+  names:
+    kind: MediaPreferences
+    listKind: MediaPreferencesList
+    plural: mediapreferences
+    singular: mediapreferences
+    categories: [media]
+  # A MediaPreferences is cluster-scoped because the household default
+  # belongs to the whole cluster, not one namespace, the same reason a
+  # Keymap is cluster-scoped.
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      # A MediaPreferences is a table a person writes and nothing reports
+      # on, so there is no status subresource and the listing shows its age.
+      additionalPrinterColumns:
+        - name: Subtitles
+          type: string
+          jsonPath: .spec.subtitles
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            The household default for audio and subtitle
+            languages; a Player or a Play overrides it field by field.
+          # The name is fixed at default, because a second default is a
+          # contradiction. A MediaPreferences under any other name is
+          # rejected at apply, so the mistake shows at once instead of
+          # adding a silent second object.
+          x-kubernetes-validations:
+            - rule: self.metadata.name == 'default'
+              message: the only MediaPreferences is named default
+          properties:
+            spec:
+              type: object
+              description: >-
+                The default language and subtitle fields, each read
+                only when no more specific tier states it.
+              properties:
+                audioLanguages:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  maxItems: 10
+                  description: >-
+                    Ordered audio language codes, most wanted first;
+                    mpv takes the first audio track that matches.
+                  items:
+                    type: string
+                    pattern: '^[a-z]{2,3}(-[A-Za-z]{2,4})?$'
+                subtitleLanguages:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  maxItems: 10
+                  description: >-
+                    Ordered subtitle language codes, separate from
+                    the audio list, so one viewer takes foreign audio with
+                    native subtitles.
+                  items:
+                    type: string
+                    pattern: '^[a-z]{2,3}(-[A-Za-z]{2,4})?$'
+                subtitles:
+                  type: string
+                  enum: [on, off, auto]
+                  description: >-
+                    When subtitles show; on always, off never, auto
+                    only when the audio that played is not the first choice.

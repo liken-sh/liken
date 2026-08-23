@@ -102,6 +102,13 @@ type PlayerSpec struct {
 	Sinks   []PlayerDevice `json:"sinks,omitempty"`
 	Render  *PlayerDevice  `json:"render,omitempty"`
 	Remotes []PlayerRemote `json:"remotes,omitempty"`
+
+	// The per-Player override of the audio and subtitle language preferences.
+	// A nil list, or an empty Subtitles, means this Player states nothing, so
+	// resolution reads the default MediaPreferences instead.
+	AudioLanguages    []string `json:"audioLanguages,omitempty"`
+	SubtitleLanguages []string `json:"subtitleLanguages,omitempty"`
+	Subtitles         string   `json:"subtitles,omitempty"`
 }
 
 // One controller the Player owns. Name is the Remote in the same
@@ -154,6 +161,13 @@ type PlaySpec struct {
 	// padded, so the tile count cannot be read back. The Play declares the
 	// interval, and it defaults to 10s when this is empty.
 	TrickplayInterval string `json:"trickplayInterval,omitempty"`
+
+	// The per-Play override of the language preferences, the most specific tier.
+	// A nil list, or an empty Subtitles, means this Play states nothing, so
+	// resolution reads the Player next.
+	AudioLanguages    []string `json:"audioLanguages,omitempty"`
+	SubtitleLanguages []string `json:"subtitleLanguages,omitempty"`
+	Subtitles         string   `json:"subtitles,omitempty"`
 }
 
 // A PlayItem is one entry in the list: the media URI and an optional
@@ -203,6 +217,17 @@ type PlayStatus struct {
 	Duration string `json:"duration,omitempty"`
 	Pod      string `json:"pod,omitempty"`
 	Message  string `json:"message,omitempty"`
+
+	// The preferences this run resolved, the console-parity record of what the
+	// three tiers settled on.
+	AudioLanguages    []string `json:"audioLanguages,omitempty"`
+	SubtitleLanguages []string `json:"subtitleLanguages,omitempty"`
+	Subtitles         string   `json:"subtitles,omitempty"`
+
+	// The language of the audio track and the subtitle track mpv selected, so a
+	// code that matched no track shows plainly.
+	AudioLanguage    string `json:"audioLanguage,omitempty"`
+	SubtitleLanguage string `json:"subtitleLanguage,omitempty"`
 }
 
 // The four phases, in the words Jobs and Pods use so nobody learns a
@@ -265,6 +290,40 @@ func finishedPhase(phase string) bool {
 type PlayList struct {
 	Metadata ListMeta `json:"metadata"`
 	Items    []Play   `json:"items"`
+}
+
+// The three subtitle modes a preference tier may state.
+const (
+	subtitlesOn   = "on"
+	subtitlesOff  = "off"
+	subtitlesAuto = "auto"
+)
+
+// mediaPreferencesName is the one name a MediaPreferences may take. The CRD
+// pins it with a CEL rule, so a second default is rejected at apply, and this
+// operator reads the singleton by this name.
+const mediaPreferencesName = "default"
+
+// MediaPreferences is the cluster-scoped household default for audio and
+// subtitle languages, the lowest of the three tiers a Play resolves.
+type MediaPreferences struct {
+	APIVersion string               `json:"apiVersion,omitempty"`
+	Kind       string               `json:"kind,omitempty"`
+	Metadata   ObjectMeta           `json:"metadata"`
+	Spec       MediaPreferencesSpec `json:"spec"`
+}
+
+// MediaPreferencesSpec holds the default language fields. Resolution reads
+// each field only when no more specific tier states it.
+type MediaPreferencesSpec struct {
+	AudioLanguages    []string `json:"audioLanguages,omitempty"`
+	SubtitleLanguages []string `json:"subtitleLanguages,omitempty"`
+	Subtitles         string   `json:"subtitles,omitempty"`
+}
+
+type MediaPreferencesList struct {
+	Metadata ListMeta           `json:"metadata"`
+	Items    []MediaPreferences `json:"items"`
 }
 
 // A Remote is one physical controller: the device it is, the Keymap

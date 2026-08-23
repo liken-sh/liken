@@ -156,6 +156,65 @@ func resolvePlay(items []PlayItem) (resolution, error) {
 	return resolved, nil
 }
 
+// resolvedPreferences is the settled value of each preference field, after
+// the three tiers resolve.
+type resolvedPreferences struct {
+	AudioLanguages    []string
+	SubtitleLanguages []string
+	Subtitles         string
+}
+
+// resolvePreferences settles each field on its own, Play then Player then the
+// default. A nil source is a tier that does not exist and is skipped, and a
+// field no tier states resolves to nothing.
+func resolvePreferences(play *PlaySpec, player *PlayerSpec, defaults *MediaPreferencesSpec) resolvedPreferences {
+	var audio, subs [][]string
+	var mode []string
+	if play != nil {
+		audio = append(audio, play.AudioLanguages)
+		subs = append(subs, play.SubtitleLanguages)
+		mode = append(mode, play.Subtitles)
+	}
+	if player != nil {
+		audio = append(audio, player.AudioLanguages)
+		subs = append(subs, player.SubtitleLanguages)
+		mode = append(mode, player.Subtitles)
+	}
+	if defaults != nil {
+		audio = append(audio, defaults.AudioLanguages)
+		subs = append(subs, defaults.SubtitleLanguages)
+		mode = append(mode, defaults.Subtitles)
+	}
+	return resolvedPreferences{
+		AudioLanguages:    firstStatedList(audio),
+		SubtitleLanguages: firstStatedList(subs),
+		Subtitles:         firstStatedString(mode),
+	}
+}
+
+// firstStatedList returns the first list a tier states. A nil list is unset,
+// and an empty non-nil list is a tier stating no preference, which overrides a
+// lower tier.
+func firstStatedList(tiers [][]string) []string {
+	for _, list := range tiers {
+		if list != nil {
+			return list
+		}
+	}
+	return nil
+}
+
+// firstStatedString returns the first value a tier states. Subtitles has no
+// empty enum value, so an empty string is unset.
+func firstStatedString(tiers []string) string {
+	for _, value := range tiers {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 // parseRef classifies one URI. An https URI passes through. An nfs URI parses
 // into a server and a path. Any other scheme, or a missing one, fails the
 // whole Play, so a Play that can never run leaves no half-built objects behind.

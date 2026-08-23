@@ -18,6 +18,7 @@ resources:
   - plays-crd.yaml
   - keymaps-crd.yaml
   - remotes-crd.yaml
+  - mediapreferences-crd.yaml
   - rbac.yaml
   - operator.yaml
   - bus.yaml

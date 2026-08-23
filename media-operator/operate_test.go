@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"path"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -17,23 +18,25 @@ import (
 // The fake cluster: one map per kind, and the list of requests a pass
 // made.
 type fakeCluster struct {
-	plays    map[string]*Play
-	players  map[string]*Player
-	remotes  map[string]*Remote
-	keymaps  map[string]*Keymap
-	claims   map[string]*ResourceClaim
-	pods     map[string]*Pod
-	requests []string
+	plays      map[string]*Play
+	players    map[string]*Player
+	remotes    map[string]*Remote
+	keymaps    map[string]*Keymap
+	mediaprefs map[string]*MediaPreferences
+	claims     map[string]*ResourceClaim
+	pods       map[string]*Pod
+	requests   []string
 }
 
 func newFakeCluster() *fakeCluster {
 	return &fakeCluster{
-		plays:   map[string]*Play{},
-		players: map[string]*Player{},
-		remotes: map[string]*Remote{},
-		keymaps: map[string]*Keymap{},
-		claims:  map[string]*ResourceClaim{},
-		pods:    map[string]*Pod{},
+		plays:      map[string]*Play{},
+		players:    map[string]*Player{},
+		remotes:    map[string]*Remote{},
+		keymaps:    map[string]*Keymap{},
+		mediaprefs: map[string]*MediaPreferences{},
+		claims:     map[string]*ResourceClaim{},
+		pods:       map[string]*Pod{},
 	}
 }
 
@@ -86,6 +89,8 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 			_ = json.NewEncoder(w).Encode(list)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/keymaps/"):
 			answer(w, f.keymaps[name])
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/mediapreferences/"):
+			answer(w, f.mediaprefs[name])
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/resourceclaims/"):
 			answer(w, f.claims[name])
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/resourceclaims"):
@@ -181,7 +186,7 @@ func housePlaybackPod() *Pod {
 	play := housePlay("https://nas/film.mkv")
 	pod := buildPod(play, buildClaim(play, housePlayer()),
 		resolution{Items: []string{"https://nas/film.mkv"}},
-		"registry.example/player:test", "bus.media.svc:1883", defaultTopicBase, nil)
+		"registry.example/player:test", "bus.media.svc:1883", defaultTopicBase, nil, resolvedPreferences{})
 	pod.Status.Phase = podRunning
 	return pod
 }
@@ -315,8 +320,8 @@ func TestAPlayWithAnUnknownSchemeFailsAndCreatesNothing(t *testing.T) {
 }
 
 // A Play that reached a terminal phase is read and left alone; the pass
-// makes no request about the play itself, only the three list reads
-// every pass makes.
+// makes no request about the play itself, only the reads every pass makes:
+// the four collection lists and the default MediaPreferences.
 func TestATerminalPlayIsReadAndLeftAlone(t *testing.T) {
 	cluster := newFakeCluster()
 	finished := housePlay("https://nas/film.mkv")
@@ -326,9 +331,11 @@ func TestATerminalPlayIsReadAndLeftAlone(t *testing.T) {
 
 	media.pass()
 
-	want := "GET " + playsPath + ",GET " + playersPath + ",GET " + remotesAllPath + ",GET " + keymapsPath
+	want := "GET " + playsPath +
+		",GET " + mediaPrefsPath + "/" + mediaPreferencesName +
+		",GET " + playersPath + ",GET " + remotesAllPath + ",GET " + keymapsPath
 	if strings.Join(cluster.requests, ",") != want {
-		t.Errorf("requests = %v, want the four list reads alone", cluster.requests)
+		t.Errorf("requests = %v, want the collection lists and the default MediaPreferences", cluster.requests)
 	}
 }
 
@@ -356,7 +363,7 @@ func TestARunningPodFoldsTheLatestReportIntoTheStatus(t *testing.T) {
 		Position: "0:03:20",
 		Duration: "1:58:00",
 	}
-	if status != want {
+	if !reflect.DeepEqual(status, want) {
 		t.Errorf("status = %+v, want %+v", status, want)
 	}
 }
@@ -562,7 +569,7 @@ func runningCluster(player *Player) *fakeCluster {
 	cluster.players["theater"] = player
 	pod := buildPod(play, buildClaim(play, player),
 		resolution{Items: []string{"https://nas/film.mkv"}},
-		"registry.example/player:test", "bus.media.svc:1883", defaultTopicBase, nil)
+		"registry.example/player:test", "bus.media.svc:1883", defaultTopicBase, nil, resolvedPreferences{})
 	pod.Status.Phase = podRunning
 	cluster.pods["movie-playback"] = pod
 	cluster.claims["movie-devices"] = buildClaim(play, player)
@@ -723,7 +730,7 @@ func TestAPlayerRemoteChangeRecreatesThePodOnTheChangedRemoteSet(t *testing.T) {
 	}}
 	pod := buildPod(play, buildClaim(play, player),
 		resolution{Items: []string{"https://nas/film.mkv"}},
-		"registry.example/player:test", "bus.media.svc:1883", defaultTopicBase, sofa)
+		"registry.example/player:test", "bus.media.svc:1883", defaultTopicBase, sofa, resolvedPreferences{})
 	pod.Status.Phase = podRunning
 	cluster.pods["movie-playback"] = pod
 	cluster.claims["movie-devices"] = buildClaim(play, player)
@@ -844,7 +851,7 @@ func TestOnlyANewRunStealsAndAResumeDoesNot(t *testing.T) {
 			claim := buildClaim(play, housePlayer())
 
 			_, fresh, err := media.ensurePlayback(play, claim,
-				resolution{Items: []string{"https://nas/film.mkv"}}, nil, false)
+				resolution{Items: []string{"https://nas/film.mkv"}}, resolvedPreferences{}, nil, false)
 			if err != nil {
 				t.Fatal(err)
 			}

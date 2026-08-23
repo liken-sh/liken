@@ -203,6 +203,11 @@ func operate() {
 		fmt.Fprintf(os.Stderr, "listing keymaps: %v\n", err)
 		os.Exit(1)
 	}
+	prefs, err := ListMediaPreferences(client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing media preferences: %v\n", err)
+		os.Exit(1)
+	}
 	pods, err := ListPlaybackPods(client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing playback pods: %v\n", err)
@@ -214,6 +219,7 @@ func operate() {
 	go watchRemotes(client, remotes.Metadata.ResourceVersion, wake)
 	go watchPlayers(client, players.Metadata.ResourceVersion, wake)
 	go watchKeymaps(client, keymaps.Metadata.ResourceVersion, wake)
+	go watchMediaPreferences(client, prefs.Metadata.ResourceVersion, wake)
 	go watchPods(client, pods.Metadata.ResourceVersion, wake)
 
 	ticker := time.NewTicker(backstopInterval)
@@ -239,6 +245,15 @@ func (o *operator) pass() {
 		fmt.Fprintf(os.Stderr, "listing plays: %v\n", err)
 		return
 	}
+	// Read the household default once per pass. A missing default is not an error,
+	// and a read that fails skips the tier this pass.
+	defaults, err := GetMediaPreferences(o.client, mediaPreferencesName)
+	if err != nil {
+		if !errors.Is(err, ErrNotFound) {
+			fmt.Fprintf(os.Stderr, "reading media preferences: %v\n", err)
+		}
+		defaults = nil
+	}
 	live := make(map[string]bool, len(list.Items))
 	for index := range list.Items {
 		play := &list.Items[index]
@@ -250,7 +265,7 @@ func (o *operator) pass() {
 		if finishedPhase(play.Status.Phase) {
 			continue
 		}
-		if err := o.reconcile(play); err != nil {
+		if err := o.reconcile(play, defaults); err != nil {
 			fmt.Fprintf(os.Stderr, "reconciling play %s/%s: %v\n",
 				play.Metadata.Namespace, play.Metadata.Name, err)
 		}
@@ -439,8 +454,13 @@ func (o *operator) reconcileRemotes() {
 // earns. The order matters: nothing is created until the Player is read
 // and every URI resolves, so a Play that can never run leaves no
 // half-built objects behind.
-func (o *operator) reconcile(play *Play) error {
+func (o *operator) reconcile(play *Play, defaults *MediaPreferences) error {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
+	// The default tier's spec, or nil when the cluster has no default.
+	var defaultSpec *MediaPreferencesSpec
+	if defaults != nil {
+		defaultSpec = &defaults.Spec
+	}
 	if playerName(play) == "" {
 		return writePlayStatus(o.client, play, PlayStatus{
 			Phase:   phaseFailed,
@@ -450,15 +470,17 @@ func (o *operator) reconcile(play *Play) error {
 
 	player, err := GetPlayer(o.client, namespace, playerName(play))
 	if errors.Is(err, ErrNotFound) {
-		return writePlayStatus(o.client, play, derivePlayStatus(play, nil, nil, nil, nil))
+		prefs := resolvePreferences(&play.Spec, nil, defaultSpec)
+		return writePlayStatus(o.client, play, derivePlayStatus(play, nil, nil, nil, nil, prefs))
 	}
 	if err != nil {
 		return err
 	}
+	prefs := resolvePreferences(&play.Spec, &player.Spec, defaultSpec)
 
 	resolved, resolveErr := resolvePlay(play.Spec.Items)
 	if resolveErr != nil {
-		return writePlayStatus(o.client, play, derivePlayStatus(play, player, resolveErr, nil, nil))
+		return writePlayStatus(o.client, play, derivePlayStatus(play, player, resolveErr, nil, nil, prefs))
 	}
 
 	// A missing Remote fails the Play only while there is still no pod.
@@ -471,7 +493,7 @@ func (o *operator) reconcile(play *Play) error {
 	if remoteErr != nil {
 		_, err := GetPod(o.client, namespace, podName(name))
 		if errors.Is(err, ErrNotFound) {
-			return writePlayStatus(o.client, play, derivePlayStatus(play, player, remoteErr, nil, nil))
+			return writePlayStatus(o.client, play, derivePlayStatus(play, player, remoteErr, nil, nil, prefs))
 		}
 		if err != nil {
 			return err
@@ -490,7 +512,7 @@ func (o *operator) reconcile(play *Play) error {
 	}
 
 	claim := buildClaim(play, player)
-	pod, fresh, err := o.ensurePlayback(play, claim, resolved, remotes, remoteErr != nil)
+	pod, fresh, err := o.ensurePlayback(play, claim, resolved, prefs, remotes, remoteErr != nil)
 	if err != nil {
 		return err
 	}
@@ -500,7 +522,7 @@ func (o *operator) reconcile(play *Play) error {
 	if fresh && len(remotes) > 0 {
 		o.stealFocus(play, remotes)
 	}
-	status := derivePlayStatus(play, player, nil, pod, o.reports.latestFor(namespace, name))
+	status := derivePlayStatus(play, player, nil, pod, o.reports.latestFor(namespace, name), prefs)
 	// A run that keeps failing reads the backoff note in place of the pod's
 	// own failure message, but only once the recreates repeat and only while
 	// the pod is Failed, so a run that recovers reads a clean status.
@@ -541,7 +563,7 @@ func (o *operator) writePlay(play *Play, desired PlayStatus) error {
 // The bool reports a genuinely new pod, true only in the no-existing-pod
 // branch. A fresh Play uses it to steal its controllers, and a recreate,
 // which returns false, leaves the focus mark alone.
-func (o *operator) ensurePlayback(play *Play, claim *ResourceClaim, resolved resolution, remotes []boundRemote, keepExisting bool) (*Pod, bool, error) {
+func (o *operator) ensurePlayback(play *Play, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote, keepExisting bool) (*Pod, bool, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	key := runKey(namespace, name)
 	running, err := GetPod(o.client, namespace, podName(name))
@@ -557,7 +579,7 @@ func (o *operator) ensurePlayback(play *Play, claim *ResourceClaim, resolved res
 		if err := ensureClaim(o.client, claim); err != nil {
 			return nil, false, err
 		}
-		pod, err := o.createPodAtStash(play, claim, resolved, remotes)
+		pod, err := o.createPodAtStash(play, claim, resolved, prefs, remotes)
 		return pod, !resuming, err
 	}
 	if err != nil {
@@ -573,7 +595,7 @@ func (o *operator) ensurePlayback(play *Play, claim *ResourceClaim, resolved res
 		if !o.mayResume(key) {
 			return running, false, nil
 		}
-		pod, err := o.recreateForResume(play, claim, resolved, remotes)
+		pod, err := o.recreateForResume(play, claim, resolved, prefs, remotes)
 		return pod, false, err
 	}
 
@@ -581,11 +603,11 @@ func (o *operator) ensurePlayback(play *Play, claim *ResourceClaim, resolved res
 	if err != nil {
 		return nil, false, err
 	}
-	desired := buildPod(play, claim, resolved, o.image, o.busAddress, o.topicBase, remotes)
+	desired := buildPod(play, claim, resolved, o.image, o.busAddress, o.topicBase, remotes, prefs)
 	if !claimChanged && sameRemoteSet(running, desired) {
 		return running, false, nil
 	}
-	pod, err := o.recreate(play, claim, resolved, remotes, claimChanged)
+	pod, err := o.recreate(play, claim, resolved, prefs, remotes, claimChanged)
 	return pod, false, err
 }
 
@@ -594,7 +616,7 @@ func (o *operator) ensurePlayback(play *Play, claim *ResourceClaim, resolved res
 // when the claim itself diverged, and creates the replacement so mpv
 // starts where the film was. The image is already on the machine, so the
 // film resumes within about a second.
-func (o *operator) recreate(play *Play, claim *ResourceClaim, resolved resolution, remotes []boundRemote, claimChanged bool) (*Pod, error) {
+func (o *operator) recreate(play *Play, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote, claimChanged bool) (*Pod, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	if err := DeletePod(o.client, namespace, podName(name)); err != nil {
 		return nil, err
@@ -607,13 +629,13 @@ func (o *operator) recreate(play *Play, claim *ResourceClaim, resolved resolutio
 			return nil, err
 		}
 	}
-	return o.createPodAtStash(play, claim, resolved, remotes)
+	return o.createPodAtStash(play, claim, resolved, prefs, remotes)
 }
 
 // recreateForResume replaces a pod that failed and keeps the film's place.
 // The claim outlives the pod, so this ensures the claim, deletes the dead
 // pod, and creates the replacement at the film's place.
-func (o *operator) recreateForResume(play *Play, claim *ResourceClaim, resolved resolution, remotes []boundRemote) (*Pod, error) {
+func (o *operator) recreateForResume(play *Play, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote) (*Pod, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	if err := ensureClaim(o.client, claim); err != nil {
 		return nil, err
@@ -621,24 +643,24 @@ func (o *operator) recreateForResume(play *Play, claim *ResourceClaim, resolved 
 	if err := DeletePod(o.client, namespace, podName(name)); err != nil {
 		return nil, err
 	}
-	return o.createPodAtStash(play, claim, resolved, remotes)
+	return o.createPodAtStash(play, claim, resolved, prefs, remotes)
 }
 
 // createPodAtStash creates the playback pod with mpv's start set to the
 // film's saved place. A genuinely new run has no saved place, so the start
 // falls back to spec.start.
-func (o *operator) createPodAtStash(play *Play, claim *ResourceClaim, resolved resolution, remotes []boundRemote) (*Pod, error) {
+func (o *operator) createPodAtStash(play *Play, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote) (*Pod, error) {
 	resume := *play
 	resume.Spec.Start = o.stashedPosition(play)
-	return o.createPod(&resume, claim, resolved, remotes)
+	return o.createPod(&resume, claim, resolved, prefs, remotes)
 }
 
 // createPod creates one playback pod and reads it back on a 409,
 // because another pass, or another copy of this operator, created the
 // pod first.
-func (o *operator) createPod(play *Play, claim *ResourceClaim, resolved resolution, remotes []boundRemote) (*Pod, error) {
+func (o *operator) createPod(play *Play, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote) (*Pod, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
-	created, err := CreatePod(o.client, buildPod(play, claim, resolved, o.image, o.busAddress, o.topicBase, remotes))
+	created, err := CreatePod(o.client, buildPod(play, claim, resolved, o.image, o.busAddress, o.topicBase, remotes, prefs))
 	if errors.Is(err, ErrConflict) {
 		return GetPod(o.client, namespace, podName(name))
 	}

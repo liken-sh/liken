@@ -197,6 +197,33 @@ spec:
                     duration like 10s. Jellyfin writes no manifest beside
                     the sheets, so the Play declares it. Omitted, it
                     defaults to 10s, the Jellyfin default.
+                audioLanguages:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  maxItems: 10
+                  description: >-
+                    A per-Play override of the audio language order,
+                    the most specific tier; omit it to inherit the Player.
+                  items:
+                    type: string
+                    pattern: '^[a-z]{2,3}(-[A-Za-z]{2,4})?$'
+                subtitleLanguages:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  maxItems: 10
+                  description: >-
+                    A per-Play override of the subtitle language
+                    order, the most specific tier; omit it to inherit the
+                    Player.
+                  items:
+                    type: string
+                    pattern: '^[a-z]{2,3}(-[A-Za-z]{2,4})?$'
+                subtitles:
+                  type: string
+                  enum: [on, off, auto]
+                  description: >-
+                    A per-Play override of when subtitles show, the
+                    most specific tier; omit it to inherit the Player.
             status:
               type: object
               description: >-
@@ -261,3 +288,35 @@ spec:
                     Why the phase is what it is, when a word is not
                     enough: the resolver refused a URI, the Player
                     does not exist, the pod failed.
+                audioLanguages:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  items:
+                    type: string
+                  description: >-
+                    The resolved audio language order this run
+                    applied, the console-parity record of what the tiers
+                    settled on.
+                subtitleLanguages:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  items:
+                    type: string
+                  description: >-
+                    The resolved subtitle language order this run
+                    applied.
+                subtitles:
+                  type: string
+                  description: >-
+                    The resolved subtitle setting this run applied,
+                    one of on, off, or auto.
+                audioLanguage:
+                  type: string
+                  description: >-
+                    The language of the audio track mpv chose, so a
+                    code that matched no track shows plainly.
+                subtitleLanguage:
+                  type: string
+                  description: >-
+                    The language of the subtitle track mpv chose;
+                    empty when none plays.

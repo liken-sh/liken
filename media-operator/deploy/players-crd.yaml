@@ -229,6 +229,32 @@ spec:
                           controller maps this way here and its Remote's
                           own way elsewhere. Empty, the unit reads the
                           Remote's own Keymap.
+                audioLanguages:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  maxItems: 10
+                  description: >-
+                    A per-Player override of the audio language
+                    order; omit it to inherit the default MediaPreferences.
+                  items:
+                    type: string
+                    pattern: '^[a-z]{2,3}(-[A-Za-z]{2,4})?$'
+                subtitleLanguages:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  maxItems: 10
+                  description: >-
+                    A per-Player override of the subtitle language
+                    order; omit it to inherit the default MediaPreferences.
+                  items:
+                    type: string
+                    pattern: '^[a-z]{2,3}(-[A-Za-z]{2,4})?$'
+                subtitles:
+                  type: string
+                  enum: [on, off, auto]
+                  description: >-
+                    A per-Player override of when subtitles show;
+                    omit it to inherit the default MediaPreferences.
             status:
               type: object
               description: >-

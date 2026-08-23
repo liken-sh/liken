@@ -59,7 +59,7 @@ func podName(play string) string {
 // end: a finished film is not a failure to restart. The player image's
 // entrypoint shim execs mpv, so the arguments are nothing but the
 // resolved playlist in spec order.
-func buildPod(play *Play, claim *ResourceClaim, resolved resolution, image, busAddress, topicBase string, remotes []boundRemote) *Pod {
+func buildPod(play *Play, claim *ResourceClaim, resolved resolution, image, busAddress, topicBase string, remotes []boundRemote, prefs resolvedPreferences) *Pod {
 	grace := int64(playbackGracePeriod)
 	// The IPC volume is unconditional, so mpv serves its socket at one
 	// path whether or not this pod binds a remote. The mount list is
@@ -83,6 +83,13 @@ func buildPod(play *Play, claim *ResourceClaim, resolved resolution, image, busA
 	if play.Spec.Start != "" {
 		container.Env = append(container.Env,
 			EnvVar{Name: playStartVariable, Value: play.Spec.Start})
+	}
+	// Pass the resolved preference flags to the shim. Nothing is passed when no
+	// tier stated a preference, so mpv keeps its own default and the feature adds
+	// no behavior.
+	if options := mpvPreferenceOptions(prefs); len(options) > 0 {
+		container.Env = append(container.Env,
+			EnvVar{Name: playerOptionsVariable, Value: strings.Join(options, "\n")})
 	}
 	// The player container holds every request the claim asks for,
 	// because the playback claim holds the player's roles alone.
@@ -126,6 +133,31 @@ func buildPod(play *Play, claim *ResourceClaim, resolved resolution, image, busA
 			Volumes:        volumes,
 		},
 	}
+}
+
+// mpvPreferenceOptions maps the resolved preferences to mpv flags. It passes a
+// flag only for a field that resolved, and adds --subs-match-os-language=no
+// only when the feature is otherwise active.
+func mpvPreferenceOptions(prefs resolvedPreferences) []string {
+	var options []string
+	if len(prefs.AudioLanguages) > 0 {
+		options = append(options, "--alang="+strings.Join(prefs.AudioLanguages, ","))
+	}
+	if len(prefs.SubtitleLanguages) > 0 {
+		options = append(options, "--slang="+strings.Join(prefs.SubtitleLanguages, ","))
+	}
+	switch prefs.Subtitles {
+	case subtitlesOn:
+		options = append(options, "--sub-visibility=yes", "--subs-with-matching-audio=yes")
+	case subtitlesOff:
+		options = append(options, "--sid=no")
+	case subtitlesAuto:
+		options = append(options, "--subs-with-matching-audio=no")
+	}
+	if len(options) == 0 {
+		return nil
+	}
+	return append(options, "--subs-match-os-language=no")
 }
 
 // commandSidecar is the playback pod's owner of the mpv IPC socket: the

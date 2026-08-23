@@ -55,6 +55,13 @@ rules:
   - apiGroups: [media.liken.sh]
     resources: [keymaps]
     verbs: [get, list, watch]
+  # The household default preferences, cluster-scoped. The operator reads
+  # the default by name each pass to resolve a run's languages, lists it
+  # to start the watch, and the watch is the wake signal for an edit.
+  # Read-only, because a person writes it and the operator only reads it.
+  - apiGroups: [media.liken.sh]
+    resources: [mediapreferences]
+    verbs: [get, list, watch]
   # The claims a play becomes. Created once per play, read back on
   # every pass, and deleted only to rebuild a claim a Player reshaped.
   # The Play still owns them, so deleting the Play is the ordinary

@@ -299,3 +299,116 @@ func TestResolveRefusesALogoItCannotMount(t *testing.T) {
 		t.Fatal("a logo with an unresolvable scheme resolved")
 	}
 }
+
+// Three tiers resolve each field on its own. A more specific tier wins, and a
+// field no tier states resolves to nothing.
+func TestResolvePreferencesTierWins(t *testing.T) {
+	play := &PlaySpec{
+		AudioLanguages:    []string{"play-a"},
+		SubtitleLanguages: []string{"play-s"},
+		Subtitles:         subtitlesOn,
+	}
+	player := &PlayerSpec{
+		AudioLanguages:    []string{"player-a"},
+		SubtitleLanguages: []string{"player-s"},
+		Subtitles:         subtitlesOff,
+	}
+	defaults := &MediaPreferencesSpec{
+		AudioLanguages:    []string{"default-a"},
+		SubtitleLanguages: []string{"default-s"},
+		Subtitles:         subtitlesAuto,
+	}
+
+	cases := []struct {
+		name     string
+		play     *PlaySpec
+		player   *PlayerSpec
+		defaults *MediaPreferencesSpec
+		want     resolvedPreferences
+	}{
+		{
+			name: "the Play wins over the Player and the default",
+			play: play, player: player, defaults: defaults,
+			want: resolvedPreferences{
+				AudioLanguages:    []string{"play-a"},
+				SubtitleLanguages: []string{"play-s"},
+				Subtitles:         subtitlesOn,
+			},
+		},
+		{
+			name:   "the Player wins when the Play states nothing",
+			player: player, defaults: defaults,
+			want: resolvedPreferences{
+				AudioLanguages:    []string{"player-a"},
+				SubtitleLanguages: []string{"player-s"},
+				Subtitles:         subtitlesOff,
+			},
+		},
+		{
+			name:     "the default wins when neither the Play nor the Player states anything",
+			defaults: defaults,
+			want: resolvedPreferences{
+				AudioLanguages:    []string{"default-a"},
+				SubtitleLanguages: []string{"default-s"},
+				Subtitles:         subtitlesAuto,
+			},
+		},
+		{
+			name: "a field no tier states resolves to nothing",
+			want: resolvedPreferences{},
+		},
+	}
+
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			got := resolvePreferences(one.play, one.player, one.defaults)
+			if !reflect.DeepEqual(got, one.want) {
+				t.Errorf("preferences = %+v, want %+v", got, one.want)
+			}
+		})
+	}
+}
+
+// Each field resolves on its own. The Play sets subtitles while the default
+// still supplies the languages.
+func TestResolvePreferencesResolvesEachFieldOnItsOwn(t *testing.T) {
+	play := &PlaySpec{Subtitles: subtitlesOn}
+	defaults := &MediaPreferencesSpec{
+		AudioLanguages:    []string{"en", "ja"},
+		SubtitleLanguages: []string{"en"},
+		Subtitles:         subtitlesAuto,
+	}
+
+	got := resolvePreferences(play, nil, defaults)
+	want := resolvedPreferences{
+		AudioLanguages:    []string{"en", "ja"},
+		SubtitleLanguages: []string{"en"},
+		Subtitles:         subtitlesOn,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("preferences = %+v, want %+v", got, want)
+	}
+}
+
+// An empty list at a tier is a stated no preference, and it overrides a lower
+// tier's list back to nothing.
+func TestResolvePreferencesEmptyListOverridesALowerTier(t *testing.T) {
+	play := &PlaySpec{AudioLanguages: []string{}}
+	defaults := &MediaPreferencesSpec{AudioLanguages: []string{"en"}}
+
+	got := resolvePreferences(play, nil, defaults)
+	if got.AudioLanguages == nil || len(got.AudioLanguages) != 0 {
+		t.Errorf("audioLanguages = %#v, want a stated empty list", got.AudioLanguages)
+	}
+}
+
+// A nil source is a tier that does not exist. Resolution reads the tiers that do.
+func TestResolvePreferencesSkipsNilTiers(t *testing.T) {
+	defaults := &MediaPreferencesSpec{AudioLanguages: []string{"en"}}
+
+	got := resolvePreferences(nil, nil, defaults)
+	want := resolvedPreferences{AudioLanguages: []string{"en"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("preferences = %+v, want %+v", got, want)
+	}
+}

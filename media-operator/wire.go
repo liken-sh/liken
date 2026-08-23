@@ -25,6 +25,11 @@ type playReport struct {
 	// player has read the item's header.
 	Position string `json:"position"`
 	Duration string `json:"duration"`
+
+	// The language of the audio track and the subtitle track mpv selected, read
+	// from current-tracks. Empty when none plays.
+	AudioLanguage    string `json:"audioLanguage,omitempty"`
+	SubtitleLanguage string `json:"subtitleLanguage,omitempty"`
 }
 
 // Environment variable names the operator sets on the pods it creates.
@@ -40,6 +45,10 @@ const (
 	// The player shim turns it into mpv's --start, so the run begins
 	// where the spec says instead of at zero.
 	playStartVariable = "MEDIA_PLAY_START"
+
+	// The newline-joined mpv preference flags the operator resolved. The player
+	// shim splits them and appends each to mpv's argv.
+	playerOptionsVariable = "MEDIA_PLAYER_OPTIONS"
 
 	// The command sidecar carries every item's presentation block, baked
 	// into the pod when the operator creates it. The sidecar swaps to the

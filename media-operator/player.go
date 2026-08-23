@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 )
 
@@ -102,6 +103,15 @@ func playerArgv(items []string) ([]string, error) {
 	// run begins here, and later items begin at their own start.
 	if start := os.Getenv(playStartVariable); start != "" {
 		argv = append(argv, "--start="+start)
+	}
+	// The operator resolved these language and subtitle flags and joined them with
+	// newlines. The shim forwards each one to mpv, unread.
+	if options := os.Getenv(playerOptionsVariable); options != "" {
+		for _, option := range strings.Split(options, "\n") {
+			if option != "" {
+				argv = append(argv, option)
+			}
+		}
 	}
 	argv = append(argv, "--")
 	return append(argv, items...), nil

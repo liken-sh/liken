@@ -67,7 +67,7 @@ func testPod(t *testing.T) *Pod {
 	t.Helper()
 	play := testPlay()
 	claim := buildClaim(play, testPlayer())
-	return buildPod(play, claim, testResolution(t), testImage, testBusAddress, testTopicBase, nil)
+	return buildPod(play, claim, testResolution(t), testImage, testBusAddress, testTopicBase, nil, resolvedPreferences{})
 }
 
 // The same pod, with two controllers bound to the player.
@@ -75,7 +75,7 @@ func testPodWithRemotes(t *testing.T) *Pod {
 	t.Helper()
 	play := testPlay()
 	claim := buildClaim(play, testPlayer())
-	return buildPod(play, claim, testResolution(t), testImage, testBusAddress, testTopicBase, testBoundRemotes())
+	return buildPod(play, claim, testResolution(t), testImage, testBusAddress, testTopicBase, testBoundRemotes(), resolvedPreferences{})
 }
 
 // restartPolicy is Never, because a finished film is not a failure to
@@ -144,7 +144,7 @@ func TestBuildPodCarriesTheDeclaredStart(t *testing.T) {
 	play := testPlay()
 	play.Spec.Start = "0:10:00"
 	claim := buildClaim(play, testPlayer())
-	pod := buildPod(play, claim, testResolution(t), testImage, testBusAddress, testTopicBase, nil)
+	pod := buildPod(play, claim, testResolution(t), testImage, testBusAddress, testTopicBase, nil, resolvedPreferences{})
 
 	env := pod.Spec.Containers[0].Env
 	want := []EnvVar{{Name: playStartVariable, Value: "0:10:00"}}
@@ -180,7 +180,7 @@ func TestBuildPodHoldsEveryRequestTheClaimAsksFor(t *testing.T) {
 func TestBuildPodCarriesTheResolvedVolumesAndMounts(t *testing.T) {
 	resolved := testResolution(t)
 	play := testPlay()
-	pod := buildPod(play, buildClaim(play, testPlayer()), resolved, testImage, testBusAddress, testTopicBase, nil)
+	pod := buildPod(play, buildClaim(play, testPlayer()), resolved, testImage, testBusAddress, testTopicBase, nil, resolvedPreferences{})
 
 	volumes := append(append([]Volume{}, resolved.Volumes...),
 		Volume{Name: "art", EmptyDir: &EmptyDirVolumeSource{SizeLimit: artSizeLimit}},
@@ -275,7 +275,7 @@ func TestBuildPodBakesThePresentationBlocks(t *testing.T) {
 		},
 	}
 	claim := buildClaim(play, testPlayer())
-	pod := buildPod(play, claim, testResolution(t), testImage, testBusAddress, testTopicBase, nil)
+	pod := buildPod(play, claim, testResolution(t), testImage, testBusAddress, testTopicBase, nil, resolvedPreferences{})
 
 	command := initContainer(t, pod, commandContainer)
 	got := envValue(command, presentationsVariable)
@@ -325,5 +325,97 @@ func TestBuildPodRunsOneTranslatorPerRemote(t *testing.T) {
 	}
 	if len(sofa.Resources.Claims) != 0 {
 		t.Errorf("the translator holds a device claim: %+v", sofa.Resources.Claims)
+	}
+}
+
+// The resolved preferences map to mpv flags. A flag rides only for a field that
+// resolved, and --subs-match-os-language=no rides when any other flag does.
+func TestMpvPreferenceOptions(t *testing.T) {
+	cases := []struct {
+		name  string
+		prefs resolvedPreferences
+		want  []string
+	}{
+		{
+			name:  "no preference passes nothing",
+			prefs: resolvedPreferences{},
+			want:  nil,
+		},
+		{
+			name:  "audio languages become --alang",
+			prefs: resolvedPreferences{AudioLanguages: []string{"en", "ja"}},
+			want:  []string{"--alang=en,ja", "--subs-match-os-language=no"},
+		},
+		{
+			name:  "subtitle languages become --slang",
+			prefs: resolvedPreferences{SubtitleLanguages: []string{"en"}},
+			want:  []string{"--slang=en", "--subs-match-os-language=no"},
+		},
+		{
+			name:  "subtitles on shows them over matching audio",
+			prefs: resolvedPreferences{Subtitles: subtitlesOn},
+			want:  []string{"--sub-visibility=yes", "--subs-with-matching-audio=yes", "--subs-match-os-language=no"},
+		},
+		{
+			name:  "subtitles off loads no subtitle track",
+			prefs: resolvedPreferences{Subtitles: subtitlesOff},
+			want:  []string{"--sid=no", "--subs-match-os-language=no"},
+		},
+		{
+			name:  "subtitles auto shows them only over other-language audio",
+			prefs: resolvedPreferences{Subtitles: subtitlesAuto},
+			want:  []string{"--subs-with-matching-audio=no", "--subs-match-os-language=no"},
+		},
+		{
+			name: "every field together maps to every flag",
+			prefs: resolvedPreferences{
+				AudioLanguages:    []string{"ja"},
+				SubtitleLanguages: []string{"en"},
+				Subtitles:         subtitlesOn,
+			},
+			want: []string{
+				"--alang=ja", "--slang=en",
+				"--sub-visibility=yes", "--subs-with-matching-audio=yes",
+				"--subs-match-os-language=no",
+			},
+		},
+		{
+			name:  "a stated empty list passes no flag for that field",
+			prefs: resolvedPreferences{AudioLanguages: []string{}},
+			want:  nil,
+		},
+	}
+
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			got := mpvPreferenceOptions(one.prefs)
+			if !reflect.DeepEqual(got, one.want) {
+				t.Errorf("options = %v, want %v", got, one.want)
+			}
+		})
+	}
+}
+
+// The resolved options reach the player container as one newline-joined
+// variable, which the shim splits back into mpv's argv.
+func TestBuildPodCarriesTheResolvedOptions(t *testing.T) {
+	play := testPlay()
+	claim := buildClaim(play, testPlayer())
+	prefs := resolvedPreferences{AudioLanguages: []string{"en", "ja"}, Subtitles: subtitlesAuto}
+	pod := buildPod(play, claim, testResolution(t), testImage, testBusAddress, testTopicBase, nil, prefs)
+
+	got := envValue(pod.Spec.Containers[0], playerOptionsVariable)
+	want := "--alang=en,ja\n--subs-with-matching-audio=no\n--subs-match-os-language=no"
+	if got != want {
+		t.Errorf("%s = %q, want %q", playerOptionsVariable, got, want)
+	}
+}
+
+// A run with no preferences carries no options variable, so an ordinary pod is
+// unchanged.
+func TestBuildPodWithNoPreferencesCarriesNoOptions(t *testing.T) {
+	pod := testPod(t)
+	if got := envValue(pod.Spec.Containers[0], playerOptionsVariable); got != "" {
+		t.Errorf("%s = %q, want none", playerOptionsVariable, got)
 	}
 }

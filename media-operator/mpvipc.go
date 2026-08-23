@@ -33,10 +33,18 @@ var mpvSocketPath = ipcSocketPath
 // the retry in milliseconds.
 var mpvDialDelay = time.Second
 
-// observedProperties are the four properties the Play's status is
-// made of. The supervisor asks for no others, because every event
-// mpv sends costs a decode and nothing else reaches the status.
-var observedProperties = []string{"pause", "playlist-pos", "time-pos", "duration"}
+// The properties the Play's status is made of. The supervisor asks for no
+// others, because every event mpv sends costs a decode. The two current-tracks
+// entries are the languages mpv selected.
+const (
+	audioLanguageProperty    = "current-tracks/audio/lang"
+	subtitleLanguageProperty = "current-tracks/sub/lang"
+)
+
+var observedProperties = []string{
+	"pause", "playlist-pos", "time-pos", "duration",
+	audioLanguageProperty, subtitleLanguageProperty,
+}
 
 // propertyChangeEvent carries an observed property's new value.
 // clientMessageEvent carries a script-message any client broadcast, which is

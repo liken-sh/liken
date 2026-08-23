@@ -162,7 +162,7 @@ func TestDerivePlayStatus(t *testing.T) {
 			// its own; here it rides along so the table need not
 			// repeat it.
 			one.want.Activity = playActivity(one.want.Phase, one.want.Paused)
-			got := derivePlayStatus(statusTestPlay(), one.player, one.buildErr, one.pod, one.report)
+			got := derivePlayStatus(statusTestPlay(), one.player, one.buildErr, one.pod, one.report, resolvedPreferences{})
 			if !reflect.DeepEqual(got, one.want) {
 				t.Errorf("status = %+v, want %+v", got, one.want)
 			}
@@ -195,11 +195,56 @@ func TestDerivePlayStatusCarriesTheLastPositionForward(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			got := derivePlayStatus(play, player, nil, one.pod, nil)
+			got := derivePlayStatus(play, player, nil, one.pod, nil, resolvedPreferences{})
 			if got.Position != "0:12:30" {
 				t.Errorf("position = %q, want it carried forward as 0:12:30", got.Position)
 			}
 		})
+	}
+}
+
+// The status reports the resolved preferences and the languages mpv chose, the
+// console-parity record of what resolved and what played.
+func TestDerivePlayStatusReportsPreferencesAndChosenTracks(t *testing.T) {
+	player := &Player{Metadata: ObjectMeta{Name: "theater", Namespace: "house"}}
+	prefs := resolvedPreferences{
+		AudioLanguages:    []string{"de"},
+		SubtitleLanguages: []string{"en"},
+		Subtitles:         subtitlesAuto,
+	}
+	report := &playReport{Item: 1, Position: "0:01:00", AudioLanguage: "eng", SubtitleLanguage: "eng"}
+
+	got := derivePlayStatus(statusTestPlay(), player, nil, playbackPod(podRunning), report, prefs)
+
+	if !reflect.DeepEqual(got.AudioLanguages, []string{"de"}) ||
+		!reflect.DeepEqual(got.SubtitleLanguages, []string{"en"}) ||
+		got.Subtitles != subtitlesAuto {
+		t.Errorf("resolved preferences = %+v", got)
+	}
+	// The viewer asked for de audio, and the status shows it fell to eng, so the
+	// cause is visible instead of guessed.
+	if got.AudioLanguage != "eng" || got.SubtitleLanguage != "eng" {
+		t.Errorf("chosen tracks = audio %q, subtitle %q, want eng and eng",
+			got.AudioLanguage, got.SubtitleLanguage)
+	}
+}
+
+// A pass with no report reads the chosen languages from the Play's own status,
+// so a dropped report does not blank them.
+func TestDerivePlayStatusCarriesTheChosenLanguagesForward(t *testing.T) {
+	player := &Player{Metadata: ObjectMeta{Name: "theater", Namespace: "house"}}
+	play := statusTestPlay()
+	play.Status = PlayStatus{
+		Phase:            phaseRunning,
+		Pod:              "movie-playback",
+		AudioLanguage:    "jpn",
+		SubtitleLanguage: "eng",
+	}
+
+	got := derivePlayStatus(play, player, nil, playbackPod(podRunning), nil, resolvedPreferences{})
+	if got.AudioLanguage != "jpn" || got.SubtitleLanguage != "eng" {
+		t.Errorf("chosen tracks = audio %q, subtitle %q, want them carried forward",
+			got.AudioLanguage, got.SubtitleLanguage)
 	}
 }
 
