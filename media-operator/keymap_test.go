@@ -123,6 +123,48 @@ func TestCompileKeymapRefusesWhatItCannotCompile(t *testing.T) {
 	}
 }
 
+// Each navigation action binds as a word action, with no amount, the
+// way play-pause binds today.
+func TestCompileKeymapAcceptsTheNavigationActions(t *testing.T) {
+	for _, action := range []string{actionUp, actionDown, actionLeft, actionRight, actionSelect, actionBack} {
+		t.Run(action, func(t *testing.T) {
+			keymap := &Keymap{
+				Metadata: ObjectMeta{Name: "pad", Namespace: "house"},
+				Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_SOUTH", Action: action}}},
+			}
+			bindings, err := compileKeymap(keymap)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(bindings) != 1 || bindings[0].Action != action || bindings[0].Amount != 0 {
+				t.Errorf("bindings = %+v, want one %s with no amount", bindings, action)
+			}
+		})
+	}
+}
+
+// A navigation action takes no amount, so a Keymap that gives one fails
+// the compile the way any word action with an amount fails.
+func TestCompileKeymapRefusesAnAmountOnANavigationAction(t *testing.T) {
+	for _, action := range []string{actionUp, actionDown, actionLeft, actionRight, actionSelect, actionBack} {
+		t.Run(action, func(t *testing.T) {
+			keymap := &Keymap{
+				Metadata: ObjectMeta{Name: "pad", Namespace: "house"},
+				Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_SOUTH", Action: action, Amount: 3}}},
+			}
+			_, err := compileKeymap(keymap)
+			if err == nil {
+				t.Fatalf("an amount on %s should fail the compile", action)
+			}
+			for _, word := range []string{"pad", "BTN_SOUTH", action} {
+				if !strings.Contains(err.Error(), word) {
+					t.Errorf("err = %q, want it to name %q", err, word)
+				}
+			}
+		})
+	}
+}
+
 // A remote with a device selector and a keymap, named by a Player.
 func testRemote(name, keymap string) Remote {
 	return Remote{

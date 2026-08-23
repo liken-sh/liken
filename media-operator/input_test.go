@@ -65,6 +65,12 @@ func TestCommandFor(t *testing.T) {
 		{name: "chapter", command: mediaCommand{Action: actionChapter, Amount: -1}, want: []any{"osd-auto", "add", "chapter", -1}},
 		{name: "subtitles", command: mediaCommand{Action: actionSubtitles}, want: []any{"osd-auto", "cycle", "sub"}},
 		{name: "audio", command: mediaCommand{Action: actionAudio}, want: []any{"osd-auto", "cycle", "audio"}},
+		{name: "up", command: mediaCommand{Action: actionUp}, want: []any{"script-message-to", "display", "up"}},
+		{name: "down", command: mediaCommand{Action: actionDown}, want: []any{"script-message-to", "display", "down"}},
+		{name: "left", command: mediaCommand{Action: actionLeft}, want: []any{"script-message-to", "display", "left"}},
+		{name: "right", command: mediaCommand{Action: actionRight}, want: []any{"script-message-to", "display", "right"}},
+		{name: "select", command: mediaCommand{Action: actionSelect}, want: []any{"script-message-to", "display", "select"}},
+		{name: "back", command: mediaCommand{Action: actionBack}, want: []any{"script-message-to", "display", "back"}},
 		{
 			name:    "info",
 			command: mediaCommand{Action: actionInfo},

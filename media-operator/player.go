@@ -29,6 +29,11 @@ var mpvBinary = "mpv"
 // itself when the claim delivered an id.
 const displayAppIDVariable = "DISPLAY_APP_ID"
 
+// The path of the display script directory inside the image, the one mpv loads
+// with --script. It is a variable rather than a constant so a test can point it
+// at a stand-in, the way mpvBinary is.
+var displayScriptDir = "/display"
+
 // runPlayer builds mpv's argument vector and execs mpv, so mpv becomes
 // the container's process. On any failure it writes the reason to
 // stderr and exits nonzero, which the kubelet reads as a pod that
@@ -55,7 +60,10 @@ func runPlayer(items []string) {
 // node that decodes. The PipeWire audio output, because Wayland
 // carries no audio and the sink claim delivers that socket. The IPC
 // server stays because the command sidecar drives that same socket to
-// run each named command and read the report. The window's app-id routes
+// run each named command and read the report. The display script directory
+// loads with --script, and the command sidecar drives it over that same IPC
+// socket. --osc=no turns off mpv's built-in on-screen controller,
+// because the display draws its own. The window's app-id routes
 // it to the allocated output when the display claim delivered one.
 //
 // The list ends with -- because a media path that starts with a dash
@@ -83,6 +91,8 @@ func playerArgv(items []string) ([]string, error) {
 		"--fullscreen",
 		"--ao=pipewire",
 		"--input-ipc-server=" + mpvSocketPath,
+		"--script=" + displayScriptDir,
+		"--osc=no",
 	}
 	if applicationID := os.Getenv(displayAppIDVariable); applicationID != "" {
 		argv = append(argv, "--wayland-app-id="+applicationID)

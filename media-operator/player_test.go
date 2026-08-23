@@ -9,6 +9,7 @@ import (
 func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 	mpv := useMPV(t)
 	useSocket(t, "/tmp/test-mpv.sock")
+	useScriptDir(t, "/test-display")
 
 	cases := []struct {
 		name          string
@@ -23,6 +24,8 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 			want: []string{
 				"--vo=gpu", "--gpu-context=wayland", "--hwdec=vaapi", "--fullscreen",
 				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
+				"--script=/test-display",
+				"--osc=no",
 				"--", "/media/0/film.mkv",
 			},
 		},
@@ -33,6 +36,8 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 			want: []string{
 				"--vo=gpu", "--gpu-context=wayland", "--hwdec=vaapi", "--fullscreen",
 				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
+				"--script=/test-display",
+				"--osc=no",
 				"--wayland-app-id=display-0",
 				"--", "https://media.example.net/one.mkv", "/media/0/two.mkv",
 			},
@@ -46,6 +51,8 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 			want: []string{
 				"--vo=gpu", "--gpu-context=wayland", "--hwdec=vaapi", "--fullscreen",
 				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
+				"--script=/test-display",
+				"--osc=no",
 				"--start=0:10:00",
 				"--", "/media/0/film.mkv",
 			},
@@ -95,4 +102,13 @@ func useSocket(t *testing.T, path string) {
 	was := mpvSocketPath
 	t.Cleanup(func() { mpvSocketPath = was })
 	mpvSocketPath = path
+}
+
+// useScriptDir moves the display script directory for the length of one
+// test, so the shim writes the --script flag the test expects.
+func useScriptDir(t *testing.T, path string) {
+	t.Helper()
+	was := displayScriptDir
+	t.Cleanup(func() { displayScriptDir = was })
+	displayScriptDir = path
 }

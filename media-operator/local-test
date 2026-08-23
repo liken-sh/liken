@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# local-test opens the liken display over a film on this workstation, so the
+# scrubber and its key bindings can be seen and felt without a cluster. It
+# loads the same display script the player runs, and binds the keyboard to
+# the navigation actions the command bus carries, so a key press drives the
+# display by the path a remote does.
+#
+# It needs a media file, named on the command line. The repository names no
+# media of its own.
+set -euo pipefail
+
+if [ "$#" -lt 1 ]; then
+  echo "usage: local-test <media-file> [start-seconds]" >&2
+  exit 2
+fi
+film="$1"
+start="${2:-0}"
+
+# The display script sits beside this file, so its path resolves from this
+# script's own directory and needs no absolute path.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+display_dir="$here/display"
+
+# These bindings send the same script messages the translator sidecar
+# publishes, so the keyboard and a controller drive the display alike. The
+# arrows repeat on hold, so a held key accelerates the seek the way a held
+# remote button does. The bindings live in a temporary file, because they
+# belong to the test and not to the player image.
+conf="$(mktemp)"
+trap 'rm -f "$conf"' EXIT
+cat >"$conf" <<'BINDINGS'
+LEFT  repeatable script-message-to display left
+RIGHT repeatable script-message-to display right
+UP    repeatable script-message-to display up
+DOWN  repeatable script-message-to display down
+ENTER script-message-to display select
+ESC   script-message-to display back
+SPACE cycle pause
+q quit
+BINDINGS
+
+# --load-scripts=no skips the workstation's own mpv scripts, so a personal
+# on-screen controller does not draw over the display. --osc=no turns off
+# mpv's built-in controller for the same reason. The workstation's mpv.conf
+# still chooses the video output that renders here.
+mpv --load-scripts=no --osc=no --pause --start="$start" \
+  --script="$display_dir" --input-conf="$conf" -- "$film"

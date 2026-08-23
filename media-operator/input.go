@@ -33,6 +33,16 @@ const (
 	actionAudio      = "audio"
 	actionInfo       = "info"
 	actionCycleFocus = "cycle-focus"
+
+	// The navigation actions, named for what a person means, so a different
+	// player program can implement them later. A Keymap binds buttons to them
+	// the way it binds play-pause.
+	actionUp     = "up"
+	actionDown   = "down"
+	actionLeft   = "left"
+	actionRight  = "right"
+	actionSelect = "select"
+	actionBack   = "back"
 )
 
 // amountActions are the actions that move by an amount: seconds for
@@ -52,6 +62,12 @@ var wordActions = map[string]bool{
 	actionAudio:      true,
 	actionInfo:       true,
 	actionCycleFocus: true,
+	actionUp:         true,
+	actionDown:       true,
+	actionLeft:       true,
+	actionRight:      true,
+	actionSelect:     true,
+	actionBack:       true,
 }
 
 // A compiledBinding is one row of the table a translator matches events
@@ -165,6 +181,10 @@ func matchBinding(bindings []compiledBinding, event inputEvent) (compiledBinding
 	return compiledBinding{}, false
 }
 
+// The mpv client name the display script registers under. It is the target of
+// every script-message-to that carries a navigation action to the display.
+const displayClientName = "display"
+
 // commandFor is where the action vocabulary becomes mpv's words, and the
 // only place in the system that holds both. The osd-auto prefix makes
 // mpv show each command on the screen, which is the viewer's proof the
@@ -189,6 +209,11 @@ func commandFor(command mediaCommand) []any {
 		return []any{"osd-auto", "cycle", "audio"}
 	case actionInfo:
 		return []any{"expand-properties", "show-text", "${filename}\n${time-pos} / ${duration}", 4000}
+	case actionUp, actionDown, actionLeft, actionRight, actionSelect, actionBack:
+		// A navigation action reaches the display script over script-message-to,
+		// and the display draws its own feedback, so it carries no osd-auto prefix
+		// and becomes no native mpv command.
+		return []any{"script-message-to", displayClientName, command.Action}
 	}
 	return nil
 }

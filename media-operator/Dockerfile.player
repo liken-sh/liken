@@ -44,6 +44,10 @@ RUN apt-get update \
 
 COPY --from=build /media-operator /media-operator
 
+# mpv treats a directory that holds main.lua as one client and adds it to
+# Lua's package path, so the display script directory copies whole.
+COPY display/ /display/
+
 # The entrypoint is the player shim, and mpv is the container's own
 # process. The display operator writes DISPLAY_APP_ID into the
 # environment at run time, after the pod spec is fixed, so the shim
