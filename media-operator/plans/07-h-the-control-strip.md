@@ -47,7 +47,9 @@ own pace.
 
 A chooser is a vertical list, and a delay is a value on a line, so an offset does
 not fit the list. It captures input as an adjuster instead. left and right nudge
-the delay by a step, select resets it to zero, and back exits.
+the delay by a step, and the nudge applies at once. up resets the delay to zero,
+and down, select, or back closes the adjuster. select does not reset, because a
+reset on the main action is a surprise.
 
 This adds left and right to a capturing widget. A chooser ignores left and right
 today. The focus router passes them to the capturing widget, and the widget uses
@@ -117,8 +119,8 @@ The drill checks each claim:
   track and its offset, and the focused control reads bright.
 * The audio, subtitle, and video choosers switch the track, and the value
   follows. Each menu drops its title and draws a green border.
-* Each offset adjuster nudges its delay, select resets it, and back leaves the
-  strip. The subtitle offset shows only with subtitles.
+* Each offset adjuster nudges its delay with left and right, up resets it, and
+  down closes it. The subtitle offset shows only with subtitles.
 * A file with one video track draws no video group.
 * The top right shows the wall-clock time and the end time, the current time
   bright and the end time dim.

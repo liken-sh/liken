@@ -85,16 +85,19 @@ function offset.new(cfg)
     open = false
   end
 
-  -- left and right nudge the delay by a step. select resets it to zero. back
-  -- closes the adjuster through focus.
+  -- left and right nudge the delay by a step, and the nudge applies at once, so
+  -- there is nothing to confirm. up resets the delay to zero. down and select
+  -- close the adjuster, and back closes it through focus.
   function self.handle(action)
     local v = mp.get_property_number(cfg.prop) or 0
     if action == "left" then
       mp.set_property_number(cfg.prop, clamp(v - STEP))
     elseif action == "right" then
       mp.set_property_number(cfg.prop, clamp(v + STEP))
-    elseif action == "select" then
+    elseif action == "up" then
       mp.set_property_number(cfg.prop, 0)
+    elseif action == "down" or action == "select" then
+      open = false
     end
   end
 
@@ -112,7 +115,7 @@ function offset.new(cfg)
     parts[#parts + 1] = theme.text(X + PAD, top + PAD, cfg.label, theme.type.small, theme.color.muted, 7)
     parts[#parts + 1] = theme.text(X + PAD, top + PAD + 54, fmt_seconds(v), theme.type.title, theme.color.text, 7)
     parts[#parts + 1] =
-      theme.text(X + PAD, top + H - PAD - 20, "left and right nudge, select resets", theme.type.small, theme.color.muted, 7)
+      theme.text(X + PAD, top + H - PAD - 20, "left and right nudge, up resets, down done", theme.type.small, theme.color.muted, 7)
     return table.concat(parts, "\n")
   end
 
