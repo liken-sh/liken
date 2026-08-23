@@ -107,7 +107,7 @@ func buildPod(play *Play, claim *ResourceClaim, resolved resolution, image, busA
 	// order, and the operator reads the translator set back off it to tell
 	// whether a Player reshaped this pod.
 	initContainers := make([]Container, 0, len(remotes)+1)
-	initContainers = append(initContainers, commandSidecar(play, resolved.Logos, resolved.Trickplays, image, busAddress, topicBase))
+	initContainers = append(initContainers, commandSidecar(play, resolved.Logos, resolved.Trickplays, resolved.Mounts, image, busAddress, topicBase))
 	for _, remote := range remotes {
 		initContainers = append(initContainers, translatorSidecar(play, image, busAddress, topicBase, remote))
 	}
@@ -165,7 +165,7 @@ func mpvPreferenceOptions(prefs resolvedPreferences) []string {
 // subscribes to the Play's commands topic, drives mpv through the shared
 // socket, and publishes the Play's status. It mounts the IPC volume,
 // because it is the one container besides mpv that reaches the socket.
-func commandSidecar(play *Play, logos, trickplays []string, image, busAddress, topicBase string) Container {
+func commandSidecar(play *Play, logos, trickplays []string, mediaMounts []VolumeMount, image, busAddress, topicBase string) Container {
 	interval := play.Spec.TrickplayInterval
 	if interval == "" {
 		interval = defaultTrickplayInterval
@@ -183,9 +183,11 @@ func commandSidecar(play *Play, logos, trickplays []string, image, busAddress, t
 			{Name: trickplayIntervalVariable, Value: interval},
 		},
 		// The command sidecar reads mpv's socket on the IPC volume and writes
-		// decoded art on the art volume, so it mounts both. mpv reads the art
-		// back through the same art volume.
-		VolumeMounts:  []VolumeMount{ipcMount(), artMount()},
+		// decoded art on the art volume, and mpv reads that art back through the
+		// same art volume. It also holds the player's media mounts, because the
+		// source art, a logo or a trickplay sheet, sits in the film's own folder
+		// and the sidecar opens it from there.
+		VolumeMounts:  append([]VolumeMount{ipcMount(), artMount()}, mediaMounts...),
 		RestartPolicy: sidecarRestartPolicy,
 	}
 }

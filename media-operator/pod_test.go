@@ -225,8 +225,9 @@ func TestBuildPodWithNoRemotesCarriesOnlyTheCommandSidecar(t *testing.T) {
 }
 
 // The command sidecar is the player image in its command mode, holding
-// no device claim, mounting the IPC socket, and carrying the play's
-// identity, the bus, and the base.
+// no device claim, mounting the IPC socket, the art volume, and the same
+// media mounts the player holds so it can open the source art, and
+// carrying the play's identity, the bus, and the base.
 func TestBuildPodRunsOneCommandSidecar(t *testing.T) {
 	pod := testPodWithRemotes(t)
 
@@ -243,7 +244,8 @@ func TestBuildPodRunsOneCommandSidecar(t *testing.T) {
 			{Name: presentationsVariable, Value: "[{}]"},
 			{Name: trickplayIntervalVariable, Value: defaultTrickplayInterval},
 		},
-		VolumeMounts:  []VolumeMount{{Name: "ipc", MountPath: "/ipc"}, {Name: "art", MountPath: "/art"}},
+		VolumeMounts: append([]VolumeMount{{Name: "ipc", MountPath: "/ipc"}, {Name: "art", MountPath: "/art"}},
+			testResolution(t).Mounts...),
 		RestartPolicy: "Always",
 	}
 	if !reflect.DeepEqual(command, want) {
