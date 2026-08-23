@@ -116,7 +116,7 @@ with no logo leaves the overlay removed.
   decode path, but it is a crop from a sprite sheet that tracks the scrub
   cursor. It arrives in 07-e.
 * **The music layout.** `music` stays on `mpv`'s default cover-art framing.
-  The composed music experience is 07-f.
+  The composed music experience is [plan 09](../09-the-music-experience.md).
 
 ## How it will be proved
 

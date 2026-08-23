@@ -22,37 +22,18 @@ is built the way it is, and what it still owes an answer to.
 
 ## Planned
 
-This plan is designed. It keeps its number and moves to
-[`completed/`](completed/) when it is built and drilled. It draws the
-display that the reworked `Remote` from plans 04 through 06 navigates,
-and it is provable on hardware alone.
+These plans are designed. Each keeps its number and moves to
+[`completed/`](completed/) when it is built and drilled.
 
-* [07, The player draws its own display](07-the-player-draws-its-own-display.md).
-  `liken` writes its own on-screen display as one `mpv` script, drawn
-  through `libass` and `overlay-add`. A `Play` gains a `presentation`
-  block that states the media type, a hint, and the art beside the
-  media, and the display renders that declaration and tunes the layout
-  by type. The command bus from plans 04 through 06 navigates it, so a
-  remote or a gamepad drives it. The design is large, so it builds in
-  slices, each usable when it lands:
-    * [07-a, The scrubber a remote summons](07-a-the-scrubber-a-remote-summons.md).
-      The script over `mpv`, the fine scrubber from `mpv`'s properties,
-      the summon, and the navigation actions on the bus.
-    * [07-b, The stack and the choosers](07-b-the-stack-and-the-choosers.md).
-      The vertical focus stack, the chapter scrubber, and the audio and
-      subtitle choosers, all from `mpv`'s properties.
-    * [07-c, The presentation contract](07-c-the-presentation-contract.md).
-      `spec.items` with a `presentation` block, three-tier field
-      resolution, per-item switching, and text tuning by type.
-    * [07-d, Art on screen](07-d-art-on-screen.md). The bridge decodes
-      art to `bgra`, and the display places the `logo`, `clearart`, and
-      `backdrop`.
-    * [07-e, Trickplay on the seekbar](07-e-trickplay-on-the-seekbar.md).
-      The scrub cursor shows a thumbnail cropped from a Jellyfin sprite
-      sheet.
-    * [07-f, The music experience](07-f-the-music-experience.md). The
-      music layout blanks the video and composes the album art, the
-      track list, and the queue.
+* [08, Preferred languages and subtitles](08-preferred-languages.md).
+  `MediaPreferences` states the audio and subtitle languages a viewer
+  wants and whether subtitles show. One cluster resource holds the
+  household default, and a `Player` or a `Play` overrides it. The
+  operator resolves the fields at `Play` start and passes them to `mpv`.
+* [09, The music experience](09-the-music-experience.md). A music
+  `Play` draws a layout `liken` owns, the album art centered with the
+  track list and the queue, in place of the scrubber a film shows. It
+  builds on the display of plan 07.
 
 ## Completed
 
@@ -98,6 +79,15 @@ and it is provable on hardware alone.
   film a press reaches. Two films ran on two monitors from one
   DualSense: the cross paused only the film that held focus, and the
   source button cycled the focus to the other.
+* [07, The player draws its own display](completed/07-the-player-draws-its-own-display.md).
+  Built across slices 07-a through 07-e, 07-g, and 07-h, and proven on
+  the workstation through `media-preview`. The on-hardware drill on
+  `liken-1` runs with the next release. `liken` draws its own on-screen
+  display as one `mpv` script through `libass` and `overlay-add`: a
+  summoned scrubber, a focus stack with chapter and track choosers, a
+  `presentation` block resolved per item, art decoded to `bgra`, a
+  trickplay seekbar, a blurred scrim, and a grouped control strip with a
+  clock. The composed music experience moved to plan 09.
 
 ## Open problems
 

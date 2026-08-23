@@ -1,10 +1,11 @@
 # The music experience
 
-Plan 07-f, the sixth slice of [plan 07](07-the-player-draws-its-own-display.md).
-It draws a music layout `liken` owns: the album art centered, the
-tracks listed, and the queue navigable, in place of the scrubber a film
-shows. When this slice lands, a music `Play` looks like a music player,
-not a film with the picture blanked.
+Plan 09. It draws a music layout `liken` owns: the album art centered,
+the tracks listed, and the queue navigable, in place of the scrubber a
+film shows. It builds on the display of
+[plan 07](completed/07-the-player-draws-its-own-display.md). When this plan
+lands, a music `Play` looks like a music player, not a film with the
+picture blanked.
 
 ## The problem
 

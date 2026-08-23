@@ -106,7 +106,7 @@ tick while it shows.
 * **Stream quality.** `liken` plays the file direct, so there is no bitrate to
   pick.
 * **The music layout.** A music item composes its own controls, and that is
-  plan 07-f.
+  [plan 09](../09-the-music-experience.md).
 
 ## How it will be proved
 

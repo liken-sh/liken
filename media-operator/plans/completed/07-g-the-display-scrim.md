@@ -6,7 +6,7 @@ reads against the same background, and it removes the text outlines the display
 uses today. When this slice lands, the header, the scrubber, and the control
 strip sit on a scrim, and the text is flat.
 
-This slice is built before 07-e and 07-f, out of the plan's number order,
+This slice is built before 07-e, out of the plan's number order,
 because it settles the display's look while the display is small.
 
 ## The problem

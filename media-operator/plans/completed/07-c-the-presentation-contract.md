@@ -94,7 +94,7 @@ is the first use of the multi-item list for navigation.
 * **The art and the trickplay.** The block leaves room for them, and
   they arrive in 07-d and 07-e with the bridge decode.
 * **The music layout.** `music` selects `mpv`'s default cover-art
-  framing for now. The composed music experience is 07-f.
+  framing for now. The composed music experience is [plan 09](../09-the-music-experience.md).
 * **The common-ancestor mount.** The resolver change that art URIs need
   arrives with the art in 07-d.
 

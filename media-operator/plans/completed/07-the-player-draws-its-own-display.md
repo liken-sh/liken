@@ -334,7 +334,7 @@ differs.
 - **music** is deferred. For now `mpv` frames the cover art the file
   carries, as its own video track, and the display draws the title over
   it. A music experience that blanks the video and composes the art,
-  the track list, and the queue is a later phase.
+  the track list, and the queue is [plan 09](../09-the-music-experience.md).
 - **idle**, a `Play` with nothing to show, draws the `backdrop` and a
   clock.
 
@@ -403,9 +403,11 @@ The slices follow those seams:
 * [07-e, Trickplay on the seekbar](07-e-trickplay-on-the-seekbar.md).
   The scrub cursor shows a thumbnail cropped from a Jellyfin sprite
   sheet.
-* [07-f, The music experience](07-f-the-music-experience.md). The music
-  layout blanks the video and composes the album art, the track list,
-  and the queue.
+* [07-g, The display scrim](07-g-the-display-scrim.md). One blurred
+  scrim behind the text, so the display reads over any frame.
+* [07-h, The control strip fills out](07-h-the-control-strip.md). The
+  strip groups each track with its delay offset, drops glyphs for
+  grouped rows, restyles the menus, and adds a clock.
 
 ## Set aside for this plan
 
@@ -424,8 +426,9 @@ The slices follow those seams:
   aside, because its display does not vary by media type or by the art
   beside the media, and the per-type display is the point.
 - **The music experience and image slideshows.** The `music` layout
-  waits for the phase that composes the art itself, and a slideshow and
-  a queue are follow-ons once the single-item layouts are proven.
+  that composes the art itself is [plan 09](../09-the-music-experience.md),
+  and a slideshow and a queue are follow-ons once the single-item layouts
+  are proven.
 
 ## How it will be proved
 
