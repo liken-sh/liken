@@ -80,6 +80,20 @@ type idleCommander struct {
 	statusTopic   string
 	runCtx        context.Context
 
+	// The topic the panel state stands on, and the publish half of the
+	// sidecar's own bus connection.
+	panelTopic string
+	publish    func(topic string, payload []byte, retained bool)
+
+	// The delivered control device. A nil wire is a Player that states
+	// no control device, and every hardware write below is off.
+	wire panelWire
+
+	// The hardware window, clamped to at least the fade, and what the
+	// sidecar writes when it runs out. Zero never darkens the panel.
+	offAfter time.Duration
+	offMode  string
+
 	// remotes maps each remote's events topic to its keymap topic. The
 	// keymap is blank for a remote with none.
 	remotes map[string]string
@@ -104,6 +118,38 @@ type idleCommander struct {
 	// replaced it reads an old generation and does nothing.
 	timer      *time.Timer
 	generation uint64
+	// The second window's timer, armed when the shade comes down and
+	// stopped by every wake.
+	offTimer *time.Timer
+	// The panel state the sidecar last actuated, and the brightness it
+	// read from the panel before it wrote zero.
+	panel          string
+	brightness     uint16
+	brightnessRead bool
+	// One wake ladder runs at a time, and the generation stops a
+	// ladder that a later off window overtook.
+	reviving        bool
+	panelGeneration uint64
+
+	// Every DDC dialogue takes this lock, so a wake ladder and an off
+	// window never interleave their writes on the one wire.
+	panelMu sync.Mutex
+}
+
+// The wake ladder: twenty tries, a second apart, then the sidecar
+// stops and reports the panel unresponsive. The spacing is a variable
+// so a test runs the ladder in milliseconds.
+const panelWakeAttempts = 20
+
+var panelWakeInterval = time.Second
+
+// The brightness a wake writes when the sidecar never read one.
+const defaultPanelBrightness uint16 = 100
+
+// panelReport is the whole of what the sidecar says about the panel.
+// The unit it belongs to is named by the topic, not by the body.
+type panelReport struct {
+	State string `json:"state"`
 }
 
 // runIdleCommand connects to the bus, subscribes to the Player's commands
@@ -123,17 +169,39 @@ func runIdleCommand() {
 	runCtx, stopRun := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stopRun()
 
+	fadeAfter := idleFadeAfter(os.Getenv(idleFadeAfterSecondsVariable))
 	ic := &idleCommander{
 		commandsTopic: commandsTopic,
 		statusTopic:   statusTopic,
 		runCtx:        runCtx,
+		panelTopic:    os.Getenv(idlePanelTopicVariable),
 		remotes: idleRemoteMap(
 			os.Getenv(idleRemoteEventsTopicsVariable),
 			os.Getenv(idleRemoteKeymapTopicsVariable)),
-		fadeAfter: idleFadeAfter(os.Getenv(idleFadeAfterSecondsVariable)),
+		fadeAfter: fadeAfter,
+		offAfter:  idleOffAfter(os.Getenv(idleOffAfterSecondsVariable), fadeAfter),
+		offMode:   idleOffMode(os.Getenv(idleOffModeVariable)),
 		tables:    map[string][]compiledBinding{},
+		panel:     panelOn,
+	}
+	// The delivered wire is the gate. A Player that states no control
+	// device holds no i2c node, so this variable is empty and the
+	// sidecar runs the fade alone. A node that does not open leaves the
+	// fade running as well, because a screen that fades beats a pod
+	// that restarts on a hardware fault.
+	if path := os.Getenv(displayControlBusVariable); path != "" {
+		wire, err := openPanelWire(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "idle-command: open the panel wire %s: %v\n", path, err)
+		} else {
+			defer wire.Close()
+			ic.wire = wire
+		}
 	}
 	bus := newBus(busAddress, idleCommandClientID(commandsTopic), nil, nil, ic.handle)
+	// The panel state publishes on the same connection the sidecar
+	// reads its topics on.
+	ic.publish = bus.Publish
 	// Each subscription is made once. The Bus remembers the filters and
 	// re-sends them on every reconnect, so a broker restart does not need
 	// the sidecar to subscribe again. The status topic is retained, so the
@@ -193,6 +261,32 @@ func idleFadeAfter(value string) time.Duration {
 		return 0
 	}
 	return time.Duration(seconds) * time.Second
+}
+
+// idleOffAfter reads the hardware window the way idleFadeAfter reads
+// the fade, and clamps it to at least the fade, so the panel never
+// goes dark behind a still-lit image. Zero means the panel never goes
+// dark on its own.
+func idleOffAfter(value string, fade time.Duration) time.Duration {
+	seconds, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || seconds <= 0 {
+		return 0
+	}
+	off := time.Duration(seconds) * time.Second
+	if off < fade {
+		return fade
+	}
+	return off
+}
+
+// idleOffMode reads what the window writes. Every value but power,
+// an unset one included, takes the backlight, because a panel at zero
+// backlight still answers DDC and a wake cannot strand.
+func idleOffMode(value string) string {
+	if value == offModePower {
+		return offModePower
+	}
+	return offModeBacklight
 }
 
 // idleCommandClientID builds the sidecar's bus identity from its commands
@@ -278,7 +372,7 @@ func (ic *idleCommander) onStatus(payload []byte) {
 	}
 	ic.rearmLocked()
 	ic.mu.Unlock()
-	ic.sendScript(message)
+	ic.applyShade(message)
 }
 
 // isPressEdge reports whether this event is a control pressed down. The
@@ -325,7 +419,17 @@ func (ic *idleCommander) onRemoteEvent(topic string, payload []byte) {
 	}
 	ic.rearmLocked()
 	ic.mu.Unlock()
+	ic.applyShade(message)
+}
+
+// applyShade sends the fold's script message, pixels first: the shade
+// lift needs no hardware, and a lit panel showing black beats a dark
+// one. Only then does a wake bring the panel up.
+func (ic *idleCommander) applyShade(message string) {
 	ic.sendScript(message)
+	if message == playerWakeMessage {
+		ic.revive()
+	}
 }
 
 // namesBackLocked reports whether this press is the back action on the
@@ -378,10 +482,28 @@ func (ic *idleCommander) rearmLocked() {
 		ic.timer.Stop()
 		ic.timer = nil
 	}
-	if !ic.idle || ic.asleep || ic.fadeAfter <= 0 {
+	if ic.offTimer != nil {
+		ic.offTimer.Stop()
+		ic.offTimer = nil
+	}
+	if !ic.idle {
 		return
 	}
 	generation := ic.generation
+	// The second window runs from the moment the shade came down, so
+	// the two windows measure one quiet stretch. It arms only for a
+	// Player that holds the wire and states a window, and only while
+	// the panel is still lit.
+	if ic.asleep {
+		if ic.wire == nil || ic.offAfter <= 0 || ic.panel != panelOn {
+			return
+		}
+		ic.offTimer = time.AfterFunc(ic.offAfter-ic.fadeAfter, func() { ic.darken(generation) })
+		return
+	}
+	if ic.fadeAfter <= 0 {
+		return
+	}
 	ic.timer = time.AfterFunc(ic.fadeAfter, func() { ic.fade(generation) })
 }
 
@@ -396,8 +518,175 @@ func (ic *idleCommander) fade(generation uint64) {
 	}
 	ic.asleep = true
 	ic.timer = nil
+	// The shade coming down starts the second window.
+	ic.rearmLocked()
 	ic.mu.Unlock()
 	ic.sendScript(playerSleepMessage)
+}
+
+// darken is the off window running out. The backlight mode reads the
+// panel's brightness, remembers it, and writes zero, so the wake puts
+// back what a person set. The power mode writes DPM off, which is
+// deeper, and which some panels never answer DDC from again.
+func (ic *idleCommander) darken(generation uint64) {
+	ic.mu.Lock()
+	if generation != ic.generation || !ic.asleep || ic.wire == nil {
+		ic.mu.Unlock()
+		return
+	}
+	ic.offTimer = nil
+	mode := ic.offMode
+	ic.mu.Unlock()
+
+	ic.panelMu.Lock()
+	defer ic.panelMu.Unlock()
+	// A wake that landed while this waited for the wire owns the
+	// panel, so a screen that is awake again stays lit.
+	if !ic.sleeping() {
+		return
+	}
+	// This window's writes take the panel from here, so a wake ladder
+	// still running from the last one stops.
+	ic.startPanelWrite()
+	if mode == offModePower {
+		ic.setPanel(ic.writePanel(vcpPowerMode, powerModeOff, panelOff))
+		return
+	}
+	if value, err := ic.wire.GetVCP(vcpBrightness); err != nil {
+		fmt.Fprintf(os.Stderr, "idle-command: read the panel brightness: %v\n", err)
+	} else {
+		ic.remember(value)
+	}
+	ic.setPanel(ic.writePanel(vcpBrightness, 0, panelBacklightOff))
+}
+
+// writePanel is one set and the state it leaves the panel in. A write
+// that fails leaves the state Unresponsive and the fault on stderr.
+func (ic *idleCommander) writePanel(code byte, value uint16, state string) string {
+	if err := ic.wire.SetVCP(code, value); err != nil {
+		fmt.Fprintf(os.Stderr, "idle-command: write VCP %#04x: %v\n", code, err)
+		return panelUnresponsive
+	}
+	return state
+}
+
+// revive is the wake's hardware half, run on its own goroutine so the
+// bus reader is never held by a ladder that can run twenty seconds.
+func (ic *idleCommander) revive() {
+	ic.mu.Lock()
+	if ic.wire == nil || ic.panel == panelOn || ic.reviving {
+		ic.mu.Unlock()
+		return
+	}
+	ic.reviving = true
+	generation := ic.panelGeneration
+	code, value := vcpBrightness, ic.rememberedLocked()
+	if ic.offMode == offModePower {
+		code, value = vcpPowerMode, powerModeOn
+	}
+	ic.mu.Unlock()
+	go ic.reviveLadder(generation, code, value)
+}
+
+// reviveLadder is the bounded wake: at most panelWakeAttempts writes,
+// panelWakeInterval apart, then the sidecar stops and reports the
+// panel unresponsive. It ends early when the run ends, and when a
+// later off window took the panel, because that window owns it from
+// there.
+func (ic *idleCommander) reviveLadder(generation uint64, code byte, value uint16) {
+	defer ic.stopReviving()
+	for attempt := range panelWakeAttempts {
+		if attempt > 0 {
+			select {
+			case <-ic.runCtx.Done():
+				return
+			case <-time.After(panelWakeInterval):
+			}
+		}
+		if ic.overtaken(generation) {
+			return
+		}
+		ic.panelMu.Lock()
+		err := ic.wire.SetVCP(code, value)
+		ic.panelMu.Unlock()
+		if err == nil {
+			ic.setPanel(panelOn)
+			return
+		}
+		fmt.Fprintf(os.Stderr, "idle-command: wake the panel: %v\n", err)
+	}
+	ic.setPanel(panelUnresponsive)
+}
+
+// sleeping reports whether the shade is down right now.
+func (ic *idleCommander) sleeping() bool {
+	ic.mu.Lock()
+	defer ic.mu.Unlock()
+	return ic.asleep
+}
+
+// startPanelWrite marks an off window taking the panel, which stops
+// every ladder that started before it.
+func (ic *idleCommander) startPanelWrite() {
+	ic.mu.Lock()
+	ic.panelGeneration++
+	ic.mu.Unlock()
+}
+
+// overtaken reports whether an off window took the panel after this
+// ladder began.
+func (ic *idleCommander) overtaken(generation uint64) bool {
+	ic.mu.Lock()
+	defer ic.mu.Unlock()
+	return generation != ic.panelGeneration
+}
+
+// stopReviving ends the ladder, so the next wake may start one.
+func (ic *idleCommander) stopReviving() {
+	ic.mu.Lock()
+	ic.reviving = false
+	ic.mu.Unlock()
+}
+
+// remember keeps the brightness the panel held before the sidecar
+// wrote zero.
+func (ic *idleCommander) remember(value uint16) {
+	ic.mu.Lock()
+	ic.brightness = value
+	ic.brightnessRead = true
+	ic.mu.Unlock()
+}
+
+// rememberedLocked is the brightness a wake writes back. A panel the
+// sidecar never read comes back at full, because a lit screen is what
+// the person pressed a button for.
+func (ic *idleCommander) rememberedLocked() uint16 {
+	if !ic.brightnessRead {
+		return defaultPanelBrightness
+	}
+	return ic.brightness
+}
+
+// setPanel publishes the panel state, retained on its own topic, so
+// the operator folds the current state into the Player's status the
+// moment it subscribes. An unchanged state publishes nothing.
+func (ic *idleCommander) setPanel(state string) {
+	ic.mu.Lock()
+	if ic.panel == state {
+		ic.mu.Unlock()
+		return
+	}
+	ic.panel = state
+	topic, publish := ic.panelTopic, ic.publish
+	ic.mu.Unlock()
+	if publish == nil || topic == "" {
+		return
+	}
+	payload, err := json.Marshal(panelReport{State: state})
+	if err != nil {
+		return
+	}
+	publish(topic, payload, true)
 }
 
 // sendScript sends one bare script message to the idle display. An

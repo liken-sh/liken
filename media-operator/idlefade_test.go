@@ -114,6 +114,9 @@ func fadingCommander(t *testing.T, fade time.Duration, remotes map[string]string
 		remotes:       remotes,
 		fadeAfter:     fade,
 		tables:        map[string][]compiledBinding{},
+		// The panel is lit when a pod starts, the same state the
+		// sidecar assumes on the metal.
+		panel: panelOn,
 	}
 	t.Cleanup(func() {
 		ic.mu.Lock()

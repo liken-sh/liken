@@ -52,9 +52,8 @@ shows until the operator restarts the film.
 
 The idle pod holds a shared draw device, not the exclusive output
 device. The display-operator publishes a draw device per connector that
-delivers the compositor socket, the app-id, and an optional panel-power
-request, but no mode, and marks it shareable so many clients hold it at
-once. Each `Play` keeps its own output claim, which still owns the mode,
+delivers the compositor socket and the app-id, but no mode, and marks
+it shareable so many clients hold it at once. Each `Play` keeps its own output claim, which still owns the mode,
 so a `Play` sets its own resolution as before. The
 display-operator's
 [plan 07](https://github.com/liken-sh/display-operator/blob/main/plans/07-sharing-the-screen.md)
@@ -70,21 +69,14 @@ policy: how long to hold the panel on after the last activity, and
 whether to sleep after that. The actual panel power reports in `Player`
 status.
 
-The panel follows demand. It is on while any holder asks for it on. A
-`Play` asks for power while it plays. The idle pod asks for power while
-its active window is open, then drops the request so the panel can
-sleep. A power change is a DDC write on the panel and does not restart
-`weston`: the delivery sets the panel controls before it sets the mode,
-and only the mode restarts the compositor (`dra.go:320` sets the
-controls, `dra.go:328` sets the mode). So the request goes on and off
-with no screen blink. The display-operator actuates the panel and counts
-the holders.
-
-How the idle pod raises and drops that request is its own design
-question, and this plan defers it. The open problem
-[How the idle screen asks for power](open-problems/how-the-idle-screen-asks-for-power.md)
-holds it. Until it is answered, the idle screen draws with the panel on,
-and the sleep behavior is a later slice.
+The panel follows the idle screen. The idle pod holds the panel's
+`-control` device, the DDC/CI wire the display-operator publishes for a
+pod that drives the panel itself, and its sidecar writes the panel down
+after a longer quiet window and up on the same events that lift the
+fade. A DDC write does not touch `weston`, so the panel sleeps and
+wakes with no screen blink. [Plan 17](17-the-idle-screen-powers-the-panel.md)
+builds this and records why every shape that moved a power request
+through the Kubernetes API was set aside.
 
 ### The wake signal rides the bus
 
@@ -145,5 +137,6 @@ The build can run in slices:
 * The idle surface content: the clock, the zone, the `Player` name, and
   the now-playing from another room.
 * The power policy on the `Player`, the sleep timer, and the wake on bus
-  activity. This slice waits on the open problem
-  [How the idle screen asks for power](open-problems/how-the-idle-screen-asks-for-power.md).
+  activity. [Plan 16](16-the-idle-screen-goes-dark.md) builds the fade
+  and the timer, and [plan 17](17-the-idle-screen-powers-the-panel.md)
+  builds the panel power.

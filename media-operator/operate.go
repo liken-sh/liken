@@ -105,6 +105,11 @@ type operator struct {
 	// pass that republishes the Player status the idle screen reads.
 	presence *presenceDesk
 
+	// panels is the desk for each unit's panel state, built on the same
+	// wake: a panel that goes dark wakes the pass that writes the
+	// Player status a person reads it from.
+	panels *panelDesk
+
 	// positionWrites stamps when each run last wrote its position, so a
 	// bare position advance writes no more than once per
 	// positionWriteInterval. Only the pass goroutine touches it.
@@ -185,6 +190,7 @@ func operate() {
 	desk := newReports(wake)
 	focusDesk := newFocusDesk(wake)
 	presenceDesk := newPresenceDesk(wake)
+	panels := newPanelDesk(wake)
 	media := &operator{
 		client:                client,
 		image:                 image,
@@ -194,6 +200,7 @@ func operate() {
 		reports:               desk,
 		focus:                 focusDesk,
 		presence:              presenceDesk,
+		panels:                panels,
 		positionWrites:        map[string]time.Time{},
 		keymapPublished:       map[string]string{},
 		playerStatusPublished: map[string]string{},
@@ -220,6 +227,7 @@ func operate() {
 	media.bus.Subscribe(remoteFocusCycleFilter(topicBase))
 	media.bus.Subscribe(remotePresenceFilter(topicBase))
 	media.bus.Subscribe(remoteAvailabilityFilter(topicBase))
+	media.bus.Subscribe(playerPanelFilter(topicBase))
 	go media.bus.Run(context.Background())
 
 	// The first lists do two jobs: they prove the operator can read the
@@ -400,6 +408,19 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 			return
 		}
 		o.presence.setAvailability(controllerKey(namespace, name), string(payload) == availabilityOnline)
+		return
+	}
+	// An empty payload is a cleared retained value and not a live
+	// signal, so the desk holds what it had.
+	if namespace, name, ok := parsePlayerPanelTopic(o.topicBase, topic); ok {
+		if len(payload) == 0 {
+			return
+		}
+		var panel panelReport
+		if err := json.Unmarshal(payload, &panel); err != nil {
+			return
+		}
+		o.panels.setState(playerKey(namespace, name), panel.State)
 		return
 	}
 }
@@ -587,9 +608,16 @@ func (o *operator) reconcileKeymaps() {
 // screen reads a topic and holds no API credentials.
 func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone string, defaultIdle *IdlePolicy) {
 	published := make(map[string]bool, len(players))
+	live := make(map[string]bool, len(players))
 	for index := range players {
 		player := &players[index]
+		key := playerKey(player.Metadata.Namespace, player.Metadata.Name)
+		live[key] = true
 		desired := derivePlayerStatus(player, plays, o.reports)
+		// The panel state is what the idle sidecar actuated, so the
+		// status reports the wire's answer and not what the operator
+		// asked for.
+		desired.Panel = o.panels.stateFor(key)
 		// The status goes out before the re-present, and the order is what
 		// the returning idle screen draws from. The display animates the
 		// return only when it reads the Idle status before the reveal that
@@ -622,6 +650,9 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 				player.Metadata.Namespace, player.Metadata.Name, err)
 		}
 	}
+	// The panel desk shrinks to the Players the cluster still holds,
+	// the way the presence desk shrinks to its Remotes.
+	o.panels.retain(live)
 	// A topic whose Player no longer exists has its retained value cleared
 	// with an empty publish, so a deleted Player leaves no unit on the bus
 	// for a subscriber to draw.

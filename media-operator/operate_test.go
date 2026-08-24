@@ -153,6 +153,7 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		reports:               newReports(wake),
 		focus:                 newFocusDesk(wake),
 		presence:              newPresenceDesk(wake),
+		panels:                newPanelDesk(wake),
 		positionWrites:        map[string]time.Time{},
 		keymapPublished:       map[string]string{},
 		playerStatusPublished: map[string]string{},
@@ -1358,6 +1359,7 @@ func playersOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker
 		bus:                   bus,
 		reports:               newReports(nil),
 		presence:              newPresenceDesk(nil),
+		panels:                newPanelDesk(nil),
 		playerStatusPublished: map[string]string{},
 	}, brokers[0]
 }

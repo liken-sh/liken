@@ -78,7 +78,20 @@ type Player struct {
 type PlayerStatus struct {
 	Activity string `json:"activity,omitempty"`
 	Play     string `json:"play,omitempty"`
+
+	// Panel is the state the idle sidecar last actuated on the unit's
+	// screen, empty until a sidecar reports one.
+	Panel string `json:"panel,omitempty"`
 }
+
+// The four panel states. Each is what the sidecar actuated over the
+// wire, not what a person hopes the glass shows.
+const (
+	panelOn           = "On"
+	panelBacklightOff = "BacklightOff"
+	panelOff          = "Off"
+	panelUnresponsive = "Unresponsive"
+)
 
 // A Player's activity is the coarse state a person scans for: it
 // plays a Play now, a Play is starting on it, or it is free. The
@@ -118,6 +131,12 @@ type PlayerSpec struct {
 	Render  *PlayerDevice  `json:"render,omitempty"`
 	Remotes []PlayerRemote `json:"remotes,omitempty"`
 
+	// Control is the panel's DDC/CI control device, an opt-in. The
+	// idle pod holds it, and its sidecar writes the panel dark and
+	// back up. A panel that refuses DDC/CI publishes no control
+	// device, so the field stays unset there.
+	Control *PlayerDevice `json:"control,omitempty"`
+
 	// The per-Player override of the audio and subtitle language preferences.
 	// A nil list, or an empty Subtitles, means this Player states nothing, so
 	// resolution reads the default MediaPreferences instead.
@@ -139,7 +158,26 @@ type IdlePolicy struct {
 	// fades to black. Zero disables the automatic fade. A pointer,
 	// because zero and absent differ: absent defers to the next tier.
 	FadeAfterSeconds *int64 `json:"fadeAfterSeconds,omitempty"`
+
+	// OffAfterSeconds is the quiet stretch before the panel itself
+	// goes dark. Zero or absent means it never does. A pointer for the
+	// same reason the fade window is one.
+	OffAfterSeconds *int64 `json:"offAfterSeconds,omitempty"`
+
+	// OffMode is what the sidecar writes at the off window, the
+	// backlight to zero or the panel's power mode to off. Empty defers
+	// to the next tier.
+	OffMode string `json:"offMode,omitempty"`
 }
+
+// The two ways the sidecar darkens a panel. The backlight is the
+// state that always answers DDC. Power is deeper, and some panels
+// never answer DDC from it again, so a Player states it only for a
+// panel the drill proved wakes.
+const (
+	offModeBacklight = "backlight"
+	offModePower     = "power"
+)
 
 // One controller the Player owns. Name is the Remote in the same
 // namespace. Keymap is a per-unit override of that Remote's own Keymap:
@@ -510,6 +548,17 @@ type ResourceClaimSpec struct {
 type DeviceClaim struct {
 	Requests []DeviceRequest            `json:"requests,omitempty"`
 	Config   []DeviceClaimConfiguration `json:"config,omitempty"`
+
+	// Constraints tie named requests to one another, so two requests
+	// allocate against the same piece of equipment.
+	Constraints []DeviceConstraint `json:"constraints,omitempty"`
+}
+
+// One constraint: the requests it covers, and the attribute whose
+// value every one of those devices must share.
+type DeviceConstraint struct {
+	Requests       []string `json:"requests,omitempty"`
+	MatchAttribute string   `json:"matchAttribute,omitempty"`
 }
 
 // The request name is the role the pod refers to, and exactly is

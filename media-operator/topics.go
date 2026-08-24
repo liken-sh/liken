@@ -46,6 +46,10 @@ const (
 	remoteAvailabilityKind = "availability"
 )
 
+// The last segment of the players topic that carries the panel
+// state, beside the commands and status topics of the same tree.
+const playerPanelKind = "panel"
+
 // remoteEventsTopic carries one Remote's raw button and axis events.
 // The standing remote pod publishes to it, not retained, because a
 // press is an event and not a state. The keymap stays off this topic,
@@ -217,6 +221,37 @@ func playerCommandsTopic(base, namespace, name string) string {
 // runs.
 func playerStatusTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/status"
+}
+
+// playerPanelTopic carries the panel state one unit's idle sidecar
+// publishes, retained, because the panel is a state and not an event.
+// The sidecar holds no API credentials, so the operator folds this
+// topic into the Player's status.
+func playerPanelTopic(base, namespace, name string) string {
+	return base + "/players/" + namespace + "/" + name + "/" + playerPanelKind
+}
+
+// playerPanelFilter is the operator's one subscription that reaches
+// every unit's panel topic.
+func playerPanelFilter(base string) string {
+	return base + "/players/+/+/" + playerPanelKind
+}
+
+// parsePlayerPanelTopic maps a panel topic back to the Player it
+// names.
+func parsePlayerPanelTopic(base, topic string) (namespace, name string, ok bool) {
+	prefix := base + "/players/"
+	if !strings.HasPrefix(topic, prefix) {
+		return "", "", false
+	}
+	parts := strings.Split(strings.TrimPrefix(topic, prefix), "/")
+	if len(parts) != 3 || parts[2] != playerPanelKind {
+		return "", "", false
+	}
+	if parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }
 
 // keymapTopic carries one Keymap's compiled table. It drops the

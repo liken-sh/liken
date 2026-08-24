@@ -462,3 +462,86 @@ func TestResolveIdleFadeAfterTierWins(t *testing.T) {
 		})
 	}
 }
+
+// offAfter builds an IdlePolicy that states one hardware window.
+func offAfter(seconds int64) *IdlePolicy {
+	return &IdlePolicy{OffAfterSeconds: &seconds}
+}
+
+// The hardware window resolves the Player first and the household
+// default second, and a cluster that states neither keeps the panel
+// lit, because darkening hardware is opt-in twice. Zero is a stated
+// value and not an absent one.
+func TestResolveIdleOffAfterTierWins(t *testing.T) {
+	cases := []struct {
+		name     string
+		player   *IdlePolicy
+		defaults *IdlePolicy
+		want     int64
+	}{
+		{name: "the Player over the default", player: offAfter(120), defaults: offAfter(1800), want: 120},
+		{name: "the default where the Player states none", defaults: offAfter(1800), want: 1800},
+		{name: "the built-in where neither states one", want: defaultOffAfterSeconds},
+		{name: "an empty block on the Player", player: &IdlePolicy{}, defaults: offAfter(1800), want: 1800},
+		{name: "zero on the Player", player: offAfter(0), defaults: offAfter(1800), want: 0},
+		{name: "zero on the default", defaults: offAfter(0), want: 0},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			mustMatch(t, resolveIdle(one.player, one.defaults).OffAfterSeconds, one.want)
+		})
+	}
+}
+
+// The mode resolves the same way, field by field, and an unstated
+// mode takes the backlight, the state that always answers DDC.
+func TestResolveIdleOffModeTierWins(t *testing.T) {
+	cases := []struct {
+		name     string
+		player   *IdlePolicy
+		defaults *IdlePolicy
+		want     string
+	}{
+		{
+			name:     "the Player over the default",
+			player:   &IdlePolicy{OffMode: offModePower},
+			defaults: &IdlePolicy{OffMode: offModeBacklight},
+			want:     offModePower,
+		},
+		{
+			name:     "the default where the Player states none",
+			defaults: &IdlePolicy{OffMode: offModePower},
+			want:     offModePower,
+		},
+		{name: "the built-in where neither states one", want: defaultOffMode},
+		{
+			name:     "an empty mode on the Player",
+			player:   &IdlePolicy{OffMode: ""},
+			defaults: &IdlePolicy{OffMode: offModePower},
+			want:     offModePower,
+		},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			mustMatch(t, resolveIdle(one.player, one.defaults).OffMode, one.want)
+		})
+	}
+}
+
+// Each field resolves on its own, so a Player that states one still
+// inherits the other two from the household.
+func TestResolveIdleSettlesEachFieldOnItsOwn(t *testing.T) {
+	player := &IdlePolicy{OffMode: offModePower}
+	defaults := &IdlePolicy{FadeAfterSeconds: ptr(int64(900)), OffAfterSeconds: ptr(int64(1800))}
+
+	got := resolveIdle(player, defaults)
+
+	mustMatch(t, got.FadeAfterSeconds, int64(900))
+	mustMatch(t, got.OffAfterSeconds, int64(1800))
+	mustMatch(t, got.OffMode, offModePower)
+}
+
+// ptr is one value's address, for a tier that states a number.
+func ptr[T any](value T) *T {
+	return &value
+}

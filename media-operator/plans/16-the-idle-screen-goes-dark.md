@@ -3,9 +3,8 @@
 Plan 16. After a quiet stretch, the idle screen fades to black, and any
 press on the unit's remotes brings it back. This is the software half of
 [plan 09](09-the-idle-screen.md)'s sleep: the pixels go dark and the
-panel stays lit. The hardware half, panel power over the draw device,
-waits on the open problem
-[How the idle screen asks for power](open-problems/how-the-idle-screen-asks-for-power.md).
+panel stays lit. The hardware half is
+[plan 17](17-the-idle-screen-powers-the-panel.md).
 
 ## The problem
 
@@ -102,9 +101,10 @@ fold.
 
 **`offAfterSeconds` in this plan.** The block could carry the hardware
 half's field now, inert. Set aside because the field's meaning depends
-on the open problem's answer, and an API field that actuates nothing
-contradicts how the operators report themselves. The field lands with
-the slice that actuates it.
+on the answer [plan 17](17-the-idle-screen-powers-the-panel.md)
+records, and an API field that actuates nothing contradicts how the
+operators report themselves. The field lands with the slice that
+actuates it.
 
 **Waking on remote presence changes.** A controller that connects is a
 person nearby. Set aside because a controller that disconnects is not,

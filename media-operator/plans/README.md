@@ -44,6 +44,12 @@ These plans are designed. Each keeps its number and moves to
   the unit's remotes brings it back. The policy is `idle.fadeAfterSeconds`
   on the `Player`, defaulted by `MediaPreferences`. The software half of
   plan 09's sleep: the pixels go dark, the panel stays lit.
+* [17, The idle screen powers the panel](17-the-idle-screen-powers-the-panel.md).
+  The hardware half. The idle pod holds the panel's `-control` device
+  and writes DDC/CI itself: backlight to 0 at `idle.offAfterSeconds`,
+  or DPM off where a drill proved the panel wakes, and the panel state
+  reports in `Player` status. Answers the open problem on how the idle
+  screen asks for power.
 
 ## Completed
 
@@ -139,13 +145,6 @@ These plans are designed. Each keeps its number and moves to
 owes an answer to. Those documents have no number, because nobody
 has decided yet what work they become.
 
-* [How the idle screen asks for power](open-problems/how-the-idle-screen-asks-for-power.md).
-  Plan 09's idle pod holds a standing draw claim, but it must raise and
-  drop its panel-power request on a slower clock as a room goes quiet. A
-  small power claim it takes and releases reuses the display-operator's
-  count but churns objects; a desired-power field the display-operator
-  reads stays quiet but couples the two operators. Deferred to its own
-  design.
 * [The player image is still Debian](open-problems/the-player-image-is-still-debian.md).
   The operator image is one binary on `scratch`; the player image is
   a distribution base, because `mpv`'s runtime closure is wide. The

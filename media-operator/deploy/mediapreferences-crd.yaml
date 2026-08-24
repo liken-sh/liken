@@ -98,3 +98,22 @@ spec:
                         Seconds of quiet before an idle screen fades to
                         black. Zero disables the automatic fade; unset,
                         every screen fades after 600.
+                    offAfterSeconds:
+                      type: integer
+                      format: int64
+                      minimum: 0
+                      description: >-
+                        Seconds of quiet before an idle panel goes
+                        dark, at least fadeAfterSeconds. Zero or
+                        unset means panels never go dark on their
+                        own. It acts only on a Player that states a
+                        control device.
+                    offMode:
+                      type: string
+                      enum: [backlight, power]
+                      description: >-
+                        What the off window writes: backlight, the
+                        default, writes the backlight to zero and
+                        always wakes over DDC; power writes DPM
+                        off, which is deeper. State power only for
+                        panels a drill proved wake.

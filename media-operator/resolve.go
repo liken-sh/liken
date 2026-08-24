@@ -217,24 +217,54 @@ func firstStatedList(tiers [][]string) []string {
 // nothing takes: ten minutes of quiet, then the idle screen fades.
 const defaultFadeAfterSeconds int64 = 600
 
+// Darkening hardware is opt-in twice, the control device and the
+// window, so a cluster that states neither keeps the panel lit.
+const defaultOffAfterSeconds int64 = 0
+
+// The built-in mode is the backlight, because a panel at zero
+// backlight still answers DDC and a wake cannot strand.
+const defaultOffMode = offModeBacklight
+
 // resolvedIdle is one Player's settled idle policy, every field a plain
 // value the idle pod's environment can carry.
 type resolvedIdle struct {
 	FadeAfterSeconds int64
+
+	// The settled hardware window and the mode the sidecar writes.
+	OffAfterSeconds int64
+	OffMode         string
 }
 
 // resolveIdle settles each idle field on its own: the Player's block,
 // then the household default, then the built-in. Field by field, so a
 // Player that states one field still inherits the rest.
 func resolveIdle(player, defaults *IdlePolicy) resolvedIdle {
-	var fade []*int64
+	var fade, off []*int64
+	var mode []string
 	if player != nil {
 		fade = append(fade, player.FadeAfterSeconds)
+		off = append(off, player.OffAfterSeconds)
+		mode = append(mode, player.OffMode)
 	}
 	if defaults != nil {
 		fade = append(fade, defaults.FadeAfterSeconds)
+		off = append(off, defaults.OffAfterSeconds)
+		mode = append(mode, defaults.OffMode)
 	}
-	return resolvedIdle{FadeAfterSeconds: firstStatedSeconds(fade, defaultFadeAfterSeconds)}
+	return resolvedIdle{
+		FadeAfterSeconds: firstStatedSeconds(fade, defaultFadeAfterSeconds),
+		OffAfterSeconds:  firstStatedSeconds(off, defaultOffAfterSeconds),
+		OffMode:          firstStatedIdleMode(mode),
+	}
+}
+
+// firstStatedIdleMode is firstStatedString with the built-in mode as
+// the floor, so an off mode no tier states is the backlight.
+func firstStatedIdleMode(tiers []string) string {
+	if mode := firstStatedString(tiers); mode != "" {
+		return mode
+	}
+	return defaultOffMode
 }
 
 // firstStatedSeconds returns the first value a tier states. A nil
