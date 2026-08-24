@@ -23,6 +23,10 @@ local identity = require("identity")
 local kind = "Idle"
 local connected = true
 
+-- Whether the s key last put the screen to sleep, so the one key plays
+-- the two edges of the fade in turn.
+local asleep = false
+
 local function status_json()
   local names = identity.split_lines(os.getenv("IDLE_PLAYER_COMPONENTS"))
   local components = {}
@@ -50,7 +54,7 @@ end
 -- enable binds the keys. send_status takes the status as a JSON string and
 -- send_revealed takes no argument, so both are the handlers the script messages
 -- call and the preview exercises the same code.
-function preview.enable(send_status, send_revealed)
+function preview.enable(send_status, send_revealed, send_sleep, send_wake)
   local function publish(activity)
     kind = activity
     send_status(status_json())
@@ -72,8 +76,19 @@ function preview.enable(send_status, send_revealed)
     connected = not connected
     send_status(status_json())
   end)
+  -- s plays the two edges of the fade in turn, the quiet window that
+  -- runs out and the press that follows, through the same handlers the
+  -- two script messages call.
+  mp.add_key_binding("s", "liken-preview-sleep", function()
+    asleep = not asleep
+    if asleep then
+      send_sleep()
+    else
+      send_wake()
+    end
+  end)
 
-  mp.msg.info("liken display preview keys: p starting, o playing, i idle, d presence")
+  mp.msg.info("liken display preview keys: p starting, o playing, i idle, d presence, s sleep")
   enabled = true
 end
 
@@ -86,7 +101,7 @@ function preview.draw()
   if not enabled then
     return nil
   end
-  local legend = "p play starts    o playing    i film ends    d presence    q quit"
+  local legend = "p play starts    o playing    i film ends    d presence    s sleep    q quit"
   return theme.text(
     theme.canvas.w - theme.margin.x, theme.canvas.h - theme.margin.y,
     legend, theme.type.tiny, theme.color.muted, 3, theme.alpha.dim

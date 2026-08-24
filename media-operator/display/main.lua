@@ -13,6 +13,7 @@ local identity = require("identity")
 local logo = require("logo")
 local energy = require("energy")
 local activity = require("activity")
+local shade = require("shade")
 local preview = require("preview")
 local utils = require("mp.utils")
 
@@ -62,6 +63,13 @@ local function redraw()
     local legend = preview.draw()
     if legend then
       idle_parts[#idle_parts + 1] = legend
+    end
+    -- The shade draws last, so it covers everything else on the idle
+    -- screen. It returns nil while the screen is awake, so an awake
+    -- screen adds no shape for it.
+    local dark = shade.draw()
+    if dark then
+      idle_parts[#idle_parts + 1] = dark
     end
     overlay.data = table.concat(idle_parts, "\n")
     overlay:update()
@@ -175,6 +183,7 @@ header.set_redraw(request_redraw)
 trickplay.set_redraw(request_redraw)
 energy.set_redraw(request_redraw)
 identity.set_redraw(request_redraw)
+shade.set_redraw(request_redraw)
 
 -- mpv pushes each property once when the script observes it, then on every
 -- change, so the display runs no timer of its own for these values.
@@ -308,9 +317,26 @@ end
 
 mp.register_script_message("revealed", on_revealed)
 
+-- The sidecar sends player-sleep when its quiet window runs out and
+-- player-wake when a press or a starting Play brings the screen back.
+-- The sidecar holds the clock and the bus, so the display only eases
+-- the shade between the two.
+local function on_sleep()
+  shade.on_sleep()
+  request_redraw()
+end
+
+local function on_wake()
+  shade.on_wake()
+  request_redraw()
+end
+
+mp.register_script_message("player-sleep", on_sleep)
+mp.register_script_message("player-wake", on_wake)
+
 -- The preview keys exist only under IDLE_PREVIEW=1, which local-idle sets and
 -- the operator never sets on an idle pod. So a workstation can play each edge of
 -- the bus by hand, and a cluster binds no key at all.
 if os.getenv("IDLE_PREVIEW") == "1" then
-  preview.enable(on_status, on_revealed)
+  preview.enable(on_status, on_revealed, on_sleep, on_wake)
 end

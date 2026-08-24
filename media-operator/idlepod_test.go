@@ -27,6 +27,12 @@ func standingIdlePlayer() *Player {
 	}
 }
 
+// plainIdlePod builds the idle pod of a Player that states no idle
+// policy and owns no remotes, for the tests that are about neither.
+func plainIdlePod(player *Player, claim *ResourceClaim, image, busAddress, topicBase, timeZone string) *Pod {
+	return buildIdlePod(player, claim, image, busAddress, topicBase, timeZone, resolveIdle(nil, nil), nil)
+}
+
 // The claim holds two requests, the draw device on the Player's own
 // screen and the render node, and is owned by the Player. The draw
 // request carries the class from config and the Player's display
@@ -107,7 +113,7 @@ func TestBuildIdleClaimOmitsTheRenderRequestWithoutARenderNode(t *testing.T) {
 func TestBuildIdlePodRunsTheIdleMode(t *testing.T) {
 	player := standingIdlePlayer()
 	claim := buildIdleClaim(player, "display-draw")
-	pod := buildIdlePod(player, claim, testImage, testBusAddress, testTopicBase, "America/New_York")
+	pod := plainIdlePod(player, claim, testImage, testBusAddress, testTopicBase, "America/New_York")
 
 	if pod.Metadata.Name != "theater-idle" {
 		t.Errorf("name = %q, want theater-idle", pod.Metadata.Name)
@@ -170,7 +176,7 @@ func TestBuildIdlePodRunsTheIdleMode(t *testing.T) {
 func TestBuildIdlePodCarriesTheCommandSidecar(t *testing.T) {
 	player := standingIdlePlayer()
 	claim := buildIdleClaim(player, "display-draw")
-	pod := buildIdlePod(player, claim, testImage, testBusAddress, testTopicBase, "America/New_York")
+	pod := plainIdlePod(player, claim, testImage, testBusAddress, testTopicBase, "America/New_York")
 
 	wantVolumes := []Volume{{Name: ipcVolumeName, EmptyDir: &EmptyDirVolumeSource{}}}
 	if !reflect.DeepEqual(pod.Spec.Volumes, wantVolumes) {
@@ -203,9 +209,10 @@ func TestBuildIdlePodCarriesTheCommandSidecar(t *testing.T) {
 		env[entry.Name] = entry.Value
 	}
 	wantEnv := map[string]string{
-		busAddressVariable:          testBusAddress,
-		playerCommandsTopicVariable: playerCommandsTopic(testTopicBase, "house", "theater"),
-		playerStatusTopicVariable:   playerStatusTopic(testTopicBase, "house", "theater"),
+		busAddressVariable:           testBusAddress,
+		playerCommandsTopicVariable:  playerCommandsTopic(testTopicBase, "house", "theater"),
+		playerStatusTopicVariable:    playerStatusTopic(testTopicBase, "house", "theater"),
+		idleFadeAfterSecondsVariable: "600",
 	}
 	if !reflect.DeepEqual(env, wantEnv) {
 		t.Errorf("sidecar env = %+v, want %+v", env, wantEnv)
@@ -217,7 +224,7 @@ func TestBuildIdlePodCarriesTheCommandSidecar(t *testing.T) {
 // depend on the zone.
 func TestBuildIdlePodOmitsTheTimeZoneWhenUnset(t *testing.T) {
 	player := standingIdlePlayer()
-	pod := buildIdlePod(player, buildIdleClaim(player, "display-draw"), testImage, testBusAddress, testTopicBase, "")
+	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"), testImage, testBusAddress, testTopicBase, "")
 
 	env := map[string]string{}
 	for _, entry := range pod.Spec.Containers[0].Env {
@@ -249,7 +256,7 @@ func TestBuildIdlePodCarriesTheIdentity(t *testing.T) {
 			Remotes:     []PlayerRemote{{Name: "pad", DisplayName: "Studio Dualsense Controller"}},
 		},
 	}
-	pod := buildIdlePod(player, buildIdleClaim(player, "display-draw"), testImage, testBusAddress, testTopicBase, "")
+	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"), testImage, testBusAddress, testTopicBase, "")
 
 	env := map[string]string{}
 	for _, entry := range pod.Spec.Containers[0].Env {
@@ -316,7 +323,7 @@ func TestBuildIdlePodOmitsTheComponentsWhenThereAreNone(t *testing.T) {
 	if got := idleComponents(player); len(got) != 0 {
 		t.Fatalf("idleComponents = %+v, want none", got)
 	}
-	pod := buildIdlePod(player, buildIdleClaim(&Player{Spec: PlayerSpec{Display: &PlayerDevice{Class: "display-output"}}}, "display-draw"),
+	pod := plainIdlePod(player, buildIdleClaim(&Player{Spec: PlayerSpec{Display: &PlayerDevice{Class: "display-output"}}}, "display-draw"),
 		testImage, testBusAddress, testTopicBase, "")
 
 	env := map[string]string{}
@@ -339,7 +346,7 @@ func TestReconcileIdleCreatesTheClaimAndThePodOnce(t *testing.T) {
 	media.idleDisplayClass = "display-draw"
 	player := standingIdlePlayer()
 
-	if err := media.reconcileIdle(player, "America/New_York"); err != nil {
+	if err := media.reconcileIdle(player, "America/New_York", nil); err != nil {
 		t.Fatalf("first reconcile: %v", err)
 	}
 
@@ -355,7 +362,7 @@ func TestReconcileIdleCreatesTheClaimAndThePodOnce(t *testing.T) {
 	}
 
 	created := len(cluster.requests)
-	if err := media.reconcileIdle(player, "America/New_York"); err != nil {
+	if err := media.reconcileIdle(player, "America/New_York", nil); err != nil {
 		t.Fatalf("second reconcile: %v", err)
 	}
 	posts := 0
@@ -378,7 +385,7 @@ func TestReconcileIdleBuildsNothingWithoutADisplay(t *testing.T) {
 	player := standingIdlePlayer()
 	player.Spec.Display = nil
 
-	if err := media.reconcileIdle(player, "America/New_York"); err != nil {
+	if err := media.reconcileIdle(player, "America/New_York", nil); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	if len(cluster.claims) != 0 || len(cluster.pods) != 0 {
@@ -393,10 +400,96 @@ func TestReconcileIdleBuildsNothingWhenTheClassIsUnset(t *testing.T) {
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	player := standingIdlePlayer()
 
-	if err := media.reconcileIdle(player, "America/New_York"); err != nil {
+	if err := media.reconcileIdle(player, "America/New_York", nil); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	if len(cluster.claims) != 0 || len(cluster.pods) != 0 {
 		t.Errorf("built claims %v and pods %v, want none", cluster.claims, cluster.pods)
+	}
+}
+
+// The sidecar carries the resolved quiet window and the two remote lists,
+// one per line and aligned by position, so it pairs each controller's
+// presses with the keymap that names them.
+func TestBuildIdlePodCarriesTheFadePolicyAndTheRemotes(t *testing.T) {
+	player := standingIdlePlayer()
+	player.Spec.Remotes = []PlayerRemote{{Name: "sofa"}, {Name: "armchair"}}
+	remotes := []idleRemoteTopics{
+		{Events: remoteEventsTopic(testTopicBase, "house", "sofa"), Keymap: keymapTopic(testTopicBase, "gamepad")},
+		{Events: remoteEventsTopic(testTopicBase, "house", "armchair")},
+	}
+	pod := buildIdlePod(player, buildIdleClaim(player, "display-draw"),
+		testImage, testBusAddress, testTopicBase, "", resolveIdle(fadeAfter(60), nil), remotes)
+
+	env := map[string]string{}
+	for _, entry := range pod.Spec.InitContainers[0].Env {
+		env[entry.Name] = entry.Value
+	}
+	mustMatch(t, env[idleFadeAfterSecondsVariable], "60")
+	mustMatch(t, env[idleRemoteEventsTopicsVariable],
+		"liken/media/remotes/house/sofa/events\nliken/media/remotes/house/armchair/events")
+	mustMatch(t, env[idleRemoteKeymapTopicsVariable], "liken/media/keymaps/gamepad\n")
+}
+
+// A Player that owns no controller sends neither remote list, so its idle
+// screen fades on the window alone and wakes on a Play.
+func TestBuildIdlePodOmitsTheRemoteListsWithoutRemotes(t *testing.T) {
+	player := standingIdlePlayer()
+	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"),
+		testImage, testBusAddress, testTopicBase, "")
+
+	env := map[string]string{}
+	for _, entry := range pod.Spec.InitContainers[0].Env {
+		env[entry.Name] = entry.Value
+	}
+	if _, carried := env[idleRemoteEventsTopicsVariable]; carried {
+		t.Errorf("%s = %q, want none", idleRemoteEventsTopicsVariable, env[idleRemoteEventsTopicsVariable])
+	}
+	if _, carried := env[idleRemoteKeymapTopicsVariable]; carried {
+		t.Errorf("%s = %q, want none", idleRemoteKeymapTopicsVariable, env[idleRemoteKeymapTopicsVariable])
+	}
+}
+
+// The gather reads spec.remotes in spec order and resolves each keymap the
+// way a Play does: the Player entry's own override, or the Remote's base
+// keymap.
+func TestGatherIdleRemotesResolvesEachKeymap(t *testing.T) {
+	cluster := newFakeCluster()
+	cluster.remotes["sofa"] = houseRemote("gamepad")
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	player := standingIdlePlayer()
+	player.Spec.Remotes = []PlayerRemote{{Name: "sofa"}, {Name: "armchair", Keymap: "pad"}}
+
+	remotes := gatherIdleRemotes(media.client, player, testTopicBase)
+
+	want := []idleRemoteTopics{
+		{
+			Events: remoteEventsTopic(testTopicBase, "house", "sofa"),
+			Keymap: keymapTopic(testTopicBase, "gamepad"),
+		},
+		{
+			Events: remoteEventsTopic(testTopicBase, "house", "armchair"),
+			Keymap: keymapTopic(testTopicBase, "pad"),
+		},
+	}
+	if !reflect.DeepEqual(remotes, want) {
+		t.Errorf("remotes = %+v, want %+v", remotes, want)
+	}
+}
+
+// A Remote a Player names that does not exist leaves that controller with
+// no keymap. Its presses still wake the screen, and they name no action, so
+// a missing object dims nothing and breaks nothing.
+func TestGatherIdleRemotesLeavesAMissingRemoteWithoutAKeymap(t *testing.T) {
+	cluster := newFakeCluster()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	player := standingIdlePlayer()
+	player.Spec.Remotes = []PlayerRemote{{Name: "sofa"}}
+
+	remotes := gatherIdleRemotes(media.client, player, testTopicBase)
+
+	want := []idleRemoteTopics{{Events: remoteEventsTopic(testTopicBase, "house", "sofa")}}
+	if !reflect.DeepEqual(remotes, want) {
+		t.Errorf("remotes = %+v, want %+v", remotes, want)
 	}
 }

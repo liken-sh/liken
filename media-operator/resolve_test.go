@@ -432,3 +432,33 @@ func TestResolvePreferencesTimeZoneUnsetWithoutDefaults(t *testing.T) {
 		t.Errorf("timeZone = %q, want empty", got.TimeZone)
 	}
 }
+
+// fadeAfter builds an IdlePolicy that states one fade window.
+func fadeAfter(seconds int64) *IdlePolicy {
+	return &IdlePolicy{FadeAfterSeconds: &seconds}
+}
+
+// The fade window resolves the Player first and the household default
+// second, and a cluster that states neither takes the built-in ten minutes.
+// Zero is a stated value and not an absent one, so a kiosk that must never
+// dim states it and keeps its screen.
+func TestResolveIdleFadeAfterTierWins(t *testing.T) {
+	cases := []struct {
+		name     string
+		player   *IdlePolicy
+		defaults *IdlePolicy
+		want     int64
+	}{
+		{name: "the Player over the default", player: fadeAfter(60), defaults: fadeAfter(900), want: 60},
+		{name: "the default where the Player states none", defaults: fadeAfter(900), want: 900},
+		{name: "the built-in where neither states one", want: defaultFadeAfterSeconds},
+		{name: "an empty block on the Player", player: &IdlePolicy{}, defaults: fadeAfter(900), want: 900},
+		{name: "zero on the Player", player: fadeAfter(0), defaults: fadeAfter(900), want: 0},
+		{name: "zero on the default", defaults: fadeAfter(0), want: 0},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			mustMatch(t, resolveIdle(one.player, one.defaults).FadeAfterSeconds, one.want)
+		})
+	}
+}

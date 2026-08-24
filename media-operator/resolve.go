@@ -213,6 +213,42 @@ func firstStatedList(tiers [][]string) []string {
 	return nil
 }
 
+// defaultFadeAfterSeconds is the fade window a cluster that states
+// nothing takes: ten minutes of quiet, then the idle screen fades.
+const defaultFadeAfterSeconds int64 = 600
+
+// resolvedIdle is one Player's settled idle policy, every field a plain
+// value the idle pod's environment can carry.
+type resolvedIdle struct {
+	FadeAfterSeconds int64
+}
+
+// resolveIdle settles each idle field on its own: the Player's block,
+// then the household default, then the built-in. Field by field, so a
+// Player that states one field still inherits the rest.
+func resolveIdle(player, defaults *IdlePolicy) resolvedIdle {
+	var fade []*int64
+	if player != nil {
+		fade = append(fade, player.FadeAfterSeconds)
+	}
+	if defaults != nil {
+		fade = append(fade, defaults.FadeAfterSeconds)
+	}
+	return resolvedIdle{FadeAfterSeconds: firstStatedSeconds(fade, defaultFadeAfterSeconds)}
+}
+
+// firstStatedSeconds returns the first value a tier states. A nil
+// pointer is unset, and an explicit zero is a statement, so a Player
+// can turn a window off rather than only shorten it.
+func firstStatedSeconds(tiers []*int64, fallback int64) int64 {
+	for _, value := range tiers {
+		if value != nil {
+			return *value
+		}
+	}
+	return fallback
+}
+
 // firstStatedString returns the first value a tier states. Subtitles has no
 // empty enum value, so an empty string is unset.
 func firstStatedString(tiers []string) string {

@@ -17,7 +17,10 @@ package main
 // surface. The two containers share the ipc volume, where mpv serves the
 // socket the sidecar drives.
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // The two containers in the standing idle pod. idleContainer runs mpv in
 // its idle mode and draws the clock; idleCommandContainer is the native
@@ -112,6 +115,51 @@ func idleComponents(player *Player) []string {
 	return components
 }
 
+// idleRemoteTopics is one of the unit's controllers as the idle pod
+// reads it: the topic its presses arrive on, and the topic its
+// compiled keymap stands on. Keymap is empty for a controller with no
+// keymap.
+type idleRemoteTopics struct {
+	Events string
+	Keymap string
+}
+
+// gatherIdleRemotes reads the events and keymap topics of every
+// controller the Player names, in spec order. The keymap name is the
+// Player entry's override, or the Remote's own. A Remote the API does
+// not hold leaves its keymap blank rather than failing the idle pod,
+// so that controller's presses still wake the screen and none of them
+// is back.
+func gatherIdleRemotes(c *Client, player *Player, base string) []idleRemoteTopics {
+	namespace := player.Metadata.Namespace
+	remotes := make([]idleRemoteTopics, 0, len(player.Spec.Remotes))
+	for _, entry := range player.Spec.Remotes {
+		topics := idleRemoteTopics{Events: remoteEventsTopic(base, namespace, entry.Name)}
+		name := entry.Keymap
+		if name == "" {
+			remote, err := GetRemote(c, namespace, entry.Name)
+			if err == nil {
+				name = remote.Spec.Keymap
+			}
+		}
+		if name != "" {
+			topics.Keymap = keymapTopic(base, name)
+		}
+		remotes = append(remotes, topics)
+	}
+	return remotes
+}
+
+// joinIdleRemotes joins one field of every remote with newlines, the
+// same form the parts list travels in.
+func joinIdleRemotes(remotes []idleRemoteTopics, field func(idleRemoteTopics) string) string {
+	values := make([]string, len(remotes))
+	for index, remote := range remotes {
+		values[index] = field(remote)
+	}
+	return strings.Join(values, "\n")
+}
+
 // buildIdleClaim turns one Player into the standing claim for its idle
 // pod: the shared draw device on the Player's own screen, and the render
 // node the idle mpv draws through.
@@ -158,7 +206,10 @@ func buildIdleClaim(player *Player, displayClass string) *ResourceClaim {
 // display seeds the identity block from them before the broker answers, and
 // the first retained status replaces them, so an edit to the Player shows
 // with no pod restart.
-func buildIdlePod(player *Player, claim *ResourceClaim, image, busAddress, topicBase, timeZone string) *Pod {
+func buildIdlePod(
+	player *Player, claim *ResourceClaim, image, busAddress, topicBase, timeZone string,
+	idle resolvedIdle, remotes []idleRemoteTopics,
+) *Pod {
 	container := Container{
 		Name:         idleContainer,
 		Image:        image,
@@ -207,6 +258,28 @@ func buildIdlePod(player *Player, claim *ResourceClaim, image, busAddress, topic
 		VolumeMounts:  []VolumeMount{ipcMount()},
 		RestartPolicy: sidecarRestartPolicy,
 	}
+	// The fade window travels on every pod, because the resolver
+	// settles it for every Player and zero is a policy the sidecar
+	// must read, not infer from an absent variable.
+	sidecar.Env = append(sidecar.Env, EnvVar{
+		Name:  idleFadeAfterSecondsVariable,
+		Value: strconv.FormatInt(idle.FadeAfterSeconds, 10),
+	})
+	// The two remote lists stay index-aligned, so the sidecar pairs
+	// each events topic with the keymap that names its presses. A
+	// Player with no remotes sends neither variable, and the fade then
+	// runs on the timer alone.
+	if len(remotes) > 0 {
+		sidecar.Env = append(sidecar.Env,
+			EnvVar{
+				Name:  idleRemoteEventsTopicsVariable,
+				Value: joinIdleRemotes(remotes, func(r idleRemoteTopics) string { return r.Events }),
+			},
+			EnvVar{
+				Name:  idleRemoteKeymapTopicsVariable,
+				Value: joinIdleRemotes(remotes, func(r idleRemoteTopics) string { return r.Keymap }),
+			})
+	}
 
 	return &Pod{
 		APIVersion: podAPIVersion,
@@ -239,11 +312,13 @@ func buildIdlePod(player *Player, claim *ResourceClaim, image, busAddress, topic
 // the stale object and the next pass creates the replacement. Recreating
 // the idle pod blinks the idle screen once. A release and a spec edit
 // are both deliberate acts, so the pass rolls the pod with no guard.
-func (o *operator) reconcileIdle(player *Player, timeZone string) error {
+func (o *operator) reconcileIdle(player *Player, timeZone string, defaultIdle *IdlePolicy) error {
 	if player.Spec.Display == nil || o.idleDisplayClass == "" {
 		return nil
 	}
 	claim := buildIdleClaim(player, o.idleDisplayClass)
-	pod := buildIdlePod(player, claim, o.image, o.busAddress, o.topicBase, timeZone)
+	idle := resolveIdle(player.Spec.Idle, defaultIdle)
+	remotes := gatherIdleRemotes(o.client, player, o.topicBase)
+	pod := buildIdlePod(player, claim, o.image, o.busAddress, o.topicBase, timeZone, idle, remotes)
 	return o.reconcileStanding(claim, pod)
 }

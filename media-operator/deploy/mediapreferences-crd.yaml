@@ -84,3 +84,17 @@ spec:
                   description: >-
                     The household wall-clock zone as an IANA name, so the
                     display clock shows local time instead of UTC.
+                idle:
+                  type: object
+                  description: >-
+                    The household default idle screen policy, read for
+                    each field a Player states none of its own.
+                  properties:
+                    fadeAfterSeconds:
+                      type: integer
+                      format: int64
+                      minimum: 0
+                      description: >-
+                        Seconds of quiet before an idle screen fades to
+                        black. Zero disables the automatic fade; unset,
+                        every screen fades after 600.

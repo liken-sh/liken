@@ -291,6 +291,20 @@ spec:
                   description: >-
                     A per-Player override of when subtitles show;
                     omit it to inherit the default MediaPreferences.
+                idle:
+                  type: object
+                  description: >-
+                    This unit's idle screen policy. Each field overrides
+                    the default MediaPreferences on its own.
+                  properties:
+                    fadeAfterSeconds:
+                      type: integer
+                      format: int64
+                      minimum: 0
+                      description: >-
+                        Seconds of quiet before the idle screen fades to
+                        black. Zero disables the automatic fade; omit it
+                        to inherit the default MediaPreferences.
             status:
               type: object
               description: >-

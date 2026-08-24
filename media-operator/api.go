@@ -124,6 +124,21 @@ type PlayerSpec struct {
 	AudioLanguages    []string `json:"audioLanguages,omitempty"`
 	SubtitleLanguages []string `json:"subtitleLanguages,omitempty"`
 	Subtitles         string   `json:"subtitles,omitempty"`
+
+	// Idle is this unit's idle screen policy. Resolution reads it field
+	// by field over the default MediaPreferences, so a Player states
+	// only what differs from the household.
+	Idle *IdlePolicy `json:"idle,omitempty"`
+}
+
+// IdlePolicy is what the idle screen does while nothing plays. The same
+// block is the override on a Player and the default on the household's
+// MediaPreferences, so the two tiers resolve field by field.
+type IdlePolicy struct {
+	// FadeAfterSeconds is the quiet stretch before the idle screen
+	// fades to black. Zero disables the automatic fade. A pointer,
+	// because zero and absent differ: absent defers to the next tier.
+	FadeAfterSeconds *int64 `json:"fadeAfterSeconds,omitempty"`
 }
 
 // One controller the Player owns. Name is the Remote in the same
@@ -372,6 +387,10 @@ type MediaPreferencesSpec struct {
 	// per cluster, with no per-Play or per-Player override. The player pod
 	// reads it as TZ, so the display clock shows local time.
 	TimeZone string `json:"timeZone,omitempty"`
+
+	// Idle is the household default idle screen policy, read for each
+	// field a Player's own block leaves unset.
+	Idle *IdlePolicy `json:"idle,omitempty"`
 }
 
 type MediaPreferencesList struct {

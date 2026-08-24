@@ -335,10 +335,14 @@ func (o *operator) pass() {
 		// the default MediaPreferences alone, so the pass resolves it once and
 		// hands it to every Player's idle pod.
 		var zone string
+		// The idle default is read once from the same MediaPreferences,
+		// and each Player's own block overrides it field by field.
+		var defaultIdle *IdlePolicy
 		if defaults != nil {
 			zone = defaults.Spec.TimeZone
+			defaultIdle = defaults.Spec.Idle
 		}
-		o.reconcilePlayers(players.Items, list.Items, zone)
+		o.reconcilePlayers(players.Items, list.Items, zone, defaultIdle)
 		o.reconcileFocus(list.Items, players.Items)
 	}
 	o.reconcileRemotes()
@@ -581,7 +585,7 @@ func (o *operator) reconcileKeymaps() {
 // the same derivation. The API server holds what exists and what is
 // desired, and the bus carries the presentable now, which is why the idle
 // screen reads a topic and holds no API credentials.
-func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone string) {
+func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone string, defaultIdle *IdlePolicy) {
 	published := make(map[string]bool, len(players))
 	for index := range players {
 		player := &players[index]
@@ -613,7 +617,7 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 			fmt.Fprintf(os.Stderr, "writing player %s/%s status: %v\n",
 				player.Metadata.Namespace, player.Metadata.Name, err)
 		}
-		if err := o.reconcileIdle(player, timeZone); err != nil {
+		if err := o.reconcileIdle(player, timeZone, defaultIdle); err != nil {
 			fmt.Fprintf(os.Stderr, "reconciling idle for player %s/%s: %v\n",
 				player.Metadata.Namespace, player.Metadata.Name, err)
 		}

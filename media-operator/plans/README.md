@@ -39,6 +39,11 @@ These plans are designed. Each keeps its number and moves to
   `Play` draws a layout `liken` owns, the album art centered with the
   track list and the queue, in place of the scrubber a film shows. It
   builds on the display of plan 07.
+* [16, The idle screen goes dark](16-the-idle-screen-goes-dark.md).
+  After a quiet stretch the idle screen fades to black, and a press on
+  the unit's remotes brings it back. The policy is `idle.fadeAfterSeconds`
+  on the `Player`, defaulted by `MediaPreferences`. The software half of
+  plan 09's sleep: the pixels go dark, the panel stays lit.
 
 ## Completed
 

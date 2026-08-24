@@ -10,7 +10,7 @@
 # the zone the clock reads. This script sets them from its arguments.
 #
 # On a cluster the bus drives the screen. This script sets IDLE_PREVIEW=1
-# instead, and under that variable the display binds four keys that build the
+# instead, and under that variable the display binds five keys that build the
 # same messages the idle pod's sidecar sends:
 #
 #   p   a Play starts. The mark ramps into motion and the activity line
@@ -19,6 +19,8 @@
 #   i   the Play ends. The idle surface returns in motion and eases to still.
 #   d   the last part connects or disconnects. Its line dims, then pulses
 #       back.
+#   s   the quiet window runs out, then a press follows. The screen fades
+#       to black, and the second press brings it back fast.
 #
 # Usage:
 #   local-idle                          a sample unit, so a first run draws a

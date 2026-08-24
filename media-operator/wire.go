@@ -71,6 +71,17 @@ const (
 	idlePlayerNameVariable       = "IDLE_PLAYER_NAME"
 	idlePlayerComponentsVariable = "IDLE_PLAYER_COMPONENTS"
 
+	// The idle sidecar's fade wiring. The first carries the resolved
+	// quiet window in seconds, where zero means the screen never fades
+	// on its own. The two topic lists are newline-joined and aligned by
+	// position, so each remote's events topic pairs with the keymap
+	// topic that names its presses. A blank keymap line is a remote
+	// with no keymap: its presses still wake the screen, and none of
+	// them is back.
+	idleFadeAfterSecondsVariable   = "IDLE_FADE_AFTER_SECONDS"
+	idleRemoteEventsTopicsVariable = "IDLE_REMOTE_EVENTS_TOPICS"
+	idleRemoteKeymapTopicsVariable = "IDLE_REMOTE_KEYMAP_TOPICS"
+
 	// The command sidecar carries every item's presentation block, baked
 	// into the pod when the operator creates it. The sidecar swaps to the
 	// current item's block as the playlist advances, so no block travels

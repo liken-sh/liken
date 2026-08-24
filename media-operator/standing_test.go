@@ -59,15 +59,20 @@ func TestTemplateHashIgnoresTheAnnotationItStamps(t *testing.T) {
 func TestTemplateHashFollowsThePodSpec(t *testing.T) {
 	player := standingIdlePlayer()
 	claim := buildIdleClaim(player, "display-draw")
-	base, err := templateHash(buildIdlePod(player, claim, testImage, testBusAddress, testTopicBase, "America/New_York").Spec)
+	base, err := templateHash(plainIdlePod(player, claim, testImage, testBusAddress, testTopicBase, "America/New_York").Spec)
 	mustSucceed(t, err)
 
 	cases := []struct {
 		name string
 		pod  *Pod
 	}{
-		{"the image", buildIdlePod(player, claim, testImage+"-next", testBusAddress, testTopicBase, "America/New_York")},
-		{"the timezone", buildIdlePod(player, claim, testImage, testBusAddress, testTopicBase, "Europe/Berlin")},
+		{"the image", plainIdlePod(player, claim, testImage+"-next", testBusAddress, testTopicBase, "America/New_York")},
+		{"the timezone", plainIdlePod(player, claim, testImage, testBusAddress, testTopicBase, "Europe/Berlin")},
+		{"the fade policy", buildIdlePod(player, claim, testImage, testBusAddress, testTopicBase,
+			"America/New_York", resolveIdle(fadeAfter(60), nil), nil)},
+		{"a remote", buildIdlePod(player, claim, testImage, testBusAddress, testTopicBase,
+			"America/New_York", resolveIdle(nil, nil),
+			[]idleRemoteTopics{{Events: remoteEventsTopic(testTopicBase, "house", "sofa")}})},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -248,10 +253,10 @@ func TestReconcileIdleRollsThePodOnAPlayerEdit(t *testing.T) {
 	player := standingIdlePlayer()
 	claim := buildIdleClaim(player, media.idleDisplayClass)
 	seedStanding(t, cluster, claim,
-		buildIdlePod(player, claim, media.image, media.busAddress, media.topicBase, "America/New_York"))
+		plainIdlePod(player, claim, media.image, media.busAddress, media.topicBase, "America/New_York"))
 
 	player.Spec.DisplayName = "Studio Lab"
-	mustSucceed(t, media.reconcileIdle(player, "America/New_York"))
+	mustSucceed(t, media.reconcileIdle(player, "America/New_York", nil))
 
 	if _, stands := cluster.pods["theater-idle"]; stands {
 		t.Errorf("the stale idle pod stands: %v", cluster.requests)
@@ -260,7 +265,7 @@ func TestReconcileIdleRollsThePodOnAPlayerEdit(t *testing.T) {
 		t.Fatalf("the idle claim was deleted with the pod: %v", cluster.requests)
 	}
 
-	mustSucceed(t, media.reconcileIdle(player, "America/New_York"))
+	mustSucceed(t, media.reconcileIdle(player, "America/New_York", nil))
 
 	replacement, stands := cluster.pods["theater-idle"]
 	if !stands {

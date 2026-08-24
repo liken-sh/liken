@@ -1375,7 +1375,7 @@ func TestAPlayEndPublishesTheIdleStatusThenARePresent(t *testing.T) {
 		Status:   PlayerStatus{Activity: playerPlaying, Play: "movie"},
 	}
 
-	media.reconcilePlayers([]Player{player}, nil, "")
+	media.reconcilePlayers([]Player{player}, nil, "", nil)
 
 	status := waitForPublish(t, broker.pubs)
 	mustMatch(t, status.topic, playerStatusTopic(defaultTopicBase, "house", "theater"))
@@ -1417,7 +1417,7 @@ func TestAReportedEndingPublishesTheIdleStatusThenARePresent(t *testing.T) {
 
 	media.handleBusMessage(playStatusTopic(defaultTopicBase, "house", "movie"),
 		[]byte(`{"item":1,"position":"0:20:00","ended":true}`))
-	media.reconcilePlayers([]Player{player}, []Play{play}, "")
+	media.reconcilePlayers([]Player{player}, []Play{play}, "", nil)
 
 	status := waitForPublish(t, broker.pubs)
 	mustMatch(t, status.topic, playerStatusTopic(defaultTopicBase, "house", "theater"))
@@ -1448,7 +1448,7 @@ func TestAnIdlePlayerPublishesNoRePresent(t *testing.T) {
 		Status:   PlayerStatus{Activity: playerIdle},
 	}
 
-	media.reconcilePlayers([]Player{player}, nil, "")
+	media.reconcilePlayers([]Player{player}, nil, "", nil)
 
 	mustPublishNoRePresent(t, broker)
 }
@@ -1468,7 +1468,7 @@ func TestAPlayerStillPlayingPublishesNoRePresent(t *testing.T) {
 		Status:   PlayStatus{Phase: phaseRunning},
 	}
 
-	media.reconcilePlayers([]Player{player}, []Play{play}, "")
+	media.reconcilePlayers([]Player{player}, []Play{play}, "", nil)
 
 	mustPublishNoRePresent(t, broker)
 }
@@ -1482,7 +1482,7 @@ func TestAPassPublishesTheRetainedPlayerStatus(t *testing.T) {
 	player := settledPlayer(housePlayerWithRemote())
 	player.Spec.DisplayName = "Studio Lab"
 
-	media.reconcilePlayers([]Player{player}, nil, "")
+	media.reconcilePlayers([]Player{player}, nil, "", nil)
 
 	published := waitForPublish(t, broker.pubs)
 	mustMatch(t, published.topic, playerStatusTopic(defaultTopicBase, "house", "theater"))
@@ -1503,14 +1503,14 @@ func TestThePlayerStatusRepublishesOnlyOnChange(t *testing.T) {
 	media, broker := playersOperator(t, cluster)
 	player := settledPlayer(housePlayer())
 
-	media.reconcilePlayers([]Player{player}, nil, "")
+	media.reconcilePlayers([]Player{player}, nil, "", nil)
 	waitForPublish(t, broker.pubs)
 
-	media.reconcilePlayers([]Player{player}, nil, "")
+	media.reconcilePlayers([]Player{player}, nil, "", nil)
 	mustPublishNothing(t, broker)
 
 	player.Spec.DisplayName = "Studio Lab"
-	media.reconcilePlayers([]Player{player}, nil, "")
+	media.reconcilePlayers([]Player{player}, nil, "", nil)
 	changed := waitForPublish(t, broker.pubs)
 	mustMatch(t, changed.topic, playerStatusTopic(defaultTopicBase, "house", "theater"))
 }
@@ -1525,7 +1525,7 @@ func TestABusPresenceReachesThePublishedPlayerStatus(t *testing.T) {
 	player := settledPlayer(housePlayerWithRemote())
 
 	media.handleBusMessage(remotePresenceTopic(defaultTopicBase, "house", "sofa"), []byte(`{"connected":true}`))
-	media.reconcilePlayers([]Player{player}, nil, "")
+	media.reconcilePlayers([]Player{player}, nil, "", nil)
 
 	var status playerBusStatus
 	mustSucceed(t, json.Unmarshal(waitForPublish(t, broker.pubs).payload, &status))
@@ -1536,7 +1536,7 @@ func TestABusPresenceReachesThePublishedPlayerStatus(t *testing.T) {
 	// The pod that reported the controller dies, so its Last Will marks the
 	// topic offline and the fold reads the controller as away.
 	media.handleBusMessage(remoteAvailabilityTopic(defaultTopicBase, "house", "sofa"), []byte(availabilityOffline))
-	media.reconcilePlayers([]Player{player}, nil, "")
+	media.reconcilePlayers([]Player{player}, nil, "", nil)
 
 	mustSucceed(t, json.Unmarshal(waitForPublish(t, broker.pubs).payload, &status))
 	remote = status.Components[len(status.Components)-1]
@@ -1550,10 +1550,10 @@ func TestADeletedPlayerClearsItsRetainedStatus(t *testing.T) {
 	cluster := newFakeCluster()
 	media, broker := playersOperator(t, cluster)
 
-	media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, nil, "")
+	media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, nil, "", nil)
 	waitForPublish(t, broker.pubs)
 
-	media.reconcilePlayers(nil, nil, "")
+	media.reconcilePlayers(nil, nil, "", nil)
 
 	cleared := waitForPublish(t, broker.pubs)
 	mustMatch(t, cleared.topic, playerStatusTopic(defaultTopicBase, "house", "theater"))
