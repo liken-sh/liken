@@ -1,6 +1,6 @@
 # The music experience
 
-Plan 09. It draws a music layout `liken` owns: the album art centered,
+Plan 11. It draws a music layout `liken` owns: the album art centered,
 the tracks listed, and the queue navigable, in place of the scrubber a
 film shows. It builds on the display of
 [plan 07](completed/07-the-player-draws-its-own-display.md). When this plan

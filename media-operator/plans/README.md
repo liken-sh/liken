@@ -25,17 +25,17 @@ is built the way it is, and what it still owes an answer to.
 These plans are designed. Each keeps its number and moves to
 [`completed/`](completed/) when it is built and drilled.
 
-* [08, Preferred languages and subtitles](08-preferred-languages.md).
-  `MediaPreferences` states the audio and subtitle languages a viewer
-  wants and whether subtitles show. One cluster resource holds the
-  household default, and a `Player` or a `Play` overrides it. The
-  operator resolves the fields at `Play` start and passes them to `mpv`.
+* [09, The idle screen](09-the-idle-screen.md). A standing per-`Player`
+  pod draws status while no `Play` runs, the clock, the zone, and the
+  now-playing from another room, and yields the screen when a `Play`'s
+  `mpv` draws on top. It holds a shared draw device so each `Play` keeps
+  its own mode and power, and it sleeps the panel through a power request
+  the display-operator counts. It needs the display-operator's
+  [plan 07](https://github.com/liken-sh/display-operator/blob/main/plans/07-sharing-the-screen.md).
 * [10, A native volume indicator](10-a-native-volume-indicator.md).
   `volume` and `mute` move off `mpv`'s built-in text onto a
-  `liken`-drawn readout that fades with the rest of the OSD. It is listed
-  before 09 because it builds first; the number is its identity, not its
-  order.
-* [09, The music experience](09-the-music-experience.md). A music
+  `liken`-drawn readout that fades with the rest of the OSD.
+* [11, The music experience](11-the-music-experience.md). A music
   `Play` draws a layout `liken` owns, the album art centered with the
   track list and the queue, in place of the scrubber a film shows. It
   builds on the display of plan 07.
@@ -92,7 +92,13 @@ These plans are designed. Each keeps its number and moves to
   summoned scrubber, a focus stack with chapter and track choosers, a
   `presentation` block resolved per item, art decoded to `bgra`, a
   trickplay seekbar, a blurred scrim, and a grouped control strip with a
-  clock. The composed music experience moved to plan 09.
+  clock. The composed music experience moved to plan 11.
+* [08, Preferred languages and subtitles](completed/08-preferred-languages.md).
+  Built. The on-hardware drill on `liken-1` runs with the next release.
+  `MediaPreferences` states the audio and subtitle languages a viewer
+  wants and whether subtitles show. One cluster resource holds the
+  household default, and a `Player` or a `Play` overrides it. The
+  operator resolves the fields at `Play` start and passes them to `mpv`.
 
 ## Open problems
 
@@ -100,11 +106,13 @@ These plans are designed. Each keeps its number and moves to
 owes an answer to. Those documents have no number, because nobody
 has decided yet what work they become.
 
-* [The screen is bare between plays](open-problems/the-screen-is-bare-between-plays.md).
-  The display lives in the playback pod and draws only while a `Play`
-  runs, so a `Player` with no `Play` shows a bare screen. A standing idle
-  surface, like the remote reader's standing pod, would draw status
-  between plays and give up the screen when a playback pod is ready.
+* [How the idle screen asks for power](open-problems/how-the-idle-screen-asks-for-power.md).
+  Plan 09's idle pod holds a standing draw claim, but it must raise and
+  drop its panel-power request on a slower clock as a room goes quiet. A
+  small power claim it takes and releases reuses the display-operator's
+  count but churns objects; a desired-power field the display-operator
+  reads stays quiet but couples the two operators. Deferred to its own
+  design.
 * [The player image is still Debian](open-problems/the-player-image-is-still-debian.md).
   The operator image is one binary on `scratch`; the player image is
   a distribution base, because `mpv`'s runtime closure is wide. The

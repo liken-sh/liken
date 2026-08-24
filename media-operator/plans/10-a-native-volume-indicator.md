@@ -4,7 +4,7 @@ Plan 10. It draws a volume readout `liken` owns, in place of `mpv`'s
 built-in text. It builds on the display of
 [plan 07](completed/07-the-player-draws-its-own-display.md) and the OSD
 fade that ships with it. It builds before
-[plan 09](09-the-music-experience.md): the readout is the small piece,
+[plan 11](11-the-music-experience.md): the readout is the small piece,
 and the music layout is the large one.
 
 ## The problem

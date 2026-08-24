@@ -334,7 +334,7 @@ differs.
 - **music** is deferred. For now `mpv` frames the cover art the file
   carries, as its own video track, and the display draws the title over
   it. A music experience that blanks the video and composes the art,
-  the track list, and the queue is [plan 09](../09-the-music-experience.md).
+  the track list, and the queue is [plan 11](../11-the-music-experience.md).
 - **idle**, a `Play` with nothing to show, draws the `backdrop` and a
   clock.
 
@@ -426,7 +426,7 @@ The slices follow those seams:
   aside, because its display does not vary by media type or by the art
   beside the media, and the per-type display is the point.
 - **The music experience and image slideshows.** The `music` layout
-  that composes the art itself is [plan 09](../09-the-music-experience.md),
+  that composes the art itself is [plan 11](../11-the-music-experience.md),
   and a slideshow and a queue are follow-ons once the single-item layouts
   are proven.
 
