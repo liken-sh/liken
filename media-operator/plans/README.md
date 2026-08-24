@@ -44,6 +44,14 @@ These plans are designed. Each keeps its number and moves to
   per `Player`, controller presence from the standing remote pod, and
   the `liken` mark in motion as the loading indicator around a `Play`.
   Nothing restarts to show a change.
+* [13, Standing pods follow the template](13-standing-pods-follow-the-template.md).
+  The idle and reader pods roll on their own when a release or a spec
+  edit changes what the operator would build, through a stamped
+  template hash, the way a `Deployment` detects a stale pod.
+* [14, The sidecar reports the ending](14-the-sidecar-reports-the-ending.md).
+  The command sidecar marks the ending on the play status the moment
+  a film ends, in every path there is, so the idle screen takes over
+  in bus time instead of waiting seconds for the pod to die.
 
 ## Completed
 

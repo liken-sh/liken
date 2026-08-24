@@ -95,6 +95,72 @@ func TestFoldOnAPauseChangeWakes(t *testing.T) {
 	waitForReportWake(t, wake)
 }
 
+// The ending is what a person is watching the screen for, so a report
+// that carries the mark wakes the loop even though the item and the pause
+// stand where they were. The pass it wakes is what turns the idle screen
+// back on.
+func TestFoldOnTheEndingRecordsTheMarkAndWakes(t *testing.T) {
+	desk, wake := reportDesk(t)
+	desk.fold("house", "movie", runningReport())
+	waitForReportWake(t, wake)
+
+	ended := runningReport()
+	ended.Ended = true
+	desk.fold("house", "movie", ended)
+
+	mustMatch(t, desk.endedFor("house", "movie"), true)
+	waitForReportWake(t, wake)
+}
+
+// The sidecar publishes the ending and then goes offline, which drops the
+// report. The mark outlives the drop, because the pod lives on for seconds
+// after the film is over and the unit is idle for every one of them.
+func TestTheEndingOutlivesTheOfflineDrop(t *testing.T) {
+	desk, wake := reportDesk(t)
+	ended := runningReport()
+	ended.Ended = true
+	desk.fold("house", "movie", ended)
+	waitForReportWake(t, wake)
+
+	desk.availability("house", "movie", false)
+
+	if stored := desk.latestFor("house", "movie"); stored != nil {
+		t.Errorf("the offline run's report = %+v, want none", *stored)
+	}
+	mustMatch(t, desk.endedFor("house", "movie"), true)
+}
+
+// A run reports its own ending, so a Play recreated under the same name
+// starts not ended.
+func TestAFreshReportClearsTheEnding(t *testing.T) {
+	desk, _ := reportDesk(t)
+	ended := runningReport()
+	ended.Ended = true
+	desk.fold("house", "movie", ended)
+
+	desk.fold("house", "movie", runningReport())
+
+	mustMatch(t, desk.endedFor("house", "movie"), false)
+}
+
+// The ending goes with the run it belongs to, both when the pass drops a
+// deleted Play and when the reclaim forgets it, so a later Play under the
+// same name does not start life ended.
+func TestTheDeskDropsTheEndingWithTheRun(t *testing.T) {
+	desk, _ := reportDesk(t)
+	ended := runningReport()
+	ended.Ended = true
+	desk.fold("house", "movie", ended)
+	desk.fold("attic", "radio", ended)
+
+	desk.retain(map[string]bool{runKey("attic", "radio"): true})
+	mustMatch(t, desk.endedFor("house", "movie"), false)
+	mustMatch(t, desk.endedFor("attic", "radio"), true)
+
+	desk.forget(runKey("attic", "radio"))
+	mustMatch(t, desk.endedFor("attic", "radio"), false)
+}
+
 func TestTheNewestReportIsTheOneTheDeskHolds(t *testing.T) {
 	desk, wake := reportDesk(t)
 

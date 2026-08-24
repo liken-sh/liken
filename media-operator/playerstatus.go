@@ -17,7 +17,14 @@ import (
 // first; among equals, the earliest name is chosen, so the answer is
 // the same on every pass. A Play in a terminal phase is over and
 // names nothing.
-func derivePlayerStatus(player *Player, plays []Play) PlayerStatus {
+//
+// A Play whose sidecar reported the ending names nothing either, though
+// its pod still runs and its phase still reads Running. The pod takes
+// seconds to terminate, and the film is over for every one of them, so
+// the unit is idle from the mark and the idle screen returns in bus
+// time. The desk is a parameter, so the derivation stays a function of
+// its arguments the way the rest of this operator's derivations are.
+func derivePlayerStatus(player *Player, plays []Play, desk *reports) PlayerStatus {
 	var running, starting string
 	for index := range plays {
 		play := &plays[index]
@@ -25,6 +32,9 @@ func derivePlayerStatus(player *Player, plays []Play) PlayerStatus {
 			continue
 		}
 		if playerName(play) != player.Metadata.Name {
+			continue
+		}
+		if desk.endedFor(play.Metadata.Namespace, play.Metadata.Name) {
 			continue
 		}
 		switch play.Status.Phase {

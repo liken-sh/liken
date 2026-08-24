@@ -8,8 +8,6 @@ package main
 // reads the claim's event nodes and publishes each event to the
 // Remote's events topic.
 
-import "errors"
-
 // The one container in the standing pod. The pod runs a single reader,
 // so its name is the job it does.
 const remoteReaderContainer = "reader"
@@ -29,7 +27,8 @@ func remoteClaimName(remote string) string {
 
 // remoteOwner is the ownerReference that makes deleting the Remote the
 // whole teardown: the garbage collector deletes the claim and the pod
-// the Remote owns, and this operator carries no delete verb.
+// the Remote owns. The operator deletes either one itself only to
+// replace an object that no longer matches the template.
 func remoteOwner(remote *Remote) OwnerReference {
 	return OwnerReference{
 		APIVersion: mediaAPIVersion,
@@ -111,30 +110,18 @@ func buildRemotePod(remote *Remote, claim *ResourceClaim, image, busAddress, top
 }
 
 // reconcileRemote reconciles one Remote into its standing claim and
-// pod, both owned by the Remote. It creates each once and never
-// rebuilds it: a Remote edited later changes the next reconcile's
-// object, not this run's, and the pod holds no state a rebuild would
-// recover.
+// pod, both owned by the Remote.
 //
-// A 409 on either create means another pass, or another copy of this
-// operator, created the object first, which is success.
+// The pair follows the template: an edit to the Remote's device
+// selector, or a release that changes the player image, deletes the
+// stale object and the next pass creates the replacement. The reader
+// pod drops controller input for the few seconds the replacement takes,
+// and it holds no other state a rebuild would have to recover. A guard
+// that held the roll while a person watched a film would trade those
+// seconds for a pod of unpredictable age, so the pass rolls the pod
+// whenever the template changes.
 func (o *operator) reconcileRemote(remote *Remote) error {
 	claim := buildRemoteClaim(remote)
-	if err := ensureClaim(o.client, claim); err != nil {
-		return err
-	}
-
-	namespace, name := remote.Metadata.Namespace, remote.Metadata.Name
-	_, err := GetPod(o.client, namespace, remotePodName(name))
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, ErrNotFound) {
-		return err
-	}
-	_, err = CreatePod(o.client, buildRemotePod(remote, claim, o.image, o.busAddress, o.topicBase))
-	if errors.Is(err, ErrConflict) {
-		return nil
-	}
-	return err
+	pod := buildRemotePod(remote, claim, o.image, o.busAddress, o.topicBase)
+	return o.reconcileStanding(claim, pod)
 }

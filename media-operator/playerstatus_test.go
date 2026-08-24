@@ -23,10 +23,23 @@ func playOn(name, namespace, player, phase string) Play {
 	}
 }
 
+// endedDesk builds a report desk that has taken an ending report for each
+// named run, through the fold the bus handler uses, so a case states the
+// ending the way the sidecar publishes it.
+func endedDesk(runs ...string) *reports {
+	desk := newReports(nil)
+	for _, run := range runs {
+		namespace, name := splitRunKey(run)
+		desk.fold(namespace, name, playReport{Item: 1, Ended: true})
+	}
+	return desk
+}
+
 func TestDerivePlayerStatus(t *testing.T) {
 	cases := []struct {
 		name  string
 		plays []Play
+		ended []string
 		want  PlayerStatus
 	}{
 		{
@@ -83,10 +96,31 @@ func TestDerivePlayerStatus(t *testing.T) {
 			plays: []Play{playOn("movie", "house", "gaming", phaseRunning)},
 			want:  PlayerStatus{Activity: playerIdle},
 		},
+		{
+			name:  "a running play whose sidecar reported the ending leaves the player idle",
+			plays: []Play{playOn("movie", "house", "theater", phaseRunning)},
+			ended: []string{runKey("house", "movie")},
+			want:  PlayerStatus{Activity: playerIdle},
+		},
+		{
+			name:  "a starting play whose sidecar reported the ending counts as neither",
+			plays: []Play{playOn("movie", "house", "theater", phasePending)},
+			ended: []string{runKey("house", "movie")},
+			want:  PlayerStatus{Activity: playerIdle},
+		},
+		{
+			name: "a second play still running keeps the player playing",
+			plays: []Play{
+				playOn("first", "house", "theater", phaseRunning),
+				playOn("second", "house", "theater", phaseRunning),
+			},
+			ended: []string{runKey("house", "first")},
+			want:  PlayerStatus{Activity: playerPlaying, Play: "second"},
+		},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			got := derivePlayerStatus(theater(), one.plays)
+			got := derivePlayerStatus(theater(), one.plays, endedDesk(one.ended...))
 			if !reflect.DeepEqual(got, one.want) {
 				t.Errorf("status = %+v, want %+v", got, one.want)
 			}

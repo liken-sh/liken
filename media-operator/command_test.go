@@ -6,10 +6,13 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -160,6 +163,165 @@ func TestTheSidecarForwardsEmptyForAMissingBlock(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("no presentation reached mpv")
 	}
+}
+
+// The display broadcasts the exit press, and the sidecar publishes the
+// ending before it quits mpv. The order is the whole point of the path, so
+// the test proves it: nothing reads mpv's socket until the publish reaches
+// the broker, and net.Pipe blocks a write nobody reads, so a sidecar that
+// quit first would publish nothing and the wait would fail.
+func TestTheExitPressPublishesTheEndingBeforeTheQuitReachesMpv(t *testing.T) {
+	bus, brokers, connected := startBus(t, 1, nil, nil)
+	waitForConnect(t, connected)
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close() })
+
+	c := &commander{
+		statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
+		bus:         bus,
+		mpv:         client,
+		lastReport:  playReport{Item: 1, Position: "0:20:00"},
+		haveReport:  true,
+	}
+
+	messages := make(chan clientMessage, 1)
+	messages <- clientMessage{Args: []string{exitMessage}}
+	close(messages)
+	go c.serveMessages(messages)
+
+	ending := waitForPublish(t, brokers[0].pubs)
+	mustMatch(t, ending.topic, c.statusTopic)
+	mustMatch(t, ending.retained, true)
+	mustMatch(t, endedReport(t, ending.payload), playReport{Item: 1, Position: "0:20:00", Ended: true})
+
+	mustMatchAll(t, readLines(t, server, 1), []string{`{"command":["quit","0"]}`})
+}
+
+// The two endings the sidecar observes on mpv's socket: mpv reaches the end
+// of the last item and closes it, and the kubelet's SIGTERM ends the run's
+// context. Each publishes the ending with the position the last report
+// carried, before runCommand clears the retained status.
+func TestTheSidecarPublishesTheEndingWhenTheRunEnds(t *testing.T) {
+	cases := []struct {
+		name string
+		end  func(conn net.Conn, stop context.CancelFunc)
+	}{
+		{
+			name: "mpv reaches the end of the last item",
+			end:  func(conn net.Conn, _ context.CancelFunc) { conn.Close() },
+		},
+		{
+			name: "the kubelet sends SIGTERM",
+			end:  func(_ net.Conn, stop context.CancelFunc) { stop() },
+		},
+	}
+
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			useDialDelay(t, time.Millisecond)
+			path := filepath.Join(t.TempDir(), "mpv.sock")
+			useSocket(t, path)
+			listener, err := net.Listen("unix", path)
+			mustSucceed(t, err)
+			t.Cleanup(func() { listener.Close() })
+
+			bus, brokers, connected := startBus(t, 1, nil, nil)
+			waitForConnect(t, connected)
+			c := &commander{
+				statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
+				bus:         bus,
+			}
+
+			ctx, stop := context.WithCancel(context.Background())
+			t.Cleanup(stop)
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				c.report(ctx)
+			}()
+
+			conn, err := listener.Accept()
+			mustSucceed(t, err)
+			t.Cleanup(func() { conn.Close() })
+
+			// The position arrives first, which reports nothing because mpv
+			// has not named an item, and the item arrives second and sends
+			// the one report of this run.
+			writeEvent(t, conn, `{"event":"property-change","name":"time-pos","data":1200.0}`)
+			writeEvent(t, conn, `{"event":"property-change","name":"playlist-pos","data":0}`)
+			running := waitForPublish(t, brokers[0].pubs)
+			mustMatch(t, reportOf(t, running.payload), playReport{Item: 1, Position: "0:20:00"})
+
+			one.end(conn, stop)
+
+			ending := waitForPublish(t, brokers[0].pubs)
+			mustMatch(t, ending.topic, c.statusTopic)
+			mustMatch(t, ending.retained, true)
+			mustMatch(t, endedReport(t, ending.payload), playReport{Item: 1, Position: "0:20:00", Ended: true})
+			<-done
+		})
+	}
+}
+
+// The mark stays set for the rest of the run, so a subscriber that reads
+// any later report reads the same ending.
+func TestEveryReportAfterTheEndingCarriesTheMark(t *testing.T) {
+	bus, brokers, connected := startBus(t, 1, nil, nil)
+	waitForConnect(t, connected)
+	c := &commander{
+		statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
+		bus:         bus,
+		lastReport:  playReport{Item: 1, Position: "0:20:00"},
+		haveReport:  true,
+	}
+
+	c.endRun()
+	waitForPublish(t, brokers[0].pubs)
+	mustSucceed(t, c.send(playReport{Item: 1, Position: "0:20:01"}))
+
+	later := waitForPublish(t, brokers[0].pubs)
+	mustMatch(t, endedReport(t, later.payload), playReport{Item: 1, Position: "0:20:01", Ended: true})
+}
+
+// A run that never reported publishes no ending, the rule the reporter
+// follows: mpv never named an item, so there are no numbers to carry and
+// the pod's own death is what ends such a run.
+func TestARunThatNeverReportedPublishesNoEnding(t *testing.T) {
+	bus, brokers, connected := startBus(t, 1, nil, nil)
+	waitForConnect(t, connected)
+	c := &commander{
+		statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
+		bus:         bus,
+	}
+
+	c.endRun()
+
+	mustPublishNothing(t, brokers[0])
+}
+
+// writeEvent hands mpv's socket one event line, the newline-delimited JSON
+// the reader reads.
+func writeEvent(t *testing.T, conn net.Conn, line string) {
+	t.Helper()
+	_, err := conn.Write([]byte(line + "\n"))
+	mustSucceed(t, err)
+}
+
+// reportOf decodes one published payload as a report.
+func reportOf(t *testing.T, payload []byte) playReport {
+	t.Helper()
+	var report playReport
+	mustSucceed(t, json.Unmarshal(payload, &report))
+	return report
+}
+
+// endedReport decodes a published payload and proves the mark travels as
+// the field it is, so a subscriber reads the ending and not an empty
+// status.
+func endedReport(t *testing.T, payload []byte) playReport {
+	t.Helper()
+	mustMatch(t, bytes.Contains(payload, []byte(`"ended":true`)), true)
+	return reportOf(t, payload)
 }
 
 func TestFormatPosition(t *testing.T) {

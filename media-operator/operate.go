@@ -497,7 +497,7 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 	published := make(map[string]bool, len(players))
 	for index := range players {
 		player := &players[index]
-		desired := derivePlayerStatus(player, plays)
+		desired := derivePlayerStatus(player, plays, o.reports)
 		// The status goes out before the re-present, and the order is what
 		// the returning idle screen draws from. The display animates the
 		// return only when it reads the Idle status before the reveal that

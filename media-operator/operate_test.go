@@ -1180,6 +1180,7 @@ func playersOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker
 		client:                testAPIClient(t, cluster.handler(t)),
 		topicBase:             defaultTopicBase,
 		bus:                   bus,
+		reports:               newReports(nil),
 		presence:              newPresenceDesk(nil),
 		playerStatusPublished: map[string]string{},
 	}, brokers[0]
@@ -1218,6 +1219,46 @@ func TestAPlayEndPublishesTheIdleStatusThenARePresent(t *testing.T) {
 	if command.Action != actionRePresent {
 		t.Errorf("action = %q, want %q", command.Action, actionRePresent)
 	}
+}
+
+// The sidecar's ending reaches the operator on the play status topic, and
+// the pass it wakes reads the unit as idle while the pod still runs and the
+// Play still reads Running. That is the whole point of the mark: the idle
+// status and the re-present go out in bus time, seconds before the pod
+// terminates, so the idle screen draws over the dying film.
+func TestAReportedEndingPublishesTheIdleStatusThenARePresent(t *testing.T) {
+	cluster := newFakeCluster()
+	media, broker := playersOperator(t, cluster)
+	player := Player{
+		Metadata: ObjectMeta{Name: "theater", Namespace: "house"},
+		Status:   PlayerStatus{Activity: playerPlaying, Play: "movie"},
+	}
+	play := Play{
+		Metadata: ObjectMeta{Name: "movie", Namespace: "house"},
+		Spec:     PlaySpec{Players: []string{"theater"}},
+		Status:   PlayStatus{Phase: phaseRunning},
+	}
+
+	media.handleBusMessage(playStatusTopic(defaultTopicBase, "house", "movie"),
+		[]byte(`{"item":1,"position":"0:20:00","ended":true}`))
+	media.reconcilePlayers([]Player{player}, []Play{play}, "")
+
+	status := waitForPublish(t, broker.pubs)
+	mustMatch(t, status.topic, playerStatusTopic(defaultTopicBase, "house", "theater"))
+	var state playerBusStatus
+	mustSucceed(t, json.Unmarshal(status.payload, &state))
+	mustMatch(t, state.Activity, playerIdle)
+	mustMatch(t, state.Play == nil, true)
+
+	published := waitForPublish(t, broker.pubs)
+	mustMatch(t, published.topic, playerCommandsTopic(defaultTopicBase, "house", "theater"))
+	var command mediaCommand
+	mustSucceed(t, json.Unmarshal(published.payload, &command))
+	mustMatch(t, command.Action, actionRePresent)
+
+	// The Play is still what the API server holds it to be, so kubectl
+	// still lists the run for the seconds the pod takes to terminate.
+	mustMatch(t, play.Status.Phase, phaseRunning)
 }
 
 // A Player already idle stays idle across the pass, which is no edge, so

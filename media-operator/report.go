@@ -20,9 +20,16 @@ import (
 // offline. latest drops a run the moment it goes offline, so it cannot
 // answer which runs still have a retained topic on the broker; seen can,
 // and it is how the operator finds a deleted Play's gravestone to clear.
+//
+// ended holds the ending mark of each run that reported one. It is kept
+// beside latest rather than read out of it, because the sidecar publishes
+// the ending and then goes offline, and offline drops the latest report.
+// The mark has to outlive that drop: the pod lives on for seconds after
+// the film is over, and the Player is idle for every one of them.
 type reports struct {
 	mutex  sync.Mutex
 	latest map[string]playReport
+	ended  map[string]bool
 	seen   map[string]bool
 	wake   chan<- struct{}
 }
@@ -30,6 +37,7 @@ type reports struct {
 func newReports(wake chan<- struct{}) *reports {
 	return &reports{
 		latest: map[string]playReport{},
+		ended:  map[string]bool{},
 		seen:   map[string]bool{},
 		wake:   wake,
 	}
@@ -52,21 +60,28 @@ func splitRunKey(key string) (namespace, name string) {
 // fold records the newest report for a run. A report is a whole
 // observation, so the newest one says everything an older one did.
 //
-// A pause or an item change is what a person waits to see, so it wakes
-// the loop at once. A position that only advances updates the desk and
+// The ending, a pause, or an item change is what a person waits to see,
+// so each wakes the loop at once. The ending is the one a person is
+// looking at the screen for: the pass it wakes is what turns the idle
+// screen back on. A position that only advances updates the desk and
 // wakes nothing: the reconcile pass reads the current position off the
 // desk on its next backstop tick, so a steadily playing film writes its
 // resource on that interval and not on every report. This is the
 // throttle that keeps a one-second bus cadence from becoming a
 // one-second write to etcd.
+//
+// The mark follows the report rather than latching, so a Play recreated
+// under the same name reports a run of its own and starts not ended.
 func (r *reports) fold(namespace, name string, report playReport) {
 	key := runKey(namespace, name)
 	r.mutex.Lock()
 	previous, had := r.latest[key]
 	r.latest[key] = report
+	r.ended[key] = report.Ended
 	r.seen[key] = true
 	r.mutex.Unlock()
-	if !had || report.Paused != previous.Paused || report.Item != previous.Item {
+	if !had || report.Ended != previous.Ended ||
+		report.Paused != previous.Paused || report.Item != previous.Item {
 		poke(r.wake)
 	}
 }
@@ -101,6 +116,16 @@ func (r *reports) latestFor(namespace, name string) *playReport {
 	return &report
 }
 
+// endedFor reports whether the run's sidecar has said the run is over.
+// The Play and its pod still exist while this is true, and the Play's
+// phase still reads from the pod; only the Player's presentable state
+// reads the mark.
+func (r *reports) endedFor(namespace, name string) bool {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	return r.ended[runKey(namespace, name)]
+}
+
 // retain drops the latest report of a deleted Play. The pass hands over
 // the set of runs that still exist, and the map shrinks to match, so the
 // desk never serves a report for a run the collection no longer holds.
@@ -112,6 +137,14 @@ func (r *reports) retain(live map[string]bool) {
 	for key := range r.latest {
 		if !live[key] {
 			delete(r.latest, key)
+		}
+	}
+	// The ending mark goes with the report it came on. A Play that no
+	// longer exists names nothing, and a Play later created under the same
+	// name must not start life ended.
+	for key := range r.ended {
+		if !live[key] {
+			delete(r.ended, key)
 		}
 	}
 }
@@ -137,6 +170,7 @@ func (r *reports) stale(live map[string]bool) []string {
 func (r *reports) forget(key string) {
 	r.mutex.Lock()
 	delete(r.latest, key)
+	delete(r.ended, key)
 	delete(r.seen, key)
 	r.mutex.Unlock()
 }

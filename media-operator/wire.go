@@ -30,6 +30,14 @@ type playReport struct {
 	// from current-tracks. Empty when none plays.
 	AudioLanguage    string `json:"audioLanguage,omitempty"`
 	SubtitleLanguage string `json:"subtitleLanguage,omitempty"`
+
+	// Ended says the run is over. The sidecar sets it in each of the three
+	// endings, and it stays set in every later report of the same run. The
+	// pod takes seconds to terminate, so an ending read from the pod alone
+	// would leave a dead film on the screen for those seconds; the operator
+	// reads this mark and reveals the idle screen in bus time. The mark says
+	// nothing about the Play's phase, which keeps deriving from the pod.
+	Ended bool `json:"ended,omitempty"`
 }
 
 // Environment variable names the operator sets on the pods it creates.

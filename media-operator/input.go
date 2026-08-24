@@ -225,6 +225,27 @@ const (
 	artKindTrickplay  = "trickplay"
 )
 
+// exitMessage is the script-message the display broadcasts when a person
+// presses back at the bare video. The command sidecar answers it: it
+// publishes the ending to the bus and then quits mpv. The display does not
+// quit mpv itself, because the ending must reach the bus before mpv starts
+// to tear down the film's surface.
+const exitMessage = "liken-exit"
+
+// isExitMessage reads a client-message as the display's exit press. The
+// first argument names the request, the same shape an art request takes,
+// so another script's broadcast is not an ending.
+func isExitMessage(args []string) bool {
+	return len(args) > 0 && args[0] == exitMessage
+}
+
+// exitCommand is mpv's own word for the ending. The exit code is zero, so
+// the pod ends Completed, the outcome a film that ran to its end gives,
+// and not Error.
+func exitCommand() []any {
+	return []any{"quit", "0"}
+}
+
 // The interval one trickplay tile covers, used when a Play sets no
 // trickplayInterval. Jellyfin generates the sheets at this spacing by
 // default, and the library keeps that default.

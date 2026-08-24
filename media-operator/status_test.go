@@ -149,6 +149,22 @@ func TestDerivePlayStatus(t *testing.T) {
 			Message: "the playback pod failed: the node was drained",
 		},
 	}, {
+		// The Play's phase reads from the pod alone. A mark folded into
+		// the phase would make the API say a pod is gone while it exists,
+		// so kubectl keeps listing the Play for the seconds the pod takes
+		// to terminate. Only the Player's presentable state reads the mark.
+		name:   "a report that carries the ending leaves the phase Running",
+		player: player,
+		pod:    playbackPod(podRunning),
+		report: &playReport{Item: 2, Position: "0:12:30", Duration: "1:45:00", Ended: true},
+		want: PlayStatus{
+			Phase:    phaseRunning,
+			Pod:      "movie-playback",
+			Item:     2,
+			Position: "0:12:30",
+			Duration: "1:45:00",
+		},
+	}, {
 		name:   "a pod phase this operator does not map is Pending",
 		player: player,
 		pod:    playbackPod("Unknown"),

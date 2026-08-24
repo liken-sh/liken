@@ -17,10 +17,7 @@ package main
 // surface. The two containers share the ipc volume, where mpv serves the
 // socket the sidecar drives.
 
-import (
-	"errors"
-	"strings"
-)
+import "strings"
 
 // The two containers in the standing idle pod. idleContainer runs mpv in
 // its idle mode and draws the clock; idleCommandContainer is the native
@@ -52,8 +49,8 @@ func idleClaimName(player string) string {
 
 // playerOwner is the ownerReference that makes deleting the Player the
 // whole teardown: the garbage collector deletes the idle claim and the
-// idle pod the Player owns, and this operator carries no delete verb for
-// them.
+// idle pod the Player owns. The operator deletes either one itself only
+// to replace an object that no longer matches the template.
 func playerOwner(player *Player) OwnerReference {
 	return OwnerReference{
 		APIVersion: mediaAPIVersion,
@@ -235,32 +232,18 @@ func buildIdlePod(player *Player, claim *ResourceClaim, image, busAddress, topic
 // reconcileIdle reconciles one Player into its standing idle claim and
 // pod, both owned by the Player. It builds nothing when the Player drives
 // no screen or when the cluster names no display-draw class, which is how
-// a cluster turns the idle screen off. It creates each object once and
-// never rebuilds it, the way the standing remote pod reconciles: a Player
-// edited later changes the next reconcile's object, not this run's.
+// a cluster turns the idle screen off.
 //
-// A 409 on either create means another pass, or another copy of this
-// operator, created the object first, which is success.
+// The pair follows the template, the way the standing remote pod does: an
+// edit to the Player, or a release that changes the player image, deletes
+// the stale object and the next pass creates the replacement. Recreating
+// the idle pod blinks the idle screen once. A release and a spec edit
+// are both deliberate acts, so the pass rolls the pod with no guard.
 func (o *operator) reconcileIdle(player *Player, timeZone string) error {
 	if player.Spec.Display == nil || o.idleDisplayClass == "" {
 		return nil
 	}
 	claim := buildIdleClaim(player, o.idleDisplayClass)
-	if err := ensureClaim(o.client, claim); err != nil {
-		return err
-	}
-
-	namespace, name := player.Metadata.Namespace, player.Metadata.Name
-	_, err := GetPod(o.client, namespace, idlePodName(name))
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, ErrNotFound) {
-		return err
-	}
-	_, err = CreatePod(o.client, buildIdlePod(player, claim, o.image, o.busAddress, o.topicBase, timeZone))
-	if errors.Is(err, ErrConflict) {
-		return nil
-	}
-	return err
+	pod := buildIdlePod(player, claim, o.image, o.busAddress, o.topicBase, timeZone)
+	return o.reconcileStanding(claim, pod)
 }

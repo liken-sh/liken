@@ -73,8 +73,15 @@ type commander struct {
 	mpv      net.Conn
 
 	reportMutex sync.Mutex
-	lastReport  []byte
+	lastReport  playReport
 	haveReport  bool
+
+	// ended is set once any of the three endings has happened. It is held
+	// rather than sent and forgotten, so every later report of this run
+	// carries the mark too and a reconnect re-publishes it. It sits under
+	// reportMutex because the ending arrives on the message goroutine or
+	// on the run's own goroutine, and the reporter reads it on each send.
+	ended bool
 
 	// Where the bridge writes decoded bgra. It is the shared art volume in the
 	// pod, and a local directory under the harness.
@@ -153,9 +160,11 @@ func runCommand() {
 	cmd.report(runCtx)
 
 	// The run is over: mpv ended or the kubelet is terminating the pod.
-	// Clear the retained status so a finished Play leaves no report that
-	// reads as still playing, mark the availability offline, and hold
-	// the bus open long enough to send both before the connection ends.
+	// report published the ending report first, so a subscriber that is
+	// listening has already read the mark. Clear the retained status so a
+	// finished Play leaves no report that reads as still playing, mark the
+	// availability offline, and hold the bus open long enough to send both
+	// before the connection ends.
 	cmd.bus.Publish(cmd.statusTopic, nil, true)
 	cmd.bus.Publish(cmd.availabilityTopic, []byte(availabilityOffline), true)
 	time.Sleep(busFlushGrace)
@@ -169,11 +178,28 @@ func runCommand() {
 func (c *commander) onConnect(bus *Bus) {
 	bus.Publish(c.availabilityTopic, []byte(availabilityOnline), true)
 	c.reportMutex.Lock()
-	payload, have := c.lastReport, c.haveReport
+	payload, have := c.marshalLastReport()
 	c.reportMutex.Unlock()
 	if have {
 		bus.Publish(c.statusTopic, payload, true)
 	}
+}
+
+// marshalLastReport encodes the last-known report, and reports whether
+// there is one. The caller holds reportMutex, so the payload and the
+// state it came from cannot diverge. A report that will not marshal is
+// logged and treated as no report at all, because there is nothing to put
+// on the bus in its place.
+func (c *commander) marshalLastReport() ([]byte, bool) {
+	if !c.haveReport {
+		return nil, false
+	}
+	payload, err := json.Marshal(c.lastReport)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "command: report: %v\n", err)
+		return nil, false
+	}
+	return payload, true
 }
 
 // handle turns one commands message into an mpv command. The topic is
@@ -218,6 +244,13 @@ func (c *commander) report(ctx context.Context) {
 	defer context.AfterFunc(ctx, func() { conn.Close() })()
 
 	c.drive(ctx, conn, c.send)
+
+	// drive returns for one of two reasons, and each is an ending: mpv
+	// reached the end of the last item and closed its socket, or the
+	// kubelet's SIGTERM ended the context. So the mark goes out here, with
+	// the position the last report carried, before runCommand clears the
+	// retained status and marks the pod offline.
+	c.endRun()
 }
 
 // drive is the socket loop the reporter and the standalone art server share.
@@ -249,20 +282,24 @@ func (c *commander) drive(ctx context.Context, conn net.Conn, send reportSender)
 		}
 	}()
 
-	// The art goroutine answers the display's logo requests off the same
-	// socket the reporter reads. It ends when the socket closes and the reader
-	// closes the messages channel.
-	go c.serveArtMessages(messages)
+	// The message goroutine answers the display's exit press and its logo
+	// requests off the same socket the reporter reads. It ends when the
+	// socket closes and the reader closes the messages channel.
+	go c.serveMessages(messages)
 
 	runReporter(ctx, changes, send, c.present)
 	<-reading
 }
 
-// serveArtMessages decodes each logo the display asks for, beside the
-// reporter, so a slow decode or a network fetch never holds up the position
-// reports.
-func (c *commander) serveArtMessages(messages <-chan clientMessage) {
+// serveMessages answers the two things the display broadcasts: the exit
+// press and each art request. It runs beside the reporter, so a slow
+// decode or a network fetch never holds up the position reports.
+func (c *commander) serveMessages(messages <-chan clientMessage) {
 	for message := range messages {
+		if isExitMessage(message.Args) {
+			c.exit()
+			continue
+		}
 		c.serveArt(message.Args)
 	}
 }
@@ -365,16 +402,69 @@ func (c *commander) blockForItem(item int) json.RawMessage {
 // report back from the broker, and a reconnect re-publishes the held
 // report through onConnect, so neither loses a running Play's place.
 func (c *commander) send(report playReport) error {
+	c.reportMutex.Lock()
+	// The reporter folds mpv's property changes alone and carries no
+	// ending, so the mark is stamped here. Every report after the ending
+	// carries it, and a subscriber that reads any one of them reads the
+	// same ending.
+	if c.ended {
+		report.Ended = true
+	}
 	payload, err := json.Marshal(report)
+	if err == nil {
+		c.lastReport = report
+		c.haveReport = true
+	}
+	c.reportMutex.Unlock()
 	if err != nil {
 		return err
 	}
-	c.reportMutex.Lock()
-	c.lastReport = payload
-	c.haveReport = true
-	c.reportMutex.Unlock()
 	c.bus.Publish(c.statusTopic, payload, true)
 	return nil
+}
+
+// endRun marks the run over and publishes the mark at once, retained,
+// beside the numbers the last report carried. Every ending calls it: the
+// exit press, mpv reaching the end of the last item, and the kubelet's
+// SIGTERM.
+//
+// The operator turns the mark into the Player's idle status and the
+// re-present that draws the idle screen again. The pod takes seconds to
+// terminate, and an ending read from the pod's own death would leave a
+// dead film on the screen for every one of them.
+//
+// A run that never reported publishes nothing, the same rule the reporter
+// follows: mpv has not said which item plays, so there are no numbers to
+// carry, and the pod's own death is what ends such a run. The art server
+// runs this same code with no bus, and it publishes nothing either.
+func (c *commander) endRun() {
+	if c.bus == nil {
+		return
+	}
+	c.reportMutex.Lock()
+	c.ended = true
+	c.lastReport.Ended = true
+	payload, have := c.marshalLastReport()
+	c.reportMutex.Unlock()
+	if !have {
+		return
+	}
+	c.bus.Publish(c.statusTopic, payload, true)
+}
+
+// exit ends the run at a person's press. The display broadcasts the exit
+// message when a person presses back at the bare video, and the sidecar
+// answers it here rather than letting the display quit mpv itself,
+// because the order is the whole point: the ending reaches the bus
+// first, and only then does quit reach mpv. So the operator holds the
+// mark while the film is still on the display, and how far mpv gets
+// through its shutdown before its socket closes changes nothing.
+//
+// The exit code is zero, so the pod ends Completed, the outcome a film
+// that ran to its end gives, and not Error.
+func (c *commander) exit() {
+	c.endRun()
+	c.command(exitCommand())
 }
 
 // playbackState is the run at one moment, as the command sidecar holds

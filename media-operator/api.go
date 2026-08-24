@@ -23,13 +23,21 @@ const (
 // namespace for the URL, resourceVersion for the conditional write, uid
 // with ownerReferences for garbage collection, and labels so a watch
 // selects the operator's own playback pods.
+//
+// Annotations carry the template hash the operator stamps on a standing
+// claim and a standing pod, which is how a pass tells a live object from
+// the object it would build now. deletionTimestamp is set by the API
+// server on an object that is on its way out, and a standing pair with
+// one set is left alone until the delete completes.
 type ObjectMeta struct {
-	Name            string            `json:"name,omitempty"`
-	Namespace       string            `json:"namespace,omitempty"`
-	UID             string            `json:"uid,omitempty"`
-	ResourceVersion string            `json:"resourceVersion,omitempty"`
-	Labels          map[string]string `json:"labels,omitempty"`
-	OwnerReferences []OwnerReference  `json:"ownerReferences,omitempty"`
+	Name              string            `json:"name,omitempty"`
+	Namespace         string            `json:"namespace,omitempty"`
+	UID               string            `json:"uid,omitempty"`
+	ResourceVersion   string            `json:"resourceVersion,omitempty"`
+	Labels            map[string]string `json:"labels,omitempty"`
+	Annotations       map[string]string `json:"annotations,omitempty"`
+	DeletionTimestamp string            `json:"deletionTimestamp,omitempty"`
+	OwnerReferences   []OwnerReference  `json:"ownerReferences,omitempty"`
 }
 
 // An ownerReference ties an object's life to its owner's: the

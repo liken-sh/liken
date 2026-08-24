@@ -26,6 +26,14 @@ local STOPS = { "fine", "chapter", "images", "strip" }
 -- the countdown.
 local IDLE_HIDE = 4
 
+-- The script-message the display and the command sidecar agree on for the exit
+-- press. The sidecar answers it: it publishes the ending to the bus and then
+-- quits mpv. The display does not quit mpv itself, because the operator must
+-- read the ending while the film is still on the display. It then draws the
+-- idle screen over the film that is shutting down, with no black gap between
+-- the two.
+local EXIT = "liken-exit"
+
 local summoned = false
 local paused = false
 local first_pause = true
@@ -265,8 +273,9 @@ end
 
 -- back has four meanings, one per state, tried in order. An open chooser closes.
 -- Else a fine scan cancels its preview. Else the visible OSD dismisses. Else, at
--- the bare video, back quits mpv with code 0, so the pod ends as the Completed a
--- finished film gives, not an Error.
+-- the bare video, back asks the command sidecar to end the run, and the sidecar
+-- quits mpv with code 0, so the pod ends as the Completed a finished film gives,
+-- not an Error.
 function focus.nav(action)
   if action == "back" then
     if capturing then
@@ -281,7 +290,7 @@ function focus.nav(action)
     elseif focus.visible() then
       focus.dismiss()
     else
-      mp.commandv("quit", "0")
+      mp.command_native({ "script-message", EXIT })
     end
     return
   end
