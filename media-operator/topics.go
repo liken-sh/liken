@@ -123,6 +123,17 @@ func playCommandsTopic(base, namespace, name string) string {
 	return base + "/plays/" + namespace + "/" + name + "/commands"
 }
 
+// playerCommandsTopic carries the display commands the operator sends
+// one Player's idle pod, the re-present that recreates the idle surface
+// when a Play ends. It is not retained, because a re-present is an event
+// and not a state, the same as the play-commands and remote-events
+// topics. It stays off the plays tree because it drives the standing
+// idle pod, not a Play, and it carries no media vocabulary a controller
+// sends.
+func playerCommandsTopic(base, namespace, name string) string {
+	return base + "/players/" + namespace + "/" + name + "/commands"
+}
+
 // keymapTopic carries one Keymap's compiled table. It drops the
 // namespace segment because a Keymap is cluster-scoped. The operator
 // publishes the table here retained, so a translator sidecar reads the

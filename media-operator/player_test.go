@@ -74,6 +74,7 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 
 func TestIdleArgvBuildsMPVsIdleCommand(t *testing.T) {
 	mpv := useMPV(t)
+	useSocket(t, "/tmp/test-mpv.sock")
 	useScriptDir(t, "/test-display")
 
 	cases := []struct {
@@ -82,12 +83,14 @@ func TestIdleArgvBuildsMPVsIdleCommand(t *testing.T) {
 		want          []string
 	}{
 		{
-			// No file, no audio, no IPC server, and no trailing media path:
-			// the idle client only draws the clock.
+			// No file, no audio, and no trailing media path: the idle client
+			// only draws the clock. It serves the IPC socket so the idle
+			// command sidecar can recreate the surface when a Play ends.
 			name: "no display claim",
 			want: []string{
 				"--vo=gpu", "--gpu-context=wayland", "--fullscreen",
 				"--idle=yes", "--force-window=yes", "--no-audio",
+				"--input-ipc-server=/tmp/test-mpv.sock",
 				"--script=/test-display", "--osc=no",
 			},
 		},
@@ -97,6 +100,7 @@ func TestIdleArgvBuildsMPVsIdleCommand(t *testing.T) {
 			want: []string{
 				"--vo=gpu", "--gpu-context=wayland", "--fullscreen",
 				"--idle=yes", "--force-window=yes", "--no-audio",
+				"--input-ipc-server=/tmp/test-mpv.sock",
 				"--script=/test-display", "--osc=no",
 				"--wayland-app-id=display-0",
 			},

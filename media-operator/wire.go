@@ -87,4 +87,10 @@ const (
 	remoteEventsVariable = "MEDIA_REMOTE_EVENTS"
 	keymapTopicVariable  = "MEDIA_KEYMAP_TOPIC"
 	focusTopicVariable   = "MEDIA_FOCUS_TOPIC"
+
+	// The player-commands topic the operator hands the idle pod's command
+	// sidecar. The operator builds it from the Player's identity and passes
+	// it whole, the way it hands a translator its focus topic, so the
+	// sidecar subscribes to one exact topic and parses nothing.
+	playerCommandsTopicVariable = "MEDIA_PLAYER_COMMANDS_TOPIC"
 )

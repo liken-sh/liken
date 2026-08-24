@@ -5,14 +5,28 @@ package main
 // Player tears the pod down. The pod runs mpv in its idle mode and draws
 // the clock while no Play runs. It holds a shared draw device on the
 // Player's screen, so the idle pod and a Play's own pod draw to one
-// screen at once. A Play's mpv starts with the same app-id and draws
-// over the idle clock, and the clock shows again when the Play ends.
+// screen at once. A Play's mpv starts with the same app-id and draws over
+// the idle clock.
+//
+// The clock does not return on its own when the Play ends. Weston's
+// kiosk-shell reveals a lower surface only along a code path gated on a
+// seat, and liken's compositor has none, so the idle surface stays
+// hidden though the idle mpv still runs. So the pod carries a second
+// container, the idle command sidecar, that recreates the idle mpv's
+// surface on the operator's re-present, and kiosk reveals the fresh
+// surface. The two containers share the ipc volume, where mpv serves the
+// socket the sidecar drives.
 
 import "errors"
 
-// The one container in the standing idle pod runs mpv in its idle mode,
-// so its name is the job it does.
-const idleContainer = "idle"
+// The two containers in the standing idle pod. idleContainer runs mpv in
+// its idle mode and draws the clock; idleCommandContainer is the native
+// sidecar that recreates mpv's surface on a re-present. Each name is the
+// job the container does.
+const (
+	idleContainer        = "idle"
+	idleCommandContainer = "idle-command"
+)
 
 // idleDrawRequest names the claim's request for the shared draw device,
 // the display companion the display-operator publishes per connector. It
@@ -79,17 +93,20 @@ func buildIdleClaim(player *Player, displayClass string) *ResourceClaim {
 }
 
 // buildIdlePod writes the standing idle pod: the player image in its idle
-// mode, holding the draw and render requests, drawing the clock.
+// mode holding the draw and render requests and drawing the clock, beside
+// the idle command sidecar that recreates the surface on a re-present.
 // restartPolicy is Always because the pod is a service and not a job: a
 // crash restarts it, and the pod ends only when the Player is deleted. It
 // carries the household timezone when the cluster set one, so the idle
-// clock reads the same wall-clock zone the playback display reads, and no
-// bus environment, because nothing drives the idle client this milestone.
-func buildIdlePod(player *Player, claim *ResourceClaim, image, timeZone string) *Pod {
+// clock reads the same wall-clock zone the playback display reads, and it
+// carries the bus address and the Player's commands topic, because the
+// sidecar reads the re-present off that topic.
+func buildIdlePod(player *Player, claim *ResourceClaim, image, busAddress, topicBase, timeZone string) *Pod {
 	container := Container{
-		Name:    idleContainer,
-		Image:   image,
-		Command: []string{"/media-operator", idleMode},
+		Name:         idleContainer,
+		Image:        image,
+		Command:      []string{"/media-operator", idleMode},
+		VolumeMounts: []VolumeMount{ipcMount()},
 	}
 	// The clock reads TZ against the image's tz database. Set it only when
 	// the household stated a zone, so an unset zone leaves the pod on UTC,
@@ -97,11 +114,26 @@ func buildIdlePod(player *Player, claim *ResourceClaim, image, timeZone string) 
 	if timeZone != "" {
 		container.Env = append(container.Env, EnvVar{Name: timeZoneVariable, Value: timeZone})
 	}
-	// The one container holds every request the claim asks for, the draw
+	// The idle container holds every request the claim asks for, the draw
 	// device and the render node.
 	for _, request := range claimRequests(claim) {
 		container.Resources.Claims = append(container.Resources.Claims,
 			ContainerClaim{Name: podClaimName, Request: request})
+	}
+
+	// The idle command sidecar owns no device claim. It subscribes to the
+	// Player's commands topic and drives the idle mpv over the shared ipc
+	// socket, so it mounts the ipc volume and reaches nothing else.
+	sidecar := Container{
+		Name:    idleCommandContainer,
+		Image:   image,
+		Command: []string{"/media-operator", idleCommandMode},
+		Env: []EnvVar{
+			{Name: busAddressVariable, Value: busAddress},
+			{Name: playerCommandsTopicVariable, Value: playerCommandsTopic(topicBase, player.Metadata.Namespace, player.Metadata.Name)},
+		},
+		VolumeMounts:  []VolumeMount{ipcMount()},
+		RestartPolicy: sidecarRestartPolicy,
 	}
 
 	return &Pod{
@@ -113,12 +145,14 @@ func buildIdlePod(player *Player, claim *ResourceClaim, image, timeZone string) 
 			OwnerReferences: []OwnerReference{playerOwner(player)},
 		},
 		Spec: PodSpec{
-			RestartPolicy: "Always",
+			RestartPolicy:  "Always",
+			InitContainers: []Container{sidecar},
 			ResourceClaims: []PodResourceClaim{{
 				Name:              podClaimName,
 				ResourceClaimName: claim.Metadata.Name,
 			}},
 			Containers: []Container{container},
+			Volumes:    []Volume{{Name: ipcVolumeName, EmptyDir: &EmptyDirVolumeSource{}}},
 		},
 	}
 }
@@ -149,7 +183,7 @@ func (o *operator) reconcileIdle(player *Player, timeZone string) error {
 	if !errors.Is(err, ErrNotFound) {
 		return err
 	}
-	_, err = CreatePod(o.client, buildIdlePod(player, claim, o.image, timeZone))
+	_, err = CreatePod(o.client, buildIdlePod(player, claim, o.image, o.busAddress, o.topicBase, timeZone))
 	if errors.Is(err, ErrConflict) {
 		return nil
 	}

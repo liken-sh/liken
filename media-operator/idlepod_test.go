@@ -102,24 +102,18 @@ func TestBuildIdleClaimOmitsTheRenderRequestWithoutARenderNode(t *testing.T) {
 }
 
 // The pod runs mpv in the idle mode, carries the household timezone in
-// the environment, holds the draw and render requests, restarts on a
-// crash, and is owned by the Player. It carries no volume and no sidecar.
+// the environment, holds the draw and render requests, mounts the ipc
+// socket, restarts on a crash, and is owned by the Player.
 func TestBuildIdlePodRunsTheIdleMode(t *testing.T) {
 	player := standingIdlePlayer()
 	claim := buildIdleClaim(player, "display-draw")
-	pod := buildIdlePod(player, claim, testImage, "America/New_York")
+	pod := buildIdlePod(player, claim, testImage, testBusAddress, testTopicBase, "America/New_York")
 
 	if pod.Metadata.Name != "theater-idle" {
 		t.Errorf("name = %q, want theater-idle", pod.Metadata.Name)
 	}
 	if pod.Spec.RestartPolicy != "Always" {
 		t.Errorf("restartPolicy = %q, want Always", pod.Spec.RestartPolicy)
-	}
-	if len(pod.Spec.Volumes) != 0 {
-		t.Errorf("volumes = %+v, want none", pod.Spec.Volumes)
-	}
-	if len(pod.Spec.InitContainers) != 0 {
-		t.Errorf("initContainers = %+v, want none", pod.Spec.InitContainers)
 	}
 	if len(pod.Spec.Containers) != 1 {
 		t.Fatalf("containers = %+v, want one", pod.Spec.Containers)
@@ -137,6 +131,10 @@ func TestBuildIdlePodRunsTheIdleMode(t *testing.T) {
 	wantEnv := map[string]string{timeZoneVariable: "America/New_York"}
 	if !reflect.DeepEqual(env, wantEnv) {
 		t.Errorf("env = %+v, want %+v", env, wantEnv)
+	}
+	wantMounts := []VolumeMount{ipcMount()}
+	if !reflect.DeepEqual(container.VolumeMounts, wantMounts) {
+		t.Errorf("volumeMounts = %+v, want %+v", container.VolumeMounts, wantMounts)
 	}
 
 	claims := container.Resources.Claims
@@ -160,11 +158,60 @@ func TestBuildIdlePodRunsTheIdleMode(t *testing.T) {
 	}
 }
 
-// An unset household zone leaves the pod's environment empty, so the
-// clock stays on UTC and the pod carries nothing extra.
+// The pod carries one native sidecar in the idle-command mode and one ipc
+// volume the sidecar and the idle mpv share. The sidecar reads the bus
+// address and the Player's commands topic, mounts the ipc socket, and
+// restarts alone on a crash. It holds no device claim, because it drives
+// mpv over the socket and reaches nothing else.
+func TestBuildIdlePodCarriesTheCommandSidecar(t *testing.T) {
+	player := standingIdlePlayer()
+	claim := buildIdleClaim(player, "display-draw")
+	pod := buildIdlePod(player, claim, testImage, testBusAddress, testTopicBase, "America/New_York")
+
+	wantVolumes := []Volume{{Name: ipcVolumeName, EmptyDir: &EmptyDirVolumeSource{}}}
+	if !reflect.DeepEqual(pod.Spec.Volumes, wantVolumes) {
+		t.Errorf("volumes = %+v, want %+v", pod.Spec.Volumes, wantVolumes)
+	}
+	if len(pod.Spec.InitContainers) != 1 {
+		t.Fatalf("initContainers = %+v, want one", pod.Spec.InitContainers)
+	}
+
+	sidecar := pod.Spec.InitContainers[0]
+	if sidecar.Name != idleCommandContainer {
+		t.Errorf("sidecar name = %q, want %q", sidecar.Name, idleCommandContainer)
+	}
+	command := []string{"/media-operator", idleCommandMode}
+	if !reflect.DeepEqual(sidecar.Command, command) {
+		t.Errorf("sidecar command = %v, want %v", sidecar.Command, command)
+	}
+	if sidecar.RestartPolicy != sidecarRestartPolicy {
+		t.Errorf("sidecar restartPolicy = %q, want %q", sidecar.RestartPolicy, sidecarRestartPolicy)
+	}
+	if len(sidecar.Resources.Claims) != 0 {
+		t.Errorf("sidecar claims = %+v, want none", sidecar.Resources.Claims)
+	}
+	wantMounts := []VolumeMount{ipcMount()}
+	if !reflect.DeepEqual(sidecar.VolumeMounts, wantMounts) {
+		t.Errorf("sidecar volumeMounts = %+v, want %+v", sidecar.VolumeMounts, wantMounts)
+	}
+	env := map[string]string{}
+	for _, entry := range sidecar.Env {
+		env[entry.Name] = entry.Value
+	}
+	wantEnv := map[string]string{
+		busAddressVariable:          testBusAddress,
+		playerCommandsTopicVariable: playerCommandsTopic(testTopicBase, "house", "theater"),
+	}
+	if !reflect.DeepEqual(env, wantEnv) {
+		t.Errorf("sidecar env = %+v, want %+v", env, wantEnv)
+	}
+}
+
+// An unset household zone leaves the idle container's environment empty,
+// so the clock stays on UTC and the container carries nothing extra.
 func TestBuildIdlePodOmitsTheTimeZoneWhenUnset(t *testing.T) {
 	player := standingIdlePlayer()
-	pod := buildIdlePod(player, buildIdleClaim(player, "display-draw"), testImage, "")
+	pod := buildIdlePod(player, buildIdleClaim(player, "display-draw"), testImage, testBusAddress, testTopicBase, "")
 
 	if len(pod.Spec.Containers[0].Env) != 0 {
 		t.Errorf("env = %+v, want none", pod.Spec.Containers[0].Env)

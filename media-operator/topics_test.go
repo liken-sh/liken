@@ -21,6 +21,7 @@ func TestTopicBuildersExtendTheBase(t *testing.T) {
 		{name: "play status", got: playStatusTopic(base, "house", "movie"), want: "liken/media/plays/house/movie/status"},
 		{name: "play availability", got: playAvailabilityTopic(base, "house", "movie"), want: "liken/media/plays/house/movie/availability"},
 		{name: "play commands", got: playCommandsTopic(base, "house", "movie"), want: "liken/media/plays/house/movie/commands"},
+		{name: "player commands", got: playerCommandsTopic(base, "house", "theater"), want: "liken/media/players/house/theater/commands"},
 		{name: "keymap", got: keymapTopic(base, "gamepad"), want: "liken/media/keymaps/gamepad"},
 		{name: "status filter", got: playStatusFilter(base), want: "liken/media/plays/+/+/status"},
 		{name: "availability filter", got: playAvailabilityFilter(base), want: "liken/media/plays/+/+/availability"},

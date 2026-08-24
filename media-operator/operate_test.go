@@ -1165,3 +1165,89 @@ func TestReconcileKeymapsPublishesNothingForAKeymapThatWillNotCompile(t *testing
 	case <-time.After(50 * time.Millisecond):
 	}
 }
+
+// playersOperator wires an operator with a bus to a fake broker, so a
+// test reads what the player reconcile publishes. The idle display class
+// stays unset, so reconcileIdle builds nothing and the test isolates the
+// re-present publish.
+func playersOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker) {
+	t.Helper()
+	bus, brokers, connected := startBus(t, 1, nil, nil)
+	waitForConnect(t, connected)
+	return &operator{
+		client:    testAPIClient(t, cluster.handler(t)),
+		topicBase: defaultTopicBase,
+		bus:       bus,
+	}, brokers[0]
+}
+
+// A Player that was playing and now names no Play crossed the play-end
+// edge, so the operator publishes a re-present to its commands topic, not
+// retained, and the idle command sidecar recreates the surface.
+func TestAPlayEndPublishesARePresent(t *testing.T) {
+	cluster := newFakeCluster()
+	media, broker := playersOperator(t, cluster)
+	player := Player{
+		Metadata: ObjectMeta{Name: "theater", Namespace: "house"},
+		Status:   PlayerStatus{Activity: playerPlaying, Play: "movie"},
+	}
+
+	media.reconcilePlayers([]Player{player}, nil, "")
+
+	published := waitForPublish(t, broker.pubs)
+	if published.topic != playerCommandsTopic(defaultTopicBase, "house", "theater") {
+		t.Errorf("topic = %q, want the player commands topic", published.topic)
+	}
+	if published.retained {
+		t.Error("the re-present was retained, want an event")
+	}
+	var command mediaCommand
+	mustSucceed(t, json.Unmarshal(published.payload, &command))
+	if command.Action != actionRePresent {
+		t.Errorf("action = %q, want %q", command.Action, actionRePresent)
+	}
+}
+
+// A Player already idle stays idle across the pass, which is no edge, so
+// the operator publishes nothing. Without the guard the backstop would
+// poke the idle sidecar every tick.
+func TestAnIdlePlayerPublishesNoRePresent(t *testing.T) {
+	cluster := newFakeCluster()
+	media, broker := playersOperator(t, cluster)
+	player := Player{
+		Metadata: ObjectMeta{Name: "theater", Namespace: "house"},
+		Status:   PlayerStatus{Activity: playerIdle},
+	}
+
+	media.reconcilePlayers([]Player{player}, nil, "")
+
+	select {
+	case got := <-broker.pubs:
+		t.Fatalf("an idle player published %+v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+// A Player still running its Play is no edge either, so a backstop pass
+// over a playing unit publishes nothing.
+func TestAPlayerStillPlayingPublishesNoRePresent(t *testing.T) {
+	cluster := newFakeCluster()
+	media, broker := playersOperator(t, cluster)
+	player := Player{
+		Metadata: ObjectMeta{Name: "theater", Namespace: "house"},
+		Status:   PlayerStatus{Activity: playerPlaying, Play: "movie"},
+	}
+	play := Play{
+		Metadata: ObjectMeta{Name: "movie", Namespace: "house"},
+		Spec:     PlaySpec{Players: []string{"theater"}},
+		Status:   PlayStatus{Phase: phaseRunning},
+	}
+
+	media.reconcilePlayers([]Player{player}, []Play{play}, "")
+
+	select {
+	case got := <-broker.pubs:
+		t.Fatalf("a still-playing player published %+v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+}

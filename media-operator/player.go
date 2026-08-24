@@ -80,8 +80,15 @@ func runIdle() {
 // because the display draws its own. The window's app-id routes the
 // surface to the shared screen when the display claim delivered one.
 //
-// There is no --input-ipc-server and no media path, because nothing
-// drives the idle client this milestone and it plays no file.
+// --input-ipc-server serves the same socket the playback shim serves,
+// because the idle command sidecar drives it to recreate the idle
+// surface when a Play ends. Weston's kiosk-shell reveals a lower surface
+// only along a code path gated on a seat, and liken's compositor runs with
+// no input devices and no seat, so it never reveals the idle surface
+// again on its own. A freshly mapped surface is revealed along a
+// seat-independent path, so recreating the surface is what shows the
+// clock again. The idle client still loads no media path and plays no
+// file.
 //
 // argv[0] is the resolved binary path, so a test that points mpvBinary at
 // a stand-in reads back the path it set. exec.LookPath fails before mpv
@@ -100,6 +107,7 @@ func idleArgv() ([]string, error) {
 		"--idle=yes",
 		"--force-window=yes",
 		"--no-audio",
+		"--input-ipc-server=" + mpvSocketPath,
 		"--script=" + displayScriptDir,
 		"--osc=no",
 	}

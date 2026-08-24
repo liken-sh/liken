@@ -450,6 +450,21 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 	for index := range players {
 		player := &players[index]
 		desired := derivePlayerStatus(player, plays)
+		// A Play that ends leaves the idle pod's surface destroyed and
+		// hidden. Weston's kiosk-shell reveals a lower surface only along a
+		// code path gated on a seat, and liken's compositor has none, so the
+		// idle clock does not return on its own. On the edge from any active
+		// state to idle, the operator publishes a re-present, and the idle
+		// command sidecar recreates the idle surface, which kiosk reveals.
+		// The edge reads the stored status against the derived one, so the
+		// poke fires once as the Player settles to idle and not on every
+		// backstop pass while it stays idle. A status write that fails leaves
+		// the stored status unchanged, so the next pass reads the edge again
+		// and pokes once more, which recreates a surface that is already up
+		// and shows the same clock.
+		if player.Status.Activity != playerIdle && desired.Activity == playerIdle {
+			o.publishRePresent(player.Metadata.Namespace, player.Metadata.Name)
+		}
 		if err := writePlayerStatus(o.client, player, desired); err != nil {
 			fmt.Fprintf(os.Stderr, "writing player %s/%s status: %v\n",
 				player.Metadata.Namespace, player.Metadata.Name, err)
@@ -459,6 +474,18 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 				player.Metadata.Namespace, player.Metadata.Name, err)
 		}
 	}
+}
+
+// publishRePresent publishes the re-present to a Player's commands topic,
+// not retained, because a re-present is an event and not a state. The
+// idle command sidecar subscribes to that topic and recreates the idle
+// surface, so the clock shows again after a Play ends.
+func (o *operator) publishRePresent(namespace, name string) {
+	payload, err := json.Marshal(mediaCommand{Action: actionRePresent})
+	if err != nil {
+		return
+	}
+	o.bus.Publish(playerCommandsTopic(o.topicBase, namespace, name), payload, false)
 }
 
 // reconcileRemotes reconciles a standing pod for every Remote in the

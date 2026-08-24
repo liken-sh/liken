@@ -46,6 +46,14 @@ const (
 	actionBack   = "back"
 )
 
+// actionRePresent is display plumbing, not part of the media vocabulary
+// above. The operator publishes it to a Player's commands topic when a
+// Play ends, and the idle command sidecar recreates the idle mpv's
+// surface so a seatless kiosk shell shows the clock again. A controller
+// never sends it, so commandFor holds no case for it and it reaches no
+// player program.
+const actionRePresent = "re-present"
+
 // amountActions are the actions that move by an amount: seconds for
 // seek, a step for volume and chapter. The sign is the direction, so
 // one action serves both bumpers.
