@@ -39,19 +39,6 @@ These plans are designed. Each keeps its number and moves to
   `Play` draws a layout `liken` owns, the album art centered with the
   track list and the queue, in place of the scrubber a film shows. It
   builds on the display of plan 07.
-* [12, The idle screen reads the bus](12-the-idle-screen-reads-the-bus.md).
-  The idle screen becomes a live client of the bus: a retained status
-  per `Player`, controller presence from the standing remote pod, and
-  the `liken` mark in motion as the loading indicator around a `Play`.
-  Nothing restarts to show a change.
-* [13, Standing pods follow the template](13-standing-pods-follow-the-template.md).
-  The idle and reader pods roll on their own when a release or a spec
-  edit changes what the operator would build, through a stamped
-  template hash, the way a `Deployment` detects a stale pod.
-* [14, The sidecar reports the ending](14-the-sidecar-reports-the-ending.md).
-  The command sidecar marks the ending on the play status the moment
-  a film ends, in every path there is, so the idle screen takes over
-  in bus time instead of waiting seconds for the pod to die.
 
 ## Completed
 
@@ -112,6 +99,26 @@ These plans are designed. Each keeps its number and moves to
   wants and whether subtitles show. One cluster resource holds the
   household default, and a `Player` or a `Play` overrides it. The
   operator resolves the fields at `Play` start and passes them to `mpv`.
+* [12, The idle screen reads the bus](completed/12-the-idle-screen-reads-the-bus.md).
+  Built, and drilled on `liken-1` on 2026-08-24 in release
+  2026.08.24-006, with the reply-await fix in 2026.08.24-008. The idle
+  screen became a live client of the bus: a retained status per
+  `Player`, controller presence from the standing remote pod, and the
+  `liken` mark in motion per the brand's `motion.md`. The full cycle
+  was read off the broker in order, and a `displayName` edit showed
+  with no restart.
+* [13, Standing pods follow the template](completed/13-standing-pods-follow-the-template.md).
+  Built, and drilled on `liken-1` on 2026-08-24 by its own rollouts.
+  The 2026.08.24-007 apply rolled every unstamped standing pod and
+  claim once, and the 2026.08.24-008 apply rolled only the pods and
+  kept the claims, the two-tier repair the template hash decides.
+* [14, The sidecar reports the ending](completed/14-the-sidecar-reports-the-ending.md).
+  Built, and drilled on `liken-1` on 2026-08-24 in release
+  2026.08.24-007. The bus carried `ended` one second after the exit
+  press, and the idle screen took over with no black gap. The arrival
+  animation needed the reply-await fix in 2026.08.24-008, because the
+  revealed message was lost when the sidecar closed its socket before
+  mpv's replies.
 
 ## Open problems
 
