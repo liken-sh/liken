@@ -91,6 +91,13 @@ spec:
                     The area this Player is in, such as living-room.
                     A word for grouping and display; nothing acts on
                     it yet.
+                displayName:
+                  type: string
+                  description: >-
+                    The human name of this unit, the one the idle
+                    screen and later ambient surfaces show in place of
+                    the object name, such as Studio Lab. Omit it, and
+                    the idle screen falls back to the object name.
                 display:
                   type: object
                   required: [class]
@@ -105,6 +112,13 @@ spec:
                         Consumer classes are the cluster owner's
                         vocabulary; each hardware operator's manual
                         gives the YAML for its class.
+                    displayName:
+                      type: string
+                      description: >-
+                        The human name of this selection, the one the
+                        idle screen shows in its parts list, such as
+                        Portable Screen. Omit it, and the idle screen
+                        falls back to the DeviceClass name.
                     selector:
                       type: string
                       description: >-
@@ -152,6 +166,14 @@ spec:
                           owner's vocabulary; each hardware
                           operator's manual gives the YAML for its
                           class.
+                      displayName:
+                        type: string
+                        description: >-
+                          The human name of this selection, the one
+                          the idle screen shows in its parts list,
+                          such as Built-in Speakers. Omit it, and the
+                          idle screen falls back to the DeviceClass
+                          name.
                       selector:
                         type: string
                         description: >-
@@ -194,6 +216,13 @@ spec:
                         The DeviceClass the claim allocates through.
                         A render class usually needs no selector,
                         because it already names one kind of device.
+                    displayName:
+                      type: string
+                      description: >-
+                        The human name of this selection, the one the
+                        idle screen shows in its parts list. Omit it,
+                        and the idle screen falls back to the
+                        DeviceClass name.
                     selector:
                       type: string
                       description: >-
@@ -221,6 +250,13 @@ spec:
                         description: >-
                           The Remote this unit owns, by name, in this
                           namespace.
+                      displayName:
+                        type: string
+                        description: >-
+                          The human name of this controller, the one
+                          the idle screen shows in its parts list,
+                          such as Studio Dualsense Controller. Omit
+                          it, and the idle screen falls back to name.
                       keymap:
                         type: string
                         description: >-

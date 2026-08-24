@@ -55,6 +55,14 @@ const (
 	// tz database to show the household's wall-clock zone.
 	timeZoneVariable = "TZ"
 
+	// The Player's friendly name and its parts, which the idle screen draws
+	// in the bottom-left. The operator sets the name always, resolved from
+	// spec.displayName or the object name, and sets the parts only when the
+	// Player lists any. The parts join with newlines, and the display Lua
+	// splits them, the same shape the player options travel in.
+	idlePlayerNameVariable       = "IDLE_PLAYER_NAME"
+	idlePlayerComponentsVariable = "IDLE_PLAYER_COMPONENTS"
+
 	// The command sidecar carries every item's presentation block, baked
 	// into the pod when the operator creates it. The sidecar swaps to the
 	// current item's block as the playlist advances, so no block travels

@@ -17,7 +17,10 @@ package main
 // surface. The two containers share the ipc volume, where mpv serves the
 // socket the sidecar drives.
 
-import "errors"
+import (
+	"errors"
+	"strings"
+)
 
 // The two containers in the standing idle pod. idleContainer runs mpv in
 // its idle mode and draws the clock; idleCommandContainer is the native
@@ -61,6 +64,57 @@ func playerOwner(player *Player) OwnerReference {
 	}
 }
 
+// idlePlayerName is the friendly name the idle screen shows for the whole
+// unit. It reads spec.displayName when the household set one, and falls back
+// to the Player's object name, so an unnamed Player still shows a name.
+func idlePlayerName(player *Player) string {
+	if player.Spec.DisplayName != "" {
+		return player.Spec.DisplayName
+	}
+	return player.Metadata.Name
+}
+
+// deviceDisplayName is the friendly name the idle screen shows for one device
+// selection. It reads displayName when set. Names are user-set, so the
+// fallback stays plain: the DeviceClass name says what kind of device the
+// selection is when the household named none.
+func deviceDisplayName(device PlayerDevice) string {
+	if device.DisplayName != "" {
+		return device.DisplayName
+	}
+	return device.Class
+}
+
+// remoteDisplayName is the friendly name the idle screen shows for one
+// controller. It reads displayName when set, and falls back to Name, the
+// Remote this entry references.
+func remoteDisplayName(remote PlayerRemote) string {
+	if remote.DisplayName != "" {
+		return remote.DisplayName
+	}
+	return remote.Name
+}
+
+// idleComponents lists the friendly names of the unit's parts in the order
+// the idle screen shows them: the display first, then each sink in spec
+// order, then each remote in spec order. Each name resolves to its
+// displayName, or a plain fallback when the household named none. A Player
+// with no display and no parts yields an empty list, and buildIdlePod then
+// sends no parts variable.
+func idleComponents(player *Player) []string {
+	var components []string
+	if player.Spec.Display != nil {
+		components = append(components, deviceDisplayName(*player.Spec.Display))
+	}
+	for _, sink := range player.Spec.Sinks {
+		components = append(components, deviceDisplayName(sink))
+	}
+	for _, remote := range player.Spec.Remotes {
+		components = append(components, remoteDisplayName(remote))
+	}
+	return components
+}
+
 // buildIdleClaim turns one Player into the standing claim for its idle
 // pod: the shared draw device on the Player's own screen, and the render
 // node the idle mpv draws through.
@@ -100,7 +154,9 @@ func buildIdleClaim(player *Player, displayClass string) *ResourceClaim {
 // carries the household timezone when the cluster set one, so the idle
 // clock reads the same wall-clock zone the playback display reads, and it
 // carries the bus address and the Player's commands topic, because the
-// sidecar reads the re-present off that topic.
+// sidecar reads the re-present off that topic. It carries the Player's
+// friendly name and its parts, which the idle screen draws so a person reads
+// what the unit is while no film runs.
 func buildIdlePod(player *Player, claim *ResourceClaim, image, busAddress, topicBase, timeZone string) *Pod {
 	container := Container{
 		Name:         idleContainer,
@@ -114,6 +170,18 @@ func buildIdlePod(player *Player, claim *ResourceClaim, image, busAddress, topic
 	if timeZone != "" {
 		container.Env = append(container.Env, EnvVar{Name: timeZoneVariable, Value: timeZone})
 	}
+	// The idle screen names the unit and lists its parts, so a person reads
+	// what the unit is and what it plays through while no film runs. The name
+	// always resolves, so the pod always carries it. The parts join with
+	// newlines and travel in one variable, and the display Lua splits them. A
+	// Player with no listed parts sends no parts variable, so the idle screen
+	// draws the name alone.
+	container.Env = append(container.Env, EnvVar{Name: idlePlayerNameVariable, Value: idlePlayerName(player)})
+	if components := idleComponents(player); len(components) > 0 {
+		container.Env = append(container.Env,
+			EnvVar{Name: idlePlayerComponentsVariable, Value: strings.Join(components, "\n")})
+	}
+
 	// The idle container holds every request the claim asks for, the draw
 	// device and the render node.
 	for _, request := range claimRequests(claim) {

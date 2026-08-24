@@ -128,7 +128,11 @@ func TestBuildIdlePodRunsTheIdleMode(t *testing.T) {
 	for _, entry := range container.Env {
 		env[entry.Name] = entry.Value
 	}
-	wantEnv := map[string]string{timeZoneVariable: "America/New_York"}
+	wantEnv := map[string]string{
+		timeZoneVariable:             "America/New_York",
+		idlePlayerNameVariable:       "theater",
+		idlePlayerComponentsVariable: "display-output",
+	}
 	if !reflect.DeepEqual(env, wantEnv) {
 		t.Errorf("env = %+v, want %+v", env, wantEnv)
 	}
@@ -207,14 +211,122 @@ func TestBuildIdlePodCarriesTheCommandSidecar(t *testing.T) {
 	}
 }
 
-// An unset household zone leaves the idle container's environment empty,
-// so the clock stays on UTC and the container carries nothing extra.
+// An unset household zone carries no TZ, so the clock stays on UTC. The
+// identity variables still travel, because they name the unit and do not
+// depend on the zone.
 func TestBuildIdlePodOmitsTheTimeZoneWhenUnset(t *testing.T) {
 	player := standingIdlePlayer()
 	pod := buildIdlePod(player, buildIdleClaim(player, "display-draw"), testImage, testBusAddress, testTopicBase, "")
 
-	if len(pod.Spec.Containers[0].Env) != 0 {
-		t.Errorf("env = %+v, want none", pod.Spec.Containers[0].Env)
+	env := map[string]string{}
+	for _, entry := range pod.Spec.Containers[0].Env {
+		env[entry.Name] = entry.Value
+	}
+	if _, held := env[timeZoneVariable]; held {
+		t.Errorf("env carries %s, want it omitted: %+v", timeZoneVariable, env)
+	}
+	wantEnv := map[string]string{
+		idlePlayerNameVariable:       "theater",
+		idlePlayerComponentsVariable: "display-output",
+	}
+	if !reflect.DeepEqual(env, wantEnv) {
+		t.Errorf("env = %+v, want %+v", env, wantEnv)
+	}
+}
+
+// The idle pod carries the unit's friendly name and its parts, resolved from
+// spec.displayName and each selection's displayName. The parts join with
+// newlines in display, sink, remote order, so the display Lua splits them into
+// the bottom-left list.
+func TestBuildIdlePodCarriesTheIdentity(t *testing.T) {
+	player := &Player{
+		Metadata: ObjectMeta{Name: "theater", Namespace: "house", UID: "player-uid"},
+		Spec: PlayerSpec{
+			DisplayName: "Studio Lab",
+			Display:     &PlayerDevice{Class: "display-output", DisplayName: "Portable Screen"},
+			Sinks:       []PlayerDevice{{Class: "audio-sink", DisplayName: "Built-in Speakers"}},
+			Remotes:     []PlayerRemote{{Name: "pad", DisplayName: "Studio Dualsense Controller"}},
+		},
+	}
+	pod := buildIdlePod(player, buildIdleClaim(player, "display-draw"), testImage, testBusAddress, testTopicBase, "")
+
+	env := map[string]string{}
+	for _, entry := range pod.Spec.Containers[0].Env {
+		env[entry.Name] = entry.Value
+	}
+	if env[idlePlayerNameVariable] != "Studio Lab" {
+		t.Errorf("%s = %q, want Studio Lab", idlePlayerNameVariable, env[idlePlayerNameVariable])
+	}
+	want := "Portable Screen\nBuilt-in Speakers\nStudio Dualsense Controller"
+	if env[idlePlayerComponentsVariable] != want {
+		t.Errorf("%s = %q, want %q", idlePlayerComponentsVariable, env[idlePlayerComponentsVariable], want)
+	}
+}
+
+// The friendly name falls back to the object name when spec.displayName is
+// unset, so an unnamed Player still shows a name on the idle screen.
+func TestIdlePlayerNameFallsBackToTheObjectName(t *testing.T) {
+	player := standingIdlePlayer()
+	if got := idlePlayerName(player); got != "theater" {
+		t.Errorf("idlePlayerName = %q, want theater", got)
+	}
+
+	player.Spec.DisplayName = "Studio Lab"
+	if got := idlePlayerName(player); got != "Studio Lab" {
+		t.Errorf("idlePlayerName = %q, want Studio Lab", got)
+	}
+}
+
+// idleComponents lists the display, then the sinks, then the remotes, in spec
+// order. Each name resolves to its displayName when set, and to a plain
+// fallback when unset: the DeviceClass for a device, the referenced Remote for
+// a controller.
+func TestIdleComponentsOrderAndFallback(t *testing.T) {
+	player := &Player{
+		Spec: PlayerSpec{
+			Display: &PlayerDevice{Class: "display-output", DisplayName: "Portable Screen"},
+			Sinks: []PlayerDevice{
+				{Class: "audio-sink", DisplayName: "Built-in Speakers"},
+				{Class: "hdmi-audio"},
+			},
+			Remotes: []PlayerRemote{
+				{Name: "pad", DisplayName: "Studio Dualsense Controller"},
+				{Name: "wand"},
+			},
+		},
+	}
+	got := idleComponents(player)
+	want := []string{
+		"Portable Screen",
+		"Built-in Speakers",
+		"hdmi-audio",
+		"Studio Dualsense Controller",
+		"wand",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("idleComponents = %+v, want %+v", got, want)
+	}
+}
+
+// A Player with no display and no parts yields no components, so buildIdlePod
+// sends no parts variable and the idle screen draws the name alone.
+func TestBuildIdlePodOmitsTheComponentsWhenThereAreNone(t *testing.T) {
+	player := &Player{Metadata: ObjectMeta{Name: "solo", Namespace: "house"}}
+	if got := idleComponents(player); len(got) != 0 {
+		t.Fatalf("idleComponents = %+v, want none", got)
+	}
+	pod := buildIdlePod(player, buildIdleClaim(&Player{Spec: PlayerSpec{Display: &PlayerDevice{Class: "display-output"}}}, "display-draw"),
+		testImage, testBusAddress, testTopicBase, "")
+
+	env := map[string]string{}
+	for _, entry := range pod.Spec.Containers[0].Env {
+		env[entry.Name] = entry.Value
+	}
+	if _, held := env[idlePlayerComponentsVariable]; held {
+		t.Errorf("env carries %s, want it omitted: %+v", idlePlayerComponentsVariable, env)
+	}
+	if env[idlePlayerNameVariable] != "solo" {
+		t.Errorf("%s = %q, want solo", idlePlayerNameVariable, env[idlePlayerNameVariable])
 	}
 }
 

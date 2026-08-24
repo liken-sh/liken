@@ -97,7 +97,14 @@ type PlayerList struct {
 // for each, so a unit's controllers belong to its spec beside its
 // display and its sinks.
 type PlayerSpec struct {
-	Zone    string         `json:"zone,omitempty"`
+	Zone string `json:"zone,omitempty"`
+
+	// The human name of this unit, the one the idle screen and later
+	// ambient surfaces show in place of the object name. It is the
+	// household's word for the unit, such as Studio Lab. Unset, the idle
+	// screen falls back to the Player's object name.
+	DisplayName string `json:"displayName,omitempty"`
+
 	Display *PlayerDevice  `json:"display,omitempty"`
 	Sinks   []PlayerDevice `json:"sinks,omitempty"`
 	Render  *PlayerDevice  `json:"render,omitempty"`
@@ -117,14 +124,27 @@ type PlayerSpec struct {
 // keymap's way on another, so one gamepad's cross is play-pause on the
 // theater and something else on the gaming unit.
 type PlayerRemote struct {
-	Name   string `json:"name"`
+	Name string `json:"name"`
+
+	// The human name of this controller, the one the idle screen shows in
+	// its parts list, such as Studio Dualsense Controller. Unset, the idle
+	// screen falls back to Name, the Remote this entry references.
+	DisplayName string `json:"displayName,omitempty"`
+
 	Keymap string `json:"keymap,omitempty"`
 }
 
 // One device selection. The three fields become a DeviceClass name,
 // a CEL selector, and an opaque config block on the claim.
 type PlayerDevice struct {
-	Class      string            `json:"class"`
+	Class string `json:"class"`
+
+	// The human name of this selection, the one the idle screen shows in
+	// its parts list, such as Portable Screen or Built-in Speakers. Unset,
+	// the idle screen falls back to the DeviceClass name, which says what
+	// the selection is.
+	DisplayName string `json:"displayName,omitempty"`
+
 	Selector   string            `json:"selector,omitempty"`
 	Parameters *DeviceParameters `json:"parameters,omitempty"`
 }
