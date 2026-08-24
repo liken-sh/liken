@@ -18,7 +18,9 @@ local BOTTOM_Y = theme.canvas.h - 90
 -- list. The parts sit close together, and the header stands off from the first
 -- part by a wider gap, so the name reads as the title of the list below it.
 local HEADER_SIZE = theme.type.label
-local ITEM_SIZE = theme.type.small
+-- Four points under theme.type.small, so the parts read a touch lighter than
+-- the shared small size without changing that size for every other element.
+local ITEM_SIZE = theme.type.small - 4
 local ITEM_LEADING = 1.1
 local HEADER_LEADING = 1.3
 
