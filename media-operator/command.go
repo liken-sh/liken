@@ -192,6 +192,13 @@ func (c *commander) handle(topic string, payload []byte) {
 		return
 	}
 	c.command(mpv)
+	// A seek or a chapter jump carries osd-no, so the sidecar summons the
+	// display to draw the new position. mpv shows the feedback for every
+	// other command, so feedbackFor returns nil and the sidecar sends
+	// nothing more.
+	if feedback := feedbackFor(command); feedback != nil {
+		c.command(feedback)
+	}
 }
 
 // report is the reporting side of the run. It dials mpv, observes the

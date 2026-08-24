@@ -201,6 +201,11 @@ const displayClientName = "display"
 // display already answers.
 const presentationMessage = "presentation"
 
+// displaySummonMessage is the script-message the sidecar sends to summon the
+// display after a seek or a chapter jump, so the scrubber shows the new
+// position. It sits beside the navigation actions the display already answers.
+const displaySummonMessage = "summon"
+
 // The two script-message names the display and the bridge agree on for art.
 // The display broadcasts artRequestMessage to ask for a decoded blob at a
 // pixel size. The bridge answers with artReplyMessage, addressed to the
@@ -230,23 +235,24 @@ func presentationCommand(block json.RawMessage) []any {
 }
 
 // commandFor is where the action vocabulary becomes mpv's words, and the
-// only place in the system that holds both. The osd-auto prefix makes
-// mpv show each command on the screen, which is the viewer's proof the
-// command landed. An action this build has no case for sends nothing, so
-// a command from a newer program degrades to no effect rather than a
-// crash.
+// only place in the system that holds both. Seek, chapter, and pause carry
+// osd-no, because the liken display draws their feedback and mpv's own
+// overlay would draw a second time over it. The rest carry osd-auto, so mpv
+// shows a short line, such as the volume or the track name, that the display
+// does not yet draw. An action this build has no case for sends nothing, so a
+// command from a newer program has no effect rather than a crash.
 func commandFor(command mediaCommand) []any {
 	switch command.Action {
 	case actionPause:
-		return []any{"osd-auto", "cycle", "pause"}
+		return []any{"osd-no", "cycle", "pause"}
 	case actionMute:
 		return []any{"osd-auto", "cycle", "mute"}
 	case actionSeek:
-		return []any{"osd-auto", "seek", command.Amount}
+		return []any{"osd-no", "seek", command.Amount}
 	case actionVolume:
 		return []any{"osd-auto", "add", "volume", command.Amount}
 	case actionChapter:
-		return []any{"osd-auto", "add", "chapter", command.Amount}
+		return []any{"osd-no", "add", "chapter", command.Amount}
 	case actionSubtitles:
 		return []any{"osd-auto", "cycle", "sub"}
 	case actionAudio:
@@ -258,6 +264,19 @@ func commandFor(command mediaCommand) []any {
 		// and the display draws its own feedback, so it carries no osd-auto prefix
 		// and becomes no native mpv command.
 		return []any{"script-message-to", displayClientName, command.Action}
+	}
+	return nil
+}
+
+// feedbackFor returns the follow-up the sidecar sends after an mpv command,
+// or nil when none is needed. A seek and a chapter jump move the playhead with
+// no on-screen mark of their own, so the sidecar summons the display and its
+// scrubber shows the new position. mpv's pause observer summons the display on
+// its own, so pause needs no follow-up here.
+func feedbackFor(command mediaCommand) []any {
+	switch command.Action {
+	case actionSeek, actionChapter:
+		return []any{"script-message-to", displayClientName, displaySummonMessage}
 	}
 	return nil
 }

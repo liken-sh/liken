@@ -57,12 +57,12 @@ func TestCommandFor(t *testing.T) {
 		command mediaCommand
 		want    []any
 	}{
-		{name: "pause", command: mediaCommand{Action: actionPause}, want: []any{"osd-auto", "cycle", "pause"}},
+		{name: "pause", command: mediaCommand{Action: actionPause}, want: []any{"osd-no", "cycle", "pause"}},
 		{name: "mute", command: mediaCommand{Action: actionMute}, want: []any{"osd-auto", "cycle", "mute"}},
-		{name: "seek forward", command: mediaCommand{Action: actionSeek, Amount: 30}, want: []any{"osd-auto", "seek", 30}},
-		{name: "seek back", command: mediaCommand{Action: actionSeek, Amount: -10}, want: []any{"osd-auto", "seek", -10}},
+		{name: "seek forward", command: mediaCommand{Action: actionSeek, Amount: 30}, want: []any{"osd-no", "seek", 30}},
+		{name: "seek back", command: mediaCommand{Action: actionSeek, Amount: -10}, want: []any{"osd-no", "seek", -10}},
 		{name: "volume", command: mediaCommand{Action: actionVolume, Amount: 5}, want: []any{"osd-auto", "add", "volume", 5}},
-		{name: "chapter", command: mediaCommand{Action: actionChapter, Amount: -1}, want: []any{"osd-auto", "add", "chapter", -1}},
+		{name: "chapter", command: mediaCommand{Action: actionChapter, Amount: -1}, want: []any{"osd-no", "add", "chapter", -1}},
 		{name: "subtitles", command: mediaCommand{Action: actionSubtitles}, want: []any{"osd-auto", "cycle", "sub"}},
 		{name: "audio", command: mediaCommand{Action: actionAudio}, want: []any{"osd-auto", "cycle", "audio"}},
 		{name: "up", command: mediaCommand{Action: actionUp}, want: []any{"script-message-to", "display", "up"}},
@@ -96,6 +96,34 @@ func TestCommandFor(t *testing.T) {
 
 // sendCommand writes one newline-delimited JSON command, the shape
 // mpv's IPC socket reads.
+func TestFeedbackFor(t *testing.T) {
+	cases := []struct {
+		name    string
+		command mediaCommand
+		want    []any
+	}{
+		{name: "seek summons the display", command: mediaCommand{Action: actionSeek, Amount: 30}, want: []any{"script-message-to", "display", "summon"}},
+		{name: "chapter summons the display", command: mediaCommand{Action: actionChapter, Amount: 1}, want: []any{"script-message-to", "display", "summon"}},
+		{name: "pause needs no follow-up", command: mediaCommand{Action: actionPause}, want: nil},
+		{name: "volume needs no follow-up", command: mediaCommand{Action: actionVolume, Amount: 5}, want: nil},
+		{name: "up needs no follow-up", command: mediaCommand{Action: actionUp}, want: nil},
+	}
+
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			got := feedbackFor(each.command)
+			if len(got) != len(each.want) {
+				t.Fatalf("feedback = %v, want %v", got, each.want)
+			}
+			for index := range got {
+				if got[index] != each.want[index] {
+					t.Errorf("feedback[%d] = %v, want %v", index, got[index], each.want[index])
+				}
+			}
+		})
+	}
+}
+
 func TestSendCommandWritesOneJSONLine(t *testing.T) {
 	var written strings.Builder
 	mustSucceed(t, sendCommand(&written, []any{"osd-auto", "cycle", "pause"}))

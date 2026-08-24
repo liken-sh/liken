@@ -36,13 +36,21 @@ func TestACommandOnTheCommandsTopicBecomesAnMpvCommand(t *testing.T) {
 	}
 	c.handle(c.commandsTopic, payload)
 
-	select {
-	case line := <-lines:
-		if line != `{"command":["osd-auto","seek",30]}` {
-			t.Errorf("mpv command = %q", line)
+	// A seek writes two commands: the osd-no seek, then the summon that
+	// makes the display draw the new position.
+	want := []string{
+		`{"command":["osd-no","seek",30]}`,
+		`{"command":["script-message-to","display","summon"]}`,
+	}
+	for _, expected := range want {
+		select {
+		case line := <-lines:
+			if line != expected {
+				t.Errorf("mpv command = %q, want %q", line, expected)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("no command reached mpv")
 		}
-	case <-time.After(time.Second):
-		t.Fatal("no command reached mpv")
 	}
 }
 
