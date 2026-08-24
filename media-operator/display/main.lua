@@ -10,6 +10,7 @@ local header = require("header")
 local trickplay = require("trickplay")
 local clock = require("clock")
 local identity = require("identity")
+local logo = require("logo")
 
 -- The remote reaches this client by its directory basename. The log names it
 -- once, so a wrong name shows in the player log.
@@ -23,19 +24,21 @@ overlay.res_y = theme.canvas.h
 -- owns two focus stops but draws one bar, told which axis is focused. The
 -- chooser covers the two while it captures input, so it draws on top.
 local function redraw()
-  -- The idle client draws the clock and the identity block, and nothing else.
-  -- mpv reports idle-active while it holds a window with no file, which is the
-  -- whole life of the idle pod and never a moment of a Play. So the idle branch
-  -- draws the clock top-right and the identity block bottom-left at full
-  -- brightness on the black idle window and returns, and a Play never reaches
-  -- it. theme.fade scales every alpha for the OSD fade, so the branch sets it to
-  -- full, and the black window backs the text with no scrim. The identity block
-  -- draws nothing when the environment names no unit, so an unnamed Player still
-  -- shows a clean clock. Assigning overlay.data and updating replaces the
-  -- surface in place, so the minute turns with no clear-then-redraw flicker.
+  -- The idle client draws the centered logo, the clock, and the identity block,
+  -- and nothing else. mpv reports idle-active while it holds a window with no
+  -- file, which is the whole life of the idle pod and never a moment of a Play.
+  -- So the idle branch draws the logo in the center, the clock top-right, and
+  -- the identity block bottom-left at full brightness on the black idle window
+  -- and returns, and a Play never reaches it. theme.fade scales every alpha for
+  -- the OSD fade, so the branch sets it to full, and the black window backs the
+  -- draw with no scrim. The logo draws first, so the corner text draws over it
+  -- if the two ever meet. The identity block draws nothing when the environment
+  -- names no unit, so an unnamed Player still shows the logo and a clean clock.
+  -- Assigning overlay.data and updating replaces the surface in place, so the
+  -- minute turns with no clear-then-redraw flicker.
   if mp.get_property_bool("idle-active") then
     theme.set_fade(1)
-    local idle_parts = { clock.draw() }
+    local idle_parts = { logo.draw(), clock.draw() }
     local block = identity.draw()
     if block then
       idle_parts[#idle_parts + 1] = block
