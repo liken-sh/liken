@@ -3,7 +3,7 @@
 Plan 17. The idle pod holds the panel's control device and writes DDC/CI
 itself, so the panel goes dark after a longer quiet stretch and comes
 back the moment a person presses a control. This is the hardware half of
-[plan 09](09-the-idle-screen.md)'s sleep, built on the fade of
+[plan 09](../09-the-idle-screen.md)'s sleep, built on the fade of
 [plan 16](16-the-idle-screen-goes-dark.md). It answers the open problem
 this repository carried as `how-the-idle-screen-asks-for-power.md`.
 

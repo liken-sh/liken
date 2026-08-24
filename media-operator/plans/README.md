@@ -26,12 +26,13 @@ These plans are designed. Each keeps its number and moves to
 [`completed/`](completed/) when it is built and drilled.
 
 * [09, The idle screen](09-the-idle-screen.md). A standing per-`Player`
-  pod draws status while no `Play` runs, the clock, the zone, and the
-  now-playing from another room, and yields the screen when a `Play`'s
-  `mpv` draws on top. It holds a shared draw device so each `Play` keeps
-  its own mode and power, and it sleeps the panel through a power request
-  the display-operator counts. It needs the display-operator's
-  [plan 07](https://github.com/liken-sh/display-operator/blob/main/plans/07-sharing-the-screen.md).
+  pod draws status while no `Play` runs, and yields the screen when a
+  `Play`'s `mpv` draws on top. Most of it is built: the standing pod
+  and the bus-fed surface through plans 12 to 15, and the sleep
+  through plans 16 and 17, on the display-operator's
+  [plan 07](https://github.com/liken-sh/display-operator/blob/main/plans/completed/07-sharing-the-screen.md)
+  draw device. What remains is surface content: the zone, and the
+  now-playing from another room.
 * [10, A native volume indicator](10-a-native-volume-indicator.md).
   `volume` and `mute` move off `mpv`'s built-in text onto a
   `liken`-drawn readout that fades with the rest of the OSD.
@@ -39,17 +40,6 @@ These plans are designed. Each keeps its number and moves to
   `Play` draws a layout `liken` owns, the album art centered with the
   track list and the queue, in place of the scrubber a film shows. It
   builds on the display of plan 07.
-* [16, The idle screen goes dark](16-the-idle-screen-goes-dark.md).
-  After a quiet stretch the idle screen fades to black, and a press on
-  the unit's remotes brings it back. The policy is `idle.fadeAfterSeconds`
-  on the `Player`, defaulted by `MediaPreferences`. The software half of
-  plan 09's sleep: the pixels go dark, the panel stays lit.
-* [17, The idle screen powers the panel](17-the-idle-screen-powers-the-panel.md).
-  The hardware half. The idle pod holds the panel's `-control` device
-  and writes DDC/CI itself: backlight to 0 at `idle.offAfterSeconds`,
-  or DPM off where a drill proved the panel wakes, and the panel state
-  reports in `Player` status. Answers the open problem on how the idle
-  screen asks for power.
 
 ## Completed
 
@@ -138,6 +128,24 @@ These plans are designed. Each keeps its number and moves to
   so a library app times its continue-watching window with the same
   knob. The upgrade's first pass swept two lingering finished pods at
   once, and both Plays deleted on their five-minute stamps.
+* [16, The idle screen goes dark](completed/16-the-idle-screen-goes-dark.md).
+  Built, and drilled on `liken-1` on 2026-08-24 in release
+  2026.08.24-010. After a quiet stretch the idle screen fades to
+  black, and a press on the unit's remotes brings it back; `back`
+  toggles it by hand. The policy is `idle.fadeAfterSeconds` on the
+  `Player`, defaulted by `MediaPreferences`. Only press edges act,
+  because the reader publishes releases too, and a release that
+  counted would wake the screen its own press just slept.
+* [17, The idle screen powers the panel](completed/17-the-idle-screen-powers-the-panel.md).
+  Built, and drilled on `liken-1` on 2026-08-24 in release
+  2026.08.24-010. The idle pod holds the panel's `-control` device
+  and its sidecar writes DDC/CI itself: the backlight to 0 at
+  `idle.offAfterSeconds`, and the actual state folded into
+  `PlayerStatus.Panel`. The BOE read 0 over DDC after the windows, a
+  press restored it, a `Play` against the dark panel lit it, and the
+  first press after a controller's Bluetooth reconnect woke it,
+  eyewitnessed. `offMode: power` stays gated on the metal drill in
+  the plan.
 
 ## Open problems
 

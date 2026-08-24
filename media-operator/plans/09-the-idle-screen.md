@@ -6,7 +6,7 @@ It builds on the display of
 [plan 07](completed/07-the-player-draws-its-own-display.md). The
 hardware seam it needs, a screen that more than one client draws, is
 the display-operator's
-[plan 07](https://github.com/liken-sh/display-operator/blob/main/plans/07-sharing-the-screen.md).
+[plan 07](https://github.com/liken-sh/display-operator/blob/main/plans/completed/07-sharing-the-screen.md).
 
 ## The problem
 
@@ -53,10 +53,10 @@ shows until the operator restarts the film.
 The idle pod holds a shared draw device, not the exclusive output
 device. The display-operator publishes a draw device per connector that
 delivers the compositor socket and the app-id, but no mode, and marks
-it shareable so many clients hold it at once. Each `Play` keeps its own output claim, which still owns the mode,
-so a `Play` sets its own resolution as before. The
-display-operator's
-[plan 07](https://github.com/liken-sh/display-operator/blob/main/plans/07-sharing-the-screen.md)
+it shareable so many clients hold it at once. Each `Play` keeps its
+own output claim, which still owns the mode, so a `Play` sets its own
+resolution as before. The display-operator's
+[plan 07](https://github.com/liken-sh/display-operator/blob/main/plans/completed/07-sharing-the-screen.md)
 builds this seam.
 
 ### The power policy lives on the `Player`
@@ -74,9 +74,10 @@ The panel follows the idle screen. The idle pod holds the panel's
 pod that drives the panel itself, and its sidecar writes the panel down
 after a longer quiet window and up on the same events that lift the
 fade. A DDC write does not touch `weston`, so the panel sleeps and
-wakes with no screen blink. [Plan 17](17-the-idle-screen-powers-the-panel.md)
-builds this and records why every shape that moved a power request
-through the Kubernetes API was set aside.
+wakes with no screen blink.
+[Plan 17](completed/17-the-idle-screen-powers-the-panel.md) builds
+this and records why every shape that moved a power request through
+the Kubernetes API was set aside.
 
 ### The wake signal rides the bus
 
@@ -123,7 +124,9 @@ one mode and one power state.
 
 ## How the work is proved
 
-This plan is not built yet. The drill runs on `liken-1`. With a `Player`
+The first and third slices are built and drilled through plans 12 to
+17; the second still owes the zone and the now-playing from another
+room. The drill runs on `liken-1`. With a `Player`
 and no `Play`, the screen shows the idle surface, the clock and the
 zone. Start a `Play`, and the film covers the idle surface with no black
 flash. End the `Play`, and the idle surface returns with no restart.
@@ -137,6 +140,7 @@ The build can run in slices:
 * The idle surface content: the clock, the zone, the `Player` name, and
   the now-playing from another room.
 * The power policy on the `Player`, the sleep timer, and the wake on bus
-  activity. [Plan 16](16-the-idle-screen-goes-dark.md) builds the fade
-  and the timer, and [plan 17](17-the-idle-screen-powers-the-panel.md)
-  builds the panel power.
+  activity. [Plan 16](completed/16-the-idle-screen-goes-dark.md)
+  builds the fade and the timer, and
+  [plan 17](completed/17-the-idle-screen-powers-the-panel.md) builds
+  the panel power.

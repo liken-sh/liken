@@ -2,7 +2,7 @@
 
 Plan 16. After a quiet stretch, the idle screen fades to black, and any
 press on the unit's remotes brings it back. This is the software half of
-[plan 09](09-the-idle-screen.md)'s sleep: the pixels go dark and the
+[plan 09](../09-the-idle-screen.md)'s sleep: the pixels go dark and the
 panel stays lit. The hardware half is
 [plan 17](17-the-idle-screen-powers-the-panel.md).
 
