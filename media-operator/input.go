@@ -236,7 +236,7 @@ func presentationCommand(block json.RawMessage) []any {
 
 // commandFor is where the action vocabulary becomes mpv's words, and the
 // only place in the system that holds both. Seek, chapter, and pause carry
-// osd-no, because the liken display draws their feedback and mpv's own
+// no-osd, because the liken display draws their feedback and mpv's own
 // overlay would draw a second time over it. The rest carry osd-auto, so mpv
 // shows a short line, such as the volume or the track name, that the display
 // does not yet draw. An action this build has no case for sends nothing, so a
@@ -244,15 +244,15 @@ func presentationCommand(block json.RawMessage) []any {
 func commandFor(command mediaCommand) []any {
 	switch command.Action {
 	case actionPause:
-		return []any{"osd-no", "cycle", "pause"}
+		return []any{"no-osd", "cycle", "pause"}
 	case actionMute:
 		return []any{"osd-auto", "cycle", "mute"}
 	case actionSeek:
-		return []any{"osd-no", "seek", command.Amount}
+		return []any{"no-osd", "seek", command.Amount}
 	case actionVolume:
 		return []any{"osd-auto", "add", "volume", command.Amount}
 	case actionChapter:
-		return []any{"osd-no", "add", "chapter", command.Amount}
+		return []any{"no-osd", "add", "chapter", command.Amount}
 	case actionSubtitles:
 		return []any{"osd-auto", "cycle", "sub"}
 	case actionAudio:

@@ -36,10 +36,10 @@ func TestACommandOnTheCommandsTopicBecomesAnMpvCommand(t *testing.T) {
 	}
 	c.handle(c.commandsTopic, payload)
 
-	// A seek writes two commands: the osd-no seek, then the summon that
+	// A seek writes two commands: the no-osd seek, then the summon that
 	// makes the display draw the new position.
 	want := []string{
-		`{"command":["osd-no","seek",30]}`,
+		`{"command":["no-osd","seek",30]}`,
 		`{"command":["script-message-to","display","summon"]}`,
 	}
 	for _, expected := range want {
