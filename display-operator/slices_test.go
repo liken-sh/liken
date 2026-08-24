@@ -62,16 +62,18 @@ func testOutputs(t *testing.T) []Output {
 
 func TestSliceDevicesPublishesTheMonitorsFacts(t *testing.T) {
 	devices := sliceDevices(testOutputs(t))
-	if len(devices) != 3 {
-		t.Fatalf("got %d devices, want 3", len(devices))
+	// Three connectors, each with an output device and a draw device.
+	if len(devices) != 6 {
+		t.Fatalf("got %d devices, want 6", len(devices))
 	}
 	// Sorted by name, so the same hardware always makes the same
-	// slice.
-	if devices[0].Name != "dp-1" || devices[1].Name != "hdmi-a-1" || devices[2].Name != "hdmi-a-2" {
-		t.Fatalf("names = %q, %q, %q", devices[0].Name, devices[1].Name, devices[2].Name)
+	// slice. Each connector's draw device sorts right after its output.
+	wantNames := []string{"dp-1", "dp-1-draw", "hdmi-a-1", "hdmi-a-1-draw", "hdmi-a-2", "hdmi-a-2-draw"}
+	if got := deviceNames(devices); !slices.Equal(got, wantNames) {
+		t.Fatalf("names = %q, want %q", got, wantNames)
 	}
 
-	ultrawide := devices[1].Attributes
+	ultrawide := devices[2].Attributes
 	want := map[string]string{
 		"connector":      "HDMI-A-1",
 		"appId":          "hdmi-a-1",
@@ -105,8 +107,8 @@ func TestSliceDevicesPublishesTheMonitorsFacts(t *testing.T) {
 			t.Errorf("%s = %d, want %d", name, *attribute.Int, value)
 		}
 	}
-	if len(devices[1].Taints) != 0 {
-		t.Errorf("a monitor that is on the wire has taints: %+v", devices[1].Taints)
+	if len(devices[2].Taints) != 0 {
+		t.Errorf("a monitor that is on the wire has taints: %+v", devices[2].Taints)
 	}
 }
 
@@ -130,11 +132,11 @@ func TestSliceDevicesPublishesTheModesTheMonitorAccepts(t *testing.T) {
 	devices := sliceDevices(testOutputs(t))
 
 	want := "3840x1600 3840x2160 3440x1440 1920x1080 1680x1050 1600x900"
-	if got := attributeText(t, devices[1], "modes"); got != want {
+	if got := attributeText(t, devices[2], "modes"); got != want {
 		t.Errorf("hdmi-a-1 modes = %q, want %q", got, want)
 	}
 	want = "1920x1080 1600x900 1280x800 1280x720 1024x768 800x600 720x480"
-	if got := attributeText(t, devices[2], "modes"); got != want {
+	if got := attributeText(t, devices[4], "modes"); got != want {
 		t.Errorf("hdmi-a-2 modes = %q, want %q", got, want)
 	}
 }
@@ -187,7 +189,7 @@ func deviceNames(devices []SliceDevice) []string {
 func TestSliceDevicesPublishesAControlDeviceBesideTheOutput(t *testing.T) {
 	devices := sliceDevices([]Output{controlledPanel(supportedControls{Brightness: true, Power: true})})
 
-	if got := deviceNames(devices); !slices.Equal(got, []string{"hdmi-a-1", "hdmi-a-1-control"}) {
+	if got := deviceNames(devices); !slices.Equal(got, []string{"hdmi-a-1", "hdmi-a-1-control", "hdmi-a-1-draw"}) {
 		t.Fatalf("devices = %v", got)
 	}
 	output, control := devices[0], devices[1]
@@ -268,6 +270,66 @@ func TestSliceDevicesPublishesAControlDeviceOnlyForAPanelThatAnswered(t *testing
 	}
 }
 
+func TestSliceDevicesPublishesADrawDeviceBesideTheOutput(t *testing.T) {
+	monitor := EDID{Manufacturer: "GSM", ProductCode: 0x7716, ModelName: "LG HDR WQHD", Serial: "202NTRLCC070"}
+	devices := sliceDevices([]Output{litOutput("HDMI-A-1", monitor)})
+
+	if got := deviceNames(devices); !slices.Equal(got, []string{"hdmi-a-1", "hdmi-a-1-draw"}) {
+		t.Fatalf("devices = %v", got)
+	}
+	output, draw := devices[0], devices[1]
+
+	// Many claims hold the draw device at once, so it shares the
+	// compositor socket, where the output takes one claim.
+	if draw.AllowMultipleAllocations == nil || !*draw.AllowMultipleAllocations {
+		t.Errorf("allowMultipleAllocations = %+v, want it published and true", draw.AllowMultipleAllocations)
+	}
+	if output.AllowMultipleAllocations != nil {
+		t.Errorf("the output device is shared: %+v", output.AllowMultipleAllocations)
+	}
+	// The marker is what a device class selects on, and only the draw
+	// device carries it.
+	if attribute, published := draw.Attributes["draw"]; !published || attribute.Bool == nil || !*attribute.Bool {
+		t.Errorf("draw = %+v, want it published and true", attribute)
+	}
+	if _, published := output.Attributes["draw"]; published {
+		t.Errorf("the output device publishes the draw marker: %+v", output.Attributes)
+	}
+	// The monitor identity is the attribute both devices publish, so one
+	// claim holds a screen and a shared surface on it through a
+	// matchAttribute constraint on monitor.liken.sh/id.
+	for _, name := range []string{pairingAttribute, "manufacturer", "model", "serial"} {
+		if got, want := attributeText(t, draw, name), attributeText(t, output, name); got != want {
+			t.Errorf("%s = %q, want %q", name, got, want)
+		}
+	}
+	// The output class selects on has(appId), so the draw device
+	// publishes no appId and never matches that class. The app-id still
+	// reaches the client at prepare, built from the connector.
+	if _, published := draw.Attributes["appId"]; published {
+		t.Errorf("the draw device publishes an appId: %+v", draw.Attributes)
+	}
+	if len(draw.Taints) != 0 {
+		t.Errorf("taints = %+v", draw.Taints)
+	}
+}
+
+func TestDrawDeviceCarriesTheOutputsTaints(t *testing.T) {
+	// A draw device is never claimable while the screen beside it serves
+	// nobody, so it takes the output device's taints and never a set of
+	// its own. A connector with nothing on it carries the disconnected
+	// taint on both.
+	devices := sliceDevices([]Output{{Connector: "DP-1"}})
+
+	if got := deviceNames(devices); !slices.Equal(got, []string{"dp-1", "dp-1-draw"}) {
+		t.Fatalf("devices = %v", got)
+	}
+	draw := devices[1]
+	if len(draw.Taints) != 1 || draw.Taints[0].Key != disconnectedTaint {
+		t.Errorf("taints = %+v", draw.Taints)
+	}
+}
+
 func TestControlDeviceCarriesTheOutputsTaints(t *testing.T) {
 	// A control device is never claimable while the screen beside it
 	// serves nobody, so it takes the output device's taints and never a
@@ -287,7 +349,7 @@ func TestCompositorDownTaintsTheControlDeviceToo(t *testing.T) {
 	// publishes, and the control device is in that list.
 	devices := compositorDown(sliceDevices([]Output{controlledPanel(supportedControls{Brightness: true})}))
 
-	if got := deviceNames(devices); !slices.Equal(got, []string{"hdmi-a-1", "hdmi-a-1-control"}) {
+	if got := deviceNames(devices); !slices.Equal(got, []string{"hdmi-a-1", "hdmi-a-1-control", "hdmi-a-1-draw"}) {
 		t.Fatalf("devices = %v", got)
 	}
 	if len(devices[1].Taints) != 1 || devices[1].Taints[0].Effect != "NoExecute" {
@@ -334,12 +396,13 @@ func TestSliceDevicesLeavesAConnectorThatGainedItsMonitorClear(t *testing.T) {
 	}), "card1")
 	devices := sliceDevices(outputs)
 
-	if len(devices) != 2 {
-		t.Fatalf("got %d devices, want 2", len(devices))
+	// Two connectors, each with an output device and a draw device.
+	if len(devices) != 4 {
+		t.Fatalf("got %d devices, want 4", len(devices))
 	}
-	hotplugged := devices[1]
+	hotplugged := devices[2]
 	if hotplugged.Name != "hdmi-a-2" {
-		t.Fatalf("devices[1] = %q", hotplugged.Name)
+		t.Fatalf("devices[2] = %q", hotplugged.Name)
 	}
 	if _, ok := hotplugged.Attributes["model"]; !ok {
 		t.Errorf("the monitor's facts are missing: %+v", hotplugged.Attributes)
@@ -375,7 +438,11 @@ func TestTheFirstReconcileFreesTheScreensThatCameBack(t *testing.T) {
 	if fixture.updated == nil {
 		t.Fatal("the slice was not replaced, so a stale one says every screen is dark")
 	}
-	wantTaints := map[string]int{"dp-1": 1, "hdmi-a-1": 0, "hdmi-a-2": 0}
+	wantTaints := map[string]int{
+		"dp-1": 1, "dp-1-draw": 1,
+		"hdmi-a-1": 0, "hdmi-a-1-draw": 0,
+		"hdmi-a-2": 0, "hdmi-a-2-draw": 0,
+	}
 	for _, device := range fixture.updated.Spec.Devices {
 		if len(device.Taints) != wantTaints[device.Name] {
 			t.Errorf("%s: taints = %+v, want %d of them",
@@ -390,8 +457,8 @@ func TestTheFirstReconcileFreesTheScreensThatCameBack(t *testing.T) {
 func TestCompositorDownTaintsEveryOutput(t *testing.T) {
 	devices := compositorDown(sliceDevices(testOutputs(t)))
 
-	if len(devices) != 3 {
-		t.Fatalf("got %d devices, want 3", len(devices))
+	if len(devices) != 6 {
+		t.Fatalf("got %d devices, want 6", len(devices))
 	}
 	for _, device := range devices {
 		if len(device.Taints) != 1 {
@@ -451,7 +518,8 @@ func TestSliceDevicesPublishesAPanelWithNoName(t *testing.T) {
 	root := fakeSysfs(t, "card1", map[string]string{"eDP-1": "framework-edp"})
 	devices := sliceDevices(discoverOutputs(root, "card1"))
 
-	if len(devices) != 1 || devices[0].Name != "edp-1" {
+	// The output device and its draw device.
+	if len(devices) != 2 || devices[0].Name != "edp-1" {
 		t.Fatalf("devices = %+v", devices)
 	}
 	attributes := devices[0].Attributes
@@ -553,7 +621,7 @@ func TestEnsureCreatesTheSliceOnFirstPublish(t *testing.T) {
 	if len(slice.Metadata.OwnerReferences) != 1 || slice.Metadata.OwnerReferences[0].UID != "abc-123" {
 		t.Errorf("ownerReferences = %+v", slice.Metadata.OwnerReferences)
 	}
-	if len(slice.Spec.Devices) != 3 {
+	if len(slice.Spec.Devices) != 6 {
 		t.Errorf("devices = %+v", slice.Spec.Devices)
 	}
 }
@@ -607,7 +675,7 @@ func TestEnsureReplacesAChangedSliceAndBumpsTheGeneration(t *testing.T) {
 		t.Errorf("resourceVersion = %q; the write must carry the one it read",
 			fixture.updated.Metadata.ResourceVersion)
 	}
-	if len(fixture.updated.Spec.Devices) != 3 {
+	if len(fixture.updated.Spec.Devices) != 6 {
 		t.Errorf("devices = %+v", fixture.updated.Spec.Devices)
 	}
 }
@@ -625,8 +693,10 @@ func TestEnsureLogsTheSliceItCreated(t *testing.T) {
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(), sliceDevices(testOutputs(t))); err != nil {
 		t.Fatal(err)
 	}
-	// DP-1 is the connector with nothing plugged into it.
-	want := "slice: created generation 1, 3 devices, 1 tainted: dp-1 has " + disconnectedTaint
+	// DP-1 is the connector with nothing plugged into it, so both its
+	// output device and its draw device carry the taint.
+	want := "slice: created generation 1, 6 devices, 2 tainted: dp-1 has " + disconnectedTaint +
+		"; dp-1-draw has " + disconnectedTaint
 	if got := capture.only(t); got != want {
 		t.Errorf("line = %q, want %q", got, want)
 	}
@@ -652,8 +722,10 @@ func TestEnsureLogsTheSliceItWrote(t *testing.T) {
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(), compositorDown(devices)); err != nil {
 		t.Fatal(err)
 	}
-	want := "slice: wrote generation 4, 3 devices, 3 tainted: hdmi-a-1 gained " + disconnectedTaint +
-		"; hdmi-a-2 gained " + disconnectedTaint
+	want := "slice: wrote generation 4, 6 devices, 6 tainted: hdmi-a-1 gained " + disconnectedTaint +
+		"; hdmi-a-1-draw gained " + disconnectedTaint +
+		"; hdmi-a-2 gained " + disconnectedTaint +
+		"; hdmi-a-2-draw gained " + disconnectedTaint
 	if got := capture.only(t); got != want {
 		t.Errorf("line = %q, want %q", got, want)
 	}
@@ -679,7 +751,7 @@ func TestEnsureLogsThatNothingMoved(t *testing.T) {
 	if fixture.updated != nil {
 		t.Fatalf("an unchanged inventory wrote to the API: %v", fixture.requests)
 	}
-	want := "slice: unchanged at generation 3, 3 devices, 1 tainted (1 pass)"
+	want := "slice: unchanged at generation 3, 6 devices, 2 tainted (1 pass)"
 	if got := capture.only(t); got != want {
 		t.Errorf("line = %q, want %q", got, want)
 	}

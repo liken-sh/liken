@@ -225,7 +225,11 @@ func TestReconcileFreesTheScreensWhenTheSocketReturns(t *testing.T) {
 	if fixture.updated == nil {
 		t.Fatal("the slice was not replaced, so a stale one says every screen is dark")
 	}
-	wantTaints := map[string]int{"dp-1": 1, "hdmi-a-1": 0, "hdmi-a-2": 0}
+	wantTaints := map[string]int{
+		"dp-1": 1, "dp-1-draw": 1,
+		"hdmi-a-1": 0, "hdmi-a-1-draw": 0,
+		"hdmi-a-2": 0, "hdmi-a-2-draw": 0,
+	}
 	for _, device := range fixture.updated.Spec.Devices {
 		if len(device.Taints) != wantTaints[device.Name] {
 			t.Errorf("%s: taints = %+v, want %d of them",

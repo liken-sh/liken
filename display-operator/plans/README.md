@@ -48,6 +48,15 @@ say why it is built the way it is.
   a 24 fps film runs on a 24 Hz mode. Absorbs and replaces the open
   problem "A mode list read too early goes stale": every prepare
   that reached the card republishes the slice.
+* [07, Sharing the screen](07-sharing-the-screen.md). Designed; not
+  yet built. A second device per connector, the draw device, is
+  `AllowMultipleAllocations` and delivers only the compositor socket,
+  so many clients draw on one output while the exclusive output device
+  still owns the mode and the power. The panel's power becomes a
+  reference count across holders, on while any claim asks for it and
+  back to standby when the last ends. Serves the media-operator's idle
+  screen,
+  [plan 09](https://github.com/liken-sh/media-operator/blob/main/plans/09-the-idle-screen.md).
 
 ## Open problems
 

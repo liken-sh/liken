@@ -988,6 +988,84 @@ func TestUnprepareOfAControlWritesNothingToThePanel(t *testing.T) {
 	}
 }
 
+// drawRequest allocates the draw device of the lab's portable panel,
+// the shared companion HDMI-A-2 publishes beside its output.
+func drawRequest() []AllocatedDevice {
+	return []AllocatedDevice{
+		{Request: "idle", Driver: DriverName, Pool: "liken-1", Device: "hdmi-a-2-draw"},
+	}
+}
+
+func TestPrepareDeliversTheSocketForADrawDevice(t *testing.T) {
+	// A draw device delivers the same Wayland connection the output
+	// delivers, so a second client draws on the output through the
+	// shared socket. It sets no mode and no panel power: the output
+	// device owns the mode, and a power write from one of many holders
+	// would act on a screen the others hold.
+	panel := newFakeMonitor()
+	plugin, compositor := labPluginWithConfig(t, drawRequest(), "")
+	controls, bench := benchPanels(t, plugin.sysRoot, plugin.card, claimedPanel(panel))
+	plugin.controls = controls
+	plugin.powerPath = filepath.Join(t.TempDir(), "power.json")
+
+	claim := prepare(t, plugin)
+	if claim.Error != "" {
+		t.Fatalf("prepare refused a draw device on a live output: %s", claim.Error)
+	}
+	if len(claim.Devices) != 1 || claim.Devices[0].DeviceName != "hdmi-a-2-draw" {
+		t.Fatalf("devices = %+v", claim.Devices)
+	}
+	wantID := cdiKind + "=" + testClaimUID + "-hdmi-a-2-draw"
+	if got := claim.Devices[0].CdiDeviceIds; len(got) != 1 || got[0] != wantID {
+		t.Errorf("cdiDeviceIds = %v, want %q", got, wantID)
+	}
+
+	spec := preparedSpec(t)
+	if len(spec.Devices) != 1 || spec.Devices[0].Name != testClaimUID+"-hdmi-a-2-draw" {
+		t.Fatalf("spec devices = %+v", spec.Devices)
+	}
+	edits := spec.Devices[0].ContainerEdits
+	for _, want := range []string{
+		"XDG_RUNTIME_DIR=" + plugin.socketDir,
+		"WAYLAND_DISPLAY=" + socketName,
+		"DISPLAY_APP_ID=hdmi-a-2",
+	} {
+		if !containsString(edits.Env, want) {
+			t.Errorf("env = %v, want %q in it", edits.Env, want)
+		}
+	}
+	if len(edits.Mounts) != 1 || edits.Mounts[0].ContainerPath != plugin.socketDir {
+		t.Errorf("mounts = %+v", edits.Mounts)
+	}
+	// The draw device delivers a socket, not a device node.
+	if len(edits.DeviceNodes) != 0 {
+		t.Errorf("the draw device delivered device nodes: %+v", edits.DeviceNodes)
+	}
+
+	// No mode: the record stays empty and the compositor never
+	// restarts, because the output device is the one that sets a mode.
+	if record := modeRecord(t, plugin); len(record) != 0 {
+		t.Errorf("the draw device wrote a mode record: %+v", record)
+	}
+	if compositor.kills != 0 {
+		t.Errorf("the draw device restarted the compositor %d times", compositor.kills)
+	}
+	if got := westonINI(t, plugin); got != "" {
+		t.Errorf("the draw device rewrote weston.ini: %q", got)
+	}
+	// No panel power: nothing reached the i2c wire and the power record
+	// stays empty, so the draw device owes the panel nothing.
+	if bench.opens != 0 {
+		t.Errorf("the draw device opened %d buses", bench.opens)
+	}
+	if len(panel.sets) != 0 {
+		t.Errorf("the draw device wrote %+v to the panel", panel.sets)
+	}
+	if record := powerRecord(t, plugin); len(record) != 0 {
+		t.Errorf("the draw device wrote a power record: %+v", record)
+	}
+}
+
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

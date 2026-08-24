@@ -6,13 +6,14 @@ package main
 // The Container Device Interface connects two things: which device to
 // use, and what appears inside the container. A JSON file in a
 // well-known directory names devices and the edits that grant one to
-// a container. What the edits hold depends on which of this driver's
-// two device types the claim allocated. A Wayland client needs no
-// device node at all: it needs the compositor's socket and the app-id
-// that the compositor routes to the allocated output, so an output's
-// edits are a mount and three environment variables. A control
-// device's client is the opposite case: it needs exactly one device
-// node, the connector's i2c wire, and the variable that names it.
+// a container. What the edits hold depends on whether the claim
+// allocated a Wayland connection or a control channel. A Wayland
+// client needs no device node at all: it needs the compositor's socket
+// and the app-id that the compositor routes to the allocated output,
+// so the edits are a mount and three environment variables. The output
+// device and the draw device both deliver this. A control device's
+// client is the opposite case: it needs exactly one device node, the
+// connector's i2c wire, and the variable that names it.
 //
 //   - The mount grants the socket directory, at the same path inside
 //     the container as on the host.
@@ -65,7 +66,7 @@ var cdiDir = "/var/run/cdi"
 // driver name identifies its slices. A CDI device ID has the form
 // "<kind>=<name>".
 //
-// One kind carries both device types. A spec file states one kind, so
+// One kind carries every device type. A spec file states one kind, so
 // a second kind would mean a second file for the same claim: a second
 // write to fail halfway, and a second thing an unprepare must remove
 // while staying idempotent. The claim's UID and the device's own name

@@ -66,6 +66,28 @@ func outputOfControl(device string) (string, bool) {
 	return strings.CutSuffix(device, controlSuffix)
 }
 
+// A connector also publishes a draw device, named after the output
+// device with this suffix. The draw device shares the compositor
+// socket with many claims at once, where the output device takes one
+// claim. The suffix is the tie between the two, the same way
+// controlSuffix ties the control device to its output.
+const drawSuffix = "-draw"
+
+// DrawName names the draw device beside one output, built from the
+// same connector, so the two names always agree.
+func drawName(connector string) string {
+	return deviceName(connector) + drawSuffix
+}
+
+// OutputOfDraw answers which output a device name belongs to, and
+// whether it named the draw companion. The answer is unambiguous for
+// the reason outputOfControl gives: the kernel names a connector after
+// its type and its index, so no connector name ends in -draw, and no
+// output device's name can read as a draw device's.
+func outputOfDraw(device string) (string, bool) {
+	return strings.CutSuffix(device, drawSuffix)
+}
+
 // appID is the string the compositor routes a client's surface by.
 // Version 0 uses the device name, and the operator writes it into
 // weston.ini as the output's app-ids= line, so a claim on hdmi-a-1

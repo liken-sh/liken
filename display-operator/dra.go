@@ -278,10 +278,15 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 			// results, and each driver answers for its own.
 			continue
 		}
-		// A connector publishes up to two devices, the output and its
-		// control channel, and the name is what tells them apart. Both
+		// A connector publishes up to three devices, the output, its
+		// control channel, and the draw companion that many claims
+		// share, and the name is what tells them apart. All three
 		// resolve against the same walk and the same connector.
 		device, control := outputOfControl(result.Device)
+		draw := false
+		if base, isDraw := outputOfDraw(result.Device); isDraw {
+			device, draw = base, true
+		}
 		output, lit := live[device]
 		if !lit {
 			// The monitor left between the allocation and this call.
@@ -294,7 +299,19 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 			return fail("output %s has no monitor on it right now", device)
 		}
 		var edits cdiEdits
-		if control {
+		switch {
+		case draw:
+			// A draw result delivers the compositor socket and the
+			// app-id, the same Wayland connection the output result
+			// delivers, so the client draws on the output weston routes
+			// its app-id to. It sets no mode and no panel power: the
+			// output device owns the mode, and many claims share the
+			// draw device, so a mode or a power write from one would act
+			// on a screen the others hold. The compositor gate at the
+			// top of this function is the wait for the socket to exist,
+			// which a draw client needs as much as an output client.
+			edits = outputEdits(p.socketDir, socketName, appID(output.Connector))
+		case control:
 			// A control result prepares nothing on the wire. The
 			// consumer holds the node and drives the panel itself, so
 			// this operator writes no VCP code for it, at prepare or at
@@ -312,7 +329,7 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 				return fail("%s carries no DDC/CI channel this operator can hand over", output.Connector)
 			}
 			edits = controlEdits(node)
-		} else {
+		default:
 			// The panel's own controls are set before the mode. A
 			// panel in standby drives no mode, so a switch that waited
 			// for the card to report one would wait on a screen nobody

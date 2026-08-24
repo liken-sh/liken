@@ -46,9 +46,10 @@ const ResourceSlicesPath = "/apis/resource.k8s.io/v1/resourceslices"
 // is the number that applies. A graphics card registers far fewer
 // connectors than that.
 //
-// A connector whose panel answers DDC/CI publishes two devices, so
-// the number to compare against 64 is twice the connector count at
-// most, and still far under the limit.
+// A connector publishes an output device and a draw device, and a
+// panel that answers DDC/CI adds a control device, so the number to
+// compare against 64 is three times the connector count at most, and
+// still far under the limit.
 const maxSliceDevices = 64
 
 // disconnectedTaint is the one a consumer tolerates. Its NoExecute
@@ -101,9 +102,15 @@ type ResourcePool struct {
 // device.attributes["display.liken.sh"].model. The one exception is
 // the pairing identity, which has its own domain.
 type SliceDevice struct {
-	Name       string                     `json:"name"`
-	Attributes map[string]DeviceAttribute `json:"attributes,omitempty"`
-	Taints     []DeviceTaint              `json:"taints,omitempty"`
+	Name string `json:"name"`
+	// AllowMultipleAllocations lets many claims hold one device at
+	// once. The scheduler leaves it off for an exclusive device, which
+	// is the default a nil pointer publishes. The draw device sets it
+	// so many clients can draw on one output through the shared
+	// compositor socket.
+	AllowMultipleAllocations *bool                      `json:"allowMultipleAllocations,omitempty"`
+	Attributes               map[string]DeviceAttribute `json:"attributes,omitempty"`
+	Taints                   []DeviceTaint              `json:"taints,omitempty"`
 }
 
 // DeviceAttribute holds exactly one of four typed values. The API
@@ -141,7 +148,9 @@ func AttrInt(i int) DeviceAttribute { v := int64(i); return DeviceAttribute{Int:
 func AttrBool(b bool) DeviceAttribute { return DeviceAttribute{Bool: &b} }
 
 // sliceDevices turns the card's connectors into the devices the slice
-// publishes, one for each connector.
+// publishes. Every connector publishes an output device and a draw
+// device, and a connector whose panel answers DDC/CI adds a control
+// device.
 //
 // Membership is every connector, and it never depends on what is
 // plugged in. A dark output is still a device a person can claim, and
@@ -213,6 +222,7 @@ func sliceDevices(outputs []Output) []SliceDevice {
 		if control, carried := controlDevice(output, device.Taints); carried {
 			devices = append(devices, control)
 		}
+		devices = append(devices, drawDevice(output, device.Taints))
 	}
 	slices.SortFunc(devices, func(a, b SliceDevice) int {
 		return strings.Compare(a.Name, b.Name)
@@ -263,6 +273,52 @@ func controlDevice(output Output, taints []DeviceTaint) (SliceDevice, bool) {
 		Attributes: attributes,
 		Taints:     taints,
 	}, true
+}
+
+// DrawDevice is the connector's shared device: the compositor socket
+// that many claims hold at once. weston already draws many clients on
+// one output and routes each by its app-id, so a second client can
+// draw between the films a single output claim runs. The output device
+// stays exclusive because one panel runs one mode, and the mode is the
+// output device's to set.
+//
+// The device exists for every connector, connected or not, the same as
+// the output device beside it, so a claim on the draw class parks until
+// a monitor arrives rather than failing to schedule.
+//
+// The attributes are the connector, a draw marker, and the monitor
+// identity. The marker is what a device class selects on, present and
+// true like the control marker. The identity is on both the output and
+// the draw device, so one claim holds a screen and a shared surface on
+// it through a matchAttribute constraint on monitor.liken.sh/id.
+//
+// The draw device publishes no appId. The output class selects on
+// has(appId), so an appId here would make the draw device match that
+// class. The app-id still reaches the client at prepare, built from
+// the connector, not read from an attribute.
+//
+// The taints are the output device's own, whatever they are, so a
+// draw device is never claimable while the screen beside it can serve
+// nobody.
+func drawDevice(output Output, taints []DeviceTaint) SliceDevice {
+	shared := true
+	attributes := map[string]DeviceAttribute{
+		"connector": AttrString(output.Connector),
+		"draw":      AttrBool(true),
+	}
+	if output.Connected {
+		monitor := output.Monitor
+		addAttribute(attributes, "manufacturer", monitor.Manufacturer)
+		addAttribute(attributes, "model", monitor.ModelName)
+		addAttribute(attributes, "serial", monitor.Serial)
+		addAttribute(attributes, pairingAttribute, monitorID(monitor))
+	}
+	return SliceDevice{
+		Name:                     drawName(output.Connector),
+		AllowMultipleAllocations: &shared,
+		Attributes:               attributes,
+		Taints:                   taints,
+	}
 }
 
 // unservableTaints is the taint set of an output that can serve
