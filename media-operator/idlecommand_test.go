@@ -1,35 +1,50 @@
 package main
 
-// These tests cover the idle command sidecar: the two force-window sets
-// that recreate the idle surface, the identity it takes from its commands
-// topic, and the handler that runs the recreate only on a re-present.
+// These tests cover the idle command sidecar: the dialog that waits for
+// mpv's reply to each command, the recreate it runs on a re-present, and
+// the identity it takes from its commands topic.
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"path/filepath"
 	"testing"
 	"time"
 )
 
-// recreateSurface clears force-window and sets it again, in that order,
-// so mpv destroys the surface and then builds a fresh one that a seatless
-// kiosk shell reveals.
-func TestRecreateSurfaceIssuesTheTwoForceWindowSetsInOrder(t *testing.T) {
-	fastTeardown(t)
-	var buffer bytes.Buffer
+// call reads mpv's reply before it returns, skipping the event lines
+// that share the socket, so the command is proven to have run before the
+// caller writes the next one or closes the connection.
+func TestDialogCallSkipsEventsAndReadsTheReply(t *testing.T) {
+	client, server := net.Pipe()
+	t.Cleanup(func() { client.Close(); server.Close() })
+	go func() {
+		reader := bufio.NewReader(server)
+		_, _ = reader.ReadBytes('\n')
+		fmt.Fprintln(server, `{"event":"idle"}`)
+		fmt.Fprintln(server, `{"error":"success"}`)
+	}()
 
-	mustSucceed(t, recreateSurface(&buffer))
+	d := &mpvDialog{conn: client, reader: bufio.NewReader(client)}
+	mustSucceed(t, d.call([]any{"set", "force-window", "no"}))
+}
 
-	got := splitLines(buffer.String())
-	want := []string{
-		`{"command":["set","force-window","no"]}`,
-		`{"command":["set","force-window","yes"]}`,
-	}
-	mustMatchAll(t, got, want)
+// A reply other than success is the command's failure, so a caller that
+// sequences commands stops at the first one mpv refused.
+func TestDialogCallReturnsTheReplysError(t *testing.T) {
+	client, server := net.Pipe()
+	t.Cleanup(func() { client.Close(); server.Close() })
+	go func() {
+		reader := bufio.NewReader(server)
+		_, _ = reader.ReadBytes('\n')
+		fmt.Fprintln(server, `{"error":"invalid parameter"}`)
+	}()
+
+	d := &mpvDialog{conn: client, reader: bufio.NewReader(client)}
+	mustFail(t, d.call([]any{"set", "force-window", "maybe"}))
 }
 
 // The sidecar's bus identity comes from its commands topic, so one
@@ -64,7 +79,7 @@ func TestIdleCommandHandleRecreatesTheSurfaceOnRePresent(t *testing.T) {
 	mustSucceed(t, err)
 	t.Cleanup(func() { conn.Close() })
 
-	got := readLines(t, conn, 3)
+	got := readAndReply(t, conn, 3)
 	want := []string{
 		`{"command":["set","force-window","no"]}`,
 		`{"command":["set","force-window","yes"]}`,
@@ -95,7 +110,7 @@ func TestIdleCommandHandleForwardsTheStatusToTheDisplay(t *testing.T) {
 	mustSucceed(t, err)
 	t.Cleanup(func() { conn.Close() })
 
-	got := readLines(t, conn, 1)
+	got := readAndReply(t, conn, 1)
 	want := []string{
 		`{"command":["script-message","player-status","{\"displayName\":\"Studio Lab\",\"activity\":\"Idle\"}"]}`,
 	}
@@ -125,7 +140,7 @@ func TestIdleCommandHandleActsOnlyOnRePresent(t *testing.T) {
 }
 
 // readLines reads n newline-delimited lines from the connection, under a
-// deadline, so a sidecar that writes too few does not hang the test.
+// deadline, so a writer that sends too few does not hang the test.
 func readLines(t *testing.T, conn net.Conn, n int) []string {
 	t.Helper()
 	mustSucceed(t, conn.SetReadDeadline(time.Now().Add(2*time.Second)))
@@ -137,13 +152,18 @@ func readLines(t *testing.T, conn net.Conn, n int) []string {
 	return lines
 }
 
-// splitLines renders the JSON commands one per line, dropping the
-// trailing empty field the last newline leaves.
-func splitLines(text string) []string {
-	scanner := bufio.NewScanner(bytes.NewReader([]byte(text)))
+// readAndReply reads n command lines the way readLines does and answers
+// each with mpv's success reply. The replies matter: the idle sidecar's
+// dialog waits for each one before its next write, so a silent fake
+// would deadlock the sequence under test.
+func readAndReply(t *testing.T, conn net.Conn, n int) []string {
+	t.Helper()
+	mustSucceed(t, conn.SetReadDeadline(time.Now().Add(2*time.Second)))
+	scanner := bufio.NewScanner(conn)
 	var lines []string
-	for scanner.Scan() {
+	for len(lines) < n && scanner.Scan() {
 		lines = append(lines, scanner.Text())
+		fmt.Fprintln(conn, `{"error":"success"}`)
 	}
 	return lines
 }

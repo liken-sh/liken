@@ -22,10 +22,11 @@ package main
 // only through the operator's own place on the bus.
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
+	"net"
 	"os"
 	"os/signal"
 	"strings"
@@ -135,30 +136,38 @@ func (ic *idleCommander) handle(topic string, payload []byte) {
 // this sidecar reads none of it: a field the display starts drawing needs
 // no change here.
 func (ic *idleCommander) forwardStatus(payload []byte) {
-	ic.withMPV("forward the player status", func(conn io.Writer) error {
-		return sendCommand(conn, []any{"script-message", playerStatusMessage, string(payload)})
+	ic.withMPV("forward the player status", func(d *mpvDialog) error {
+		return d.call([]any{"script-message", playerStatusMessage, string(payload)})
 	})
 }
 
 // represent recreates the idle surface and then reports that it is on
-// screen. The reveal goes out on the same connection and after the second
-// force-window set succeeds, so the display starts the mark in
-// motion on the frame the surface came back into view.
+// screen. The first set clears the window, so mpv's video output tears
+// the surface down; the second sets it again, so mpv builds a fresh
+// surface that kiosk reveals. The pause between them is
+// surfaceTeardownGap, so the teardown finishes before the rebuild
+// starts. The reveal goes out on the same connection after the second
+// set's reply, so the display starts the mark in motion on the frame
+// the surface came back into view.
 func (ic *idleCommander) represent() {
-	ic.withMPV("recreate the idle surface", func(conn io.Writer) error {
-		if err := recreateSurface(conn); err != nil {
+	ic.withMPV("recreate the idle surface", func(d *mpvDialog) error {
+		if err := d.call([]any{"set", "force-window", "no"}); err != nil {
 			return err
 		}
-		return sendCommand(conn, []any{"script-message", revealedMessage})
+		time.Sleep(surfaceTeardownGap)
+		if err := d.call([]any{"set", "force-window", "yes"}); err != nil {
+			return err
+		}
+		return d.call([]any{"script-message", revealedMessage})
 	})
 }
 
-// withMPV dials the idle mpv and runs one write against it. A dial that
+// withMPV dials the idle mpv and runs one dialog against it. A dial that
 // does not connect within idleDialTimeout writes nothing, so a message
 // that lands while the idle mpv restarts does not hold the bus reader.
-// The what argument names the write in the failure line, because every
-// caller reaches mpv the same way and only the write differs.
-func (ic *idleCommander) withMPV(what string, write func(conn io.Writer) error) {
+// The what argument names the dialog in the failure line, because every
+// caller reaches mpv the same way and only the commands differ.
+func (ic *idleCommander) withMPV(what string, run func(d *mpvDialog) error) {
 	ctx, cancel := context.WithTimeout(ic.runCtx, idleDialTimeout)
 	defer cancel()
 	conn, err := dialMPV(ctx, mpvSocketPath)
@@ -167,20 +176,59 @@ func (ic *idleCommander) withMPV(what string, write func(conn io.Writer) error) 
 		return
 	}
 	defer conn.Close()
-	if err := write(conn); err != nil {
+	if err := run(&mpvDialog{conn: conn, reader: bufio.NewReader(conn)}); err != nil {
 		fmt.Fprintf(os.Stderr, "idle-command: %s: %v\n", what, err)
 	}
 }
 
-// recreateSurface writes the two force-window sets that destroy and
-// rebuild the idle mpv's surface. The first clears the window, so mpv's
-// video output tears the surface down; the second sets it again, so mpv
-// builds a fresh surface that kiosk reveals. The pause between them is
-// surfaceTeardownGap, so the teardown finishes before the rebuild starts.
-func recreateSurface(conn io.Writer) error {
-	if err := sendCommand(conn, []any{"set", "force-window", "no"}); err != nil {
+// mpvDialog is one connection to the idle mpv: the socket and the reader
+// that takes mpv's replies off it. mpv answers every command on the same
+// socket, and this sidecar must read those answers. A client that writes
+// its last command and closes at once races mpv's reply writes, and mpv
+// abandons a connection whose reply write fails, buffered input unread.
+// The reply to `set force-window yes` arrives only after the video
+// output rebuilds, so that race window is long, and the abandoned
+// command was the revealed that starts the mark's arrival motion.
+type mpvDialog struct {
+	conn   net.Conn
+	reader *bufio.Reader
+}
+
+// mpvReply is the slice of one reply line this dialog reads: the event
+// name that marks a line as an event and not a reply, and the error word
+// every reply carries, which is "success" for a command that ran.
+type mpvReply struct {
+	Event string `json:"event"`
+	Error string `json:"error"`
+}
+
+// call writes one command and waits for its reply, so the command is
+// proven to have run before the next one goes out and before the caller
+// closes the connection. Event lines share the socket and arrive
+// unasked, so the wait skips them. The read deadline bounds the wait,
+// so an mpv that stops answering does not hold the bus reader.
+func (d *mpvDialog) call(command []any) error {
+	if err := sendCommand(d.conn, command); err != nil {
 		return err
 	}
-	time.Sleep(surfaceTeardownGap)
-	return sendCommand(conn, []any{"set", "force-window", "yes"})
+	if err := d.conn.SetReadDeadline(time.Now().Add(idleDialTimeout)); err != nil {
+		return err
+	}
+	for {
+		line, err := d.reader.ReadBytes('\n')
+		if err != nil {
+			return err
+		}
+		var reply mpvReply
+		if err := json.Unmarshal(line, &reply); err != nil {
+			continue
+		}
+		if reply.Event != "" {
+			continue
+		}
+		if reply.Error != "" && reply.Error != "success" {
+			return fmt.Errorf("mpv: %s", reply.Error)
+		}
+		return nil
+	}
 }
