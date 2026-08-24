@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# local-idle opens the liken idle screen on this workstation, so the clock, the
+# centered logo, and the identity block can be seen without a cluster and
+# without a release. It runs mpv with no file, the way the standing idle pod
+# does, and loads the same display script the player runs, so an edit to a
+# display/*.lua file shows on the next run.
+#
+# The idle screen reads three environment values, the same ones the operator
+# sets on the idle pod: the unit's friendly name, its parts one per line, and
+# the zone the clock reads. This script sets them from its arguments.
+#
+# Usage:
+#   local-idle                          a sample unit, so a first run draws a
+#                                        full screen
+#   local-idle "Studio Desk" "LG Ultrawide Screen" "Built-in Speakers"
+#                                        the first argument is the name, the
+#                                        rest are the components in order
+set -euo pipefail
+
+# The display script sits beside this file, so its path resolves from this
+# script's own directory and needs no absolute path.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+display_dir="$here/display"
+
+# The name is the first argument, the components are the rest. With no
+# arguments, show a sample unit.
+if [ "$#" -ge 1 ]; then
+  name="$1"
+  shift
+  components="$(printf '%s\n' "$@")"
+else
+  name="Studio Lab"
+  components=$'Portable Screen\nBuilt-in Speakers\nStudio Dualsense'
+fi
+
+# --idle and --force-window hold a window with no file, the way the idle pod
+# runs. --load-scripts=no skips the workstation's own mpv scripts, so a
+# personal on-screen controller does not draw over the display. --osc=no turns
+# off mpv's built-in controller, because the display draws its own. The window
+# opens at 1280x720, and the overlay scales to it. Quit with q.
+exec env \
+  TZ="${TZ:-America/New_York}" \
+  IDLE_PLAYER_NAME="$name" \
+  IDLE_PLAYER_COMPONENTS="$components" \
+  mpv \
+    --idle=yes \
+    --force-window=yes \
+    --no-audio \
+    --load-scripts=no \
+    --osc=no \
+    --script="$display_dir" \
+    --geometry=1280x720 \
+    --title="liken idle preview"
